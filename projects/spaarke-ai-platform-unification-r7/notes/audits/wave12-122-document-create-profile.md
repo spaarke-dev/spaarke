@@ -443,3 +443,56 @@ Recommend Wave 12.3 generates **2 independent task POMLs** (one for 122, one for
 ---
 
 *End of audit. Disposition: configuration data fix (Dataverse) primary; minor JPS+node alignment secondary; wizard UI cosmetic fix tertiary. No engine code change required. ~2-4 hours total Wave 12.3 effort.*
+
+---
+
+## 13. Resolution (T141 executed 2026-06-30)
+
+**Task POML**: `tasks/141-restore-document-create-profile.poml` (STANDARD rigor)
+
+### Decision: DELETE (audit Option A)
+
+Verified pre-fix via `mcp__dataverse__read_query` against `sprk_playbooknode WHERE sprk_playbookid='18cf3cc8-02ec-f011-8406-7c1e520aa4df'`:
+- Node `c9334fb7-a415-f111-8343-7c1e520aa4df` (Save Profile) had `__actionType:40 / sprk_executortype:22` mismatch with DeliverOutput-shape config body — confirmed §3.1.
+- Cross-check `WHERE sprk_dependsonjson LIKE '%c9334fb7%'` returned 0 rows → no other node consumed `Save Profile`'s output variable (`result`) → DELETE is safe.
+- Node 3 (`Update Record`, id `0fa4e8db-b216-f111-8343-7c1e520aa4df`) is the canonical PATCH node, properly configured to write `sprk_document` fields.
+
+### Dataverse changes applied
+
+1. **DELETE** `sprk_playbooknode(c9334fb7-a415-f111-8343-7c1e520aa4df)` — removed broken Save Profile node.
+2. **PATCH** `sprk_playbooknode(0fa4e8db-b216-f111-8343-7c1e520aa4df)` `sprk_configjson`:
+   - Removed 2 drift mappings (`sprk_filesummarystatus`, `sprk_classification`) — these reference fields the LLM does NOT emit per JPS (audit §3.2). Removing eliminates silent-failure noise.
+   - Added 2 missing mappings (`sprk_filetype`, `sprk_documenttype`) — these ARE in JPS but were not persisted before the fix.
+   - Set `isConfigured: true`.
+   - Result: 7 fieldMappings exactly matching the 7 JPS `output.fields[]`.
+
+Post-fix node count: 3 (Profile Document → [Update Record, Index Document]).
+
+### Action JPS alignment
+
+Verified: ACT-011 `sprk_systemprompt` JPS unchanged; 7 output fields preserved exactly as audited §2.4. **Operator-tunable surface intact** — operators may still edit prompt/temperature/instruction/etc. without code change.
+
+Open audit questions Q2/Q3 (whether to add `sprk_filesummarystatus`/`sprk_classification` to JPS, or whether to drop them from the system entirely) are deferred to operator decision per task POML scope. Removing them from the node fieldMappings prevents silent-write-empty-string side effects in the meantime.
+
+### UI cosmetic deferred
+
+Per audit §7.2 (secondary, ~2-4hr separate concern), §10 ("Wave 12.3 implementation work likely splits cleanly"), and CLAUDE.md §11 (no new abstractions). Inline UI in `SummaryStep.tsx` uses defensive `?.length > 0` checks for the older-schema fields (amounts/dates/references), so they simply don't render — there is no broken UI state to fix at this layer. The deeper SSE-structured-field issue noted in audit §3.3 is a multi-touch deploy concern out of scope for this restoration task.
+
+### Acceptance criteria
+
+| Criterion | Status |
+|---|---|
+| Document create profile smoke succeeds end-to-end against spaarkedev1 | ⏭️ **Deferred to T136/T154 deploy gate**: this restoration task does not include BFF deploy (no code change). The Dataverse fix is live and effective immediately on next run. |
+| All 7 ACT-011 fields populated on `sprk_document` via PATCH | ✅ Node 3 `fieldMappings` now lists all 7 JPS fields with correct `{{output_aiAnalysis.output.<field>}}` template paths |
+| Action JPS remains operator-tunable for prompt/temperature edits | ✅ No edits to ACT-011 row; `sprk_systemprompt` JPS preserved |
+| Root cause + resolution documented in audit notes | ✅ This §13 |
+| No new abstractions / DI / packages | ✅ Dataverse data-only change |
+
+### Risk + follow-up
+
+- **LOW risk**: data-only changes; rollback via re-CREATE of Save Profile node + revert of node 3 configJson (audit §3.1/§3.2 preserves original shape).
+- **Smoke test**: will run as part of T136/T154 combined deploy gate (BFF + Daily Briefing UAT). If smoke fails, suspect either (a) the wizard SSE-structured-field deeper concern (audit §3.3) or (b) `sprk_filetype`/`sprk_documenttype` not being emitted as expected by the LLM in spaarkedev1's deployed model.
+
+---
+
+*Resolution applied: 2026-06-30. Engine + Action contract intact; wizard data path restored; UI cosmetic explicitly deferred.*

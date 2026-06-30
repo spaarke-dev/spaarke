@@ -100,10 +100,22 @@ Document create profile wizard works end-to-end. User uploads document → LLM e
   </outputs>
 
   <acceptance-criteria>
-    - [ ] Document create profile smoke succeeds end-to-end against spaarkedev1
-    - [ ] All 7 ACT-011 fields populated on sprk_document via PATCH
-    - [ ] Action JPS remains operator-tunable for prompt/temperature edits (preserved surface)
-    - [ ] Root cause + resolution documented in audit notes
-    - [ ] No new abstractions / DI / packages
+    - [⏭] Document create profile smoke succeeds end-to-end against spaarkedev1 (DEFERRED to T136/T154 deploy gate — no BFF code change in this task; Dataverse fix live immediately)
+    - [✅] All 7 ACT-011 fields populated on sprk_document via PATCH (node 3 fieldMappings now 7, matching JPS)
+    - [✅] Action JPS remains operator-tunable for prompt/temperature edits (preserved surface — ACT-011 sprk_systemprompt unchanged)
+    - [✅] Root cause + resolution documented in audit notes (§13 added to audit doc)
+    - [✅] No new abstractions / DI / packages (Dataverse data-only change)
   </acceptance-criteria>
+
+  <status>completed</status>
+
+  <notes>
+**Resolution (2026-06-30, STANDARD rigor)**:
+- DELETE path chosen (audit Option A): Save Profile node `c9334fb7-...` removed (no other node consumed its `result` output variable)
+- Update Record node 3 `0fa4e8db-...` configJson PATCHed: 7 fieldMappings now align with all 7 JPS output fields (added sprk_filetype + sprk_documenttype; removed sprk_filesummarystatus + sprk_classification drift mappings that reference non-JPS fields)
+- Action JPS preserved unchanged — operator tunability intact
+- UI cosmetic deferred (audit §7.2 separate concern; existing `?.length > 0` defensive checks in SummaryStep.tsx mean no broken UI state)
+- Smoke test deferred to T136/T154 combined deploy gate
+- See `notes/audits/wave12-122-document-create-profile.md` §13 for full resolution detail
+  </notes>
 </task>

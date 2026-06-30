@@ -1,7 +1,7 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-06-30 (Wave 12.1 audits ✅ ALL DONE; Wave 12.2/12.3/12.4 POMLs ✅ ALL GENERATED; PR #520 awaiting CI re-run after CI fix; ready to execute starting at T130)
+> **Last Updated**: 2026-06-30 (T141 EXECUTING — Wave 12.3 Document Create Profile restoration)
 
 ---
 
@@ -9,13 +9,14 @@
 
 | Field | Value |
 |---|---|
-| **Task** | Wave 12.2/12.3/12.4 POMLs ready to execute (18 tasks: 130-136, 140-145, 150-154). Coordinated with PR #520 merge for R7→master. |
-| **Task File** | All 18 POMLs at `projects/spaarke-ai-platform-unification-r7/tasks/{130..136,140..145,150..154}-*.poml` |
-| **Phase / Wave** | Wave 12 — MVP Completion (Daily Briefing 6-entity + Wizards + Assistant↔Workspace) |
-| **Sub-wave** | W12.1 audits ✅ DONE; W12.2/12.3/12.4 POMLs ✅ GENERATED; awaiting operator go-ahead to start T130 (start of critical path) |
-| **Step** | PR #520 (R7→master) commits pushed; CI fix for APPLICATIONINSIGHTS_CONNECTION_STRING applied; CI re-running |
-| **Status** | Wave 12 PLAN + AUDITS + POMLS complete; PR #520 waiting on CI green |
-| **Next Action** | (1) Wait for PR #520 CI green + merge. (2) Operator triggers Wave 12 execution starting at T130 (or T130 + parallel-safe siblings T132/T133/T134/T140/T141/T142/T143/T150/T151/T152/T153 in one parallel kickoff). |
+| **Task** | T141 — RESTORE document create profile (Dataverse data fix + Action JPS alignment + UI cosmetic) per audit 122 |
+| **Task File** | `projects/spaarke-ai-platform-unification-r7/tasks/141-restore-document-create-profile.poml` |
+| **Phase / Wave** | Wave 12.3 — Wizard restoration (parallel-safe sibling to T140/T142/T143) |
+| **Sub-wave** | 12.3 |
+| **Step** | In progress |
+| **Rigor Level** | STANDARD |
+| **Status** | in-progress |
+| **Next Action** | Step 1 — Decide DELETE vs REPAIR via Dataverse inspection |
 
 ### Wave 12 dependency-driven execution plan (recap)
 

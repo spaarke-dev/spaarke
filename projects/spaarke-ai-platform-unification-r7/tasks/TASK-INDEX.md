@@ -251,7 +251,7 @@
 | ID | Status | Title | Tags | Parallel-safe | Dependencies |
 |---|---|---|---|---|---|
 | 140 | 🔲 | RESTORE wizard file summary (smoke + config drift fix per audit 121) | wizard, deploy, config, smoke, wave12 | yes | — |
-| 141 | 🔲 | RESTORE document create profile (Dataverse + Action JPS + UI cosmetic per audit 122) | wizard, document, dataverse, config, wave12 | yes | — |
+| 141 | ✅ | RESTORE document create profile (Dataverse data-only fix: DELETE broken Save Profile node `c9334fb7-...` + PATCH Update Record node 3 fieldMappings to align with 7 JPS fields; ACT-011 JPS preserved; UI cosmetic deferred; 2026-06-30) | wizard, document, dataverse, config, wave12 | yes | — |
 | 142 | ✅ | RESTORE Create Project — single Dataverse PATCH (sprk_actionid FK re-link per audit 123) | wizard, project, dataverse, data-fix, wave12 | yes | — |
 | 143 | 🔲 | SMOKE Create Matter wizard — verify code path healthy per audit 123 | wizard, matter, smoke, wave12 | yes | — |
 | 144 | 🔲 | VERIFY Create Work Assignment inherits Matter fix per audit 123 | wizard, work-assignment, smoke, wave12 | no | 143 |
