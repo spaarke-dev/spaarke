@@ -1,7 +1,7 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-06-30 (T141 EXECUTING — Wave 12.3 Document Create Profile restoration)
+> **Last Updated**: 2026-06-30 (Wave 12 Batch 4 COMBINED DEPLOY COMPLETE — T136 + T154 agent-smoke done; operator UAT pending)
 
 ---
 
@@ -9,14 +9,30 @@
 
 | Field | Value |
 |---|---|
-| **Task** | T141 — RESTORE document create profile (Dataverse data fix + Action JPS alignment + UI cosmetic) per audit 122 |
-| **Task File** | `projects/spaarke-ai-platform-unification-r7/tasks/141-restore-document-create-profile.poml` |
-| **Phase / Wave** | Wave 12.3 — Wizard restoration (parallel-safe sibling to T140/T142/T143) |
-| **Sub-wave** | 12.3 |
-| **Step** | In progress |
-| **Rigor Level** | STANDARD |
-| **Status** | in-progress |
-| **Next Action** | Step 1 — Decide DELETE vs REPAIR via Dataverse inspection |
+| **Task** | T136 + T154 — Combined Wave 12 Batch 4 deploy + agent-smoke + UAT prep |
+| **Task File** | `projects/spaarke-ai-platform-unification-r7/tasks/136-deploy-smoke-uat-wave12-2.poml` + `projects/spaarke-ai-platform-unification-r7/tasks/154-assistant-workspace-uat.poml` |
+| **Phase / Wave** | Wave 12 Batch 4 — combined deploy event |
+| **Sub-wave** | 12.2 + 12.4 |
+| **Step** | Deploy + agent-smoke complete; operator UAT requested |
+| **Rigor Level** | STANDARD (deploy + smoke + UAT facilitation) |
+| **Status** | T136 ⏳ pending-operator-UAT; T154 ⏳ pending-operator-UAT |
+| **Next Action** | Operator runs browser UAT per `notes/handoffs/wave12-batch4-deploy-smoke.md` §7 |
+
+### Wave 12 Batch 4 deploy summary (2026-06-30)
+
+| Component | Result |
+|---|---|
+| Pre-deploy build | ✅ 0 errors, 19 pre-existing warnings |
+| Pre-deploy tests | ✅ 7537 pass / 7 pre-existing baseline failures (zero new regressions) |
+| BFF compressed publish | ✅ **45.42 MB** (-1.30 MB vs Wave 4; -0.23 MB vs pre-R7 — NET NEGATIVE) |
+| CVE scan | ✅ 0 new HIGH (1 pre-existing Kiota accepted-risk) |
+| Rollback tag | ✅ `deploy/spaarkedev1/pre-wave12-batch4` at `4fc73ae4a` |
+| BFF deploy (Deploy-BffApi.ps1) | ✅ Healthz green; SHA-256 4/4 critical files match |
+| Widget build (`npm run build`) | ✅ 3,902 KB bundle in 17.77s |
+| Widget deploy (Deploy-SpaarkeAi.ps1) | ✅ modifiedon `2026-06-30T21:10:38Z` |
+| Curl smoke (5 endpoints) | ✅ healthz/ping 200; daily-briefing/chat surfaces 401 correctly |
+| Defects (ISS-NNN) | 0 from agent smoke |
+| Handoff doc | `notes/handoffs/wave12-batch4-deploy-smoke.md` |
 
 ### Wave 12 dependency-driven execution plan (recap)
 

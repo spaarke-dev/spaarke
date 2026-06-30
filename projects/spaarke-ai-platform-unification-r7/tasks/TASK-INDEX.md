@@ -241,11 +241,11 @@
 |---|---|---|---|---|---|
 | 130 | ✅ | Diagnose + fix IMembershipResolverService root cause (operator-chosen durable path) — root cause: empty default `IncludedIdentityTables`; fix via `MembershipOptionsDefaults` post-configure; 3 regression tests added; commit `451603bac` | bff-api, code-impl, dataverse, membership, wave12 | yes | — |
 | 131 | ✅ | Extend DailyBriefingCollector to 6 entity types + use IMembershipResolverService — 6 query methods (`QueryUpcomingTasksAsync`/`QueryOverdueTasksAsync`/`QueryEventsAsync`/`QueryDocumentsAsync`/`QueryMattersAsync`/`QueryProjectsAsync`/`QueryTodosAsync`) + `ResolveMembershipsSafelyAsync` resolver consumption; inline `eq-userid` bypass REMOVED; 10 unit tests added (commit `badcc1309`); collector landed via T133's `5480ef830` due to interleaved staging; publish 46 MB (-1.6 MB vs T150) | bff-api, code-impl, daily-briefing, wave12 | no | 130 |
-| 132 | 🔲 | TLDR↔Activity Notes consistency — chain TLDR as input to channel narratives | bff-api, code-impl, ai, narrator, wave12 | yes | — |
+| 132 | ✅ | TLDR↔Activity Notes consistency — chain TLDR as input to channel narratives; landed via commit `524d1bee9`; deployed Wave 12 Batch 4 (2026-06-30) | bff-api, code-impl, ai, narrator, wave12 | yes | — |
 | 133 | ✅ | Channel registry expansion (BFF response shape + widget CHANNEL_REGISTRY) | bff-api, pcf, widget, wave12 | yes | — |
 | 134 | ✅ | Widget tools — 'Add To Do' checkmark + preserve three-dot menu | pcf, react, fluent-ui, widget, wave12 | yes | ee12e172e |
 | 135 | ✅ | Verify per-bullet entity links work for all 6 entity types | bff-api, narrator, testing, wave12 | no | (orphan-fallback gap fix + 9 tests) |
-| 136 | 🔲 | Wave 12.2 deploy + smoke + UAT (combinable with T154 deploy event) | deploy, smoke, uat, gate, wave12 | no | 130-135 |
+| 136 | ⏳ | Wave 12.2 deploy + smoke + UAT — combined Batch 4 deploy + agent-smoke COMPLETE 2026-06-30 (BFF 45.42 MB; widget deployed `2026-06-30T21:10:38Z`; healthz green; all auth-gated endpoints surface correctly); see `notes/handoffs/wave12-batch4-deploy-smoke.md`; **AC1-AC7 PENDING-OPERATOR final browser UAT signoff** | deploy, smoke, uat, gate, wave12 | no | 130-135 |
 
 ### Wave 12.3 — Wizards (READY TO EXECUTE — 6 POMLs generated 2026-06-30; all RESTORATION)
 
@@ -263,10 +263,10 @@
 | ID | Status | Title | Tags | Parallel-safe | Dependencies |
 |---|---|---|---|---|---|
 | 150 | ✅ | Gap A — Naming normalization at BFF boundary (most-impactful single fix) — commit `287e7b0a9` | bff-api, code-impl, assistant, normalization, wave12 | yes | — |
-| 151 | 🔲 | Gap B — Server-side EntityName lazy-fetch in PlaybookChatContextProvider | bff-api, code-impl, assistant, wave12 | yes | — |
-| 152 | 🔲 | Gap C — Default PageType in PlaybookChatContextProvider | bff-api, code-impl, assistant, wave12 | yes | — |
-| 153 | 🔲 | Audit 120 Gaps D-H — apply remaining 5 smaller fixes per §5 disposition table | bff-api, code-impl, assistant, wave12 | yes | — |
-| 154 | 🔲 | Assistant↔Workspace UAT (Wave 12.4 gate) | uat, gate, assistant, wave12 | no | 150-153, 136 |
+| 151 | ✅ | Gap B — Server-side EntityName lazy-fetch in PlaybookChatContextProvider; landed via commit `e2b4abdad` (6 new tests; 46/46 pass); deployed Wave 12 Batch 4 (2026-06-30) | bff-api, code-impl, assistant, wave12 | yes | — |
+| 152 | ✅ | Gap C — Default PageType in PlaybookChatContextProvider; landed via commit `800f23a0a`; deployed Wave 12 Batch 4 (2026-06-30) | bff-api, code-impl, assistant, wave12 | yes | — |
+| 153 | ✅ | Audit 120 Gaps D-H — DEF-002 filed; 4 no-action documented per §5 disposition table; landed via commit `e91ff89d7`; deployed Wave 12 Batch 4 (2026-06-30) | bff-api, code-impl, assistant, wave12 | yes | — |
+| 154 | ⏳ | Assistant↔Workspace UAT (Wave 12.4 gate) — combined Batch 4 deploy COMPLETE 2026-06-30; agent-side smoke confirmed `/api/ai/chat/*` endpoints surface correctly; see `notes/handoffs/wave12-batch4-deploy-smoke.md`; **AC13-AC15 PENDING-OPERATOR final browser UAT signoff** | uat, gate, assistant, wave12 | no | 150-153, 136 |
 
 ### Wave 12.5 — Wrap-up (PLACEHOLDER)
 
