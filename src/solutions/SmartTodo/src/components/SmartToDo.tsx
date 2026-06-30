@@ -323,6 +323,16 @@ export interface ISmartToDoProps {
    * Back-compat: when omitted, SmartToDo uses its own preference instance.
    */
   orientation?: Orientation;
+  /**
+   * Code-review hotfix 2026-06-27 — filter predicate for the consolidated
+   * Header's SearchBox. When provided, displayItems are filtered (case-
+   * insensitive substring on sprk_name + sprk_description) BEFORE the
+   * kanban-columns hook buckets them. Mirrors the widget pattern at
+   * `Spaarke.SmartTodo.Components/src/widgets/SmartTodoWidget.tsx:552-560`.
+   *
+   * Back-compat: when omitted or empty string, no filter is applied.
+   */
+  searchQuery?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -343,6 +353,7 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
   hideHeader = false,
   onSettingsOpenerReady,
   orientation: orientationProp,
+  searchQuery,
 }) => {
   const styles = useStyles();
 
@@ -518,12 +529,24 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
   }, [items, dismissedItems, statusOverrides]);
 
   // Merge addedItems into the display list
-  const displayItems = React.useMemo(() => {
+  const mergedItems = React.useMemo(() => {
     if (addedItems.length === 0) return activeItems;
     const addedIds = new Set(addedItems.map((a) => a.sprk_todoid));
     const dedupedActive = activeItems.filter((i) => !addedIds.has(i.sprk_todoid));
     return sortTodoItems([...dedupedActive, ...addedItems]);
   }, [activeItems, addedItems]);
+
+  // Code-review hotfix 2026-06-27 — apply Header SearchBox filter (when set).
+  // Mirrors `SmartTodoWidget.tsx:552-560` substring-match-on-name+description.
+  const displayItems = React.useMemo(() => {
+    const q = (searchQuery ?? "").trim().toLowerCase();
+    if (!q) return mergedItems;
+    return mergedItems.filter((item) => {
+      const name = (item.sprk_name ?? "").toLowerCase();
+      const desc = (item.sprk_description ?? "").toLowerCase();
+      return name.includes(q) || desc.includes(q);
+    });
+  }, [mergedItems, searchQuery]);
 
   const totalCount = displayItems.length;
   const isEmpty = !isLoading && !error && totalCount === 0 && dismissedItems.length === 0;

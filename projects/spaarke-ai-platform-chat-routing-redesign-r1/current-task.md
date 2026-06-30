@@ -1,6 +1,6 @@
 # Current Task State — Spaarke AI Platform Chat Routing Redesign (R1)
 
-> **Last Updated**: 2026-06-25 (context-handoff — all code work merged to master + all 4 deploy primitives executed; awaiting AI Search restoration + Redis flip-on; 2 follow-up projects identified)
+> **Last Updated**: 2026-06-28 (task-150 wrap-up — PROJECT CLOSED)
 
 ---
 
@@ -9,14 +9,15 @@
 | Field | Value |
 |-------|-------|
 | **Project** | `spaarke-ai-platform-chat-routing-redesign-r1` |
-| **Branch** | `work/spaarke-ai-platform-chat-routing-redesign-r1` (worktree at `c:\code_files\spaarke-wt-spaarke-ai-platform-chat-routing-redesign-r1\`) |
-| **Branch state** | **MERGED TO MASTER**. Worktree, main repo master, origin/work, origin/master all at `bf866e7d5`. Working tree CLEAN. 0 commits to push, 0 to pull. |
-| **Code-level status** | **All Phase 7 + Track 1 ✅** (141, 142, 143, 144, 145, 147, 148 all closed). Build clean, 7,818/7,818 tests pass. ADR compliance 12/12. |
-| **Deploy status** | **All 4 deploy primitives executed against bff-dev today**: (1) Dataverse `sprk_nodetype` option `100_000_004 → DeliverComposite` added ✅; (2) 118R multinode playbook deployed — new ID `9b44cb6a-c370-f111-ab0e-7ced8ddc4a05` ✅; (3) BFF deployed to `spaarke-bff-dev` (46.3 MB, hash-verified, healthz 200) ✅; (4) SpaarkeAi Code Page deployed (3.87 MB, FR-49/50 + section streaming verified in bundle) ✅ |
-| **R6 alignment audit** | **CLEAN** — All 4 R6-marked "successor scope" items closed (Pillar 3 invoke_playbook, Pillar 5 NodeRoutingConfig wiring, Pillar 7 memory composition, Pillar 8 soft-slash absorption). 6 R6-deferred items remain in R6/R7 scope (Builder UI, ExecutionTraceWidget mount, etc. — NOT this project's scope). 0 silent regressions detected. |
-| **Active Task** | NONE — Phase 7 closeout pending. |
-| **Next Action (explicit)** | **3 options waiting for user decision**: (A) Run `scripts\Seed-TypedHandlers.ps1 -OnlyHandler GET-WORKSPACE-TAB-CONTENT` to seed the new chat-tool row that surfaces FR-57 `get_workspace_tab_content` handler to the LLM (1 min, unblocks workspace→memory T2 round-trip in UAT); OR (B) Verify Phase 6 specialized playbooks (PB-009/PB-012/PB-015/PB-017 + Path 3 JPS `$ref` extension) status before task 150 wrap-up; OR (C) Wait for AI Search restoration + Redis flip-on (external infra projects) before UAT. |
-| **User's last words** | Asked "are there any dataverse deployments required?" — I answered with: (1) `Seed-TypedHandlers.ps1 -OnlyHandler GET-WORKSPACE-TAB-CONTENT` is the main outstanding Dataverse deploy; (2) optional re-pointing of `sprk_playbookconsumer` "summarize-file" record to the new `9b44cb6a` playbook (depends on UX intent — library-modal route works without it); (3) FR-25 `sprk_aichatmessage` write-only retirement may need cleanup if implemented. Then ran /context-handoff. |
+| **Status** | ✅ **COMPLETE** (2026-06-28) |
+| **Active Task** | none |
+| **Branch** | `work/spaarke-ai-platform-chat-routing-redesign-r1` — merged to master via **PR #491** (2026-06-25); follow-up docs via **PR #509** (2026-06-28) |
+| **Next Action** | **Project complete.** Run `/devops-project-sync` then `/devops-project-archive`. Successor project: `spaarkeai-widget-summarize-document-r1` (design committed). |
+| **Closeout artifacts** | [`notes/lessons-learned.md`](notes/lessons-learned.md), [`notes/handoffs/final-publish-size-summary.md`](notes/handoffs/final-publish-size-summary.md), [`notes/r7-backlog.md`](notes/r7-backlog.md) (8 items filed during session + extensions in task-150 wrap-up) |
+| **Task 146 (UAT regression)** | 🟡 PARTIAL/WAIVED — 15/17 FRs verified via library-modal route in ad-hoc UAT 2026-06-26 with deployed BFF; formal regression waived (rationale: AI Search dev was NXDOMAIN during project; sister project restored it 2026-06-26; full UAT scope rolled into successor project graduation) |
+| **Task 150 (wrap-up)** | ✅ Completed 2026-06-28. README + plan.md + CLAUDE.md + TASK-INDEX statuses flipped. lessons-learned authored. r7-backlog extended. final-publish-size-summary authored. |
+| **Quality gates** | All confirmed already passed in tasks 147 + 148 (Phase 7-F closeout, 2026-06-25): code-review 0 CRITICAL + adr-check 12/12 ADR PASS. No new code changes since. |
+| **BFF publish-size final** | 46.67 MB compressed (vs Phase 0 baseline 45.65 MB; +1.02 MB attributable to sister-project master merges; **net-zero for this project's own code** — WP4 deletion offset Phase 5R/6 additions) |
 
 ---
 

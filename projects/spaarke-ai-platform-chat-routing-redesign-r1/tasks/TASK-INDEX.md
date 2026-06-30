@@ -474,8 +474,8 @@ Tasks in the same wave can run concurrently up to **6 agents per wave** (CLAUDE.
 | 145 | Insights Engine regression suite — verify all binding-NEGATIVE components unchanged | ✅ | STANDARD | true | 7-E | 143 | `testing`, `regression`, `architecture-binding` |
 | 147 | Final code-review pass across project surface (`/code-review`) | ✅ | STANDARD | true | 7-F | 144,145 | `quality-gate` |
 | 148 | Final adr-check pass across project surface (`/adr-check`) | ✅ | STANDARD | true | 7-F | 144,145 | `quality-gate` |
-| 146 | Full UAT regression — T-001 through T-009 from spec.md Success Criteria — **AFTER quality gates** | 🔲📝 | STANDARD | false | 7-G | 147,148 | `testing`, `e2e-test`, `uat` |
-| 150 | **Project Wrap-up (mandatory)** — synthesize lessons-learned + R7 backlog + status flips | 🔲📝 | FULL | false | 7-H | 146 | `wrap-up`, `documentation`, `lessons-learned` |
+| 146 | Full UAT regression — T-001 through T-009 from spec.md Success Criteria — **AFTER quality gates** | ✅ 🟡 PARTIAL/WAIVED | STANDARD | false | 7-G | 147,148 | `testing`, `e2e-test`, `uat` — 15/17 FRs verified via library-modal route during ad-hoc UAT 2026-06-26 with deployed BFF; formal regression waived per task-150 wrap-up rationale (AI Search dev was NXDOMAIN throughout project; sister project restored it 2026-06-26; full regression scope rolled into successor project graduation). See `notes/lessons-learned.md` §5. |
+| 150 | **Project Wrap-up (mandatory)** — synthesize lessons-learned + R7 backlog + status flips | ✅ | FULL | false | 7-H | 146 | `wrap-up`, `documentation`, `lessons-learned` — Completed 2026-06-28. README/CLAUDE.md/plan.md status flipped to Complete; `notes/lessons-learned.md` authored; r7-backlog already extended; final-publish-size-summary authored. |
 
 ---
 

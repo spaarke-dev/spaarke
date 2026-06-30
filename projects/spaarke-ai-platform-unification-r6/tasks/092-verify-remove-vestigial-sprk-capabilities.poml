@@ -2,7 +2,9 @@
   <metadata>
     <title>Verify + Remove Vestigial `sprk_capabilities` Field on Playbook Entity</title>
     <phase>Closeout — Surface Completion (post-audit)</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-06-29</completed>
+    <completion-notes>DEF-004 (#476) verification + user removal 2026-06-29. Confirmed `sprk_analysisplaybook.sprk_capabilities` is vestigial: ZERO production-code references on the playbook table (sprk_playbookcapabilities is the live field used by PlaybookService, AnalysisChatContextResolver, SprkChatAgentFactory). 3 of 20 playbooks populated the vestigial field; one (Daily Briefing Narrate) populated ONLY vestigial — its Summarize capability was invisible to LLM. User removed the column. Sister-project bug surfaced (spaarke-daily-update-service's daily-briefing-narrate.json writes to vestigial field) — filed as ISS-003 (#510) with `now` urgency since their next deploy will fail.</completion-notes>
     <estimated-effort>1 hour</estimated-effort>
     <dependencies>none</dependencies>
     <blocks>none</blocks>

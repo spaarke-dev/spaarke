@@ -1,7 +1,7 @@
 # Current Task State — spaarke-redis-cache-remediation-r2
 
-> **Last Updated**: 2026-06-26
-> **Status**: ✅ PROJECT COMPLETE (LOCAL) — PR pending operator-driven Phase 4 task 030 live deploy + KQL verification
+> **Last Updated**: 2026-06-29
+> **Status**: ✅ **PROJECT GRADUATED** — PR #489 merged + live deploy + KQL acceptance verified
 
 ---
 
@@ -10,9 +10,9 @@
 | Field | Value |
 |-------|-------|
 | **Project** | spaarke-redis-cache-remediation-r2 |
-| **Active task** | — (none; 16 of 17 ✅ ; task 030 🟡 PARTIAL ⏸ OPERATOR) |
-| **Status** | All local work complete + committed + pushed to `origin/work/spaarke-redis-cache-remediation-r2` |
-| **Next action** | PR open + merge per NFR-01 atomic strategy |
+| **Active task** | — (none; all 17 tasks ✅) |
+| **Status** | PR #489 merged to master (2026-06-27). Live dev deploy completed 2026-06-29: 4 alerts enabled, BFF redeployed (+0.04 MB vs R1 baseline), FR-01 + FR-03 KQL acceptance verified with real traffic. All 4 GitHub Issues closed. |
+| **Next action** | `/devops-project-archive` to retire this project. |
 
 ---
 

@@ -7,10 +7,10 @@
 
 ## Project Status
 
-- **Phase**: Planning
-- **Last Updated**: 2026-06-21
-- **Current Task**: Not started
-- **Next Action**: Review generated artifacts, then run `/task-execute 001` in a fresh session
+- **Phase**: ✅ **Complete** (2026-06-28)
+- **Last Updated**: 2026-06-28
+- **Current Task**: None — project closed
+- **Next Action**: Project complete. Successor: `spaarkeai-widget-summarize-document-r1` (design committed). See `notes/lessons-learned.md` for cross-cutting findings.
 
 ---
 
@@ -189,6 +189,15 @@ For `.claude/` edits during this project: parallel-safe: **false** (main session
 - Active PR overlap: PR #401 (R6 hotfix series) blocks Phase 7 WP4 cutover — coordinate merge timing
 - PR #406 (SmartTodo r4) touches LegalWorkspace consumers; verify no intersection with Phase 0 dead-code cleanup
 - Dataverse schema validation confirmed all 4 target entities + field shapes — no surprises
+
+**Cross-cutting learnings (task 150 wrap-up, 2026-06-28)**:
+
+- **R6 PR #401 unblocked Phase 7 cleanly** — no merge-timing friction; the WP4 single-phase cutover landed without parallel-run complexity (Q8 was the right call)
+- **Phase 4 MVP cut (30/42 tasks deferred 2026-06-22)** was the right business call. The remaining 12 active MVP tasks shipped the substrate; the 30 deferred tasks form a coherent post-MVP roadmap for a future memory-subsystem project. See `notes/lessons-learned.md` §3 + spec.md MVP Scope Cut section.
+- **Subject-matter-aware summarization is playbook matching, not classification** — initial framing assumed a `FileClassificationService` was needed (R1 Phase 4b deferred items). Late-stage discovery (2026-06-26 product-led discussion): `PlaybookDispatcher` Phase B vector match + multiple area-specific playbooks IS the classification mechanism. This finding shrinks the follow-on product project's scope substantially.
+- **Asymmetric registration anti-pattern caught in UAT** (2026-06-26, GraphModule.cs:74) — `IFieldMappingDataverseService` was routed to the stub `DataverseServiceClientImpl` instead of the real `DataverseWebApiService`. This is exactly the failure mode CLAUDE.md §10 F.1 warns against. Fix landed (commit `3119c11ef`), merged via PR #491. Worth a future health-check hook.
+- **Daily-briefing-r4 task 031 (Path A.5 canonical pattern)** landed in master DURING this project — its Path A.5 thin-dispatch pattern (`IConsumerRoutingService` + `IInvokePlaybookAi`) became the canonical reference for all future endpoints. Documented in `docs/architecture/ai-architecture-playbook-consumer-routing.md` (renamed + augmented at task 150).
+- **Product-led project framing emerged from this project's retrospective** — the cross-cutting insight that "we built sophisticated infrastructure + shipped one new tool handler" led to the methodology pivot. Captured in `docs/procedures/PRODUCT-LED-DEVELOPMENT.md` (added via PR #509). All future Spaarke projects under this framing.
 
 ---
 
