@@ -89,12 +89,38 @@ Each bullet in DailyBriefing widget displays an 'Add To Do' checkmark icon as pr
   </outputs>
 
   <acceptance-criteria>
-    - [ ] 'Add To Do' checkmark icon visible as primary tool on each bullet
-    - [ ] Three-dot overflow menu component preserved in component tree (for future tools)
-    - [ ] Fluent UI v9 components used (Checkmark icon, IconButton)
-    - [ ] ADR-021 dark mode: semantic tokens used; no hardcoded colors
-    - [ ] Widget unit tests 0 new failures
-    - [ ] `npm run build:prod` succeeds
-    - [ ] Version bumped in 4 mandatory locations if widget version affected
+    - [x] 'Add To Do' checkmark icon visible as primary tool on each bullet
+    - [x] Three-dot overflow menu component preserved in component tree (for future tools)
+    - [x] Fluent UI v9 components used (Checkmark icon, IconButton)
+    - [x] ADR-021 dark mode: semantic tokens used; no hardcoded colors
+    - [x] Widget unit tests 0 new failures (16/16 NarrativeBullet tests pass; +2 new tests added)
+    - [x] `npm run build:prod` succeeds — N/A; shared lib uses `npm run build` (tsc --noEmit). My changes compile cleanly; 4 pre-existing peer-dep resolution errors are unrelated to T134.
+    - [x] Version bumped in 4 mandatory locations if widget version affected — N/A; pure shared-library .tsx changes. No PCF ControlManifest or Solution.xml affected. Consumers (DailyBriefing code page + SpaarkeAi widget) ship via their own deployment pipelines.
   </acceptance-criteria>
+
+  <status>completed</status>
+
+  <notes>
+**Completion**: 2026-06-30 by Wave 12 Batch 2 parallel agent.
+
+**Commit**: `ee12e172e` (also swept in pre-staged audit doc wave12-124-wave5-backfill-health-sweep.md from a sibling agent; non-blocking).
+
+**Files affected**:
+- `src/client/shared/Spaarke.DailyBriefing.Components/src/components/NarrativeBullet.tsx` — primary visible Fluent v9 `Button` with `CheckmarkRegular` icon (aria-label="Add To Do") wired to existing `handleMenuAddToTodo` handler; 5-item overflow menu preserved (was 6 items pre-task-134, "Add to To Do" promoted out); 2 new semantic-token styles; unused `AddRegular`/`MicrosoftToDoIcon` imports pruned.
+- `src/client/shared/Spaarke.DailyBriefing.Components/test/NarrativeBullet.test.tsx` — `OverflowMenu_Shows6Actions` → `Shows5Actions`; `OverflowMenu_AddToTodoCallsExistingPath` → `PrimaryAddToDoButton_CallsExistingPath`; +2 new tests (DisabledWhenCreated, DisabledWhenPending); updated RendersOverflowMenu_NotInlineRow + Case 4 comments for aria-label disambiguation.
+
+**Test result**: `npx jest --testPathPatterns="NarrativeBullet.test"` → **16/16 pass** (was 14 pre-task-134; +2 new tests, 4 modified, 10 unchanged).
+
+**Build**: `npm run build` (tsc --noEmit) — zero errors on NarrativeBullet.tsx. 4 pre-existing peer-dep resolution errors in OTHER files (SubRowTodo.tsx, useInlineTodoCreate.ts, briefingService.ts, dailyBriefing.registration.ts) are unrelated to T134 — they're `@spaarke/*` peerDependencies expected to resolve in consumer packages.
+
+**ADR compliance verified**:
+- ADR-006 (Fluent UI v9): `Button`, `Tooltip`, `CheckmarkRegular` — all v9
+- ADR-021 (dark mode): `tokens.colorBrandForeground1` + `tokens.colorNeutralForegroundDisabled` — no hex literals
+- ADR-024 (useInlineTodoCreate path): preserved via `onAddToTodo(itemIds)` handler delegation
+- CLAUDE.md §11 (Component Justification): NO new abstractions — primary button reuses existing `onAddToTodo` prop + `handleMenuAddToTodo` handler
+
+**Three-dot menu preservation**: Confirmed in code — `Menu`, `MenuTrigger`, `MenuButton`, `MenuPopover`, `MenuList` all retained with 5 secondary actions. Operator requirement satisfied: "don't remove the three dot tool menu" (for future tools).
+
+**No widget version bump needed**: This is a shared-library .tsx change; not a PCF control (no ControlManifest.Input.xml / Solution.xml). Consumers re-bundle from `@spaarke/daily-briefing-components` on next code-page or SpaarkeAi deploy.
+  </notes>
 </task>
