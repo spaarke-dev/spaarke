@@ -46,6 +46,27 @@ public class PlaybookChatContextProvider : IChatContextProvider
         ["custom"] = "custom page view"
     };
 
+    /// <summary>
+    /// R7 Wave 12 task 152 (audit 120 Gap C) — default <see cref="ChatHostContext.PageType"/>
+    /// applied at the entity-enrichment guard when the client did not populate one.
+    /// <para>
+    /// Choice rationale: chat requests carrying an EntityType + EntityId (e.g. SpaarkeAi
+    /// launched from a matter form) are by definition on an entity-form surface. The
+    /// Dynamics "entityrecord" page type is the most-common case for that scenario and
+    /// maps to the human-readable label "main form view" — the same label every existing
+    /// matter / project / invoice form would surface today. Clients MAY override by sending
+    /// an explicit <c>PageType</c>; the default only fires when the client omits the field
+    /// or sends null/whitespace.
+    /// </para>
+    /// <para>
+    /// "unknown" inputs are still treated as missing (no default substituted) because that
+    /// is the client's explicit "I don't know" signal — overriding it would mask
+    /// a real misconfiguration upstream. Default substitution only applies to
+    /// null/empty/whitespace.
+    /// </para>
+    /// </summary>
+    internal const string DefaultPageType = "entityrecord";
+
     private readonly IScopeResolverService _scopeResolver;
     private readonly IPlaybookService _playbookService;
     private readonly IDocumentDataverseService _documentService;
@@ -600,17 +621,24 @@ public class PlaybookChatContextProvider : IChatContextProvider
         if (string.IsNullOrWhiteSpace(entityName))
             return systemPrompt;
 
+        // R7 Wave 12 task 152 (audit 120 Gap C): apply DefaultPageType when client omitted
+        // the field. "unknown" is the client's explicit not-known signal and is NOT defaulted —
+        // it still hits the "must be present and not unknown" guard below.
+        var pageType = string.IsNullOrWhiteSpace(hostContext.PageType)
+            ? DefaultPageType
+            : hostContext.PageType;
+
         // Guard: PageType must be present and not "unknown"
-        if (string.IsNullOrWhiteSpace(hostContext.PageType) ||
-            string.Equals(hostContext.PageType, "unknown", StringComparison.OrdinalIgnoreCase))
+        if (string.IsNullOrWhiteSpace(pageType) ||
+            string.Equals(pageType, "unknown", StringComparison.OrdinalIgnoreCase))
             return systemPrompt;
 
         // Guard: PageType must map to a known label
-        if (!PageTypeLabels.TryGetValue(hostContext.PageType, out var humanReadablePageType))
+        if (!PageTypeLabels.TryGetValue(pageType, out var humanReadablePageType))
         {
             _logger.LogDebug(
                 "Unmapped page type '{PageType}'; skipping entity enrichment",
-                hostContext.PageType);
+                pageType);
             return systemPrompt;
         }
 

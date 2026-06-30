@@ -276,6 +276,49 @@ public class PlaybookChatContextProviderEntityNameLazyFetchTests
     }
 
     /// <summary>
+    /// Audit 120 Scenario A end-to-end protection: T150 (EntityType normalisation) + T151
+    /// (EntityName lazy-fetch) + T152 (default PageType) combined. Client sends ONLY
+    /// EntityType + EntityId (no EntityName, no PageType — the SpaarkeAi shipped behaviour).
+    /// Assistant chat MUST receive matter-aware system prompt enrichment.
+    /// </summary>
+    [Fact]
+    public async Task GetContextAsync_AuditScenarioA_ClientSendsOnlyEntityTypeAndId_EnrichmentFires()
+    {
+        // Arrange — mimic SpaarkeAi today: EntityType + EntityId only
+        var matterEntity = new Entity("sprk_matter", TestMatterId);
+        matterEntity["sprk_name"] = "Smith v. Jones";
+
+        _dataverseServiceMock
+            .Setup(d => d.RetrieveAsync(
+                "sprk_matter",
+                TestMatterId,
+                It.IsAny<string[]>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(matterEntity);
+
+        // No EntityName, no PageType (SpaarkeAi default behaviour pre-fix)
+        var hostContext = new ChatHostContext(
+            EntityType: "matter",
+            EntityId: TestMatterIdString,
+            EntityName: null,
+            PageType: null);
+
+        var sut = CreateProvider();
+
+        // Act
+        var context = await sut.GetContextAsync(
+            TestDocumentId, TestTenantId, TestPlaybookId, hostContext,
+            cancellationToken: CancellationToken.None);
+
+        // Assert — full enrichment fires: T151 lazy-fetches the name, T152 defaults the page type
+        context.SystemPrompt.Should()
+            .Contain("Context: You are assisting with matter record 'Smith v. Jones'.");
+        context.SystemPrompt.Should()
+            .Contain("The user is viewing the main form view.",
+                "T152 default PageType 'entityrecord' → 'main form view'");
+    }
+
+    /// <summary>
     /// Raw Dataverse logical name (<c>sprk_matter</c>) also resolves correctly — T151's
     /// <c>ToDataverseLogicalName</c> mapper is bidirectional for canonical AND raw inputs.
     /// This protects against accidental coupling to T150 boundary normalisation order.
