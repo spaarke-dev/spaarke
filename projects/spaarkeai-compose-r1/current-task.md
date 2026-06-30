@@ -1,7 +1,7 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-06-29 (initial state — created by `/project-pipeline` Step 2)
+> **Last Updated**: 2026-06-30 (by `/context-handoff` — pre-compaction checkpoint)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
@@ -13,10 +13,40 @@
 
 | Field | Value |
 |-------|-------|
-| **Active Wave** | **W10 (deploy) — 2 agents in flight** |
-| **Mode** | **Autonomous parallel** |
-| **Status** | W10 operator review ✅ approved 2026-06-29 (ISS-002 carry-forward, ISS-003 [#518] filed, publish-size OK); W10 deploy dispatched |
-| **Next Action** | Wait for W10 agents (080, 081); main session reviews deploy artifacts + smoke-test results; pauses at **W11 operator review gate (pre-wrap-up)** for `/test-diet` report sign-off. |
+| **Project state** | ✅ **ALL implementation + audits + cleanup + wrap-up artifacts complete.** Ready to deploy. |
+| **Active phase** | **W10 (deploy) — UNPAUSED; operator decided 2026-06-30 to proceed without waiting for r7** |
+| **PR** | [#515](https://github.com/spaarke-dev/spaarke/pull/515) — 6 commits pushed (head: `9a6141167`) |
+| **Why deploy NOW (changed 2026-06-30)** | r7 (`work/spaarke-ai-platform-unification-r7`) is taking significantly longer than expected. Operator confirmed r7 has NOT merged to master and r7's BFF changes are NOT in Dev (r7 only has a local deploy). Compose deploy is safe — file-level overlap with r7 = 0 on critical surfaces; only additive `Seed-PlaybookConsumers.ps1` overlap. |
+| **NEXT ACTION (explicit)** | **Resume W10 deploy**: (1) operator runs `pwsh ./scripts/Deploy-BffApi.ps1 -SkipBuild` → deploys `deploy/api-publish.zip` (45.41 MB, already staged) to `spaarke-bff-dev` in `rg-spaarke-dev`. (2) operator runs `pwsh ./scripts/Deploy-SpaarkeAi.ps1` → deploys `src/solutions/SpaarkeAi/dist/spaarkeai.html` to Dataverse as web resource `sprk_spaarkeai`. (3) Follow the 6-step runbook in [`notes/bff-publish-size-report.md`](notes/bff-publish-size-report.md) §6 (deploy → unauth smoke → auth smoke → FR-06 acceptance → CVE re-scan → live SC verification for SC4/5/9-live/10-live/13/14/15). |
+| **What I (Claude) should do post-compaction** | (a) Confirm operator has run the deploy commands above. (b) Help interpret smoke-test results. (c) If operator wants Claude to dispatch the W10-081 sub-agent for code-page deploy + Dataverse artifact verification, do that. (d) DO NOT revert to "hold for r7" — operator already made the deploy decision 2026-06-30. (e) After deploy succeeds + live SCs verify: merge Compose to master (PR #515). |
+
+### Files Modified This Session (full Wave 0 → W11)
+
+Full project work landed in PR #515 (6 commits):
+
+| Commit | Subject |
+|---|---|
+| `964594eea` | feat: initialize project artifacts + task plan |
+| `9aa18c9b3` | feat: autonomous parallel execution mode |
+| `cf46eac8a` | feat(bff/spaarkeai-compose-r1): Compose API + services + DI + tests + Dataverse seed |
+| `0881e6097` | feat(frontend/spaarkeai-compose-r1): Compose UI surface + shared libs + SemanticSearch refactor |
+| `5f7fb61a3` | docs(spaarkeai-compose-r1): R1 implementation artifacts + audits + defer registry |
+| `0778793a6` | chore(husky): track .husky/_/h helper alongside existing tracked shims |
+| `fcb69ed17` | refactor(spaarkeai-compose-r1): code-review cleanup (R1+R2+R3+R4 from PR #515) |
+| `9a6141167` | docs(spaarkeai-compose-r1): wrap-up artifacts — /test-diet + W9 consolidation + defer registry update |
+
+Plus 2 CI auto-format commits (`086a23da7`, `d89dab8b0`) integrated via rebase.
+
+### Critical Context (what a post-compaction agent MUST know)
+
+1. **Deploy is GO**. Operator decided 2026-06-30 — do not hold for r7. r7 has not merged to master; r7's BFF changes are not in Dev; Compose deploy will not regress anything.
+2. **All audits passed**: W9-070 (17/22 SCs pass + 7 deferred to live; 0 fail), W9-071 (9 ADRs / 9 PASS / 0 violations), W9-072 (§10 #5 PASS — 0 new HIGH CVEs), /test-diet (0 DELETE / 0 AMBIGUOUS).
+3. **All cleanup applied**: R1 (12 null checks removed), R2 (ComposeWorkspace.tsx 1795 → 687 LOC + 3 hooks), R3 (FU-1 heartbeat gate — RESOLVED), R4 Option C (IComposeSessionService collapsed to concrete; virtual modifier trade-off documented as FU-4).
+4. **Tests pass**: 136/136 BFF + 38/38 frontend = 174 tests; builds clean.
+5. **Path A tensions ratified**: T-1 (Dataverse-side checkout), T-2 (DocxAsync coverage delegation), T-3 (ADR-038 §7 SCAFFOLDING decline). All documented in spec.md + defer-issues.md.
+6. **Deploy artifacts**: BFF zip at `deploy/api-publish.zip` (45.41 MB, **−0.24 MB vs baseline**); SpaarkeAi prod bundle at `src/solutions/SpaarkeAi/dist/spaarkeai.html`.
+7. **Single reviewer doc**: [`notes/wrap-up-summary.md`](notes/wrap-up-summary.md) consolidates everything.
+8. **Comprehensive defer/issues registry**: [`notes/defer-issues.md`](notes/defer-issues.md) — ISS-001 resolved in PR, ISS-002 [#516] + ISS-003 [#518] filed, ISS-004 noted, 3 Path A tensions, OI-5 open, FU-1 RESOLVED, FU-2 open, FU-3 deferred to R2, FU-4 open (R4 trade-off), 7 DEFERRED SCs.
 
 ---
 
