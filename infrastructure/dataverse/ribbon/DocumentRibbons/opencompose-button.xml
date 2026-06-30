@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Document Entity - "Open in Compose" Command-Bar Button
+  spaarkeai-compose-r1 task 046 / Phase 4 / FR-19
+
+  Adds an "Open in Compose" button to the `sprk_document` form command bar that
+  launches `Sprk.SpaarkeAi.DocumentComposeLaunch.openInCompose`. The handler
+  reads `sprk_documentid` and the SPE drive-item pointer from the open record
+  and opens the SpaarkeAi modal directly into the Compose editor surface with
+  the document pre-loaded.
+
+  This is the Path A entry per `projects/spaarkeai-compose-r1/design.md` §14
+  row 3 ("Modal with full-screen toggle"). The full-screen toggle is provided
+  by the Xrm dialog chrome itself (platform-provided Expand button on the
+  modal header at target=2, 90%×90%) — no new modal abstraction.
+
+  Sequence: 230 (places this button immediately AFTER the existing
+  "Create To Do" button at Sequence 220, before any later buttons).
+
+  Deployment:
+   1. Locate the existing unmanaged ribbon solution: DocumentRibbons
+      (already created in earlier `smart-todo-decoupling-r3` work).
+   2. Export the solution and unpack it.
+   3. Merge the <RibbonDiffXml> below into the solution's customizations.xml
+      under <Entity><Name>sprk_document</Name>. If a <RibbonDiffXml> already
+      exists for sprk_document, MERGE the elements below into the existing
+      sections (CustomActions, CommandDefinitions, RuleDefinitions, LocLabels)
+      — do not replace.
+   4. Re-pack and import via `pac solution import --publish-changes`.
+
+  Prerequisites:
+    - sprk_spaarkeai_documentcomposelaunch web resource is deployed (bundled
+      JS output of `src/solutions/SpaarkeAi/src/ribbon/DocumentComposeLaunch.ts`
+      built via the SpaarkeAi build pipeline).
+    - sprk_document record has `sprk_graphitemid` populated (SPE drive-item id);
+      records without it open into Compose's empty-state per the handler's
+      defensive fallback (see DocumentComposeLaunch.ts).
+
+  Enable / display rules:
+    - DisplayRule: FormStateRule State="Existing" — the button only appears on
+      saved records (no drive-item id to send on a new form).
+    - EnableRule: FormStateRule State="Existing" Default="true" — the button
+      is enabled by default on saved records; the handler itself defends
+      against missing fields gracefully.
+
+  Image: reuses the standard Edit Pencil icon ($webresource is not available
+  for ribbon images; uses the built-in CRM stock image set).
+-->
+<ImportExportXml>
+  <Entities>
+    <Entity>
+      <Name>sprk_document</Name>
+      <RibbonDiffXml>
+        <CustomActions>
+          <CustomAction Id="sprk.SpaarkeAi.Document.OpenInCompose.CustomAction"
+                        Location="Mscrm.Form.sprk_document.MainTab.Actions.Controls._children"
+                        Sequence="230">
+            <CommandUIDefinition>
+              <Button Id="sprk.SpaarkeAi.Document.OpenInCompose.Button"
+                      Command="sprk.SpaarkeAi.Document.OpenInCompose.Command"
+                      LabelText="$LocLabels:sprk.SpaarkeAi.OpenInCompose.Label"
+                      Alt="$LocLabels:sprk.SpaarkeAi.OpenInCompose.Label"
+                      ToolTipTitle="$LocLabels:sprk.SpaarkeAi.OpenInCompose.ToolTipTitle"
+                      ToolTipDescription="$LocLabels:sprk.SpaarkeAi.OpenInCompose.ToolTipDescription"
+                      Image16by16="/_imgs/ribbon/Edit_16.png"
+                      Image32by32="/_imgs/ribbon/Edit_32.png"
+                      TemplateAlias="o1" />
+            </CommandUIDefinition>
+          </CustomAction>
+        </CustomActions>
+        <Templates>
+          <RibbonTemplates Id="Mscrm.Templates"></RibbonTemplates>
+        </Templates>
+        <CommandDefinitions>
+          <CommandDefinition Id="sprk.SpaarkeAi.Document.OpenInCompose.Command">
+            <EnableRules>
+              <EnableRule Id="sprk.SpaarkeAi.Document.Form.EnableRule" />
+            </EnableRules>
+            <DisplayRules>
+              <DisplayRule Id="sprk.SpaarkeAi.Document.Form.DisplayRule" />
+            </DisplayRules>
+            <Actions>
+              <JavaScriptFunction Library="$webresource:sprk_spaarkeai_documentcomposelaunch"
+                                  FunctionName="Sprk.SpaarkeAi.DocumentComposeLaunch.openInCompose">
+                <CrmParameter Value="PrimaryControl" />
+              </JavaScriptFunction>
+            </Actions>
+          </CommandDefinition>
+        </CommandDefinitions>
+        <RuleDefinitions>
+          <TabDisplayRules />
+          <DisplayRules>
+            <DisplayRule Id="sprk.SpaarkeAi.Document.Form.DisplayRule">
+              <FormStateRule State="Existing" />
+            </DisplayRule>
+          </DisplayRules>
+          <EnableRules>
+            <EnableRule Id="sprk.SpaarkeAi.Document.Form.EnableRule">
+              <FormStateRule State="Existing" Default="true" />
+            </EnableRule>
+          </EnableRules>
+        </RuleDefinitions>
+        <LocLabels>
+          <LocLabel Id="sprk.SpaarkeAi.OpenInCompose.Label">
+            <Titles>
+              <Title languagecode="1033" description="Open in Compose" />
+            </Titles>
+          </LocLabel>
+          <LocLabel Id="sprk.SpaarkeAi.OpenInCompose.ToolTipTitle">
+            <Titles>
+              <Title languagecode="1033" description="Open in Compose" />
+            </Titles>
+          </LocLabel>
+          <LocLabel Id="sprk.SpaarkeAi.OpenInCompose.ToolTipDescription">
+            <Titles>
+              <Title languagecode="1033" description="Open this document in the SpaarkeAi Compose editor for AI-assisted drafting and revision." />
+            </Titles>
+          </LocLabel>
+        </LocLabels>
+      </RibbonDiffXml>
+    </Entity>
+  </Entities>
+</ImportExportXml>

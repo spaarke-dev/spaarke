@@ -72,10 +72,12 @@ $SharedLibs = @(
     @{ Name = "Spaarke.SdapClient";           Path = "$RepoRoot\src\client\shared\Spaarke.SdapClient" }
     @{ Name = "Spaarke.AI.Context";           Path = "$RepoRoot\src\client\shared\Spaarke.AI.Context" }           # depends on Auth
     @{ Name = "Spaarke.AI.Outputs";           Path = "$RepoRoot\src\client\shared\Spaarke.AI.Outputs" }
+    @{ Name = "Spaarke.DocumentOperations";   Path = "$RepoRoot\src\client\shared\Spaarke.DocumentOperations" }   # depends on Auth (added 2026-06-29 by spaarkeai-compose-r1 task 030)
     @{ Name = "Spaarke.Events.Components";    Path = "$RepoRoot\src\client\shared\Spaarke.Events.Components" }
     @{ Name = "Spaarke.SmartTodo.Components"; Path = "$RepoRoot\src\client\shared\Spaarke.SmartTodo.Components" }
     @{ Name = "Spaarke.UI.Components";        Path = "$RepoRoot\src\client\shared\Spaarke.UI.Components" }        # depends on Auth, SdapClient
     @{ Name = "Spaarke.AI.Widgets";           Path = "$RepoRoot\src\client\shared\Spaarke.AI.Widgets" }           # depends on UI.Components, AI.Outputs
+    @{ Name = "Spaarke.Compose.Components";   Path = "$RepoRoot\src\client\shared\Spaarke.Compose.Components" }   # depends on Auth + DocumentOperations + AI.Widgets (PaneEventBus); MUST build AFTER AI.Widgets — re-ordered 2026-06-29 by spaarkeai-compose-r1 task 045 W4 when AI.Widgets dep was added
 )
 
 # Expand the "SharedLibs" special shortcut into the actual lib names so the filter at line ~113 matches.

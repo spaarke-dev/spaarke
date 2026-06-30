@@ -40,6 +40,7 @@ import {
   ReceiptRegular,
   BriefcaseRegular,
   BriefcaseSearchRegular,
+  EditRegular,
 } from '@fluentui/react-icons';
 import type { SectionCategory } from './types';
 
@@ -171,6 +172,19 @@ export const SECTION_METADATA_CATALOG: readonly SectionMetadata[] = [
     description: 'All events + tasks you have access to',
     category: 'data',
     icon: CalendarLtr24Regular,
+    defaultHeight: '720px',
+  },
+  // spaarkeai-compose-r1 task 040 (2026-06-29): Compose editor section type.
+  // Mounted by the "Compose" system workspace layout (sprk_workspacelayout row
+  // c09d26be-e173-f111-ab0e-7ced8ddc4a05, task 010). Registration lives in
+  // LegalWorkspace's sections/composeEditor.registration.ts. R1 placeholder
+  // skeleton; task 042 (Phase 4) wires the TipTap editor widget.
+  {
+    id: 'compose-editor',
+    label: 'Compose',
+    description: 'TipTap editor for drafting and revising documents',
+    category: 'productivity',
+    icon: EditRegular,
     defaultHeight: '720px',
   },
 ] as const;

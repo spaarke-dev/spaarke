@@ -49,6 +49,10 @@ import { projectsRegistration } from "./sections/projects.registration";
 import { invoicesRegistration } from "./sections/invoices.registration";
 import { workAssignmentsRegistration } from "./sections/workAssignments.registration";
 import { mattersRegistration } from "./sections/matters.registration";
+// spaarkeai-compose-r1 task 040 (2026-06-29): Compose editor section. Mounted
+// by the "Compose" workspace layout (system row, task 010). Renders an inline
+// Skeleton placeholder in R1; task 042 swaps in the real TipTap widget.
+import { composeEditorRegistration } from "./sections/composeEditor.registration";
 
 /**
  * Per-widget customization options for the LegalWorkspace section registry.
@@ -110,6 +114,7 @@ export function createLegalWorkspaceSectionRegistry(
     workAssignmentsRegistration,
     createLegalWorkspaceDailyBriefingRegistration(options.dailyBriefing ?? {}),
     calendarRegistration,
+    composeEditorRegistration,
   ] as const;
 
   if (process.env.NODE_ENV !== "production") {

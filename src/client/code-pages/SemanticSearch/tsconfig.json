@@ -14,7 +14,8 @@
     "rootDir": "./src",
     "typeRoots": ["./node_modules/@types"],
     "paths": {
-      "@spaarke/auth": ["../../shared/Spaarke.Auth/src/index"]
+      "@spaarke/auth": ["../../shared/Spaarke.Auth/src/index"],
+      "@spaarke/document-operations": ["../../shared/Spaarke.DocumentOperations/src/index"]
     }
   },
   "include": ["src/**/*"],

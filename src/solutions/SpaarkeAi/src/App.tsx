@@ -33,8 +33,15 @@ import {
   setupCodePageThemeListener,
 } from "@spaarke/ui-components";
 import { getAuthProvider } from "@spaarke/auth";
-import { getBffBaseUrl } from "./config/runtimeConfig";
+import { getBffBaseUrl, getTenantId } from "./config/runtimeConfig";
 import { ThreePaneShell } from "./components/shell/ThreePaneShell";
+// spaarkeai-compose-r1 task 046 (Path A entry per design.md §14 row 3):
+// When the modal is launched with `composeMode=editor`, render ComposeWorkspace
+// directly inside the SpaarkeAi modal shell instead of the three-pane shell.
+// Reuses the existing Xrm modal chrome (target=2, 90%×90% — platform-provided
+// full-screen toggle) — no new modal abstraction is created.
+import { ComposeWorkspace } from "./components/compose";
+import type { ComposeDocumentRef } from "./types/compose-contracts";
 
 // ---------------------------------------------------------------------------
 // Styles — Fluent v9 tokens only (ADR-021)
@@ -70,6 +77,31 @@ export interface AppProps {
   matterId?: string;
   /** Session ID for restore flow (AIPU2-106). When present, triggers session restore before first render. */
   sessionId?: string;
+
+  // ---------------------------------------------------------------------------
+  // Compose launch params (spaarkeai-compose-r1 task 046 — Path A entry).
+  //
+  // When `composeMode === 'editor'`, App mounts `ComposeWorkspace` directly
+  // (bypassing ThreePaneShell). The document pointer (sprkDocumentId +
+  // speDriveItemId) is forwarded to ComposeWorkspace so the editor can load
+  // the DOCX on mount. When `composeMode` is undefined the standard three-pane
+  // shell renders unchanged.
+  //
+  // The "modal with full-screen toggle" UX is provided by the Xrm dialog chrome
+  // itself (opened with target=2 at 90%×90%; the platform-provided Expand
+  // button is the full-screen toggle) — no new modal abstraction.
+  // ---------------------------------------------------------------------------
+
+  /** Routes the app to the Compose editor surface (Path A). */
+  composeMode?: "editor";
+  /** Dataverse `sprk_document` record GUID (Compose-only). */
+  sprkDocumentId?: string;
+  /** SPE drive-item id of the DOCX to load (Compose-only). */
+  speDriveItemId?: string;
+  /** SPE container drive id (Compose-only — may be omitted; resolved at runtime). */
+  speDriveId?: string;
+  /** Display name of the document for the workspace title (Compose-only). */
+  speFileName?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -118,6 +150,53 @@ function AppWithAuth(props: AppProps): React.JSX.Element {
       return "";
     }
   })();
+
+  const tenantId = (() => {
+    try {
+      return getTenantId();
+    } catch {
+      return "";
+    }
+  })();
+
+  // -------------------------------------------------------------------------
+  // Path A entry (spaarkeai-compose-r1 task 046, design.md §14 row 3)
+  //
+  // When `composeMode === 'editor'`, mount `ComposeWorkspace` directly inside
+  // the SpaarkeAi modal shell instead of the standard three-pane shell. The
+  // modal chrome (Xrm dialog with platform-provided expand-to-full-screen
+  // button) is the "modal with full-screen toggle" UX from the locked decision.
+  //
+  // Auth is still gated via the AppWithAuth probe — if `isAuthenticated` is
+  // false ComposeWorkspace's BFF load will simply surface the standard
+  // unauthorized error via its existing MessageBar (no special handling here).
+  // -------------------------------------------------------------------------
+  if (props.composeMode === "editor") {
+    const initialDocumentRef: ComposeDocumentRef | null = props.speDriveItemId
+      ? {
+          speDriveItemId: props.speDriveItemId,
+          sprkDocumentId: props.sprkDocumentId,
+          fileName: props.speFileName,
+          // containerId is unused in the BFF Load contract (driveId is what's
+          // queried); leave undefined and let the workspace resolve via runtime.
+          containerId: undefined,
+        }
+      : null;
+
+    return (
+      <div className={styles.appRoot} data-spaarkeai-mode="compose">
+        <div className={styles.layoutShell}>
+          <ComposeWorkspace
+            bffBaseUrl={bffBaseUrl}
+            driveId={props.speDriveId ?? ""}
+            tenantId={tenantId}
+            initialDocumentRef={initialDocumentRef}
+            initialSessionId=""
+          />
+        </div>
+      </div>
+    );
+  }
 
   return (
     <div className={styles.appRoot}>

@@ -383,6 +383,43 @@ async function bootstrap(): Promise<void> {
     undefined;
 
   // -------------------------------------------------------------------------
+  // Compose launch params (spaarkeai-compose-r1 task 046 — Path A entry).
+  //
+  // When `composeMode=editor` is present, App.tsx mounts ComposeWorkspace
+  // directly inside the SpaarkeAi modal shell instead of rendering the
+  // standard three-pane shell. The document pointer (sprkDocumentId +
+  // speDriveItemId) is forwarded to ComposeWorkspace so ComposeEditor can
+  // load the DOCX via GET /api/compose/documents/{speDriveItemId}.
+  //
+  // Falls through to undefined for non-Compose launches; the standard
+  // three-pane shell renders unchanged in that case.
+  // -------------------------------------------------------------------------
+  const composeMode =
+    searchParams.get("composeMode") ??
+    dataParams.get("composeMode") ??
+    undefined;
+
+  const sprkDocumentId =
+    searchParams.get("sprkDocumentId") ??
+    dataParams.get("sprkDocumentId") ??
+    undefined;
+
+  const speDriveItemId =
+    searchParams.get("speDriveItemId") ??
+    dataParams.get("speDriveItemId") ??
+    undefined;
+
+  const speDriveId =
+    searchParams.get("speDriveId") ??
+    dataParams.get("speDriveId") ??
+    undefined;
+
+  const speFileName =
+    searchParams.get("speFileName") ??
+    dataParams.get("speFileName") ??
+    undefined;
+
+  // -------------------------------------------------------------------------
   // 4. Render the app
   // -------------------------------------------------------------------------
   const rootElement = document.getElementById("root");
@@ -400,6 +437,11 @@ async function bootstrap(): Promise<void> {
           entityId={entityId}
           matterId={matterId}
           sessionId={sessionId}
+          composeMode={composeMode === "editor" ? "editor" : undefined}
+          sprkDocumentId={sprkDocumentId}
+          speDriveItemId={speDriveItemId}
+          speDriveId={speDriveId}
+          speFileName={speFileName}
         />
       </AppErrorBoundary>
     </React.StrictMode>
