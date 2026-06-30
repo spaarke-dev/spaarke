@@ -583,4 +583,50 @@ Both §10.4 fixes applied via main-session MCP calls after explicit operator app
 
 ---
 
-*End of audit 123. Resolution §10 + §10.10 appended 2026-06-30 by T143 (diagnostic) + main session (fix application). T142 §8.5 added by sibling task earlier the same day.*
+## 11. Resolution (Wave 12.3 task 144 — Create Work Assignment inheritance verification)
+
+**Disposition**: NO ACTION at code or data layer (per §6.1 disposition table, prediction confirmed). Inheritance from T143 Matter fix verified by code-path trace; end-to-end UAT deferred to T145.
+
+### 11.1 What was verified
+
+| Inheritance link | Evidence | Status |
+|---|---|---|
+| WA AI-prefill endpoint = Matter endpoint | [`EnterInfoStep.tsx:175`](../../../../src/client/shared/Spaarke.UI.Components/src/components/CreateWorkAssignmentWizard/EnterInfoStep.tsx) literal: `endpoint: '/api/workspace/matters/pre-fill'` (no WA-dedicated route) | ✅ confirmed |
+| Endpoint dispatches Matter playbook | §1.1 audit + §10.4 fix scope (single endpoint → single consumer-routing row → single playbook) | ✅ confirmed |
+| Matter playbook fix applied | commit [`3cb239e5d`](../../../../) — Fix A DELETE EntityNameValidator + Fix B PATCH AI Analysis systemPrompt strip (per §10.10) | ✅ confirmed |
+| Net effect on WA: AI prefill receives ACT-023 real prompt | Same code path as Matter wizard from BFF onward; WA-side `fieldExtractor` ([`EnterInfoStep.tsx:179-188`](../../../../src/client/shared/Spaarke.UI.Components/src/components/CreateWorkAssignmentWizard/EnterInfoStep.tsx)) keeps `name`+`description`+`matterTypeName`+`practiceAreaName`, discards 3 Matter-only fields (responsibleAttorney / clientName / openedDate) — confirmed unchanged by audit §2.3 | ✅ confirmed |
+| Record-copy prefill path independent | [`workAssignmentService.ts:267`](../../../../src/client/shared/Spaarke.UI.Components/src/components/CreateWorkAssignmentWizard/workAssignmentService.ts) `readRecordForPrefill(recordType, recordId)` — pure client-side OData reads via `IDataService`, no playbook/AI dependency; unaffected by Matter playbook state | ✅ confirmed (out of failure-mode scope) |
+
+### 11.2 Why no code change
+
+The WA wizard has TWO prefill paths:
+1. **AI prefill** (files uploaded, no record selected) — reuses Matter endpoint → benefits from T143 Matter playbook fix automatically. No WA-side code, data, or DI registration involved.
+2. **Record-copy prefill** (record selected from matter/project/invoice/event picker) — pure client-side OData via `IDataService`. Never touched the AI pipeline; was never broken by §10.2/§10.3 root causes.
+
+Per audit §6.1 row 3: "NO ACTION. Inherits fix from Matter." Per audit §10.5: "WA wizard's AI prefill path reuses `/api/workspace/matters/pre-fill`. Fixing the Matter playbook automatically fixes WA AI prefill." Both predictions hold under code-path trace.
+
+### 11.3 Why no Bash smoke from sandboxed agent
+
+Same constraint as T143 §10.6: sandboxed agent has no browser, no SSO credentials, no spaarkedev1 network reach. End-to-end UAT belongs to T145 (operator-driven). Code-path verification is the appropriate sandbox-level signal; it is sufficient given:
+- T143 already verified the Matter side end-to-end (code + Dataverse data) and fixed both root causes.
+- WA reuses Matter's exact endpoint, so the only failure surface unique to WA is the WA-side React component (`EnterInfoStep.tsx`) — which has not changed since the audit was authored.
+
+### 11.4 Acceptance criteria status
+
+- [x] WA wizard inheritance confirmed via code-path trace (endpoint + dispatch + payload-shape audit)
+- [x] Audit notes updated with Resolution (this section)
+- [x] No code change required (prediction from §6.1 row 3 confirmed)
+- [ ] WA wizard smoke pass against spaarkedev1 — DEFERRED to T145 UAT (operator-driven; appropriate boundary per CLAUDE.md §6 escalation + sandbox constraints)
+
+### 11.5 Confidence
+
+- **Inheritance-correctness confidence**: VERY HIGH. WA AI prefill path is a literal endpoint reuse with no WA-side branching, transformation, or override.
+- **T145 UAT pass probability for WA**: HIGH (conditional on T145 Matter wizard UAT passing — if Matter passes, WA passes by construction).
+
+### 11.6 Open follow-ups
+
+None new. T145 UAT covers both Matter + WA together per §10.5 design.
+
+---
+
+*End of audit 123. Resolution §10 + §10.10 + §11 appended 2026-06-30 by T143 (diagnostic) + main session (fix application) + T144 (WA inheritance verification). T142 §8.5 added by sibling task earlier the same day.*
