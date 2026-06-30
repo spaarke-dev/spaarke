@@ -130,9 +130,28 @@ public sealed class DailyBriefingNarrator
                 $"DailyBriefingNarrator: Action {ChannelActionCode} has no OutputSchemaJson.");
         }
 
+        // ── R7 Wave 12 T132 — TLDR ↔ Activity Notes consistency ──
+        // Chain the TLDR result as an additional input to per-channel narrative generation.
+        // Operator UAT requirement (wave12 plan §2.1): items mentioned in TLDR.keyTakeaways
+        // or TLDR.topAction MUST have corresponding details in Activity Notes bullets.
+        //
+        // The TLDR is computed FIRST (above). We pass its summary / keyTakeaways / topAction
+        // into each per-channel call as a `tldr` payload field so the LLM can ensure its
+        // narrative bullets cover TLDR-referenced items.
+        //
+        // The BRIEF-NARRATE-CHANNEL Action's `sprk_systemprompt` is amended to instruct
+        // the LLM to use this `tldr` input as a coverage requirement (operator-tunable
+        // surface — preserves the no-hardcoded-LLM-behavior-in-C# rule from §G Home A).
+        var tldrContextForChannels = new
+        {
+            summary       = tldr.Summary,
+            keyTakeaways  = tldr.KeyTakeaways,
+            topAction     = tldr.TopAction
+        };
+
         var channelTasks = req.Channels.Select(async ch =>
         {
-            var channelPayload = new { channel = ch.Label, items = ch.Items };
+            var channelPayload = new { channel = ch.Label, items = ch.Items, tldr = tldrContextForChannels };
             var channelRaw = await CallLlmStructuredAsync(
                 actionCode: ChannelActionCode,
                 systemPrompt: channelAction.SystemPrompt,

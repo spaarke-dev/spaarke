@@ -99,7 +99,7 @@ public class AnalysisActionService : DataverseHttpServiceBase
     /// filter on sprk_actioncode (not the alternate-key URL form) so the call works
     /// uniformly whether or not the alternate key is enabled at the Dataverse level.
     /// </remarks>
-    public async Task<AnalysisAction?> GetActionByCodeAsync(
+    public virtual async Task<AnalysisAction?> GetActionByCodeAsync(
         string actionCode,
         CancellationToken cancellationToken)
     {
