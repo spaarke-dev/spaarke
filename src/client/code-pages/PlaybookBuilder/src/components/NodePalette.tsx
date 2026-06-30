@@ -252,11 +252,12 @@ export function NodePalette({ onTileDragStart }: NodePaletteProps = {}): React.R
   const filteredEntries = useMemo(() => {
     const q = searchQuery.trim().toLowerCase();
     if (!q) return EXECUTOR_METADATA;
-    return EXECUTOR_METADATA.filter(e =>
-      e.label.toLowerCase().includes(q) ||
-      e.name.toLowerCase().includes(q) ||
-      e.description.toLowerCase().includes(q) ||
-      e.tierPrefix.includes(q)
+    return EXECUTOR_METADATA.filter(
+      e =>
+        e.label.toLowerCase().includes(q) ||
+        e.name.toLowerCase().includes(q) ||
+        e.description.toLowerCase().includes(q) ||
+        e.tierPrefix.includes(q)
     );
   }, [searchQuery]);
 
@@ -332,32 +333,18 @@ export function NodePalette({ onTileDragStart }: NodePaletteProps = {}): React.R
             <Text>No executors match &ldquo;{searchQuery}&rdquo;.</Text>
           </div>
         ) : (
-          <Accordion
-            multiple
-            collapsible
-            defaultOpenItems={defaultOpenItems}
-            className={styles.accordion}
-          >
+          <Accordion multiple collapsible defaultOpenItems={defaultOpenItems} className={styles.accordion}>
             {TIER_ORDER.map(tier => {
               const entries = groupedFiltered[tier];
               // When searching, hide empty tiers entirely; in default state show all 6 tiers
               // (always non-empty in default catalog).
               if (entries.length === 0) return null;
               return (
-                <AccordionItem
-                  key={tier}
-                  value={tier}
-                  className={styles.accordionItem}
-                >
+                <AccordionItem key={tier} value={tier} className={styles.accordionItem}>
                   <AccordionHeader className={styles.accordionHeader}>
                     <span className={styles.tierHeaderLabel}>
                       {TIER_LABEL[tier]}
-                      <Badge
-                        className={styles.tierBadge}
-                        size="small"
-                        appearance="ghost"
-                        color="informative"
-                      >
+                      <Badge className={styles.tierBadge} size="small" appearance="ghost" color="informative">
                         {entries.length}
                       </Badge>
                     </span>
@@ -365,11 +352,7 @@ export function NodePalette({ onTileDragStart }: NodePaletteProps = {}): React.R
                   <AccordionPanel>
                     <div className={styles.paletteList}>
                       {entries.map(metadata => (
-                        <PaletteTile
-                          key={metadata.value}
-                          metadata={metadata}
-                          onDragStart={handleTileDragStart}
-                        />
+                        <PaletteTile key={metadata.value} metadata={metadata} onDragStart={handleTileDragStart} />
                       ))}
                     </div>
                   </AccordionPanel>
@@ -382,4 +365,3 @@ export function NodePalette({ onTileDragStart }: NodePaletteProps = {}): React.R
     </div>
   );
 }
-

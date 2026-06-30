@@ -92,9 +92,7 @@ function parseConfigBag(configJson: string | undefined): Record<string, unknown>
   if (!configJson) return {};
   try {
     const parsed = JSON.parse(configJson);
-    return parsed && typeof parsed === 'object' && !Array.isArray(parsed)
-      ? (parsed as Record<string, unknown>)
-      : {};
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : {};
   } catch {
     return {};
   }

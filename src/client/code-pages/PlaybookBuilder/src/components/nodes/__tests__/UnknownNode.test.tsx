@@ -66,15 +66,11 @@ describe('UnknownNode (R7 Wave 8 task 089 / FR-27)', () => {
 
   it('exposes an aria-label that includes the executor type for screen readers', () => {
     renderUnknownNode({ executorType: 42 });
-    expect(
-      screen.getByRole('group', { name: /Unknown executor type 42/ })
-    ).toBeInTheDocument();
+    expect(screen.getByRole('group', { name: /Unknown executor type 42/ })).toBeInTheDocument();
   });
 
   it('renders the CTA prompting the maker to pick an Executor Type', () => {
     renderUnknownNode({ executorType: 999 });
-    expect(
-      screen.getByText(/Open the node and pick an Executor Type/)
-    ).toBeInTheDocument();
+    expect(screen.getByText(/Open the node and pick an Executor Type/)).toBeInTheDocument();
   });
 });

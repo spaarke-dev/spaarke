@@ -321,9 +321,7 @@ export const TypedConfigForm = memo(function TypedConfigForm({
               jsonAreaClassName={styles.jsonArea}
             />
 
-            {field.description && !validation.hasError && (
-              <Text className={styles.fieldHint}>{field.description}</Text>
-            )}
+            {field.description && !validation.hasError && <Text className={styles.fieldHint}>{field.description}</Text>}
             {validation.hasError && validation.message && (
               <Text role="alert" className={styles.fieldError}>
                 {validation.message}

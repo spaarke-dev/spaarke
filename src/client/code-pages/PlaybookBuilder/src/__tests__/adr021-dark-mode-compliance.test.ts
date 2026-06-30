@@ -47,15 +47,7 @@ import * as path from 'path';
 // Repo root resolved relative to this test file:
 // src/client/code-pages/PlaybookBuilder/src/__tests__/this-file → ../../../../../..
 const REPO_ROOT = path.resolve(__dirname, '..', '..', '..', '..', '..', '..');
-const PB_ROOT = path.join(
-  REPO_ROOT,
-  'src',
-  'client',
-  'code-pages',
-  'PlaybookBuilder',
-  'src',
-  'components'
-);
+const PB_ROOT = path.join(REPO_ROOT, 'src', 'client', 'code-pages', 'PlaybookBuilder', 'src', 'components');
 
 /**
  * Wave 8 touched files (relative to src/client/code-pages/PlaybookBuilder/src/components).
@@ -130,7 +122,7 @@ interface Finding {
  */
 function stripComments(source: string): string {
   // Remove /* ... * / block comments (greedy across lines)
-  let stripped = source.replace(/\/\*[\s\S]*?\*\//g, (match) => {
+  let stripped = source.replace(/\/\*[\s\S]*?\*\//g, match => {
     // Preserve newlines so line numbers in remaining content stay stable
     return match.replace(/[^\n]/g, ' ');
   });
@@ -199,10 +191,7 @@ function scanFileForHardcodedColors(filePath: string): Finding[] {
     for (const prop of COLOR_PROPERTY_NAMES) {
       for (const namedColor of CSS_NAMED_COLORS) {
         // Match e.g. `color: 'red'` / `backgroundColor: "blue"` / `fill:\`gray\``
-        const propPattern = new RegExp(
-          `\\b${prop}\\s*:\\s*['"\`]${namedColor}['"\`]`,
-          'i'
-        );
+        const propPattern = new RegExp(`\\b${prop}\\s*:\\s*['"\`]${namedColor}['"\`]`, 'i');
         if (propPattern.test(line)) {
           findings.push({
             file: filePath,
@@ -221,7 +210,7 @@ function scanFileForHardcodedColors(filePath: string): Finding[] {
 
 describe('ADR-021 dark-mode semantic-token compliance — Wave 8 PlaybookBuilder UI', () => {
   // Pre-resolve absolute file paths so failure messages are clear.
-  const absoluteFilePaths = WAVE_8_FILES.map((rel) => path.join(PB_ROOT, rel));
+  const absoluteFilePaths = WAVE_8_FILES.map(rel => path.join(PB_ROOT, rel));
 
   it('all 5 Wave 8 component files exist on disk (sanity)', () => {
     for (const abs of absoluteFilePaths) {
@@ -262,10 +251,7 @@ describe('ADR-021 dark-mode semantic-token compliance — Wave 8 PlaybookBuilder
     if (allFindings.length > 0) {
       // Build a human-readable report so a regression is debuggable from CI logs alone.
       const report = allFindings
-        .map(
-          (f) =>
-            `  ${path.relative(REPO_ROOT, f.file)}:${f.lineNumber}  [${f.pattern}] ${f.matched}\n      ${f.line}`
-        )
+        .map(f => `  ${path.relative(REPO_ROOT, f.file)}:${f.lineNumber}  [${f.pattern}] ${f.matched}\n      ${f.line}`)
         .join('\n');
       throw new Error(
         `ADR-021 violation — ${allFindings.length} hardcoded color reference(s) in Wave 8 UI surface:\n${report}\n\n` +
@@ -281,11 +267,7 @@ describe('ADR-021 dark-mode semantic-token compliance — Wave 8 PlaybookBuilder
   describe('scanner self-test (negative assertion)', () => {
     it('detects a hex color in a non-comment line', () => {
       const tmpFile = path.join(__dirname, '__adr021-self-test-hex.tsx');
-      fs.writeFileSync(
-        tmpFile,
-        `import * as React from 'react';\nconst style = { color: '#FF0000' };\n`,
-        'utf8'
-      );
+      fs.writeFileSync(tmpFile, `import * as React from 'react';\nconst style = { color: '#FF0000' };\n`, 'utf8');
       try {
         const findings = scanFileForHardcodedColors(tmpFile);
         expect(findings.length).toBeGreaterThanOrEqual(1);
@@ -298,11 +280,7 @@ describe('ADR-021 dark-mode semantic-token compliance — Wave 8 PlaybookBuilder
 
     it('detects rgb()/rgba() function calls', () => {
       const tmpFile = path.join(__dirname, '__adr021-self-test-rgb.tsx');
-      fs.writeFileSync(
-        tmpFile,
-        `const style = { backgroundColor: 'rgba(255, 0, 0, 0.5)' };\n`,
-        'utf8'
-      );
+      fs.writeFileSync(tmpFile, `const style = { backgroundColor: 'rgba(255, 0, 0, 0.5)' };\n`, 'utf8');
       try {
         const findings = scanFileForHardcodedColors(tmpFile);
         expect(findings.length).toBeGreaterThanOrEqual(1);
@@ -314,15 +292,11 @@ describe('ADR-021 dark-mode semantic-token compliance — Wave 8 PlaybookBuilder
 
     it('detects named CSS color in style-property context', () => {
       const tmpFile = path.join(__dirname, '__adr021-self-test-named.tsx');
-      fs.writeFileSync(
-        tmpFile,
-        `const style = { color: 'red', backgroundColor: "blue" };\n`,
-        'utf8'
-      );
+      fs.writeFileSync(tmpFile, `const style = { color: 'red', backgroundColor: "blue" };\n`, 'utf8');
       try {
         const findings = scanFileForHardcodedColors(tmpFile);
         expect(findings.length).toBeGreaterThanOrEqual(2);
-        const patterns = findings.map((f) => f.pattern).join(',');
+        const patterns = findings.map(f => f.pattern).join(',');
         expect(patterns).toMatch(/named CSS color/);
       } finally {
         fs.unlinkSync(tmpFile);
@@ -346,11 +320,7 @@ describe('ADR-021 dark-mode semantic-token compliance — Wave 8 PlaybookBuilder
 
     it('IGNORES HTML entities like &#8593; that look like hex tokens', () => {
       const tmpFile = path.join(__dirname, '__adr021-self-test-entity.tsx');
-      fs.writeFileSync(
-        tmpFile,
-        `const arrow = <span>&#8593; up &#8595; down</span>;\n`,
-        'utf8'
-      );
+      fs.writeFileSync(tmpFile, `const arrow = <span>&#8593; up &#8595; down</span>;\n`, 'utf8');
       try {
         const findings = scanFileForHardcodedColors(tmpFile);
         // &#8593; and &#8595; have 4-digit decimal payloads that the bare hex
@@ -364,11 +334,7 @@ describe('ADR-021 dark-mode semantic-token compliance — Wave 8 PlaybookBuilder
 
     it('IGNORES color names in non-style contexts (e.g., a label string)', () => {
       const tmpFile = path.join(__dirname, '__adr021-self-test-label.tsx');
-      fs.writeFileSync(
-        tmpFile,
-        `const category = { name: 'blue theme', label: "red flag indicator" };\n`,
-        'utf8'
-      );
+      fs.writeFileSync(tmpFile, `const category = { name: 'blue theme', label: "red flag indicator" };\n`, 'utf8');
       try {
         const findings = scanFileForHardcodedColors(tmpFile);
         expect(findings).toEqual([]);

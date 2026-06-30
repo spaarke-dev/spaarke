@@ -49,7 +49,7 @@ const AI_ANALYSIS_SCHEMA: ExecutorConfigSchema = {
   executorTypeName: 'AiAnalysis',
   executorTypeValue: 0,
   description:
-    "Document-grounded structured analysis with tool dispatch (FR-13). Requires Action FK + Tool + Document with extracted text.",
+    'Document-grounded structured analysis with tool dispatch (FR-13). Requires Action FK + Tool + Document with extracted text.',
   fields: [
     {
       name: 'templateParameters',
@@ -61,7 +61,7 @@ const AI_ANALYSIS_SCHEMA: ExecutorConfigSchema = {
       name: 'promptSchemaOverride',
       type: 'Object',
       required: false,
-      description: 'Per-node override merged into the Action\'s base JPS prompt schema (FR-25).',
+      description: "Per-node override merged into the Action's base JPS prompt schema (FR-25).",
     },
     {
       name: 'knowledgeRetrieval',
@@ -107,7 +107,7 @@ const AI_COMPLETION_SCHEMA: ExecutorConfigSchema = {
       name: 'promptSchemaOverride',
       type: 'Object',
       required: false,
-      description: 'Per-node override merged into the Action\'s base JPS prompt schema (FR-25).',
+      description: "Per-node override merged into the Action's base JPS prompt schema (FR-25).",
     },
   ],
 };
@@ -115,8 +115,7 @@ const AI_COMPLETION_SCHEMA: ExecutorConfigSchema = {
 const CONDITION_SCHEMA: ExecutorConfigSchema = {
   executorTypeName: 'Condition',
   executorTypeValue: 30,
-  description:
-    'Conditional branching based on expression evaluation. Routes execution to true or false branch.',
+  description: 'Conditional branching based on expression evaluation. Routes execution to true or false branch.',
   fields: [
     {
       name: 'condition',
@@ -142,8 +141,7 @@ const CONDITION_SCHEMA: ExecutorConfigSchema = {
 const ENTITY_NAME_VALIDATOR_SCHEMA: ExecutorConfigSchema = {
   executorTypeName: 'EntityNameValidator',
   executorTypeValue: 141,
-  description:
-    'Post-LLM defense-in-depth scrubber. Removes hallucinated entity names from LLM output.',
+  description: 'Post-LLM defense-in-depth scrubber. Removes hallucinated entity names from LLM output.',
   fields: [
     {
       name: 'candidateText',
@@ -163,8 +161,7 @@ const ENTITY_NAME_VALIDATOR_SCHEMA: ExecutorConfigSchema = {
 const CREATE_NOTIFICATION_SCHEMA: ExecutorConfigSchema = {
   executorTypeName: 'CreateNotification',
   executorTypeValue: 50,
-  description:
-    'Creates a Dataverse appnotification record for the recipient with template substitution + idempotency.',
+  description: 'Creates a Dataverse appnotification record for the recipient with template substitution + idempotency.',
   fields: [
     {
       name: 'title',
@@ -298,9 +295,7 @@ describe('TypedConfigForm — 5 priority executor schemas (R7 FR-23 / task 084)'
   // ---- Validation: required fields ----------------------------------------
 
   it('shows "Required" error on empty required field — Condition.condition', () => {
-    renderWithProviders(
-      <TypedConfigForm nodeId="n-cond" schema={CONDITION_SCHEMA} value={{}} onChange={jest.fn()} />
-    );
+    renderWithProviders(<TypedConfigForm nodeId="n-cond" schema={CONDITION_SCHEMA} value={{}} onChange={jest.fn()} />);
 
     // condition is required + Object — an empty bag with no key means undefined,
     // which `validateField` treats as empty + required → "Required".
@@ -433,9 +428,7 @@ describe('TypedConfigForm — 5 priority executor schemas (R7 FR-23 / task 084)'
   // ---- Empty / placeholder schema branches --------------------------------
 
   it('renders "No schema available" placeholder when schema is undefined', () => {
-    renderWithProviders(
-      <TypedConfigForm nodeId="n-undef" schema={undefined} value={{}} onChange={jest.fn()} />
-    );
+    renderWithProviders(<TypedConfigForm nodeId="n-undef" schema={undefined} value={{}} onChange={jest.fn()} />);
 
     expect(screen.getByText(/No schema available/i)).toBeInTheDocument();
   });
@@ -447,9 +440,7 @@ describe('TypedConfigForm — 5 priority executor schemas (R7 FR-23 / task 084)'
       description: 'Canvas anchor — pass-through with no execution logic.',
       fields: [],
     };
-    renderWithProviders(
-      <TypedConfigForm nodeId="n-start" schema={emptySchema} value={{}} onChange={jest.fn()} />
-    );
+    renderWithProviders(<TypedConfigForm nodeId="n-start" schema={emptySchema} value={{}} onChange={jest.fn()} />);
 
     expect(screen.getByText('Start')).toBeInTheDocument();
     expect(screen.getByText(emptySchema.description)).toBeInTheDocument();

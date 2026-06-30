@@ -78,24 +78,22 @@ export async function loadPlaybooks(
       : Promise.resolve(new Map<string, IPlaybookConsumerMapping[]>()),
   ]);
 
-  return playbookResult.entities.map(
-    (entity: Record<string, unknown>): IPlaybook => {
-      const playbookId = entity[ID_FIELDS.playbook] as string;
-      const playbook: IPlaybook = {
-        id: playbookId,
-        name: entity.sprk_name as string,
-        description: (entity.sprk_description as string) || '',
-        icon: 'Lightbulb', // No dedicated icon field in Dataverse
-        isDefault: false,
-      };
-      if (includeConsumers) {
-        // Always assign — empty array signals "expand was requested, no rows"
-        // (a dead-code candidate per design.md §3 consumer-driven model).
-        playbook.consumers = consumerMap.get(playbookId) ?? [];
-      }
-      return playbook;
+  return playbookResult.entities.map((entity: Record<string, unknown>): IPlaybook => {
+    const playbookId = entity[ID_FIELDS.playbook] as string;
+    const playbook: IPlaybook = {
+      id: playbookId,
+      name: entity.sprk_name as string,
+      description: (entity.sprk_description as string) || '',
+      icon: 'Lightbulb', // No dedicated icon field in Dataverse
+      isDefault: false,
+    };
+    if (includeConsumers) {
+      // Always assign — empty array signals "expand was requested, no rows"
+      // (a dead-code candidate per design.md §3 consumer-driven model).
+      playbook.consumers = consumerMap.get(playbookId) ?? [];
     }
-  );
+    return playbook;
+  });
 }
 
 /**

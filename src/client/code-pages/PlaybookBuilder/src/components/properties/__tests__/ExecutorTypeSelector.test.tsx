@@ -30,12 +30,7 @@
 import * as React from 'react';
 import { screen, fireEvent, within } from '@testing-library/react';
 import { ExecutorTypeSelector } from '../ExecutorTypeSelector';
-import {
-  EXECUTOR_METADATA,
-  EXECUTOR_METADATA_COUNT,
-  TIER_LABEL,
-  TIER_ORDER,
-} from '../../../config/executorMetadata';
+import { EXECUTOR_METADATA, EXECUTOR_METADATA_COUNT, TIER_LABEL, TIER_ORDER } from '../../../config/executorMetadata';
 import { renderWithProviders, renderWithTheme, webDarkTheme } from './testUtils';
 
 describe('ExecutorTypeSelector (R7 Wave 8 task 089a / FR-22 + FR-24)', () => {
@@ -105,9 +100,7 @@ describe('ExecutorTypeSelector (R7 Wave 8 task 089a / FR-22 + FR-24)', () => {
 
     // Verify one specific description from the catalog appears in the popover.
     // "AI Completion" → "Raw LLM completion with a prompt template + structured-output schema."
-    expect(
-      screen.getByText(/Raw LLM completion with a prompt template/i)
-    ).toBeInTheDocument();
+    expect(screen.getByText(/Raw LLM completion with a prompt template/i)).toBeInTheDocument();
   });
 
   it('displays the tier-prefixed label for the currently selected value', () => {
@@ -124,9 +117,7 @@ describe('ExecutorTypeSelector (R7 Wave 8 task 089a / FR-22 + FR-24)', () => {
 
     // Find the "30  Condition" option and click it.
     const options = screen.getAllByRole('option');
-    const conditionOption = options.find(opt =>
-      within(opt).queryByText(/30\s+Condition/)
-    );
+    const conditionOption = options.find(opt => within(opt).queryByText(/30\s+Condition/));
     expect(conditionOption).toBeDefined();
     fireEvent.click(conditionOption!);
 
@@ -141,9 +132,7 @@ describe('ExecutorTypeSelector (R7 Wave 8 task 089a / FR-22 + FR-24)', () => {
 
     // 141 → Entity Name Validator (Capability tier).
     const options = screen.getAllByRole('option');
-    const target = options.find(opt =>
-      within(opt).queryByText(/141\s+Entity Name Validator/)
-    );
+    const target = options.find(opt => within(opt).queryByText(/141\s+Entity Name Validator/));
     expect(target).toBeDefined();
     fireEvent.click(target!);
 
@@ -175,10 +164,7 @@ describe('ExecutorTypeSelector (R7 Wave 8 task 089a / FR-22 + FR-24)', () => {
   });
 
   it('renders cleanly under dark theme (ADR-021 semantic-token parity)', () => {
-    renderWithTheme(
-      <ExecutorTypeSelector value={1} onChange={jest.fn()} />,
-      webDarkTheme
-    );
+    renderWithTheme(<ExecutorTypeSelector value={1} onChange={jest.fn()} />, webDarkTheme);
     // Same label + combobox surface; Fluent v9 token-driven styles flip automatically.
     expect(screen.getByText('Executor Type')).toBeInTheDocument();
     const combobox = screen.getByRole('combobox') as HTMLInputElement;

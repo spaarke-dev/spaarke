@@ -630,7 +630,9 @@ function resolveExecutorType(data: PlaybookNodeData, canvasType: string): number
   const pascal = canvasType.charAt(0).toUpperCase() + canvasType.slice(1);
   const meta = getExecutorByName(pascal);
   if (meta) return meta.value;
-  console.warn(`${LOG_PREFIX} Could not resolve executor type for canvas type '${canvasType}' (no executorType in data and no name match)`);
+  console.warn(
+    `${LOG_PREFIX} Could not resolve executor type for canvas type '${canvasType}' (no executorType in data and no name match)`
+  );
   return undefined;
 }
 

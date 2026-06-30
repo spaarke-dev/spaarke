@@ -40,13 +40,7 @@ import type { PlaybookNodeType } from '../types/canvas';
  * Order matters — Accordion renders tiers in this declared order
  * (AI first, then Compute, etc.). See R7 design.md §11.
  */
-export type ExecutorTier =
-  | 'AI'
-  | 'Compute'
-  | 'Mutations'
-  | 'Control'
-  | 'Delivery'
-  | 'Capability';
+export type ExecutorTier = 'AI' | 'Compute' | 'Mutations' | 'Control' | 'Delivery' | 'Capability';
 
 /** Display label for each tier shown in the Accordion header. */
 export const TIER_LABEL: Record<ExecutorTier, string> = {
@@ -59,14 +53,7 @@ export const TIER_LABEL: Record<ExecutorTier, string> = {
 };
 
 /** Tier order — drives Accordion rendering order. */
-export const TIER_ORDER: ExecutorTier[] = [
-  'AI',
-  'Compute',
-  'Mutations',
-  'Control',
-  'Delivery',
-  'Capability',
-];
+export const TIER_ORDER: ExecutorTier[] = ['AI', 'Compute', 'Mutations', 'Control', 'Delivery', 'Capability'];
 
 /** Compute tier from the executor's integer value per the prefix rule. */
 function tierFromValue(value: number): ExecutorTier {

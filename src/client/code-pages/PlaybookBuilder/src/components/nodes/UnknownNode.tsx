@@ -101,13 +101,9 @@ const useStyles = makeStyles({
  * want a visually distinct warning treatment driven entirely by
  * `tokens.colorStatusWarning*` semantic tokens.
  */
-export const UnknownNode = React.memo(function UnknownNode({
-  data,
-  selected,
-}: NodeProps<Node<PlaybookNodeData>>) {
+export const UnknownNode = React.memo(function UnknownNode({ data, selected }: NodeProps<Node<PlaybookNodeData>>) {
   const styles = useStyles();
-  const executorTypeLabel =
-    typeof data.executorType === 'number' ? String(data.executorType) : 'unset';
+  const executorTypeLabel = typeof data.executorType === 'number' ? String(data.executorType) : 'unset';
 
   return (
     <div
@@ -135,10 +131,7 @@ export const UnknownNode = React.memo(function UnknownNode({
       </div>
 
       <div className={styles.body}>
-        <Text size={100}>
-          This node's executor type is not recognized by the current PlaybookBuilder
-          version.
-        </Text>
+        <Text size={100}>This node's executor type is not recognized by the current PlaybookBuilder version.</Text>
         <Text size={100} className={styles.cta}>
           Open the node and pick an Executor Type to enable execution.
         </Text>

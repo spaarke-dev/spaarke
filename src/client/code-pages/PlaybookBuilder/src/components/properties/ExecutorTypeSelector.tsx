@@ -94,11 +94,7 @@ export interface ExecutorTypeSelectorProps {
 // Component
 // ---------------------------------------------------------------------------
 
-export const ExecutorTypeSelector: React.FC<ExecutorTypeSelectorProps> = ({
-  value,
-  onChange,
-  disabled = false,
-}) => {
+export const ExecutorTypeSelector: React.FC<ExecutorTypeSelectorProps> = ({ value, onChange, disabled = false }) => {
   const styles = useStyles();
 
   // Memoize tier grouping (stable since EXECUTOR_METADATA is module-scope constant).
@@ -117,15 +113,10 @@ export const ExecutorTypeSelector: React.FC<ExecutorTypeSelectorProps> = ({
     return groups;
   }, []);
 
-  const selectedEntry = useMemo(
-    () => (typeof value === 'number' ? getExecutorByValue(value) : undefined),
-    [value]
-  );
+  const selectedEntry = useMemo(() => (typeof value === 'number' ? getExecutorByValue(value) : undefined), [value]);
 
   // Selected option display text — show "NN  Label" so the tier prefix is visible.
-  const displayValue = selectedEntry
-    ? `${selectedEntry.tierPrefix}  ${selectedEntry.label}`
-    : '';
+  const displayValue = selectedEntry ? `${selectedEntry.tierPrefix}  ${selectedEntry.label}` : '';
 
   // Fluent v9 Dropdown selectedOptions is a string[] of option values.
   const selectedOptions = selectedEntry ? [String(selectedEntry.value)] : [];
@@ -164,16 +155,10 @@ export const ExecutorTypeSelector: React.FC<ExecutorTypeSelectorProps> = ({
               {entries.map(entry => {
                 const optionText = `${entry.tierPrefix}  ${entry.label}`;
                 return (
-                  <Option
-                    key={entry.value}
-                    value={String(entry.value)}
-                    text={optionText}
-                  >
+                  <Option key={entry.value} value={String(entry.value)} text={optionText}>
                     <div className={styles.optionLine}>
                       <div>{optionText}</div>
-                      <div className={styles.optionDescription}>
-                        {entry.description}
-                      </div>
+                      <div className={styles.optionDescription}>{entry.description}</div>
                     </div>
                   </Option>
                 );

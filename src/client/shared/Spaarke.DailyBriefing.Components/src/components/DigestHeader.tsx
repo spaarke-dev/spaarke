@@ -38,12 +38,7 @@ import {
   MenuList,
   MenuItem,
 } from '@fluentui/react-components';
-import {
-  AlertRegular,
-  ArrowClockwiseRegular,
-  MoreHorizontalRegular,
-  BookRegular,
-} from '@fluentui/react-icons';
+import { AlertRegular, ArrowClockwiseRegular, MoreHorizontalRegular, BookRegular } from '@fluentui/react-icons';
 
 // ---------------------------------------------------------------------------
 // Styles (Fluent v9 semantic tokens only — ADR-021)
@@ -155,12 +150,7 @@ export const DigestHeader: React.FC<DigestHeaderProps> = ({
           <Menu>
             <MenuTrigger disableButtonEnhancement>
               <Tooltip content="More actions" relationship="label">
-                <Button
-                  appearance="subtle"
-                  size="small"
-                  icon={<MoreHorizontalRegular />}
-                  aria-label="More actions"
-                />
+                <Button appearance="subtle" size="small" icon={<MoreHorizontalRegular />} aria-label="More actions" />
               </Tooltip>
             </MenuTrigger>
             <MenuPopover>

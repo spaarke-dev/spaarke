@@ -163,12 +163,7 @@ describe('TypedConfigForm priority-executor sentinels (R7 task 089b)', () => {
 
     it('AiAnalysis renders the includeDocumentContext Boolean default (false) when bag lacks the key', () => {
       const { container } = renderWithProviders(
-        <TypedConfigForm
-          nodeId="n-ai-default"
-          schema={AI_ANALYSIS_SCHEMA}
-          value={{}}
-          onChange={jest.fn()}
-        />
+        <TypedConfigForm nodeId="n-ai-default" schema={AI_ANALYSIS_SCHEMA} value={{}} onChange={jest.fn()} />
       );
       const switchEl = container.querySelector('#n-ai-default-includeDocumentContext') as HTMLInputElement;
       expect(switchEl).not.toBeNull();
@@ -212,12 +207,7 @@ describe('TypedConfigForm priority-executor sentinels (R7 task 089b)', () => {
       const onChange = jest.fn();
       const user = userEvent.setup();
       const { container } = renderWithProviders(
-        <TypedConfigForm
-          nodeId="n-ai-bool"
-          schema={AI_ANALYSIS_SCHEMA}
-          value={{}}
-          onChange={onChange}
-        />
+        <TypedConfigForm nodeId="n-ai-bool" schema={AI_ANALYSIS_SCHEMA} value={{}} onChange={onChange} />
       );
       const switchEl = container.querySelector('#n-ai-bool-includeDocumentContext') as HTMLInputElement;
       await user.click(switchEl);
@@ -287,12 +277,7 @@ describe('TypedConfigForm priority-executor sentinels (R7 task 089b)', () => {
   describe('optional-field empty-value semantics', () => {
     it('AiCompletion with empty bag shows ZERO "Required" errors (no required fields)', () => {
       renderWithProviders(
-        <TypedConfigForm
-          nodeId="n-ac-empty"
-          schema={AI_COMPLETION_SCHEMA}
-          value={{}}
-          onChange={jest.fn()}
-        />
+        <TypedConfigForm nodeId="n-ac-empty" schema={AI_COMPLETION_SCHEMA} value={{}} onChange={jest.fn()} />
       );
       const alerts = screen.queryAllByRole('alert');
       const required = alerts.filter(el => el.textContent === 'Required');
@@ -301,12 +286,7 @@ describe('TypedConfigForm priority-executor sentinels (R7 task 089b)', () => {
 
     it('AiAnalysis with empty bag shows ZERO "Required" errors (no required fields in schema)', () => {
       renderWithProviders(
-        <TypedConfigForm
-          nodeId="n-aa-empty"
-          schema={AI_ANALYSIS_SCHEMA}
-          value={{}}
-          onChange={jest.fn()}
-        />
+        <TypedConfigForm nodeId="n-aa-empty" schema={AI_ANALYSIS_SCHEMA} value={{}} onChange={jest.fn()} />
       );
       const alerts = screen.queryAllByRole('alert');
       const required = alerts.filter(el => el.textContent === 'Required');
@@ -444,12 +424,7 @@ describe('TypedConfigForm priority-executor sentinels (R7 task 089b)', () => {
     ])('%s mounts in isolation with no console error', (_label, schema) => {
       const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => {});
       const { unmount } = renderWithProviders(
-        <TypedConfigForm
-          nodeId={`iso-${schema.executorTypeName}`}
-          schema={schema}
-          value={{}}
-          onChange={jest.fn()}
-        />
+        <TypedConfigForm nodeId={`iso-${schema.executorTypeName}`} schema={schema} value={{}} onChange={jest.fn()} />
       );
       // Render produced no console.error (catches PropTypes / React warnings).
       expect(errorSpy).not.toHaveBeenCalled();
@@ -467,12 +442,7 @@ describe('TypedConfigForm priority-executor sentinels (R7 task 089b)', () => {
       ];
       for (const schema of schemas) {
         const { unmount } = renderWithProviders(
-          <TypedConfigForm
-            nodeId={`desc-${schema.executorTypeName}`}
-            schema={schema}
-            value={{}}
-            onChange={jest.fn()}
-          />
+          <TypedConfigForm nodeId={`desc-${schema.executorTypeName}`} schema={schema} value={{}} onChange={jest.fn()} />
         );
         expect(screen.getByText(schema.description)).toBeInTheDocument();
         unmount();
