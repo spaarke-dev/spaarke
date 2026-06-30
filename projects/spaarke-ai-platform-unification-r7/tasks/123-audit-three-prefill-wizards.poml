@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="123" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Audit three Prefill wizards (Create Matter / Project / Work Assignment) — Action-output-schema contract documentation + UI-binding pattern + disposition</title>
+    <phase>Wave 12 — MVP Completion</phase>
+    <wave>12</wave>
+    <sub-wave>12.1</sub-wave>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Read-only audit; no code modification; output is a notes doc; covers three wizards in one task because they likely share architecture</rigor-reason>
+    <parallel-group>W12-1-Audit</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <tags>audit, bff-api, code-page, wizard, playbook, prefill, investigation, wave12</tags>
+    <estimated-effort>~1 day</estimated-effort>
+  </metadata>
+
+  <prompt>
+The three Prefill wizards (Create Matter, Create Project, Create Work Assignment) use the Action output schema as a contract with the wizard UI — the LLM's structured output binds to wizard form fields, and operators can edit the schema to add prefill fields. All three are currently broken. Audit them: locate code, reproduce failures, document the Action-output-schema-to-form-field contract for each, determine if the wizard UI is dynamic-schema-driven or hardcoded mapping (operator-flagged investigation point), and recommend disposition per wizard with effort estimates.
+  </prompt>
+
+  <role>
+You are a code auditor doing read-only investigation. Do NOT modify code. Do NOT run deployments. Your job is to produce a concrete audit covering all three wizards, with particular focus on documenting the Action-output-schema-to-wizard-UI contract.
+  </role>
+
+  <goal>
+Output a notes doc at projects/spaarke-ai-platform-unification-r7/notes/audits/wave12-123-three-prefill-wizards.md containing per wizard: (1) location of all code involved, (2) Action output schema as currently authored (full field list), (3) wizard UI binding pattern (dynamic vs hardcoded), (4) reproduced failure with diagnostic detail, (5) root-cause categorization, (6) disposition recommendation with effort estimate. Across all three: shared-pattern findings + opportunities for shared code.
+  </goal>
+
+  <inputs>
+    - Operator-stated: all three wizards have "Prefill feature that is in the Action output schema"
+    - Operator-stated: "I see field mapping in the output schema but I'm not sure if the execution is actually hardcoded — check it out"
+    - All three wizards are currently broken
+    - Operator confirmed previously working
+    - Three wizards: Create Matter (creates sprk_matter), Create Project (creates sprk_project), Create Work Assignment (creates sprk_workassignment or similar)
+    - Likely share same code page architecture (under src/solutions/SpaarkeAi/src/ or src/client/code-pages/)
+    - Each likely uses Start → AiCompletion → ReturnResponse playbook with Action whose output schema defines prefill field set
+  </inputs>
+
+  <constraints>
+    - Read-only. No code edits. No deploys. No Dataverse writes.
+    - Investigate only — do NOT propose code fixes inside this task. Wave 12.3 POMLs handle that.
+    - **Critical**: Action output schema is an OPERATOR-TUNABLE SURFACE that MUST be preserved in restoration OR remediation. Audit must document the contract precisely so Wave 12.3 work cannot accidentally break it.
+    - Cite file:line references for every claim.
+    - Sub-Agent Write Boundary: writes go ONLY to projects/spaarke-ai-platform-unification-r7/notes/audits/.
+    - If three wizards share common architecture, document it once + note divergence points per wizard.
+  </constraints>
+
+  <knowledge>
+    <files>
+      - projects/spaarke-ai-platform-unification-r7/notes/wave12-mvp-completion-plan.md (§2.2 Wizards, esp. Prefill discussion)
+      - projects/spaarke-ai-platform-unification-r7/CLAUDE.md
+      - projects/spaarke-ai-platform-unification-r7/notes/handoffs/wave11-t116-narrate-systematic-assessment.md
+      - projects/spaarke-ai-platform-unification-r7/notes/spikes/poc-vs-playbook-engine-architecture.md
+      - .claude/constraints/bff-extensions.md
+      - docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md
+      - docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md
+    </files>
+  </knowledge>
+
+  <context>
+    <relevant-files>
+      - src/solutions/SpaarkeAi/src/** (likely wizard UI location)
+      - src/client/code-pages/** (alternate location)
+      - src/server/api/Sprk.Bff.Api/Api/Ai/** (BFF endpoints — search "create-matter" / "create-project" / "create-workassignment" / "wizard")
+      - src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookOrchestrationService.cs
+      - src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/InvokePlaybookAi.cs
+    </relevant-files>
+  </context>
+
+  <steps>
+1. **Locate all three wizards** (45 min):
+   - For each (Create Matter, Create Project, Create Work Assignment):
+     - Find wizard UI entry point + main components
+     - Find BFF endpoint (likely shared pattern, one per wizard)
+     - Find playbook IDs + consumer routing rows (mcp__dataverse__read_query on sprk_playbookconsumer)
+   - Identify shared infrastructure (common wizard framework / shared form renderer / etc.)
+   - Document: 3 entry points × (UI file:line, BFF file:line, playbook ID, consumer-routing-key)
+
+2. **Inspect each wizard's Action output schema** (45 min):
+   - For each playbook's AiCompletion node, locate Action FK
+   - Query `sprk_analysisaction.sprk_outputschemajson` for each
+   - Document the FULL field list per wizard (this is the operator-tunable contract)
+   - Note fields that appear in schema but might NOT be expected by form UI (would indicate schema-driven binding)
+   - Note conventions (camelCase / snake_case / typed primitives)
+
+3. **Determine wizard UI binding pattern per wizard** (30-45 min):
+   - Read each wizard's form rendering code
+   - **Critical operator question**: does form render fields generically from output schema (dynamic-schema-driven) OR map known keys to hardcoded form fields (hardcoded)?
+   - Look for: schema → loop → render each field; OR hardcoded components like `<MatterNumberField value={data.matterNumber} />`
+   - Per-wizard documentation: dynamic / hybrid / hardcoded
+   - Implication: if hardcoded, schema-editing only matters for known fields. If dynamic, schema-editing extensibility is live operator benefit that MUST be preserved.
+
+4. **Trace data flow end-to-end for one representative wizard** (30 min):
+   - Walk one wizard (e.g., Create Matter) end-to-end: UI prompt → BFF endpoint → IInvokePlaybookAi → orchestrator → AiCompletion call (with structured schema) → response → UI prefill
+   - Identify R7-touched code (enum rename, DI, dispatch)
+   - Identify engine bug class exposure (aggregator IsDeliverOutput drops ReturnResponse — does it apply? LoadKnowledge mismatch — does playbook use LoadKnowledge?)
+   - Most likely: simple Start → AiCompletion → ReturnResponse; aggregator issue applies if ReturnResponse is output node
+
+5. **Reproduce failures if possible** (45 min):
+   - If deployed environment accessible: run each wizard; capture failure
+   - If not: predict failure mode per wizard
+   - Document per-wizard: failure symptom + evidence
+
+6. **Categorize root cause per wizard** (15 min):
+   - Most likely: same root cause across all three (shared architecture means shared regression)
+   - Document any divergence — one wizard may have additional complexity
+
+7. **Produce disposition recommendation per wizard + shared-pattern recommendation** (30 min):
+   - Per wizard: restore (cite the regression + fix) OR remediate (sketch thin code wrapper)
+   - **Shared-pattern recommendation**: if all three share architecture AND remediation is needed, propose ONE shared helper (`StructuredPrefillRunner.RunAsync(actionCode, JsonElement userInput, CancellationToken ct)` or similar) that all three wizards use. Operator has been strict about not building infrastructure without 2+ consumer demand — 3 consumers crosses that bar.
+   - Effort estimate per disposition
+
+8. **Write notes doc** at projects/spaarke-ai-platform-unification-r7/notes/audits/wave12-123-three-prefill-wizards.md (45 min)
+
+  </steps>
+
+  <tools>
+    - Read (file inspection)
+    - Grep / Glob (code search)
+    - Bash (dotnet test; curl smoke)
+    - mcp__dataverse__describe / mcp__dataverse__read_query (playbook + Action + consumer-routing inspection)
+    - Write (notes doc only)
+    - TodoWrite (track audit progress)
+  </tools>
+
+  <outputs>
+    - notes/audits/wave12-123-three-prefill-wizards.md
+  </outputs>
+
+  <acceptance-criteria>
+    - [ ] All three wizards' UI entry points + BFF endpoints + playbook IDs located with file:line references
+    - [ ] Action output schemas inspected; field lists documented per wizard
+    - [ ] Wizard UI binding pattern determined per wizard (dynamic / hybrid / hardcoded)
+    - [ ] At least one wizard traced end-to-end with engine-bug-class exposure analysis
+    - [ ] Failures reproduced OR walked through with predicted-failure-points per wizard
+    - [ ] Root cause categorized per wizard (likely same across all three)
+    - [ ] Disposition recommended per wizard with effort estimate
+    - [ ] **Shared-pattern recommendation**: if remediation is the path, propose ONE shared helper (or explicitly justify per-wizard code) — operator has set 2+ consumer bar for new abstractions; 3 consumers crosses it
+    - [ ] notes/audits/wave12-123-three-prefill-wizards.md exists with file:line references throughout
+    - [ ] Operator-tunable Action output schema contract is documented precisely enough that Wave 12.3 work cannot accidentally break it
+  </acceptance-criteria>
+</task>

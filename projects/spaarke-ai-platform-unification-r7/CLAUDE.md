@@ -32,7 +32,7 @@
 - **Parent Epic**: [#421 SPAARKE AI](https://github.com/spaarke-dev/spaarke/issues/421)
 - **Type**: AI Platform / Dispatch reform + BFF orchestration + Code Page UI + Dataverse schema + Skill rewrites
 - **Complexity**: High (33 FRs, 10 waves, ~80-110 tasks, ~18-25 days)
-- **Hot-paths**: BFF=YES, SpaarkeAi=NO, ci-workflows=NO, skill-directives=YES, root-CLAUDE.md=NO (see design.md `<hot-path-declaration>`)
+- **Hot-paths**: BFF=YES, SpaarkeAi=**YES (changed 2026-06-30 by Wave 12 — widget + wizard code page work added to scope)**, ci-workflows=NO, skill-directives=YES, root-CLAUDE.md=NO (see design.md `<hot-path-declaration>` + Wave 12 plan §1)
 
 ---
 
@@ -136,6 +136,15 @@ See [task-execute SKILL.md](../../.claude/skills/task-execute/SKILL.md) for comp
 | 2026-06-28 | Wave 1 task POMLs pre-generated (001, 002); Waves 2-10 deferred to `/task-create` per-wave | Pragmatic delivery: foundation ready, on-demand task generation as work advances | Pipeline init |
 | 2026-06-28 | Wave 4 ordering DEPENDS on Wave 9 completion | Cannot delete `ExecuteAnalysisAsync` until chat-summarize migrated to consumer routing (FR-17 → FR-11) | plan.md WBS |
 | 2026-06-28 | Wave 7 skill rewrites SEQUENTIAL only | Sub-Agent Write Boundary (CLAUDE.md §3): `.claude/skills/` writes happen only in main session | plan.md |
+| 2026-06-30 | **Wave 12 added — MVP Completion (Daily Briefing 6-entity + Wizards + Assistant↔Workspace)** | Operator strategic discussion 2026-06-30: R7's W11 POC pivot validated narrator pattern for ONE consumer; Wave 12 absorbs coordinated MVP push to bring 3 feature groups to functioning state | [notes/wave12-mvp-completion-plan.md](notes/wave12-mvp-completion-plan.md) |
+| 2026-06-30 | Code-defined narrator pattern (W11 POC) is default for narrative consumers | W11 POC empirically validated; ~10× less runtime code; 0 vs ~6 bug classes | wave12 plan §8 |
+| 2026-06-30 | Tunable config tables (Tier B) DEFERRED — operator: "config-table-with-rules IS an interpreter" | Same bug surface as the engine we're moving away from | wave12 plan §4 |
+| 2026-06-30 | Wizards: audit-then-decide (restoration vs remediation) | Simple playbooks often work fine on engine; broken state likely R7 regression, not inherent engine | wave12 plan §2.2 |
+| 2026-06-30 | Three Prefill wizards' Action output schema is wizard-UI contract; MUST be preserved | Operator-flagged 2026-06-30 follow-up | wave12 plan §2.2 + task 123 |
+| 2026-06-30 | Daily Briefing membership filter: prefer resolver; fall back to inline FetchXml | Operator pre-approved fallback with specific field criteria | wave12 plan §2.1 |
+| 2026-06-30 | Chat-summarize stays on playbook engine | Per W11 architecture doc §5 — chat genuinely needs streaming, dynamic context, tool calls | wave12 plan §8 |
+| 2026-06-30 | Assistant↔Workspace is MVP-critical (not mid-term) | Operator correction; "nothing fixed" in UAT must be addressed in this MVP | wave12 plan §2.3 |
+| 2026-06-30 | No new shared abstractions unless 2+ demonstrated consumer need | Operator pushback against premature infrastructure | wave12 plan §8 |
 
 ---
 

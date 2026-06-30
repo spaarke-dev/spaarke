@@ -1,10 +1,11 @@
 # Task Index — Spaarke AI Platform Unification R7
 
-> **Last Updated**: 2026-06-29 (Wave 11 added — Playbook Orchestrator Runtime Variable Resolution + R7 UAT Drive)
+> **Last Updated**: 2026-06-30 (Wave 12 added — MVP Completion: Daily Briefing 6-entity + Wizards + Assistant↔Workspace)
 > **Source plan**: [`../plan.md`](../plan.md)
 > **Source spec**: [`../spec.md`](../spec.md)
-> **Total tasks generated**: **92 POML files across 11 waves** (Wave 11 added 2026-06-29 in response to Wave 10 task 101 UAT discovery: orchestrator template-engine gap blocks /narrate end-to-end)
-> **Generation method**: 10 parallel subagents per wave 1-10 (dispatched by `/project-pipeline` Step 3); Wave 11 generated sequentially 2026-06-29 via `/task-create --wave 11`
+> **Wave 12 plan**: [`../notes/wave12-mvp-completion-plan.md`](../notes/wave12-mvp-completion-plan.md)
+> **Total tasks generated**: **96 POML files across 12 waves** (Wave 12 added 2026-06-30 from operator-driven strategic discussion: bring three AI feature groups to functioning-in-production state on 3-6 week horizon)
+> **Generation method**: 10 parallel subagents per wave 1-10 (dispatched by `/project-pipeline` Step 3); Wave 11 generated 2026-06-29 via `/task-create --wave 11`; Wave 12 generated manually 2026-06-30 alongside Wave 12 plan doc
 
 ## Status Legend
 
@@ -28,9 +29,10 @@
 | Wave 8 | Playbook Builder UI updates (FR-21 to FR-27) | 🔄 in-progress (080 ✅ audit; 082 ✅ 33-executor categorized Node Types left panel FR-22; 083 ✅ typed config form renderer infrastructure; 084 ✅ 5 priority typed forms verified + 20 Jest tests (W3-032 already shipped rich BFF schemas; canvas-side test gate added); 085 ✅ remaining 18 placeholder executors enriched with typed fields FR-23 (2026-06-29); 086 ✅ Action tab promotion FR-24; 088 ✅ canvas state `sprk_nodetype`→`sprk_executortype` FR-26 (9 refs replaced, 3 `__actionType` removed, 4 legacy constructs deleted, grep zero verified, build clean); 089a ✅ Jest UI tests for ExecutorTypeSelector dropdown + tier grouping (14/14 pass, 2026-06-29); 089b ✅ +26 incremental jest tests for 5 priority typed forms covering field-count sentinels / default-value resolution / Boolean+Number widget commits / controlled-component re-render / per-executor isolation (FR-23; 46/46 pass combined with task 084); 089c ✅ ADR-021 dark-mode static jest scan (5 Wave 8 files, 1949 LOC, 0 hardcoded color findings; 13 tests pass incl. 6 scanner self-tests; 2026-06-29); 081, 087, 089, 089d pending) | 080-089d ✅ generated (14 files); 080, 082, 083, 084, 085, 086, 088, 089a, 089b, 089c ✅ executed |
 | Wave 9 | Consumer migration (FR-17, FR-18) | 🟢 COMPLETE (090 ✅ audit/design; 091 ✅ FR-17 SessionSummarizeOrchestrator migrated; 092 ✅ chat-summarize sprk_playbookconsumer row verified; 093 ✅; 094 ✅ /playbooks hard slash + Library modal browse-mode + PlaybookCardGrid consumer chips; 095 ✅ Library modal wired into Daily Briefing widget via DigestHeader overflow; 096 ✅ Library modal wired into LegalWorkspace Get Started 9th "Browse Playbooks" card — FR-18 ≥3 surfaces acceptance MET; see notes/handoffs/fr18-closure.md) | 090 ✅, 091 ✅, 092 ✅, 093 ✅, 094 ✅, 095 ✅, 096 ✅ |
 | Wave 10 | Wrap-up + R4 graduation gate close | 🔄 in-progress (100 ✅ end-to-end verification report 2026-06-29 marked 11/15 PASS at verification-report level, but Wave 10 task 101 UAT discovered orchestrator template-engine gap — Wave 11 added 2026-06-29 to close that gap; 101 + 090-wrap-up NOW BLOCK on Wave 11 task 119 GREEN) | 100 ✅, 101 ⏸️ (blocks on W11-117), 090-project-wrap-up ⏸️ (blocks on W11-119) |
-| Wave 11 | Playbook Orchestrator Runtime Variable Resolution + R7 UAT Drive | 🔄 in-progress (110 ✅ + 111 ✅ + 111a ✅ + 112 ✅ + 113 ✅ + 114 ✅ + 115 ✅ 2026-06-29 — Option B Layer 1+2 + 7 helpers + lambda+pipe eliminated + fan-out iteration + ValidateEntityNames smoke-test value REPLACED by source-correct templates; 131/131 Wave 11 + regression tests pass; 0 regressions across 7,532 BFF tests; AiAnalysis wiring deferred via DEF-001; T116 deploy + smoke is the next gate) | 110-119 + 111a ✅ generated (11 files); 7/11 executed |
+| Wave 11 | Playbook Orchestrator Runtime Variable Resolution + R7 UAT Drive | 🔄 in-progress (110 ✅ + 111 ✅ + 111a ✅ + 112 ✅ + 113 ✅ + 114 ✅ + 115 ✅ 2026-06-29 — Option B Layer 1+2 + 7 helpers + lambda+pipe eliminated + fan-out iteration + ValidateEntityNames smoke-test value REPLACED by source-correct templates; 131/131 Wave 11 + regression tests pass; 0 regressions across 7,532 BFF tests; AiAnalysis wiring deferred via DEF-001; T118 ACHIEVED via POC pivot — DailyBriefingCollector live-render path operator-verified in spaarkedev1; T119 publish gate pending) | 110-119 + 111a ✅ generated; 8/11 executed (T117 substantively SATISFIED by T118 POC) |
+| Wave 12 | MVP Completion — Daily Briefing 6-entity + Wizards + Assistant↔Workspace (audits-first) | 🔄 in-progress (W12.1 audits 120-123 generated 2026-06-30; W12.2-12.5 placeholders pending audit findings) | 120-123 ✅ generated (4 audit POMLs); W12.2+ POMLs post-audit |
 
-**Total: 92 POML files generated across 11 waves. Wave 11 ready for execution starting at task 110.**
+**Total: 96 POML files generated across 12 waves. Wave 11 and Wave 12 both in-progress; Wave 12 audits are next executable.**
 
 ---
 
@@ -215,6 +217,62 @@
 | 118 | 🔲 | Address operator-flagged UAT issues (events, links/tools, two unidentified items) | investigation, uat | no (operator-context-dependent) | 117 |
 | 119 | 🔲 | Wave 11 BFF publish + size check (NFR-01) + CVE scan (NFR-02) | bff-api, deploy | yes | 118 |
 
+## Wave 12 — MVP Completion (audits-first; broader scope than original R7)
+
+> Added 2026-06-30 from operator-driven strategic discussion. Three deliverable groups: Daily Briefing 6-entity coverage + UI fixes; restoration/remediation of 5 broken wizards (file summary, doc create profile, three Prefill wizards Create Matter/Project/Work Assignment); Assistant↔Workspace audit + fixes per audit findings. Full scope + plan at [`../notes/wave12-mvp-completion-plan.md`](../notes/wave12-mvp-completion-plan.md).
+>
+> **Why Wave 12 exists**: R7's W11 POC pivot validated the code-defined narrator pattern but only for ONE consumer (Daily Briefing). Wave 12 absorbs the coordinated MVP push to bring 3 feature groups to functioning state. Operator-stated: "we have to focus on 1 and 2 today and after those are working then we can focus on the rest."
+>
+> **Sub-wave structure**: W12.1 audits (read-only, parallel-safe) → W12.2 Daily Briefing → W12.3 Wizards → W12.4 Assistant↔Workspace → W12.5 wrap-up. W12.2-12.5 POMLs generated after W12.1 audits return findings.
+
+### Wave 12.1 — Audits (READY TO EXECUTE; all 4 parallel-safe, read-only)
+
+| ID | Status | Title | Tags | Parallel-safe | Dependencies |
+|---|---|---|---|---|---|
+| 120 | 🔲 | Audit Assistant↔Workspace state — gap list + UAT failures + scope recommendation | audit, bff-api, code-page, assistant, wave12 | yes | — |
+| 121 | 🔲 | Audit wizard file summary — reproduce + categorize + restoration vs remediation | audit, bff-api, wizard, playbook, wave12 | yes | — |
+| 122 | 🔲 | Audit document create profile — reproduce + categorize + restoration vs remediation | audit, bff-api, wizard, playbook, document, wave12 | yes | — |
+| 123 | 🔲 | Audit three Prefill wizards (Create Matter/Project/Work Assignment) — Action-output-schema contract + UI-binding pattern + disposition | audit, bff-api, code-page, wizard, playbook, prefill, wave12 | yes | — |
+
+### Wave 12.2 — Daily Briefing (PLACEHOLDER — pending W12.1 task 120 audit for membership filter recommendation)
+
+| Anticipated ID | Title | Notes |
+|---|---|---|
+| 130 | Extend DailyBriefingCollector with 6 entity-type queries | Upcoming Tasks, Overdue Tasks, Documents, Matters, Projects, ToDos |
+| 131 | Implement membership filter (resolver fix OR inline FetchXml per W12.1) | Operator-pre-approved fallback fields documented in wave12 plan §2.1 |
+| 132 | TLDR↔ActivityNotes consistency — chain TLDR as input to channel narratives | |
+| 133 | Channel registry expansion to 6 entries + label polish | |
+| 134 | Widget tools — 'Add To Do' checkmark + preserve three-dot menu | |
+| 135 | Verify per-bullet entity links work for all 6 entity types | |
+| 136 | BFF deploy + smoke + operator UAT | |
+
+### Wave 12.3 — Wizards (PLACEHOLDER — pending W12.1 audits 121/122/123)
+
+| Anticipated ID | Title | Notes |
+|---|---|---|
+| 140 | Restore OR remediate wizard file summary | Per audit 121 |
+| 141 | Restore OR remediate document create profile | Per audit 122 |
+| 142 | Restore OR remediate Create Matter prefill | Per audit 123; preserve Action output schema as wizard contract |
+| 143 | Restore OR remediate Create Project prefill | Per audit 123 |
+| 144 | Restore OR remediate Create Work Assignment prefill | Per audit 123 |
+| 145 | Wizard end-to-end UAT (all 5) | |
+
+### Wave 12.4 — Assistant↔Workspace (PLACEHOLDER — pending W12.1 task 120)
+
+| Anticipated ID | Title | Notes |
+|---|---|---|
+| 150 | Assistant↔Workspace plumbing fixes (claims, context, session) | Per audit 120 plumbing findings |
+| 151 | Assistant current-matter awareness | Per audit 120 |
+| 152 | Assistant↔Workspace UAT | |
+
+### Wave 12.5 — Wrap-up (PLACEHOLDER)
+
+| Anticipated ID | Title | Notes |
+|---|---|---|
+| 160 | Wave 12 UAT close-out across all 3 deliverable groups | |
+| 161 | Wave 12 lessons-learned doc | Informs follow-on projects (tunable config, descriptors, retrieval) |
+| 162 | Wave 12 final BFF publish + size + CVE gate | |
+
 ---
 
 ## Parallel Execution Groups
@@ -251,6 +309,11 @@ Tasks within a group can run concurrently (separate `task-execute` invocations i
 | W11-F | 117 | 116 ✅ | no — operator UAT (sequential) |
 | W11-G | 118 | 117 ✅ | no — operator-context-dependent (may spawn sub-tasks 118a/b/c) |
 | W11-H | 119 | 118 ✅ | yes — hygiene gate |
+| W12-1-Audit | 120, 121, 122, 123 | — | yes — all 4 read-only audits parallel-safe; dispatch in one message with 4 task-execute invocations |
+| W12-2-DB | 130-136 (placeholder) | 120 ✅ | post-audit POML generation; mostly sequential within (collector → membership → UI fixes → deploy) |
+| W12-3-Wiz | 140-145 (placeholder) | 121, 122, 123 ✅ | post-audit POML generation; mostly parallel-safe if independent file surfaces |
+| W12-4-Asst | 150-152 (placeholder) | 120 ✅ | post-audit POML generation; sequential (plumbing → matter awareness → UAT) |
+| W12-5-Wrap | 160-162 (placeholder) | W12.2-12.4 ✅ | sequential wrap-up |
 
 ### Parallel-safety summary
 

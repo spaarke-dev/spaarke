@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="122" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Audit document create profile — reproduce failure, categorize, recommend restoration vs remediation</title>
+    <phase>Wave 12 — MVP Completion</phase>
+    <wave>12</wave>
+    <sub-wave>12.1</sub-wave>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Read-only audit; no code modification; output is a notes doc</rigor-reason>
+    <parallel-group>W12-1-Audit</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <tags>audit, bff-api, wizard, playbook, document, investigation, wave12</tags>
+    <estimated-effort>~half day</estimated-effort>
+  </metadata>
+
+  <prompt>
+The document create profile feature is currently broken but was previously working. Audit it: locate the code, reproduce the failure, categorize the root cause (R7 regression vs inherent playbook engine bug class), and recommend restoration vs remediation with effort estimates per path.
+  </prompt>
+
+  <role>
+You are a code auditor doing read-only investigation. Do NOT modify code. Do NOT run deployments. Your job is to produce a concrete audit that enables Wave 12.3 task generation with a disposition (restore vs remediate) and realistic effort estimate.
+  </role>
+
+  <goal>
+Output a notes doc at projects/spaarke-ai-platform-unification-r7/notes/audits/wave12-122-document-create-profile.md containing: (1) location of all code involved (BFF endpoint + playbook definition + UI invocation point), (2) reproduced failure with diagnostic detail, (3) root-cause categorization, (4) disposition recommendation (restore or remediate) with effort estimate. Pay special attention to the structured-output field mapping into the document profile form (this likely parallels the Prefill wizard pattern in task 123).
+  </goal>
+
+  <inputs>
+    - Operator-reported state: feature was previously working; currently broken
+    - "Document create profile" likely: user uploads/selects document → LLM extracts metadata fields → fields prefill into document profile form → user reviews/saves
+    - Likely architecture: Start → AiCompletion (with structured output schema matching profile fields) → ReturnResponse → wizard UI binds output to form fields
+    - May share Action output schema pattern with the three Prefill wizards in task 123
+  </inputs>
+
+  <constraints>
+    - Read-only. No code edits. No deploys. No Dataverse writes.
+    - Investigate only — do NOT propose code fixes inside this task. Wave 12.3 POMLs handle that.
+    - Cite file:line references for every claim.
+    - If this feature shares Action output schema pattern with task 123's three Prefill wizards, note that — but conduct audit independently.
+    - Sub-Agent Write Boundary: writes go ONLY to projects/spaarke-ai-platform-unification-r7/notes/audits/.
+  </constraints>
+
+  <knowledge>
+    <files>
+      - projects/spaarke-ai-platform-unification-r7/notes/wave12-mvp-completion-plan.md (§2.2 Wizards)
+      - projects/spaarke-ai-platform-unification-r7/CLAUDE.md
+      - projects/spaarke-ai-platform-unification-r7/notes/handoffs/wave11-t116-narrate-systematic-assessment.md
+      - projects/spaarke-ai-platform-unification-r7/notes/spikes/poc-vs-playbook-engine-architecture.md
+      - .claude/constraints/bff-extensions.md
+    </files>
+  </knowledge>
+
+  <context>
+    <relevant-files>
+      - src/server/api/Sprk.Bff.Api/Api/Ai/** (BFF endpoint — search "document" / "profile" / "create")
+      - src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookOrchestrationService.cs
+      - src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/InvokePlaybookAi.cs
+      - src/solutions/SpaarkeAi/src/** (wizard UI may be here)
+      - src/client/code-pages/** (wizard UI alternate location)
+      - src/solutions/SpaarkeAi/src/components/** (document profile form may live here)
+    </relevant-files>
+  </context>
+
+  <steps>
+1. **Locate feature code** (30 min):
+   - Search BFF endpoints for "document-create-profile" / "create-profile" / "profile" / similar
+   - Search code pages / SpaarkeAi for wizard UI invocation + profile form
+   - Identify playbook (sprk_analysisplaybook row + consumer-type)
+   - Document: BFF endpoint file:line, UI entry point file:line, playbook ID + node count, profile form component file:line
+
+2. **Inspect playbook shape AND Action output schema** (30 min):
+   - Query playbook + nodes via mcp__dataverse__read_query
+   - Document node count, executor types, fan-out / iteration presence
+   - **Critical**: locate Action (sprk_analysisaction) used by AiCompletion node and inspect `sprk_outputschemajson` — defines structured output mapping to profile form fields
+   - Document output schema field set + intended binding to profile form
+
+3. **Determine if profile form is schema-driven or hardcoded** (20 min):
+   - Read wizard UI component
+   - Look for: dynamic field rendering from schema OR hardcoded field-name-to-form-field mapping
+   - Determines what "preserving the contract" looks like
+
+4. **Trace data flow end-to-end** (30 min):
+   - Walk: UI uploads doc → BFF endpoint → IInvokePlaybookAi → orchestrator → AiCompletion call to OpenAI with structured schema → response → UI binds to form
+   - Identify where regression OR engine bug class surfaces
+   - Specifically check: does playbook use /narrate's failure-prone features (fan-out, LoadKnowledge passthrough, multi-field ReturnResponse composition)?
+
+5. **Reproduce failure if possible** (30 min):
+   - If deployed environment accessible: run wizard with sample document
+   - If not: trace expected vs actual
+   - Document failure symptom + evidence
+
+6. **Categorize root cause** (15 min):
+   - **R7 regression**: enum rename / DI / dispatch broke reference → cheap restoration
+   - **Inherent engine bug class** → thin code wrapper remediation, ~50-100 LOC, preserves Action output schema
+   - **Configuration drift** (Dataverse row data wrong) → data fix
+   - **Schema/UI mismatch** (output schema doesn't match UI expects) → schema OR UI fix
+
+7. **Produce disposition recommendation** (20 min):
+   - Per-disposition effort estimate
+   - If remediation: sketch what code-defined wrapper looks like — should be very thin (load Action by code, call IOpenAiClient.GetStructuredCompletionRawAsync, return LLM's structured output; ~50-100 LOC)
+   - Flag whether work can be shared with task 123's three Prefill wizards (likely yes if all follow Action-output-schema-as-contract pattern)
+
+8. **Write notes doc** at projects/spaarke-ai-platform-unification-r7/notes/audits/wave12-122-document-create-profile.md (30 min)
+
+  </steps>
+
+  <tools>
+    - Read (file inspection)
+    - Grep / Glob (code search)
+    - Bash (dotnet test if useful; curl smoke)
+    - mcp__dataverse__describe / mcp__dataverse__read_query (playbook + Action inspection)
+    - Write (notes doc only)
+    - TodoWrite (track audit progress)
+  </tools>
+
+  <outputs>
+    - notes/audits/wave12-122-document-create-profile.md
+  </outputs>
+
+  <acceptance-criteria>
+    - [ ] BFF endpoint + UI entry point + playbook ID + profile form component located with file:line references
+    - [ ] Playbook shape + Action output schema documented (field set listed)
+    - [ ] Profile form binding pattern determined (schema-driven vs hardcoded)
+    - [ ] Failure reproduced OR walked through with predicted-failure-point
+    - [ ] Root cause categorized
+    - [ ] Disposition recommended with effort estimate; remediation sketch if applicable
+    - [ ] Note whether work can be shared with task 123's three Prefill wizards
+    - [ ] notes/audits/wave12-122-document-create-profile.md exists with file:line references throughout
+  </acceptance-criteria>
+</task>
