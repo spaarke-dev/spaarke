@@ -380,10 +380,36 @@ That's it for in-MVP-scope.
 
 ## 11. Open follow-ups (filed via this task, NOT in scope of T124)
 
-- Operator approval + apply T124-FIX-A (Document Summary node `e514cfab` executortype 0 → 40) OR alternative DELETE path
-- File 7 DEF-NNN entries per §8
+- ~~Operator approval + apply T124-FIX-A (Document Summary node `e514cfab` executortype 0 → 40)~~ — **APPLIED 2026-06-30 via main-session MCP (see §12)**
+- File 7 DEF-NNN entries per §8 — still pending operator session at R7 wrap-up
 - Consider whether to delete the `compose-summarize` consumer routing row (`986799ad-...`) if its target playbook is also DELETEd — orphan routing rows are silent landmines for future canvas authors
 
 ---
 
-*End of audit 124. Per-row data sourced from spaarkedev1 via `mcp__dataverse__read_query` 2026-06-30. Executor Validate-rule contracts sourced from [`src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/`](../../../../src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/) tree (24 files inspected). No code changes applied by this task; recommended Dataverse mutations queued for operator-approved per-row application per T141/T142/T143 pattern.*
+## 12. T124-FIX-A Applied (operator-approved 2026-06-30 main session)
+
+Operator authorized PATCH per audit §5.1 recommendation. Applied via main-session MCP after Batch 2 dispatch.
+
+**Pre-state read** (`mcp__dataverse__read_query`):
+- `sprk_playbooknode(e514cfab-9d16-f111-8343-7c1e520aa4df)` "Document Profile"
+- `sprk_executortype = 0` (AiAnalysis)
+- `sprk_executortypename = "AI Analysis"`
+- `sprk_configjson` contained `__actionType:40` + `deliveryType:"markdown"` + `outputFormat` — canvas-asserted Deliver Output intent
+
+**PATCH applied** (`mcp__dataverse__update_record`):
+- `item = { sprk_executortype: 40 }` → "Record updated successfully."
+
+**Post-state read** (verification):
+- `sprk_executortype = 40` ✅
+- `sprk_executortypename = "Deliver Output"` ✅ (auto-updated; aligns with canvas + configJson)
+- `sprk_configjson` unchanged (still has deliveryType + outputFormat keys appropriate for Deliver Output executor)
+
+**Net effect**: Wave 5 backfill mis-classification corrected. Document Summary playbook node now dispatches to DeliverOutputNodeExecutor (which the canvas + configJson always intended) instead of AiAnalysisNodeExecutor (which would have failed Validate() because the configJson lacked AiAnalysis-required inputs). The `compose-summarize` consumer routing row remains intact for any future BFF wiring.
+
+**Time to apply**: 1 MCP call + 1 verification read; ~30 seconds total from operator approval.
+
+**Remaining T124 follow-ups**: 7 DEF-NNN entries for abandoned playbooks (§8) + future-mitigation script enhancement (pre-write coherence assertion in `Migrate-PlaybookNodes-to-ExecutorType.ps1`). All deferred to R7 wrap-up per §6 per-consumer recommendation.
+
+---
+
+*End of audit 124. Per-row data sourced from spaarkedev1 via `mcp__dataverse__read_query` 2026-06-30. Executor Validate-rule contracts sourced from [`src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/`](../../../../src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/) tree (24 files inspected). T124-FIX-A APPLIED 2026-06-30 via main-session MCP per §12.*
