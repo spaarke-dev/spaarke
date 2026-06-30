@@ -363,8 +363,13 @@ public class AnalysisChatContextResolver
 
                     if (entityColumns.Length > 0)
                     {
+                        // R7 Wave 12 task 150 (audit 120 Gap A): hostContext.EntityType is now
+                        // BFF-boundary-normalized to canonical short form (e.g. "matter"); map
+                        // back to the raw Dataverse logical name (e.g. "sprk_matter") for
+                        // IDataverseEntityService.RetrieveAsync.
+                        var dataverseLogicalName = ToDataverseLogicalName(hostContext.EntityType);
                         var entityRecord = await _entityService.RetrieveAsync(
-                            hostContext.EntityType,
+                            dataverseLogicalName,
                             entityGuid,
                             entityColumns,
                             ct);
@@ -546,15 +551,36 @@ public class AnalysisChatContextResolver
     /// Returns the Dataverse columns to query for entity-specific context
     /// based on the entity type. Uses <see cref="ChatHostContext.EntityType"/>
     /// to determine which fields are relevant (ADR-013 — no hardcoded entity names).
+    /// <para>
+    /// R7 Wave 12 task 150 (audit 120 Gap A): <see cref="ChatHostContext.EntityType"/>
+    /// is now BFF-boundary-normalized to the canonical short form (<c>matter</c>),
+    /// so this switch accepts BOTH the canonical and raw Dataverse logical-name forms.
+    /// </para>
     /// </summary>
     private static string[] GetEntityContextColumns(string entityType)
     {
         return entityType.ToLowerInvariant() switch
         {
-            "sprk_matter" => new[] { "sprk_mattertype", "sprk_practicearea" },
-            "sprk_project" => new[] { "sprk_projecttype" },
-            "sprk_invoice" => new[] { "sprk_invoicetype" },
+            "sprk_matter" or "matter" => new[] { "sprk_mattertype", "sprk_practicearea" },
+            "sprk_project" or "project" => new[] { "sprk_projecttype" },
+            "sprk_invoice" or "invoice" => new[] { "sprk_invoicetype" },
             _ => [] // Unknown entity type — no context columns to query
+        };
+    }
+
+    /// <summary>
+    /// Maps a normalized canonical entity type (post-R7 Wave 12 task 150 normalization)
+    /// to the raw Dataverse logical name used by <see cref="IDataverseEntityService.RetrieveAsync"/>.
+    /// Raw inputs are passed through unchanged for defensive forward-compat.
+    /// </summary>
+    private static string ToDataverseLogicalName(string entityType)
+    {
+        return entityType.ToLowerInvariant() switch
+        {
+            "matter" => "sprk_matter",
+            "project" => "sprk_project",
+            "invoice" => "sprk_invoice",
+            _ => entityType
         };
     }
 
