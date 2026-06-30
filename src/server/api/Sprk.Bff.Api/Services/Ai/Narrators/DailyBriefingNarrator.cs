@@ -291,8 +291,18 @@ public sealed class DailyBriefingNarrator
     ///
     /// Output:
     ///   - <c>ItemIds</c>: every input item whose name appears in the narrative
-    ///   - <c>PrimaryEntityType/Id/Name</c>: the first matched item with a usable
-    ///     RegardingId — provides the widget with a click-through target
+    ///   - <c>PrimaryEntityType/Id/Name</c>: click-through target for the widget.
+    ///     Resolution order (R7 Wave 12 task 135):
+    ///       1. First match whose <c>RegardingId</c> is populated → navigate to that
+    ///          regarding record (matter or project). This is the dominant case across
+    ///          all 6 entity types — the collector projection sets RegardingId to the
+    ///          parent matter/project GUID (or to self for Matter/Project rows).
+    ///       2. First match whose <c>SourceEntityType</c> is populated → navigate to
+    ///          the source record itself (orphan fallback — e.g., a Task with no
+    ///          sprk_regardingmatter, a To Do with no regarding). Without this fallback
+    ///          orphan bullets render with no link in the widget (NarrativeBullet hides
+    ///          the link node when primaryEntityType/Id are empty).
+    ///       3. First match overall → name-only fallback (no link).
     ///
     /// If no match is found, returns a bullet with text only (widget renders as plain text).
     /// This is best-effort post-processing; the LLM does not emit per-bullet IDs.
@@ -321,18 +331,54 @@ public sealed class DailyBriefingNarrator
             return new NarrativeBulletDto { Narrative = narrativeText };
         }
 
-        // Primary = first matched item that has a usable RegardingId (so the widget
-        // can build a navigation link). Falls back to first match overall.
-        var primary = matches.FirstOrDefault(m => !string.IsNullOrEmpty(m.RegardingId))
-                      ?? matches[0];
+        var itemIds = matches
+            .Select(m => m.Id)
+            .Where(id => !string.IsNullOrEmpty(id))
+            .ToArray();
 
+        // Tier 1 — first match with a usable RegardingId (matter/project link).
+        // Dominant case across all 6 entity types when the source row has a
+        // regarding matter (or is a self-regarding Matter/Project row).
+        var primaryByRegarding = matches.FirstOrDefault(m => !string.IsNullOrEmpty(m.RegardingId));
+        if (primaryByRegarding is not null)
+        {
+            return new NarrativeBulletDto
+            {
+                Narrative = narrativeText,
+                ItemIds = itemIds,
+                PrimaryEntityType = primaryByRegarding.RegardingEntityType ?? string.Empty,
+                PrimaryEntityId = primaryByRegarding.RegardingId ?? string.Empty,
+                PrimaryEntityName = primaryByRegarding.RegardingName ?? string.Empty,
+            };
+        }
+
+        // Tier 2 — orphan fallback (R7 Wave 12 task 135). Use the source entity
+        // type + the bullet's own Id + Title so the widget can navigate to the
+        // source record (e.g., a Task with no regarding matter still gets a
+        // clickable link to its sprk_event row).
+        var primaryBySource = matches.FirstOrDefault(m =>
+            !string.IsNullOrEmpty(m.SourceEntityType) && !string.IsNullOrEmpty(m.Id));
+        if (primaryBySource is not null)
+        {
+            return new NarrativeBulletDto
+            {
+                Narrative = narrativeText,
+                ItemIds = itemIds,
+                PrimaryEntityType = primaryBySource.SourceEntityType ?? string.Empty,
+                PrimaryEntityId = primaryBySource.Id ?? string.Empty,
+                PrimaryEntityName = !string.IsNullOrEmpty(primaryBySource.Title)
+                    ? primaryBySource.Title
+                    : (primaryBySource.RegardingName ?? string.Empty),
+            };
+        }
+
+        // Tier 3 — neither regarding nor source-entity-type usable. Widget will
+        // hide the link node; bullet still renders text + actions.
+        var primary = matches[0];
         return new NarrativeBulletDto
         {
             Narrative = narrativeText,
-            ItemIds = matches
-                .Select(m => m.Id)
-                .Where(id => !string.IsNullOrEmpty(id))
-                .ToArray(),
+            ItemIds = itemIds,
             PrimaryEntityType = primary.RegardingEntityType ?? string.Empty,
             PrimaryEntityId = primary.RegardingId ?? string.Empty,
             PrimaryEntityName = primary.RegardingName ?? string.Empty,

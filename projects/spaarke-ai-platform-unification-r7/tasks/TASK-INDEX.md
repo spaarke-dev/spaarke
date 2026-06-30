@@ -244,7 +244,7 @@
 | 132 | 🔲 | TLDR↔Activity Notes consistency — chain TLDR as input to channel narratives | bff-api, code-impl, ai, narrator, wave12 | yes | — |
 | 133 | ✅ | Channel registry expansion (BFF response shape + widget CHANNEL_REGISTRY) | bff-api, pcf, widget, wave12 | yes | — |
 | 134 | ✅ | Widget tools — 'Add To Do' checkmark + preserve three-dot menu | pcf, react, fluent-ui, widget, wave12 | yes | ee12e172e |
-| 135 | 🔲 | Verify per-bullet entity links work for all 6 entity types | bff-api, narrator, testing, wave12 | no | 131 |
+| 135 | ✅ | Verify per-bullet entity links work for all 6 entity types | bff-api, narrator, testing, wave12 | no | (orphan-fallback gap fix + 9 tests) |
 | 136 | 🔲 | Wave 12.2 deploy + smoke + UAT (combinable with T154 deploy event) | deploy, smoke, uat, gate, wave12 | no | 130-135 |
 
 ### Wave 12.3 — Wizards (READY TO EXECUTE — 6 POMLs generated 2026-06-30; all RESTORATION)

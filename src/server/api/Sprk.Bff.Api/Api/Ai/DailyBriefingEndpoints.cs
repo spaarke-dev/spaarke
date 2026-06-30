@@ -786,6 +786,16 @@ public record ChannelItemDto
     [JsonPropertyName("regardingId")]
     public string RegardingId { get; init; } = "";
 
+    /// <summary>
+    /// Source entity type for this item (e.g., "sprk_event", "sprk_document",
+    /// "sprk_matter", "sprk_project", "sprk_todo"). Added by R7 Wave 12 task 135
+    /// so EnrichBulletWithEntityRefs can fall back to the source entity for
+    /// click-through navigation when the item has no regarding-matter populated
+    /// (orphan items still need a working link to the source record).
+    /// </summary>
+    [JsonPropertyName("sourceEntityType")]
+    public string SourceEntityType { get; init; } = "";
+
     /// <summary>ISO 8601 timestamp when the item was created.</summary>
     [JsonPropertyName("createdOn")]
     public string CreatedOn { get; init; } = "";

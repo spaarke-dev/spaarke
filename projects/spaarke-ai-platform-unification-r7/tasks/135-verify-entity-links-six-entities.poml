@@ -12,6 +12,7 @@
     <parallel-reason>depends on T131 (6-entity collector) being complete</parallel-reason>
     <tags>bff-api, daily-briefing, narrator, testing, wave12</tags>
     <estimated-effort>0.5 day</estimated-effort>
+    <status>completed</status>
   </metadata>
 
   <prompt>
@@ -83,10 +84,35 @@ Every bullet rendered in Daily Briefing widget has a working entity link (primar
   </outputs>
 
   <acceptance-criteria>
-    - [ ] Enrichment branches for all 6 entity types (sprk_event already; sprk_document / sprk_matter / sprk_project / sprk_todo new or verified)
-    - [ ] Unit tests cover entity-link resolution per entity type
-    - [ ] `dotnet test` 0 new failures
-    - [ ] `dotnet build` 0 errors
-    - [ ] No new abstractions / DI / packages
+    - [x] Enrichment branches for all 6 entity types (verified — logic is GENERIC, not per-entity branched; sprk_event/document/matter/project/todo all flow through Tier-1 RegardingId resolution when populated)
+    - [x] Unit tests cover entity-link resolution per entity type (7 theory cases + 2 facts = 9 tests in `DailyBriefingNarratorEntityLinkTests.cs`)
+    - [x] `dotnet test` 0 new failures (34/34 DailyBriefing tests pass; 6 pre-existing failures unrelated)
+    - [x] `dotnet build` 0 errors (Release publish 48.5 MB compressed; well below 60 MB ceiling)
+    - [x] No new abstractions / DI / packages (single field added to existing ChannelItemDto)
   </acceptance-criteria>
+
+  <notes>
+    **Status**: COMPLETED 2026-06-30 (R7 W12.2 task 135)
+
+    **Verification outcome** — `EnrichBulletWithEntityRefs` is implemented as a generic matcher (not per-entity branches). It works for all 6 entity types in the dominant case (item has a populated RegardingId — either parent matter/project for Tasks/Documents/ToDos, or self for Matter/Project rows).
+
+    **Gap found + fixed**: orphan items (no regarding matter — common for sprk_event tasks without sprk_regardingmatter, and sprk_todo without regarding) produced bullets with empty PrimaryEntityType/Id, causing the widget's click-through link to be hidden (NarrativeBullet.tsx line 390 condition fails). Per task goal "every bullet has a working entity link", this is a real UX defect.
+
+    **Fix**: Three-tier resolution in EnrichBulletWithEntityRefs:
+      - **Tier 1** (dominant): first match with populated `RegardingId` → click goes to matter/project (preserves existing behavior).
+      - **Tier 2** (NEW, orphan fallback): first match with populated `SourceEntityType` + `Id` → click goes to the source entity row (e.g., orphan Task → sprk_event row).
+      - **Tier 3** (defensive): first match overall → name-only (widget hides link).
+
+    **Files modified**:
+      - `src/server/api/Sprk.Bff.Api/Api/Ai/DailyBriefingEndpoints.cs` — added `SourceEntityType` field to `ChannelItemDto` record.
+      - `src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingCollector.cs` — populate `SourceEntityType = i.EntityType` in `ToChannel` projection.
+      - `src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingNarrator.cs` — three-tier `EnrichBulletWithEntityRefs` resolution.
+      - `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Narrators/DailyBriefingNarratorEntityLinkTests.cs` — NEW; 9 tests (7 theory cases per entity type + 2 facts for unmatched / tier-preference).
+
+    **Verification**:
+      - 9 new tests pass; 34/34 DailyBriefing-area tests pass.
+      - Release publish: 48.5 MB compressed (NFR-01 ceiling 60 MB).
+      - No new packages / DI registrations / endpoints / abstractions.
+      - CLAUDE.md §11 component justification satisfied (one field extension to existing DTO with named concrete failure mode).
+  </notes>
 </task>

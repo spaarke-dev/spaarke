@@ -833,6 +833,13 @@ public sealed class DailyBriefingCollector
                         ? EntityProject
                         : EntityMatter),
                 RegardingId = i.RegardingMatterId ?? string.Empty,
+                // R7 Wave 12 task 135 — carry the source entity type so
+                // EnrichBulletWithEntityRefs can fall back to the source record
+                // when an item has no regarding matter (orphan tasks, todos
+                // without regarding, etc.). Without this, orphan bullets render
+                // with no click-through link in the widget (link node hides
+                // when primaryEntityType/Id are empty).
+                SourceEntityType = i.EntityType,
                 CreatedOn = (i.ModifiedOn ?? DateTimeOffset.UtcNow).ToString("o")
             }).ToArray()
         };
