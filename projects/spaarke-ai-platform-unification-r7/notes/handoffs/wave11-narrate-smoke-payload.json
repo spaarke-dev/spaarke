@@ -1,0 +1,66 @@
+{
+  "categories": [
+    { "name": "Tasks Due Soon", "count": 3, "unreadCount": 3 },
+    { "name": "Matter Activity", "count": 2, "unreadCount": 2 }
+  ],
+  "priorityItems": [
+    { "category": "Tasks", "title": "Smith Matter 2026 Q3 Filing Review", "dueDate": "2026-07-02T17:00:00Z" },
+    { "category": "Tasks", "title": "Acme Litigation Deposition Prep", "dueDate": "2026-07-01T15:00:00Z" },
+    { "category": "Tasks", "title": "Beta Corp Contract Renewal Draft", "dueDate": "2026-07-03T12:00:00Z" }
+  ],
+  "totalNotificationCount": 5,
+  "channels": [
+    {
+      "category": "tasks",
+      "label": "Tasks Due Soon",
+      "items": [
+        {
+          "id": "evt-001",
+          "title": "Smith Matter 2026 Q3 Filing Review",
+          "body": "Quarterly filing due next week — review attached draft",
+          "priority": "high",
+          "regardingName": "Smith Matter 2026",
+          "regardingEntityType": "sprk_matter",
+          "regardingId": "smith-001",
+          "createdOn": "2026-06-29T10:00:00Z"
+        },
+        {
+          "id": "evt-002",
+          "title": "Acme Litigation Deposition Prep",
+          "body": "Witness deposition scheduled for Friday — prep notes needed",
+          "priority": "high",
+          "regardingName": "Acme Litigation",
+          "regardingEntityType": "sprk_matter",
+          "regardingId": "acme-001",
+          "createdOn": "2026-06-28T14:00:00Z"
+        }
+      ]
+    },
+    {
+      "category": "communications",
+      "label": "Recent Matter Activity",
+      "items": [
+        {
+          "id": "comm-001",
+          "title": "Smith Matter Settlement Notes",
+          "body": "Opposing counsel sent revised settlement terms — review needed",
+          "priority": "normal",
+          "regardingName": "Smith Matter 2026",
+          "regardingEntityType": "sprk_matter",
+          "regardingId": "smith-001",
+          "createdOn": "2026-06-29T09:00:00Z"
+        },
+        {
+          "id": "comm-002",
+          "title": "Acme Witness Statement Received",
+          "body": "Key witness statement received — file in evidence folder",
+          "priority": "normal",
+          "regardingName": "Acme Litigation",
+          "regardingEntityType": "sprk_matter",
+          "regardingId": "acme-001",
+          "createdOn": "2026-06-29T08:30:00Z"
+        }
+      ]
+    }
+  ]
+}

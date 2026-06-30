@@ -86,25 +86,25 @@ public sealed class TemplateEngine : ITemplateEngine
         _handlebars.RegisterHelper("json", (context, args) =>
             JsonSerializeForTemplate(args.Length > 0 ? args[0] : null));
 
-        // {{map COLL 'fieldName'}} or {{map COLL 'nested.path'}} — extract field from each
-        // item in COLL, returns flat enumerable. Supports dotted nested paths.
-        // Return-style helper so it composes in subexpressions: `(distinct (map A 'b'))`.
+        // Collection helpers (map / flatten / distinct / concat / flatMap): return-style only.
+        // R7 Wave 11 Option D auto-wrap ensures top-level interpolation is ALWAYS wrapped
+        // with `{{json X}}` — so the engine never needs a writer-style fallback that tries to
+        // stringify an IEnumerable directly. (Earlier dual registration caused subexpression
+        // composition `(distinct (map A 'b'))` to dispatch to the writer-style overload,
+        // producing JSON-array-text that the outer json helper then re-serialized as a
+        // string-of-string — double-encoding. Single return-style avoids this.)
+
         _handlebars.RegisterHelper("map", (context, args) =>
             MapField(
                 args.Length > 0 ? args[0] : null,
                 args.Length > 1 ? args[1]?.ToString() : null));
 
-        // {{flatten COLL}} — flatten one level. Items that are enumerable get expanded;
-        // scalar items pass through.
         _handlebars.RegisterHelper("flatten", (context, args) =>
             FlattenEnumerable(args.Length > 0 ? args[0] : null));
 
-        // {{distinct COLL}} — case-insensitive distinct (ordinal), preserves first-occurrence order.
         _handlebars.RegisterHelper("distinct", (context, args) =>
             DistinctValues(args.Length > 0 ? args[0] : null));
 
-        // {{concat A B C …}} — concatenate enumerables (scalars promoted to single-element);
-        // nulls / UndefinedBindingResult skipped entirely.
         _handlebars.RegisterHelper("concat", (context, args) => ConcatArgs(args.ToArray()));
 
         // {{join SEP A B C …}} — first arg is separator (string); subsequent args

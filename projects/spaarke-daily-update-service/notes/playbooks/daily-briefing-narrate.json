@@ -130,8 +130,11 @@
           "useActionDefaults": true
         },
         "inputBinding": {
-          "_comment": "Action's 'payload' input (single-string maxLength=50000) receives a JSON-serialized projection of the DailyBriefingNarrateRequest. The payload-execution method serializes start.* fields into the placeholder {{briefing.payload}}. The Action's prompt instructs the LLM to use ONLY entity names present in this payload.",
-          "payload": "{{json start}}"
+          "_comment": "R7 Wave 11 T116 rewrite: flatten to top-level fields so the LLM's `## Input` section has {categories, priorityItems, channels, totalNotificationCount} directly — matches BRIEF-NARRATE-TLDR JPS body's instruction.task which says 'Read the structured input payload (categories, priorityItems, channels, totalNotificationCount)'. Previously wrapped under 'payload' key which nested the data one level too deep.",
+          "categories": "{{start.categories}}",
+          "priorityItems": "{{start.priorityItems}}",
+          "channels": "{{start.channels}}",
+          "totalNotificationCount": "{{start.totalNotificationCount}}"
         },
         "outputBinding": {
           "tldrResult": "{{output}}"
@@ -184,11 +187,9 @@
         "actionCode": "BRIEF-VALIDATE-ENTITY-NAMES",
         "actionId": "BRIEF-VALIDATE-ENTITY-NAMES",
         "_comment": "Post-LLM defense-in-depth scrubber per FR-14. Concatenates all narration text (TL;DR + per-channel) into candidateText; builds allowList from input payload entity-name fields (deduplicated, empty-allowed). MUST execute AFTER both GenerateTldr and GenerateChannelNarratives — the merge of the two parallel branches happens here (per ADR-037 §When-composite + sprk_configjson.composeStrategy above).",
-        "inputBinding": {
-          "_comment": "R7 Wave 11 T113 rewrite: eliminated inline lambda + pipe-shorthand (both NOT valid Handlebars). candidateText uses nested subexpressions; allowList uses flatMap helper (registered in TemplateEngine.cs) — equivalent semantics, fewer lines, parses cleanly. See docs/architecture/SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md.",
-          "candidateText": "{{join '\\n\\n' tldrResult.summary tldrResult.keyTakeaways tldrResult.topAction (join '\\n' (flatten (map channelNarrationResults 'narrative')))}}",
-          "allowList": "{{distinct (concat (map start.priorityItems 'regardingName') (map start.priorityItems 'viaMatter.name') (map start.priorityItems 'source.owningUser') (flatMap start.categories 'items.regardingName') (flatMap start.categories 'items.viaMatter.name') (flatMap start.categories 'items.source.owningUser') (flatMap start.channels 'items.regardingName') (flatMap start.channels 'items.viaMatter.name') (flatMap start.channels 'items.source.owningUser'))}}"
-        },
+        "_inputBindingNote": "R7 Wave 11 T116 smoke discovery: EntityNameValidatorNodeExecutor (sprk_executortype 141) deserializes configJson directly into EntityNameValidatorNodeConfig — it reads candidateText + allowList at TOP LEVEL, NOT under inputBinding. The R4 author's inputBinding wrapping was wrong for this non-AI executor. (The inputBinding pattern applies only to AI executors that pass to PromptSchemaRenderer — AiCompletion, AiAnalysis. See docs/architecture/SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md Layer 2.) The two template expressions below remain Layer-1-resolved at the configJson string level uniformly.",
+        "candidateText": "{{join '\\n\\n' tldrResult.summary tldrResult.keyTakeaways tldrResult.topAction (join '\\n' (flatten (map channelNarrationResults 'narrative')))}}",
+        "allowList": "{{distinct (concat (map start.priorityItems 'regardingName') (map start.priorityItems 'viaMatter.name') (map start.priorityItems 'source.owningUser') (flatMap start.categories 'items.regardingName') (flatMap start.categories 'items.viaMatter.name') (flatMap start.categories 'items.source.owningUser') (flatMap start.channels 'items.regardingName') (flatMap start.channels 'items.viaMatter.name') (flatMap start.channels 'items.source.owningUser'))}}",
         "outputBinding": {
           "validationResult": "{{output}}"
         },

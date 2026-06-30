@@ -2016,10 +2016,17 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
     {
         var startedAt = DateTimeOffset.UtcNow;
 
-        // 1. Resolve the iterateOver expression alone (wrap in {{ }} if missing).
+        // 1. Resolve the iterateOver expression. Wrap in {{ }} if missing, then auto-wrap
+        //    with the json helper (Option D pattern) so the rendered output is JSON-parseable
+        //    array text even when iterateOver references a bare variable like
+        //    `{{channelRegistry.channels}}` (which would otherwise stringify as Dictionary garbage).
         var wrappedExpr = iterateOverExpr.Contains("{{", StringComparison.Ordinal)
             ? iterateOverExpr
             : "{{" + iterateOverExpr + "}}";
+        if (IsPureTemplate(wrappedExpr))
+        {
+            wrappedExpr = AutoWrapWithJsonHelper(wrappedExpr);
+        }
         var baseContext = PlaybookTemplateContextBuilder.Build(runContext);
         string resolvedIterateOver;
         try
@@ -2248,9 +2255,273 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
             return node;
 
         var context = PlaybookTemplateContextBuilder.Build(runContext);
-        var rendered = _templateEngine.Render(node.ConfigJson, context);
+
+        // R7 Wave 11 Option D (operator-approved 2026-06-29): JSON-aware substitution.
+        // The configJson is parsed as a JSON tree. For each STRING value:
+        //   - Pure-template value (entire string is one `{{...}}` expression):
+        //     render via Handlebars, then try parse the rendered result as JSON. If the
+        //     rendered output is a valid JSON value (array/object/number/bool/null),
+        //     replace this property's value with the native JSON shape instead of a
+        //     string. This eliminates the "string-encoded array" problem at quoted
+        //     template positions like `"allowList": "{{distinct (concat ...)}}"`.
+        //   - Mixed value (template + literal text):
+        //     render normally; the result stays a string (existing behavior).
+        // Net effect: the engine produces VALID configJson of the correct shape, every
+        // time, with no executor-side workarounds. Future narrative consumers benefit.
+        // See docs/architecture/SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md §3 (Layer 1).
+        string rendered;
+        try
+        {
+            rendered = RenderConfigJsonStructurally(node.ConfigJson, context);
+        }
+        catch (JsonException ex)
+        {
+            // configJson is not valid JSON — fall back to flat string substitution
+            // (preserves the previous behavior for non-JSON configJson values).
+            _logger.LogWarning(ex,
+                "ApplyConfigJsonTemplates: configJson is not valid JSON for node {NodeId}; falling back to flat string substitution",
+                node.Id);
+            rendered = _templateEngine.Render(node.ConfigJson, context);
+        }
 
         return node with { ConfigJson = rendered };
+    }
+
+    /// <summary>
+    /// R7 Wave 11 Option D (operator-approved 2026-06-29): JSON-aware template substitution.
+    /// Walks the parsed configJson tree depth-first; for each string value that is a
+    /// "pure template" (entire string is a single <c>{{...}}</c> expression), renders the
+    /// template via the engine and parses the result as JSON if possible — so an
+    /// IEnumerable helper result becomes a native JSON array, an object helper result
+    /// becomes a native JSON object, etc. Mixed values (text-with-template) render as
+    /// strings per the existing behavior.
+    /// </summary>
+    private string RenderConfigJsonStructurally(string configJson, Dictionary<string, object?> context)
+    {
+        using var sourceDoc = JsonDocument.Parse(configJson);
+        using var stream = new System.IO.MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            WriteJsonElementWithTemplateExpansion(writer, sourceDoc.RootElement, context);
+        }
+        return System.Text.Encoding.UTF8.GetString(stream.ToArray());
+    }
+
+    /// <summary>
+    /// Recursive depth-first walker. For Object/Array nodes, descends into children.
+    /// For String nodes, expands templates per the pure-vs-mixed rule described above.
+    /// For other scalar nodes (Number/Bool/Null), writes verbatim.
+    /// </summary>
+    private void WriteJsonElementWithTemplateExpansion(
+        Utf8JsonWriter writer,
+        JsonElement element,
+        Dictionary<string, object?> context)
+    {
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.Object:
+                writer.WriteStartObject();
+                foreach (var prop in element.EnumerateObject())
+                {
+                    writer.WritePropertyName(prop.Name);
+                    WriteJsonElementWithTemplateExpansion(writer, prop.Value, context);
+                }
+                writer.WriteEndObject();
+                return;
+
+            case JsonValueKind.Array:
+                writer.WriteStartArray();
+                foreach (var item in element.EnumerateArray())
+                {
+                    WriteJsonElementWithTemplateExpansion(writer, item, context);
+                }
+                writer.WriteEndArray();
+                return;
+
+            case JsonValueKind.String:
+                var raw = element.GetString() ?? string.Empty;
+                if (!raw.Contains("{{", StringComparison.Ordinal))
+                {
+                    writer.WriteStringValue(raw);
+                    return;
+                }
+
+                if (IsPureTemplate(raw))
+                {
+                    // R7 Wave 11 Option D auto-wrap: source authors write natural Handlebars
+                    // (`{{tldrResult}}`, `{{start.channels}}`, `{{distinct (concat …)}}`).
+                    // The engine wraps with the `json` helper so the rendered output is
+                    // ALWAYS JSON-parseable text — scalars become JSON scalars, objects
+                    // become JSON objects, arrays become JSON arrays. No source-author
+                    // burden to remember when to use {{json X}} vs {{X}}.
+                    //
+                    // After wrap+render+parse, the property value is the native JSON shape
+                    // (object/array/number/bool/null/string), not Dictionary.ToString() garbage.
+                    var wrappedTemplate = AutoWrapWithJsonHelper(raw);
+                    var renderedJson = _templateEngine.Render(wrappedTemplate, context);
+                    if (TryParseAsJson(renderedJson, out var parsedElement))
+                    {
+                        WriteJsonElementVerbatim(writer, parsedElement!.Value);
+                        return;
+                    }
+                    // Should be rare: the json helper failed to produce parseable JSON.
+                    // Fall through to render-as-string for graceful degradation.
+                }
+
+                var renderedString = _templateEngine.Render(raw, context);
+                writer.WriteStringValue(renderedString);
+                return;
+
+            case JsonValueKind.Null:
+                writer.WriteNullValue();
+                return;
+
+            default:
+                // Number / True / False — write verbatim.
+                element.WriteTo(writer);
+                return;
+        }
+    }
+
+    /// <summary>
+    /// R7 Wave 11 Option D auto-wrap: takes a pure-template string (e.g. <c>"{{tldrResult}}"</c>
+    /// or <c>"{{distinct (concat ...)}}"</c>) and wraps it with the <c>{{json …}}</c> helper
+    /// so the rendered output is always JSON-parseable text — regardless of whether the
+    /// inner expression returns a scalar, object, array, or helper-composed result.
+    /// </summary>
+    /// <remarks>
+    /// Detection: if the inner expression already uses the json helper (e.g.
+    /// <c>"{{json start}}"</c>), returns the original unchanged. Otherwise wraps the inner
+    /// expression: <c>"{{json &lt;inner&gt;}}"</c>. The json helper accepts any value
+    /// (variable, helper-call, scalar) and produces JSON-encoded text.
+    /// </remarks>
+    private static string AutoWrapWithJsonHelper(string pureTemplate)
+    {
+        var trimmed = pureTemplate.Trim();
+        // Strip the outer {{ and }}; inner is what's between them.
+        var inner = trimmed.Substring(2, trimmed.Length - 4).Trim();
+        if (inner.StartsWith("json ", StringComparison.Ordinal) || inner.StartsWith("json(", StringComparison.Ordinal))
+        {
+            return pureTemplate; // already wrapped
+        }
+        // If inner contains whitespace at top level (helper call like `distinct X` or
+        // `join '\n' X Y`), wrap with parens to make it a subexpression — `{{json (inner)}}`
+        // — so the inner helper's return value becomes the first arg to json.
+        // For single-token variable references like `tldrResult` or `start.channels`, no
+        // parens needed — Handlebars treats `{{json varName}}` as json(varName).
+        var needsParens = ContainsTopLevelWhitespace(inner);
+        return needsParens
+            ? "{{json (" + inner + ")}}"
+            : "{{json " + inner + "}}";
+    }
+
+    /// <summary>
+    /// Returns true if <paramref name="expr"/> contains whitespace at the top level
+    /// (not inside nested parens or quotes). Used to distinguish helper-call expressions
+    /// (e.g. <c>distinct X</c>) from variable references (e.g. <c>start.channels</c>).
+    /// </summary>
+    private static bool ContainsTopLevelWhitespace(string expr)
+    {
+        var parenDepth = 0;
+        var inSingle = false;
+        var inDouble = false;
+        foreach (var c in expr)
+        {
+            if (inSingle) { if (c == '\'') inSingle = false; continue; }
+            if (inDouble) { if (c == '"') inDouble = false; continue; }
+            if (c == '\'') { inSingle = true; continue; }
+            if (c == '"') { inDouble = true; continue; }
+            if (c == '(') { parenDepth++; continue; }
+            if (c == ')') { parenDepth--; continue; }
+            if (parenDepth == 0 && char.IsWhiteSpace(c)) return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Tests whether a string value is a "pure template" — the entire value (after
+    /// trimming whitespace) is a single Handlebars expression. Detection rule:
+    /// trimmed string starts with <c>{{</c> and ends with <c>}}</c>, AND there is
+    /// exactly ONE outermost <c>{{…}}</c> span (no literal text interleaved).
+    /// </summary>
+    /// <remarks>
+    /// We approximate by counting brace pairs: trimmed `{{X}}` is pure;
+    /// `{{X}}{{Y}}` is mixed (two top-level templates) — render as string.
+    /// `prefix{{X}}` is mixed (literal prefix) — render as string.
+    /// </remarks>
+    private static bool IsPureTemplate(string value)
+    {
+        var trimmed = value.Trim();
+        if (!trimmed.StartsWith("{{", StringComparison.Ordinal)) return false;
+        if (!trimmed.EndsWith("}}", StringComparison.Ordinal)) return false;
+        // Walk to find the matching outermost `}}` for the leading `{{`. If it's at the
+        // END of the trimmed string, this is a pure template; otherwise mixed.
+        var depth = 0;
+        var i = 0;
+        while (i < trimmed.Length - 1)
+        {
+            if (trimmed[i] == '{' && trimmed[i + 1] == '{')
+            {
+                depth++;
+                i += 2;
+                continue;
+            }
+            if (trimmed[i] == '}' && trimmed[i + 1] == '}')
+            {
+                depth--;
+                i += 2;
+                if (depth == 0)
+                {
+                    return i == trimmed.Length;
+                }
+                continue;
+            }
+            i++;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Attempts to parse <paramref name="value"/> as a JSON document. Returns true and
+    /// sets <paramref name="parsed"/> to the (cloned, detached) RootElement when the value
+    /// is a valid JSON value (array, object, number, bool, null). Bare strings without
+    /// surrounding quotes are NOT considered JSON here — they fall through to the
+    /// string-render path.
+    /// </summary>
+    private static bool TryParseAsJson(string value, out JsonElement? parsed)
+    {
+        parsed = null;
+        var trimmed = value.Trim();
+        if (string.IsNullOrEmpty(trimmed)) return false;
+        // Cheap pre-check: only object/array/number/bool/null shapes — bare strings
+        // (no quotes) should remain as strings (caller writes them as JSON string values).
+        var first = trimmed[0];
+        if (first != '{' && first != '[' && first != '-'
+            && !(first >= '0' && first <= '9')
+            && !trimmed.StartsWith("true", StringComparison.Ordinal)
+            && !trimmed.StartsWith("false", StringComparison.Ordinal)
+            && !trimmed.StartsWith("null", StringComparison.Ordinal))
+        {
+            return false;
+        }
+        try
+        {
+            using var doc = JsonDocument.Parse(trimmed);
+            parsed = doc.RootElement.Clone();
+            return true;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Writes a JsonElement verbatim to the writer (handles all ValueKinds).
+    /// </summary>
+    private static void WriteJsonElementVerbatim(Utf8JsonWriter writer, JsonElement element)
+    {
+        element.WriteTo(writer);
     }
 
     #endregion
