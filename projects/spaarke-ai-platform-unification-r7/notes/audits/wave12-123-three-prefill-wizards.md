@@ -449,4 +449,119 @@ This was a surgical Dataverse PATCH addressing the EXACT root cause identified i
 
 ---
 
-*End of audit 123.*
+## 10. Resolution (Wave 12.3 task 143 — Create Matter smoke + diagnostic)
+
+> **Applied**: 2026-06-30
+> **Task**: [`tasks/143-smoke-matter-wizard.poml`](../../tasks/143-smoke-matter-wizard.poml)
+> **Rigor**: STANDARD (verification + diagnostic; mutation deferred to operator)
+> **Status**: CODE PATH VERIFICATION COMPLETE. End-to-end smoke deferred to operator T145 UAT (sandboxed agent has no browser to spaarkedev1).
+> **Disposition revised**: audit §5.1 ranked Matter as "likely WORKING by code path inspection". Re-verification with Dataverse data reads + executor source reading shows **NOT WORKING — deterministic failure** at node 3 (EntityNameValidator). The §5.1 priority-2 risk ("EntityNameValidator allowList stripping output") underestimated severity — it's not "scrubs output", it's "fails validation, kills entire run, returns empty."
+
+### 10.1 Dataverse state re-verified
+
+All confirmed via `mcp__dataverse__read_query` 2026-06-30:
+
+| Surface | Verified value | Healthy? |
+|---|---|---|
+| Playbook `2d660cad-d418-f111-8343-7ced8d1dc988` | `sprk_name = "Create New Matter Pre-Fill"` (audit had named it "Wizard New Matter Create"; actual name differs but ID matches) | ✅ |
+| Routing row `sprk_playbookconsumer` consumerType=matter-pre-fill | `sprk_enabled = true`, routes to playbook above | ✅ |
+| Node 1 "Start" (`434b06d3-...`) | executortype=33, order=1, dependsonjson=null | ✅ |
+| Node 2 "AI Analysis" (`444b06d3-...`) | executortype=0, order=2, depends on Start, `sprk_actionid = 89cc641a-df18-f111-8343-7c1e520aa4df` (ACT-023) | ✅ FK present |
+| Node 3 "Entity Name Validator" (`c3c5226d-5b71-f111-ab0d-7ced8ddc4a05`) | executortype=141, order=3, depends on AI Analysis, **stub configJson** | ⚠️ broken (§10.2) |
+| Node 2 configJson | contains stub `systemPrompt` override that REPLACES ACT-023's real instruction | ⚠️ degrades quality (§10.3) |
+| Action ACT-023 (`89cc641a-...`) | present, has full systemPrompt + outputschemajson + modelDeploymentId | ✅ |
+
+### 10.2 Root cause #1 — EntityNameValidator stub configJson causes total run failure
+
+`sprk_playbooknode(c3c5226d-...).sprk_configjson` = `{"__canvasNodeId":"node_1782477270462_pehsxfjnu","__actionType":141}` — only Power Apps Maker canvas metadata, **no `candidateText`, no `allowList`**.
+
+[`EntityNameValidatorNodeExecutor.Validate()`](../../../../src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/EntityNameValidatorNodeExecutor.cs) (lines 151-198) requires BOTH fields:
+
+```
+if (string.IsNullOrWhiteSpace(config.CandidateText))
+    errors.Add("EntityNameValidator node requires 'candidateText' in ConfigJson");
+if (config.AllowList is null)
+    errors.Add("EntityNameValidator node requires 'allowList' in ConfigJson (use [] to scrub all proper-noun names)");
+```
+
+Without them, returns `NodeOutput.Error(NodeErrorCodes.ValidationFailed)`.
+
+[`PlaybookOrchestrationService` batch loop](../../../../src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookOrchestrationService.cs) (lines 724-745): on ANY failed node fires `PlaybookStreamEvent.RunFailed` and aborts the entire run (the TODO at line 730 acknowledges `sprk_continueonerror` is not implemented yet — GitHub #233).
+
+[`MatterPreFillService.ExtractFieldsViaPlaybookAsync`](../../../../src/server/api/Sprk.Bff.Api/Services/Workspace/MatterPreFillService.cs) (lines 427-433): on `RunFailed` returns `PreFillResponse.Empty("PLAYBOOK_FAILED: ...")` — **even though node 2 (AI Analysis) had already emitted valid StructuredData earlier in the stream (line 411 captured it; lines 427-433 discard it)**.
+
+Net effect: wizard always shows empty prefill. App Insights signature: `"Playbook execution failed for pre-fill. Error=Node 'Entity Name Validator' failed: EntityNameValidator node requires 'candidateText' in ConfigJson; EntityNameValidator node requires 'allowList' in ConfigJson"`.
+
+This is the same R7 Wave 5 backfill mechanism that orphaned the Project node's Action FK (per audit §5.2). The backfill script ([`notes/drafts/playbook-node-review-output.csv` line 61](../drafts/playbook-node-review-output.csv)) set `sprk_executortype = 141` based on node-name match ("Entity Name Validator" → 141) without verifying the configJson contained the required executor inputs. This confirms audit §9.2 — there are other R7-rename-era orphans beyond the Project Action FK.
+
+### 10.3 Root cause #2 — AI Analysis node systemPrompt override clobbers Action's real prompt
+
+`sprk_playbooknode(444b06d3-...).sprk_configjson` contains a stub systemPrompt override:
+
+```json
+{
+  "__canvasNodeId":"node_1772743778436_khspxdutg",
+  "__actionType":0,
+  "modelDeploymentId":"cdfa4e52-7c16-f111-8343-7c1e520aa4df",
+  "systemPrompt":"{\"$schema\":\"https://spaarke.com/schemas/jps/v1\",\"$version\":1,\"instruction\":{\"task\":\"Task\",\"role\":\"You are a document reviewer\"}}"
+}
+```
+
+[`PromptSchemaOverrideMerger.MergeInstruction`](../../../../src/server/api/Sprk.Bff.Api/Services/Ai/PromptSchemaOverrideMerger.cs) (lines 208-234) REPLACES the Action's `instruction.task` and `instruction.role` with this stub when override is present. Net effect: even if §10.2 is fixed, the LLM receives the stub instruction "Task / You are a document reviewer" instead of ACT-023's real Matter-field-extraction prompt with `$choices` lookups against `sprk_mattertype` and `sprk_practicearea`. Extraction quality severely degraded; LLM doesn't know what fields to emit or what allowed enumerations to use.
+
+### 10.4 Recommended minimal fix (data-layer only, no BFF code change)
+
+**Operator approval required before mutation. Sandboxed agent did NOT apply** (per `mcp__dataverse__delete_record` requiring `hasUserApproved=true`; aligns with CLAUDE.md §6 escalation triggers for production data mutation).
+
+Two atomic Dataverse updates needed. Recommend both in one operator session for atomicity:
+
+| # | Action | Target record | Field | New value | Effect |
+|---|---|---|---|---|---|
+| A | **Delete** (preferred) OR **Update** | `sprk_playbooknode` `c3c5226d-5b71-f111-ab0d-7ced8ddc4a05` (Entity Name Validator) | (whole record) OR `sprk_configjson` | Delete the node entirely (preferred), OR set configjson to `{"__canvasNodeId":"node_1782477270462_pehsxfjnu","__actionType":141,"candidateText":"","allowList":[]}` (workaround) | Stops total-run-failure. **Preferred: delete** — EntityNameValidator is designed for narrative text scrubbing (R4 FR-3) where the LLM emits free-form prose with hallucination risk; structured field extraction via ACT-023's `sprk_outputschemajson` + Structured Outputs has constrained the LLM at generation time, eliminating the hallucination problem the validator is designed for. The validator is the wrong tool here. |
+| B | **Update** | `sprk_playbooknode` `444b06d3-d418-f111-8343-7ced8d1dc988` (AI Analysis) | `sprk_configjson` | Strip the `systemPrompt` key. Keep `__canvasNodeId`, `__actionType`, `modelDeploymentId`. New value: `{"__canvasNodeId":"node_1772743778436_khspxdutg","__actionType":0,"modelDeploymentId":"cdfa4e52-7c16-f111-8343-7c1e520aa4df"}` | Stops the stub instruction from clobbering ACT-023's real prompt. ModelDeploymentId override remains intact. |
+
+Operator can apply via Power Apps Maker (edit node configJson in the canvas designer) OR via Dataverse Web API (preferred — atomic; canvas editor may add/strip canvas metadata).
+
+**Audit §7 contract preservation**: both fixes preserve all operator-tunable surfaces (Action `sprk_systemprompt`, `sprk_outputschemajson`, `sprk_temperature`, `sprk_modeldeploymentid`, routing table, env-var fallback). Only per-node STUB overrides are removed — the Action remains the single source of truth, as designed.
+
+### 10.5 Inheritance to T144 (Create Work Assignment wizard)
+
+WA wizard's AI prefill path reuses `/api/workspace/matters/pre-fill` (audit §1.3 + §5.3). Fixing the Matter playbook automatically fixes WA AI prefill. **T144 disposition**: verify the Matter fix from §10.4 has been applied; then run WA UAT alongside Matter UAT at T145. WA does NOT need its own playbook or its own fix — only inheritance verification. Should be a straightforward "wait for Matter fix → confirm WA inherits" task.
+
+### 10.6 Why no end-to-end Bash smoke from sandboxed agent
+
+Per T143 POML fallback instruction: *"If you cannot reach spaarkedev1 for browser smoke, do code path verification via Read/Grep + leave end-to-end smoke for operator at T145 UAT."* Sandboxed agent has no browser, no SSO credentials, no spaarkedev1 network reach. Code path + Dataverse data verification done; mutation requires operator consent (CLAUDE.md §6 escalation; `mcp__dataverse__delete_record` requires `hasUserApproved=true`).
+
+### 10.7 Acceptance criteria status
+
+- [x] Create Matter wizard code path verified end-to-end (Read/Grep)
+- [x] All 3 Dataverse surfaces (playbook, 3 nodes, Action, routing row) verified via read_query
+- [x] Failure mode identified deterministically (§10.2)
+- [x] Secondary issue (§10.3 stub systemPrompt) identified — would degrade quality even after §10.2 fix
+- [x] Minimal fix recommended (§10.4) — data-layer only; no BFF code change; preserves §7 contract
+- [x] T144 (WA wizard) inheritance confirmed (§10.5)
+- [x] Audit notes updated with Resolution (this section)
+- [ ] Operator applies §10.4 fixes (deferred to operator)
+- [ ] T145 UAT — wizard end-to-end in spaarkedev1 (deferred per T143 POML)
+
+### 10.8 Confidence
+
+- **Diagnosis confidence**: VERY HIGH (Dataverse data read directly via MCP; code path traced from endpoint to executor; failure mode deterministic — both bugs trigger on every invocation)
+- **Fix-effectiveness confidence**: HIGH (both root causes are pure data-layer; no code change risk; preserves all operator-tunable surfaces per §7)
+- **T145 UAT pass probability after operator applies §10.4**: HIGH
+
+### 10.9 Open follow-ups (filed via this task, NOT in scope of T143)
+
+- Operator applies §10.4 fixes A + B before T145.
+- T145 UAT against Matter + WA wizards together (per §10.5 inheritance).
+- Audit §9.2 recommendation already executed by T143 — sweep query `SELECT sprk_name, sprk_playbookid, sprk_configjson FROM sprk_playbooknode WHERE sprk_executortype = 141` returned exactly 2 rows:
+  1. **The broken Matter node** (`c3c5226d-...` — addressed by §10.4 fix A)
+  2. **Daily Briefing's `ValidateEntityNames` node** (`11895da7-a171-f111-ab0d-7ced8ddc4cc6` in playbook `7b5a6ed3-0271-f111-ab0e-000d3a13a4cd`) — has properly-template-expanded `candidateText` + `allowList` per R7 Wave 11 T116 DTO-alignment fix (visible in its `_allowListNote` comment in configJson). **Healthy.**
+
+  No additional EntityNameValidator orphans exist. The Matter node is the only instance of this misconfiguration pattern. Scope of cleanup confirmed limited to §10.4 fix A.
+
+- For Wave 5 backfill audit (parallel concern, separate from EntityNameValidator class): the systemPrompt-override clobbering pattern in §10.3 may exist on other AiAnalysis nodes that received node-level stub overrides during Power Apps Maker canvas authoring. A broader sweep `SELECT sprk_name, sprk_playbookid, sprk_configjson FROM sprk_playbooknode WHERE sprk_executortype = 0 AND sprk_configjson LIKE '%systemPrompt%'` would surface candidates. Optional; track as DEF if operator wants comprehensive cleanup; not blocking for T145 UAT (Matter fix is the only one needed for Wave 12 MVP).
+
+---
+
+*End of audit 123. Resolution §10 appended 2026-06-30 by T143 (T142 §8.5 added by sibling task earlier the same day).*
