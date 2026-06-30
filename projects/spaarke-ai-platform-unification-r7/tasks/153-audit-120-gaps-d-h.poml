@@ -11,6 +11,8 @@
     <parallel-safe>true</parallel-safe>
     <tags>bff-api, code-impl, assistant, wave12</tags>
     <estimated-effort>0.5-1 day</estimated-effort>
+    <status>completed</status>
+    <completed-date>2026-06-30</completed-date>
   </metadata>
 
   <prompt>

@@ -511,4 +511,140 @@ No `Mock<HttpMessageHandler>`, no DI-registration tests, no ctor null-check test
 
 ---
 
-*End audit 120 — Resolution §8 records T130 closure; Resolution §9 records T150 / Gap A closure. T151/T152/T153 remain open for Gaps B/C/D-H per disposition §5.*
+## 10. Resolution — Wave 12 task 151 / Gap B (added 2026-06-30)
+
+> **Author**: Wave 12.4 task 151 (task-execute FULL rigor)
+> **Date**: 2026-06-30
+> **Scope**: ONLY Gap B — server-side EntityName lazy-fetch in `PlaybookChatContextProvider`.
+
+### Approach
+
+Per §5 disposition B recommendation: server-side lazy-fetch (minimum-touch, centralised). When `ChatHostContext.EntityName` is null/whitespace but `EntityType` + `EntityId` are present, the provider retrieves the entity's primary-name attribute (`sprk_name`) from Dataverse via `IGenericEntityService.RetrieveAsync` and uses it for system-prompt enrichment. Result memoised per-request to avoid duplicate round-trips when the prompt is composed twice in the same request lifecycle.
+
+### Actual surfaces touched
+
+- `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookChatContextProvider.cs` — added:
+  - `using Microsoft.Xrm.Sdk;` import for `Entity` return type
+  - `IGenericEntityService? _entityService` field (optional ctor param — nullable for backward-compat with existing test fixtures that pre-date T151; production DI satisfies via existing `GraphModule.AddSingleton<IGenericEntityService>(...)` forward from `IDataverseService` composite)
+  - `Dictionary<string, string?> _entityNameCache` instance field (Scoped lifetime → naturally per-request; null cached value = "previous fetch failed; do not retry")
+  - `TryResolveEntityNameAsync` private async helper (single Dataverse retrieve + cache; soft-fails on any exception path)
+  - `ToDataverseLogicalName` private static helper (maps "matter"/"project"/"invoice" → "sprk_*"; pass-through for unknown types)
+  - `AppendEntityEnrichmentAsync` (renamed from sync `AppendEntityEnrichment`): calls `TryResolveEntityNameAsync` BEFORE the EntityName guard when EntityName is missing but EntityType+EntityId present
+- Both call sites updated to `await`: line 219 (generic mode) and line 329 (playbook mode)
+
+### Tests added
+
+`tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/PlaybookChatContextProviderEntityNameLazyFetchTests.cs` — 6 new tests (later 7 after T152's end-to-end addition):
+
+1. `GetContextAsync_MissingEntityName_LazyFetchesNameFromDataverseAndEnriches` — happy path
+2. `GetContextAsync_MissingEntityName_LazyFetchFails_SkipsEnrichmentAndContinues` — soft-fail invariant
+3. `GetContextAsync_TwoCallsSameInstance_LazyFetchCachedAcrossCalls` — per-request cache invariant (asserts `RetrieveAsync` called `Times.Once` despite 2 GetContextAsync calls)
+4. `GetContextAsync_EntityNameAlreadyPresent_DoesNotInvokeLazyFetch` — `Times.Never` when EntityName supplied
+5. `GetContextAsync_MissingEntityName_InvalidGuidId_SkipsLazyFetchAndEnrichment` — non-GUID boundary
+6. `GetContextAsync_MissingEntityName_RawLogicalNameType_LazyFetchUsesSameLogicalName` — `sprk_matter` form pass-through
+
+Test fixture pattern: `IDataverseService` mock satisfies `IGenericEntityService` injection because `IDataverseService` composite interface inherits `IGenericEntityService` (per `Spaarke.Dataverse.IDataverseService.cs:9-19`). Same composite mock already used by sibling tests (`PlaybookChatContextProviderEnrichmentTests`).
+
+NO `Mock<HttpMessageHandler>`, NO DI-registration tests, NO ctor null-check tests per ADR-038.
+
+### Verification
+
+- `dotnet build src/server/api/Sprk.Bff.Api/`: **0 errors**, 19 pre-existing warnings (unchanged from T150 baseline)
+- `dotnet test --filter "FullyQualifiedName~PlaybookChatContextProvider"`: **46/46 pass** (6 new T151 tests + 40 existing)
+- Full chat suite (`--filter "FullyQualifiedName~Chat"`): **1253/1253 pass**
+- Full BFF unit suite: same 6 pre-existing baseline failures from audit Resolution §9 (`AuditLogServiceTests`, `ExecutorConfigSchemasEndpointTests`, `SummarizeSessionEndpointContractTests`, `KnowledgeDeploymentConfigTests`, `PlaybookDispatcherPhaseBTests`, `SessionFilesCleanupJobTests`) — none touch chat hostContext / entity-name surfaces; T151 introduces **0 new failures**.
+- **Compressed publish size**: 46 MB (well within 60 MB NFR-01 ceiling; -1.6 MB vs T150 baseline 47.6 MB because no new packages, only an additional optional ctor param + helper methods)
+- No new DI registrations (existing `IGenericEntityService` singleton already wired in `GraphModule.cs:70`)
+
+### Out of scope for T151
+
+- Gap C (default PageType) — T152
+- Gaps D/E/F/G/H — T153
+- `IGenericEntityService` becoming a REQUIRED (non-nullable) ctor param — deferred to keep existing test fixtures green; the nullable+default-null pattern matches `IPromptBudgetTracker`'s existing convention
+
+### Commit
+
+- `e2b4abdad` — `feat(bff/r7): T151 Wave 12 — server-side EntityName lazy-fetch in PlaybookChatContextProvider (audit 120 Gap B)` (pushed to `work/spaarke-ai-platform-unification-r7`)
+
+---
+
+## 11. Resolution — Wave 12 task 152 / Gap C (added 2026-06-30)
+
+> **Author**: Wave 12.4 task 152 (task-execute FULL rigor)
+> **Date**: 2026-06-30
+> **Scope**: ONLY Gap C — default `ChatHostContext.PageType` substitution at the enrichment guard.
+
+### Approach
+
+Per §5 disposition C option (b) (loosen the guard with a default label) blended with option (a) (explicit default value): introduced an `internal const string DefaultPageType = "entityrecord"` on `PlaybookChatContextProvider` and a one-line null-coalesce in `AppendEntityEnrichmentAsync` so the missing-PageType case maps to "main form view" via the existing `PageTypeLabels` dictionary. Choice rationale: chat requests carrying EntityType+EntityId are by definition on an entity-form surface, and "entityrecord" is the canonical Dynamics page type for that.
+
+### Surfaces touched
+
+- `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookChatContextProvider.cs` — added:
+  - `internal const string DefaultPageType = "entityrecord"` with full rationale XML doc
+  - One null-coalesce in `AppendEntityEnrichmentAsync`: `var pageType = string.IsNullOrWhiteSpace(hostContext.PageType) ? DefaultPageType : hostContext.PageType;`
+  - Guards downstream (line 612 +) now operate on the local `pageType` variable rather than `hostContext.PageType` directly
+
+### Contract change — existing test rewired
+
+`PlaybookChatContextProviderEnrichmentTests.GetContextAsync_NullPageType_NoEnrichmentBlockAppended` was the source of the bug: it asserted that a null PageType produced no enrichment. After T152 the contract is that the default substitution happens and enrichment DOES fire. Test renamed to `GetContextAsync_NullPageType_EnrichmentAppendedWithDefaultPageType` and its assertions inverted to verify the new contract.
+
+The "unknown" PageType test (`GetContextAsync_UnknownPageType_NoEnrichmentBlockAppended`) is **unchanged** — "unknown" is the client's explicit not-known signal and is preserved as a deliberate no-enrichment trigger so upstream misconfiguration stays visible.
+
+### Tests added
+
+- `PlaybookChatContextProviderEntityNameLazyFetchTests.GetContextAsync_AuditScenarioA_ClientSendsOnlyEntityTypeAndId_EnrichmentFires` — end-to-end protection covering T150 + T151 + T152 combined. Client sends ONLY EntityType + EntityId (the SpaarkeAi shipped behaviour pre-fixes) → assistant chat receives full matter-aware enrichment.
+
+### Verification
+
+- `dotnet build src/server/api/Sprk.Bff.Api/`: **0 errors**
+- `dotnet test --filter "FullyQualifiedName~PlaybookChatContextProvider"`: **47/47 pass** (was 46 before T152; +1 Scenario A end-to-end test)
+- Publish size: negligible impact (one const + one ternary)
+
+### Commit
+
+- `800f23a0a` — `feat(bff/r7): T152 Wave 12 — default PageType in PlaybookChatContextProvider (audit 120 Gap C)` (pushed to `work/spaarke-ai-platform-unification-r7`)
+
+---
+
+## 12. Resolution — Wave 12 task 153 / Gaps D-H (added 2026-06-30)
+
+> **Author**: Wave 12.4 task 153 (task-execute FULL rigor)
+> **Date**: 2026-06-30
+> **Scope**: Process the remaining 5 gaps (D, E, F, G, H) per the audit's §5 disposition table. None of the 5 are in-scope code fixes per the audit's own dispositions — T153 records dispositional closure + files deferred-work tracker for the one item the audit explicitly marked DEFER (Gap D).
+
+### Per-gap closure
+
+| Gap | Audit §5 disposition | T153 closure action | Status |
+|---|---|---|---|
+| **D** Tab-change doesn't refresh hostContext | DEFER post-MVP | Filed as `DEF-002` in `notes/defer-issues.md` with concrete-behaviour rationale + scope-of-work + when-to-address. To be filed as GitHub Issue on next `push-to-github` invocation per project DEF convention. | DEFERRED |
+| **E** No "current matter" tool | NO ACTION (subsumed by A+B+C) | Recorded in `notes/defer-issues.md` § R7-NOACTION-001. After T150+T151+T152, system-prompt enrichment answers "what matter am I in?" deterministically — no separate tool needed. | NO-ACTION (closed) |
+| **F** Verify matter documents indexed in spaarkedev1 | UAT VERIFICATION (not a code task) | Owned by T136+T154 UAT smoke. If post-deploy smoke shows 0 hits on `"what documents are in this matter?"`, file ISS-NNN at that point. Recorded in § R7-NOACTION-001. | NO-ACTION (UAT-owned) |
+| **G** LoadKnowledgeNodeExecutor is NOT the chat retrieval path | NO ACTION (documentation only) | Already documented in audit 120 §3 Gap G + Wave 12 plan §2.3 + W11 architecture doc §5. No additional documentation edits needed. | NO-ACTION (documented) |
+| **H** Deployment coordination across spaarkedev1 | OPERATOR DECISION | Tracked in `notes/wave12-mvp-completion-plan.md` §10 Q3. Not a code task; deployment scripting (T136+T154) + operator notification own. | NO-ACTION (operator-owned) |
+
+### Why no `PlaybookChatContextProvider.cs` edits in T153
+
+T153 inspected the audit §5 disposition table and confirmed every remaining gap (D-H) is either:
+1. Explicitly NOT a code task (E, F, G, H per audit), OR
+2. Explicitly DEFERRED post-MVP per the audit's own recommendation (D)
+
+The audit itself anticipated this outcome — Wave 12 task 153's input POML §inputs explicitly notes "Some gaps may turn out to be out-of-MVP-scope on closer read (e.g., retrieval-grounding-needed); flag those and defer". T153 honoured that anticipation rather than fabricating fixes not called for by the source audit.
+
+### Tests added by T153
+
+None — T153 adds no executable code paths. Audit closure is documentation work.
+
+### Verification
+
+- `dotnet build src/server/api/Sprk.Bff.Api/`: **0 errors** (no code change in T153)
+- `dotnet test --filter "FullyQualifiedName~PlaybookChatContextProvider"`: **47/47 pass** (unchanged from T152 baseline)
+- Publish size: 46 MB compressed (unchanged from T152)
+
+### Commit (pending — this file change is staged as part of T153)
+
+To be commit `<sha>` — `docs(bff/r7): T153 Wave 12 — audit 120 Gaps D-H disposition (DEF-002 + 4 no-action closures)` (will be pushed after this resolution section is committed)
+
+---
+
+*End audit 120 — Resolution §8 records T130 closure; Resolution §9 records T150 / Gap A; §10 records T151 / Gap B; §11 records T152 / Gap C; §12 records T153 / Gaps D-H dispositional closure. Audit 120 is now CLOSED for R7 W12.4 — Gap D follow-up is tracked as DEF-002.*
