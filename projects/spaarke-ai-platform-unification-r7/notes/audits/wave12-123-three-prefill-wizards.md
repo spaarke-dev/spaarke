@@ -377,6 +377,69 @@ d. **The existing `IWorkspacePrefillAi` facade + `useAiPrefill` hook already cap
 
 ---
 
+## 8.5 Resolution (Wave 12.3 task 142 — Create Project FK re-link)
+
+> **Applied**: 2026-06-30
+> **Task**: [`tasks/142-restore-project-wizard-fk.poml`](../../tasks/142-restore-project-wizard-fk.poml)
+> **Rigor**: STANDARD (data fix only; no code change)
+> **Operator/Agent**: task-execute via mcp__dataverse__update_record
+
+### Pre-state (verified before PATCH)
+
+```sql
+SELECT sprk_playbooknodeid, sprk_name, sprk_executortype, sprk_actionid, sprk_playbookid, sprk_configjson
+FROM sprk_playbooknode
+WHERE sprk_playbooknodeid = 'dacac491-4f6c-f111-ab0e-7ced8ddc4a05';
+```
+
+Result: `sprk_actionid = NULL` (column absent from response row — confirming the orphan diagnosis in §5.2). Node `Extract Project Fields` in playbook `fc343e9c-3460-f111-ab0b-7c1e521b425f` ("Wizard New Project Create"), executor type 0 (AI Analysis), config json reduced to the canvas stub `{"__canvasNodeId":"0893d69d-3460-f111-ab0b-70a8a59455f4","__actionType":0}`.
+
+Target Action `sprk_analysisaction(1e838114-7919-f111-8343-7ced8d1dc988)` ACT-024 "New Project Field Extraction" verified present with full `sprk_outputschemajson` (project-prefill output schema, ~10 fields) + full `sprk_systemprompt` (JPS instruction/output/examples block for project field extraction). The Action's wire contract is the wizard-UI contract per §7 — preservation requirement satisfied (no schema or prompt change applied).
+
+### PATCH applied
+
+```
+mcp__dataverse__update_record(
+  tablename = 'sprk_playbooknode',
+  recordId  = 'dacac491-4f6c-f111-ab0e-7ced8ddc4a05',
+  item      = { sprk_actionid: { relatedTable: 'sprk_analysisaction',
+                                 name:         'New Project Field Extraction',
+                                 recordId:     '1e838114-7919-f111-8343-7ced8d1dc988' } }
+)
+→ "Record updated successfully."
+```
+
+### Post-state (verified after PATCH)
+
+Same SELECT as pre-state. Result: `sprk_actionid = "1e838114-7919-f111-8343-7ced8d1dc988"`. The FK now resolves to ACT-024.
+
+### Effect on orchestration path
+
+With the FK now present, `PlaybookOrchestrationService.ExecuteNodeAsync` (`src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookOrchestrationService.cs`) will:
+
+1. Read `node.SprkExecutortype = 0` → `ExecutorType.AiAnalysis` (single-hop dispatch — no change from before).
+2. Load the real `AnalysisAction` (ACT-024) via the `sprk_actionid` lookup instead of falling into the synthetic-action-shell branch (lines 1117-1126).
+3. `AiAnalysisNodeExecutor.Validate` will now find a non-null SystemPrompt + OutputSchemaJson + Tool (per Action) and proceed to execute the LLM call.
+4. The LLM emits JSON matching the ACT-024 output schema → `ProjectPreFillService.ParseAiResponse` deserializes into `AiProjectPreFillResult` → BFF returns populated `ProjectPreFillResponse` → wizard `useAiPrefill` hook receives non-empty fields → JSX renders prefilled `projectName`, `description`, `projectType`, `practiceArea` (the 4 fields the wizard actually renders per §3.1.2).
+
+### Acceptance criteria status
+
+- [x] `sprk_playbooknode(dacac491-...).sprk_actionid = 1e838114-...` (verified pre + post)
+- [ ] Create Project wizard prefill works end-to-end (operator UAT — deferred to T145)
+- [x] Audit notes updated with Resolution (this section)
+- [x] No code change required (data fix only — no `.cs`/`.ts`/`.tsx` edits)
+
+### Disposition
+
+This was a surgical Dataverse PATCH addressing the EXACT root cause identified in §5.2. No code changes, no schema changes, no new abstractions, no test changes. Per CLAUDE.md §11 (Component Justification): rule does NOT apply (no new surface). Per CLAUDE.md §10 (BFF Hygiene): does NOT apply (no BFF touch).
+
+### Open follow-ups (filed via task-execute, NOT in scope of T142)
+
+- Operator UAT at T145 — confirm wizard end-to-end in spaarkedev1 (upload PDF → see prefill).
+- Open question §9.2 still recommended: one-shot audit `SELECT sprk_name, sprk_executortype FROM sprk_playbooknode WHERE sprk_executortype IN (0,1,2) AND sprk_actionid IS NULL` to detect other R7-rename-era orphans. Tracked as potential ISS during R7 wrap-up if Matter smoke (§5.1) reveals similar pattern.
+
+---
+
 ## 9. Open questions for operator (non-blocking)
 
 1. **Confirm the Project playbook node's missing Action FK is acceptable to restore** (vs. operator-intentional state for a different reason). Wave 12.3 should ask before flipping the FK.

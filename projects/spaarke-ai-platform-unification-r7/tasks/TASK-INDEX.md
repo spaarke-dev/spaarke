@@ -252,7 +252,7 @@
 |---|---|---|---|---|---|
 | 140 | 🔲 | RESTORE wizard file summary (smoke + config drift fix per audit 121) | wizard, deploy, config, smoke, wave12 | yes | — |
 | 141 | 🔲 | RESTORE document create profile (Dataverse + Action JPS + UI cosmetic per audit 122) | wizard, document, dataverse, config, wave12 | yes | — |
-| 142 | 🔲 | RESTORE Create Project — single Dataverse PATCH (sprk_actionid FK re-link per audit 123) | wizard, project, dataverse, data-fix, wave12 | yes | — |
+| 142 | ✅ | RESTORE Create Project — single Dataverse PATCH (sprk_actionid FK re-link per audit 123) | wizard, project, dataverse, data-fix, wave12 | yes | — |
 | 143 | 🔲 | SMOKE Create Matter wizard — verify code path healthy per audit 123 | wizard, matter, smoke, wave12 | yes | — |
 | 144 | 🔲 | VERIFY Create Work Assignment inherits Matter fix per audit 123 | wizard, work-assignment, smoke, wave12 | no | 143 |
 | 145 | 🔲 | UAT — all 5 wizards end-to-end (Wave 12.3 gate) | wizard, uat, gate, wave12 | no | 140-144 |

@@ -11,6 +11,8 @@
     <parallel-safe>true</parallel-safe>
     <tags>wizard, project, dataverse, data-fix, wave12</tags>
     <estimated-effort>1-2 hours</estimated-effort>
+    <status>completed</status>
+    <completed-at>2026-06-30</completed-at>
   </metadata>
 
   <prompt>
@@ -81,9 +83,27 @@ Create Project wizard works end-to-end. User invokes wizard → LLM extracts 8 p
   </outputs>
 
   <acceptance-criteria>
-    - [ ] sprk_playbooknode(dacac491-...).sprk_actionid = 1e838114-... (verified pre + post)
+    - [x] sprk_playbooknode(dacac491-...).sprk_actionid = 1e838114-... (verified pre + post)
     - [ ] Create Project wizard prefill works end-to-end (operator UAT at T145)
-    - [ ] Audit notes updated with Resolution
-    - [ ] No code change required (data fix only)
+    - [x] Audit notes updated with Resolution
+    - [x] No code change required (data fix only)
   </acceptance-criteria>
+
+  <notes>
+**Completed 2026-06-30** via task-execute (STANDARD rigor).
+
+**Pre-state**: `sprk_actionid = NULL` on node `dacac491-4f6c-f111-ab0e-7ced8ddc4a05` (confirmed via mcp__dataverse__read_query — attribute absent from response row).
+
+**Target verified**: Action `1e838114-7919-f111-8343-7ced8d1dc988` (ACT-024 "New Project Field Extraction") exists with full `sprk_outputschemajson` + `sprk_systemprompt`.
+
+**PATCH applied**: mcp__dataverse__update_record with `sprk_actionid` lookup → ACT-024. Response: "Record updated successfully."
+
+**Post-state verified**: `sprk_actionid = "1e838114-7919-f111-8343-7ced8d1dc988"`.
+
+**Outcome**: Project wizard's orchestration path now resolves the real Action (ACT-024) instead of falling into the synthetic-action-shell branch in PlaybookOrchestrationService (lines 1117-1126). AiAnalysisNodeExecutor.Validate will now find SystemPrompt + Schema + Tool and proceed to LLM call.
+
+**Resolution doc**: §8.5 added to `projects/spaarke-ai-platform-unification-r7/notes/audits/wave12-123-three-prefill-wizards.md`.
+
+**Open item**: Operator UAT in spaarkedev1 (T145) — confirms upload PDF → prefilled project form fields.
+  </notes>
 </task>
