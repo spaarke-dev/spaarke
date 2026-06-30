@@ -203,6 +203,8 @@ public static class DailyBriefingEndpoints
         ILoggerFactory loggerFactory,
         IConsumerRoutingService routing,
         IInvokePlaybookAi invokePlaybookAi,
+        IConfiguration configuration,
+        Sprk.Bff.Api.Services.Ai.Narrators.DailyBriefingNarrator narrator,
         HttpContext httpContext,
         CancellationToken cancellationToken)
     {
@@ -237,8 +239,39 @@ public static class DailyBriefingEndpoints
             });
         }
 
+        // R7 Wave 11 T116 narrator spike (2026-06-30) — feature-flag branch.
+        // When Features:NarrateUseCodeBasedNarrator=true, bypass the playbook engine
+        // and execute /narrate via DailyBriefingNarrator (direct C# calls). Flag off
+        // (default) preserves existing playbook-engine path. Plan:
+        //   projects/spaarke-ai-platform-unification-r7/notes/spikes/narrator-spike-plan.md
+        var useCodeNarrator = configuration.GetValue<bool>(
+            "Features:NarrateUseCodeBasedNarrator", defaultValue: false);
+
+        if (useCodeNarrator)
+        {
+            logger.LogInformation(
+                "Dispatching daily briefing narration via CODE-BASED narrator (spike): Categories={CategoryCount}, PriorityItems={PriorityCount}, Channels={ChannelCount}",
+                request.Categories.Length, request.PriorityItems.Length, request.Channels.Length);
+
+            try
+            {
+                var response = await narrator.NarrateAsync(request, cancellationToken).ConfigureAwait(false);
+                return TypedResults.Ok(response);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex,
+                    "Code-based narrator failed for /narrate (spike). Falling through to playbook-engine path.");
+                // Fall through to the playbook path below for resilience during the spike.
+            }
+        }
+
         logger.LogInformation(
-            "Dispatching daily briefing narration: Categories={CategoryCount}, PriorityItems={PriorityCount}, Channels={ChannelCount}",
+            "Dispatching daily briefing narration via PLAYBOOK ENGINE: Categories={CategoryCount}, PriorityItems={PriorityCount}, Channels={ChannelCount}",
             request.Categories.Length, request.PriorityItems.Length, request.Channels.Length);
 
         try
@@ -656,6 +689,32 @@ public record DailyBriefingNarrateResponse
     /// <summary>UTC timestamp when the narration was generated.</summary>
     [JsonPropertyName("generatedAtUtc")]
     public DateTimeOffset GeneratedAtUtc { get; init; }
+
+    /// <summary>
+    /// Optional sidecar with post-LLM entity-name validation metadata. Added by R7
+    /// Wave 11 narrator spike (2026-06-30) to mirror the original playbook design's
+    /// <c>_validationMetadata</c> responseBinding. Null when no scrubbing occurred
+    /// (i.e., the LLM emitted no hallucinated entity names — the common happy path).
+    /// Widget treats this as optional observability metadata, not user-visible content.
+    /// </summary>
+    [JsonPropertyName("_validationMetadata")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ValidationMetadataDto? ValidationMetadata { get; init; }
+}
+
+/// <summary>
+/// Post-LLM entity-name validation outcome sidecar. Emitted on the narrate response only
+/// when the scrubber removed one or more proper-noun spans not present in the allow-list.
+/// </summary>
+public record ValidationMetadataDto
+{
+    /// <summary>Post-scrub text (sentence-aggregate after hallucinated proper-noun sentences removed).</summary>
+    [JsonPropertyName("scrubbedText")]
+    public string ScrubbedText { get; init; } = string.Empty;
+
+    /// <summary>Proper-noun spans that were not in the allow-list and were stripped.</summary>
+    [JsonPropertyName("removedTerms")]
+    public string[] RemovedTerms { get; init; } = [];
 }
 
 /// <summary>

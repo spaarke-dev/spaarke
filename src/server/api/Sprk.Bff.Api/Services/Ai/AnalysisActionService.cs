@@ -89,6 +89,66 @@ public class AnalysisActionService : DataverseHttpServiceBase
     }
 
     /// <summary>
+    /// Get action definition by its <c>sprk_actioncode</c> alternate key. Added by the
+    /// R7 Wave 11 T116 narrator spike so code-based narrators can resolve Actions by
+    /// stable string code (e.g., "BRIEF-NARRATE-TLDR") instead of by GUID.
+    /// </summary>
+    /// <remarks>
+    /// Mirrors the column set of <see cref="GetActionAsync(Guid, CancellationToken)"/>
+    /// exactly — returns the same shape with the same field semantics. Uses an OData
+    /// filter on sprk_actioncode (not the alternate-key URL form) so the call works
+    /// uniformly whether or not the alternate key is enabled at the Dataverse level.
+    /// </remarks>
+    public async Task<AnalysisAction?> GetActionByCodeAsync(
+        string actionCode,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrWhiteSpace(actionCode))
+        {
+            throw new ArgumentException("actionCode is required", nameof(actionCode));
+        }
+
+        Logger.LogDebug("Loading action by code {ActionCode} from Dataverse", actionCode);
+
+        await EnsureAuthenticatedAsync(cancellationToken);
+
+        // OData filter (URL-encoded single quotes around the literal). Top=1 because
+        // sprk_actioncode is unique by design even when not enforced as an alternate key.
+        var encoded = Uri.EscapeDataString(actionCode);
+        var url = $"sprk_analysisactions?$select=sprk_analysisactionid,sprk_name,sprk_description,sprk_systemprompt,sprk_temperature,sprk_outputschemajson&$filter=sprk_actioncode eq '{encoded}'&$top=1";
+        var response = await Http.GetAsync(url, cancellationToken);
+
+        await EnsureSuccessWithDiagnosticsAsync(response, $"GetActionByCodeAsync({actionCode})", cancellationToken);
+
+        var result = await response.Content.ReadFromJsonAsync<ODataCollectionResponse<ActionEntity>>(cancellationToken);
+        if (result?.Value is null || result.Value.Count == 0)
+        {
+            Logger.LogWarning("Action with code {ActionCode} not found in Dataverse", actionCode);
+            return null;
+        }
+
+        var entity = result.Value[0];
+        var action = new AnalysisAction
+        {
+            Id = entity.Id,
+            Name = entity.Name ?? "Unnamed Action",
+            Description = entity.Description,
+            SystemPrompt = entity.SystemPrompt ?? "You are an AI assistant that analyzes documents.",
+            SortOrder = 0,
+            ExecutorType = Nodes.ExecutorType.AiAnalysis,
+            OwnerType = ScopeOwnerType.System,
+            IsImmutable = false,
+            Temperature = entity.Temperature,
+            OutputSchemaJson = entity.OutputSchemaJson
+        };
+
+        Logger.LogInformation("Loaded action by code from Dataverse: {ActionCode} -> {ActionName} ({ActionId})",
+            actionCode, action.Name, action.Id);
+
+        return action;
+    }
+
+    /// <summary>
     /// List all available actions with pagination.
     /// </summary>
     public async Task<ScopeListResult<AnalysisAction>> ListActionsAsync(

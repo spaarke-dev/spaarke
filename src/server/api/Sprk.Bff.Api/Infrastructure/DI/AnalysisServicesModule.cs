@@ -501,6 +501,22 @@ public static class AnalysisServicesModule
         services.AddScoped<IAnalysisOrchestrationService, AnalysisOrchestrationService>();
         services.AddScoped<IAppOnlyAnalysisService, AppOnlyAnalysisService>();
 
+        // R7 Wave 11 T116 narrator spike (2026-06-30): code-defined narrator for /narrate.
+        // Gated at request-time by Features:NarrateUseCodeBasedNarrator (default false) in
+        // DailyBriefingEndpoints.HandleNarrate — DI registration is unconditional so the
+        // service is always resolvable; the endpoint chooses which path runs.
+        //
+        // Lifetime: Transient — depends on AnalysisActionService (typed HttpClient = Transient)
+        // and IOpenAiClient (Singleton) and IEntityNameScrubber (Singleton). Transient is the
+        // safe choice given the HttpClient dependency.
+        //
+        // Scrubber: Singleton — pure algorithm, no state, no per-request data.
+        //
+        // Spike plan: projects/spaarke-ai-platform-unification-r7/notes/spikes/narrator-spike-plan.md
+        services.AddSingleton<Sprk.Bff.Api.Services.Ai.Narrators.IEntityNameScrubber,
+                              Sprk.Bff.Api.Services.Ai.Narrators.EntityNameScrubber>();
+        services.AddTransient<Sprk.Bff.Api.Services.Ai.Narrators.DailyBriefingNarrator>();
+
         // R5 task 012 (D2-03) — SessionSummarizeOrchestrator. Concrete sealed class (no
         // interface per ADR-010); registered Scoped to match the lifetime of its dependencies
         // (ChatSessionManager + IGenericEntityService are both Scoped; IRagService + IOpenAiClient
