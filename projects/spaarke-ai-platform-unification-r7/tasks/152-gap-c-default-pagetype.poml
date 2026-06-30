@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="152" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Gap C — Default PageType in PlaybookChatContextProvider per audit 120</title>
+    <phase>Wave 12 — MVP Completion</phase>
+    <wave>12</wave>
+    <sub-wave>12.4</sub-wave>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>bff-api + code-impl; affects second guard rail</rigor-reason>
+    <parallel-group>W12-4</parallel-place>
+    <parallel-safe>true</parallel-safe>
+    <tags>bff-api, code-impl, assistant, wave12</tags>
+    <estimated-effort>0.5 day</estimated-effort>
+  </metadata>
+
+  <prompt>
+Audit 120 Gap C: `PageType` is never populated → second guard rail at `PlaybookChatContextProvider.cs:554` fails. Fix: add a default PageType value (likely `"entityrecord"` or similar Dynamics page-type convention) when client doesn't send one. Smallest possible fix.
+  </prompt>
+
+  <role>
+You are a BFF developer applying a one-line default-value fix.
+  </role>
+
+  <goal>
+PageType has a sensible default when client doesn't send one; second guard rail no longer unconditionally trips. Combined with T150 + T151, audit Scenarios A + B + D pass.
+  </goal>
+
+  <inputs>
+    - Audit notes: projects/spaarke-ai-platform-unification-r7/notes/audits/wave12-120-assistant-workspace.md (Gap C at PlaybookChatContextProvider.cs:554)
+    - Dynamics page-type conventions (likely "entityrecord" for entity-form pages; may be others — read the guard to understand allowed values)
+  </inputs>
+
+  <constraints>
+    - Per CLAUDE.md §11: tiny modification; no new abstractions
+    - Default value MUST be the most-common case (entityrecord = matter detail pages); document the choice
+    - Client-side code unchanged (this fixes the server-side default; client may still populate explicitly when known)
+  </constraints>
+
+  <knowledge>
+    <files>
+      - projects/spaarke-ai-platform-unification-r7/notes/audits/wave12-120-assistant-workspace.md (Gap C section)
+      - projects/spaarke-ai-platform-unification-r7/notes/wave12-mvp-completion-plan.md (§2.3)
+      - projects/spaarke-ai-platform-unification-r7/CLAUDE.md
+    </files>
+  </knowledge>
+
+  <context>
+    <relevant-files>
+      - src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookChatContextProvider.cs (Gap C at line 554)
+    </relevant-files>
+  </context>
+
+  <steps>
+1. **Read PlaybookChatContextProvider.cs:540-570 + identify the guard** (15 min)
+2. **Determine appropriate default** (15 min):
+   - Read guard logic; identify expected values
+   - Choose most-common case (likely "entityrecord")
+   - Document choice in code comment + audit notes
+3. **Apply default** (5 min): single-line null-coalesce or default-initializer
+4. **Add unit test** (20 min) — test: missing PageType → default applied; guard passes
+5. **Build + test verification** (15 min)
+
+  </steps>
+
+  <tools>
+    - Read / Grep
+    - Edit
+    - Bash (dotnet test, dotnet build)
+    - TodoWrite
+  </tools>
+
+  <outputs>
+    - PlaybookChatContextProvider.cs (M) — default PageType
+    - Unit test addition
+  </outputs>
+
+  <acceptance-criteria>
+    - [ ] Default PageType applied at guard
+    - [ ] Default value documented (most-common case)
+    - [ ] Unit test covers missing-PageType case
+    - [ ] `dotnet test` 0 new failures
+    - [ ] `dotnet build` 0 errors
+  </acceptance-criteria>
+</task>

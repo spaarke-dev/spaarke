@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="145" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>UAT — all 5 wizards end-to-end in spaarkedev1 (Wave 12.3 gate)</title>
+    <phase>Wave 12 — MVP Completion</phase>
+    <wave>12</wave>
+    <sub-wave>12.3</sub-wave>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>operator-driven UAT; document outcomes</rigor-reason>
+    <parallel-group>W12-Gate</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>gate task; depends on T140-T144 complete</parallel-reason>
+    <tags>wizard, uat, gate, wave12</tags>
+    <estimated-effort>0.5 day (mostly operator-time)</estimated-effort>
+  </metadata>
+
+  <prompt>
+After T140-T144 land their fixes, operator runs end-to-end UAT against spaarkedev1 for all 5 wizards: file summary, document create profile, Create Matter, Create Project, Create Work Assignment. Verifies wave12 plan ACs §3.2 (AC8-AC12).
+  </prompt>
+
+  <role>
+You facilitate operator UAT; document outcomes; capture defects as ISS-NNN if any surface.
+  </role>
+
+  <goal>
+All 5 wizards confirmed working end-to-end by operator. All AC8-AC12 (wave12 plan §3.2) signed off.
+  </goal>
+
+  <inputs>
+    - T140: wizard file summary fix applied
+    - T141: document create profile fix applied
+    - T142: Project wizard FK re-linked
+    - T143: Matter wizard verified
+    - T144: WA wizard verified
+  </inputs>
+
+  <constraints>
+    - Operator-driven; out-of-band activity
+    - Defects captured via /project-defer-issue-tracking → ISS-NNN
+    - Critical defects gate Wave 12.5 wrap-up
+  </constraints>
+
+  <knowledge>
+    <files>
+      - projects/spaarke-ai-platform-unification-r7/notes/wave12-mvp-completion-plan.md (§3.2 ACs)
+      - projects/spaarke-ai-platform-unification-r7/notes/audits/wave12-12{1,2,3}-*.md (audit resolutions)
+    </files>
+  </knowledge>
+
+  <context>
+    <relevant-files>
+      - All wizard UI components (5 wizards)
+      - All wizard BFF endpoints
+    </relevant-files>
+  </context>
+
+  <steps>
+1. **Request operator UAT** (operator-time):
+   - Provide checklist of 5 wizards × representative test scenario each
+   - Operator runs each in browser against spaarkedev1
+2. **Capture outcomes** per wizard (15 min each):
+   - ✅ Pass (signoff)
+   - ⚠️ Minor issues (capture as ISS-NNN)
+   - ❌ Critical fail (escalate; do NOT proceed to Wave 12.5)
+3. **Update audit notes + wrap-up doc** (30 min):
+   - Notes/handoffs/wave12-3-uat-signoff.md with per-wizard outcomes
+   - Append final state to each audit's Resolution subsection
+
+  </steps>
+
+  <tools>
+    - Bash (operator scheduling; doc updates)
+    - mcp__claude_ai_Claude_Code_Remote__create_trigger (optional — schedule UAT reminder)
+    - TodoWrite
+  </tools>
+
+  <outputs>
+    - notes/handoffs/wave12-3-uat-signoff.md
+    - Updated audit notes with final state
+  </outputs>
+
+  <acceptance-criteria>
+    - [ ] AC8 (file summary): operator-verified
+    - [ ] AC9 (document create profile): operator-verified
+    - [ ] AC10 (3 Prefill wizards): operator-verified
+    - [ ] AC11 (Action output schema editing preserved): operator-confirmed
+    - [ ] AC12 (all 5 wizards): operator-verified
+    - [ ] Defects (if any) captured as ISS-NNN
+    - [ ] wave12-3-uat-signoff.md exists
+  </acceptance-criteria>
+</task>

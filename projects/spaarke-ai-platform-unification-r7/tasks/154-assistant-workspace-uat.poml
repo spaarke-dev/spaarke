@@ -1,0 +1,83 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="154" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>UAT — Assistant↔Workspace end-to-end (Wave 12.4 gate)</title>
+    <phase>Wave 12 — MVP Completion</phase>
+    <wave>12</wave>
+    <sub-wave>12.4</sub-wave>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>operator-driven UAT; document outcomes</rigor-reason>
+    <parallel-group>W12-Gate</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>gate task; depends on T150-T153 complete + Wave 12.4 BFF deploy (can combine with T136 deploy event)</parallel-reason>
+    <tags>uat, gate, assistant, wave12</tags>
+    <estimated-effort>0.5 day (mostly operator-time)</estimated-effort>
+  </metadata>
+
+  <prompt>
+After T150-T153 land their fixes (+ deploy via combined Wave 12.2/12.4 event), operator runs Assistant↔Workspace UAT scenarios from audit 120 §4 against spaarkedev1. Verifies wave12 plan ACs §3.3 (AC13-AC15).
+  </prompt>
+
+  <role>
+You facilitate operator UAT; document outcomes; capture defects as ISS-NNN.
+  </role>
+
+  <goal>
+Assistant chat in workspace context renders matter-aware responses. AC13 + AC14 + AC15 (wave12 plan §3.3) operator-signed-off.
+  </goal>
+
+  <inputs>
+    - T150-T153 fixes deployed (via T136 combined deploy or separate)
+    - Audit 120 §4 UAT scenarios A-E
+    - Wave12 plan §3.3 ACs (AC13-AC15)
+  </inputs>
+
+  <constraints>
+    - Out-of-band operator-driven
+    - Defects via /project-defer-issue-tracking → ISS-NNN
+    - Critical defects gate Wave 12.5 wrap-up
+  </constraints>
+
+  <knowledge>
+    <files>
+      - projects/spaarke-ai-platform-unification-r7/notes/audits/wave12-120-assistant-workspace.md (§4 UAT scenarios)
+      - projects/spaarke-ai-platform-unification-r7/notes/wave12-mvp-completion-plan.md (§3.3 ACs)
+    </files>
+  </knowledge>
+
+  <context>
+    <relevant-files>
+      - src/solutions/SpaarkeAi/src/** (assistant chat surface)
+    </relevant-files>
+  </context>
+
+  <steps>
+1. **Request operator UAT** (operator-time):
+   - Provide checklist: audit 120 Scenarios A, B, D + AC13-AC15 from wave12 plan
+   - Operator runs in browser against spaarkedev1
+2. **Capture outcomes** per scenario (15 min each):
+   - ✅ Pass / ⚠️ Minor issues / ❌ Critical fail
+3. **Update audit + wrap-up doc** (30 min):
+   - notes/handoffs/wave12-4-uat-signoff.md per-scenario outcomes
+   - Append final state to audit 120 Resolution subsection
+
+  </steps>
+
+  <tools>
+    - Bash (operator scheduling; doc updates)
+    - TodoWrite
+  </tools>
+
+  <outputs>
+    - notes/handoffs/wave12-4-uat-signoff.md
+    - Updated audit 120 with final state
+  </outputs>
+
+  <acceptance-criteria>
+    - [ ] AC13 (assistant knows current matter ID): operator-verified
+    - [ ] AC14 (assistant responses reference matter-specific data): operator-verified
+    - [ ] AC15 (operator end-to-end UAT): signed off
+    - [ ] Defects (if any) captured as ISS-NNN
+    - [ ] wave12-4-uat-signoff.md exists
+  </acceptance-criteria>
+</task>

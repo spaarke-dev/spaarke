@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="130" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Diagnose + fix IMembershipResolverService — root cause of 0-results-for-all-users in spaarkedev1</title>
+    <phase>Wave 12 — MVP Completion</phase>
+    <wave>12</wave>
+    <sub-wave>12.2</sub-wave>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>bff-api + code-impl modifying .cs files; 6+ steps; affects critical path for Daily Briefing membership filtering</rigor-reason>
+    <parallel-group>W12-2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <tags>bff-api, code-impl, dataverse, membership, investigation, wave12</tags>
+    <estimated-effort>1-3 days (depends on root cause)</estimated-effort>
+  </metadata>
+
+  <prompt>
+The `IMembershipResolverService` returns 0 memberships for all users in spaarkedev1 today. This forced R7's W11 POC to use inline FetchXml `eq-userid` in DailyBriefingCollector as a bypass. Operator preference is the durable fix (root-cause the resolver) rather than carrying the FetchXml bypass forward. Diagnose the root cause + implement fix + verify in spaarkedev1.
+  </prompt>
+
+  <role>
+You are a BFF service developer doing diagnostic-then-fix work on a shared infrastructure service. Investigate empirically (read code + reproduce + query Dataverse via MCP), identify the precise root cause, then implement the smallest fix that addresses it. Do NOT introduce new abstractions; modify the existing service.
+  </role>
+
+  <goal>
+`IMembershipResolverService.ResolveMembershipsAsync(userId, ct)` returns correct memberships for spaarkedev1 users (verified for at least 3 test users including the operator), with unit tests covering the previously-broken path. Daily Briefing Collector (T131) can then refactor to use the resolver instead of inline `eq-userid`.
+  </goal>
+
+  <inputs>
+    - `IMembershipResolverService` interface + implementation (existing in BFF)
+    - `IMembershipFieldDiscoveryService` (referenced by resolver per descriptor pattern)
+    - Identity normalization (the resolver may use systemuserid OR azureactivedirectoryobjectid)
+    - spaarkedev1 has real users with real memberships — actual data exists
+    - Operator-pre-approved fallback fields (use as oracle for what "correct" membership means): owner, sprk_assignedto, sprk_assignedattorney, sprk_assignedparalegal (general/tasks); sprk_assignedattorney1/2 + sprk_assignedparalegal1/2 (matters/projects)
+  </inputs>
+
+  <constraints>
+    - **Modification only** — do NOT introduce new resolver implementations OR new shared services. Fix the existing one.
+    - Per CLAUDE.md §11: this is modification of existing component; no `<justification>` required
+    - Per CLAUDE.md §10: BFF-touching task; run `.claude/constraints/bff-extensions.md` checklist + verify publish-size impact (current baseline ~47 MB; expect no material change)
+    - Per ADR-038: integration-heavy test pyramid; ban Mock&lt;HttpMessageHandler&gt; + DI-registration tests + ctor null-check tests
+    - MUST NOT change `IMembershipResolverService` interface signature (downstream consumers exist; binding contract)
+    - MUST preserve identity-normalization semantics (caller passes systemuserid OR OBO oid claim)
+    - If root cause is in `IMembershipFieldDiscoveryService` or upstream — fix at root, don't band-aid in resolver
+  </constraints>
+
+  <knowledge>
+    <files>
+      - projects/spaarke-ai-platform-unification-r7/notes/wave12-mvp-completion-plan.md (§2.1 membership filter requirements)
+      - projects/spaarke-ai-platform-unification-r7/notes/audits/wave12-120-assistant-workspace.md (audit-120 noted resolver as broken context)
+      - projects/spaarke-ai-platform-unification-r7/CLAUDE.md
+      - .claude/constraints/bff-extensions.md
+      - .claude/adr/ADR-038-testing-strategy.md
+    </files>
+  </knowledge>
+
+  <context>
+    <relevant-files>
+      - src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipResolverService.cs
+      - src/server/api/Sprk.Bff.Api/Services/Ai/Membership/IMembershipResolverService.cs
+      - src/server/api/Sprk.Bff.Api/Services/Ai/Membership/MembershipFieldDiscoveryService.cs (if exists)
+      - src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingCollector.cs (current FetchXml bypass — refactor target for T131)
+      - tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Membership/** (existing tests if any)
+    </relevant-files>
+  </context>
+
+  <steps>
+1. **Reproduce the 0-result behavior empirically** (45-60 min)
+   - Locate `IMembershipResolverService` impl + trace `ResolveMembershipsAsync` code path
+   - Identify what FetchXml / OData / endpoint it calls
+   - Use mcp__dataverse__read_query to run the EXACT query the resolver runs, with a real spaarkedev1 systemuserid
+   - Verify: does the query return 0 rows in spaarkedev1?
+   - If 0 rows: that's the symptom. If non-0: the bug is in result-projection or downstream — keep investigating.
+
+2. **Identify root cause** (30-90 min)
+   - Possible causes (test each):
+     - (a) Field discovery wrong (membership entity / fields enumerated incorrectly)
+     - (b) Identity normalization wrong (passing oid claim where systemuserid expected, or vice versa)
+     - (c) FetchXml malformed (wrong operator, wrong field name, missing link-entity)
+     - (d) Permission issue (resolver called with wrong identity context)
+     - (e) Empty data (no memberships exist for tested users — but operator says they do; use sprk_assignedattorney etc. as oracle)
+     - (f) Caching wrong (stale cache returning 0)
+   - Document precisely which (a-f) is the cause with evidence (file:line + repro)
+
+3. **Implement fix targeting the root cause** (30 min - 1 day depending on (a-f))
+   - Smallest possible change that addresses the root cause
+   - Do NOT refactor surrounding code unless necessary for the fix
+   - Preserve `IMembershipResolverService` interface (binding contract)
+
+4. **Add/update unit tests** (60-90 min, per ADR-038)
+   - Add test that covers the previously-broken path (would have caught the bug)
+   - Mock at boundaries only (IGenericEntityService, not the resolver itself)
+   - Do NOT add ctor null-check tests, DI-registration tests, or Mock&lt;HttpMessageHandler&gt; tests
+
+5. **BFF unit tests + build verification** (15 min)
+   - `dotnet test tests/unit/Sprk.Bff.Api.Tests/` — confirm green
+   - `dotnet build src/server/api/Sprk.Bff.Api/` — confirm 0 errors
+
+6. **Verify in spaarkedev1 (post-deploy validation reserved for T136 wave-end gate)** (15 min)
+   - Document the verification approach for T136 to execute
+   - Suggested smoke: 3 test users (operator + 2 known) → expect non-zero membership lists matching their actual matter/project assignments
+
+7. **Update audit notes** (15 min)
+   - Append a "Resolution" subsection to `notes/audits/wave12-120-assistant-workspace.md` documenting what was wrong + what was fixed (since audit 120 noted the resolver broken state)
+
+  </steps>
+
+  <tools>
+    - Read / Grep / Glob (code inspection)
+    - Bash (`dotnet test`, `dotnet build`)
+    - Edit / Write (resolver code changes; test additions)
+    - mcp__dataverse__describe / mcp__dataverse__read_query (FetchXml repro)
+    - TodoWrite
+  </tools>
+
+  <outputs>
+    - MembershipResolverService.cs (M) — root-cause fix applied
+    - Unit test additions
+    - Append to notes/audits/wave12-120-assistant-workspace.md (Resolution subsection)
+    - current-task.md updated
+  </outputs>
+
+  <acceptance-criteria>
+    - [ ] Root cause identified with file:line evidence + repro steps
+    - [ ] Fix applied (smallest change targeting root cause)
+    - [ ] Unit test added that would have caught the bug (per ADR-038)
+    - [ ] `dotnet test` 0 new failures (baseline preserved)
+    - [ ] `dotnet build` 0 errors
+    - [ ] Verification approach documented for T136 wave-end gate
+    - [ ] `IMembershipResolverService` interface signature unchanged
+    - [ ] No new DI registrations / packages / Dataverse columns introduced
+    - [ ] Publish-size impact reported (expect no material change)
+  </acceptance-criteria>
+</task>

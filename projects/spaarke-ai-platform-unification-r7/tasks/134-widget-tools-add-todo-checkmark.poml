@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="134" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Widget tools — 'Add To Do' checkmark icon only for MVP; preserve three-dot overflow menu</title>
+    <phase>Wave 12 — MVP Completion</phase>
+    <wave>12</wave>
+    <sub-wave>12.2</sub-wave>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>pcf code-impl modifying .tsx files; UI surface change</rigor-reason>
+    <parallel-group>W12-2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <tags>pcf, react, fluent-ui, daily-briefing, widget, wave12</tags>
+    <estimated-effort>~0.5 day</estimated-effort>
+  </metadata>
+
+  <prompt>
+Operator requirement (wave12 plan §2.1): "for the tools only need the 'Add To Do' (so just the checkmark — but in future we will add other tools so don't remove the three dot tool menu)". Update widget per-bullet tools: visible primary action = 'Add To Do' checkmark icon; secondary actions live behind the existing three-dot overflow menu. Preserve the three-dot menu component for future tool additions.
+  </prompt>
+
+  <role>
+You are a PCF/React widget developer making a targeted UX change. Use Fluent UI v9 components (per ADR-006). Honor ADR-021 dark mode semantic tokens (no hardcoded colors).
+  </role>
+
+  <goal>
+Each bullet in DailyBriefing widget displays an 'Add To Do' checkmark icon as primary visible tool; the three-dot overflow menu component is retained (for future tools) but contains only the existing actions today. UAT-verifiable: operator clicks checkmark → To Do creation flow invoked; clicks three dots → overflow menu opens.
+  </goal>
+
+  <inputs>
+    - Current DailyBriefing widget per-bullet rendering (R7 W11 deploy state)
+    - 'Add To Do' tool wiring may or may not exist — verify; if missing, this task scopes the wire-up too
+    - Three-dot overflow menu component must remain in component tree (operator emphasis on future extensibility)
+  </inputs>
+
+  <constraints>
+    - Per ADR-006: Fluent UI v9 only (no v8)
+    - Per ADR-021: dark mode — use semantic tokens (`tokens.colorBrandForeground1`, etc.); NO hardcoded colors
+    - Per CLAUDE.md §10 + §11: modification only; no new abstractions
+    - MUST preserve three-dot overflow menu component (operator explicit)
+    - MUST use Fluent UI v9 Checkmark icon (`@fluentui/react-icons` Checkmark24Regular or similar)
+    - 'Add To Do' tool implementation may delegate to existing useDocumentActions hook OR similar pattern — investigate before building
+  </constraints>
+
+  <knowledge>
+    <files>
+      - projects/spaarke-ai-platform-unification-r7/notes/wave12-mvp-completion-plan.md (§2.1 tools requirement)
+      - projects/spaarke-ai-platform-unification-r7/CLAUDE.md
+      - src/client/shared/CLAUDE.md (Fluent UI v9 shared library)
+      - .claude/adr/ADR-006-pcf-fluent-ui-v9.md
+      - .claude/adr/ADR-021-dark-mode-fluent-ui-v9.md
+      - docs/guides/PCF-DEPLOYMENT-GUIDE.md (mandatory version bumping)
+    </files>
+  </knowledge>
+
+  <context>
+    <relevant-files>
+      - src/client/shared/Spaarke.DailyBriefing.Components/src/components/** (per-bullet rendering components — locate)
+      - src/client/shared/Spaarke.DailyBriefing.Components/src/services/briefingService.ts (response shape)
+      - Existing 'Add To Do' integration if shipped elsewhere (search codebase)
+    </relevant-files>
+  </context>
+
+  <steps>
+1. **Locate per-bullet rendering component + current tool layout** (15 min)
+2. **Inspect existing three-dot overflow menu component** (10 min) — confirm structure
+3. **Investigate 'Add To Do' tool wiring** (15-30 min):
+   - Does a checkmark-click handler exist? If yes, lift to primary visible tool.
+   - If no, identify the API + entity shape needed to create a sprk_todo from a bullet's context
+4. **Update per-bullet UI** (30-60 min):
+   - Primary visible: Fluent UI v9 Checkmark icon button (with aria-label "Add To Do")
+   - Secondary: existing three-dot overflow menu (unchanged structurally)
+   - Wire checkmark click to 'Add To Do' handler
+5. **ADR-021 dark mode check** (15 min): use Fluent UI v9 semantic tokens; verify Light + Dark renders correctly
+6. **Run widget unit tests** (10 min)
+7. **Build widget** (5 min): `npm run build:prod`
+8. **PCF deployment guide check** (10 min): bump version numbers in the 4 mandatory locations per docs/guides/PCF-DEPLOYMENT-GUIDE.md if widget version is affected
+
+  </steps>
+
+  <tools>
+    - Read / Grep / Glob
+    - Edit (component update)
+    - Bash (npm test, npm run build:prod)
+    - TodoWrite
+  </tools>
+
+  <outputs>
+    - Per-bullet component (M) — primary checkmark + preserved overflow
+    - Version bump in 4 locations if applicable (per PCF-DEPLOYMENT-GUIDE.md)
+  </outputs>
+
+  <acceptance-criteria>
+    - [ ] 'Add To Do' checkmark icon visible as primary tool on each bullet
+    - [ ] Three-dot overflow menu component preserved in component tree (for future tools)
+    - [ ] Fluent UI v9 components used (Checkmark icon, IconButton)
+    - [ ] ADR-021 dark mode: semantic tokens used; no hardcoded colors
+    - [ ] Widget unit tests 0 new failures
+    - [ ] `npm run build:prod` succeeds
+    - [ ] Version bumped in 4 mandatory locations if widget version affected
+  </acceptance-criteria>
+</task>

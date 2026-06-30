@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="133" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Expand channel registry to 6 entries + verify response-shape labels match widget CHANNEL_REGISTRY</title>
+    <phase>Wave 12 — MVP Completion</phase>
+    <wave>12</wave>
+    <sub-wave>12.2</sub-wave>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>bff-api + pcf modifying .cs + .ts files</rigor-reason>
+    <parallel-group>W12-2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <tags>bff-api, pcf, daily-briefing, widget, wave12</tags>
+    <estimated-effort>0.5 day</estimated-effort>
+  </metadata>
+
+  <prompt>
+Widget `CHANNEL_REGISTRY` today has 4 entries matching the 4 sprk_event channels. With T131's 6-channel expansion, the widget needs 6 entries with proper human-readable labels (operator noted "my-updates" raw slug as an example of missing registry entry — cosmetic but visible). Update widget CHANNEL_REGISTRY + verify the response-shape channel codes match between BFF (T131) and widget so the widget renders all 6 channels with correct labels.
+  </prompt>
+
+  <role>
+You are a widget developer making a small registry update to keep widget labels in sync with the BFF's 6-channel response shape. Cross-team contract maintenance.
+  </role>
+
+  <goal>
+Widget renders 6 channels with human-readable labels matching operator expectation. No raw slugs visible. Each channel code emitted by T131's collector has a corresponding registry entry in the widget.
+  </goal>
+
+  <inputs>
+    - Current widget `CHANNEL_REGISTRY` in DailyBriefing widget code (R7 W11 deploy state)
+    - T131's 6-channel output (channel codes TBD by T131 — coordinate via channel-code naming convention)
+    - Operator-stated label examples:
+      - "Upcoming Tasks" (sprk_event Task next 5 days)
+      - "Overdue Tasks" (sprk_event Task > 5 days past)
+      - "Documents" (sprk_document)
+      - "Matters" (sprk_matter)
+      - "Projects" (sprk_project)
+      - "To Dos" (sprk_todo)
+  </inputs>
+
+  <constraints>
+    - Per CLAUDE.md §10 + §11: modification only; no new abstractions
+    - Per ADR-006 / ADR-021: PCF widget uses Fluent UI v9 + ADR-021 dark mode semantic tokens
+    - MUST coordinate channel-code naming with T131 (suggest: kebab-case slugs: `upcoming-tasks`, `overdue-tasks`, `documents`, `matters`, `projects`, `to-dos`)
+    - MUST preserve unknown-channel fallback in widget (if BFF emits an unknown code, widget renders with raw code rather than crashing)
+  </constraints>
+
+  <knowledge>
+    <files>
+      - projects/spaarke-ai-platform-unification-r7/notes/wave12-mvp-completion-plan.md (§2.1 UI requirements)
+      - projects/spaarke-ai-platform-unification-r7/CLAUDE.md
+      - src/client/shared/CLAUDE.md (Fluent UI v9 shared library)
+      - .claude/adr/ADR-021-dark-mode-fluent-ui-v9.md
+    </files>
+  </knowledge>
+
+  <context>
+    <relevant-files>
+      - src/client/shared/Spaarke.DailyBriefing.Components/src/services/briefingService.ts (channel response shape)
+      - src/client/shared/Spaarke.DailyBriefing.Components/src/CHANNEL_REGISTRY.* (or wherever the registry lives — locate)
+      - src/client/shared/Spaarke.DailyBriefing.Components/src/components/** (channel rendering components)
+      - src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingCollector.cs (BFF side — channel-code source)
+    </relevant-files>
+  </context>
+
+  <steps>
+1. **Locate widget CHANNEL_REGISTRY** (15 min)
+2. **Confirm channel-code naming with T131 collector** (10 min):
+   - Read T131's collector implementation
+   - Channel codes emitted by collector MUST match registry entries 1:1
+3. **Add/update 6 entries in CHANNEL_REGISTRY** (15-30 min):
+   - Add new entries: `upcoming-tasks`, `overdue-tasks`, `documents`, `matters`, `projects`, `to-dos` (or whatever T131 emits)
+   - Remove obsolete 4-channel entries if codes changed
+   - Each entry: { code, label, icon (Fluent UI v9), color (semantic token) }
+4. **Verify unknown-channel fallback** still works (no regression) (10 min)
+5. **Run widget unit tests** (`npm test` in `src/client/shared/Spaarke.DailyBriefing.Components/`) (10 min)
+6. **Build widget package** (5 min): `npm run build:prod` (NOT `npm run build` per FAILURE-MODES AP-1)
+
+  </steps>
+
+  <tools>
+    - Read / Grep / Glob
+    - Edit (CHANNEL_REGISTRY update)
+    - Bash (npm test, npm run build:prod)
+    - TodoWrite
+  </tools>
+
+  <outputs>
+    - CHANNEL_REGISTRY.* (M)
+    - Widget package rebuild verification
+  </outputs>
+
+  <acceptance-criteria>
+    - [ ] 6 channel entries in CHANNEL_REGISTRY matching T131's emitted codes 1:1
+    - [ ] Each entry has human-readable label per operator spec
+    - [ ] Unknown-channel fallback preserved
+    - [ ] Widget unit tests 0 new failures
+    - [ ] `npm run build:prod` succeeds
+    - [ ] No new dependencies / abstractions introduced
+  </acceptance-criteria>
+</task>

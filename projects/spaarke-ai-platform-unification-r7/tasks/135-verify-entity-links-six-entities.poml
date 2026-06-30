@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="135" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Verify per-bullet entity links (EnrichBulletWithEntityRefs) work for all 6 entity types</title>
+    <phase>Wave 12 — MVP Completion</phase>
+    <wave>12</wave>
+    <sub-wave>12.2</sub-wave>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>verification + selective code adjustment if gaps found</rigor-reason>
+    <parallel-group>W12-2</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>depends on T131 (6-entity collector) being complete</parallel-reason>
+    <tags>bff-api, daily-briefing, narrator, testing, wave12</tags>
+    <estimated-effort>0.5 day</estimated-effort>
+  </metadata>
+
+  <prompt>
+The R7 W11 POC implemented `EnrichBulletWithEntityRefs` to populate per-bullet `primaryEntityType`/`primaryEntityId`/`primaryEntityName` for click-through. With T131 expanding to 6 entity types (events / documents / matters / projects / todos), verify the enrichment logic correctly resolves entity refs for ALL 6 types — not just events. Fix any gaps.
+  </prompt>
+
+  <role>
+You are a BFF service developer verifying cross-cutting projection logic across new entity types. Targeted code modification if gaps found; investigation otherwise.
+  </role>
+
+  <goal>
+Every bullet rendered in Daily Briefing widget has a working entity link (primaryEntityType / primaryEntityId / primaryEntityName populated) regardless of which of the 6 channels it came from. UAT-verifiable: operator clicks ANY bullet → navigates to correct entity record.
+  </goal>
+
+  <inputs>
+    - Current `EnrichBulletWithEntityRefs` implementation in `DailyBriefingNarrator` (R7 W11)
+    - Entity types to verify: sprk_event (existing), sprk_document, sprk_matter, sprk_project, sprk_todo (new from T131)
+    - BriefingItem projection contains entity metadata per T131
+  </inputs>
+
+  <constraints>
+    - Per CLAUDE.md §10 + §11: modification only if gaps; no new abstractions
+    - Per ADR-038: integration-heavy test pyramid for any new test additions
+    - Each entity type must have a matching enrichment branch (or a generic dispatcher that handles all 5)
+  </constraints>
+
+  <knowledge>
+    <files>
+      - projects/spaarke-ai-platform-unification-r7/notes/wave12-mvp-completion-plan.md (§2.1)
+      - projects/spaarke-ai-platform-unification-r7/CLAUDE.md
+    </files>
+  </knowledge>
+
+  <context>
+    <relevant-files>
+      - src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingNarrator.cs (EnrichBulletWithEntityRefs)
+      - src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingCollector.cs (BriefingItem source)
+      - tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Narrators/DailyBriefingNarratorTests.cs
+    </relevant-files>
+  </context>
+
+  <steps>
+1. **Read current EnrichBulletWithEntityRefs** (15 min)
+2. **Identify how it matches narrative text to input items** (15-30 min):
+   - Today: matches by RegardingName or Title (per session prior context)
+   - Verify this works for sprk_document.name, sprk_matter.sprk_matternumber/name, sprk_project.name, sprk_todo.subject
+3. **Identify gaps per entity type** (30 min):
+   - Per entity type: what's the human-readable name field? What's the navigation URL pattern?
+   - Document each gap or confirm coverage
+4. **Implement fixes for gaps** (0-2 hours depending on gap count):
+   - Smallest-change additions to enrichment dispatch
+5. **Add unit tests covering each entity type's enrichment** (30-45 min):
+   - Mock narrative output containing entity name; verify enrichment resolves the right entity ref
+6. **Build + test verification** (15 min)
+
+  </steps>
+
+  <tools>
+    - Read / Grep / Glob
+    - Edit (selective)
+    - Bash (dotnet test, dotnet build)
+    - TodoWrite
+  </tools>
+
+  <outputs>
+    - EnrichBulletWithEntityRefs gap fixes (if any)
+    - Unit test additions
+    - Verification notes
+  </outputs>
+
+  <acceptance-criteria>
+    - [ ] Enrichment branches for all 6 entity types (sprk_event already; sprk_document / sprk_matter / sprk_project / sprk_todo new or verified)
+    - [ ] Unit tests cover entity-link resolution per entity type
+    - [ ] `dotnet test` 0 new failures
+    - [ ] `dotnet build` 0 errors
+    - [ ] No new abstractions / DI / packages
+  </acceptance-criteria>
+</task>
