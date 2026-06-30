@@ -215,7 +215,13 @@ All R1 Compose endpoints belong in `Sprk.Bff.Api`. No new microservice; no Datav
 
 *Anticipated conflicts between Compose's R1 design and existing ADR rules. Surfaced at design time so they can be resolved as Path A (project-scoped exception) / Path B (ADR amendment) / Path C (pivot to comply) rather than discovered as silent violations at code-review.*
 
-**Scan result**: **No ADR tensions surfaced at design time.**
+**Scan result at design time**: No ADR tensions surfaced.
+
+**Tensions surfaced during implementation** (post-design):
+
+| # | Rule challenged | Surfaced by | Conflict | Path | Rationale | Impact |
+|---|---|---|---|---|---|---|
+| T-1 | **design.md §14 row 4** (project decision row — "SPE-native check-out lock") | Spike #3 (2026-06-29; locked artifact: `notes/spikes/spike-3-spe-checkout-promotion.md`) | Spike found existing `DocumentCheckoutService` (~1170 LOC in production) already implements check-out / check-in / discard / cross-user 409 conflict / `sprk_fileversions` row creation / Office Online edit-URL exchange. SPE-native wrapper would duplicate ~85% of this for one capability gain (auto-lock-banner in Word for Web + Word Desktop). | **Path A — project-scoped exception** | Reuse existing service (CLAUDE.md §11 default-to-reuse). Add heartbeat field + sweeper + 2 net-new endpoints (~150 LOC) instead of building parallel SPE-native lock infrastructure (~600 LOC). Operator approved 2026-06-29 at post-Wave-0 review gate. | (1) design.md §14 row 4 amended to "Dataverse-side via existing `DocumentCheckoutService`". (2) Phase 5 task LOC estimate ~600 → ~150. (3) Phase 1 must add Dataverse field `sprk_documents.sprk_lastheartbeatutc` + verify Alternate Key on `sprk_graphitemid`. (4) **Known R1 cross-surface trade-off**: Dataverse-side lock NOT visible to Word for Web or Word Desktop — concurrent edits across surfaces resolve via **last-writer-wins**. Risk small (user must deliberately bypass Compose to open same doc in Word); R2+ escape hatch pre-documented in Spike #3 §3 (SPE Graph API surface). |
 
 All listed ADRs (above) apply to Compose without exception:
 - Compose follows ADR-001 (minimal API), ADR-008 (endpoint filters), ADR-019 (route conventions) for all new BFF endpoints
@@ -226,7 +232,7 @@ All listed ADRs (above) apply to Compose without exception:
 - Compose follows ADR-010 (org-owned default) for new Dataverse rows (`sprk_workspacelayout`, `sprk_playbookconsumer`)
 - Compose intentionally REUSES existing patterns (per CLAUDE.md §11 Component Justification) — no parallel sessions infrastructure, no parallel Word-handoff plumbing, no parallel consumer-routing facade
 
-**This section is required to be updated if tensions emerge during implementation.** Per CLAUDE.md §6.5, silent compliance with an ADR rule that produces a sub-optimal outcome is itself a failure mode. If an implementer encounters a legitimate need to deviate from any ADR rule above, they MUST surface the conflict via Path A/B (exception/amendment) rather than silently choosing a worse approach.
+**This section MUST be updated as further tensions emerge.** Per CLAUDE.md §6.5, silent compliance with an ADR rule that produces a sub-optimal outcome is itself a failure mode. If an implementer encounters a legitimate need to deviate from any ADR rule above, they MUST surface the conflict via Path A/B (exception/amendment) rather than silently choosing a worse approach.
 
 Foundational projects like R1 should typically have few or no tensions because they reuse existing patterns. Later releases (R2 AI actions, R3 Office add-in, R4 multi-artifact) are more likely to surface tensions as they introduce novel surface area — those releases will populate this section accordingly.
 

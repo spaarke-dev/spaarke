@@ -3,7 +3,8 @@
   <metadata>
     <title>Frontend — Register `compose-editor` section type in SECTION_REGISTRY</title>
     <phase>Phase 4: Frontend — SpaarkeAi Compose Surface</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed-date>2026-06-29</completed-date>
     <estimated-hours>4</estimated-hours>
     <tags>frontend, react, typescript, fluent-ui, widget</tags>
     <rigor-hint>FULL</rigor-hint>
@@ -103,4 +104,66 @@
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>
+
+  <notes completed="2026-06-29" author="spaarke-dev (Claude Opus 4.7 sub-agent, autonomous Wave 1b)">
+## Summary
+
+Registered the `compose-editor` section in the canonical SECTION_REGISTRY (LegalWorkspace's `sectionRegistry.ts` — the registry consumed by SpaarkeAi via `createLegalWorkspaceSectionRegistry`). The Compose workspace layout (system row `c09d26be-e173-f111-ab0e-7ced8ddc4a05`, task 010) now mounts a Fluent v9 Skeleton placeholder when selected. Task 042 will swap the placeholder for the real TipTap-backed `ComposeWorkspace`.
+
+## Files modified
+
+1. **`src/solutions/LegalWorkspace/src/sections/composeEditor.registration.ts`** — NEW. Thin Pattern D shim with inline `ComposeWorkspacePlaceholder` (uses `React.createElement` per existing `.ts` convention). Exports `composeEditorRegistration` + `ComposeWorkspacePlaceholder`.
+2. **`src/solutions/LegalWorkspace/src/sectionRegistry.ts`** — additive 5-line edit: import + array entry. The dev-mode drift guard automatically validates the new entry against the metadata catalog.
+3. **`src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/sectionMetadataCatalog.ts`** — added `compose-editor` metadata entry (label "Compose", category `productivity`, `EditRegular` icon, 720px height). Required to silence the dev-guard drift warning + makes Compose pickable in the wizard for power users building custom layouts.
+4. **`src/solutions/LegalWorkspace/src/sections/index.ts`** — barrel re-export for `composeEditorRegistration` + `ComposeWorkspacePlaceholder`.
+
+## Architectural decisions
+
+- **Pattern D thin shim (Calendar precedent)**: registration lives in LegalWorkspace; widget will live in a shared lib (task 042 — `@spaarke/compose-components` or similar per `plan.md` Phase 4). Inline placeholder is intentionally co-located to avoid a circular dependency for R1 (SpaarkeAi → LegalWorkspace).
+- **No JSX in `.ts` file**: matches all other registration files; uses `React.createElement` calls. Task 042's full widget will live in a `.tsx` file inside a shared lib.
+- **Fluent v9 semantic tokens only (ADR-021)**: `colorNeutralBackground1`, `colorNeutralForeground1`, `colorNeutralForeground2`, `colorNeutralStroke1` — no hard-coded hex. Dark mode auto-resolves.
+- **Both metadata + registration added** (resolves dev-guard drift): asymmetric "registry but no metadata" would log a `console.error` in dev. Adding both is the established convention.
+
+## Justification (CLAUDE.md §11)
+
+- **Existing**: no Compose section exists; grep `compose-editor` returned only the future references in spec/plan/POML + the task 010 Dataverse row.
+- **Extension**: no existing section can be extended to serve an editor surface; Calendar/Documents/etc. have different purposes.
+- **Cost-of-doing-nothing**: Phase 1 Dataverse `sprk_workspacelayout` Compose row (id `c09d26be-...`) references `section: 'compose-editor'`. Without this registration, the SpaarkeAi workspace picker exposes "Compose" but selecting it mounts NOTHING (silent factory-lookup failure). FR-02 fails; tasks 042 + 045 cannot ship. ✅
+
+## ADR Conflict Resolution Protocol (CLAUDE.md §6.5)
+
+None encountered. ADR-021 (Fluent v9 + dark mode) and ADR-028 (Spaarke Auth v2) both fully satisfied by the placeholder design.
+
+## Build verification
+
+- **`Spaarke.UI.Components` build**: ✅ green (with new `EditRegular` icon import + metadata entry).
+- **All 9 shared libraries build**: ✅ green (`Build-AllClientComponents.ps1 -Component SharedLibs`, 264.8s).
+- **`SpaarkeAi` build (the FR-02 consumer)**: ✅ green (`npm run build` in `src/solutions/SpaarkeAi`, 3576 modules transformed, gzip 1.09 MB). This is the path that matters for FR-02 acceptance.
+- **`LegalWorkspace` standalone build**: ❌ FAILS on a **pre-existing** import error (`@spaarke/daily-briefing-components/widgets` referenced by `dailyBriefing/dailyBriefing.registration.ts` — unrelated to this task). Verified by `git stash -u` test on a clean working tree: same error reproduces without any of my changes. Flagged for a separate fix; not blocking task 040.
+- **Type-check delta on `sectionRegistry.ts`**: my diff is purely additive (5 lines); no new TS errors introduced. The 2 pre-existing errors (`NarrateRequest` import, `process` global) are also unrelated to this task.
+
+## Hot-path coordination
+
+SECTION_REGISTRY is shared with 8 other active SpaarkeAi-touching projects (per `projects/INDEX.md` 2026-06-26 sweep). Flagged for reviewer to sequence against any concurrent SECTION_REGISTRY edits. The reviewer should also note the `SECTION_METADATA_CATALOG` touch — it's the single source of truth for wizard pickability.
+
+## Open items for downstream tasks
+
+| # | Item | Target task |
+|---|---|---|
+| OI-040-1 | Replace inline `ComposeWorkspacePlaceholder` with the real TipTap widget loaded from a shared lib | Task 042 |
+| OI-040-2 | If the shared lib for the widget is named differently from `@spaarke/compose-components` (referenced in `plan.md` Phase 4), update the registration import accordingly | Task 042 |
+| OI-040-3 | Wire `useEffect` cleanup + `SectionFactoryContext` consumption (e.g. `ctx.userId`, `ctx.bffBaseUrl`) once the real widget needs them | Task 042 / 045 |
+| OI-040-4 | (Pre-existing, not introduced by this task) Fix `@spaarke/daily-briefing-components/widgets` import in `dailyBriefing.registration.ts` so the standalone LegalWorkspace Vite bundle builds | Separate triage |
+
+## Acceptance criteria status
+
+| Criterion | Status |
+|---|---|
+| `SECTION_REGISTRY.get('compose-editor')` returns a non-null factory | ✅ (added to registry array) |
+| `npm run build` succeeds with no TS errors | ✅ for SpaarkeAi (FR-02 consumer); pre-existing LegalWorkspace standalone Vite failure documented + verified unrelated |
+| `Build-AllClientComponents.ps1` succeeds | ✅ for shared libs (9/9); blocked on pre-existing failure for solutions |
+| UI tests (browser-based) | ⏸ Deferred — sub-agent has no Chrome integration. Static contract verification done (Fluent v9 tokens, no hex). Operator can validate live via SpaarkeAi MDA load. |
+| Dark mode renders correctly using Fluent v9 semantic tokens | ✅ static verification — placeholder uses `tokens.colorNeutral*` only |
+| TASK-INDEX.md status for task 040 is ✅ | ✅ |
+  </notes>
 </task>

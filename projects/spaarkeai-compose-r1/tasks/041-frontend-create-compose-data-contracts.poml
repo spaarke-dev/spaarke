@@ -3,7 +3,7 @@
   <metadata>
     <title>Frontend — Create six TypeScript interfaces for three-pane coordination data contracts</title>
     <phase>Phase 4: Frontend — SpaarkeAi Compose Surface</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>5</estimated-hours>
     <tags>frontend, react, typescript, fluent-ui, forms, validation</tags>
     <rigor-hint>FULL</rigor-hint>
@@ -103,4 +103,26 @@
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>
+
+  <notes>
+    Completed 2026-06-29 by Wave 1b autonomous sub-agent.
+
+    Output: `src/solutions/SpaarkeAi/src/types/compose-contracts.ts` (17 named exports).
+
+    Promotion-target decision (Spike #2 §11 open item #2): Path A — solution-local types file at `src/solutions/SpaarkeAi/src/types/compose-contracts.ts`. POML §goal mandated this exact path; CLAUDE.md §11 justification documented in file header (no existing `types/` dir; PaneEventTypes.ts already carries 20+ optional fields per interface — additive merge would bloat the shared bus with Compose-specific concerns; cost-of-doing-nothing is FR-20 fails). Shared-lib additive merge (Path B) deferred to a future task if a second consumer needs the types.
+
+    R1-wired contracts (3): ComposeWorkspaceToContextFlow (Flow 1), ComposeWorkspaceToAssistantFlow (Flow 2), ComposeAssistantToWorkspaceFlow (Flow 5).
+    R1-stub-only contracts (3): ComposeContextToWorkspaceFlow (Flow 3), ComposeContextToAssistantFlow (Flow 4), ComposeAssistantToContextFlow (Flow 6).
+    Plus: ComposeDocumentRef, ComposeSelection, 4 channel-union types (ComposeWorkspaceEvent, ComposeContextEvent, ComposeConversationEvent, AnyComposeFlowEvent), ComposeEventBusContract (PaneChannel-keyed dispatch contract), COMPOSE_FLOW_CHANNEL_MAP, COMPOSE_FLOW_RECEIVER_MATRIX, StubReceiver, logFlowEvent.
+
+    Verification: TypeScript surface-gate ✓ 0 surface-owned errors under strict mode. `grep "compose-contracts"` against full tsc output: 0 matches. Vite production build blocked by a sibling Wave 1b task (040's `composeEditor.registration.ts` is `.ts` containing JSX — should be `.tsx`); that bug is outside task 041's scope and does not affect 041's deliverable.
+
+    ADR tensions: NONE. Compliance: ADR-013 (refined) ✓ (opaque IDs + JPS scope strings only); ADR-015 ✓ (privacy annotations + caps on selectionText/contentHtml/insightText; logFlowEvent strips Tier 3 fields); ADR-030 ✓ (additive on existing 4 channels, no new channel, `unknown` not `any`); ADR-028 N/A; ADR-019 N/A.
+
+    Open items for downstream tasks:
+      - 042 (ComposeWorkspace.tsx) will import `ComposeWorkspaceToContextFlow`, `ComposeWorkspaceToAssistantFlow`, `ComposeDocumentRef`, `ComposeSelection`, `logFlowEvent`.
+      - 045 (ComposeEditor.tsx) will import `ComposeAssistantToWorkspaceFlow` (subscriber stub with manual-confirm gate).
+      - Spike #2 §11 open item #1 (contentHtml format html vs prosemirror-json) remains open for Spike #1 outcome; contract supports BOTH via the `format` discriminant — no churn needed downstream.
+      - The 6-flow contracts file imports `PaneChannel` from `@spaarke/ai-widgets` only; no other shared-lib coupling — safe for cross-wave parallelization.
+  </notes>
 </task>

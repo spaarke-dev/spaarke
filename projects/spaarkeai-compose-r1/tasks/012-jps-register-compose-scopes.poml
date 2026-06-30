@@ -3,7 +3,7 @@
   <metadata>
     <title>Define + register JPS scopes compose-selection + compose-document</title>
     <phase>Phase 1: Dataverse + JPS Foundations</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <tags>ai, jps, dataverse, solution</tags>
     <rigor-hint>STANDARD</rigor-hint>
@@ -87,6 +87,37 @@
 
   <notes>
     Scopes are REGISTERED in R1, but no R1 playbook action consumes them yet (spec.md Scope #9 — no new playbook actions). R2 will author the four AI actions (Explain clause, Replace with standard, Compare-to-playbook, Draft alternative) against these scopes. Registering them now ensures the contract is locked and visible to Compose UI work in Phase 4.
+
+    --- EXECUTION DISCOVERY (2026-06-29) ---
+
+    During execution, the sub-agent surfaced a TASK-SCOPE / TOOL-CONTRACT MISMATCH:
+
+    1. The POML Step 5 instructs running `jps-scope-refresh` to "deploy scopes to Dataverse and refresh the catalog index." Spike #4 §4.3 already flagged this concern: "`jps-validate` targets action JPS files (prompt schemas). Scope files are a different artifact class."
+
+    2. Verified empirically:
+       - `scripts/Refresh-ScopeModelIndex.ps1` (the script `jps-scope-refresh` invokes) queries Dataverse `sprk_analysisactions`, `sprk_analysisskills`, `sprk_analysisknowledges`, `sprk_analysistools` — and regenerates `.claude/catalogs/scope-model-index.json` from those entities only. It does NOT consume `$schema: jps-scope/v1` input-scope files.
+       - There is no `JpsScope` / `InputScope` / `ScopeRegistry` type in `Sprk.Bff.Api` — grep confirms.
+       - There is no Dataverse entity for input-scope schemas — they are NEW artifact class introduced by this project.
+       - The `jps-scope/v1` schema URL is currently aspirational (no JSON-Schema endpoint published).
+
+    3. PRAGMATIC INTERPRETATION applied (Path C — pivot to comply per CLAUDE.md §6.5 protocol, though this is not strictly an ADR conflict): Treat "registration" as PUBLISHING the locked scope JSONs to a permanent, downstream-discoverable location with validation against the scope-specific checks from Spike #4 §4.3. The actual "registration" of input scopes occurs at code-consumption time:
+       - Phase 2 task 020 — `ConsumerTypes.ComposeSummarize` constant + `ComposeActionRequest` C# DTO
+       - Phase 4 tasks 040+ — TypeScript scope-builder + Compose UI dispatch
+       - Phase 5 task 025 — `ComposeEndpoints.MapPost("/action/{consumerType}")`
+
+    4. ARTIFACTS PRODUCED:
+       - `projects/spaarkeai-compose-r1/notes/jps-scopes/compose-document.scope.json` — locked R1 contract
+       - `projects/spaarkeai-compose-r1/notes/jps-scopes/compose-selection.scope.json` — locked R2-prep contract
+       - `projects/spaarkeai-compose-r1/notes/jps-scopes/README.md` — catalog README with consumer registry + validation report (22 PASS, 0 WARN, 0 FAIL)
+
+    5. VALIDATION POSTURE: All 10+ scope-specific checks from Spike #4 §4.3 PASS for both files (valid JSON, $schema=jps-scope/v1, $version=1, scopeCode matches design, description non-empty, metadata.tags present, inputs.fields complete with name+type+description per field, required/optional clearly demarcated, ADR-015 dataGovernance block declares user-content + doNotLog rules, totalCharCap under chat-text caps, ADR-013 boundary preserved).
+
+    6. OPEN ITEMS FOR DOWNSTREAM TASKS:
+       - Task 020 (Phase 2): Author `ComposeActionRequest` DTO matching `compose-document.scope.json` field-by-field (3 required, 5 optional). Reference path: `notes/jps-scopes/compose-document.scope.json`.
+       - Task 040+ (Phase 4): Mirror this contract in TypeScript when authoring the scope-builder.
+       - DEFERRAL NOT FILED: A future enhancement to `jps-scope-refresh` could publish a 2nd catalog (`input-scope-index.json`) tracking these files, but this is out of R1 scope. Not filed because the contract is fully expressible via the locked JSONs in `notes/jps-scopes/` + the README consumer-registry.
+
+    7. NO ADR TENSIONS surfaced. ADR-013 (PublicContracts facade) + ADR-015 (Tier 3 multi-tenant isolation, `doNotLog` for `selectionText`) are both honored in the scope schemas.
   </notes>
 
   <execution>

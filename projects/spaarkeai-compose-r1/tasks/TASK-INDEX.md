@@ -39,37 +39,37 @@
 
 | ID | Title | Phase | Status | Tags | Rigor | Dependencies | Parallel Group | Parallel Safe |
 |---|---|---|---|---|---|---|---|---|
-| 001 | TipTap OOB + DOCX round-trip prototype | 0 | 🔲 | spike, frontend, tiptap, docx, prototype | STANDARD | none | A | ✅ |
+| 001 | TipTap OOB + DOCX round-trip prototype | 0 | ✅ | spike, frontend, tiptap, docx, prototype | STANDARD | none | A | ✅ |
 | 002 | Three-pane coordination wiring prototype | 0 | 🔲 | spike, frontend, typescript, prototype | STANDARD | none | A | ✅ |
-| 003 | SPE check-out/check-in + Document promotion-on-Save | 0 | 🔲 | spike, backend, bff-api, spe, prototype | STANDARD | none | A | ✅ |
+| 003 | SPE check-out/check-in + Document promotion-on-Save | 0 | ✅ | spike, backend, bff-api, spe, prototype | STANDARD | none | A | ✅ |
 | 004 | Consumer-routing E2E smoke + JPS scope registration | 0 | 🔲 | spike, backend, bff-api, ai, prototype | STANDARD | none | A | ✅ |
-| 010 | Create `sprk_workspacelayout` Compose row | 1 | 🔲 | dataverse, solution, data | STANDARD | 001,002,003,004 | B | ✅ |
-| 011 | Create `sprk_playbookconsumer` compose-summarize row | 1 | 🔲 | dataverse, solution, ai | STANDARD | 004 | B | ✅ |
-| 012 | Register JPS scopes (compose-selection, compose-document) | 1 | 🔲 | ai, jps, dataverse, solution | STANDARD | 004 | B | ✅ |
-| 020 | Add `ConsumerTypes.ComposeSummarize` constant | 2 | 🔲 | bff-api, backend | FULL | 001,002,003,004 | — | ❌ (blocks 021–027) |
-| 021 | Create `Services/Compose/ComposeService.cs` | 2 | 🔲 | bff-api, backend, services | FULL | 020 | C | ✅ |
-| 022 | Create `Services/Compose/ComposeDocumentService.cs` | 2 | 🔲 | bff-api, backend, services, spe | FULL | 020 | C | ✅ |
-| 023 | Create `Services/Compose/ComposeSessionService.cs` | 2 | 🔲 | bff-api, backend, services | FULL | 020 | C | ✅ |
-| 024 | Create `Api/ComposeEndpoints.cs` (7 endpoints) | 2 | 🔲 | bff-api, backend, endpoints, minimal-api | FULL | 021,022,023 | — | ❌ |
-| 025 | Update Program.cs — register Compose DI | 2 | 🔲 | bff-api, backend, di, config | FULL | 024 | — | ❌ |
-| 026 | Unit tests for 3 Compose services | 2 | 🔲 | bff-api, testing, unit-test | FULL | 021,022,023 | D | ✅ |
-| 027 | Integration tests for 7 Compose endpoints | 2 | 🔲 | bff-api, testing, integration-test | FULL | 024 | D | ✅ |
-| 030 | Scaffold `@spaarke/document-operations` package | 3 | 🔲 | frontend, typescript, shared-lib, refactoring | FULL | 001,002,003,004 | E | ✅ |
-| 031 | Move `useDocumentActions` to shared lib | 3 | 🔲 | frontend, typescript, refactoring | FULL | 030 | — | ❌ |
-| 032 | Refactor SemanticSearch to consume shared lib | 3 | 🔲 | frontend, typescript, refactoring | FULL | 031 | — | ❌ |
-| 033 | Verify SemanticSearch tests pass; add consumer tests | 3 | 🔲 | testing, frontend, integration-test | STANDARD | 032 | — | ❌ |
-| 040 | Register `compose-editor` section type | 4 | 🔲 | frontend, react, typescript, fluent-ui, widget | FULL | 001,002,003,004 | F | ✅ |
-| 041 | Create six TypeScript data-contract interfaces | 4 | 🔲 | frontend, typescript | FULL | 002 | F | ✅ |
-| 042 | Create `ComposeWorkspace.tsx` | 4 | 🔲 | frontend, react, typescript, fluent-ui, widget | FULL | 032,040,045 | — | ❌ |
+| 010 | Create `sprk_workspacelayout` Compose row | 1 | ✅ | dataverse, solution, data | STANDARD | 001,002,003,004 | B | ✅ |
+| 011 | Create `sprk_playbookconsumer` compose-summarize row | 1 | ✅ | dataverse, solution, ai | STANDARD | 004 | B | ✅ |
+| 012 | Register JPS scopes (compose-selection, compose-document) | 1 | ✅ | ai, jps, dataverse, solution | STANDARD | 004 | B | ✅ |
+| 020 | Add `ConsumerTypes.ComposeSummarize` constant | 2 | ✅ | bff-api, backend | FULL | 001,002,003,004 | — | ❌ (blocks 021–027) |
+| 021 | Create `Services/Compose/ComposeService.cs` | 2 | ✅ | bff-api, backend, services | FULL | 020 | C | ✅ |
+| 022 | Create `Services/Compose/ComposeDocumentService.cs` | 2 | ✅ | bff-api, backend, services, spe | FULL | 020 | C | ✅ |
+| 023 | Create `Services/Compose/ComposeSessionService.cs` | 2 | ✅ | bff-api, backend, services | FULL | 020 | C | ✅ |
+| 024 | Create `Api/ComposeEndpoints.cs` (7 endpoints) | 2 | ✅ | bff-api, backend, endpoints, minimal-api | FULL | 021,022,023 | — | ❌ |
+| 025 | Update Program.cs — register Compose DI | 2 | ✅ | bff-api, backend, di, config | FULL | 024 | — | ❌ |
+| 026 | Unit tests for 3 Compose services | 2 | ✅ | bff-api, testing, unit-test | FULL | 021,022,023 | D | ✅ |
+| 027 | Integration tests for 7 Compose endpoints | 2 | ✅ | bff-api, testing, integration-test | FULL | 024 | D | ✅ |
+| 030 | Scaffold `@spaarke/document-operations` package | 3 | ✅ | frontend, typescript, shared-lib, refactoring | FULL | 001,002,003,004 | E | ✅ |
+| 031 | Move `useDocumentActions` to shared lib | 3 | ✅ | frontend, typescript, refactoring | FULL | 030 | — | ❌ |
+| 032 | Refactor SemanticSearch to consume shared lib | 3 | ✅ | frontend, typescript, refactoring | FULL | 031 | — | ❌ |
+| 033 | Verify SemanticSearch tests pass; add consumer tests | 3 | ✅ | testing, frontend, integration-test | STANDARD | 032 | — | ❌ |
+| 040 | Register `compose-editor` section type | 4 | ✅ | frontend, react, typescript, fluent-ui, widget | FULL | 001,002,003,004 | F | ✅ |
+| 041 | Create six TypeScript data-contract interfaces | 4 | ✅ | frontend, typescript | FULL | 002 | F | ✅ |
+| 042 | Create `ComposeWorkspace.tsx` | 4 | ✅ | frontend, react, typescript, fluent-ui, widget | FULL | 032,040,045 | — | ❌ |
 | 043 | Create `ComposeToolbar.tsx` | 4 | 🔲 | frontend, react, typescript, fluent-ui | FULL | 032 | F2 | ✅ |
-| 044 | Create `ComposeEmptyState.tsx` | 4 | 🔲 | frontend, react, typescript, fluent-ui | FULL | 001 | F2 | ✅ |
-| 045 | Create `ComposeEditor.tsx` (TipTap + DOCX bridge) | 4 | 🔲 | frontend, react, typescript, fluent-ui, tiptap | FULL | 001,040 | — | ❌ |
+| 044 | Create `ComposeEmptyState.tsx` | 4 | ✅ | frontend, react, typescript, fluent-ui | FULL | 001 | F2 | ✅ |
+| 045 | Create `ComposeEditor.tsx` (TipTap + DOCX bridge) | 4 | ✅ | frontend, react, typescript, fluent-ui, tiptap | FULL | 001,040 | — | ❌ |
 | 046 | Wire modal launch (Path A) | 4 | 🔲 | frontend, react, typescript, fluent-ui | FULL | 042 | — | ❌ |
-| 050 | Acquire SPE check-out on Compose open | 5 | 🔲 | bff-api, backend, frontend, spe | FULL | 003,024,042 | — | ❌ |
-| 051 | Multi-tab conflict UX | 5 | 🔲 | frontend, typescript, fluent-ui | FULL | 050 | — | ❌ |
-| 052 | Heartbeat + 15 min idle orphan release | 5 | 🔲 | bff-api, backend, frontend | FULL | 050 | G | ✅ |
-| 060 | E2E smoke test: compose-summarize | 6 | 🔲 | testing, integration-test, ai, e2e-test | STANDARD | 010,011,012,026,043 | — | ❌ |
-| 061 | Automated integration test: compose-summarize | 6 | 🔲 | testing, integration-test | STANDARD | 060 | — | ❌ |
+| 050 | Acquire SPE check-out on Compose open | 5 | ✅ | bff-api, backend, frontend, spe | FULL | 003,024,042 | — | ❌ |
+| 051 | Multi-tab conflict UX | 5 | ✅ | frontend, typescript, fluent-ui | FULL | 050 | — | ❌ |
+| 052 | Heartbeat + 15 min idle orphan release | 5 | ✅ | bff-api, backend, frontend | FULL | 050 | G | ✅ |
+| 060 | E2E smoke test: compose-summarize | 6 | ✅ | testing, integration-test, ai, e2e-test | STANDARD | 010,011,012,026,043 | — | ❌ |
+| 061 | Automated integration test: compose-summarize | 6 | ✅ | testing, integration-test | STANDARD | 060 | — | ❌ |
 | 070 | Verify 22 spec success criteria | 7 | 🔲 | testing, integration-test, acceptance | STANDARD | 020–027,030–033,040–046,050–052,060,061 | — | ❌ |
 | 071 | ADR-038 conformance check (no banned patterns) | 7 | 🔲 | testing, refactoring | STANDARD | 026,027,033,061 | H | ✅ |
 | 072 | CVE scan + coverage observation | 7 | 🔲 | testing, devops | MINIMAL | 024,025 | H | ✅ |

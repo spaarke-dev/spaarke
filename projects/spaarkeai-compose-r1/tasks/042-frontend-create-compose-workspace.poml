@@ -3,7 +3,7 @@
   <metadata>
     <title>Frontend — Create `ComposeWorkspace.tsx` (TipTap host + toolbar wrapper)</title>
     <phase>Phase 4: Frontend — SpaarkeAi Compose Surface</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>10</estimated-hours>
     <tags>frontend, react, typescript, fluent-ui, widget, tiptap</tags>
     <rigor-hint>FULL</rigor-hint>
@@ -104,4 +104,35 @@
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>
+
+  <notes>
+    Completed 2026-06-29 by Wave 5 parallel-dispatch sub-agent.
+
+    Location: `src/solutions/SpaarkeAi/src/components/compose/ComposeWorkspace.tsx` per POML §steps[1] + outputs (NOT shared lib — orchestrator consumes solution-local `compose-contracts.ts` + ComposeToolbar + ComposeEmptyState; shared lib `@spaarke/compose-components` retains only the reusable ComposeEditor per W4 architectural lock).
+
+    State management: `useReducer` chosen over `useState` because the document-context state machine has 5 status transitions (empty/loading/loaded/saving/error) that each touch 4–5 fields atomically. useState would open race windows on intermediate renders. useContext was overkill (single consumer, no nested subscribers).
+
+    PaneEventBus subscribers wired: Flow 1 (`compose_selection_changed` on `context`), Flow 2 (`compose_selection_offer` on `conversation`), Flow 5 (`compose_assistant_insert` on `workspace`) — all three R1-WIRED per `COMPOSE_FLOW_RECEIVER_MATRIX`. R1 behaviour = log Tier-1 metadata; Flow 5 additionally stages `pendingAssistantInsert` reducer state with manual-confirm MessageBar (per Spike #2 §10.3 BINDING — overrides `requireUserConfirm: false` in R1). Flows 3, 4, 6 are CONTRACT-ONLY in R1 per the matrix; no subscribers needed at this layer.
+
+    Empty-state action dispatch: handleBrowseRequested / handleSearchRequested fire host callbacks AND dispatch additive `compose_browse_requested` / `compose_search_requested` events on the `workspace` channel (ADR-030 additive — same pattern as compose_summarize_request in ComposeToolbar).
+
+    BFF wiring: GET `/api/compose/documents/{speId}?driveId&tenantId&documentRecordId&displayName` for load; POST `/api/compose/documents/{speId}/save` for save (per `ComposeEndpoints.cs` Load + Save contracts). Both use `authenticatedFetch` from `@spaarke/auth` (ADR-028 compliant — no token re-acquisition). Save triggered via Ctrl/Cmd+S keyboard shortcut.
+
+    Dependency wiring: added `@spaarke/compose-components` to SpaarkeAi `package.json`, `tsconfig.json` paths, and `vite.config.ts` (sharedLibPaths, react include globs, alias). npm install ran clean. SpaarkeAi `npm run build` succeeded: 3576 modules / surface-owned 0 errors / built in 13.66s. Spaarke.Compose.Components orchestrator build PASS 2.4s.
+
+    Downstream open items for task 046 (W6): wire ComposeWorkspace into `composeEditor.registration.ts`. Current shim mounts `ComposeWorkspacePlaceholder` (R1 stub). Task 046 will need to thread `bffBaseUrl`, `driveId`, `tenantId`, optional `initialDocumentRef` + `initialSessionId` through the `SectionFactoryContext`. Note: SpaarkeAi → @spaarke/legal-workspace dependency direction is preserved; task 046 may use a sentinel registration on the SpaarkeAi side or pass `ComposeWorkspace` as an injectable factory arg to avoid the circular import.
+
+    Quality gates (Step 9.5):
+      - ADR-021 Fluent v9 dark mode: PASS (tokens.* only, no hex)
+      - ADR-022 React 19: PASS (React.JSX.Element + modern hooks)
+      - ADR-028 Auth v2: PASS (authenticatedFetch only)
+      - ADR-030 typed PaneEventBus: PASS (additive discriminants, narrowing on event.type)
+      - ADR-015 Tier 3 privacy: PASS (no selectionText/contentHtml/insightText in logs)
+      - CLAUDE.md §3 sub-agent write boundary: PASS (no .claude/ writes)
+      - CLAUDE.md §6.5 ADR conflict resolution: no new tensions surfaced
+      - CLAUDE.md §11 component justification: documented in file header
+      - LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT 21 host MUSTs: PASS
+
+    No tests added in this task. Acceptance criterion #5 (ui-tests) cannot run in autonomous sub-agent (no Chrome integration); Phase 6 smoke test (tasks 060/061) is the canonical validation path. Component tests are deferred to project-close test-diet review (task 090).
+  </notes>
 </task>

@@ -2,7 +2,7 @@
 <task id="052" project="spaarkeai-compose-r1">
   <metadata>
     <title>Session heartbeat + 15 min idle orphan-lock release</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>1 day</estimated-effort>
     <tags>bff-api, backend, frontend</tags>
     <rigor-hint>FULL</rigor-hint>

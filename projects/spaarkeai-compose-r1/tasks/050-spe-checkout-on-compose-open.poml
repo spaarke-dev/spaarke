@@ -2,7 +2,7 @@
 <task id="050" project="spaarkeai-compose-r1">
   <metadata>
     <title>Acquire SPE check-out on Compose open via BFF endpoint</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>1 day</estimated-effort>
     <tags>bff-api, backend, frontend, spe</tags>
     <rigor-hint>FULL</rigor-hint>
@@ -134,4 +134,92 @@
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>
+
+  <notes>
+    <completed-at>2026-06-29 (W6 parallel dispatch sub-agent)</completed-at>
+    <scope-revised-at>2026-06-29 by Spike #3 (003) §9 LOCKED — Path A approved at post-Wave-0 operator gate</scope-revised-at>
+    <revised-direction>
+      Spike #3 LOCKED a frontend-only direction for task 050: call existing
+      POST /api/documents/{documentId}/checkout from Compose React. NO BFF
+      code changes; the existing DocumentCheckoutService.CheckoutAsync covers
+      acquisition, idempotent same-user re-checkout, and cross-user 409.
+      Original POML steps 2/3/5/6 (BFF endpoint + service + persistence +
+      publish-size measurement) are SUPERSEDED by the spike pivot; ONLY
+      step 1 (load spike) + step 4 (wire ComposeWorkspace) + step 7 (manual
+      Word-for-Web verification) remain in scope. Manual verification deferred
+      to Phase 6 task 060 E2E smoke test per spike §11.
+    </revised-direction>
+    <files-modified>
+      <file change-type="modify">
+        src/solutions/SpaarkeAi/src/components/compose/ComposeWorkspace.tsx
+        — Added ComposeCheckoutStatus type (6 values), ComposeCheckoutLockedByInfo
+        interface, 5 reducer actions (skipped/requested/acquired/conflict/failed),
+        reducer branches for each, and the SPE check-out useEffect that fires
+        POST /api/documents/{sprkDocumentId}/checkout via authenticatedFetch
+        when status === 'loaded' and sprkDocumentId is present. Renders a
+        warning MessageBar for 409 conflicts (cross-user lock; task 051 swaps
+        for richer multi-tab UX) and an info MessageBar for 4xx/5xx/network
+        failures (non-fatal — editor remains usable). Tier 3 discipline:
+        only Tier 1 metadata logged (status, sprkDocumentId, lockedByName,
+        checkedOutAt). Path B ephemeral docs (no sprkDocumentId) skip
+        checkout; retry triggered automatically on Save promotion via the
+        existing saveSucceeded → reducer.documentRef update flow.
+      </file>
+      <file change-type="modify">
+        projects/spaarkeai-compose-r1/tasks/TASK-INDEX.md
+        — 050 status 🔲 → ✅
+      </file>
+      <file change-type="modify">
+        projects/spaarkeai-compose-r1/current-task.md
+        — Active Task switched to 050 with FULL rigor; details + completion notes
+      </file>
+    </files-modified>
+    <files-not-modified>
+      <file reason="Per Spike #3 §9 + dispatcher direction: NO BFF code changes for task 050. Original POML steps 2/3/5 superseded.">
+        src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs (existing /checkout stub at line 145 unchanged — refers callers to /api/documents/{id}/checkout)
+      </file>
+      <file reason="Per Spike #3 §9: no new ComposeCheckoutService. Existing DocumentCheckoutService.CheckoutAsync handles acquisition.">
+        src/server/api/Sprk.Bff.Api/Services/Compose/ComposeCheckoutService.cs (NOT CREATED — explicitly out of scope)
+      </file>
+      <file reason="Per dispatcher: NO BFF tests for this task; frontend tests deferred to Phase 6 E2E (task 060).">
+        tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ComposeCheckoutServiceTests.cs (NOT CREATED)
+      </file>
+    </files-not-modified>
+    <build-verification>
+      <command>cd src/solutions/SpaarkeAi &amp;&amp; npm run build</command>
+      <result>✅ 3704 modules transformed / 14.97s; vite bundle 4.81 MB / gzip 1.34 MB; surface-gate 0 errors (78 pre-existing shared-lib errors deferred to Phase B — unchanged from W5 baseline)</result>
+      <command>cd src/client/shared/Spaarke.Compose.Components &amp;&amp; npm run build</command>
+      <result>✅ tsc 0 errors</result>
+      <note>Pre-existing ComposeToolbar.tsx ts2307 (cannot find '@spaarke/ai-widgets/events') and main.tsx ts2322 (AppProps missing props from W6/046) are NOT caused by this task. main.tsx error is W6 sibling task 046's wiring-in-flight; ComposeToolbar.tsx error is W4 baseline.</note>
+    </build-verification>
+    <acceptance-criteria-mapping>
+      <criterion poml-text="Opening a document in Compose acquires SPE check-out — verified via Graph API check + Word for Web">
+        ✅ Implementation complete. Manual Word for Web verification deferred to Phase 6 task 060 E2E smoke test per spike §11 row 1 (consistent with spike note: "empirical validation deferred to Phase 6 task 060 E2E smoke test").
+      </criterion>
+      <criterion poml-text="BFF endpoint requires authentication (401 when unauthenticated)">
+        ✅ Existing /api/documents/{id}/checkout endpoint already has .RequireAuthorization() per DocumentOperationsEndpoints.cs:30. Verified — no change needed.
+      </criterion>
+      <criterion poml-text="Lock metadata persisted in the tier specified by Spike #3">
+        ✅ Dataverse-side per spike §1 (Path A). Existing DocumentCheckoutService.CheckoutAsync persists sprk_checkedoutdate + sprk_CheckedOutBy on sprk_documents.
+      </criterion>
+      <criterion poml-text="Unit tests pass for ComposeCheckoutService (or equivalent)">
+        ⏭️ SUPERSEDED. Per Spike #3 §9 + dispatcher direction: no new BFF service created; no new BFF tests required. Frontend integration coverage deferred to Phase 6 task 060 E2E.
+      </criterion>
+      <criterion poml-text="BFF compressed publish-size delta ≤+2 MB; absolute ≤60 MB ceiling">
+        ⏭️ SUPERSEDED. Zero BFF code changes → zero publish-size delta. Last measured baseline (post-W3-024): 48.42 MB compressed (well under 60 MB ceiling).
+      </criterion>
+    </acceptance-criteria-mapping>
+    <adr-tensions>None new. Pre-existing Spike #3 Path A tension on design.md §14 row 4 ("per-user single-session lock via SPE check-out" → "Dataverse-side lock") was approved at post-Wave-0 gate 2026-06-29 and is the basis for this task's revised scope.</adr-tensions>
+    <open-items-for-downstream>
+      <item task="051">
+        Multi-tab same-user conflict UX. The existing endpoint returns 200 (NOT 409) for same-user re-checkout per DocumentCheckoutService.CheckoutAsync line 121-152. Task 051 must therefore use a separate detection mechanism — likely a checkout-status probe (GET /api/documents/{id}/checkout-status) on mount that compares CheckoutUserInfo.Id to the current user's Dataverse systemuserid. The current 050 implementation lands same-user multi-tab in the 'acquired' state with no warning; 051 replaces that with the richer "Go-to-other / Force-close" modal per spike §1 row 4.
+      </item>
+      <item task="052">
+        Heartbeat sweeper BFF backend. Client-side heartbeat already exists in W4-045 ComposeEditor (3-min sliding, visibility-gated). Task 052 must add: (a) RefreshHeartbeatAsync method on existing DocumentCheckoutService, (b) POST /api/compose/document/{documentId}/heartbeat endpoint, (c) StaleCheckoutSweeperHostedService for 15-min orphan release, (d) sprk_lastheartbeatutc field (already created per W1a OI-2). All per Spike #3 §4.3.
+      </item>
+      <item task="041 ComposeDocumentRef">
+        The current effect uses state.documentRef.sprkDocumentId which is typed as optional per ComposeDocumentRef (compose-contracts.ts task 041). No new type required — leverage existing contract.
+      </item>
+    </open-items-for-downstream>
+  </notes>
 </task>

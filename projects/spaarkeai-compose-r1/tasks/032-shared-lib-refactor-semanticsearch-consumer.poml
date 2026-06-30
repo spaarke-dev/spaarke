@@ -2,7 +2,7 @@
 <task id="032" project="spaarkeai-compose-r1">
   <metadata>
     <title>Refactor SemanticSearch SearchCommandBar to import from @spaarke/document-operations</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>0.5 day</estimated-effort>
     <tags>frontend, typescript, refactoring</tags>
     <rigor-hint>FULL</rigor-hint>
@@ -111,4 +111,66 @@
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>
+
+  <notes>
+    Completed 2026-06-29 by Wave 3 autonomous dispatch (task-execute, FULL rigor).
+
+    Refactor summary:
+    - Sole SemanticSearch consumer of `useDocumentActions` is `App.tsx` line 367
+      (SearchCommandBar.tsx receives handlers as props — no direct hook use).
+      Verified by grep across `src/client/code-pages/SemanticSearch/` BEFORE
+      editing per POML constraint.
+    - Updated `App.tsx` import from `./hooks/useDocumentActions` to
+      `@spaarke/document-operations`; added `getBffBaseUrl()` import from
+      local `./services/apiBase`; call site changed to
+      `useDocumentActions({ bffBaseUrl: getBffBaseUrl() })`.
+    - Deleted the transitional shim at
+      `src/client/code-pages/SemanticSearch/src/hooks/useDocumentActions.ts`
+      (no more local hook — single source of truth in `@spaarke/document-operations`).
+    - Deleted obsolete test at
+      `src/client/code-pages/SemanticSearch/src/__tests__/hooks/useDocumentActions.test.ts`.
+      It mocked the wrong surface (`buildAuthHeaders` + `global.fetch`) while
+      the canonical hook uses `authenticatedFetch` from `@spaarke/auth`.
+      Was process-crashing on master per W2-031 outcome. Canonical 14-test
+      suite at `src/client/shared/Spaarke.DocumentOperations/__tests__/hooks/useDocumentActions.test.tsx`
+      provides full behavior coverage. ADR-038 mirror-test ban applies (don't
+      duplicate at the consumer when behavior owner has KEEP-path coverage).
+    - `package.json` step (POML step 2) was already satisfied — task 031 had
+      already added `@spaarke/document-operations` as a file:dependency.
+
+    Verification:
+    - SemanticSearch webpack build: clean (0 errors, 3 pre-existing
+      bundle-size warnings — unchanged from baseline).
+    - SemanticSearch test suite: 20 suites / 423 tests / 319 pass / 104 fail.
+      The 104 failures are PRE-EXISTING (verified by stashing all changes and
+      re-running — identical failure count). Failures are in `useSavedSearches`,
+      `useFilterOptions`, etc. — unrelated to `useDocumentActions`. Net delta
+      from this task: -1 test suite (deleted broken file), zero new failures.
+    - Hot-path coordination: SpaarkeAi=Y but isolated to SemanticSearch source —
+      no conflict with active worktrees.
+
+    Decision deltas vs POML:
+    - POML step 1 named `SearchCommandBar.tsx` as the consumer-to-refactor;
+      actual consumer is `App.tsx` (SearchCommandBar receives handlers via
+      props). POML constraint "find ALL consumers via grep" took precedence.
+    - POML did not address the obsolete test file; the dispatch brief did.
+      Deletion chosen per ADR-038 (no mirror tests when behavior owner is
+      tested) and CLAUDE.md §11 (cost-of-doing-nothing — keeping a broken
+      duplicate against a non-existent surface = pure tech debt).
+
+    Quality gates (Step 9.5):
+    - code-review: passed (pure import-path refactor; no banned ADR-038
+      patterns; comment cites task 031/032 lineage).
+    - adr-check: passed (ADR-013 BFF facade respected via canonical hook;
+      ADR-028 Auth v2 respected via `authenticatedFetch`; ADR-038 testing
+      strategy respected by deleting mirror duplicate).
+
+    Downstream open items:
+    - Task 033 (next in Phase 3): Compose adopts the hook via
+      `import { useDocumentActions } from '@spaarke/document-operations'`
+      with its own `bffBaseUrl` source (likely the SpaarkeAi runtime config).
+    - Pre-existing 104 test failures in SemanticSearch suite are technical
+      debt not owned by task 032. Recommend separate /defer entry if not
+      already tracked.
+  </notes>
 </task>

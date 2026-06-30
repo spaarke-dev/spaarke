@@ -3,7 +3,8 @@
   <metadata>
     <title>Frontend — Create `ComposeEditor.tsx` (TipTap editor shell + DOCX bridge from Spike #1)</title>
     <phase>Phase 4: Frontend — SpaarkeAi Compose Surface</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed-date>2026-06-29</completed-date>
     <estimated-hours>10</estimated-hours>
     <tags>frontend, react, typescript, fluent-ui, tiptap</tags>
     <rigor-hint>FULL</rigor-hint>
@@ -107,4 +108,48 @@
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>
+
+  <notes>
+    Completed 2026-06-29 by W4 parallel autonomous dispatch.
+
+    PATH CORRECTION applied at dispatch: POML mentioned `src/solutions/SpaarkeAi/src/components/compose/` (original draft path); W1b follow-up created the canonical shared-lib home at `src/client/shared/Spaarke.Compose.Components/`, which is where ComposeEditor lands. Build orchestrator (`scripts/Build-AllClientComponents.ps1`) registers the shared lib and was re-ordered to build it AFTER `Spaarke.AI.Widgets` (added dep) — see lib-list comment in script.
+
+    FILES CREATED / MODIFIED:
+      • src/client/shared/Spaarke.Compose.Components/package.json (TipTap + bridge + ai-widgets deps; bumped 0.1.0 → 0.2.0)
+      • src/client/shared/Spaarke.Compose.Components/tsconfig.json (added @spaarke/ai-widgets path mapping)
+      • src/client/shared/Spaarke.Compose.Components/src/utils/docxBridge.ts (mammoth import + docx export helpers — lazy-loaded)
+      • src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx (~450 LOC; LOCKED Spike #1 extension set + Flow 1/2 dispatch + 3-min heartbeat)
+      • src/client/shared/Spaarke.Compose.Components/src/index.ts (barrel exports for ComposeEditor + bridge helpers)
+      • scripts/Build-AllClientComponents.ps1 (moved Compose.Components AFTER AI.Widgets — dep-order fix)
+
+    LICENSE AUDIT (16 new deps, all MIT or BSD-2-Clause):
+      • 14 × @tiptap/* (StarterKit + 11 standard extensions) — all MIT
+      • mammoth ^1.8.0 (resolved 1.12.0) — BSD-2-Clause
+      • docx ^9.0.3 (resolved 9.7.1) — MIT
+      • ZERO TipTap Pro. ZERO proprietary.
+
+    BUILD VERIFICATION:
+      • npm run build — 0 errors, 0 warnings (Compose.Components dist clean)
+      • Build-AllClientComponents.ps1 -Component Spaarke.Compose.Components — SUCCESS in 2.4s
+      • npm run typecheck — clean (0 errors)
+
+    ACCEPTANCE CRITERIA STATUS:
+      ✅ Editor mounts with locked extensions  ✅ DOCX byte input renders  ✅ serialize() exposed via ref  ✅ PaneEventBus events emitted (Flow 1 + Flow 2 per compose-contracts; "compose:document-changed" speculative POML name replaced with the locked contract names)  ✅ npm build + orchestrator build pass  ⏭ Browser ui-tests deferred to Phase 6 task 060 (no Chrome integration available in autonomous wave)  ⏭ TASK-INDEX flip handled by main session
+
+    ADR TENSIONS: None. (compose-contracts.ts cross-cast through `unknown`/`any` is documented as adhering to ADR-030 additive contract; compose-contracts is solution-local per Spike #2 §11.)
+
+    HEARTBEAT IMPL: 3-min sliding via setInterval, gated on `document.visibilityState === 'visible'`, calls `POST /api/compose/document/{documentId}/heartbeat` (singular `document` per Spike #3 §8) via `authenticatedFetch`. Defensive: logs warning + swallows non-2xx (W7-052 wires the BFF side; 404 today is expected and tolerated).
+
+    ADR-013 (refined) verified: editor does NOT inject IOpenAiClient/IPlaybookService/AI internals. Only AI surface from editor is `compose_selection_offer` on the conversation channel — ConversationPane is the dispatcher to `POST /api/compose/action/{consumerType}` (W3-024). Facade boundary intact.
+
+    ADR-015 Tier 3 verified: `selectionText` flows through PaneEventBus payloads (subscribers strip when bridging to telemetry per logFlowEvent reference impl). Document content (HTML from mammoth import) is NEVER console.log'd; only mammoth's `messages` array (Tier 1 safe configuration metadata) is logged.
+
+    OPEN ITEMS for downstream tasks:
+      • Task 046 (W6): swap inline `ComposeWorkspacePlaceholder` in `composeEditor.registration.ts` for an import from `@spaarke/compose-components` — currently the registration shim still uses the placeholder.
+      • Task 042 (W5): create `ComposeWorkspace.tsx` that hosts ComposeEditor + ComposeToolbar (043) + ComposeEmptyState (044); threads documentRef/bffBaseUrl/sessionId from the host context.
+      • Task 052 (W7): wire the BFF heartbeat endpoint + DocumentCheckoutService.RefreshHeartbeatAsync (currently client logs 404 + swallows — graceful degradation).
+      • R1-OPEN-1: actual AI-action dispatch from selection (Flow 2 "compose_selection_offer" subscriber) lives in ConversationPane work; not in this task.
+      • R1-OPEN-2: TipTap floating range pin (`~2.10.3`) — Spike #1 §7 R-6 risk; resolved to 2.27.2 here, well within `^2.10.3` semver. Operator may tighten in a follow-up if behavior drifts.
+      • Tests: ADR-038 + project CLAUDE.md guidance says jest tests for shared-lib components remain MAINTAIN-category. Did NOT add tests in this task (W4 frontend lane is implementation-only; W5 task 042 + Phase 5 task 060 provide the integration coverage). Consider follow-up to add a focused unit-test covering selectionUpdate debounce + heartbeat suppression-on-hidden-tab logic.
+  </notes>
 </task>

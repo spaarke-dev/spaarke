@@ -3,7 +3,7 @@
   <metadata>
     <title>BFF — Add unit tests for the 3 Compose services</title>
     <phase>Phase 2: BFF Endpoints + Services</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <tags>bff-api, backend, testing, unit-test</tags>
     <rigor-hint>FULL</rigor-hint>
@@ -96,4 +96,49 @@
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>
+
+  <notes>
+    <completed-on>2026-06-29</completed-on>
+    <completed-by>Wave 5 parallel dispatch sub-agent (FULL rigor — TEST-MODIFYING override per CLAUDE.md §8)</completed-by>
+    <summary>
+      Added 14 new tests across 3 files in `tests/unit/Sprk.Bff.Api.Tests/Services/Compose/`:
+      - ComposeServiceTests.cs (NEW, 6 tests, KEEP: domain-logic) — FR-06 idempotency happy path,
+        FR-06 first-create + FR-07 rebind, FR-06 repeated-Save invariant (one create across N Saves),
+        FR-06 race-window resolution via alternate key, SaveAsync→Promote wiring, SaveAsync safety
+        invariant (failed SPE write MUST NOT promote).
+      - ComposeDocumentServiceTests.cs (NEW, 7 tests, KEEP: domain-logic) — argument-validation
+        behavior + R1-stub semantics. Path A documented inline (CLAUDE.md §6.5): full SPE round-trip
+        coverage delegated to task 027 (endpoint-contract category) because deeper Graph-SDK mocks
+        would violate ADR-038 B1/B2.
+      - ComposeSessionServiceTests.cs (EXTENDED, +1 test, total 10, KEEP: domain-logic) — added
+        ADR-015 Tier 3 tenant flow-through test (POML step 3c gap).
+
+      All 23 Services.Compose unit tests pass (was 9; +14 from this task). Cumulative Compose tests
+      across the assembly: 118 (was 84 after W4; +14 from this task + 20 from W5-027 endpoint tests).
+
+      Banned-pattern audit: zero `Mock<HttpMessageHandler>` (B1), zero `Mock<IServiceClient>` (B2),
+      zero DI-registration tests (B3), zero ctor null-check tests (B4 — my ArgumentException tests
+      assert ParamName, which is observable behavior, NOT B4's compiler-style guard test), zero
+      mirror tests (B6), zero all-mocks-trivial (B7). All test names follow
+      `{Method}_{Scenario}_{ExpectedResult}` (B13).
+
+      Build: 0 errors / 0 warnings (dotnet build clean). Publish-size delta: 0 MB (test-only
+      changes don't ship in BFF publish).
+    </summary>
+    <files-created>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ComposeServiceTests.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ComposeDocumentServiceTests.cs</file>
+    </files-created>
+    <files-modified>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ComposeSessionServiceTests.cs (+1 test)</file>
+    </files-modified>
+    <adr-tensions-encountered>
+      Path A (project-scoped narrowing) for ComposeDocumentService LoadDocxAsync/SaveDocxAsync —
+      documented inline in test file class summary citing CLAUDE.md §6.5 + ADR-038 §4 (B1/B2 bans) +
+      §7 ("delete the scaffolding once the building stands"). Full SPE round-trip coverage lives in
+      task 027 endpoint-contract tests. Same Path A was already implicit at W2 dispatch ("R1 stubs
+      for checkout methods; pure Graph-SDK wrappers fail 'what production behavior breaks if
+      deleted'"). No new ADR amendment required.
+    </adr-tensions-encountered>
+  </notes>
 </task>

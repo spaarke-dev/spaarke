@@ -3,7 +3,7 @@
   <metadata>
     <title>Create sprk_playbookconsumer row: compose-summarize → Document Summary playbook</title>
     <phase>Phase 1: Dataverse + JPS Foundations</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <tags>dataverse, solution, ai</tags>
     <rigor-hint>STANDARD</rigor-hint>
@@ -85,6 +85,20 @@
 
   <notes>
     This row only WIRES the existing playbook to the new consumer type — no new playbook authoring needed (spec.md "Owner Clarifications" row: First consumer type). If `ResolveAsync` returns null after row creation, check Redis-cache invalidation of the consumer-routing service (the service may need a cold restart or cache flush in the target environment).
+
+    Completion notes (2026-06-29, W1a parallel agent):
+    - Row created in Dev via Dataverse MCP create_record: sprk_playbookconsumerid = 986799ad-e173-f111-ab0e-7ced8ddc4a05
+    - All 6 column values verified via read_query: consumertype=compose-summarize, consumercode=default, environment=*, priority=500, enabled=true, playbook=47686eb1-9916-f111-8343-7c1e520aa4df ("Document Summary")
+    - Existing 7 consumer rows preserved (ai-summary, chat-summarize, daily-briefing-narrate, email-analysis, matter-pre-fill, project-pre-fill, summarize-file); compose-summarize is the 8th
+    - Ownership: org-owned (sprk_playbookconsumer is an org-owned table at definition level; all rows including this one inherit org ownership)
+    - Cross-environment promotion: scripts/dataverse/Seed-PlaybookConsumers.ps1 appended with compose-summarize record + GUID provenance comment (operator updates PlaybookId per env when seeding Test/Prod)
+    - Verification of IConsumerRoutingService.ResolveAsync semantics (read of ConsumerRoutingService.cs match algorithm):
+      * Query filter sprk_consumertype='compose-summarize' AND sprk_enabled=true returns this row
+      * MatchesConsumerCode('default','default')=true; MatchesEnvironment('*',any)=true (wildcard); TryMatchConditions(null,any)=true (null/empty)
+      * Single candidate wins selection -> returns sprk_playbook.Id = 47686eb1-... per acceptance criterion 1
+    - Cache lag: 5-min TTL per ConsumerRoutingService.cs CacheDuration constant; first BFF call after row creation hits real Dataverse, subsequent calls cache-hit for 5 min
+    - ADR tensions encountered: NONE
+    - Open items for downstream tasks: none for task 060 (smoke test); task 060 sequence per Spike #4 §11 stands
   </notes>
 
   <execution>

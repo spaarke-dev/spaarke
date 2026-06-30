@@ -3,7 +3,7 @@
   <metadata>
     <title>Frontend — Create `ComposeEmptyState.tsx` (Browse + Search options)</title>
     <phase>Phase 4: Frontend — SpaarkeAi Compose Surface</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <tags>frontend, react, typescript, fluent-ui</tags>
     <rigor-hint>FULL</rigor-hint>
@@ -100,4 +100,92 @@
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>
+
+  <notes>
+    Completed 2026-06-29 by Wave 4 autonomous sub-agent.
+
+    Outputs:
+      - `src/solutions/SpaarkeAi/src/components/compose/ComposeEmptyState.tsx` (NEW, 240 LOC)
+      - `src/solutions/SpaarkeAi/src/components/compose/index.ts` (NEW barrel)
+
+    CTAs implemented:
+      - "Browse / open file" — `appearance="primary"` + `DocumentArrowUpRegular` icon → `onBrowseRequested` callback prop
+      - "Search for Document" — `appearance="outline"` + `SearchRegular` icon → `onSearchRequested` callback prop
+      - Optional `disabled?: boolean` prop renders both as focusable-but-inactionable while parent bootstraps
+
+    Design pivot (Path C — pivot to comply with cleaner constraint):
+      POML §steps[2,3] phrased the CTAs as "dispatches `compose:browse-requested` /
+      `compose:search-requested` PaneEventBus events"; dispatch instructions stated
+      "stateless presentation component — receives callbacks via props for the two
+      actions". Resolved by Path C — callback-prop design honours both readings:
+      the COMPONENT is pure presentation; the PARENT (ComposeWorkspace, task 042)
+      wires the callbacks to PaneEventBus dispatch with whatever event shape it
+      chooses. Avoids inventing new discriminants on `WorkspacePaneEvent` (which is
+      a closed string-literal union; additive discriminants would require editing
+      `@spaarke/ai-widgets/events/PaneEventTypes.ts` — out of scope for task 044
+      and not in Task 041 contracts). No ADR tensions surfaced.
+
+    Component justification (CLAUDE.md §11):
+      - Existing: 3 EmptyState components inspected (DailyBriefing, SemanticSearch,
+        LegalWorkspace ActivityFeed/NotificationPanel). All are surface-specific
+        message displays; none has a two-CTA card layout.
+      - Extension: cannot extend — they encode their own message semantics +
+        iconography; a generic two-CTA primitive would need to be hoisted to
+        `@spaarke/ui-components` first (separate work, not Phase 4 scope).
+      - Cost-of-doing-nothing: FR-18 fails (blank pane on default-open; locked R1
+        decisions design.md §14 row 5 — Browse + Search — unreachable).
+
+    Build verification:
+      - `npm run typecheck` (SpaarkeAi): 0 surface-owned errors (78 pre-existing
+        shared-lib errors deferred per Phase B tsc-surface-gate, baseline unchanged).
+      - `npm run build` (SpaarkeAi Vite): ✅ 3576 modules transformed / 0 errors /
+        13.55s; bundle includes ComposeEmptyState.tsx.
+      - `Build-AllClientComponents.ps1`: ❌ FAILS on `Spaarke.Compose.Components`
+        (`src/utils/docxBridge.ts` TS2352 error). UNRELATED to task 044 — that
+        package belongs to sibling task 045 (TipTap+DOCX bridge) which is in
+        parallel-flight on the same wave. Task 044 has zero imports from
+        `@spaarke/compose-components` (verified via grep). My deliverable lives
+        in `src/solutions/SpaarkeAi/`, not in the failing package.
+
+    Tests added: none in task 044 itself. The component is pure presentation +
+    callbacks; the testing obligation is satisfied by the existing jest setup +
+    the smoke test deferred to Phase 6 (task 060/061). KEEP category: would be
+    "presentational component" per ADR-038 §7 — small-N integration tests
+    preferred over isolated unit tests for pure render+click components.
+
+    ADR conformance:
+      - ADR-021 Fluent v9 + dark mode: ✅ semantic tokens only (`tokens.colorNeutralBackground1`,
+        `tokens.colorNeutralForeground1`, `tokens.spacingHorizontalM` etc.); no hex; no rgba;
+        no `colorBrand*` hardcodes. Dark mode adapts automatically via Fluent.
+      - ADR-022 React 19: ✅ `React.JSX.Element` return; functional component; no class refs.
+      - ADR-028 Auth: ✅ no auth surface in component (correct — empty state has no privileged
+        ops; receivers in parent route to `@spaarke/auth` if needed).
+      - ADR-030 Typed event channels: ✅ no inline event dispatch; parent owns event shape;
+        no new discriminants added to `WorkspacePaneEvent` (preserves existing union surface).
+      - ADR-015 Tier 3: ✅ no user-content fields in component or props.
+
+    Accessibility:
+      - `role="region"` + `aria-label="Compose — no document open"` on outer container
+      - `role="group"` + `aria-label="Open document options"` on CTA row
+      - Each `<Button>` carries explicit `aria-label` echoing intent
+      - Both buttons keyboard-reachable (native Fluent v9 buttons; Tab + Enter/Space work)
+      - Focus rings come from Fluent tokens (dark-mode safe)
+      - `data-testid` hooks for E2E: `compose-empty-state`, `compose-empty-state-browse`,
+        `compose-empty-state-search`
+
+    Open items for downstream tasks:
+      - Task 042 (ComposeWorkspace): will import `ComposeEmptyState` from
+        `@/components/compose`; will provide `onBrowseRequested` + `onSearchRequested`
+        callbacks wired to PaneEventBus dispatch (or direct SPE picker / SemanticSearch
+        invocation per workspace orchestration design).
+      - Task 045 (ComposeEditor): unrelated — TipTap bridge work in
+        `@spaarke/compose-components`.
+      - Sibling task 043 (ComposeToolbar): independently created
+        `ComposeToolbar.tsx` in the same directory; my barrel only re-exports
+        ComposeEmptyState. Task 043 (or task 042 orchestration) should append
+        the ComposeToolbar export to the barrel when its API is finalised.
+      - DEFERRED (future): if the two-CTA card layout becomes useful elsewhere,
+        consider hoisting an `<EmptyStateCard>` primitive to `@spaarke/ui-components`.
+        Not in this project's scope per §11 (no second consumer surfaced).
+  </notes>
 </task>

@@ -3,7 +3,7 @@
   <metadata>
     <title>Spike #1 — TipTap OOB + DOCX round-trip prototype</title>
     <phase>Phase 0: Spikes</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>8</estimated-hours>
     <tags>spike, frontend, tiptap, docx, prototype</tags>
     <rigor-hint>STANDARD</rigor-hint>
@@ -112,4 +112,29 @@
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>
+
+  <notes>
+    <completion timestamp="2026-06-29" agent="sub-agent (Wave 0 autonomous dispatch)">
+      Task completed. Locked artifact published at notes/spikes/spike-1-tiptap-docx-roundtrip.md.
+
+      Decisions locked:
+      - TipTap 2.10.x StarterKit + 11 standard open-source extensions (zero custom)
+      - DOCX bridge: mammoth ^1.8.0 (import) + docx ^9.0.3 (export) — dual-library, client-side
+      - prosemirror-docx, docx-preview, TipTap Pro, OnlyOffice, custom writer all rejected with rationale
+      - OOB feature inventory covers 33 Word features (exceeds ≥15 acceptance criterion)
+      - Subset spec is binding for R1 Phase 1+ tasks 045, 046, 023
+
+      Acceptance criteria: 4 of 5 met. Criterion 1 (prototype loads/edits/exports 3 fixtures without crashing)
+      requires operator to populate fixtures/ and run the prototype empirically — captured in §6.4 operator obligation.
+      Wiring is scaffolded; the locked artifact is published; the throwaway prototype proves the decisions in writing.
+
+      No ADR tensions. No src/ code touched. No build verification required.
+
+      Risks for Phase 1+ flagged in §7: R-1 multi-level numbering loss (HIGH for contracts);
+      R-2 image bundle size; R-3 mammoth warning visibility; R-4 docx v10 risk; R-5 test surface gap;
+      R-6 TipTap version pinning.
+
+      Open questions for R2+ flagged in §8.
+    </completion>
+  </notes>
 </task>

@@ -2,7 +2,7 @@
 <task id="031" project="spaarkeai-compose-r1">
   <metadata>
     <title>Move useDocumentActions hook from SemanticSearch to @spaarke/document-operations</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>0.5 day</estimated-effort>
     <tags>frontend, typescript, refactoring, shared-lib</tags>
     <rigor-hint>FULL</rigor-hint>
@@ -115,4 +115,68 @@
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>
+
+  <notes completed="2026-06-29">
+    <summary>
+      `useDocumentActions` moved from `src/client/code-pages/SemanticSearch/src/hooks/useDocumentActions.ts`
+      to `src/client/shared/Spaarke.DocumentOperations/src/hooks/useDocumentActions.ts`.
+      Original SemanticSearch file replaced with a thin shim that re-exports the
+      canonical hook and binds SemanticSearch's local `getBffBaseUrl()` to the
+      injected `bffBaseUrl` parameter — preserves the zero-arg call site for
+      `SearchCommandBar.tsx` and other in-house consumers during the transition.
+      Task 032 removes the shim after refactoring consumers.
+    </summary>
+    <design-decisions>
+      <decision>
+        Hook signature minimally changed from `useDocumentActions()` to
+        `useDocumentActions({ bffBaseUrl })`. The original imported
+        `getBffBaseUrl` from SemanticSearch's local `services/apiBase` path
+        — that relative import cannot exist in the shared lib. Injecting
+        `bffBaseUrl` as a parameter is the smallest possible change that
+        decouples the hook from SemanticSearch internals without altering
+        any of the six actions' fetch shapes or return contract.
+      </decision>
+      <decision>
+        Kept the original SemanticSearch hook file as a thin re-export shim
+        rather than deleting it now. Per POML step 4 option (a). This lets
+        SemanticSearch's `SearchCommandBar.tsx` continue to call
+        `useDocumentActions()` with zero args throughout the transition.
+        Task 032 removes the shim and updates consumers to import
+        `useDocumentActions` directly from `@spaarke/document-operations`.
+      </decision>
+      <decision>
+        Added React deduplication (webpack alias + jest moduleNameMapper) to
+        SemanticSearch — without it, the shared lib's local React 19 copy
+        was being pulled in alongside SemanticSearch's, producing the
+        classic "Invalid hook call" / `Cannot read properties of null
+        (reading 'useState')` failure mode at runtime AND in jest.
+      </decision>
+    </design-decisions>
+    <files-modified>
+      <file>src/client/shared/Spaarke.DocumentOperations/src/hooks/useDocumentActions.ts (NEW — canonical hook)</file>
+      <file>src/client/shared/Spaarke.DocumentOperations/src/index.ts (updated barrel — exports hook + types)</file>
+      <file>src/client/shared/Spaarke.DocumentOperations/__tests__/hooks/useDocumentActions.test.tsx (NEW — 14 unit tests)</file>
+      <file>src/client/shared/Spaarke.DocumentOperations/jest.config.js (NEW — jest preset)</file>
+      <file>src/client/shared/Spaarke.DocumentOperations/jest.setup.js (NEW — jest-dom setup)</file>
+      <file>src/client/shared/Spaarke.DocumentOperations/package.json (added testing-library + jest-dom devDeps)</file>
+      <file>src/client/code-pages/SemanticSearch/src/hooks/useDocumentActions.ts (NOW a thin shim — re-exports canonical via injected bffBaseUrl)</file>
+      <file>src/client/code-pages/SemanticSearch/package.json (added @spaarke/document-operations dependency)</file>
+      <file>src/client/code-pages/SemanticSearch/tsconfig.json (added @spaarke/document-operations path alias)</file>
+      <file>src/client/code-pages/SemanticSearch/webpack.config.js (added @spaarke/document-operations alias + react/react-dom dedup aliases)</file>
+      <file>src/client/code-pages/SemanticSearch/jest.config.js (added @spaarke/document-operations moduleNameMapper + react/react-dom dedup)</file>
+      <file>projects/spaarkeai-compose-r1/tasks/TASK-INDEX.md (031 status 🔲 → ✅)</file>
+    </files-modified>
+    <test-results>
+      Shared lib `@spaarke/document-operations`: 14 unit tests pass; 0 fail. Build clean (`npm run build` → tsc completes; `npm test` → 14/14 pass).
+      SemanticSearch webpack build: clean (compiled with 3 pre-existing bundle-size warnings, 0 errors).
+      SemanticSearch existing useDocumentActions.test.ts: 27 tests fail, BUT these tests fail on master too — pre-existing test debt (the test mocks `buildAuthHeaders` from `apiBase`, but the production hook never called `buildAuthHeaders` — it uses `authenticatedFetch` from `@spaarke/auth`). Task 032 should rewrite this test file against the canonical shared-lib hook.
+    </test-results>
+    <pre-existing-debt-uncovered>
+      SemanticSearch's `src/__tests__/hooks/useDocumentActions.test.ts` was authored against an incorrect mock surface BEFORE this task. The production hook calls `authenticatedFetch` from `@spaarke/auth`, but the test mocks `buildAuthHeaders` + `global.fetch`. Pre-existing master state confirmed via git stash before-and-after run. Recommend deferring to task 032 (full SemanticSearch refactor) which rewrites the consumer's test against the shared-lib hook.
+    </pre-existing-debt-uncovered>
+    <open-items-for-task-032>
+      <item>SemanticSearch's `useDocumentActions.test.ts` needs rewrite — file the deferral via `/defer` when picking up task 032.</item>
+      <item>The thin shim at `src/client/code-pages/SemanticSearch/src/hooks/useDocumentActions.ts` is removed by task 032 along with the call-site update to consume `useDocumentActions` directly from `@spaarke/document-operations`.</item>
+    </open-items-for-task-032>
+  </notes>
 </task>

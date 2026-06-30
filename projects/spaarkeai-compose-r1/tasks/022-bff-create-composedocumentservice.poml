@@ -3,7 +3,7 @@
   <metadata>
     <title>BFF — Create ComposeDocumentService (SPE plumbing via Graph)</title>
     <phase>Phase 2: BFF Endpoints + Services</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <tags>bff-api, backend, services</tags>
     <rigor-hint>FULL</rigor-hint>

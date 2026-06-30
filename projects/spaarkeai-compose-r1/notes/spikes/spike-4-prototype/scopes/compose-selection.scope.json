@@ -1,0 +1,88 @@
+{
+  "$schema": "https://spaarke.com/schemas/jps-scope/v1",
+  "$version": 1,
+  "scopeCode": "compose-selection",
+  "scopeName": "Compose Selection",
+  "description": "Selected text in a Compose-hosted document. Input contract for playbook actions that operate on a user-selected span (e.g., Explain clause, Replace with standard, Compare-to-playbook, Draft alternative). All AI actions in Compose operating on a selection consume this scope.",
+  "appliesTo": ["compose-editor"],
+  "inputs": {
+    "fields": [
+      {
+        "name": "selectionText",
+        "type": "string",
+        "description": "The exact text the user has selected in the Compose editor. UTF-8 plain text extracted from TipTap; rich-formatting metadata is stripped before sending. Bounded to 16,000 characters at the BFF input filter (CHAT-ATTACHMENT-POLICY total-text cap class). Empty selection = the playbook action is invalid; surface a validation error pre-dispatch.",
+        "required": true,
+        "maxLength": 16000
+      },
+      {
+        "name": "selectionAnchorStart",
+        "type": "number",
+        "description": "Zero-based character offset of the selection start within the TipTap document. Used by R2 annotation re-anchoring on return-from-Word. Stable within a single editing session; meaningless across sessions unless paired with a document version etag.",
+        "required": true
+      },
+      {
+        "name": "selectionAnchorEnd",
+        "type": "number",
+        "description": "Zero-based character offset of the selection end (exclusive). MUST satisfy selectionAnchorEnd > selectionAnchorStart.",
+        "required": true
+      },
+      {
+        "name": "documentSpeId",
+        "type": "string",
+        "description": "SharePoint Embedded drive-item id of the open document. The session<>document binding key. Always present (Compose binding rule: every document is in SPE).",
+        "required": true
+      },
+      {
+        "name": "documentVersionEtag",
+        "type": "string",
+        "description": "SPE driveItem etag at the moment of selection. Lets the playbook detect that the document changed mid-flight and reject stale-selection invocations. Optional; if absent the playbook proceeds without staleness verification.",
+        "required": false
+      },
+      {
+        "name": "documentRecordId",
+        "type": "string",
+        "description": "sprk_document GUID when the document has been promoted (post-first-Save). Null for ephemeral pre-Save docs (Path B). When present, enables matter-binding lookups + audit trail joins.",
+        "required": false,
+        "format": "uuid"
+      },
+      {
+        "name": "matterId",
+        "type": "string",
+        "description": "sprk_matter GUID when the document is matter-bound. Null when the document is unbound or pre-Save. When present, enables matter-scoped knowledge retrieval (precedent, prior negotiations, matter playbook entries).",
+        "required": false,
+        "format": "uuid"
+      },
+      {
+        "name": "sessionId",
+        "type": "string",
+        "description": "ChatSession id (Redis/Cosmos/Dataverse three-tier persistence key). Lets the playbook write annotations / derived insights back to session memory for the R2 'return-from-Word re-anchoring' workflow.",
+        "required": true
+      },
+      {
+        "name": "tenantId",
+        "type": "string",
+        "description": "Azure AD tenant GUID. ADR-015 Tier 3 isolation key; inherited from PlaybookInvocationContext.TenantId.",
+        "required": true,
+        "format": "uuid"
+      }
+    ],
+    "totalCharCap": 16500,
+    "rationale": "16K selection + ~500 chars for identifiers + etag stays well under the chat-text caps (CHAT-ATTACHMENT-POLICY) and within the typical playbook prompt budget."
+  },
+  "outputs": {
+    "expected": "Playbook-shape: terminal-node text + structured fields per the invoked action's JPS output schema. This scope does not constrain output — the action defines its own output fields. The session-memory write contract (writing back to ChatSession annotations) is the action's responsibility per the playbook node configJson."
+  },
+  "datagovernance": {
+    "containsUserContent": true,
+    "containsUserContentField": "selectionText",
+    "doNotLog": ["selectionText"],
+    "loggableFields": ["documentSpeId", "documentRecordId", "matterId", "sessionId", "tenantId", "selectionAnchorStart", "selectionAnchorEnd"]
+  },
+  "metadata": {
+    "author": "spaarkeai-compose-r1 spike-4",
+    "createdAt": "2026-06-29T00:00:00Z",
+    "tags": ["compose", "selection", "input-scope", "r1"],
+    "relatedAdrs": ["ADR-013", "ADR-015"],
+    "consumedBy": "R2 actions (Explain clause, Replace with standard, Compare-to-playbook, Draft alternative). R1 does NOT ship any action consuming this scope — schema is locked for R2 to consume without retrofit."
+  }
+}

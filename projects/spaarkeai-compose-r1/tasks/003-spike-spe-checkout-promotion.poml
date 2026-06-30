@@ -3,7 +3,7 @@
   <metadata>
     <title>Spike #3 — SPE check-out/check-in + Document promotion-on-Save</title>
     <phase>Phase 0: Spikes</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <tags>spike, backend, bff-api, spe, prototype</tags>
     <rigor-hint>STANDARD</rigor-hint>
@@ -112,4 +112,21 @@
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>
+
+  <notes>
+    Completed 2026-06-29 via Wave 0 autonomous parallel dispatch. Locked artifact: `projects/spaarkeai-compose-r1/notes/spikes/spike-3-spe-checkout-promotion.md`.
+
+    KEY FINDINGS:
+    1. CLAUDE.md §11 reuse pivot: `Services/DocumentCheckoutService.cs` (~1170 LOC) already implements check-out/check-in/discard/status with same-user-idempotent + cross-user-409 semantics that match design.md §14 row 4. R1 extends this service (~150 LOC additive) instead of building a parallel SPE-native wrapper (~600 LOC).
+    2. Heartbeat interval locked: 3 min sliding, sweeper at 2 min, stale threshold 15 min → max orphan lifetime ≤17 min.
+    3. Save-promotion locked: probe-then-create with race-aware retry; depends on Dataverse Alternate Key on `sprk_documents(sprk_graphitemid)` (open item OI-1).
+    4. BFF endpoint shape locked: 2 NEW (promote, heartbeat) + 4 REUSED (existing checkout/checkin/discard/status). Down from 7 implied in design.md §12.
+    5. NO prototype code written — STANDARD rigor with research/decision-artifact output (production code lives in Phase 5).
+
+    ADR TENSION SURFACED (§6 of report): design.md §14 row 4 says "SPE-native check-out"; spike concludes Dataverse-side via existing service is the better R1 choice (6-2 on technical merits). Path A (project-scoped exception) requested at post-Wave-0 operator review gate.
+
+    5 OPEN ITEMS for Phase 1 / Phase 5 / Phase 6: OI-1 Alternate Key on sprk_graphitemid; OI-2 new sprk_lastheartbeatutc field; OI-3 operator ADR Tension resolution; OI-4 empirical rate-limit smoke test; OI-5 modifiedon-on-heartbeat decision.
+
+    Phase 5 LOC estimate revised: ~150 LOC (was ~600 LOC pre-spike). Task 050 becomes frontend-only; 051 unchanged; 052 expanded to 3 sub-components.
+  </notes>
 </task>

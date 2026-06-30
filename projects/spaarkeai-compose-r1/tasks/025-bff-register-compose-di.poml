@@ -3,7 +3,7 @@
   <metadata>
     <title>BFF — Register Compose services + map endpoint group in Program.cs</title>
     <phase>Phase 2: BFF Endpoints + Services</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <tags>bff-api, backend, di, config</tags>
     <rigor-hint>FULL</rigor-hint>
@@ -98,4 +98,39 @@
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>
+
+  <notes>
+    <completion-summary date="2026-06-29">
+      <files-modified>
+        <file path="src/server/api/Sprk.Bff.Api/Infrastructure/DI/ComposeModule.cs" action="created">
+          New focused feature-module extension. Registers IComposeService, IComposeDocumentService,
+          IComposeSessionService as Scoped, UNCONDITIONALLY. Convention matches OfficeModule precedent
+          (Infrastructure/DI/, not Infrastructure/Modules/ — POML wording was flexible per "or similar
+          location matching existing module convention").
+        </file>
+        <file path="src/server/api/Sprk.Bff.Api/Program.cs" action="modified">
+          +8 lines: builder.Services.AddComposeModule() inserted after AddAgentModule(). UNCONDITIONAL.
+          Comment cites bff-extensions.md §F.1 + RB-T028-03/04/05/06 + R1 no-feature-gates.
+        </file>
+        <file path="src/server/api/Sprk.Bff.Api/Infrastructure/DI/EndpointMappingExtensions.cs" action="modified">
+          +7 lines: app.MapComposeEndpoints() inserted in MapDomainEndpoints() after
+          MapDocumentOperationsEndpoints() per W3-024 recommendation. UNCONDITIONAL. Using directive
+          for Sprk.Bff.Api.Api namespace was already present (line 2).
+        </file>
+      </files-modified>
+      <build status="success" errors="0" warnings="18" delta-warnings="0-vs-baseline" />
+      <publish-size compressed-mb="45.39" delta-mb="≈0 (DI wiring only; no packages added)" baseline-mb="48.42" ceiling-mb="60" />
+      <test-status>
+        Compose-filtered test run: 84 passed / 0 failed / 0 skipped (W2-023 ComposeSessionService unit tests + W3-024 ComposeEndpoints integration-shaped tests; all WebApplicationFactory-based — exercise full DI graph).
+      </test-status>
+      <adr-compliance>
+        ADR-001 ✅ · ADR-008 ✅ · ADR-010 ✅ Scoped focused module · ADR-013 ✅ static-scan clean (no AI internals in Compose ctors) · ADR-019 ✅ · ADR-028 ✅ · ADR-032 N/A no feature gates · ADR-038 ✅ existing test coverage maintained. bff-extensions.md §F.1 symmetric (both DI + endpoints unconditional). No ADR tensions surfaced.
+      </adr-compliance>
+      <cve status="skipped" reason="No new package references added — pure code change. CVE check is a §10 #5 obligation for package additions only." />
+      <open-items>
+        - Task 027 (integration tests) — will verify full /api/compose/* surface end-to-end with the DI wired
+        - Task 060 (smoke test) — Compose vertical-slice readiness check now unblocked from BFF DI standpoint
+      </open-items>
+    </completion-summary>
+  </notes>
 </task>

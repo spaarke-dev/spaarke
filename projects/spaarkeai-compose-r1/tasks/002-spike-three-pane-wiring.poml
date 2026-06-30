@@ -3,7 +3,7 @@
   <metadata>
     <title>Spike #2 — Three-pane coordination wiring prototype</title>
     <phase>Phase 0: Spikes</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <tags>spike, frontend, typescript, prototype</tags>
     <rigor-hint>STANDARD</rigor-hint>
@@ -111,4 +111,43 @@
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>
+
+  <notes>
+    Completed 2026-06-29 by Wave 0 autonomous sub-agent. STANDARD rigor.
+
+    Locked artifact: projects/spaarkeai-compose-r1/notes/spikes/spike-2-three-pane-wiring.md
+    Contracts:       projects/spaarkeai-compose-r1/notes/spikes/spike-2-prototype/contracts.ts
+    Wiring ref:      projects/spaarkeai-compose-r1/notes/spikes/spike-2-prototype/stub-wiring.ts
+
+    Six contracts locked (additive on existing four PaneEventBus channels per ADR-030):
+      Flow 1 (WS→Ctx) — ComposeWorkspaceToContextFlow      on `context`      [R1-wired]
+      Flow 2 (WS→As)  — ComposeWorkspaceToAssistantFlow    on `conversation` [R1-wired]
+      Flow 3 (Ctx→WS) — ComposeContextToWorkspaceFlow      on `workspace`    [R1-stub]
+      Flow 4 (Ctx→As) — ComposeContextToAssistantFlow      on `conversation` [R1-stub]
+      Flow 5 (As→WS)  — ComposeAssistantToWorkspaceFlow    on `workspace`    [R1-wired (no-insert)]
+      Flow 6 (As→Ctx) — ComposeAssistantToContextFlow      on `context`      [R1-stub]
+
+    ADR Tensions: NONE. Path C (pivot to comply) was default for all design decisions.
+
+    HostContext non-extension (design.md §14 row 2): VERIFIED — six-row audit table in spike report §6.
+
+    ADR-013 facade compliance: VERIFIED — contracts reference AI only via opaque IDs + JPS scope names.
+
+    ADR-015 Tier 3 privacy: VERIFIED — three user-content fields (selectionText, contentHtml, insightText) annotated; mirror existing workspace.user_selection.selectionText privacy contract.
+
+    Open items requiring operator decision (none blocking Phase 1/2 — block Phase 4 task 041 promotion):
+      1. contentHtml format (html vs ProseMirror-JSON) — pending Spike #1 outcome
+      2. Promotion target (separate file vs additive on PaneEventTypes.ts) — Phase 4 design review
+      3. Flow 2 min-selection-size threshold — Phase 4 task 042 owner
+      4. Flow 5 manual-confirm UX shape (in-editor hover vs Assistant pane button) — Phase 4 task 042 owner
+      5. ComposeContextToWorkspaceFlow.insertAt semantics — Phase 4 R2
+      6. Flow 6 insightKind closed vs extensible — R2 design
+
+    No production code modified. No tests added. No .claude/ files touched.
+
+    Main session TODO (per autonomous parallel mode):
+      - Update TASK-INDEX.md row 002 status 🔲 → ✅
+      - Update current-task.md Wave Tracker (W0 agent log)
+      - Consume locked artifact at the post-Wave-0 operator review gate
+  </notes>
 </task>

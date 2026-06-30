@@ -3,7 +3,7 @@
   <metadata>
     <title>BFF — Create ComposeSessionService (ChatSession DocumentId binding)</title>
     <phase>Phase 2: BFF Endpoints + Services</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <tags>bff-api, backend, services</tags>
     <rigor-hint>FULL</rigor-hint>
@@ -96,4 +96,54 @@
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>
+
+  <notes>
+    <completion date="2026-06-29" rigor="FULL">
+      <summary>
+        ComposeSessionService implemented as a thin binding seam over the existing
+        ChatSessionManager three-tier persistence pipeline (Redis hot → Cosmos warm
+        → Dataverse cold). Zero new session entity, zero new Redis keys, zero new
+        Cosmos partitions, zero new Dataverse columns — pure delegation + two
+        idempotency short-circuits on RebindToDocumentIdAsync (caller-asserted
+        equality + stored-already-at-target). Out-of-order Save races logged at
+        Warning with new-value-wins semantics.
+      </summary>
+      <files-created>
+        <file>src/server/api/Sprk.Bff.Api/Services/Compose/IComposeSessionService.cs</file>
+        <file>src/server/api/Sprk.Bff.Api/Services/Compose/ComposeSessionService.cs</file>
+        <file>tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ComposeSessionServiceTests.cs (9 tests, all passing)</file>
+      </files-created>
+      <chat-session-reuse>
+        <consumed>Sprk.Bff.Api.Services.Ai.Chat.ChatSessionManager (Scoped; unconditional per AnalysisServicesModule.cs:275 line B4)</consumed>
+        <reused-methods>CreateSessionAsync, GetSessionAsync, UpdateSessionCacheAsync (internal)</reused-methods>
+        <model>Sprk.Bff.Api.Models.Ai.Chat.ChatSession (immutable record; record `with` expression mirrors ChatHistoryManager.AddMessageAsync pattern)</model>
+        <persistence-tiers>Redis (tenant:{tenantId}:session:{sessionId}:v1 — FR-05) + Cosmos write-through (fire-and-forget, D-06) + Dataverse sprk_aichatsummary (cold audit) — all unchanged.</persistence-tiers>
+      </chat-session-reuse>
+      <documentid-binding>
+        <path-b>DocumentId = SPE drive-item id (ephemeral); HostContext=null (not extended in R1).</path-b>
+        <path-a>DocumentId = sprk_documentid (post-promotion); RebindToDocumentIdAsync idempotent on (1) currentDocumentId==newDocumentId, (2) session.DocumentId==newDocumentId.</path-a>
+        <out-of-order-race>caller-asserted current ≠ stored current → log Warning + proceed (new-value-wins).</out-of-order-race>
+      </documentid-binding>
+      <build-status>
+        <bff-build>Build succeeded — 0 errors, 18 warnings (all pre-existing).</bff-build>
+        <test-build>Build succeeded — 0 errors, 19 warnings (1 added is xunit style, pre-existing).</test-build>
+        <test-run>Passed! Failed: 0, Passed: 9, Skipped: 0 (19 ms).</test-run>
+      </build-status>
+      <publish-size>
+        <baseline>47.6 MB compressed (W1b post-publish; from existing deploy/api-publish.zip).</baseline>
+        <after>48.19 MB compressed (post-task-023 publish to deploy/api-publish-task023/).</after>
+        <delta>+0.59 MB (includes ALL W2 source — sibling 021 + 022 + 023). My isolated contribution is 2 files (~28 KB source).</delta>
+        <nfr-06>Well under NFR-06 ceiling of +2 MB; under absolute cap of 60 MB.</nfr-06>
+      </publish-size>
+      <cve>
+        <new>None introduced.</new>
+        <pre-existing>Microsoft.Kiota.Abstractions 1.21.2 HIGH (chain-locked by Microsoft.Graph 5.99.0 per BFF CLAUDE.md package management guidance).</pre-existing>
+      </cve>
+      <adr-tensions>None. ADR-013 (refined) compliance verified: only ChatSessionManager + ILogger injected. ADR-015 Tier 3 inherited via underlying ChatSession infra. ADR-032 N/A (ChatSessionManager unconditionally registered).</adr-tensions>
+      <open-items>
+        <item>Task 024 endpoint wiring will surface the interface to HTTP — verify call-site alignment (sibling 021 ComposeService.cs already consumes IComposeSessionService at lines 167, 320, 380 — confirmed compatible).</item>
+        <item>Task 026 (separate POML) is the formal "unit tests for 3 Compose services" task — these 9 tests are CLAUDE.md §10 #6 test-update-obligation deliverable; task 026 may augment.</item>
+      </open-items>
+    </completion>
+  </notes>
 </task>

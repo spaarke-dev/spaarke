@@ -3,7 +3,7 @@
   <metadata>
     <title>Capture automated integration test for compose-summarize roundtrip</title>
     <phase>Phase 6: E2E Smoke Test</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <tags>testing, integration-test</tags>
     <rigor-hint>STANDARD</rigor-hint>
@@ -80,6 +80,17 @@
 
   <notes>
     Per CLAUDE.md §8 TEST-MODIFYING override row: this task triggers code-review + adr-check at Step 9.5 UNCONDITIONALLY because tags include `testing` + `integration-test`. The override exists precisely so that test additions don't sneak banned ADR-038 patterns past the quality gates. If `compose-summarize` does NOT yet have a stable response shape at execution time, write the test against the locked response contract from Spike #4 and add a TODO comment referencing the spike output.
+
+    **Completion 2026-06-29 (W8 sub-agent)**:
+    - **CLAUDE.md §6.5 Path C (pivot to comply)** invoked. Per W3-027 (PR #514 + related), the W3-027 ComposeEndpointsContractTests.cs file already covers the POML §goal verbatim via `PostDispatchAction_Authenticated_WithRoutedPlaybook_Returns200_ViaPublicContractsFacadeOnly` (200 happy-path, both facade calls verified Times.Once, KEEP path `endpoint-contract`, zero banned patterns). Adding a duplicate happy-path test = B6 mirror antipattern (ADR-038 §7).
+    - **Resolution**: Closed the response-shape coverage gap. W3-027 asserted 3 fields of the 10-field locked ComposeActionResponse contract (Spike #4 §6); the new test pins ALL 10 fields against a fully-populated PlaybookInvocationResult, including StructuredData, DurationMs, CitationCount, ErrorMessage, ErrorCode, CorrelationId. Test name: `PostDispatchAction_WithComposeSummarizeRoundTrip_ReturnsLockedResponseShape_PerSpike4Section6`.
+    - **Location**: `tests/integration/contract/Api/Compose/ComposeEndpointsContractTests.cs` (KEEP path `endpoint-contract`; same fixture as W3-027).
+    - **Lines added**: ~165 LOC (1 test + extensive Path-C rationale comments per CLAUDE.md §6.5 transparency).
+    - **Build**: dotnet build ✅ 0 errors, 19 warnings (= pre-existing baseline).
+    - **Test run**: `dotnet test --filter Compose` 129/129 ✅ (was 128 after W7; +1 round-trip response-shape contract test). New test in 1s with 0 warnings.
+    - **Banned-pattern audit**: grep for `Mock<HttpMessageHandler>` returns only 2 negation comments (both pre-existing). No DI-registration tests, no ctor null-check tests, no mirror tests, no setup-dwarf, no language-feature redundancy.
+    - **ADR-013 boundary**: dispatch handler injects only `IConsumerRoutingService` + `IInvokePlaybookAi` (PublicContracts facade). Test exercises both Mock<>.Verify(... Times.Once) — anchors the boundary at the live HTTP level.
+    - **ADR-015**: mock playbook response uses placeholder text ("Document Summary: this is the round-trip summary from the playbook."), no user content / PII.
   </notes>
 
   <execution>

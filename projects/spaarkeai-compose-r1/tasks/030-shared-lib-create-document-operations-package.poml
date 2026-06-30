@@ -2,7 +2,7 @@
 <task id="030" project="spaarkeai-compose-r1">
   <metadata>
     <title>Scaffold src/client/shared/Spaarke.DocumentOperations/ package</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>0.5 day</estimated-effort>
     <tags>frontend, typescript, refactoring, shared-lib</tags>
     <rigor-hint>FULL</rigor-hint>
@@ -123,4 +123,53 @@
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
   </execution>
+
+  <notes>
+    <completion timestamp="2026-06-29">
+      Completed by Wave 1b autonomous parallel dispatch.
+
+      Files created:
+        - src/client/shared/Spaarke.DocumentOperations/package.json (@spaarke/document-operations v0.1.0)
+        - src/client/shared/Spaarke.DocumentOperations/tsconfig.json
+        - src/client/shared/Spaarke.DocumentOperations/src/index.ts (empty barrel with `export {}`)
+        - src/client/shared/Spaarke.DocumentOperations/README.md
+
+      Files modified:
+        - scripts/Build-AllClientComponents.ps1 — added Spaarke.DocumentOperations to $SharedLibs array
+          after Spaarke.AI.Outputs (dependency order: depends on Spaarke.Auth which is built earlier).
+
+      Package conventions: mirrors @spaarke/ai-widgets shape — React 19 + ReactDOM 19 peer-deps,
+      `@spaarke/auth` as file: dependency (the future hook needs authenticatedFetch + buildBffApiUrl),
+      strict tsconfig + paths for `@spaarke/auth`, scripts (build/typecheck/lint/test), eslint + jest
+      devDeps. The build script's discovery is hardcoded (not glob), so explicit registration was
+      mandatory per Step 3 fallback.
+
+      Build verification:
+        - Standalone: `cd Spaarke.DocumentOperations && npm install --legacy-peer-deps && npm run build`
+          → 419 packages installed in 27s; tsc clean (0 errors, 0 warnings, dist/index.{js,d.ts,.map} emitted).
+        - Orchestrator: `pwsh -File scripts/Build-AllClientComponents.ps1 -Component Spaarke.DocumentOperations`
+          → PASS in 1.4s, "All builds completed successfully."
+
+      No existing consumers broken — empty barrel has no runtime exports; nothing imports the package yet.
+
+      Open items for follow-up tasks (031, 032, 033):
+        - Task 031: Move `useDocumentActions` hook from src/client/code-pages/SemanticSearch/src/hooks/
+          into this package; add jest.config + tests; update barrel to export the hook + result type.
+          The hook source already uses `@spaarke/auth` (`authenticatedFetch`) correctly — no rewrite,
+          just relocation + update of one consumer-side import path in SearchCommandBar.tsx.
+        - Task 032: Refactor SemanticSearch to consume from `@spaarke/document-operations` (verify
+          SemanticSearch tests green). MUST land BEFORE Compose adopts (per project CLAUDE.md MUST rule).
+        - Task 033: Wire Compose to consume the hook for Open-in-Word handoff (FR-13).
+        - All three downstream tasks: when added, the consumer's tsconfig needs the `@spaarke/document-operations`
+          paths mapping similar to how AI.Widgets's tsconfig declares `@spaarke/ui-components`.
+
+      ADR tensions encountered: none.
+
+      Manual quality gates (sub-agent — no /code-review or /adr-check skill access):
+        - Code review: package.json + tsconfig + barrel + README all follow conventions; build script
+          edit is additive with audit comment citing project + date.
+        - ADR check: ADR-012 (shared lib layering) ✓, ADR-022 (React 19 platform) ✓, ADR-013 refined
+          (BFF-only data path retained for future hook) ✓, ADR-021 (Fluent v9) N/A, ADR-038 N/A in skeleton.
+    </completion>
+  </notes>
 </task>
