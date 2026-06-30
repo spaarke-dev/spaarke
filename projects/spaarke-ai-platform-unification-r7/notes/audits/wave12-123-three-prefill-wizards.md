@@ -630,3 +630,15 @@ None new. T145 UAT covers both Matter + WA together per §10.5 design.
 ---
 
 *End of audit 123. Resolution §10 + §10.10 + §11 appended 2026-06-30 by T143 (diagnostic) + main session (fix application) + T144 (WA inheritance verification). T142 §8.5 added by sibling task earlier the same day.*
+
+---
+
+## 12. T145 UAT signoff (appended 2026-06-30)
+
+**Code-path + Dataverse-state status (all 3 wizards)**: ✅ PASS-CANDIDATE.
+
+- **Matter** (playbook `2d660cad-...`): 2-node post-fix (Start + AI Analysis → ACT-023). EntityNameValidator node (was `c3c5226d-...`) absent. AI Analysis node `444b06d3-...` configJson is clean — `systemPrompt` override key is **ABSENT** (clobbering bug §10.3 resolved).
+- **Project** (playbook `fc343e9c-...`): 1-node with `sprk_actionid` re-linked to ACT-024 (`1e838114-...`). Pre-fix NULL is fixed.
+- **Work Assignment**: No own playbook. Verified via `EnterInfoStep.tsx:175` hardcoded literal — calls `/api/workspace/matters/pre-fill`. Inherits Matter fix by construction.
+
+**Operator browser UAT**: PENDING — checklists at `notes/handoffs/wave12-3-uat-signoff.md` §4.3 (Matter), §4.4 (Project), §4.5 (WA), §4.6 (AC11 schema editing). AC10/AC11/AC12 will move from PENDING-OPERATOR to PASS on operator signoff.

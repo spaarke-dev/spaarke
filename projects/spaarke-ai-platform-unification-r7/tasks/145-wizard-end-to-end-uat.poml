@@ -12,6 +12,8 @@
     <parallel-reason>gate task; depends on T140-T144 complete</parallel-reason>
     <tags>wizard, uat, gate, wave12</tags>
     <estimated-effort>0.5 day (mostly operator-time)</estimated-effort>
+    <status>operator-pending</status>
+    <status-note>Agent-side prep + smoke complete 2026-06-30. Awaiting operator browser UAT signoff per `notes/handoffs/wave12-3-uat-signoff.md` §6.</status-note>
   </metadata>
 
   <prompt>
@@ -86,6 +88,44 @@ All 5 wizards confirmed working end-to-end by operator. All AC8-AC12 (wave12 pla
     - [ ] AC11 (Action output schema editing preserved): operator-confirmed
     - [ ] AC12 (all 5 wizards): operator-verified
     - [ ] Defects (if any) captured as ISS-NNN
-    - [ ] wave12-3-uat-signoff.md exists
+    - [x] wave12-3-uat-signoff.md exists
   </acceptance-criteria>
+
+  <notes>
+T145 closure 2026-06-30 (task-execute STANDARD rigor, sandboxed-agent prep mode):
+
+Sandboxed agent has NO browser + NO OBO bearer; cannot run end-to-end click-through UAT. Per task POML constraints (operator-driven; out-of-band activity), the agent's role is PREP + smoke verification.
+
+What was DONE this run:
+1. Verified all 5 prerequisite fixes landed on `work/spaarke-ai-platform-unification-r7`:
+   - T140 (b5e3aa82f): Wizard File Summary env-var set
+   - T141 (89977022b): Document Profile Save Profile node DELETEd
+   - T142 (79af4befd): Create Project FK re-linked to ACT-024
+   - T143 + main-session (df0dd01ae + 3cb239e5d + 5316cbe36): Matter EntityNameValidator DELETEd + systemPrompt override stripped
+   - T144 (558a6e594): WA inheritance verified
+   - T124-FIX-A (20bad1793): Wave-5 backfill-health doc-summary executortype 0→40 (sibling fix surfaced from T143 systemPrompt incident)
+
+2. Dataverse state verified via mcp__dataverse__read_query for all 4 playbooks (Summarize File, Document Profile, Matter, Project). Post-fix state matches each audit's expected good state. See `notes/handoffs/wave12-3-uat-signoff.md` §2.
+
+3. Code-path verified intact for AC11 (Action output schema → StructuredData → template substitution → consumer). See `notes/handoffs/wave12-3-uat-signoff.md` §3.
+
+4. Created `notes/handoffs/wave12-3-uat-signoff.md` with:
+   - Per-wizard fix landing ledger (commit SHAs)
+   - Dataverse state verification per playbook
+   - Code-path verification for AC11
+   - Operator UAT checklist with suggested test scenarios per wizard (§4.1-4.6)
+   - Operator signoff table (§6)
+   - Defect tracking instructions (§7)
+
+5. Appended T145 UAT signoff status section to all 3 audit notes (121, 122, 123) referencing the handoff doc.
+
+What is PENDING (operator-driven):
+- AC8/AC9/AC10/AC11/AC12 final PASS/FAIL — operator runs §4.1-4.6 in spaarkedev1 browser session.
+- If any AC fails, file as ISS-NNN per `/project-defer-issue-tracking` and gate Wave 12.5 wrap-up on resolution.
+
+Acceptance criteria status from this run:
+- AC8/AC9/AC10/AC11/AC12: PENDING-OPERATOR (all prerequisites + code/data verified PASS-CANDIDATE; operator confirms PASS at actual UAT)
+- Defects: 0 surfaced from code-path + Dataverse verification (no ISS-NNN filed)
+- wave12-3-uat-signoff.md exists: ✅
+  </notes>
 </task>

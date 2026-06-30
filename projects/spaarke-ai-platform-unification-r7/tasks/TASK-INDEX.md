@@ -256,7 +256,7 @@
 | 142 | ✅ | RESTORE Create Project — single Dataverse PATCH (sprk_actionid FK re-link per audit 123) | wizard, project, dataverse, data-fix, wave12 | yes | — |
 | 143 | ✅ | SMOKE Create Matter wizard — code-path verification (no browser smoke from sandbox); found 2 deterministic data-layer bugs (EntityNameValidator stub configJson + AI Analysis systemPrompt-override clobber); minimal fix recommended (data-only, operator must approve); see audit 123 §10; T144 inherits via Matter endpoint; 2026-06-30 | wizard, matter, smoke, wave12 | yes | — |
 | 144 | ✅ | VERIFY Create Work Assignment inherits Matter fix — code-path trace confirms WA AI prefill calls `/api/workspace/matters/pre-fill` (literal at `EnterInfoStep.tsx:175`); T143 fix (commit `3cb239e5d`) applies to WA by construction; record-copy prefill path is client-side OData unaffected; NO CODE CHANGE; end-to-end smoke deferred to T145 UAT; see audit 123 §11; 2026-06-30 | wizard, work-assignment, smoke, wave12 | no | 143 |
-| 145 | 🔲 | UAT — all 5 wizards end-to-end (Wave 12.3 gate) | wizard, uat, gate, wave12 | no | 140-144 |
+| 145 | ⏳ | UAT — all 5 wizards end-to-end (Wave 12.3 gate); agent-side prep + Dataverse smoke complete 2026-06-30; signoff doc at `notes/handoffs/wave12-3-uat-signoff.md`; AC8-AC12 PENDING-OPERATOR final browser UAT signoff | wizard, uat, gate, wave12 | no | 140-144 |
 
 ### Wave 12.4 — Assistant↔Workspace (READY TO EXECUTE — 5 POMLs generated 2026-06-30; PLUMBING-ONLY)
 

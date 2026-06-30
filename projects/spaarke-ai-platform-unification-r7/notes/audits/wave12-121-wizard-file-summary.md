@@ -364,3 +364,11 @@ Pre-seat `Workspace__SummarizePlaybookId` on every BFF environment in the deploy
 ---
 
 *End of audit 121. Disposition: RESTORE with 1-3 hour configuration-fix budget. Engine bug class: NONE. Wave 12.3 task 140 — RESOLVED via App Service env-var set; operator UAT in T145.*
+
+---
+
+## 12. T145 UAT signoff (appended 2026-06-30)
+
+**Code-path + Dataverse-state status**: ✅ PASS-CANDIDATE. Playbook `4a72f99c-...` confirmed 2-node clean (Start, AI Analysis → ACT-025). Env-var fallback path restored. App Service healthz green post-restart.
+
+**Operator browser UAT**: PENDING — checklist at `notes/handoffs/wave12-3-uat-signoff.md` §4.1. AC8 will move from PENDING-OPERATOR to PASS on operator signoff.

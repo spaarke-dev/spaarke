@@ -496,3 +496,11 @@ Per audit §7.2 (secondary, ~2-4hr separate concern), §10 ("Wave 12.3 implement
 ---
 
 *Resolution applied: 2026-06-30. Engine + Action contract intact; wizard data path restored; UI cosmetic explicitly deferred.*
+
+---
+
+## 14. T145 UAT signoff (appended 2026-06-30)
+
+**Code-path + Dataverse-state status**: ✅ PASS-CANDIDATE. Playbook `18cf3cc8-...` confirmed 3-node post-DELETE (Profile Document → Update Record → Index Document). `Save Profile` node (was `c9334fb7-...`) is absent. Update Record node 3 carries the 7-field PATCH config aligned with ACT-011 JPS.
+
+**Operator browser UAT**: PENDING — checklist at `notes/handoffs/wave12-3-uat-signoff.md` §4.2. AC9 will move from PENDING-OPERATOR to PASS on operator signoff.
