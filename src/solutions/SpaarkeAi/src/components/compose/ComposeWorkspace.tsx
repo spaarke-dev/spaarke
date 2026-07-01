@@ -443,6 +443,10 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         sprkDocumentId: payload.documentRecordId,
         etag: payload.eTag ?? null,
       });
+      // Clear the local dirty flag so the Save button disables until the
+      // next edit. ComposeEditor's internal dirtyRef also resets on the
+      // next load; here we mirror that for post-save.
+      setIsDirty(false);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       dispatch({ kind: 'saveFailed', errorMessage: `Save failed: ${message}` });
@@ -551,9 +555,12 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   // Editor-side callbacks
   // -------------------------------------------------------------------------
 
-  const handleDirtyChange = React.useCallback((_dirty: boolean): void => {
-    // Reducer doesn't track a separate dirty flag — status is source of truth.
-    // R2 may add a "Unsaved changes" indicator via this callback.
+  // Dirty flag is UI-only (drives the Save button's enabled/disabled state
+  // in ComposeToolbar). The reducer's status enum doesn't distinguish clean
+  // vs dirty inside `loaded`; a local flag is the least-invasive surface.
+  const [isDirty, setIsDirty] = React.useState<boolean>(false);
+  const handleDirtyChange = React.useCallback((dirty: boolean): void => {
+    setIsDirty(dirty);
   }, []);
 
   const handleImportWarnings = React.useCallback(
@@ -626,10 +633,28 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             success: boolean;
             textContent: string | null;
             durationMs: number;
+            errorCode?: string;
+            errorMessage?: string;
           };
+          // eslint-disable-next-line no-console
+          console.info('[ComposeWorkspace] compose-summarize response', {
+            runId: result.runId,
+            success: result.success,
+            hasText: typeof result.textContent === 'string' && result.textContent.length > 0,
+            textLength: result.textContent?.length ?? 0,
+            durationMs: result.durationMs,
+            errorCode: result.errorCode,
+            errorMessage: result.errorMessage,
+          });
           if (!result.success || !result.textContent) {
             setSummaryStatus('error');
-            setSummaryError('Summarize completed without a text result.');
+            const parts: string[] = [];
+            if (!result.success) parts.push('playbook returned success=false');
+            if (!result.textContent) parts.push('no text content');
+            if (result.errorMessage) parts.push(result.errorMessage);
+            if (result.errorCode) parts.push(`(code ${result.errorCode})`);
+            parts.push(`runId=${result.runId ?? 'unknown'}`);
+            setSummaryError(`Summarize completed without a text result: ${parts.join('; ')}`);
             return;
           }
           setSummaryStatus('ready');
@@ -720,6 +745,11 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
               bffBaseUrl={bffBaseUrl}
               disabled={state.status === 'saving'}
               onComposeSummarizeRequest={handleComposeSummarizeRequest}
+              onSaveRequested={() => {
+                void triggerSave();
+              }}
+              isDirty={isDirty}
+              isSaving={state.status === 'saving'}
             />
           </div>
 
