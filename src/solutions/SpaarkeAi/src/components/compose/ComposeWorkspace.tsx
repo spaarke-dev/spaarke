@@ -563,7 +563,17 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     []
   );
 
-  // Toolbar observer — log compose-summarize dispatches (Tier 1 safe).
+  // -------------------------------------------------------------------------
+  // Summarize dispatch (Path A modal has no ConversationPane listener, so
+  // Compose owns the BFF call directly). Fires POST /api/compose/action/
+  // compose-summarize and stores the result for banner rendering.
+  // -------------------------------------------------------------------------
+  const [summaryStatus, setSummaryStatus] = React.useState<
+    'idle' | 'in-flight' | 'ready' | 'error'
+  >('idle');
+  const [summaryText, setSummaryText] = React.useState<string | null>(null);
+  const [summaryError, setSummaryError] = React.useState<string | null>(null);
+
   const handleComposeSummarizeRequest = React.useCallback(
     (payload: ComposeSummarizeRequestEvent): void => {
       // eslint-disable-next-line no-console
@@ -572,9 +582,81 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         timestamp: payload.timestamp,
         documentId: payload.documentRef.documentId,
       });
+
+      if (!state.documentRef?.speDriveItemId || !bffBaseUrl || !tenantId) {
+        setSummaryStatus('error');
+        setSummaryError('Cannot summarize — document, BFF URL, or tenant missing.');
+        return;
+      }
+
+      setSummaryStatus('in-flight');
+      setSummaryText(null);
+      setSummaryError(null);
+
+      const url = `${bffBaseUrl}/api/compose/action/compose-summarize`;
+      const body = {
+        documentSpeId: state.documentRef.speDriveItemId,
+        tenantId,
+        sessionId: state.sessionId || undefined,
+        driveId: driveId || undefined,
+        documentRecordId: state.documentRef.sprkDocumentId || undefined,
+        documentName: state.documentRef.fileName || undefined,
+      };
+
+      void (async () => {
+        try {
+          const response = await authenticatedFetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          });
+          if (!response.ok) {
+            const detail =
+              response.status === 429
+                ? 'Rate limit exceeded — try again in a minute.'
+                : response.status === 503
+                  ? 'Summarization service temporarily unavailable.'
+                  : `Summarize failed (HTTP ${response.status}).`;
+            setSummaryStatus('error');
+            setSummaryError(detail);
+            return;
+          }
+          const result = (await response.json()) as {
+            runId: string;
+            success: boolean;
+            textContent: string | null;
+            durationMs: number;
+          };
+          if (!result.success || !result.textContent) {
+            setSummaryStatus('error');
+            setSummaryError('Summarize completed without a text result.');
+            return;
+          }
+          setSummaryStatus('ready');
+          setSummaryText(result.textContent);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          setSummaryStatus('error');
+          setSummaryError(`Summarize failed: ${message}`);
+        }
+      })();
     },
-    []
+    [
+      state.documentRef?.speDriveItemId,
+      state.documentRef?.sprkDocumentId,
+      state.documentRef?.fileName,
+      state.sessionId,
+      bffBaseUrl,
+      driveId,
+      tenantId,
+    ]
   );
+
+  const dismissSummary = React.useCallback((): void => {
+    setSummaryStatus('idle');
+    setSummaryText(null);
+    setSummaryError(null);
+  }, []);
 
   // -------------------------------------------------------------------------
   // Editor doc-ref shape (shared lib has its own narrower interface)
@@ -641,7 +723,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             />
           </div>
 
-          {/* Banner stack — errors / warnings / checkout status / assistant pending */}
+          {/* Banner stack — errors / warnings / checkout status / assistant pending / summary */}
           <ComposeBannerStack
             errorMessage={state.errorMessage}
             checkoutStatus={state.checkoutStatus}
@@ -649,6 +731,10 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             checkoutFailureMessage={state.checkoutFailureMessage}
             importWarnings={state.importWarnings}
             pendingAssistantInsert={state.pendingAssistantInsert}
+            summaryStatus={summaryStatus}
+            summaryText={summaryText}
+            summaryError={summaryError}
+            onDismissSummary={dismissSummary}
           />
 
 

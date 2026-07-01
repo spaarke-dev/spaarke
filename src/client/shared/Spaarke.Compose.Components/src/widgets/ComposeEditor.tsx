@@ -53,7 +53,7 @@
  */
 
 import * as React from 'react';
-import { useEditor, EditorContent, type Editor } from '@tiptap/react';
+import { useEditor, EditorContent, BubbleMenu, type Editor } from '@tiptap/react';
 import StarterKit from '@tiptap/starter-kit';
 import Underline from '@tiptap/extension-underline';
 import Link from '@tiptap/extension-link';
@@ -67,7 +67,16 @@ import TaskItem from '@tiptap/extension-task-item';
 import CharacterCount from '@tiptap/extension-character-count';
 import TextAlign from '@tiptap/extension-text-align';
 
-import { makeStyles, tokens, Spinner, Text } from '@fluentui/react-components';
+import { makeStyles, tokens, Spinner, Text, Toolbar, ToolbarButton } from '@fluentui/react-components';
+import {
+  TextBold24Regular,
+  TextItalic24Regular,
+  TextUnderline24Regular,
+  TextStrikethrough24Regular,
+  Link24Regular,
+  LinkDismiss24Regular,
+} from '@fluentui/react-icons';
+import { ComposeFormatToolbar } from './ComposeFormatToolbar';
 import { useDispatchPaneEvent, type DispatchPaneEvent } from '@spaarke/ai-widgets';
 
 import { docxToTipTapHtml, tipTapToDocxBytes } from '../utils/docxBridge';
@@ -294,6 +303,16 @@ const useStyles = makeStyles({
     flex: 1,
     columnGap: tokens.spacingHorizontalS,
     color: tokens.colorNeutralForeground2,
+  },
+  bubbleMenu: {
+    display: 'flex',
+    alignItems: 'center',
+    columnGap: tokens.spacingHorizontalXXS,
+    backgroundColor: tokens.colorNeutralBackground1,
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+    borderRadius: tokens.borderRadiusMedium,
+    boxShadow: tokens.shadow4,
+    padding: tokens.spacingHorizontalXXS,
   },
 });
 
@@ -549,6 +568,26 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       );
     }
 
+    // BubbleMenu handler for the "Link" button — prompts for a URL and applies
+    // it as a link mark to the current selection. Removing an existing link
+    // uses the same button when a link is already active.
+    const toggleLink = React.useCallback((): void => {
+      if (!editor) return;
+      if (editor.isActive('link')) {
+        editor.chain().focus().unsetLink().run();
+        return;
+      }
+      const previousUrl = editor.getAttributes('link').href as string | undefined;
+      // eslint-disable-next-line no-alert
+      const url = window.prompt('Enter URL', previousUrl ?? 'https://');
+      if (url === null) return; // cancelled
+      if (url.trim() === '') {
+        editor.chain().focus().unsetLink().run();
+        return;
+      }
+      editor.chain().focus().extendMarkRange('link').setLink({ href: url.trim() }).run();
+    }, [editor]);
+
     return (
       <div
         className={styles.container}
@@ -557,6 +596,56 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
         data-compose-editor-document-id={documentRef?.sprkDocumentId ?? ''}
         data-compose-editor-spe-id={documentRef?.speDriveItemId ?? ''}
       >
+        <ComposeFormatToolbar editor={editor} disabled={isImporting} />
+        {editor ? (
+          <BubbleMenu
+            editor={editor}
+            tippyOptions={{ duration: 100, placement: 'top' }}
+            className={styles.bubbleMenu}
+          >
+            <Toolbar
+              size="small"
+              aria-label="Selection formatting"
+              data-testid="compose-bubble-menu"
+            >
+              <ToolbarButton
+                appearance={editor.isActive('bold') ? 'primary' : 'subtle'}
+                icon={<TextBold24Regular />}
+                aria-label="Bold"
+                aria-pressed={editor.isActive('bold')}
+                onClick={() => editor.chain().focus().toggleBold().run()}
+              />
+              <ToolbarButton
+                appearance={editor.isActive('italic') ? 'primary' : 'subtle'}
+                icon={<TextItalic24Regular />}
+                aria-label="Italic"
+                aria-pressed={editor.isActive('italic')}
+                onClick={() => editor.chain().focus().toggleItalic().run()}
+              />
+              <ToolbarButton
+                appearance={editor.isActive('underline') ? 'primary' : 'subtle'}
+                icon={<TextUnderline24Regular />}
+                aria-label="Underline"
+                aria-pressed={editor.isActive('underline')}
+                onClick={() => editor.chain().focus().toggleUnderline().run()}
+              />
+              <ToolbarButton
+                appearance={editor.isActive('strike') ? 'primary' : 'subtle'}
+                icon={<TextStrikethrough24Regular />}
+                aria-label="Strikethrough"
+                aria-pressed={editor.isActive('strike')}
+                onClick={() => editor.chain().focus().toggleStrike().run()}
+              />
+              <ToolbarButton
+                appearance={editor.isActive('link') ? 'primary' : 'subtle'}
+                icon={editor.isActive('link') ? <LinkDismiss24Regular /> : <Link24Regular />}
+                aria-label={editor.isActive('link') ? 'Remove link' : 'Add link'}
+                aria-pressed={editor.isActive('link')}
+                onClick={toggleLink}
+              />
+            </Toolbar>
+          </BubbleMenu>
+        ) : null}
         {isImporting ? (
           <div className={styles.loadingState} role="status" aria-live="polite">
             <Spinner size="small" />
