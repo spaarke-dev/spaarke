@@ -76,7 +76,7 @@ import {
   MenuItem,
 } from '@fluentui/react-components';
 import {
-  MoreHorizontalRegular,
+  MoreVerticalRegular,
   CheckmarkRegular,
   DismissRegular,
   CalendarAddRegular,
@@ -479,7 +479,7 @@ export const NarrativeBullet: React.FC<NarrativeBulletProps> = ({
         */}
         <Menu>
           <MenuTrigger disableButtonEnhancement>
-            <MenuButton appearance="subtle" size="small" icon={<MoreHorizontalRegular />} aria-label="More actions" />
+            <MenuButton appearance="subtle" size="small" icon={<MoreVerticalRegular />} aria-label="More actions" />
           </MenuTrigger>
           <MenuPopover>
             <MenuList>
