@@ -64,7 +64,7 @@
       "actionCode": "SUM-CHAT@v1",
       "$comment-actionCode": "Resolved by Deploy-Playbook.ps1 line 396-405 against sprk_analysisactions filtered by sprk_actioncode='SUM-CHAT@v1'. This file's actions[] array is EMPTY — the action is expected to ALREADY exist (seeded by summarize-document-for-chat.playbook.json in R5). The deploy harness sets sprk_playbooknode.sprk_actionid to the resolved GUID (line 737-740). Pre-flight check at line 446-510 will fail loudly if SUM-CHAT@v1 is missing.",
       "actionType": 0,
-      "$comment-actionType": "ActionType.AiAnalysis = 0; handled by AiAnalysisNodeExecutor (existing platform executor — no new node executor needed per R6 NFR-08). The SUM-CHAT@v1 action carries sprk_systemprompt with the JPS-formatted Summarize prompt + the structured-outputs JSON Schema (declaration order: tldr → summary → keywords → entities).",
+      "$comment-actionType": "ExecutorType.AiAnalysis = 0; handled by AiAnalysisNodeExecutor (existing platform executor — no new node executor needed per R6 NFR-08). The SUM-CHAT@v1 action carries sprk_systemprompt with the JPS-formatted Summarize prompt + the structured-outputs JSON Schema (declaration order: tldr → summary → keywords → entities).",
       "outputVariable": "summary",
       "positionX": 400,
       "positionY": 200,

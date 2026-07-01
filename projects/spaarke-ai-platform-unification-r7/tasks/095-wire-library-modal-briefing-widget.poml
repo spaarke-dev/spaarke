@@ -1,0 +1,205 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-095" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Wire Library modal into briefing widget (FR-18)</title>
+    <status>completed</status>
+    <wave>9</wave>
+    <estimated-effort>2-3 hours</estimated-effort>
+    <tags>code-page, ui, wave-9</tags>
+    <rigor-level>FULL</rigor-level>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>094</dependencies>
+    <fr-coverage>FR-18 (consumer surface 2 of 3)</fr-coverage>
+  </metadata>
+
+  <prompt>
+    Wire the Playbook Library modal into the Daily Briefing widget
+    (src/client/shared/Spaarke.DailyBriefing.Components/). Add a "Browse Playbooks" affordance at
+    the mount point recommended by task 093's audit. When clicked, the affordance opens the
+    PlaybookLibraryShell modal. The modal lists every playbook with its consumer mapping. Clicking
+    a playbook invokes it through proper Path A.5 routing. Reuse the shared PlaybookLibraryShell
+    component AND mirror the pattern established by task 094 in the spaarke-ai chat surface.
+  </prompt>
+
+  <role>
+    Senior React / Fluent UI v9 developer familiar with Spaarke.DailyBriefing.Components and the
+    "shared lib widget + thin host shim" pattern (Calendar canonical Pattern D per SPAARKEAI-COMPONENTIZATION-AUDIT.md).
+  </role>
+
+  <goal>
+    Daily Briefing widget now has a "Browse Playbooks" affordance such that:
+    1. Affordance mounted at the location task 093 audit recommended for the briefing widget
+       (e.g., DailyBriefingApp toolbar, header action menu, or per-section overflow).
+    2. Affordance triggers a modal Dialog wrapping PlaybookLibraryShell (the shared component from
+       Spaarke.UI.Components). Same modal wrapper pattern as task 094.
+    3. Modal lists every playbook with its consumer mapping (consumer code visible per row).
+    4. Clicking a playbook invokes it through Path A.5 routing — verified by inspecting BFF log
+       or behavioral check. Briefing widget context (current date range, channel filter, etc.)
+       MAY be passed to invocation if the selected playbook is briefing-aware; otherwise default
+       payload.
+    5. Affordance follows ADR-021 (dark mode semantic tokens; no hardcoded colors).
+    6. Component test added at src/client/shared/Spaarke.DailyBriefing.Components/test/PlaybookLibraryAffordance.test.tsx
+       (or equivalent — mirror existing test pattern in same dir) confirming affordance opens
+       modal + selection callback fires.
+    7. No new app-level state library; use existing pattern.
+    8. Pattern parity with task 094 — review both for consistency before commit.
+  </goal>
+
+  <inputs>
+    <file purpose="audit-doc">projects/spaarke-ai-platform-unification-r7/notes/spikes/playbook-library-audit.md</file>
+    <file purpose="design-spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    <file purpose="shared-modal-component">src/client/shared/Spaarke.UI.Components/src/components/PlaybookLibraryShell/PlaybookLibraryShell.tsx</file>
+    <file purpose="briefing-widget">src/client/shared/Spaarke.DailyBriefing.Components/src/components/DailyBriefingApp.tsx</file>
+    <file purpose="briefing-test-pattern">src/client/shared/Spaarke.DailyBriefing.Components/test/DailyBriefingApp.smoke.test.tsx</file>
+    <file purpose="task-094-pattern">src/solutions/SpaarkeAi/src/components/conversation/{wired-in-094}.tsx</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-013">BFF AI Architecture — playbook launch from modal MUST flow through IInvokePlaybookAi triangle (Path A.5). NO direct PlaybookOrchestrationService call.</constraint>
+    <constraint source="ADR-021 (referenced)">Dark mode compliance — affordance + modal use semantic Fluent UI tokens, no hardcoded colors.</constraint>
+    <constraint source="spec FR-18">Acceptance: "Browse Playbooks" affordance opens modal; modal lists every playbook + consumer mapping; clicking invokes through Path A.5 routing.</constraint>
+    <constraint source="CLAUDE.md §11">Component justification triple:
+      1. Existing: PlaybookLibraryShell shared component already exists. Task 094 just wired the same modal into spaarke-ai chat. Reuse the same Dialog wrapper pattern.
+      2. Extension: this task adds the affordance + Dialog wrapper in the briefing widget. NO new shared component; NO duplication of task 094's wiring pattern (mirror it).
+      3. Cost-of-doing-nothing: briefing widget users cannot in-flow browse + invoke any playbook from the briefing surface; FR-18 acceptance criterion (≥3 consumer surfaces wired) not met.
+    </constraint>
+    <constraint source="fluent-v9-component skill">Apply Fluent UI v9 patterns + Spaarke conventions.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>code-pages/daily-briefing</topic>
+    <files>
+      <file>docs/adr/ADR-013-bff-ai-architecture.md</file>
+      <file>docs/architecture/SPAARKEAI-COMPONENTIZATION-AUDIT.md</file>
+      <file>docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="PlaybookLibraryShell shared component" location="src/client/shared/Spaarke.UI.Components/src/components/PlaybookLibraryShell/PlaybookLibraryShell.tsx">
+        Reuse via Dialog wrapper.
+      </pattern>
+      <pattern name="Task 094 wiring pattern" location="src/solutions/SpaarkeAi/src/components/conversation/{wired-in-094}.tsx">
+        Mirror this affordance + Dialog wrapper structure for consistency.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Daily Briefing widget is consumer surface 2 of 3 for FR-18. Task 094 wired the same modal into
+      spaarke-ai chat (surface 1). Task 096 will wire surface 3 (ad-hoc launcher). Pattern parity
+      between 094/095/096 matters: 3 separate hosts, ONE Dialog wrapper recipe, ONE PlaybookLibraryShell reuse.
+    </background>
+    <dependencies>
+      <dependency task="093" status="required">Audit doc with mount-point recommendation for the briefing widget.</dependency>
+      <dependency task="094" status="required">Establishes the Dialog wrapper + Path A.5 invocation pattern this task mirrors.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Briefing widget today: DailyBriefingApp.tsx. Pattern D dual-use (Calendar widget canonical).</item>
+      <item>Task 094 wiring — mirror its structure for consistency.</item>
+      <item>Task 096 — ad-hoc launcher next.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: FULL · 📋 REASON: code-impl in Code Page (.tsx file modification, tags code-page + ui, ADR-013+021 applicable, FR-18 acceptance criterion) — quality gates Step 9.5 required · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read project CLAUDE.md + spec.md (FR-18) + plan.md (Wave 9) + task 093 audit doc + task 094 wiring (for pattern parity).
+      Invoke the fluent-v9-component skill.
+    </step>
+    <step order="2" name="Verify dependency">
+      Confirm task 094 is complete + committed. Confirm audit doc's recommended briefing-widget mount point is unambiguous.
+    </step>
+    <step order="3" name="Read DailyBriefingApp host component">
+      Open src/client/shared/Spaarke.DailyBriefing.Components/src/components/DailyBriefingApp.tsx
+      (+ any sibling toolbar/header components). Identify the recommended mount point's exact insertion site.
+    </step>
+    <step order="4" name="Read task 094's wiring as pattern template">
+      Open the file modified in task 094 (likely under src/solutions/SpaarkeAi/src/components/conversation/).
+      Document the Dialog wrapper structure, state management, props passed to PlaybookLibraryShell,
+      and the Path A.5 invocation callback. This task mirrors that pattern.
+    </step>
+    <step order="5" name="Wire affordance at recommended mount point">
+      Add a "Browse Playbooks" Button at the recommended mount point in DailyBriefingApp.tsx (or
+      sibling). Wire onClick to open Dialog state (useState in the host component).
+    </step>
+    <step order="6" name="Wrap PlaybookLibraryShell in Dialog">
+      Mirror task 094's Dialog wrapper. Same DialogSurface / DialogBody / DialogContent / DialogActions
+      structure. PlaybookLibraryShell as DialogContent body. Pass the same props pattern.
+    </step>
+    <step order="7" name="Wire playbook-selected callback to Path A.5">
+      Mirror task 094's invocation pattern. If briefing-widget context (date range, channel filter)
+      should be passed when invoking briefing-aware playbooks, pass it via the invocation payload;
+      otherwise default payload. MUST flow through IInvokePlaybookAi (Path A.5).
+    </step>
+    <step order="8" name="ADR-021 dark mode compliance">
+      Verify affordance + Dialog use semantic tokens. Dark mode toggle smoke.
+    </step>
+    <step order="9" name="Component test">
+      Create src/client/shared/Spaarke.DailyBriefing.Components/test/PlaybookLibraryAffordance.test.tsx
+      (or alongside existing DailyBriefingApp.smoke.test.tsx). Test:
+      - Affordance renders
+      - Click opens Dialog (mock PlaybookLibraryShell as stub)
+      - onPlaybookSelected callback fires
+      - Dialog closes
+    </step>
+    <step order="10" name="Build + test">
+      Run: npm run build:prod for Spaarke.DailyBriefing.Components (or the consuming app — check existing build script).
+      Run: npm test for the new test.
+      Goal: 0 errors; new test passes.
+    </step>
+    <step order="11" name="Manual smoke">
+      Deploy to spaarkedev1 dev or document for owner to deploy. Manual smoke: open briefing widget
+      → click "Browse Playbooks" → modal opens → modal lists playbooks WITH consumer mapping →
+      click a playbook → invocation flows through Path A.5 (verify by checking BFF logs).
+    </step>
+    <step order="9.5" name="Quality gates (FULL rigor)">
+      Run `/code-review` on new affordance + test. Run `/adr-check` against ADR-013 + ADR-021 + spec FR-18.
+      Verify pattern parity with task 094 (cite the mirror in PR description).
+      Fix any findings before commit.
+    </step>
+    <step order="12" name="Update current-task.md + TASK-INDEX">
+      Mark task 095 status complete; advance current-task.md to task 096.
+    </step>
+    <step order="13" name="Commit">
+      Commit affordance + Dialog wrapper + test with conventional message.
+      Example: feat(daily-briefing/r7): wire Playbook Library modal into briefing widget (Wave 9 task 095, FR-18)
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (audit doc, shared component, briefing widget files, task 094 wiring for mirror)</tool>
+    <tool>Edit (add affordance + Dialog wrapper)</tool>
+    <tool>Write (component test file)</tool>
+    <tool>Bash (npm run build:prod, npm test, git commit)</tool>
+    <tool>Skill (fluent-v9-component for patterns)</tool>
+    <tool>Skill (code-review at Step 9.5)</tool>
+    <tool>Skill (adr-check at Step 9.5)</tool>
+  </tools>
+
+  <outputs>
+    <output type="modified-file">src/client/shared/Spaarke.DailyBriefing.Components/src/components/DailyBriefingApp.tsx (or sibling — affordance + Dialog wrapper)</output>
+    <output type="new-file">src/client/shared/Spaarke.DailyBriefing.Components/test/PlaybookLibraryAffordance.test.tsx</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md (advance to task 096)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 095 ✅)</output>
+    <output type="commit">feat(daily-briefing/r7): wire Playbook Library modal into briefing widget (Wave 9 task 095, FR-18)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>"Browse Playbooks" affordance mounted at the audit-recommended location in briefing widget</criterion>
+    <criterion>Click opens Dialog wrapping PlaybookLibraryShell — mirrors task 094 wiring pattern</criterion>
+    <criterion>Modal lists every playbook with consumer mapping per row</criterion>
+    <criterion>Clicking a playbook invokes it through Path A.5 routing (verified manually)</criterion>
+    <criterion>NO direct call to AnalysisOrchestrationService.ExecuteAnalysisAsync</criterion>
+    <criterion>ADR-021 dark mode compliance — semantic tokens only</criterion>
+    <criterion>Component test passes</criterion>
+    <criterion>npm run build:prod passes</criterion>
+    <criterion>code-review + adr-check pass at Step 9.5 (FULL rigor)</criterion>
+    <criterion>Pattern parity with task 094 confirmed in PR description</criterion>
+    <criterion>Manual smoke in spaarkedev1 dev confirms end-to-end flow</criterion>
+    <criterion>Commit pushed to work/spaarke-ai-platform-unification-r7</criterion>
+  </acceptance-criteria>
+</task>

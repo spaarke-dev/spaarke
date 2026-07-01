@@ -1,28 +1,39 @@
 /**
- * NarrativeBullet unit tests — R2 task 024 + R4 task 045 coverage.
+ * NarrativeBullet unit tests — R2 task 024 + R4 task 045 + R7 W12 task 134 coverage.
  *
  * R2/P2a (preserved): FR-11..FR-14a + dark-mode parity for the hybrid-aggregation
  * UX introduced in Wave 8 + Wave 9 (SubRow + SubRowLink/Todo/Dismiss).
  *
- * R4 / FR-18 (new): three-dot overflow menu replacing the inline 5-icon action
- * row. AC-18a/b/c cases:
+ * R7 W12 task 134 (operator MVP, wave12 plan §2.1): primary visible 'Add To Do'
+ * Checkmark icon button hoisted OUT of the overflow menu while preserving the
+ * three-dot menu component for future tools. Net changes to test surface:
+ *   - Overflow menu now shows 5 MenuItems (Add to To Do removed; canonical
+ *     order: Mark as read, Remove from briefing, Keep on briefing for 7 more
+ *     days, Dismiss, Open record).
+ *   - Primary 'Add To Do' button is a sibling Button BEFORE the MenuButton
+ *     with aria-label "Add To Do" (distinct from SubRowTodo's "Add to To Do").
+ *   - onAddToTodo(itemIds) callback contract is UNCHANGED — clicking the
+ *     primary button preserves the ADR-024 useInlineTodoCreate path.
+ *
+ * R4 / FR-18 (preserved): three-dot overflow menu replaces the inline 5-icon
+ * action row. AC-18a/b/c cases (post-task-134):
  *   - RendersOverflowMenu_NotInlineRow — MoreHorizontalRegular trigger present;
- *     5-icon inline row absent.
- *   - OverflowMenu_Shows6Actions — open the menu, assert 6 MenuItems with the
- *     canonical labels in order: Mark as read, Remove from briefing, Keep on
- *     briefing for 7 more days, Add to To Do, Dismiss, Open record.
+ *     5-icon inline row absent; primary 'Add To Do' button present (task 134).
+ *   - OverflowMenu_Shows5Actions — open the menu, assert 5 MenuItems in the
+ *     canonical order: Mark as read, Remove from briefing, Keep on briefing
+ *     for 7 more days, Dismiss, Open record.
  *   - OverflowMenu_KeyboardAccessible — trigger is focusable; Enter opens.
  *   - OverflowMenu_DarkModeCompliance (ADR-021) — render with `webDarkTheme`;
  *     static source scan rejects raw hex literals.
  *   - OverflowMenu_PreservesR3Actions — invoke onCheck/onRemove/onKeep via
  *     the menu items → callbacks fire as expected.
- *   - OverflowMenu_AddToTodoCallsExistingPath — invoke onAddToTodo via the
- *     menu item → existing prop signature preserved (`useInlineTodoCreate` +
- *     `TODO_REGARDING_CATALOG` integration owned by the parent component,
- *     ADR-024 regression-free invariant).
+ *   - PrimaryAddToDoButton_CallsExistingPath — invoke onAddToTodo via the
+ *     primary visible Checkmark button → existing prop signature preserved
+ *     (`useInlineTodoCreate` + `TODO_REGARDING_CATALOG` integration owned by
+ *     the parent component, ADR-024 regression-free invariant).
  *
  * Sub-list (FR-11..FR-14) test cases preserved verbatim since SubRow slot
- * behavior was NOT changed by task 045.
+ * behavior was NOT changed by task 045 or task 134.
  *
  * Mocking strategy:
  *   - window.Xrm is installed per-test (sub-row link case + Open record case)
@@ -128,7 +139,7 @@ describe('NarrativeBullet — FR-18 three-dot overflow menu (R4 task 045)', () =
     uninstallXrm();
   });
 
-  it('RendersOverflowMenu_NotInlineRow: renders MoreHorizontalRegular trigger and NO inline 5-icon row (FR-18 / AC-18a)', () => {
+  it('RendersOverflowMenu_NotInlineRow: renders MoreHorizontalRegular trigger + primary Add To Do button; NO inline 5-icon row (FR-18 / AC-18a / task 134)', () => {
     const props = baseProps({
       itemIds: ['n-1'],
       items: [makeItem({ id: 'n-1' })],
@@ -138,24 +149,33 @@ describe('NarrativeBullet — FR-18 three-dot overflow menu (R4 task 045)', () =
     });
     renderWith(props);
 
-    // The new overflow MenuButton trigger is present.
+    // The overflow MenuButton trigger is present (preserved per operator
+    // emphasis on three-dot menu for future tools).
     expect(screen.getByRole('button', { name: /More actions/i })).toBeInTheDocument();
 
-    // The inline 5-icon row had buttons with these aria-labels rendered BEFORE
-    // the menu was open. With the menu CLOSED, those aria-labels MUST NOT exist
-    // anywhere in the DOM — they only appear inside the MenuPopover (which is
-    // unmounted while the menu is closed). This is the binding FR-18 assertion
-    // that the inline row was removed.
+    // R7 W12 task 134: primary visible 'Add To Do' Checkmark button is present
+    // as a sibling BEFORE the menu trigger (operator MVP, wave12 plan §2.1).
+    // Distinct aria-label "Add To Do" — NOT "Add to To Do" (which is the
+    // SubRowTodo per-item button label) — so per-bullet vs per-sub-row
+    // targeting is unambiguous for tests and screen readers.
+    expect(screen.getByRole('button', { name: /^Add To Do$/i })).toBeInTheDocument();
+
+    // The inline 5-icon row (pre-R4) had buttons with these aria-labels
+    // rendered. With the menu CLOSED, the menu-only aria-labels MUST NOT
+    // exist anywhere in the DOM — they only appear inside the MenuPopover
+    // (which is unmounted while the menu is closed). This is the binding
+    // FR-18 assertion that the inline row was removed.
     expect(screen.queryByRole('button', { name: /^Mark as read$/i })).toBeNull();
     expect(screen.queryByRole('button', { name: /^Remove from briefing$/i })).toBeNull();
     expect(screen.queryByRole('button', { name: /^Keep on briefing for 7 more days$/i })).toBeNull();
-    // For the single-item bullet there is also no aggregated "Add to To Do" /
-    // "Dismiss" button rendered inline.
+    // For the single-item bullet there is no per-bullet "Add to To Do"
+    // (the sub-row label, distinct from the new primary "Add To Do") and
+    // no "Dismiss" button rendered inline.
     expect(screen.queryByRole('button', { name: /^Add to To Do$/i })).toBeNull();
     expect(screen.queryByRole('button', { name: /^Dismiss$/i })).toBeNull();
   });
 
-  it('OverflowMenu_Shows6Actions: open the menu and assert 6 MenuItems in canonical FR-18 order (AC-18a)', () => {
+  it('OverflowMenu_Shows5Actions: open the menu and assert 5 MenuItems in canonical post-task-134 order (AC-18a)', () => {
     const props = baseProps({
       itemIds: ['n-1'],
       onCheck: jest.fn(),
@@ -167,15 +187,15 @@ describe('NarrativeBullet — FR-18 three-dot overflow menu (R4 task 045)', () =
     openOverflowMenu();
 
     // Fluent v9 MenuItems have role="menuitem". Collect them in DOM order and
-    // assert the canonical labels match the FR-18 sequence.
+    // assert the canonical labels match the post-task-134 sequence.
+    // ("Add to To Do" is now a primary visible button, NOT a menu item.)
     const menuItems = screen.getAllByRole('menuitem');
-    expect(menuItems).toHaveLength(6);
+    expect(menuItems).toHaveLength(5);
     const labels = menuItems.map(el => (el.textContent ?? '').trim());
     expect(labels).toEqual([
       'Mark as read',
       'Remove from briefing',
       'Keep on briefing for 7 more days',
-      'Add to To Do',
       'Dismiss',
       'Open record',
     ]);
@@ -300,7 +320,7 @@ describe('NarrativeBullet — FR-18 three-dot overflow menu (R4 task 045)', () =
     expect(onKeep).toHaveBeenCalledWith('n-1', 604800);
   });
 
-  it('OverflowMenu_AddToTodoCallsExistingPath: clicking Add to To Do invokes onAddToTodo(itemIds) — preserves ADR-024 useInlineTodoCreate path (AC-18c)', () => {
+  it('PrimaryAddToDoButton_CallsExistingPath: clicking the primary Add To Do Checkmark button invokes onAddToTodo(itemIds) — preserves ADR-024 useInlineTodoCreate path (AC-18c / task 134)', () => {
     const onAddToTodo = jest.fn();
     const props = baseProps({
       itemIds: ['n-1', 'n-2'],
@@ -312,9 +332,12 @@ describe('NarrativeBullet — FR-18 three-dot overflow menu (R4 task 045)', () =
     });
     renderWith(props);
 
-    openOverflowMenu();
+    // Task 134: Add To Do is now a PRIMARY VISIBLE Button with aria-label
+    // "Add To Do" — NOT a menu item. The overflow menu is not opened in this
+    // test because the primary button is reachable directly.
+    const addToDoButton = screen.getByRole('button', { name: /^Add To Do$/i });
     act(() => {
-      fireEvent.click(screen.getByRole('menuitem', { name: /^Add to To Do$/i }));
+      fireEvent.click(addToDoButton);
     });
 
     // ADR-024 regression-free invariant: the parent's `onAddToTodo` callback
@@ -323,6 +346,46 @@ describe('NarrativeBullet — FR-18 three-dot overflow menu (R4 task 045)', () =
     // wiring; this component only invokes the prop unchanged.
     expect(onAddToTodo).toHaveBeenCalledTimes(1);
     expect(onAddToTodo).toHaveBeenCalledWith(['n-1', 'n-2']);
+  });
+
+  it('PrimaryAddToDoButton_DisabledWhenCreated: button is disabled when isTodoCreated=true (no duplicate creates, task 134)', () => {
+    const onAddToTodo = jest.fn();
+    const props = baseProps({
+      itemIds: ['n-1'],
+      onAddToTodo,
+      isTodoCreated: true,
+      onCheck: jest.fn(),
+      onRemove: jest.fn(),
+      onKeep: jest.fn(),
+    });
+    renderWith(props);
+
+    const addToDoButton = screen.getByRole('button', { name: /^Add To Do$/i }) as HTMLButtonElement;
+    expect(addToDoButton.disabled).toBe(true);
+    act(() => {
+      fireEvent.click(addToDoButton);
+    });
+    expect(onAddToTodo).not.toHaveBeenCalled();
+  });
+
+  it('PrimaryAddToDoButton_DisabledWhenPending: button is disabled when isTodoPending=true (no double-fire, task 134)', () => {
+    const onAddToTodo = jest.fn();
+    const props = baseProps({
+      itemIds: ['n-1'],
+      onAddToTodo,
+      isTodoPending: true,
+      onCheck: jest.fn(),
+      onRemove: jest.fn(),
+      onKeep: jest.fn(),
+    });
+    renderWith(props);
+
+    const addToDoButton = screen.getByRole('button', { name: /^Add To Do$/i }) as HTMLButtonElement;
+    expect(addToDoButton.disabled).toBe(true);
+    act(() => {
+      fireEvent.click(addToDoButton);
+    });
+    expect(onAddToTodo).not.toHaveBeenCalled();
   });
 
   it('OverflowMenu_DismissCallsParentCascade: clicking Dismiss invokes onDismiss(itemIds[]) — FR-14a cascade contract preserved', () => {
@@ -507,8 +570,13 @@ describe('NarrativeBullet — P2a sub-list + SubRow behaviors (FR-11..FR-14a)', 
 
   // -------------------------------------------------------------------------
   // Case 4: sub-row Add-to-To-Do click invokes onAddToTodoItem with the
-  //         item's id (FR-13). [Note: top-level Add-to-To-Do is now in the
-  //         overflow menu — covered by OverflowMenu_AddToTodoCallsExistingPath.]
+  //         item's id (FR-13). [Note: top-level Add-To-Do is now a primary
+  //         visible Checkmark button — covered by
+  //         PrimaryAddToDoButton_CallsExistingPath. The primary button uses
+  //         aria-label "Add To Do" (no lowercase "to"); the sub-row buttons
+  //         use aria-label "Add to To Do". The regex below targets the
+  //         sub-row label and does NOT match the primary button — leaving
+  //         the per-item assertion intact.]
   // -------------------------------------------------------------------------
 
   it('Case 4: sub-row Add-to-To-Do click invokes onAddToTodoItem with item.id (FR-13)', () => {
@@ -526,10 +594,10 @@ describe('NarrativeBullet — P2a sub-list + SubRow behaviors (FR-11..FR-14a)', 
     });
     renderWith(props);
 
-    // SubRowTodo renders a Button with aria-label="Add to To Do". The
-    // overflow menu's "Add to To Do" item is unmounted while the menu is
-    // closed, so the only "Add to To Do" buttons in the DOM right now are
-    // the per-item sub-row buttons. Assert there are exactly N of them.
+    // SubRowTodo renders a Button with aria-label="Add to To Do". The primary
+    // task-134 button uses aria-label "Add To Do" (no lowercase "to") and
+    // does NOT match the substring regex below. So the only "Add to To Do"
+    // matches in the DOM right now are the per-item sub-row buttons.
     const subRowTodoButtons = screen.getAllByRole('button', { name: /Add to To Do/i });
     expect(subRowTodoButtons).toHaveLength(2);
 

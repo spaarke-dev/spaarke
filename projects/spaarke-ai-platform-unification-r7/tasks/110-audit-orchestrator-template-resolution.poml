@@ -1,0 +1,153 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-110" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Audit current orchestrator template resolution + design RunContext.NodeOutputs surface</title>
+    <status>completed</status>
+    <completed-on>2026-06-29</completed-on>
+    <completion-notes>Design doc at `notes/spikes/wave11-orchestrator-resolution-design.md`. Key audit finding: NodeOutputs infra ALREADY exists in PlaybookRunContext (ConcurrentDictionary at line 30, StoreNodeOutput at line 225, passed to executors via NodeExecutionContext.PreviousOutputs at line 315). ReturnResponseNodeExecutor.BuildTemplateContext (lines 312-339) already proves the exact pattern needed — T111 just extracts it as a shared helper. T113 scope expanded to cover pipe-shorthand elimination in addition to lambda. ITemplateEngine already DI-registered at AnalysisServicesModule.cs:860 — no DI work needed in T111.</completion-notes>
+    <wave>11</wave>
+    <estimated-effort>2-3 hours</estimated-effort>
+    <tags>audit, bff-api, planning, wave-11</tags>
+    <rigor-level>STANDARD</rigor-level>
+    <rigor-reason>Audit + design task; no source modification; planning artifact only. STANDARD per task-execute Step 0.5 ("phase 2.x or higher, design doc output").</rigor-reason>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none (Wave 5 + Wave 8 already complete; this task only reads code)</dependencies>
+    <blocks>111, 112, 113, 114</blocks>
+    <fr-coverage>FR-15 (closes R4 graduation gate by enabling /narrate end-to-end)</fr-coverage>
+  </metadata>
+
+  <prompt>
+    Wave 11 starts here. Before any code edits, audit how PlaybookOrchestrationService resolves
+    template expressions today and design the RunContext.NodeOutputs surface that Wave 11 will
+    introduce. The audit must answer: what does ApplyConfigJsonTemplates do today? What context
+    is available at each ExecuteNodeAsync call? Where would node outputs need to be collected
+    and re-exposed for downstream nodes? Output is a design doc the next tasks (111, 112, 113,
+    114) execute against — they should not need to re-read source to start.
+  </prompt>
+
+  <role>
+    Senior .NET backend developer familiar with the Spaarke BFF playbook orchestration model
+    and Handlebars.NET. Goal: extract the exact wiring decisions, not re-implement.
+  </role>
+
+  <goal>
+    A design document at `projects/spaarke-ai-platform-unification-r7/notes/spikes/wave11-orchestrator-resolution-design.md`
+    that answers:
+    1. What does `PlaybookOrchestrationService.ApplyConfigJsonTemplates` (line ~1921) do today, and what does it NOT do?
+    2. What does `ITemplateEngine.Render(template, context)` accept as context, and what helpers does the existing `TemplateEngine.cs` already register?
+    3. What is the proposed `RunContext.NodeOutputs` shape? (`IDictionary<string, object?>` keyed by `OutputVariable` name → JsonElement-converted output value via `TemplateEngine.ConvertJsonElement`)
+    4. At which point in the orchestrator loop do node outputs get registered, and what type does the orchestrator pass to subsequent template-engine renders?
+    5. Which Handlebars helpers must be added (per deployed DAILY-BRIEFING-NARRATE playbook configJson scan)? List concretely.
+    6. Does the fan-out iteration semantic (`iteration.iterateOver` + `iteration.itemAlias`) live in the orchestrator or in the template engine? (Per Wave 11 plan: orchestrator.) Justify briefly.
+    7. What's the minimum-viable test plan for each subsequent task (111 / 112 / 113 / 114)?
+  </goal>
+
+  <inputs>
+    <file purpose="orchestrator">src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookOrchestrationService.cs</file>
+    <file purpose="template-engine-impl">src/server/api/Sprk.Bff.Api/Services/Ai/TemplateEngine.cs</file>
+    <file purpose="template-engine-iface">src/server/api/Sprk.Bff.Api/Services/Ai/ITemplateEngine.cs</file>
+    <file purpose="run-context">src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookRunContext.cs</file>
+    <file purpose="executor-iface">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/INodeExecutor.cs</file>
+    <file purpose="node-output">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/NodeOutput.cs</file>
+    <file purpose="deployed-playbook-source">projects/spaarke-daily-update-service/notes/playbooks/daily-briefing-narrate.json</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    <file purpose="plan">projects/spaarke-ai-platform-unification-r7/plan.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-010">DI Minimalism — `ITemplateEngine` is already registered in DI. No new abstraction layers. Wave 11 uses it; does not wrap it.</constraint>
+    <constraint source="ADR-013">BFF AI Architecture — orchestrator stays in BFF; no new service surface introduced.</constraint>
+    <constraint source="ADR-037">Multinode Output Composition — fan-out iteration semantic must align with composeStrategy as documented in the playbook source JSON `composeStrategy.fanOut` block.</constraint>
+    <constraint source="CLAUDE.md §11">Audit only — do NOT introduce new components in this task. Component justification triple applies to subsequent tasks where applicable.</constraint>
+    <constraint source="CLAUDE.md §10">Audit task does not modify BFF; no publish-size check needed for this task.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai/node-executor-authoring</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-010-di-minimalism.md</file>
+      <file>docs/adr/ADR-013-bff-ai-architecture.md</file>
+      <file>docs/adr/ADR-037-multinode-output-composition.md</file>
+      <file>docs/architecture/ai-architecture-playbook-runtime.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Existing Handlebars.NET helpers" location="src/server/api/Sprk.Bff.Api/Services/Ai/TemplateEngine.cs">
+        Engine already exists. Registers `default`, `safe`, `joinIds`. Supports `{{X.Y.Z}}` nested access natively. Has `ConvertJsonElement` for JsonElement → Dictionary/List conversion.
+      </pattern>
+      <pattern name="Current orchestrator template resolution" location="src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookOrchestrationService.cs">
+        `ApplyConfigJsonTemplates` at line ~1921 only does literal `{{paramName}}` string replacement against `runContext.Parameters` (IReadOnlyDictionary&lt;string,string&gt;). Does NOT use `ITemplateEngine`. Does NOT carry node outputs.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Wave 10 task 100 marked 15 success criteria GREEN at the verification report level, but Wave 10 task 101 (UAT) hit empty `/narrate` responses end-to-end. Investigation 2026-06-29 traced root cause to the orchestrator: `ApplyConfigJsonTemplates` only handles literal `{{paramName}}` substitution. The deployed `DAILY-BRIEFING-NARRATE` playbook uses richer expressions (`{{json start}}`, `{{tldrResult.summary}}`, `{{map …}}`, fan-out iteration) that go unresolved. LLM nodes see literal template strings as their payload and return empty content.
+    </background>
+    <dependencies>
+      <dependency task="Wave 5" status="complete">94 nodes backfilled with sprk_executortype (executor dispatch ready).</dependency>
+      <dependency task="Wave 8" status="complete">PlaybookBuilder UI deployable (Power Apps form changes for executorType).</dependency>
+    </dependencies>
+    <related-work>
+      <item>R4 worktree `spaarke-daily-update-service-r4` HOLDS open until Wave 11 + Wave 10 task 101 close R4 graduation gate (FR-15).</item>
+      <item>Existing TemplateEngine.cs (Handlebars.NET-based) was built for delivery nodes (email/Word templates). Wave 11 extends its usage into the orchestrator without forking.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: STANDARD · 📋 REASON: audit + planning, no source mod, design doc only · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read project CLAUDE.md + plan.md (Wave 11 section) + bff-extensions.md.
+    </step>
+    <step order="2" name="Read orchestrator template-resolution today">
+      Read `PlaybookOrchestrationService.cs` focusing on: `ExecuteAsync`/`ExecuteNodeAsync` loop, `ApplyConfigJsonTemplates` (line ~1921), `RunContext` field references. Document what `runContext.Parameters` carries and what's missing.
+    </step>
+    <step order="3" name="Read existing TemplateEngine.cs + ITemplateEngine.cs">
+      Document the existing helpers (`default`, `safe`, `joinIds`), the `Render` API, and the `ConvertJsonElement` JsonElement-to-Dictionary helper. Note: Handlebars.NET supports `{{X.Y.Z}}` natively + subexpressions `{{helperA (helperB arg) arg}}`.
+    </step>
+    <step order="4" name="Read PlaybookRunContext.cs + NodeOutput.cs + INodeExecutor.cs">
+      Identify where to add `NodeOutputs` collection. Confirm NodeOutput shape (StructuredData? TextContent?). Confirm executor return contract.
+    </step>
+    <step order="5" name="Scan deployed DAILY-BRIEFING-NARRATE source JSON for required helpers">
+      Read `projects/spaarke-daily-update-service/notes/playbooks/daily-briefing-narrate.json`. Enumerate every distinct `{{helperName …}}` shape. Confirm: `json`, `map`, `flatten`, `distinct`, `concat`, `join`, fan-out (`iteration.iterateOver`/`itemAlias`), `lambda` (T113 eliminates via `flatMap` rewrite).
+    </step>
+    <step order="6" name="Write design doc">
+      Create `projects/spaarke-ai-platform-unification-r7/notes/spikes/wave11-orchestrator-resolution-design.md` answering all 7 goal questions. Include code snippets for: proposed `RunContext.NodeOutputs` shape, proposed `ApplyConfigJsonTemplates` rewrite signature using `ITemplateEngine`, proposed helper registrations, iteration semantic placement. Target: 150-200 lines.
+    </step>
+    <step order="7" name="Update current-task.md + TASK-INDEX">
+      Mark task 110 ✅; advance current-task.md to task 111.
+    </step>
+    <step order="8" name="Commit">
+      Commit notes/spikes/wave11-orchestrator-resolution-design.md with conventional message. No PR yet (Wave 11 commits incrementally per task).
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (BFF source files + playbook JSON)</tool>
+    <tool>Grep (template-expression patterns)</tool>
+    <tool>Write (design document)</tool>
+    <tool>Bash (git commit)</tool>
+  </tools>
+
+  <outputs>
+    <output type="document">projects/spaarke-ai-platform-unification-r7/notes/spikes/wave11-orchestrator-resolution-design.md</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md (advance to task 111)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 110 ✅)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Design document exists at notes/spikes/wave11-orchestrator-resolution-design.md</criterion>
+    <criterion>Document answers all 7 goal questions explicitly with code snippets where applicable</criterion>
+    <criterion>Document enumerates every distinct Handlebars-style expression shape used in DAILY-BRIEFING-NARRATE source JSON</criterion>
+    <criterion>Document proposes exact `RunContext.NodeOutputs` shape (`IDictionary&lt;string, object?&gt;`) + lifecycle (when written, when read)</criterion>
+    <criterion>Document confirms ITemplateEngine reuse (no new template-engine abstraction)</criterion>
+    <criterion>Document places fan-out iteration in orchestrator (NOT in TemplateEngine) with justification</criterion>
+    <criterion>Document includes minimum-viable test plan for tasks 111-114</criterion>
+    <criterion>current-task.md updated to task 111 as next</criterion>
+    <criterion>TASK-INDEX.md shows 110 ✅, 111 🔲 ready</criterion>
+  </acceptance-criteria>
+</task>

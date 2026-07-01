@@ -35,16 +35,34 @@ export type PlaybookNodeType =
  *
  * Fields map to Dataverse sprk_playbooknode columns:
  *   label        -> sprk_name
- *   type         -> sprk_nodetype (coarse category via NodeTypeToDataverse mapping)
- *                    + __actionType in sprk_configjson (specific executor dispatch)
+ *   type         -> React Flow discriminator (UI-only renderer hint; not persisted)
+ *   executorType -> sprk_executortype (Choice, the SINGLE source of dispatch truth)
  *   configJson   -> sprk_configjson
  *   actionId     -> sprk_actionid (lookup)
+ *
+ * R7 FR-26: `executorType` (number) is the canonical dispatch field — round-trips
+ * to the `sprk_executortype` Choice column on `sprk_playbooknode`. The canvas
+ * `type` discriminator drives React Flow's nodeTypes registry + renderer choice
+ * only; the server reads `sprk_executortype` directly (single-hop dispatch per FR-07).
  */
 export interface PlaybookNodeData {
   /** Display label shown in the node header */
   label: string;
-  /** Node type discriminator */
+  /** Node type discriminator (UI-only — drives React Flow nodeTypes registry + renderer) */
   type: PlaybookNodeType;
+  /**
+   * Executor Type Choice value (sprk_executortype). The single source of dispatch
+   * truth — mirrors server `ExecutorType` enum value (0=AiAnalysis, 1=AiCompletion, …, 143=ReturnResponse).
+   * Written by NodePalette drag-drop (R7 task 082) + ExecutorTypeSelector property panel.
+   * Persisted to / hydrated from Dataverse `sprk_executortype` Choice column by playbookNodeSync.
+   */
+  executorType?: number;
+  /**
+   * Optional PascalCase mirror of the executor enum name (e.g., "AiCompletion").
+   * Diagnostic / telemetry use only — never persisted to Dataverse and never used for dispatch.
+   * `executorType` (number) is the authoritative wire field.
+   */
+  executorName?: string;
   /** Optional Dataverse action record ID linked to this node */
   actionId?: string;
   /** Output variable name for downstream node references */

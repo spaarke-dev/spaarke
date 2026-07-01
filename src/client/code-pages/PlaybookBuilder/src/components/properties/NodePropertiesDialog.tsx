@@ -3,7 +3,8 @@
  *
  * Opens automatically when a node is selected on the canvas.
  * Fixed dialog shell (860×560) with horizontal tabs at top:
- *   - Overview: Name, Output Variable, Action selector, AI Model selector
+ *   - Overview: Name, Output Variable, AI Model selector
+ *   - Action: Action lookup + Executor Type selector (side-by-side) — R7 FR-24
  *   - Prompt: Prompt Configuration (AI nodes only)
  *   - Skills: Skill scope selector
  *   - Knowledge: Knowledge scope selector
@@ -40,6 +41,7 @@ import { useCanvasStore } from '../../stores/canvasStore';
 
 // Sub-components
 import { ActionSelector } from './ActionSelector';
+import { ExecutorTypeSelector } from './ExecutorTypeSelector';
 import { ModelSelector } from './ModelSelector';
 import { ScopeSelector } from './ScopeSelector';
 import { ConditionEditor } from './ConditionEditor';
@@ -55,8 +57,46 @@ import { EntityNameValidatorForm } from './EntityNameValidatorForm';
 import { PromptSchemaForm } from './PromptSchemaForm';
 import { PromptSchemaEditor } from './PromptSchemaEditor';
 import { RenameGuardDialog, type RenameGuardAction } from './RenameGuardDialog';
+import { TypedConfigForm } from './TypedConfigForm';
 import { findOutputVariableReferences, type OutputVariableReference } from '../../services/canvasValidation';
+import {
+  fetchExecutorSchemas,
+  getSchemaForExecutorTypeName,
+  type ExecutorConfigSchema,
+} from '../../services/executorSchemaService';
+import { useTemplateStore } from '../../stores/templateStore';
 import type { PromptSchema } from '../../types/promptSchema';
+
+// R7 Wave 8 task 083 (FR-23) — map camelCase canvas node types to PascalCase ExecutorType
+// enum member names served by the BFF schema endpoint. Once Wave 8 tasks 081 + 088 add
+// the numeric `sprk_executortype` to the canvas node data, prefer `getSchemaForExecutorType`
+// over this name-based lookup. Names omitted from the map (e.g., 'start') fall through to
+// the schema service's "no schema available" placeholder branch.
+const CANVAS_NODE_TYPE_TO_EXECUTOR_NAME: Record<string, string> = {
+  start: 'Start',
+  aiAnalysis: 'AiAnalysis',
+  aiCompletion: 'AiCompletion',
+  condition: 'Condition',
+  deliverOutput: 'DeliverOutput',
+  deliverToIndex: 'DeliverToIndex',
+  updateRecord: 'UpdateRecord',
+  createTask: 'CreateTask',
+  sendEmail: 'SendEmail',
+  createNotification: 'CreateNotification',
+  lookupUserMembership: 'LookupUserMembership',
+  entityNameValidator: 'EntityNameValidator',
+  wait: 'Wait',
+};
+
+function parseConfigBag(configJson: string | undefined): Record<string, unknown> {
+  if (!configJson) return {};
+  try {
+    const parsed = JSON.parse(configJson);
+    return parsed && typeof parsed === 'object' && !Array.isArray(parsed) ? (parsed as Record<string, unknown>) : {};
+  } catch {
+    return {};
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -132,7 +172,7 @@ const useStyles = makeStyles({
 // Tab IDs
 // ---------------------------------------------------------------------------
 
-type TabId = 'overview' | 'prompt' | 'skills' | 'knowledge' | 'tools' | 'configuration';
+type TabId = 'overview' | 'action' | 'prompt' | 'skills' | 'knowledge' | 'tools' | 'configuration';
 
 // ---------------------------------------------------------------------------
 // Component
@@ -166,6 +206,11 @@ export const NodePropertiesDialog = memo(function NodePropertiesDialog() {
   const isAiNode = nodeType === 'aiAnalysis' || nodeType === 'aiCompletion';
   const isConditionNode = nodeType === 'condition';
   const isStartNode = nodeType === 'start';
+  // R7 Wave 8 task 089 (FR-27): when the node has been coerced to 'unknown'
+  // by canvasStore.coerceUnknownNodeTypes (executorType not in catalog),
+  // restrict the dialog to the Action tab only so the maker is funneled toward
+  // picking a known Executor Type via the ExecutorTypeSelector.
+  const isUnknownNode = nodeType === 'unknown';
   const hasTypeForm = [
     'deliverOutput',
     'deliverToIndex',
@@ -207,6 +252,63 @@ export const NodePropertiesDialog = memo(function NodePropertiesDialog() {
       selectNode(null);
     }
   }, [selectedNode, removeNode, selectNode]);
+
+  // R7 Wave 8 task 083 (FR-23) — typed config schema renderer wiring.
+  //
+  // Lazy-fetch the executor config schemas on first dialog open. Cached across opens
+  // via in-memory + sessionStorage by `executorSchemaService`. Re-renders this dialog
+  // when the cache flips from "loading" → "ready" via the local `executorSchema` state.
+  //
+  // The hand-crafted forms above (AiCompletionForm, CreateTaskForm, etc.) remain in
+  // place at this task — tasks 084 + 085 replace them incrementally on top of the
+  // TypedConfigForm renderer rendered below them.
+  const apiBaseUrl = useTemplateStore(s => s.apiBaseUrl);
+  const [executorSchema, setExecutorSchema] = useState<ExecutorConfigSchema | undefined>(undefined);
+  const [schemasReady, setSchemasReady] = useState<boolean>(false);
+
+  useEffect(() => {
+    if (!isOpen || !apiBaseUrl) return;
+    let cancelled = false;
+    fetchExecutorSchemas(apiBaseUrl)
+      .then(() => {
+        if (!cancelled) setSchemasReady(true);
+      })
+      .catch(err => {
+        // Non-fatal: typed form will render the "no schema available" placeholder
+        // and existing hand-crafted forms continue to work unchanged.
+        console.warn('[NodePropertiesDialog] failed to load executor config schemas', err);
+      });
+    return () => {
+      cancelled = true;
+    };
+  }, [isOpen, apiBaseUrl]);
+
+  useEffect(() => {
+    if (!schemasReady || !nodeType) {
+      setExecutorSchema(undefined);
+      return;
+    }
+    const executorName = CANVAS_NODE_TYPE_TO_EXECUTOR_NAME[nodeType];
+    setExecutorSchema(executorName ? getSchemaForExecutorTypeName(executorName) : undefined);
+  }, [schemasReady, nodeType]);
+
+  const typedConfigValue = useMemo(
+    () => parseConfigBag(selectedNode?.data.configJson),
+    [selectedNode?.data.configJson]
+  );
+
+  const handleTypedConfigChange = useCallback(
+    (next: Record<string, unknown>) => {
+      if (!selectedNode) return;
+      try {
+        const json = JSON.stringify(next);
+        updateNodeData(selectedNode.id, { configJson: json });
+      } catch (err) {
+        console.warn('[NodePropertiesDialog] failed to serialize typed config', err);
+      }
+    },
+    [selectedNode, updateNodeData]
+  );
 
   // -----------------------------------------------------------------------
   // R3 P9 H2 (task 091) — OutputVariable rename guard (FR-3H2.1 / AC-H2.1).
@@ -269,9 +371,23 @@ export const NodePropertiesDialog = memo(function NodePropertiesDialog() {
     [renameGuard, selectedNode, committedOutputVar, outputVarDraft, updateNodeData, renameOutputVariableReferences]
   );
 
-  // Which tabs to show — dynamic based on node type
+  // Which tabs to show — dynamic based on node type.
+  // R7 Wave 8 task 086 (FR-24): tab order is Overview, Action, Prompt, Skills,
+  // Knowledge, Tools, Configuration. Action tab is hidden on Start nodes
+  // (Start is a canvas anchor with no Action / ExecutorType to choose).
+  // R7 Wave 8 task 089 (FR-27): when nodeType === 'unknown', show ONLY the
+  // Action tab. The maker must pick a known Executor Type via the
+  // ExecutorTypeSelector before any other tab is meaningful (Prompt depends on
+  // executor being prompt-driven; Configuration depends on the executor's
+  // typed config schema; Skills/Knowledge/Tools depend on executor capability).
   const visibleTabs = useMemo(() => {
+    if (isUnknownNode) {
+      return [{ id: 'action' as TabId, label: 'Action' }];
+    }
     const tabs: { id: TabId; label: string }[] = [{ id: 'overview', label: 'Overview' }];
+    if (!isStartNode) {
+      tabs.push({ id: 'action', label: 'Action' });
+    }
     if (isAiNode) {
       tabs.push({ id: 'prompt', label: 'Prompt' });
     }
@@ -284,7 +400,18 @@ export const NodePropertiesDialog = memo(function NodePropertiesDialog() {
       tabs.push({ id: 'configuration', label: 'Configuration' });
     }
     return tabs;
-  }, [isAiNode, isStartNode, hasConfigTab]);
+  }, [isAiNode, isStartNode, hasConfigTab, isUnknownNode]);
+
+  // R7 Wave 8 task 089 (FR-27): when the selected node is unknown, force
+  // activeTab to 'action' so the dialog opens directly on the
+  // ExecutorTypeSelector. Without this, the previously-selected tab (e.g.
+  // 'overview') would persist across selection changes and the maker would
+  // see an empty pane.
+  useEffect(() => {
+    if (isUnknownNode && activeTab !== 'action') {
+      setActiveTab('action');
+    }
+  }, [isUnknownNode, activeTab]);
 
   return (
     <Dialog
@@ -358,20 +485,11 @@ export const NodePropertiesDialog = memo(function NodePropertiesDialog() {
                       )}
                     </div>
 
-                    {isAiNode && (
-                      <>
-                        <Divider className={styles.sectionTitle} />
-                        <Text weight="semibold" size={300} className={styles.sectionTitle}>
-                          Action
-                        </Text>
-                        <div className={styles.fieldGroup}>
-                          <ActionSelector
-                            selectedActionId={selectedNode.data.actionId}
-                            onActionChange={id => handleUpdate('actionId', id)}
-                          />
-                        </div>
-                      </>
-                    )}
+                    {/*
+                      R7 Wave 8 task 086 (FR-24): ActionSelector has been promoted
+                      out of Overview tab into the new dedicated Action tab below.
+                      Overview tab now shows only: Name, Output Variable, AI Model.
+                    */}
 
                     {isAiNode && (
                       <>
@@ -388,6 +506,28 @@ export const NodePropertiesDialog = memo(function NodePropertiesDialog() {
                       </>
                     )}
                   </>
+                )}
+
+                {/* === ACTION (R7 FR-24 — Action + Executor Type side-by-side) === */}
+                {activeTab === 'action' && !isStartNode && (
+                  <div className={styles.fieldRow}>
+                    <div className={styles.fieldCol}>
+                      <ActionSelector
+                        selectedActionId={selectedNode.data.actionId}
+                        onActionChange={id => handleUpdate('actionId', id)}
+                      />
+                    </div>
+                    <div className={styles.fieldCol}>
+                      <ExecutorTypeSelector
+                        value={
+                          typeof selectedNode.data.executorType === 'number'
+                            ? selectedNode.data.executorType
+                            : undefined
+                        }
+                        onChange={value => handleUpdate('executorType', value)}
+                      />
+                    </div>
+                  </div>
                 )}
 
                 {/* === PROMPT (AI nodes only) === */}
@@ -533,9 +673,28 @@ export const NodePropertiesDialog = memo(function NodePropertiesDialog() {
                       </div>
                     )}
 
-                    {!isStartNode && (
+                    {!isStartNode && schemasReady && (
                       <>
                         {(hasTypeForm || isConditionNode) && <Divider style={{ marginBottom: '16px' }} />}
+                        <Text weight="semibold" size={300} className={styles.sectionTitle}>
+                          Typed Configuration (R7 FR-23)
+                        </Text>
+                        <div className={styles.fieldGroup}>
+                          <TypedConfigForm
+                            nodeId={selectedNode.id}
+                            schema={executorSchema}
+                            value={typedConfigValue}
+                            onChange={handleTypedConfigChange}
+                          />
+                        </div>
+                      </>
+                    )}
+
+                    {!isStartNode && (
+                      <>
+                        {(hasTypeForm || isConditionNode || schemasReady) && (
+                          <Divider style={{ marginBottom: '16px' }} />
+                        )}
                         <Text weight="semibold" size={300} className={styles.sectionTitle}>
                           Runtime Settings
                         </Text>

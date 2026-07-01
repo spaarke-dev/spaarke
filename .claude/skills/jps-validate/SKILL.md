@@ -5,14 +5,13 @@ techStack: [azure-openai, aspnet-core]
 appliesTo: ["validate JPS", "check JPS", "test JPS definition", "validate prompt schema"]
 alwaysApply: false
 exemplar: .claude/skills/jps-action-create/examples/document-profiler.json
-last-reviewed: 2026-05-17
+last-reviewed: 2026-06-29
 ---
 
 # jps-validate
 
-> **Last Reviewed**: 2026-05-17 (Option A move executed; exemplar path now valid)
-> **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2b-A initial; Wave 2d updated post-move)
-> **Exemplar rationale**: `examples/document-profiler.json` (under `jps-action-create/`) is the canonical "valid JPS" reference — shared with `jps-action-create`. Live, verifiable input for validation tests.
+> **Last Reviewed**: 2026-06-29
+> **Reviewed By**: spaarke-ai-platform-unification-r7 task 073 (FR-32 — executor-first validation). New Step 7.6 R7-Dispatch checks anchor validation on the single-hop `node.sprk_executortype` Choice (33 values matching the C# `ExecutorType` enum). Step 7.5 CHECK 25 list of legacy NodeType values (AIAnalysis | Output | Control | Workflow | DeliverComposite) MARKED LEGACY — the canonical contract is now the 33-value `sprk_playbookexecutortype` global Choice set. Step 7.5 CHECK 26 (configJson.__actionType structural fallback) DELETED — the structural fallback ladder was removed in Wave 2 task 025; reading `__actionType` is no longer load-bearing. Step 7.7 references the Wave 3 typed-config-schema endpoint (FR-16) for per-executor configJson validation. Prior review: ai-procedure-quality-r1 (Phase 2b Wave 2b-A; Wave 2d post-move).
 
 ## Purpose
 
@@ -134,15 +133,17 @@ If the file under validation is a **playbook definition** (top-level keys `playb
 
 ```
 NODE-LEVEL CHECKS (apply per node in nodes[]):
-  ✅/❌ CHECK 24: actionCode is present for every node UNLESS nodeType == "DeliverComposite"
-    — Deploy-Playbook.ps1:331-356 lints this; missing actionCode = silent failure path
-    — DeliverComposite is the only documented exemption (Deploy-Playbook.ps1:333)
-  ✅/❌ CHECK 25: nodeType is one of: AIAnalysis | Output | Control | Workflow | DeliverComposite
-    — These are the 5 server-side NodeType values per INodeExecutor.cs:59-91
-  ✅/⚠️ CHECK 26: For AIAnalysis nodes, configJson.__actionType is set (structural fallback)
-    — Per PlaybookOrchestrationService.cs:1116, runtime falls back to __actionType if no FK
+  ✅/❌ CHECK 24: actionCode is present for every PROMPT-DRIVEN node (executorType ∈ {AiAnalysis=0, AiCompletion=1, AiEmbedding=2})
+    — Pure executors (Condition, ReturnResponse, etc.) MUST NOT carry actionCode — it is unused at runtime
+    — Deploy-Playbook.ps1 still lints this for prompt-driven nodes; missing actionCode → executor Validate() throws
+  ✅/❌ CHECK 25 [R7]: executorType is one of the 33 values from `sprk_playbookexecutortype` Choice
+    — Source of truth: src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/ExecutorType.cs (C# enum, post-Wave-2-task-022 rename)
+    — Aligns with the 33-value global Dataverse Choice (sprk_playbookexecutortype)
+    — LEGACY (pre-R7) values like AIAnalysis | Output | Control | Workflow | DeliverComposite are gone; if encountered, FLAG as LEGACY-25 drift
   ✅/⚠️ CHECK 27: configJson is well-formed against node-routing-config.schema.json
     — Same schema gate Deploy-Playbook.ps1:789 applies (FR-14e)
+
+  ⚠️ R7 NOTE: pre-R7 this section also CHECK 26'd that `configJson.__actionType` was set as a STRUCTURAL FALLBACK for AIAnalysis nodes. That fallback was DELETED in Wave 2 task 025 (~150 LOC removed from `PlaybookOrchestrationService.cs`). Reading or writing `__actionType` is now load-NOT-bearing; FLAG any occurrence as LEGACY-26 drift.
 
   ⚠️ NOTE on sprk_isactive: the JSON file format does NOT carry this field — Deploy-Playbook.ps1:823
      writes sprk_isactive=true explicitly. There is nothing to validate at the JSON level;
@@ -153,6 +154,44 @@ ANTI-PATTERN CHECKS (per ai-architecture-actions-nodes-scopes.md §5):
     — That's the R4 deploy bug: putting nodes in playbook configjson instead of deploying as rows
   ✅/⚠️ CHECK 29: Scope decisions (skills, knowledge, tools) live in scopes.*, NOT inline in node configJson
     — Audit + refresh tooling cannot find inline-JSON scope declarations
+```
+
+### Step 7.6: R7 Dispatch-Identity Checks (BINDING per spec FR-32; added 2026-06-29 by task 073)
+
+Anchor every executor-related validation on `node.sprk_executortype` (Choice). This is the canonical dispatch axis post-R7 single-hop refactor. Failures here are non-bypassable.
+
+```
+PER-NODE DISPATCH CHECKS:
+  ✅/❌ R7-V-01: node.executorType is non-NULL and is a valid Choice value (0-143 per the 33-value catalog)
+  ✅/❌ R7-V-02: If executorType is prompt-driven (∈ {0=AiAnalysis, 1=AiCompletion, 2=AiEmbedding}), then sprk_actionid FK MUST be non-NULL
+  ✅/⚠️ R7-V-03: If executorType is pure (anything NOT prompt-driven), then sprk_actionid FK MUST be NULL (non-NULL = LEGACY-F drift per audit Check 3.6 pattern F; warning, not fail)
+  ✅/❌ R7-V-04: Action FK (when present) resolves to a sprk_analysisaction row that exists in Dataverse
+
+LEGACY-DRIFT FAIL conditions (any of these = validator FAIL with LEGACY-* rule id):
+  - LEGACY-NT: node carries `sprk_nodetype` field (column removed pre-R7)
+  - LEGACY-AT: node configJson references `__actionType` (structural fallback deleted in Wave 2 task 025)
+  - LEGACY-LK: validation logic reads `sprk_actiontypeid` lookup as a dispatch signal (column dropped in Wave 4 task 043 — `_sprk_actiontypeid_value` no longer exists)
+  - LEGACY-EX: validation logic reads `sprk_executoractiontype` INT (column dropped in Wave 4 task 044)
+  - LEGACY-NV: Action JPS output field is named `ActionType` / `ExecutorActionType` / `NodeType` — these names mean nothing under R7
+  - LEGACY-DH: Node config carries a dispatch hint that is NOT `sprk_executortype` (e.g., a custom `dispatchTo` field) — author is reaching for the old model
+```
+
+### Step 7.7: Typed Config-Schema Check (BINDING per spec FR-16; Wave 3 endpoint)
+
+For each node, fetch the executor's typed config schema from the BFF endpoint and validate the node's `sprk_configjson` against it. This catches authoring errors before Deploy-Playbook.ps1 sees them.
+
+```
+  ✅/❌ R7-V-05: GET /api/ai/playbook-builder/executor-config-schemas (Wave 3 task 033)
+    — Returns 33 schemas (one per ExecutorType value)
+    — Each schema declares fields[].name, type, required, default, description
+
+  ✅/❌ R7-V-06: node.sprk_configjson conforms to its executorType's schema
+    — Required fields are present
+    — Field types match (string / number / boolean / array)
+    — Unknown fields → WARN (forward-compatibility) — only fail if executorType also unknown
+    — Empty schema (e.g., StartNodeExecutor) → configJson SHOULD be {} or absent
+
+  ✅/⚠️ R7-V-07: If executor is Wave-3-rich-schema (AiAnalysis, AiCompletion, Condition, EntityNameValidator, CreateNotification), validate ALL declared fields. If executor is Wave-8-placeholder-schema (the other 28 per task 085), validate AT LEAST the 1 declared field. Both paths are FR-23 compliant.
 ```
 
 ### Step 8: Render Test (Optional)
@@ -278,6 +317,38 @@ User: "check this JPS: { \"instruction\": { \"role\": \"analyst\" } }"
 | Binary/non-text file | Report error, ask for correct file |
 | Valid JSON but not JPS | Explain JPS requirements, offer to convert |
 | All checks pass | Confirm ready for deployment |
+
+---
+
+## The R7 dispatch model — what changed and why this validator works
+
+> **Read this once.** It anchors why Step 7.6 + 7.7 fail FAST on `sprk_executortype` deviations.
+
+**Before R7**, validation was complacent because none of the 3 dispatch layers (`node.sprk_nodetype` + `Action.sprk_executoractiontype` INT + `Action.sprk_actiontypeid` lookup) was authoritatively enforced. The validator could pass and the wrong executor could still run, because the runtime ladder picked whichever layer was first non-NULL — and that varied across releases. Every release shipped a different version of the same class of "wrong executor ran" bug (design.md §3.1).
+
+**After R7** (Invariants 1-3):
+- `PlaybookOrchestrationService.ExecuteNodeAsync` reads `node.sprk_executortype` (Choice) once. Single hop. No ladder.
+- The 33 executor types catalog in `sprk_playbookexecutortype` global Choice mirrors the C# `ExecutorType` enum (Wave 2 task 022 rename from the legacy `ActionType` name).
+- Each executor declares its own typed config schema via `INodeExecutor.GetConfigSchema()` (Wave 3 FR-16 + tasks 030-036). The BFF endpoint `GET /api/ai/playbook-builder/executor-config-schemas` returns all 33.
+- Action is a reusable prompt template for prompt-driven executors only. Pure executors don't reference an Action.
+
+**This validator's load-bearing job** under R7:
+1. **Step 7.5** — playbook-definition contract (preserved from canonical-truth loop 2026-06-26; CHECK 25 + 26 updated to flag legacy NodeType + `__actionType` drift).
+2. **Step 7.6** — dispatch-identity anchored on `sprk_executortype`. 4 R7-V-* checks + 6 LEGACY-* drift flags.
+3. **Step 7.7** — per-executor typed config validation against the live BFF schema endpoint. Catches the failures Wave 3 was designed to prevent.
+
+**The pre-R7 "$schema + structural fallback + lookup precedence" trio is gone**, and so is the validator's reliance on it. If you see code or docs that still describe the old contract, it's stale — file as `LEGACY-*` drift, not a validator bug.
+
+**Cross-references**:
+- design.md §2 (Invariants 1-3) — binding rules
+- design.md §3.1 (R3.1 WHY history) — failure modes that motivated the rewrite
+- design.md §11 (executor categorization) — tier mapping for the 33 values
+- spec.md FR-07 / FR-08 / FR-09 — single-hop runtime refactor
+- spec.md FR-16 — typed config schemas
+- spec.md FR-32 — this skill's rewrite
+- `ExecutorType.cs` — C# enum (renamed in Wave 2 task 022)
+- `PlaybookOrchestrationService.ExecuteNodeAsync` — runtime source of truth (Wave 2 task 024)
+- `GET /api/ai/playbook-builder/executor-config-schemas` — BFF endpoint serving the 33 schemas (Wave 3 task 033)
 
 ---
 

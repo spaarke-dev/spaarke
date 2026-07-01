@@ -1,0 +1,165 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-051" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Run Review-PlaybookNodes-Dispatch.ps1 against spaarkedev1 — produce CSV for owner review</title>
+    <status>completed</status>
+    <wave>5</wave>
+    <estimated-effort>30-60 minutes</estimated-effort>
+    <tags>dataverse, audit, wave-5</tags>
+    <rigor-level>STANDARD</rigor-level>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>050</dependencies>
+    <fr-coverage>FR-19 (review-tool execution portion)</fr-coverage>
+  </metadata>
+
+  <prompt>
+    Run the review tool against spaarkedev1, produce the CSV at
+    `notes/drafts/playbook-node-review-input.csv`, validate it, and hand it to the owner
+    for the manual-review checkpoint (task 052). This is the bridge from "tool exists" to
+    "owner has the data".
+  </prompt>
+
+  <role>
+    Platform engineer running a read-only Dataverse query + producing a structured CSV.
+    No code modifications; this is execution + validation only.
+  </role>
+
+  <goal>
+    A CSV file at `projects/spaarke-ai-platform-unification-r7/notes/drafts/playbook-node-review-input.csv`
+    containing one row per existing `sprk_playbooknode` row in spaarkedev1 (~94 rows) with the
+    columns defined in task 050. The CSV is the owner's input for the manual review at task 052.
+  </goal>
+
+  <inputs>
+    <file purpose="script-to-run">scripts/dataverse/Review-PlaybookNodes-Dispatch.ps1</file>
+    <file purpose="task-050-poml">projects/spaarke-ai-platform-unification-r7/tasks/050-author-review-playbooknodes-dispatch-script.poml</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    <file purpose="spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="task-index">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-19">Manual per-node review backfill of `sprk_executortype` for all 94 existing `sprk_playbooknode` rows in spaarkedev1. This task delivers the input CSV for owner review.</constraint>
+    <constraint source="read-only">This task makes NO Dataverse writes. Review-PlaybookNodes-Dispatch.ps1 is read-only by design (task 050 acceptance criteria).</constraint>
+    <constraint source="environment">Target environment: spaarkedev1 (dev). Owner must have `az login` session active + System Customizer/Admin role.</constraint>
+    <constraint source="CLAUDE.md §10">No BFF surface touched — no publish-size verification needed.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>dataverse/script-execution</topic>
+    <files>
+      <file>scripts/dataverse/Review-PlaybookNodes-Dispatch.ps1</file>
+      <file>scripts/Deploy-Playbook.ps1</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Task 050 authored the tool; task 051 runs it. This is the production-data execution step
+      that turns "94 abstract node rows" into "a concrete CSV the owner can review one row at a time."
+
+      The CSV is committed to the repo at `notes/drafts/` so the owner-checkpoint trail is
+      auditable: input CSV (this task), output CSV (task 052), migration log (task 054).
+    </background>
+    <dependencies>
+      <dependency task="050" status="must-be-complete">Review-PlaybookNodes-Dispatch.ps1 must exist and be tested via -DryRun.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 052 is the OWNER CHECKPOINT — owner edits this CSV.</item>
+      <item>Task 053 reads owner-output CSV and applies values via migration script.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: STANDARD · 📋 REASON: read-only Dataverse query execution, no code modification, output is a CSV artifact for owner review · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read project CLAUDE.md + task 050 POML + the Review-PlaybookNodes-Dispatch.ps1 source.
+    </step>
+    <step order="2" name="Verify authentication">
+      Run `az account show` to confirm Azure CLI session is active. If not, request user run `az login` before continuing.
+      Confirm `DATAVERSE_URL` env var is set to spaarkedev1 URL (e.g., `https://spaarkedev1.crm.dynamics.com`).
+    </step>
+    <step order="3" name="Dry-run sanity check">
+      Run: `pwsh ./scripts/dataverse/Review-PlaybookNodes-Dispatch.ps1 -DryRun`.
+      Confirm: ~94 rows returned, suggestions look reasonable, summary prints, no errors.
+      If row count is wildly different (e.g., 0 or 500), STOP and investigate before proceeding.
+    </step>
+    <step order="4" name="Real run — emit CSV">
+      Run: `pwsh ./scripts/dataverse/Review-PlaybookNodes-Dispatch.ps1`.
+      Confirm: file written at `projects/spaarke-ai-platform-unification-r7/notes/drafts/playbook-node-review-input.csv`.
+    </step>
+    <step order="5" name="Validate the CSV">
+      Open the CSV; verify:
+      - Header row matches expected columns
+      - Row count ≈ 94 (within ±5 — playbook nodes may have changed slightly)
+      - At least some rows have a `suggested_executortype` populated
+      - `owner_decision_executortype` and `owner_notes` columns are present and BLANK (owner fills)
+      - No obvious garbage (escape errors, encoding issues)
+    </step>
+    <step order="6" name="Update current-task.md + TASK-INDEX">
+      Mark task 051 status complete; advance current-task.md to task 052 (OWNER CHECKPOINT).
+      Add a prominent note in current-task.md that task 052 is a HUMAN gate — the agent will block
+      on owner action.
+    </step>
+    <step order="7" name="Commit the input CSV">
+      Commit `projects/spaarke-ai-platform-unification-r7/notes/drafts/playbook-node-review-input.csv` with conventional message.
+      Example: `chore(r7): emit playbook-node review CSV for owner checkpoint (Wave 5 task 051, FR-19)`
+    </step>
+    <step order="8" name="Notify user">
+      Print explicit message:
+      "✋ TASK 051 COMPLETE. NEXT: TASK 052 IS AN OWNER CHECKPOINT.
+      The CSV is at `projects/spaarke-ai-platform-unification-r7/notes/drafts/playbook-node-review-input.csv`.
+      The owner must review each of ~94 rows, fill in `owner_decision_executortype` (+ optional `owner_notes`),
+      and save as `playbook-node-review-output.csv` (or any name they choose — task 053 reads what they provide).
+      Task 053 (migration script authoring) begins only after the owner produces the output CSV."
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Bash (pwsh script invocation, az account show, git commit)</tool>
+    <tool>Read (the produced CSV for validation)</tool>
+    <tool>Edit (current-task.md + TASK-INDEX.md)</tool>
+  </tools>
+
+  <outputs>
+    <output type="new-file">projects/spaarke-ai-platform-unification-r7/notes/drafts/playbook-node-review-input.csv</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md (advance to task 052 with OWNER CHECKPOINT flag)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 051 ✅)</output>
+    <output type="commit">chore(r7): emit playbook-node review CSV for owner checkpoint (Wave 5 task 051, FR-19)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>`pwsh ./scripts/dataverse/Review-PlaybookNodes-Dispatch.ps1 -DryRun` runs clean against spaarkedev1</criterion>
+    <criterion>`pwsh ./scripts/dataverse/Review-PlaybookNodes-Dispatch.ps1` produces CSV at expected path</criterion>
+    <criterion>CSV row count is approximately 94 (±5 acceptable)</criterion>
+    <criterion>CSV columns match task 050 specification</criterion>
+    <criterion>CSV is committed to repo</criterion>
+    <criterion>current-task.md advances to task 052 with prominent OWNER CHECKPOINT notice</criterion>
+    <criterion>User notified explicitly that task 052 blocks on human action</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Completed 2026-06-28.
+
+    Real run against spaarkedev1: 94 rows / 41 HIGH / 14 MEDIUM / 23 LOW / 16 NONE confidence (identical
+    to task 050 dry-run as expected — script is deterministic + read-only). CSV written to
+    `projects/spaarke-ai-platform-unification-r7/notes/drafts/playbook-node-review-input.csv`.
+
+    Verification:
+    - 94 rows (✅ exact match to task 050 baseline)
+    - 13 columns (node_id, node_name, playbook_name, action_id, action_name, current_sprk_executortype,
+      current_advisory_executoractiontype, suggested_executortype, suggested_executortype_label,
+      confidence, suggestion_source, owner_decision_executortype, owner_notes)
+    - All 94 `owner_decision_executortype` cells blank ✅
+    - All 94 `owner_notes` cells blank ✅
+    - All 94 `current_sprk_executortype` cells blank ✅ (confirms FR-19 backfill obligation: zero rows
+      already backfilled)
+
+    NEXT: Task 052 is OWNER CHECKPOINT. Owner reviews CSV + fills
+    `owner_decision_executortype` per row + saves as `playbook-node-review-output.csv`.
+    Task 053 (migration script) consumes the owner-output.
+  </notes>
+</task>

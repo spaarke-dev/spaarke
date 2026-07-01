@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-021" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Plan rename strategy (PR sizing, conflict-risk windows, rollback plan)</title>
+    <status>completed</status>
+    <wave>2</wave>
+    <estimated-effort>1-2 hours</estimated-effort>
+    <tags>planning, wave-2</tags>
+    <rigor-level>STANDARD</rigor-level>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>020</dependencies>
+    <fr-coverage>FR-10 (preparatory)</fr-coverage>
+  </metadata>
+
+  <prompt>
+    Task 020 produced the reference inventory. This task decides HOW to execute the rename:
+    one PR or split into chunks; coordinate with sibling worktrees that touch BFF (R4, chat-routing-redesign-r1, R6)
+    to minimize merge-conflict windows; identify the rollback strategy if the rename breaks something post-merge.
+    Output is a brief plan the executor of task 022 follows mechanically.
+  </prompt>
+
+  <role>
+    Senior .NET backend developer + release coordinator. Pragmatic — large rename in one diff is fine if executed cleanly.
+  </role>
+
+  <goal>
+    A rename plan at `projects/spaarke-ai-platform-unification-r7/notes/spikes/actiontype-rename-plan.md` that decides:
+    1. Single PR vs split (recommendation + rationale based on 020 audit counts)
+    2. Conflict-risk window — what sibling worktrees currently touch BFF; when to schedule the rename relative to their PRs
+    3. Execution order within task 022 (file-by-file vs IDE-driven rename refactor vs `sed` script)
+    4. Rollback plan if rename merges then breaks downstream consumer
+    5. CI gate strategy — ensure full BFF build + test suite is green pre-rename and post-rename
+  </goal>
+
+  <inputs>
+    <file purpose="audit-report">projects/spaarke-ai-platform-unification-r7/notes/spikes/actiontype-audit.md</file>
+    <file purpose="design-spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="plan">projects/spaarke-ai-platform-unification-r7/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    <file purpose="active-projects-registry">projects/INDEX.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-10">Full rename in BFF only — no PCF / code-page / script changes in this wave.</constraint>
+    <constraint source="plan.md Wave 2">Task 022 is intentionally a single sequential task — large diff beats parallel patchwork. This plan confirms or recommends an alternative.</constraint>
+    <constraint source="CLAUDE.md §3">Sub-Agent Write Boundary does NOT apply (no `.claude/` writes); rename is BFF-source-only.</constraint>
+    <constraint source="bff-extensions.md">No publish-size check required for this planning task; task 022 + 029 carry that.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff/refactor-coordination</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/INDEX.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      The rename diff is large (audit confirms ~1000+ references). Sibling worktrees (R4 on hold, chat-routing-redesign-r1, R6)
+      may be touching BFF files in parallel. The window between rename merge and downstream rebase is when merge conflicts strike.
+      A clear plan reduces friction.
+    </background>
+    <dependencies>
+      <dependency task="020" status="must-be-complete">Audit report at notes/spikes/actiontype-audit.md.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 022 executes the rename per this plan.</item>
+      <item>Sibling worktree coordination: R4 holds open per spec; check `projects/INDEX.md` for currently-active BFF projects.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: STANDARD · 📋 REASON: planning task; produces strategy document only · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read audit report from task 020 + plan.md Wave 2 + projects/INDEX.md to identify currently-active BFF-touching worktrees.
+    </step>
+    <step order="2" name="Assess PR sizing">
+      Based on audit counts (per-file breakdown), assess whether a single PR is reviewable (likely yes — mechanical rename). Recommend single PR.
+      If split is needed, identify boundaries (per-namespace? per-file group?).
+    </step>
+    <step order="3" name="Identify sibling worktree conflict windows">
+      Cross-reference projects/INDEX.md for active BFF-touching projects. Document which worktrees touch which BFF files. Recommend coordination touchpoint (e.g., post-message in shared comms; pause sibling PRs for 24h around rename merge).
+    </step>
+    <step order="4" name="Decide execution mechanism">
+      Recommend: IDE-driven Rename refactor (Roslyn-aware, handles XML doc cref + signatures) vs sed-script (fast but blind to context). Prefer IDE-driven for correctness; document fallback.
+    </step>
+    <step order="5" name="Define CI gate strategy">
+      Pre-rename: confirm BFF build + xUnit suite is green at baseline. Post-rename: same suite must be green. Document the exact dotnet commands.
+    </step>
+    <step order="6" name="Define rollback plan">
+      If rename merges and breaks downstream: `git revert` the merge commit is the recommended rollback. Document the steps + acceptance criteria for triggering rollback (e.g., production smoke test fails within 24h).
+    </step>
+    <step order="7" name="Write rename plan document">
+      Compose `notes/spikes/actiontype-rename-plan.md`. Target 80-120 lines. Keep the doc operational — task 022 follows it mechanically.
+    </step>
+    <step order="8" name="Update current-task.md + TASK-INDEX">
+      Mark task 021 complete; advance current-task.md to task 022.
+    </step>
+    <step order="9" name="Commit">
+      Commit `notes/spikes/actiontype-rename-plan.md`. Conventional message: `chore(r7/plan): rename strategy for ActionType → ExecutorType (task 021, FR-10)`.
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (audit report, INDEX.md, plan.md)</tool>
+    <tool>Write (rename plan document)</tool>
+    <tool>Bash (git commit)</tool>
+  </tools>
+
+  <outputs>
+    <output type="document">projects/spaarke-ai-platform-unification-r7/notes/spikes/actiontype-rename-plan.md</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md (advance to task 022)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 021 ✅)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Rename plan document exists at notes/spikes/actiontype-rename-plan.md</criterion>
+    <criterion>PR sizing recommendation stated with rationale</criterion>
+    <criterion>Sibling worktree conflict-risk window identified (per projects/INDEX.md)</criterion>
+    <criterion>Execution mechanism chosen (IDE-driven vs sed-script) with reasoning</criterion>
+    <criterion>CI gate commands documented (dotnet build + dotnet test)</criterion>
+    <criterion>Rollback plan documented with trigger criteria</criterion>
+    <criterion>current-task.md updated to point at task 022 as next</criterion>
+  </acceptance-criteria>
+</task>

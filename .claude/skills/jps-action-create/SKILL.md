@@ -5,13 +5,13 @@ techStack: [azure-openai, aspnet-core, dataverse]
 appliesTo: ["create JPS action", "new JPS definition", "create analysis action", "new playbook action"]
 alwaysApply: false
 exemplar: .claude/skills/jps-action-create/examples/document-profiler.json
-last-reviewed: 2026-05-17
+last-reviewed: 2026-06-29
 ---
 
 # jps-action-create
 
-> **Last Reviewed**: 2026-05-17
-> **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2d — Option A executed: moved 23 canonical JPS examples from `projects/x-ai-json-prompt-schema-system/notes/jps-conversions/` to `.claude/skills/jps-action-create/examples/`; updated 5 path refs in this skill + 3 refs in jps-playbook-design + 3 refs in jps-validate; renumbered second duplicate Step 6 → Step 7; flipped frontmatter above H1)
+> **Last Reviewed**: 2026-06-29
+> **Reviewed By**: spaarke-ai-platform-unification-r7 task 070 (FR-32 — node-first dispatch rewrite). Action is now framed as a reusable prompt template; dispatch identity lives on `node.sprk_executortype`. The `sprk_analysisaction.sprk_actiontypeid` lookup and `sprk_executoractiontype` INT columns were dropped in Wave 4 tasks 043+044 — no JPS-author signal touches them anymore. Prior review: ai-procedure-quality-r1 (Phase 2b Wave 2d).
 > **Exemplar rationale**: `examples/document-profiler.json` is the canonical simple-extraction reference (named throughout this skill body as "gold standard"). For complex-with-scopes pattern, see `examples/clause-analyzer.json`.
 
 ## Purpose
@@ -45,20 +45,22 @@ Ask the user (use AskUserQuestion or conversation):
 5. **Does it need template parameters?** (runtime customization like `{{jurisdiction}}`)
 6. **Does it need dynamic enum values?** (`$choices` from Dataverse lookups, option sets, or downstream routing nodes)
 
-### Step 1.5: Where does this config live? (Config-Home Guard — BINDING per canonical-truth loop 2026-06-26)
+### Step 1.5: Where does this config live? (Config-Home Guard — BINDING per canonical-truth loop 2026-06-26; updated for R7 node-first dispatch 2026-06-29)
 
-Before writing JPS JSON, confirm what you are putting on the Action vs the node. **Actions are reusable; per-instance wire-up belongs on the node row.** Walk the 4-Home decision tree at [`docs/architecture/ai-architecture-actions-nodes-scopes.md`](../../../docs/architecture/ai-architecture-actions-nodes-scopes.md) §4 BEFORE Step 2:
+Before writing JPS JSON, confirm what you are putting on the Action vs the node. **Actions are reusable prompt templates; per-instance wire-up AND dispatch identity live on the node row.** Walk the 4-Home decision tree at [`docs/architecture/ai-architecture-actions-nodes-scopes.md`](../../../docs/architecture/ai-architecture-actions-nodes-scopes.md) §4 BEFORE Step 2:
 
 | If the field is... | Home | Goes on... |
 |---|---|---|
-| Action-intrinsic (prompt, temperature, output schema, executor selector) | A | `sprk_analysisaction` columns — THIS skill creates these |
+| Action-intrinsic prompt template — system prompt, output schema, default temperature | A | `sprk_analysisaction` columns — THIS skill creates these |
 | Identity/scheduling/capability of the playbook | B | `sprk_analysisplaybook` columns — NOT this skill |
-| Per-node runtime config (input bindings, output variable, position, executor-specific knobs) | C | `sprk_playbooknode` row / `sprk_configjson` — NOT this skill |
+| **Per-node dispatch identity** (`sprk_executortype` Choice — selects which executor runs the node) AND per-node runtime config (input bindings, output variable, position, executor-specific knobs) | C | `sprk_playbooknode` row / `sprk_configjson` — NOT this skill |
 | Declarative "this playbook needs Skill X" scope | D | N:N relationships — NOT this skill |
 
-If your "Action config" turns out to be Home C (per-instance wire-up), STOP — that belongs in the node's `sprk_configjson` set by the playbook designer, not in the JPS. The JPS describes WHAT the Action does intrinsically (its system prompt + output shape + scope references).
+**Dispatch was REMOVED from Home A in R7** (FR-07, FR-08, FR-09). The node's `sprk_executortype` Choice now owns dispatch identity per design.md §2 Invariant 2 — a single-hop read in `PlaybookOrchestrationService.ExecuteNodeAsync`. Why is this binding? See design.md §3.1 — the pre-R7 3-layer dispatch storage (`node.sprk_nodetype` + `Action.sprk_executoractiontype` + `Action.sprk_actiontypeid` lookup chain) was never enforced to agree, drifted across releases, and caused every release to ship a different version of the same class of "wrong executor ran" bug. The Wave 4 schema cleanup (tasks 043+044, 2026-06-29) dropped the two Action-side columns; if your JPS author muscle-memory says "set ActionType on the Action," the column literally does not exist anymore.
 
-**Note on `sprk_outputschemajson`**: this column exists on `sprk_analysisaction` and is read at runtime by `PlaybookExecutionEngine.cs:490` (chat-summarize FK chain) — so it IS a Home A field. JPS authors can populate it via the `output.structuredOutput: true` flag (the deploy pipeline derives the JSON Schema from `output.fields[]`).
+If your "Action config" turns out to be Home C (per-instance wire-up OR dispatch identity), STOP — that belongs on the node, not in the JPS. The JPS describes WHAT the Action does intrinsically (its system prompt + output shape + scope references). The NODE describes WHO runs it (the executor) and HOW it's wired (config, bindings).
+
+**Note on `sprk_outputschemajson`**: this column exists on `sprk_analysisaction` and is read at runtime by the orchestrator for prompt-driven executors (AiAnalysis, AiCompletion, AiEmbedding) — so it IS a Home A field. JPS authors can populate it via the `output.structuredOutput: true` flag (the deploy pipeline derives the JSON Schema from `output.fields[]`).
 
 ### Step 2: Load Context
 
@@ -178,20 +180,21 @@ ACTION-NAME convention:
   - Match the Analysis Action's sprk_name field
 ```
 
-### Step 5.5: Post-Deploy Verification (BINDING per canonical-truth loop 2026-06-26)
+### Step 5.5: Post-Deploy Verification (BINDING per canonical-truth loop 2026-06-26; updated for R7 schema cleanup 2026-06-29)
 
 After the Action row is seeded to Dataverse via `Seed-JpsActions.ps1`, **verify with Dataverse MCP `read_query`** that the row landed with the right columns. The actionCode is the canonical alternate key — every playbook node will FK-resolve to this Action via actionCode → Guid at deploy time (see [`ai-guide-playbook-deploy-recipe.md`](../../../docs/guides/ai-guide-playbook-deploy-recipe.md) §3 step 3).
 
 ```
 mcp__dataverse__read_query against sprk_analysisaction
   filter: sprk_actioncode eq '{ACTION-CODE}'
-  select: sprk_actioncode, sprk_name, sprk_systemprompt, sprk_outputschemajson, sprk_temperature, _sprk_actiontypeid_value
+  select: sprk_actioncode, sprk_name, sprk_systemprompt, sprk_outputschemajson, sprk_temperature
 
 EXPECT exactly 1 row.
 EXPECT sprk_systemprompt non-empty (Memo column — first 200 chars sufficient).
 EXPECT sprk_outputschemajson non-empty IF structuredOutput=true in JPS.
-EXPECT _sprk_actiontypeid_value resolves to the expected sprk_actiontype row.
 ```
+
+The `_sprk_actiontypeid_value` lookup and `sprk_executoractiontype` INT columns were dropped from `sprk_analysisaction` in R7 Wave 4 (tasks 043+044, 2026-06-29) — do NOT include them in your select projection; the request will 400 (column does not exist).
 
 If the row is missing or missing required columns, re-run `Seed-JpsActions.ps1` — do NOT manually patch.
 
@@ -201,6 +204,38 @@ Ask user:
 - Add this action to `scripts/Seed-JpsActions.ps1` mapping? (for deployment)
 - Create a playbook that uses this action? (invoke `jps-playbook-design`)
 - Validate the JPS with a render test? (invoke `jps-validate`)
+
+---
+
+## The R7 dispatch model — what changed and why
+
+> **Read this once.** It anchors why "Don't set ActionType on the Action" is binding in R7+.
+
+**Before R7**, an Action carried dispatch identity via TWO redundant columns on `sprk_analysisaction`:
+- `sprk_actiontypeid` (lookup → `sprk_analysisactiontype` table)
+- `sprk_executoractiontype` (INT column duplicating the row's executor value)
+
+The orchestrator resolved dispatch via a 3-layer lookup: `node → Action → ActionType lookup row → executor`. None of the three layers was enforced to agree with the others, so they drifted across releases. Every release shipped a different version of the same "wrong executor ran for this node" bug.
+
+**After R7** (design.md §2 Invariants 1-3 + §3.1 WHY history):
+- **Invariant 1**: Every node has `sprk_executortype` (Choice) set. Single source of dispatch identity.
+- **Invariant 2**: `PlaybookOrchestrationService.ExecuteNodeAsync` reads `node.sprk_executortype` directly. Single hop. No lookup chain. No structural fallback. No Action override branch.
+- **Invariant 3**: Action carries `SystemPrompt + OutputSchema + Temperature` ONLY. It is a reusable prompt template for prompt-driven executors (AiAnalysis, AiCompletion, AiEmbedding). It does NOT carry dispatch identity.
+
+**The schema columns that previously held Action-side dispatch are GONE** (Wave 4 tasks 043+044, 2026-06-29):
+- `sprk_analysisaction.sprk_actiontypeid` — deleted via Dataverse Web API; the ManyToOne relationship was dropped, cascading the lookup column.
+- `sprk_analysisaction.sprk_executoractiontype` — deleted via Dataverse Web API.
+
+The `sprk_analysisactiontype` lookup TABLE itself is preserved (FR-05) as decorative maker categorization — but no runtime code reads it for dispatch.
+
+**Implication for JPS authoring**: when you create a new Action, you describe WHAT it does intrinsically (system prompt + output schema + temperature). You do NOT describe WHO runs it — that's the node author's call in PlaybookBuilder when they drop the node on the canvas and pick `Executor Type` from the Choice dropdown. If you find yourself reaching for "set ActionType on the Action," stop — the column literally does not exist anymore, and reaching for it suggests you're trying to bake a Home-C concern (node-level dispatch) into a Home-A artifact (the prompt template).
+
+**Cross-references**:
+- design.md §2 (Invariants 1-3) — the binding rules
+- design.md §3.1 (R3.1 WHY history) — the failure modes that motivated the rewrite
+- spec.md FR-07 / FR-08 / FR-09 — runtime reform (single-hop dispatch, structural-fallback delete, Action-override-branch delete)
+- spec.md FR-03 / FR-04 — schema column deletions
+- `PlaybookOrchestrationService.ExecuteNodeAsync` — runtime source of truth (Wave 2 task 024)
 
 ---
 

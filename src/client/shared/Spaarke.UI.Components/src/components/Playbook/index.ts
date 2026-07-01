@@ -12,6 +12,7 @@
 // Types
 export type {
   IPlaybook,
+  IPlaybookConsumerMapping,
   IScopeItem,
   IAction,
   ISkill,

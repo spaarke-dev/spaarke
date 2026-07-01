@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="132" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>TLDR ↔ Activity Notes consistency — chain TLDR output as input to channel narrative generation</title>
+    <phase>Wave 12 — MVP Completion</phase>
+    <wave>12</wave>
+    <sub-wave>12.2</sub-wave>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>bff-api + code-impl; modifies DailyBriefingNarrator structured LLM flow</rigor-reason>
+    <parallel-group>W12-2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <tags>bff-api, code-impl, ai, daily-briefing, narrator, wave12</tags>
+    <estimated-effort>0.5-1 day</estimated-effort>
+  </metadata>
+
+  <prompt>
+Operator requirement (wave12 plan §2.1): "TL;DR must be consistent with what is in the Activity Notes (i.e., if in TL;DR then details must be in Activity Notes)." Today the narrator generates TLDR and per-channel narratives in parallel from the same source items — but the LLM can reference items in TLDR that don't appear in the per-channel narratives (because the per-channel call doesn't see the TLDR's choices). Fix: chain TLDR output as an input/hint to per-channel narrative generation so channel narratives explicitly cover items mentioned in TLDR.
+  </prompt>
+
+  <role>
+You are a BFF AI service developer modifying an existing narrator. Smallest possible change that achieves operator-stated consistency. Do NOT introduce new abstractions.
+  </role>
+
+  <goal>
+Items referenced in TLDR.keyTakeaways or TLDR.topAction always have corresponding bullets in the per-channel narratives. UAT-verifiable: operator looks at TLDR, then expands channels, and every TLDR-mentioned matter/document/task is in the detailed channel narratives.
+  </goal>
+
+  <inputs>
+    - Current `DailyBriefingNarrator` (R7 W11 commits `3affa952f` + `85c762081`)
+    - Flow today: TLDR generated FIRST via 1 LLM call; per-channel narratives generated in parallel via N LLM calls — these N calls do NOT see TLDR
+    - Operator requirement: bidirectional consistency
+  </inputs>
+
+  <constraints>
+    - Per CLAUDE.md §10 + §11: modification of existing narrator, no new abstractions
+    - Per ADR-038: integration-heavy test pyramid; mock IOpenAiClient at boundary
+    - MUST preserve narrator response shape (downstream widget unaffected)
+    - MUST preserve Action-row-as-prompt-tunable-surface (BRIEF-NARRATE-CHANNEL Action's prompt may need amendment to accept TLDR input; operator can edit prompt to tune behavior — do NOT hardcode TLDR-handling in C#)
+    - Acceptable approach: add a new optional parameter `tldrContext` to the per-channel call; channel narrative Action's prompt instructs LLM to ensure coverage of TLDR-referenced items
+  </constraints>
+
+  <knowledge>
+    <files>
+      - projects/spaarke-ai-platform-unification-r7/notes/wave12-mvp-completion-plan.md (§2.1 UI/UX requirements)
+      - projects/spaarke-ai-platform-unification-r7/CLAUDE.md
+      - .claude/constraints/bff-extensions.md
+      - .claude/adr/ADR-038-testing-strategy.md
+    </files>
+  </knowledge>
+
+  <context>
+    <relevant-files>
+      - src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingNarrator.cs (modify chaining)
+      - src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisActionService.cs (load Action prompts)
+      - tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Narrators/DailyBriefingNarratorTests.cs (extend)
+      - Action BRIEF-NARRATE-CHANNEL `sprk_systemprompt` (Dataverse — may need prompt amendment so LLM uses TLDR context)
+    </relevant-files>
+  </context>
+
+  <steps>
+1. **Read narrator current flow** — identify TLDR call + per-channel call sites (15 min)
+2. **Design chaining approach** (15 min):
+   - Option A (preferred): pass TLDR result as additional input to each per-channel call; channel prompt amended to reference it
+   - Option B: aggregate per-channel + TLDR after-the-fact and verify; if inconsistency detected, regenerate channels (more complex, more LLM cost)
+   - Choose A unless prompt amendment proves infeasible
+3. **Implement chaining in narrator** (30-60 min):
+   - Capture TLDR result
+   - Pass to per-channel LLM call as additional input section
+   - Per ADR-013 BFF facade pattern: use existing `IOpenAiClient.GetStructuredCompletionRawAsync` with augmented input
+4. **Amend BRIEF-NARRATE-CHANNEL Action's `sprk_systemprompt`** if needed via mcp__dataverse__update_record (15 min):
+   - Add instruction: "Each item mentioned in TLDR keyTakeaways or topAction MUST be covered in your bullet narrative"
+   - Operator can tune this further post-deploy
+5. **Add unit tests** (30-45 min):
+   - Test: TLDR-mentioned item appears in per-channel bullets (mock LLM to return correlated outputs)
+   - Test: TLDR result correctly passed as input parameter to per-channel call
+6. **Build + test verification** (15 min)
+7. **Verify publish-size impact** (10 min)
+
+  </steps>
+
+  <tools>
+    - Read / Grep / Glob
+    - Edit (narrator modification)
+    - Bash (dotnet test, dotnet build, dotnet publish for size check)
+    - mcp__dataverse__read_query / mcp__dataverse__update_record (Action prompt amendment)
+    - TodoWrite
+  </tools>
+
+  <outputs>
+    - DailyBriefingNarrator.cs (M)
+    - Unit test additions
+    - BRIEF-NARRATE-CHANNEL Action `sprk_systemprompt` amended (Dataverse update)
+    - Publish-size report
+  </outputs>
+
+  <acceptance-criteria>
+    - [ ] TLDR result chained as input to per-channel narrative call
+    - [ ] BRIEF-NARRATE-CHANNEL Action prompt instructs coverage of TLDR-referenced items
+    - [ ] Unit tests verify chaining (mocked LLM)
+    - [ ] `dotnet test` 0 new failures
+    - [ ] `dotnet build` 0 errors
+    - [ ] Publish-size diff reported
+    - [ ] Narrator response shape unchanged (widget unaffected)
+    - [ ] Action prompt remains operator-tunable (no hardcoded TLDR handling in C#)
+  </acceptance-criteria>
+</task>

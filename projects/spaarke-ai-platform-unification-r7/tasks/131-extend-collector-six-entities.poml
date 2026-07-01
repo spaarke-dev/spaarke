@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="131" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Extend DailyBriefingCollector to 6 entity types + refactor to use IMembershipResolverService</title>
+    <phase>Wave 12 — MVP Completion</phase>
+    <wave>12</wave>
+    <sub-wave>12.2</sub-wave>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>bff-api + code-impl modifying .cs files; 6+ steps; gates Wave 12.2 deploy</rigor-reason>
+    <parallel-group>W12-2</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>depends on T130 IMembershipResolverService fix completing (uses resolver instead of FetchXml bypass)</parallel-reason>
+    <tags>bff-api, code-impl, dataverse, daily-briefing, wave12</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+  </metadata>
+
+  <prompt>
+Extend `DailyBriefingCollector` from its current 4 channels (all `sprk_event`-based) to the 6 operator-specified channels (Upcoming Tasks, Overdue Tasks, Documents, Matters, Projects, To Dos) — each with its own entity query + ownership filter. Refactor to use `IMembershipResolverService` (fixed by T130) instead of inline FetchXml `eq-userid` bypass. Preserve the current per-bullet entity-link projection so `EnrichBulletWithEntityRefs` continues to work across all 6 entity types.
+  </prompt>
+
+  <role>
+You are a BFF service developer extending an existing service. Add new methods + queries; refactor data-access layer call; do NOT introduce new abstractions or shared services. The 6-entity expansion is consumer-specific code (Daily Briefing only); CLAUDE.md §11 component-justification rule applies — modification of existing component, no new surface.
+  </role>
+
+  <goal>
+`DailyBriefingCollector.CollectAsync(systemUserId, ct)` returns 6 channels (each with proper entity items per operator spec). Uses `IMembershipResolverService` for ownership filtering. Each channel populated with realistic Dataverse-sourced data when run against spaarkedev1. Per-bullet entity-link projection (primaryEntityType/Id/Name) works for all 6 entity types.
+  </goal>
+
+  <inputs>
+    - Current `DailyBriefingCollector` with 4 sprk_event channels (R7 W11 commit `85c762081`)
+    - Operator-specified 6 entity types + filters (from wave12 plan §2.1):
+      1. Upcoming Tasks: sprk_event, type=Task, dueDate OR finalDueDate within next 5 days, status=Open, ownership filter
+      2. Overdue Tasks: sprk_event, type=Task, dueDate OR finalDueDate > 5 days past, status=Open, same ownership
+      3. Documents: sprk_document, new or modified, matter/project member
+      4. Matter: sprk_matter, modifiedon last 5 days, status=Active, member
+      5. Project: sprk_project, modifiedon last 5 days, status=Active, member
+      6. To Do: sprk_todo, dueDate=today/tomorrow, owner/assignee
+    - Timezone: user TZ for date filters; no time-of-day precision
+    - `IMembershipResolverService` (post T130 fix)
+  </inputs>
+
+  <constraints>
+    - Per CLAUDE.md §10: BFF Hygiene — run constraints checklist; verify publish-size impact (expect no material change; collector is data-access logic)
+    - Per CLAUDE.md §11: modifying existing collector, no new surface; no `<justification>` required
+    - Per ADR-038: unit tests mock at boundaries only (IGenericEntityService + IMembershipResolverService)
+    - MUST preserve BriefingItem projection shape (downstream narrator depends on it)
+    - MUST NOT introduce new shared abstractions; per-entity-type query methods live as private methods on `DailyBriefingCollector`
+    - Date filters use user timezone (resolve from caller context) but no time-of-day precision — date arithmetic at day boundaries only
+    - Each query runs in parallel via Task.WhenAll (matches current 4-channel pattern)
+  </constraints>
+
+  <knowledge>
+    <files>
+      - projects/spaarke-ai-platform-unification-r7/notes/wave12-mvp-completion-plan.md (§2.1 record spec)
+      - projects/spaarke-ai-platform-unification-r7/CLAUDE.md
+      - .claude/constraints/bff-extensions.md
+      - .claude/adr/ADR-038-testing-strategy.md
+    </files>
+  </knowledge>
+
+  <context>
+    <relevant-files>
+      - src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingCollector.cs (extend)
+      - src/server/api/Sprk.Bff.Api/Services/Ai/Membership/IMembershipResolverService.cs (consume)
+      - src/server/api/Sprk.Bff.Api/Services/Dataverse/IGenericEntityService.cs (existing query API)
+      - src/server/api/Sprk.Bff.Api/Api/Ai/DailyBriefingEndpoints.cs (`/render` endpoint, may need DTO update)
+      - tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Narrators/DailyBriefingCollectorTests.cs (extend if exists; create if not)
+    </relevant-files>
+  </context>
+
+  <steps>
+1. **Read current DailyBriefingCollector + understand BriefingItem shape** (20 min)
+2. **Refactor to use IMembershipResolverService** (45-60 min):
+   - Replace inline `eq-userid` filter logic with resolver call
+   - Apply to existing 4 channels first; verify still works (regression test)
+3. **Implement 4 NEW channel queries** (2-4 hours):
+   - Upcoming Tasks (sprk_event, type=Task, next 5 days) — extend existing
+   - Overdue Tasks (sprk_event, type=Task, > 5 days past) — extend existing
+   - Documents (sprk_document, new or modified, matter/project member)
+   - Matter (sprk_matter, modifiedon last 5 days, member)
+   - Project (sprk_project, modifiedon last 5 days, member)
+   - To Do (sprk_todo, dueDate today/tomorrow, owner/assignee)
+4. **Project per-channel results to BriefingItem** with entity-link metadata populated for each entity type (30-45 min)
+5. **Parallel orchestration**: assemble all 6 queries in single Task.WhenAll; project to NarrateRequest (15 min)
+6. **Add unit tests** per channel — mock IGenericEntityService + IMembershipResolverService at boundaries (60-90 min)
+7. **Build + test verification**: `dotnet build` + `dotnet test` (15 min)
+8. **Verify publish-size impact**: `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`; report compressed size + diff (10 min)
+9. **Update DailyBriefingNarrateRequest DTO if needed** to accommodate new channels (likely no change — channels are dynamic list)
+
+  </steps>
+
+  <tools>
+    - Read / Grep / Glob (code inspection)
+    - Edit / Write (collector extension + tests)
+    - Bash (dotnet build / test / publish)
+    - TodoWrite
+  </tools>
+
+  <outputs>
+    - DailyBriefingCollector.cs (M) — 6-channel implementation + resolver consumption
+    - Unit tests (NEW or M)
+    - Updated DTO if needed
+    - Build + publish-size verification report
+  </outputs>
+
+  <acceptance-criteria>
+    - [x] Collector returns 6 channels matching operator spec
+    - [x] IMembershipResolverService used for ownership filtering (no inline FetchXml `eq-userid` remaining)
+    - [x] Per-bullet entity-link metadata populated for ALL 6 entity types
+    - [x] Unit tests cover each channel (mock at IGenericEntityService + IMembershipResolverService boundaries)
+    - [x] `dotnet test` 0 new failures (baseline preserved)
+    - [x] `dotnet build` 0 errors
+    - [x] Publish-size diff reported; if &gt;+2 MB single-task delta, justify per ADR-029 / NFR-01
+    - [x] BriefingItem projection shape unchanged (downstream narrator unaffected)
+    - [x] No new DI registrations / packages / Dataverse columns
+  </acceptance-criteria>
+
+  <status>completed</status>
+  <notes>
+**Completed 2026-06-30** — see commits `5480ef830` (collector — landed via T133's commit due to interleaved staging) + `badcc1309` (unit tests).
+
+Channel implementations (file:line) — `src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingCollector.cs`:
+- `QueryUpcomingTasksAsync` (line ~232) — sprk_event Task, NextXDays=5
+- `QueryOverdueTasksAsync` (line ~256) — sprk_event Task, OnOrBefore today-5d
+- `QueryEventsAsync` (line ~290 — shared task query path)
+- `QueryDocumentsAsync` (line ~363) — sprk_document, modifiedon last 5d, matter/project member
+- `QueryMattersAsync` (line ~423) — sprk_matter, statecode=Active, modifiedon last 5d, member
+- `QueryProjectsAsync` (line ~475) — sprk_project, statecode=Active, modifiedon last 5d, member
+- `QueryTodosAsync` (line ~525) — sprk_todo, sprk_duedate today/tomorrow, owner
+
+Channel codes (kebab-case per T133 coordination): `upcoming-tasks`, `overdue-tasks`, `documents`, `matters`, `projects`, `to-dos`.
+
+IMembershipResolverService refactor: inline FetchXml `eq-userid` bypass REMOVED. `ResolveMembershipsSafelyAsync` (line ~205) wraps the resolver call; called for sprk_event + sprk_matter + sprk_project in parallel via Task.WhenAll. sprk_todo is direct-owner (no resolver needed). sprk_document is filtered off resolved matter/project memberships (regarding edges).
+
+Unit tests: 10 tests, all pass. Cover all 6 channels + entity-link metadata + failure-soft per-channel + resolver-failure paths.
+
+Publish size: 46 MB compressed (vs T150 baseline 47.6 MB → -1.6 MB; well below NFR-01 ceiling).
+
+T130 secondary risk observed in passing: did not trigger any spaarkedev1-tenant lookup during this task (testing was mock-only). Unit tests do not exercise `contact.azureactivedirectoryobjectid` path. T136 UAT will surface if the secondary risk materializes.
+  </notes>
+</task>

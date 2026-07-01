@@ -1,0 +1,154 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-060" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Audit ai-architecture-playbook-runtime.md for outdated sections</title>
+    <status>completed</status>
+    <wave>6</wave>
+    <estimated-effort>1-2 hours</estimated-effort>
+    <tags>docs, audit, wave-6</tags>
+    <rigor-level>STANDARD</rigor-level>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>024</dependencies>
+    <fr-coverage>FR-28 (audit phase)</fr-coverage>
+  </metadata>
+
+  <prompt>
+    Wave 6 starts here. Before deleting or updating any documentation, produce a section-disposition
+    list for the R4 canonical-truth docs that this wave will modify. The audit enumerates every
+    section in scope, classifies it (DELETE / UPDATE / LEAVE), and explains WHY. Downstream Wave 6
+    tasks (061-068) consume this disposition list rather than re-discovering scope each time.
+    Per spec FR-28, the spec does NOT enumerate every section to DELETE — this audit task is where
+    that enumeration happens.
+  </prompt>
+
+  <role>
+    Senior documentation analyst familiar with R4 canonical-truth docs and the R7 dispatch reform.
+    Goal: produce a clean, actionable disposition list that lets the rest of Wave 6 execute without
+    re-discovering scope.
+  </role>
+
+  <goal>
+    A section-disposition document at
+    `projects/spaarke-ai-platform-unification-r7/notes/drafts/wave6-doc-disposition.md` that:
+    1. Enumerates every section of `docs/architecture/ai-architecture-playbook-runtime.md` with disposition (DELETE / UPDATE / LEAVE) + rationale
+    2. Confirms the spec-named sections are present:
+       - §5 action-lookup precedence ladder (DELETE per FR-28)
+       - structural-fallback section (DELETE per FR-28)
+    3. Enumerates relevant sections of `docs/architecture/ai-architecture-actions-nodes-scopes.md` — specifically the 4-Home decision tree (UPDATE per FR-28)
+    4. Enumerates relevant sections of `docs/guides/ai-guide-playbook-deploy-recipe.md` — Control-flow name-detection workaround steps (UPDATE per FR-28; task 063)
+    5. Lists task ownership: which Wave 6 task (061-068) executes each disposition
+    6. Calls out any sections discovered during the audit that need disposition beyond the spec-named ones (per spec FR-28 "Other sections discovered during Wave 6 audit")
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="design-doc">projects/spaarke-ai-platform-unification-r7/design.md</file>
+    <file purpose="plan">projects/spaarke-ai-platform-unification-r7/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    <file purpose="target-doc-primary">docs/architecture/ai-architecture-playbook-runtime.md</file>
+    <file purpose="target-doc-decision-tree">docs/architecture/ai-architecture-actions-nodes-scopes.md</file>
+    <file purpose="target-doc-deploy-recipe">docs/guides/ai-guide-playbook-deploy-recipe.md</file>
+    <file purpose="readonly-reference">docs/architecture/ai-architecture-consumer-routing.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-28">DELETE outdated content (no SUPERSEDED markers, no redirect stubs, no archive folders). Enumeration of specific sections happens in this audit task per spec "Other sections discovered during Wave 6 audit."</constraint>
+    <constraint source="spec NFR-08">Documentation discipline — DELETE, don't deprecate. PR review gates drift. This audit task does NOT modify any doc — it produces a disposition list only.</constraint>
+    <constraint source="CLAUDE.md §11">Cost-of-doing-nothing for the audit: without a centralized disposition list, downstream Wave 6 tasks duplicate scope-discovery work and risk inconsistent dispositions across tasks 061-068.</constraint>
+    <constraint source="scope-boundary">DO NOT include `docs/architecture/ai-architecture-consumer-routing.md` in disposition — that doc is READ-ONLY in R7 (chat-routing-redesign-r1 owns).</constraint>
+    <constraint source="audit-only">This task produces planning artifact ONLY. Do NOT modify any docs/architecture/* or docs/guides/* file in this task.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>documentation</topic>
+    <files>
+      <file>docs/architecture/ai-architecture-playbook-runtime.md</file>
+      <file>docs/architecture/ai-architecture-actions-nodes-scopes.md</file>
+      <file>docs/guides/ai-guide-playbook-deploy-recipe.md</file>
+      <file>docs/architecture/ai-architecture-consumer-routing.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      R4 shipped canonical-truth docs describing the (now-superseded) three-layer dispatch model.
+      R7 collapses that model to single-hop dispatch via `node.sprk_executortype`. R4-era sections
+      describing the action-lookup precedence ladder, structural-fallback ladder, and Control-flow
+      name-detection workarounds are now actively misleading. Per FR-28 + NFR-08, these sections
+      get DELETED (no SUPERSEDED markers).
+    </background>
+    <dependencies>
+      <dependency task="024" status="not-started-but-required">PlaybookOrchestrationService.ExecuteNodeAsync now single-hop; the audit can confirm doc descriptions are obsolete.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 061 executes DELETE on §5 + structural-fallback section.</item>
+      <item>Task 062 executes UPDATE on 4-Home decision tree.</item>
+      <item>Task 063 executes UPDATE on deploy-recipe name-detection steps.</item>
+      <item>Tasks 064-067 update other docs (constraints + guides + new doc).</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: STANDARD · 📋 REASON: docs audit, no source/doc modification, planning artifact only · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read project CLAUDE.md + spec.md FR-28 to FR-31 + plan.md Wave 6 + NFR-08 documentation discipline rule.
+    </step>
+    <step order="2" name="Read ai-architecture-playbook-runtime.md in full">
+      Skim the table of contents; identify all major sections. Pay special attention to §5 (action-lookup precedence ladder) and any structural-fallback section.
+    </step>
+    <step order="3" name="Read ai-architecture-actions-nodes-scopes.md">
+      Locate the 4-Home decision tree. Identify the precise section bounds (start/end heading).
+    </step>
+    <step order="4" name="Read ai-guide-playbook-deploy-recipe.md">
+      Identify the Control-flow name-detection steps (any subsection that documents the `__actionType` injection workaround or name-pattern dispatch).
+    </step>
+    <step order="5" name="Identify newly-discovered sections">
+      During reads in steps 2-4, flag any OTHER section that contradicts the new dispatch model (e.g., examples that hard-code the 3-layer chain, JSON snippets showing `__actionType` injection, etc.). Per spec FR-28, the audit discovers these — they go into the disposition list.
+    </step>
+    <step order="6" name="Write disposition document">
+      Create `notes/drafts/wave6-doc-disposition.md` as a markdown table:
+      | Doc | Section heading | Disposition | Owning task | Rationale |
+      |---|---|---|---|---|
+      Group rows by doc. Use precise section headings (copy-paste from source) so downstream tasks can grep+find. Target: 60-120 lines.
+    </step>
+    <step order="7" name="Verify completeness">
+      Sanity check: every spec-named section (§5 + structural-fallback + 4-Home tree + name-detection) appears in the table with disposition DELETE or UPDATE. Every Wave 6 task 061-068 has at least one row pointing to it.
+    </step>
+    <step order="8" name="Update current-task.md + TASK-INDEX">
+      Mark task 060 status complete; advance current-task.md to next pending Wave 6 task.
+    </step>
+    <step order="9" name="Commit">
+      Commit `notes/drafts/wave6-doc-disposition.md` with conventional message.
+      Example: docs(audit/r7): Wave 6 doc disposition list (task 060, FR-28)
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (target docs)</tool>
+    <tool>Grep (search for outdated patterns)</tool>
+    <tool>Write (disposition document)</tool>
+    <tool>Bash (git commit)</tool>
+  </tools>
+
+  <outputs>
+    <output type="document">projects/spaarke-ai-platform-unification-r7/notes/drafts/wave6-doc-disposition.md</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md (advance to next Wave 6 task)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 060 ✅)</output>
+    <output type="commit">docs(audit/r7): Wave 6 doc disposition list (task 060, FR-28)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Disposition document exists at notes/drafts/wave6-doc-disposition.md</criterion>
+    <criterion>Document enumerates ai-architecture-playbook-runtime.md sections with dispositions</criterion>
+    <criterion>Document confirms §5 (action-lookup precedence ladder) DELETE</criterion>
+    <criterion>Document confirms structural-fallback section DELETE</criterion>
+    <criterion>Document enumerates 4-Home decision tree section in actions-nodes-scopes.md with UPDATE disposition</criterion>
+    <criterion>Document enumerates Control-flow name-detection section in deploy-recipe.md with UPDATE disposition</criterion>
+    <criterion>Each row identifies the owning Wave 6 task (061-068)</criterion>
+    <criterion>Document explicitly excludes ai-architecture-consumer-routing.md (READ-ONLY in R7)</criterion>
+    <criterion>No docs modified in this task — audit only</criterion>
+    <criterion>Commit pushed to work/spaarke-ai-platform-unification-r7</criterion>
+  </acceptance-criteria>
+</task>

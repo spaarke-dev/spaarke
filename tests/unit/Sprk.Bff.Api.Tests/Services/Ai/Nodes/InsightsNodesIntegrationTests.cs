@@ -17,7 +17,7 @@ namespace Sprk.Bff.Api.Tests.Services.Ai.Nodes;
 ///  - <see cref="EvidenceSufficiencyNode"/> →
 ///  - <see cref="DeclineToFindNode"/> OR <see cref="ReturnInsightArtifactNode"/>
 ///
-/// Also verifies <see cref="NodeExecutorRegistry"/> dispatch by ActionType so the registry
+/// Also verifies <see cref="NodeExecutorRegistry"/> dispatch by ExecutorType so the registry
 /// contract (auto-discovery via DI's <c>IEnumerable&lt;INodeExecutor&gt;</c> pattern) is
 /// covered end-to-end, not just per-node.
 /// </summary>
@@ -28,19 +28,19 @@ public sealed class InsightsNodesIntegrationTests
     {
         var registry = BuildRegistry(out _, out _);
 
-        registry.HasExecutor(ActionType.LiveFact).Should().BeTrue();
-        registry.HasExecutor(ActionType.IndexRetrieve).Should().BeTrue();
-        registry.HasExecutor(ActionType.EvidenceSufficiency).Should().BeTrue();
-        registry.HasExecutor(ActionType.DeclineToFind).Should().BeTrue();
-        registry.HasExecutor(ActionType.ReturnInsightArtifact).Should().BeTrue();
+        registry.HasExecutor(ExecutorType.LiveFact).Should().BeTrue();
+        registry.HasExecutor(ExecutorType.IndexRetrieve).Should().BeTrue();
+        registry.HasExecutor(ExecutorType.EvidenceSufficiency).Should().BeTrue();
+        registry.HasExecutor(ExecutorType.DeclineToFind).Should().BeTrue();
+        registry.HasExecutor(ExecutorType.ReturnInsightArtifact).Should().BeTrue();
 
         // Task 020's GroundingVerify must still resolve too — we did NOT renumber it.
         // (Not explicitly registered here, just verifying the new five did not clobber it.)
-        registry.GetExecutor(ActionType.LiveFact).Should().BeOfType<LiveFactNode>();
-        registry.GetExecutor(ActionType.IndexRetrieve).Should().BeOfType<IndexRetrieveNode>();
-        registry.GetExecutor(ActionType.EvidenceSufficiency).Should().BeOfType<EvidenceSufficiencyNode>();
-        registry.GetExecutor(ActionType.DeclineToFind).Should().BeOfType<DeclineToFindNode>();
-        registry.GetExecutor(ActionType.ReturnInsightArtifact).Should().BeOfType<ReturnInsightArtifactNode>();
+        registry.GetExecutor(ExecutorType.LiveFact).Should().BeOfType<LiveFactNode>();
+        registry.GetExecutor(ExecutorType.IndexRetrieve).Should().BeOfType<IndexRetrieveNode>();
+        registry.GetExecutor(ExecutorType.EvidenceSufficiency).Should().BeOfType<EvidenceSufficiencyNode>();
+        registry.GetExecutor(ExecutorType.DeclineToFind).Should().BeOfType<DeclineToFindNode>();
+        registry.GetExecutor(ExecutorType.ReturnInsightArtifact).Should().BeOfType<ReturnInsightArtifactNode>();
     }
 
     /// <summary>
@@ -79,9 +79,9 @@ public sealed class InsightsNodesIntegrationTests
         resolverMock.Setup(r => r.ResolveAsync(MatterSubject, "matterType", It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(liveFact);
 
-        var liveFactNode = registry.GetExecutor(ActionType.LiveFact)!;
+        var liveFactNode = registry.GetExecutor(ExecutorType.LiveFact)!;
         var liveFactCtx = InsightsNodeTestHelpers.CreateContext(
-            ActionType.LiveFact,
+            ExecutorType.LiveFact,
             $$"""{ "subject": "{{MatterSubject}}", "predicate": "matterType" }""",
             outputVariable: "matterType");
         var liveFactOut = await liveFactNode.ExecuteAsync(liveFactCtx, CancellationToken.None);
@@ -89,9 +89,9 @@ public sealed class InsightsNodesIntegrationTests
 
         // Step 2 — EvidenceSufficiencyNode (insufficient: only 4 comparable matters, need 12)
         var comparableMatters = NodeOutput.Ok(Guid.NewGuid(), "retrieveComparableMatters", new { count = 4 });
-        var sufficiencyNode = registry.GetExecutor(ActionType.EvidenceSufficiency)!;
+        var sufficiencyNode = registry.GetExecutor(ExecutorType.EvidenceSufficiency)!;
         var sufficiencyCtx = InsightsNodeTestHelpers.CreateContext(
-            ActionType.EvidenceSufficiency,
+            ExecutorType.EvidenceSufficiency,
             """
             {
               "rules": [ { "name": "comparableMatters", "from": "retrieveComparableMatters", "minCount": 12 } ],
@@ -110,9 +110,9 @@ public sealed class InsightsNodesIntegrationTests
         sufficiencyOut.GetData<EvidenceSufficiencyResult>()!.Sufficient.Should().BeFalse();
 
         // Step 3 — DeclineToFindNode
-        var declineNode = registry.GetExecutor(ActionType.DeclineToFind)!;
+        var declineNode = registry.GetExecutor(ExecutorType.DeclineToFind)!;
         var declineCtx = InsightsNodeTestHelpers.CreateContext(
-            ActionType.DeclineToFind,
+            ExecutorType.DeclineToFind,
             """
             {
               "from": "checkSufficiency",
@@ -160,9 +160,9 @@ public sealed class InsightsNodesIntegrationTests
         };
         var synthOut = NodeOutput.Ok(Guid.NewGuid(), "synthesize", synth, confidence: 0.74);
 
-        var returnNode = registry.GetExecutor(ActionType.ReturnInsightArtifact)!;
+        var returnNode = registry.GetExecutor(ExecutorType.ReturnInsightArtifact)!;
         var ctx = InsightsNodeTestHelpers.CreateContext(
-            ActionType.ReturnInsightArtifact,
+            ExecutorType.ReturnInsightArtifact,
             """
             {
               "from": "synthesize",

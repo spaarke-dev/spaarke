@@ -1,0 +1,201 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-082" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Update canvas Node Types left panel — 33 categorized entries (FR-22)</title>
+    <status>completed</status>
+    <wave>8</wave>
+    <estimated-effort>4-6 hours</estimated-effort>
+    <tags>code-page, ui, wave-8</tags>
+    <rigor-level>FULL</rigor-level>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>024 (W2 dispatch ready)</dependencies>
+    <fr-coverage>FR-22</fr-coverage>
+  </metadata>
+
+  <prompt>
+    Replace the current ~11-tile Node Types left panel in the PlaybookBuilder canvas with a
+    full 33-executor categorized selector. Categories are 6 tiers using integer prefixes:
+    AI (0-9), Compute (10-19), Mutations (20-29), Control (30-39), Delivery (40-49),
+    Capability (50+). Each entry shows: tier prefix + name + 1-line description sourced from
+    the C# enum XML doc comments (parallel metadata via Wave 3 endpoint OR static TS metadata).
+    Drag-drop a tile to create a node with the correct `sprk_executortype` Choice value.
+    Component Justification (CLAUDE.md §11) applies — see constraints.
+  </prompt>
+
+  <role>
+    Senior React + Fluent UI v9 developer. Familiar with @xyflow/react v12 node-creation flow,
+    Zustand canvas store, and the existing `NODE_PALETTE` array in `BuilderLayout.tsx`.
+    Goal: replace the existing palette with a categorized, scrollable, semantically-tokened panel.
+  </role>
+
+  <goal>
+    Updated `src/client/code-pages/PlaybookBuilder/src/components/BuilderLayout.tsx` (or extracted
+    `NodePalette.tsx` sub-component, preferred) that:
+    1. Displays 33 executor entries grouped into 6 categorized tiers (collapsible group headers)
+    2. Each entry: tier prefix (e.g., "01") + executor name + 1-line description
+    3. Description source: either fetched from Wave 3 endpoint (`GET /api/ai/playbook-builder/executor-config-schemas`) OR a static TS metadata constant — fetched preferred to avoid drift
+    4. Drag-drop creates a node with the correct `sprk_executortype` Choice value baked into node data
+    5. All colors use Fluent v9 semantic tokens (ADR-021 binding)
+    6. Tier groups collapsible/expandable; first-time user sees all 6 tiers expanded
+    7. Search/filter input above the panel (small win — optional, but consistent with maker UX)
+    8. Build passes (`npm run build:prod` per CLAUDE.md §12) with 0 errors / 0 new warnings
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="design-doc">projects/spaarke-ai-platform-unification-r7/design.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    <file purpose="current-layout">src/client/code-pages/PlaybookBuilder/src/components/BuilderLayout.tsx</file>
+    <file purpose="canvas-types">src/client/code-pages/PlaybookBuilder/src/types/canvas.ts</file>
+    <file purpose="canvas-store">src/client/code-pages/PlaybookBuilder/src/stores/canvasStore.ts</file>
+    <file purpose="dataverse-sync">src/client/code-pages/PlaybookBuilder/src/services/playbookNodeSync.ts</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-006">Fluent UI v9 ONLY (`@fluentui/react-components`). No v8 patterns.</constraint>
+    <constraint source="ADR-021">Dark mode binding. Use semantic tokens (`tokens.colorNeutralBackground1`, `tokens.colorNeutralForeground1`, etc.). NO hardcoded hex colors. Icons use `currentColor`.</constraint>
+    <constraint source="ADR-029">Not BFF — no publish-size verification. Code Page bundle size DOES matter, but no per-task ceiling defined.</constraint>
+    <constraint source="spec FR-22">33-executor categorized panel with 6 tiers (AI 0-9, Compute 10-19, Mutations 20-29, Control 30-39, Delivery 40-49, Capability 50+).</constraint>
+    <constraint source="spec FR-26">Node creation MUST set `sprk_executortype` Choice value on the new node — NO `sprk_nodetype` references in canvas state (this task is the primary new-node creation path; replaces old NODE_PALETTE).</constraint>
+    <constraint source="CLAUDE.md §11">Component Justification triple for new `NodePalette.tsx` sub-component (if extracted):
+      1. Existing: `BuilderLayout.tsx` has an inline `NODE_PALETTE` constant + render block (~11 tiles). It is part of BuilderLayout's layout responsibility.
+      2. Extension: extracting to a dedicated `NodePalette.tsx` reduces BuilderLayout from ~400 LOC and makes the panel testable in isolation. Extension wins over keeping inline because the new panel is 33 entries with category state — significantly more complex than 11 flat tiles.
+      3. Cost-of-doing-nothing: keeping inline keeps BuilderLayout >500 LOC and tangled. Tests for the panel become tests for the layout. UAT regression risk grows.
+    </constraint>
+    <constraint source="CLAUDE.md §12">Build command: `npm run build:prod` (NOT `npm run build`) per FAILURE-MODES AP-1.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>code-page/playbookbuilder</topic>
+    <files>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>docs/adr/ADR-006-pcf-fluent-ui-v9.md</file>
+      <file>docs/adr/ADR-021-dark-mode-semantic-tokens.md</file>
+      <file>docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+    </files>
+    <patterns>
+      <pattern name="existing NODE_PALETTE" location="src/client/code-pages/PlaybookBuilder/src/components/BuilderLayout.tsx">
+        Lines ~72-130. The 11-tile palette to replace. Shows drag-drop wiring with React Flow.
+      </pattern>
+      <pattern name="Fluent v9 semantic tokens" location=".claude/skills/fluent-v9-component/SKILL.md">
+        How to use `tokens.colorNeutralBackground1` etc., FluentProvider patterns, dark-mode adaptation.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      The current panel shows 11 named tiles (AI Analysis, AI Completion, Condition, etc.) hard-coded
+      in `BuilderLayout.tsx`. R7 expands the model to 33 executors organized by tier. The categorized
+      view helps makers discover the right executor without scrolling a flat list of 33 items.
+      Tier prefix integers (01, 10, 20, 30, 40, 50+) match the `sprk_playbookexecutortype` Choice values
+      and the C# enum values, so visual order matches dispatch ID order.
+    </background>
+    <dependencies>
+      <dependency task="024" status="prerequisite">Wave 2 dispatch refactor complete — orchestrator reads `sprk_executortype` single-hop.</dependency>
+      <dependency task="033" status="ideal-not-blocking">Wave 3 endpoint (`GET /api/ai/playbook-builder/executor-config-schemas`) ideal for fetching descriptions. If not yet shipped, fall back to static TS metadata constant in this task and refetch dynamically in task 083.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 083 wires the typed-config-form renderer that consumes the same schemas.</item>
+      <item>Task 086 promotes Action selection to dedicated Action tab — coordinated UI work.</item>
+      <item>Task 088 replaces remaining `sprk_nodetype` references in canvas state (out-of-scope for this task; in-scope is new-node creation only).</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: FULL · 📋 REASON: code-page UI modification, tag code-page+ui, ADR-006+021 applicable, quality gates Step 9.5 required · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read project CLAUDE.md + spec.md FR-22 + design.md §11 + audit doc (task 080) + `.claude/skills/fluent-v9-component/SKILL.md`.
+    </step>
+    <step order="2" name="Verify W2 task 024 complete">
+      Confirm dispatch reform is in place. If not, STOP.
+    </step>
+    <step order="3" name="Check W3 task 033 endpoint status">
+      If `GET /api/ai/playbook-builder/executor-config-schemas` is deployed, plan to fetch descriptions from it.
+      Otherwise, plan to embed a static TS metadata constant (33 entries × {tier, name, description}) in `executorMetadata.ts` for this task — task 083 will move to fetched.
+    </step>
+    <step order="4" name="Extract NodePalette.tsx component">
+      Create new file `src/client/code-pages/PlaybookBuilder/src/components/NodePalette.tsx`.
+      Move the existing `NODE_PALETTE` constant + render block from `BuilderLayout.tsx` into the new component.
+      Use Fluent v9 components: `Accordion` / `AccordionItem` for tier groups, `Card` or `Button` for tiles.
+      Use Fluent v9 semantic tokens for all colors (ADR-021).
+    </step>
+    <step order="5" name="Implement 33-entry metadata">
+      In `src/client/code-pages/PlaybookBuilder/src/config/executorMetadata.ts` (NEW file), define:
+      ```
+      export interface ExecutorMetadata { value: number; tier: 'AI'|'Compute'|'Mutations'|'Control'|'Delivery'|'Capability'; tierPrefix: string; name: string; description: string; }
+      export const EXECUTOR_METADATA: ExecutorMetadata[] = [ /* 33 entries */ ];
+      ```
+      Tier mapping: 0-9=AI, 10-19=Compute, 20-29=Mutations, 30-39=Control, 40-49=Delivery, 50+=Capability.
+    </step>
+    <step order="6" name="Render categorized panel">
+      In `NodePalette.tsx`:
+      - Group `EXECUTOR_METADATA` by tier
+      - Render an `Accordion` with 6 items (one per tier) — all expanded by default
+      - Each tier item lists its executors as draggable tiles
+      - Each tile shows: tierPrefix + name + description (truncated to 1 line, with tooltip for full text)
+      - All colors via semantic tokens
+    </step>
+    <step order="7" name="Wire drag-drop to canvas store">
+      On drop, create a new node with:
+      ```
+      data.type = 'aiAnalysis'|'aiCompletion'|... (legacy discriminator for React Flow renderer)
+      data.executorType = <Choice value> (NEW — bound to sprk_executortype on round-trip)
+      ```
+      Coordinate with task 088 (canvas state migration) — for now, set BOTH fields so this task's output doesn't regress existing rendering. Task 088 will retire `data.type` once canvas state migration completes.
+    </step>
+    <step order="8" name="Update BuilderLayout.tsx">
+      Replace the inline palette render with `<NodePalette onNodeDrop={...} />`. Delete the now-unused `NODE_PALETTE` constant + `NodePaletteItem` interface.
+    </step>
+    <step order="9" name="Build">
+      Run: `cd src/client/code-pages/PlaybookBuilder && npm run build:prod` (NOT `npm run build` per AP-1).
+      Goal: 0 errors, 0 new warnings.
+    </step>
+    <step order="9.5" name="Quality gates (FULL rigor)">
+      Run `/code-review` on `NodePalette.tsx`, `executorMetadata.ts`, and modified `BuilderLayout.tsx`.
+      Run `/adr-check` against ADR-006 (Fluent v9), ADR-021 (dark mode + semantic tokens).
+      Verify NO hardcoded colors via Grep: `Grep` for `#fff`, `#000`, `rgb(`, `rgba(` in the new files.
+      Fix findings.
+    </step>
+    <step order="10" name="Update current-task.md + TASK-INDEX">
+      Mark task 082 status complete; advance to next Wave 8 task.
+    </step>
+    <step order="11" name="Commit">
+      Commit new + modified files. Message:
+      `feat(playbookbuilder/r7): categorized 33-executor Node Types panel (Wave 8 task 082, FR-22)`. No PR yet.
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (source files + skills + ADRs)</tool>
+    <tool>Grep (search for hardcoded colors, sprk_nodetype refs)</tool>
+    <tool>Write (NodePalette.tsx, executorMetadata.ts)</tool>
+    <tool>Edit (BuilderLayout.tsx)</tool>
+    <tool>Bash (npm run build:prod, git commit)</tool>
+    <tool>Skill (code-review at Step 9.5)</tool>
+    <tool>Skill (adr-check at Step 9.5)</tool>
+    <tool>Skill (fluent-v9-component for Fluent patterns)</tool>
+  </tools>
+
+  <outputs>
+    <output type="new-file">src/client/code-pages/PlaybookBuilder/src/components/NodePalette.tsx</output>
+    <output type="new-file">src/client/code-pages/PlaybookBuilder/src/config/executorMetadata.ts</output>
+    <output type="modified-file">src/client/code-pages/PlaybookBuilder/src/components/BuilderLayout.tsx</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 082 ✅)</output>
+    <output type="commit">feat(playbookbuilder/r7): categorized 33-executor Node Types panel (Wave 8 task 082, FR-22)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>NodePalette.tsx renders 33 entries grouped into 6 tiers (AI / Compute / Mutations / Control / Delivery / Capability)</criterion>
+    <criterion>Each entry shows tierPrefix + name + 1-line description</criterion>
+    <criterion>Drag-drop creates a node with correct `sprk_executortype` Choice value</criterion>
+    <criterion>All colors use Fluent v9 semantic tokens — NO hardcoded hex (ADR-021)</criterion>
+    <criterion>Tier groups collapsible; default state is all 6 expanded</criterion>
+    <criterion>`npm run build:prod` passes: 0 errors, 0 new warnings</criterion>
+    <criterion>code-review + adr-check pass at Step 9.5</criterion>
+    <criterion>TASK-INDEX.md shows 082 ✅</criterion>
+  </acceptance-criteria>
+</task>

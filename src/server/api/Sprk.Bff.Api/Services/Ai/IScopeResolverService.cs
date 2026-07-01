@@ -600,7 +600,7 @@ public record AnalysisAction
     /// Action type for executor routing.
     /// Maps to sprk_analysisaction.sprk_actiontype choice value.
     /// </summary>
-    public Sprk.Bff.Api.Services.Ai.Nodes.ActionType ActionType { get; init; } = Sprk.Bff.Api.Services.Ai.Nodes.ActionType.AiAnalysis;
+    public Sprk.Bff.Api.Services.Ai.Nodes.ExecutorType ExecutorType { get; init; } = Sprk.Bff.Api.Services.Ai.Nodes.ExecutorType.AiAnalysis;
 
     // Ownership properties
     /// <summary>
@@ -650,6 +650,30 @@ public record AnalysisAction
     /// </para>
     /// </remarks>
     public decimal? Temperature { get; init; }
+
+    /// <summary>
+    /// Structured-Outputs JSON Schema for the action (sprk_outputschemajson, multiline text).
+    /// Verbatim contents of the Dataverse field — supplied to
+    /// <see cref="IOpenAiClient.GetStructuredCompletionRawAsync"/> as the
+    /// <c>BinaryData jsonSchema</c> constrained-decoding argument for prompt-driven executors
+    /// (AiCompletion, future AiAnalysis JPS path). Null when the column is empty or absent.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Added in R7 spaarke-ai-platform-unification-r7 (task 002 / FR-12) to make the
+    /// {SystemPrompt + OutputSchema + Temperature} triple first-class on the Action record
+    /// per the project orchestrator decision. Previously, callers read
+    /// <c>sprk_outputschemajson</c> ad-hoc (see <c>PlaybookExecutionEngine</c>'s
+    /// <c>ChatSummarizeActionConfig</c> path); the new <see cref="AiCompletionNodeExecutor"/>
+    /// consumes this property directly to avoid ConfigJson-parsing duplication.
+    /// </para>
+    /// <para>
+    /// <strong>Null semantics</strong>: prompt-driven executors that REQUIRE a schema
+    /// (e.g., AiCompletion per FR-13) MUST surface a validation error when this is null/empty.
+    /// Non-prompt executors ignore the field.
+    /// </para>
+    /// </remarks>
+    public string? OutputSchemaJson { get; init; }
 }
 
 /// <summary>

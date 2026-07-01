@@ -1531,16 +1531,30 @@ public class SprkChatAgentFactory
     /// or does not carry a matter-shaped entity reference.
     /// </summary>
     /// <remarks>
-    /// R6 Pillar 2 / Task D-A-11. We read <c>ParentEntityType=='sprk_matter'</c> +
-    /// <c>ParentEntityId</c> from the scope; non-matter contexts (e.g., chat from
-    /// a project workspace) return null per the ChatInvocationContext contract.
-    /// ADR-015: this is a deterministic id only — no user content is captured.
+    /// R6 Pillar 2 / Task D-A-11. We read the matter-shaped entity reference from
+    /// the scope; non-matter contexts (e.g., chat from a project workspace) return
+    /// null per the ChatInvocationContext contract. ADR-015: this is a deterministic
+    /// id only — no user content is captured.
+    /// <para>
+    /// R7 Wave 12 task 150 (audit 120 Gap A): the scope's <c>ParentEntityType</c>
+    /// is now BFF-boundary-normalized to the canonical short form (<c>matter</c>)
+    /// via <see cref="EntityTypeNormalizer"/>. The legacy raw form
+    /// (<c>sprk_matter</c>) is accepted for forward-compat with any session payloads
+    /// that bypass <see cref="ChatHostContext"/> construction (none today; defensive).
+    /// </para>
     /// </remarks>
     private static Guid? TryParseMatterId(ChatKnowledgeScope? knowledgeScope)
     {
         if (knowledgeScope is null) return null;
-        if (!string.Equals(knowledgeScope.ParentEntityType, "sprk_matter", StringComparison.OrdinalIgnoreCase))
-            return null;
+
+        var parentEntityType = knowledgeScope.ParentEntityType;
+        if (string.IsNullOrWhiteSpace(parentEntityType)) return null;
+
+        // Accept canonical "matter" (post-normalization) and raw "sprk_matter" (defensive).
+        var isMatter = string.Equals(parentEntityType, "matter", StringComparison.OrdinalIgnoreCase)
+                    || string.Equals(parentEntityType, "sprk_matter", StringComparison.OrdinalIgnoreCase);
+        if (!isMatter) return null;
+
         return Guid.TryParse(knowledgeScope.ParentEntityId, out var parsed) ? parsed : null;
     }
 

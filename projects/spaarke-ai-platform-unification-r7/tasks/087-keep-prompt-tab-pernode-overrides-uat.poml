@@ -1,0 +1,157 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-087" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>KEEP Prompt tab + per-node override wiring (FR-25) — UAT</title>
+    <status>not-started</status>
+    <wave>8</wave>
+    <estimated-effort>2-3 hours</estimated-effort>
+    <tags>code-page, ui, testing, wave-8</tags>
+    <rigor-level>FULL</rigor-level>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>086</dependencies>
+    <fr-coverage>FR-25</fr-coverage>
+  </metadata>
+
+  <prompt>
+    Verify the Prompt tab + per-node override wiring still works after the Wave 2 dispatch reform
+    and Wave 8 UI restructure. Spec FR-25 says KEEP — no UI changes intended; this task is a UAT
+    verification + integration-test confirmation that the per-node Role/Task/Constraints/Output Fields
+    overrides flow through to runtime via `PromptSchemaOverrideMerger`. If wiring drifted, fix it.
+  </prompt>
+
+  <role>
+    Senior React + .NET developer. Comfortable end-to-end testing through the canvas, BFF,
+    and runtime LLM call. Familiar with `PromptSchemaOverrideMerger` (BFF) and `PromptSchemaForm.tsx` (canvas).
+  </role>
+
+  <goal>
+    Verified Prompt tab wiring:
+    1. Prompt tab UI unchanged (per FR-25 "KEEP")
+    2. Per-node Role/Task/Constraints/Output Fields overrides set via Prompt tab are persisted to `node.data.promptSchema`
+    3. On round-trip to Dataverse, overrides serialize correctly (existing channel)
+    4. At BFF runtime, `PromptSchemaOverrideMerger` applies overrides to the Action's prompt before LLM call
+    5. UAT: spaarkedev1 dev test plan executes the override-merge end-to-end via DAILY-BRIEFING-NARRATE playbook
+    6. If integration test fails, fix the wiring (root-cause analysis + minimal fix, no scope creep)
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    <file purpose="prompt-form">src/client/code-pages/PlaybookBuilder/src/components/properties/PromptSchemaForm.tsx</file>
+    <file purpose="prompt-editor">src/client/code-pages/PlaybookBuilder/src/components/properties/PromptSchemaEditor.tsx</file>
+    <file purpose="dialog">src/client/code-pages/PlaybookBuilder/src/components/properties/NodePropertiesDialog.tsx</file>
+    <file purpose="bff-merger">src/server/api/Sprk.Bff.Api/Services/Ai/PromptSchemaOverrideMerger.cs</file>
+    <file purpose="aicompletion-executor">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiCompletionNodeExecutor.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-006">Fluent UI v9 — Prompt tab uses v9 components already.</constraint>
+    <constraint source="ADR-021">Dark mode binding.</constraint>
+    <constraint source="spec FR-25">KEEP existing Prompt tab + per-node overrides via `PromptSchemaOverrideMerger`. Prompt tab UI unchanged.</constraint>
+    <constraint source="spec Q2 KEEP">Per-node prompt overrides are a personalization layer. Must be preserved.</constraint>
+    <constraint source="ADR-038">Integration test additions follow KEEP category (test pyramid integration-heavy). Mock IOpenAiClient only.</constraint>
+    <constraint source="CLAUDE.md §11">Modifying existing files only (if wiring drift discovered) — no Component Justification triple.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai/prompt-schema-override-merger</topic>
+    <files>
+      <file>.claude/patterns/ai/node-executor-authoring.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="PromptSchemaOverrideMerger" location="src/server/api/Sprk.Bff.Api/Services/Ai/PromptSchemaOverrideMerger.cs">
+        Merges node-level overrides (Role/Task/Constraints/Output Fields) with Action's base prompt before LLM call.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      The Prompt tab pre-existed R7. Wave 8 task 086 reorganized tabs (added Action tab) but Prompt tab
+      itself is unchanged. The risk: a tab-reorg refactor might have accidentally broken event wiring,
+      schema persistence, or override application. This task is the explicit verification gate.
+    </background>
+    <dependencies>
+      <dependency task="086" status="prerequisite">Tab reorg done; Action tab in place.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 089a-c UI tests cover dark mode + dropdowns; this task covers behavior.</item>
+      <item>Wave 1 task 003 wired AiCompletionNodeExecutor to consume `PromptSchemaOverrideMerger`. Verify still functional.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: FULL · 📋 REASON: behavioral verification of UI + BFF integration; if drift discovered → code fix; ADR-038 test-modifying override applies (any tests/** modification = FULL rigor) · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read project CLAUDE.md + spec.md FR-25 + design.md §11 + PromptSchemaForm.tsx + PromptSchemaOverrideMerger.cs + AiCompletionNodeExecutor.cs.
+    </step>
+    <step order="2" name="Verify task 086 complete">
+      Confirm Action tab is in place + Prompt tab still renders.
+    </step>
+    <step order="3" name="Read PromptSchemaForm.tsx + PromptSchemaEditor.tsx">
+      Document the data flow: form input → `node.data.promptSchema` (canvas state) → Dataverse `sprk_promptschemajson` (round-trip channel).
+    </step>
+    <step order="4" name="Read PromptSchemaOverrideMerger.cs">
+      Confirm merger reads Action's base prompt + node's override schema + produces merged prompt.
+    </step>
+    <step order="5" name="Read AiCompletionNodeExecutor.cs">
+      Confirm executor invokes the merger before calling `IOpenAiClient.GetStructuredCompletionRawAsync`.
+    </step>
+    <step order="6" name="Spot-check in browser">
+      Open canvas → drop AI Completion node → open properties → Prompt tab.
+      Set: Role="test role", Task="test task", Constraints="test constraint", Output Fields=["fieldA"].
+      Save. Verify `node.data.promptSchema` reflects these values (via dev console / React DevTools).
+    </step>
+    <step order="7" name="Verify Dataverse round-trip">
+      Reload the playbook. Confirm the Prompt tab still shows the saved overrides (i.e., they round-tripped to Dataverse and back).
+    </step>
+    <step order="8" name="Integration test — execute via /narrate or test endpoint">
+      In spaarkedev1, run DAILY-BRIEFING-NARRATE playbook via `/narrate`. Confirm the LLM prompt includes the per-node overrides (via BFF runtime logs or `/api/ai/playbook/runtime-trace` if available).
+    </step>
+    <step order="9" name="If wiring drifted: minimal fix">
+      Root-cause + minimal fix. If `PromptSchemaForm.tsx` no longer renders → fix tab routing in `NodePropertiesDialog.tsx`. If `PromptSchemaOverrideMerger` no longer invoked → fix `AiCompletionNodeExecutor.ExecuteAsync`. Capture root cause in task notes.
+    </step>
+    <step order="9.5" name="Quality gates (FULL rigor)">
+      If any code changed: run `/code-review` on modified files. Run `/adr-check` against ADR-006 + ADR-021 + ADR-038.
+      Add an xUnit integration test (if not already covered) confirming the merger is invoked end-to-end. Place in `tests/integration/Sprk.Bff.Api.Tests/` per ADR-038 KEEP path.
+    </step>
+    <step order="10" name="Update current-task.md + TASK-INDEX">
+      Mark task 087 status complete; advance to next Wave 8 task. Capture UAT verification status (PASS / FAIL+fix) in task notes.
+    </step>
+    <step order="11" name="Commit">
+      If no code changes: documentation-only commit with UAT result. Else:
+      `chore(playbookbuilder/r7): verify Prompt tab + per-node override wiring (Wave 8 task 087, FR-25)`. No PR yet.
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (source files + ADRs)</tool>
+    <tool>Edit (if wiring drift discovered)</tool>
+    <tool>Bash (npm run build:prod, dotnet test, git commit)</tool>
+    <tool>Skill (code-review at Step 9.5, if code changed)</tool>
+    <tool>Skill (adr-check at Step 9.5, if code changed)</tool>
+  </tools>
+
+  <outputs>
+    <output type="verification">UAT result captured in current-task.md or task notes</output>
+    <output type="possibly-modified-file">PromptSchemaForm.tsx, NodePropertiesDialog.tsx, or AiCompletionNodeExecutor.cs (only if drift discovered)</output>
+    <output type="possibly-new-file">tests/integration/Sprk.Bff.Api.Tests/.../PromptOverrideEndToEndTests.cs (KEEP path)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 087 ✅)</output>
+    <output type="commit">UAT verification commit OR fix commit if drift discovered</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Prompt tab renders post tab-reorg</criterion>
+    <criterion>Per-node Role/Task/Constraints/Output Fields persist on canvas + round-trip to Dataverse</criterion>
+    <criterion>`PromptSchemaOverrideMerger` invoked at runtime by AiCompletionNodeExecutor</criterion>
+    <criterion>End-to-end test via `/narrate` confirms overrides reach LLM</criterion>
+    <criterion>UAT result documented (PASS / FAIL+root cause+fix)</criterion>
+    <criterion>If code changed: code-review + adr-check pass at Step 9.5</criterion>
+    <criterion>TASK-INDEX.md shows 087 ✅</criterion>
+  </acceptance-criteria>
+</task>

@@ -47,14 +47,14 @@ public class CreateTaskNodeExecutorTests
             _loggerMock.Object);
     }
 
-    #region SupportedActionTypes Tests
+    #region SupportedExecutorTypes Tests
 
     [Fact]
     public void SupportedActionTypes_ContainsCreateTask()
     {
         // Assert
-        _executor.SupportedActionTypes.Should().Contain(ActionType.CreateTask);
-        _executor.SupportedActionTypes.Should().HaveCount(1);
+        _executor.SupportedExecutorTypes.Should().Contain(ExecutorType.CreateTask);
+        _executor.SupportedExecutorTypes.Should().HaveCount(1);
     }
 
     #endregion
@@ -305,7 +305,7 @@ public class CreateTaskNodeExecutorTests
                 Id = actionId,
                 Name = "Create Task"
             },
-            ActionType = ActionType.CreateTask,
+            ExecutorType = ExecutorType.CreateTask,
             Scopes = new ResolvedScopes([], [], []),
             TenantId = "test-tenant"
         };

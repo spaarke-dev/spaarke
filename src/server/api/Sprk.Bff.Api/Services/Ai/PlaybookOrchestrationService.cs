@@ -46,6 +46,7 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
     private readonly IScopeResolverService _scopeResolver;
     private readonly IAnalysisOrchestrationService _legacyOrchestrator;
     private readonly IInsightsActionRouter _insightsRouter;
+    private readonly ITemplateEngine _templateEngine;
     private readonly ILogger<PlaybookOrchestrationService> _logger;
 
     /// <summary>
@@ -65,6 +66,7 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
         IScopeResolverService scopeResolver,
         IAnalysisOrchestrationService legacyOrchestrator,
         IInsightsActionRouter insightsRouter,
+        ITemplateEngine templateEngine,
         ILogger<PlaybookOrchestrationService> logger,
         Sprk.Bff.Api.Services.Ai.Telemetry.IContextEventEmitter? contextEventEmitter = null)
     {
@@ -73,6 +75,7 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
         _scopeResolver = scopeResolver;
         _legacyOrchestrator = legacyOrchestrator;
         _insightsRouter = insightsRouter ?? throw new ArgumentNullException(nameof(insightsRouter));
+        _templateEngine = templateEngine ?? throw new ArgumentNullException(nameof(templateEngine));
         _logger = logger;
         _contextEventEmitter = contextEventEmitter;
     }
@@ -861,202 +864,18 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
     }
 
     /// <summary>
-    /// Detects whether a Control node is a deployed-Start node — the canvas
-    /// entry-point anchor that the dispatching wrapper binds the payload into.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// R4 (2026-06-25, daily-update-service-r4): Deploy-Playbook.ps1 writes the Start
-    /// row's <c>sprk_configjson</c> as the playbook JSON's <c>nodes[].configJson</c>
-    /// object verbatim — it does NOT inject <c>__actionType=33</c> the way the
-    /// canvas-sync path (<c>NodeService.BuildConfigJson</c>) does. Without an explicit
-    /// <c>__actionType</c>, the orchestrator's structural fallback used to default
-    /// <c>NodeType.Control</c> to <c>ActionType.Condition</c>, which then failed
-    /// <c>ConditionNodeExecutor</c> validation ("Condition expression is required").
-    /// </para>
-    /// <para>
-    /// Detection signals (any one is sufficient — kept lenient because the deploy
-    /// shape varies across the 5 R4 playbooks):
-    /// </para>
-    /// <list type="number">
-    /// <item><description>Empty / null ConfigJson — auto-placed anchor.</description></item>
-    /// <item><description>Node name equals "Start" (case-insensitive).</description></item>
-    /// <item><description>ConfigJson contains a <c>canvasType</c> or <c>__canvasType</c>
-    ///   property with value "start".</description></item>
-    /// <item><description>ConfigJson contains an <c>inputContract</c> object (entry-point
-    ///   marker per the R4 playbook authoring convention).</description></item>
-    /// </list>
-    /// </remarks>
-    private static bool IsDeployedStartNode(PlaybookNodeDto node)
-    {
-        if (node.NodeType != NodeType.Control)
-            return false;
-
-        if (string.IsNullOrWhiteSpace(node.ConfigJson))
-            return true;
-
-        if (string.Equals(node.Name, "Start", StringComparison.OrdinalIgnoreCase))
-            return true;
-
-        try
-        {
-            using var doc = System.Text.Json.JsonDocument.Parse(node.ConfigJson);
-            var root = doc.RootElement;
-            if (root.ValueKind != System.Text.Json.JsonValueKind.Object)
-                return false;
-
-            if (root.TryGetProperty("canvasType", out var canvas)
-                && canvas.ValueKind == System.Text.Json.JsonValueKind.String
-                && string.Equals(canvas.GetString(), "start", StringComparison.OrdinalIgnoreCase))
-                return true;
-
-            if (root.TryGetProperty("__canvasType", out var underscored)
-                && underscored.ValueKind == System.Text.Json.JsonValueKind.String
-                && string.Equals(underscored.GetString(), "start", StringComparison.OrdinalIgnoreCase))
-                return true;
-
-            if (root.TryGetProperty("inputContract", out _))
-                return true;
-        }
-        catch
-        {
-            // Malformed JSON — not Start; the executor lookup will surface the error.
-        }
-
-        return false;
-    }
-
-    /// <summary>
-    /// Detects whether a Control node is a deployed-LoadKnowledge node — the canvas-only
-    /// pass-through placeholder for the R5 AI Search knowledge-source binding.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// R4 (2026-06-26, daily-update-service-r4 follow-on after StartNodeExecutor):
-    /// same failure class as Start — Deploy-Playbook.ps1 does NOT inject
-    /// <c>__actionType=142</c> for the LoadKnowledge row, so without this detection
-    /// the structural fallback would route Control → ActionType.Condition →
-    /// ConditionNodeExecutor → "Condition expression is required" validation failure.
-    /// </para>
-    /// <para>
-    /// Detection signals (any one is sufficient):
-    /// </para>
-    /// <list type="number">
-    /// <item><description>Node name equals "LoadKnowledge" (case-insensitive).</description></item>
-    /// <item><description>ConfigJson contains a <c>canvasType</c> or <c>__canvasType</c>
-    ///   property with value "loadKnowledge".</description></item>
-    /// <item><description>ConfigJson contains a <c>passthroughBinding</c> object
-    ///   (R4 placeholder marker) OR an <c>r5BindingPlan</c> object (forward-compat
-    ///   marker).</description></item>
-    /// </list>
-    /// </remarks>
-    private static bool IsDeployedLoadKnowledgeNode(PlaybookNodeDto node)
-    {
-        if (node.NodeType != NodeType.Control)
-            return false;
-
-        if (string.Equals(node.Name, "LoadKnowledge", StringComparison.OrdinalIgnoreCase))
-            return true;
-
-        if (string.IsNullOrWhiteSpace(node.ConfigJson))
-            return false;
-
-        try
-        {
-            using var doc = System.Text.Json.JsonDocument.Parse(node.ConfigJson);
-            var root = doc.RootElement;
-            if (root.ValueKind != System.Text.Json.JsonValueKind.Object)
-                return false;
-
-            if (root.TryGetProperty("canvasType", out var canvas)
-                && canvas.ValueKind == System.Text.Json.JsonValueKind.String
-                && string.Equals(canvas.GetString(), "loadKnowledge", StringComparison.OrdinalIgnoreCase))
-                return true;
-
-            if (root.TryGetProperty("__canvasType", out var underscored)
-                && underscored.ValueKind == System.Text.Json.JsonValueKind.String
-                && string.Equals(underscored.GetString(), "loadKnowledge", StringComparison.OrdinalIgnoreCase))
-                return true;
-
-            if (root.TryGetProperty("passthroughBinding", out _))
-                return true;
-
-            if (root.TryGetProperty("r5BindingPlan", out _))
-                return true;
-        }
-        catch
-        {
-            // Malformed JSON — not LoadKnowledge; executor lookup will surface the error.
-        }
-
-        return false;
-    }
-
-    /// <summary>
-    /// Detects whether a Control node is a deployed-ReturnResponse node — the canvas-only
-    /// terminal node that binds upstream node outputs into the playbook run's return value.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// R4 (2026-06-26, daily-update-service-r4 follow-on after StartNodeExecutor):
-    /// same failure class as Start + LoadKnowledge — Deploy-Playbook.ps1 does NOT inject
-    /// <c>__actionType=143</c> for the ReturnResponse row.
-    /// </para>
-    /// <para>
-    /// Detection signals (any one is sufficient):
-    /// </para>
-    /// <list type="number">
-    /// <item><description>Node name equals "ReturnResponse" (case-insensitive).</description></item>
-    /// <item><description>ConfigJson contains a <c>canvasType</c> or <c>__canvasType</c>
-    ///   property with value "returnResponse".</description></item>
-    /// <item><description>ConfigJson contains a <c>responseBinding</c> object
-    ///   (terminal-node marker per the R4 playbook authoring convention).</description></item>
-    /// </list>
-    /// </remarks>
-    private static bool IsDeployedReturnResponseNode(PlaybookNodeDto node)
-    {
-        if (node.NodeType != NodeType.Control)
-            return false;
-
-        if (string.Equals(node.Name, "ReturnResponse", StringComparison.OrdinalIgnoreCase))
-            return true;
-
-        if (string.IsNullOrWhiteSpace(node.ConfigJson))
-            return false;
-
-        try
-        {
-            using var doc = System.Text.Json.JsonDocument.Parse(node.ConfigJson);
-            var root = doc.RootElement;
-            if (root.ValueKind != System.Text.Json.JsonValueKind.Object)
-                return false;
-
-            if (root.TryGetProperty("canvasType", out var canvas)
-                && canvas.ValueKind == System.Text.Json.JsonValueKind.String
-                && string.Equals(canvas.GetString(), "returnResponse", StringComparison.OrdinalIgnoreCase))
-                return true;
-
-            if (root.TryGetProperty("__canvasType", out var underscored)
-                && underscored.ValueKind == System.Text.Json.JsonValueKind.String
-                && string.Equals(underscored.GetString(), "returnResponse", StringComparison.OrdinalIgnoreCase))
-                return true;
-
-            if (root.TryGetProperty("responseBinding", out _))
-                return true;
-        }
-        catch
-        {
-            // Malformed JSON — not ReturnResponse; executor lookup will surface the error.
-        }
-
-        return false;
-    }
-
-    /// <summary>
     /// Extracts the __actionType value from a node's ConfigJson.
     /// Returns null if ConfigJson is missing or doesn't contain the field.
     /// </summary>
-    private static ActionType? ExtractActionTypeFromConfig(string? configJson)
+    /// <remarks>
+    /// R7 task 025 (2026-06-28, FR-08): PRESERVED — sole remaining caller is
+    /// <see cref="CollectDownstreamNodeInfo"/> for <c>$choices</c> option-set
+    /// resolution on downstream UpdateRecord nodes. This is NOT structural
+    /// dispatch fallback (which was deleted) — it's payload introspection
+    /// for cross-node option-set hydration. Spec FR-08 scope is the dispatch
+    /// ladder; this helper survives that scope per task 024 caller audit.
+    /// </remarks>
+    private static ExecutorType? ExtractActionTypeFromConfig(string? configJson)
     {
         if (string.IsNullOrEmpty(configJson))
             return null;
@@ -1067,7 +886,7 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
             if (doc.RootElement.TryGetProperty("__actionType", out var actionTypeProp) &&
                 actionTypeProp.TryGetInt32(out var actionTypeInt))
             {
-                return (ActionType)actionTypeInt;
+                return (ExecutorType)actionTypeInt;
             }
         }
         catch
@@ -1213,49 +1032,61 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                 }
             }
 
-            // R4 spaarke-daily-update-service-r4 (2026-06-25): Start nodes are now
-            // first-class executable nodes routed to StartNodeExecutor (ActionType.Start
-            // = 33). The previous inline "passthrough" handler did not bind the dispatch
-            // payload into the scope variable, which made {{start.channels}} references
-            // in downstream nodes resolve to null. The executor reads the wrapper's
-            // payload from runContext.Parameters and binds it as a JsonElement into
-            // node.OutputVariable.
+            // R7 Wave 2 task 024 (FR-07) — SINGLE-HOP DISPATCH.
+            // Dispatch reads `node.SprkExecutortype` (sprk_executortype Choice column) DIRECTLY.
+            // The legacy 3-layer chain (`node.actionid` → `Action.actiontypeid` → `lookup_row.executoractiontype`)
+            // and structural fallback ladder have been removed. Per FR-19, all
+            // production nodes are backfilled (Wave 5 task 054); a null sprk_executortype
+            // indicates an unmigrated row and MUST throw rather than silently fall back —
+            // silent fallback would defeat the refactor.
             //
-            // Detection is centralised in IsDeployedStartNode (below) and applied by
-            // the structural fallback at the NodeType→ActionType switch — Control nodes
-            // matching the Start shape get ActionType.Start regardless of whether
-            // ConfigJson carries __actionType.
-            var configActionType = ExtractActionTypeFromConfig(node.ConfigJson);
+            // Action FK is still required for prompt-driven executors (AiAnalysis, AiCompletion,
+            // AiEmbedding) via per-executor `Validate()`; it carries the SystemPrompt + OutputSchema.
+            // The orchestrator resolves it as payload, not as dispatch source.
+            //
+            // R7 task 025 (FR-08, 2026-06-28): structural fallback ladder helpers
+            // (IsDeployedStartNode / IsDeployedLoadKnowledgeNode / IsDeployedReturnResponseNode)
+            // DELETED. ExtractActionTypeFromConfig PRESERVED — sole remaining caller is
+            // CollectDownstreamNodeInfo for $choices option-set hydration (payload introspection,
+            // not dispatch).
+            //
+            // R7 task 026 (FR-09, 2026-06-28): Action.ExecutorType override branch
+            // ("Action ActionType is canonical regardless of NodeType" — Insights Engine
+            // r2 Wave B legacy) was inline-deleted by task 024 when ExecuteNodeAsync moved
+            // to single-hop dispatch. No standalone code block remains to delete; closure
+            // confirmed.
 
-            // Note: ConditionJson on nodes is for conditional execution guards (Phase 5).
-            // The Condition ActionType is handled by ConditionNodeExecutor (Phase 4) which
-            // returns ConditionResult with branch selection for orchestrator-level branching.
+            ExecutorType actionType;
+            if (node.SprkExecutortype.HasValue)
+            {
+                actionType = node.SprkExecutortype.Value;
+            }
+            else
+            {
+                var errorMsg = $"Node '{node.Name}' (id={node.Id}) has null sprk_executortype — backfill required per FR-19. Single-hop dispatch (FR-07) does not fall back to Action lookup.";
+                var errorOutput = NodeOutput.Error(node.Id, node.OutputVariable, errorMsg, NodeErrorCodes.InvalidConfiguration);
+                runContext.StoreNodeOutput(errorOutput);
 
-            // NodeType-driven scope resolution and action lookup.
-            // AI nodes require an Action record and resolve all scopes (skills, knowledge, tools).
-            // Structural nodes (Output, Control) need neither.
+                await writer.WriteAsync(PlaybookStreamEvent.NodeFailed(
+                    runContext.RunId, runContext.PlaybookId, node.Id, node.Name, errorMsg), cancellationToken);
+
+                EmitNodeCompleted("failed"); // R6 Pillar 6c (FR-37 / task 063)
+
+                return errorOutput;
+            }
+
+            // Resolve scopes (skills, knowledge, tools) for AI nodes only.
+            // Structural nodes (Control / Output / Workflow) have no resolved scopes.
+            // Use NodeType as the coarse category indicator until Wave 8 collapses it into ExecutorType.
+            ResolvedScopes scopes = node.NodeType == NodeType.AIAnalysis
+                ? await _scopeResolver.ResolveNodeScopesAsync(node.Id, runContext.CancellationToken)
+                : new ResolvedScopes([], [], []);
+
+            // Resolve Action payload (SystemPrompt + OutputSchema) when Action FK is set.
+            // Prompt-driven executors validate the Action presence in their own Validate().
             AnalysisAction action;
-            ActionType actionType;
-            ResolvedScopes scopes;
-
-            // Per Insights Engine r2 Wave B (2026-06-02): when sprk_actionid is set,
-            // the action's ActionType is the canonical dispatch source REGARDLESS of
-            // nodeType. Insights nodes like checkSufficiency (Control), groundCitations
-            // (Control), ReturnInsightArtifactNode (Output), and declineInsufficient
-            // (Output) all need their specific executor (EvidenceSufficiency, GroundingVerify,
-            // ReturnInsightArtifact, DeclineToFind) — not the nodeType-based default
-            // (Condition / DeliverOutput) that the original logic fell back to.
-            //
-            // The legacy structural-node path is preserved for backward compat: when no
-            // action FK is set, fall back to ConfigJson __actionType (canvas-Designer
-            // convention) or nodeType-based default.
             if (node.ActionId != Guid.Empty)
             {
-                // Resolve scopes only for AI nodes (Control/Output/Workflow have none)
-                scopes = node.NodeType == NodeType.AIAnalysis
-                    ? await _scopeResolver.ResolveNodeScopesAsync(node.Id, runContext.CancellationToken)
-                    : new ResolvedScopes([], [], []);
-
                 var resolved = await _scopeResolver.GetActionAsync(
                     node.ActionId, runContext.CancellationToken);
 
@@ -1274,70 +1105,24 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                 }
 
                 action = resolved;
-                actionType = action.ActionType;
-            }
-            else if (node.NodeType == NodeType.AIAnalysis)
-            {
-                var errorMsg = $"AI node '{node.Name}' requires an Action but has no ActionId";
-                var errorOutput = NodeOutput.Error(node.Id, node.OutputVariable, errorMsg, NodeErrorCodes.InvalidConfiguration);
-                runContext.StoreNodeOutput(errorOutput);
-
-                await writer.WriteAsync(PlaybookStreamEvent.NodeFailed(
-                    runContext.RunId, runContext.PlaybookId, node.Id, node.Name, errorMsg), cancellationToken);
-
-                EmitNodeCompleted("failed"); // R6 Pillar 6c (FR-37 / task 063)
-
-                return errorOutput;
             }
             else
             {
-                // Structural nodes (Output, Control, Workflow) WITHOUT an action FK:
-                // legacy path — uses ConfigJson __actionType, the deployed-Start
-                // detection helper, or nodeType-based default (in that order).
-                scopes = new ResolvedScopes([], [], []);
-
-                // R4 (2026-06-25, daily-update-service-r4): when the structural fallback
-                // resolves a Control node that matches the deployed-Start shape AND
-                // ConfigJson did not carry an explicit __actionType, route to
-                // ActionType.Start so StartNodeExecutor handles it instead of the
-                // legacy Condition default. Deploy-Playbook.ps1 does not inject
-                // __actionType=33 (only the canvas-sync path does that), so without
-                // this branch the deployed Start row falls into ConditionNodeExecutor
-                // and fails validation. Detection logic is centralised in
-                // IsDeployedStartNode for reuse + clarity.
-                // R4 (2026-06-26, daily-update-service-r4 follow-on): extended deployed-Start
-                // detection to cover all three canvas-only Control nodes that the R4
-                // DAILY-BRIEFING-NARRATE playbook deploys without __actionType injection.
-                // Each helper centralises the per-shape detection (see IsDeployedStartNode /
-                // IsDeployedLoadKnowledgeNode / IsDeployedReturnResponseNode). Without these
-                // branches the Condition default fires and rejects the node with "Condition
-                // expression is required" — the same UAT class that StartNodeExecutor closed
-                // on 2026-06-25.
-                actionType = configActionType
-                    ?? (IsDeployedStartNode(node) ? ActionType.Start : (ActionType?)null)
-                    ?? (IsDeployedLoadKnowledgeNode(node) ? ActionType.LoadKnowledge : (ActionType?)null)
-                    ?? (IsDeployedReturnResponseNode(node) ? ActionType.ReturnResponse : (ActionType?)null)
-                    ?? node.NodeType switch
-                    {
-                        NodeType.Output => ActionType.DeliverOutput,
-                        NodeType.Control => ActionType.Condition,
-                        NodeType.Workflow => ActionType.CreateTask,
-                        // FR-52 / Phase 5R Wave 5-C task 114R: composite delivery node maps to a
-                        // SEPARATE ActionType so the legacy Output → DeliverOutput dispatch is
-                        // UNCHANGED (backward-compat invariant). The DeliverCompositeNodeExecutor
-                        // is the only executor for DeliverComposite.
-                        NodeType.DeliverComposite => ActionType.DeliverComposite,
-                        _ => ActionType.DeliverOutput
-                    };
+                // Structural nodes (Start, Condition, ReturnResponse, DeliverOutput, etc.) without
+                // an Action FK get a synthetic AnalysisAction shell so the existing NodeExecutionContext
+                // contract (Action non-null) is preserved. Per-executor Validate() enforces FR-13
+                // invariants (e.g., StartNodeExecutor.Validate does NOT require an Action; AiCompletionNodeExecutor.Validate
+                // DOES require one). The ExecutorType field carries the dispatch type for diagnostic display only —
+                // dispatch itself comes from `node.SprkExecutortype` above.
                 action = new AnalysisAction
                 {
                     Id = Guid.Empty,
                     Name = node.Name,
-                    ActionType = actionType
+                    ExecutorType = actionType
                 };
 
                 _logger.LogDebug(
-                    "Structural node '{NodeName}' (NodeType={NodeType}) — using ActionType {ActionType}, no scopes",
+                    "Structural node '{NodeName}' (NodeType={NodeType}, ExecutorType={ExecutorType}) — no Action FK, no scopes",
                     node.Name, node.NodeType, actionType);
             }
 
@@ -1413,7 +1198,45 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
             // "matter:{{matterId}}" and failed at LiveFactResolver. Centralizing the fix here
             // applies it to every node executor uniformly (LiveFact / IndexRetrieve /
             // ReturnInsightArtifact all use {{matterId}} in synthesis playbooks).
-            var substitutedNode = ApplyConfigJsonTemplates(node, runContext.Parameters);
+
+            // R7 Wave 11 task 114: fan-out iteration detection BEFORE Layer 1 template
+            // resolution. If the node's RAW configJson declares iteration.iterateOver +
+            // iteration.itemAlias, run the executor N times (one per element of iterateOver)
+            // with a per-iteration overlay context. Outputs collected into an ordered
+            // array; aggregated into a single composite NodeOutput. Per ADR-037 +
+            // SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md. Sequential v1 (parallelism deferred).
+            // Detection-on-RAW-configJson is intentional: the iteration metadata is itself
+            // templated (`iterateOver: "{{channelRegistry.channels}}"`), so we must read it
+            // before Layer 1 rewrites it into a resolved string.
+            if (TryExtractIterationConfig(node.ConfigJson, out var iterateOverExpr, out var itemAlias))
+            {
+                var compositeOutput = await ExecuteFanOutIterationAsync(
+                    runContext, node, action, scopes, actionType, executor, downstreamNodes,
+                    iterateOverExpr!, itemAlias!, writer, cancellationToken).ConfigureAwait(false);
+
+                runContext.StoreNodeOutput(compositeOutput);
+
+                if (compositeOutput.Success)
+                {
+                    _logger.LogInformation(
+                        "Fan-out node {NodeName} completed: {Iterations} iterations, total duration: {Duration}ms",
+                        node.Name, compositeOutput.ToolResults.Count, compositeOutput.Metrics.DurationMs);
+                    await writer.WriteAsync(PlaybookStreamEvent.NodeCompleted(
+                        runContext.RunId, runContext.PlaybookId, node.Id, node.Name, compositeOutput), cancellationToken);
+                }
+                else
+                {
+                    await writer.WriteAsync(PlaybookStreamEvent.NodeFailed(
+                        runContext.RunId, runContext.PlaybookId, node.Id, node.Name,
+                        compositeOutput.ErrorMessage ?? "Iteration failed"), cancellationToken);
+                }
+
+                EmitNodeCompleted(compositeOutput.Success ? "completed" : "failed");
+                await ScanForUnrenderedTemplatesAsync(runContext, node, compositeOutput, writer, cancellationToken).ConfigureAwait(false);
+                return compositeOutput;
+            }
+
+            var substitutedNode = ApplyConfigJsonTemplates(node, runContext);
 
             // Create node execution context with streaming callback for per-token SSE events
             var nodeContext = runContext.CreateNodeContext(substitutedNode, action, scopes, actionType) with
@@ -1473,7 +1296,7 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                 // Existing NodeType.Output → DeliverOutput path emits ZERO section events; its
                 // `FieldDelta` stream (via PlaybookExecutionEngine.ExecuteChatSummarizeAsync)
                 // continues UNCHANGED until migrated by FR-58 (task 118R).
-                if (actionType == ActionType.DeliverComposite)
+                if (actionType == ExecutorType.DeliverComposite)
                 {
                     await EmitDeliverCompositeSectionEventsAsync(
                         runContext, node, output, writer, cancellationToken).ConfigureAwait(false);
@@ -1561,7 +1384,7 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
             // Only collect nodes that are likely UpdateRecord type.
             // Check ConfigJson for __actionType == UpdateRecord (22).
             var dependentActionType = ExtractActionTypeFromConfig(dependentNode.ConfigJson);
-            if (dependentActionType != Nodes.ActionType.UpdateRecord)
+            if (dependentActionType != Nodes.ExecutorType.UpdateRecord)
                 continue;
 
             // Only include if ConfigJson exists (it should contain fieldMappings)
@@ -2122,41 +1945,583 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
     }
 
     /// <summary>
-    /// Substitute <c>{{paramName}}</c> placeholders in the node's ConfigJson with values
-    /// from the run parameters. Returns a NEW PlaybookNodeDto record with the substituted
-    /// ConfigJson; never mutates the input. Idempotent — placeholders without matching
-    /// parameters are left intact (the executor surfaces the original string for clear
-    /// authoring feedback).
+    /// R7 Wave 11 task 114: detects fan-out iteration metadata in a node's RAW configJson
+    /// (BEFORE Layer 1 template resolution rewrites it). Returns true + outputs the
+    /// iterateOver template expression + itemAlias when the node has
+    /// <c>iteration.iterateOver</c> + <c>iteration.itemAlias</c> declared.
     /// </summary>
     /// <remarks>
-    /// Per Insights Engine r2 Wave B (2026-06-02): adds centralized template substitution
-    /// previously missing from the orchestration pipeline. Without it, playbook nodes like
-    /// <c>resolveLiveFacts</c> received literal <c>"matter:{{matterId}}"</c> from ConfigJson
-    /// and failed at <c>LiveFactResolver.ParseMatterSubject</c> with
-    /// <c>LiveFactNotSupportedException</c>, returning a scaffold "no-artifact-produced"
-    /// decline to the caller. Centralized fix applies uniformly to all executor types.
+    /// Detection-on-RAW is intentional: the iteration metadata is itself templated
+    /// (<c>iterateOver: "{{channelRegistry.channels}}"</c>), so we must read it BEFORE
+    /// Layer 1 rewrites it into a resolved string. Defensive: missing iteration block,
+    /// missing keys, or malformed JSON → returns false (single-call path).
     /// </remarks>
-    private static PlaybookNodeDto ApplyConfigJsonTemplates(
-        PlaybookNodeDto node,
-        IReadOnlyDictionary<string, string>? parameters)
+    private static bool TryExtractIterationConfig(
+        string? configJson,
+        out string? iterateOverExpr,
+        out string? itemAlias)
     {
-        if (parameters is null || parameters.Count == 0)
-            return node;
+        iterateOverExpr = null;
+        itemAlias = null;
+
+        if (string.IsNullOrWhiteSpace(configJson) || !configJson.Contains("iteration", StringComparison.Ordinal))
+            return false;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(configJson);
+            if (!doc.RootElement.TryGetProperty("iteration", out var iteration)
+                || iteration.ValueKind != JsonValueKind.Object)
+            {
+                return false;
+            }
+
+            if (!iteration.TryGetProperty("iterateOver", out var iterOver) || iterOver.ValueKind != JsonValueKind.String)
+                return false;
+
+            if (!iteration.TryGetProperty("itemAlias", out var alias) || alias.ValueKind != JsonValueKind.String)
+                return false;
+
+            iterateOverExpr = iterOver.GetString();
+            itemAlias = alias.GetString();
+            return !string.IsNullOrWhiteSpace(iterateOverExpr) && !string.IsNullOrWhiteSpace(itemAlias);
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// R7 Wave 11 task 114 (ADR-037 fan-out semantic): runs the node's executor N times,
+    /// one per element of the resolved iterateOver collection. Per iteration the configJson
+    /// is rendered against a context overlay where <paramref name="itemAlias"/> binds the
+    /// current iteration's item. Per-iteration NodeOutputs are aggregated into a single
+    /// composite NodeOutput whose StructuredData is a JsonElement-array — downstream nodes
+    /// reference the aggregate via <c>{{node.OutputVariable}}</c> as if it were a single
+    /// node's output containing an array. Sequential execution v1 (parallelism deferred).
+    /// </summary>
+    private async Task<NodeOutput> ExecuteFanOutIterationAsync(
+        PlaybookRunContext runContext,
+        PlaybookNodeDto node,
+        AnalysisAction action,
+        ResolvedScopes scopes,
+        ExecutorType actionType,
+        INodeExecutor executor,
+        IReadOnlyList<DownstreamNodeInfo>? downstreamNodes,
+        string iterateOverExpr,
+        string itemAlias,
+        ChannelWriter<PlaybookStreamEvent> writer,
+        CancellationToken cancellationToken)
+    {
+        var startedAt = DateTimeOffset.UtcNow;
+
+        // 1. Resolve the iterateOver expression. Wrap in {{ }} if missing, then auto-wrap
+        //    with the json helper (Option D pattern) so the rendered output is JSON-parseable
+        //    array text even when iterateOver references a bare variable like
+        //    `{{channelRegistry.channels}}` (which would otherwise stringify as Dictionary garbage).
+        var wrappedExpr = iterateOverExpr.Contains("{{", StringComparison.Ordinal)
+            ? iterateOverExpr
+            : "{{" + iterateOverExpr + "}}";
+        if (IsPureTemplate(wrappedExpr))
+        {
+            wrappedExpr = AutoWrapWithJsonHelper(wrappedExpr);
+        }
+        var baseContext = PlaybookTemplateContextBuilder.Build(runContext);
+        string resolvedIterateOver;
+        try
+        {
+            resolvedIterateOver = _templateEngine.Render(wrappedExpr, baseContext);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "Fan-out node {NodeName}: failed to render iterateOver expression '{Expr}'; treating as empty iteration",
+                node.Name, iterateOverExpr);
+            return NodeOutput.Ok(
+                node.Id,
+                node.OutputVariable,
+                data: Array.Empty<object>(),
+                metrics: NodeExecutionMetrics.Timed(startedAt, DateTimeOffset.UtcNow));
+        }
+
+        // 2. Parse the rendered iterateOver as JSON to recover the array.
+        var iterationItems = TryParseIterationItems(resolvedIterateOver, node.Name);
+
+        // 3. Strip the iteration block from configJson so the executor doesn't see it.
+        var configWithoutIteration = StripIterationBlock(node.ConfigJson);
+
+        // 4. Per-iteration execution.
+        var perIterationOutputs = new List<JsonElement?>();
+        var failedIterations = new List<string>();
+        var iterIndex = 0;
+        foreach (var item in iterationItems)
+        {
+            cancellationToken.ThrowIfCancellationRequested();
+
+            // Build overlay context: base + { [itemAlias]: currentItem }
+            var overlay = new Dictionary<string, object?>(baseContext, StringComparer.Ordinal)
+            {
+                [itemAlias] = item
+            };
+
+            string renderedConfigJson;
+            try
+            {
+                renderedConfigJson = _templateEngine.Render(configWithoutIteration ?? string.Empty, overlay);
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Fan-out node {NodeName}: failed to render configJson for iteration {Index}; skipping",
+                    node.Name, iterIndex);
+                failedIterations.Add($"iteration[{iterIndex}]: render failed");
+                iterIndex++;
+                continue;
+            }
+
+            var iterationNode = node with { ConfigJson = renderedConfigJson };
+            var iterationNodeContext = runContext.CreateNodeContext(iterationNode, action, scopes, actionType) with
+            {
+                DownstreamNodes = downstreamNodes
+            };
+
+            var validation = executor.Validate(iterationNodeContext);
+            if (!validation.IsValid)
+            {
+                failedIterations.Add($"iteration[{iterIndex}]: validation failed: {string.Join("; ", validation.Errors)}");
+                iterIndex++;
+                continue;
+            }
+
+            NodeOutput iterationOutput;
+            try
+            {
+                iterationOutput = await executor.ExecuteAsync(iterationNodeContext, cancellationToken).ConfigureAwait(false);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                _logger.LogWarning(ex,
+                    "Fan-out node {NodeName} iteration {Index} threw; recording failure",
+                    node.Name, iterIndex);
+                failedIterations.Add($"iteration[{iterIndex}]: {ex.GetType().Name}: {ex.Message}");
+                iterIndex++;
+                continue;
+            }
+
+            perIterationOutputs.Add(iterationOutput.StructuredData);
+            if (!iterationOutput.Success)
+            {
+                failedIterations.Add($"iteration[{iterIndex}]: {iterationOutput.ErrorMessage}");
+            }
+            iterIndex++;
+        }
+
+        // 5. Aggregate per-iteration outputs into a single composite NodeOutput.
+        var arrayData = perIterationOutputs
+            .Select(je => je is JsonElement v && v.ValueKind != JsonValueKind.Null && v.ValueKind != JsonValueKind.Undefined
+                ? TemplateEngine.ConvertJsonElement(v)
+                : null)
+            .ToArray();
+
+        var allSucceeded = failedIterations.Count == 0;
+        var metrics = NodeExecutionMetrics.Timed(startedAt, DateTimeOffset.UtcNow);
+
+        if (allSucceeded)
+        {
+            return NodeOutput.Ok(
+                nodeId: node.Id,
+                outputVariable: node.OutputVariable,
+                data: arrayData,
+                metrics: metrics,
+                toolResults: PadToolResults(perIterationOutputs.Count));
+        }
+        else
+        {
+            var errMsg = $"Fan-out completed with {failedIterations.Count}/{iterIndex} failed iteration(s): " +
+                         string.Join(" | ", failedIterations.Take(3));
+            return NodeOutput.Error(node.Id, node.OutputVariable, errMsg, NodeErrorCodes.InternalError, metrics);
+        }
+    }
+
+    /// <summary>
+    /// Parses the rendered iterateOver value into an enumeration of items.
+    /// Accepts JSON-array text (from <c>{{json X}}</c> or raw collection rendering).
+    /// Defensive: malformed / non-array / null → empty enumeration.
+    /// </summary>
+    private IEnumerable<object?> TryParseIterationItems(string? renderedValue, string nodeName)
+    {
+        if (string.IsNullOrWhiteSpace(renderedValue))
+            return Array.Empty<object?>();
+
+        try
+        {
+            using var doc = JsonDocument.Parse(renderedValue);
+            if (doc.RootElement.ValueKind == JsonValueKind.Array)
+            {
+                return doc.RootElement.EnumerateArray()
+                    .Select(e => TemplateEngine.ConvertJsonElement(e))
+                    .ToList();
+            }
+        }
+        catch (JsonException ex)
+        {
+            _logger.LogDebug(ex,
+                "Fan-out node {NodeName}: iterateOver rendered to non-JSON string; treating as empty iteration",
+                nodeName);
+        }
+        return Array.Empty<object?>();
+    }
+
+    /// <summary>
+    /// Returns a copy of the configJson with the <c>iteration</c> top-level property removed,
+    /// so executors don't receive iteration metadata in their configJson.
+    /// </summary>
+    private static string? StripIterationBlock(string? configJson)
+    {
+        if (string.IsNullOrWhiteSpace(configJson))
+            return configJson;
+
+        try
+        {
+            using var doc = JsonDocument.Parse(configJson);
+            if (doc.RootElement.ValueKind != JsonValueKind.Object)
+                return configJson;
+
+            using var stream = new System.IO.MemoryStream();
+            using (var writer = new Utf8JsonWriter(stream))
+            {
+                writer.WriteStartObject();
+                foreach (var prop in doc.RootElement.EnumerateObject())
+                {
+                    if (string.Equals(prop.Name, "iteration", StringComparison.Ordinal))
+                        continue;
+                    prop.WriteTo(writer);
+                }
+                writer.WriteEndObject();
+            }
+            return System.Text.Encoding.UTF8.GetString(stream.ToArray());
+        }
+        catch (JsonException)
+        {
+            return configJson; // defensive: malformed → pass through unchanged
+        }
+    }
+
+    /// <summary>
+    /// Placeholder ToolResults list sized to per-iteration count (used to signal iteration
+    /// count to log lines that read ToolResults.Count without semantic meaning).
+    /// </summary>
+    private static IReadOnlyList<ToolResult> PadToolResults(int count)
+        => count <= 0 ? Array.Empty<ToolResult>() : new ToolResult[count];
+
+    /// <summary>
+    /// Resolve Handlebars-style placeholders (<c>{{X}}</c>, <c>{{X.Y.Z}}</c>, custom helpers)
+    /// in the node's ConfigJson against the merged playbook run context (Parameters +
+    /// NodeOutputs + run metadata). Returns a NEW <see cref="PlaybookNodeDto"/> record with the
+    /// rendered ConfigJson; never mutates the input. Missing references render as empty string
+    /// (graceful per Handlebars configuration).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// R7 Wave 11 (FR-15 / task 111 / Option B, 2026-06-29): Layer 1 of the two-layer architecture.
+    /// Replaces the prior literal <c>Replace</c> loop with <see cref="ITemplateEngine.Render"/>
+    /// against a merged context built by <see cref="PlaybookTemplateContextBuilder"/>. Every
+    /// executor's configJson now benefits uniformly — no per-executor template-resolution code.
+    /// </para>
+    /// <para>
+    /// Pre-Wave-11 behavior preserved: <c>{{paramName}}</c> against Parameters still substitutes
+    /// (Handlebars handles flat <c>{{key}}</c> natively against the merged context dict).
+    /// </para>
+    /// <para>
+    /// Per Insights Engine r2 Wave B (2026-06-02): the original centralized substitution prevented
+    /// playbook nodes like <c>resolveLiveFacts</c> from receiving literal
+    /// <c>"matter:{{matterId}}"</c> and failing at <c>LiveFactResolver.ParseMatterSubject</c>.
+    /// Option B (R7 task 111) extends that fix to support <c>{{nodeName.field.subfield}}</c>
+    /// references against prior node outputs, enabling the DAILY-BRIEFING-NARRATE playbook's
+    /// rich template expressions to resolve end-to-end. Bug being closed: <c>/narrate</c> HTTP 200
+    /// with empty content (LLM nodes saw literal <c>{{json start}}</c> as their input).
+    /// </para>
+    /// </remarks>
+    private PlaybookNodeDto ApplyConfigJsonTemplates(
+        PlaybookNodeDto node,
+        PlaybookRunContext runContext)
+    {
         if (string.IsNullOrEmpty(node.ConfigJson) || !node.ConfigJson.Contains("{{", StringComparison.Ordinal))
             return node;
 
-        var rendered = node.ConfigJson;
-        foreach (var kvp in parameters)
+        var context = PlaybookTemplateContextBuilder.Build(runContext);
+
+        // R7 Wave 11 Option D (operator-approved 2026-06-29): JSON-aware substitution.
+        // The configJson is parsed as a JSON tree. For each STRING value:
+        //   - Pure-template value (entire string is one `{{...}}` expression):
+        //     render via Handlebars, then try parse the rendered result as JSON. If the
+        //     rendered output is a valid JSON value (array/object/number/bool/null),
+        //     replace this property's value with the native JSON shape instead of a
+        //     string. This eliminates the "string-encoded array" problem at quoted
+        //     template positions like `"allowList": "{{distinct (concat ...)}}"`.
+        //   - Mixed value (template + literal text):
+        //     render normally; the result stays a string (existing behavior).
+        // Net effect: the engine produces VALID configJson of the correct shape, every
+        // time, with no executor-side workarounds. Future narrative consumers benefit.
+        // See docs/architecture/SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md §3 (Layer 1).
+        string rendered;
+        try
         {
-            if (string.IsNullOrEmpty(kvp.Key)) continue;
-            var placeholder = "{{" + kvp.Key + "}}";
-            if (rendered.Contains(placeholder, StringComparison.Ordinal))
-            {
-                rendered = rendered.Replace(placeholder, kvp.Value ?? string.Empty, StringComparison.Ordinal);
-            }
+            rendered = RenderConfigJsonStructurally(node.ConfigJson, context);
+        }
+        catch (JsonException ex)
+        {
+            // configJson is not valid JSON — fall back to flat string substitution
+            // (preserves the previous behavior for non-JSON configJson values).
+            _logger.LogWarning(ex,
+                "ApplyConfigJsonTemplates: configJson is not valid JSON for node {NodeId}; falling back to flat string substitution",
+                node.Id);
+            rendered = _templateEngine.Render(node.ConfigJson, context);
         }
 
         return node with { ConfigJson = rendered };
+    }
+
+    /// <summary>
+    /// R7 Wave 11 Option D (operator-approved 2026-06-29): JSON-aware template substitution.
+    /// Walks the parsed configJson tree depth-first; for each string value that is a
+    /// "pure template" (entire string is a single <c>{{...}}</c> expression), renders the
+    /// template via the engine and parses the result as JSON if possible — so an
+    /// IEnumerable helper result becomes a native JSON array, an object helper result
+    /// becomes a native JSON object, etc. Mixed values (text-with-template) render as
+    /// strings per the existing behavior.
+    /// </summary>
+    private string RenderConfigJsonStructurally(string configJson, Dictionary<string, object?> context)
+    {
+        using var sourceDoc = JsonDocument.Parse(configJson);
+        using var stream = new System.IO.MemoryStream();
+        using (var writer = new Utf8JsonWriter(stream))
+        {
+            WriteJsonElementWithTemplateExpansion(writer, sourceDoc.RootElement, context);
+        }
+        return System.Text.Encoding.UTF8.GetString(stream.ToArray());
+    }
+
+    /// <summary>
+    /// Recursive depth-first walker. For Object/Array nodes, descends into children.
+    /// For String nodes, expands templates per the pure-vs-mixed rule described above.
+    /// For other scalar nodes (Number/Bool/Null), writes verbatim.
+    /// </summary>
+    private void WriteJsonElementWithTemplateExpansion(
+        Utf8JsonWriter writer,
+        JsonElement element,
+        Dictionary<string, object?> context)
+    {
+        switch (element.ValueKind)
+        {
+            case JsonValueKind.Object:
+                writer.WriteStartObject();
+                foreach (var prop in element.EnumerateObject())
+                {
+                    writer.WritePropertyName(prop.Name);
+                    WriteJsonElementWithTemplateExpansion(writer, prop.Value, context);
+                }
+                writer.WriteEndObject();
+                return;
+
+            case JsonValueKind.Array:
+                writer.WriteStartArray();
+                foreach (var item in element.EnumerateArray())
+                {
+                    WriteJsonElementWithTemplateExpansion(writer, item, context);
+                }
+                writer.WriteEndArray();
+                return;
+
+            case JsonValueKind.String:
+                var raw = element.GetString() ?? string.Empty;
+                if (!raw.Contains("{{", StringComparison.Ordinal))
+                {
+                    writer.WriteStringValue(raw);
+                    return;
+                }
+
+                if (IsPureTemplate(raw))
+                {
+                    // R7 Wave 11 Option D auto-wrap: source authors write natural Handlebars
+                    // (`{{tldrResult}}`, `{{start.channels}}`, `{{distinct (concat …)}}`).
+                    // The engine wraps with the `json` helper so the rendered output is
+                    // ALWAYS JSON-parseable text — scalars become JSON scalars, objects
+                    // become JSON objects, arrays become JSON arrays. No source-author
+                    // burden to remember when to use {{json X}} vs {{X}}.
+                    //
+                    // After wrap+render+parse, the property value is the native JSON shape
+                    // (object/array/number/bool/null/string), not Dictionary.ToString() garbage.
+                    var wrappedTemplate = AutoWrapWithJsonHelper(raw);
+                    var renderedJson = _templateEngine.Render(wrappedTemplate, context);
+                    if (TryParseAsJson(renderedJson, out var parsedElement))
+                    {
+                        WriteJsonElementVerbatim(writer, parsedElement!.Value);
+                        return;
+                    }
+                    // Should be rare: the json helper failed to produce parseable JSON.
+                    // Fall through to render-as-string for graceful degradation.
+                }
+
+                var renderedString = _templateEngine.Render(raw, context);
+                writer.WriteStringValue(renderedString);
+                return;
+
+            case JsonValueKind.Null:
+                writer.WriteNullValue();
+                return;
+
+            default:
+                // Number / True / False — write verbatim.
+                element.WriteTo(writer);
+                return;
+        }
+    }
+
+    /// <summary>
+    /// R7 Wave 11 Option D auto-wrap: takes a pure-template string (e.g. <c>"{{tldrResult}}"</c>
+    /// or <c>"{{distinct (concat ...)}}"</c>) and wraps it with the <c>{{json …}}</c> helper
+    /// so the rendered output is always JSON-parseable text — regardless of whether the
+    /// inner expression returns a scalar, object, array, or helper-composed result.
+    /// </summary>
+    /// <remarks>
+    /// Detection: if the inner expression already uses the json helper (e.g.
+    /// <c>"{{json start}}"</c>), returns the original unchanged. Otherwise wraps the inner
+    /// expression: <c>"{{json &lt;inner&gt;}}"</c>. The json helper accepts any value
+    /// (variable, helper-call, scalar) and produces JSON-encoded text.
+    /// </remarks>
+    private static string AutoWrapWithJsonHelper(string pureTemplate)
+    {
+        var trimmed = pureTemplate.Trim();
+        // Strip the outer {{ and }}; inner is what's between them.
+        var inner = trimmed.Substring(2, trimmed.Length - 4).Trim();
+        if (inner.StartsWith("json ", StringComparison.Ordinal) || inner.StartsWith("json(", StringComparison.Ordinal))
+        {
+            return pureTemplate; // already wrapped
+        }
+        // If inner contains whitespace at top level (helper call like `distinct X` or
+        // `join '\n' X Y`), wrap with parens to make it a subexpression — `{{json (inner)}}`
+        // — so the inner helper's return value becomes the first arg to json.
+        // For single-token variable references like `tldrResult` or `start.channels`, no
+        // parens needed — Handlebars treats `{{json varName}}` as json(varName).
+        var needsParens = ContainsTopLevelWhitespace(inner);
+        return needsParens
+            ? "{{json (" + inner + ")}}"
+            : "{{json " + inner + "}}";
+    }
+
+    /// <summary>
+    /// Returns true if <paramref name="expr"/> contains whitespace at the top level
+    /// (not inside nested parens or quotes). Used to distinguish helper-call expressions
+    /// (e.g. <c>distinct X</c>) from variable references (e.g. <c>start.channels</c>).
+    /// </summary>
+    private static bool ContainsTopLevelWhitespace(string expr)
+    {
+        var parenDepth = 0;
+        var inSingle = false;
+        var inDouble = false;
+        foreach (var c in expr)
+        {
+            if (inSingle) { if (c == '\'') inSingle = false; continue; }
+            if (inDouble) { if (c == '"') inDouble = false; continue; }
+            if (c == '\'') { inSingle = true; continue; }
+            if (c == '"') { inDouble = true; continue; }
+            if (c == '(') { parenDepth++; continue; }
+            if (c == ')') { parenDepth--; continue; }
+            if (parenDepth == 0 && char.IsWhiteSpace(c)) return true;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Tests whether a string value is a "pure template" — the entire value (after
+    /// trimming whitespace) is a single Handlebars expression. Detection rule:
+    /// trimmed string starts with <c>{{</c> and ends with <c>}}</c>, AND there is
+    /// exactly ONE outermost <c>{{…}}</c> span (no literal text interleaved).
+    /// </summary>
+    /// <remarks>
+    /// We approximate by counting brace pairs: trimmed `{{X}}` is pure;
+    /// `{{X}}{{Y}}` is mixed (two top-level templates) — render as string.
+    /// `prefix{{X}}` is mixed (literal prefix) — render as string.
+    /// </remarks>
+    private static bool IsPureTemplate(string value)
+    {
+        var trimmed = value.Trim();
+        if (!trimmed.StartsWith("{{", StringComparison.Ordinal)) return false;
+        if (!trimmed.EndsWith("}}", StringComparison.Ordinal)) return false;
+        // Walk to find the matching outermost `}}` for the leading `{{`. If it's at the
+        // END of the trimmed string, this is a pure template; otherwise mixed.
+        var depth = 0;
+        var i = 0;
+        while (i < trimmed.Length - 1)
+        {
+            if (trimmed[i] == '{' && trimmed[i + 1] == '{')
+            {
+                depth++;
+                i += 2;
+                continue;
+            }
+            if (trimmed[i] == '}' && trimmed[i + 1] == '}')
+            {
+                depth--;
+                i += 2;
+                if (depth == 0)
+                {
+                    return i == trimmed.Length;
+                }
+                continue;
+            }
+            i++;
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Attempts to parse <paramref name="value"/> as a JSON document. Returns true and
+    /// sets <paramref name="parsed"/> to the (cloned, detached) RootElement when the value
+    /// is a valid JSON value (array, object, number, bool, null). Bare strings without
+    /// surrounding quotes are NOT considered JSON here — they fall through to the
+    /// string-render path.
+    /// </summary>
+    private static bool TryParseAsJson(string value, out JsonElement? parsed)
+    {
+        parsed = null;
+        var trimmed = value.Trim();
+        if (string.IsNullOrEmpty(trimmed)) return false;
+        // Cheap pre-check: only object/array/number/bool/null shapes — bare strings
+        // (no quotes) should remain as strings (caller writes them as JSON string values).
+        var first = trimmed[0];
+        if (first != '{' && first != '[' && first != '-'
+            && !(first >= '0' && first <= '9')
+            && !trimmed.StartsWith("true", StringComparison.Ordinal)
+            && !trimmed.StartsWith("false", StringComparison.Ordinal)
+            && !trimmed.StartsWith("null", StringComparison.Ordinal))
+        {
+            return false;
+        }
+        try
+        {
+            using var doc = JsonDocument.Parse(trimmed);
+            parsed = doc.RootElement.Clone();
+            return true;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Writes a JsonElement verbatim to the writer (handles all ValueKinds).
+    /// </summary>
+    private static void WriteJsonElementVerbatim(Utf8JsonWriter writer, JsonElement element)
+    {
+        element.WriteTo(writer);
     }
 
     #endregion

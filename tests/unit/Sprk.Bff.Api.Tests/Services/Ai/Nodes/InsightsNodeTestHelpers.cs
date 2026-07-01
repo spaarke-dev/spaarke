@@ -14,7 +14,7 @@ internal static class InsightsNodeTestHelpers
     public const string DefaultTenantId = "test-tenant";
 
     public static NodeExecutionContext CreateContext(
-        ActionType actionType,
+        ExecutorType actionType,
         string? configJson,
         string outputVariable = "result",
         IDictionary<string, NodeOutput>? previousOutputs = null,
@@ -41,7 +41,7 @@ internal static class InsightsNodeTestHelpers
         {
             Id = actionId,
             Name = actionType.ToString(),
-            ActionType = actionType
+            ExecutorType = actionType
         };
         return new NodeExecutionContext
         {
@@ -49,7 +49,7 @@ internal static class InsightsNodeTestHelpers
             PlaybookId = node.PlaybookId,
             Node = node,
             Action = action,
-            ActionType = actionType,
+            ExecutorType = actionType,
             Scopes = new ResolvedScopes(Array.Empty<AnalysisSkill>(), Array.Empty<AnalysisKnowledge>(), Array.Empty<AnalysisTool>()),
             TenantId = tenantId,
             PreviousOutputs = previousOutputs is null

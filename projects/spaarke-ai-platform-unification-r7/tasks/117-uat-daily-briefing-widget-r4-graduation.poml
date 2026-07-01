@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-117" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>UAT — Daily Briefing widget renders TL;DR + per-channel narratives with real data (R4 graduation)</title>
+    <status>not-started</status>
+    <wave>11</wave>
+    <estimated-effort>1-2 hours (operator UAT session)</estimated-effort>
+    <tags>uat, gate, operator, wave-11</tags>
+    <rigor-level>STANDARD</rigor-level>
+    <rigor-reason>Operator UAT task; no code modification; sign-off gate. STANDARD per task-execute Step 0.5 — operator review pattern.</rigor-reason>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Operator-driven UAT against shared spaarkedev1 widget; sequential after T116 smoke passes.</parallel-reason>
+    <dependencies>116</dependencies>
+    <blocks>118, Wave 10 task 101, Wave 10 090-project-wrap-up</blocks>
+    <fr-coverage>FR-15 (R4 graduation gate close) + spec.md Success Criterion #1 — Daily Briefing widget operational end-to-end</fr-coverage>
+  </metadata>
+
+  <prompt>
+    Operator-driven UAT: load the Daily Briefing widget in spaarkedev1, refresh notifications,
+    trigger /narrate via the widget's narration affordance, verify the TL;DR + per-channel
+    narratives render with real spaarkedev1 notification data. Capture screenshots. Operator
+    sign-off closes the R4 graduation gate (FR-15). If UAT fails (empty content, error, wrong
+    shape), capture defect details + decide whether to fix in T118 or spawn a new task. **This
+    is an operator-blocking checkpoint — Claude prepares the test scaffolding and awaits the
+    operator's hands-on session.**
+  </prompt>
+
+  <role>
+    Operator UAT sponsor (operator drives the session); Claude prepares scaffolding (refresh data,
+    queue test scenarios, capture diagnostic context) + records sign-off / defect findings.
+  </role>
+
+  <goal>
+    Owner sign-off captured at `projects/spaarke-ai-platform-unification-r7/notes/handoffs/wave11-uat-r4-graduation.md`,
+    documenting: load behavior, /narrate trigger evidence, content quality (TL;DR substance,
+    per-channel bullet substance, entity-name grounding), screenshots, sign-off decision (PASS /
+    PARTIAL / FAIL). PASS closes FR-15. PARTIAL / FAIL feeds into T118 (or spawns sub-tasks).
+  </goal>
+
+  <inputs>
+    <file purpose="widget-source">src/client/shared/Spaarke.DailyBriefing.Components/src/components/DailyBriefingWidget.tsx</file>
+    <file purpose="narration-hook">src/client/shared/Spaarke.DailyBriefing.Components/src/hooks/useBriefingNarration.ts</file>
+    <file purpose="spaarkeai-page-host">src/solutions/SpaarkeAi/</file>
+    <file purpose="smoke-evidence-from-116">projects/spaarke-ai-platform-unification-r7/notes/handoffs/wave11-narrate-smoke.md</file>
+    <file purpose="spec-success-criteria">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="operator-gate">This is an OPERATOR-BLOCKING task per the established R7 pattern (operator-only stops at 089d, 101, 090-project-wrap-up). Claude prepares + awaits.</constraint>
+    <constraint source="evidence">UAT result MUST be captured in writing (handoff doc), not just operator verbal sign-off — supports R7 close.</constraint>
+    <constraint source="data-fidelity">UAT uses REAL spaarkedev1 data — do NOT seed synthetic notifications for this run. If notifications are too sparse for meaningful narration, surface as a defect (not a workaround).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>uat/daily-briefing</topic>
+    <files>
+      <file>projects/spaarke-ai-platform-unification-r7/notes/handoffs/wave10-success-criteria-verification.md</file>
+      <file>projects/spaarke-ai-platform-unification-r7/notes/handoffs/wave11-narrate-smoke.md</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Operator-blocking task pattern" location="projects/spaarke-ai-platform-unification-r7/tasks/101-uat-narrate-daily-briefing-r4-graduation.poml">
+        Pattern: Claude reads pre-flight state, surfaces operator instructions, awaits operator action, captures findings, decides next task based on outcome.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Wave 11 task 116 confirmed `/narrate` returns non-empty content end-to-end. T117 is the live operator-driven UAT inside the actual Daily Briefing widget — final proof that the end-user experience is fixed. R4 graduation gate (FR-15) closes on operator PASS.
+    </background>
+    <dependencies>
+      <dependency task="116" status="must-complete-first">Smoke evidence + deploy SHA captured.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Wave 10 task 101 is the formal R4 graduation UAT — T117 is the operational verification feeding into it. The operator may treat T117 + 101 as a single session.</item>
+      <item>T118 follows up on the operator's other UAT issues (events / links / extras).</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: STANDARD · 📋 REASON: operator UAT, no code mod · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Pre-flight verify smoke + deploy state">
+      Confirm T116 ✅. Re-curl /narrate from CLI to confirm BFF still healthy + non-empty response (catches drift since T116).
+    </step>
+    <step order="2" name="Surface UAT instructions to operator">
+      Present operator with: (a) test URL (spaarkedev1 SpaarkeAi code page hosting Daily Briefing widget); (b) expected actions (refresh widget, scroll to narration section, observe TL;DR + per-channel bullets); (c) acceptance criteria checklist (non-empty content, real entity names, no console errors).
+    </step>
+    <step order="3" name="Await operator UAT session + capture screenshots">
+      Operator loads widget. Operator confirms or denies each acceptance criterion. Operator pastes screenshots. Claude logs each finding inline.
+    </step>
+    <step order="4" name="Determine sign-off outcome">
+      PASS → all acceptance criteria met → proceed to T118 + Wave 10 task 101 close.
+      PARTIAL → some criteria met, others have defects → record defects, file in T118 step 1 investigation.
+      FAIL → empty content or critical regression → STOP, re-open T116 smoke, may need re-deploy / re-PATCH.
+    </step>
+    <step order="5" name="Write UAT handoff doc">
+      Create `notes/handoffs/wave11-uat-r4-graduation.md` with: test URL, screenshots, acceptance-criterion table (PASS/PARTIAL/FAIL per row), entity-name grounding spot-check, sign-off decision + signature/timestamp, next-step recommendation.
+    </step>
+    <step order="6" name="Update TASK-INDEX + current-task.md">
+      Mark 117 status per sign-off outcome (✅ on PASS); advance current-task.md to 118 (unless FAIL — then re-route).
+    </step>
+    <step order="7" name="Commit">
+      Commit UAT handoff doc.
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Bash (curl pre-flight)</tool>
+    <tool>Write (UAT handoff doc)</tool>
+    <tool>AskUserQuestion (operator sign-off capture)</tool>
+  </tools>
+
+  <outputs>
+    <output type="document">projects/spaarke-ai-platform-unification-r7/notes/handoffs/wave11-uat-r4-graduation.md</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Daily Briefing widget loads in spaarkedev1 without console errors</criterion>
+    <criterion testable="true">/narrate triggered via widget completes within reasonable latency (≤ 8s observed)</criterion>
+    <criterion testable="true">TL;DR renders with non-empty summary referencing real notification content</criterion>
+    <criterion testable="true">Per-channel narrative section renders with ≥1 bullet per channel that has items</criterion>
+    <criterion testable="true">At least one entity name in narration is verifiably from notification data (grounding evidence)</criterion>
+    <criterion testable="true">UAT handoff doc captures operator sign-off (PASS / PARTIAL / FAIL) with screenshots + rationale</criterion>
+  </acceptance-criteria>
+</task>

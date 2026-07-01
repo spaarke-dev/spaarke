@@ -3,6 +3,7 @@ using Sprk.Bff.Api.Infrastructure.Streaming;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Builder;
+using Sprk.Bff.Api.Services.Ai.Nodes;
 using Sprk.Bff.Api.Services.Ai.Testing;
 
 namespace Sprk.Bff.Api.Api.Ai;
@@ -191,6 +192,31 @@ public static class AiPlaybookBuilderEndpoints
             .ProducesProblem(400)
             .ProducesProblem(401)
             .ProducesProblem(429)
+            .ProducesProblem(500);
+
+        // GET /api/ai/playbook-builder/executor-config-schemas - Typed config schema registry (R7 FR-16, task 033)
+        group.MapGet("/executor-config-schemas", GetExecutorConfigSchemas)
+            .WithName("GetExecutorConfigSchemas")
+            .WithSummary("Get typed configuration schemas for all registered node executors")
+            .WithDescription("""
+                Returns the typed configuration schema (`ExecutorConfigSchema`) for every registered
+                `INodeExecutor` in the BFF. Drives the Playbook Builder canvas (Wave 8 FR-23)
+                typed config form renderer — replaces free-text JSON editing of `sprk_configjson`.
+
+                Response shape: `{ "schemas": ExecutorConfigSchema[] }` envelope. Schemas are
+                ordered by `executorTypeValue` ascending for deterministic diffing and predictable
+                canvas grouping. Each entry embeds its own `executorTypeName` + `executorTypeValue`
+                so the consumer can key by either string name or integer value as needed.
+
+                Schemas are static descriptors per executor — safe to cache client-side for the
+                session (schemas change only across BFF deployments). No server-side cache in v1
+                per design doc §6 (33 executors × shallow schemas ≈ ~40KB payload, negligible
+                compute to regenerate per request).
+
+                Design authority: `projects/spaarke-ai-platform-unification-r7/notes/spikes/getconfigschema-design.md` §6.
+                """)
+            .Produces<ExecutorConfigSchemasResponse>()
+            .ProducesProblem(401)
             .ProducesProblem(500);
 
         // POST /api/ai/playbook-builder/agentic - Agentic builder with function calling (Phase 2)
@@ -1060,6 +1086,33 @@ public static class AiPlaybookBuilderEndpoints
     }
 
     /// <summary>
+    /// Return typed configuration schemas for every registered <see cref="INodeExecutor"/>.
+    /// GET /api/ai/playbook-builder/executor-config-schemas
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Thin facade over <see cref="INodeExecutorRegistry"/>: iterates registered executors,
+    /// calls <see cref="INodeExecutor.GetConfigSchema"/> on each, and returns the schemas in an
+    /// envelope ordered by <c>ExecutorTypeValue</c> ascending.
+    /// </para>
+    /// <para>
+    /// R7 task 033 / FR-16. Drives Wave 8 task 083 typed config form renderer on the
+    /// Playbook Builder canvas. Cannot fail in normal operation — registry is constructed at
+    /// DI-time; if somehow empty, returns 200 with an empty array rather than 500 (better
+    /// degradation for the canvas).
+    /// </para>
+    /// </remarks>
+    private static IResult GetExecutorConfigSchemas(INodeExecutorRegistry registry)
+    {
+        var schemas = registry.GetAllExecutors()
+            .Select(executor => executor.GetConfigSchema())
+            .OrderBy(schema => schema.ExecutorTypeValue)
+            .ToArray();
+
+        return Results.Ok(new ExecutorConfigSchemasResponse(schemas));
+    }
+
+    /// <summary>
     /// Process a builder message using agentic function calling.
     /// POST /api/ai/playbook-builder/agentic
     /// </summary>
@@ -1128,6 +1181,21 @@ public static class AiPlaybookBuilderEndpoints
         }
     }
 }
+
+/// <summary>
+/// Response envelope for <c>GET /api/ai/playbook-builder/executor-config-schemas</c>
+/// (R7 FR-16 / task 033). Envelope chosen over a raw array to leave room for additive
+/// metadata (e.g., <c>version</c>, <c>generatedAt</c>) without breaking the wire contract.
+/// </summary>
+/// <param name="Schemas">
+/// All registered executor config schemas, ordered by <c>ExecutorTypeValue</c> ascending
+/// for deterministic diffing + predictable canvas grouping.
+/// </param>
+/// <remarks>
+/// Design authority: <c>projects/spaarke-ai-platform-unification-r7/notes/spikes/getconfigschema-design.md</c> §6.
+/// </remarks>
+public sealed record ExecutorConfigSchemasResponse(
+    [property: System.Text.Json.Serialization.JsonPropertyName("schemas")] IReadOnlyList<ExecutorConfigSchema> Schemas);
 
 /// <summary>
 /// API request for production test execution.

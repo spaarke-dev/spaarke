@@ -1,0 +1,180 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-044" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Drop sprk_analysisaction.sprk_executoractiontype (INT column) (FR-04)</title>
+    <status>not-started</status>
+    <wave>4</wave>
+    <estimated-effort>1-2 hours</estimated-effort>
+    <tags>dataverse-schema, deletion, wave-4</tags>
+    <rigor-level>FULL</rigor-level>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>043</dependencies>
+    <fr-coverage>FR-04</fr-coverage>
+  </metadata>
+
+  <prompt>
+    Sequential follow-on to task 043. Drop the `sprk_executoractiontype` INT column on `sprk_analysisaction`.
+    Same pattern as task 043 (MCP describe → grep → PowerShell DELETE → MCP re-describe). This field was
+    a parallel-encoding of the dispatch axis that R7 collapses into `node.sprk_executortype`. After
+    task 024 (single-hop dispatch) and task 042 (ExecuteAnalysisAsync deletion), nothing reads this INT
+    column. Drop it per FR-04.
+  </prompt>
+
+  <role>
+    Senior Dataverse platform engineer dropping a schema field via Web API. Mirror task 043's pattern
+    exactly — the only differences are the field name (`sprk_executoractiontype` vs `sprk_actiontypeid`)
+    and the attribute type (Integer vs Lookup; deletion API call shape is similar but slightly different).
+  </role>
+
+  <goal>
+    1. Pre-deletion MCP verification: `sprk_executoractiontype` exists on `sprk_analysisaction`; type Integer
+    2. PowerShell script written to delete the attribute (idempotent; safe-rerun)
+    3. Field removed from Dataverse `sprk_analysisaction` entity in spaarkedev1
+    4. Post-deletion MCP verification: field absent from entity
+    5. Production-code grep confirms no readers post-deletion (task 046 mops up `AnalysisActionService` references)
+    6. `sprk_analysisactiontype` lookup table preserved per FR-05 (re-verified — defense in depth)
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="plan">projects/spaarke-ai-platform-unification-r7/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    <file purpose="schema-target">sprk_analysisaction (Dataverse entity)</file>
+    <file purpose="field-to-delete">sprk_analysisaction.sprk_executoractiontype (INT column)</file>
+    <file purpose="downstream-cleanup">src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisActionService.cs (cleaned by task 046)</file>
+    <file purpose="skill-reference">.claude/skills/dataverse-create-schema/SKILL.md</file>
+    <file purpose="prior-task-reference">projects/spaarke-ai-platform-unification-r7/tasks/043-drop-sprk-actiontypeid-lookup.poml</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-04">DELETE `sprk_analysisaction.sprk_executoractiontype` (INT column). Acceptance: field removed; no code reads it.</constraint>
+    <constraint source="spec FR-05">KEEP `sprk_analysisactiontype` lookup table (decorative). Defense-in-depth re-verify post task 043 + 044 cascade.</constraint>
+    <constraint source="spec Q6 RESOLVED">No backward compatibility. Hard cutover.</constraint>
+    <constraint source="ADR-013">BFF AI Architecture — dispatch axis lives ONLY on `node.sprk_executortype`. Action no longer carries dispatch identity.</constraint>
+    <constraint source="dataverse-create-schema skill">Web API + PowerShell (PAC CLI gap). MCP describe pre/post. Idempotent.</constraint>
+    <constraint source="CLAUDE.md §11">Pure deletion — no new component.</constraint>
+    <constraint source="sequencing">Task 044 MUST follow task 043 (sequential within wave). Task 046 MUST follow task 044 (code cleanup after both fields gone).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>dataverse/schema-deletion</topic>
+    <files>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>docs/guides/DATAVERSE-MCP-INTEGRATION-GUIDE.md</file>
+      <file>docs/architecture/ai-architecture-actions-nodes-scopes.md</file>
+    </files>
+    <patterns>
+      <pattern name="MCP-first schema verification" location=".claude/skills/dataverse-create-schema/SKILL.md">
+        STEP 0: mcp__dataverse__describe_table before PowerShell. Cheaper, faster, catches "field already deleted" early.
+      </pattern>
+      <pattern name="Idempotent attribute deletion" location="dataverse-create-schema skill body">
+        Test-AttributeExists → DELETE EntityDefinitions(...)/Attributes(...) → PublishXml → re-test absence.
+      </pattern>
+      <pattern name="Task 043 sibling reference" location="projects/spaarke-ai-platform-unification-r7/tasks/043-drop-sprk-actiontypeid-lookup.poml">
+        Same task structure; copy + adapt for the INT-column case.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      `sprk_executoractiontype` (INT) was a parallel encoding of dispatch — a hardcoded enum-equivalent column.
+      R7 reform makes `node.sprk_executortype` (Choice) the canonical dispatch axis; this INT column is
+      redundant. After tasks 024 + 042 + 043, nothing reads it. Drop per FR-04.
+    </background>
+    <dependencies>
+      <dependency task="043" status="must-complete-first">Schema-cascade pair: 043 (lookup field) → 044 (INT column).</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 045 documents `sprk_analysisactiontype` as decorative (FR-05) — parallel to this cascade.</item>
+      <item>Task 046 cleans `AnalysisActionService` references to BOTH dropped fields — runs immediately after this task.</item>
+      <item>Task 047 cumulative wave publish-size check.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: FULL · 📋 REASON: dataverse-schema deletion, tag dataverse-schema+deletion, FR-04 acceptance gate — quality gates Step 9.5 required · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read project CLAUDE.md + spec.md FR-04 + FR-05 + plan.md Wave 4 + .claude/skills/dataverse-create-schema/SKILL.md + task 043 POML (sibling pattern).
+    </step>
+    <step order="2" name="MCP pre-check — verify field exists">
+      Call: mcp__dataverse__describe(table="sprk_analysisaction")
+      Confirm `sprk_executoractiontype` is present in the entity's attribute list. Note its LogicalName + AttributeType (Integer/Whole Number).
+      If absent — STOP and report (may already be dropped; no-op task).
+    </step>
+    <step order="3" name="Code-side pre-check — confirm no runtime reader">
+      Run: Grep pattern="sprk_executoractiontype" glob="**/*.cs" output_mode="content" -n true
+      Expected: hits in `AnalysisActionService.cs` are flagged for task 046 (not blocking this task — schema deletion proceeds; code cleanup follows). Production runtime read path was severed by task 024 + 042.
+      If a hot runtime reader still exists outside `AnalysisActionService.cs` — STOP and investigate.
+    </step>
+    <step order="4" name="Author deletion PowerShell script">
+      Create: `scripts/dataverse/Drop-Sprk-Analysisaction-Executoractiontype.ps1`
+      Pattern (mirror task 043):
+      - Acquire Dataverse Web API token (Azure CLI auth)
+      - Test-AttributeExists for `sprk_executoractiontype` on `sprk_analysisaction`
+      - If exists: DELETE EntityDefinitions(LogicalName='sprk_analysisaction')/Attributes(LogicalName='sprk_executoractiontype')
+      - PublishXml for the entity
+      - Re-test absence
+      - Idempotent
+    </step>
+    <step order="5" name="Review the DELETE call carefully">
+      Visual review. Confirm correct entity + attribute LogicalName. Destructive — no undo.
+    </step>
+    <step order="6" name="Run script against spaarkedev1">
+      Execute. Capture stdout.
+    </step>
+    <step order="7" name="MCP post-check — verify field absent">
+      Call: mcp__dataverse__describe(table="sprk_analysisaction")
+      Required: `sprk_executoractiontype` NOT in attribute list. FR-04 acceptance signal.
+    </step>
+    <step order="8" name="Defense-in-depth: verify lookup TABLE still present (FR-05 guard)">
+      Call: mcp__dataverse__describe(table="sprk_analysisactiontype")
+      Required: table still exists. We've now dropped TWO fields on `sprk_analysisaction` referencing dispatch concepts; explicitly re-verify the decorative table itself is intact.
+    </step>
+    <step order="8.5" name="Flag AnalysisActionService cleanup target for task 046">
+      Document the grep hits from step 3 in task notes. Task 046 picks these up next.
+    </step>
+    <step order="9" name="Quality gates (FULL rigor)">
+      Run `/code-review` on the new PowerShell script. Run `/adr-check` against ADR-013 + dataverse-create-schema skill.
+      Fix any findings before commit.
+    </step>
+    <step order="10" name="Update current-task.md + TASK-INDEX">
+      Mark task 044 status complete; advance current-task.md to task 045 (parallel-safe with 046 — choose whichever).
+    </step>
+    <step order="11" name="Commit">
+      Commit the deletion script + any task notes with conventional message.
+      Example: feat(dataverse/r7): drop sprk_analysisaction.sprk_executoractiontype INT column (Wave 4 task 044, FR-04)
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (spec, plan, dataverse-create-schema skill, task 043 POML)</tool>
+    <tool>Grep (sprk_executoractiontype in `src/`)</tool>
+    <tool>mcp__dataverse__describe (pre + post-deletion schema state)</tool>
+    <tool>Write (PowerShell deletion script)</tool>
+    <tool>Bash (pwsh script execution, git commit)</tool>
+    <tool>Skill (code-review at Step 9)</tool>
+    <tool>Skill (adr-check at Step 9)</tool>
+  </tools>
+
+  <outputs>
+    <output type="new-file">scripts/dataverse/Drop-Sprk-Analysisaction-Executoractiontype.ps1</output>
+    <output type="schema-change">sprk_analysisaction.sprk_executoractiontype attribute removed from Dataverse</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md (advance to task 045 or 046)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 044 ✅)</output>
+    <output type="commit">feat(dataverse/r7): drop sprk_analysisaction.sprk_executoractiontype INT column (Wave 4 task 044, FR-04)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>MCP describe_table confirms `sprk_executoractiontype` absent from `sprk_analysisaction` post-deletion</criterion>
+    <criterion>MCP describe_table confirms `sprk_analysisactiontype` TABLE still present (FR-05 guard)</criterion>
+    <criterion>PowerShell deletion script committed at scripts/dataverse/Drop-Sprk-Analysisaction-Executoractiontype.ps1</criterion>
+    <criterion>Script is idempotent</criterion>
+    <criterion>Code-side grep hits flagged for task 046 follow-up (AnalysisActionService.cs cleanup)</criterion>
+    <criterion>code-review + adr-check pass at Step 9 (FULL rigor)</criterion>
+    <criterion>current-task.md advanced to task 045 (parallel-safe with 046)</criterion>
+    <criterion>Schema-cascade pair (043 + 044) complete</criterion>
+  </acceptance-criteria>
+</task>

@@ -916,6 +916,16 @@ export function ConversationPane(): React.JSX.Element {
   // is pragmatic (no new SprkChat API surface) and surgical to /clear.
   const [sprkChatRemountKey, setSprkChatRemountKey] = React.useState<number>(0);
 
+  // R7 task 094 / FR-18 — forward-declared ref for the Playbook Library modal
+  // opener. The actual `handleOpenLibraryModal` useCallback is declared below
+  // and depends on entityContext / Xrm.Navigation, but the
+  // `hardSlashContext` useMemo above needs to reference it BEFORE
+  // it's lexically defined. Solution: a ref that `handleOpenLibraryModal`
+  // assigns itself to via a useEffect side-effect after each render. The
+  // `/playbooks` hard slash invokes `openLibraryModalRef.current?.([])`.
+  // Pattern mirrors `messagesRef` / `focusedTabIdRef` already in this file.
+  const openLibraryModalRef = React.useRef<((ids: string[]) => void) | null>(null);
+
   // chat-routing-redesign-r1 task 117b — track the user's most recent outbound
   // message text so the playbook_options click handler can forward it to the
   // dispatcher endpoint as `originalMessage`. Captured in `handleBeforeSendMessage`
@@ -1420,6 +1430,16 @@ export function ConversationPane(): React.JSX.Element {
       getFocusedTabId: (): string | null => focusedTabIdRef.current,
       activeMatterId: entityContext?.matterId ?? null,
       downloadBlob: defaultDownloadBlob,
+      // R7 task 094 / FR-18 — `/playbooks` hard-slash opener. Indirected
+      // through `openLibraryModalRef` because `handleOpenLibraryModal`
+      // (the underlying Xrm.Navigation thunk) is declared LATER in this
+      // function body and is in the Temporal Dead Zone at memo-factory time.
+      // The ref is assigned by a useEffect immediately below the
+      // `handleOpenLibraryModal` declaration. Browse-mode opens with an empty
+      // sessionAttachmentIds array (no pre-filter) per task 093 audit Q6.
+      openLibraryModal: (): void => {
+        openLibraryModalRef.current?.([]);
+      },
       telemetry: defaultTelemetrySink,
     }),
     [bffBaseUrl, authenticatedFetch, chatSessionId, entityContext, paneEventBus, setChatSessionId]
@@ -1800,6 +1820,19 @@ export function ConversationPane(): React.JSX.Element {
     },
     []
   );
+
+  // R7 task 094 / FR-18 — keep `openLibraryModalRef` in lock-step with the
+  // useCallback above so the `/playbooks` hard slash dispatched from
+  // `hardSlashContext` (declared earlier in this body) can invoke the live
+  // implementation. The useCallback has empty deps so the assignment is
+  // effectively once-per-component-instance, but using useEffect keeps the
+  // assignment explicit + survives any future ref-identity changes.
+  React.useEffect(() => {
+    openLibraryModalRef.current = handleOpenLibraryModal;
+    return () => {
+      openLibraryModalRef.current = null;
+    };
+  }, [handleOpenLibraryModal]);
 
   /**
    * dispatchSummarizeIntent — pure routing decision helper, retained from

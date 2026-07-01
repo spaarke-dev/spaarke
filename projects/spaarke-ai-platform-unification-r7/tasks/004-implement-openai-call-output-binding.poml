@@ -1,0 +1,174 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-004" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Implement IOpenAiClient.GetStructuredCompletionRawAsync call + JsonElement binding</title>
+    <status>completed</status>
+    <wave>1</wave>
+    <estimated-effort>2-3 hours</estimated-effort>
+    <tags>bff-api, code-impl, wave-1</tags>
+    <rigor-level>FULL</rigor-level>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>003</dependencies>
+    <fr-coverage>FR-12 (LLM invocation + output binding)</fr-coverage>
+  </metadata>
+
+  <prompt>
+    Wire the IOpenAiClient.GetStructuredCompletionRawAsync call into AiCompletionNodeExecutor.ExecuteAsync()
+    using the merged (SystemPrompt, OutputSchema, Temperature) tuple produced by task 003. Bind the response
+    to JsonElement and write it to node.OutputVariable via NodeOutput.Ok. Wrap LLM errors as NodeOutput.Error
+    with NodeErrorCodes.LlmCallFailed (or matching existing code) — the test in task 009 will assert this
+    error path.
+  </prompt>
+
+  <role>
+    Senior .NET backend developer completing the AiCompletionNodeExecutor happy-path. Mirror AiAnalysisNodeExecutor's
+    call to IOpenAiClient — same retry envelope, same telemetry tags, same error mapping. Do NOT introduce a new
+    retry policy or new error code class.
+  </role>
+
+  <goal>
+    AiCompletionNodeExecutor.ExecuteAsync() complete happy-path:
+    1. Invokes IOpenAiClient.GetStructuredCompletionRawAsync with merged SystemPrompt + OutputSchema + Temperature
+    2. Receives raw structured-completion response (JsonElement or string-then-parsed)
+    3. Binds the parsed JsonElement to node.OutputVariable via NodeOutput.Ok
+    4. Emits standard ActivitySource telemetry tags (node.id, action_type=AiCompletion, llm.deployment, llm.tokens)
+    5. Wraps LLM HTTP errors / malformed responses as NodeOutput.Error with appropriate NodeErrorCodes value
+    6. Honors CancellationToken (propagates to IOpenAiClient call)
+    7. Compiles clean; existing test suite green
+  </goal>
+
+  <inputs>
+    <file purpose="executor-with-merge-applied">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiCompletionNodeExecutor.cs</file>
+    <file purpose="pattern-decision">projects/spaarke-ai-platform-unification-r7/notes/spikes/aicompletion-pattern-decision.md</file>
+    <file purpose="design-spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    <file purpose="reference-llm-call">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiAnalysisNodeExecutor.cs</file>
+    <file purpose="openai-client-interface">src/server/api/Sprk.Bff.Api/Services/Ai/IOpenAiClient.cs</file>
+    <file purpose="bff-constraints">.claude/constraints/bff-extensions.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-010">DI Minimalism — IOpenAiClient is already injected (task 002 ctor); no new dependencies.</constraint>
+    <constraint source="ADR-013">BFF AI Architecture — direct dependency on IOpenAiClient is allowed inside Services/Ai/ (this is the AI internals boundary). Do NOT introduce a facade type.</constraint>
+    <constraint source="ADR-029">BFF Publish Hygiene — task 010 runs full publish + CVE; this task contributes another small delta.</constraint>
+    <constraint source="ADR-038">Testing Strategy — task 009 mocks IOpenAiClient at the executor boundary. Do NOT use Mock&lt;HttpMessageHandler&gt;. The error-mapping code added in this task is what task 009 asserts.</constraint>
+    <constraint source="spec FR-12">Pattern: Call IOpenAiClient.GetStructuredCompletionRawAsync; parse response to JsonElement; bind to node.OutputVariable.</constraint>
+    <constraint source="CLAUDE.md §10">BFF Hygiene — placement decision unchanged from task 002 (IN BFF, leaf executor).</constraint>
+    <constraint source="bff-extensions.md §F">Test update obligation — task 007 covers happy-path payload binding; task 009 covers error paths added here.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai/node-executor-authoring</topic>
+    <files>
+      <file>.claude/patterns/ai/node-executor-authoring.md</file>
+      <file>docs/adr/ADR-013-bff-ai-architecture.md</file>
+      <file>docs/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+    </files>
+    <patterns>
+      <pattern name="AiAnalysisNodeExecutor LLM call" location="src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiAnalysisNodeExecutor.cs">
+        Canonical call shape for IOpenAiClient.GetStructuredCompletionRawAsync. Mirror exactly (retry envelope + telemetry + error mapping).
+      </pattern>
+      <pattern name="NodeOutput.Ok / NodeOutput.Error" location="src/server/api/Sprk.Bff.Api/Models/Ai/NodeOutput.cs">
+        Output-binding helpers. Ok wraps successful JsonElement; Error wraps failure with NodeErrorCodes value.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Task 003 left a TODO at the LLM-call insertion point with the merged tuple in local variables. This task
+      replaces that TODO with the actual IOpenAiClient.GetStructuredCompletionRawAsync call + response parsing
+      + output binding. After this task, the executor's happy path is complete. Task 005 (parallel-safe with
+      this one — both depend on 003 but not on each other) hardens Validate(). Tasks 007-009 add tests.
+    </background>
+    <dependencies>
+      <dependency task="003" status="not-started-but-required">Merge logic + merged (SystemPrompt, OutputSchema, Temperature) locals in ExecuteAsync.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 005 (independent of this task; runs in parallel) implements Validate() — both modify the same file so parallel-safe means logical parallel; main session sequences edits.</item>
+      <item>Task 009 (depends on this) mocks IOpenAiClient to assert error mapping for malformed JSON + LLM HTTP errors.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: FULL · 📋 REASON: code-impl in BFF (.cs file modification, tag bff-api, LLM call + error mapping is semantically load-bearing, ADR-013+038 applicable) — quality gates Step 9.5 required · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read project CLAUDE.md + spec.md FR-12 + .claude/constraints/bff-extensions.md + task 001 pattern-decision doc + task 003 modified executor file.
+    </step>
+    <step order="2" name="Re-read AiAnalysisNodeExecutor LLM-call section">
+      Identify exactly: (a) the IOpenAiClient.GetStructuredCompletionRawAsync invocation signature + parameter order, (b) telemetry tags emitted around the call, (c) how the response is parsed to JsonElement, (d) how errors are mapped to NodeOutput.Error + NodeErrorCodes.
+    </step>
+    <step order="3" name="Implement the LLM call">
+      Edit AiCompletionNodeExecutor.cs ExecuteAsync(): replace the task-003 TODO with:
+      - var response = await _openAiClient.GetStructuredCompletionRawAsync(mergedSystemPrompt, mergedOutputSchema, mergedTemperature, cancellationToken)
+      - Parse response to JsonElement (mirror AiAnalysisNodeExecutor parsing path)
+      - Emit telemetry tags: node.id, action_type=AiCompletion, llm.deployment, llm.tokens (if available)
+      - Bind JsonElement to NodeOutput.Ok with node.Id + node.OutputVariable + metrics
+    </step>
+    <step order="4" name="Implement error mapping">
+      Wrap the LLM call in try/catch:
+      - JsonException (malformed response) → NodeOutput.Error(NodeErrorCodes.InvalidResponse, "LLM returned malformed JSON: {msg}")
+      - HttpRequestException / OperationCanceledException (LLM HTTP error) → NodeOutput.Error(NodeErrorCodes.LlmCallFailed or matching code, "LLM call failed: {msg}")
+      - General Exception → NodeOutput.Error(NodeErrorCodes.InternalError, ex.Message)
+      Mirror AiAnalysisNodeExecutor's error mapping if more specific codes exist there.
+    </step>
+    <step order="5" name="Confirm cancellation propagation">
+      Verify CancellationToken is passed to IOpenAiClient.GetStructuredCompletionRawAsync (no silent drop).
+    </step>
+    <step order="6" name="Build">
+      Run: dotnet build src/server/api/Sprk.Bff.Api/ — expect 0 errors, 0 new warnings.
+    </step>
+    <step order="7" name="Verify existing tests still pass">
+      Run: dotnet test tests/unit/Sprk.Bff.Api.Tests/ — expect no regression.
+    </step>
+    <step order="8" name="Publish + size check (partial)">
+      Run: dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish-task004/ — measure compressed size delta vs task 003 baseline. Document.
+    </step>
+    <step order="9" name="Verify acceptance">
+      Re-read AiCompletionNodeExecutor.cs; confirm all goal bullets satisfied; the executor's happy path is now complete end-to-end (modulo Validate() task 005).
+    </step>
+    <step order="9.5" name="Quality gates (FULL rigor)">
+      Run `/code-review` on the modified file. Run `/adr-check` against ADR-010 + ADR-013 + ADR-029 + ADR-038 + bff-extensions.md. Fix findings before commit.
+    </step>
+    <step order="10" name="Update current-task.md + TASK-INDEX">
+      Mark task 004 status complete; advance current-task.md.
+    </step>
+    <step order="11" name="Commit">
+      Commit AiCompletionNodeExecutor.cs change with conventional message.
+      Example: feat(bff/r7): IOpenAiClient call + JsonElement output binding in AiCompletionNodeExecutor (Wave 1 task 004, FR-12)
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (AiAnalysisNodeExecutor.cs LLM call section + IOpenAiClient interface)</tool>
+    <tool>Edit (AiCompletionNodeExecutor.cs ExecuteAsync body)</tool>
+    <tool>Bash (dotnet build, dotnet test, dotnet publish, git commit)</tool>
+    <tool>Skill (code-review at Step 9.5)</tool>
+    <tool>Skill (adr-check at Step 9.5)</tool>
+  </tools>
+
+  <outputs>
+    <output type="modified-file">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiCompletionNodeExecutor.cs</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 004 ✅)</output>
+    <output type="commit">feat(bff/r7): IOpenAiClient call + JsonElement output binding in AiCompletionNodeExecutor (Wave 1 task 004, FR-12)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>ExecuteAsync invokes IOpenAiClient.GetStructuredCompletionRawAsync with the merged tuple from task 003</criterion>
+    <criterion>Response is parsed to JsonElement and bound to NodeOutput.Ok with node.Id + node.OutputVariable</criterion>
+    <criterion>Telemetry tags emitted: node.id, action_type=AiCompletion, llm.deployment (and llm.tokens if available)</criterion>
+    <criterion>JsonException → NodeOutput.Error with InvalidResponse-equivalent code</criterion>
+    <criterion>HttpRequestException / LLM HTTP error → NodeOutput.Error with LlmCallFailed-equivalent code</criterion>
+    <criterion>CancellationToken is propagated to IOpenAiClient call (no silent drop)</criterion>
+    <criterion>dotnet build passes: 0 errors, 0 new warnings</criterion>
+    <criterion>Existing test suite (pre-W1) still green</criterion>
+    <criterion>code-review + adr-check pass at Step 9.5 (FULL rigor)</criterion>
+    <criterion>Publish size delta documented (expected: +5-30 KB)</criterion>
+    <criterion>Commit pushed to work/spaarke-ai-platform-unification-r7</criterion>
+  </acceptance-criteria>
+</task>

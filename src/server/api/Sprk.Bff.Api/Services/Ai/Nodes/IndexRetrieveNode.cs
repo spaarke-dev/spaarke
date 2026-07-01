@@ -91,10 +91,74 @@ public sealed class IndexRetrieveNode : INodeExecutor
     }
 
     /// <inheritdoc />
-    public IReadOnlyList<ActionType> SupportedActionTypes { get; } = new[]
+    public IReadOnlyList<ExecutorType> SupportedExecutorTypes { get; } = new[]
     {
-        ActionType.IndexRetrieve
+        ExecutorType.IndexRetrieve
     };
+
+    // R7 task 085 / FR-23 — typed config schema for Playbook Builder canvas.
+    // Derived from IndexRetrieveNodeConfig: indexName (default spaarke-insights-index),
+    // artifactType (observation/precedent), predicate, filter, vectorQuery, topK (default 12),
+    // requireEvidence (default true), subjectScope.
+    private static readonly ExecutorConfigSchema ConfigSchemaInstance = new(
+        ExecutorTypeName: nameof(ExecutorType.IndexRetrieve),
+        ExecutorTypeValue: (int)ExecutorType.IndexRetrieve,
+        Description: "Retrieves Observations and Precedents from spaarke-insights-index via filter + optional vector search (D-P12 / SPEC §3.4.3). Tenant isolation is always enforced.",
+        Fields: new ConfigSchemaField[]
+        {
+            new(
+                Name: "indexName",
+                Type: SchemaFieldType.String,
+                Required: false,
+                Description: "Target AI Search index name. Defaults to 'spaarke-insights-index'.",
+                Default: "spaarke-insights-index"),
+            new(
+                Name: "artifactType",
+                Type: SchemaFieldType.Enum,
+                Required: false,
+                Description: "Optional artifact-type narrowing. Omit to retrieve both Observations and Precedents.",
+                Default: null,
+                EnumValues: new[] { "observation", "precedent" }),
+            new(
+                Name: "predicate",
+                Type: SchemaFieldType.String,
+                Required: false,
+                Description: "Optional claim-name narrowing (e.g., 'outcomeCategory' per SPEC §3.4.3 Query 1).",
+                Default: null),
+            new(
+                Name: "filter",
+                Type: SchemaFieldType.String,
+                Required: false,
+                Description: "Optional OData filter clause appended to tenant + artifactType + predicate guards (e.g., \"value/raw/scope/matterType eq 'IP'\"). Trusted operator input only — passed through unsanitized.",
+                Default: null),
+            new(
+                Name: "vectorQuery",
+                Type: SchemaFieldType.String,
+                Required: false,
+                Description: "Optional natural-language query for vector search. When set, enables KNN search on the contentVector field (text-embedding-3-large, 3072 dim).",
+                Default: null),
+            new(
+                Name: "topK",
+                Type: SchemaFieldType.Number,
+                Required: false,
+                Description: "Number of results to return. Defaults to 12 (matches the predict-matter-cost cohort size from SPEC).",
+                Default: 12),
+            new(
+                Name: "requireEvidence",
+                Type: SchemaFieldType.Boolean,
+                Required: false,
+                Description: "D-A23 / D-48 EvidenceGuard. Defaults to true: zero results yield a node error so downstream synthesis never runs with empty evidence. Set false only for non-evidence-bearing diagnostic queries.",
+                Default: true),
+            new(
+                Name: "subjectScope",
+                Type: SchemaFieldType.String,
+                Required: false,
+                Description: "Optional <scheme>:<entityId> subject filter (e.g., 'matter:M-2024-0341', 'project:p-abc'). Emits the hybrid dual-read OR-filter per design-a6 §4.5 for matter subjects.",
+                Default: null)
+        });
+
+    /// <inheritdoc />
+    public ExecutorConfigSchema GetConfigSchema() => ConfigSchemaInstance;
 
     /// <inheritdoc />
     public NodeValidationResult Validate(NodeExecutionContext context)

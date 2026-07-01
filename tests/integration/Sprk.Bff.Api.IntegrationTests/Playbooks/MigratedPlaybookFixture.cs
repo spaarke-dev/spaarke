@@ -1,6 +1,6 @@
 // R3 Part 1C — Task 053 (2026-06-21): Integration-test fixture for the 3 migrated
 // notification playbooks (tasks 050 / 051 / 052). Each migrated playbook now uses the
-// new LookupUserMembership node (ActionType 52) + the {{joinIds}} Handlebars helper
+// new LookupUserMembership node (ExecutorType 52) + the {{joinIds}} Handlebars helper
 // to filter downstream FetchXML queries by the executing user's matter memberships.
 //
 // FR-1C.4 / AC-1C.1 / AC-1C.2 — End-to-end tests assert:
@@ -212,7 +212,7 @@ public sealed class MigratedPlaybookFixture
         // execution (mirrors PlaybookOrchestrationService.ExecuteNodeBasedModeAsync).
         var nodes = LoadNodes(doc.RootElement);
 
-        // Real production node executors — one instance per ActionType the playbooks use.
+        // Real production node executors — one instance per ExecutorType the playbooks use.
         var lookupExecutor = new LookupUserMembershipNodeExecutor(
             _scopeFactory,
             NullLogger<LookupUserMembershipNodeExecutor>.Instance);
@@ -262,7 +262,7 @@ public sealed class MigratedPlaybookFixture
                 PlaybookId = playbookId,
                 Node = node.dto,
                 Action = new AnalysisAction { Id = Guid.NewGuid(), Name = node.dto.Name },
-                ActionType = node.actionType,
+                ExecutorType = node.actionType,
                 Scopes = new ResolvedScopes(Array.Empty<AnalysisSkill>(), Array.Empty<AnalysisKnowledge>(), Array.Empty<AnalysisTool>()),
                 TenantId = "test-tenant",
                 UserId = TestUserId,
@@ -280,12 +280,12 @@ public sealed class MigratedPlaybookFixture
             //       designer pattern used by the migrated notification playbooks (task 050
             //       / 051 / 052), which set queryMode=true to indicate "execute the FetchXML
             //       and return rows" rather than the standard "mutate the named record" flow.
-            //       The production orchestrator routes by ActionType + the executor branches
+            //       The production orchestrator routes by ExecutorType + the executor branches
             //       internally; here we mirror that decision at the test seam since we are
             //       wiring executors directly without the full registry.
             //   - actionType 50 (CreateNotification)    → CreateNotificationNodeExecutor.
             //   - anything else (Start, Condition, etc.) was already filtered above.
-            var isQueryMode = node.actionType == ActionType.UpdateRecord
+            var isQueryMode = node.actionType == ExecutorType.UpdateRecord
                               && node.dto.ConfigJson is not null
                               && node.dto.ConfigJson.Contains("\"queryMode\": true", StringComparison.OrdinalIgnoreCase);
 
@@ -315,18 +315,18 @@ public sealed class MigratedPlaybookFixture
             // playbook intent and current executor capability here rather than silently
             // bridging it.)
             // ─────────────────────────────────────────────────────────────────────
-            if (node.actionType == ActionType.QueryDataverse ||
-                (node.actionType == ActionType.UpdateRecord && isQueryMode))
+            if (node.actionType == ExecutorType.QueryDataverse ||
+                (node.actionType == ExecutorType.UpdateRecord && isQueryMode))
             {
                 ctx = PreRenderFetchXmlTemplates(ctx, _templateEngine);
             }
 
             NodeOutput output = (node.actionType, isQueryMode) switch
             {
-                (ActionType.LookupUserMembership, _) => await lookupExecutor.ExecuteAsync(ctx, cancellationToken),
-                (ActionType.QueryDataverse, _) => await queryExecutor.ExecuteAsync(ctx, cancellationToken),
-                (ActionType.UpdateRecord, true) => await queryExecutor.ExecuteAsync(ctx, cancellationToken),
-                (ActionType.CreateNotification, _) => await notifyExecutor.ExecuteAsync(ctx, cancellationToken),
+                (ExecutorType.LookupUserMembership, _) => await lookupExecutor.ExecuteAsync(ctx, cancellationToken),
+                (ExecutorType.QueryDataverse, _) => await queryExecutor.ExecuteAsync(ctx, cancellationToken),
+                (ExecutorType.UpdateRecord, true) => await queryExecutor.ExecuteAsync(ctx, cancellationToken),
+                (ExecutorType.CreateNotification, _) => await notifyExecutor.ExecuteAsync(ctx, cancellationToken),
                 _ => NodeOutput.Ok(node.dto.Id, node.dto.OutputVariable, null, $"skipped action {node.actionType}"),
             };
 
@@ -418,9 +418,9 @@ public sealed class MigratedPlaybookFixture
         };
     }
 
-    private static (PlaybookNodeDto dto, ActionType actionType, string canvasType)[] LoadNodes(JsonElement root)
+    private static (PlaybookNodeDto dto, ExecutorType actionType, string canvasType)[] LoadNodes(JsonElement root)
     {
-        var nodes = new List<(PlaybookNodeDto, ActionType, string)>();
+        var nodes = new List<(PlaybookNodeDto, ExecutorType, string)>();
         var nameToId = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
 
         // First pass: assign each node a stable Guid keyed by its "name" so the dependsOn
@@ -439,7 +439,7 @@ public sealed class MigratedPlaybookFixture
             var actionTypeValue = nodeElem.TryGetProperty("actionType", out var atProp) && atProp.ValueKind != JsonValueKind.Null
                 ? atProp.GetInt32()
                 : 33; // 33 = Start (pass-through)
-            var actionType = (ActionType)actionTypeValue;
+            var actionType = (ExecutorType)actionTypeValue;
             var outputVariable = nodeElem.GetProperty("outputVariable").GetString() ?? string.Empty;
             var configJson = nodeElem.TryGetProperty("configJson", out var cjProp) && cjProp.ValueKind != JsonValueKind.Null
                 ? cjProp.GetRawText()
@@ -477,11 +477,11 @@ public sealed class MigratedPlaybookFixture
         return nodes.ToArray();
     }
 
-    private static (PlaybookNodeDto dto, ActionType actionType, string canvasType)[] TopologicallySort(
-        (PlaybookNodeDto dto, ActionType actionType, string canvasType)[] nodes)
+    private static (PlaybookNodeDto dto, ExecutorType actionType, string canvasType)[] TopologicallySort(
+        (PlaybookNodeDto dto, ExecutorType actionType, string canvasType)[] nodes)
     {
         // Simple Kahn's algorithm — playbook graphs are small (≤5 nodes) so naive impl is fine.
-        var sorted = new List<(PlaybookNodeDto, ActionType, string)>();
+        var sorted = new List<(PlaybookNodeDto, ExecutorType, string)>();
         var visited = new HashSet<Guid>();
         var byId = nodes.ToDictionary(n => n.dto.Id, n => n);
 

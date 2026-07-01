@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-061" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>DELETE §5 action-lookup precedence ladder + structural-fallback section from ai-architecture-playbook-runtime.md</title>
+    <status>not-started</status>
+    <wave>6</wave>
+    <estimated-effort>1 hour</estimated-effort>
+    <tags>docs, deletion, wave-6</tags>
+    <rigor-level>STANDARD</rigor-level>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>060</dependencies>
+    <fr-coverage>FR-28 (deletion of action-lookup precedence + structural-fallback)</fr-coverage>
+  </metadata>
+
+  <prompt>
+    Execute the DELETE disposition from task 060. Pure deletion — no replacement text in this file.
+    The new dispatch model is documented elsewhere (CLAUDE.md §10 BFF Hygiene, spec.md, and the
+    updated 4-Home decision tree from task 062). Per NFR-08, this is hard DELETE: no SUPERSEDED
+    markers, no redirect stub, no "(removed — see X)" leave-behind. Section headings + body go away.
+  </prompt>
+
+  <role>
+    Documentation editor executing a planned deletion. Surgical: delete only what task 060 flagged
+    for DELETE, leave neighboring sections untouched. Verify file still reads cleanly after.
+  </role>
+
+  <goal>
+    `docs/architecture/ai-architecture-playbook-runtime.md` updated such that:
+    1. §5 action-lookup precedence ladder section is REMOVED (heading + body)
+    2. The structural-fallback section is REMOVED (heading + body)
+    3. NO SUPERSEDED marker, NO redirect stub, NO "(removed)" leave-behind (NFR-08 binding)
+    4. Sibling sections remain intact; section numbering re-flows naturally OR is adjusted if the
+       doc uses explicit numbered headings (§4, §5, §6 → §4, §5 after delete — match doc convention)
+    5. The doc still reads coherently end-to-end (no dangling cross-references to deleted sections;
+       update or remove any cross-refs to §5 or structural-fallback elsewhere in the same doc)
+  </goal>
+
+  <inputs>
+    <file purpose="disposition">projects/spaarke-ai-platform-unification-r7/notes/drafts/wave6-doc-disposition.md</file>
+    <file purpose="target-doc">docs/architecture/ai-architecture-playbook-runtime.md</file>
+    <file purpose="spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-28">DELETE outdated R4 canonical-truth content; no SUPERSEDED markers; no redirect stubs.</constraint>
+    <constraint source="spec NFR-08">Documentation discipline — every overlapping doc gets explicit disposition. PR review gates drift. Post-R7 grep for "deprecated"/"superseded" in `docs/` returns zero new instances (verified in task 069).</constraint>
+    <constraint source="CLAUDE.md §11">Cost-of-doing-nothing if NOT deleted: the doc actively misleads future authors about how dispatch works — they will reach for the (now-removed) precedence ladder and structural-fallback ladder.</constraint>
+    <constraint source="surgical-deletion">DELETE only what task 060 flagged. Do NOT delete sibling sections or refactor neighboring prose. If a sibling section cross-references the deleted ones, UPDATE the cross-reference (don't leave a dangling link).</constraint>
+    <constraint source="scope-boundary">DO NOT modify ai-architecture-consumer-routing.md.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>documentation</topic>
+    <files>
+      <file>docs/architecture/ai-architecture-playbook-runtime.md</file>
+      <file>projects/spaarke-ai-platform-unification-r7/notes/drafts/wave6-doc-disposition.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      §5 action-lookup precedence ladder documented the legacy `node.actionid → Action.actiontypeid → lookup_row.executoractiontype`
+      chain. R7 collapses dispatch to single-hop `node.sprk_executortype` read (FR-07). The structural
+      fallback section documented the `IsDeployedStartNode` / `IsDeployedLoadKnowledgeNode` / etc.
+      helpers that R7 deletes (FR-08). Both sections are now actively misleading.
+    </background>
+    <dependencies>
+      <dependency task="060" status="not-started-but-required">Disposition list at notes/drafts/wave6-doc-disposition.md.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 062 UPDATES the 4-Home decision tree in actions-nodes-scopes.md (new model).</item>
+      <item>Task 069 post-audits grep for SUPERSEDED markers — must find zero new instances after this task.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: STANDARD · 📋 REASON: docs deletion task (no .cs / .ts / .tsx / .ps1 modification, tag docs/deletion) · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read project CLAUDE.md + spec.md FR-28 + NFR-08 + task 060 disposition list. Confirm the exact section bounds (start heading + end heading or next sibling heading).
+    </step>
+    <step order="2" name="Open target doc">
+      Read `docs/architecture/ai-architecture-playbook-runtime.md` in full. Locate §5 action-lookup precedence ladder + the structural-fallback section by exact heading.
+    </step>
+    <step order="3" name="Identify cross-references">
+      Grep within the same file for references to "§5", "precedence ladder", "structural fallback", "IsDeployedStartNode", "IsDeployedLoadKnowledgeNode", "IsDeployedReturnResponseNode", "ExtractActionTypeFromConfig". Note any sibling-section text that points at the deleted sections.
+    </step>
+    <step order="4" name="Delete §5 section">
+      Edit the file: remove the §5 heading + all body content up to the next sibling heading. Verify no orphaned trailing prose remains.
+    </step>
+    <step order="5" name="Delete structural-fallback section">
+      Edit the file: remove the structural-fallback heading + all body content. Verify clean cut.
+    </step>
+    <step order="6" name="Update cross-references">
+      For each sibling section identified in step 3 that pointed at the deleted sections, UPDATE the prose (don't leave dangling link). If the cross-reference is short and merely descriptive (e.g., "see §5 for the lookup chain"), delete the sentence. If the cross-reference is load-bearing (e.g., a sibling section's logic depends on §5), REWRITE the sentence to describe the new single-hop model + cite spec FR-07.
+    </step>
+    <step order="7" name="Re-flow section numbering if applicable">
+      If the doc uses explicit numbered headings (§1, §2, §3, §4, §5, §6, §7), check whether deletion of §5 leaves a gap or whether numbering re-flows. Match doc convention; the goal is "reads cleanly," not "preserve original numbers." If doc uses heading anchors (e.g., `#section-5-action-lookup`), and other docs link to those anchors, prefer keeping anchors clean (don't introduce dangling anchors).
+    </step>
+    <step order="8" name="Verify NFR-08 discipline">
+      Grep the modified doc for "SUPERSEDED", "deprecated", "removed", "see X for the old", "(removed)", "→". Confirm zero new instances. The deletion is HARD — no leave-behinds.
+    </step>
+    <step order="9" name="Verify doc still reads coherently">
+      Read the doc end-to-end. No dangling cross-references; no abrupt section transitions; no prose that assumes the deleted sections still exist.
+    </step>
+    <step order="10" name="Update current-task.md + TASK-INDEX">
+      Mark task 061 status complete; advance current-task.md to next pending Wave 6 task.
+    </step>
+    <step order="11" name="Commit">
+      Commit `docs/architecture/ai-architecture-playbook-runtime.md` with conventional message.
+      Example: docs(architecture/r7): delete §5 + structural-fallback (Wave 6 task 061, FR-28)
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (target doc + disposition list)</tool>
+    <tool>Grep (cross-reference search)</tool>
+    <tool>Edit (delete sections + update cross-refs)</tool>
+    <tool>Bash (git commit)</tool>
+  </tools>
+
+  <outputs>
+    <output type="modified-file">docs/architecture/ai-architecture-playbook-runtime.md (§5 + structural-fallback section removed)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md (advance to next Wave 6 task)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 061 ✅)</output>
+    <output type="commit">docs(architecture/r7): delete §5 + structural-fallback (Wave 6 task 061, FR-28)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>§5 action-lookup precedence ladder heading + body removed from doc</criterion>
+    <criterion>Structural-fallback section heading + body removed from doc</criterion>
+    <criterion>No SUPERSEDED marker added (NFR-08)</criterion>
+    <criterion>No redirect stub added (NFR-08)</criterion>
+    <criterion>No "(removed — see X)" leave-behind (NFR-08)</criterion>
+    <criterion>Cross-references to deleted sections updated or removed (no dangling links)</criterion>
+    <criterion>Doc reads coherently end-to-end after deletion</criterion>
+    <criterion>Commit pushed to work/spaarke-ai-platform-unification-r7</criterion>
+    <criterion>TASK-INDEX.md shows 061 ✅</criterion>
+  </acceptance-criteria>
+</task>

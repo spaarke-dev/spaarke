@@ -1,6 +1,7 @@
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Ai;
@@ -85,11 +86,11 @@ public class PlaybookExecutionTests
         var registry = new NodeExecutorRegistry(executors, Mock.Of<ILogger<NodeExecutorRegistry>>());
 
         // Act & Assert
-        registry.HasExecutor(ActionType.AiAnalysis).Should().BeTrue("AiAnalysis executor should be registered");
-        registry.HasExecutor(ActionType.CreateTask).Should().BeTrue("CreateTask executor should be registered");
-        registry.HasExecutor(ActionType.SendEmail).Should().BeTrue("SendEmail executor should be registered");
-        registry.HasExecutor(ActionType.UpdateRecord).Should().BeTrue("UpdateRecord executor should be registered");
-        registry.HasExecutor(ActionType.DeliverOutput).Should().BeTrue("DeliverOutput executor should be registered");
+        registry.HasExecutor(ExecutorType.AiAnalysis).Should().BeTrue("AiAnalysis executor should be registered");
+        registry.HasExecutor(ExecutorType.CreateTask).Should().BeTrue("CreateTask executor should be registered");
+        registry.HasExecutor(ExecutorType.SendEmail).Should().BeTrue("SendEmail executor should be registered");
+        registry.HasExecutor(ExecutorType.UpdateRecord).Should().BeTrue("UpdateRecord executor should be registered");
+        registry.HasExecutor(ExecutorType.DeliverOutput).Should().BeTrue("DeliverOutput executor should be registered");
 
         registry.ExecutorCount.Should().BeGreaterOrEqualTo(5, "All Phase 3 executors should be registered");
     }
@@ -110,7 +111,7 @@ public class PlaybookExecutionTests
         var registry = new NodeExecutorRegistry(executors, Mock.Of<ILogger<NodeExecutorRegistry>>());
 
         // Act
-        var retrieved = registry.GetExecutor(ActionType.CreateTask);
+        var retrieved = registry.GetExecutor(ExecutorType.CreateTask);
 
         // Assert
         retrieved.Should().NotBeNull();
@@ -162,14 +163,14 @@ public class PlaybookExecutionTests
         var registry = new NodeExecutorRegistry(executors, Mock.Of<ILogger<NodeExecutorRegistry>>());
 
         // Act
-        var supportedTypes = registry.GetSupportedActionTypes();
+        var supportedTypes = registry.GetSupportedExecutorTypes();
 
         // Assert
-        supportedTypes.Should().Contain(ActionType.AiAnalysis);
-        supportedTypes.Should().Contain(ActionType.CreateTask);
-        supportedTypes.Should().Contain(ActionType.SendEmail);
-        supportedTypes.Should().Contain(ActionType.UpdateRecord);
-        supportedTypes.Should().Contain(ActionType.DeliverOutput);
+        supportedTypes.Should().Contain(ExecutorType.AiAnalysis);
+        supportedTypes.Should().Contain(ExecutorType.CreateTask);
+        supportedTypes.Should().Contain(ExecutorType.SendEmail);
+        supportedTypes.Should().Contain(ExecutorType.UpdateRecord);
+        supportedTypes.Should().Contain(ExecutorType.DeliverOutput);
     }
 
     #endregion
@@ -263,7 +264,7 @@ public class PlaybookExecutionTests
             });
 
         mocks.ExecutorRegistry
-            .Setup(x => x.GetExecutor(ActionType.AiAnalysis))
+            .Setup(x => x.GetExecutor(ExecutorType.AiAnalysis))
             .Returns(mocks.Executor.Object);
 
         SetupScopeResolver(mocks, actionId);
@@ -331,7 +332,7 @@ public class PlaybookExecutionTests
             });
 
         mocks.ExecutorRegistry
-            .Setup(x => x.GetExecutor(ActionType.AiAnalysis))
+            .Setup(x => x.GetExecutor(ExecutorType.AiAnalysis))
             .Returns(mocks.Executor.Object);
 
         SetupScopeResolver(mocks, actionId);
@@ -398,7 +399,7 @@ public class PlaybookExecutionTests
             });
 
         mocks.ExecutorRegistry
-            .Setup(x => x.GetExecutor(ActionType.AiAnalysis))
+            .Setup(x => x.GetExecutor(ExecutorType.AiAnalysis))
             .Returns(mocks.Executor.Object);
 
         SetupScopeResolver(mocks, actionId);
@@ -448,7 +449,7 @@ public class PlaybookExecutionTests
             entityServiceMock.Object,
             loggerMock.Object);
 
-        var context = CreateNodeContext(ActionType.CreateTask, @"{""subject"":""Review document"",""description"":""Please review""}");
+        var context = CreateNodeContext(ExecutorType.CreateTask, @"{""subject"":""Review document"",""description"":""Please review""}");
 
         // Act
         var result = await executor.ExecuteAsync(context, CancellationToken.None);
@@ -471,7 +472,7 @@ public class PlaybookExecutionTests
             entityServiceMock.Object,
             loggerMock.Object);
 
-        var context = CreateNodeContext(ActionType.CreateTask, @"{""description"":""No subject""}");
+        var context = CreateNodeContext(ExecutorType.CreateTask, @"{""description"":""No subject""}");
 
         // Act
         var validation = executor.Validate(context);
@@ -500,7 +501,7 @@ public class PlaybookExecutionTests
             httpContextAccessorMock.Object,
             loggerMock.Object);
 
-        var context = CreateNodeContext(ActionType.SendEmail, @"{
+        var context = CreateNodeContext(ExecutorType.SendEmail, @"{
             ""to"":[""user@example.com""],
             ""subject"":""Test Email"",
             ""body"":""Email body content""
@@ -528,7 +529,7 @@ public class PlaybookExecutionTests
             httpContextAccessorMock.Object,
             loggerMock.Object);
 
-        var context = CreateNodeContext(ActionType.SendEmail, @"{""subject"":""No recipient"",""body"":""test""}");
+        var context = CreateNodeContext(ExecutorType.SendEmail, @"{""subject"":""No recipient"",""body"":""test""}");
 
         // Act
         var validation = executor.Validate(context);
@@ -557,7 +558,7 @@ public class PlaybookExecutionTests
         var recordId = Guid.NewGuid();
         // Use camelCase (JSON-style) property names - should work with PropertyNameCaseInsensitive = true
         var configJson = $@"{{""entityLogicalName"":""sprk_document"",""recordId"":""{recordId}"",""fields"":{{""sprk_status"":""Completed""}}}}";
-        var context = CreateNodeContext(ActionType.UpdateRecord, configJson);
+        var context = CreateNodeContext(ExecutorType.UpdateRecord, configJson);
 
         // Act
         var validation = executor.Validate(context);
@@ -579,7 +580,7 @@ public class PlaybookExecutionTests
             Mock.Of<IDataverseService>(),
             loggerMock.Object);
 
-        var context = CreateNodeContext(ActionType.UpdateRecord, @"{""recordId"":""abc"",""fields"":{}}");
+        var context = CreateNodeContext(ExecutorType.UpdateRecord, @"{""recordId"":""abc"",""fields"":{}}");
 
         // Act
         var validation = executor.Validate(context);
@@ -607,7 +608,7 @@ public class PlaybookExecutionTests
             templateEngineMock.Object,
             loggerMock.Object);
 
-        var context = CreateNodeContext(ActionType.DeliverOutput, @"{
+        var context = CreateNodeContext(ExecutorType.DeliverOutput, @"{
             ""deliveryType"":""json""
         }");
 
@@ -629,7 +630,7 @@ public class PlaybookExecutionTests
             templateEngineMock.Object,
             loggerMock.Object);
 
-        var context = CreateNodeContext(ActionType.DeliverOutput, @"{""template"":""Some content""}");
+        var context = CreateNodeContext(ExecutorType.DeliverOutput, @"{""template"":""Some content""}");
 
         // Act
         var validation = executor.Validate(context);
@@ -651,8 +652,12 @@ public class PlaybookExecutionTests
         var deliveryActionId = Guid.NewGuid();
 
         // Create realistic playbook: Analysis -> Delivery
+        // R7 task 024 (FR-07): SprkExecutortype carries dispatch (single-hop). Override
+        // the AIAnalysis default on the delivery node to route to DeliverOutput.
         var analysisNode = CreateNode("AI Analysis", analysisActionId, "analysis_result", 1);
-        var deliveryNode = CreateNode("Deliver Output", deliveryActionId, "delivery_result", 2, analysisNode.Id);
+        var deliveryNode = CreateNode("Deliver Output", deliveryActionId, "delivery_result", 2, analysisNode.Id)
+            with
+        { SprkExecutortype = ExecutorType.DeliverOutput };
 
         var nodes = new[] { analysisNode, deliveryNode };
         var (service, mocks) = CreateTestService();
@@ -677,10 +682,10 @@ public class PlaybookExecutionTests
                 NodeOutput.Ok(ctx.Node.Id, ctx.Node.OutputVariable, new { delivered = true }));
 
         mocks.ExecutorRegistry
-            .Setup(x => x.GetExecutor(ActionType.AiAnalysis))
+            .Setup(x => x.GetExecutor(ExecutorType.AiAnalysis))
             .Returns(analysisExecutor.Object);
         mocks.ExecutorRegistry
-            .Setup(x => x.GetExecutor(ActionType.DeliverOutput))
+            .Setup(x => x.GetExecutor(ExecutorType.DeliverOutput))
             .Returns(deliveryExecutor.Object);
 
         // Setup scope resolver for both actions
@@ -735,7 +740,7 @@ public class PlaybookExecutionTests
                 NodeOutput.Error(ctx.Node.Id, ctx.Node.OutputVariable, "Simulated failure"));
 
         mocks.ExecutorRegistry
-            .Setup(x => x.GetExecutor(ActionType.AiAnalysis))
+            .Setup(x => x.GetExecutor(ExecutorType.AiAnalysis))
             .Returns(mocks.Executor.Object);
 
         SetupScopeResolver(mocks, actionId);
@@ -790,7 +795,7 @@ public class PlaybookExecutionTests
             });
 
         mocks.ExecutorRegistry
-            .Setup(x => x.GetExecutor(ActionType.AiAnalysis))
+            .Setup(x => x.GetExecutor(ExecutorType.AiAnalysis))
             .Returns(mocks.Executor.Object);
 
         SetupScopeResolver(mocks, actionId);
@@ -828,7 +833,9 @@ public class PlaybookExecutionTests
             ExecutionOrder = order,
             DependsOn = dependsOn,
             IsActive = true,
-            NodeType = NodeType.AIAnalysis
+            NodeType = NodeType.AIAnalysis,
+            // R7 task 024 (FR-07) — single-hop dispatch reads SprkExecutortype directly.
+            SprkExecutortype = ExecutorType.AiAnalysis
         };
     }
 
@@ -841,7 +848,7 @@ public class PlaybookExecutionTests
         };
     }
 
-    private static NodeExecutionContext CreateNodeContext(ActionType actionType, string configJson)
+    private static NodeExecutionContext CreateNodeContext(ExecutorType actionType, string configJson)
     {
         var nodeId = Guid.NewGuid();
         var actionId = Guid.NewGuid();
@@ -866,7 +873,7 @@ public class PlaybookExecutionTests
                 Id = actionId,
                 Name = "Test Action"
             },
-            ActionType = actionType,
+            ExecutorType = actionType,
             Scopes = new ResolvedScopes([], [], []),
             TenantId = "test-tenant"
         };
@@ -906,6 +913,8 @@ public class PlaybookExecutionTests
             scopeResolverMock.Object,
             legacyOrchestratorMock.Object,
             insightsRouterMock.Object,
+            // R7 Wave 11 task 111: ITemplateEngine for orchestrator Layer 1 resolution.
+            new TemplateEngine(NullLogger<TemplateEngine>.Instance),
             loggerMock.Object);
 
         return (service, new TestMocks(
@@ -927,7 +936,7 @@ public class PlaybookExecutionTests
                 NodeOutput.Ok(ctx.Node.Id, ctx.Node.OutputVariable, new { }));
 
         mocks.ExecutorRegistry
-            .Setup(x => x.GetExecutor(ActionType.AiAnalysis))
+            .Setup(x => x.GetExecutor(ExecutorType.AiAnalysis))
             .Returns(mocks.Executor.Object);
 
         SetupScopeResolver(mocks, actionId);

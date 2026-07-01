@@ -67,6 +67,21 @@ env:
   DOTNET_NOLOGO: true
   DOTNET_SKIP_FIRST_TIME_EXPERIENCE: true
   DOTNET_CLI_TELEMETRY_OPTOUT: true
+  # Required by Sprk.Bff.Api startup validation in non-Development envs
+  # (added by spaarke-redis-cache-remediation-r2 FR-06). Integration tests run
+  # in ASPNETCORE_ENVIRONMENT=Testing → validation fires unconditionally.
+  # Fake instrumentation key satisfies the check; no telemetry is actually
+  # exported in CI runs. See ISS-NNN (to be filed): consider whether redis-r2
+  # validation should be relaxed for Testing env so this CI workaround can be
+  # removed.
+  APPLICATIONINSIGHTS_CONNECTION_STRING: InstrumentationKey=00000000-0000-0000-0000-000000000000
+  # Second redis-r2 startup validation: rejects Redis disabled unless explicit
+  # in-memory fallback opt-in. Tests run in Testing env without a real Redis;
+  # `AllowInMemoryFallback=true` is the documented Testing-env path per the
+  # validation's own error message ("Development or Testing only"). Same ISS as
+  # APPLICATIONINSIGHTS_CONNECTION_STRING above — both should be relaxed at
+  # the validation layer for Testing env so these CI workarounds can be removed.
+  Redis__AllowInMemoryFallback: "true"
 
 jobs:
   # --------------------------------------------------------------------------

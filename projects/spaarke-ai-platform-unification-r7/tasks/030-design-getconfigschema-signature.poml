@@ -1,0 +1,177 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-030" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Design GetConfigSchema() signature + schema DTO shape</title>
+    <status>not-started</status>
+    <wave>3</wave>
+    <estimated-effort>2-3 hours</estimated-effort>
+    <tags>bff-api, planning, wave-3</tags>
+    <rigor-level>STANDARD</rigor-level>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>Wave 1 complete (010)</dependencies>
+    <fr-coverage>FR-16 (design portion)</fr-coverage>
+  </metadata>
+
+  <prompt>
+    Wave 3 starts here. Before code lands on `INodeExecutor` or its 33 implementations, the schema DTO
+    shape must be pinned: what does `GetConfigSchema()` return? FR-16 calls for a TypeScript-like
+    descriptor (field types, required/optional, defaults, descriptions, optional enums). Produce a
+    design doc the next tasks (031 interface change, 032 per-executor impl, 033 endpoint) can implement
+    without ambiguity.
+  </prompt>
+
+  <role>
+    Senior .NET backend developer with API design sensibility. Goal: design a JSON-serializable schema
+    shape that is unambiguous, minimal, and forward-compatible (new field-type kinds added without breaking).
+  </role>
+
+  <goal>
+    A design document at `projects/spaarke-ai-platform-unification-r7/notes/spikes/getconfigschema-design.md`
+    that pins:
+    1. `INodeExecutor.GetConfigSchema()` method signature (return type, sync vs async, parameter list — likely none)
+    2. The schema DTO C# record(s) (e.g., `ExecutorConfigSchema`, `ConfigFieldDescriptor`) including all members and their JSON serialization names
+    3. The supported `type` values (string / number / boolean / object / array — plus optional `enum`) and what each implies for the canvas form renderer
+    4. Required vs optional fields semantics (boolean `required`, nullable `default`, nullable `enum`, nullable `description`)
+    5. How a placeholder/empty schema is represented (e.g., zero fields = `{}`)
+    6. How the endpoint payload aggregates schemas — keyed by `ExecutorType` integer (the post-rename enum), the executor's display name, or both
+    7. Forward-compat strategy when a new field type or attribute is needed without breaking existing PlaybookBuilder canvas consumers
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="design-doc">projects/spaarke-ai-platform-unification-r7/design.md</file>
+    <file purpose="plan">projects/spaarke-ai-platform-unification-r7/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    <file purpose="interface">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/INodeExecutor.cs</file>
+    <file purpose="pattern-reference">.claude/patterns/ai/node-executor-authoring.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-16">Method returns a TypeScript-like schema descriptor: field types, required/optional, defaults, descriptions. Endpoint serves the full registry to PlaybookBuilder canvas.</constraint>
+    <constraint source="ADR-010">DI Minimalism — `GetConfigSchema()` MUST be a method on `INodeExecutor`, NOT a new abstraction layer (no `IConfigSchemaProvider` or factory wrappers). Spec explicitly notes "static attribute alternative" was considered and rejected during this design step.</constraint>
+    <constraint source="ADR-013">BFF AI Architecture — the schema endpoint is a thin facade over the executor registry; it does NOT introduce new dispatch surface area.</constraint>
+    <constraint source="ADR-038">Testing Strategy — design must produce a shape that can be tested via plain JSON serialization assertions (no need for HttpMessageHandler mocks or DI-graph plumbing).</constraint>
+    <constraint source="CLAUDE.md §11">Component justification triple applies to the schema DTO design:
+      1. Existing: no existing `INodeExecutor.GetConfigSchema()` or `ExecutorConfigSchema` record exists.
+      2. Extension: this is a method ADDED to an existing interface, not a new interface — minimum new surface area.
+      3. Cost-of-doing-nothing: FR-23 (typed config forms in PlaybookBuilder canvas) cannot ship; canvas continues to require makers to hand-edit `sprk_configjson` for every node; FR-16 acceptance criterion (5 typed forms minimum) blocked.
+    </constraint>
+    <constraint source="bff-extensions.md">No publish-size or CVE impact in this task (planning only, no code change). Verified at task 036.</constraint>
+    <constraint source="DO NOT CHANGE">Working endpoint name `GET /api/ai/playbook-builder/executor-config-schemas` is the spec assumption. If the design surfaces a stronger naming convention from existing PlaybookBuilder endpoints, RAISE as Open Question in the design doc — do NOT change the URL substantively without sign-off.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai/node-executor-authoring</topic>
+    <files>
+      <file>.claude/patterns/ai/node-executor-authoring.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-010-di-minimalism.md</file>
+      <file>docs/adr/ADR-013-bff-ai-architecture.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="INodeExecutor interface" location="src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/INodeExecutor.cs">
+        Current shape: `SupportedActionTypes` property + `ExecuteAsync` + `Validate`. `GetConfigSchema()` joins as a third synchronous accessor.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      FR-16 closes Invariant 5 (typed config) for the Playbook Builder canvas. Today every node's
+      configuration lives as free-form `sprk_configjson` and makers must know what shape each executor
+      expects. The schema endpoint lets the canvas render typed forms per executor — string fields,
+      dropdowns, booleans, sub-JSON editors as needed — driven by data, not hand-coded UI per executor.
+      Wave 8 task 083 consumes this endpoint to drive form rendering.
+    </background>
+    <dependencies>
+      <dependency task="Wave 1 (010)" status="not-started-but-required">Wave 1 completion gates Wave 3 start per WBS — but this design task only reads code; no dependency on AiCompletion existing.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 031 adds the method to the interface.</item>
+      <item>Task 032 implements it on all 33 executors (5 rich schemas, 28 placeholders).</item>
+      <item>Task 033 builds the BFF endpoint serving the registry.</item>
+      <item>Task 083 (Wave 8) consumes the endpoint to drive typed-form rendering.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: STANDARD · 📋 REASON: planning/design task, no source modification, design artifact only · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read project CLAUDE.md + spec.md FR-16 + plan.md Wave 3 + `.claude/constraints/bff-extensions.md`.
+    </step>
+    <step order="2" name="Read INodeExecutor interface">
+      Open `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/INodeExecutor.cs`. Note current member signatures and XML doc style.
+    </step>
+    <step order="3" name="Sketch candidate DTO shape">
+      Draft a C# record like:
+      <![CDATA[
+      public sealed record ExecutorConfigSchema(
+          IReadOnlyDictionary<string, ConfigFieldDescriptor> Fields);
+
+      public sealed record ConfigFieldDescriptor(
+          string Type,           // "string" | "number" | "boolean" | "object" | "array"
+          bool Required,
+          object? Default,
+          string Description,
+          IReadOnlyList<string>? Enum);
+      ]]>
+      Annotate with `[JsonPropertyName]` decisions and serialization examples.
+    </step>
+    <step order="4" name="Define type taxonomy">
+      Enumerate the allowed `Type` strings. Decide whether `array` is in v1 or deferred. Decide how nested objects are described (recursive `Fields`? string-typed JSON sub-editor?).
+    </step>
+    <step order="5" name="Define placeholder/empty schema">
+      A placeholder schema for the 28 non-priority executors should serialize as `{ "fields": {} }`. Document this is the literal placeholder.
+    </step>
+    <step order="6" name="Define endpoint payload aggregation">
+      Decide aggregation shape — likely `Dictionary&lt;int, ExecutorConfigSchema&gt;` keyed by ExecutorType integer value (post-rename per Wave 2). Include the display name + tier prefix per FR-22 if cheap.
+    </step>
+    <step order="7" name="Document forward-compat strategy">
+      How does the canvas handle an unknown `Type` value? Falls back to read-only JSON view + warning per FR-27 (`unknown executor type` pattern). Document this is the same pattern.
+    </step>
+    <step order="8" name="Raise endpoint URL naming question">
+      Does `GET /api/ai/playbook-builder/executor-config-schemas` align with existing PlaybookBuilder endpoint convention? If not, list a recommended alternative + raise as Open Question in design doc. Do NOT decide unilaterally.
+    </step>
+    <step order="9" name="Write design document">
+      Create `notes/spikes/getconfigschema-design.md` answering all 7 goal items + the endpoint URL question. Include 1-2 worked examples (one for AiAnalysis rich schema, one for placeholder).
+    </step>
+    <step order="10" name="Update current-task.md + TASK-INDEX">
+      Mark task 030 status complete; advance current-task.md to task 031.
+    </step>
+    <step order="11" name="Commit">
+      Commit `notes/spikes/getconfigschema-design.md` with conventional message. No PR yet — Wave 3 ships as a single PR at task 036.
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (interface + patterns + ADRs)</tool>
+    <tool>Grep (search for existing PlaybookBuilder endpoints for URL convention reference)</tool>
+    <tool>Write (design document)</tool>
+    <tool>Bash (git commit)</tool>
+  </tools>
+
+  <outputs>
+    <output type="document">projects/spaarke-ai-platform-unification-r7/notes/spikes/getconfigschema-design.md</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md (advance to task 031)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 030 ✅)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Design document exists at notes/spikes/getconfigschema-design.md</criterion>
+    <criterion>Document defines GetConfigSchema() method signature (return type, sync/async, parameters)</criterion>
+    <criterion>Document defines ExecutorConfigSchema + ConfigFieldDescriptor records with JSON serialization names</criterion>
+    <criterion>Document enumerates allowed Type values (string, number, boolean, object, array if in v1)</criterion>
+    <criterion>Document specifies placeholder/empty schema shape</criterion>
+    <criterion>Document specifies endpoint payload aggregation (keyed by ExecutorType integer)</criterion>
+    <criterion>Document specifies forward-compat behavior for unknown types (warning state per FR-27 pattern)</criterion>
+    <criterion>Document either confirms working endpoint URL or raises naming as Open Question (does NOT decide unilaterally)</criterion>
+    <criterion>Document includes 1-2 worked examples (rich + placeholder)</criterion>
+    <criterion>current-task.md updated to point at task 031 as next</criterion>
+    <criterion>TASK-INDEX.md shows 030 ✅, 031 🔲 ready</criterion>
+  </acceptance-criteria>
+</task>

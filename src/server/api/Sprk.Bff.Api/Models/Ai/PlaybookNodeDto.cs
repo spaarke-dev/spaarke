@@ -50,6 +50,16 @@ public record PlaybookNodeDto
     public NodeType NodeType { get; init; }
 
     /// <summary>
+    /// Per-node executor dispatch type (R7 Wave 2, FR-07).
+    /// Maps to sprk_playbooknode.sprk_executortype Choice column.
+    /// When non-null, the orchestrator dispatches the node via this executor in a SINGLE HOP
+    /// (no fallback to Action.executortype). FR-07 makes this the canonical dispatch source.
+    /// FR-19 requires all production nodes to be backfilled; null indicates an unmigrated
+    /// row and the orchestrator MUST throw rather than silently fall back.
+    /// </summary>
+    public ExecutorType? SprkExecutortype { get; init; }
+
+    /// <summary>
     /// Action ID to execute (only required when NodeType == AI).
     /// </summary>
     public Guid ActionId { get; init; }

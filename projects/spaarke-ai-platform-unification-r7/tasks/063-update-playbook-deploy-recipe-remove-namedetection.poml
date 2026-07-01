@@ -1,0 +1,158 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-063" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>UPDATE ai-guide-playbook-deploy-recipe.md — remove Control-flow name-detection steps</title>
+    <status>not-started</status>
+    <wave>6</wave>
+    <estimated-effort>1 hour</estimated-effort>
+    <tags>docs, wave-6</tags>
+    <rigor-level>STANDARD</rigor-level>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>055</dependencies>
+    <fr-coverage>FR-28 (deploy-recipe name-detection removal)</fr-coverage>
+  </metadata>
+
+  <prompt>
+    UPDATE `docs/guides/ai-guide-playbook-deploy-recipe.md` to remove the Control-flow name-detection
+    workaround steps. Wave 5 task 055 updated `Deploy-Playbook.ps1` to write `node.sprk_executortype`
+    explicitly — no more name-pattern matching, no more `__actionType` injection in configJson. The
+    recipe doc must now show the clean "deploy with executor type set explicitly" flow. Per NFR-08,
+    UPDATE in place: no SUPERSEDED markers, no "(removed)" leave-behinds.
+  </prompt>
+
+  <role>
+    Documentation editor + deployment-recipe author. Mirror the existing guide style (step-by-step
+    numbered, code-block-heavy, troubleshooting subsections). REMOVE workaround steps; UPDATE the
+    main flow to reflect the new script behavior.
+  </role>
+
+  <goal>
+    `docs/guides/ai-guide-playbook-deploy-recipe.md` updated such that:
+    1. Any subsection documenting Control-flow name-detection (name-pattern matching for Start /
+       LoadKnowledge / ReturnResponse / etc.) is REMOVED
+    2. Any subsection documenting `__actionType` injection in configJson is REMOVED
+    3. The main deploy flow describes the new explicit-executor-type step:
+       "For each node in the playbook JSON, set `node.sprk_executortype` to the corresponding
+       integer value from the `sprk_playbookexecutortype` Choice set (33 values)."
+    4. Updated example shows a playbook JSON snippet with explicit `sprk_executortype` on each node
+    5. NO SUPERSEDED markers (NFR-08)
+    6. Cross-reference Wave 5 task 055 changes to `Deploy-Playbook.ps1` (script writes executor type
+       explicitly; lint rejects unknown values per FR-20)
+    7. Troubleshooting subsection updated: removed mentions of "name didn't match expected pattern,
+       so node didn't dispatch correctly" (no longer possible)
+  </goal>
+
+  <inputs>
+    <file purpose="disposition">projects/spaarke-ai-platform-unification-r7/notes/drafts/wave6-doc-disposition.md</file>
+    <file purpose="target-doc">docs/guides/ai-guide-playbook-deploy-recipe.md</file>
+    <file purpose="spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="updated-script">scripts/dataverse/Deploy-Playbook.ps1</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-20">Deploy-Playbook.ps1 writes node.sprk_executortype explicitly; no name-detection; no `__actionType` injection. This task documents the new behavior.</constraint>
+    <constraint source="spec FR-28">UPDATE in place. No SUPERSEDED markers, no "(removed — see X)" leave-behinds.</constraint>
+    <constraint source="spec NFR-08">Documentation discipline.</constraint>
+    <constraint source="CLAUDE.md §11">Cost-of-doing-nothing: maker following the old recipe would be confused why the workaround steps don't apply (and might try to manually inject `__actionType` against a script that now lints-reject it).</constraint>
+    <constraint source="dependency">Task 055 must have shipped — this doc describes the script's new behavior. If 055 hasn't shipped, this task references the spec FR-20 intent; document this caveat at the bottom of the section.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>documentation</topic>
+    <files>
+      <file>docs/guides/ai-guide-playbook-deploy-recipe.md</file>
+      <file>scripts/dataverse/Deploy-Playbook.ps1</file>
+      <file>projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Pre-R7, Deploy-Playbook.ps1 had two workarounds because the schema didn't carry dispatch on
+      the node itself: (1) name-pattern matching to infer Start / LoadKnowledge / ReturnResponse
+      semantics from node names; (2) `__actionType` injection into configJson to thread the dispatch
+      decision through the deploy pipeline. The recipe doc documented both workarounds as required
+      steps. Wave 5 task 055 ships the new script that writes `sprk_executortype` explicitly, so
+      both workarounds are obsolete. This task removes them from the recipe.
+    </background>
+    <dependencies>
+      <dependency task="055" status="not-started-but-required">Deploy-Playbook.ps1 updated to write executor type explicitly. This doc describes the new behavior.</dependency>
+      <dependency task="060" status="not-started-but-required">Disposition list confirms this section is UPDATE.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 020 (Wave 5) wave-sanity redeploys 3 representative playbooks — confirms the new script works.</item>
+      <item>Tasks 065 + 066 update author guides to teach the new model.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: STANDARD · 📋 REASON: docs UPDATE task (no .cs / .ts / .tsx / .ps1 modification, tag docs only) · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read project CLAUDE.md + spec.md FR-20 + FR-28 + NFR-08 + task 060 disposition list + (if shipped) the updated Deploy-Playbook.ps1 from task 055.
+    </step>
+    <step order="2" name="Open target doc">
+      Read `docs/guides/ai-guide-playbook-deploy-recipe.md` in full. Identify subsections documenting:
+      - Control-flow name-detection (name-pattern matching for Start / LoadKnowledge / ReturnResponse / etc.)
+      - `__actionType` injection in configJson
+      - Any troubleshooting bullets about "node not dispatching due to name pattern"
+    </step>
+    <step order="3" name="Identify cross-references">
+      Grep within the same file for references to "name-detection", "__actionType", "name pattern", "IsDeployedStartNode", "structural fallback".
+    </step>
+    <step order="4" name="Delete workaround subsections">
+      Edit the doc: remove the name-detection subsection + `__actionType` injection subsection + obsolete troubleshooting bullets. Surgical cuts — preserve sibling content.
+    </step>
+    <step order="5" name="Update the main deploy flow">
+      Find the main step-by-step section. Update the "deploy a playbook" step to include: "For each node, set `node.sprk_executortype` to the integer Choice value matching the executor (e.g., AiCompletion=1, Condition=30, ReturnResponse=42)." Include a JSON snippet showing 2-3 nodes with explicit `sprk_executortype` set.
+    </step>
+    <step order="6" name="Cross-reference Wave 5 task 055 script behavior">
+      Add a sentence pointing at `Deploy-Playbook.ps1` (script writes executor type explicitly; lint rejects unknown values per spec FR-20).
+    </step>
+    <step order="7" name="Update troubleshooting subsection">
+      Remove obsolete bullets about name-pattern matching. Add (if needed): "If lint rejects deploy with 'unknown executor type', confirm the value is in the `sprk_playbookexecutortype` Choice set (33 values)."
+    </step>
+    <step order="8" name="Verify NFR-08 discipline">
+      Grep the modified doc for "SUPERSEDED", "deprecated", "old workaround", "(removed)". Confirm zero new instances.
+    </step>
+    <step order="9" name="Verify doc still reads coherently">
+      Read the recipe end-to-end. The main flow now describes the new behavior; no dangling references to workarounds; troubleshooting matches the new script.
+    </step>
+    <step order="10" name="Update current-task.md + TASK-INDEX">
+      Mark task 063 status complete; advance current-task.md to next pending Wave 6 task.
+    </step>
+    <step order="11" name="Commit">
+      Commit `docs/guides/ai-guide-playbook-deploy-recipe.md` with conventional message.
+      Example: docs(guides/r7): remove Control-flow name-detection from deploy recipe (Wave 6 task 063, FR-28)
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (target doc + spec + deploy script)</tool>
+    <tool>Grep (find workaround references)</tool>
+    <tool>Edit (delete workaround subsections + update main flow + troubleshooting)</tool>
+    <tool>Bash (git commit)</tool>
+  </tools>
+
+  <outputs>
+    <output type="modified-file">docs/guides/ai-guide-playbook-deploy-recipe.md (name-detection + __actionType subsections removed; main flow updated)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md (advance to next Wave 6 task)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 063 ✅)</output>
+    <output type="commit">docs(guides/r7): remove Control-flow name-detection from deploy recipe (Wave 6 task 063, FR-28)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Name-detection subsection removed from ai-guide-playbook-deploy-recipe.md</criterion>
+    <criterion>__actionType injection subsection removed</criterion>
+    <criterion>Main deploy flow updated to describe explicit sprk_executortype write</criterion>
+    <criterion>JSON snippet showing explicit executor type values per node added</criterion>
+    <criterion>Cross-reference to Wave 5 task 055 Deploy-Playbook.ps1 behavior</criterion>
+    <criterion>Obsolete troubleshooting bullets about name-pattern dispatch removed</criterion>
+    <criterion>No SUPERSEDED markers (NFR-08)</criterion>
+    <criterion>Doc reads coherently end-to-end</criterion>
+    <criterion>Commit pushed to work/spaarke-ai-platform-unification-r7</criterion>
+    <criterion>TASK-INDEX.md shows 063 ✅</criterion>
+  </acceptance-criteria>
+</task>

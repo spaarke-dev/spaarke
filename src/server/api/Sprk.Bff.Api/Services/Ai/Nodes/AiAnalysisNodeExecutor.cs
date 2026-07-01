@@ -52,10 +52,62 @@ public sealed class AiAnalysisNodeExecutor : INodeExecutor
     }
 
     /// <inheritdoc />
-    public IReadOnlyList<ActionType> SupportedActionTypes { get; } = new[]
+    public IReadOnlyList<ExecutorType> SupportedExecutorTypes { get; } = new[]
     {
-        ActionType.AiAnalysis
+        ExecutorType.AiAnalysis
     };
+
+    // R7 task 032 / FR-16 — typed config schema for Playbook Builder canvas (Wave 8 FR-23).
+    // Derived from this executor's ConfigJson consumption: ExtractTemplateParameters,
+    // PromptSchemaOverrideMerger.ExtractOverride, ParseKnowledgeRetrievalConfig,
+    // IsDocumentContextEnabled (legacy), ExtractEntityScope (parentEntityType + parentEntityId).
+    // See projects/spaarke-ai-platform-unification-r7/notes/spikes/executor-config-fields-inventory.md §1.
+    private static readonly ExecutorConfigSchema ConfigSchemaInstance = new(
+        ExecutorTypeName: nameof(ExecutorType.AiAnalysis),
+        ExecutorTypeValue: (int)ExecutorType.AiAnalysis,
+        Description: "Document-grounded structured analysis with tool dispatch (FR-13). Requires Action FK + Tool + Document with extracted text.",
+        Fields: new ConfigSchemaField[]
+        {
+            new(
+                Name: "templateParameters",
+                Type: SchemaFieldType.Object,
+                Required: false,
+                Description: "Key-to-value map substituted into {{var}} bindings in the JPS prompt instruction section.",
+                Default: null),
+            new(
+                Name: "promptSchemaOverride",
+                Type: SchemaFieldType.Object,
+                Required: false,
+                Description: "Per-node override merged into the Action's base JPS prompt schema (FR-25). Same shape as the Action's SystemPrompt JPS object.",
+                Default: null),
+            new(
+                Name: "knowledgeRetrieval",
+                Type: SchemaFieldType.Object,
+                Required: false,
+                Description: "Knowledge retrieval config: { mode: 'auto'|'always'|'never', topK: number, includeDocumentContext: bool, includeEntityContext: bool }. Controls L1/L2/L3 RAG retrieval behavior.",
+                Default: null),
+            new(
+                Name: "includeDocumentContext",
+                Type: SchemaFieldType.Boolean,
+                Required: false,
+                Description: "Legacy top-level flag — superseded by knowledgeRetrieval.includeDocumentContext. Both supported for backward compatibility.",
+                Default: false),
+            new(
+                Name: "parentEntityType",
+                Type: SchemaFieldType.String,
+                Required: false,
+                Description: "Parent entity type for L2/L3 retrieval scoping (e.g., 'Matter', 'Project', 'Invoice'). Used to scope similar-document and entity-context searches.",
+                Default: null),
+            new(
+                Name: "parentEntityId",
+                Type: SchemaFieldType.String,
+                Required: false,
+                Description: "Parent entity ID (GUID) for L2/L3 retrieval scoping. Must be paired with parentEntityType to take effect.",
+                Default: null)
+        });
+
+    /// <inheritdoc />
+    public ExecutorConfigSchema GetConfigSchema() => ConfigSchemaInstance;
 
     /// <inheritdoc />
     public NodeValidationResult Validate(NodeExecutionContext context)

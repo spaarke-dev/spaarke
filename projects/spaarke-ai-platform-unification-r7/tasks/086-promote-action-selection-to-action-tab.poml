@@ -1,0 +1,174 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-086" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Promote Action selection to new Action tab (FR-24)</title>
+    <status>completed</status>
+    <wave>8</wave>
+    <estimated-effort>3-4 hours</estimated-effort>
+    <tags>code-page, ui, wave-8</tags>
+    <rigor-level>FULL</rigor-level>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>082</dependencies>
+    <fr-coverage>FR-24</fr-coverage>
+  </metadata>
+
+  <prompt>
+    Promote Action selection from the Overview tab to a dedicated Action tab in the NodePropertiesDialog.
+    The new Action tab includes BOTH the Action lookup dropdown AND the Executor Type Choice selector,
+    side-by-side so the maker sees the relationship between Action (prompt template) and Executor Type
+    (dispatch). New tab order: Overview, Action, Prompt, Skills, Knowledge, Tools, Configuration.
+    The Overview tab no longer shows Action.
+  </prompt>
+
+  <role>
+    Senior React + Fluent UI v9 developer. Familiar with the existing NodePropertiesDialog tab structure
+    (TabList + Tab components from `@fluentui/react-components`), ActionSelector sub-component, and the
+    new ExecutorType selector pattern (to be added side-by-side).
+  </role>
+
+  <goal>
+    Updated `NodePropertiesDialog.tsx`:
+    1. New "Action" tab in the TabList, between Overview and Prompt
+    2. Action tab content: ActionSelector (existing) + new ExecutorTypeSelector (NEW component, side-by-side layout)
+    3. Overview tab NO LONGER renders ActionSelector
+    4. Tab order: Overview, Action, Prompt, Skills, Knowledge, Tools, Configuration
+    5. ExecutorTypeSelector is a Fluent v9 Dropdown bound to `node.data.executorType` with the 33-value Choice set
+    6. Layout side-by-side: ActionSelector on left half, ExecutorTypeSelector on right half (CSS Grid or Flex)
+    7. All colors use Fluent v9 semantic tokens (ADR-021)
+    8. Build passes (`npm run build:prod`)
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    <file purpose="dialog">src/client/code-pages/PlaybookBuilder/src/components/properties/NodePropertiesDialog.tsx</file>
+    <file purpose="action-selector">src/client/code-pages/PlaybookBuilder/src/components/properties/ActionSelector.tsx</file>
+    <file purpose="executor-metadata">src/client/code-pages/PlaybookBuilder/src/config/executorMetadata.ts</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-006">Fluent UI v9 ONLY.</constraint>
+    <constraint source="ADR-021">Dark mode binding. Semantic tokens only.</constraint>
+    <constraint source="spec FR-24">Action tab includes Action lookup + Executor Type Choice side-by-side. Overview tab no longer shows Action. Tab order: Overview, Action, Prompt, Skills, Knowledge, Tools, Configuration.</constraint>
+    <constraint source="CLAUDE.md §11">Component Justification triple for new `ExecutorTypeSelector.tsx`:
+      1. Existing: `NodePalette.tsx` (task 082) sets `executorType` at node creation. No selector exists for editing existing nodes' `executorType`.
+      2. Extension: cannot reuse NodePalette tile UI (it's drag-drop). New Dropdown selector is required for the properties dialog.
+      3. Cost-of-doing-nothing: maker cannot change a node's executor type post-creation. FR-24 explicitly requires the side-by-side relationship view.
+    </constraint>
+    <constraint source="CLAUDE.md §12">Build command: `npm run build:prod`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>code-page/playbookbuilder</topic>
+    <files>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>docs/adr/ADR-006-pcf-fluent-ui-v9.md</file>
+      <file>docs/adr/ADR-021-dark-mode-semantic-tokens.md</file>
+    </files>
+    <patterns>
+      <pattern name="existing tab structure" location="src/client/code-pages/PlaybookBuilder/src/components/properties/NodePropertiesDialog.tsx">
+        Fluent v9 TabList + Tab pattern. Each tab has conditional render based on activeTab state.
+      </pattern>
+      <pattern name="ActionSelector" location="src/client/code-pages/PlaybookBuilder/src/components/properties/ActionSelector.tsx">
+        Existing Dropdown for selecting `sprk_analysisaction` lookup. Reused as-is in the new Action tab.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Today, Action selection is on the Overview tab — co-mingled with general node metadata
+      (label, output variable). Spec FR-24 reorganizes UI to make Action and Executor Type
+      first-class peers on their own tab. This signals to makers that Action = prompt template
+      and Executor Type = dispatch — and they relate but are NOT the same thing (R7's core unification).
+    </background>
+    <dependencies>
+      <dependency task="082" status="prerequisite">Categorized panel + executorMetadata.ts exists (provides metadata for the new selector).</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 087 confirms Prompt tab + per-node override wiring still works post tab reorg.</item>
+      <item>Task 089c verifies dark mode compliance of new Action tab.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: FULL · 📋 REASON: code-page UI restructure, ADR-006+021 applicable, quality gates Step 9.5 required · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read project CLAUDE.md + spec.md FR-24 + NodePropertiesDialog.tsx + ActionSelector.tsx.
+    </step>
+    <step order="2" name="Create ExecutorTypeSelector.tsx">
+      New file `src/client/code-pages/PlaybookBuilder/src/components/properties/ExecutorTypeSelector.tsx`:
+      - Props: `value: number`, `onChange: (newValue: number) => void`, `disabled?: boolean`
+      - Renders Fluent v9 `Dropdown` with 33 options sourced from `executorMetadata.ts` (task 082)
+      - Options grouped by tier (use `OptionGroup` if Fluent v9 supports, else flat with tier-prefix labels)
+      - Default state: highlights current `value`
+      - All colors via semantic tokens
+    </step>
+    <step order="3" name="Update NodePropertiesDialog.tsx TabList">
+      Add new "Action" tab between Overview and Prompt:
+      - Update TabList: Overview, Action, Prompt, Skills, Knowledge, Tools, Configuration
+      - Conditional render block for activeTab === 'action': renders ActionSelector + ExecutorTypeSelector side-by-side
+      - Use CSS Grid (2 columns) or Flex to layout side-by-side
+    </step>
+    <step order="4" name="Remove ActionSelector from Overview tab">
+      Find the existing `<ActionSelector .../>` render in the Overview tab section; delete it.
+      Overview tab now shows only: Name, Output Variable, AI Model selector.
+    </step>
+    <step order="5" name="Wire ExecutorTypeSelector onChange">
+      When `executorType` changes:
+      - Update canvas store: `node.data.executorType = newValue`
+      - Round-trip to Dataverse `sprk_executortype` via `playbookNodeSync.ts` (task 088 fully wires; this task uses existing `data.executorType` channel set up in task 082)
+    </step>
+    <step order="6" name="Build">
+      `cd src/client/code-pages/PlaybookBuilder && npm run build:prod`.
+      0 errors, 0 new warnings.
+    </step>
+    <step order="7" name="Spot-check in browser">
+      Open canvas, drop a node, open properties → verify new tab order, new Action tab content, Overview tab no longer has Action.
+    </step>
+    <step order="9.5" name="Quality gates (FULL rigor)">
+      Run `/code-review` on the 2 modified/new files.
+      Run `/adr-check` against ADR-006 + ADR-021.
+      Grep for hardcoded colors. Fix findings.
+    </step>
+    <step order="10" name="Update current-task.md + TASK-INDEX">
+      Mark task 086 status complete; advance to next Wave 8 task.
+    </step>
+    <step order="11" name="Commit">
+      Commit message:
+      `feat(playbookbuilder/r7): promote Action + ExecutorType to dedicated Action tab (Wave 8 task 086, FR-24)`. No PR yet.
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (source files + skills)</tool>
+    <tool>Grep (hardcoded colors)</tool>
+    <tool>Write (ExecutorTypeSelector.tsx)</tool>
+    <tool>Edit (NodePropertiesDialog.tsx)</tool>
+    <tool>Bash (npm run build:prod, git commit)</tool>
+    <tool>Skill (code-review at Step 9.5)</tool>
+    <tool>Skill (adr-check at Step 9.5)</tool>
+  </tools>
+
+  <outputs>
+    <output type="new-file">src/client/code-pages/PlaybookBuilder/src/components/properties/ExecutorTypeSelector.tsx</output>
+    <output type="modified-file">src/client/code-pages/PlaybookBuilder/src/components/properties/NodePropertiesDialog.tsx</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 086 ✅)</output>
+    <output type="commit">feat(playbookbuilder/r7): promote Action + ExecutorType to dedicated Action tab (Wave 8 task 086, FR-24)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>New "Action" tab exists between Overview and Prompt</criterion>
+    <criterion>Action tab renders ActionSelector + ExecutorTypeSelector side-by-side</criterion>
+    <criterion>Overview tab no longer renders ActionSelector</criterion>
+    <criterion>Tab order: Overview, Action, Prompt, Skills, Knowledge, Tools, Configuration</criterion>
+    <criterion>ExecutorTypeSelector shows 33 values grouped by tier</criterion>
+    <criterion>All colors via Fluent v9 semantic tokens (ADR-021); no hardcoded hex</criterion>
+    <criterion>npm run build:prod passes: 0 errors, 0 new warnings</criterion>
+    <criterion>code-review + adr-check pass at Step 9.5</criterion>
+    <criterion>TASK-INDEX.md shows 086 ✅</criterion>
+  </acceptance-criteria>
+</task>

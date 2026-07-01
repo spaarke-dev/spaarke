@@ -1,0 +1,109 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="142" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>RESTORE Create Project wizard — re-link orphan sprk_playbooknode.sprk_actionid FK per audit 123</title>
+    <phase>Wave 12 — MVP Completion</phase>
+    <wave>12</wave>
+    <sub-wave>12.3</sub-wave>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Dataverse data fix only; no code change; surgical PATCH</rigor-reason>
+    <parallel-group>W12-3</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <tags>wizard, project, dataverse, data-fix, wave12</tags>
+    <estimated-effort>1-2 hours</estimated-effort>
+    <status>completed</status>
+    <completed-at>2026-06-30</completed-at>
+  </metadata>
+
+  <prompt>
+Audit 123 identified the exact root cause: Project Wizard's playbook `fc343e9c-3460-f111-ab0b-7c1e521b425f` ("Wizard New Project Create") has 1 node whose `sprk_actionid` is NULL. ACT-024 (Action with the project-specific prompt + schema) EXISTS but is orphaned. Re-link the FK: `sprk_playbooknode(dacac491-...).sprk_actionid = 1e838114-...`. Single Dataverse PATCH.
+  </prompt>
+
+  <role>
+You are a Dataverse data operator. Apply the exact fix identified in audit 123. Surgical PATCH, smoke verify.
+  </role>
+
+  <goal>
+Create Project wizard works end-to-end. User invokes wizard → LLM extracts 8 project fields per ACT-024 schema → prefill populates the Project create form.
+  </goal>
+
+  <inputs>
+    - Audit notes: projects/spaarke-ai-platform-unification-r7/notes/audits/wave12-123-three-prefill-wizards.md (PRIMARY)
+    - Playbook ID: `fc343e9c-3460-f111-ab0b-7c1e521b425f` ("Wizard New Project Create", 1 node)
+    - Broken node: `sprk_playbooknode(dacac491-...).sprk_actionid = NULL`
+    - Action ID to re-link: `1e838114-...` (ACT-024 "Project Profiler")
+  </inputs>
+
+  <constraints>
+    - Per CLAUDE.md §11: Dataverse data fix only; no code change; no new abstractions
+    - Single PATCH; no schema changes
+    - Verify before + after with mcp__dataverse__read_query
+  </constraints>
+
+  <knowledge>
+    <files>
+      - projects/spaarke-ai-platform-unification-r7/notes/audits/wave12-123-three-prefill-wizards.md (PRIMARY)
+      - projects/spaarke-ai-platform-unification-r7/CLAUDE.md
+    </files>
+  </knowledge>
+
+  <context>
+    <relevant-files>
+      - src/client/shared/Spaarke.UI.Components/src/components/CreateProjectWizard/CreateProjectStep.tsx (UI; no change needed)
+      - src/server/api/Sprk.Bff.Api/Api/Workspace/WorkspaceProjectEndpoints.cs (BFF; no change needed)
+      - src/server/api/Sprk.Bff.Api/Services/Workspace/ProjectPreFillService.cs (BFF; no change needed)
+    </relevant-files>
+  </context>
+
+  <steps>
+1. **Verify current state** (10 min):
+   - `mcp__dataverse__read_query` on sprk_playbooknode where id = `dacac491-...` — confirm `_sprk_actionid_value` is NULL
+2. **Verify target Action exists** (5 min):
+   - `mcp__dataverse__read_query` on sprk_analysisaction where id = `1e838114-...` — confirm exists + has prompt/schema
+3. **Apply FK re-link** (5 min):
+   - `mcp__dataverse__update_record` with `{ "[email protected]": "/sprk_analysisactions(1e838114-...)" }`
+4. **Verify post-PATCH** (5 min):
+   - `mcp__dataverse__read_query` confirms `_sprk_actionid_value` now non-NULL
+5. **Smoke wizard against spaarkedev1** (15-30 min):
+   - Invoke Create Project wizard in browser
+   - Verify 8 ACT-024 fields prefill the Project create form
+6. **Update audit notes Resolution subsection** (10 min)
+
+  </steps>
+
+  <tools>
+    - mcp__dataverse__read_query / update_record
+    - Bash (browser smoke if accessible)
+    - TodoWrite
+  </tools>
+
+  <outputs>
+    - Dataverse PATCH applied
+    - Append "Resolution" subsection to audits/wave12-123-three-prefill-wizards.md (Project Wizard section)
+  </outputs>
+
+  <acceptance-criteria>
+    - [x] sprk_playbooknode(dacac491-...).sprk_actionid = 1e838114-... (verified pre + post)
+    - [ ] Create Project wizard prefill works end-to-end (operator UAT at T145)
+    - [x] Audit notes updated with Resolution
+    - [x] No code change required (data fix only)
+  </acceptance-criteria>
+
+  <notes>
+**Completed 2026-06-30** via task-execute (STANDARD rigor).
+
+**Pre-state**: `sprk_actionid = NULL` on node `dacac491-4f6c-f111-ab0e-7ced8ddc4a05` (confirmed via mcp__dataverse__read_query — attribute absent from response row).
+
+**Target verified**: Action `1e838114-7919-f111-8343-7ced8d1dc988` (ACT-024 "New Project Field Extraction") exists with full `sprk_outputschemajson` + `sprk_systemprompt`.
+
+**PATCH applied**: mcp__dataverse__update_record with `sprk_actionid` lookup → ACT-024. Response: "Record updated successfully."
+
+**Post-state verified**: `sprk_actionid = "1e838114-7919-f111-8343-7ced8d1dc988"`.
+
+**Outcome**: Project wizard's orchestration path now resolves the real Action (ACT-024) instead of falling into the synthetic-action-shell branch in PlaybookOrchestrationService (lines 1117-1126). AiAnalysisNodeExecutor.Validate will now find SystemPrompt + Schema + Tool and proceed to LLM call.
+
+**Resolution doc**: §8.5 added to `projects/spaarke-ai-platform-unification-r7/notes/audits/wave12-123-three-prefill-wizards.md`.
+
+**Open item**: Operator UAT in spaarkedev1 (T145) — confirms upload PDF → prefilled project form fields.
+  </notes>
+</task>

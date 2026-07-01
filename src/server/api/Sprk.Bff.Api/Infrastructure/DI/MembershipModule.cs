@@ -79,6 +79,22 @@ public static class MembershipModule
         services.Configure<MembershipOptions>(
             configuration.GetSection(MembershipOptions.SectionName));
 
+        // R7 W12 task 130 (2026-06-30): post-configure step that seeds the
+        // canonical Spaarke identity tables + audit-field exclusions when the
+        // bound configuration left them empty. Required because the
+        // "Membership" appsettings section is absent in every deployed
+        // environment (only defined in the GITIGNORED
+        // appsettings.Development.json.template); without this, the discovery
+        // service silently classifies every membership-bearing lookup as
+        // "target-table-not-in-identity-list" and the resolver returns zero
+        // results for every user. The post-configure runs AFTER any operator
+        // binding, and ONLY seeds when the bound list is empty — operator
+        // config replaces the defaults cleanly. See
+        // MembershipOptionsDefaults XML doc for the bug analysis.
+        services.AddSingleton<
+            Microsoft.Extensions.Options.IPostConfigureOptions<MembershipOptions>,
+            MembershipOptionsDefaults>();
+
         // Task 032: organization-membership resolver. One concrete satisfies
         // both consumer-facing interfaces:
         //   - IOrganizationMembershipResolver: canonical (PersonIdentity-aware) contract

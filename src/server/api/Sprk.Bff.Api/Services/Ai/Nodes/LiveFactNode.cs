@@ -75,10 +75,35 @@ public sealed class LiveFactNode : INodeExecutor
     }
 
     /// <inheritdoc />
-    public IReadOnlyList<ActionType> SupportedActionTypes { get; } = new[]
+    public IReadOnlyList<ExecutorType> SupportedExecutorTypes { get; } = new[]
     {
-        ActionType.LiveFact
+        ExecutorType.LiveFact
     };
+
+    // R7 task 085 / FR-23 — typed config schema for Playbook Builder canvas.
+    // Derived from LiveFactNodeConfig: subject (required, scheme-prefixed), predicate (required).
+    private static readonly ExecutorConfigSchema ConfigSchemaInstance = new(
+        ExecutorTypeName: nameof(ExecutorType.LiveFact),
+        ExecutorTypeValue: (int)ExecutorType.LiveFact,
+        Description: "Resolves a deterministic Live Fact about a Dataverse subject via ILiveFactResolver (per-entity dispatch: matter, project, invoice). Confidence is always 1.0 per design.md §2.1.",
+        Fields: new ConfigSchemaField[]
+        {
+            new(
+                Name: "subject",
+                Type: SchemaFieldType.String,
+                Required: true,
+                Description: "Scheme-prefixed subject (e.g., 'matter:M-1234', 'project:p-abc', 'invoice:i-xyz'). Required. Supports {{var}} substitution. Scheme determines the per-entity resolver.",
+                Default: null),
+            new(
+                Name: "predicate",
+                Type: SchemaFieldType.String,
+                Required: true,
+                Description: "Claim name supported by the resolver (e.g., 'totalSpend', 'matterType'). Required. Unknown predicates surface as LiveFactNotSupportedException → InvalidConfiguration.",
+                Default: null)
+        });
+
+    /// <inheritdoc />
+    public ExecutorConfigSchema GetConfigSchema() => ConfigSchemaInstance;
 
     /// <inheritdoc />
     public NodeValidationResult Validate(NodeExecutionContext context)

@@ -55,7 +55,7 @@ public class InsightsActionRouterTests
         Id = GenericLayer1ActionId,
         Name = "Layer 1 Classify (Generic)",
         SystemPrompt = "generic-classification@v1",
-        ActionType = ActionType.AiAnalysis
+        ExecutorType = ExecutorType.AiAnalysis
     };
 
     private static AnalysisAction DefaultLayer2Action() => new()
@@ -63,7 +63,7 @@ public class InsightsActionRouterTests
         Id = Guid.NewGuid(),
         Name = "Layer 2 Extract (Generic)",
         SystemPrompt = "generic-outcome-extraction@v1",
-        ActionType = ActionType.AiAnalysis
+        ExecutorType = ExecutorType.AiAnalysis
     };
 
     private static AnalysisAction PerAreaLayer1Action() => new()
@@ -71,7 +71,7 @@ public class InsightsActionRouterTests
         Id = PerAreaLayer1ActionId,
         Name = "Layer 1 Classify (CTRNS)",
         SystemPrompt = "ctrns-classification@v1",
-        ActionType = ActionType.AiAnalysis
+        ExecutorType = ExecutorType.AiAnalysis
     };
 
     private static AnalysisAction PerPairLayer2Action() => new()
@@ -79,7 +79,7 @@ public class InsightsActionRouterTests
         Id = PerPairLayer2ActionId,
         Name = "Layer 2 Extract (CTRNS × Closing)",
         SystemPrompt = "ctrns-closing-extraction@v1",
-        ActionType = ActionType.AiAnalysis
+        ExecutorType = ExecutorType.AiAnalysis
     };
 
     private static (InsightsActionRouter Router, Mock<IGenericEntityService> Entity, Mock<IScopeResolverService> Scope, IMemoryCache Cache) CreateRouter()

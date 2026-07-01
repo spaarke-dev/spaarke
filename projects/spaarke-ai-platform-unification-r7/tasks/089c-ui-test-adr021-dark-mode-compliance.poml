@@ -1,0 +1,201 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-089c" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>UI test — ADR-021 dark mode compliance</title>
+    <status>completed</status>
+    <wave>8</wave>
+    <estimated-effort>2 hours</estimated-effort>
+    <tags>code-page, testing, ui-test, wave-8</tags>
+    <rigor-level>FULL</rigor-level>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>081-088</dependencies>
+    <fr-coverage>ADR-021 binding for all Wave 8 UI changes</fr-coverage>
+  </metadata>
+
+  <prompt>
+    Browser-based UI test of ADR-021 dark mode compliance across all Wave 8 UI changes
+    (NodePalette, ExecutorTypeSelector, Action tab, TypedConfigForm, UnknownNode warning).
+    Uses Claude Code Chrome integration per `/ui-test` skill. Verifies:
+    - All new UI uses Fluent v9 semantic tokens (no hardcoded colors)
+    - Dark mode toggle in D365 settings causes Wave 8 UI to adapt correctly
+    - Light mode AND dark mode both readable + properly contrasted
+    - Warning state colors (UnknownNode) adapt across themes
+    Tests run against deployed PlaybookBuilder Code Page in spaarkedev1.
+  </prompt>
+
+  <role>
+    QA + accessibility engineer. Familiar with Fluent UI v9 semantic-token system,
+    ADR-021 binding rules, and dark-mode visual verification.
+  </role>
+
+  <goal>
+    Documented dark mode compliance results:
+    1. Screenshots of all Wave 8 UI surfaces in BOTH light + dark mode
+    2. Per-surface PASS/FAIL on semantic-token adaptation
+    3. Zero hardcoded color violations in computed styles (sampled via Chrome DevTools)
+    4. Results recorded in `projects/spaarke-ai-platform-unification-r7/notes/handoffs/089c-dark-mode-results.md`
+    5. Any violations filed via `/project-defer-issue-tracking`
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    <file purpose="ui-test-skill">.claude/skills/ui-test/SKILL.md</file>
+    <file purpose="adr-021">docs/adr/ADR-021-dark-mode-semantic-tokens.md</file>
+    <file purpose="adr-check-skill">.claude/skills/adr-check/SKILL.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-021">BINDING. Semantic tokens only. NO hardcoded hex/rgb. Icons use `currentColor`. FluentProvider wraps the component tree.</constraint>
+    <constraint source="ui-test SKILL.md">Dark mode toggle location: D365 Settings gear → Personalization → Dark mode. Toggle does NOT survive page reload per ui-test SKILL.md "Failure Modes". Tests must capture before page reload.</constraint>
+    <constraint source="ADR-038">UI tests at KEEP path.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ui/dark-mode</topic>
+    <files>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>.claude/skills/adr-check/SKILL.md</file>
+      <file>docs/adr/ADR-021-dark-mode-semantic-tokens.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      ADR-021 is binding for all Spaarke UI. Wave 8 introduces 4 new components (NodePalette,
+      ExecutorTypeSelector, TypedConfigForm, UnknownNode) + modifies NodePropertiesDialog tab structure.
+      This task is the dedicated dark-mode + semantic-token verification gate.
+    </background>
+    <dependencies>
+      <dependency task="081-088" status="prerequisite">All Wave 8 UI changes merged.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 089a + 089b cover functional behavior; this task covers VISUAL behavior in dark/light.</item>
+      <item>Task 089d deploys after this UI test passes.</item>
+    </related-work>
+  </context>
+
+  <ui-tests>
+    <test name="Light mode baseline — all surfaces">
+      <url>https://spaarke-dev.crm.dynamics.com/main.aspx?appid={app-id}&pagetype=custom&name=sprk_playbookbuilder</url>
+      <steps>
+        <step>Confirm D365 is in Light mode (Settings → Personalization)</step>
+        <step>Open PlaybookBuilder Code Page</step>
+        <step>Capture screenshot: NodePalette (left panel)</step>
+        <step>Drop AI Completion node; open properties → Action tab; capture screenshot</step>
+        <step>Switch to Configuration tab; capture screenshot of TypedConfigForm</step>
+        <step>Capture screenshot of UnknownNode warning state (if test row exists from task 089a)</step>
+      </steps>
+      <expected>4 light-mode screenshots captured; all surfaces readable + properly contrasted</expected>
+    </test>
+
+    <test name="Dark mode toggle — all surfaces">
+      <steps>
+        <step>Toggle Settings → Personalization → Dark mode = ON</step>
+        <step>Return to PlaybookBuilder (DO NOT reload page — toggle doesn't survive reload per ui-test SKILL.md)</step>
+        <step>Capture screenshot: NodePalette in dark mode</step>
+        <step>Open Action tab → capture screenshot</step>
+        <step>Open Configuration tab → capture screenshot of TypedConfigForm</step>
+        <step>Capture screenshot of UnknownNode in dark mode</step>
+      </steps>
+      <expected>4 dark-mode screenshots; all surfaces readable; semantic tokens adapted (backgrounds dark, text light, warning state semantically themed)</expected>
+    </test>
+
+    <test name="Computed style sampling — no hardcoded colors">
+      <steps>
+        <step>In Chrome DevTools, inspect a NodePalette tile</step>
+        <step>Verify computed background-color is derived from CSS variable (e.g., --colorNeutralBackground1) NOT a hardcoded hex</step>
+        <step>Repeat for: ExecutorTypeSelector dropdown, TypedConfigForm Input, UnknownNode warning area</step>
+        <step>Run page-source Grep for `#fff`, `#000`, `rgb(`, `rgba(` patterns in computed styles</step>
+      </steps>
+      <expected>All sampled elements use CSS variables / semantic tokens; no hardcoded hex in inline styles</expected>
+    </test>
+
+    <test name="Icon color = currentColor">
+      <steps>
+        <step>Inspect any Fluent v9 icon in NodePalette tier headers (Accordion expand/collapse)</step>
+        <step>Verify SVG fill = currentColor (not hardcoded)</step>
+        <step>Verify icon visually adapts when dark mode toggled</step>
+      </steps>
+      <expected>Icons use currentColor; adapt to theme automatically</expected>
+    </test>
+  </ui-tests>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: FULL · 📋 REASON: testing + ui-test tags + ADR-021 binding + ADR-038 TEST-MODIFYING override · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read project CLAUDE.md + spec.md + ADR-021 + ui-test SKILL.
+    </step>
+    <step order="2" name="Verify Chrome integration">
+      Run `/chrome` — confirm connected.
+    </step>
+    <step order="3" name="Verify PlaybookBuilder deployed">
+      Confirm Code Page accessible at spaarkedev1.
+    </step>
+    <step order="4" name="Execute Test 1 — Light mode baseline">
+      Capture 4 screenshots per Test 1.
+    </step>
+    <step order="5" name="Execute Test 2 — Dark mode toggle">
+      Toggle dark mode; capture 4 screenshots WITHOUT reloading page.
+    </step>
+    <step order="6" name="Execute Test 3 — Computed style sampling">
+      Via Chrome DevTools, sample 4-5 elements; record computed style values. Flag any hardcoded hex.
+    </step>
+    <step order="7" name="Execute Test 4 — Icon color = currentColor">
+      Sample at least 2 icons; verify fill semantic.
+    </step>
+    <step order="8" name="Document results">
+      Write `notes/handoffs/089c-dark-mode-results.md`:
+      - Side-by-side light/dark screenshots (4 surfaces × 2 modes = 8 images)
+      - Computed-style audit table
+      - Icon-color audit table
+      - Pass/Fail per surface + per ADR-021 rule
+      - Violation list (if any)
+    </step>
+    <step order="9" name="File violations if any">
+      For each ADR-021 violation, invoke `/project-defer-issue-tracking`. Severity = HIGH if any hardcoded color found in production component.
+    </step>
+    <step order="9.5" name="Quality gates (FULL rigor)">
+      Run `/code-review` on results doc.
+      Run `/adr-check` against ADR-021 explicitly.
+    </step>
+    <step order="10" name="Update current-task.md + TASK-INDEX">
+      Mark task 089c status complete; advance to next Wave 8 task (089d deploy).
+    </step>
+    <step order="11" name="Commit">
+      Commit message:
+      `test(playbookbuilder/r7): ADR-021 dark mode compliance UI test results (Wave 8 task 089c)`. No PR yet.
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (ui-test SKILL + ADRs + spec)</tool>
+    <tool>Skill (ui-test for browser test execution)</tool>
+    <tool>Bash (chrome connectivity check)</tool>
+    <tool>Write (results doc)</tool>
+    <tool>Skill (code-review at Step 9.5)</tool>
+    <tool>Skill (adr-check at Step 9.5)</tool>
+  </tools>
+
+  <outputs>
+    <output type="document">projects/spaarke-ai-platform-unification-r7/notes/handoffs/089c-dark-mode-results.md</output>
+    <output type="screenshots">projects/spaarke-ai-platform-unification-r7/assets/089c-{surface}-{mode}.png (8 screenshots)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 089c ✅)</output>
+    <output type="commit">test(playbookbuilder/r7): ADR-021 dark mode compliance UI test results (Wave 8 task 089c)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>4 surfaces tested in light + dark mode (8 screenshots total)</criterion>
+    <criterion>All surfaces readable + properly contrasted in both modes</criterion>
+    <criterion>Computed-style audit confirms semantic tokens (no hardcoded hex inline)</criterion>
+    <criterion>Icons use currentColor</criterion>
+    <criterion>Any ADR-021 violation filed as defect (HIGH severity)</criterion>
+    <criterion>Results doc exists at notes/handoffs/089c-dark-mode-results.md</criterion>
+    <criterion>code-review + adr-check pass at Step 9.5</criterion>
+    <criterion>TASK-INDEX.md shows 089c ✅</criterion>
+  </acceptance-criteria>
+</task>

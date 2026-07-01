@@ -1,0 +1,168 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-088" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Replace `sprk_nodetype` references in canvas state (FR-26)</title>
+    <status>completed</status>
+    <wave>8</wave>
+    <estimated-effort>3-4 hours</estimated-effort>
+    <tags>code-page, code-impl, wave-8</tags>
+    <rigor-level>FULL</rigor-level>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>080</dependencies>
+    <fr-coverage>FR-26</fr-coverage>
+  </metadata>
+
+  <prompt>
+    Execute the replacement plan documented by task 080. Replace every `sprk_nodetype` reference
+    in PlaybookBuilder canvas state with `sprk_executortype`. Affects: node serialization
+    (`@spaarke/legal-workspace/playbook-builder/types`, but for THIS code page the equivalent is
+    `src/client/code-pages/PlaybookBuilder/src/types/canvas.ts`), canvas store, graph traversal
+    helpers, and any per-node decision logic that branched on Node Type. Also remove the `__actionType`
+    injection hack in `sprk_configjson`. Grep returns zero references after.
+  </prompt>
+
+  <role>
+    Senior TypeScript developer. Familiar with the PlaybookBuilder canvas state pipeline
+    (canvasStore.ts + playbookNodeSync.ts + types/canvas.ts). Executing a mechanical refactor
+    guided by the task-080 audit inventory.
+  </role>
+
+  <goal>
+    Cleanly refactored canvas state:
+    1. All `sprk_nodetype` literal-string references replaced with `sprk_executortype` in `src/client/code-pages/PlaybookBuilder/src/**/*.{ts,tsx}`
+    2. All `__actionType` injection hacks in `sprk_configjson` removed
+    3. `PlaybookNodeData.type` (React Flow discriminator) PRESERVED — it's a UI-only field
+    4. `PlaybookNodeData.executorType: number` is the new canonical dispatch field, round-trips to Dataverse `sprk_executortype` Choice
+    5. `playbookNodeSync.ts` reads/writes `sprk_executortype` (not `sprk_nodetype`)
+    6. Any graph traversal logic that branched on Node Type now branches on Executor Type
+    7. Grep for `sprk_nodetype` in `src/client/code-pages/PlaybookBuilder/` returns ZERO hits (per FR-26 acceptance)
+    8. Grep for `__actionType` returns ZERO hits
+    9. Tests pass; canvas serializes new schema correctly
+    10. Build passes (`npm run build:prod`)
+  </goal>
+
+  <inputs>
+    <file purpose="audit-inventory">projects/spaarke-ai-platform-unification-r7/notes/spikes/playbookbuilder-sprk-nodetype-audit.md</file>
+    <file purpose="design-spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    <file purpose="canvas-types">src/client/code-pages/PlaybookBuilder/src/types/canvas.ts</file>
+    <file purpose="canvas-store">src/client/code-pages/PlaybookBuilder/src/stores/canvasStore.ts</file>
+    <file purpose="dataverse-sync">src/client/code-pages/PlaybookBuilder/src/services/playbookNodeSync.ts</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-26">Grep returns zero `sprk_nodetype` references in `src/client/code-pages/PlaybookBuilder/` after this task.</constraint>
+    <constraint source="spec FR-20">No `__actionType` injection in `sprk_configjson` anymore (deploy-side fix in Wave 5 task 055; canvas-side cleanup here).</constraint>
+    <constraint source="ADR-006">Fluent UI v9.</constraint>
+    <constraint source="ADR-038">Update tests in `src/client/code-pages/PlaybookBuilder/src/stores/__tests__/` if they reference `sprk_nodetype`. Tests at KEEP path; do NOT scaffold new tests beyond what's needed.</constraint>
+    <constraint source="CLAUDE.md §11">Modifying existing files only — no Component Justification triple.</constraint>
+    <constraint source="CLAUDE.md §12">Build command: `npm run build:prod`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>code-page/playbookbuilder</topic>
+    <files>
+      <file>.claude/skills/spaarke-conventions/SKILL.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Task 080 enumerated every call site. This task is the mechanical refactor. The risk:
+      missing a call site that's discovered later via runtime error. Mitigated by the final
+      grep-zero verification step + the test suite.
+    </background>
+    <dependencies>
+      <dependency task="080" status="prerequisite">Audit inventory provides the call-site list.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 055 (Wave 5) updates Deploy-Playbook.ps1 to write `sprk_executortype` directly — coordinated server-side counterpart.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: FULL · 📋 REASON: code-impl across multiple files, tag code-page+code-impl, ADR-038 TEST-MODIFYING override applies if tests touched · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read project CLAUDE.md + spec.md FR-26 + audit doc (task 080) + canvas.ts + canvasStore.ts + playbookNodeSync.ts.
+    </step>
+    <step order="2" name="Verify task 080 done">
+      Confirm audit inventory exists. If not, STOP.
+    </step>
+    <step order="3" name="Update types/canvas.ts">
+      Per audit: replace JSDoc comment `type → sprk_nodetype (coarse category via NodeTypeToDataverse mapping) + __actionType in sprk_configjson` with: `type → React Flow discriminator (UI-only); executorType → sprk_executortype Choice (Dataverse, dispatch)`.
+      Add field: `executorType?: number` on `PlaybookNodeData` interface.
+    </step>
+    <step order="4" name="Update services/playbookNodeSync.ts">
+      Per audit:
+      - Remove `NodeTypeToDataverse` mapping (the coarse-to-Choice translation)
+      - Replace any `sprk_nodetype` field reads/writes with `sprk_executortype`
+      - Remove any `__actionType` injection into `sprk_configjson`
+      - On Dataverse → canvas: hydrate `node.data.executorType` from `sprk_executortype`
+      - On canvas → Dataverse: write `node.data.executorType` to `sprk_executortype`
+    </step>
+    <step order="5" name="Update stores/canvasStore.ts">
+      Per audit: remove any logic that mapped between `data.type` and `sprk_nodetype` Choice value. Add helper if needed: `getExecutorTypeForNode(nodeData): number | undefined`.
+    </step>
+    <step order="6" name="Update graph traversal helpers">
+      Per audit: any helper that branched on `sprk_nodetype` Choice value should branch on `executorType` instead. E.g., `isStartNode(node)` → check `executorType === EXECUTOR_TYPE_START`.
+    </step>
+    <step order="7" name="Update tests">
+      Per audit: tests in `stores/__tests__/canvasStore.test.ts` may reference `sprk_nodetype`. Update to use `executorType` (or the equivalent Choice number).
+    </step>
+    <step order="8" name="Build + run tests">
+      `cd src/client/code-pages/PlaybookBuilder && npm run build:prod && npm test`.
+      Goal: 0 build errors, 0 new warnings, all tests pass.
+    </step>
+    <step order="9" name="Final grep-zero verification">
+      Run Grep with pattern `sprk_nodetype` across `src/client/code-pages/PlaybookBuilder/` — MUST return zero hits.
+      Run Grep with pattern `__actionType` across same scope — MUST return zero hits.
+      If any hit remains, fix.
+    </step>
+    <step order="9.5" name="Quality gates (FULL rigor)">
+      Run `/code-review` on modified files (sample 3-4 most-changed files).
+      Run `/adr-check` against ADR-006 + ADR-021 + ADR-038.
+      Fix findings.
+    </step>
+    <step order="10" name="Update current-task.md + TASK-INDEX">
+      Mark task 088 status complete; advance to next Wave 8 task.
+    </step>
+    <step order="11" name="Commit">
+      Commit message:
+      `refactor(playbookbuilder/r7): replace sprk_nodetype + __actionType with sprk_executortype in canvas state (Wave 8 task 088, FR-26)`. No PR yet.
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (audit doc + source files)</tool>
+    <tool>Grep (`sprk_nodetype` and `__actionType` literal search)</tool>
+    <tool>Edit (types/canvas.ts, services/playbookNodeSync.ts, stores/canvasStore.ts, graph helpers, tests)</tool>
+    <tool>Bash (npm run build:prod, npm test, git commit)</tool>
+    <tool>Skill (code-review at Step 9.5)</tool>
+    <tool>Skill (adr-check at Step 9.5)</tool>
+  </tools>
+
+  <outputs>
+    <output type="modified-file">src/client/code-pages/PlaybookBuilder/src/types/canvas.ts</output>
+    <output type="modified-file">src/client/code-pages/PlaybookBuilder/src/services/playbookNodeSync.ts</output>
+    <output type="modified-file">src/client/code-pages/PlaybookBuilder/src/stores/canvasStore.ts</output>
+    <output type="modified-file">graph traversal helpers (per audit)</output>
+    <output type="modified-file">tests referenced in audit (canvasStore.test.ts etc.)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 088 ✅)</output>
+    <output type="commit">refactor(playbookbuilder/r7): replace sprk_nodetype + __actionType with sprk_executortype in canvas state (Wave 8 task 088, FR-26)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Grep for `sprk_nodetype` in `src/client/code-pages/PlaybookBuilder/` returns ZERO hits</criterion>
+    <criterion>Grep for `__actionType` in same scope returns ZERO hits</criterion>
+    <criterion>`PlaybookNodeData.executorType` field exists and round-trips to Dataverse `sprk_executortype`</criterion>
+    <criterion>`PlaybookNodeData.type` (React Flow discriminator) preserved (UI-only field)</criterion>
+    <criterion>npm run build:prod passes: 0 errors, 0 new warnings</criterion>
+    <criterion>npm test: all tests pass</criterion>
+    <criterion>code-review + adr-check pass at Step 9.5</criterion>
+    <criterion>TASK-INDEX.md shows 088 ✅</criterion>
+  </acceptance-criteria>
+</task>

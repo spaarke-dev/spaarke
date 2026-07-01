@@ -1,0 +1,205 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-092" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Add chat-summarize row to sprk_playbookconsumer table</title>
+    <status>completed</status>
+    <wave>9</wave>
+    <estimated-effort>1-2 hours</estimated-effort>
+    <tags>dataverse, wave-9</tags>
+    <rigor-level>FULL</rigor-level>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>091</dependencies>
+    <fr-coverage>FR-17 (data portion)</fr-coverage>
+  </metadata>
+
+  <prompt>
+    Now that SessionSummarizeOrchestrator routes through IConsumerRoutingService.ResolveAsync (task 091),
+    the routing table needs the chat-summarize row to actually map to a playbook. Add a row to the
+    sprk_playbookconsumer table in spaarkedev1 with consumer code = "chat-summarize", target
+    playbook reference (the playbook currently fronted by WorkspaceOptions.ChatSummarizePlaybookId),
+    and match conditions. Use MCP Dataverse tooling preferred; PowerShell migration script fallback.
+  </prompt>
+
+  <role>
+    Senior Dataverse / platform developer familiar with sprk_playbookconsumer schema,
+    IConsumerRoutingService consultation pattern, and the MCP dataverse tooling.
+  </role>
+
+  <goal>
+    A single sprk_playbookconsumer row exists in spaarkedev1 such that:
+    1. sprk_consumercode (alternate key, string) = "chat-summarize" — matches ConsumerTypes.ChatSummarize constant in BFF.
+    2. sprk_playbookid (lookup to sprk_analysisplaybook) = the playbook GUID currently configured in
+       WorkspaceOptions.ChatSummarizePlaybookId (resolve at task-execution time by reading
+       config/{env}.json or appsettings.json).
+    3. sprk_matchconditions (JSON column) = empty / null / "{}" (chat-summarize has no
+       conditional routing — it always dispatches to the same playbook). Document this decision.
+    4. The row is in spaarkedev1 (development environment); test + prod tenant rollout handled
+       separately under NFR-07.
+    5. Verification: invoke IConsumerRoutingService.ResolveAsync("chat-summarize") via a quick
+       integration test or REPL-style smoke and confirm it returns the playbook ID without falling
+       back to WorkspaceOptions (which would indicate the row isn't found).
+    6. Idempotency: re-running the row insertion must NOT create duplicates — use upsert semantics
+       on sprk_consumercode alternate key.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    <file purpose="orchestrator">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SessionSummarizeOrchestrator.cs</file>
+    <file purpose="consumer-types">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ConsumerTypes.cs</file>
+    <file purpose="routing-service">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IConsumerRoutingService.cs</file>
+    <file purpose="canonical-doc">docs/architecture/ai-architecture-consumer-routing.md</file>
+    <file purpose="config-source">config/spaarkedev1.local.json (or equivalent — for ChatSummarizePlaybookId)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-014">Caching — IConsumerRoutingService has 5-min TTL; row insertion will be picked up after cache expiry. If immediate verification needed, restart BFF App Service or wait 5 min.</constraint>
+    <constraint source="spec FR-17">Acceptance criterion: chat-summarize consumer row in sprk_playbookconsumer table.</constraint>
+    <constraint source="spec NFR-04">No new invalidation hook — accept the 5-min TTL delay for cache pickup.</constraint>
+    <constraint source="spec NFR-07">Rollout scope — spaarkedev1 only in this task. Customer-tenant migration handled separately.</constraint>
+    <constraint source="MUST NOT modify">docs/architecture/ai-architecture-consumer-routing.md — READ-ONLY in R7 per spec (chat-routing-redesign-r1 owns).</constraint>
+    <constraint source="MUST NOT create">docs/data-model/sprk_playbookconsumer.md — owned by chat-routing-redesign-r1 follow-on per spec.</constraint>
+    <constraint source="CLAUDE.md §11">Component justification triple:
+      1. Existing: sprk_playbookconsumer table already exists (chat-routing-redesign-r1 promoted it to first-class). 6 rows for existing consumers already present (per design.md §11).
+      2. Extension: this task adds ONE row using the existing schema. NO new column, NO new table.
+      3. Cost-of-doing-nothing: IConsumerRoutingService.ResolveAsync("chat-summarize") returns null; SessionSummarizeOrchestrator falls back to WorkspaceOptions.ChatSummarizePlaybookId on every call (graceful-degrade fallback works but R7 FR-17 acceptance criterion not met).
+    </constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai/consumer-routing</topic>
+    <files>
+      <file>docs/adr/ADR-014-caching.md</file>
+      <file>docs/architecture/ai-architecture-consumer-routing.md</file>
+      <file>.claude/skills/dataverse-mcp-usage/SKILL.md</file>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="MCP dataverse create_record" location=".claude/skills/dataverse-mcp-usage/SKILL.md">
+        Preferred path: mcp__dataverse__create_record with sprk_playbookconsumer entity.
+      </pattern>
+      <pattern name="PowerShell Web API fallback" location="scripts/dataverse/Add-EntityNameValidatorNodeTypeOption.ps1">
+        R4-era pattern if MCP is unavailable. Idempotent via Get-then-Create.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      sprk_playbookconsumer was promoted to first-class status by chat-routing-redesign-r1. The
+      table currently has 6 rows for existing consumers (per design.md §11). chat-summarize is the
+      7th — added now because task 091 just refactored SessionSummarizeOrchestrator to call
+      IConsumerRoutingService.ResolveAsync("chat-summarize"). Until this row exists, the orchestrator
+      falls back to WorkspaceOptions.ChatSummarizePlaybookId on every call (the graceful-degrade
+      pattern chat-routing-redesign-r1 task 028d established).
+    </background>
+    <dependencies>
+      <dependency task="091" status="required">SessionSummarizeOrchestrator must already consult IConsumerRoutingService — if 091 isn't done, this row has no consumer.</dependency>
+    </dependencies>
+    <related-work>
+      <item>R7 task 094-096 (Wave 9) — wire Playbook Library modal into consumer surfaces. Those tasks consult sprk_playbookconsumer for the consumer listing.</item>
+      <item>R7 task 067 (Wave 6) — author docs/guides/ai-guide-consumer-wiring.md uses chat-summarize as a case study.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: FULL · 📋 REASON: dataverse schema/data modification in production-adjacent environment (spaarkedev1), idempotency required, blocking dependency for downstream wave tasks · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read project CLAUDE.md + spec.md (FR-17 + NFR-04 + NFR-07) + plan.md (Wave 9) + ai-architecture-consumer-routing.md.
+    </step>
+    <step order="2" name="Verify dependency">
+      Confirm task 091 is complete — SessionSummarizeOrchestrator calls IConsumerRoutingService.ResolveAsync("chat-summarize").
+      Confirm row absence first via Dataverse query (mcp__dataverse__read_query or PowerShell).
+    </step>
+    <step order="3" name="Resolve target playbook ID">
+      Read config/spaarkedev1.local.json (or App Service appsettings in Azure) for WorkspaceOptions.ChatSummarizePlaybookId.
+      Confirm the playbook exists in sprk_analysisplaybook (query by sprk_playbookid alternate key).
+      Document the GUID in task notes for traceability.
+    </step>
+    <step order="4" name="Describe sprk_playbookconsumer entity">
+      Run: mcp__dataverse__describe to confirm column names + types: sprk_consumercode (string), sprk_playbookid (lookup), sprk_matchconditions (string or memo).
+      Note any required-flag fields beyond these three.
+    </step>
+    <step order="5" name="Insert the row (preferred: MCP)">
+      Run: mcp__dataverse__create_record with payload:
+      {
+        "entity": "sprk_playbookconsumer",
+        "data": {
+          "sprk_consumercode": "chat-summarize",
+          "sprk_playbookid@odata.bind": "/sprk_analysisplaybooks({resolved-playbook-guid})",
+          "sprk_matchconditions": null
+        }
+      }
+      OR (fallback): write a script scripts/dataverse/Add-ChatSummarize-Consumer-Row.ps1 using Web API + upsert-on-alternate-key semantics. Script must be idempotent (re-run safe).
+    </step>
+    <step order="6" name="Verify row created">
+      Run: mcp__dataverse__read_query against sprk_playbookconsumer where sprk_consumercode = 'chat-summarize'.
+      Assert: exactly 1 row; sprk_playbookid matches the resolved GUID.
+    </step>
+    <step order="7" name="Cache-aware verification">
+      The IConsumerRoutingService cache TTL is 5 min (ADR-014, NFR-04). To verify the row is picked up:
+      - Option A: wait 5 min then trigger a chat-summarize call via SprkChat UI and observe BFF logs
+        for the resolved playbook ID (should match the new row's GUID, not the WorkspaceOptions fallback).
+      - Option B: restart BFF App Service in spaarkedev1 dev environment to force cache refresh, then
+        trigger a chat-summarize call.
+      Document which option was used + the verification result.
+    </step>
+    <step order="8" name="Idempotency check">
+      Re-run step 5 (MCP create_record or PowerShell script). Confirm it does NOT create a duplicate
+      (the platform's alternate-key upsert semantics or script Get-then-Skip should prevent duplicate).
+      If duplicate created, halt + investigate alternate-key configuration on sprk_consumercode.
+    </step>
+    <step order="9" name="Document migration step">
+      Append to projects/spaarke-ai-platform-unification-r7/notes/handoffs/dataverse-changes.md (create if not exists)
+      a row entry: date, table, action ("insert sprk_playbookconsumer chat-summarize"), GUID values,
+      operator. This is the traceability record for the wave-9 dataverse changes.
+    </step>
+    <step order="9.5" name="Quality gates (FULL rigor)">
+      Run `/code-review` on any PowerShell script (if fallback used).
+      Run `/adr-check` against ADR-014 (caching TTL preserved) + spec NFR-04 (no new invalidation logic).
+      Verify no test/code changes accidentally bundled.
+    </step>
+    <step order="10" name="Update current-task.md + TASK-INDEX">
+      Mark task 092 status complete; advance current-task.md to task 093.
+    </step>
+    <step order="11" name="Commit">
+      Commit any script + traceability notes with conventional message.
+      Example: chore(r7/wave9): add chat-summarize row to sprk_playbookconsumer in spaarkedev1 (task 092, FR-17)
+      NOTE: if pure MCP insertion with no script, commit may only include notes/handoffs/dataverse-changes.md and TASK-INDEX update.
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (config files + canonical doc + spec)</tool>
+    <tool>mcp__dataverse__describe (confirm entity schema)</tool>
+    <tool>mcp__dataverse__read_query (verify absence then verify presence)</tool>
+    <tool>mcp__dataverse__create_record (preferred row insertion)</tool>
+    <tool>Write (PowerShell script fallback, traceability notes)</tool>
+    <tool>Bash (git commit)</tool>
+    <tool>Skill (code-review at Step 9.5 — script only)</tool>
+    <tool>Skill (adr-check at Step 9.5)</tool>
+  </tools>
+
+  <outputs>
+    <output type="dataverse-row">sprk_playbookconsumer row with sprk_consumercode = "chat-summarize" in spaarkedev1</output>
+    <output type="optional-new-file">scripts/dataverse/Add-ChatSummarize-Consumer-Row.ps1 (only if PowerShell fallback used)</output>
+    <output type="new-or-updated-file">projects/spaarke-ai-platform-unification-r7/notes/handoffs/dataverse-changes.md (traceability entry)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md (advance to task 093)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 092 ✅)</output>
+    <output type="commit">chore(r7/wave9): add chat-summarize row to sprk_playbookconsumer in spaarkedev1 (task 092, FR-17)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Row exists in sprk_playbookconsumer with sprk_consumercode = "chat-summarize"</criterion>
+    <criterion>sprk_playbookid lookup points to the playbook GUID configured in WorkspaceOptions.ChatSummarizePlaybookId</criterion>
+    <criterion>sprk_matchconditions = null/empty (chat-summarize has no conditional routing — documented in task notes)</criterion>
+    <criterion>Insertion is idempotent — re-running does NOT create a duplicate (verified)</criterion>
+    <criterion>Post-cache-refresh, IConsumerRoutingService.ResolveAsync("chat-summarize") returns the new row's playbook GUID (not falling back to WorkspaceOptions) — verified via BFF log inspection OR App Service restart + chat-summarize smoke</criterion>
+    <criterion>Traceability entry in notes/handoffs/dataverse-changes.md</criterion>
+    <criterion>code-review + adr-check pass at Step 9.5 (FULL rigor) — ADR-014 TTL preserved, no new invalidation logic per NFR-04</criterion>
+    <criterion>current-task.md updated to point at task 093 as next</criterion>
+    <criterion>TASK-INDEX.md shows 092 ✅, 093 🔲 ready</criterion>
+  </acceptance-criteria>
+</task>

@@ -20,7 +20,7 @@
         "frequency": "daily",
         "time": "06:00"
       },
-      "category": "tasks-due",
+      "category": "tasks-due-soon",
       "channelLabel": "Upcoming Tasks",
       "channelIcon": "clock",
       "parameters": {
@@ -127,7 +127,7 @@
         "__actionType": 50,
         "title": "{{dueSoonQuery.output.count}} task(s) due in the next {{dueWithinDays}} day(s)",
         "body": "{{#each dueSoonQuery.output.items}}{{sprk_eventname}} is due on {{sprk_duedate}}.\n{{/each}}",
-        "category": "tasks-due",
+        "category": "tasks-due-soon",
         "priority": 200000000,
         "actionUrl": "/main.aspx?pagetype=entitylist&etn=sprk_event&viewtype=1039",
         "recipientId": "{{run.userId}}",
@@ -136,7 +136,7 @@
         "itemNotification": {
           "title": "Due soon: {{item.sprk_eventname}}",
           "body": "{{item.sprk_eventname}} is due on {{item.sprk_duedate}} ({{item.sprk_regardingrecordname}})",
-          "category": "tasks-due",
+          "category": "tasks-due-soon",
           "priority": 200000000,
           "actionUrl": "/main.aspx?pagetype=entityrecord&etn=sprk_event&id={{item.sprk_eventid}}",
           "recipientId": "{{run.userId}}",

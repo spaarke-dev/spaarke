@@ -88,7 +88,7 @@
       "knowledge": [],
       "tools": []
     },
-    "$comment-scopes": "Ingest playbook node executors are auto-discovered by NodeExecutorRegistry via SupportedActionTypes. Scopes left empty intentionally; the seed script tolerates empty arrays per resolution-loop guards."
+    "$comment-scopes": "Ingest playbook node executors are auto-discovered by NodeExecutorRegistry via SupportedExecutorTypes. Scopes left empty intentionally; the seed script tolerates empty arrays per resolution-loop guards."
   },
 
   "nodes": [
@@ -98,7 +98,7 @@
       "actionCode": "INS-SANI@v1",
       "$comment-actionCode": "Insights Engine r2 Wave C1: NEW action row INS-SANI in sprk_analysisaction, lookup '130 — Sanitization' with sprk_executoractiontype=130. Created during Wave C1 deploy step.",
       "actionType": 130,
-      "$comment-actionType": "ActionType.Sanitization = 130 (NEW in Wave C1). Handled by SanitizerNodeExecutor; wraps IInsightsContentSanitizer (D-50).",
+      "$comment-actionType": "ExecutorType.Sanitization = 130 (NEW in Wave C1). Handled by SanitizerNodeExecutor; wraps IInsightsContentSanitizer (D-50).",
       "outputVariable": "sanitization",
       "positionX": 100, "positionY": 200,
       "configJson": {
@@ -114,7 +114,7 @@
       "actionCode": "INS-L1C@v1",
       "$comment-actionCode": "Insights Engine r2 Wave C1: NEW action row INS-L1C in sprk_analysisaction, lookup '0 — AI Analysis' with sprk_executoractiontype=0. Carries sprk_systemprompt = classification@v1 JPS (Wave C2 task 021 migrates the .txt prompt into this field).",
       "actionType": 0,
-      "$comment-actionType": "ActionType.AiAnalysis = 0; handled by AiAnalysisNodeExecutor (existing). Layer 1 emission (write L1 observation to spaarke-insights-index + mirror) is fused into the layer1Classify executor per design-a5 §4 Node 2 dual-responsibility rationale.",
+      "$comment-actionType": "ExecutorType.AiAnalysis = 0; handled by AiAnalysisNodeExecutor (existing). Layer 1 emission (write L1 observation to spaarke-insights-index + mirror) is fused into the layer1Classify executor per design-a5 §4 Node 2 dual-responsibility rationale.",
       "outputVariable": "layer1",
       "positionX": 400, "positionY": 200,
       "dependsOn": ["sanitize"],
@@ -135,7 +135,7 @@
       "actionCode": "INS-EVID@v1",
       "$comment-actionCode": "Insights Engine r2 Wave B (EXISTING): INS-EVID action row in sprk_analysisaction, lookup '100 — Evidence Sufficiency' with sprk_executoractiontype=100. Reused from Wave B (predict-matter-cost@v1 also uses INS-EVID).",
       "actionType": 100,
-      "$comment-actionType": "ActionType.EvidenceSufficiency = 100; handled by EvidenceSufficiencyNode. Requires the Wave C1 'predicate: in' patch (Gap #1, ~15–20 LOC in EvidenceSufficiencyNode.cs) to support the outcomeBearingClassification membership rule below.",
+      "$comment-actionType": "ExecutorType.EvidenceSufficiency = 100; handled by EvidenceSufficiencyNode. Requires the Wave C1 'predicate: in' patch (Gap #1, ~15–20 LOC in EvidenceSufficiencyNode.cs) to support the outcomeBearingClassification membership rule below.",
       "outputVariable": "gate",
       "positionX": 700, "positionY": 200,
       "dependsOn": ["layer1Classify"],
@@ -169,7 +169,7 @@
       "actionCode": "INS-L2X@v1",
       "$comment-actionCode": "Insights Engine r2 Wave C1: NEW action row INS-L2X in sprk_analysisaction, lookup '0 — AI Analysis' with sprk_executoractiontype=0. Carries sprk_systemprompt = outcome-extraction@v1 JPS (Wave C2 task 021 migrates the .txt prompt into this field).",
       "actionType": 0,
-      "$comment-actionType": "ActionType.AiAnalysis = 0; handled by AiAnalysisNodeExecutor (existing).",
+      "$comment-actionType": "ExecutorType.AiAnalysis = 0; handled by AiAnalysisNodeExecutor (existing).",
       "outputVariable": "layer2",
       "positionX": 1000, "positionY": 100,
       "dependsOn": ["checkLayer2Gate"],
@@ -188,7 +188,7 @@
       "actionCode": "INS-GRND@v1",
       "$comment-actionCode": "Insights Engine r2 Wave B (EXISTING): INS-GRND action row in sprk_analysisaction, lookup '70 — Grounding Verify' with sprk_executoractiontype=70. Reused from Wave B (predict-matter-cost@v1 also uses INS-GRND).",
       "actionType": 70,
-      "$comment-actionType": "ActionType.GroundingVerify = 70; handled by GroundingVerifyNode (existing).",
+      "$comment-actionType": "ExecutorType.GroundingVerify = 70; handled by GroundingVerifyNode (existing).",
       "outputVariable": "grounded",
       "positionX": 1300, "positionY": 100,
       "dependsOn": ["layer2Extract"],
@@ -206,7 +206,7 @@
       "actionCode": "INS-OBSE@v1",
       "$comment-actionCode": "Insights Engine r2 Wave C1: NEW action row INS-OBSE in sprk_analysisaction, lookup '140 — Observation Emit' with sprk_executoractiontype=140. Created during Wave C1 deploy step.",
       "actionType": 140,
-      "$comment-actionType": "ActionType.ObservationEmit = 140 (NEW in Wave C1). Handled by ObservationEmitterNodeExecutor; wraps IObservationEmitter + IObservationIndexUpserter + IObservationMirror.",
+      "$comment-actionType": "ExecutorType.ObservationEmit = 140 (NEW in Wave C1). Handled by ObservationEmitterNodeExecutor; wraps IObservationEmitter + IObservationIndexUpserter + IObservationMirror.",
       "outputVariable": "emission",
       "positionX": 1600, "positionY": 200,
       "dependsOn": ["groundingVerify", "checkLayer2Gate"],

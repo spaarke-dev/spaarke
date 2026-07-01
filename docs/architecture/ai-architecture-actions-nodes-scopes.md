@@ -57,34 +57,65 @@ The node configjson is **the right place** for executor-specific runtime fields 
 
 ---
 
-## 4. The decision tree
+## 4. Where dispatch, prompt, and categorization live (single-hop model)
 
-When you have a new piece of config, walk this tree:
+Pre-R7, this section walked makers through a multi-rung lookup ladder ("which of four homes carries the executor selector?"). R7 collapses the question. **Dispatch reads `node.sprk_executortype` directly — a single hop, no fallback chain.** Action FK is optional and carries the prompt template only when an executor is prompt-driven. The lookup table (`sprk_analysisactiontype`) is decorative for maker browsing (see §8a for the binding disposition).
+
+The decision is no longer "which home wins?" but "what are you trying to express?"
+
+### What lives where
+
+| What you need to express | Where it lives | Required? |
+|---|---|---|
+| Which executor handles this node (dispatch identity) | `sprk_playbooknode.sprk_executortype` (Choice column on the node row) | **Required** on every node (FR-07; FR-19 backfill) |
+| Prompt template for prompt-driven executors (SystemPrompt, OutputSchemaJson, Temperature) | Action row (`sprk_analysisaction`) via `sprk_playbooknode.sprk_actionid` FK | Required only for prompt-driven executors (AiAnalysis, AiCompletion, AiEmbedding); enforced at executor `Validate()` (FR-06) |
+| Per-node runtime config (input bindings, output variable, conditional guard, model deployment override, scope arrays) | `sprk_playbooknode.sprk_configjson` + first-class node columns where they exist (see §3 for canonical contents) | Per-node, per-executor |
+| Playbook-header metadata (name, type, capabilities, scheduling, canvas layout) | `sprk_analysisplaybook` row columns (Home B in §2) | Per playbook |
+| Declarative resource scope (which Actions / Skills / Knowledge / Tools this playbook depends on) | N:N relationships (Home D in §2) | Per playbook |
+| Maker categorization / browsing of "what kinds of actions exist" | `sprk_analysisactiontype` lookup table | **Advisory only — runtime ignores it** (see §8a) |
+
+### Two worked examples
+
+**Example 1 — Prompt-driven node (`AiCompletion`)**: a node in `DAILY-BRIEFING-NARRATE` runs the `BRIEF-NARRATE-TLDR` prompt.
 
 ```
-Is the config a property of the Action's intrinsic behaviour
-(prompt, temperature, output shape, executor-internal param)?
-├─ YES → Home A: sprk_analysisaction column
-│        (do NOT put it on the node — it would couple the action to one use)
-└─ NO → Is it identity/scheduling/capability metadata of the playbook
-         as a whole (name, type, scope of capability, builder-UI state)?
-        ├─ YES → Home B: sprk_analysisplaybook column
-        │        (do NOT put it in canvas json — runtime won't read it)
-        └─ NO → Is it per-node runtime config (which action FK, input bindings,
-                 dependencies, output variable, position, executor-specific
-                 input shape)?
-                ├─ YES → Home C: sprk_playbooknode row
-                │        — first-class columns where they exist
-                │        — sprk_configjson for executor-specific extras
-                └─ NO → Is it a declaration of "what this playbook
-                         is allowed/expected to use" (action list, skill list,
-                         knowledge list, tool list)?
-                        ├─ YES → Home D: N:N relationships
-                        │        (do NOT put it inline as JSON — it bypasses
-                        │        the audit, refresh, and reuse tooling)
-                        └─ NO → STOP. You probably haven't separated concerns;
-                                 re-examine the requirement.
+sprk_playbooknode row
+├─ sprk_executortype = 1 (AiCompletion)             ← single-hop dispatch identity
+├─ sprk_actionid = {BRIEF-NARRATE-TLDR Action row}  ← Action FK supplies prompt template
+└─ sprk_configjson = { /* template parameters, etc. */ }
+
+sprk_analysisaction row (BRIEF-NARRATE-TLDR)
+├─ sprk_systemprompt = "..."                        ← prompt-driven payload only
+├─ sprk_outputschemajson = "..."                    ← structured output shape
+└─ sprk_temperature = 0
 ```
+
+Runtime: orchestrator reads `node.sprk_executortype = 1` → routes to `AiCompletionNodeExecutor` (one hop). Executor's `Validate()` then asserts Action FK is present and reads SystemPrompt + OutputSchemaJson from the Action row.
+
+**Example 2 — Pure executor node (`Condition`)**: a node that evaluates a branching condition. No prompt; no Action FK needed.
+
+```
+sprk_playbooknode row
+├─ sprk_executortype = 30 (Condition)               ← single-hop dispatch identity
+├─ sprk_actionid = null                             ← no Action FK (Validate() prohibits it)
+└─ sprk_configjson = { "condition": "...", "trueBranch": "...", "falseBranch": "..." }
+```
+
+Runtime: orchestrator reads `node.sprk_executortype = 30` → routes to `ConditionNodeExecutor` (one hop). Executor's `Validate()` prohibits Action FK presence and reads the branching expression from `sprk_configjson`.
+
+### What was removed
+
+Three pre-R7 dispatch artifacts no longer exist at runtime:
+- The structural-fallback ladder (`IsDeployedStartNode`, `IsDeployedLoadKnowledgeNode`, `IsDeployedReturnResponseNode`) — deleted per FR-08.
+- The 3-rung lookup chain (`node.actionid → Action.actiontypeid → lookup_row.executoractiontype`) — replaced by the single `node.sprk_executortype` read per FR-07.
+- The `__actionType` discriminator in `sprk_playbooknode.sprk_configjson` — no longer read at runtime per FR-08 (see §3).
+
+### Cross-references
+
+- Runtime mechanics (single-hop dispatch contract, executor registry, validation order): `ai-architecture-playbook-runtime.md`.
+- Spec authority: FR-07 (single-hop dispatch), FR-12 / FR-13 (AiCompletion executor + Validate contract), FR-19 (`sprk_executortype` backfill on existing 94 nodes).
+- BFF placement decision criteria (config boundary): root `CLAUDE.md` §10 BFF Hygiene + `.claude/constraints/bff-extensions.md` §G.
+- Lookup-table disposition (advisory only): §8a below.
 
 ---
 
@@ -190,6 +221,24 @@ The policy is not yet binding — capture in this doc so it's not lost between R
 
 ---
 
+## 8a. `sprk_analysisactiontype` lookup table — R7 disposition (FR-05)
+
+> **Added by**: spaarke-ai-platform-unification-r7 Wave 4 task 045 (FR-05)
+> **Status**: PRESERVED, repurposed as decorative. Wave 6 task 062 may rewrite the surrounding §8 "ActionType allocation policy" treatment to fully reflect the new model; this section is the binding interim disposition note.
+
+The `sprk_analysisactiontype` Dataverse lookup table is KEPT in R7 (not dropped) but its role changes fundamentally:
+
+- **Decorative / maker categorization only**: the table exists so makers can browse "what kinds of actions exist" in the maker portal. It is convenience metadata for human navigation.
+- **Runtime ignores it**: `PlaybookOrchestrationService.ExecuteNodeAsync` does NOT read the lookup table or any FK to it for dispatch decisions. Per FR-07, dispatch identity lives ONLY on `sprk_playbooknode.sprk_executortype` (a Choice column directly on the node row) — a single-hop read.
+- **The `sprk_executoractiontype` field on lookup-table ROWS remains, but is advisory only**: the column persists on the lookup table for maker readability (so a maker viewing a lookup row can see "this category corresponds to executor type X"), but it is NOT load-bearing. The runtime never reads it. Treat it as informational documentation about the row's intent.
+- **The Action row's prior `sprk_actiontypeid` FK is dropped** (FR-03 + FR-04, executed in tasks 042-044). The Action row no longer carries an ActionType pointer at all. Per FR-05, this is the binding state: dispatch is on `node.sprk_executortype`; Actions are prompt templates (Home A — prompt, temperature, output schema), not dispatch markers.
+
+**Traceability**: this disposition implements spec **FR-03** (drop FK on Action), **FR-04** (drop INT field on Action), **FR-05** (KEEP lookup table; field on rows is advisory), and **FR-07** (single-hop dispatch on `node.sprk_executortype`).
+
+**Practical consequence for the §2 four-home model**: the row in §2's Home A table listing `sprk_ActionTypeId FK (executor selector)` reflects the PRE-R7 state. As of R7, that FK is gone; Actions in Home A carry only Action-intrinsic LLM behaviour (prompt, temperature, output schema). The "executor selector" responsibility moves to Home C — the node row's `sprk_executortype` Choice column. Wave 6 task 062 will refresh §2 + §8 to align fully.
+
+---
+
 ## 9. Relationship to other canonical docs
 
 | Question | Read |
@@ -199,6 +248,7 @@ The policy is not yet binding — capture in this doc so it's not lost between R
 | How to author the JSON file the deploy script consumes | `ai-guide-playbook-deploy-recipe.md` |
 | JPS schema for action prompts + structured output | `ai-guide-jps-authoring.md` |
 | Maker recipe for a real `sprk_event` notification playbook | `PLAYBOOK-AUTHOR-GUIDE.md` |
+| **How runtime data flows from playbook node configJson into the LLM prompt (R7 Wave 11 two-layer pattern)** | [`SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md`](SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md) — Layer 1 orchestrator template resolution + Layer 2 PromptSchemaRenderer structured `## Input` section. Required reading for any new narrative-output consumer (Insight Engine, future Workspace UX). Maker tutorial: [`BUILD-A-NEW-NARRATIVE-OUTPUT-CONSUMER.md`](../guides/BUILD-A-NEW-NARRATIVE-OUTPUT-CONSUMER.md). |
 | BFF placement decision criteria | `.claude/constraints/bff-extensions.md` (§G now points back here) |
 
 ---

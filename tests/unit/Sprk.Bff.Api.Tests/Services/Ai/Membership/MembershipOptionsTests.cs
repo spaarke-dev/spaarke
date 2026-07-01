@@ -18,8 +18,16 @@ namespace Sprk.Bff.Api.Tests.Services.Ai.Membership;
 public class MembershipOptionsTests
 {
     [Fact]
-    public void DefaultValues_AreConservativeEmptyDefaults()
+    public void DefaultValues_RawConstruction_AreEmptyAndScalarsSetToCanonical()
     {
+        // Raw `new MembershipOptions()` (no DI, no IConfiguration binding) returns
+        // empty lists. The CANONICAL Spaarke defaults are seeded by the
+        // post-configure step in AddMembership(); see
+        // DefaultValues_AfterAddMembership_AreCanonicalSpaarkeIdentityTables below.
+        // This split exists because IConfiguration.Bind APPENDS to List<T>
+        // properties — property-initializer defaults would double-up the entries
+        // when an operator binds the same names. The post-configure seeds only
+        // when the bound list is empty, so operator config replaces cleanly.
         var options = new MembershipOptions();
 
         options.IncludedIdentityTables.Should().BeEmpty();
@@ -114,9 +122,16 @@ public class MembershipOptionsTests
     }
 
     [Fact]
-    public void AddMembership_WithEmptyConfig_StillResolvesDefaults()
+    public void AddMembership_WithEmptyConfig_SeedsCanonicalDefaultsViaPostConfigure()
     {
-        // Confirms the "production deployments that never opt in still work" guarantee.
+        // R7 W12 task 130 (2026-06-30): when the "Membership" appsettings section
+        // is absent — which is currently the case in every deployed environment
+        // (appsettings.template.json, appsettings.Production.json.template, and
+        // the Bicep appSettings ALL omit it; only the GITIGNORED
+        // appsettings.Development.json.template defines it) — the resolver still
+        // produces a functional configuration via the MembershipOptionsDefaults
+        // post-configure step. This is the regression-protection test for the
+        // production-environment 0-results-for-all-users bug.
         var services = new ServiceCollection();
         IConfiguration config = new ConfigurationBuilder().Build();
         services.AddMembership(config);
@@ -125,10 +140,50 @@ public class MembershipOptionsTests
         var options = sp.GetRequiredService<IOptions<MembershipOptions>>().Value;
 
         options.Should().NotBeNull();
-        options.IncludedIdentityTables.Should().BeEmpty();
-        options.GlobalFieldExclusions.Should().BeEmpty();
+        options.IncludedIdentityTables.Should().HaveCount(6,
+            because: "MembershipOptionsDefaults seeds the 6 canonical Spaarke identity tables " +
+                     "when the bound list is empty");
+        options.IncludedIdentityTables.Select(t => t.Table).Should().BeEquivalentTo(new[]
+        {
+            "systemuser", "contact", "team", "businessunit", "account", "sprk_organization"
+        });
+        options.GlobalFieldExclusions.Should().BeEquivalentTo(new[]
+        {
+            "createdby", "modifiedby", "createdonbehalfby", "modifiedonbehalfby"
+        }, because: "MembershipOptionsDefaults seeds the 4 canonical audit-field exclusions " +
+                    "when the bound list is empty");
         options.RoleNameStrategy.Should().Be("CamelCase");
         options.MetadataCacheTtlMinutes.Should().Be(60);
         options.EntityOverrides.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void AddMembership_WithOperatorBoundIdentityTables_DoesNotSeedDefaults()
+    {
+        // The post-configure seeding is GATED on empty — operator-provided
+        // configuration MUST replace the defaults cleanly, not append to them.
+        // This pins the contract for environments that may want a restricted
+        // identity-table set (e.g., contact-only or team-only) or a different
+        // set of audit-field exclusions.
+        var configValues = new Dictionary<string, string?>
+        {
+            ["Membership:IncludedIdentityTables:0:Table"] = "systemuser",
+            ["Membership:IncludedIdentityTables:0:IdentityType"] = "SystemUser",
+            ["Membership:GlobalFieldExclusions:0"] = "owninguser",
+        };
+        IConfiguration config = new ConfigurationBuilder()
+            .AddInMemoryCollection(configValues)
+            .Build();
+
+        var services = new ServiceCollection();
+        services.AddMembership(config);
+        using var sp = services.BuildServiceProvider();
+
+        var options = sp.GetRequiredService<IOptions<MembershipOptions>>().Value;
+
+        // Operator override stands alone — NOT appended to the 6 canonical defaults.
+        options.IncludedIdentityTables.Should().HaveCount(1);
+        options.IncludedIdentityTables[0].Table.Should().Be("systemuser");
+        options.GlobalFieldExclusions.Should().BeEquivalentTo(new[] { "owninguser" });
     }
 }

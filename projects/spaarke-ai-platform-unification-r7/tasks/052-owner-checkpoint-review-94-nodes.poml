@@ -1,0 +1,169 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-052" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>OWNER CHECKPOINT — owner reviews + sets sprk_executortype for 94 nodes</title>
+    <status>not-started</status>
+    <wave>5</wave>
+    <estimated-effort>variable — depends on owner availability (1-4 hours of owner time)</estimated-effort>
+    <tags>manual, owner-gate, wave-5</tags>
+    <rigor-level>MINIMAL</rigor-level>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>051</dependencies>
+    <fr-coverage>FR-19 (owner-decision portion)</fr-coverage>
+  </metadata>
+
+  <prompt>
+    🔔 HUMAN GATE. This task is a manual owner-checkpoint, not an agent execution.
+
+    The agent's role here is minimal: surface the CSV, explain the review format, and BLOCK
+    (status stays in-progress) until the owner produces the output CSV. Task 053 (migration
+    script authoring) begins only after the output CSV exists.
+
+    The owner reviews each of ~94 rows in `playbook-node-review-input.csv` and assigns each
+    node's final `sprk_executortype` value. The owner is the authoritative source for these
+    decisions per spec FR-19 + 2026-06-28 confirmation (small scale, manual per-node review).
+  </prompt>
+
+  <role>
+    Coordinator / gatekeeper, NOT implementer. The agent's job is to:
+    1. Verify the input CSV exists and is well-formed
+    2. Explain the review format to the owner clearly
+    3. Wait for the owner to produce the output CSV
+    4. Validate the output CSV when produced
+    5. Advance to task 053
+  </role>
+
+  <goal>
+    A file at `projects/spaarke-ai-platform-unification-r7/notes/drafts/playbook-node-review-output.csv`
+    (or any name the owner chooses — exact filename is flexible) containing the owner's
+    authoritative `sprk_executortype` assignment for every node in the input CSV.
+
+    Format flexibility: the owner may
+    - Edit the input CSV in place + rename it
+    - Add a single `owner_decision_executortype` column to a copy
+    - Use a separate spreadsheet entirely
+    - Produce a JSON file instead of CSV
+    The output is whatever shape the owner finds easiest to produce; task 053 adapts to it.
+  </goal>
+
+  <inputs>
+    <file purpose="input-csv">projects/spaarke-ai-platform-unification-r7/notes/drafts/playbook-node-review-input.csv</file>
+    <file purpose="spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-19">Manual per-node review by owner — 94 rows is small enough that owner reviews each one.</constraint>
+    <constraint source="CLAUDE.md §6 Human Escalation Triggers">This task IS a planned human-input gate. The agent surfaces the requirement and waits; no autonomous decision-making is permitted on `sprk_executortype` values.</constraint>
+    <constraint source="CLAUDE.md §10">No BFF surface touched. No publish-size verification needed.</constraint>
+    <constraint source="output-format flexibility">DO NOT require a specific output filename or column shape from the owner. Task 053 adapts to whatever the owner produces.</constraint>
+    <constraint source="no-autonomous-write">The agent MUST NOT write `sprk_executortype` values to any CSV in this task. All values come from owner.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>owner-checkpoint-pattern</topic>
+    <files>
+      <file>projects/spaarke-ai-platform-unification-r7/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      The owner has authoritative knowledge of every playbook node's intended dispatch behavior.
+      The agent's heuristic suggestions in task 050 are advisory only — the owner sets the
+      final value. This is the human-judgment gate for FR-19.
+
+      Why this matters: incorrect `sprk_executortype` values in the backfill would silently
+      route nodes to the wrong executor at runtime — a "right tool, wrong job" failure mode
+      that's hard to detect by automated test. The owner's per-node review catches edge cases
+      the heuristic misses.
+
+      The 33 Choice values are documented in `sprk_playbookexecutortype` global Choice set.
+      The owner can reference this list when filling in decisions.
+    </background>
+    <dependencies>
+      <dependency task="051" status="must-be-complete">Input CSV must exist at `notes/drafts/playbook-node-review-input.csv`.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 053 (Migrate-PlaybookNodes-to-ExecutorType.ps1) reads the output CSV.</item>
+      <item>Task 054 runs the migration; post-run audit confirms no node has null `sprk_executortype`.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: MINIMAL · 📋 REASON: human-gate task; agent's role is verify-input + wait-for-output + validate. No code modification, no quality gates needed · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Verify input CSV exists">
+      Confirm `projects/spaarke-ai-platform-unification-r7/notes/drafts/playbook-node-review-input.csv` exists.
+      If not, STOP — task 051 must complete first.
+    </step>
+    <step order="2" name="Surface the checkpoint to the owner">
+      Output exactly:
+
+      🔔 **OWNER CHECKPOINT — TASK 052 (FR-19)**
+
+      I need your manual review for the 94 existing playbook-node rows in spaarkedev1.
+
+      **Input file**: `projects/spaarke-ai-platform-unification-r7/notes/drafts/playbook-node-review-input.csv`
+
+      **What to do**:
+      1. Open the CSV in Excel / VS Code / your preferred editor
+      2. Review each row's `suggested_executortype` (my best guess based on Action name + advisory field)
+      3. Fill in `owner_decision_executortype` (the final value to write to Dataverse) with the Choice value (integer) per node — use the 33-value `sprk_playbookexecutortype` Choice set as reference
+      4. Optionally add `owner_notes` for any node where the decision was non-obvious (helps future audits)
+      5. Save as `notes/drafts/playbook-node-review-output.csv` (or any name you prefer — I'll adapt)
+
+      **Reference**: 33 ExecutorType values are in the C# enum at `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/INodeExecutor.cs` (post-Wave 2 rename) and in the `sprk_playbookexecutortype` global Choice set in Dataverse.
+
+      **When done**: tell me "owner review complete" or "task 053 ready" and I'll proceed to author the migration script.
+    </step>
+    <step order="3" name="Block on human action">
+      Status: in-progress. Do not advance to task 053 until owner confirms.
+      The agent may help with ad-hoc questions (e.g., "what does ExecutorType 5 mean?") during the review.
+      The agent MUST NOT write decisions into the CSV autonomously.
+    </step>
+    <step order="4" name="Validate owner output (after owner confirms done)">
+      Once owner says "review complete", locate the output CSV (whatever name they chose).
+      Verify:
+      - File exists
+      - Row count ≈ same as input (~94)
+      - Every row has a non-blank `owner_decision_executortype` (or owner explicitly noted "skip this row — node was deleted")
+      - Values look like valid integers in the 0-150 range (the `sprk_playbookexecutortype` value range)
+      - No obvious data corruption
+      If validation fails, surface specific row-level issues to the owner for a quick correction pass.
+    </step>
+    <step order="5" name="Update current-task.md + TASK-INDEX">
+      Mark task 052 status complete; advance current-task.md to task 053.
+      Record the owner-output CSV path in current-task.md so task 053 knows where to read from.
+    </step>
+    <step order="6" name="Commit the output CSV">
+      Commit the owner's output CSV with conventional message.
+      Example: `chore(r7): owner playbook-node sprk_executortype review complete (Wave 5 task 052, FR-19)`
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (input CSV for validation, output CSV for validation)</tool>
+    <tool>Edit (current-task.md to record output CSV path)</tool>
+    <tool>Bash (git commit after owner produces output)</tool>
+  </tools>
+
+  <outputs>
+    <output type="manual-input">projects/spaarke-ai-platform-unification-r7/notes/drafts/playbook-node-review-output.csv (owner-produced; exact name flexible)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md (advance to task 053, record owner-output CSV path)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 052 ✅)</output>
+    <output type="commit">chore(r7): owner playbook-node sprk_executortype review complete (Wave 5 task 052, FR-19)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Input CSV verified to exist before owner notification</criterion>
+    <criterion>Owner notification surfaced clearly with file path + format instructions + Choice-set reference</criterion>
+    <criterion>Agent does NOT auto-fill owner-decision values (rule of this checkpoint)</criterion>
+    <criterion>Owner produces output CSV (or equivalent file) with `sprk_executortype` decision per row</criterion>
+    <criterion>Output CSV validated: row count matches, every row has a decision, values in valid range</criterion>
+    <criterion>Output CSV path recorded in current-task.md for task 053 to read</criterion>
+    <criterion>Output CSV committed</criterion>
+  </acceptance-criteria>
+</task>

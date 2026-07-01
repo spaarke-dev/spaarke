@@ -1,6 +1,6 @@
 // R4 spaarke-daily-update-service-r4 — Tests for ReturnResponseNodeExecutor (UAT
 // 2026-06-26 follow-on to Start fix). Mirrors StartNodeExecutorTests shape:
-//   - SupportedActionTypes contains ReturnResponse.
+//   - SupportedExecutorTypes contains ReturnResponse.
 //   - Validate: null / empty / well-formed / malformed configJson.
 //   - ExecuteAsync: responseBinding resolves all templates against scope.
 //   - ExecuteAsync: _validationMetadata sidecar binding (nested name→template map).
@@ -39,13 +39,13 @@ public class ReturnResponseNodeExecutorTests
         _executor = new ReturnResponseNodeExecutor(_templateEngine, _loggerMock.Object);
     }
 
-    #region SupportedActionTypes
+    #region SupportedExecutorTypes
 
     [Fact]
     public void SupportedActionTypes_ContainsReturnResponse()
     {
-        _executor.SupportedActionTypes.Should().Contain(ActionType.ReturnResponse);
-        _executor.SupportedActionTypes.Should().HaveCount(1);
+        _executor.SupportedExecutorTypes.Should().Contain(ExecutorType.ReturnResponse);
+        _executor.SupportedExecutorTypes.Should().HaveCount(1);
     }
 
     #endregion
@@ -301,9 +301,9 @@ public class ReturnResponseNodeExecutorTests
             {
                 Id = Guid.Empty,
                 Name = "ReturnResponse",
-                ActionType = ActionType.ReturnResponse
+                ExecutorType = ExecutorType.ReturnResponse
             },
-            ActionType = ActionType.ReturnResponse,
+            ExecutorType = ExecutorType.ReturnResponse,
             Scopes = new ResolvedScopes([], [], []),
             PreviousOutputs = previousOutputs ?? new Dictionary<string, NodeOutput>(),
             Parameters = new Dictionary<string, string>(),

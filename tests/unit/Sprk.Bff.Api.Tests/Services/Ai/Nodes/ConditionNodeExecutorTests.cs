@@ -27,14 +27,14 @@ public class ConditionNodeExecutorTests
             _loggerMock.Object);
     }
 
-    #region SupportedActionTypes Tests
+    #region SupportedExecutorTypes Tests
 
     [Fact]
     public void SupportedActionTypes_ContainsCondition()
     {
         // Assert
-        _executor.SupportedActionTypes.Should().Contain(ActionType.Condition);
-        _executor.SupportedActionTypes.Should().HaveCount(1);
+        _executor.SupportedExecutorTypes.Should().Contain(ExecutorType.Condition);
+        _executor.SupportedExecutorTypes.Should().HaveCount(1);
     }
 
     #endregion
@@ -849,9 +849,9 @@ public class ConditionNodeExecutorTests
             {
                 Id = actionId,
                 Name = "Condition",
-                ActionType = ActionType.Condition
+                ExecutorType = ExecutorType.Condition
             },
-            ActionType = ActionType.Condition,
+            ExecutorType = ExecutorType.Condition,
             Scopes = new ResolvedScopes([], [], []),
             TenantId = "test-tenant"
         };

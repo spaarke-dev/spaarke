@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="153" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Audit 120 Gaps D-H — apply remaining 5 smaller assistant-workspace fixes</title>
+    <phase>Wave 12 — MVP Completion</phase>
+    <wave>12</wave>
+    <sub-wave>12.4</sub-wave>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>bff-api code-impl; multiple smaller fixes per audit 120 dispositions D-H</rigor-reason>
+    <parallel-group>W12-4</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <tags>bff-api, code-impl, assistant, wave12</tags>
+    <estimated-effort>0.5-1 day</estimated-effort>
+    <status>completed</status>
+    <completed-date>2026-06-30</completed-date>
+  </metadata>
+
+  <prompt>
+Audit 120 enumerated 8 gaps; T150 (Gap A), T151 (Gap B), T152 (Gap C) cover the top 3 most-impactful. This task applies remaining gaps D-H per the disposition table in audit 120 §5. Read the audit's §5 disposition table for the precise gap definitions + recommended fixes; apply each.
+  </prompt>
+
+  <role>
+You are a BFF developer applying multiple smaller targeted fixes from a single audit. Each gap may have its own fix location; treat as a sequence of small edits.
+  </role>
+
+  <goal>
+All 8 audit 120 gaps addressed. Combined with T150 + T151 + T152, audit Scenarios A-E (per audit §4) all pass except those explicitly out-of-MVP scope.
+  </goal>
+
+  <inputs>
+    - Audit notes: projects/spaarke-ai-platform-unification-r7/notes/audits/wave12-120-assistant-workspace.md §5 disposition table (gaps D-H definitions + fixes)
+    - Already-covered: Gap A (T150), Gap B (T151), Gap C (T152)
+    - Gaps D-H are smaller per audit's effort estimate (each likely &lt;2 hours)
+  </inputs>
+
+  <constraints>
+    - Per CLAUDE.md §10 + §11: modification only; no new abstractions
+    - Per ADR-038: integration-heavy tests for any new test additions
+    - Each gap MUST have a unit test if it modifies executable code path
+    - Some gaps may turn out to be out-of-MVP-scope on closer read (e.g., retrieval-grounding-needed); flag those and defer
+  </constraints>
+
+  <knowledge>
+    <files>
+      - projects/spaarke-ai-platform-unification-r7/notes/audits/wave12-120-assistant-workspace.md (PRIMARY — §5 dispositions)
+      - projects/spaarke-ai-platform-unification-r7/CLAUDE.md
+    </files>
+  </knowledge>
+
+  <context>
+    <relevant-files>
+      - File:line per each Gap D-H definition (see audit notes §5)
+    </relevant-files>
+  </context>
+
+  <steps>
+1. **Read audit 120 §5 disposition table** (15 min):
+   - Enumerate Gaps D, E, F, G, H precisely
+   - Per gap: file:line + recommended fix + effort
+2. **Classify each gap** (15 min):
+   - In MVP scope? (plumbing-only — proceed)
+   - Out of MVP scope? (requires retrieval / tool-use — defer; document)
+3. **For each in-scope gap** (varies; 1-2 hours each):
+   - Apply minimal fix
+   - Add unit test if executable-code-path affected
+4. **For each out-of-scope gap**: document + file as DEF-NNN via /project-defer-issue-tracking
+5. **Build + test verification across all in-scope gaps** (15-30 min)
+
+  </steps>
+
+  <tools>
+    - Read / Grep / Glob
+    - Edit
+    - Bash (dotnet test, dotnet build)
+    - TodoWrite
+  </tools>
+
+  <outputs>
+    - Per-gap fix files modified (per audit §5)
+    - Per-gap unit tests added
+    - DEF-NNN entries for out-of-scope gaps
+    - Audit notes updated with per-gap Resolution
+  </outputs>
+
+  <acceptance-criteria>
+    - [ ] All 5 gaps (D-H) addressed (in-scope fixed; out-of-scope deferred with DEF-NNN)
+    - [ ] Unit tests for each in-scope gap
+    - [ ] `dotnet test` 0 new failures
+    - [ ] `dotnet build` 0 errors
+    - [ ] Audit notes updated with per-gap Resolution
+  </acceptance-criteria>
+</task>

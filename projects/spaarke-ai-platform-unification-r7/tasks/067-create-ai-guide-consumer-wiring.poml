@@ -1,0 +1,198 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-067" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>CREATE docs/guides/ai-guide-consumer-wiring.md — maker-facing tutorial for wiring a new consumer</title>
+    <status>not-started</status>
+    <wave>6</wave>
+    <estimated-effort>3-4 hours</estimated-effort>
+    <tags>docs, wave-6</tags>
+    <rigor-level>STANDARD</rigor-level>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>091</dependencies>
+    <fr-coverage>FR-31 (consumer wiring guide creation)</fr-coverage>
+  </metadata>
+
+  <prompt>
+    CREATE a new guide at `docs/guides/ai-guide-consumer-wiring.md` — a maker-facing tutorial for
+    wiring a new consumer of the playbook dispatch system. R7 promotes `sprk_playbookconsumer` to
+    first-class; this guide is the maker entry point for the promoted model. Covers: what a consumer
+    is, how to add one (ConsumerTypes.cs + sprk_playbookconsumer row + endpoint pattern), examples
+    from existing 6 consumers + chat-summarize migration case study (from Wave 9 task 091).
+
+    CRITICAL CONSTRAINT: DO NOT modify `docs/architecture/ai-architecture-consumer-routing.md`. That
+    doc is owned by `chat-routing-redesign-r1` (READ-ONLY in R7). This new guide CITES it for runtime
+    details but does NOT duplicate or modify it.
+  </prompt>
+
+  <role>
+    Documentation author + AI-platform architect. Audience: makers + AI engineers wiring a new
+    consumer surface (chat window, widget, code-page, ad-hoc launcher). Tutorial style: step-by-step,
+    code-snippet-heavy, worked examples, troubleshooting.
+  </role>
+
+  <goal>
+    A new file `docs/guides/ai-guide-consumer-wiring.md` covering:
+    1. **What is a consumer?** — short framing: a surface that invokes playbooks via the unified
+       dispatch model (`IConsumerRoutingService` + `IInvokePlaybookAi`)
+    2. **The 6 existing consumers** — enumerate them with brief description (citing actual current
+       codebase: spaarke-ai chat, briefing widget, etc. — discover via grep in step 2 of execution)
+    3. **How to wire a new consumer** — step-by-step procedure:
+       - Step 1: Add the consumer's type identifier to `ConsumerTypes.cs`
+       - Step 2: Add a row to `sprk_playbookconsumer` table (Dataverse), pointing at the playbook(s) to dispatch
+       - Step 3: At the consumer surface, call `IConsumerRoutingService.ResolveAsync(consumerType)` to get the playbook FK
+       - Step 4: Dispatch via `IInvokePlaybookAi.InvokePlaybookAsync(playbookId, payload)`
+       - Step 5: Handle the response (which is the playbook output shape)
+    4. **Worked example: chat-summarize migration** (W9 case study) — show the BEFORE state (direct
+       `AnalysisOrchestrationService.ExecuteAnalysisAsync` call) and AFTER state (Path A.5 via consumer
+       routing). Cite Wave 9 task 091.
+    5. **Troubleshooting** — common errors (consumer not registered, playbook not found, payload
+       schema mismatch) + how to debug.
+    6. **Cross-references**:
+       - `docs/architecture/ai-architecture-consumer-routing.md` for runtime details (READ-ONLY pointer)
+       - spec FR-17 + FR-18 + FR-31
+       - CLAUDE.md §10 BFF Hygiene
+       - PLAYBOOK-AUTHOR-GUIDE.md (for authoring the playbook the consumer will dispatch)
+
+    EXPLICIT EXCLUSION: This guide does NOT modify `ai-architecture-consumer-routing.md`. It cites
+    that doc but does NOT duplicate runtime mechanics (cache TTL, internal classes, etc.). If the
+    maker needs runtime depth, the cross-reference takes them there.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="design">projects/spaarke-ai-platform-unification-r7/design.md</file>
+    <file purpose="readonly-canonical">docs/architecture/ai-architecture-consumer-routing.md (READ-ONLY in R7)</file>
+    <file purpose="consumer-types">src/server/api/Sprk.Bff.Api/Services/Ai/ConsumerTypes.cs (or equivalent)</file>
+    <file purpose="consumer-routing-service">src/server/api/Sprk.Bff.Api/Services/Ai/IConsumerRoutingService.cs (interface)</file>
+    <file purpose="invoke-playbook-ai">src/server/api/Sprk.Bff.Api/Services/Ai/IInvokePlaybookAi.cs (interface)</file>
+    <file purpose="w9-migration">src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs (post-task-091 chat-summarize migration)</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-31">CREATE the consumer-wiring guide as R7 deliverable. Maker-facing tutorial.</constraint>
+    <constraint source="spec NFR-08">No SUPERSEDED markers; pure CREATE (no parallel content to existing docs).</constraint>
+    <constraint source="scope-boundary STRICT">DO NOT modify `docs/architecture/ai-architecture-consumer-routing.md`. That doc is owned by chat-routing-redesign-r1 follow-on. This new guide CITES it.</constraint>
+    <constraint source="scope-boundary STRICT">DO NOT create `docs/data-model/sprk_playbookconsumer.md`. That doc is owned by chat-routing-redesign-r1 follow-on.</constraint>
+    <constraint source="dependency">Task 091 (chat-summarize migration) must have shipped — the worked example references actual code. If 091 hasn't shipped, scaffold the example based on FR-17 intent + note the caveat that this section will need refinement after 091 ships.</constraint>
+    <constraint source="CLAUDE.md §11">Cost-of-doing-nothing: makers wiring a new consumer have no entry-point doc; they reverse-engineer from chat-summarize / briefing-widget code. Each new consumer reinvents the integration pattern.</constraint>
+    <constraint source="LENGTH">Target 200-350 lines. Tutorial-depth, not architecture-depth. Step-by-step, examples-heavy.</constraint>
+    <constraint source="audience">Audience is a maker who has NOT read the architecture doc. Use plain language. Code snippets are the load-bearing teaching tool, not prose.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>documentation</topic>
+    <files>
+      <file>docs/architecture/ai-architecture-consumer-routing.md</file>
+      <file>docs/guides/PLAYBOOK-AUTHOR-GUIDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Pre-R7, `sprk_playbookconsumer` existed but was lightly used; consumer wiring was ad-hoc per
+      surface (chat-summarize used direct `ExecuteAnalysisAsync`; briefing used /narrate-specific
+      paths). R7 promotes the consumer model to first-class: every surface dispatches through
+      `IConsumerRoutingService` + `IInvokePlaybookAi`. The runtime mechanics are documented in
+      `docs/architecture/ai-architecture-consumer-routing.md` (READ-ONLY here). What's MISSING is a
+      maker-facing tutorial for "I have a new surface and want to wire it" — this guide fills that gap.
+    </background>
+    <dependencies>
+      <dependency task="091" status="not-started-but-required">chat-summarize migration to Path A.5 — the worked-example case study.</dependency>
+      <dependency task="064" status="not-started-but-helpful">Constraint §G update — guide cross-references it.</dependency>
+      <dependency task="066" status="not-started-but-helpful">PLAYBOOK-AUTHOR-GUIDE update — guide cross-references it.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 068 may update root CLAUDE.md if this new doc warrants an entry in §17 Pointers.</item>
+      <item>Task 069 post-audit verifies no SUPERSEDED markers in `docs/` after this guide is added.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: STANDARD · 📋 REASON: docs CREATE task (no .cs / .ts / .tsx / .ps1 modification, tag docs only) · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read project CLAUDE.md + spec.md FR-17 + FR-18 + FR-31 + (READ-ONLY) ai-architecture-consumer-routing.md + (if shipped) chat-summarize migration from task 091.
+    </step>
+    <step order="2" name="Discover existing consumers">
+      Grep BFF source for `ConsumerTypes` / `IConsumerRoutingService` / `sprk_playbookconsumer`. Enumerate the 6 existing consumers in the codebase. Capture each consumer's identifier + brief purpose for the "6 existing consumers" section.
+    </step>
+    <step order="3" name="Locate ConsumerTypes.cs + relevant interfaces">
+      Find `ConsumerTypes.cs` (or equivalent). Read `IConsumerRoutingService` and `IInvokePlaybookAi` interfaces. Capture exact method signatures for the step-by-step procedure section.
+    </step>
+    <step order="4" name="Identify chat-summarize BEFORE state">
+      Read the pre-task-091 state of SessionSummarizeOrchestrator (or grep git log). Capture the BEFORE snippet — direct `ExecuteAnalysisAsync` call — for the worked example.
+    </step>
+    <step order="5" name="Identify chat-summarize AFTER state">
+      If task 091 has shipped, read the post-migration code from ChatEndpoints.cs / SessionSummarizeOrchestrator. Capture the AFTER snippet — Path A.5 via `IConsumerRoutingService` + `IInvokePlaybookAi`. If 091 hasn't shipped, scaffold the snippet from spec FR-17 intent.
+    </step>
+    <step order="6" name="Draft the guide">
+      Create `docs/guides/ai-guide-consumer-wiring.md`. Structure:
+      - **§1. What is a consumer?** — short framing paragraph + 1-line definition
+      - **§2. The 6 existing consumers** — table or bulleted list with consumer identifier + 1-line description
+      - **§3. How to wire a new consumer** — step-by-step procedure (5 steps as enumerated in goal)
+        - Step 1: ConsumerTypes.cs (code snippet)
+        - Step 2: sprk_playbookconsumer row (Dataverse Web API snippet or PAC CLI snippet)
+        - Step 3: ResolveAsync call (code snippet)
+        - Step 4: InvokePlaybookAsync call (code snippet)
+        - Step 5: Response handling (code snippet)
+      - **§4. Worked example: chat-summarize migration** (BEFORE / AFTER snippets)
+      - **§5. Troubleshooting** — bulleted common errors + diagnosis
+      - **§6. See also** — cross-references with explicit (READ-ONLY) note on the routing doc
+    </step>
+    <step order="7" name="Cross-reference appropriately">
+      Cite `docs/architecture/ai-architecture-consumer-routing.md` (READ-ONLY pointer) + spec FR-17 + FR-18 + FR-31 + CLAUDE.md §10 + sibling PLAYBOOK-AUTHOR-GUIDE.md.
+    </step>
+    <step order="8" name="Verify scope boundary">
+      Confirm: this task only CREATED a new file. No modifications to `ai-architecture-consumer-routing.md` or any other file in `docs/architecture/`. No new file in `docs/data-model/`.
+    </step>
+    <step order="9" name="Verify NFR-08 discipline">
+      Grep new doc for "SUPERSEDED", "deprecated". Zero instances. Discipline: CREATE clean.
+    </step>
+    <step order="10" name="Verify guide reads coherently">
+      Read end-to-end as a maker wiring a new consumer. Could they wire a working consumer from this guide alone? Code snippets must compile when copy-pasted. If not, tighten.
+    </step>
+    <step order="11" name="Update current-task.md + TASK-INDEX">
+      Mark task 067 status complete; advance current-task.md to next pending Wave 6 task.
+    </step>
+    <step order="12" name="Commit">
+      Commit `docs/guides/ai-guide-consumer-wiring.md` with conventional message.
+      Example: docs(guides/r7): create ai-guide-consumer-wiring maker tutorial (Wave 6 task 067, FR-31)
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (READ-ONLY consumer routing doc + spec + BFF source for consumer interfaces)</tool>
+    <tool>Grep (discover existing consumers + locate interfaces)</tool>
+    <tool>Write (new ai-guide-consumer-wiring.md file)</tool>
+    <tool>Bash (git commit)</tool>
+  </tools>
+
+  <outputs>
+    <output type="new-file">docs/guides/ai-guide-consumer-wiring.md</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md (advance to next Wave 6 task)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 067 ✅)</output>
+    <output type="commit">docs(guides/r7): create ai-guide-consumer-wiring maker tutorial (Wave 6 task 067, FR-31)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>New file docs/guides/ai-guide-consumer-wiring.md exists</criterion>
+    <criterion>§1 What is a consumer? — present</criterion>
+    <criterion>§2 6 existing consumers — enumerated</criterion>
+    <criterion>§3 Step-by-step wiring procedure — 5 steps with code snippets</criterion>
+    <criterion>§4 Worked example chat-summarize BEFORE/AFTER — present</criterion>
+    <criterion>§5 Troubleshooting — bulleted common errors</criterion>
+    <criterion>§6 Cross-references — present (incl. READ-ONLY pointer to ai-architecture-consumer-routing.md)</criterion>
+    <criterion>DID NOT modify docs/architecture/ai-architecture-consumer-routing.md</criterion>
+    <criterion>DID NOT create docs/data-model/sprk_playbookconsumer.md</criterion>
+    <criterion>No SUPERSEDED markers (NFR-08)</criterion>
+    <criterion>Length within 200-350 lines</criterion>
+    <criterion>Code snippets compile when copy-pasted</criterion>
+    <criterion>Future maker could wire working consumer from this guide alone</criterion>
+    <criterion>Commit pushed to work/spaarke-ai-platform-unification-r7</criterion>
+    <criterion>TASK-INDEX.md shows 067 ✅</criterion>
+  </acceptance-criteria>
+</task>

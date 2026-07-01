@@ -1,5 +1,5 @@
 // R3 Part 1 — User-Record Membership Resolution (node executor)
-// Task 041 (2026-06-21): Implements ActionType.LookupUserMembership = 52
+// Task 041 (2026-06-21): Implements ExecutorType.LookupUserMembership = 52
 // (added in task 040). Calls IMembershipResolverService IN-PROCESS per FR-1B.1
 // (NOT an HTTP round-trip to /api/users/me/memberships/{entityType}) and binds
 // the resolved IDs to the node's OutputVariable for downstream consumption
@@ -55,7 +55,7 @@ namespace Sprk.Bff.Api.Services.Ai.Nodes;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Implements <see cref="INodeExecutor"/> for <see cref="ActionType.LookupUserMembership"/>
+/// Implements <see cref="INodeExecutor"/> for <see cref="ExecutorType.LookupUserMembership"/>
 /// (value 52, added by task 040). Registered as a Singleton in
 /// <c>AnalysisServicesModule.AddNodeExecutors</c> alongside the other executors.
 /// </para>
@@ -90,10 +90,41 @@ public sealed class LookupUserMembershipNodeExecutor : INodeExecutor
     }
 
     /// <inheritdoc />
-    public IReadOnlyList<ActionType> SupportedActionTypes { get; } = new[]
+    public IReadOnlyList<ExecutorType> SupportedExecutorTypes { get; } = new[]
     {
-        ActionType.LookupUserMembership
+        ExecutorType.LookupUserMembership
     };
+
+    // R7 task 085 / FR-23 — typed config schema for Playbook Builder canvas.
+    // Derived from LookupUserMembershipNodeConfig: entityType (required), roles, includeRelated.
+    private static readonly ExecutorConfigSchema ConfigSchemaInstance = new(
+        ExecutorTypeName: nameof(ExecutorType.LookupUserMembership),
+        ExecutorTypeValue: (int)ExecutorType.LookupUserMembership,
+        Description: "Resolves the current user's record memberships for a given Dataverse entity type via IMembershipResolverService (FR-1B.1). Emits IDs + by-role map for downstream filter/template consumption.",
+        Fields: new ConfigSchemaField[]
+        {
+            new(
+                Name: "entityType",
+                Type: SchemaFieldType.String,
+                Required: true,
+                Description: "Dataverse entity logical name to resolve memberships against (e.g., 'sprk_matter', 'sprk_document'). Required.",
+                Default: null),
+            new(
+                Name: "roles",
+                Type: SchemaFieldType.Array,
+                Required: false,
+                Description: "Optional case-insensitive role filter (e.g., ['owner', 'assignedAttorney']). Empty/null means 'all discovered roles for the entity'.",
+                Default: null),
+            new(
+                Name: "includeRelated",
+                Type: SchemaFieldType.Boolean,
+                Required: false,
+                Description: "Phase 1D transitive expansion flag (1-hop max per Q3 owner clarification). Currently accepted-but-ignored by the resolver in Phase 1A; task 054 implements. Defaults to false.",
+                Default: false)
+        });
+
+    /// <inheritdoc />
+    public ExecutorConfigSchema GetConfigSchema() => ConfigSchemaInstance;
 
     /// <inheritdoc />
     public NodeValidationResult Validate(NodeExecutionContext context)
@@ -151,7 +182,7 @@ public sealed class LookupUserMembershipNodeExecutor : INodeExecutor
             "ai.lookup_user_membership.node_execute", ActivityKind.Internal);
         activity?.SetTag("node.id", context.Node.Id.ToString());
         activity?.SetTag("node.name", context.Node.Name);
-        activity?.SetTag("action_type", (int)ActionType.LookupUserMembership);
+        activity?.SetTag("action_type", (int)ExecutorType.LookupUserMembership);
 
         _logger.LogDebug(
             "Executing LookupUserMembership node {NodeId} ({NodeName})",

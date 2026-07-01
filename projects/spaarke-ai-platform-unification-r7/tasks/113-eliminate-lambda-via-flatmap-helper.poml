@@ -1,0 +1,161 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-113" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Eliminate {{lambda}} from source by adding {{flatMap}} helper + rewriting allowList expression</title>
+    <status>not-started</status>
+    <wave>11</wave>
+    <estimated-effort>2-3 hours</estimated-effort>
+    <tags>bff-api, code-impl, ai, dataverse-data, wave-11</tags>
+    <rigor-level>FULL</rigor-level>
+    <rigor-reason>Modifies .cs (TemplateEngine helper) + canonical source JSON for deployed playbook; tags include `bff-api`. FULL per task-execute Step 0.5.</rigor-reason>
+    <parallel-safe>true</parallel-safe>
+    <parallel-group>W11-C</parallel-group>
+    <parallel-reason>Adds a single new helper to TemplateEngine.cs (separate scope from 112's 6 helpers) + edits a separate source JSON file. Coordinate with 112 by both touching TemplateEngine.cs — if collision, merge sequentially.</parallel-reason>
+    <dependencies>111</dependencies>
+    <blocks>115</blocks>
+    <fr-coverage>FR-15 (eliminates the lambda expression-shape gap in source playbook)</fr-coverage>
+  </metadata>
+
+  <prompt>
+    Handlebars.NET has no native `lambda`. The DAILY-BRIEFING-NARRATE source uses
+    `(lambda c (map c.items 'regardingName'))` inside the ValidateEntityNames allowList expression
+    — needed because `start.categories[]` is an array of objects each containing an `items[]`
+    sub-array (categories → items → regardingName). Rather than build a true lambda helper
+    (complex), register a single `{{flatMap COLL 'nested.path'}}` helper that handles
+    "for each item in COLL, traverse 'nested.path' on it, return flat array". Then rewrite the
+    source playbook JSON's allowList expression using `flatMap`. Net: one helper, one source edit,
+    no lambda complexity in the engine.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Same expertise as 112 (Handlebars.NET) + JPS authoring
+    familiarity. Goal: simplest engine + cleanest source — pick the form that's easier to read.
+  </role>
+
+  <goal>
+    `TemplateEngine.cs` registers a `flatMap` helper. `daily-briefing-narrate.json` source has its
+    ValidateEntityNames allowList expression rewritten using `flatMap` (no `lambda`). xUnit tests
+    for the helper. Update task 115 to PATCH the deployed `sprk_playbooknode` row with the rewritten
+    expression (deferred — 115 handles deployed-data restoration).
+  </prompt>
+
+  <inputs>
+    <file purpose="template-engine">src/server/api/Sprk.Bff.Api/Services/Ai/TemplateEngine.cs</file>
+    <file purpose="template-engine-tests">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/TemplateEngineTests.cs</file>
+    <file purpose="source-playbook">projects/spaarke-daily-update-service/notes/playbooks/daily-briefing-narrate.json</file>
+    <file purpose="source-action">projects/spaarke-daily-update-service/notes/playbooks/actions/brief-validate-entity-names.action.json</file>
+    <file purpose="design-from-110">projects/spaarke-ai-platform-unification-r7/notes/spikes/wave11-orchestrator-resolution-design.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-010">DI Minimalism — helper added to existing TemplateEngine; no new abstraction.</constraint>
+    <constraint source="ADR-029">BFF Publish Hygiene — no new packages.</constraint>
+    <constraint source="CLAUDE.md §10">BFF Hygiene checklist applies.</constraint>
+    <constraint source="CLAUDE.md §11">Helper is extension of existing TemplateEngine; source JSON edit is modification. No new component justification required.</constraint>
+    <constraint source="readability">After rewrite, the source allowList expression MUST be readable in &lt; 5 lines (current lambda version spans 1 multi-line expression).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai/template-engine-helpers</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/adr/ADR-010-di-minimalism.md</file>
+      <file>docs/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/guides/JPS-AUTHORING-GUIDE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r7/notes/spikes/wave11-orchestrator-resolution-design.md</file>
+    </files>
+    <patterns>
+      <pattern name="flatMap semantic" location="JavaScript Array.prototype.flatMap">
+        Equivalent of `arr.flatMap(item =&gt; lookup(item, 'nested.path'))`. C# equivalent: `coll.SelectMany(item =&gt; ResolveDottedPath(item, fieldPath).AsEnumerable())`.
+      </pattern>
+      <pattern name="dotted-path resolution" location="TemplateEngine.ConvertJsonElement output shape">
+        Items in ConvertJsonElement output are Dictionary&lt;string, object?&gt; (case-insensitive). Walk dotted path by splitting on '.' and indexing each level. Final value may be IEnumerable (array case) or scalar.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Current source `ValidateEntityNames.inputBinding.allowList` uses:
+      `{{distinct (concat (map start.priorityItems 'regardingName') ... (flatten (map start.categories (lambda c (map c.items 'regardingName')))) ...)}}`
+      The `(lambda c (map c.items 'regardingName'))` is needed because categories is array-of-objects each with items[]. Adding a true Handlebars lambda is complex (block helper + subexpression capture); adding a `flatMap` helper sidesteps the issue with one straightforward addition.
+    </background>
+    <dependencies>
+      <dependency task="111" status="must-complete-first">ITemplateEngine wired so the helper is reachable.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 112 adds 6 other helpers (json, map, flatten, distinct, concat, join). T113 adds the 7th (flatMap).</item>
+      <item>Task 115 PATCHes the deployed sprk_playbooknode row with the rewritten allowList expression.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: FULL · 📋 REASON: bff-api code-impl + edits canonical source JSON · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context + verify 111 complete">
+      Confirm 111 ✅. Read design doc from 110. Read existing JoinIds helper for defensive style.
+    </step>
+    <step order="2" name="Implement flatMap helper">
+      Register `_handlebars.RegisterHelper("flatMap", …)`. Signature: `{{flatMap COLL 'nested.path'}}`. Internals: walk COLL items, for each item resolve dotted-path (split + index step-by-step on Dictionary&lt;string,object?&gt;), collect via SelectMany. Returns flat List&lt;object?&gt;. Null guard + UndefinedBindingResult guard per existing style.
+    </step>
+    <step order="3" name="Write xUnit tests for flatMap">
+      Test cases:
+      (a) Happy path — array of objects each with array sub-field (categories → items → regardingName);
+      (b) Empty outer array → empty result;
+      (c) Item missing nested.path → null entries skipped or kept (decision: skip);
+      (d) Scalar at intermediate path → empty;
+      (e) JsonElement input via ConvertJsonElement;
+      (f) Single-level path (no dots) → equivalent to flatten+map.
+    </step>
+    <step order="4" name="Rewrite source playbook allowList expression">
+      Edit `projects/spaarke-daily-update-service/notes/playbooks/daily-briefing-narrate.json`. Replace the lambda-based `allowList` expression with flatMap-based form. Example new shape:
+      `{{distinct (concat (map start.priorityItems 'regardingName') (map start.priorityItems 'viaMatter.name') (map start.priorityItems 'source.owningUser') (flatMap start.categories 'items.regardingName') (flatMap start.categories 'items.viaMatter.name') (flatMap start.categories 'items.source.owningUser') (flatMap start.channels 'items.regardingName') (flatMap start.channels 'items.viaMatter.name') (flatMap start.channels 'items.source.owningUser'))}}`
+      Preserve the `_comment` documenting the FR-3 / FR-14 rationale; add a brief note on the lambda → flatMap rewrite.
+    </step>
+    <step order="5" name="Verify no remaining lambda in source">
+      Grep `projects/spaarke-daily-update-service/notes/playbooks/` for `lambda`. Confirm zero matches after edit.
+    </step>
+    <step order="6" name="Build + run BFF test suite">
+      `dotnet build` + `dotnet test` — confirm zero regressions.
+    </step>
+    <step order="7" name="Step 9.5 — Quality gates">
+      `/code-review` + `/adr-check` on the TemplateEngine + test changes. Address HIGH/CRITICAL.
+    </step>
+    <step order="8" name="Update TASK-INDEX + current-task.md">
+      Mark 113 ✅; advance to next pending (114).
+    </step>
+    <step order="9" name="Commit">
+      Commit message body cites the lambda-to-flatMap decision + reference to design doc.
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (TemplateEngine + source playbook)</tool>
+    <tool>Edit (TemplateEngine.cs)</tool>
+    <tool>Edit (daily-briefing-narrate.json — rewrite allowList)</tool>
+    <tool>Edit (TemplateEngineTests.cs)</tool>
+    <tool>Grep (lambda check)</tool>
+    <tool>Bash (build + test + commit)</tool>
+    <tool>Skill (code-review, adr-check)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/TemplateEngine.cs (flatMap helper added)</output>
+    <output type="data">projects/spaarke-daily-update-service/notes/playbooks/daily-briefing-narrate.json (allowList expression rewritten)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/TemplateEngineTests.cs (flatMap test cases)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">flatMap helper registered on TemplateEngine</criterion>
+    <criterion testable="true">6+ flatMap test cases cover happy/empty/missing-path/scalar/JsonElement/single-level</criterion>
+    <criterion testable="true">Grep for `lambda` in projects/spaarke-daily-update-service/notes/playbooks/ returns zero matches</criterion>
+    <criterion testable="true">Source allowList expression rewritten is ≤ 5 lines + readable</criterion>
+    <criterion testable="true">All existing tests pass; new tests pass</criterion>
+    <criterion testable="true">code-review + adr-check return zero HIGH/CRITICAL</criterion>
+  </acceptance-criteria>
+</task>

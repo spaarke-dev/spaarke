@@ -1,0 +1,182 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-090" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Audit SessionSummarizeOrchestrator caller graph; design Path A.5 migration</title>
+    <status>completed</status>
+    <wave>9</wave>
+    <estimated-effort>2-3 hours</estimated-effort>
+    <tags>audit, bff-api, wave-9</tags>
+    <rigor-level>STANDARD</rigor-level>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>024</dependencies>
+    <fr-coverage>FR-17 (audit + design portion)</fr-coverage>
+  </metadata>
+
+  <prompt>
+    Wave 9 starts here. Before refactoring SessionSummarizeOrchestrator (task 091), audit the
+    current caller graph and the existing partial migration that chat-routing-redesign-r1 left in
+    place. Today the orchestrator already uses IConsumerRoutingService.ResolveAsync but still
+    dispatches through IPlaybookExecutionEngine.ExecuteChatSummarizeAsync (a streaming-specific
+    method), NOT through the canonical IInvokePlaybookAi.InvokePlaybookAsync triangle that ADR-013
+    mandates. R7 FR-17 closes this gap. Produce a clean Path A.5 migration design doc so task 091
+    can execute without re-reading source.
+  </prompt>
+
+  <role>
+    Senior .NET backend developer familiar with the Spaarke BFF AI architecture, the canonical
+    IInvokePlaybookAi triangle (ADR-013), and the IConsumerRoutingService 5-min TTL cache (ADR-014).
+    Goal: extract the right migration path, not re-implement.
+  </role>
+
+  <goal>
+    A migration-design document at
+    `projects/spaarke-ai-platform-unification-r7/notes/spikes/chat-summarize-migration-design.md`
+    that answers:
+    1. What is the current SessionSummarizeOrchestrator caller graph? (Who calls it, who does it call?)
+    2. What is the gap between today's IPlaybookExecutionEngine.ExecuteChatSummarizeAsync path and
+       the canonical IInvokePlaybookAi triangle (ADR-013)?
+    3. What is the Path A.5 design:
+       IConsumerRoutingService.ResolveAsync("chat-summarize") -> playbook ID ->
+       IInvokePlaybookAi.InvokePlaybookAsync(playbookId, payload)?
+    4. What streaming-vs-non-streaming semantics must be preserved (Structured Outputs streaming +
+       IncrementalJsonParser field-delta emission)?
+    5. What sprk_playbookconsumer row needs to exist (FR-17 acceptance criterion handled in task 092)?
+    6. What is the fallback behavior (graceful-degrade if routing-table returns null) the design
+       must preserve from chat-routing-redesign-r1 task 028d?
+    7. What integration test confirms the end-to-end migration works (chat /summarize works
+       through playbook dispatch)?
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="design-doc">projects/spaarke-ai-platform-unification-r7/design.md</file>
+    <file purpose="plan">projects/spaarke-ai-platform-unification-r7/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    <file purpose="refactor-target">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SessionSummarizeOrchestrator.cs</file>
+    <file purpose="canonical-triangle">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IInvokePlaybookAi.cs</file>
+    <file purpose="canonical-triangle-impl">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/InvokePlaybookAi.cs</file>
+    <file purpose="legacy-direct-path">src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs</file>
+    <file purpose="chat-endpoints">src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs</file>
+    <file purpose="consumer-routing-doc">docs/architecture/ai-architecture-consumer-routing.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-013">BFF AI Architecture — IInvokePlaybookAi triangle is canonical. SessionSummarizeOrchestrator MUST route through this triangle post-R7, not through IPlaybookExecutionEngine.ExecuteChatSummarizeAsync (chat-streaming-specific).</constraint>
+    <constraint source="ADR-014">Caching — IConsumerRoutingService 5-min TTL is preserved verbatim. NFR-04: invalidation hook is NOT in R7 scope.</constraint>
+    <constraint source="spec FR-17">Migrate chat-summarize from legacy direct path (AnalysisOrchestrationService.ExecuteAnalysisAsync) to playbook dispatch via IConsumerRoutingService.ResolveAsync + IInvokePlaybookAi.InvokePlaybookAsync.</constraint>
+    <constraint source="spec NFR-04">Consumer routing cache invalidation hook NOT in R7 scope — design must not propose new invalidation logic.</constraint>
+    <constraint source="CLAUDE.md §11">Audit task — modification justification triple applies to task 091 (the refactor task), not this audit.</constraint>
+    <constraint source="bff-extensions.md">Audit task does not modify BFF; no publish-size check needed for this task.</constraint>
+    <constraint source="MUST NOT modify">docs/architecture/ai-architecture-consumer-routing.md — READ-ONLY in R7 per spec (chat-routing-redesign-r1 owns).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai/consumer-routing</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-010-di-minimalism.md</file>
+      <file>docs/adr/ADR-013-bff-ai-architecture.md</file>
+      <file>docs/adr/ADR-014-caching.md</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>docs/architecture/ai-architecture-consumer-routing.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="IInvokePlaybookAi triangle (canonical)" location="src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IInvokePlaybookAi.cs">
+        ADR-013 canonical AI public contract. SessionSummarizeOrchestrator (post-R7) and every
+        consumer-routed dispatch path MUST flow through this triangle.
+      </pattern>
+      <pattern name="DailyBriefingEndpoints /narrate case study" location="src/server/api/Sprk.Bff.Api/Api/Ai/DailyBriefingEndpoints.cs:201-374">
+        Reference impl of "consumer code -> IConsumerRoutingService.ResolveAsync -> IInvokePlaybookAi.InvokePlaybookAsync" pattern.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      chat-routing-redesign-r1 task 028d landed a partial migration: SessionSummarizeOrchestrator
+      now consults IConsumerRoutingService.ResolveAsync(ConsumerTypes.ChatSummarize) for the
+      playbook ID, falling back to WorkspaceOptions.ChatSummarizePlaybookId when the routing-table
+      returns null. But the dispatch step still calls IPlaybookExecutionEngine.ExecuteChatSummarizeAsync
+      directly (a streaming-specific method) instead of going through the canonical
+      IInvokePlaybookAi.InvokePlaybookAsync triangle that ADR-013 mandates. This is the gap R7 FR-17 closes.
+    </background>
+    <dependencies>
+      <dependency task="024" status="must-be-complete">PlaybookOrchestrationService.ExecuteNodeAsync single-hop dispatch must be ready so task 091 can build on a stable orchestrator surface.</dependency>
+    </dependencies>
+    <related-work>
+      <item>chat-routing-redesign-r1 task 028d — landed partial routing-table consultation; R7 FR-17 completes the migration to the canonical triangle.</item>
+      <item>R7 task 092 (this wave) — adds the chat-summarize row to sprk_playbookconsumer table.</item>
+      <item>R7 task 042 (Wave 4) DEPENDS on this wave completing — cannot delete ExecuteAnalysisAsync until chat-summarize is fully migrated.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: STANDARD · 📋 REASON: audit-only task, no source modification, planning artifact only · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read project CLAUDE.md + spec.md (FR-17 + NFR-04) + plan.md (Wave 9 section) + .claude/constraints/bff-extensions.md.
+    </step>
+    <step order="2" name="Read SessionSummarizeOrchestrator">
+      Read the full source file. Note: how IConsumerRoutingService.ResolveAsync is called today,
+      how IPlaybookExecutionEngine.ExecuteChatSummarizeAsync is dispatched, where streaming chunks emit.
+    </step>
+    <step order="3" name="Read IInvokePlaybookAi canonical surface">
+      Read IInvokePlaybookAi.cs + InvokePlaybookAi.cs. Document the method signature, payload shape,
+      return shape, and how it relates to PlaybookOrchestrationService.ExecuteAsync.
+    </step>
+    <step order="4" name="Read DailyBriefingEndpoints reference impl">
+      Read DailyBriefingEndpoints.cs:201-374 for the canonical "consumer -> routing -> InvokePlaybookAi" wiring.
+    </step>
+    <step order="5" name="Read AnalysisOrchestrationService.ExecuteAnalysisAsync">
+      Read the legacy direct-invocation path that R7 deletes (FR-11). Confirm no remaining caller in
+      SessionSummarizeOrchestrator post-task-091.
+    </step>
+    <step order="6" name="Identify integration-test entry points">
+      Grep for tests under tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/SessionSummarizeOrchestrator*.cs
+      to identify what test scaffold exists for task 091's integration test acceptance.
+    </step>
+    <step order="7" name="Read ai-architecture-consumer-routing.md (READ-ONLY)">
+      Note: do NOT modify. Just confirm the documented routing pattern matches the design.
+    </step>
+    <step order="8" name="Write migration-design document">
+      Create `notes/spikes/chat-summarize-migration-design.md` answering the 7 goal questions.
+      Include code-snippet sketches of the before/after dispatch sites (target: 120-180 lines).
+      Explicitly state: streaming-vs-non-streaming preservation strategy + the integration-test plan.
+    </step>
+    <step order="9" name="Update current-task.md + TASK-INDEX">
+      Mark task 090 status complete; advance current-task.md to task 091.
+    </step>
+    <step order="10" name="Commit">
+      Commit notes/spikes/chat-summarize-migration-design.md with conventional message.
+      Example: docs(r7/wave9): audit SessionSummarizeOrchestrator + Path A.5 design (task 090, FR-17).
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (Spaarke BFF source files + canonical doc)</tool>
+    <tool>Grep (search for ExecuteChatSummarizeAsync, InvokePlaybookAsync, ResolveAsync call sites)</tool>
+    <tool>Write (migration-design document)</tool>
+    <tool>Bash (git commit)</tool>
+  </tools>
+
+  <outputs>
+    <output type="document">projects/spaarke-ai-platform-unification-r7/notes/spikes/chat-summarize-migration-design.md</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md (advance to task 091)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 090 ✅)</output>
+    <output type="commit">docs(r7/wave9): audit SessionSummarizeOrchestrator + Path A.5 design (task 090, FR-17)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Migration-design document exists at notes/spikes/chat-summarize-migration-design.md</criterion>
+    <criterion>Document answers all 7 goal questions explicitly</criterion>
+    <criterion>Document maps the current ExecuteChatSummarizeAsync dispatch site and the target IInvokePlaybookAi.InvokePlaybookAsync dispatch site</criterion>
+    <criterion>Document preserves streaming semantics (Structured Outputs + IncrementalJsonParser field-delta emission)</criterion>
+    <criterion>Document cites ADR-013 (canonical triangle) and ADR-014 (5-min TTL preserved, no invalidation hook per NFR-04)</criterion>
+    <criterion>Document includes integration-test plan (chat /summarize works end-to-end through playbook dispatch)</criterion>
+    <criterion>Document explicitly notes the sprk_playbookconsumer row task 092 will add</criterion>
+    <criterion>current-task.md updated to point at task 091 as next</criterion>
+    <criterion>TASK-INDEX.md shows 090 ✅, 091 🔲 ready</criterion>
+  </acceptance-criteria>
+</task>

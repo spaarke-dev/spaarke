@@ -139,7 +139,7 @@ public sealed class SummarizeWorkspaceMultinodeMigrationTests
                 "every Action node must reference the existing SUM-CHAT@v1 action by " +
                 "actionCode FK (no new action seeded)");
             node.GetProperty("actionType").GetInt32().Should().Be(0,
-                "ActionType.AiAnalysis = 0; handled by existing AiAnalysisNodeExecutor");
+                "ExecutorType.AiAnalysis = 0; handled by existing AiAnalysisNodeExecutor");
         }
     }
 
@@ -152,7 +152,7 @@ public sealed class SummarizeWorkspaceMultinodeMigrationTests
             .Single(n => n.GetProperty("nodeType").GetString() == "DeliverComposite");
 
         composite.GetProperty("actionType").GetInt32().Should().Be(42,
-            "ActionType.DeliverComposite = 42; handled by DeliverCompositeNodeExecutor");
+            "ExecutorType.DeliverComposite = 42; handled by DeliverCompositeNodeExecutor");
 
         var configJson = composite.GetProperty("configJson");
         configJson.GetProperty("destination").GetString().Should().Be("workspace");

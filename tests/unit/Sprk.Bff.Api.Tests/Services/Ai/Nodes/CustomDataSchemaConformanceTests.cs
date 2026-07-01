@@ -543,7 +543,7 @@ public class CustomDataSchemaConformanceTests
                 Id = actionId,
                 Name = "Create Notification"
             },
-            ActionType = ActionType.CreateNotification,
+            ExecutorType = ExecutorType.CreateNotification,
             Scopes = new ResolvedScopes([], [], []),
             TenantId = "test-tenant"
         };

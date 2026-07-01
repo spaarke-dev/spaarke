@@ -6,17 +6,17 @@
 //   nodeType=Control + canvasType=loadKnowledge + a placeholder configJson with a
 //   `passthroughBinding` map but NO `__actionType`. Without an explicit __actionType,
 //   the orchestrator structural fallback (PlaybookOrchestrationService.cs) routes
-//   Control → ActionType.Condition → ConditionNodeExecutor, which rejects the node
+//   Control → ExecutorType.Condition → ConditionNodeExecutor, which rejects the node
 //   with "Condition expression is required" — the same UAT failure class the Start
 //   fix closed.
 //
-//   This executor is the first-class pairing for ActionType.LoadKnowledge (= 142),
+//   This executor is the first-class pairing for ExecutorType.LoadKnowledge (= 142),
 //   modelled exactly on StartNodeExecutor.cs (sibling pattern just landed).
 //
 // Semantics (per daily-briefing-narrate.json LoadKnowledge node + R4 spec line 58
 // "AI Search matter context knowledge node deferred to R5"):
 //   - NodeType: Control (no Action FK, no scope resolution required).
-//   - ActionType: LoadKnowledge = 142.
+//   - ExecutorType: LoadKnowledge = 142.
 //   - Execute (R4 pass-through placeholder):
 //       1. Read configJson.passthroughBinding (optional name→template map, e.g.
 //          { "channels": "{{start.channels}}" }).
@@ -32,8 +32,8 @@
 //     succeed.
 //
 // Why a dedicated executor, not orchestrator special-casing (mirrors Start's rationale):
-//   - Per canonical-truth §9: NodeType (5 values) and ActionType (31+ enum values) are
-//     orthogonal; dispatch axis is ActionType. The registry indexes by ActionType.
+//   - Per canonical-truth §9: NodeType (5 values) and ExecutorType (31+ enum values) are
+//     orthogonal; dispatch axis is ExecutorType. The registry indexes by ExecutorType.
 //   - Per node-executor-authoring pattern: every dispatchable node-type has its own
 //     INodeExecutor. Adding LoadKnowledge as a new executor preserves the canonical shape.
 //   - Future R5 work substitutes the placeholder bind with the AI Search retrieval
@@ -61,7 +61,7 @@ namespace Sprk.Bff.Api.Services.Ai.Nodes;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Implements <see cref="INodeExecutor"/> for <see cref="ActionType.LoadKnowledge"/>
+/// Implements <see cref="INodeExecutor"/> for <see cref="ExecutorType.LoadKnowledge"/>
 /// (value 142). Registered as a Singleton in <c>AnalysisServicesModule.AddNodeExecutors</c>
 /// (no scope-factory needed — uses <see cref="ITemplateEngine"/> + ILogger only).
 /// </para>
@@ -102,10 +102,42 @@ public sealed class LoadKnowledgeNodeExecutor : INodeExecutor
     }
 
     /// <inheritdoc />
-    public IReadOnlyList<ActionType> SupportedActionTypes { get; } = new[]
+    public IReadOnlyList<ExecutorType> SupportedExecutorTypes { get; } = new[]
     {
-        ActionType.LoadKnowledge
+        ExecutorType.LoadKnowledge
     };
+
+    // R7 task 085 / FR-23 — typed config schema for Playbook Builder canvas.
+    // Derived from LoadKnowledgeConfig: kind (documentation discriminator),
+    // passthroughBinding (name→template map), r5BindingPlan (R5 forward-compat).
+    private static readonly ExecutorConfigSchema ConfigSchemaInstance = new(
+        ExecutorTypeName: nameof(ExecutorType.LoadKnowledge),
+        ExecutorTypeValue: (int)ExecutorType.LoadKnowledge,
+        Description: "Canvas-only Control node — R4 pass-through placeholder for the R5 AI Search knowledge-source binding. Evaluates optional passthroughBinding templates against scope variables and binds the resolved object map to OutputVariable (default 'channelRegistry').",
+        Fields: new ConfigSchemaField[]
+        {
+            new(
+                Name: "passthroughBinding",
+                Type: SchemaFieldType.Object,
+                Required: false,
+                Description: "Optional name→Handlebars-template map (e.g., { channels: '{{start.channels}}' }). Each key becomes a field on the bound output; each value is rendered against upstream scope variables.",
+                Default: null),
+            new(
+                Name: "kind",
+                Type: SchemaFieldType.String,
+                Required: false,
+                Description: "Documentation-only discriminator (e.g., 'pass-through-placeholder'). Ignored at runtime.",
+                Default: null),
+            new(
+                Name: "r5BindingPlan",
+                Type: SchemaFieldType.Object,
+                Required: false,
+                Description: "Forward-compat: { knowledgeSourceCode: string }. When set, triggers an INFO log so future R5 wiring (AI Search retrieval) knows where to hook in. NOT honoured in R4.",
+                Default: null)
+        });
+
+    /// <inheritdoc />
+    public ExecutorConfigSchema GetConfigSchema() => ConfigSchemaInstance;
 
     /// <inheritdoc />
     public NodeValidationResult Validate(NodeExecutionContext context)
@@ -248,28 +280,11 @@ public sealed class LoadKnowledgeNodeExecutor : INodeExecutor
     /// </remarks>
     private static Dictionary<string, object?> BuildTemplateContext(NodeExecutionContext context)
     {
-        var templateContext = new Dictionary<string, object?>();
-
-        foreach (var (varName, output) in context.PreviousOutputs)
-        {
-            if (output.StructuredData.HasValue)
-            {
-                templateContext[varName] = TemplateEngine.ConvertJsonElement(output.StructuredData.Value);
-            }
-            else
-            {
-                templateContext[varName] = null;
-            }
-        }
-
-        templateContext["run"] = new
-        {
-            id = context.RunId.ToString(),
-            playbookId = context.PlaybookId.ToString(),
-            tenantId = context.TenantId
-        };
-
-        return templateContext;
+        // R7 Wave 11 task 111 (Option B): delegates to shared PlaybookTemplateContextBuilder
+        // helper. Prior to Wave 11 this method was byte-for-byte duplicated across
+        // LoadKnowledgeNodeExecutor + ReturnResponseNodeExecutor. The shared helper is the
+        // single source of truth for "what context can templates see".
+        return PlaybookTemplateContextBuilder.Build(context);
     }
 
     /// <summary>

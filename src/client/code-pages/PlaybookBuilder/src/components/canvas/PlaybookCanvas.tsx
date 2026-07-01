@@ -81,6 +81,13 @@ export const PlaybookCanvasInner = React.memo(function PlaybookCanvasInner() {
   }, []);
 
   // Handle drop from node palette
+  //
+  // R7 Wave 8 task 082 (FR-22 / FR-26): NodePalette.tsx now writes an extended
+  // payload that includes `executorType` (sprk_executortype Choice value) and
+  // `executorName` (server PascalCase enum name) alongside the legacy
+  // `type` discriminator + `label`. Both fields are OPTIONAL on read for
+  // backward compatibility with any legacy producers; missing executorType
+  // results in a node without the Choice value set (existing pre-R7 behavior).
   const handleDrop = useCallback(
     (event: DragEvent<HTMLDivElement>) => {
       event.preventDefault();
@@ -90,10 +97,13 @@ export const PlaybookCanvasInner = React.memo(function PlaybookCanvasInner() {
       if (!nodeTypeData) return;
 
       try {
-        const { type, label } = JSON.parse(nodeTypeData) as {
+        const parsed = JSON.parse(nodeTypeData) as {
           type: PlaybookNodeType;
           label: string;
+          executorType?: number;
+          executorName?: string;
         };
+        const { type, label, executorType, executorName } = parsed;
 
         // v12: screenToFlowPosition() replaces the v10 project() method
         const position = screenToFlowPosition({
@@ -101,7 +111,7 @@ export const PlaybookCanvasInner = React.memo(function PlaybookCanvasInner() {
           y: event.clientY,
         });
 
-        onDrop(position, type, label);
+        onDrop(position, type, label, executorType, executorName);
       } catch (e) {
         console.error('Failed to parse dropped node data:', e);
       }

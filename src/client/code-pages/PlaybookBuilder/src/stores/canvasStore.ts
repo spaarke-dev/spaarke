@@ -23,6 +23,82 @@ import {
 } from '@xyflow/react';
 import type { PlaybookNodeType, PlaybookNodeData, PlaybookNode, PlaybookEdge, CanvasJson } from '../types/canvas';
 import { CANVAS_JSON_VERSION } from '../types/canvas';
+import { getExecutorByValue } from '../config/executorMetadata';
+
+// ---------------------------------------------------------------------------
+// R7 Wave 8 task 089 (FR-27) — Unknown-executor-type coercion
+// ---------------------------------------------------------------------------
+
+/**
+ * Rewrite `node.type = 'unknown'` (and mirror it on `node.data.type`) for any
+ * node whose `data.executorType` is undefined OR not present in
+ * `EXECUTOR_METADATA`. The UnknownNode renderer (registered in
+ * `components/nodes/index.ts`) renders a warning-state shell so the maker can
+ * pick a known executor type via the ExecutorTypeSelector property panel.
+ *
+ * Start nodes are exempt — they have no `executorType` Choice value by design
+ * (canvas anchor with no execution logic; see executorMetadata.ts value=33 is
+ * the server-side enum slot, but the canvas Start node is a pass-through that
+ * never carries `executorType` in the drag-drop or initialize-new-canvas
+ * paths).
+ *
+ * Called from `loadFromCanvasJson` during canvas hydration. Mutates the array
+ * in place AND returns it for caller convenience. Pure on already-valid nodes
+ * (returns the original references so React Flow's referential-equality checks
+ * do not trip unnecessary re-renders).
+ *
+ * @see ../components/nodes/UnknownNode.tsx for the renderer
+ * @see ../config/executorMetadata.ts for the 33-entry catalog
+ * @see spec.md FR-27
+ */
+export function coerceUnknownNodeTypes(nodes: PlaybookNode[]): PlaybookNode[] {
+  return nodes.map(node => {
+    // Start nodes never carry an executorType — never mark them unknown.
+    if (node.data.type === 'start') return node;
+
+    const executorType = node.data.executorType;
+
+    // R7 hotfix 2026-06-29: do NOT coerce when executorType is absent. Pre-R7
+    // canvasLayoutJson uses legacy `data.type` discriminators ('control',
+    // 'aiAnalysis', 'output', 'workflow', 'deliverComposite') WITHOUT an
+    // executorType integer. The original logic coerced those to 'unknown',
+    // which permanently corrupted the JSON (next save persisted 'unknown' to
+    // Dataverse — observed on "Tasks Due Soon" 2026-06-29). Only coerce when
+    // executorType IS a number BUT not in the catalog — that's the actual
+    // "unknown executor" case FR-27 was designed for.
+    //
+    // The companion canvas-JSON migration
+    // (scripts/dataverse/Migrate-PlaybookCanvasJson-To-ExecutorType.ps1)
+    // backfills `data.executorType` from sprk_playbooknode rows for legacy
+    // playbooks. After it runs, all nodes have executorType set and this
+    // function only coerces genuinely unknown values.
+    if (typeof executorType !== 'number') {
+      return node;
+    }
+
+    const knownExecutor = getExecutorByValue(executorType);
+
+    // Known + present in catalog → leave untouched.
+    if (knownExecutor) return node;
+
+    // Already coerced on a previous load → no-op (idempotent).
+    if (node.type === 'unknown' && node.data.type === 'unknown') return node;
+
+    // Unknown — rewrite both the React Flow discriminator (`node.type`) and the
+    // mirror on `node.data.type` so renderer dispatch + downstream type checks
+    // both see 'unknown'. Preserve every other field (label, position, original
+    // executorType, configJson, etc.) so the user can recover by picking a
+    // valid type.
+    return {
+      ...node,
+      type: 'unknown',
+      data: {
+        ...node.data,
+        type: 'unknown' as PlaybookNodeType,
+      },
+    };
+  });
+}
 
 /** Generate a unique ID for new nodes */
 const generateNodeId = (): string => `node_${Date.now()}_${Math.random().toString(36).substring(2, 11)}`;
@@ -89,7 +165,21 @@ interface CanvasState {
   selectNode: (nodeId: string | null) => void;
 
   // Drag and drop
-  onDrop: (position: XYPosition, nodeType: PlaybookNodeType, label: string) => void;
+  //
+  // R7 Wave 8 task 082 (FR-22 / FR-26): `executorType` (sprk_executortype Choice
+  // value) + `executorName` (server PascalCase enum name) are written into
+  // `node.data.executorType` and `node.data.executorName` when provided. Both
+  // are OPTIONAL for backward-compat with legacy producers that only pass
+  // `(position, nodeType, label)`. When omitted, no Choice value is baked in —
+  // matches pre-R7 behavior. Task 088 widens canvas-state to require
+  // `executorType` and retires the legacy `data.type` discriminator.
+  onDrop: (
+    position: XYPosition,
+    nodeType: PlaybookNodeType,
+    label: string,
+    executorType?: number,
+    executorName?: string
+  ) => void;
 
   // Persistence
   loadFromCanvasJson: (json: string) => void;
@@ -399,7 +489,7 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   // Drag and drop
   // -----------------------------------------------------------------------
 
-  onDrop: (position, nodeType, label) => {
+  onDrop: (position, nodeType, label, executorType, executorName) => {
     const baseData: Record<string, unknown> = {
       label,
       type: nodeType,
@@ -407,6 +497,16 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
       isConfigured: false,
       validationErrors: [],
     };
+
+    // R7 FR-26: bake the new sprk_executortype Choice value into node.data when
+    // the drop payload carried it (NodePalette tiles always do). The optional
+    // executorName mirror is kept for diagnostics + future task 088 cleanup.
+    if (typeof executorType === 'number') {
+      baseData.executorType = executorType;
+    }
+    if (executorName) {
+      baseData.executorName = executorName;
+    }
 
     // Set type-specific defaults for structural nodes
     if (nodeType === 'deliverOutput') {
@@ -433,8 +533,13 @@ export const useCanvasStore = create<CanvasState>((set, get) => ({
   loadFromCanvasJson: (json: string) => {
     try {
       const data: CanvasJson = JSON.parse(json);
+      // R7 Wave 8 task 089 (FR-27): coerce any node whose executorType is not
+      // in EXECUTOR_METADATA to type='unknown' so the UnknownNode warning-state
+      // shell renders instead of React Flow silently falling back to the
+      // default plain box.
+      const coercedNodes = coerceUnknownNodeTypes(data.nodes || []);
       set({
-        nodes: data.nodes || [],
+        nodes: coercedNodes,
         edges: data.edges || [],
         selectedNodeId: null,
         isDirty: false,

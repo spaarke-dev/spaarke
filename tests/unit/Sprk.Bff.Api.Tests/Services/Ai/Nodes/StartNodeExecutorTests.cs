@@ -33,13 +33,13 @@ public class StartNodeExecutorTests
         _executor = new StartNodeExecutor(_loggerMock.Object);
     }
 
-    #region SupportedActionTypes
+    #region SupportedExecutorTypes
 
     [Fact]
     public void SupportedActionTypes_ContainsStart()
     {
-        _executor.SupportedActionTypes.Should().Contain(ActionType.Start);
-        _executor.SupportedActionTypes.Should().HaveCount(1);
+        _executor.SupportedExecutorTypes.Should().Contain(ExecutorType.Start);
+        _executor.SupportedExecutorTypes.Should().HaveCount(1);
     }
 
     #endregion
@@ -438,9 +438,9 @@ public class StartNodeExecutorTests
             {
                 Id = Guid.Empty,
                 Name = "Start",
-                ActionType = ActionType.Start
+                ExecutorType = ExecutorType.Start
             },
-            ActionType = ActionType.Start,
+            ExecutorType = ExecutorType.Start,
             Scopes = new ResolvedScopes([], [], []),
             Parameters = parameters ?? new Dictionary<string, string>(),
             TenantId = "test-tenant",

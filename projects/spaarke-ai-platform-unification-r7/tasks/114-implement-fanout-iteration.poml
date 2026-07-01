@@ -1,0 +1,172 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-114" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Implement fan-out iteration semantics in PlaybookOrchestrationService</title>
+    <status>not-started</status>
+    <wave>11</wave>
+    <estimated-effort>4-5 hours</estimated-effort>
+    <tags>bff-api, code-impl, ai, wave-11</tags>
+    <rigor-level>FULL</rigor-level>
+    <rigor-reason>Modifies .cs (orchestrator); tags include `bff-api`; novel orchestrator behavior with concurrency + output-aggregation semantics. FULL per task-execute Step 0.5.</rigor-reason>
+    <parallel-safe>true</parallel-safe>
+    <parallel-group>W11-C</parallel-group>
+    <parallel-reason>Touches PlaybookOrchestrationService.cs (same file as 111 edits); coordinate with 112/113 if collision. If 111 edits already merged, 114 can layer on top.</parallel-reason>
+    <dependencies>111</dependencies>
+    <blocks>115</blocks>
+    <fr-coverage>FR-15 + ADR-037 (multinode output composition / fan-out)</fr-coverage>
+  </metadata>
+
+  <prompt>
+    Implement fan-out iteration in `PlaybookOrchestrationService`: when a node's configJson
+    contains `iteration.iterateOver` + `iteration.itemAlias`, the orchestrator (a) resolves
+    `iterateOver` against the merged context, (b) iterates the resolved collection, (c) per
+    iteration overlays the context with `itemAlias` → current item, (d) renders configJson + runs
+    the executor against the overlay context, (e) collects each per-iteration NodeOutput into an
+    array, (f) registers the array in `RunContext.NodeOutputs[OutputVariable]`. Use sequential
+    execution within the iteration (no parallel LLM calls in v1 — matches existing
+    AnalysisOrchestrationService convention; parallelize in a follow-up if perf demands it).
+    Write unit tests with a mock executor that records each iteration's bound itemAlias.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in the BFF orchestration model + Handlebars context-overlay
+    patterns. Goal: simplest implementation that matches ADR-037 fan-out semantics in the deployed
+    DAILY-BRIEFING-NARRATE playbook (GenerateChannelNarratives iterates over channelRegistry.channels).
+  </role>
+
+  <goal>
+    `PlaybookOrchestrationService.ExecuteNodeAsync` detects `iteration.iterateOver` in node configJson
+    and switches to fan-out mode. xUnit tests prove (a) N iterations with N=3 inputs, (b) each
+    iteration sees the correct itemAlias binding, (c) outputs aggregated as ordered array in
+    NodeOutputs, (d) empty iterateOver → empty array (no executor call, no error), (e) missing
+    iteration block → backward-compatible single-call behavior.
+  </goal>
+
+  <inputs>
+    <file purpose="orchestrator">src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookOrchestrationService.cs</file>
+    <file purpose="run-context">src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookRunContext.cs</file>
+    <file purpose="executor-iface">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/INodeExecutor.cs</file>
+    <file purpose="design-from-110">projects/spaarke-ai-platform-unification-r7/notes/spikes/wave11-orchestrator-resolution-design.md</file>
+    <file purpose="adr-037">docs/adr/ADR-037-multinode-output-composition.md</file>
+    <file purpose="deployed-fanout-example">projects/spaarke-daily-update-service/notes/playbooks/daily-briefing-narrate.json</file>
+    <file purpose="orchestrator-tests">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/PlaybookOrchestrationServiceTests.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-010">DI Minimalism — no new abstraction; iteration semantic lives inside existing orchestrator's ExecuteNodeAsync flow.</constraint>
+    <constraint source="ADR-013">BFF AI Architecture — no new public contract; INodeExecutor interface unchanged.</constraint>
+    <constraint source="ADR-029">BFF Publish Hygiene — no new packages.</constraint>
+    <constraint source="ADR-037">Multinode Output Composition — fan-out output aggregation is `array-preserve-input-order` per the playbook's composeStrategy.fanOut.merge.strategy.</constraint>
+    <constraint source="ADR-038">Testing Strategy — mock IExecutor minimally; ban Mock&lt;HttpMessageHandler&gt;.</constraint>
+    <constraint source="CLAUDE.md §10">BFF Hygiene checklist applies.</constraint>
+    <constraint source="CLAUDE.md §11">Modification of existing orchestrator; no new component justification required.</constraint>
+    <constraint source="concurrency">v1 = SEQUENTIAL iteration. Do NOT introduce Task.WhenAll/parallel LLM calls in this task. Document in commit body that parallelism is a deferred optimization.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai/playbook-orchestration</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/adr/ADR-010-di-minimalism.md</file>
+      <file>docs/adr/ADR-013-bff-ai-architecture.md</file>
+      <file>docs/adr/ADR-037-multinode-output-composition.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r7/notes/spikes/wave11-orchestrator-resolution-design.md</file>
+    </files>
+    <patterns>
+      <pattern name="Iteration context-overlay" location="design-from-110">
+        Per-iteration context = base merged context (Parameters + NodeOutputs) + { [itemAlias]: currentItem }. Use ConvertJsonElement on currentItem if it's a JsonElement before placing in overlay. Throw away overlay after iteration (don't pollute caller context).
+      </pattern>
+      <pattern name="Detection signal" location="daily-briefing-narrate.json GenerateChannelNarratives node">
+        `configJson.iteration` is the trigger. Parse configJson as JsonDocument BEFORE template render to extract iteration metadata; render configJson AFTER iteration unpacking + per-iteration overlay.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Per ADR-037 + deployed playbook source: GenerateChannelNarratives node has `iteration.iterateOver = "{{channelRegistry.channels}}"` + `iteration.itemAlias = "channel"`. Today the orchestrator ignores `iteration` entirely; it renders configJson once and calls the executor once with the literal `{{channel.X}}` text intact. Wave 11 implements the missing semantic.
+    </background>
+    <dependencies>
+      <dependency task="111" status="must-complete-first">Orchestrator must already carry NodeOutputs + use ITemplateEngine — fan-out builds on top.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Parallelism is a deferred optimization. v1 runs iterations sequentially.</item>
+      <item>Output aggregation strategy `array-preserve-input-order` per playbook composeStrategy.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: FULL · 📋 REASON: bff-api code-impl, novel orchestrator behavior · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context + verify 111 complete">
+      Confirm 111 ✅. Read design doc from 110 (iteration placement section).
+    </step>
+    <step order="2" name="Add iteration-detection in ExecuteNodeAsync">
+      Before rendering configJson, parse the RAW configJson as JsonDocument to check for `iteration.iterateOver` + `iteration.itemAlias`. If both present → switch to fan-out branch. Else → fall through to existing single-call path (backward-compatible).
+    </step>
+    <step order="3" name="Implement fan-out branch">
+      In fan-out branch:
+      (a) Render ONLY the iterateOver template against current context → get resolved value;
+      (b) Cast to IEnumerable (defensive — guard against scalar/null; null → empty array);
+      (c) For each item, build per-iteration overlay = current merged context + { [itemAlias]: ConvertJsonElement(item) };
+      (d) Render FULL configJson against overlay;
+      (e) Build a clone of the node with rendered configJson;
+      (f) Call executor.ExecuteAsync sequentially;
+      (g) Collect each per-iteration output into a List&lt;object?&gt;;
+      (h) After loop, set runContext.NodeOutputs[OutputVariable] = list (array-preserve-input-order).
+    </step>
+    <step order="4" name="Handle iteration-output shape conversion">
+      Per-iteration NodeOutput may have StructuredData (JsonElement) or TextContent. Apply same conversion as task 111's standard registration: ConvertJsonElement for StructuredData, raw string for TextContent.
+    </step>
+    <step order="5" name="Write xUnit tests">
+      Add `PlaybookOrchestrationService_FanOutIterationTests.cs`. Test cases:
+      (a) N=3 iteration; mock executor records each itemAlias; verify 3 calls + correct binding;
+      (b) Output array ordered by input order;
+      (c) Empty iterateOver collection → zero executor calls + empty array in NodeOutputs;
+      (d) Missing iteration block → falls back to single-call (regression);
+      (e) iterateOver template renders to JsonElement array → handled via ConvertJsonElement;
+      (f) iterateOver template renders to null → empty array, no throw.
+    </step>
+    <step order="6" name="Run full BFF test suite">
+      `dotnet build` + `dotnet test`. Verify zero regressions + new tests pass.
+    </step>
+    <step order="7" name="Step 9.5 — Quality gates">
+      `/code-review` + `/adr-check` on orchestrator + new tests.
+    </step>
+    <step order="8" name="Update TASK-INDEX + current-task.md">
+      Mark 114 ✅; advance to next pending (115).
+    </step>
+    <step order="9" name="Commit">
+      Commit body documents: sequential v1 (parallelism deferred), ADR-037 alignment, single-call backward-compatibility.
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (orchestrator + tests + ADR-037)</tool>
+    <tool>Edit (PlaybookOrchestrationService.cs)</tool>
+    <tool>Write (new test file)</tool>
+    <tool>Bash (build + test + commit)</tool>
+    <tool>Skill (code-review, adr-check)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookOrchestrationService.cs (fan-out branch added)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/PlaybookOrchestrationService_FanOutIterationTests.cs</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Fan-out branch detects `iteration.iterateOver` + `iteration.itemAlias` from RAW configJson</criterion>
+    <criterion testable="true">N=3 iteration test: executor called 3× with correct per-iteration itemAlias binding</criterion>
+    <criterion testable="true">Output aggregated as ordered array; registered in NodeOutputs[OutputVariable]</criterion>
+    <criterion testable="true">Empty iterateOver → zero executor calls + empty-array output (no throw)</criterion>
+    <criterion testable="true">Backward-compat: nodes without iteration block run via single-call path (existing tests still pass)</criterion>
+    <criterion testable="true">code-review + adr-check return zero HIGH/CRITICAL</criterion>
+    <criterion testable="true">Commit body explicitly notes parallelism deferred + ADR-037 alignment</criterion>
+  </acceptance-criteria>
+</task>

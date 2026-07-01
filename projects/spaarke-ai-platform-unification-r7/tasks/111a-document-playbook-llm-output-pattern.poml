@@ -1,0 +1,200 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-111a" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Document the Playbook-driven LLM Output pattern (architecture + maker guide)</title>
+    <status>not-started</status>
+    <wave>11</wave>
+    <estimated-effort>3-4 hours</estimated-effort>
+    <tags>documentation, architecture, ai, wave-11</tags>
+    <rigor-level>STANDARD</rigor-level>
+    <rigor-reason>Documentation task; no source modification. STANDARD per task-execute Step 0.5. Quality Gates skipped (no .cs/.ts code modifications). Spawned 2026-06-29 from operator binding requirement: "ensure we have documentation of the architecture and component model because we will need it for Insights Engine (and many other areas)".</rigor-reason>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Must follow T111 implementation so docs reflect what shipped, not what was designed. Sequential after T111.</parallel-reason>
+    <dependencies>111</dependencies>
+    <blocks>112 (operator-facing artifact — Insights Engine and other consumers depend on this being authoritative before further build)</blocks>
+    <fr-coverage>R7 spec NFR-08 (documentation discipline) + binding operator requirement 2026-06-29 ("we will need it for Insights Engine and many other areas")</fr-coverage>
+  </metadata>
+
+  <prompt>
+    Author the architecture doc + maker guide for the Playbook-driven LLM Output pattern that
+    Wave 11 finalizes. These docs are NOT optional — operator made them a binding requirement
+    so Insights Engine, future Workspace narrative outputs, work assignment briefings, project
+    status updates, document review summaries (and many other future consumers) can be authored
+    without rediscovering the design. Each doc reflects WHAT WAS SHIPPED in T111, not what was
+    originally designed — read the T111 final code state before writing.
+  </prompt>
+
+  <role>
+    SPAARKE technical writer + AI platform architect. Audience: future devs authoring new
+    narrative-output consumers (Workspace UX features) + makers authoring playbook + Action JPS.
+    Goal: produce docs concise enough to actually be read (target: each doc &lt;400 lines), specific
+    enough to copy from.
+  </role>
+
+  <goal>
+    Three deliverables:
+    1. `docs/architecture/SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md` — authoritative architecture
+       reference covering the two-layer design (Layer 1 orchestrator template resolution + Layer 2
+       PromptSchemaRenderer "## Input" section), runtime data flow, component model, file map,
+       and what's centralized vs what's per-consumer.
+    2. `docs/guides/BUILD-A-NEW-NARRATIVE-OUTPUT-CONSUMER.md` — step-by-step maker tutorial with
+       two worked examples (Daily Briefing as the shipped reference, Insight Engine Matter Summary
+       as a future example) covering: trigger / playbook composition / Action JPS authoring / output
+       destination wiring / testing / deployment.
+    3. Update root `CLAUDE.md` §17 pointer table with row pointing to the new architecture doc
+       (load-bearing for future agents).
+  </goal>
+
+  <inputs>
+    <file purpose="design-source">projects/spaarke-ai-platform-unification-r7/notes/spikes/wave11-orchestrator-resolution-design.md</file>
+    <file purpose="t111-implementation">src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookTemplateContextBuilder.cs (created by T111)</file>
+    <file purpose="t111-orchestrator">src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookOrchestrationService.cs (modified by T111)</file>
+    <file purpose="t111-renderer">src/server/api/Sprk.Bff.Api/Services/Ai/PromptSchemaRenderer.cs (modified by T111)</file>
+    <file purpose="t111-ai-executors">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiCompletionNodeExecutor.cs + AiAnalysisNodeExecutor.cs (modified by T111)</file>
+    <file purpose="canonical-source-playbook">projects/spaarke-daily-update-service/notes/playbooks/daily-briefing-narrate.json</file>
+    <file purpose="canonical-source-action">projects/spaarke-daily-update-service/notes/playbooks/actions/brief-narrate-tldr.action.json</file>
+    <file purpose="existing-ai-architecture">docs/architecture/AI-ARCHITECTURE.md</file>
+    <file purpose="existing-actions-nodes-scopes">docs/architecture/ai-architecture-actions-nodes-scopes.md</file>
+    <file purpose="existing-playbook-runtime">docs/architecture/ai-architecture-playbook-runtime.md</file>
+    <file purpose="adr-013">docs/adr/ADR-013-bff-ai-architecture.md</file>
+    <file purpose="adr-037">docs/adr/ADR-037-multinode-output-composition.md</file>
+    <file purpose="root-claude-md">CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="NFR-08">No SUPERSEDED markers, no redirect stubs. Cross-link to existing docs that are still accurate. If existing AI-ARCHITECTURE.md / ai-architecture-actions-nodes-scopes.md needs minor updates (cross-reference back to the new pattern doc), do it inline — don't create archive copies.</constraint>
+    <constraint source="CLAUDE.md §17">New architecture doc gets a pointer-table row in root CLAUDE.md §17. Doc title format matches existing convention.</constraint>
+    <constraint source="CLAUDE.md §11">Reuse-first: confirm the new docs do NOT duplicate AI-ARCHITECTURE.md or ai-architecture-playbook-runtime.md scope. They're focused specifically on the narrative-output pattern.</constraint>
+    <constraint source="audience">Architecture doc audience = future devs. Maker guide audience = playbook + Action JPS authors. Don't mix them in one doc.</constraint>
+    <constraint source="length-discipline">Each doc target: &lt;400 lines. Use tables, code blocks, diagrams. Concise wins.</constraint>
+    <constraint source="ship-reality">Docs reflect SHIPPED code (read T111 final state). If T111 design deviated from the spike doc, document what shipped — not what was planned.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>documentation/architecture-pattern</topic>
+    <files>
+      <file>projects/spaarke-ai-platform-unification-r7/notes/spikes/wave11-orchestrator-resolution-design.md</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>docs/architecture/ai-architecture-actions-nodes-scopes.md</file>
+      <file>docs/architecture/ai-architecture-playbook-runtime.md</file>
+      <file>docs/adr/ADR-013-bff-ai-architecture.md</file>
+      <file>docs/adr/ADR-037-multinode-output-composition.md</file>
+      <file>docs/guides/JPS-AUTHORING-GUIDE.md</file>
+      <file>docs/guides/PLAYBOOK-AUTHOR-GUIDE.md</file>
+      <file>docs/guides/ai-guide-consumer-wiring.md</file>
+    </files>
+    <patterns>
+      <pattern name="Architecture doc format" location="docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md">
+        Existing canonical pattern: subsystem overview → component model → data flow diagrams → file map → cross-references. Match this style.
+      </pattern>
+      <pattern name="Maker guide format" location="docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md">
+        Existing canonical pattern: decision tree → step-by-step tutorial → worked examples → testing + deployment. Match this style.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Operator (2026-06-29) approved Option B and made docs a binding requirement: "ensure we have documentation of the architecture and component model because we will need it for Insights Engine (and many other areas)". Without this doc, every future consumer team rediscovers the architecture, re-debates the design, and likely diverges. With this doc, new consumers are authored in days using the established pattern.
+    </background>
+    <dependencies>
+      <dependency task="111" status="must-complete-first">T111 implementation provides the canonical reference code that docs describe.</dependency>
+    </dependencies>
+    <related-work>
+      <item>T113 source rewrites (lambda → flatMap, pipe → nested subexpression) provide additional concrete examples for the maker guide's "advanced expressions" section.</item>
+      <item>T117 widget UAT may produce the first end-to-end "this is what it actually does" screenshot for the maker guide's reference example section.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: STANDARD · 📋 REASON: documentation task, no source mod · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context + verify T111 complete">
+      Confirm 111 ✅. Read T111 final code state (PlaybookTemplateContextBuilder, modified PlaybookOrchestrationService.ApplyConfigJsonTemplates, modified PromptSchemaRenderer.Render, modified AiCompletion + AiAnalysis). Read the spike design doc to recall design rationale.
+    </step>
+    <step order="2" name="Author SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md (architecture doc)">
+      Create `docs/architecture/SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md`. Structure:
+      - Title + purpose (one paragraph: what pattern, why it exists)
+      - Two-layer architecture diagram + explanation
+      - Layer 1 deep dive: PlaybookTemplateContextBuilder + ITemplateEngine + ApplyConfigJsonTemplates. Cite file paths + line numbers.
+      - Layer 2 deep dive: PromptSchemaRenderer "## Input" section + AI executor inputBinding extraction. Cite file paths.
+      - Runtime data flow: 6-step trace from playbook trigger through to LLM call (sequence diagram in markdown or ASCII art).
+      - Component model: which files do what. Table format.
+      - What's centralized vs what's per-consumer. Table format. Address operator's "scaling concern" explicitly.
+      - When to use this pattern (vs hardcoded C# prompts, vs other AI dispatch). 1-2 paragraphs.
+      - Cross-references: ADR-013, ADR-037, AI-ARCHITECTURE.md, ai-architecture-actions-nodes-scopes.md, JPS-AUTHORING-GUIDE.md.
+      - Failure modes table (orphan placeholders, missing inputBinding, malformed JSON, etc.)
+      Target: 300-400 lines.
+    </step>
+    <step order="3" name="Author BUILD-A-NEW-NARRATIVE-OUTPUT-CONSUMER.md (maker guide)">
+      Create `docs/guides/BUILD-A-NEW-NARRATIVE-OUTPUT-CONSUMER.md`. Structure:
+      - Title + audience (playbook + Action JPS authors; not devs)
+      - Quick decision tree: when this pattern applies
+      - Pre-flight checklist (Dataverse access, ITemplateEngine + AiCompletion executor available, etc.)
+      - Step-by-step tutorial (each step = one authoring action):
+        1. Decide what triggers the consumer
+        2. Author the Action JPS (paste template; explain instruction.* fields; explain input.parameters declarative metadata)
+        3. Compose the playbook (Start, intermediate nodes for data fetch, AiCompletion node with inputBinding, destination node)
+        4. Author the output destination (UpdateRecord vs ReturnResponse vs SendEmail vs CreateNotification)
+        5. Deploy (Action via Sync script or MCP, playbook via Deploy-Playbook.ps1)
+        6. Test (curl /endpoint or trigger fire; inspect NodeOutput; inspect destination)
+      - Worked example 1: Daily Briefing TL;DR (full source playbook + Action + screenshot of widget output)
+      - Worked example 2: Insight Engine Matter Performance Summary (full pseudocode/design; no shipped impl yet — included as a future example to ground the pattern)
+      - Common gotchas (template not resolving → check Layer 1 wiring, LLM doesn't see data → check inputBinding extraction, etc.)
+      - Reference (links to architecture doc + ADRs + skill files)
+      Target: 350-400 lines.
+    </step>
+    <step order="4" name="Update root CLAUDE.md §17 pointer table">
+      Add new row to the pointer table for `docs/architecture/SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md` with one-line description. Add row for `docs/guides/BUILD-A-NEW-NARRATIVE-OUTPUT-CONSUMER.md` if maker-guide section of pointer table exists. Position rows near existing AI-architecture pointers.
+    </step>
+    <step order="5" name="Cross-link from existing AI architecture docs">
+      Add cross-reference lines to:
+      - `docs/architecture/AI-ARCHITECTURE.md` (one paragraph + link in playbook section)
+      - `docs/architecture/ai-architecture-actions-nodes-scopes.md` (one paragraph + link in Actions section)
+      - `docs/architecture/ai-architecture-playbook-runtime.md` (one paragraph + link in runtime resolution section)
+      - `docs/guides/JPS-AUTHORING-GUIDE.md` (one paragraph + link in narrative output section)
+      Avoid creating SUPERSEDED markers — these are augmentations, not replacements.
+    </step>
+    <step order="6" name="Verify cross-references resolve + no broken links">
+      Grep for any broken file references in the new docs. Verify cross-links go both ways (existing docs → new pattern doc; new pattern doc → existing docs). Confirm root CLAUDE.md §17 row visible.
+    </step>
+    <step order="7" name="Update TASK-INDEX + current-task.md">
+      Mark 111a ✅; advance current-task.md to T112 (next pending task).
+    </step>
+    <step order="8" name="Commit">
+      Single commit. Body documents: new pattern doc + maker guide + cross-link updates. Reference operator binding 2026-06-29.
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (existing docs + T111 implementation files)</tool>
+    <tool>Write (2 new docs)</tool>
+    <tool>Edit (CLAUDE.md + 4 existing AI architecture docs for cross-links)</tool>
+    <tool>Grep (broken-link check)</tool>
+    <tool>Bash (git commit)</tool>
+  </tools>
+
+  <outputs>
+    <output type="document">docs/architecture/SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md (NEW)</output>
+    <output type="document">docs/guides/BUILD-A-NEW-NARRATIVE-OUTPUT-CONSUMER.md (NEW)</output>
+    <output type="document">CLAUDE.md (edited — §17 pointer row added)</output>
+    <output type="document">docs/architecture/AI-ARCHITECTURE.md (edited — cross-link)</output>
+    <output type="document">docs/architecture/ai-architecture-actions-nodes-scopes.md (edited — cross-link)</output>
+    <output type="document">docs/architecture/ai-architecture-playbook-runtime.md (edited — cross-link)</output>
+    <output type="document">docs/guides/JPS-AUTHORING-GUIDE.md (edited — cross-link)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md (advance to 112)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 111a ✅)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md exists at docs/architecture/ + ≤ 400 lines + answers all sections listed in Step 2</criterion>
+    <criterion testable="true">BUILD-A-NEW-NARRATIVE-OUTPUT-CONSUMER.md exists at docs/guides/ + ≤ 400 lines + includes both worked examples</criterion>
+    <criterion testable="true">Worked example 2 (Insight Engine Matter Summary) is fully specified — playbook composition + Action JPS + destination node + sample LLM output — even though no implementation ships in R7</criterion>
+    <criterion testable="true">Root CLAUDE.md §17 pointer table has a row for the new architecture doc</criterion>
+    <criterion testable="true">Cross-links added (both directions) to AI-ARCHITECTURE.md + ai-architecture-actions-nodes-scopes.md + ai-architecture-playbook-runtime.md + JPS-AUTHORING-GUIDE.md</criterion>
+    <criterion testable="true">No SUPERSEDED markers + no broken links + no duplicated content vs existing docs (cross-reference, don't repeat)</criterion>
+    <criterion testable="true">Failure modes table in architecture doc covers ≥4 modes (orphan placeholders, missing inputBinding, malformed JSON, output schema violation)</criterion>
+    <criterion testable="true">Decision tree in maker guide can route a non-expert maker to "use this pattern" vs "use hardcoded C#" vs "use another AI dispatch" without further consultation</criterion>
+  </acceptance-criteria>
+</task>

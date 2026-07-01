@@ -392,6 +392,81 @@ public class MembershipFieldDiscoveryServiceTests
     }
 
     // ────────────────────────────────────────────────────────────────────
+    // R7 W12 task 130 — regression: zero-config defaults still discover
+    // ────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task DiscoverAsync_WithPostConfiguredDefaultMembershipOptions_DiscoversMatterAssignmentFields()
+    {
+        // R7 W12 task 130 (2026-06-30): regression test for the
+        // "0-memberships-for-every-user in deployed environments" bug. The
+        // "Membership" appsettings section is NOT present in
+        // appsettings.template.json, appsettings.Production.json.template, OR in
+        // the Bicep appSettings used to deploy to spaarkedev1. Before this fix,
+        // MembershipOptions defaulted to empty IncludedIdentityTables, which
+        // caused EVERY membership-bearing lookup on sprk_matter (incl. ownerid,
+        // sprk_assignedattorney1, sprk_assignedparalegal1) to be classified as
+        // "target-table-not-in-identity-list" (silent no-op). Downstream,
+        // MembershipResolverService.ResolveAsync would return Count=0 for every
+        // user. The fix adds a MembershipOptionsDefaults post-configure step
+        // (registered in MembershipModule.AddMembership) that seeds the
+        // canonical identity tables + audit exclusions when the bound list is
+        // empty.
+        //
+        // This test pins the contract by applying the same post-configure step
+        // the production DI pipeline applies, then verifies that the canonical
+        // sprk_matter assignment fields are discovered. The post-configure is
+        // simulated directly here (rather than going through ServiceCollection)
+        // to keep this test focused on the discovery contract; the DI wiring
+        // itself is covered by MembershipOptionsTests.AddMembership_*.
+
+        var lookups = new[]
+        {
+            Lookup("ownerid",                  "systemuser"),
+            Lookup("owningteam",               "team"),
+            Lookup("owningbusinessunit",       "businessunit"),
+            Lookup("createdby",                "systemuser"),    // globally excluded
+            Lookup("sprk_assignedattorney1",   "contact"),
+            Lookup("sprk_assignedparalegal1",  "contact"),
+            Lookup("sprk_assignedlawfirm1",    "sprk_organization"),
+        };
+
+        // Apply the production post-configure step on raw default options —
+        // this is what AddMembership() does for any environment that does NOT
+        // bind a "Membership" appsettings section.
+        var defaultOptions = new MembershipOptions();
+        new MembershipOptionsDefaults().PostConfigure(name: null, options: defaultOptions);
+
+        var sut = new TestableMembershipFieldDiscoveryService(defaultOptions, lookups);
+
+        var result = await sut.DiscoverAsync(MatterEntity, CancellationToken.None);
+
+        // The bug-was-here assertion: after the post-configure seeds defaults,
+        // BOTH the systemuser lookups (ownerid, owningteam, owningbusinessunit)
+        // AND the contact / organization lookups (sprk_assignedattorney1,
+        // sprk_assignedparalegal1, sprk_assignedlawfirm1) MUST be discovered.
+        // Pre-fix, all 6 would be classified IgnoredField with reason
+        // "target-table-not-in-identity-list".
+        result.DiscoveredFields.Select(d => d.Field).Should().BeEquivalentTo(new[]
+        {
+            "ownerid", "owningteam", "owningbusinessunit",
+            "sprk_assignedattorney1", "sprk_assignedparalegal1", "sprk_assignedlawfirm1",
+        }, because: "MembershipOptionsDefaults seeds the 6 canonical identity tables so " +
+                    "membership-bearing lookups on sprk_matter are discovered even when " +
+                    "no 'Membership' section is bound from appsettings");
+
+        // Audit fields land in ExcludedFields (default GlobalFieldExclusions).
+        result.ExcludedFields.Select(e => e.Field).Should().Contain("createdby",
+            because: "MembershipOptionsDefaults seeds the standard audit-field exclusions " +
+                     "(createdby, modifiedby, createdonbehalfby, modifiedonbehalfby)");
+
+        // Spot-check the identity-type derivation works through the seeded config.
+        DescriptorFor(result, "sprk_assignedattorney1").IdentityType.Should().Be("Contact");
+        DescriptorFor(result, "sprk_assignedlawfirm1").IdentityType.Should().Be("Organization");
+        DescriptorFor(result, "ownerid").IdentityType.Should().Be("SystemUser");
+    }
+
+    // ────────────────────────────────────────────────────────────────────
     // Helpers
     // ────────────────────────────────────────────────────────────────────
 

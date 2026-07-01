@@ -49,7 +49,125 @@ public static class DailyBriefingEndpoints
             .ProducesProblem(429)
             .ProducesProblem(503);
 
+        // POST /api/ai/daily-briefing/render — Single-call live briefing render.
+        // R7 Wave 11 T118 narrator spike (2026-06-30): bypasses the appnotification
+        // dependency by running live Dataverse queries via DailyBriefingCollector,
+        // then narrating via DailyBriefingNarrator. No request body — discovers the
+        // user from the OBO token and resolves their systemuserid to drive queries.
+        // POC scope: sprk_event only, 4 channels (Tasks Due Soon / Overdue /
+        // Recent Matter Activity / My Recent Updates).
+        group.MapPost("/render", HandleRender)
+            .RequireRateLimiting("ai-batch")
+            .WithName("RenderDailyBriefing")
+            .WithSummary("Render full Daily Briefing from live Dataverse queries (no appnotification dependency)")
+            .WithDescription(
+                "Runs live FetchXML queries against Dataverse for the calling user's events " +
+                "(tasks due soon, overdue, recent matter activity, your recent updates), " +
+                "builds the NarrateRequest payload, then narrates via Azure OpenAI. " +
+                "Returns the same DailyBriefingNarrateResponse shape as /narrate.")
+            .Produces<DailyBriefingNarrateResponse>(StatusCodes.Status200OK)
+            .ProducesProblem(401)
+            .ProducesProblem(429)
+            .ProducesProblem(500)
+            .ProducesProblem(503);
+
         return app;
+    }
+
+    /// <summary>
+    /// R7 Wave 11 T118 narrator spike (2026-06-30): live-query render path.
+    /// Resolves the caller's systemuserid from the OBO token's AAD oid claim,
+    /// runs the collector to populate the request payload, then hands off to the
+    /// existing narrator. No body required — the briefing is self-contained.
+    /// </summary>
+    private static async Task<IResult> HandleRender(
+        ILoggerFactory loggerFactory,
+        Sprk.Bff.Api.Services.Ai.Narrators.DailyBriefingCollector collector,
+        Sprk.Bff.Api.Services.Ai.Narrators.DailyBriefingNarrator narrator,
+        Spaarke.Dataverse.IGenericEntityService entityService,
+        HttpContext httpContext,
+        CancellationToken cancellationToken)
+    {
+        var logger = loggerFactory.CreateLogger("DailyBriefingEndpoints");
+
+        // Resolve the caller's Dataverse systemuserid from their AAD oid claim.
+        // The "oid" claim on the OBO token is the Azure AD object id; Dataverse's
+        // systemuser table stores it in azureactivedirectoryobjectid.
+        var aadOid = httpContext.User?.FindFirst("oid")?.Value
+                  ?? httpContext.User?.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
+        if (string.IsNullOrEmpty(aadOid))
+        {
+            logger.LogWarning("Daily briefing render: token has no AAD oid claim; cannot resolve systemuserid");
+            return Results.Problem(
+                statusCode: 401,
+                title: "Unauthorized",
+                detail: "Caller AAD object id (oid claim) is required.");
+        }
+
+        Guid systemUserId;
+        try
+        {
+            var lookupFxml = $@"
+                <fetch top=""1"">
+                  <entity name=""systemuser"">
+                    <attribute name=""systemuserid""/>
+                    <attribute name=""fullname""/>
+                    <filter>
+                      <condition attribute=""azureactivedirectoryobjectid"" operator=""eq"" value=""{aadOid}""/>
+                      <condition attribute=""isdisabled"" operator=""eq"" value=""0""/>
+                    </filter>
+                  </entity>
+                </fetch>";
+            var lookup = await entityService.RetrieveMultipleAsync(
+                new Microsoft.Xrm.Sdk.Query.FetchExpression(lookupFxml), cancellationToken).ConfigureAwait(false);
+            if (lookup.Entities.Count == 0)
+            {
+                logger.LogWarning("Daily briefing render: no systemuser found for AAD oid {AadOid}", aadOid);
+                return Results.Problem(
+                    statusCode: 403,
+                    title: "Forbidden",
+                    detail: "Caller is not a Dataverse user in this environment.");
+            }
+            systemUserId = lookup.Entities[0].GetAttributeValue<Guid>("systemuserid");
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Daily briefing render: systemuser lookup failed for AAD oid {AadOid}", aadOid);
+            return Results.Problem(
+                statusCode: 500,
+                title: "Internal Server Error",
+                detail: "Failed to resolve caller identity.");
+        }
+
+        try
+        {
+            var payload = await collector.CollectAsync(systemUserId, cancellationToken).ConfigureAwait(false);
+            if (payload.Channels.Length == 0 && payload.PriorityItems.Length == 0 && payload.Categories.Length == 0)
+            {
+                logger.LogInformation("Daily briefing render: no notable items for systemuserid={SystemUserId} — returning empty narrative", systemUserId);
+                return TypedResults.Ok(new DailyBriefingNarrateResponse
+                {
+                    Tldr = new TldrResult { Summary = string.Empty, KeyTakeaways = [], TopAction = string.Empty },
+                    ChannelNarratives = [],
+                    GeneratedAtUtc = DateTimeOffset.UtcNow,
+                });
+            }
+
+            var response = await narrator.NarrateAsync(payload, cancellationToken).ConfigureAwait(false);
+            return TypedResults.Ok(response);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Daily briefing render failed for systemuserid {SystemUserId}", systemUserId);
+            return Results.Problem(
+                statusCode: 500,
+                title: "Internal Server Error",
+                detail: "Failed to render daily briefing.");
+        }
     }
 
     /// <summary>
@@ -203,6 +321,8 @@ public static class DailyBriefingEndpoints
         ILoggerFactory loggerFactory,
         IConsumerRoutingService routing,
         IInvokePlaybookAi invokePlaybookAi,
+        IConfiguration configuration,
+        Sprk.Bff.Api.Services.Ai.Narrators.DailyBriefingNarrator narrator,
         HttpContext httpContext,
         CancellationToken cancellationToken)
     {
@@ -237,8 +357,39 @@ public static class DailyBriefingEndpoints
             });
         }
 
+        // R7 Wave 11 T116 narrator spike (2026-06-30) — feature-flag branch.
+        // When Features:NarrateUseCodeBasedNarrator=true, bypass the playbook engine
+        // and execute /narrate via DailyBriefingNarrator (direct C# calls). Flag off
+        // (default) preserves existing playbook-engine path. Plan:
+        //   projects/spaarke-ai-platform-unification-r7/notes/spikes/narrator-spike-plan.md
+        var useCodeNarrator = configuration.GetValue<bool>(
+            "Features:NarrateUseCodeBasedNarrator", defaultValue: false);
+
+        if (useCodeNarrator)
+        {
+            logger.LogInformation(
+                "Dispatching daily briefing narration via CODE-BASED narrator (spike): Categories={CategoryCount}, PriorityItems={PriorityCount}, Channels={ChannelCount}",
+                request.Categories.Length, request.PriorityItems.Length, request.Channels.Length);
+
+            try
+            {
+                var response = await narrator.NarrateAsync(request, cancellationToken).ConfigureAwait(false);
+                return TypedResults.Ok(response);
+            }
+            catch (OperationCanceledException)
+            {
+                throw;
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex,
+                    "Code-based narrator failed for /narrate (spike). Falling through to playbook-engine path.");
+                // Fall through to the playbook path below for resilience during the spike.
+            }
+        }
+
         logger.LogInformation(
-            "Dispatching daily briefing narration: Categories={CategoryCount}, PriorityItems={PriorityCount}, Channels={ChannelCount}",
+            "Dispatching daily briefing narration via PLAYBOOK ENGINE: Categories={CategoryCount}, PriorityItems={PriorityCount}, Channels={ChannelCount}",
             request.Categories.Length, request.PriorityItems.Length, request.Channels.Length);
 
         try
@@ -635,6 +786,16 @@ public record ChannelItemDto
     [JsonPropertyName("regardingId")]
     public string RegardingId { get; init; } = "";
 
+    /// <summary>
+    /// Source entity type for this item (e.g., "sprk_event", "sprk_document",
+    /// "sprk_matter", "sprk_project", "sprk_todo"). Added by R7 Wave 12 task 135
+    /// so EnrichBulletWithEntityRefs can fall back to the source entity for
+    /// click-through navigation when the item has no regarding-matter populated
+    /// (orphan items still need a working link to the source record).
+    /// </summary>
+    [JsonPropertyName("sourceEntityType")]
+    public string SourceEntityType { get; init; } = "";
+
     /// <summary>ISO 8601 timestamp when the item was created.</summary>
     [JsonPropertyName("createdOn")]
     public string CreatedOn { get; init; } = "";
@@ -656,6 +817,32 @@ public record DailyBriefingNarrateResponse
     /// <summary>UTC timestamp when the narration was generated.</summary>
     [JsonPropertyName("generatedAtUtc")]
     public DateTimeOffset GeneratedAtUtc { get; init; }
+
+    /// <summary>
+    /// Optional sidecar with post-LLM entity-name validation metadata. Added by R7
+    /// Wave 11 narrator spike (2026-06-30) to mirror the original playbook design's
+    /// <c>_validationMetadata</c> responseBinding. Null when no scrubbing occurred
+    /// (i.e., the LLM emitted no hallucinated entity names — the common happy path).
+    /// Widget treats this as optional observability metadata, not user-visible content.
+    /// </summary>
+    [JsonPropertyName("_validationMetadata")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public ValidationMetadataDto? ValidationMetadata { get; init; }
+}
+
+/// <summary>
+/// Post-LLM entity-name validation outcome sidecar. Emitted on the narrate response only
+/// when the scrubber removed one or more proper-noun spans not present in the allow-list.
+/// </summary>
+public record ValidationMetadataDto
+{
+    /// <summary>Post-scrub text (sentence-aggregate after hallucinated proper-noun sentences removed).</summary>
+    [JsonPropertyName("scrubbedText")]
+    public string ScrubbedText { get; init; } = string.Empty;
+
+    /// <summary>Proper-noun spans that were not in the allow-list and were stripped.</summary>
+    [JsonPropertyName("removedTerms")]
+    public string[] RemovedTerms { get; init; } = [];
 }
 
 /// <summary>

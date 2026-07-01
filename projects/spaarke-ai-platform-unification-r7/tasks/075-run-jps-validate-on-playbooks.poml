@@ -1,0 +1,196 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-075" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Run `/jps-validate` on representative playbooks to confirm Wave 7 functional</title>
+    <status>not-started</status>
+    <wave>7</wave>
+    <estimated-effort>1-2 hours</estimated-effort>
+    <tags>testing, wave-7</tags>
+    <rigor-level>STANDARD</rigor-level>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>074</dependencies>
+    <fr-coverage>FR-32 + FR-33 (smoke test)</fr-coverage>
+  </metadata>
+
+  <prompt>
+    SMOKE TEST. Run the just-rewritten `/jps-validate` skill on 3 representative playbooks to confirm
+    all 5 Wave 7 skill rewrites (jps-action-create, jps-playbook-design, jps-playbook-audit, jps-validate,
+    jps-scope-refresh) are functional end-to-end.
+
+    Representative playbooks:
+    1. **Daily Briefing — DAILY-BRIEFING-NARRATE** (the R4 graduation-gate playbook; uses AiCompletionNodeExecutor delivered in Wave 1).
+    2. **Insights universal-ingest** (the Insights Engine R2 playbook; multi-node compose pattern per ADR-037).
+    3. **chat-summarize** (the SessionSummarizeOrchestrator playbook migrated to consumer routing in Wave 9 FR-17).
+
+    Confirm: each playbook passes `/jps-validate` with the new executor-first + typed-config validation pipeline.
+    Document results in a brief task-completion note. If any validation surfaces issues, file under
+    `/project-defer-issue-tracking` (do NOT block Wave 7 close — issues feed back into wave touch-ups).
+
+    After smoke test passes, this is the final task of Wave 7 — main session commits all Wave 7 changes
+    as a single PR.
+
+    **Sub-Agent Write Boundary applies — main session executes this. No parallel dispatch.** Per CLAUDE.md §3.
+  </prompt>
+
+  <role>
+    Senior QA engineer running a smoke test on freshly-rewritten skills. You understand JPS validation,
+    the R7 dispatch model, and the difference between "skill body has a bug" (P0 — fix in Wave 7) vs
+    "playbook has legacy drift" (P1-P2 — defer to Wave 4 or future).
+  </role>
+
+  <goal>
+    Smoke-test report at `projects/spaarke-ai-platform-unification-r7/notes/wave-7-smoke-test.md` that:
+    1. Runs `/jps-validate` on Daily Briefing DAILY-BRIEFING-NARRATE Action JPS + nodes.
+    2. Runs `/jps-validate` on Insights universal-ingest Action JPS + nodes.
+    3. Runs `/jps-validate` on chat-summarize Action JPS + nodes.
+    4. Records: pass/fail per playbook, drift findings (LEGACY- vs R7- prefix per task 073), and recommended remediation.
+    5. Confirms Wave 7 functional — if any P0 (skill body bug) is found, file as task 075a touch-up.
+    6. Confirms Wave 7 can close — main session commits all 5 skill rewrites + advances to next wave.
+  </goal>
+
+  <inputs>
+    <file purpose="just-rewritten-skill">.claude/skills/jps-validate/SKILL.md (task 073 output)</file>
+    <file purpose="aligned-skills">.claude/skills/jps-action-create/SKILL.md (task 070)</file>
+    <file purpose="aligned-skills">.claude/skills/jps-playbook-design/SKILL.md (task 071)</file>
+    <file purpose="aligned-skills">.claude/skills/jps-playbook-audit/SKILL.md (task 072)</file>
+    <file purpose="aligned-skills">.claude/skills/jps-scope-refresh/SKILL.md (task 074)</file>
+    <file purpose="design-spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    <file purpose="playbook-1">Daily Briefing — DAILY-BRIEFING-NARRATE Action JPS (Dataverse) + playbook nodes</file>
+    <file purpose="playbook-2">Insights universal-ingest Action JPS + playbook nodes</file>
+    <file purpose="playbook-3">chat-summarize Action JPS + playbook nodes (post Wave 9 FR-17 migration)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="CLAUDE.md §3 Sub-Agent Write Boundary">Sub-agents CANNOT write to `.claude/` paths. Main session executes this task. No parallel dispatch.</constraint>
+    <constraint source="spec FR-32 + FR-33">Smoke test confirms Wave 7 skill rewrites are functional — single representative playbook per category (AI completion, multi-node compose, consumer-routed).</constraint>
+    <constraint source="design.md §2 Invariants 1-5">Validation runs against the new executor-first + typed-config model. Per task 073 validation order: schema → executor existence → typed config → Action template → cross-field invariants.</constraint>
+    <constraint source="ADR-037">Insights universal-ingest tests compose strategy — `DeliverComposite` invariant preserved.</constraint>
+    <constraint source="ADR-038">Smoke test is observation, NOT a coverage gate. Tests added during this task are scaffolding (delete on project close per `/test-diet` rules).</constraint>
+    <constraint source="CLAUDE.md §11">Smoke test on existing playbooks — §11 triple does not apply (no new components).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>jps-validation-smoke-test</topic>
+    <files>
+      <file>projects/spaarke-ai-platform-unification-r7/spec.md (FR-32, FR-33 acceptance)</file>
+      <file>projects/spaarke-ai-platform-unification-r7/design.md (§2 invariants 1-5, §3.1 WHY)</file>
+      <file>.claude/skills/jps-validate/SKILL.md (just rewritten — task 073)</file>
+      <file>docs/adr/ADR-037-multinode-output-composition.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md (smoke test ≠ coverage gate)</file>
+    </files>
+    <patterns>
+      <pattern name="Smoke-test report shape" location="this task">
+        Per playbook: pass/fail, rules invoked, findings classified (P0 skill-body bug vs P1 playbook drift vs P2 cosmetic), recommended action.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Wave 7 (FR-32, FR-33) rewrote 5 jps-* skills sequentially per Sub-Agent Write Boundary. This task
+      validates the rewrites by running `/jps-validate` against 3 representative playbooks. Pass = Wave 7
+      closes; main session commits the wave as one PR. Findings classified:
+      - P0 (skill-body bug) → file as task 075a touch-up; Wave 7 cannot close.
+      - P1 (playbook drift) → defer to Wave 4 schema cleanup or future cleanup project.
+      - P2 (cosmetic) → defer indefinitely.
+
+      Important: Wave 9 (chat-summarize migration FR-17) is the dependency for the third playbook smoke
+      test. If Wave 9 has not landed yet, the chat-summarize playbook smoke test runs against pre-migration
+      state — note this caveat in the report.
+    </background>
+    <dependencies>
+      <dependency task="074" status="prerequisite">jps-scope-refresh minor update complete (all 5 Wave 7 rewrites done).</dependency>
+      <dependency task="W9 (FR-17)" status="conditional">chat-summarize playbook smoke test ideally runs post-migration; pre-migration result is informative if Wave 9 not yet merged.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Wave 4 (FR-03, FR-04) drops legacy schema fields. P1 drift findings from this smoke test feed into Wave 4 task 040 audit.</item>
+      <item>Wave 10 task 100 end-to-end verification re-runs `/jps-validate` on broader playbook set.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: STANDARD · 📋 REASON: smoke test (observation, not coverage gate per ADR-038); not ADR-bound code · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read project CLAUDE.md + spec.md FR-32 + FR-33 + design.md §2 Invariants 1-5 + the 5 rewritten skill bodies.
+    </step>
+    <step order="2" name="Identify representative playbooks">
+      Confirm the 3 playbook code values + Action JPS + node config locations:
+      1. DAILY-BRIEFING-NARRATE (Daily Briefing widget; R4 graduation-gate).
+      2. universal-ingest (Insights Engine R2; multi-node compose).
+      3. chat-summarize (consumer routing — Wave 9 FR-17 dependency).
+    </step>
+    <step order="3" name="Fetch playbook data via Dataverse">
+      Use `mcp__dataverse__read_query` to fetch:
+      - Action JPS rows from `sprk_analysisaction` (sprk_systemprompt, sprk_outputschemajson, sprk_temperature)
+      - Node rows from `sprk_playbooknode` (sprk_executortype, sprk_configjson, sprk_actionid)
+      for each of the 3 playbooks. If any aren't deployed in spaarkedev1 yet, note in report.
+    </step>
+    <step order="4" name="Run /jps-validate on Daily Briefing">
+      Invoke `/jps-validate` (the just-rewritten skill — task 073) on Daily Briefing DAILY-BRIEFING-NARRATE Action JPS + node configs. Record: pass/fail, rules invoked, findings.
+    </step>
+    <step order="5" name="Run /jps-validate on Insights universal-ingest">
+      Same invocation pattern. Pay particular attention to compose strategy (ADR-037) — must validate cleanly under R7 rules.
+    </step>
+    <step order="6" name="Run /jps-validate on chat-summarize">
+      Same invocation pattern. If Wave 9 not yet merged, the playbook may still carry legacy dispatch — note pre-vs-post state in report.
+    </step>
+    <step order="7" name="Classify findings">
+      Categorize every finding as:
+      - P0 (skill-body bug — validation logic is wrong; Wave 7 must touch up).
+      - P1 (playbook drift — playbook still carries legacy fields; deferred to Wave 4 schema cleanup).
+      - P2 (cosmetic — naming consistency, deprecation hints; defer indefinitely).
+    </step>
+    <step order="8" name="Write smoke-test report">
+      Write `projects/spaarke-ai-platform-unification-r7/notes/wave-7-smoke-test.md` with:
+      - Date, executor (main session), 5 skill rewrites confirmed.
+      - Per-playbook results table.
+      - Findings classified.
+      - Wave 7 close decision: ALL P0 = 0 → close; ANY P0 > 0 → file task 075a, hold Wave 7.
+    </step>
+    <step order="9" name="If P0 found, file task 075a touch-up">
+      If smoke test surfaces a skill-body bug, do NOT close Wave 7. Instead create task 075a (`075a-touchup-{skill}-bug-fix.poml`) with the failing finding + fix scope. Wave 7 closes when 075a passes.
+    </step>
+    <step order="10" name="If smoke test passes, mark Wave 7 closeable">
+      In `current-task.md`, advance state to "Wave 7 complete — ready for commit/PR". Main session will commit all Wave 7 changes (070-075 skill rewrites + smoke test note) as one PR.
+    </step>
+    <step order="11" name="Update current-task.md + TASK-INDEX">
+      Mark task 075 status complete; advance current-task.md to first Wave 8 task (or next wave per dependency graph).
+      Mark Wave 7 status row in TASK-INDEX: ⏸️ → ✅ (header row).
+    </step>
+    <step order="12" name="Commit Wave 7 as single PR">
+      Main session commits 5 skill rewrites + smoke-test report as one Wave 7 PR. Conventional commit:
+      `docs(skills/r7): rewrite jps-* skills for node-first dispatch model (Wave 7 FR-32/33, tasks 070-075)`.
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (rewritten skill bodies + design.md + spec.md)</tool>
+    <tool>mcp__dataverse__read_query (fetch playbook + action data)</tool>
+    <tool>Skill (jps-validate — invoke on each playbook)</tool>
+    <tool>Write (smoke-test report)</tool>
+    <tool>Bash (git commit + push for Wave 7 PR at end)</tool>
+  </tools>
+
+  <outputs>
+    <output type="report">projects/spaarke-ai-platform-unification-r7/notes/wave-7-smoke-test.md</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md (advance to Wave 8 task)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 075 ✅; Wave 7 row ✅)</output>
+    <output type="conditional-output">tasks/075a-touchup-{skill}-bug-fix.poml (ONLY if P0 found)</output>
+    <output type="commit">docs(skills/r7): rewrite jps-* skills for node-first dispatch model (Wave 7 FR-32/33, tasks 070-075)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>`/jps-validate` runs cleanly on Daily Briefing DAILY-BRIEFING-NARRATE Action JPS + nodes</criterion>
+    <criterion>`/jps-validate` runs cleanly on Insights universal-ingest (compose strategy preserved per ADR-037)</criterion>
+    <criterion>`/jps-validate` runs against chat-summarize (pre- or post- Wave 9 state noted in report)</criterion>
+    <criterion>Findings classified as P0 / P1 / P2 per the classification scheme</criterion>
+    <criterion>If P0 = 0 → Wave 7 closes; main session commits all 6 Wave 7 task outputs as one PR</criterion>
+    <criterion>If P0 > 0 → task 075a touch-up filed; Wave 7 held until P0 resolved</criterion>
+    <criterion>Smoke-test report written at `notes/wave-7-smoke-test.md` with per-playbook results table</criterion>
+    <criterion>TASK-INDEX Wave 7 status row updated to ✅</criterion>
+    <criterion>current-task.md advanced to next wave</criterion>
+  </acceptance-criteria>
+</task>

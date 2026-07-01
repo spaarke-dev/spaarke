@@ -1,0 +1,168 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-112" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Register custom Handlebars helpers: json, map, flatten, distinct, concat, join</title>
+    <status>not-started</status>
+    <wave>11</wave>
+    <estimated-effort>3 hours</estimated-effort>
+    <tags>bff-api, code-impl, ai, wave-11</tags>
+    <rigor-level>FULL</rigor-level>
+    <rigor-reason>Modifies .cs (TemplateEngine); tags include `bff-api`; helpers are reusable infrastructure — bugs compound across all downstream playbook expressions. FULL per task-execute Step 0.5.</rigor-reason>
+    <parallel-safe>true</parallel-safe>
+    <parallel-group>W11-C</parallel-group>
+    <parallel-reason>Independent of 113 (different helper) and 114 (orchestrator iteration). All three touch different code surfaces.</parallel-reason>
+    <dependencies>111</dependencies>
+    <blocks>115</blocks>
+    <fr-coverage>FR-15 (enables resolution of all expression shapes in DAILY-BRIEFING-NARRATE)</fr-coverage>
+  </metadata>
+
+  <prompt>
+    Register 6 custom Handlebars helpers on the existing `TemplateEngine`: `{{json X}}`,
+    `{{map COLL 'field'}}`, `{{flatten COLL}}`, `{{distinct COLL}}`, `{{concat A B …}}`,
+    `{{join SEP A B …}}`. Match the existing `default`/`safe`/`joinIds` helper style:
+    return empty string for null / UndefinedBindingResult; treat strings as scalars (not as
+    IEnumerable&lt;char&gt;); use System.Text.Json for `json` helper with camelCase. Write per-helper
+    xUnit tests including null/empty/scalar/object/JsonElement input shapes.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in Handlebars.NET helper authoring + System.Text.Json.
+    Follow the defensive contract established by existing helpers (graceful on UndefinedBindingResult).
+  </role>
+
+  <goal>
+    `TemplateEngine.cs` registers 6 new helpers. Each helper has a defensive `JoinIds`-style null
+    guard. xUnit `TemplateEngineTests.cs` (extended) proves correct behavior for each helper:
+    happy path, null/missing input, empty collection, string-as-scalar, JsonElement traversal.
+    Build + full test suite pass.
+  </goal>
+
+  <inputs>
+    <file purpose="template-engine">src/server/api/Sprk.Bff.Api/Services/Ai/TemplateEngine.cs</file>
+    <file purpose="existing-tests">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/TemplateEngineTests.cs</file>
+    <file purpose="playbook-source-for-coverage-check">projects/spaarke-daily-update-service/notes/playbooks/daily-briefing-narrate.json</file>
+    <file purpose="design-from-110">projects/spaarke-ai-platform-unification-r7/notes/spikes/wave11-orchestrator-resolution-design.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-010">DI Minimalism — helpers are static registrations on existing TemplateEngine; no new interfaces / abstractions introduced.</constraint>
+    <constraint source="ADR-029">BFF Publish Hygiene — System.Text.Json already in BFF; no new packages. Expected publish-size delta ~0.</constraint>
+    <constraint source="ADR-038">Testing Strategy — test the helpers directly via TemplateEngine.Render with controlled inputs; do NOT mock TemplateEngine itself.</constraint>
+    <constraint source="CLAUDE.md §10">BFF Hygiene checklist applies. No new packages added.</constraint>
+    <constraint source="CLAUDE.md §11">Helpers extend existing TemplateEngine — modification, not new component. Justification not required.</constraint>
+    <constraint source="existing-style">Match defensive style of existing helpers: null/UndefinedBindingResult → empty string; strings treated as scalars.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai/template-engine-helpers</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/adr/ADR-010-di-minimalism.md</file>
+      <file>docs/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r7/notes/spikes/wave11-orchestrator-resolution-design.md</file>
+    </files>
+    <patterns>
+      <pattern name="Defensive Handlebars helper" location="src/server/api/Sprk.Bff.Api/Services/Ai/TemplateEngine.cs">
+        See `JoinIds` (private static) for the canonical pattern: null guard → UndefinedBindingResult guard → string-as-scalar guard → IEnumerable case → fallback empty. Re-use this for `flatten`/`distinct`/`concat`/`join`.
+      </pattern>
+      <pattern name="json helper recipe">
+        `{{json X}}` → `JsonSerializer.Serialize(X, new JsonSerializerOptions { PropertyNamingPolicy = JsonNamingPolicy.CamelCase, DefaultIgnoreCondition = JsonIgnoreCondition.Never })`. Handle UndefinedBindingResult → `"null"` literal (matches DAILY-BRIEFING-NARRATE expectations for empty start payload).
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Task 111 wired ITemplateEngine into the orchestrator. The deployed DAILY-BRIEFING-NARRATE
+      playbook uses these 6 expression shapes (per the source JSON):
+        - `{{json start}}` — serialize start payload to JSON for LLM prompt input
+        - `{{map start.priorityItems 'regardingName'}}` — pluck field across collection
+        - `{{flatten X}}` — flatten array of arrays
+        - `{{distinct X}}` — deduplicate
+        - `{{concat A B C}}` — concatenate arrays
+        - `{{join '\n\n' a b c}}` — join with separator (used for candidateText composition)
+      None are native to Handlebars.NET. T112 adds them as helpers.
+    </background>
+    <dependencies>
+      <dependency task="111" status="must-complete-first">ITemplateEngine wired into orchestrator (so helpers are reachable at render time).</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 113 adds the 7th helper (`flatMap`) to replace inline lambda.</item>
+      <item>Task 115 (restore ValidateEntityNames config) requires all helpers + flatMap registered.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: FULL · 📋 REASON: bff-api code-impl, modifies .cs, helpers compound · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context + verify task 111 complete">
+      Confirm TASK-INDEX shows 111 ✅. Read design doc from 110. Read existing TemplateEngine.cs `JoinIds` for the defensive pattern.
+    </step>
+    <step order="2" name="Implement json helper">
+      Register `_handlebars.RegisterHelper("json", …)`. Serialize via System.Text.Json with camelCase. Handle null/UndefinedBindingResult → literal `"null"` string. Add private static helper method for serialization options reuse.
+    </step>
+    <step order="3" name="Implement map helper">
+      `{{map COLL 'fieldName'}}` → returns Array of (item[fieldName] OR null). Use reflection or IDictionary lookup (NodeOutputs values are Dictionary&lt;string,object?&gt; per ConvertJsonElement). Support dotted `'a.b'` field path (split + reduce).
+    </step>
+    <step order="4" name="Implement flatten helper">
+      `{{flatten COLL}}` → returns concatenated inner-array elements when each item is IEnumerable; null/scalar guard returns empty.
+    </step>
+    <step order="5" name="Implement distinct helper">
+      `{{distinct COLL}}` → returns enumerable with case-insensitive ordinal distinct (matches the entity-name allow-list use case). Preserves first-occurrence order.
+    </step>
+    <step order="6" name="Implement concat helper">
+      `{{concat A B C …}}` → flattens all args into one list. Each arg may be enumerable or scalar; nulls skipped.
+    </step>
+    <step order="7" name="Implement join helper">
+      `{{join SEP A B C …}}` → SEP is the first arg (string); subsequent args concatenated then joined. Distinct from Handlebars built-in `{{#each}}` join — this is a flat-args helper.
+    </step>
+    <step order="8" name="Write xUnit tests for each helper">
+      Extend `TemplateEngineTests.cs`. Per helper: happy path + null input + empty input + string-as-scalar + JsonElement input (via ConvertJsonElement). Target: 6 helpers × 5 cases = ~30 tests. Verify subexpression composition: `{{distinct (concat (map A 'x') (map B 'y'))}}` resolves end-to-end.
+    </step>
+    <step order="9" name="Coverage check against playbook source">
+      Re-read daily-briefing-narrate.json. Confirm every `{{helperX …}}` expression EXCEPT `{{lambda …}}` (T113) and EXCEPT iteration (T114) is now covered by a registered helper. Document any gap in commit body.
+    </step>
+    <step order="10" name="Build + run full BFF test suite">
+      `dotnet build` + `dotnet test`. Confirm zero regressions + new tests pass.
+    </step>
+    <step order="11" name="Step 9.5 — Quality gates">
+      `/code-review` + `/adr-check` on TemplateEngine.cs + new tests. Address HIGH/CRITICAL.
+    </step>
+    <step order="12" name="Update TASK-INDEX + current-task.md">
+      Mark 112 ✅; current-task points to next pending (113).
+    </step>
+    <step order="13" name="Commit">
+      Conventional commit. Body cites helper coverage status + design-doc reference.
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (TemplateEngine + tests + playbook source)</tool>
+    <tool>Edit (TemplateEngine.cs)</tool>
+    <tool>Edit (TemplateEngineTests.cs)</tool>
+    <tool>Bash (dotnet build + test + git commit)</tool>
+    <tool>Skill (code-review, adr-check)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/TemplateEngine.cs (6 helpers added)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/TemplateEngineTests.cs (extended with ~30 new tests)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">6 new helpers registered: json, map, flatten, distinct, concat, join</criterion>
+    <criterion testable="true">Each helper has ≥4 test cases covering null/empty/happy/scalar paths</criterion>
+    <criterion testable="true">Subexpression composition `{{distinct (concat (map A 'x') (map B 'y'))}}` resolves correctly in an integration-style test</criterion>
+    <criterion testable="true">All pre-existing TemplateEngine tests still pass (zero regression)</criterion>
+    <criterion testable="true">`dotnet build` zero errors; full BFF test suite passes</criterion>
+    <criterion testable="true">code-review + adr-check return zero HIGH/CRITICAL findings (or all addressed)</criterion>
+    <criterion testable="true">Commit body documents which DAILY-BRIEFING-NARRATE expressions are now covered + which remain (T113, T114)</criterion>
+  </acceptance-criteria>
+</task>

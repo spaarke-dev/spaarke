@@ -1,7 +1,7 @@
 namespace Sprk.Bff.Api.Services.Ai.Nodes;
 
 /// <summary>
-/// Registry for discovering and resolving node executors by ActionType.
+/// Registry for discovering and resolving node executors by ExecutorType.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -9,7 +9,7 @@ namespace Sprk.Bff.Api.Services.Ai.Nodes;
 /// </para>
 /// <list type="bullet">
 /// <item>Executor registration at startup via DI</item>
-/// <item>Executor resolution by ActionType</item>
+/// <item>Executor resolution by ExecutorType</item>
 /// <item>Metadata for executor discovery</item>
 /// </list>
 /// <para>
@@ -19,11 +19,11 @@ namespace Sprk.Bff.Api.Services.Ai.Nodes;
 public interface INodeExecutorRegistry
 {
     /// <summary>
-    /// Gets a node executor that can handle the specified ActionType.
+    /// Gets a node executor that can handle the specified ExecutorType.
     /// </summary>
-    /// <param name="actionType">The action type to find an executor for.</param>
+    /// <param name="executorType">The executor type to find an executor for.</param>
     /// <returns>The registered executor, or null if not found.</returns>
-    INodeExecutor? GetExecutor(ActionType actionType);
+    INodeExecutor? GetExecutor(ExecutorType executorType);
 
     /// <summary>
     /// Gets all registered executors.
@@ -32,17 +32,17 @@ public interface INodeExecutorRegistry
     IReadOnlyList<INodeExecutor> GetAllExecutors();
 
     /// <summary>
-    /// Checks if an executor is registered for the specified ActionType.
+    /// Checks if an executor is registered for the specified ExecutorType.
     /// </summary>
-    /// <param name="actionType">The action type to check.</param>
-    /// <returns>True if an executor exists for this action type.</returns>
-    bool HasExecutor(ActionType actionType);
+    /// <param name="executorType">The executor type to check.</param>
+    /// <returns>True if an executor exists for this executor type.</returns>
+    bool HasExecutor(ExecutorType executorType);
 
     /// <summary>
-    /// Gets all ActionTypes that have registered executors.
+    /// Gets all ExecutorTypes that have registered executors.
     /// </summary>
-    /// <returns>Collection of supported action types.</returns>
-    IReadOnlyList<ActionType> GetSupportedActionTypes();
+    /// <returns>Collection of supported executor types.</returns>
+    IReadOnlyList<ExecutorType> GetSupportedExecutorTypes();
 
     /// <summary>
     /// Gets the count of registered executors.

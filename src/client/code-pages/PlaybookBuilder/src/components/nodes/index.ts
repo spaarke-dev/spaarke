@@ -23,6 +23,11 @@ export { SendEmailNode } from './SendEmailNode';
 export { CreateNotificationNode } from './CreateNotificationNode';
 export { WaitNode } from './WaitNode';
 export { EntityNameValidatorNode } from './EntityNameValidatorNode';
+// R7 Wave 8 task 089 (FR-27): warning-state shell for nodes whose executorType
+// is not present in the local EXECUTOR_METADATA catalog. See UnknownNode.tsx
+// for the rationale + coerceUnknownNodeTypes in canvasStore.ts for canvas-side
+// detection.
+export { UnknownNode } from './UnknownNode';
 
 // Import components for registry
 import { StartNode } from './StartNode';
@@ -37,6 +42,7 @@ import { SendEmailNode } from './SendEmailNode';
 import { CreateNotificationNode } from './CreateNotificationNode';
 import { WaitNode } from './WaitNode';
 import { EntityNameValidatorNode } from './EntityNameValidatorNode';
+import { UnknownNode } from './UnknownNode';
 
 /**
  * Node type registry for @xyflow/react v12.
@@ -61,4 +67,9 @@ export const nodeTypes: NodeTypes = {
   // the default plain box. EntityNameValidator is a post-LLM Tool node; the
   // component renders icon + "Tool" type label + output preview to match peers.
   entityNameValidator: EntityNameValidatorNode,
+  // R7 Wave 8 task 089 (FR-27): rendered when `node.data.executorType` is
+  // undefined OR not present in EXECUTOR_METADATA. canvasStore's
+  // coerceUnknownNodeTypes() rewrites `node.type = 'unknown'` during canvas
+  // hydration so this entry actually gets dispatched by React Flow.
+  unknown: UnknownNode,
 };

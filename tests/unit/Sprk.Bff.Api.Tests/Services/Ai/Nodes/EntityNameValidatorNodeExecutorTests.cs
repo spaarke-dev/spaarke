@@ -33,13 +33,13 @@ public class EntityNameValidatorNodeExecutorTests
         _executor = new EntityNameValidatorNodeExecutor(_loggerMock.Object);
     }
 
-    #region SupportedActionTypes
+    #region SupportedExecutorTypes
 
     [Fact]
     public void SupportedActionTypes_ContainsEntityNameValidator()
     {
-        _executor.SupportedActionTypes.Should().Contain(ActionType.EntityNameValidator);
-        _executor.SupportedActionTypes.Should().HaveCount(1);
+        _executor.SupportedExecutorTypes.Should().Contain(ExecutorType.EntityNameValidator);
+        _executor.SupportedExecutorTypes.Should().HaveCount(1);
     }
 
     #endregion
@@ -343,7 +343,7 @@ public class EntityNameValidatorNodeExecutorTests
                 Id = actionId,
                 Name = "Entity Name Validator"
             },
-            ActionType = ActionType.EntityNameValidator,
+            ExecutorType = ExecutorType.EntityNameValidator,
             Scopes = new ResolvedScopes([], [], []),
             TenantId = "test-tenant",
             CorrelationId = "corr-" + Guid.NewGuid().ToString("N")

@@ -27,14 +27,14 @@ public class DeliverOutputNodeExecutorTests
             _loggerMock.Object);
     }
 
-    #region SupportedActionTypes Tests
+    #region SupportedExecutorTypes Tests
 
     [Fact]
     public void SupportedActionTypes_ContainsDeliverOutput()
     {
         // Assert
-        _executor.SupportedActionTypes.Should().Contain(ActionType.DeliverOutput);
-        _executor.SupportedActionTypes.Should().HaveCount(1);
+        _executor.SupportedExecutorTypes.Should().Contain(ExecutorType.DeliverOutput);
+        _executor.SupportedExecutorTypes.Should().HaveCount(1);
     }
 
     #endregion
@@ -419,7 +419,7 @@ public class DeliverOutputNodeExecutorTests
                 Id = actionId,
                 Name = "Deliver Output"
             },
-            ActionType = ActionType.DeliverOutput,
+            ExecutorType = ExecutorType.DeliverOutput,
             Scopes = new ResolvedScopes([], [], []),
             TenantId = "test-tenant"
         };

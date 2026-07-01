@@ -1,0 +1,158 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-115" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Restore source-correct ValidateEntityNames node configJson + author sync script</title>
+    <status>not-started</status>
+    <wave>11</wave>
+    <estimated-effort>1-2 hours</estimated-effort>
+    <tags>dataverse, deploy, script, wave-11</tags>
+    <rigor-level>FULL</rigor-level>
+    <rigor-reason>Modifies deployed Dataverse data + creates new .ps1 script; data-modifying task per CLAUDE.md §8 TEST-MODIFYING analog. FULL rigor regardless of step count.</rigor-reason>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches deployed data on spaarkedev1 — sequential after 112+113+114 confirm template-engine + fan-out work end-to-end in unit tests.</parallel-reason>
+    <dependencies>112, 113, 114</dependencies>
+    <blocks>116</blocks>
+    <fr-coverage>FR-15 + FR-14 (post-LLM scrubber now reads source-correct config; anti-hallucination defense restored)</fr-coverage>
+  </metadata>
+
+  <prompt>
+    Replace the smoke-test PATCH from 2026-06-29 R7 hotfix on the ValidateEntityNames node
+    (`candidateText="smoke test text", allowList=[]`) with the source-correct templates from
+    `daily-briefing-narrate.json`. Author `scripts/dataverse/Sync-DailyBriefingNarratePlaybookNodes.ps1`
+    (pattern: existing `Sync-BriefNarrateOutputSchemas.ps1`) so the source playbook's node
+    configJson values can be re-applied to spaarkedev1 idempotently. PATCH the ValidateEntityNames
+    row to use source-correct `inputBinding.candidateText` + `inputBinding.allowList` expressions
+    (the flatMap rewrite from task 113 applies here). Smoke that the orchestrator + template engine
+    + fan-out + flatMap together resolve the expression at runtime — pure unit-level proof; full
+    end-to-end /narrate smoke is task 116.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer with Dataverse Web API + PowerShell + JPS playbook config
+    familiarity. Goal: capture the data PATCH as a reusable script (vs. ad-hoc PowerShell).
+  </role>
+
+  <goal>
+    Two artifacts:
+    1. `scripts/dataverse/Sync-DailyBriefingNarratePlaybookNodes.ps1` — idempotent + dry-run-mode
+       PowerShell that PATCHes the 6 `sprk_playbooknode` rows of `DAILY-BRIEFING-NARRATE` (playbook
+       GUID `7b5a6ed3-0271-f111-ab0e-000d3a13a4cd`) with `sprk_configjson` values read from the
+       source JSON `daily-briefing-narrate.json`.
+    2. Live PATCH applied to spaarkedev1 — ValidateEntityNames row's sprk_configjson restored to
+       source-correct (replaces 2026-06-29 smoke-test value).
+    Idempotent re-run is a no-op.
+  </goal>
+
+  <inputs>
+    <file purpose="source-playbook">projects/spaarke-daily-update-service/notes/playbooks/daily-briefing-narrate.json</file>
+    <file purpose="existing-sync-script-pattern">scripts/dataverse/Sync-BriefNarrateOutputSchemas.ps1</file>
+    <file purpose="deploy-r4-playbook-nodes-context">scripts/Deploy-R4-Playbook-Nodes.ps1</file>
+    <file purpose="entity-validator-executor-contract">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/EntityNameValidatorNodeExecutor.cs</file>
+    <file purpose="validator-action-source">projects/spaarke-daily-update-service/notes/playbooks/actions/brief-validate-entity-names.action.json</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-029">BFF Publish Hygiene — no BFF code change in this task; no publish-size check.</constraint>
+    <constraint source="CLAUDE.md §10">No BFF surface added — script lives in `scripts/dataverse/`.</constraint>
+    <constraint source="CLAUDE.md §11">New script: `Sync-DailyBriefingNarratePlaybookNodes.ps1` — modification-pattern of existing `Sync-BriefNarrateOutputSchemas.ps1`. Justification triple required (see &lt;justification&gt; below).</constraint>
+    <constraint source="idempotency">Script MUST be idempotent — second run with no source changes = no-op PATCH (or skip).</constraint>
+    <constraint source="dry-run-first">Script MUST have `-DryRun` switch; run dry-run BEFORE live PATCH.</constraint>
+    <constraint source="runtime-validation">EntityNameValidatorNodeExecutor expects TOP-LEVEL `candidateText` + `allowList` in configJson (per its Validate). The orchestrator's template engine MUST resolve `inputBinding.candidateText` template into TOP-LEVEL `candidateText` BEFORE the executor sees it. If not — re-open T111/T112/T113 design.</constraint>
+  </constraints>
+
+  <justification>
+    <existing>`scripts/dataverse/Sync-BriefNarrateOutputSchemas.ps1` (created 0f834ce69) — same idempotent-PATCH pattern, but for `sprk_analysisaction.sprk_outputschemajson`. Differences: this task targets `sprk_playbooknode.sprk_configjson` for 6 nodes (vs 2 action rows).</existing>
+    <extension>No — extension via parameter would couple action-row PATCH and node-row PATCH into one script; the cleanly-separated scripts mirror the cleanly-separated Dataverse tables. Reuse the PATCH/auth/derive-from-source pattern but ship as a sibling script.</extension>
+    <cost-of-doing-nothing>Without this script, the 2026-06-29 smoke-test PATCH on ValidateEntityNames (`candidateText="smoke test text"`) remains in production data. The next time DAILY-BRIEFING-NARRATE is re-deployed via Deploy-R4-Playbook-Nodes.ps1 (which only does a partial node-row replacement, not a configJson refresh), the smoke value would survive — bypassing the FR-14 anti-hallucination scrubber permanently. End-to-end /narrate would silently degrade to "scrubber sees smoke text, scrubs nothing".</cost-of-doing-nothing>
+  </justification>
+
+  <knowledge>
+    <topic>dataverse/sync-script</topic>
+    <files>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>docs/guides/ai-guide-playbook-deploy-recipe.md</file>
+      <file>scripts/dataverse/Sync-BriefNarrateOutputSchemas.ps1</file>
+    </files>
+    <patterns>
+      <pattern name="Idempotent Web API PATCH" location="scripts/dataverse/Sync-BriefNarrateOutputSchemas.ps1">
+        az account get-access-token + Invoke-RestMethod PATCH with If-Match: *. Per-row try/catch; per-row success/fail log. DryRun mode prints derived value without writing.
+      </pattern>
+      <pattern name="Source-derived value" location="scripts/dataverse/Sync-BriefNarrateOutputSchemas.ps1">
+        Read source JSON; derive Dataverse column value from a sub-tree; compare-and-PATCH. For node configJson: read each node from `daily-briefing-narrate.json` `nodes[]`, locate by name, serialize its `configJson` block to JSON string.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      The 2026-06-29 R7 hotfix sequence (before Wave 11 was planned) PATCHed the ValidateEntityNames node's sprk_configjson with `{"candidateText":"smoke test text","allowList":[]}` to get /narrate past the executor's validator while diagnosing the orchestrator gap. That smoke value still lives in spaarkedev1. Now that template engine + flatMap + iteration are wired (T111-T114), the source-correct template expressions can be restored and will actually resolve at runtime.
+    </background>
+    <dependencies>
+      <dependency task="112" status="must-complete-first">All 6 standard helpers registered (used in candidateText join + map expressions).</dependency>
+      <dependency task="113" status="must-complete-first">flatMap helper + source rewrite (used in allowList expression).</dependency>
+      <dependency task="114" status="must-complete-first">Fan-out iteration semantic (channelNarrationResults array assembly requires this).</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 116 (smoke + deploy) is the end-to-end test of all Wave 11 work; this task only restores data + writes the script.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: FULL · 📋 REASON: data-modifying on spaarkedev1 + new script · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context + verify upstream tasks complete">
+      Confirm 112 ✅, 113 ✅, 114 ✅. Read Sync-BriefNarrateOutputSchemas.ps1 (canonical pattern).
+    </step>
+    <step order="2" name="Read source playbook + map node names → GUIDs">
+      Read daily-briefing-narrate.json; enumerate the 6 nodes. Map each `nodes[i].name` to the deployed `sprk_playbooknodeid` via known GUIDs (per MCP read_query 2026-06-29):
+        Start=32371fa5-a171-f111-ab0d-7ced8ddc4a05; LoadKnowledge=0c895da7-…; GenerateTldr=0d895da7-…; GenerateChannelNarratives=10895da7-…; ValidateEntityNames=11895da7-…; ReturnResponse=12895da7-….
+      Encode these in the script as a hashtable.
+    </step>
+    <step order="3" name="Author Sync-DailyBriefingNarratePlaybookNodes.ps1">
+      Create `scripts/dataverse/Sync-DailyBriefingNarratePlaybookNodes.ps1`. Mirror the structure of `Sync-BriefNarrateOutputSchemas.ps1`. Parameters: `-DataverseUrl` (default $env:DATAVERSE_URL or spaarkedev1), `-DryRun`. For each known node: derive sprk_configjson from source JSON's `nodes[i].configJson` block (serialize as JSON string); PATCH the corresponding sprk_playbooknode row.
+    </step>
+    <step order="4" name="DryRun smoke">
+      Run `pwsh ./scripts/dataverse/Sync-DailyBriefingNarratePlaybookNodes.ps1 -DryRun`. Verify output shows each node's derived configJson (including ValidateEntityNames's restored expression with flatMap).
+    </step>
+    <step order="5" name="Live PATCH">
+      Run without -DryRun. Verify Green per-row PATCHED messages. MCP read_query the ValidateEntityNames row's sprk_configjson — confirm contains `inputBinding.candidateText` template (NOT `smoke test text`) AND `inputBinding.allowList` with the flatMap-based expression.
+    </step>
+    <step order="6" name="Idempotency verify">
+      Re-run the script; confirm PATCH succeeds (idempotent — same body, write succeeds without semantic change).
+    </step>
+    <step order="7" name="Step 9.5 — Quality gate (script-only)">
+      `/code-review` on the new script. `/adr-check` is non-applicable for scripts (no .cs / .ts). Capture finding count in commit body.
+    </step>
+    <step order="8" name="Update TASK-INDEX + current-task.md">
+      Mark 115 ✅; advance to 116.
+    </step>
+    <step order="9" name="Commit">
+      Commit message body cites: source-of-truth restoration, smoke-PATCH replacement, idempotency + DryRun semantics.
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (source playbook + existing sync script)</tool>
+    <tool>Write (new sync script)</tool>
+    <tool>Bash (pwsh dry-run, pwsh live-run, git commit)</tool>
+    <tool>MCP (mcp__dataverse__read_query for post-PATCH verification)</tool>
+    <tool>Skill (code-review)</tool>
+  </tools>
+
+  <outputs>
+    <output type="script">scripts/dataverse/Sync-DailyBriefingNarratePlaybookNodes.ps1</output>
+    <output type="data">spaarkedev1 sprk_playbooknode (ValidateEntityNames row PATCHed)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Sync-DailyBriefingNarratePlaybookNodes.ps1 exists with -DryRun + idempotent semantics</criterion>
+    <criterion testable="true">DryRun output prints derived configJson for all 6 nodes</criterion>
+    <criterion testable="true">Live PATCH applied; ValidateEntityNames row sprk_configjson no longer contains `smoke test text`</criterion>
+    <criterion testable="true">Post-PATCH MCP query confirms `inputBinding.candidateText` template + flatMap-based allowList expression</criterion>
+    <criterion testable="true">Idempotent re-run succeeds; no semantic divergence</criterion>
+    <criterion testable="true">code-review on script returns zero HIGH/CRITICAL</criterion>
+  </acceptance-criteria>
+</task>

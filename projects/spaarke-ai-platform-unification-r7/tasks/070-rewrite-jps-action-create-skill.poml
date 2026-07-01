@@ -1,0 +1,171 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-070" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>REWRITE `.claude/skills/jps-action-create/SKILL.md` (FR-32)</title>
+    <status>not-started</status>
+    <wave>7</wave>
+    <estimated-effort>2-3 hours</estimated-effort>
+    <tags>skill-directives, docs, wave-7</tags>
+    <rigor-level>STANDARD</rigor-level>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>024 (W2 single-hop dispatch ready)</dependencies>
+    <fr-coverage>FR-32</fr-coverage>
+  </metadata>
+
+  <prompt>
+    REWRITE the `.claude/skills/jps-action-create/SKILL.md` body to reflect the R7 node-first dispatch model.
+    Today this skill teaches the author "set ActionType on the Action" — that signal is no longer load-bearing
+    after R7. Actions are now PROMPT TEMPLATES (when prompt-driven): they carry `SystemPrompt`, `OutputSchema`,
+    `Temperature`. They do NOT carry dispatch identity; the node's `sprk_executortype` Choice does.
+
+    Cite the §3.1 WHY (R3.1 history of dispatch-model confusion from design.md) inline so future authors
+    learn the rationale, not just the new mechanic.
+
+    **Sub-Agent Write Boundary applies — main session executes this. No parallel dispatch.** This is the
+    first of 5 sequential skill rewrites in Wave 7. Per CLAUDE.md §3, `.claude/skills/` writes happen only
+    in main session — sub-agents launched via the Agent tool cannot write to these paths.
+  </prompt>
+
+  <role>
+    Senior skill author for the Spaarke skill library. You understand both the OLD dispatch model
+    (3-layer lookup chain `node → Action → ActionType lookup row`) and the NEW R7 model (single-hop
+    `node.sprk_executortype`). Your job: rewrite the skill body so a future author using this skill
+    in Wave 8+ produces a correct Action JSON that does NOT carry dispatch identity.
+  </role>
+
+  <goal>
+    Updated `.claude/skills/jps-action-create/SKILL.md` that:
+    1. Frames Actions as REUSABLE PROMPT TEMPLATES for prompt-driven executors (AiAnalysis, AiCompletion, AiEmbedding) — not as dispatch identity carriers.
+    2. New Actions specify `SystemPrompt` + `OutputSchema` + `Temperature` (the prompt-template contract per design.md §2 Invariant 3).
+    3. Explicitly tells the author: do NOT set `ActionType` / `sprk_executoractiontype` / lookup-row signals — the NODE's `sprk_executortype` Choice does dispatch (single hop).
+    4. Cites the §3.1 WHY (R3.1 history of dispatch-model confusion) so future authors understand the rationale.
+    5. Validates against `sprk_executortype` Choice values for the consuming node — NOT against the legacy ActionType lookup.
+    6. Updates the Config-Home Guard table (Step 1.5) — Home A is still Action prompt+schema+temperature; dispatch field is REMOVED from Home A.
+    7. Preserves the JPS schema contract (instruction, output fields, scopes, template params, examples) — only the dispatch wiring narrative changes.
+    8. `last-reviewed` frontmatter bumped to 2026-06-28; `Reviewed By` cites this task.
+  </goal>
+
+  <inputs>
+    <file purpose="rewrite-target">.claude/skills/jps-action-create/SKILL.md</file>
+    <file purpose="design-spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="design-doc-WHY">projects/spaarke-ai-platform-unification-r7/design.md</file>
+    <file purpose="plan">projects/spaarke-ai-platform-unification-r7/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    <file purpose="dispatch-refactor-source-of-truth">src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookOrchestrationService.cs</file>
+    <file purpose="sibling-skill-pattern">.claude/skills/jps-playbook-design/SKILL.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="CLAUDE.md §3 Sub-Agent Write Boundary">Sub-agents CANNOT write to `.claude/` paths. Main session executes this task directly via Edit/Write. Do NOT dispatch parallel agents.</constraint>
+    <constraint source="spec FR-32">Each rewritten skill cites the §3.1 WHY history and validates against `node.sprk_executortype`, not Action lookup.</constraint>
+    <constraint source="design.md §2 Invariant 3">Action is a reusable prompt template carrying `sprk_systemprompt`, `sprk_outputschemajson`, `sprk_temperature`. NOT dispatch identity.</constraint>
+    <constraint source="design.md §2 Invariant 2">Executor dispatch lives on the NODE via `sprk_executortype` Choice, not on the Action.</constraint>
+    <constraint source="design.md §3.1">The R3.1 history of dispatch-model confusion (3-layer storage, none enforced to agree, drifted across releases) is the WHY — cite it inline so authors using this skill understand why "do not set ActionType" is binding.</constraint>
+    <constraint source="CLAUDE.md §11">Component justification — this is a REWRITE of an existing skill (not a new component); §11 triple does not apply. Only modifying existing surface.</constraint>
+    <constraint source="bff-extensions.md">Not BFF-touching; no publish-size check.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>jps-skill-authoring</topic>
+    <files>
+      <file>projects/spaarke-ai-platform-unification-r7/design.md (§2 invariants 1-3, §3.1 WHY)</file>
+      <file>projects/spaarke-ai-platform-unification-r7/spec.md (FR-32 acceptance)</file>
+      <file>.claude/skills/jps-action-create/SKILL.md (rewrite target)</file>
+      <file>docs/architecture/ai-architecture-actions-nodes-scopes.md (4-Home decision tree)</file>
+    </files>
+    <patterns>
+      <pattern name="Config-Home Guard table" location=".claude/skills/jps-action-create/SKILL.md Step 1.5">
+        Existing structure preserved; Home A row updated to remove dispatch signal — Action carries prompt/schema/temperature only.
+      </pattern>
+      <pattern name="WHY-citation inline" location="design.md §3.1">
+        Brief inline reference: "Why no dispatch signal on Action? See R3.1 — the 3-layer dispatch storage caused every release to ship a different version of the same bug."
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Wave 7 (FR-32, FR-33) rewrites jps-* skill bodies to teach the R7 dispatch model. Wave 2 task 024
+      shipped the single-hop dispatch refactor in the BFF; Wave 5 backfilled the 94 existing nodes;
+      this wave aligns the skill instructions so future authors don't recreate the legacy split.
+
+      jps-action-create is the FIRST skill rewrite — it authors new Action JPS definitions. The downstream
+      skills (jps-playbook-design, jps-playbook-audit, jps-validate) build on the new Action contract.
+    </background>
+    <dependencies>
+      <dependency task="024" status="prerequisite">Wave 2 single-hop dispatch refactor must be merged; the runtime now reads `node.sprk_executortype` only.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Tasks 071-073 rewrite the sibling jps-* skills; task 074 minor-updates jps-scope-refresh; task 075 runs `/jps-validate` for smoke-test.</item>
+      <item>Wave 6 task 065 (MAJOR UPDATE JPS-AUTHORING-GUIDE.md) updates the operator guide in `docs/guides/`. Skill body + guide must stay aligned.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: STANDARD · 📋 REASON: skill body rewrite (not ADR-bound code); STANDARD per CLAUDE.md §8 — no Step 9.5 code-review/adr-check · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read project CLAUDE.md + spec.md FR-32 + design.md §2 Invariants 1-3 + §3.1 WHY history.
+    </step>
+    <step order="2" name="Read existing skill body">
+      Read full current `.claude/skills/jps-action-create/SKILL.md`. Note: frontmatter, Purpose, Applies When, Step 1.5 Config-Home Guard, Step 2+ workflow steps, examples references.
+    </step>
+    <step order="3" name="Inventory legacy dispatch references">
+      Grep the skill body for references to: `ActionType`, `sprk_actiontypeid`, `sprk_executoractiontype`, "action type lookup", "lookup row", "dispatch on Action". List every reference; each must be rewritten or deleted.
+    </step>
+    <step order="4" name="Rewrite Purpose + Applies When">
+      Reframe: "Creates a new reusable prompt template (JPS Action) for prompt-driven executors. The Action carries SystemPrompt + OutputSchema + Temperature. The NODE that consumes this Action carries dispatch identity via `sprk_executortype` (single hop, set in PlaybookBuilder)."
+    </step>
+    <step order="5" name="Update Config-Home Guard table (Step 1.5)">
+      Home A row: "Action-intrinsic — prompt + output schema + default temperature". DELETE any dispatch-field mention from Home A.
+      Add inline WHY: "Dispatch was REMOVED from Home A in R7. The node's `sprk_executortype` Choice owns dispatch identity per design.md §2 Invariant 2. Why? See §3.1 — the 3-layer dispatch storage caused every release to ship a different version of the same class of bug."
+    </step>
+    <step order="6" name="Update workflow steps">
+      Remove any step that asks the author to set ActionType or executor on the Action. The JPS workflow stays — only the dispatch wiring is removed. The Action JPS still defines instruction, output fields, scopes, template params, examples.
+    </step>
+    <step order="7" name="Add a R7 dispatch-model context section">
+      Insert a short subsection (~15 lines): "## The R7 dispatch model — what changed and why" citing design.md §3.1 + §2 Invariants 1-3. Make the WHY explicit so future authors learn the rationale, not just the new mechanic.
+    </step>
+    <step order="8" name="Update validation guidance">
+      Where the skill previously validated Action JSON against an ActionType lookup, replace with: "Validate against the consuming node's `sprk_executortype` Choice. The Action JSON itself does not carry dispatch identity."
+    </step>
+    <step order="9" name="Bump frontmatter">
+      `last-reviewed: 2026-06-28`; `Reviewed By: spaarke-ai-platform-unification-r7 task 070 (FR-32 — node-first dispatch rewrite)`.
+    </step>
+    <step order="10" name="Verify acceptance">
+      Re-read the rewritten skill body. Confirm: (a) no remaining ActionType-on-Action language, (b) §3.1 WHY is cited inline at least once, (c) Config-Home Guard table updated, (d) Purpose + Applies When reframed, (e) frontmatter bumped.
+    </step>
+    <step order="11" name="Update current-task.md + TASK-INDEX">
+      Mark task 070 status complete; advance current-task.md to task 071.
+    </step>
+    <step order="12" name="Commit-deferred">
+      DO NOT commit. Wave 7 commits as a single PR after task 075. Stage changes locally; main session commits at wave-end.
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (existing skill body + design.md + spec.md)</tool>
+    <tool>Grep (legacy ActionType references in skill body)</tool>
+    <tool>Edit (rewrite skill body sections in place)</tool>
+    <tool>Write (full rewrite if Edit churn is excessive)</tool>
+  </tools>
+
+  <outputs>
+    <output type="modified-file">.claude/skills/jps-action-create/SKILL.md</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md (advance to task 071)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 070 ✅)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Skill body no longer instructs the author to set ActionType / executor identity on the Action</criterion>
+    <criterion>Action is framed as REUSABLE PROMPT TEMPLATE — SystemPrompt + OutputSchema + Temperature contract per design.md §2 Invariant 3</criterion>
+    <criterion>The §3.1 WHY (R3.1 history of dispatch-model confusion) is cited inline at least once with rationale, not just a pointer</criterion>
+    <criterion>Validation guidance updated: validate against node's `sprk_executortype` Choice, NOT against Action lookup</criterion>
+    <criterion>Config-Home Guard Step 1.5 Home A row updated — dispatch signal removed</criterion>
+    <criterion>Purpose + Applies When sections reframed to match the new Action role</criterion>
+    <criterion>Frontmatter `last-reviewed: 2026-06-28`; `Reviewed By: R7 task 070`</criterion>
+    <criterion>No commit yet (Wave 7 batches at task 075)</criterion>
+    <criterion>current-task.md updated to point at task 071</criterion>
+  </acceptance-criteria>
+</task>

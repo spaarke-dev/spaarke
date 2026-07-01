@@ -559,6 +559,62 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
   // Full card click handler map: Create Matter (wizard) + 6 Analysis Builder
   // -------------------------------------------------------------------------
 
+  // -------------------------------------------------------------------------
+  // Generic webresource-launcher (R3 hoist from CreateMatter); load-bearing for
+  // both the GetStarted card handlers below AND the SectionFactoryContext at
+  // line ~656. MUST be declared BEFORE any callback that lists it in deps
+  // (e.g., handleOpenPlaybookLibraryBrowse, FR-18 Wave 9 task 096) — otherwise
+  // dep-array evaluation reads it in TDZ → ReferenceError. The Wave 9 task 096
+  // sub-agent added handleOpenPlaybookLibraryBrowse without observing this
+  // declaration-order constraint; moved upward 2026-06-29 to fix.
+  // -------------------------------------------------------------------------
+
+  const handleOpenWizardGeneric = React.useCallback(
+    async (webResourceName: string, data?: string, options?: DialogOptions) => {
+      try {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const xrm: any =
+          (window as any)?.Xrm ??
+          (window.parent as any)?.Xrm ??
+          (window.top as any)?.Xrm;
+        if (!xrm?.Navigation?.navigateTo) return;
+
+        const bffParam = `bffBaseUrl=${encodeURIComponent(getBffBaseUrl())}`;
+        const fullData = data ? `${data}&${bffParam}` : bffParam;
+
+        await xrm.Navigation.navigateTo(
+          {
+            pageType: "webresource",
+            webresourceName: webResourceName,
+            data: fullData,
+          },
+          {
+            target: 2,
+            width: options?.width ?? { value: 60, unit: "%" },
+            height: options?.height ?? { value: 70, unit: "%" },
+          },
+        );
+      } catch {
+        // User cancelled or dialog error — ignore
+      }
+    },
+    [],
+  );
+
+  // -------------------------------------------------------------------------
+  // browse-playbooks card handler (R7 Wave 9 task 096 / FR-18 surface 3 of 3)
+  //
+  // Browse mode = NO intent param. Reuses handleOpenWizardGeneric (declared
+  // immediately above — order matters: see comment block on handleOpenWizardGeneric).
+  // Mirrors the registration-factory wiring in getStarted.registration.ts so
+  // both layout-driven and fallback paths (incl. GetStartedExpandDialog) get
+  // the same affordance.
+  // -------------------------------------------------------------------------
+
+  const handleOpenPlaybookLibraryBrowse = React.useCallback(() => {
+    void handleOpenWizardGeneric("sprk_playbooklibrary");
+  }, [handleOpenWizardGeneric]);
+
   const cardClickHandlers = React.useMemo(
     () => ({
       ...playbookHandlers,
@@ -568,8 +624,9 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
       "summarize-new-files": handleOpenSummarize,
       "find-similar": handleOpenFindSimilar,
       "assign-to-counsel": handleOpenWorkAssignmentWizard,
+      "browse-playbooks": handleOpenPlaybookLibraryBrowse,
     }),
-    [playbookHandlers, handleOpenWizard, handleOpenProjectWizard, handleOpenSummarize, handleOpenFindSimilar, handleOpenWorkAssignmentWizard]
+    [playbookHandlers, handleOpenWizard, handleOpenProjectWizard, handleOpenSummarize, handleOpenFindSimilar, handleOpenWorkAssignmentWizard, handleOpenPlaybookLibraryBrowse]
   );
 
   // -------------------------------------------------------------------------
@@ -607,37 +664,9 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
     }
   }, []);
 
-  const handleOpenWizardGeneric = React.useCallback(
-    async (webResourceName: string, data?: string, options?: DialogOptions) => {
-      try {
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        const xrm: any =
-          (window as any)?.Xrm ??
-          (window.parent as any)?.Xrm ??
-          (window.top as any)?.Xrm;
-        if (!xrm?.Navigation?.navigateTo) return;
-
-        const bffParam = `bffBaseUrl=${encodeURIComponent(getBffBaseUrl())}`;
-        const fullData = data ? `${data}&${bffParam}` : bffParam;
-
-        await xrm.Navigation.navigateTo(
-          {
-            pageType: "webresource",
-            webresourceName: webResourceName,
-            data: fullData,
-          },
-          {
-            target: 2,
-            width: options?.width ?? { value: 60, unit: "%" },
-            height: options?.height ?? { value: 70, unit: "%" },
-          },
-        );
-      } catch {
-        // User cancelled or dialog error — ignore
-      }
-    },
-    [],
-  );
+  // handleOpenWizardGeneric — moved upward 2026-06-29 to before
+  // handleOpenPlaybookLibraryBrowse to fix TDZ. See the comment block at its
+  // new location (~line 562) for the bug history.
 
   const factoryContext = React.useMemo<SectionFactoryContext>(() => {
     let bffBaseUrl = "";
@@ -925,7 +954,7 @@ export const WorkspaceGrid: React.FC<IWorkspaceGridProps> = ({
       {/* ----- Loaded: normal workspace rendering ----- */}
       {layoutStatus === "loaded" && <WorkspaceShell config={workspaceConfig} />}
 
-      {/* GetStarted expand dialog — shows all 7 action cards in a grid */}
+      {/* GetStarted expand dialog — shows all 9 action cards in a grid */}
       {isExpandOpen && (
         <React.Suspense fallback={<DialogLoadingFallback />}>
           <LazyGetStartedExpandDialog

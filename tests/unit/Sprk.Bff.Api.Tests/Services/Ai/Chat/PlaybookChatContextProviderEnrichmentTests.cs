@@ -80,9 +80,16 @@ public class PlaybookChatContextProviderEnrichmentTests
     }
 
     [Fact]
-    public async Task GetContextAsync_NullPageType_NoEnrichmentBlockAppended()
+    public async Task GetContextAsync_NullPageType_EnrichmentAppendedWithDefaultPageType()
     {
-        // Arrange — EntityName is valid, PageType is null
+        // CONTRACT UPDATED 2026-06-30 by R7 Wave 12 task 152 (audit 120 Gap C):
+        // when PageType is null/whitespace, the provider now defaults to "entityrecord"
+        // (PlaybookChatContextProvider.DefaultPageType) so the operator-visible scenario
+        // "client launches SpaarkeAi from a matter form without sending PageType" still
+        // produces enrichment. Previously this case produced a bare prompt — the original
+        // assertion (no enrichment) was the source of Audit 120 Gap C.
+
+        // Arrange — EntityName is valid, PageType is null (will fall back to default)
         var hostContext = new ChatHostContext(
             EntityType: "matter",
             EntityId: "entity-123",
@@ -96,8 +103,12 @@ public class PlaybookChatContextProviderEnrichmentTests
             TestDocumentId, TestTenantId, TestPlaybookId, hostContext,
             cancellationToken: CancellationToken.None);
 
-        // Assert
-        context.SystemPrompt.Should().NotContain("Context: You are assisting with");
+        // Assert — Gap C default makes enrichment fire even when client omits PageType
+        context.SystemPrompt.Should()
+            .Contain("Context: You are assisting with matter record 'Acme v. Beta Corp'.");
+        context.SystemPrompt.Should()
+            .Contain("The user is viewing the main form view.",
+                "DefaultPageType=\"entityrecord\" maps to \"main form view\" via PageTypeLabels");
         context.SystemPrompt.Should().Contain(BaseSystemPrompt);
     }
 

@@ -1,0 +1,178 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-089" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Handle unknown-executor-type warning state (FR-27)</title>
+    <status>not-started</status>
+    <wave>8</wave>
+    <estimated-effort>2-3 hours</estimated-effort>
+    <tags>code-page, ui, wave-8</tags>
+    <rigor-level>FULL</rigor-level>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>085</dependencies>
+    <fr-coverage>FR-27</fr-coverage>
+  </metadata>
+
+  <prompt>
+    Handle unknown executor types gracefully in the canvas. Today, if a node has an `executorType`
+    Choice value that doesn't match a known executor (e.g., a future executor not yet shipped to this
+    PlaybookBuilder version), the canvas silently fails or renders blankly. Spec FR-27 says: show a
+    node with "Unknown Executor Type {N}" warning state and disable editing until user picks a known
+    executor type from the ExecutorTypeSelector.
+  </prompt>
+
+  <role>
+    Senior React developer. Familiar with the BaseNode pattern (`src/client/code-pages/PlaybookBuilder/src/components/nodes/BaseNode.tsx`),
+    NodeValidationBadge component, and disabled-state styling in Fluent UI v9.
+  </role>
+
+  <goal>
+    Canvas gracefully handles unknown executor types:
+    1. New "Unknown" node type registered in React Flow nodeTypes registry (or BaseNode handles unknown gracefully)
+    2. Renders with "Unknown Executor Type {N}" label + warning icon (semantic color token: `tokens.colorStatusWarningBackground1`)
+    3. Edit button on the node opens NodePropertiesDialog → forces Action tab → ExecutorTypeSelector enabled, all other tabs disabled
+    4. After user picks a known executor type, node re-renders normally
+    5. Visual warning state honors ADR-021 dark mode (semantic tokens only)
+    6. canvasValidation.ts flags the node with validation warning (not blocking save, advisory only per existing pattern)
+    7. Vitest tests cover: render unknown node, render known node, state transition after user picks known type
+    8. Build passes (`npm run build:prod`)
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    <file purpose="basenode">src/client/code-pages/PlaybookBuilder/src/components/nodes/BaseNode.tsx</file>
+    <file purpose="nodes-index">src/client/code-pages/PlaybookBuilder/src/components/nodes/index.ts</file>
+    <file purpose="validation">src/client/code-pages/PlaybookBuilder/src/services/canvasValidation.ts</file>
+    <file purpose="validation-badge">src/client/code-pages/PlaybookBuilder/src/components/properties/NodeValidationBadge.tsx</file>
+    <file purpose="executor-metadata">src/client/code-pages/PlaybookBuilder/src/config/executorMetadata.ts</file>
+    <file purpose="typed-form">src/client/code-pages/PlaybookBuilder/src/components/properties/TypedConfigForm.tsx</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-006">Fluent UI v9 ONLY.</constraint>
+    <constraint source="ADR-021">Dark mode binding. Warning state colors via `tokens.colorStatusWarningBackground1`, `tokens.colorStatusWarningForeground1`. NO hardcoded warning hex like `#fbe9a7`.</constraint>
+    <constraint source="spec FR-27">Invalid executor type shows warning state; known types render normally. Editing disabled until user picks a known executor type.</constraint>
+    <constraint source="ADR-038">Vitest tests — KEEP path. Mock executorMetadata lookup; do NOT mock React Flow internals.</constraint>
+    <constraint source="CLAUDE.md §11">Component Justification triple for new `UnknownNode.tsx`:
+      1. Existing: BaseNode.tsx handles known nodes via React Flow nodeTypes mapping.
+      2. Extension: BaseNode could fall through to "unknown" rendering, but a dedicated component makes intent + testability cleaner. Extension: edit BaseNode to handle unknown OR create dedicated UnknownNode. Cost-of-doing-nothing analysis tilts toward dedicated component for clarity.
+      3. Cost-of-doing-nothing: silent failure breaks user trust — they don't know what their node represents. Spec FR-27 makes this a hard requirement.
+    </constraint>
+    <constraint source="CLAUDE.md §12">Build command: `npm run build:prod`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>code-page/playbookbuilder</topic>
+    <files>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+      <file>docs/adr/ADR-021-dark-mode-semantic-tokens.md</file>
+    </files>
+    <patterns>
+      <pattern name="BaseNode + validation badge" location="src/client/code-pages/PlaybookBuilder/src/components/nodes/BaseNode.tsx">
+        Existing pattern for node rendering + validation state display.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      This is the canvas-side counterpart to the renderer's "No schema available" placeholder
+      (task 083). Where the renderer handles the schema-fetch miss, this task handles the
+      node-rendering-on-canvas miss. The canvas should never silently fail on unknown types
+      because the maker has no way to diagnose silent failure.
+    </background>
+    <dependencies>
+      <dependency task="085" status="prerequisite">All 33 known executors have schemas — needed to distinguish known from unknown.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 083 already handles the schema-side "No schema available" placeholder in the typed form renderer.</item>
+      <item>Task 089a UI test covers this warning state in the browser.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: FULL · 📋 REASON: code-page UI + validation logic + new component, ADR-006+021+038 applicable, quality gates Step 9.5 required · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read project CLAUDE.md + spec.md FR-27 + BaseNode.tsx + canvasValidation.ts + executorMetadata.ts.
+    </step>
+    <step order="2" name="Verify task 085 complete">
+      Confirm all 33 known executor schemas exist + executorMetadata.ts has the canonical list.
+    </step>
+    <step order="3" name="Create UnknownNode.tsx">
+      New file `src/client/code-pages/PlaybookBuilder/src/components/nodes/UnknownNode.tsx`:
+      - Renders BaseNode shell with warning-state styling
+      - Title: `Unknown Executor Type {executorType}`
+      - Body: brief explanation + "Pick an Executor Type" CTA
+      - Uses `tokens.colorStatusWarningBackground1` + `tokens.colorStatusWarningForeground1` (ADR-021)
+      - On click: opens NodePropertiesDialog forcing activeTab='action'
+    </step>
+    <step order="4" name="Register UnknownNode in nodes/index.ts">
+      Add to nodeTypes registry: `unknown: UnknownNode`.
+      Update canvas rendering logic: if `node.data.executorType` is undefined OR not in `EXECUTOR_METADATA`, render with type='unknown'.
+    </step>
+    <step order="5" name="Update canvasValidation.ts">
+      Add validation rule: if `node.data.executorType` is not a known value → push warning to `node.data.warnings`: `Unknown executor type ${executorType}. Pick a known type to enable execution.`
+    </step>
+    <step order="6" name="Disable other tabs when executorType unknown">
+      In NodePropertiesDialog.tsx: when activeNode has unknown executorType, disable Tab buttons for Overview, Prompt, Skills, Knowledge, Tools, Configuration (Action tab only enabled).
+    </step>
+    <step order="7" name="Write Vitest tests">
+      Create `src/client/code-pages/PlaybookBuilder/src/components/nodes/__tests__/UnknownNode.test.tsx`:
+      - Renders Unknown node when executorType not in metadata
+      - Renders normal node when executorType in metadata
+      - Click on Unknown node opens dialog on Action tab
+      - State transition: changing executorType to known value re-renders as normal node
+    </step>
+    <step order="8" name="Build + run tests">
+      `cd src/client/code-pages/PlaybookBuilder && npm run build:prod && npm test`.
+      0 build errors, all tests pass.
+    </step>
+    <step order="9.5" name="Quality gates (FULL rigor)">
+      Run `/code-review` on UnknownNode.tsx + NodePropertiesDialog.tsx changes + canvasValidation.ts.
+      Run `/adr-check` against ADR-006 + ADR-021 + ADR-038.
+      Grep for hardcoded warning colors (e.g., `#fbe9a7`, `orange`, `yellow`). Fix findings.
+    </step>
+    <step order="10" name="Update current-task.md + TASK-INDEX">
+      Mark task 089 status complete; advance to next Wave 8 task (089a UI tests).
+    </step>
+    <step order="11" name="Commit">
+      Commit message:
+      `feat(playbookbuilder/r7): handle unknown executor type with warning state (Wave 8 task 089, FR-27)`. No PR yet.
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (source files + ADRs)</tool>
+    <tool>Grep (hardcoded warning colors)</tool>
+    <tool>Write (UnknownNode.tsx, UnknownNode.test.tsx)</tool>
+    <tool>Edit (nodes/index.ts, NodePropertiesDialog.tsx, canvasValidation.ts)</tool>
+    <tool>Bash (npm run build:prod, npm test, git commit)</tool>
+    <tool>Skill (code-review at Step 9.5)</tool>
+    <tool>Skill (adr-check at Step 9.5)</tool>
+  </tools>
+
+  <outputs>
+    <output type="new-file">src/client/code-pages/PlaybookBuilder/src/components/nodes/UnknownNode.tsx</output>
+    <output type="new-file">src/client/code-pages/PlaybookBuilder/src/components/nodes/__tests__/UnknownNode.test.tsx</output>
+    <output type="modified-file">src/client/code-pages/PlaybookBuilder/src/components/nodes/index.ts</output>
+    <output type="modified-file">src/client/code-pages/PlaybookBuilder/src/components/properties/NodePropertiesDialog.tsx</output>
+    <output type="modified-file">src/client/code-pages/PlaybookBuilder/src/services/canvasValidation.ts</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 089 ✅)</output>
+    <output type="commit">feat(playbookbuilder/r7): handle unknown executor type with warning state (Wave 8 task 089, FR-27)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Unknown executor type renders with warning state "Unknown Executor Type {N}"</criterion>
+    <criterion>Known executor types render normally (no regression)</criterion>
+    <criterion>Editing disabled until user picks known executor type (only Action tab enabled)</criterion>
+    <criterion>Warning colors via Fluent v9 semantic tokens (ADR-021); no hardcoded warning hex</criterion>
+    <criterion>canvasValidation.ts flags unknown executor type as warning (advisory, non-blocking)</criterion>
+    <criterion>Vitest tests cover render + transition cases</criterion>
+    <criterion>npm run build:prod + npm test pass: 0 errors, 0 new warnings, all tests pass</criterion>
+    <criterion>code-review + adr-check pass at Step 9.5</criterion>
+    <criterion>TASK-INDEX.md shows 089 ✅</criterion>
+  </acceptance-criteria>
+</task>

@@ -4,7 +4,7 @@ namespace Sprk.Bff.Api.Services.Ai.Nodes;
 
 /// <summary>
 /// Interface for node executors that process specific action types.
-/// Each executor handles one or more ActionTypes and produces NodeOutput.
+/// Each executor handles one or more ExecutorTypes and produces NodeOutput.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -14,16 +14,16 @@ namespace Sprk.Bff.Api.Services.Ai.Nodes;
 /// </para>
 /// <para>
 /// Follows the registry pattern per ADR-010 - executors register with
-/// INodeExecutorRegistry for ActionType-based dispatch.
+/// INodeExecutorRegistry for ExecutorType-based dispatch.
 /// </para>
 /// </remarks>
 public interface INodeExecutor
 {
     /// <summary>
-    /// Gets the ActionTypes this executor can handle.
+    /// Gets the ExecutorTypes this executor can handle.
     /// Most executors handle a single type; some may handle multiple.
     /// </summary>
-    IReadOnlyList<ActionType> SupportedActionTypes { get; }
+    IReadOnlyList<ExecutorType> SupportedExecutorTypes { get; }
 
     /// <summary>
     /// Executes the node and produces output.
@@ -42,6 +42,37 @@ public interface INodeExecutor
     /// <param name="context">Execution context to validate.</param>
     /// <returns>Validation result with success/failure and any error messages.</returns>
     NodeValidationResult Validate(NodeExecutionContext context);
+
+    /// <summary>
+    /// Returns the typed configuration schema this executor reads from
+    /// <see cref="Sprk.Bff.Api.Models.Ai.PlaybookNodeDto.ConfigJson"/>. Used by the Playbook
+    /// Builder canvas (Wave 8 FR-23) to render typed forms instead of free-text JSON editing.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Per R7 FR-16 / Invariant 5. Implementations MUST be pure + deterministic (same return
+    /// every call) and safe to invoke at any time after construction (no DI dependencies
+    /// consulted, no I/O). Implementations typically cache the schema in a
+    /// <c>private static readonly</c> field built once.
+    /// </para>
+    /// <para>
+    /// <b>Default implementation</b>: returns an empty placeholder schema keyed on the
+    /// executor's first <see cref="SupportedExecutorTypes"/> entry. This lets task 031 add
+    /// the interface seam without breaking the build across all existing executors; task 032
+    /// overrides this default on every executor (rich schemas for the 5 priority executors —
+    /// AiCompletion, AiAnalysis, AiEmbedding, EntityNameValidator, DeliverComposite — and
+    /// non-default <see cref="ExecutorConfigSchema.Empty"/> calls on the remaining executors
+    /// to supply accurate descriptions).
+    /// </para>
+    /// <para>
+    /// Design authority:
+    /// <c>projects/spaarke-ai-platform-unification-r7/notes/spikes/getconfigschema-design.md</c>.
+    /// </para>
+    /// </remarks>
+    ExecutorConfigSchema GetConfigSchema() =>
+        ExecutorConfigSchema.Empty(
+            SupportedExecutorTypes[0],
+            $"Default placeholder schema for {GetType().Name} — task 032 supplies real schema (FR-16).");
 }
 
 /// <summary>
@@ -79,7 +110,7 @@ public enum NodeType
     /// <para>
     /// Backward-compat invariant: existing single-action <see cref="Output"/> nodes are UNCHANGED.
     /// This is a NEW node type; legacy playbooks with <see cref="Output"/> nodes continue to use
-    /// <see cref="ActionType.DeliverOutput"/> and <c>DeliverOutputNodeExecutor</c>.
+    /// <see cref="ExecutorType.DeliverOutput"/> and <c>DeliverOutputNodeExecutor</c>.
     /// </para>
     /// <para>
     /// Per-section SSE streaming (<c>section_started</c> / <c>section_data</c> / <c>section_completed</c>)
@@ -91,10 +122,10 @@ public enum NodeType
 }
 
 /// <summary>
-/// Action types available in the node-based playbook system.
+/// Executor types available in the node-based playbook system.
 /// Maps to sprk_analysisaction.sprk_actiontype choice values.
 /// </summary>
-public enum ActionType
+public enum ExecutorType
 {
     /// <summary>AI analysis using tool handlers (existing pipeline).</summary>
     AiAnalysis = 0,
@@ -153,7 +184,7 @@ public enum ActionType
     /// emits one composite output containing a section map plus destination + widget routing.
     /// Pairs with <see cref="NodeType.DeliverComposite"/> and
     /// <c>DeliverCompositeNodeExecutor</c>. Existing <see cref="DeliverOutput"/> behavior is
-    /// UNCHANGED — this is a separate executor on a separate ActionType.
+    /// UNCHANGED — this is a separate executor on a separate ExecutorType.
     /// </summary>
     DeliverComposite = 42,
 

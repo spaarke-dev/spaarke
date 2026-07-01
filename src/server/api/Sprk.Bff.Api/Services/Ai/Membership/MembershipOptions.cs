@@ -25,7 +25,14 @@ public sealed class MembershipOptions
     /// <summary>
     /// Identity tables (lookup targets) that count as "person/group" identities
     /// during membership discovery. Lookups pointing to other tables are
-    /// ignored by the discovery service.
+    /// ignored by the discovery service. Defaults to an empty list at the
+    /// property level — the canonical defaults are seeded by
+    /// <see cref="MembershipOptionsDefaults"/> via
+    /// <c>IPostConfigureOptions&lt;MembershipOptions&gt;</c> ONLY when the
+    /// bound list is empty, so operator-provided configuration overrides
+    /// cleanly (IConfiguration.Bind APPENDS to List&lt;T&gt; properties — a
+    /// property-level default would double-up the canonical entries when the
+    /// operator binds the same names).
     /// </summary>
     public List<IdentityTableConfig> IncludedIdentityTables { get; set; } = new();
 
@@ -33,6 +40,8 @@ public sealed class MembershipOptions
     /// Logical names of lookup fields that are always excluded from membership
     /// resolution regardless of entity. Typical entries: <c>createdby</c>,
     /// <c>modifiedby</c>, <c>createdonbehalfby</c>, <c>modifiedonbehalfby</c>.
+    /// Defaults seeded by <see cref="MembershipOptionsDefaults"/> only when the
+    /// bound list is empty (see <see cref="IncludedIdentityTables"/> rationale).
     /// </summary>
     public List<string> GlobalFieldExclusions { get; set; } = new();
 
@@ -144,4 +153,76 @@ public sealed class EntityOverride
     /// Key = lookup field logical name; value = role name.
     /// </summary>
     public Dictionary<string, string> FieldRoleOverrides { get; set; } = new();
+}
+
+/// <summary>
+/// Post-configuration seeding for <see cref="MembershipOptions"/>. Populates
+/// the canonical Spaarke identity tables + audit-field exclusions ONLY when the
+/// bound configuration left them empty.
+/// </summary>
+/// <remarks>
+/// <para><b>R7 W12 task 130 (2026-06-30) — root-cause fix for "0 memberships for
+/// every user in spaarkedev1":</b></para>
+/// <para>The <see cref="MembershipFieldDiscoveryService"/> classifies a lookup
+/// as "discovered" only when its target table appears in
+/// <see cref="MembershipOptions.IncludedIdentityTables"/>. Prior to this seeding
+/// step, the property defaulted to an empty list and the <c>"Membership"</c>
+/// appsettings section was not present in any deployed environment
+/// (<c>appsettings.template.json</c>, <c>appsettings.Production.json.template</c>,
+/// and the Bicep <c>appSettings</c> all omitted it — only the GITIGNORED
+/// <c>appsettings.Development.json.template</c> defined it). The net result:
+/// every membership-bearing lookup on every entity was classified as
+/// <c>target-table-not-in-identity-list</c>, the downstream resolver returned
+/// zero descriptors, and <see cref="MembershipResolverService.ResolveAsync"/>
+/// emitted an empty <see cref="MembershipResponse"/> for every user.</para>
+/// <para><b>Why post-configure rather than property-initializer defaults:</b>
+/// <c>IConfiguration.Bind</c> APPENDS to <see cref="List{T}"/> properties — it
+/// does not replace. Defaulting at the property initializer would cause every
+/// operator-supplied entry to duplicate the canonical defaults. The
+/// post-configure pattern seeds defaults ONLY when the bound list is empty, so
+/// operator config replaces cleanly.</para>
+/// <para>Registered by <c>MembershipModule.AddMembership</c> via
+/// <c>ConfigureOptions&lt;MembershipOptionsDefaults&gt;</c> AFTER
+/// <c>Configure&lt;MembershipOptions&gt;</c>.</para>
+/// </remarks>
+public sealed class MembershipOptionsDefaults : Microsoft.Extensions.Options.IPostConfigureOptions<MembershipOptions>
+{
+    /// <summary>The canonical Spaarke identity tables (6 entries).</summary>
+    public static IReadOnlyList<IdentityTableConfig> CanonicalIdentityTables { get; } = new[]
+    {
+        new IdentityTableConfig { Table = "systemuser",        IdentityType = "SystemUser" },
+        new IdentityTableConfig { Table = "contact",           IdentityType = "Contact" },
+        new IdentityTableConfig { Table = "team",              IdentityType = "Team" },
+        new IdentityTableConfig { Table = "businessunit",      IdentityType = "BusinessUnit" },
+        new IdentityTableConfig { Table = "account",           IdentityType = "Account" },
+        new IdentityTableConfig { Table = "sprk_organization", IdentityType = "Organization" },
+    };
+
+    /// <summary>
+    /// The standard Dataverse audit lookups (4 entries). These point to
+    /// <c>systemuser</c> but never represent membership in a business sense
+    /// (they record who created/modified a row, not who is assigned to it).
+    /// </summary>
+    public static IReadOnlyList<string> CanonicalAuditFieldExclusions { get; } = new[]
+    {
+        "createdby",
+        "modifiedby",
+        "createdonbehalfby",
+        "modifiedonbehalfby",
+    };
+
+    /// <inheritdoc/>
+    public void PostConfigure(string? name, MembershipOptions options)
+    {
+        ArgumentNullException.ThrowIfNull(options);
+
+        if (options.IncludedIdentityTables.Count == 0)
+        {
+            options.IncludedIdentityTables.AddRange(CanonicalIdentityTables);
+        }
+        if (options.GlobalFieldExclusions.Count == 0)
+        {
+            options.GlobalFieldExclusions.AddRange(CanonicalAuditFieldExclusions);
+        }
+    }
 }
