@@ -292,14 +292,21 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           driveId: string;
           sessionId: string;
           documentRecordId?: string;
-          content: number[];
+          // ASP.NET Core serializes byte[] as a base64-encoded string in JSON,
+          // NOT as a JSON array of numbers. Decode with atob() below.
+          content: string;
           eTag?: string;
           fileName?: string;
           size: number;
           correlationId?: string;
         };
 
-        const bytes = new Uint8Array(payload.content ?? []);
+        // Decode base64 -> bytes. atob() returns a binary string (one char per byte).
+        const binary = atob(payload.content ?? '');
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) {
+          bytes[i] = binary.charCodeAt(i);
+        }
         if (ac.signal.aborted) return;
         dispatch({
           kind: 'loadSucceeded',
@@ -391,6 +398,16 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         state.documentRef.speDriveItemId
       )}/save`;
 
+      // Encode bytes -> base64. ASP.NET Core deserializes byte[] from
+      // base64 strings, NOT from JSON number arrays. Iterate rather than
+      // spread to avoid call-stack overflow on large documents.
+      const view = new Uint8Array(bytes);
+      let binary = '';
+      for (let i = 0; i < view.length; i++) {
+        binary += String.fromCharCode(view[i]);
+      }
+      const base64Content = btoa(binary);
+
       const response = await authenticatedFetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -398,7 +415,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           driveId,
           tenantId,
           sessionId: state.sessionId,
-          content: Array.from(new Uint8Array(bytes)),
+          content: base64Content,
           documentRecordId: state.documentRef.sprkDocumentId ?? null,
           displayName: state.documentRef.fileName ?? null,
         }),
