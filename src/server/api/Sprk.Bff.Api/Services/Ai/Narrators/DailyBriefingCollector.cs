@@ -647,18 +647,28 @@ public class DailyBriefingCollector
     }
 
     /// <summary>
-    /// To Dos — sprk_todo due today or tomorrow, owner=user, status Open/In Progress.
-    /// No membership-resolver call needed — sprk_todo ownership is direct (owner).
-    /// (sprk_assignedto targets contact; only ownerid is systemuser-typed — contact-side
-    /// filtering would require an identity-normalization round-trip and is out of MVP scope.)
+    /// To Dos — sprk_todo due today or later, owner=user, status Open/In Progress.
+    ///
+    /// R7 W12 widget cutover fix (2026-07-01 UTC):
+    ///   1. Ownership filter changed from `ownerid = systemUserId` to
+    ///      `owninguser = systemUserId`. The polymorphic Owner attribute doesn't
+    ///      match plain Guid values reliably in QueryExpression (same class of
+    ///      bug as the membership resolver — see ResolveOwnedIdsAsync above).
+    ///   2. Date filter widened from `= today OR = tomorrow` (exact timestamp
+    ///      match, misses records with any time-of-day) to `>= today start UTC`
+    ///      (matches operator intent: "today, tomorrow, later"). Operator can
+    ///      set a due date in their local time; as long as the stored UTC value
+    ///      is at-or-after UTC midnight today, it shows.
+    ///
+    /// sprk_assignedto targets contact; only ownerid/owninguser is systemuser-
+    /// typed — contact-side filtering would require an identity-normalization
+    /// round-trip and is out of MVP scope.
     /// </summary>
     private async Task<BriefingItem[]> QueryTodosAsync(Guid systemUserId, CancellationToken ct)
     {
         try
         {
-            // Date window: today + tomorrow (date-only, no time-of-day precision per wave12 §2.1).
-            var today = DateTime.UtcNow.Date;
-            var tomorrow = today.AddDays(1);
+            var todayStartUtc = DateTime.UtcNow.Date;
 
             var query = new QueryExpression(EntityTodo)
             {
@@ -683,14 +693,14 @@ public class DailyBriefingCollector
             statusGroup.AddCondition("statuscode", ConditionOperator.Equal, TodoStatusInProgress);
             query.Criteria.AddFilter(statusGroup);
 
-            // Due date: today OR tomorrow.
-            var dateGroup = new FilterExpression(LogicalOperator.Or);
-            dateGroup.AddCondition("sprk_duedate", ConditionOperator.Equal, today);
-            dateGroup.AddCondition("sprk_duedate", ConditionOperator.Equal, tomorrow);
-            query.Criteria.AddFilter(dateGroup);
+            // Due date: today or later (matches operator intent "today, tomorrow, later").
+            // NotNull first so records without a due date are excluded (intentional —
+            // undated todos would clutter the digest).
+            query.Criteria.AddCondition("sprk_duedate", ConditionOperator.NotNull);
+            query.Criteria.AddCondition("sprk_duedate", ConditionOperator.OnOrAfter, todayStartUtc);
 
-            // Ownership: ownerid=user.
-            query.Criteria.AddCondition("ownerid", ConditionOperator.Equal, systemUserId);
+            // Ownership: owninguser=user (NOT ownerid — see method docstring).
+            query.Criteria.AddCondition("owninguser", ConditionOperator.Equal, systemUserId);
 
             query.AddOrder("sprk_duedate", OrderType.Ascending);
             query.AddOrder("sprk_priority", OrderType.Ascending);
