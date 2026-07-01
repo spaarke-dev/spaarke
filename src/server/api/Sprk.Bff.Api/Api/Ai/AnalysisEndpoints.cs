@@ -214,9 +214,32 @@ public static class AnalysisEndpoints
     /// Execute a new analysis with SSE streaming.
     /// POST /api/ai/analysis/execute
     /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>R7 Wave 4 (FR-11)</b>: This endpoint dispatches the canonical
+    /// <c>IPlaybookOrchestrationService.ExecuteAsync</c> facade per ADR-013 Invariant 1
+    /// ("IInvokePlaybookAi triangle is the canonical AI invocation surface"). Task 041 migrated
+    /// this endpoint from the legacy direct-invocation path; task 042 deleted the legacy
+    /// pipeline entirely (see <c>notes/spikes/executeanalysisasync-caller-audit.md</c>).
+    /// </para>
+    /// <para>
+    /// <b>SSE chunk-shape adapter</b>: <c>IPlaybookOrchestrationService.ExecuteAsync</c>
+    /// emits <see cref="PlaybookStreamEvent"/>; Code Page consumers parse <see cref="AnalysisStreamChunk"/>.
+    /// <see cref="BridgePlaybookEventToAnalysisChunk"/> maps the playbook event surface onto the
+    /// stable client SSE contract (PlaybookId-typed); the <c>[DONE]</c> terminator and post-stream
+    /// completion notification semantics are preserved unchanged.
+    /// </para>
+    /// <para>
+    /// <b>Required-PlaybookId</b>: the canonical orchestrator requires a real
+    /// <c>sprk_analysisplaybook</c> record in Dataverse. The legacy "raw OpenAI call" path (no
+    /// PlaybookId, ActionId only) is rejected with 400 BadRequest. Existing consumers always
+    /// supply a PlaybookId per the Analysis Code Page flow (endpoint is feature-gated by
+    /// <see cref="AnalysisOptions.Enabled"/>).
+    /// </para>
+    /// </remarks>
     private static async Task ExecuteAnalysis(
         AnalysisExecuteRequest request,
-        IAnalysisOrchestrationService orchestrationService,
+        IPlaybookOrchestrationService playbookOrchestrationService,
         IOptions<AnalysisOptions> options,
         NotificationService notificationService,
         IGenericEntityService entityService,
@@ -242,6 +265,20 @@ public static class AnalysisEndpoints
             return;
         }
 
+        // R7 Wave 4 (FR-11): PlaybookId is REQUIRED for the canonical orchestrator path.
+        // The legacy raw-OpenAI/ActionId-only path was deleted by task 042 (no transition shim
+        // per spec Q6). All Analysis Code Page flows always supply a PlaybookId per the contract.
+        if (!request.PlaybookId.HasValue)
+        {
+            response.StatusCode = StatusCodes.Status400BadRequest;
+            await response.WriteAsJsonAsync(new
+            {
+                error = "PlaybookId is required. The legacy ActionId-only analysis path was removed by R7 FR-11. " +
+                        "Provide a PlaybookId referencing an sprk_analysisplaybook record."
+            }, cancellationToken);
+            return;
+        }
+
         // Set SSE headers + disable response buffering for real-time streaming
         response.ContentType = "text/event-stream";
         response.Headers.CacheControl = "no-cache";
@@ -253,13 +290,28 @@ public static class AnalysisEndpoints
         bufferingFeature?.DisableBuffering();
 
         logger.LogInformation(
-            "Starting analysis execution for documents [{DocumentIds}], ActionId={ActionId}, TraceId={TraceId}",
-            string.Join(",", request.DocumentIds), request.ActionId, context.TraceIdentifier);
+            "Starting analysis execution for documents [{DocumentIds}], ActionId={ActionId}, PlaybookId={PlaybookId}, TraceId={TraceId}",
+            string.Join(",", request.DocumentIds), request.ActionId, request.PlaybookId, context.TraceIdentifier);
+
+        // R7 task 041 (FR-11): Construct PlaybookRunRequest from AnalysisExecuteRequest. Per audit
+        // R-040-3, AnalysisId is not part of PlaybookRunRequest (the existing AnalysisRecord is
+        // referenced elsewhere by AnalysisOrchestrationService.ExecutePlaybookAsync via
+        // AdditionalContext upstream; AnalysisId pass-through review left for follow-on as needed).
+        var playbookRequest = new PlaybookRunRequest
+        {
+            PlaybookId = request.PlaybookId.Value,
+            DocumentIds = request.DocumentIds
+        };
 
         try
         {
-            await foreach (var chunk in orchestrationService.ExecuteAnalysisAsync(request, context, cancellationToken))
+            await foreach (var evt in playbookOrchestrationService.ExecuteAsync(playbookRequest, context, cancellationToken))
             {
+                var chunk = BridgePlaybookEventToAnalysisChunk(evt, request.PlaybookId.Value);
+                if (chunk is null)
+                {
+                    continue; // Event type has no AnalysisStreamChunk equivalent (e.g., section_* events)
+                }
                 await WriteSSEAsync(response, chunk, cancellationToken);
             }
 
@@ -305,6 +357,68 @@ public static class AnalysisEndpoints
                 await WriteSSEAsync(response, errorChunk, CancellationToken.None);
             }
         }
+    }
+
+    /// <summary>
+    /// R7 task 041 (FR-11 / audit R-040-1): Map a <see cref="PlaybookStreamEvent"/> onto the
+    /// client-facing <see cref="AnalysisStreamChunk"/> SSE wire shape. Preserves the stable
+    /// Code Page consumer contract (<c>metadata / progress / chunk / done / error</c> types)
+    /// while routing through the canonical playbook orchestrator.
+    /// </summary>
+    /// <param name="evt">Playbook event emitted by <see cref="IPlaybookOrchestrationService.ExecuteAsync"/>.</param>
+    /// <param name="playbookId">Originating playbook ID, used as a stable surrogate for the
+    /// analysis metadata when the orchestrator does not provide a discrete <c>sprk_analysis</c>
+    /// record ID upstream.</param>
+    /// <returns>An <see cref="AnalysisStreamChunk"/> for events with a wire-contract equivalent,
+    /// or <c>null</c> for events that have no Code Page consumer impact (e.g., section_*
+    /// composite events, NodeStarted/NodeSkipped which do not surface in the existing UI).</returns>
+    private static AnalysisStreamChunk? BridgePlaybookEventToAnalysisChunk(
+        PlaybookStreamEvent evt,
+        Guid playbookId)
+    {
+        return evt.Type switch
+        {
+            // RunStarted → emit metadata so the Code Page renders the "analysis starting" frame.
+            // PlaybookRunRequest does not surface a sprk_analysis record id at this layer; the
+            // RunId substitutes as a stable correlation key (the Code Page treats it opaquely).
+            PlaybookEventType.RunStarted =>
+                AnalysisStreamChunk.Metadata(evt.RunId, $"playbook:{playbookId}"),
+
+            // NodeProgress carries streamed token content — surface as a chunk.
+            PlaybookEventType.NodeProgress when !string.IsNullOrEmpty(evt.Content) =>
+                AnalysisStreamChunk.TextChunk(evt.Content!),
+
+            // NodeCompleted with text output — surface as a chunk so partial results render.
+            PlaybookEventType.NodeCompleted when evt.NodeOutput?.TextContent is { Length: > 0 } text =>
+                AnalysisStreamChunk.TextChunk(text),
+
+            // RunCompleted → terminator chunk with token usage from metrics.
+            PlaybookEventType.RunCompleted =>
+                AnalysisStreamChunk.Completed(
+                    evt.RunId,
+                    new TokenUsage(
+                        Input: evt.Metrics?.TotalTokensIn ?? 0,
+                        Output: evt.Metrics?.TotalTokensOut ?? 0)),
+
+            // RunFailed → error chunk; preserves the existing client error path.
+            PlaybookEventType.RunFailed =>
+                AnalysisStreamChunk.FromError(evt.Error ?? "Playbook execution failed"),
+
+            // NodeFailed → error chunk (single-node failure terminates the run per orchestrator semantics).
+            PlaybookEventType.NodeFailed =>
+                AnalysisStreamChunk.FromError(
+                    $"Node '{evt.NodeName ?? evt.NodeId?.ToString() ?? "unknown"}' failed: {evt.Error ?? "no detail"}"),
+
+            // RunCancelled — client already saw the OperationCanceledException path or will see
+            // the next [DONE]; no chunk to emit (mirrors legacy behavior which had no Cancelled
+            // chunk type either).
+            PlaybookEventType.RunCancelled => null,
+
+            // Events with no Code Page wire-contract counterpart (NodeStarted, NodeSkipped,
+            // UnrenderedTemplateDetected, SectionStarted/Data/Completed). Silently drop —
+            // these are observability events the Code Page does not consume today.
+            _ => null
+        };
     }
 
     /// <summary>

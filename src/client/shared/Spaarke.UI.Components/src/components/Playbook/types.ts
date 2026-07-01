@@ -10,6 +10,29 @@
 // Entity types — map to Dataverse entities
 // ---------------------------------------------------------------------------
 
+/**
+ * Consumer mapping for a playbook — reflects an `sprk_playbookconsumer` row
+ * pointing at the playbook via its `sprk_playbook` lookup (R7 task 094 / FR-18).
+ *
+ * Surfaced by `loadPlaybooks` via a parallel `sprk_playbookconsumer` query
+ * joined in-memory on `_sprk_playbook_value` so the Playbook Library modal
+ * can display "which consumer surface invokes this playbook" per row.
+ * Empty array → the playbook has no consumer mapping (dead-code candidate
+ * per design.md §3 consumer-driven model).
+ */
+export interface IPlaybookConsumerMapping {
+  /** `sprk_consumertype` — e.g., `chat-summarize`, `matter-pre-fill`. */
+  consumerType: string;
+  /** `sprk_consumercode` — typically `default`. May be null/empty. */
+  consumerCode?: string | null;
+  /** `sprk_environment` — env scope, e.g., `*` or `dev`. May be null/empty. */
+  environment?: string | null;
+  /** `sprk_enabled` — true = active, false = soft-disabled. */
+  enabled?: boolean;
+  /** `sprk_priority` — lower = higher priority within consumer-type. */
+  priority?: number;
+}
+
 /** sprk_analysisplaybook */
 export interface IPlaybook {
   id: string;
@@ -18,6 +41,14 @@ export interface IPlaybook {
   icon?: string;
   category?: string;
   isDefault?: boolean;
+  /**
+   * Consumer surfaces that invoke this playbook (R7 task 094 / FR-18).
+   * Populated by `loadPlaybooks({includeConsumers:true})` via a parallel
+   * `sprk_playbookconsumer` query joined in-memory on `_sprk_playbook_value`.
+   * `undefined` → consumer join was not requested (caller opted out).
+   * `[]` → join was requested but no consumer rows reference this playbook.
+   */
+  consumers?: IPlaybookConsumerMapping[];
 }
 
 /** Base interface for scope items (shared across action, skill, knowledge, tool). */
@@ -116,6 +147,8 @@ export const ENTITY_NAMES = {
   tool: 'sprk_analysistool',
   analysis: 'sprk_analysis',
   document: 'sprk_document',
+  /** R7 task 094 / FR-18 — consumer-routing table; sourced by Library modal display. */
+  playbookConsumer: 'sprk_playbookconsumer',
 } as const;
 
 export const RELATIONSHIP_NAMES = {

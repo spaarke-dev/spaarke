@@ -1,0 +1,146 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-027" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Update NodeExecutorRegistry dispatch to use ExecutorType</title>
+    <status>completed</status>
+    <wave>2</wave>
+    <estimated-effort>2 hours</estimated-effort>
+    <tags>bff-api, code-impl, wave-2</tags>
+    <rigor-level>FULL</rigor-level>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>023</dependencies>
+    <fr-coverage>FR-07, FR-10</fr-coverage>
+  </metadata>
+
+  <prompt>
+    Post-022 (enum rename) and 023 (property rename), `NodeExecutorRegistry` still has internal dispatch shape
+    that may reference the old names in its private fields, dictionary keys, or method signatures. This task
+    aligns the registry's internals to the new `ExecutorType` naming and confirms its public method correctly
+    accepts an `ExecutorType` argument from the orchestrator (per task 024's dispatch read).
+  </prompt>
+
+  <role>
+    Senior .NET backend developer. Mechanical alignment — registry dispatch shape unchanged, names harmonized.
+  </role>
+
+  <goal>
+    `NodeExecutorRegistry`:
+    1. Public dispatch method accepts `ExecutorType` argument (renamed from `ActionType` per task 022).
+    2. Internal dictionary / lookup keyed by `ExecutorType`.
+    3. Method names (e.g., `ResolveExecutorByActionType` → `ResolveExecutorByExecutorType` or similar) renamed if not already covered by Roslyn refactor in task 022.
+    4. Unit tests for the registry pass + still assert correct executor returned for each ExecutorType value.
+  </goal>
+
+  <inputs>
+    <file purpose="registry">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/NodeExecutorRegistry.cs</file>
+    <file purpose="interface">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/INodeExecutor.cs</file>
+    <file purpose="orchestrator-caller">src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookOrchestrationService.cs</file>
+    <file purpose="design-spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    <file purpose="bff-constraints">.claude/constraints/bff-extensions.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-010">DI Minimalism — no new abstractions.</constraint>
+    <constraint source="ADR-013">BFF AI Architecture — registry stays the single dispatch surface inside orchestrator.</constraint>
+    <constraint source="ADR-029">BFF Publish Hygiene — size neutral.</constraint>
+    <constraint source="ADR-038">Testing Strategy — registry unit tests are KEEP (existing behavior assertion). Update method names if needed.</constraint>
+    <constraint source="spec FR-07">Dispatch single-hop via this registry.</constraint>
+    <constraint source="spec FR-10">All references use `ExecutorType` post-rename.</constraint>
+    <constraint source="CLAUDE.md §11">Modifies existing surface — justification triple NOT required.</constraint>
+    <constraint source="bff-extensions.md">Test obligation: update registry tests per §F.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff/playbook-runtime</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-010-di-minimalism.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      `NodeExecutorRegistry` is the single dispatch surface used by `PlaybookOrchestrationService.ExecuteNodeAsync`
+      to map an `ExecutorType` to an `INodeExecutor`. Task 022 renamed the enum; task 023 renamed the property.
+      This task ensures the registry's internal shape (dictionary keys, method names, parameter names) is consistent.
+    </background>
+    <dependencies>
+      <dependency task="023" status="must-be-complete">`SupportedExecutorTypes` property renamed; registry can iterate executors by that property.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 024 single-hop dispatch in orchestrator calls this registry.</item>
+      <item>Task 028 simplifies AnalysisActionService Action read path.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: FULL · 📋 REASON: code-impl in BFF; modifies dispatch registry + tests; ADR-010+038 applicable; quality gates Step 9.5 required · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read CLAUDE.md + spec FR-07 + FR-10 + plan.md Wave 2 + bff-extensions.md.
+    </step>
+    <step order="2" name="Pre-baseline build + test">
+      `dotnet build` + `dotnet test`. Confirm green.
+    </step>
+    <step order="3" name="Read NodeExecutorRegistry">
+      Open the registry. Identify: public dispatch method signature, internal dictionary key type, method names that still reference old names if any.
+    </step>
+    <step order="4" name="Align internal naming">
+      If task 022 Roslyn refactor missed any internal field or method name (e.g., `_executorsByActionType` → `_executorsByExecutorType`), apply rename now. Keep public API stable where possible (post-022 it should already be aligned).
+    </step>
+    <step order="5" name="Confirm dispatch contract">
+      Verify the registry exposes a method `INodeExecutor Resolve(ExecutorType type)` (or similar) that task 024's `ExecuteNodeAsync` calls. If signature differs, align.
+    </step>
+    <step order="6" name="Update registry tests">
+      Open `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/NodeExecutorRegistryTests.cs` (or similar). Confirm tests use `ExecutorType` not `ActionType`. Update test method names if they encode the old name. Tests are KEEP per ADR-038 (real dispatch behavior assertion).
+    </step>
+    <step order="7" name="Build + test">
+      `dotnet build` + `dotnet test`. Green.
+    </step>
+    <step order="8" name="Verify integration with orchestrator">
+      Spot check: `PlaybookOrchestrationService.ExecuteNodeAsync` calls registry with the parsed `ExecutorType` from `node.sprk_executortype`. Confirm signature alignment.
+    </step>
+    <step order="9.5" name="Quality gates (FULL rigor)">
+      Run `/code-review` on the diff. Run `/adr-check` against ADR-010 + ADR-038 + bff-extensions.md. Fix any findings.
+    </step>
+    <step order="10" name="Update current-task.md + TASK-INDEX">
+      Mark task 027 complete; advance current-task.md.
+    </step>
+    <step order="11" name="Commit">
+      `refactor(bff/r7): align NodeExecutorRegistry to ExecutorType dispatch (Wave 2 task 027, FR-07/FR-10)`.
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (registry, interface, orchestrator)</tool>
+    <tool>Edit (registry internal naming + tests)</tool>
+    <tool>Grep (verify naming alignment)</tool>
+    <tool>Bash (dotnet build, dotnet test, git commit)</tool>
+    <tool>Skill (code-review at Step 9.5)</tool>
+    <tool>Skill (adr-check at Step 9.5)</tool>
+  </tools>
+
+  <outputs>
+    <output type="modified-file">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/NodeExecutorRegistry.cs</output>
+    <output type="modified-file">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/NodeExecutorRegistryTests.cs</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md (advance)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 027 ✅)</output>
+    <output type="commit">refactor(bff/r7): align NodeExecutorRegistry to ExecutorType dispatch (Wave 2 task 027, FR-07/FR-10)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>NodeExecutorRegistry public method accepts ExecutorType argument</criterion>
+    <criterion>Internal dictionary / lookup keyed by ExecutorType</criterion>
+    <criterion>No internal references to old `ActionType` name remain</criterion>
+    <criterion>Registry tests updated to use ExecutorType (KEEP per ADR-038)</criterion>
+    <criterion>Orchestrator → registry call site signature aligned</criterion>
+    <criterion>dotnet build passes: 0 errors, 0 new warnings</criterion>
+    <criterion>dotnet test passes: full suite green</criterion>
+    <criterion>code-review + adr-check pass at Step 9.5</criterion>
+    <criterion>Commit pushed</criterion>
+  </acceptance-criteria>
+</task>

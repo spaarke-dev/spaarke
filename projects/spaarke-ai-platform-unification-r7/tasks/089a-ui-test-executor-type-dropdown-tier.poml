@@ -1,0 +1,195 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-089a" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>UI test — Executor Type dropdown + tier grouping render</title>
+    <status>completed</status>
+    <wave>8</wave>
+    <estimated-effort>2 hours</estimated-effort>
+    <tags>code-page, testing, ui-test, wave-8</tags>
+    <rigor-level>FULL</rigor-level>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>089</dependencies>
+    <fr-coverage>FR-22, FR-24, FR-27 (UI test coverage)</fr-coverage>
+  </metadata>
+
+  <prompt>
+    Browser-based UI test of the Executor Type dropdown + tier grouping render. Uses Claude Code
+    Chrome integration per `/ui-test` skill. Verifies:
+    - NodePalette left panel renders 33 entries grouped into 6 tiers (FR-22)
+    - Each entry shows tier prefix + name + description
+    - ExecutorTypeSelector dropdown in Action tab shows 33 values grouped by tier (FR-24)
+    - Unknown executor type state renders "Unknown Executor Type {N}" warning (FR-27)
+    Tests run against deployed PlaybookBuilder Code Page in spaarkedev1.
+  </prompt>
+
+  <role>
+    QA + frontend engineer. Familiar with Claude Code Chrome integration, Dynamics 365
+    model-driven app navigation, and Code Page testing patterns.
+  </role>
+
+  <goal>
+    Documented UI test results:
+    1. Browser-based test pass/fail report for each test case below
+    2. Screenshots of key states (panel, dropdown, unknown node)
+    3. Console logs capture (zero errors expected)
+    4. Test results recorded in `projects/spaarke-ai-platform-unification-r7/notes/handoffs/089a-ui-test-results.md`
+    5. If any test fails → root-cause + filed defect via `/project-defer-issue-tracking` (or fix immediately if scope <30min)
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    <file purpose="ui-test-skill">.claude/skills/ui-test/SKILL.md</file>
+    <file purpose="adr-021">docs/adr/ADR-021-dark-mode-semantic-tokens.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ui-test SKILL.md">Browser-based testing requires Claude Code started with `--chrome` flag. If not available, document the skip and run tests manually.</constraint>
+    <constraint source="ADR-021">All UI tests verify dark mode compliance (semantic tokens — see task 089c for dedicated dark mode test).</constraint>
+    <constraint source="ADR-038">UI tests are KEEP category. Results documented in handoffs; no test scaffolding to delete.</constraint>
+    <constraint source="CLAUDE.md §11">No new components — testing existing UI.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>testing/ui-tests</topic>
+    <files>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>docs/adr/ADR-021-dark-mode-semantic-tokens.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Wave 8 critical path: tasks 081-089 land the UI changes; tasks 089a-c run UI tests; task 089d deploys.
+      This task is the first of three UI tests, focused on the new dropdown + tier grouping (FR-22, FR-24, FR-27).
+      All three UI test tasks run against the spaarkedev1-deployed PlaybookBuilder Code Page.
+    </background>
+    <dependencies>
+      <dependency task="089" status="prerequisite">All UI changes (082, 086, 089) merged + buildable.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 089b: UI tests for typed config forms.</item>
+      <item>Task 089c: UI tests for ADR-021 dark mode compliance.</item>
+      <item>Task 089d: Deploy to spaarkedev1 (depends on all 3 UI test tasks passing).</item>
+    </related-work>
+  </context>
+
+  <ui-tests>
+    <test name="NodePalette tier grouping renders">
+      <url>https://spaarke-dev.crm.dynamics.com/main.aspx?appid={app-id}&pagetype=custom&name=sprk_playbookbuilder</url>
+      <steps>
+        <step>Navigate to PlaybookBuilder Code Page (with a sample playbookId)</step>
+        <step>Verify left panel (NodePalette) renders</step>
+        <step>Verify 6 tier groups visible: AI, Compute, Mutations, Control, Delivery, Capability</step>
+        <step>Expand each tier; verify total tile count = 33</step>
+        <step>Verify each tile shows tier prefix (e.g., "01") + name + description</step>
+        <step>Check console for errors</step>
+      </steps>
+      <expected>6 tier groups render; 33 total tiles; no console errors</expected>
+    </test>
+
+    <test name="ExecutorTypeSelector dropdown in Action tab">
+      <steps>
+        <step>Drag an "AI Completion" tile from NodePalette to canvas</step>
+        <step>Click on the new node to open NodePropertiesDialog</step>
+        <step>Click "Action" tab</step>
+        <step>Verify ActionSelector + ExecutorTypeSelector render side-by-side</step>
+        <step>Click ExecutorTypeSelector → verify dropdown shows 33 options grouped by tier</step>
+        <step>Select "Condition" (value 30 or 31) from dropdown</step>
+        <step>Verify node updates to Condition type on canvas</step>
+        <step>Check console for errors</step>
+      </steps>
+      <expected>Side-by-side layout; dropdown shows 33 grouped options; selection updates node; no console errors</expected>
+    </test>
+
+    <test name="Unknown executor type warning">
+      <steps>
+        <step>Manually create a Dataverse `sprk_playbooknode` row with `sprk_executortype = 99` (unknown value) via Web API or owner script</step>
+        <step>Reload PlaybookBuilder Code Page with that playbook</step>
+        <step>Verify the node renders with "Unknown Executor Type 99" label + warning styling</step>
+        <step>Verify warning color is semantically themed (not hardcoded #fbe9a7 etc.)</step>
+        <step>Click the node → verify NodePropertiesDialog opens on Action tab</step>
+        <step>Verify all other tabs disabled until executor type changed</step>
+        <step>Change executor type via dropdown → verify warning state clears, normal render returns</step>
+        <step>Check console for errors</step>
+      </steps>
+      <expected>Warning rendered correctly; tabs disabled; state transition works; no console errors</expected>
+    </test>
+  </ui-tests>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: FULL · 📋 REASON: testing tag + tag ui-test + acceptance criteria require browser verification; ADR-038 TEST-MODIFYING override applies · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read project CLAUDE.md + spec.md FR-22/FR-24/FR-27 + `.claude/skills/ui-test/SKILL.md`.
+    </step>
+    <step order="2" name="Verify Chrome integration">
+      Run `/chrome` — confirm connected. If not connected, document skip + run tests manually (capture screenshots manually).
+    </step>
+    <step order="3" name="Verify PlaybookBuilder deployed to spaarkedev1">
+      Confirm Code Page accessible at expected URL. If not deployed (e.g., task 089d not done), use local dev server fallback (`npm run dev` in PlaybookBuilder folder).
+    </step>
+    <step order="4" name="Execute Test 1 — NodePalette tier grouping">
+      Per `<ui-tests>` Test 1. Capture screenshot of full NodePalette with all tiers expanded.
+    </step>
+    <step order="5" name="Execute Test 2 — ExecutorTypeSelector dropdown">
+      Per Test 2. Capture screenshot of Action tab with dropdown open.
+    </step>
+    <step order="6" name="Execute Test 3 — Unknown executor type warning">
+      Per Test 3. Capture screenshot of warning-state node.
+      NOTE: requires creating a test row with unknown executorType — coordinate with owner if dataverse-write access needed; alternatively use Dataverse MCP `mcp__dataverse__update_record` to set executorType to 99 on a scratch node.
+    </step>
+    <step order="7" name="Document results">
+      Write `notes/handoffs/089a-ui-test-results.md`:
+      - Test results table (each test PASS/FAIL with notes)
+      - Console error capture (per test)
+      - Screenshot references
+      - Defect list (if any)
+    </step>
+    <step order="8" name="File defects if any">
+      For each FAIL, invoke `/project-defer-issue-tracking` to file defer entry + GitHub Issue.
+    </step>
+    <step order="9.5" name="Quality gates (FULL rigor)">
+      Run `/code-review` on results doc (markdown review for completeness, NOT code).
+      Run `/adr-check` against ADR-021 (warning state colors verified semantically).
+    </step>
+    <step order="10" name="Update current-task.md + TASK-INDEX">
+      Mark task 089a status complete; advance to next Wave 8 task (089b).
+    </step>
+    <step order="11" name="Commit">
+      Commit message:
+      `test(playbookbuilder/r7): UI test results for executor type dropdown + tier grouping (Wave 8 task 089a, FR-22+24+27)`. No PR yet.
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (ui-test SKILL + ADRs + spec)</tool>
+    <tool>Skill (ui-test for browser test execution)</tool>
+    <tool>Bash (chrome connectivity check)</tool>
+    <tool>Write (results doc)</tool>
+    <tool>Skill (code-review at Step 9.5)</tool>
+    <tool>Skill (adr-check at Step 9.5)</tool>
+    <tool>MCP (mcp__dataverse__update_record for unknown-executor test setup)</tool>
+  </tools>
+
+  <outputs>
+    <output type="document">projects/spaarke-ai-platform-unification-r7/notes/handoffs/089a-ui-test-results.md</output>
+    <output type="screenshots">projects/spaarke-ai-platform-unification-r7/assets/089a-{test}.png (3 screenshots)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 089a ✅)</output>
+    <output type="commit">test(playbookbuilder/r7): UI test results for executor type dropdown + tier grouping (Wave 8 task 089a, FR-22+24+27)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Test 1: NodePalette renders 6 tier groups + 33 total tiles + no console errors — PASS</criterion>
+    <criterion>Test 2: ExecutorTypeSelector dropdown shows 33 grouped options + selection updates node + no console errors — PASS</criterion>
+    <criterion>Test 3: Unknown executor type renders warning state + tabs disabled + state transition works + no console errors — PASS</criterion>
+    <criterion>3 screenshots captured</criterion>
+    <criterion>Results doc exists at notes/handoffs/089a-ui-test-results.md</criterion>
+    <criterion>Any FAILs filed via /project-defer-issue-tracking</criterion>
+    <criterion>code-review + adr-check pass at Step 9.5</criterion>
+    <criterion>TASK-INDEX.md shows 089a ✅</criterion>
+  </acceptance-criteria>
+</task>

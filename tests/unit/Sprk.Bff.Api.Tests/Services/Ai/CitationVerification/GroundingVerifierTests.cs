@@ -269,7 +269,7 @@ public sealed class GroundingVerifierTests
 
 /// <summary>
 /// Unit tests for <see cref="GroundingVerifyNode"/> — wraps <see cref="IGroundingVerifier"/>
-/// as an INodeExecutor (ActionType.GroundingVerify = 70) and is dispatchable via
+/// as an INodeExecutor (ExecutorType.GroundingVerify = 70) and is dispatchable via
 /// NodeExecutorRegistry per the acceptance criterion.
 /// </summary>
 public sealed class GroundingVerifyNodeTests
@@ -282,8 +282,8 @@ public sealed class GroundingVerifyNodeTests
     public void SupportedActionTypes_ContainsGroundingVerify()
     {
         var node = CreateNode();
-        node.SupportedActionTypes.Should().Contain(ActionType.GroundingVerify);
-        node.SupportedActionTypes.Should().HaveCount(1);
+        node.SupportedExecutorTypes.Should().Contain(ExecutorType.GroundingVerify);
+        node.SupportedExecutorTypes.Should().HaveCount(1);
     }
 
     [Fact]
@@ -403,13 +403,13 @@ public sealed class GroundingVerifyNodeTests
     [Fact]
     public Task ExecuteAsync_RegisteredAndDispatchableViaRegistry()
     {
-        // Integration-ish: confirm a real NodeExecutorRegistry can resolve our executor by ActionType.
+        // Integration-ish: confirm a real NodeExecutorRegistry can resolve our executor by ExecutorType.
         var verifier = new GroundingVerifier(NullLogger<GroundingVerifier>.Instance);
         var node = new GroundingVerifyNode(verifier, NullLogger<GroundingVerifyNode>.Instance);
         var registry = new NodeExecutorRegistry(new INodeExecutor[] { node }, NullLogger<NodeExecutorRegistry>.Instance);
 
-        registry.HasExecutor(ActionType.GroundingVerify).Should().BeTrue();
-        var resolved = registry.GetExecutor(ActionType.GroundingVerify);
+        registry.HasExecutor(ExecutorType.GroundingVerify).Should().BeTrue();
+        var resolved = registry.GetExecutor(ExecutorType.GroundingVerify);
         resolved.Should().NotBeNull();
         resolved.Should().BeOfType<GroundingVerifyNode>();
         return Task.CompletedTask;
@@ -450,9 +450,9 @@ public sealed class GroundingVerifyNodeTests
                 {
                     Id = actionId,
                     Name = "GroundingVerify",
-                    ActionType = ActionType.GroundingVerify
+                    ExecutorType = ExecutorType.GroundingVerify
                 },
-                ActionType = ActionType.GroundingVerify,
+                ExecutorType = ExecutorType.GroundingVerify,
                 Scopes = new Sprk.Bff.Api.Services.Ai.ResolvedScopes(
                     Array.Empty<Sprk.Bff.Api.Services.Ai.AnalysisSkill>(),
                     Array.Empty<Sprk.Bff.Api.Services.Ai.AnalysisKnowledge>(),

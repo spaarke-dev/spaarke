@@ -1,0 +1,164 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-054" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Run migration script (dry-run → real run); audit post-migration null check</title>
+    <status>not-started</status>
+    <wave>5</wave>
+    <estimated-effort>1-2 hours</estimated-effort>
+    <tags>dataverse, deploy, wave-5</tags>
+    <rigor-level>FULL</rigor-level>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>053</dependencies>
+    <fr-coverage>FR-19 (migration-execution portion)</fr-coverage>
+  </metadata>
+
+  <prompt>
+    Run the migration script in dry-run mode first, review the planned writes carefully,
+    then run for real. After the real run, audit Dataverse to confirm zero nodes remain
+    with null `sprk_executortype`. This is the load-bearing data-migration step for FR-19.
+  </prompt>
+
+  <role>
+    Platform engineer executing a production data migration. The agent's discipline is:
+    dry-run → human-confirm → real run → audit. No shortcuts on the dry-run review.
+  </role>
+
+  <goal>
+    Two outcomes:
+    1. All 94 `sprk_playbooknode` rows in spaarkedev1 have `sprk_executortype` populated with the owner's authoritative values
+    2. Post-migration audit confirms: `SELECT count(*) FROM sprk_playbooknodes WHERE sprk_executortype IS NULL` returns 0
+  </goal>
+
+  <inputs>
+    <file purpose="script">scripts/dataverse/Migrate-PlaybookNodes-to-ExecutorType.ps1</file>
+    <file purpose="owner-output-csv">projects/spaarke-ai-platform-unification-r7/notes/drafts/playbook-node-review-output.csv</file>
+    <file purpose="design-spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-19">Post-migration audit confirms no node has null `sprk_executortype`.</constraint>
+    <constraint source="spec Success Criteria #1">Every `sprk_playbooknode` row in spaarkedev1 has `sprk_executortype` populated and accurate — verified by post-migration audit `SELECT count(*) FROM sprk_playbooknodes WHERE sprk_executortype IS NULL` returns 0.</constraint>
+    <constraint source="dry-run-discipline">Run dry-run BEFORE real run. Review planned writes. Spot-check at least 5 random rows against owner-output CSV to confirm script logic is correct. Only proceed to real run after spot-check passes.</constraint>
+    <constraint source="defensive-halt">If real run halts mid-migration, do NOT autonomously resume. Surface the error to the user, identify the failing row, fix the root cause, then re-run (idempotency makes resume safe).</constraint>
+    <constraint source="CLAUDE.md §10">No BFF surface touched — no publish-size verification needed.</constraint>
+    <constraint source="audit-method">Use MCP Dataverse tools (`mcp__dataverse__read_query`) for the post-migration null check — Web API equivalent of `SELECT count(*) WHERE sprk_executortype IS NULL`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>data-migration-execution</topic>
+    <files>
+      <file>scripts/dataverse/Migrate-PlaybookNodes-to-ExecutorType.ps1</file>
+      <file>scripts/dataverse/Review-PlaybookNodes-Dispatch.ps1</file>
+      <file>projects/spaarke-ai-platform-unification-r7/spec.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      This is the moment of truth for FR-19: 94 production node rows in spaarkedev1 get patched
+      with `sprk_executortype` values. Once this lands, FR-07 single-hop dispatch (Wave 2 task 024)
+      can actually find a value to dispatch on, and existing playbook executions stop falling
+      through to null-fallback.
+
+      The dry-run review is non-negotiable — script bugs caught here are cheap; bugs caught
+      after real run mean a recovery operation across 94 rows.
+    </background>
+    <dependencies>
+      <dependency task="053" status="must-be-complete">Migration script must exist + self-test passed.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 055 updates `Deploy-Playbook.ps1` to write executor type explicitly (FR-20) — depends on this task's success.</item>
+      <item>Task 056 redeploys 3 representative playbooks as sanity check.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: FULL · 📋 REASON: production Dataverse data migration (writes), tags include `dataverse`+`deploy`, high-risk operation, 6+ steps · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read project CLAUDE.md + spec.md FR-19 + Success Criteria #1 + task 053 POML + migration script source.
+    </step>
+    <step order="2" name="Verify dependencies">
+      Confirm task 053 status is ✅ in TASK-INDEX.md. Confirm migration script exists. Confirm owner-output CSV exists.
+      Confirm `az account show` returns active spaarkedev1-capable session.
+    </step>
+    <step order="3" name="Run dry-run">
+      Execute: `pwsh ./scripts/dataverse/Migrate-PlaybookNodes-to-ExecutorType.ps1 -DryRun`.
+      Capture output to a log file at `projects/spaarke-ai-platform-unification-r7/notes/handoffs/migration-dryrun-log.txt`.
+    </step>
+    <step order="4" name="Review dry-run log carefully">
+      Examine the log:
+      - Total rows enumerated ≈ 94 (within ±5)
+      - Skip count (already-correct) makes sense — for a fresh backfill, should be ~0 (column is null on all rows)
+      - Planned write count + planned skip count = total rows (no orphan rows)
+      - Spot-check 5 random rows: read the planned FROM/TO from log, then read the owner-output CSV row for the same node_id, confirm TO value matches
+      - Look for any errors / warnings
+      If anything looks wrong, STOP. Surface findings to user. Do NOT proceed to real run.
+    </step>
+    <step order="5" name="Spot-check Dataverse state via MCP">
+      Use `mcp__dataverse__read_query` to fetch 3 sample node rows from spaarkedev1 BEFORE the real run. Capture their current `sprk_executortype` value (likely null). This is the "before" baseline.
+    </step>
+    <step order="6" name="Real run">
+      Execute: `pwsh ./scripts/dataverse/Migrate-PlaybookNodes-to-ExecutorType.ps1`.
+      Capture output to `projects/spaarke-ai-platform-unification-r7/notes/handoffs/migration-real-run-log.txt`.
+      Monitor for errors. If halt mid-run, STOP + surface error.
+    </step>
+    <step order="7" name="Post-migration audit — null check">
+      Use `mcp__dataverse__read_query` to execute the audit query:
+      `GET sprk_playbooknodes?$select=sprk_playbooknodeid,sprk_name,sprk_executortype&$filter=sprk_executortype eq null`.
+      Confirm: 0 rows returned. If non-zero, identify which nodes were missed + cross-reference with owner-output CSV to determine if it was a script bug or owner CSV gap.
+    </step>
+    <step order="8" name="Post-migration audit — random sample correctness check">
+      Pick 5 random rows; use MCP to GET each + cross-check current `sprk_executortype` against the owner-output CSV value. Confirm match.
+    </step>
+    <step order="9" name="Idempotency re-run check">
+      Re-run the script (real, not dry-run) WITHOUT cleanup. Confirm: all 94 rows logged as "skip — already correct"; zero PATCH calls made. This proves idempotency.
+    </step>
+    <step order="9.5" name="Quality gates (FULL rigor)">
+      Run `/code-review` on the migration logs + audit output. Run `/adr-check` against ADR-029 + bff-extensions.md.
+      Note: code-review here applies to the EVIDENCE artifacts (log analysis), not source code. Verify the migration log shows the expected outcomes.
+    </step>
+    <step order="10" name="Update current-task.md + TASK-INDEX">
+      Mark task 054 status complete; advance current-task.md to task 055.
+      Record post-migration audit results in current-task.md (e.g., "94 rows patched; 0 null; idempotent re-run confirmed").
+    </step>
+    <step order="11" name="Commit migration logs">
+      Commit `notes/handoffs/migration-dryrun-log.txt` + `notes/handoffs/migration-real-run-log.txt` with conventional message.
+      Example: `chore(r7): playbook-node sprk_executortype migration complete (Wave 5 task 054, FR-19)`
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Bash (pwsh script invocation, az account show, git commit)</tool>
+    <tool>mcp__dataverse__read_query (post-migration null check + spot-check rows)</tool>
+    <tool>Read (script source, dry-run log, owner CSV for spot-check)</tool>
+    <tool>Edit (current-task.md + TASK-INDEX.md)</tool>
+    <tool>Skill (code-review at Step 9.5)</tool>
+    <tool>Skill (adr-check at Step 9.5)</tool>
+  </tools>
+
+  <outputs>
+    <output type="dataverse-mutation">All 94 sprk_playbooknode rows in spaarkedev1 patched with sprk_executortype</output>
+    <output type="log-file">projects/spaarke-ai-platform-unification-r7/notes/handoffs/migration-dryrun-log.txt</output>
+    <output type="log-file">projects/spaarke-ai-platform-unification-r7/notes/handoffs/migration-real-run-log.txt</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md (advance to task 055 + record audit results)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 054 ✅)</output>
+    <output type="commit">chore(r7): playbook-node sprk_executortype migration complete (Wave 5 task 054, FR-19)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Dry-run completed successfully + log captured</criterion>
+    <criterion>Dry-run log spot-check against owner-output CSV — at least 5 rows verified manually</criterion>
+    <criterion>Real run completed without halt + log captured</criterion>
+    <criterion>Post-migration null-check query returns 0 rows (Success Criteria #1)</criterion>
+    <criterion>Post-migration sample correctness check — 5 random rows verified against owner CSV</criterion>
+    <criterion>Idempotency re-run confirmed — all 94 rows logged as skip; zero PATCH calls</criterion>
+    <criterion>code-review + adr-check pass at Step 9.5 (FULL rigor)</criterion>
+    <criterion>Logs committed to repo</criterion>
+    <criterion>current-task.md records audit results (rows patched / null / idempotent)</criterion>
+  </acceptance-criteria>
+</task>

@@ -21,7 +21,7 @@ import { ACTION_CARD_CONFIGS } from "../components/GetStarted/getStartedConfig";
 /**
  * Section registration for Get Started (action-cards).
  *
- * The factory wires all 8 card click handlers using `ctx.onOpenWizard`:
+ * The factory wires all 9 card click handlers using `ctx.onOpenWizard`:
  *   - create-new-matter       → sprk_creatematterwizard
  *   - create-new-project      → sprk_createprojectwizard
  *   - assign-to-counsel       → sprk_createworkassignmentwizard
@@ -30,6 +30,13 @@ import { ACTION_CARD_CONFIGS } from "../components/GetStarted/getStartedConfig";
  *   - find-similar            → sprk_findsimilar
  *   - send-email-message      → sprk_playbooklibrary (intent=email-compose)
  *   - schedule-new-meeting    → sprk_playbooklibrary (intent=meeting-schedule)
+ *   - browse-playbooks        → sprk_playbooklibrary (NO intent → browse mode)
+ *                               R7 Wave 9 task 096 / FR-18 surface 3 of 3.
+ *                               Mirrors task 094 (/playbooks hard slash in chat) and
+ *                               task 095 (Browse Playbooks overflow on Daily Briefing).
+ *                               Pattern parity: all three surfaces open the same
+ *                               PlaybookLibraryShell in browse mode with
+ *                               sprk_playbookconsumer chips per card grid row.
  *
  * Toolbar: a single "Open Playbook Library" expand button.
  */
@@ -68,9 +75,13 @@ export const getStartedRegistration: SectionRegistration = {
         ctx.onOpenWizard("sprk_playbooklibrary", "intent=email-compose"),
       "schedule-new-meeting": () =>
         ctx.onOpenWizard("sprk_playbooklibrary", "intent=meeting-schedule"),
+      // Browse mode — NO intent param → PlaybookLibraryShell renders full card grid
+      // with consumer-mapping chips (FR-18 surface 3 of 3). R7 Wave 9 task 096.
+      "browse-playbooks": () =>
+        ctx.onOpenWizard("sprk_playbooklibrary"),
     };
 
-    // Toolbar: expand button opens the Get Started expand dialog (all 7 cards)
+    // Toolbar: expand button opens the Get Started expand dialog (all 9 cards)
     const toolbar = React.createElement(
       Button,
       {

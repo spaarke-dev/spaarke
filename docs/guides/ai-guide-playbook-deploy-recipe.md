@@ -1,9 +1,9 @@
 # AI Guide — Playbook Deploy Recipe (`Deploy-Playbook.ps1`)
 
-> **Last reviewed**: 2026-06-26
-> **Authored by**: canonical-truth loop step 3 (spaarke-daily-update-service-r4)
+> **Last reviewed**: 2026-06-29
+> **Authored by**: canonical-truth loop step 3 (spaarke-daily-update-service-r4); updated by spaarke-ai-platform-unification-r7 Wave 6 task 063 (FR-28 + FR-20) on 2026-06-29 to remove Control-flow name-detection narrative + `__actionType` structural-fallback hint + document the new R7 explicit-`sprk_executortype` write path and Lint A.
 > **Status**: Canonical operator runbook for `Deploy-Playbook.ps1`. Consolidates fragments from `JPS-AUTHORING-GUIDE.md` §10, `.claude/skills/jps-playbook-design/SKILL.md` Steps 9-10, and `.claude/skills/dataverse-deploy/SKILL.md`. Cited from R4 W0.
-> **Scope**: Input file format, 12-step deploy sequence, skip-vs-Force behaviour, the load-bearing `sprk_isactive` rule, the actionCode lint, failure recovery, verification queries, and the "Playbook has no nodes — using Legacy mode" diagnostic.
+> **Scope**: Input file format (R7 explicit `executorType` field + backward-compat `nodeType` label mapping), 12-step deploy sequence (R7 Lint A pre-check), skip-vs-Force behaviour, the load-bearing `sprk_isactive` rule, the actionCode lint, failure recovery, verification queries, and the "Playbook has no nodes — using Legacy mode" diagnostic.
 > **NOT in scope**: JPS schema (see `ai-guide-jps-authoring.md`); maker recipes (see `PLAYBOOK-AUTHOR-GUIDE.md`); runtime semantics (see `ai-architecture-playbook-runtime.md`); consumer routing (see `ai-architecture-playbook-consumer-routing.md`).
 
 ---
@@ -57,14 +57,14 @@ The script accepts a JSON file shaped roughly as follows (1069-line full grammar
   "nodes": [                                     // REQUIRED (array; can be empty but then runtime is Legacy mode)
     {
       "name": "narrate-llm",                     // unique within the playbook
-      "nodeType": "AIAnalysis",                  // AIAnalysis | Output | Control | Workflow | DeliverComposite
-      "actionCode": "BRIEF-NARRATE",             // REQUIRED for all non-DeliverComposite nodes (lint at 331-356)
+      "executorType": 1,                         // R7 PREFERRED — integer from sprk_playbookexecutortype Choice (33 values: AiAnalysis=0, AiCompletion=1, AiEmbedding=2, Condition=30, Start=33, DeliverOutput=40, DeliverComposite=42, CreateNotification=50, ... EntityNameValidator=141, ReturnResponse=143). Validated by Lint A pre-write.
+      "nodeType": "AIAnalysis",                  // OPTIONAL backward-compat friendly label (R3/R4-era playbooks). If executorType is absent, Deploy-Playbook.ps1 maps `nodeType` string → executorType integer via $LegacyNodeTypeToExecutorType. New playbooks SHOULD use executorType directly.
+      "actionCode": "BRIEF-NARRATE",             // REQUIRED for prompt-driven executors (AiAnalysis=0, AiCompletion=1, AiEmbedding=2). Optional/forbidden for pure executors (Condition, Start, ReturnResponse, etc.). actionCode lint at Deploy-Playbook.ps1:331-356.
       "model": "gpt-4o-mini",                    // optional; resolved against sprk_aimodeldeployments
       "outputVariable": "narration",             // string — downstream nodes reference by name
       "positionX": 100,
       "positionY": 200,
-      "configJson": {                            // per-node runtime config (canonical home for executor-specific fields)
-        "__actionType": 11,                      // structural fallback (orchestrator uses FK first)
+      "configJson": {                            // per-node runtime config (canonical home for executor-specific fields). Validated against node-routing-config.schema.json per executor type (Wave 3 FR-16).
         "inputBindings": { /* executor-specific */ }
       },
       "dependsOn": ["lookup-membership"],
@@ -74,7 +74,11 @@ The script accepts a JSON file shaped roughly as follows (1069-line full grammar
 }
 ```
 
-**The actionCode lint** at `Deploy-Playbook.ps1:331-356` rejects any non-`DeliverComposite` node missing `actionCode`. `DeliverComposite` is the only documented exemption (`:333`) because its executor dispatches by ActionType (not FK). For everything else: every dispatchable node MUST carry actionCode, which the script resolves to an Action FK at deploy time.
+> **R7 change (FR-20, Wave 5 task 055)**: every node now writes `sprk_executortype` explicitly. The legacy `sprk_nodetype` column was removed from `sprk_playbooknode` pre-R7; the `__actionType` structural-fallback hint that the orchestrator used to read from `configJson` was deleted in Wave 2 task 025 (~150 LOC removed). Do NOT add `__actionType` to new playbook JSONs — it is no longer load-bearing. The R7 `Deploy-Playbook.ps1` REMOVES any `__actionType` that appears in input JSON before posting `sprk_configjson` to Dataverse (logged at debug level).
+
+**The actionCode lint** at `Deploy-Playbook.ps1:331-356` rejects any prompt-driven node (executorType ∈ {0, 1, 2}) missing `actionCode`. `DeliverComposite` (executorType 42) is the documented exemption because its executor dispatches by composite-strategy semantics, not Action FK. For prompt-driven nodes: every node MUST carry actionCode, which the script resolves to an Action FK at deploy time.
+
+**Lint A — R7 executor-type validation** (Wave 5 task 055, FR-20): runs BEFORE any Dataverse write. For each node, the script verifies the resolved `executorType` integer is one of the 33 known `sprk_playbookexecutortype` Choice values. If unknown → exit 1 with the offending node name, the value seen, and the full 33-value reference. This catches typos and stale playbook JSONs that pre-date the 33-value catalog. The 33-value `$KnownExecutorTypes` hashtable lives inline in the script for now (flagged as a future codegen-from-`INodeExecutor.cs` opportunity).
 
 ---
 
@@ -84,18 +88,20 @@ The script narrates each step. Here is the full sequence with file:line referenc
 
 | Step | Action | Reference |
 |---|---|---|
-| 1 | Parse + validate definition (includes the actionCode lint) | `:296-356` |
+| 1 | Parse + validate definition (includes the actionCode lint + R7 Lint A executor-type validation per FR-20) | `:296-356` |
 | 2 | Collect all scope codes from playbook-level + node-level | scope code accumulator |
 | 3 | Resolve scope codes → Guids via `sprk_analysisactions[sprk_actioncode]`, `sprk_analysisskills[sprk_skillcode]`, `sprk_analysisknowledges[sprk_externalid]`, `sprk_analysistools[sprk_toolcode]` | `:419-477` |
 | 4 | Resolve model deployments by name (`sprk_aimodeldeployments`) | model resolver |
 | 5 | Check for existing playbook by name. Without `-Force`: SKIP if exists. With `-Force`: delete + recreate. | `:587-590` |
 | 6 | POST `sprk_analysisplaybooks` row with: name, description, isPublic, optional sprk_playbooktype, optional sprk_issystemplaybook, optional sprk_configjson | `:621` |
 | 7 | Associate playbook-level N:N scopes (`sprk_analysisplaybook_action`, `sprk_playbook_skill`, `sprk_playbook_knowledge`, `sprk_playbook_tool`) | N:N associate calls |
-| 8 | Per-node loop: validate `sprk_configjson` against schema (FR-14e gate) → POST `sprk_playbooknodes` row with `sprk_isactive=true` (LOAD-BEARING), `sprk_playbookid@odata.bind`, optional `sprk_actionid@odata.bind`, optional `sprk_modeldeploymentid@odata.bind`, optional `sprk_configjson` | `:765-853`, schema validate at `:789`, `sprk_isactive` comment at `:823` |
+| 8 | Per-node loop: validate `sprk_configjson` against schema (FR-14e gate) → resolve `executorType` (explicit field preferred; `nodeType` string mapped via backward-compat table) → POST `sprk_playbooknodes` row with **`sprk_executortype = <integer>`** (R7 FR-20, the single-hop dispatch axis), `sprk_isactive=true` (LOAD-BEARING), `sprk_playbookid@odata.bind`, optional `sprk_actionid@odata.bind` (REQUIRED for prompt-driven executors), optional `sprk_modeldeploymentid@odata.bind`, optional `sprk_configjson` | `:765-853`, schema validate at `:789`, `sprk_isactive` comment at `:823` |
 | 9 | Second pass: PATCH each node with `sprk_dependsonjson` (built from resolved node Guids) | `:891` |
 | 10 | Associate node-level N:N scopes (`sprk_playbooknode_{skill,knowledge,tool}`) | node-scope associate calls |
 | 11 | Build canvas layout JSON (nodes + edges in React Flow shape) → PATCH playbook with `sprk_canvaslayoutjson` | `:1044` |
 | 12 | Summary print | end of script |
+
+> **R7 step-1 change (Wave 5 task 055, FR-20)**: Lint A runs *before* scope resolution (step 3). If any node's resolved executorType is not in the 33-value `sprk_playbookexecutortype` Choice catalog, the script exits 1 immediately — no scope queries, no Dataverse writes. This catches stale executorType values + typos before they create partially-deployed playbook rows.
 
 ---
 
@@ -183,7 +189,7 @@ If the node-row query returns ZERO, the deploy script did NOT create nodes — L
 
 ---
 
-## 9. Troubleshooting — "Playbook has no nodes — using Legacy mode"
+## 9. Troubleshooting — "Playbook has no nodes — using Legacy mode" + R7 lint failures
 
 This is the canonical R4 UAT log entry. It fires from `PlaybookOrchestrationService.cs:250` and means **the runtime queried `sprk_playbooknode` filtered by your playbook GUID and got zero rows back**. Possible causes:
 
@@ -191,11 +197,23 @@ This is the canonical R4 UAT log entry. It fires from `PlaybookOrchestrationServ
 |---|---|---|
 | Playbook never had nodes deployed (only canvas JSON populated) | `pac data list -e sprk_playbooknode -filt "_sprk_playbookid_value eq <Guid>"` returns 0 | Run `Deploy-Playbook.ps1 -Force` |
 | Nodes were created but `sprk_isactive` is false | Same query, plus check `sprk_isactive` column | Inspect deploy script's step 8 — confirm `sprk_isactive = true` is being written |
+| Nodes were created but `sprk_executortype` is NULL | `pac data list -e sprk_playbooknode -fl "sprk_name,sprk_executortype" -filt "_sprk_playbookid_value eq <Guid>"` shows NULL on any row | Wave 5 backfill applies — run `scripts/dataverse/Migrate-PlaybookNodes-to-ExecutorType.ps1` (R7 task 053) after the owner has filled in the review CSV (task 052). Or, if the source JSON is missing `executorType`, fix the JSON + re-deploy with `-Force`. |
 | Skip-by-name swallowed a failed re-deploy | Playbook row exists but is stale (old node set) | Run `Deploy-Playbook.ps1 -Force` |
 | You ran against the wrong Dataverse environment | `pac auth list` shows wrong profile | Switch profile, re-deploy |
 | The playbook Guid the runtime is querying doesn't match what you deployed | Different env, or stale `sprk_playbookconsumer` cache (5 min TTL) | Wait 5 min OR restart BFF to clear `IMemoryCache` |
 
 After fixing, the next dispatch should log `"Executing playbook in NodeBased mode"` (or equivalent) instead. The Legacy log site catalog is in `ai-architecture-playbook-runtime.md` §3.
+
+### R7 Lint A failure — "Unknown executor type"
+
+If `Deploy-Playbook.ps1` exits 1 with `Lint A: node '<name>' has unknown executorType value <N>` (or similar):
+
+| Cause | Fix |
+|---|---|
+| Typo in playbook JSON (`executorType: 999`) | Set `executorType` to one of the 33 known `sprk_playbookexecutortype` Choice values (see [§2 above](#2-input-file-format) for the list). |
+| Stale `nodeType` label not in the backward-compat table | Either replace `nodeType` with an explicit `executorType` integer OR add the label to `$LegacyNodeTypeToExecutorType` in `Deploy-Playbook.ps1` (small set; covers the R3/R4-era 17 friendly labels). |
+| Playbook JSON pre-dates R7 entirely | Wave 5 backfill applies to the deployed rows; re-author the JSON to use explicit `executorType` integers and re-deploy with `-Force`. |
+| New executor was added to the C# enum but not to the script's 33-value `$KnownExecutorTypes` table | Append the new value (key=integer, value=enum-name string) to `$KnownExecutorTypes` in `Deploy-Playbook.ps1`. Codegen from `INodeExecutor.cs` is a tracked DEF-NNN follow-up. |
 
 ---
 

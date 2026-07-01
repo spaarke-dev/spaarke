@@ -5,14 +5,13 @@ techStack: [azure-openai, dataverse, powershell]
 appliesTo: ["refresh scope index", "update scope catalog", "sync scope index", "refresh scopes"]
 alwaysApply: false
 exemplar: none-too-volatile
-last-reviewed: 2026-05-16
+last-reviewed: 2026-06-29
 ---
 
 # jps-scope-refresh
 
-> **Last Reviewed**: 2026-05-16
-> **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2b-A)
-> **Exemplar rationale**: The contract is "run the script, verify counts changed, commit if changed." There is no useful canonical reference output — the catalog content itself changes with every scope addition.
+> **Last Reviewed**: 2026-06-29
+> **Reviewed By**: spaarke-ai-platform-unification-r7 task 074 (FR-33 — enum + schema rename touch-up). Two-authoring-surfaces table updated: legacy Node Type OptionSet (5 values) REMOVED; replaced with Executor Type Choice Set (`sprk_playbookexecutortype`, 33 values, global) — updated independently via Wave 8 task 081. C# enum `ActionType` references updated to `ExecutorType` per Wave 2 task 022 rename. Operational behavior (script invocation + JSON catalog shape) UNCHANGED — this is a terminology touch-up only. Prior review: ai-procedure-quality-r1 (Phase 2b Wave 2b-A).
 
 ## Purpose
 
@@ -28,16 +27,20 @@ last-reviewed: 2026-05-16
 **The scope catalog is ADVISORY for authoring, not runtime enforcement.** Per [`docs/architecture/ai-architecture-playbook-runtime.md`](../../../docs/architecture/ai-architecture-playbook-runtime.md) §6:
 
 - The BFF runtime does NOT cross-check that a node's action references a Skill in `playbook.scopes.skills`. Scope arrays are pre-fetch hints, not gates.
-- This skill refreshes `.claude/catalogs/scope-model-index.json` — which is consumed by `jps-playbook-design` and the PCF PlaybookBuilder UI dropdowns for **authoring hints**, not by the orchestrator at runtime.
-- The model-driven app form's Node Type OptionSet is a **separate authoring surface** (Dataverse-side) — this skill does NOT update that OptionSet. If a new NodeType is added to `INodeExecutor.cs`, the OptionSet must be updated independently via Dataverse customization (R4 UAT discovery 2026-06-26).
+- This skill refreshes `.claude/catalogs/scope-model-index.json` — which is consumed by `jps-playbook-design` and the PlaybookBuilder UI dropdowns (Code Page) for **authoring hints**, not by the orchestrator at runtime.
+- The model-driven app form's **Executor Type Choice Set** is a **separate authoring surface** (Dataverse-side) — this skill does NOT update that Choice Set. If a new executor is added to `INodeExecutor.cs` (and the C# `ExecutorType` enum + global `sprk_playbookexecutortype` Choice), the Choice Set must be updated independently via Dataverse customization (Wave 8 task 081 establishes the current contract — pre-R7 the surface used the now-removed Node Type OptionSet).
 
-**Two authoring surfaces, one catalog**:
+**Two authoring surfaces, one catalog** (updated 2026-06-29 per R7 FR-21 + FR-33):
 | Surface | What it shows | Updated by |
 |---|---|---|
 | PlaybookBuilder UI dropdowns (Code Page) | actions/skills/knowledge/tools from scope-model-index.json | This skill (after Refresh-ScopeModelIndex.ps1) |
-| Node Type OptionSet (Model-Driven App form) | NodeType values (AIAnalysis, Output, Control, Workflow, DeliverComposite) | Manual Dataverse customization — NOT this skill |
+| **Executor Type Choice Set** on `sprk_playbooknode` (Model-Driven App form) | 33 Executor Type values from global `sprk_playbookexecutortype` Choice (mirrors C# `ExecutorType` enum at `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/ExecutorType.cs`) | Manual Dataverse customization — Wave 8 task 081 set the column default to AiCompletion=1; future executor additions follow the same path. NOT this skill. |
 
-If a UAT user reports "new NodeType missing from the form OptionSet," this skill cannot fix it — escalate to the Dataverse customizer.
+The legacy `sprk_nodetype` column + its 5-value Node Type OptionSet (AIAnalysis, Output, Control, Workflow, DeliverComposite) were REMOVED from `sprk_playbooknode` pre-R7. Any code or doc referencing them is stale — flag as drift.
+
+If a UAT user reports "new executor missing from the form Choice Set," this skill cannot fix it — escalate to the Dataverse customizer (add the option value via `Add-NodeTypeChoiceOption.ps1` pattern, then update C# `ExecutorType` enum + INodeExecutor implementation).
+
+**Brief R7 context — why renamed?** Wave 2 (FR-07 to FR-10, 2026-06-28) collapsed the legacy 3-layer dispatch model (`node.sprk_nodetype` → `Action.sprk_executoractiontype` INT → `Action.sprk_actiontypeid` lookup) to a single-hop `node.sprk_executortype` read in `PlaybookOrchestrationService.ExecuteNodeAsync`. The C# enum rename (`ActionType` → `ExecutorType`, Wave 2 task 022) + Dataverse Choice naming (`sprk_playbookexecutortype` global Choice with 33 values) aligns naming with reality. See R7 design.md §3.1 for the WHY history — the 3-layer drift caused every release to ship a different version of the same "wrong executor ran" bug.
 
 ## Applies When
 

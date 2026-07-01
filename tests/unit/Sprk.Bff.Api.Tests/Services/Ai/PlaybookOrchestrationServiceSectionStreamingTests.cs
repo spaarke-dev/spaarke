@@ -2,6 +2,7 @@ using System.Text.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
@@ -31,7 +32,7 @@ namespace Sprk.Bff.Api.Tests.Services.Ai;
 ///   <item>Empty composite payloads emit ZERO section events (FR-52: a partial / empty
 ///     composite is a valid composite).</item>
 ///   <item><b>Backward-compat invariant (binding)</b>: a schema-position playbook (i.e.,
-///     a non-composite Output node dispatched as <see cref="ActionType.DeliverOutput"/>)
+///     a non-composite Output node dispatched as <see cref="ExecutorType.DeliverOutput"/>)
 ///     emits ZERO section events. The existing <c>FieldDelta</c> flow on a different
 ///     stream surface (<see cref="PlaybookExecutionEngine.ExecuteChatSummarizeAsync"/>)
 ///     is unaffected by these events — this test asserts the non-emission contract on
@@ -78,6 +79,8 @@ public class PlaybookOrchestrationServiceSectionStreamingTests
             _scopeResolverMock.Object,
             _legacyOrchestratorMock.Object,
             _insightsRouterMock.Object,
+            // R7 Wave 11 task 111: ITemplateEngine for orchestrator Layer 1 resolution.
+            new TemplateEngine(NullLogger<TemplateEngine>.Instance),
             _loggerMock.Object);
     }
 
@@ -95,14 +98,16 @@ public class PlaybookOrchestrationServiceSectionStreamingTests
     {
         Id = Guid.NewGuid(),
         Name = name,
-        // Structural node — no Action FK; orchestrator picks ActionType.DeliverComposite
-        // via the NodeType.DeliverComposite switch arm.
+        // Structural node — no Action FK; per R7 FR-07 single-hop dispatch, SprkExecutortype
+        // carries the dispatch target directly (task 024). Previously inferred via the
+        // NodeType.DeliverComposite switch arm in the now-dead structural fallback.
         ActionId = Guid.Empty,
         OutputVariable = name.ToLowerInvariant().Replace(" ", "_"),
         ExecutionOrder = 1,
         DependsOn = Array.Empty<Guid>(),
         IsActive = true,
-        NodeType = NodeType.DeliverComposite
+        NodeType = NodeType.DeliverComposite,
+        SprkExecutortype = ExecutorType.DeliverComposite
     };
 
     private static PlaybookNodeDto CreateLegacyOutputNode(string name) => new()
@@ -114,8 +119,9 @@ public class PlaybookOrchestrationServiceSectionStreamingTests
         ExecutionOrder = 1,
         DependsOn = Array.Empty<Guid>(),
         IsActive = true,
-        // Legacy schema-position path — orchestrator picks ActionType.DeliverOutput.
-        NodeType = NodeType.Output
+        // R7 FR-07 single-hop dispatch (task 024) — SprkExecutortype = DeliverOutput.
+        NodeType = NodeType.Output,
+        SprkExecutortype = ExecutorType.DeliverOutput
     };
 
     private static CompositeOutputPayload BuildCompositePayload(params string[] sectionNames)
@@ -140,7 +146,7 @@ public class PlaybookOrchestrationServiceSectionStreamingTests
 
     /// <summary>
     /// Configures the executor registry to return a stub executor for
-    /// <see cref="ActionType.DeliverComposite"/> that produces the given composite payload
+    /// <see cref="ExecutorType.DeliverComposite"/> that produces the given composite payload
     /// as <see cref="NodeOutput.StructuredData"/>. Mirrors the executor's real shape so the
     /// orchestrator's deserialization path lights up.
     /// </summary>
@@ -161,13 +167,13 @@ public class PlaybookOrchestrationServiceSectionStreamingTests
             });
 
         _executorRegistryMock
-            .Setup(x => x.GetExecutor(ActionType.DeliverComposite))
+            .Setup(x => x.GetExecutor(ExecutorType.DeliverComposite))
             .Returns(mockExecutor.Object);
     }
 
     /// <summary>
     /// Configures the executor registry to return a stub executor for
-    /// <see cref="ActionType.DeliverOutput"/> (the legacy schema-position path).
+    /// <see cref="ExecutorType.DeliverOutput"/> (the legacy schema-position path).
     /// The output carries arbitrary structured data — NOT a composite payload — so the
     /// orchestrator's section-emission guard MUST NOT light up.
     /// </summary>
@@ -188,7 +194,7 @@ public class PlaybookOrchestrationServiceSectionStreamingTests
             });
 
         _executorRegistryMock
-            .Setup(x => x.GetExecutor(ActionType.DeliverOutput))
+            .Setup(x => x.GetExecutor(ExecutorType.DeliverOutput))
             .Returns(mockExecutor.Object);
     }
 
@@ -388,7 +394,7 @@ public class PlaybookOrchestrationServiceSectionStreamingTests
     /// <b>Backward-compat invariant test name (118R re-runs this)</b>:
     /// <c>SchemaPositionPlaybook_DeliverOutputPath_EmitsZeroSectionEvents</c>.
     /// A legacy <see cref="NodeType.Output"/> node dispatched as
-    /// <see cref="ActionType.DeliverOutput"/> MUST emit zero <c>section_*</c> events on
+    /// <see cref="ExecutorType.DeliverOutput"/> MUST emit zero <c>section_*</c> events on
     /// the orchestrator's stream surface. The existing <c>FieldDelta</c> flow on a
     /// different stream surface
     /// (<see cref="PlaybookExecutionEngine.ExecuteChatSummarizeAsync"/>) is unaffected
@@ -426,7 +432,7 @@ public class PlaybookOrchestrationServiceSectionStreamingTests
 
         sectionEvents.Should().BeEmpty(
             "BACKWARD-COMPAT INVARIANT (FR-53): schema-position playbooks (NodeType.Output → " +
-            "ActionType.DeliverOutput) MUST emit zero section_* events on the orchestrator's " +
+            "ExecutorType.DeliverOutput) MUST emit zero section_* events on the orchestrator's " +
             "stream surface until migrated by FR-58 (task 118R). The existing FieldDelta flow " +
             "on PlaybookExecutionEngine.ExecuteChatSummarizeAsync's stream surface is " +
             "untouched by 114a.");

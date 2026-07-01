@@ -5,13 +5,13 @@ techStack: [azure-openai, aspnet-core, dataverse]
 appliesTo: ["design playbook", "create playbook", "new AI playbook", "playbook architecture"]
 alwaysApply: false
 exemplar: none-too-volatile
-last-reviewed: 2026-05-17
+last-reviewed: 2026-06-29
 ---
 
 # jps-playbook-design
 
-> **Last Reviewed**: 2026-05-17
-> **Reviewed By**: ai-procedure-quality-r1 (Phase 2b Wave 2d — `leave-alone-justified` on body length per dereferencing-reliability concern; flipped frontmatter above H1; added Failure Modes & Recovery)
+> **Last Reviewed**: 2026-06-29
+> **Reviewed By**: spaarke-ai-platform-unification-r7 task 071 (FR-32 — node-first dispatch rewrite). Workflow reframed: pick `sprk_executortype` Choice FIRST per node, then optional Action for prompt-driven executors. Step 1.5 item 3 + Step 10 deployment-verify query updated to remove the legacy 3-layer precedence + `sprk_nodetype` projection — both are gone post-R7. Step 2 + ai-architecture-playbook-runtime §5 references corrected (the §5 lookup-precedence section was DELETED in Wave 6 task 061). Prior review: ai-procedure-quality-r1 (Phase 2b Wave 2d).
 > **Exemplar rationale**: Playbook designs are project-specific; the JPS schema + Dataverse table model is the contract.
 > **Justified length** (516 lines): Tier 2 orchestrator chaining `jps-action-create`, `jps-scope-refresh`, `jps-validate`. The 13-step design procedure + scope/model selection logic + ASCII canvas layout must remain inline for the agent executing the design to follow accurately. Splitting risks dereferencing reliability.
 > **Drift note**: The singular `sprk_analysisaction` (logical name) vs plural `sprk_analysisactions` (Web API collection endpoint) — both are correct in their respective contexts. This skill uses plural in OData URLs; `jps-scope-refresh` uses singular as the logical table name.
@@ -50,15 +50,15 @@ Ask the user:
 5. **What data needs to flow between nodes?** (output of one -> input of another)
 6. **What shared knowledge is needed across nodes?** (standard clauses, regulatory frameworks, etc.)
 
-### Step 1.5: Runtime Contract Reminder (BINDING per canonical-truth loop 2026-06-26)
+### Step 1.5: Runtime Contract Reminder (BINDING per canonical-truth loop 2026-06-26; updated for R7 single-hop dispatch 2026-06-29)
 
 Before designing, internalize these runtime rules from [`docs/architecture/ai-architecture-playbook-runtime.md`](../../../docs/architecture/ai-architecture-playbook-runtime.md):
 
 1. **Mode is emergent, not declarative**. There is NO `sprk_playbookmode` column read at runtime. The orchestrator (`PlaybookOrchestrationService.cs:246-253`) checks for `sprk_playbooknode` rows; zero rows → Legacy mode log + fallback. **Do NOT instruct the user to set a "mode" field on the playbook row** — instead instruct them to deploy node rows.
 2. **The playbook's `sprk_configjson` is NOT the node graph**. The node graph MUST be deployed as `sprk_playbooknode` rows via `Deploy-Playbook.ps1` per [`ai-guide-playbook-deploy-recipe.md`](../../../docs/guides/ai-guide-playbook-deploy-recipe.md). Putting nodes inline in playbook `sprk_configjson` is the R4 deploy bug — runtime ignores it.
-3. **Action lookup precedence at runtime**: Action FK → ConfigJson `__actionType` → NodeType-default. The deploy script's actionCode lint at `Deploy-Playbook.ps1:331-356` ensures every dispatchable node carries `actionCode`, which is resolved to FK at deploy time. **Authoring by code; runtime by FK.**
-4. **Empty-payload contract** (Path A.5): if the playbook is a non-document dispatch (e.g., `/narrate`, `/summarize` invoked via `IInvokePlaybookAi` facade), the playbook **MUST** have nodes — otherwise Legacy fallback fires + returns 503 `PLAYBOOK_INVOCATION_FAILED`. See [`ai-architecture-playbook-consumer-routing.md`](../../../docs/architecture/ai-architecture-playbook-consumer-routing.md) §3.
-5. **Config-bag boundary** (from [`ai-architecture-actions-nodes-scopes.md`](../../../docs/architecture/ai-architecture-actions-nodes-scopes.md) §4): every config field has a single Home — Action / Playbook columns / Node row / N:N scopes. When designing nodes, do NOT inline scope decisions in node configJson; use the N:N relationships.
+3. **Dispatch is SINGLE-HOP at runtime** (R7 FR-07 + FR-08 + FR-09, 2026-06-29). `PlaybookOrchestrationService.ExecuteNodeAsync` reads `node.sprk_executortype` (Choice) directly and routes to the matching `INodeExecutor`. **There is no precedence ladder; there is no structural fallback; the Action's ActionType override branch is deleted.** Pre-R7 this skill described a 3-tier ladder (Action FK → ConfigJson `__actionType` → NodeType-default) — that ladder is GONE, and the deploy script no longer needs to "lint actionCode for dispatch reasons." Action FK is still required for prompt-driven executors (carries SystemPrompt + OutputSchema + Temperature), but it is no longer a dispatch signal. The previously-referenced `ai-architecture-playbook-runtime.md` §5 "Action-Lookup Precedence" section was DELETED in Wave 6 task 061 (it described the now-removed ladder).
+4. **Empty-payload contract** (Path A.5): if the playbook is a non-document dispatch (e.g., `/narrate`, `/summarize` invoked via `IInvokePlaybookAi` facade), the playbook **MUST** have nodes — otherwise Legacy fallback fires + returns 503 `PLAYBOOK_INVOCATION_FAILED`. See [`ai-architecture-playbook-consumer-routing.md`](../../../docs/architecture/ai-architecture-playbook-consumer-routing.md) §3 (file was renamed from `ai-architecture-consumer-routing.md` on master via chat-routing-redesign-r1 commit `db546810c` — that branch's rename now lives in our merged tree).
+5. **Config-bag boundary** (from [`ai-architecture-actions-nodes-scopes.md`](../../../docs/architecture/ai-architecture-actions-nodes-scopes.md) §4): every config field has a single Home — Action / Playbook columns / Node row / N:N scopes. **Dispatch identity is a Home C concern** (lives on `sprk_playbooknode.sprk_executortype`), not a Home A concern. When designing nodes, do NOT inline scope decisions in node configJson; use the N:N relationships.
 
 ### Step 2: Load Architecture Context
 
@@ -350,11 +350,12 @@ QUERY Dataverse via MCP read_query to verify (BINDING — sprk_playbooknode rows
 
   2. mcp__dataverse__read_query against sprk_playbooknode
        filter: _sprk_playbookid_value eq <captured Guid>
-       select: sprk_name, sprk_nodetype, sprk_isactive, _sprk_actionid_value, sprk_executionorder
+       select: sprk_name, sprk_executortype, sprk_isactive, _sprk_actionid_value, sprk_executionorder
        orderby: sprk_executionorder asc
      EXPECT N rows where N == definition.nodes.length
      EXPECT every row has sprk_isactive = true (else runtime sees zero nodes → Legacy mode)
-     EXPECT every dispatchable node has _sprk_actionid_value non-null (the FK is the canonical dispatch axis per ai-architecture-playbook-runtime.md §5)
+     EXPECT every row has sprk_executortype set to a valid Choice value (single-hop dispatch axis per R7 FR-07; `sprk_nodetype` column was removed in the pre-R7 schema cleanup and `sprk_executortype` is the sole node-level dispatch signal post-R7)
+     EXPECT every prompt-driven node (executorType ∈ {AiAnalysis=0, AiCompletion=1, AiEmbedding=2}) has _sprk_actionid_value non-null (Action FK carries SystemPrompt + OutputSchema + Temperature for prompt-driven executors only — pure executors leave it NULL)
 
   3. mcp__dataverse__read_query for N:N associations
        Verify sprk_analysisplaybook_action, sprk_playbook_skill, sprk_playbook_knowledge, sprk_playbook_tool match scopes
@@ -432,6 +433,43 @@ INFORM user:
 - Refine the playbook based on test results
 - Deploy to additional environments (staging, production)
 - Add monitoring and alerting for playbook execution
+
+---
+
+## The R7 dispatch model — what changed and why
+
+> **Read this once.** It anchors why "Pick Executor Type FIRST per node" is the correct mental model in R7+.
+
+**Before R7**, the orchestrator resolved a node's executor via a 3-layer ladder: `node.sprk_nodetype` → `Action.sprk_executoractiontype` INT → `Action.sprk_actiontypeid` lookup → ActionType enum. None of the layers was enforced to agree, so they drifted across releases and every release shipped a different version of the same "wrong executor ran" bug (see design.md §3.1 for the WHY history).
+
+**After R7** (design.md §2 Invariants 1-3):
+- **Invariant 1**: Every node has `sprk_executortype` (Choice) set explicitly.
+- **Invariant 2**: `PlaybookOrchestrationService.ExecuteNodeAsync` reads `node.sprk_executortype` once. Single hop. No ladder.
+- **Invariant 3**: Action is a reusable prompt template (`SystemPrompt + OutputSchema + Temperature`) for prompt-driven executors. It does NOT carry dispatch identity.
+
+**The 33-executor catalog** (Choice values 0-143; categorized by tier per design.md §11):
+- AI tier (prompt-driven, Action FK REQUIRED): AiAnalysis (0), AiCompletion (1), AiEmbedding (2)
+- Workflow tier (pure executors, Action FK NULL): RuleEngine (10), Calculation (11), DataTransform (12), Condition (30), Parallel (31), Wait (32), Start (33)
+- Action tier (pure executors): CreateTask (20), SendEmail (21), UpdateRecord (22), CallWebhook (23), SendTeamsMessage (24)
+- Delivery tier (pure): DeliverOutput (40), DeliverToIndex (41), DeliverComposite (42)
+- Notification (pure): CreateNotification (50)
+- Data tier (pure): QueryDataverse (51), LookupUserMembership (52)
+- Reasoning tier: AgentService (60), GroundingVerify (70), LiveFact (80), IndexRetrieve (90), EvidenceSufficiency (100), DeclineToFind (110), ReturnInsightArtifact (120), Sanitization (130), ObservationEmit (140)
+- Validation/IO (pure): EntityNameValidator (141), LoadKnowledge (142), ReturnResponse (143)
+
+**Author workflow under R7**:
+1. **Pick `sprk_executortype` FIRST** per node — this is the dispatch decision.
+2. If executor is **prompt-driven** (AiAnalysis / AiCompletion / AiEmbedding) → pick or author an Action FK using `jps-action-create`.
+3. If executor is **pure** → leave Action FK NULL; configure via `sprk_configjson` (Home C).
+4. The Wave 8 PlaybookBuilder UI (FR-21 to FR-27) renders the 33 executors in a categorized selector (FR-22), enables the Action tab only for prompt-driven executors (FR-24), and shows typed config forms per executor (FR-23) — so the UI nudges you toward the correct mental model.
+
+**Cross-references**:
+- design.md §2 (Invariants 1-3) — binding rules
+- design.md §3.1 (R3.1 WHY history) — failure modes that motivated the rewrite
+- design.md §11 (executor categorization) — tier mapping
+- spec.md FR-07 / FR-08 / FR-09 — runtime reform
+- spec.md FR-21 to FR-27 — Wave 8 UI shape
+- `PlaybookOrchestrationService.ExecuteNodeAsync` — runtime source of truth (Wave 2 task 024)
 
 ---
 

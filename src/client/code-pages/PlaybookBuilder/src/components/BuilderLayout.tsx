@@ -34,6 +34,7 @@ import {
 import { ReactFlowProvider } from '@xyflow/react';
 
 import { PlaybookCanvas } from './canvas/PlaybookCanvas';
+import { NodePalette } from './NodePalette';
 import { NodePropertiesDialog } from './properties/NodePropertiesDialog';
 import { ExecutionOverlay } from './execution/ExecutionOverlay';
 import { AiAssistantModal } from './ai-assistant/AiAssistantModal';
@@ -47,7 +48,6 @@ import { useTemplateStore } from '../stores/templateStore';
 import { syncNodesToDataverse } from '../services/playbookNodeSync';
 import { createRecord, updateRecord } from '../services/dataverseClient';
 import { useKeyboardShortcuts } from '../hooks/useKeyboardShortcuts';
-import type { PlaybookNodeType } from '../types/canvas';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -59,82 +59,16 @@ interface BuilderLayoutProps {
 }
 
 // ---------------------------------------------------------------------------
-// Node palette items
+// Node palette
 // ---------------------------------------------------------------------------
-
-interface NodePaletteItem {
-  type: PlaybookNodeType;
-  label: string;
-  description: string;
-  color: string;
-}
-
-const NODE_PALETTE: NodePaletteItem[] = [
-  {
-    type: 'aiAnalysis',
-    label: 'AI Analysis',
-    description: 'Run AI analysis with skills and knowledge',
-    color: tokens.colorBrandBackground,
-  },
-  {
-    type: 'aiCompletion',
-    label: 'AI Completion',
-    description: 'Generate AI text completion',
-    color: tokens.colorBrandBackground,
-  },
-  {
-    type: 'condition',
-    label: 'Condition',
-    description: 'Branch based on expression',
-    color: tokens.colorPaletteYellowBackground3,
-  },
-  {
-    type: 'deliverOutput',
-    label: 'Deliver Output',
-    description: 'Format and save results',
-    color: tokens.colorPaletteGreenBackground3,
-  },
-  {
-    type: 'deliverToIndex',
-    label: 'Deliver to Index',
-    description: 'Queue for RAG semantic indexing',
-    color: tokens.colorPaletteGreenBackground3,
-  },
-  {
-    type: 'updateRecord',
-    label: 'Update Record',
-    description: 'Write fields to Dataverse record',
-    color: tokens.colorPaletteGreenBackground3,
-  },
-  {
-    type: 'createTask',
-    label: 'Create Task',
-    description: 'Create a Dataverse task',
-    color: tokens.colorPaletteBerryBackground2,
-  },
-  {
-    type: 'sendEmail',
-    label: 'Send Email',
-    description: 'Send notification email',
-    color: tokens.colorPaletteBerryBackground2,
-  },
-  {
-    type: 'wait',
-    label: 'Wait',
-    description: 'Pause for duration or condition',
-    color: tokens.colorPaletteMagentaBackground2,
-  },
-  // R4 hotfix 2026-06-26: Task 004 left this palette entry missing despite
-  // BaseNode.tsx (line 141) + types/playbook.ts (PlaybookNodeType.EntityNameValidator)
-  // both wiring the type. Without this entry the Tool is never draggable from the
-  // palette. Closes AC-3c "PlaybookBuilder UI palette displays the Tool" gap.
-  {
-    type: 'entityNameValidator',
-    label: 'Entity Name Validator',
-    description: 'Scrub LLM-emitted entity names against allow-list',
-    color: tokens.colorPaletteMagentaBackground2,
-  },
-];
+//
+// R7 Wave 8 task 082 (FR-22): the legacy inline ~11-tile palette + draggable
+// tile render block were extracted to `./NodePalette.tsx`, which renders the
+// full 33-executor catalog grouped into 6 categorized tiers (AI / Compute /
+// Mutations / Control / Delivery / Capability). NodePalette writes its own
+// drag-start payload containing `executorType` (FR-26 dispatch field) in
+// addition to the legacy `type` discriminator, so PlaybookCanvas.handleDrop
+// continues to function without changes (it reads the same MIME type).
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -207,40 +141,15 @@ const useStyles = makeStyles({
     ...shorthands.borderBottom('1px', 'solid', tokens.colorNeutralStroke2),
     backgroundColor: tokens.colorNeutralBackground3,
   },
-  paletteList: {
-    ...shorthands.padding('8px'),
+  // Palette list/item styles moved to NodePalette.tsx (task 082 / FR-22).
+  // BuilderLayout retains only sidebar-container styles; tile rendering owned
+  // by the extracted component.
+  paletteContainer: {
+    flex: 1,
+    minHeight: 0,
     display: 'flex',
     flexDirection: 'column',
-    ...shorthands.gap('4px'),
-  },
-  paletteItem: {
-    display: 'flex',
-    alignItems: 'center',
-    ...shorthands.gap('8px'),
-    ...shorthands.padding('8px'),
-    ...shorthands.borderRadius('4px'),
-    cursor: 'grab',
-    ':hover': {
-      backgroundColor: tokens.colorNeutralBackground1Hover,
-    },
-  },
-  paletteColor: {
-    width: '8px',
-    height: '28px',
-    ...shorthands.borderRadius('2px'),
-    flexShrink: 0,
-  },
-  paletteInfo: {
-    display: 'flex',
-    flexDirection: 'column',
-  },
-  paletteName: {
-    fontSize: tokens.fontSizeBase200,
-    fontWeight: tokens.fontWeightSemibold,
-  },
-  paletteDesc: {
-    fontSize: tokens.fontSizeBase100,
-    color: tokens.colorNeutralForeground3,
+    overflow: 'hidden',
   },
   canvasArea: {
     flex: 1,
@@ -377,11 +286,10 @@ export function BuilderLayout({ playbookId, apiBaseUrl }: BuilderLayoutProps): J
     };
   }, [isDirty, playbookId, handleSave]);
 
-  // Drag start handler for palette items
-  const handleDragStart = useCallback((event: React.DragEvent, nodeType: PlaybookNodeType, label: string) => {
-    event.dataTransfer.setData('application/reactflow', JSON.stringify({ type: nodeType, label }));
-    event.dataTransfer.effectAllowed = 'move';
-  }, []);
+  // Drag-start handler is now owned by NodePalette.tsx (R7 task 082 / FR-22) —
+  // it writes the FR-26 payload (with `executorType` Choice value) to dataTransfer
+  // via the same 'application/reactflow' MIME type that PlaybookCanvas.handleDrop
+  // already reads. BuilderLayout no longer needs a custom handler.
 
   // Keyboard shortcuts
   useKeyboardShortcuts({ onSave: handleSave });
@@ -495,21 +403,8 @@ export function BuilderLayout({ playbookId, apiBaseUrl }: BuilderLayoutProps): J
               Node Types
             </Text>
           </div>
-          <div className={styles.paletteList}>
-            {NODE_PALETTE.map(item => (
-              <div
-                key={item.type}
-                className={styles.paletteItem}
-                draggable
-                onDragStart={e => handleDragStart(e, item.type, item.label)}
-              >
-                <div className={styles.paletteColor} style={{ backgroundColor: item.color }} />
-                <div className={styles.paletteInfo}>
-                  <span className={styles.paletteName}>{item.label}</span>
-                  <span className={styles.paletteDesc}>{item.description}</span>
-                </div>
-              </div>
-            ))}
+          <div className={styles.paletteContainer}>
+            <NodePalette />
           </div>
         </div>
 

@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="124" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>AUDIT — Wave 5 backfill-health sweep: identify other broken sprk_playbooknode rows whose sprk_executortype was set by name-match without configJson health verification</title>
+    <phase>Wave 12 — MVP Completion</phase>
+    <wave>12</wave>
+    <sub-wave>12.1</sub-wave>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Read-only audit; no code modifications; output is a notes doc</rigor-reason>
+    <parallel-group>W12-1-Audit</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <tags>audit, dataverse, backfill, wave5, health-check, wave12, follow-up</tags>
+    <estimated-effort>0.5-1 day</estimated-effort>
+  </metadata>
+
+  <prompt>
+Wave 12 surfaced TWO independent Wave 5 backfill-quality issues during execution:
+1. **T142** (Project Wizard): playbook node had `sprk_actionid = NULL` after backfill (orphaned FK). Required Action existed but wasn't linked.
+2. **T143** (Matter Wizard): EntityNameValidator node had stub configJson missing required fields. Backfill set `sprk_executortype = 141` by node-name match without verifying configJson contained the required executor inputs. Plus a related issue (T143 §10.3) where AI Analysis node had stub `systemPrompt` override clobbering the Action's real prompt.
+
+Both issues are Wave 5 backfill side-effects: the migration set executor types by name-match without health-checking the configJson. Goal: sweep ALL Wave 5-backfilled nodes systematically and surface any other stub-config / orphaned-FK / clobbered-override patterns before they cause more broken consumers downstream.
+  </prompt>
+
+  <role>
+You are a Dataverse-data auditor doing systematic health sweep across playbook nodes. Read-only investigation; document findings + recommended fixes per affected node. Do NOT apply fixes (operator approves separately per node, similar to T141 / T142 / T143 pattern).
+  </role>
+
+  <goal>
+Output a notes doc at `projects/spaarke-ai-platform-unification-r7/notes/audits/wave12-124-wave5-backfill-health-sweep.md` containing: (1) sweep query results per known failure pattern, (2) per-node disposition + recommended fix, (3) prioritized list (which playbooks block which consumers / which are highest impact), (4) recommendation on whether to fix systematically (one-shot) or per-consumer (as each consumer's UAT discovers issues).
+  </goal>
+
+  <inputs>
+    - T142 finding: orphaned Action FK on `sprk_playbooknode` (specifically `dacac491-4f6c-f111-ab0e-7ced8ddc4a05` for Project Wizard); pattern = AiAnalysis executor type set but `sprk_actionid = NULL`
+    - T143 §10.2 finding: EntityNameValidator executor type set but configJson missing `candidateText` + `allowList` (specifically the broken Matter validator `c3c5226d-...`, now deleted)
+    - T143 §10.3 finding: AI Analysis nodes with stub `systemPrompt` override key clobbering the Action's real prompt (specifically Matter `444b06d3-...`, now stripped)
+    - T143 §10.9 verified only 2 EntityNameValidator nodes exist (the broken Matter one — fixed; the healthy Daily Briefing `11895da7-...`) — so EntityNameValidator class is fully addressed; this sweep focuses on OTHER patterns
+    - Wave 5 backfill source: `notes/drafts/playbook-node-review-output.csv` + migration scripts under `scripts/dataverse/Migrate-PlaybookNodes-to-ExecutorType.ps1`
+  </inputs>
+
+  <constraints>
+    - **READ-ONLY** — no Dataverse mutations from this task; document recommended fixes for operator to apply per-node
+    - No code modifications
+    - Output is a single notes doc with file:line references where applicable
+    - Categorize findings by severity: CRITICAL (deterministic failure) / HIGH (degraded behavior) / LOW (cosmetic / metadata-only) / INFO
+    - Per CLAUDE.md §11: identify but do NOT propose new shared abstractions
+    - Sub-Agent Write Boundary: writes go ONLY to `projects/spaarke-ai-platform-unification-r7/notes/audits/`
+  </constraints>
+
+  <knowledge>
+    <files>
+      - projects/spaarke-ai-platform-unification-r7/notes/audits/wave12-123-three-prefill-wizards.md (PRIMARY — §10.2/10.3/10.9 patterns; §10.10 applied fixes)
+      - projects/spaarke-ai-platform-unification-r7/notes/wave12-mvp-completion-plan.md
+      - projects/spaarke-ai-platform-unification-r7/CLAUDE.md
+      - projects/spaarke-ai-platform-unification-r7/notes/drafts/playbook-node-review-output.csv (Wave 5 source data)
+      - scripts/dataverse/Migrate-PlaybookNodes-to-ExecutorType.ps1 (migration script)
+    </files>
+  </knowledge>
+
+  <context>
+    <relevant-files>
+      - src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiAnalysisNodeExecutor.cs (Validate rules)
+      - src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/EntityNameValidatorNodeExecutor.cs (Validate rules)
+      - src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiCompletionNodeExecutor.cs (Validate rules)
+      - src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/* — all executor Validate methods for required-field discovery
+      - src/server/api/Sprk.Bff.Api/Services/Ai/PromptSchemaOverrideMerger.cs (override clobber mechanism)
+    </relevant-files>
+  </context>
+
+  <steps>
+1. **Catalog known failure patterns** (15-30 min):
+   - Pattern P1 (orphan FK): AiAnalysis / AiCompletion executor type set but `sprk_actionid = NULL`
+   - Pattern P2 (stub validator config): EntityNameValidator executor type set but configJson missing required fields — KNOWN to be limited to 2 nodes (sweep confirms zero others)
+   - Pattern P3 (clobbering override): AI Analysis nodes with stub `systemPrompt` override key in configJson
+   - Pattern P4 (any other executor's required-field missing): per-executor sweep based on each executor's Validate rules — read each `*NodeExecutor.cs` Validate method to enumerate required configJson keys per executor type
+
+2. **Run sweep queries via mcp__dataverse__read_query** (60-90 min):
+   - P1 sweep: `SELECT sprk_playbooknodeid, sprk_name, sprk_executortype FROM sprk_playbooknode WHERE sprk_executortype IN (0, 1) AND sprk_actionid IS NULL` (0=AiAnalysis, 1=AiCompletion)
+   - P3 sweep: `SELECT sprk_playbooknodeid, sprk_name, sprk_playbookid, sprk_configjson FROM sprk_playbooknode WHERE sprk_executortype = 0 AND sprk_configjson LIKE '%systemPrompt%'`
+   - P4 sweeps: per-executor as required fields dictate; check executor types 2-33 + 141 + others actually deployed in spaarkedev1
+
+3. **For each matched row, classify severity** (30-60 min):
+   - CRITICAL: missing required field → Validate() fails → run aborts → consumer always returns empty
+   - HIGH: stub override clobbers Action → degraded LLM output quality
+   - LOW: stub keys are noise but don't break execution
+   - INFO: notable but not actionable
+
+4. **Group findings by consumer / playbook impact** (30 min):
+   - Per affected node, identify which `sprk_analysisplaybook` row contains it
+   - Per playbook, identify which `sprk_playbookconsumer` row(s) route to it
+   - Map to user-facing consumer (Daily Briefing / chat-summarize / wizards / Insights / etc.)
+   - This produces the prioritized blast-radius list
+
+5. **Per-node recommended fix** (30-45 min):
+   - Cite the exact MCP call (DELETE / UPDATE) that would fix
+   - Note any dependency checks needed before mutation (similar to T141/T143's dependsonjson scan)
+
+6. **Recommendation on systematic vs per-consumer fix** (15 min):
+   - If N broken nodes ≤ 5: fix all in one operator session (15-30 min total)
+   - If N > 5: prioritize per-consumer; defer non-blocking ones to dedicated DEF-NNN tasks per consumer
+   - Cross-reference with Wave 12.2/12.3/12.4 consumer scope (Daily Briefing / wizards / Assistant↔Workspace) — fixes affecting in-scope consumers go into Wave 12; out-of-scope consumers get DEF entries
+
+7. **Write notes doc** at `projects/spaarke-ai-platform-unification-r7/notes/audits/wave12-124-wave5-backfill-health-sweep.md` (60 min)
+
+  </steps>
+
+  <tools>
+    - Read / Grep / Glob (executor Validate rules; Wave 5 migration script + CSV)
+    - mcp__dataverse__read_query (sweep queries; consumer routing lookups)
+    - Write (notes doc only)
+    - TodoWrite
+  </tools>
+
+  <outputs>
+    - `notes/audits/wave12-124-wave5-backfill-health-sweep.md` — sweep results + per-node disposition + prioritization
+  </outputs>
+
+  <acceptance-criteria>
+    - [ ] Sweep queries documented + run for all 4 patterns (P1, P2, P3, P4)
+    - [ ] Per-matched-row classification with severity + Recommended fix MCP call
+    - [ ] Findings grouped by affected consumer / playbook (blast-radius)
+    - [ ] Recommendation on systematic vs per-consumer fix path
+    - [ ] notes/audits/wave12-124-wave5-backfill-health-sweep.md exists with file:line refs throughout
+    - [ ] Cross-references to existing T141/T142/T143 fixes to avoid double-work
+    - [ ] In-scope (Wave 12) vs out-of-scope (DEF-NNN) findings split clearly
+  </acceptance-criteria>
+</task>

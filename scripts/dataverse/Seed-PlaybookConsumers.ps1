@@ -293,7 +293,8 @@ Write-Host ""
 Write-Host "[4/4] Summary:" -ForegroundColor Yellow
 Write-Host "  Created: $($summary.Created)" -ForegroundColor Green
 Write-Host "  Updated: $($summary.Updated)" -ForegroundColor Cyan
-Write-Host "  Failed:  $($summary.Failed)" -ForegroundColor (if ($summary.Failed -gt 0) { 'Red' } else { 'Gray' })
+$failedColor = if ($summary.Failed -gt 0) { 'Red' } else { 'Gray' }
+Write-Host "  Failed:  $($summary.Failed)" -ForegroundColor $failedColor
 Write-Host ""
 
 if ($summary.Failed -gt 0) {

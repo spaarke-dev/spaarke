@@ -1,0 +1,11 @@
+Archived: 2026-06-28
+Final status: Completed
+Closing PR: #491 (https://github.com/spaarke-dev/spaarke/pull/491) — chat-routing-redesign-r1 branch merged to master
+Follow-up docs PR: #509 (https://github.com/spaarke-dev/spaarke/pull/509)
+Worktree removed: c:/code_files/spaarke-wt-spaarke-ai-platform-chat-routing-redesign-r1
+Remote branch preserved: work/spaarke-ai-platform-chat-routing-redesign-r1 (still on origin per NFR-09)
+Issue: #442 (closed)
+Project board: Spaarke Core (https://github.com/users/spaarke-dev/projects/2) — Status=Completed, Task Count=138, Tasks Completed=138
+Successor: spaarkeai-widget-summarize-document-r1 (first product-led project)
+Methodology: docs/procedures/PRODUCT-LED-DEVELOPMENT.md
+Wrap-up artifacts: notes/lessons-learned.md, notes/handoffs/final-publish-size-summary.md, notes/r7-backlog.md

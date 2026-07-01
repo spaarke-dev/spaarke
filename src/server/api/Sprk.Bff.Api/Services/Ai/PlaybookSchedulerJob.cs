@@ -427,6 +427,19 @@ public sealed class PlaybookSchedulerJob : IScheduledJob
                     var orchestrationService = userScope.ServiceProvider
                         .GetRequiredService<IPlaybookOrchestrationService>();
 
+                    // R7 Wave 11 T118 fix (2026-06-30): notification playbooks reference template
+                    // variables ({{todayUtc}}, {{dueSoonWindowUtc}}, {{timeWindowHours}}, {{dueWithinDays}})
+                    // that the scheduler had not previously supplied — causing FetchXML queries to
+                    // receive empty values and fail at the QueryDataverse executor. These defaults
+                    // make the notification playbooks runnable with no per-tenant or per-user
+                    // configuration; per-user preference overrides can be layered later.
+                    //
+                    // Format: dates as FetchXML-compatible UTC strings ("yyyy-MM-ddTHH:mm:ssZ").
+                    // Integer windows: hour/day windows as plain integer strings.
+                    var nowUtc = DateTimeOffset.UtcNow;
+                    var todayUtcStr = nowUtc.UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ssZ");
+                    var dueSoonWindowUtcStr = nowUtc.AddDays(3).UtcDateTime.ToString("yyyy-MM-ddTHH:mm:ssZ");
+
                     var request = new PlaybookRunRequest
                     {
                         PlaybookId = playbookId,
@@ -435,7 +448,11 @@ public sealed class PlaybookSchedulerJob : IScheduledJob
                         Parameters = new Dictionary<string, string>
                         {
                             ["userId"] = userId.ToString(),
-                            ["userName"] = userName
+                            ["userName"] = userName,
+                            ["todayUtc"] = todayUtcStr,
+                            ["dueSoonWindowUtc"] = dueSoonWindowUtcStr,
+                            ["timeWindowHours"] = "24",
+                            ["dueWithinDays"] = "3"
                         }
                     };
 

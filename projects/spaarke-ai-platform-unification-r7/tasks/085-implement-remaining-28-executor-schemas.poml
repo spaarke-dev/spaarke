@@ -1,0 +1,154 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-085" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Implement remaining 28 executor schemas (placeholders OK)</title>
+    <status>completed</status>
+    <wave>8</wave>
+    <estimated-effort>3-4 hours</estimated-effort>
+    <tags>code-page, ui, wave-8</tags>
+    <rigor-level>FULL</rigor-level>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>084</dependencies>
+    <fr-coverage>FR-23 (remainder)</fr-coverage>
+  </metadata>
+
+  <prompt>
+    Fill out `GetConfigSchema()` on the remaining 28 executors (non-priority). Spec FR-23 acceptance:
+    "remaining executors get schemas in a follow-on wave but DO have a schema (even if empty)".
+    Placeholder schemas are OK — minimal required fields, sensible defaults, descriptions sourced
+    from C# enum XML doc comments. The goal is that every executor has SOMETHING for the canvas
+    renderer to render (not the empty-schema placeholder from task 083).
+  </prompt>
+
+  <role>
+    Senior .NET backend developer. Familiar with the 33 executor types and their high-level config
+    shapes from existing code + design.md §11.
+  </role>
+
+  <goal>
+    All 28 non-priority executors have `GetConfigSchema()` returning a non-empty `ExecutorConfigSchema`:
+    1. Each schema declares AT LEAST one field (sensible default field per executor's domain)
+    2. Each field has type, default, description
+    3. Schemas align with what the executor's existing `Validate()` + `ExecuteAsync()` methods expect
+    4. BFF endpoint (task 033) returns all 33 schemas now (5 rich from task 084 + 28 placeholder from this task)
+    5. Canvas renderer (task 083) shows typed inputs for every executor when dropped (not "No schema available" anymore)
+    6. Build passes; publish-size delta minimal
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="design-doc">projects/spaarke-ai-platform-unification-r7/design.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    <file purpose="executor-folder">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/ (all 33 executors)</file>
+    <file purpose="priority-reference">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiCompletionNodeExecutor.cs (task 084 pattern)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-010">DI Minimalism — no new abstraction layers; schemas live as static method returns on each executor.</constraint>
+    <constraint source="ADR-029">Per-task publish-size + CVE verification. Expected delta minimal (28 small methods).</constraint>
+    <constraint source="ADR-038">No test additions required by this task — task 089b UI tests cover the 5 priority forms; remaining 28 are placeholders and don't warrant per-form tests yet.</constraint>
+    <constraint source="spec FR-23">Remaining executors DO have a schema (even if empty / minimal). Placeholder forms acceptable.</constraint>
+    <constraint source="bff-extensions.md">BFF task — placement decision: schemas stay IN BFF (per task 084). No new public types.</constraint>
+    <constraint source="CLAUDE.md §10">BFF task: run publish-size + CVE checks.</constraint>
+    <constraint source="CLAUDE.md §11">Modifying existing files only — no Component Justification triple required.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai/node-executor-authoring</topic>
+    <files>
+      <file>.claude/patterns/ai/node-executor-authoring.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-029-bff-publish-hygiene.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Spec FR-23 explicitly accepts placeholder schemas for the 28 non-priority executors. Authoring
+      will iterate as authoring patterns emerge. The goal here is canvas completeness — every executor
+      type the maker drops on the canvas renders typed inputs (not empty placeholder text).
+    </background>
+    <dependencies>
+      <dependency task="084" status="prerequisite">5 priority schemas done — establishes the pattern.</dependency>
+      <dependency task="032" status="prerequisite">Wave 3 task 032 added placeholder `GetConfigSchema()` to all 33 executors — this task refines the 28 non-priority returns.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 089 handles unknown-executor-type warning state for future executors not yet shipped.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: FULL · 📋 REASON: BFF code-impl across 28 files, ADR-029 publish-size verification required · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read project CLAUDE.md + spec.md FR-23 + task 084 schemas for pattern reference.
+    </step>
+    <step order="2" name="Enumerate the 28 non-priority executors">
+      Subtract the 5 priority (AiAnalysis, AiCompletion, Condition, EntityNameValidator, CreateNotification) from the 33-value `sprk_playbookexecutortype` Choice set. Capture the 28 in a checklist.
+    </step>
+    <step order="3" name="Iterate each of the 28 — author placeholder schema">
+      For each executor file in `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/`:
+      - Read existing `Validate()` to identify required config fields
+      - Author placeholder `GetConfigSchema()` return: at minimum 1 field, sensible default, description from XML doc comment if exists or from spec/design.md if not
+      - Examples:
+        * StartNodeExecutor → fields: empty (Start has no config), schema returns `new ExecutorConfigSchema(...)` with empty fields array
+        * ReturnResponseNodeExecutor → fields: `responseFormat` (enum: json/text, default json)
+        * LookupUserMembershipNodeExecutor → fields: `groupId` (string, required), `userId` (string, required)
+        * SendEmailNodeExecutor → fields: `to` (string, required), `subject` (string, required), `bodyTemplate` (string, required)
+        * UpdateRecordNodeExecutor → fields: `entityName` (string, required), `recordId` (string, required), `fields` (json, required)
+        * (continue for all 28)
+    </step>
+    <step order="4" name="Build BFF">
+      `dotnet build src/server/api/Sprk.Bff.Api/`.
+      0 errors, 0 new warnings.
+    </step>
+    <step order="5" name="Verify endpoint returns 33 non-placeholder schemas">
+      Manually invoke `GET /api/ai/playbook-builder/executor-config-schemas` in local dev or via a quick spike test. Confirm all 33 schemas have AT LEAST one field (no empty placeholders from Wave 3).
+    </step>
+    <step order="6" name="Verify canvas renders typed inputs">
+      Spot-check in browser: drop one of the 28 executors on canvas, open properties → Configuration tab should show typed inputs, not "No schema available" placeholder.
+    </step>
+    <step order="9.5" name="Quality gates (FULL rigor)">
+      Run `/code-review` on the 28 modified executor files (sample 5 representative files).
+      Run `/adr-check` against ADR-010 + ADR-029.
+      Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish-task085/` — measure publish size, report delta. Expected: <+0.5 MB (28 tiny method additions).
+      Run `dotnet list package --vulnerable --include-transitive` — confirm no new HIGH CVE.
+      Fix findings.
+    </step>
+    <step order="10" name="Update current-task.md + TASK-INDEX">
+      Mark task 085 status complete; advance to next Wave 8 task.
+    </step>
+    <step order="11" name="Commit">
+      Commit message:
+      `feat(bff/r7): config schemas for remaining 28 executors (Wave 8 task 085, FR-23)`. No PR yet.
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (28 executor files + task 084 reference)</tool>
+    <tool>Edit (28 executor .cs files, modify GetConfigSchema returns)</tool>
+    <tool>Bash (dotnet build, dotnet publish, dotnet list package, git commit)</tool>
+    <tool>Skill (code-review at Step 9.5)</tool>
+    <tool>Skill (adr-check at Step 9.5)</tool>
+  </tools>
+
+  <outputs>
+    <output type="modified-file">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/{28 executor files} (GetConfigSchema returns)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 085 ✅)</output>
+    <output type="commit">feat(bff/r7): config schemas for remaining 28 executors (Wave 8 task 085, FR-23)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All 28 non-priority executors have non-empty `GetConfigSchema()` returns</criterion>
+    <criterion>Each schema declares at least 1 field with type, default, description</criterion>
+    <criterion>BFF endpoint returns all 33 schemas correctly</criterion>
+    <criterion>Canvas renders typed inputs for every executor (no "No schema available" placeholder)</criterion>
+    <criterion>dotnet build passes: 0 errors, 0 new warnings</criterion>
+    <criterion>Publish-size delta documented (expected: <+0.5 MB)</criterion>
+    <criterion>No new HIGH-severity CVE</criterion>
+    <criterion>code-review + adr-check pass at Step 9.5</criterion>
+    <criterion>TASK-INDEX.md shows 085 ✅</criterion>
+  </acceptance-criteria>
+</task>

@@ -2,6 +2,7 @@ using System.Text.Json;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
@@ -46,13 +47,18 @@ public sealed class DailyBriefingEndpointsTests
     // ── Helpers ───────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Invokes the private static HandleNarrate handler via reflection. New
-    /// signature (R4 task 031 / FR-12 Path A.5):
+    /// Invokes the private static HandleNarrate handler via reflection. Updated for
+    /// R7 Wave 11 T116 narrator spike: signature gained two parameters
+    /// (IConfiguration, DailyBriefingNarrator) for the feature-flagged code-based
+    /// narrator path. Default behavior preserves the playbook path (flag off).
+    ///
     ///   HandleNarrate(
     ///       DailyBriefingNarrateRequest request,
     ///       ILoggerFactory loggerFactory,
     ///       IConsumerRoutingService routing,
     ///       IInvokePlaybookAi invokePlaybookAi,
+    ///       IConfiguration configuration,
+    ///       DailyBriefingNarrator narrator,
     ///       HttpContext httpContext,
     ///       CancellationToken cancellationToken)
     /// </summary>
@@ -61,12 +67,19 @@ public sealed class DailyBriefingEndpointsTests
         IConsumerRoutingService routing,
         IInvokePlaybookAi invokePlaybookAi,
         HttpContext? httpContext = null,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        IConfiguration? configuration = null,
+        Sprk.Bff.Api.Services.Ai.Narrators.DailyBriefingNarrator? narrator = null)
     {
         var method = typeof(DailyBriefingEndpoints)
             .GetMethod("HandleNarrate",
                 System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)
             ?? throw new InvalidOperationException("HandleNarrate not found via reflection");
+
+        // Default feature flag OFF — these tests verify the playbook-engine path
+        // (existing behavior). The narrator parameter is allowed to be null because
+        // with the flag off, HandleNarrate never invokes the narrator.
+        var config = configuration ?? new ConfigurationBuilder().Build();
 
         var task = (Task<IResult>)method.Invoke(null, new object?[]
         {
@@ -74,6 +87,8 @@ public sealed class DailyBriefingEndpointsTests
             NullLoggerFactory.Instance,
             routing,
             invokePlaybookAi,
+            config,
+            narrator!,  // null is safe here — feature flag off → narrator never accessed
             httpContext ?? new DefaultHttpContext(),
             cancellationToken
         })!;

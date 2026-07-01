@@ -48,6 +48,8 @@ interface TestCtxBundle {
   setHelpOpenCalls: boolean[];
   clearLocalConversationCalls: number;
   createNewSessionResult: string | null;
+  /** R7 task 094 / FR-18 — spy on `/playbooks` invocations of openLibraryModal. */
+  openLibraryModalCalls: number;
 }
 
 interface MakeCtxOptions {
@@ -68,6 +70,7 @@ function makeCtx(opts: MakeCtxOptions = {}): TestCtxBundle {
   const downloads: Array<{ blob: Blob; filename: string }> = [];
   const setHelpOpenCalls: boolean[] = [];
   let clearLocalConversationCalls = 0;
+  let openLibraryModalCalls = 0;
   const createNewSessionResult: string | null = null;
 
   const sessionId = opts.sessionId === undefined ? 'session-1' : opts.sessionId;
@@ -124,6 +127,10 @@ function makeCtx(opts: MakeCtxOptions = {}): TestCtxBundle {
     downloadBlob: (blob, filename) => {
       downloads.push({ blob, filename });
     },
+    // R7 task 094 / FR-18 — spy on `/playbooks` opener.
+    openLibraryModal: (): void => {
+      openLibraryModalCalls++;
+    },
     telemetry,
   };
 
@@ -136,6 +143,9 @@ function makeCtx(opts: MakeCtxOptions = {}): TestCtxBundle {
     setHelpOpenCalls,
     get clearLocalConversationCalls() {
       return clearLocalConversationCalls;
+    },
+    get openLibraryModalCalls() {
+      return openLibraryModalCalls;
     },
     createNewSessionResult,
   } as unknown as TestCtxBundle;
@@ -576,11 +586,13 @@ describe('ADR-015 telemetry audit', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Latency aggregate — all 6 commands under <100ms p99 in the test runner
+// Latency aggregate — all 7 commands under <100ms p99 in the test runner
+// (R7 task 094 added /playbooks; pure-frontend like /help so trivially under
+// 100ms — the runner is the only meaningful upper bound here.)
 // ---------------------------------------------------------------------------
 
 describe('Phase D exit criterion 2 — latency', () => {
-  it('all 6 hard slashes execute in <100ms under mocked BFF', async () => {
+  it('all 7 hard slashes execute in <100ms under mocked BFF', async () => {
     const samples: Array<{ command: string; elapsed: number }> = [];
 
     // /clear
@@ -640,6 +652,15 @@ describe('Phase D exit criterion 2 — latency', () => {
         executeHardSlash(parse('/pin'), bundle.ctx),
       );
       samples.push({ command: '/pin', elapsed });
+    }
+
+    // /playbooks (R7 task 094 / FR-18)
+    {
+      const bundle = makeCtx();
+      const { elapsed } = await timeIt(() =>
+        executeHardSlash(parse('/playbooks'), bundle.ctx),
+      );
+      samples.push({ command: '/playbooks', elapsed });
     }
 
     for (const s of samples) {

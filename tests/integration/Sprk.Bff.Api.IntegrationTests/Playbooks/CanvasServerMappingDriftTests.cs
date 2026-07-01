@@ -8,8 +8,8 @@
 //      `MapCanvasTypeToActionType()` switch — otherwise authoring a playbook with that node
 //      type would persist a record the server cannot dispatch.
 //
-//   2. Every `ActionType` slot referenced by the client's `NodeTypeToActionType` lookup MUST
-//      exist as a named member of the server-side `ActionType` enum in `INodeExecutor.cs` —
+//   2. Every `ExecutorType` slot referenced by the client's `NodeTypeToActionType` lookup MUST
+//      exist as a named member of the server-side `ExecutorType` enum in `INodeExecutor.cs` —
 //      otherwise the persisted `__actionType` integer would not resolve to an executor.
 //
 // Source-of-truth: this is a parse-the-source test (pure C# + regex, no Roslyn / no Node
@@ -76,7 +76,7 @@ public sealed class CanvasServerMappingDriftTests
             PlaybookNodeSyncPath);
         serverCanvasArms.Should().NotBeEmpty(
             "server-side `MapCanvasTypeToActionType()` switch in {0} should contain at least " +
-            "one `\"X\" => ActionType.Y,` arm — if this assertion fails, the source file " +
+            "one `\"X\" => ExecutorType.Y,` arm — if this assertion fails, the source file " +
             "shape changed and the ExtractServerCanvasArms() regex needs to be updated.",
             NodeServicePath);
 
@@ -94,8 +94,8 @@ public sealed class CanvasServerMappingDriftTests
             "`MapCanvasTypeToActionType()` switch (in {1}). Authoring a playbook with an " +
             "unmapped canvas type would persist a __actionType the server cannot dispatch. " +
             "DRIFT: client emits these canvas types with no server arm: [{2}]. To fix: add " +
-            "the matching `\"X\" => ActionType.Y,` arm to MapCanvasTypeToActionType (and a " +
-            "MapCanvasTypeToNodeType entry) in {1}, plus the corresponding ActionType enum " +
+            "the matching `\"X\" => ExecutorType.Y,` arm to MapCanvasTypeToActionType (and a " +
+            "MapCanvasTypeToNodeType entry) in {1}, plus the corresponding ExecutorType enum " +
             "value in {3}.",
             PlaybookNodeSyncPath,
             NodeServicePath,
@@ -104,13 +104,13 @@ public sealed class CanvasServerMappingDriftTests
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
-    // FR-3H3.1 (companion) — Client ActionType enum members MUST exist server-side
+    // FR-3H3.1 (companion) — Client ExecutorType enum members MUST exist server-side
     // ─────────────────────────────────────────────────────────────────────────────
 
     [Fact]
     public void ClientActionTypeMembers_ExistInServerActionTypeEnum_NoDrift()
     {
-        // Arrange — parse both ActionType enums.
+        // Arrange — parse both ExecutorType enums.
         var repoRoot = FindRepoRoot();
         var clientActionTypeMembers = ExtractClientActionTypeMembers(
             Path.Combine(repoRoot, PlaybookTypesPath));
@@ -119,19 +119,19 @@ public sealed class CanvasServerMappingDriftTests
 
         // Sanity — both enums must parse non-empty.
         clientActionTypeMembers.Should().NotBeEmpty(
-            "client-side `enum ActionType` in {0} should contain at least one member — if " +
+            "client-side `enum ExecutorType` in {0} should contain at least one member — if " +
             "this assertion fails, the enum shape changed and ExtractClientActionTypeMembers() " +
             "needs to be updated.",
             PlaybookTypesPath);
         serverActionTypeMembers.Should().NotBeEmpty(
-            "server-side `public enum ActionType` in {0} should contain at least one member.",
+            "server-side `public enum ExecutorType` in {0} should contain at least one member.",
             NodeExecutorPath);
 
         // Act — compute drift. Client ⊆ Server is the binding direction (server may carry
         // executor types the canvas doesn't expose, e.g., QueryDataverse=51, AgentService=60,
         // GroundingVerify=70, LiveFact=80, IndexRetrieve=90, EvidenceSufficiency=100,
         // DeclineToFind=110, ReturnInsightArtifact=120, Sanitization=130, ObservationEmit=140).
-        // The client MUST NOT carry an ActionType the server doesn't define.
+        // The client MUST NOT carry an ExecutorType the server doesn't define.
         var clientOnlyMembers = clientActionTypeMembers
             .Where(kvp => !serverActionTypeMembers.TryGetValue(kvp.Key, out var serverValue) ||
                           serverValue != kvp.Value)
@@ -140,8 +140,8 @@ public sealed class CanvasServerMappingDriftTests
         // Assert — name the offending members (including value mismatches, not just missing
         // names — a renumbered slot is just as broken as a missing one).
         clientOnlyMembers.Should().BeEmpty(
-            "FR-3H3.1 / AC-H3.1 — every member of the client `ActionType` enum in {0} MUST " +
-            "exist in the server `ActionType` enum in {1} with the SAME integer value (the " +
+            "FR-3H3.1 / AC-H3.1 — every member of the client `ExecutorType` enum in {0} MUST " +
+            "exist in the server `ExecutorType` enum in {1} with the SAME integer value (the " +
             "value is the wire format stored in `sprk_configjson.__actionType`). DRIFT: these " +
             "client members are missing or value-mismatched on the server: [{2}]. To fix: " +
             "either add the matching server enum value or correct the client value to match " +
@@ -200,7 +200,7 @@ public sealed class CanvasServerMappingDriftTests
     /// <summary>
     /// Extract the set of canvas node type strings handled by the server's
     /// <c>MapCanvasTypeToActionType()</c> switch in <c>NodeService.cs</c>. Matches
-    /// switch-expression arms of the shape <c>"X" => ActionType.Y,</c>.
+    /// switch-expression arms of the shape <c>"X" => ExecutorType.Y,</c>.
     /// </summary>
     private static HashSet<string> ExtractServerCanvasArms(string nodeServicePath)
     {
@@ -230,7 +230,7 @@ public sealed class CanvasServerMappingDriftTests
     }
 
     /// <summary>
-    /// Extract the client-side <c>ActionType</c> enum members + their numeric values from
+    /// Extract the client-side <c>ExecutorType</c> enum members + their numeric values from
     /// <c>playbook.ts</c>. Returns a name→value map (case-sensitive on name).
     /// </summary>
     private static Dictionary<string, int> ExtractClientActionTypeMembers(string playbookTypesPath)
@@ -241,8 +241,8 @@ public sealed class CanvasServerMappingDriftTests
 
         var source = File.ReadAllText(playbookTypesPath);
 
-        // Scope to `export enum ActionType { ... }` block.
-        const string startMarker = "export enum ActionType";
+        // Scope to `export enum ExecutorType { ... }` block.
+        const string startMarker = "export enum ExecutorType";
         var startIdx = source.IndexOf(startMarker, StringComparison.Ordinal);
         if (startIdx < 0) return [];
 
@@ -267,7 +267,7 @@ public sealed class CanvasServerMappingDriftTests
     }
 
     /// <summary>
-    /// Extract the server-side <c>ActionType</c> enum members + their numeric values from
+    /// Extract the server-side <c>ExecutorType</c> enum members + their numeric values from
     /// <c>INodeExecutor.cs</c>. Returns a name→value map (case-sensitive on name).
     /// </summary>
     private static Dictionary<string, int> ExtractServerActionTypeMembers(string nodeExecutorPath)
@@ -278,9 +278,9 @@ public sealed class CanvasServerMappingDriftTests
 
         var source = File.ReadAllText(nodeExecutorPath);
 
-        // Scope to `public enum ActionType { ... }`. The closing `}` is at column 0 in this
+        // Scope to `public enum ExecutorType { ... }`. The closing `}` is at column 0 in this
         // file, so locate the brace pair starting from the enum header.
-        const string startMarker = "public enum ActionType";
+        const string startMarker = "public enum ExecutorType";
         var startIdx = source.IndexOf(startMarker, StringComparison.Ordinal);
         if (startIdx < 0) return [];
 

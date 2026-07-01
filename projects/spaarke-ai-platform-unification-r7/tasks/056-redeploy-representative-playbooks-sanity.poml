@@ -1,0 +1,182 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-056" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Sanity — redeploy 3 representative playbooks (Daily Briefing, Insights, chat) via updated Deploy-Playbook.ps1</title>
+    <status>not-started</status>
+    <wave>5</wave>
+    <estimated-effort>1-2 hours</estimated-effort>
+    <tags>dataverse, deploy, wave-5</tags>
+    <rigor-level>FULL</rigor-level>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>055</dependencies>
+    <fr-coverage>FR-20 (sanity-verification portion)</fr-coverage>
+  </metadata>
+
+  <prompt>
+    Redeploy 3 representative playbook categories — Daily Briefing (5 playbooks), Insights pipeline
+    (~5 playbooks), chat playbooks — using the updated `Deploy-Playbook.ps1` (task 055). Confirm
+    every node ends up with the correct `sprk_executortype` after redeploy + that orchestrator
+    dispatch actually works through the redeployed playbooks. This is the Wave 5 closing
+    sanity check before moving to Wave 6 (docs cleanup).
+  </prompt>
+
+  <role>
+    Platform engineer running production-style redeploys + verifying outcomes. The discipline is
+    Force redeploy → audit Dataverse → smoke-test runtime dispatch.
+  </role>
+
+  <goal>
+    Three outcomes:
+    1. Daily Briefing playbooks (5) redeploy cleanly via updated `Deploy-Playbook.ps1` with `-Force` flag
+    2. Insights pipeline playbooks (~5) redeploy cleanly
+    3. Chat playbooks redeploy cleanly
+    Plus: post-redeploy audit confirms every node from these 3 categories has correct `sprk_executortype`; runtime smoke test confirms at least one playbook from each category dispatches correctly through `PlaybookOrchestrationService.ExecuteNodeAsync` (using the W2 single-hop dispatch).
+  </goal>
+
+  <inputs>
+    <file purpose="updated-script">scripts/Deploy-Playbook.ps1</file>
+    <file purpose="playbook-definitions">scripts/playbooks/</file>
+    <file purpose="design-spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="plan">projects/spaarke-ai-platform-unification-r7/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md</file>
+    <file purpose="migration-audit-state">projects/spaarke-ai-platform-unification-r7/notes/handoffs/migration-real-run-log.txt</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-20">Acceptance: existing playbook deploys (Daily Briefing 5 playbooks, Insights pipeline ~5 playbooks, chat playbooks, others) all redeploy cleanly through new script.</constraint>
+    <constraint source="spec Success Criteria #2">PlaybookOrchestrationService.ExecuteNodeAsync reads dispatch from `node.sprk_executortype` only — verify via code inspection + integration tests for Daily Briefing + Insights pipeline + chat. Sanity check covers the "+ integration test" part of that criterion.</constraint>
+    <constraint source="defensive-redeploy">Use `-Force` flag for clean redeploy. Confirm `-DryRun` first before each Force redeploy to spot issues early.</constraint>
+    <constraint source="post-deploy-audit">After each playbook category redeploys, query Dataverse via MCP to confirm every node in that playbook has `sprk_executortype` populated. Compare against the playbook JSON definition's `executorType` values for correctness.</constraint>
+    <constraint source="runtime-smoke-test">Pick one playbook from each category + invoke it via the BFF (e.g., curl /api/ai/playbook/invoke with playbookId). Confirm 200 + structured output. If 503 / null dispatch, STOP — Wave 5 is not complete.</constraint>
+    <constraint source="CLAUDE.md §10">No BFF source modified in this task (script + deploy only) — no publish-size verification needed. BFF runtime smoke-test validates orchestrator behavior post-W2 + post-W5.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>playbook-deploy-verification</topic>
+    <files>
+      <file>scripts/Deploy-Playbook.ps1</file>
+      <file>scripts/playbooks/</file>
+      <file>projects/spaarke-ai-platform-unification-r7/spec.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookOrchestrationService.cs</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Wave 5 has populated `sprk_executortype` on all 94 existing nodes (task 054) and updated
+      `Deploy-Playbook.ps1` to write the column explicitly (task 055). This task closes Wave 5
+      by proving the full loop works:
+      - JSON definition → Deploy-Playbook.ps1 (with new lint + write) → Dataverse → orchestrator dispatch
+
+      Three representative categories cover the major executor mixes in spaarkedev1:
+      - Daily Briefing (`DAILY-BRIEFING-*`): AiCompletion-heavy (new R7 executor) + Start/ReturnResponse + DeliverComposite
+      - Insights pipeline (`UNIVERSAL-INGEST`, `MATTER-HEALTH-*`): mixed Deterministic + AiAnalysis + Tool/Handler-driven nodes
+      - Chat playbooks (`CHAT-SUMMARIZE`, `CHAT-*`): consumer-routing-driven, with chat-summarize specifically being the Wave 9 migration target
+
+      If any category fails redeploy, Wave 5 cannot close.
+    </background>
+    <dependencies>
+      <dependency task="055" status="must-be-complete">Deploy-Playbook.ps1 updated with explicit `sprk_executortype` write + lint check.</dependency>
+      <dependency task="054" status="must-be-complete">All existing nodes already have `sprk_executortype` populated (so Force redeploy can compare + idempotency holds).</dependency>
+    </dependencies>
+    <related-work>
+      <item>Wave 5 closes after this task. Next: Wave 6 docs cleanup (60+ tasks) can begin.</item>
+      <item>Task 056 is the final sanity gate before Wave 10 graduation UAT.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: FULL · 📋 REASON: production playbook redeploys + runtime smoke test, tags include `dataverse`+`deploy`, high-risk operation, 6+ steps · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read project CLAUDE.md + spec.md FR-20 + Success Criteria #2 + task 054/055 outputs + Deploy-Playbook.ps1 updated source.
+    </step>
+    <step order="2" name="Verify dependencies">
+      Confirm task 055 status ✅ in TASK-INDEX.md. Confirm Deploy-Playbook.ps1 has new write path + lint. Confirm `az account show` returns active session.
+    </step>
+    <step order="3" name="Enumerate playbook JSON files">
+      List the playbook JSON files for each category in `scripts/playbooks/` (or wherever they live). Examples:
+      - Daily Briefing: `DAILY-BRIEFING-NARRATE.json`, `DAILY-BRIEFING-INSIGHTS.json`, etc.
+      - Insights: `UNIVERSAL-INGEST.json`, `MATTER-HEALTH-*.json`, etc.
+      - Chat: `CHAT-SUMMARIZE.json`, etc.
+      Record the list in a notes file at `projects/spaarke-ai-platform-unification-r7/notes/handoffs/wave5-sanity-redeploys.md`.
+    </step>
+    <step order="4" name="Dry-run all 3 categories">
+      For each playbook JSON file, run:
+      `pwsh ./scripts/Deploy-Playbook.ps1 -DefinitionFile <path> -DryRun`
+      Capture log. Confirm: lint passes per playbook; each node shows `sprk_executortype = N` in the planned writes; no `sprk_nodetype` / `__actionType` writes.
+      If any lint fails, STOP — the playbook JSON needs `executorType` added per task 055 conventions.
+    </step>
+    <step order="5" name="Real redeploy — Daily Briefing">
+      For each Daily Briefing playbook JSON, run:
+      `pwsh ./scripts/Deploy-Playbook.ps1 -DefinitionFile <path> -Force`
+      Capture log. Confirm clean deploy (HTTP 204 on creates/updates).
+    </step>
+    <step order="6" name="Real redeploy — Insights pipeline">
+      For each Insights playbook JSON, run with `-Force`. Capture log.
+    </step>
+    <step order="7" name="Real redeploy — chat">
+      For each chat playbook JSON, run with `-Force`. Capture log.
+    </step>
+    <step order="8" name="Post-redeploy audit per category">
+      Use `mcp__dataverse__read_query` for each category:
+      - GET nodes for each redeployed playbook
+      - Confirm every node has non-null `sprk_executortype`
+      - Spot-check 3 nodes per category against the source playbook JSON `executorType` field
+      Document audit results in the notes file.
+    </step>
+    <step order="9" name="Runtime smoke test (per category)">
+      For each category, invoke ONE playbook via BFF runtime:
+      - Daily Briefing: invoke `DAILY-BRIEFING-NARRATE` via the briefing widget or curl the BFF endpoint
+      - Insights: invoke one matter-health-* via consumer routing or direct invoke
+      - Chat: invoke `CHAT-SUMMARIZE` via the chat surface (still on legacy path since Wave 9 hasn't migrated yet — but it should still dispatch correctly through the orchestrator)
+      For each, confirm: 200 OK, structured output returned, no 503 / null dispatch.
+      Document smoke-test results in the notes file.
+    </step>
+    <step order="9.5" name="Quality gates (FULL rigor)">
+      Run `/code-review` on the sanity notes file + audit outputs. Run `/adr-check` against ADR-029 + bff-extensions.md.
+      Code-review here applies to evidence artifacts — verify smoke-test outcomes match expected per spec FR-20 + Success Criteria #2.
+    </step>
+    <step order="10" name="Update current-task.md + TASK-INDEX">
+      Mark task 056 status complete + Wave 5 COMPLETE. Advance current-task.md to first task in Wave 6 (e.g., task 060 audit) or to "none — Wave 5 done; ready for Wave 6 generation" if Wave 6 tasks not yet generated.
+      Record Wave 5 completion summary in current-task.md.
+    </step>
+    <step order="11" name="Commit sanity notes + redeploy logs">
+      Commit `notes/handoffs/wave5-sanity-redeploys.md` + per-playbook dry-run/real logs with conventional message.
+      Example: `chore(r7): Wave 5 sanity redeploys complete — Daily Briefing + Insights + chat clean (Wave 5 task 056, FR-20)`
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Bash (pwsh script invocations, az account show, curl for BFF smoke tests, git commit)</tool>
+    <tool>mcp__dataverse__read_query (post-redeploy node audit per category)</tool>
+    <tool>Read (Deploy-Playbook.ps1 updated, playbook JSON definitions)</tool>
+    <tool>Write (notes/handoffs/wave5-sanity-redeploys.md)</tool>
+    <tool>Edit (current-task.md + TASK-INDEX.md)</tool>
+    <tool>Skill (code-review at Step 9.5)</tool>
+    <tool>Skill (adr-check at Step 9.5)</tool>
+  </tools>
+
+  <outputs>
+    <output type="dataverse-mutation">Daily Briefing + Insights + chat playbook nodes redeployed via updated script</output>
+    <output type="new-file">projects/spaarke-ai-platform-unification-r7/notes/handoffs/wave5-sanity-redeploys.md (per-category audit + smoke-test results)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md (advance to Wave 6 first task; record Wave 5 completion)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 056 ✅, Wave 5 ✅ complete)</output>
+    <output type="commit">chore(r7): Wave 5 sanity redeploys complete — Daily Briefing + Insights + chat clean (Wave 5 task 056, FR-20)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Daily Briefing playbooks (5) redeploy cleanly via updated Deploy-Playbook.ps1 -Force</criterion>
+    <criterion>Insights pipeline playbooks (~5) redeploy cleanly</criterion>
+    <criterion>Chat playbooks redeploy cleanly</criterion>
+    <criterion>Post-redeploy audit per category: every node has non-null `sprk_executortype`</criterion>
+    <criterion>Spot-check 3 nodes per category: `sprk_executortype` matches source JSON `executorType` field</criterion>
+    <criterion>Runtime smoke test: one playbook per category invoked successfully (200 OK, structured output, no 503)</criterion>
+    <criterion>code-review + adr-check pass at Step 9.5 (FULL rigor)</criterion>
+    <criterion>Sanity notes + logs committed</criterion>
+    <criterion>Wave 5 marked complete in TASK-INDEX.md and current-task.md</criterion>
+  </acceptance-criteria>
+</task>

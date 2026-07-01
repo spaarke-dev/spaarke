@@ -1,0 +1,162 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-022" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Rename C# enum ActionType → ExecutorType (full refactor, BFF only)</title>
+    <status>completed</status>
+    <wave>2</wave>
+    <estimated-effort>4-6 hours (single large diff; mechanical execution)</estimated-effort>
+    <tags>bff-api, code-impl, refactor, wave-2</tags>
+    <rigor-level>FULL</rigor-level>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>021</dependencies>
+    <fr-coverage>FR-10</fr-coverage>
+  </metadata>
+
+  <prompt>
+    Execute the rename. This is the largest single diff in R7 — ~1000+ references converted from `ActionType` to
+    `ExecutorType` across the BFF + tests. Follow the plan from task 021 mechanically. No new behavior. No side
+    refactors. Build + tests must be green at the start and at the end. Single sequential task — cannot parallelize
+    because the rename touches too many overlapping files.
+  </prompt>
+
+  <role>
+    Senior .NET backend developer executing a Roslyn-aware rename refactor.
+    Discipline: change the symbol name + nothing else. Resist scope creep.
+  </role>
+
+  <goal>
+    `ActionType` enum (and any internal references named after it) renamed to `ExecutorType` across:
+    - `src/server/api/Sprk.Bff.Api/` (all .cs files)
+    - `src/server/shared/` (where the enum or references appear; per audit 020)
+    - `tests/unit/Sprk.Bff.Api.Tests/` (test code + fixtures)
+    Excluded (per FR-10 scope): PCF, code-pages, scripts, docs, .claude/ skill bodies (Wave 6/7/8 own).
+    Acceptance: build passes, full xUnit test suite passes, grep for `ActionType` in BFF source returns zero hits (except historical commit messages or `nameof()` usages that were already correct).
+  </goal>
+
+  <inputs>
+    <file purpose="rename-plan">projects/spaarke-ai-platform-unification-r7/notes/spikes/actiontype-rename-plan.md</file>
+    <file purpose="audit-report">projects/spaarke-ai-platform-unification-r7/notes/spikes/actiontype-audit.md</file>
+    <file purpose="enum-definition">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/INodeExecutor.cs</file>
+    <file purpose="design-spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    <file purpose="bff-constraints">.claude/constraints/bff-extensions.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-010">DI Minimalism — rename does not introduce new abstractions or registration shapes.</constraint>
+    <constraint source="ADR-013">BFF AI Architecture — `IInvokePlaybookAi` triangle unchanged. Rename touches type names only.</constraint>
+    <constraint source="ADR-029">BFF Publish Hygiene — rename should be SIZE NEUTRAL (compiled binary symbol name changes but LOC count same). Task 029 verifies.</constraint>
+    <constraint source="ADR-038">Testing Strategy — all existing tests must continue to pass. Rename does not change behavior, so no new tests required.</constraint>
+    <constraint source="spec FR-10">BFF only. NO renames in PCF, code-pages, scripts, docs, or .claude/ skill bodies (those waves own).</constraint>
+    <constraint source="spec NFR-06">No backward compatibility. No `[Obsolete] type alias` shim. Hard rename.</constraint>
+    <constraint source="CLAUDE.md §11">No new components — pure rename of existing surface. Justification triple NOT required.</constraint>
+    <constraint source="bff-extensions.md">Pre-merge checklist: placement decision N/A (no new component); publish-size delta near zero expected.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff/refactor-execution</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-010-di-minimalism.md</file>
+      <file>docs/adr/ADR-013-bff-ai-architecture.md</file>
+      <file>docs/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      The C# enum `ActionType` predates R7's dispatch reform. Its values name executors (`AiAnalysis`, `AiCompletion`,
+      `Condition`, `Start`, `ReturnResponse`, ...) — the "Action" prefix is misleading because the Action concept now
+      refers to a separate Dataverse entity (`sprk_analysisaction`) carrying prompt templates. Renaming aligns the type
+      name with its true role (dispatch axis). Per Q17 in spec.md, full rename across BFF is the chosen disposition.
+    </background>
+    <dependencies>
+      <dependency task="020" status="must-be-complete">Reference inventory.</dependency>
+      <dependency task="021" status="must-be-complete">Rename strategy + execution plan.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 023 renames `INodeExecutor.SupportedActionTypes` → `SupportedExecutorTypes` immediately after.</item>
+      <item>Tasks 024-028 use the new `ExecutorType` name in updated dispatch logic.</item>
+      <item>Sibling worktrees may need to rebase after this PR merges; coordination per task 021 plan.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: FULL · 📋 REASON: code-impl in BFF; refactor tag; ADR-010+013+029+038 applicable; large diff (~1000+ references); quality gates Step 9.5 required · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read project CLAUDE.md + spec FR-10 + plan.md Wave 2 + audit 020 + plan 021 + .claude/constraints/bff-extensions.md.
+    </step>
+    <step order="2" name="Pre-baseline build + test">
+      Run: `dotnet build src/server/api/Sprk.Bff.Api/` — confirm 0 errors.
+      Run: `dotnet test tests/unit/Sprk.Bff.Api.Tests/` — confirm green baseline.
+      If either fails, STOP — fix baseline before renaming.
+    </step>
+    <step order="3" name="Locate enum definition">
+      Open `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/INodeExecutor.cs` (or wherever `ActionType` is defined per audit). Confirm the canonical location.
+    </step>
+    <step order="4" name="Execute rename — enum type name">
+      Rename the enum declaration `ActionType` → `ExecutorType`. Apply Roslyn-aware refactor (IDE Rename Symbol) so all references update including XML doc `&lt;see cref=...&gt;` references.
+    </step>
+    <step order="5" name="Sweep edge cases">
+      Per audit 020 list: review string literals (`"ActionType"`), JSON property name attributes, log message text, and any remaining edge cases not handled by the Roslyn rename. Update each manually.
+    </step>
+    <step order="6" name="Confirm out-of-scope surfaces untouched">
+      Verify NO changes leaked into `src/client/`, `src/dataverse/`, `scripts/`, `docs/`, `.claude/`. Those waves own their renames.
+    </step>
+    <step order="7" name="Post-rename build">
+      Run: `dotnet build src/server/api/Sprk.Bff.Api/` — must succeed with 0 errors, 0 new warnings.
+    </step>
+    <step order="8" name="Post-rename test">
+      Run: `dotnet test tests/unit/Sprk.Bff.Api.Tests/` — must be green. No behavior change → no new test failures expected.
+    </step>
+    <step order="9" name="Verify grep zero hits">
+      Run: Grep for `\bActionType\b` (whole word) across `src/server/api/Sprk.Bff.Api/`, `src/server/shared/`, `tests/unit/Sprk.Bff.Api.Tests/`.
+      Expected: zero hits (or only commented-out references that are clearly historical).
+    </step>
+    <step order="9.5" name="Quality gates (FULL rigor)">
+      Run `/code-review` on the diff — focus on missed edge cases (string literals, JSON property attrs, log messages).
+      Run `/adr-check` against ADR-010 + ADR-013 + ADR-029 + ADR-038 + bff-extensions.md.
+      Fix any findings before commit.
+    </step>
+    <step order="10" name="Update current-task.md + TASK-INDEX">
+      Mark task 022 complete; advance current-task.md to task 023 (next: rename SupportedActionTypes).
+    </step>
+    <step order="11" name="Commit">
+      Commit the rename with conventional message:
+      `refactor(bff/r7): rename ActionType enum → ExecutorType (Wave 2 task 022, FR-10)`
+      Body: cite audit + plan; note BFF-only scope per FR-10.
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (audit, plan, enum source, constraints)</tool>
+    <tool>Edit (per-file rename application + edge case manual fixes)</tool>
+    <tool>Grep (verify zero hits post-rename)</tool>
+    <tool>Bash (dotnet build, dotnet test, git commit)</tool>
+    <tool>Skill (code-review at Step 9.5)</tool>
+    <tool>Skill (adr-check at Step 9.5)</tool>
+  </tools>
+
+  <outputs>
+    <output type="modified-files">~80-150 BFF .cs files (per audit 020 distribution)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md (advance to task 023)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 022 ✅)</output>
+    <output type="commit">refactor(bff/r7): rename ActionType enum → ExecutorType (Wave 2 task 022, FR-10)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Enum declaration renamed from `ActionType` to `ExecutorType` at its canonical location</criterion>
+    <criterion>All BFF source references updated (per audit 020 inventory)</criterion>
+    <criterion>String literal + XML doc cref + JSON property name edge cases all handled</criterion>
+    <criterion>No changes leaked into PCF, code-pages, scripts, docs, .claude/ surfaces (FR-10 scope honored)</criterion>
+    <criterion>dotnet build passes: 0 errors, 0 new warnings</criterion>
+    <criterion>dotnet test passes: full xUnit suite green</criterion>
+    <criterion>Grep for `\bActionType\b` in BFF source returns zero non-historical hits</criterion>
+    <criterion>code-review + adr-check pass at Step 9.5 (FULL rigor)</criterion>
+    <criterion>Commit pushed to work/spaarke-ai-platform-unification-r7</criterion>
+  </acceptance-criteria>
+</task>

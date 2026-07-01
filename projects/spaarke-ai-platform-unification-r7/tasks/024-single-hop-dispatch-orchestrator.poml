@@ -1,0 +1,161 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-024" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Update PlaybookOrchestrationService.ExecuteNodeAsync to read single-hop dispatch (FR-07)</title>
+    <status>completed</status>
+    <wave>2</wave>
+    <estimated-effort>3-4 hours</estimated-effort>
+    <tags>bff-api, code-impl, wave-2</tags>
+    <rigor-level>FULL</rigor-level>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>022</dependencies>
+    <fr-coverage>FR-07</fr-coverage>
+  </metadata>
+
+  <prompt>
+    Collapse 3-layer dispatch to single-hop. Today `ExecuteNodeAsync` walks `node.actionid → Action.actiontypeid →
+    lookup_row.executoractiontype` plus structural fallback. After this task, dispatch reads `node.sprk_executortype`
+    directly and routes via `NodeExecutorRegistry`. This is the keystone refactor — tasks 025 (delete fallback ladder)
+    and 026 (delete Action override branch) and 027 (registry dispatch by ExecutorType) clean up the now-dead code.
+    Per spec FR-07: single-hop only; no fallback to Action lookup; integration test confirms DAILY-BRIEFING-NARRATE
+    runs via new path.
+  </prompt>
+
+  <role>
+    Senior .NET backend developer with strong grasp of the playbook orchestration runtime.
+    Discipline: change the dispatch read path; leave deletions to dedicated tasks (025/026/027/028).
+  </role>
+
+  <goal>
+    `PlaybookOrchestrationService.ExecuteNodeAsync` reads dispatch from `node.sprk_executortype` directly.
+    1. Replace lookup-chain (actionid → Action → lookup → ActionType) with single-hop read of `node.sprk_executortype`.
+    2. Pass the parsed `ExecutorType` to `NodeExecutorRegistry` for executor resolution.
+    3. Add unit test confirming dispatch is single-hop (no fallback to Action lookup).
+    4. Add integration test confirming DAILY-BRIEFING-NARRATE playbook runs end-to-end through the new path.
+    5. Leave the now-dead fallback code in place (tasks 025/026 delete it) but mark with `// TODO(task-025/026/027): delete in cleanup` comments so reviewers see intent.
+  </goal>
+
+  <inputs>
+    <file purpose="orchestrator">src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookOrchestrationService.cs</file>
+    <file purpose="dispatch-registry">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/NodeExecutorRegistry.cs</file>
+    <file purpose="interface">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/INodeExecutor.cs</file>
+    <file purpose="design-spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    <file purpose="bff-constraints">.claude/constraints/bff-extensions.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-010">DI Minimalism — no new services. Reuse existing `NodeExecutorRegistry`.</constraint>
+    <constraint source="ADR-013">BFF AI Architecture — `IInvokePlaybookAi` triangle unchanged; orchestrator internals reshape.</constraint>
+    <constraint source="ADR-029">BFF Publish Hygiene — task expected SIZE NEUTRAL (will SHRINK after task 025/026 deletions).</constraint>
+    <constraint source="ADR-038">Testing Strategy — integration-heavy pyramid. Add unit test (no fallback) + integration test (DAILY-BRIEFING-NARRATE end-to-end). NO `Mock&lt;HttpMessageHandler&gt;`, NO DI-registration tests.</constraint>
+    <constraint source="spec FR-07">Dispatch is single-hop. NO fallback to Action lookup chain.</constraint>
+    <constraint source="spec NFR-03">Single-hop dispatch latency &lt;1ms cached, &lt;10ms uncached. No regression.</constraint>
+    <constraint source="CLAUDE.md §11">Modifies existing surface (PlaybookOrchestrationService.ExecuteNodeAsync) — justification triple NOT required.</constraint>
+    <constraint source="bff-extensions.md">Pre-merge checklist: placement decision = existing service refactor, no new component. Test obligation: update PlaybookOrchestrationService tests per §F.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff/playbook-runtime</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-010-di-minimalism.md</file>
+      <file>docs/adr/ADR-013-bff-ai-architecture.md</file>
+      <file>docs/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/architecture/ai-architecture-playbook-runtime.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Today's dispatch is the artifact of three R-series projects (R3.1 + R4 + Insights Engine r2 Wave B) each adding
+      a layer without removing the prior. The result: walk `actionid` → Action → lookup → INT column, with structural
+      fallback inferring dispatch when the column is null. R7 collapses this to a single read.
+    </background>
+    <dependencies>
+      <dependency task="022" status="must-be-complete">`ActionType` renamed to `ExecutorType`; orchestrator can pass `ExecutorType` to registry.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 025 deletes the structural fallback ladder (~150 LOC) made dead by this change.</item>
+      <item>Task 026 deletes the Action override branch (lines 1241-1278) made dead by this change.</item>
+      <item>Task 027 updates NodeExecutorRegistry to dispatch by ExecutorType.</item>
+      <item>Task 028 simplifies AnalysisActionService read path (no ActionType from Action lookup).</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: FULL · 📋 REASON: code-impl in BFF; modifies orchestrator hot path; ADR-010+013+029+038 applicable; quality gates Step 9.5 required · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read CLAUDE.md + spec FR-07 + plan.md Wave 2 + bff-extensions.md + docs/architecture/ai-architecture-playbook-runtime.md.
+    </step>
+    <step order="2" name="Read PlaybookOrchestrationService.ExecuteNodeAsync">
+      Locate the current dispatch logic. Identify the 3-layer lookup chain. Identify the structural fallback ladder + Action override branch (lines ~863-1079 + 1241-1278 per plan.md). Capture the exact line ranges in a sub-note for tasks 025 + 026.
+    </step>
+    <step order="3" name="Read NodeExecutorRegistry">
+      Confirm registry's resolution signature — should be able to accept an `ExecutorType` and return an `INodeExecutor`. If signature change needed, document for task 027.
+    </step>
+    <step order="4" name="Implement single-hop dispatch">
+      In `ExecuteNodeAsync`, add the new path: parse `node.sprk_executortype` (Dataverse Choice value INT) into `ExecutorType` enum; look up executor via `NodeExecutorRegistry`; invoke `ExecuteAsync`.
+      Wrap the old fallback code in a clear "// DEAD CODE — task 025/026/027 delete in cleanup" comment block; do NOT delete in this task (cleanup tasks own the diff).
+    </step>
+    <step order="5" name="Handle null sprk_executortype">
+      Per FR-19, all 94 existing nodes will be backfilled (Wave 5). Until then, a null value should THROW with a clear error message ("Node {id} has null sprk_executortype — backfill required per FR-19"). Do NOT silently fall back to the old path; that defeats the refactor.
+    </step>
+    <step order="6" name="Add unit test (no fallback)">
+      In `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/PlaybookOrchestrationServiceTests.cs` (or sibling), add: when node has `sprk_executortype = AiAnalysis`, executor resolved via registry directly; Action lookup table is NEVER queried. Mock the Dataverse client; assert no Action-lookup call.
+    </step>
+    <step order="7" name="Add integration test (DAILY-BRIEFING-NARRATE)">
+      Stub or wire integration test for the DAILY-BRIEFING-NARRATE playbook (depends on task 015 backfill of those Actions; if blocked, scaffold the test with [Skip] and note the dependency).
+    </step>
+    <step order="8" name="Build + run tests">
+      `dotnet build` + `dotnet test`. Must be green. New unit test green. Existing tests still green (fallback code still present, untouched).
+    </step>
+    <step order="9" name="Verify acceptance">
+      Re-read ExecuteNodeAsync — confirm single-hop is the primary path; old code is marked for deletion.
+    </step>
+    <step order="9.5" name="Quality gates (FULL rigor)">
+      Run `/code-review` on the diff — focus on the dispatch logic + null handling.
+      Run `/adr-check` against ADR-010 + ADR-013 + ADR-029 + ADR-038 + bff-extensions.md.
+      Fix any findings.
+    </step>
+    <step order="10" name="Update current-task.md + TASK-INDEX">
+      Mark task 024 complete; advance current-task.md.
+    </step>
+    <step order="11" name="Commit">
+      `feat(bff/r7): single-hop dispatch in PlaybookOrchestrationService (Wave 2 task 024, FR-07)`.
+      Body: cite FR-07; mention follow-on tasks 025/026/027 delete the dead-code blocks.
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (orchestrator, registry, interface)</tool>
+    <tool>Edit (PlaybookOrchestrationService.cs — dispatch logic)</tool>
+    <tool>Write (new unit + integration test stubs)</tool>
+    <tool>Bash (dotnet build, dotnet test, git commit)</tool>
+    <tool>Skill (code-review at Step 9.5)</tool>
+    <tool>Skill (adr-check at Step 9.5)</tool>
+  </tools>
+
+  <outputs>
+    <output type="modified-file">src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookOrchestrationService.cs</output>
+    <output type="modified-file">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/PlaybookOrchestrationServiceTests.cs (new unit test added)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md (advance)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 024 ✅)</output>
+    <output type="commit">feat(bff/r7): single-hop dispatch in PlaybookOrchestrationService (Wave 2 task 024, FR-07)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>`ExecuteNodeAsync` reads `node.sprk_executortype` directly as the primary dispatch path</criterion>
+    <criterion>Single-hop path resolves executor via `NodeExecutorRegistry`</criterion>
+    <criterion>Null `sprk_executortype` throws clear error (no silent fallback)</criterion>
+    <criterion>Old fallback code marked with delete-in-cleanup comment (deleted by tasks 025/026)</criterion>
+    <criterion>New unit test confirms no Action-lookup call when sprk_executortype is set</criterion>
+    <criterion>dotnet build + dotnet test pass green</criterion>
+    <criterion>code-review + adr-check pass at Step 9.5</criterion>
+    <criterion>Commit pushed</criterion>
+  </acceptance-criteria>
+</task>

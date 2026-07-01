@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="151" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Gap B — Server-side EntityName lazy-fetch in PlaybookChatContextProvider per audit 120</title>
+    <phase>Wave 12 — MVP Completion</phase>
+    <wave>12</wave>
+    <sub-wave>12.4</sub-wave>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>bff-api + code-impl; modifies system-prompt enrichment guard path</rigor-reason>
+    <parallel-group>W12-4</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <tags>bff-api, code-impl, assistant, wave12</tags>
+    <estimated-effort>0.5-1 day</estimated-effort>
+    <status>completed</status>
+    <completed-date>2026-06-30</completed-date>
+  </metadata>
+
+  <prompt>
+Audit 120 Gap B: `EntityName` is never populated by the SpaarkeAi client → `PlaybookChatContextProvider.cs:550` guard fails → system prompt enrichment is unconditionally skipped. Fix: when EntityName is missing but entityId+entityType are present, server-side lazy-fetch the entity's display name from Dataverse and populate EntityName before reaching the guard.
+  </prompt>
+
+  <role>
+You are a BFF developer adding minimal server-side fallback logic. Add lazy-fetch only; do NOT change client-side or the guard's semantics.
+  </role>
+
+  <goal>
+System prompt enrichment fires when client sends entityType + entityId (even when EntityName missing). Assistant chat in matter context has matter-aware system prompt. Combined with T150's naming normalization, audit Scenario A passes.
+  </goal>
+
+  <inputs>
+    - Audit notes: projects/spaarke-ai-platform-unification-r7/notes/audits/wave12-120-assistant-workspace.md (Gap B at PlaybookChatContextProvider.cs:550)
+    - Existing service: IGenericEntityService for Dataverse reads
+    - Cache opportunity: per-request memoize (don't re-fetch same entity twice in single request lifecycle)
+  </inputs>
+
+  <constraints>
+    - Per CLAUDE.md §10 + §11: modification only; reuse IGenericEntityService; no new abstractions
+    - Per ADR-038: integration-heavy tests; mock IGenericEntityService at boundary
+    - MUST not block on the lazy-fetch — if Dataverse times out / errors, log + fall back to original guard behavior (skip enrichment); don't fail the chat request
+    - Cache scope: per-request (avoid leaking state across requests; avoid stale data)
+  </constraints>
+
+  <knowledge>
+    <files>
+      - projects/spaarke-ai-platform-unification-r7/notes/audits/wave12-120-assistant-workspace.md (Gap B section)
+      - projects/spaarke-ai-platform-unification-r7/notes/wave12-mvp-completion-plan.md (§2.3)
+      - projects/spaarke-ai-platform-unification-r7/CLAUDE.md
+    </files>
+  </knowledge>
+
+  <context>
+    <relevant-files>
+      - src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookChatContextProvider.cs (Gap B at line 550)
+      - src/server/api/Sprk.Bff.Api/Services/Dataverse/IGenericEntityService.cs
+    </relevant-files>
+  </context>
+
+  <steps>
+1. **Read PlaybookChatContextProvider.cs:540-570 context** (15 min) — understand the existing guard
+2. **Identify normalized entityType + entityId source post-T150** (15 min)
+3. **Implement lazy-fetch** (45-60 min):
+   - When EntityName empty AND entityType + entityId present: call IGenericEntityService to fetch entity's display name (typically `name` or entity-specific primary name field)
+   - Populate EntityName before guard
+   - If fetch fails: log + skip enrichment (preserve original guard behavior)
+4. **Add per-request cache** (15-20 min) to avoid duplicate fetches
+5. **Add unit tests** (45 min) per ADR-038:
+   - Test: missing EntityName + present entityType/Id → fetch + enrich succeeds
+   - Test: Dataverse fetch fails → graceful skip (no enrichment, no chat failure)
+   - Test: cached entry on second call within same request
+6. **Build + test verification** (15 min)
+
+  </steps>
+
+  <tools>
+    - Read / Grep / Glob
+    - Edit
+    - Bash (dotnet test, dotnet build)
+    - TodoWrite
+  </tools>
+
+  <outputs>
+    - PlaybookChatContextProvider.cs (M) — lazy-fetch added
+    - Unit test additions
+  </outputs>
+
+  <acceptance-criteria>
+    - [ ] Lazy-fetch implemented in PlaybookChatContextProvider
+    - [ ] Per-request cache prevents duplicate fetches
+    - [ ] Fetch failure gracefully degrades (skip enrichment; chat request still succeeds)
+    - [ ] Unit tests cover success + failure + cache hit
+    - [ ] `dotnet test` 0 new failures
+    - [ ] `dotnet build` 0 errors
+    - [ ] No new packages / DI registrations
+  </acceptance-criteria>
+</task>

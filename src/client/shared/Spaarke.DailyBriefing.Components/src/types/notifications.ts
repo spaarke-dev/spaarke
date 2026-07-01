@@ -148,11 +148,32 @@ export async function tryCatch<T>(fn: () => Promise<T>, errorCode: string = 'UNK
 // ---------------------------------------------------------------------------
 
 /**
- * Notification categories matching the 7 notification playbooks.
- * The category string is stored in appnotification.data JSON as
- * customData.category by CreateNotificationNodeExecutor.
+ * Notification categories — superset of the legacy appnotification-pipeline
+ * codes and the live-collector codes used by `DailyBriefingCollector` (R7
+ * W11 POC) + R7 W12 T131 6-entity extension.
+ *
+ * **Categories of categories**:
+ *  - **Legacy appnotification-pipeline** (preserved for back-compat with the
+ *    `CreateNotificationNodeExecutor`-driven flow + R3/R4 widget pipeline):
+ *    `tasks-overdue`, `tasks-due-soon`, `new-documents`, `new-emails`,
+ *    `new-events`, `matter-activity`, `work-assignments`, `system`.
+ *  - **W11 POC live-collector codes** (emitted by `DailyBriefingCollector`
+ *    against `sprk_event`, currently in production prior to T131 deploy):
+ *    `my-updates` (was raw-slug bug — now has registry entry).
+ *    Note: `tasks-due-soon` / `matter-activity` are shared with the legacy set.
+ *  - **W12 T131 6-entity expansion** (kebab-case slugs coordinated with the
+ *    collector author in T131; see wave12-mvp-completion-plan §2.1):
+ *    `upcoming-tasks`, `overdue-tasks`, `documents`, `matters`, `projects`,
+ *    `to-dos`. These supersede the W11 POC codes once T131 collector ships
+ *    via T136 deploy; both code sets are registered to avoid a coordinated
+ *    flag-flip between BFF + widget at deploy time.
+ *
+ * The `resolveChannelLabel` fallback in `ActivityNotesSection.tsx` renders the
+ * raw category string when an unregistered code arrives — this remains the
+ * unknown-channel safety net.
  */
 export type NotificationCategory =
+  // Legacy appnotification-pipeline codes (R2/R3/R4 — back-compat)
   | 'tasks-overdue'
   | 'tasks-due-soon'
   | 'new-documents'
@@ -160,7 +181,16 @@ export type NotificationCategory =
   | 'new-events'
   | 'matter-activity'
   | 'work-assignments'
-  | 'system';
+  | 'system'
+  // W11 POC live-collector codes (T118 — pre-T131 deploy state)
+  | 'my-updates'
+  // W12 T131 6-entity expansion codes (post-T131 deploy state)
+  | 'upcoming-tasks'
+  | 'overdue-tasks'
+  | 'documents'
+  | 'matters'
+  | 'projects'
+  | 'to-dos';
 
 /** Display metadata for each notification category/channel. */
 export interface ChannelMeta {
@@ -221,6 +251,59 @@ export const CHANNEL_REGISTRY: Record<NotificationCategory, ChannelMeta> = {
     label: 'System',
     iconName: 'Info',
     order: 99,
+  },
+  // W11 POC live-collector entry (T118) — closes the operator-reported "my-updates"
+  // raw-slug bug. Ordered between matter-activity and work-assignments since this
+  // is user-self activity. Will be superseded by `to-dos` semantics from T131
+  // collector once T136 deploy ships, but kept registered for back-compat with
+  // the W11 POC payload format.
+  'my-updates': {
+    category: 'my-updates',
+    label: 'My Recent Updates',
+    iconName: 'People',
+    order: 8,
+  },
+  // W12 T131 6-entity expansion entries (kebab-case slugs coordinated with
+  // collector — see notes/wave12-mvp-completion-plan.md §2.1). Labels follow
+  // operator-specified text verbatim ("Upcoming Tasks", "Overdue Tasks",
+  // "Documents", "Matters", "Projects", "To Dos"). Order matches the operator
+  // priority sequence from the wave12 plan (10..15). Icons reuse the existing
+  // Fluent v9 icon catalog (`channelIcons.ts`) — no new icon imports needed.
+  'upcoming-tasks': {
+    category: 'upcoming-tasks',
+    label: 'Upcoming Tasks',
+    iconName: 'Clock',
+    order: 10,
+  },
+  'overdue-tasks': {
+    category: 'overdue-tasks',
+    label: 'Overdue Tasks',
+    iconName: 'Warning',
+    order: 11,
+  },
+  documents: {
+    category: 'documents',
+    label: 'Documents',
+    iconName: 'Document',
+    order: 12,
+  },
+  matters: {
+    category: 'matters',
+    label: 'Matters',
+    iconName: 'Briefcase',
+    order: 13,
+  },
+  projects: {
+    category: 'projects',
+    label: 'Projects',
+    iconName: 'Briefcase',
+    order: 14,
+  },
+  'to-dos': {
+    category: 'to-dos',
+    label: 'To Dos',
+    iconName: 'Calendar',
+    order: 15,
   },
 };
 

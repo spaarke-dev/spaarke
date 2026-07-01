@@ -1,21 +1,28 @@
 # JPS Authoring Guide
 
-> **Version**: 3.0 (consolidated) — scope statement added 2026-06-26 (R4 canonical-truth loop); §§6, 9, 10, 14 stripped in favour of skill-owned procedures
-> **Date**: 2026-04-05 (last full review); 2026-06-26 (scope + dedup pass)
+> **Version**: 4.0 — node-first dispatch model (R7 spaarke-ai-platform-unification-r7, Wave 6 task 065, FR-30)
+> **Date**: 2026-06-28 (R7 rewrite); 2026-04-05 (last full v3 review)
 > **Status**: Production
 > **Author**: Spaarke Engineering
 > **Audience**: Developers, AI engineers, prompt authors, solution architects
-> **Supersedes**: PLAYBOOK-JPS-PROMPT-SCHEMA-GUIDE.md, PLAYBOOK-DESIGN-GUIDE.md (merged in)
-> **Related**: [AI Architecture Overview](../architecture/AI-ARCHITECTURE.md), [Playbook Runtime](../architecture/ai-architecture-playbook-runtime.md), [Actions/Nodes/Scopes Boundary](../architecture/ai-architecture-actions-nodes-scopes.md), [Playbook Deploy Recipe](ai-guide-playbook-deploy-recipe.md)
+> **Related**: [AI Architecture Overview](../architecture/AI-ARCHITECTURE.md), [Playbook Runtime](../architecture/ai-architecture-playbook-runtime.md), [Actions/Nodes/Scopes Boundary](../architecture/ai-architecture-actions-nodes-scopes.md), [Playbook Deploy Recipe](ai-guide-playbook-deploy-recipe.md), [PLAYBOOK-AUTHOR-GUIDE](PLAYBOOK-AUTHOR-GUIDE.md)
 >
-> **Scope of this guide**: schema reference for the JPS (JSON Prompt Schema) DSL — section grammars (`instruction`, `input`, `output`, `scopes`, `examples`, `metadata`), feature deep dives (template parameters, `$ref`, `$choices`, override merge, structured output), best practices, validation, troubleshooting. NOT a procedural how-to — see the skills below.
+> **Scope of this guide**: authoring contract for the JPS (JSON Prompt Schema) DSL — section grammars (`instruction`, `input`, `output`, `scopes`, `examples`, `metadata`), feature deep dives (template parameters, `$ref`, `$choices`, override merge, structured output), the node-first authoring flow + worked examples, best practices, validation, troubleshooting.
+
+---
+
+## Why this guide was rewritten (R7, 2026-06-28)
+
+Prior to R7, dispatch — the decision of which executor runs a node — was split across three storage layers: a structural fallback ladder in `PlaybookOrchestrationService`, an `Action.sprk_actiontypeid` lookup chain, and per-node `configJson.__actionType` injection. Authors had to reason about all three layers simultaneously, and the v3 guide taught Action-type-first authoring as if Action drove dispatch. **R7 unified dispatch to a single column: `sprk_playbooknode.sprk_executortype`**. The runtime now reads one Choice value on the node row to decide which executor runs; the Action FK becomes the **prompt template carrier** for the prompt-driven executors only (AiAnalysis, AiCompletion, AiEmbedding) — not a dispatch source. This guide reflects the unified model. See spec FR-07 (single-hop dispatch), FR-12 (AiCompletion executor), FR-30 (this guide rewrite), and CLAUDE.md §10 (BFF Hygiene).
+
+> **Wave 11 addition (2026-06-29 — narrative-output authoring)**: when an Action produces structured output consumed downstream (Daily Briefing, Insight Engine matter summaries, etc.), write the Action JPS body as PURE INSTRUCTIONS — no `{{X}}` placeholders for runtime data in `instruction.task/context/constraints`. Data arrives via the playbook node's `configJson.inputBinding`, gets resolved by the orchestrator (Layer 1), and is rendered into a structured `## Input` section by `PromptSchemaRenderer` (Layer 2). See the canonical reference [`SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md`](../architecture/SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md) and the maker tutorial [`BUILD-A-NEW-NARRATIVE-OUTPUT-CONSUMER.md`](BUILD-A-NEW-NARRATIVE-OUTPUT-CONSUMER.md).
 
 ---
 
 ## Table of Contents
 
 1. [What is JPS?](#1-what-is-jps)
-2. [JPS Pipeline Architecture](#2-jps-pipeline-architecture)
+2. [JPS Pipeline Architecture (post-R7 single-hop dispatch)](#2-jps-pipeline-architecture)
 3. [JPS JSON Structure](#3-jps-json-structure)
 4. [Section Reference](#4-section-reference)
    - [instruction](#instruction-section)
@@ -30,20 +37,21 @@
    - [$choices Resolution](#choices-resolution)
    - [Override Merge](#override-merge)
    - [Structured Output](#structured-output)
-6. [Creating a New JPS Action (Step-by-Step)](#6-creating-a-new-jps-action-step-by-step)
-7. [Playbook Design Patterns](#7-playbook-design-patterns)
-8. [Examples](#8-examples)
-9. [Migration Guide (Hardcoded to JPS)](#9-migration-guide-hardcoded-to-jps)
-10. [Deployment](#10-deployment)
-11. [Best Practices](#11-best-practices)
-12. [Validation Checklist](#12-validation-checklist)
-13. [Troubleshooting](#13-troubleshooting)
-14. [Designing Playbooks with Claude Code](#14-designing-playbooks-with-claude-code)
-   - [Quick Start](#quick-start)
-   - [Scope Catalog](#scope-catalog)
-   - [Model Selection](#model-selection)
-   - [Output Node Types](#output-node-types)
-   - [Creating New Scope Primitives](#creating-new-scope-primitives)
+6. [The Node-First Authoring Flow](#6-the-node-first-authoring-flow)
+   - [Step 1 — Pick the Executor Type](#step-1--pick-the-executor-type-drives-dispatch)
+   - [Step 2 — Choose or Author an Action (prompt-driven executors only)](#step-2--choose-or-author-an-action-prompt-driven-executors-only)
+   - [Step 3 — Configure the Node](#step-3--configure-the-node)
+   - [Step 4 — Test + Deploy via Deploy-Playbook.ps1](#step-4--test--deploy-via-deploy-playbookps1)
+7. [Worked Examples (node-first)](#7-worked-examples-node-first)
+   - [Example A — AiCompletion node (prompt-driven, no tools)](#example-a--aicompletion-node-prompt-driven-no-tools)
+   - [Example B — Condition node (pure executor, no Action FK)](#example-b--condition-node-pure-executor-no-action-fk)
+   - [Example C — AiAnalysis node (prompt-driven, with tools + document context)](#example-c--aianalysis-node-prompt-driven-with-tools--document-context)
+8. [Playbook Design Patterns](#8-playbook-design-patterns)
+9. [JPS Schema Examples (full files)](#9-jps-schema-examples-full-files)
+10. [Best Practices](#10-best-practices)
+11. [Validation Checklist](#11-validation-checklist)
+12. [Troubleshooting](#12-troubleshooting)
+13. [Designing Whole Playbooks (pointer)](#13-designing-whole-playbooks-pointer)
 
 ---
 
@@ -55,7 +63,9 @@ Hardcoded prompts in C# handler classes are unmaintainable. When prompt logic li
 
 ### The Solution
 
-JSON Prompt Schema (JPS) externalizes prompt logic into structured JSON stored in the `sprk_systemprompt` column of `sprk_aiaction` Dataverse records. The BFF API detects the format at runtime and renders it into an assembled prompt for OpenAI consumption.
+JSON Prompt Schema (JPS) externalizes prompt logic into structured JSON stored in the `sprk_systemprompt` column of `sprk_analysisaction` (Action) Dataverse records. The BFF API detects the format at runtime and renders it into an assembled prompt for the LLM.
+
+Under the R7 dispatch model, the Action record carries **prompt material only** (system prompt + output schema + temperature). Which executor runs the node is decided by the **node row's `sprk_executortype` Choice column** — not by any field on the Action. Authors therefore think node-first: pick the executor type, then (for prompt-driven executors) attach an Action whose JPS describes the prompt.
 
 ### Benefits
 
@@ -69,53 +79,69 @@ JSON Prompt Schema (JPS) externalizes prompt logic into structured JSON stored i
 
 ### When to Use JPS vs. Flat Text
 
-| Use JPS When | Use Flat Text When |
-|--------------|--------------------|
-| Action needs structured JSON output | Simple text-in, text-out with no field mapping |
-| Action is reused across multiple playbook nodes | One-off prompt with no reuse potential |
-| Prompt needs shared knowledge scopes | Prompt is self-contained and short |
-| Output routes to downstream nodes (`$choices`) | Prototyping or rapid experimentation |
-| Multiple teams author or customize prompts | Legacy handler not yet migrated |
+JPS is the canonical format for all new Actions in R7. Flat-text `sprk_systemprompt` payloads are read-only legacy: some pre-R7 Action rows still carry them and continue to render verbatim (no schema, no override merge, no `$choices`). Author all new Actions as JPS.
+
+| JPS gives you | Flat-text limits |
+|---|---|
+| Structured JSON output via `structuredOutput: true` + JSON Schema | No schema enforcement; model returns free text |
+| Reuse across nodes via template parameters | One-off prompt, no per-node override |
+| Shared knowledge + skill scopes via `$ref` | No scope composition |
+| `$choices` to constrain outputs against Dataverse lookups or downstream nodes | No dynamic enums |
+| Per-node override via `promptSchemaOverride` in `configJson` | No node-level customization without duplicating the Action |
 
 ---
 
 ## 2. JPS Pipeline Architecture
 
-### Data Flow
+### Single-hop dispatch (R7 FR-07)
 
 ```
-sprk_aiaction.sprk_systemprompt (JSON or flat text)
+PlaybookOrchestrationService.ExecuteNodeAsync(node)
         |
         v
-  Format Detection (IsJpsFormat)
-  --------------------------------
-  Starts with '{' AND contains "$schema" --> JPS path
-  Otherwise --> flat-text legacy path (pass-through)
+  Read node.sprk_executortype  (one Choice value, single Dataverse read)
         |
-   +----+----+
-   v         v
- JPS Path    Legacy Path (unchanged)
-   |
-   v
+        v
+  NodeExecutorRegistry.Resolve(executorType)
+        |
+        v
+  Executor.Validate(node)  (per-executor invariants — prompt-driven executors
+                            REQUIRE Action FK + JPS; pure executors do not)
+        |
+        v
+  Executor.ExecuteAsync(node, context)
+```
+
+The orchestrator does **not** consult `Action.sprk_actiontypeid`, structural ladder helpers, or `configJson.__actionType` for dispatch. Those layers were deleted in R7 (FR-08, FR-09). Per FR-19, every `sprk_playbooknode` row MUST have `sprk_executortype` populated.
+
+### JPS rendering pipeline (runs inside prompt-driven executors only)
+
+For executors that consume a prompt template (`AiAnalysis`, `AiCompletion`, `AiEmbedding`), the executor invokes the JPS pipeline against the `Action.sprk_systemprompt` payload:
+
+```
+node.sprk_actionid  -->  Action.sprk_systemprompt (JPS JSON)
+        |
+        v
  1. Override Merge (PromptSchemaOverrideMerger)
-    ConfigJson.promptSchemaOverride merged into base schema
+    node.configJson.promptSchemaOverride merged into base JPS
         |
         v
- 2. Scope Resolution (ScopeResolverService)
-    Parallel Dataverse queries for skills, knowledge by ID
+ 2. Template Parameter Substitution
+    {{paramName}} replaced from node.configJson.templateParameters
         |
         v
- 3. Named $ref Resolution (JpsRefResolver --> IScopeResolverService)
+ 3. Scope Resolution (ScopeResolverService)
+    Parallel Dataverse queries for skills, knowledge, tools
+        |
+        v
+ 4. Named $ref Resolution (JpsRefResolver --> IScopeResolverService)
     Extract knowledge:{name} and skill:{name} from scopes section
     Resolve against Dataverse by name
         |
         v
- 4. Template Parameter Substitution
-    {{paramName}} replaced from ConfigJson.templateParameters
-        |
-        v
- 5. $choices Resolution
-    output.fields[].enum populated from Dataverse lookups, option sets, or downstream nodes
+ 5. $choices Resolution (LookupChoicesResolver + downstream resolver)
+    output.fields[].enum populated from Dataverse lookups, option sets,
+    or downstream-node display names
         |
         v
  6. PromptSchemaRenderer.Render()
@@ -123,48 +149,33 @@ sprk_aiaction.sprk_systemprompt (JSON or flat text)
     Generates JSON Schema for structuredOutput if enabled
         |
         v
- RenderedPrompt --> OpenAI (via OpenAiClient)
+ RenderedPrompt --> IOpenAiClient (GetStructuredCompletionRawAsync)
 ```
+
+Pure executors (`Condition`, `Start`, `DeliverOutput`, `LookupUserMembership`, etc.) skip the JPS pipeline entirely — they read `node.configJson` directly per their typed config schema (see FR-16 / Wave 3).
 
 ### Key Components
 
 | Component | File | Purpose |
 |-----------|------|---------|
+| `PlaybookOrchestrationService` | `Services/Ai/PlaybookOrchestrationService.cs` | Single-hop dispatch: reads `node.sprk_executortype` and delegates to the executor |
+| `NodeExecutorRegistry` | `Services/Ai/Nodes/NodeExecutorRegistry.cs` | Maps `ExecutorType` enum value → `INodeExecutor` implementation |
+| `INodeExecutor` | `Services/Ai/Nodes/INodeExecutor.cs` | Executor contract; declares `SupportedExecutorTypes` + `Validate` + `ExecuteAsync` + `GetConfigSchema` (FR-16) |
+| `AiAnalysisNodeExecutor` | `Services/Ai/Nodes/AiAnalysisNodeExecutor.cs` | Tool-augmented analysis executor (ExecutorType = 0) |
+| `AiCompletionNodeExecutor` | `Services/Ai/Nodes/AiCompletionNodeExecutor.cs` | Raw LLM completion executor (ExecutorType = 1) — closes R4 graduation gate per FR-12 |
 | `PromptSchemaRenderer` | `Services/Ai/PromptSchemaRenderer.cs` | Renders JPS JSON + runtime context into assembled prompt text |
 | `JpsRefResolver` | `Services/Ai/JpsRefResolver.cs` | Extracts `knowledge:{name}` and `skill:{name}` refs from scopes (static, no DI) |
 | `PromptSchemaOverrideMerger` | `Services/Ai/PromptSchemaOverrideMerger.cs` | Merges node-level overrides into base schema (static, no DI) |
 | `ScopeResolverService` | `Services/Ai/ScopeResolverService.cs` | Resolves skills, knowledge, and tools by ID or name from Dataverse |
-| `AiAnalysisNodeExecutor` | `Services/Ai/Nodes/AiAnalysisNodeExecutor.cs` | Central wiring point — orchestrates the full pipeline per node |
-| `GenericAnalysisHandler` | `Services/Ai/Handlers/GenericAnalysisHandler.cs` | Default handler consuming JPS prompts via the renderer |
 | `PromptSchema` | `Services/Ai/Models/PromptSchema.cs` | C# data model for the JPS JSON structure |
 
 All file paths are relative to `src/server/api/Sprk.Bff.Api/`.
 
-### Format Detection
+### How the executor reaches the JPS pipeline
 
-```csharp
-private static bool IsJpsFormat(string rawPrompt)
-{
-    return rawPrompt.TrimStart().StartsWith('{') && rawPrompt.Contains("\"$schema\"");
-}
-```
+Each prompt-driven executor (`AiAnalysisNodeExecutor`, `AiCompletionNodeExecutor`, `AiEmbeddingNodeExecutor`) loads the Action's `sprk_systemprompt` payload, runs override merge + template substitution + scope resolution + render, and calls `IOpenAiClient`. The orchestrator does not parse or peek at JPS — that responsibility lives inside the executor.
 
-This check is duplicated in both `PromptSchemaRenderer` and `AiAnalysisNodeExecutor` for independent decision-making. If JPS parsing fails, the renderer falls back to flat-text with a warning log.
-
-### Dual-Path Pattern
-
-Migrated handlers that retain custom logic use a dual-path pattern:
-
-```csharp
-var prompt = context.ActionSystemPrompt;
-if (IsJpsFormat(prompt))
-{
-    // JPS path: renderer handles everything
-    return await _genericHandler.ExecuteAsync(context, ct);
-}
-// Legacy path: hardcoded prompt construction (backward compatible)
-return await ExecuteLegacyAsync(context, ct);
-```
+Authors do **not** write logic that detects "is this JPS or flat text?" in client code. The renderer parses JPS by structural inspection (root object with `$schema`); JPS is the only supported prompt format in R7. The legacy flat-text fallback was removed when the structural-fallback ladder was deleted (FR-08).
 
 ---
 
@@ -540,140 +551,304 @@ When `output.structuredOutput` is `true`:
 
 ---
 
-## 6. Creating a New JPS Action — REDIRECT
+## 6. The Node-First Authoring Flow
 
-> **Moved 2026-06-26 (R4 canonical-truth loop)**: the 7-step procedural recipe for creating a new JPS Action lives in the [`jps-action-create`](../../.claude/skills/jps-action-create/SKILL.md) skill. The skill is the procedural source-of-truth; this guide is the schema reference. Invoke via `/jps-action-create` or by stating the trigger phrases listed in the skill's frontmatter.
->
-> Use this guide for: the schema fields each step should populate (sections 4 and 5 above).
-> Use the skill for: the procedural sequence + Dataverse seed step + validation runner.
->
-> The "Decision Tree: Do I Need JPS?" originally inlined here is preserved in git history and lives operationally inside the skill's Step 0.
-<!-- ORIGINAL CONTENT STRIPPED: 65 lines of step-by-step procedure consolidated into .claude/skills/jps-action-create/SKILL.md (R4 canonical-truth loop, 2026-06-26). Recover via git history if needed.
+Authoring a playbook node in R7 is a **four-step decision sequence**. The order matters: each step narrows what is valid for the next.
 
-```
-Does the action need structured JSON output?  --> Yes --> Use JPS
-                                               --> No
-Is the action reused across multiple nodes?    --> Yes --> Use JPS
-                                               --> No
-Does it need shared knowledge scopes?          --> Yes --> Use JPS
-                                               --> No
-Does output route to downstream nodes?         --> Yes --> Use JPS
-                                               --> No  --> Flat text may suffice
-```
+### Step 1 — Pick the Executor Type (drives dispatch)
 
-### Step 1: Define the Instruction
+The first decision is **which executor will run this node?** That choice is recorded in `node.sprk_executortype` and is the single dispatch identity per FR-07. There are 33 executor types as of R7, organized into clusters:
 
-Write the `role`, `task`, `context`, and `constraints`. Be specific: domain-expert personas produce better results than generic assistants. Make `task` actionable and unambiguous. Make `constraints` testable.
+| Cluster | Range | Executors | When to pick |
+|---|---|---|---|
+| Generic AI | `0–2` | `AiAnalysis` (0), `AiCompletion` (1), `AiEmbedding` (2) | Prompt-driven LLM work. Pick `AiAnalysis` if tools or document context are needed; `AiCompletion` for pure prompt → structured output; `AiEmbedding` to generate vectors. |
+| Business logic | `10–12` | `RuleEngine`, `Calculation`, `DataTransform` | Deterministic non-LLM compute. |
+| Side-effect actions | `20–24` | `CreateTask`, `SendEmail`, `UpdateRecord`, `CallWebhook`, `SendTeamsMessage` | Outbound writes to Dataverse / Graph / external systems. |
+| Control flow | `30–33` | `Condition`, `Parallel`, `Wait`, `Start` | Branching, fan-out, gates, canvas anchors. |
+| Delivery | `40–42` | `DeliverOutput`, `DeliverToIndex`, `DeliverComposite` | Terminal nodes that emit the playbook result. |
+| Notification + query | `50–52` | `CreateNotification`, `QueryDataverse`, `LookupUserMembership` | In-app messaging + Dataverse reads + membership resolution. |
+| Workflow primitives | `60, 70, 80, 90` | `AgentService`, `GroundingVerify`, `LiveFact`, `IndexRetrieve` | Foundry agent calls, citation verification, deterministic facts, Insights retrieval. |
+| Insights synthesis | `100–120` | `EvidenceSufficiency`, `DeclineToFind`, `ReturnInsightArtifact` | Evidence-gated Insights playbook nodes. |
+| Post-LLM scrub | `130–143` | `Sanitization`, `ObservationEmit`, `EntityNameValidator`, `LoadKnowledge`, `ReturnResponse` | Sanitizers, validators, and R4 control-flow executors. |
 
-### Step 2: Define Output Fields
+For the authoritative list with descriptions, see the `ExecutorType` enum at `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/INodeExecutor.cs` (the executor XML doc on each enum value is the canonical 1-line description) and the rewritten decision tree in [`docs/architecture/ai-architecture-actions-nodes-scopes.md`](../architecture/ai-architecture-actions-nodes-scopes.md) §4.
 
-Identify what structured data you need. For each field, specify `name` (Dataverse column), `type`, `description`, and optional `enum` or `maxLength`. Use `"$choices"` for routing fields. Use `"$choices": "lookup:..."` for Dataverse-constrained lookup fields.
+**Implication of this step**: the executor's `Validate(node)` method now sets the contract for the remaining steps. Prompt-driven executors REQUIRE an Action FK; pure executors REJECT one (or ignore it). The Playbook Builder UI shows the right config affordances based on `node.sprk_executortype`.
 
-### Step 3: Add Scopes (if needed)
+### Step 2 — Choose or Author an Action (prompt-driven executors only)
 
-Reference shared knowledge or skills via `$ref`. Prefer scopes over inline knowledge — shared records are maintained once and used everywhere. Keep scope count minimal (each adds to token count).
+If you picked a prompt-driven executor in Step 1 (`AiAnalysis`, `AiCompletion`, `AiEmbedding`), set `node.sprk_actionid` to point at the `sprk_analysisaction` row that carries the prompt template. The Action row owns:
 
-### Step 4: Add Template Parameters
+- `sprk_systemprompt` — the JPS JSON (or a flat-text prompt for legacy actions that haven't been converted)
+- `sprk_outputschemajson` — the JSON Schema for the LLM's structured output (REQUIRED for `AiCompletion`)
+- `sprk_temperature` — the LLM temperature override
 
-If the same action serves multiple configurations (e.g., different jurisdictions), use `{{paramName}}` placeholders in instruction fields. Document expected parameters in `metadata.description`.
+The Action does **not** carry dispatch information. The legacy `sprk_actiontypeid` FK was dropped in R7 (FR-03/FR-04); the maker-facing `sprk_analysisactiontype` lookup table is preserved as decorative metadata only (FR-05).
 
-### Step 5: Add Examples
+**If you pick a pure executor** (e.g., `Condition`, `Start`, `DeliverOutput`, `LookupUserMembership`), skip this step. Leave `node.sprk_actionid` null — the executor's `Validate` will reject an unexpected Action FK on pure executors (or simply ignore it).
 
-Include 1-3 few-shot examples for complex output formats. Examples should cover edge cases and match `output.fields` names exactly.
-
-### Step 6: Validate JSON
-
-See the [Validation Checklist](#12-validation-checklist) below.
-
-### Step 7: Seed to Dataverse
+To author a new Action JPS, follow the section-by-section schema reference in [§4 Section Reference](#4-section-reference) and [§5 Features Deep Dive](#5-features-deep-dive). The `jps-action-create` skill automates the seed step:
 
 ```powershell
-# Dry run — preview changes without writing
-.\scripts\Seed-JpsActions.ps1 -WhatIf
-
-# Seed with backup of existing prompts
-.\scripts\Seed-JpsActions.ps1 -BackupPath ./backups
-
-# Seed specific environment
-.\scripts\Seed-JpsActions.ps1 -Environment test
-
-# Seed with explicit token (CI/CD)
-.\scripts\Seed-JpsActions.ps1 -Environment prod -Token "eyJ0eXAi..."
+# Invoke via Claude Code
+/jps-action-create
 ```
 
-JPS JSON files are stored in `projects/*/notes/jps-conversions/` and mapped to Action records by `sprk_name`.
+### Step 3 — Configure the Node
 
-### Step 8: Test End-to-End
+Per FR-16 (Wave 3), every executor now declares a typed `ExecutorConfigSchema` via `INodeExecutor.GetConfigSchema()`. That schema is the contract for `node.sprk_configjson`. The schema enumerates the fields the executor will read at runtime — required vs optional, types, descriptions, defaults, enum values.
 
-1. Trigger the playbook containing the action
-2. Verify format detection selects the JPS path (check logs for `PromptSchemaRenderer`)
-3. Verify structured output matches the expected JSON Schema
-4. Verify scope resolution succeeded (check for missing `$ref` warnings)
-5. Test with template parameters if applicable
--->
+The Playbook Builder UI in R7 Wave 8 (in flight) renders the right input controls for an executor based on its declared schema. While building manually, consult the executor's source for the schema. Common fields by executor family:
+
+| Executor family | Common `configJson` fields |
+|---|---|
+| `AiAnalysis` (0) | `templateParameters`, `promptSchemaOverride`, `knowledgeRetrieval`, `includeDocumentContext`, `parentEntityType`, `parentEntityId` |
+| `AiCompletion` (1) | `templateParameters`, `promptSchemaOverride` |
+| `Condition` (30) | `condition` (required), `trueBranch`, `falseBranch` |
+| `EntityNameValidator` (141) | `candidateText` (required), `allowList` (required) |
+| `CreateNotification` (50) | `title` (required), `body` (required), `recipient`, `category`, `priority`, `toastType`, `actionUrl`, `dueDate`, + 8 enrichment fields |
+
+The full schema for each executor lives on the executor class. There is **no** `__actionType` injection — that name-detection hack is removed in R7 (FR-08).
+
+### Step 4 — Test + Deploy via Deploy-Playbook.ps1
+
+The standard deploy path is the `Deploy-Playbook.ps1` script + a JSON definition file. The R7 script writes `sprk_executortype` explicitly per node (no name-detection inference). Full recipe lives at [`docs/guides/ai-guide-playbook-deploy-recipe.md`](ai-guide-playbook-deploy-recipe.md).
+
+```powershell
+# Preview deployment without writing
+.\scripts\Deploy-Playbook.ps1 -DefinitionFile "my-playbook.json" -DryRun
+
+# Deploy to current environment
+.\scripts\Deploy-Playbook.ps1 -DefinitionFile "my-playbook.json"
+```
+
+The definition file's per-node `sprk_executortype` field is the source of truth — it maps 1:1 to the `node.sprk_executortype` column at runtime. For end-to-end JPS Action authoring (including the `Seed-JpsActions.ps1` flow), see the [`jps-action-create`](../../.claude/skills/jps-action-create/SKILL.md) skill.
 
 ---
 
-## 7. Playbook Design Patterns
+## 7. Worked Examples (node-first)
 
-### Simple Action (Single Node, No Routing)
+### Example A — AiCompletion node (prompt-driven, no tools)
 
-A standalone classification or extraction action. One node reads a document, produces structured output, and writes to Dataverse.
+**Use case**: a "narrate-briefing" node that takes pre-computed structured data and renders it as a short narrative paragraph via raw LLM completion (no tools, no document context). Closes the R4 graduation gate per FR-12 + FR-15.
+
+**Step 1 — Pick the executor**: `AiCompletion` (executor type `1`). Pure prompt → structured output, no tool calls.
+
+**Step 2 — Author the Action** (`BRIEF-NARRATE-TLDR` row in `sprk_analysisaction`):
+
+```json
+// sprk_systemprompt (JPS)
+{
+  "$schema": "https://spaarke.com/schemas/prompt/v1",
+  "$version": 1,
+  "instruction": {
+    "role": "You are a concise legal-briefing narrator.",
+    "task": "Compose a single-paragraph TL;DR for the briefing using the provided structured facts.",
+    "constraints": [
+      "Maximum 3 sentences",
+      "Plain language; no jargon",
+      "Open with the most material change"
+    ]
+  },
+  "output": {
+    "structuredOutput": true,
+    "fields": [
+      { "name": "narrative", "type": "string", "description": "The TL;DR narrative paragraph.", "maxLength": 600 }
+    ]
+  },
+  "metadata": {
+    "author": "r7-wave-1",
+    "authorLevel": 1,
+    "createdAt": "2026-06-28T00:00:00Z",
+    "description": "Daily-briefing TL;DR narrator (AiCompletion).",
+    "tags": ["narrate", "briefing", "ai-completion"]
+  }
+}
+
+// sprk_outputschemajson (carried by Action row — REQUIRED for AiCompletion)
+{ "type": "object", "properties": { "narrative": { "type": "string", "maxLength": 600 } }, "required": ["narrative"], "additionalProperties": false }
+```
+
+**Step 3 — Node config** (`sprk_playbooknode` row):
+
+```jsonc
+{
+  "sprk_executortype": 1,                          // AiCompletion — DRIVES DISPATCH
+  "sprk_actionid": "{guid-of-BRIEF-NARRATE-TLDR}", // payload only (prompt + schema)
+  "sprk_outputvariable": "tldrNarrative",
+  "sprk_configjson": {
+    "templateParameters": {
+      "facts": "{{upstream.briefingFacts}}"
+    }
+  }
+}
+```
+
+**Step 4 — Deploy**: `Deploy-Playbook.ps1 -DefinitionFile daily-briefing-narrate.json`. Verify via Daily Briefing widget UAT in spaarkedev1.
+
+### Example B — Condition node (pure executor, no Action FK)
+
+**Use case**: a routing node that picks one of two downstream branches based on whether the document is a contract.
+
+**Step 1 — Pick the executor**: `Condition` (executor type `30`). Pure executor — no LLM, no Action FK.
+
+**Step 2 — Choose Action**: SKIP. Pure executors do not carry a prompt template.
+
+**Step 3 — Node config**:
+
+```jsonc
+{
+  "sprk_executortype": 30,                  // Condition — DRIVES DISPATCH
+  "sprk_actionid": null,                    // no Action FK for pure executors
+  "sprk_outputvariable": "branchTaken",
+  "sprk_configjson": {
+    "condition": "{{upstream.documentType}} == 'contract'",
+    "trueBranch": "contract-review-node",
+    "falseBranch": "general-filing-node"
+  }
+}
+```
+
+**Step 4 — Deploy**: `Deploy-Playbook.ps1`. The orchestrator reads `sprk_executortype = 30`, the registry resolves `ConditionNodeExecutor`, the executor reads `condition` / `trueBranch` / `falseBranch` from `configJson` per its declared schema, evaluates the expression, and writes the branch name to `NodeOutput.OutputVariable`. No JPS pipeline is invoked.
+
+### Example C — AiAnalysis node (prompt-driven, with tools + document context)
+
+**Use case**: a contract-review node that runs deep clause analysis over a SharePoint Embedded document, with tool-augmented retrieval against a knowledge corpus. This is the historical primary use case preserved in R7.
+
+**Step 1 — Pick the executor**: `AiAnalysis` (executor type `0`). Tool-augmented LLM with document context.
+
+**Step 2 — Author/choose the Action** (`CONTRACT-REVIEW` row):
+
+```json
+// sprk_systemprompt (JPS)
+{
+  "$schema": "https://spaarke.com/schemas/prompt/v1",
+  "$version": 1,
+  "instruction": {
+    "role": "You are a commercial-contract review specialist.",
+    "task": "Extract key clauses, flag risks, and produce an executive summary.",
+    "context": "Runs against an uploaded contract document. Results are written to the matter record.",
+    "constraints": [
+      "Cite section + page for every risk flag",
+      "Use [RISK: HIGH/MEDIUM/LOW] markers consistently",
+      "Limit summary to 5 bullets"
+    ]
+  },
+  "input": {
+    "document": {
+      "required": true,
+      "maxLength": 100000,
+      "placeholder": "{{document.extractedText}}"
+    }
+  },
+  "scopes": {
+    "$knowledge": [
+      { "$ref": "knowledge:red-flags-catalog", "as": "reference" }
+    ],
+    "$skills": [
+      { "$ref": "skill:citation-extraction" },
+      { "$ref": "skill:risk-flagging" }
+    ]
+  },
+  "output": {
+    "structuredOutput": true,
+    "fields": [
+      { "name": "summary", "type": "string", "description": "Executive summary (max 5 bullets).", "maxLength": 2000 },
+      { "name": "risks", "type": "array", "description": "Risk findings.", "items": { "type": "object" } },
+      { "name": "routingDecision", "type": "string", "description": "Which downstream review path.", "enum": ["$choices"] }
+    ]
+  },
+  "metadata": { "author": "migration", "authorLevel": 0, "createdAt": "2026-03-04T00:00:00Z", "description": "Commercial contract review.", "tags": ["contract", "ai-analysis"] }
+}
+```
+
+**Step 3 — Node config**:
+
+```jsonc
+{
+  "sprk_executortype": 0,                          // AiAnalysis — DRIVES DISPATCH
+  "sprk_actionid": "{guid-of-CONTRACT-REVIEW}",    // payload (prompt + schema + scopes)
+  "sprk_outputvariable": "contractAnalysis",
+  "sprk_configjson": {
+    "includeDocumentContext": true,
+    "parentEntityType": "sprk_matter",
+    "parentEntityId": "{{trigger.matterId}}",
+    "templateParameters": { "jurisdiction": "Delaware" },
+    "knowledgeRetrieval": { "topK": 8 }
+  }
+}
+```
+
+**Step 4 — Deploy**: `Deploy-Playbook.ps1`. The orchestrator dispatches to `AiAnalysisNodeExecutor`, which loads the Action JPS, merges any `promptSchemaOverride` from configJson, substitutes `{{jurisdiction}}`, resolves scopes, runs tool calls against retrieved knowledge, and emits structured output bound to `contractAnalysis`.
+
+---
+
+## 8. Playbook Design Patterns
+
+The four-step authoring flow composes into reusable patterns. The pattern is named by **which executor types its nodes use** — not by which Action is referenced.
+
+### Simple Analysis (Single AiAnalysis Node)
+
+A standalone classification or extraction node. One `AiAnalysis` node reads a document, produces structured output, and writes to Dataverse via a downstream `UpdateRecord` (`ExecutorType = 22`) or terminal `DeliverOutput` (`ExecutorType = 40`).
 
 ```
-[Document Upload] --> [AI Analysis Node] --> [Update Record]
+[Start (33)] --> [AiAnalysis (0)] --> [UpdateRecord (22)]
 ```
 
-JPS features used: `instruction`, `output` with `structuredOutput: true`, optional `examples`.
+### Classification + Conditional Routing
 
-### Classification + Routing
-
-A classifier node uses `$choices` to route to specialized downstream nodes based on document type or content.
+An `AiAnalysis` classifier node emits a routing field via `$choices`, then a `Condition` executor (`ExecutorType = 30`) selects the downstream branch.
 
 ```
-[Document] --> [Classifier Node] --> $choices --> [Path A: Contract Review]
-                                              --> [Path B: Invoice Processing]
-                                              --> [Path C: General Filing]
+[Start] --> [AiAnalysis (0): classifier] --> [Condition (30)] --+--> [Contract Review path]
+                                                                |--> [Invoice Processing path]
+                                                                +--> [General Filing path]
 ```
-
-JPS features used: `output.fields` with `"enum": ["$choices"]`, `structuredOutput: true`.
 
 ### Multi-Document Comparison
 
-A comparison handler receives multiple document texts via `input.priorOutputs` and produces a comparative analysis.
+Two parallel `AiAnalysis` nodes feed a third `AiAnalysis` or `AiCompletion` comparison node via `input.priorOutputs`.
 
 ```
-[Doc A Analysis] --+
-                    +--> [Comparison Node] --> [Summary Record]
-[Doc B Analysis] --+
+[Doc A: AiAnalysis (0)] --+
+                           +--> [Comparison: AiCompletion (1)] --> [DeliverOutput (40)]
+[Doc B: AiAnalysis (0)] --+
 ```
-
-JPS features used: `input.priorOutputs` for upstream dependencies, template parameters for comparison criteria.
 
 ### RAG-Augmented Analysis
 
-An action that combines document text with retrieved knowledge scopes for domain-specific analysis.
+An `AiAnalysis` node combines document text with retrieved knowledge scopes for domain-specific analysis. Use `scopes.$knowledge` with `$ref` for domain knowledge plus `as` labels for section organization.
+
+### Insights Synthesis (evidence-gated)
+
+The Insights pattern uses `IndexRetrieve` (90) to fetch artifacts, `EvidenceSufficiency` (100) to gate, `AiCompletion` (1) to synthesize, and `ReturnInsightArtifact` (120) to emit.
 
 ```
-[Document] --> [AI Node + $knowledge refs] --> [Structured Output]
+[IndexRetrieve (90)] --> [EvidenceSufficiency (100)] --+--> [AiCompletion (1): synth] --> [ReturnInsightArtifact (120)]
+                                                       |
+                                                       +--> [DeclineToFind (110)]
 ```
 
-JPS features used: `scopes.$knowledge` with `$ref` for domain knowledge, `as` labels for section organization.
+### Notification-On-Completion
 
-### Template Parameter Patterns
+Any analysis pattern can fork into a `CreateNotification` (`ExecutorType = 50`) terminal branch alongside the main delivery path.
 
-One Action definition serves multiple use cases via `templateParameters` in each consuming node's `ConfigJson`:
+### Template Parameter Reuse
+
+One Action definition (Step 2) serves multiple use cases via `templateParameters` in each consuming node's `configJson` (Step 3):
 
 ```
 Shared Action: "Analyze under {{jurisdiction}} law with {{depth}} depth"
   |
-  +-- Node A: { "templateParameters": { "jurisdiction": "Delaware", "depth": "comprehensive" } }
-  +-- Node B: { "templateParameters": { "jurisdiction": "California", "depth": "summary" } }
+  +-- Node A (AiAnalysis, executorType=0): { templateParameters: { jurisdiction: "Delaware", depth: "comprehensive" } }
+  +-- Node B (AiAnalysis, executorType=0): { templateParameters: { jurisdiction: "California", depth: "summary" } }
 ```
 
 ---
 
-## 8. Examples
+## 9. JPS Schema Examples (full files)
+
+The three node-first worked examples in §7 show the per-node decisions. The full JPS Action JSON files below show the schema in detail — useful as starter templates for new Action authoring.
 
 ### Example: Simple Classification Action
 
@@ -851,86 +1026,7 @@ An action designed for form pre-fill workflows with Dataverse lookup constraints
 
 ---
 
-## 9. Migration Guide (Hardcoded to JPS) — REDIRECT
-
-> **Moved 2026-06-26 (R4 canonical-truth loop)**: the migration procedure (assessment, conversion steps, strategies, testing) was a one-time R1/R2 migration aid and is no longer canonical. Recover from git history if needed for historical context. New JPS Actions are created via [`jps-action-create`](../../.claude/skills/jps-action-create/SKILL.md) skill, not via migration from flat text.
-
-<!-- ORIGINAL CONTENT STRIPPED: migration recipe consolidated into git history (R4 canonical-truth loop, 2026-06-26).
-
-### Assessment Checklist (HISTORICAL)
-
-Migrate a handler when:
-- [ ] Handler has a hardcoded prompt string > 200 characters
-- [ ] Prompt logic is reusable across multiple actions or nodes
-- [ ] Handler needs structured output that maps to Dataverse columns
-- [ ] Non-developers need to edit the prompt content
-- [ ] Handler has no custom pre/post-processing logic beyond prompt construction
-
-### Conversion Steps
-
-1. **Extract prompt**: Copy the hardcoded prompt text from the handler
-2. **Create JPS**: Structure the text into `instruction`, `output`, and other sections
-3. **Add dual-path**: Implement the JPS/legacy check in the handler (see Section 2)
-4. **Seed to Dataverse**: Run `Seed-JpsActions.ps1` to populate the Action record
-5. **Test**: Verify both paths produce equivalent results
-6. **Deprecate legacy**: After validation, remove the legacy code path
-
-### Migration Strategies
-
-| Strategy | When to Use |
-|----------|-------------|
-| **Consolidated** | No custom logic — remove handler; `GenericAnalysisHandler` serves via JPS |
-| **Thin Wrapper** | Has custom pre/post-processing — retain handler with dual-path |
-
-### Testing Strategy
-
-Run both paths against the same input. Compare output field-by-field, verify enum values and routing, check edge cases (empty/long/ambiguous documents), and disable flat-text fallback in test to verify JPS parsing.
-
----
-
-## 10. Deployment
-
-### BFF API Deployment
-
-```powershell
-# Deploy BFF API to Azure App Service
-.\scripts\Deploy-BffApi.ps1
-```
-
-The BFF API contains all JPS pipeline components (`PromptSchemaRenderer`, `JpsRefResolver`, `PromptSchemaOverrideMerger`). Any changes to these classes require a BFF deployment.
-
-### Dataverse Seeding
-
-```powershell
-# Dry run — preview which records will be updated
-.\scripts\Seed-JpsActions.ps1 -WhatIf
-
-# Seed with backup of existing prompts
-.\scripts\Seed-JpsActions.ps1 -BackupPath ./backups
-
-# Seed specific environment
-.\scripts\Seed-JpsActions.ps1 -Environment test
-
-# Seed with explicit token (CI/CD)
-.\scripts\Seed-JpsActions.ps1 -Environment prod -Token "eyJ0eXAi..."
-```
-
-### Verification
-
-1. Query `sprk_analysisactions` for records with `sprk_systemprompt` starting with `{`
-2. Trigger a playbook and check logs for JPS path selection
-3. Verify scope resolution succeeded (check for missing `$ref` warnings)
-
-### Rollback
-
-Restore from backup files (`-BackupPath`), re-seed from git history, or remove JPS from the record (dual-path falls back to flat text automatically).
--->
-
-> **§10 (Deployment) moved 2026-06-26 (R4 canonical-truth loop)**: BFF API deployment + Dataverse seeding + verification + rollback procedures are now canonicalised in [`ai-guide-playbook-deploy-recipe.md`](ai-guide-playbook-deploy-recipe.md) (for `Deploy-Playbook.ps1` flow) and [`.claude/skills/bff-deploy/SKILL.md`](../../.claude/skills/bff-deploy/SKILL.md) (for BFF deploy). `Seed-JpsActions.ps1` invocation lives in [`.claude/skills/jps-action-create/SKILL.md`](../../.claude/skills/jps-action-create/SKILL.md) Step 7.
-
----
-
-## 11. Best Practices
+## 10. Best Practices
 
 ### Prompt Design
 
@@ -966,33 +1062,52 @@ Restore from backup files (`-BackupPath`), re-seed from git history, or remove J
 
 ---
 
-## 12. Validation Checklist
+## 11. Validation Checklist
 
-Before deploying a new JPS definition:
+Before deploying a new JPS Action + node:
 
+**Node-level (per FR-07 / FR-19):**
+- [ ] `node.sprk_executortype` is set to a non-null integer matching a value in the `sprk_playbookexecutortype` Choice set (33 values)
+- [ ] For prompt-driven executors (`AiAnalysis`=0, `AiCompletion`=1, `AiEmbedding`=2): `node.sprk_actionid` is set to a valid Action row
+- [ ] For pure executors (`Condition`=30, `Start`=33, `DeliverOutput`=40, etc.): `node.sprk_actionid` is null or omitted
+- [ ] `node.sprk_configjson` matches the executor's declared `ExecutorConfigSchema` (FR-16) — required fields present, types correct
+
+**Action / JPS-level:**
 - [ ] `$schema` is `"https://spaarke.com/schemas/prompt/v1"` and `$version` is `1`
 - [ ] `instruction` has at least `role` and `task`
 - [ ] All `output.fields` have `name`, `type`, and `description`
+- [ ] For `AiCompletion`: `sprk_outputschemajson` is set on the Action row (REQUIRED — executor `Validate` rejects null per FR-13)
 - [ ] `enum` values are lowercase if used for Dataverse option sets
 - [ ] `$ref` names match existing Dataverse records
 - [ ] Template parameters have corresponding `templateParameters` in consuming nodes
 - [ ] `metadata` includes `description` and `tags`
 - [ ] No actual production prompt content in documentation or logs (ADR-015)
-- [ ] Test with flat-text fallback disabled to verify JPS parsing
 
 ---
 
-## 13. Troubleshooting
+## 12. Troubleshooting
 
-### Format Detection Issues
+### Dispatch Issues (R7 single-hop)
 
-**Symptom**: JPS JSON is treated as flat text.
+**Symptom**: node fails with `InvalidConfiguration` citing missing executor type, OR node dispatches to the wrong executor.
 
 | Cause | Fix |
 |-------|-----|
-| JSON does not start with `{` (leading whitespace after BOM) | Ensure `sprk_systemprompt` has no BOM or leading non-`{` characters |
+| `node.sprk_executortype` is null (FR-19 backfill missed this node) | Set the column to the correct Choice value. Per R7, dispatch is single-hop and the orchestrator throws a clear error rather than falling back. |
+| Wrong executor type value | Verify the integer matches an `ExecutorType` enum value (see `INodeExecutor.cs`). The `sprk_playbookexecutortype` Choice set is the source of truth. |
+| Deploy script wrote `__actionType` instead of `sprk_executortype` | Re-deploy with the R7 `Deploy-Playbook.ps1` (Wave 5 task 055 update). The name-detection workaround was removed; the script writes `sprk_executortype` explicitly. |
+| Prompt-driven executor missing Action FK | Set `node.sprk_actionid`. The executor's `Validate` rejects null Action FK for prompt-driven executors per FR-13. |
+| Pure executor rejecting unexpected Action FK | Remove `node.sprk_actionid` (set to null). Pure executors (Condition, Start, etc.) do not consume a prompt template. |
+
+### JPS Parsing Issues
+
+**Symptom**: executor fails with JPS parse error or rendered prompt is empty.
+
+| Cause | Fix |
+|-------|-----|
 | `$schema` property missing or misspelled | Verify `"$schema": "https://spaarke.com/schemas/prompt/v1"` is present |
 | JSON parse failure (malformed) | Validate JSON syntax; check for trailing commas in strict parsers |
+| Leading BOM or whitespace before `{` | Re-save `sprk_systemprompt` without BOM |
 
 ### Scope Resolution Failures
 
@@ -1055,9 +1170,29 @@ Before deploying a new JPS definition:
 
 | Document | Purpose |
 |----------|---------|
-| [Scope Configuration Guide](SCOPE-CONFIGURATION-GUIDE.md) | Creating Tools, Skills, Knowledge, and Action records in Dataverse; builder UI; pre-fill integration |
-| [AI Architecture](../architecture/AI-ARCHITECTURE.md) | Full platform architecture, JPS pipeline internals |
-| [Playbook Architecture](../architecture/playbook-architecture.md) | Playbook internals, node executors, execution engine |
+| [PLAYBOOK-AUTHOR-GUIDE.md](PLAYBOOK-AUTHOR-GUIDE.md) | Sibling guide for authoring whole playbooks (graph + nodes + edges) with the node-first model |
+| [ai-guide-playbook-deploy-recipe.md](ai-guide-playbook-deploy-recipe.md) | `Deploy-Playbook.ps1` definition file format + 12-step deploy procedure |
+| [AI Architecture](../architecture/AI-ARCHITECTURE.md) | Full platform architecture |
+| [Actions/Nodes/Scopes Boundary](../architecture/ai-architecture-actions-nodes-scopes.md) | Four-Home decision tree + ExecutorType allocation policy |
+| [Playbook Runtime](../architecture/ai-architecture-playbook-runtime.md) | Single-hop dispatch, executor catalog, runtime contract |
+| [Scope Configuration Guide](SCOPE-CONFIGURATION-GUIDE.md) | Creating Tools, Skills, Knowledge, and Action records in Dataverse |
+| [`.claude/constraints/bff-extensions.md`](../../.claude/constraints/bff-extensions.md) §G | BFF Hygiene — binding pre-merge checklist for any BFF-touching change |
+| [`.claude/skills/jps-action-create/SKILL.md`](../../.claude/skills/jps-action-create/SKILL.md) | Skill — generate a new JPS Action JSON + seed it to Dataverse |
+| [`.claude/skills/jps-playbook-design/SKILL.md`](../../.claude/skills/jps-playbook-design/SKILL.md) | Skill — design + deploy a complete playbook end-to-end |
+| [`.claude/skills/jps-validate/SKILL.md`](../../.claude/skills/jps-validate/SKILL.md) | Skill — validate a JPS JSON file against schema and test rendering |
+
+### Spec FR References (R7)
+
+| FR | Relevance |
+|---|---|
+| FR-07 | Single-hop dispatch on `node.sprk_executortype` — the foundation of node-first authoring |
+| FR-08 / FR-09 | Removal of structural fallback ladder + Action override branch — no more dispatch via name detection |
+| FR-10 | C# enum renamed `ActionType` → `ExecutorType` (and `SupportedActionTypes` → `SupportedExecutorTypes`) |
+| FR-12 / FR-13 | `AiCompletionNodeExecutor` build + Validate contract (Action FK + JPS REQUIRED; no Tool) |
+| FR-16 | Typed `ExecutorConfigSchema` per executor — the contract for `node.sprk_configjson` |
+| FR-19 | Every existing node row must have `sprk_executortype` populated (backfill) |
+| FR-30 | This guide rewrite |
+| NFR-08 | Documentation discipline (DELETE / UPDATE in place — no SUPERSEDED markers) |
 
 ### ADR References
 
@@ -1083,328 +1218,12 @@ All paths relative to `src/server/api/Sprk.Bff.Api/`:
 
 ---
 
-## 14. Designing Playbooks with Claude Code — REDIRECT
+## 13. Designing Whole Playbooks (pointer)
 
-> **Moved 2026-06-26 (R4 canonical-truth loop)**: end-to-end playbook design via Claude Code lives in the [`jps-playbook-design`](../../.claude/skills/jps-playbook-design/SKILL.md) skill (13-step orchestrator including scope catalog lookup + Dataverse cross-check + `Deploy-Playbook.ps1` invocation). The skill is the procedural source-of-truth.
->
-> For scope catalog (Actions / Skills / Knowledge / Tools), use `/jps-scope-refresh` to view current catalog from `.claude/catalogs/scope-model-index.json` — do NOT consult an inline catalog (manual sync drift). For model selection (gpt-4o-mini vs gpt-4o), see [`ai-guide-model-selection.md`](AI-MODEL-SELECTION-GUIDE.md) (when present) or the model decision matrix inside `jps-playbook-design` skill Step 5. For Output node types, see [`../architecture/ai-architecture-playbook-runtime.md`](../architecture/ai-architecture-playbook-runtime.md) §9 (NodeType vs ActionType axes) and [`../architecture/ai-architecture-actions-nodes-scopes.md`](../architecture/ai-architecture-actions-nodes-scopes.md) (config-bag boundary). For new scope primitives, see [`../../.claude/skills/jps-action-create/SKILL.md`](../../.claude/skills/jps-action-create/SKILL.md). For definition file format + troubleshooting + deployment, see [`ai-guide-playbook-deploy-recipe.md`](ai-guide-playbook-deploy-recipe.md).
+Authoring a single node + Action is scoped above (§§6, 7, 9). For end-to-end playbook design — multi-node graphs, scope-catalog lookup, model selection, deploy verification — invoke the [`jps-playbook-design`](../../.claude/skills/jps-playbook-design/SKILL.md) skill. The sibling [`PLAYBOOK-AUTHOR-GUIDE.md`](PLAYBOOK-AUTHOR-GUIDE.md) covers playbook-level authoring; it uses the same node-first model documented above.
 
-<!-- ORIGINAL §14 CONTENT STRIPPED 2026-06-26 (R4 canonical-truth loop): this section originally inlined ~300 lines of skill-procedure content (Quick Start, How Claude Code Designs Playbooks, Scope Catalog (8 ACT codes + 10 SKL + 10 KNW + 8 TL), Model Selection, Output Node Types, Creating New Scope Primitives, Definition File Format, Troubleshooting Deployment) that drift relative to the live skill body + scope-model-index.json. The skill bodies are canonical; the inline catalog was a manual sync risk per docs survey §3 Cluster D6. Recover via git history if needed.
-
-### Quick Start (HISTORICAL — see skill instead)
-
-#### Option 1: Natural Language (Recommended)
-
-Tell Claude Code what you need in plain English:
-
-```
-I need a playbook that reviews commercial lease agreements.
-It should extract key dates, financial terms, and obligations,
-then flag any non-standard clauses and produce an executive summary.
-```
-
-Claude Code will:
-1. Design a node graph based on your description
-2. Select the right analysis actions, skills, knowledge, and tools from the scope catalog
-3. Choose the optimal AI model for each node (gpt-4o for deep analysis, gpt-4o-mini for triage)
-4. Ask you to confirm the design
-5. Generate the playbook definition
-6. Deploy everything to Dataverse
-7. Verify it appears in the Playbook Builder canvas
-
-#### Option 2: Slash Command
-
-```
-/jps-playbook-design
-```
-
-This invokes the structured 13-step workflow with prompts at each decision point.
-
-#### Option 3: Definition File (Advanced)
-
-Write a playbook definition JSON directly and deploy with:
-
-```powershell
-.\scripts\Deploy-Playbook.ps1 -DefinitionFile "path/to/my-playbook.json"
-```
-
-### How Claude Code Designs Playbooks
-
-```
-YOU                          CLAUDE CODE                    DATAVERSE
- │                              │                              │
- │  Describe your playbook      │                              │
- │ ───────────────────────────► │                              │
- │                              │  1. Load scope catalog       │
- │                              │  2. Design node graph        │
- │                              │  3. Select scopes & models   │
- │                              │                              │
- │  ◄─── "Here's my plan:      │                              │
- │        3 nodes, 5 skills,    │                              │
- │        estimated $3/1M tok"  │                              │
- │                              │                              │
- │  "Looks good, deploy it"     │                              │
- │ ───────────────────────────► │                              │
- │                              │  4. Generate definition JSON │
- │                              │  5. Run Deploy-Playbook.ps1  │
- │                              │ ────────────────────────────► │
- │                              │     Create playbook record   │
- │                              │     Create nodes             │
- │                              │     Link scopes (N:N)        │
- │                              │     Save canvas layout       │
- │  ◄─── "Deployed! Open in    │                              │
- │        Playbook Builder"     │                              │
-```
-
-### Scope Catalog
-
-#### Actions (ACT-*)
-
-The primary analysis instruction for a node. Each AI node uses exactly one action.
-
-| Code | Name | Best For |
-|------|------|----------|
-| ACT-001 | Contract Review | MSAs, PSAs, vendor agreements |
-| ACT-002 | NDA Analysis | NDAs, CDAs, confidentiality agreements |
-| ACT-003 | Lease Agreement Review | Commercial and residential leases |
-| ACT-004 | Invoice Processing | Vendor invoices, utility bills |
-| ACT-005 | SLA Analysis | Service level agreements |
-| ACT-006 | Employment Agreement Review | Offer letters, employment contracts |
-| ACT-007 | Statement of Work Analysis | SOWs, work orders |
-| ACT-008 | General Legal Document Review | Any legal document (catch-all) |
-
-#### Skills (SKL-*)
-
-Composable expertise that enriches the analysis. Each node can use multiple skills.
-
-| Code | Name | What It Adds |
-|------|------|-------------|
-| SKL-001 | Citation Extraction | Section and page citations for every claim |
-| SKL-002 | Risk Flagging | [RISK: HIGH/MEDIUM/LOW] annotations |
-| SKL-003 | Summary Generation | Executive summary in 3-5 bullets |
-| SKL-004 | Date Extraction | All dates normalized to ISO 8601 |
-| SKL-005 | Party Identification | Full legal names, roles, contacts |
-| SKL-006 | Obligation Mapping | Structured obligation table |
-| SKL-007 | Defined Terms | Alphabetical glossary of defined terms |
-| SKL-008 | Financial Terms | Monetary amounts, schedules, rates |
-| SKL-009 | Termination Analysis | Triggers, notice periods, consequences |
-| SKL-010 | Jurisdiction & Governing Law | Applicable law, dispute resolution |
-
-#### Knowledge Sources (KNW-*)
-
-Reference materials injected into the prompt for context.
-
-| Code | Name | Content |
-|------|------|---------|
-| KNW-001 | Contract Terms Glossary | 50+ standard term definitions |
-| KNW-002 | NDA Review Checklist | 20-item NDA checklist |
-| KNW-003 | Lease Standards | Commercial lease provisions |
-| KNW-004 | Invoice Processing Guide | AP rules and fraud indicators |
-| KNW-005 | SLA Metrics Reference | SLA/SLO/SLI definitions |
-| KNW-006 | Employment Law Reference | US employment fundamentals |
-| KNW-007 | IP Assignment Clause Library | Annotated IP clauses |
-| KNW-008 | Termination Provisions | Triggers, damages, survival |
-| KNW-009 | Jurisdiction Guide | Governing law, arbitration |
-| KNW-010 | Red Flags Catalog | 32 red flags across 10 categories |
-
-#### Tools (TL-*)
-
-Executable handlers that perform specific operations.
-
-| Code | Name | What It Does |
-|------|------|-------------|
-| TL-001 | DocumentSearch | Search knowledge base and document index |
-| TL-002 | AnalysisRetrieval | Retrieve prior analysis results |
-| TL-003 | KnowledgeRetrieval | Retrieve knowledge source content |
-| TL-004 | TextRefinement | AI-assisted text editing |
-| TL-005 | CitationExtractor | Extract citation references |
-| TL-006 | SummaryGenerator | Generate structured summaries |
-| TL-007 | RedFlagDetector | Detect risk/compliance issues |
-| TL-008 | PartyExtractor | Extract party information |
-
-### Model Selection
-
-Claude Code automatically selects the best AI model for each node:
-
-| Node Purpose | Model Selected | Why |
-|-------------|---------------|-----|
-| Document classification | gpt-4o-mini | Simple categorical decision — fast and cheap |
-| Document triage | gpt-4o-mini | Binary/bounded decision — speed matters |
-| Deep contract analysis | gpt-4o | Complex reasoning, nuanced interpretation |
-| Entity extraction | gpt-4o | Accuracy critical for structured output |
-| Simple summary (TL;DR) | gpt-4o-mini | Bullet summaries don't need depth |
-| Detailed summary with citations | gpt-4o | Cross-referencing requires full model |
-| Legal reasoning | gpt-4o | Interpretive analysis needs depth |
-| Financial calculation | gpt-4o | Multi-step computation needs accuracy |
-| Condition routing | gpt-4o-mini | Simple boolean evaluation |
-
-**Cost Impact**:
-
-| Strategy | Estimated Cost (per 1M tokens) |
-|----------|-------------------------------|
-| All gpt-4o | ~$7.50 |
-| Optimized (mix) | ~$3.00 |
-| All gpt-4o-mini | ~$0.45 |
-
-Claude Code will show you the estimated cost breakdown before deploying.
-
-### Output Node Types
-
-#### DeliverOutput (ActionType 40)
-
-The standard output node. Assembles results from upstream nodes into a structured output, optionally writing fields to the triggering Dataverse record via UpdateRecord-style field mappings.
-
-**When to use**: Displaying results in UI, writing analysis output back to the source record.
-
-#### DeliverToIndex (ActionType 41)
-
-Indexes upstream node results into Azure AI Search for semantic retrieval. Enqueues a `RagIndexing` background job via Service Bus — processing is asynchronous.
-
-**When to use**: Making playbook output searchable via Semantic Search. Common pattern: Document Profile playbooks that index document metadata for later retrieval.
-
-**Configuration**:
-
-| Property | Default | Description |
-|----------|---------|-------------|
-| `indexName` | `"knowledge"` | Target Azure AI Search index |
-| `indexSource` | `"document"` | Source type: `"document"` (full doc) or `"field"` (specific field) |
-
-**Design tip**: Use DeliverToIndex alongside DeliverOutput when you want both UI display AND search indexing. They can run in parallel as separate output branches.
-
-### Creating New Scope Primitives
-
-If your playbook needs a scope that doesn't exist yet:
-
-#### New Action
-
-Tell Claude Code: "I need a new action for analyzing insurance policies"
-
-Claude Code will:
-1. Run `/jps-action-create` to generate the JPS definition
-2. Add it to `Seed-JpsActions.ps1` and seed to Dataverse
-3. Add it to `scope-model-index.json`
-
-#### New Skill
-
-Tell Claude Code: "I need a skill for extracting coverage limits from insurance documents"
-
-Claude Code will:
-1. Create the prompt fragment content
-2. Add it to `Seed-AnalysisSkills.ps1` and update Dataverse
-3. Add it to `scope-model-index.json`
-
-#### New Knowledge Source
-
-Tell Claude Code: "I need a knowledge source with standard insurance policy terms"
-
-Claude Code will:
-1. Create the reference content
-2. Add it to `Seed-KnowledgeScopes.ps1` and seed to Dataverse
-3. Add it to `scope-model-index.json`
-
-After creating new scopes, refresh the index:
-
-```powershell
-# Regenerate scope-model-index.json from current Dataverse state
-.\scripts\Refresh-ScopeModelIndex.ps1 -Environment dev
-```
-
-This ensures Claude Code always has the latest scope catalog when designing playbooks.
-
-### Definition File Format
-
-For full control, write the definition JSON directly:
-
-```json
-{
-  "$schema": "https://spaarke.com/schemas/playbook-definition/v1",
-  "playbook": {
-    "name": "Custom Lease Review",
-    "description": "Three-stage lease analysis pipeline",
-    "isPublic": true,
-    "capabilities": ["analyze", "search"],
-    "scopes": {
-      "actions": ["ACT-003"],
-      "skills": ["SKL-003", "SKL-004", "SKL-005", "SKL-006", "SKL-008"],
-      "knowledge": ["KNW-003"],
-      "tools": ["TL-001", "TL-007"]
-    }
-  },
-  "nodes": [
-    {
-      "name": "Lease Profiler",
-      "actionCode": "ACT-003",
-      "nodeType": "AIAnalysis",
-      "outputVariable": "profile",
-      "model": "gpt-4o-mini",
-      "positionX": 100,
-      "positionY": 200,
-      "dependsOn": [],
-      "scopes": {
-        "skills": ["SKL-004", "SKL-005"],
-        "knowledge": [],
-        "tools": ["TL-001"]
-      }
-    },
-    {
-      "name": "Deep Clause Analysis",
-      "actionCode": "ACT-003",
-      "nodeType": "AIAnalysis",
-      "outputVariable": "analysis",
-      "model": "gpt-4o",
-      "positionX": 400,
-      "positionY": 200,
-      "dependsOn": ["Lease Profiler"],
-      "scopes": {
-        "skills": ["SKL-006", "SKL-008"],
-        "knowledge": ["KNW-003"],
-        "tools": ["TL-001", "TL-007"]
-      }
-    },
-    {
-      "name": "Executive Summary",
-      "actionCode": "ACT-003",
-      "nodeType": "AIAnalysis",
-      "outputVariable": "summary",
-      "model": "gpt-4o-mini",
-      "positionX": 700,
-      "positionY": 200,
-      "dependsOn": ["Deep Clause Analysis"],
-      "scopes": {
-        "skills": ["SKL-003"],
-        "knowledge": [],
-        "tools": ["TL-006"]
-      }
-    }
-  ],
-  "edges": [
-    { "source": "Lease Profiler", "target": "Deep Clause Analysis" },
-    { "source": "Deep Clause Analysis", "target": "Executive Summary" }
-  ]
-}
-```
-
-Deploy with:
-
-```powershell
-.\scripts\Deploy-Playbook.ps1 -DefinitionFile "my-lease-playbook.json"
-
-# Preview first without creating:
-.\scripts\Deploy-Playbook.ps1 -DefinitionFile "my-lease-playbook.json" -DryRun
-```
-
-### Troubleshooting Deployment
-
-| Issue | Cause | Fix |
-|-------|-------|-----|
-| "Scope code not found" during deploy | Code doesn't exist in Dataverse | Run the appropriate seed script first |
-| Nodes overlap on canvas | Default positions conflict | Edit positionX/Y in definition, or drag in canvas |
-| Playbook doesn't appear in canvas | Canvas layout JSON not saved | Re-run Deploy-Playbook.ps1 with the same definition |
-| Wrong model being used | Model deployment not found | Check `sprk_aimodeldeployments` in Dataverse |
-| Node scopes not linked | N:N association failed | Check script output for errors; verify relationship names |
--->
 
 ---
 
 *Document Owner: Spaarke Engineering*
-*Last Updated: 2026-04-05 (content); 2026-06-26 (R4 canonical-truth scope + dedup pass)*
+*Last Updated: 2026-06-28 (R7 node-first dispatch rewrite — Wave 6 task 065, spec FR-30); 2026-04-05 (v3 content)*

@@ -1,0 +1,157 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-028" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Update AnalysisActionService Action read path (no ActionType from lookup)</title>
+    <status>completed</status>
+    <wave>2</wave>
+    <estimated-effort>2 hours</estimated-effort>
+    <tags>bff-api, code-impl, wave-2</tags>
+    <rigor-level>FULL</rigor-level>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>024</dependencies>
+    <fr-coverage>FR-07 (cleanup), FR-03 (forward-prep)</fr-coverage>
+  </metadata>
+
+  <prompt>
+    `AnalysisActionService` currently reads an Action and projects an `ActionType` value derived from
+    `sprk_analysisaction.sprk_actiontypeid → sprk_analysisactiontype.sprk_executoractiontype`. Post-task 024, the
+    orchestrator no longer consumes that value (dispatch comes from `node.sprk_executortype`). This task removes
+    the projection from the Action read path so the service returns Action data without the dispatch derivative.
+    The Dataverse field DROP itself happens in Wave 4 (task 043/044) — this task just stops READING it.
+  </prompt>
+
+  <role>
+    Senior .NET backend developer. Simplification of a service read method.
+    Discipline: stop reading the dispatch-derived field; leave the column in Dataverse for Wave 4 to drop.
+  </role>
+
+  <goal>
+    `AnalysisActionService.GetActionAsync` (or equivalent read method) no longer reads or projects:
+    - `sprk_actiontypeid` lookup
+    - `sprk_executoractiontype` INT
+    The returned Action shape no longer contains an `ActionType` (or `ExecutorType`) field — those are now node-level concerns.
+    Action DTO simplifies to: prompt template + output schema + temperature (plus identity).
+    Build + tests pass.
+  </goal>
+
+  <inputs>
+    <file purpose="service">src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisActionService.cs</file>
+    <file purpose="orchestrator">src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookOrchestrationService.cs</file>
+    <file purpose="design-spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    <file purpose="bff-constraints">.claude/constraints/bff-extensions.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-010">DI Minimalism — service simplification; no new abstractions.</constraint>
+    <constraint source="ADR-013">BFF AI Architecture — Action is now strictly prompt + schema + temperature surface; dispatch is node-level.</constraint>
+    <constraint source="ADR-029">BFF Publish Hygiene — SHRINK expected (less code in service + smaller DTO).</constraint>
+    <constraint source="ADR-038">Testing Strategy — service tests are KEEP (real read-path behavior). Update assertions if they expected the old projection.</constraint>
+    <constraint source="spec FR-07">Action lookup chain no longer consulted in dispatch.</constraint>
+    <constraint source="spec FR-03 / FR-04">Wave 4 owns the Dataverse field DROP. This task only stops READING.</constraint>
+    <constraint source="CLAUDE.md §11">Modifies existing surface — justification triple NOT required.</constraint>
+    <constraint source="bff-extensions.md">Test obligation per §F — update AnalysisActionService tests.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff/action-read-path</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-013-bff-ai-architecture.md</file>
+      <file>docs/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/architecture/ai-architecture-playbook-runtime.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Pre-R7, the Action carried dispatch identity via `sprk_actiontypeid` lookup → `sprk_executoractiontype` INT.
+      Post-R7, the node carries dispatch via `sprk_executortype`. The Action is now strictly a prompt-template carrier
+      (SystemPrompt + OutputSchema + Temperature). This task simplifies the read path. Wave 4 drops the now-unused
+      Dataverse fields.
+    </background>
+    <dependencies>
+      <dependency task="024" status="must-be-complete">Orchestrator no longer reads Action.ActionType for dispatch.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 043 (Wave 4) drops `sprk_analysisaction.sprk_actiontypeid` from Dataverse.</item>
+      <item>Task 044 (Wave 4) drops `sprk_analysisaction.sprk_executoractiontype` INT.</item>
+      <item>Task 046 (Wave 4) finalizes AnalysisActionService changes (any leftover references to dropped fields).</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: FULL · 📋 REASON: code-impl in BFF; modifies service read path + tests; ADR-010+013+029+038 applicable; quality gates Step 9.5 required · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read CLAUDE.md + spec FR-07 + FR-03/04 + plan.md Wave 2 + bff-extensions.md.
+    </step>
+    <step order="2" name="Pre-baseline build + test">
+      `dotnet build` + `dotnet test`. Confirm green.
+    </step>
+    <step order="3" name="Read AnalysisActionService">
+      Open the service. Identify: read method (likely `GetActionAsync` or `LoadAction`); how it queries Dataverse; how it projects `ActionType` / `ExecutorType` from the lookup chain.
+    </step>
+    <step order="4" name="Identify Action DTO shape">
+      Find the DTO/record returned by the service. Note properties: SystemPrompt, OutputSchema, Temperature, identity. Identify the now-dead projection (`ActionType` or `ExecutorType` property derived from lookup).
+    </step>
+    <step order="5" name="Remove the projection">
+      Edit the read method to stop querying the lookup chain (`sprk_actiontypeid` + `sprk_executoractiontype`). Remove the projection from the DTO.
+      Note: leave the Dataverse query for SystemPrompt + OutputSchema + Temperature intact.
+    </step>
+    <step order="6" name="Remove DTO property if any">
+      If the Action DTO had an `ActionType` / `ExecutorType` property, remove it. Verify no callers in BFF still consume it (grep). Update any callers that did (likely none — task 024 already removed orchestrator's read).
+    </step>
+    <step order="7" name="Update service tests">
+      Open `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/AnalysisActionServiceTests.cs`. Remove assertions on `ActionType` projection. Tests KEEP per ADR-038 — still validate prompt/schema/temperature read path.
+    </step>
+    <step order="8" name="Build + test">
+      `dotnet build` + `dotnet test`. Green.
+    </step>
+    <step order="9" name="Verify acceptance">
+      Re-read service — confirm prompt/schema/temperature read remains, dispatch projection removed.
+    </step>
+    <step order="9.5" name="Quality gates (FULL rigor)">
+      Run `/code-review` on the diff. Run `/adr-check` against ADR-010 + ADR-013 + ADR-029 + ADR-038 + bff-extensions.md. Fix any findings.
+    </step>
+    <step order="10" name="Update current-task.md + TASK-INDEX">
+      Mark task 028 complete; advance current-task.md.
+    </step>
+    <step order="11" name="Commit">
+      `refactor(bff/r7): simplify AnalysisActionService read path (Wave 2 task 028, FR-07)`.
+      Body: cite FR-07; note Action DTO simplified to prompt+schema+temperature; Dataverse field drops follow in Wave 4.
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (service, DTO, tests)</tool>
+    <tool>Edit (AnalysisActionService.cs + tests)</tool>
+    <tool>Grep (find callers of removed DTO property)</tool>
+    <tool>Bash (dotnet build, dotnet test, git commit)</tool>
+    <tool>Skill (code-review at Step 9.5)</tool>
+    <tool>Skill (adr-check at Step 9.5)</tool>
+  </tools>
+
+  <outputs>
+    <output type="modified-file">src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisActionService.cs</output>
+    <output type="modified-file">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/AnalysisActionServiceTests.cs (assertions updated)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md (advance)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 028 ✅)</output>
+    <output type="commit">refactor(bff/r7): simplify AnalysisActionService read path (Wave 2 task 028, FR-07)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>AnalysisActionService no longer reads `sprk_actiontypeid` or `sprk_executoractiontype` from Dataverse</criterion>
+    <criterion>Action DTO no longer exposes a dispatch-axis property (`ActionType` / `ExecutorType`)</criterion>
+    <criterion>Service still reads SystemPrompt + OutputSchema + Temperature correctly</criterion>
+    <criterion>Service tests updated; assertions on dispatch projection removed</criterion>
+    <criterion>No callers in BFF reference the removed DTO property (grep zero hits)</criterion>
+    <criterion>dotnet build passes: 0 errors, 0 new warnings</criterion>
+    <criterion>dotnet test passes: full suite green</criterion>
+    <criterion>code-review + adr-check pass at Step 9.5</criterion>
+    <criterion>Commit pushed</criterion>
+  </acceptance-criteria>
+</task>

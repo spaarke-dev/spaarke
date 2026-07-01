@@ -1,6 +1,7 @@
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Logging;
+using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
 using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Models.Ai;
@@ -52,6 +53,10 @@ public class PlaybookOrchestrationServiceTests
             _scopeResolverMock.Object,
             _legacyOrchestratorMock.Object,
             _insightsRouterMock.Object,
+            // R7 Wave 11 task 111: ITemplateEngine injected for orchestrator-level
+            // {{X}} resolution via PlaybookTemplateContextBuilder. Use real Handlebars-backed
+            // engine — its behavior is well-tested by TemplateEngineTests.
+            new TemplateEngine(NullLogger<TemplateEngine>.Instance),
             _loggerMock.Object);
     }
 
@@ -75,7 +80,10 @@ public class PlaybookOrchestrationServiceTests
             ExecutionOrder = order,
             DependsOn = dependsOn,
             IsActive = true,
-            NodeType = NodeType.AIAnalysis
+            NodeType = NodeType.AIAnalysis,
+            // R7 task 024 (FR-07) — single-hop dispatch reads SprkExecutortype directly.
+            // Existing AI-analysis tests dispatch via AiAnalysis executor.
+            SprkExecutortype = ExecutorType.AiAnalysis
         };
 
     private static AnalysisAction CreateAction(Guid? id = null, string? name = null) => new()
@@ -155,7 +163,7 @@ public class PlaybookOrchestrationServiceTests
             .ReturnsAsync(NodeOutput.Ok(node.Id, node.OutputVariable, new { result = "test" }));
 
         _executorRegistryMock
-            .Setup(x => x.GetExecutor(ActionType.AiAnalysis))
+            .Setup(x => x.GetExecutor(ExecutorType.AiAnalysis))
             .Returns(mockExecutor.Object);
 
         // Act
@@ -283,7 +291,7 @@ public class PlaybookOrchestrationServiceTests
             });
 
         _executorRegistryMock
-            .Setup(x => x.GetExecutor(ActionType.AiAnalysis))
+            .Setup(x => x.GetExecutor(ExecutorType.AiAnalysis))
             .Returns(mockExecutor.Object);
 
         // Act
@@ -335,7 +343,7 @@ public class PlaybookOrchestrationServiceTests
                 NodeOutput.Error(ctx.Node.Id, ctx.Node.OutputVariable, "Execution failed"));
 
         _executorRegistryMock
-            .Setup(x => x.GetExecutor(ActionType.AiAnalysis))
+            .Setup(x => x.GetExecutor(ExecutorType.AiAnalysis))
             .Returns(mockExecutor.Object);
 
         // Act
@@ -418,7 +426,7 @@ public class PlaybookOrchestrationServiceTests
             .Returns(NodeValidationResult.Failure("Missing required field"));
 
         _executorRegistryMock
-            .Setup(x => x.GetExecutor(ActionType.AiAnalysis))
+            .Setup(x => x.GetExecutor(ExecutorType.AiAnalysis))
             .Returns(mockExecutor.Object);
 
         // Act
@@ -457,7 +465,7 @@ public class PlaybookOrchestrationServiceTests
 
         // No executor registered
         _executorRegistryMock
-            .Setup(x => x.GetExecutor(ActionType.AiAnalysis))
+            .Setup(x => x.GetExecutor(ExecutorType.AiAnalysis))
             .Returns((INodeExecutor?)null);
 
         // Act
@@ -531,7 +539,7 @@ public class PlaybookOrchestrationServiceTests
             });
 
         _executorRegistryMock
-            .Setup(x => x.GetExecutor(ActionType.AiAnalysis))
+            .Setup(x => x.GetExecutor(ExecutorType.AiAnalysis))
             .Returns(mockExecutor.Object);
 
         // Act
@@ -600,7 +608,7 @@ public class PlaybookOrchestrationServiceTests
             });
 
         _executorRegistryMock
-            .Setup(x => x.GetExecutor(ActionType.AiAnalysis))
+            .Setup(x => x.GetExecutor(ExecutorType.AiAnalysis))
             .Returns(mockExecutor.Object);
 
         // Act
@@ -672,7 +680,7 @@ public class PlaybookOrchestrationServiceTests
             });
 
         _executorRegistryMock
-            .Setup(x => x.GetExecutor(ActionType.AiAnalysis))
+            .Setup(x => x.GetExecutor(ExecutorType.AiAnalysis))
             .Returns(mockExecutor.Object);
 
         // Act
@@ -730,7 +738,7 @@ public class PlaybookOrchestrationServiceTests
             });
 
         _executorRegistryMock
-            .Setup(x => x.GetExecutor(ActionType.AiAnalysis))
+            .Setup(x => x.GetExecutor(ExecutorType.AiAnalysis))
             .Returns(mockExecutor.Object);
 
         // Act
@@ -1132,7 +1140,7 @@ public class PlaybookOrchestrationServiceTests
             .ReturnsAsync(NodeOutput.Ok(node.Id, node.OutputVariable, new { result = "test" }, "Test output", 0.95));
 
         _executorRegistryMock
-            .Setup(x => x.GetExecutor(ActionType.AiAnalysis))
+            .Setup(x => x.GetExecutor(ExecutorType.AiAnalysis))
             .Returns(mockExecutor.Object);
 
         // Execute to create a run
@@ -1202,7 +1210,7 @@ public class PlaybookOrchestrationServiceTests
             });
 
         _executorRegistryMock
-            .Setup(x => x.GetExecutor(ActionType.AiAnalysis))
+            .Setup(x => x.GetExecutor(ExecutorType.AiAnalysis))
             .Returns(mockExecutor.Object);
 
         // Execute to create a run
@@ -1333,7 +1341,7 @@ public class PlaybookOrchestrationServiceTests
             .ReturnsAsync(leakedOutput);
 
         _executorRegistryMock
-            .Setup(x => x.GetExecutor(ActionType.AiAnalysis))
+            .Setup(x => x.GetExecutor(ExecutorType.AiAnalysis))
             .Returns(mockExecutor.Object);
 
         // Act
@@ -1407,7 +1415,7 @@ public class PlaybookOrchestrationServiceTests
             .ReturnsAsync(cleanOutput);
 
         _executorRegistryMock
-            .Setup(x => x.GetExecutor(ActionType.AiAnalysis))
+            .Setup(x => x.GetExecutor(ExecutorType.AiAnalysis))
             .Returns(mockExecutor.Object);
 
         // Act
@@ -1472,7 +1480,7 @@ public class PlaybookOrchestrationServiceTests
             .ReturnsAsync(leakedOutput);
 
         _executorRegistryMock
-            .Setup(x => x.GetExecutor(ActionType.AiAnalysis))
+            .Setup(x => x.GetExecutor(ExecutorType.AiAnalysis))
             .Returns(mockExecutor.Object);
 
         // Act

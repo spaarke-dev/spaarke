@@ -548,7 +548,14 @@ public class NodeService : INodeService
 
     private static string GetSelectFields()
     {
-        return "sprk_playbooknodeid,sprk_name,sprk_nodetype,_sprk_playbookid_value,_sprk_actionid_value," +
+        // R7 Wave 2 task 024 (FR-07): sprk_executortype is the canonical single-hop dispatch source.
+        // R7 hotfix 2026-06-29: removed `sprk_nodetype` from the SELECT — that column was DROPPED
+        // from sprk_playbooknode pre-R7 as part of FR-02 schema cleanup. Leaving it in the
+        // $select caused every Dataverse query to return 400 Bad Request, which surfaced as the
+        // /narrate 503 "AI Service Unavailable" pinned to NodeService.GetNodesAsync line 89 in
+        // App Service logs. R7 dispatch worked end-to-end (routing + playbook execution); only
+        // the very first GetNodesAsync load step failed because of this stale column ref.
+        return "sprk_playbooknodeid,sprk_name,sprk_executortype,_sprk_playbookid_value,_sprk_actionid_value," +
                "_sprk_modeldeploymentid_value,sprk_executionorder,sprk_dependsonjson,sprk_outputvariable," +
                "sprk_conditionjson,sprk_configjson,sprk_timeoutseconds,sprk_retrycount," +
                "sprk_position_x,sprk_position_y,sprk_isactive,createdon,modifiedon";
@@ -598,6 +605,9 @@ public class NodeService : INodeService
             Id = entity.Id,
             PlaybookId = entity.PlaybookId ?? Guid.Empty,
             NodeType = (Nodes.NodeType)(entity.NodeType ?? (int)Nodes.NodeType.AIAnalysis),
+            // R7 Wave 2 task 024 (FR-07): single-hop dispatch reads sprk_executortype directly.
+            // Null indicates an unmigrated row (per FR-19, Wave 5 backfills all 94 production nodes).
+            SprkExecutortype = entity.ExecutorType.HasValue ? (Nodes.ExecutorType)entity.ExecutorType.Value : null,
             ActionId = entity.ActionId ?? Guid.Empty,
             ToolIds = toolIds,
             Name = entity.Name ?? string.Empty,
@@ -868,7 +878,12 @@ public class NodeService : INodeService
         var payload = new Dictionary<string, object?>
         {
             ["sprk_name"] = name,
-            ["sprk_nodetype"] = (int)nodeType,
+            // R7 hotfix 2026-06-29: write sprk_executortype (Choice) — the canonical
+            // single-hop dispatch field per FR-07/FR-26. Was previously writing to
+            // sprk_nodetype which was DROPPED from the schema pre-R7; that write
+            // would 400 on every node create. actionType (the int from
+            // MapCanvasTypeToActionType) IS the executor type value.
+            ["sprk_executortype"] = (int)actionType,
             ["sprk_playbookid@odata.bind"] = $"/sprk_analysisplaybooks({playbookId})",
             ["sprk_executionorder"] = executionOrder,
             ["sprk_outputvariable"] = outputVariable,
@@ -922,7 +937,9 @@ public class NodeService : INodeService
 
         var payload = new Dictionary<string, object?>
         {
-            ["sprk_nodetype"] = (int)nodeType,
+            // R7 hotfix 2026-06-29: write sprk_executortype (Choice) — same fix as
+            // CreateNodeAsync above. sprk_nodetype was dropped from the schema pre-R7.
+            ["sprk_executortype"] = (int)actionType,
             ["sprk_executionorder"] = executionOrder,
             ["sprk_configjson"] = configJson,
             ["sprk_position_x"] = (int)canvasNode.X,
@@ -984,38 +1001,38 @@ public class NodeService : INodeService
         "condition" or "parallel" or "wait" or "start" => NodeType.Control,
         // "lookupUserMembership" is a data-ops Workflow node — invokes
         // IMembershipResolverService in-process (R3 P5 / task 042; pairs with
-        // ActionType.LookupUserMembership = 52 + LookupUserMembershipNodeExecutor).
+        // ExecutorType.LookupUserMembership = 52 + LookupUserMembershipNodeExecutor).
         "createTask" or "sendEmail" or "updateRecord" or "callWebhook" or "sendTeamsMessage"
             or "lookupUserMembership" or "createNotification" => NodeType.Workflow,
         _ => NodeType.AIAnalysis // Default to AI for unknown types
     };
 
     /// <summary>
-    /// Maps canvas node type string to specific ActionType for executor dispatch.
+    /// Maps canvas node type string to specific ExecutorType for executor dispatch.
     /// Stored in ConfigJson so the orchestrator can dispatch structural nodes correctly.
     /// </summary>
-    private static ActionType MapCanvasTypeToActionType(string canvasType) => canvasType switch
+    private static ExecutorType MapCanvasTypeToActionType(string canvasType) => canvasType switch
     {
-        "start" => ActionType.Start,
-        "aiAnalysis" => ActionType.AiAnalysis,
-        "aiCompletion" => ActionType.AiCompletion,
-        "aiEmbedding" => ActionType.AiEmbedding,
-        "deliverOutput" => ActionType.DeliverOutput,
-        "deliverToIndex" => ActionType.DeliverToIndex,
+        "start" => ExecutorType.Start,
+        "aiAnalysis" => ExecutorType.AiAnalysis,
+        "aiCompletion" => ExecutorType.AiCompletion,
+        "aiEmbedding" => ExecutorType.AiEmbedding,
+        "deliverOutput" => ExecutorType.DeliverOutput,
+        "deliverToIndex" => ExecutorType.DeliverToIndex,
         // FR-52 / Phase 5R Wave 5-C task 114R: composite delivery — pairs with
         // DeliverCompositeNodeExecutor (registered in AnalysisServicesModule.cs).
-        "deliverComposite" => ActionType.DeliverComposite,
-        "condition" => ActionType.Condition,
-        "parallel" => ActionType.Parallel,
-        "wait" => ActionType.Wait,
-        "createTask" => ActionType.CreateTask,
-        "sendEmail" => ActionType.SendEmail,
-        "updateRecord" => ActionType.UpdateRecord,
-        "callWebhook" => ActionType.CallWebhook,
-        "sendTeamsMessage" => ActionType.SendTeamsMessage,
+        "deliverComposite" => ExecutorType.DeliverComposite,
+        "condition" => ExecutorType.Condition,
+        "parallel" => ExecutorType.Parallel,
+        "wait" => ExecutorType.Wait,
+        "createTask" => ExecutorType.CreateTask,
+        "sendEmail" => ExecutorType.SendEmail,
+        "updateRecord" => ExecutorType.UpdateRecord,
+        "callWebhook" => ExecutorType.CallWebhook,
+        "sendTeamsMessage" => ExecutorType.SendTeamsMessage,
         // R3 P5 / task 042 — pairs with LookupUserMembershipNodeExecutor (task 041)
         // and the client-side PlaybookNodeType.LookupUserMembership canvas string.
-        "lookupUserMembership" => ActionType.LookupUserMembership,
+        "lookupUserMembership" => ExecutorType.LookupUserMembership,
         // R3 P7.1 / task 065 — pre-existing drift discovered by the canvas-server mapping
         // drift integration test (FR-3H3.1 / AC-H3.1): the canvas has emitted
         // `createNotification` since R2 (with __actionType=50 baked into configJson client-side
@@ -1025,14 +1042,14 @@ public class NodeService : INodeService
         // client-driven sync path (playbookNodeSync.ts) was unaffected because that path
         // bakes __actionType from NodeTypeToActionType directly. Fix is minimal-scope and
         // surgical; full G6-class drift prevention is the test itself going forward.
-        "createNotification" => ActionType.CreateNotification,
-        _ => ActionType.AiAnalysis // Default for unknown types
+        "createNotification" => ExecutorType.CreateNotification,
+        _ => ExecutorType.AiAnalysis // Default for unknown types
     };
 
     /// <summary>
     /// Build a configJson string that includes the __canvasNodeId marker plus any unmapped data fields.
     /// </summary>
-    private static string BuildConfigJson(string canvasNodeId, ActionType actionType, Dictionary<string, object?>? data)
+    private static string BuildConfigJson(string canvasNodeId, ExecutorType actionType, Dictionary<string, object?>? data)
     {
         var config = new Dictionary<string, object?>
         {
@@ -1138,6 +1155,10 @@ public class NodeService : INodeService
 
         [JsonPropertyName("sprk_nodetype")]
         public int? NodeType { get; set; }
+
+        // R7 Wave 2 task 024 (FR-07): sprk_executortype Choice column = canonical dispatch source.
+        [JsonPropertyName("sprk_executortype")]
+        public int? ExecutorType { get; set; }
 
         [JsonPropertyName("_sprk_playbookid_value")]
         public Guid? PlaybookId { get; set; }

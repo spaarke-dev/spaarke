@@ -183,12 +183,49 @@ export function createDailyBriefingRegistration(
     defaultHeight: '480px',
 
     factory(_context: SectionFactoryContext): ContentSectionConfig {
+      /**
+       * R7 task 095 / FR-18 — "Browse Playbooks" overflow menu item on the
+       * DigestHeader (embedded surface). Provides the Xrm.Navigation thunk so
+       * the shared `DailyBriefingApp` can stay Xrm-free per ADR-012. Mirrors
+       * the standalone code-page wiring in `src/solutions/DailyBriefing/src/main.tsx`
+       * (added in same task) and the chat-surface wiring established by task
+       * 094. Browse mode launches the existing `sprk_playbooklibrary` Code
+       * Page (preserves Path A.5 routing per ADR-013 — no new BFF surface).
+       */
+      const handleBrowsePlaybooks = (): void => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const w = window as any;
+        const xrm = w.Xrm ?? w.parent?.Xrm ?? w.top?.Xrm ?? null;
+        const navigateTo: ((page: object, options?: object) => Promise<unknown>) | undefined =
+          xrm?.Navigation?.navigateTo;
+        if (typeof navigateTo !== 'function') {
+          console.warn('[DailyBriefing/embedded] Xrm.Navigation unavailable — cannot open Playbook Library.');
+          return;
+        }
+        navigateTo(
+          {
+            pageType: 'webresource',
+            webresourceName: 'sprk_playbooklibrary',
+            data: '',
+          },
+          {
+            target: 2,
+            width: { value: 85, unit: '%' },
+            height: { value: 85, unit: '%' },
+            title: 'Playbook Library',
+          }
+        ).catch((err: unknown) => {
+          console.warn('[DailyBriefing/embedded] Playbook Library navigation rejected:', err);
+        });
+      };
+
       return {
         id: 'daily-briefing',
         type: 'content',
         title: 'Daily Briefing',
         style: {},
-        renderContent: () => React.createElement(DailyBriefingApp, { params: {} }),
+        renderContent: () =>
+          React.createElement(DailyBriefingApp, { params: {}, onBrowsePlaybooks: handleBrowsePlaybooks }),
       };
     },
   };

@@ -187,7 +187,7 @@ public sealed class IndexRetrieveNodeSubjectScopeTests
             Microsoft.Extensions.Logging.Abstractions.NullLogger<IndexRetrieveNode>.Instance);
 
         var context = InsightsNodeTestHelpers.CreateContext(
-            ActionType.IndexRetrieve,
+            ExecutorType.IndexRetrieve,
             """{ "subjectScope": "matter:M-2024-0341" }""");
 
         var result = node.Validate(context);

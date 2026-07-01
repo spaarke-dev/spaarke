@@ -46,7 +46,8 @@ Status legend:
 
 | Project | Branch | Worktree Path | BFF | SpaarkeAi | CI Workflows | Skill Directives | Last Commit | Status |
 |---|---|---|---|---|---|---|---|---|
-| `spaarkeai-compose-r1` | `work/spaarkeai-compose-r1` | `C:/code_files/spaarke-wt-spaarkeai-compose-r1` | Y | Y | N | N | 2026-06-29 | Active |
+| `spaarkeai-compose-r1` | `work/spaarkeai-compose-r1` | `C:/code_files/spaarke-wt-spaarkeai-compose-r1` | Y | Y | N | N | 2026-06-30 | Active |
+| `spaarke-ai-platform-unification-r7` | `work/spaarke-ai-platform-unification-r7` | `C:/code_files/spaarke-wt-spaarke-ai-platform-unification-r7` | Y | N | N | Y | 2026-06-28 | Active |
 | `spaarke-redis-cache-remediation-r2` | `work/spaarke-redis-cache-remediation-r2` | `C:/code_files/spaarke-wt-spaarke-redis-cache-remediation-r2` | Y | N | Y | N | 2026-06-26 | Active |
 | `spaarke-redis-cache-remediation-r1` | `work/spaarke-redis-cache-remediation-r1` | `C:/code_files/spaarke-wt-spaarke-redis-cache-remediation-r1` | Y | N | N | N | 2026-06-26 | Active |
 | `spaarke-daily-update-service-r4` | `work/spaarke-daily-update-service-r4` | `C:/code_files/spaarke-wt-spaarke-daily-update-service-r4` | Y | Y | N | N | 2026-06-26 | Active |
@@ -66,7 +67,7 @@ Status legend:
 | `email-communication-solution-r3` | `work/email-communication-solution-r3` | `C:/code_files/spaarke-wt-email-communication-solution-r3` | Y | N | N | N | 2026-06-05 | Recent |
 | `ai-spaarke-action-engine-r1` | `work/ai-spaarke-action-engine-r1` | `C:/code_files/spaarke-wt-ai-spaarke-action-engine-r1` | Y | Y | N | N | 2026-05-30 | Recent |
 
-**Count**: 19 active worktrees (R2 added 2026-06-26 by `project-pipeline`; `spaarkeai-compose-r1` added 2026-06-29 by `project-pipeline`; exceeds spec's 5-6 estimate; this reflects current portfolio reality post-2026-05-20 ramp — flagged for spec refinement in `ci-cd-unit-test-remediation-r1` Phase 1 task `010`).
+**Count**: 20 active worktrees (`spaarkeai-compose-r1` added 2026-06-29 by `project-pipeline`; R7 added 2026-06-28 by `project-pipeline`; R2 added 2026-06-26 by `project-pipeline`; exceeds spec's 5-6 estimate; this reflects current portfolio reality post-2026-05-20 ramp — flagged for spec refinement in `ci-cd-unit-test-remediation-r1` Phase 1 task `010`).
 
 ---
 
@@ -79,6 +80,7 @@ This section surfaces where parallel projects collide on the same hot-path surfa
 **15 active projects touch BFF.** This is the single most-contested hot-path and the reason `.claude/constraints/bff-extensions.md` exists. Projects:
 
 - `spaarkeai-compose-r1` (Compose drafting workspace: 7 new `/api/compose/` endpoints, 3 new `Services/Compose/*` services, `ConsumerTypes.ComposeSummarize` constant; ChatSession reuse + PublicContracts facade per refined ADR-013)
+- `spaarke-ai-platform-unification-r7` (AiCompletionNodeExecutor + PlaybookOrchestrationService dispatch refactor + ActionType→ExecutorType enum rename + new executor-config-schemas endpoint — foundational dispatch reform)
 - `spaarke-redis-cache-remediation-r2` (Theme A: `MetricsDistributedCache`, `TenantCache`, `CacheMetrics`, `Program.cs` — closure of R1 senior-review items DEF-007/008/009)
 - `spaarke-redis-cache-remediation-r1` (117 `IDistributedCache` call sites — broadest touch; closure shipped via PR #458 + #460)
 - `spaarke-daily-update-service-r4` (NotificationService, playbook membership queries)
@@ -125,13 +127,14 @@ This section surfaces where parallel projects collide on the same hot-path surfa
 
 ### Skill Directives (`.claude/skills/**`, `.claude/constraints/**`)
 
-**3 active projects touch skill directives**:
+**4 active projects touch skill directives**:
 
 - `ci-cd-unit-test-remediation-r1` — modifies `task-execute`, `project-pipeline`, `conflict-check` SKILL.md (Phase 1 Stream C)
 - `spaarke-devops-project-tracking-r1` — 9 new `/devops-*` skills + 9 hooked existing skills (this is the project's core deliverable)
 - `customer-provisioning-orchestration-r1` — new skill + scripts for provisioning orchestration (`/master-deploy` extension)
+- `spaarke-ai-platform-unification-r7` — REWRITES `jps-action-create`, `jps-playbook-design`, `jps-playbook-audit`, `jps-validate` + MINOR UPDATE `jps-scope-refresh` (Wave 7, FR-32/FR-33; node-first dispatch model)
 
-**Coordination action**: All three projects must serialize PRs touching `.claude/skills/INDEX.md`. Recommended order: `devops-project-tracking-r1` first (it owns the skill registry concept), then `ci-cd-unit-test-remediation-r1` (it modifies existing skills), then `customer-provisioning-orchestration-r1` (it adds new skills).
+**Coordination action**: Four projects serialize PRs touching `.claude/skills/INDEX.md`. Recommended order: `devops-project-tracking-r1` first (owns skill registry concept), then `ci-cd-unit-test-remediation-r1` (modifies existing skills), then `customer-provisioning-orchestration-r1` (adds new skills), then `spaarke-ai-platform-unification-r7` Wave 7 (rewrites jps-* skill bodies after R7's dispatch reform lands). R7 Wave 7 is sequential within itself (Sub-Agent Write Boundary per CLAUDE.md §3).
 
 ---
 

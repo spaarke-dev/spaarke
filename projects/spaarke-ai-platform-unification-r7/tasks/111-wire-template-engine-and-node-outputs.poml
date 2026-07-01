@@ -1,0 +1,204 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-111" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Wire ITemplateEngine into PlaybookOrchestrationService + carry RunContext.NodeOutputs to subsequent nodes</title>
+    <status>not-started</status>
+    <wave>11</wave>
+    <estimated-effort>3-4 hours</estimated-effort>
+    <tags>bff-api, code-impl, ai, refactoring, wave-11</tags>
+    <rigor-level>FULL</rigor-level>
+    <rigor-reason>Modifies .cs (PlaybookOrchestrationService + RunContext); tags include `bff-api`; has 7+ steps; downstream tasks 112/113/114/115 depend on this. FULL per task-execute Step 0.5.</rigor-reason>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>110</dependencies>
+    <blocks>112, 113, 114</blocks>
+    <fr-coverage>FR-15 (orchestrator now resolves node-output references — prerequisite for /narrate end-to-end)</fr-coverage>
+  </metadata>
+
+  <prompt>
+    **FINAL REVISION 2026-06-29 — Option B (operator-approved after deeper inspection of
+    PromptSchemaRenderer + JPS schema).**
+
+    LAYER 1 (universal — every executor): extract `PlaybookTemplateContextBuilder.Build(runContext)`
+    and wire orchestrator's `ApplyConfigJsonTemplates` to use `ITemplateEngine.Render` with it.
+    Every executor's configJson gets `{{X}}` substitution at the string level (NodeOutputs +
+    Parameters + run bag context). Existing `LoadKnowledgeNodeExecutor` + `ReturnResponseNodeExecutor`
+    BuildTemplateContext methods refactored to call the shared helper.
+
+    LAYER 2 (AI-shared — structured Input section, NOT embedded placeholders): finalize the
+    half-built `InputSection.Parameters` field in PromptSchema. Extend `PromptSchemaRenderer.Render`
+    to accept `JsonElement? runtimeInput` parameter and render a new "## Input\n{json}" section
+    between Context and Document. AI executors (AiCompletion + AiAnalysis) extract resolved
+    `inputBinding` from configJson, package as JsonElement, pass to renderer as `runtimeInput`.
+
+    KEY DESIGN PROPERTY (operator-required): the Action JPS body (instruction.role/task/constraints/context)
+    stays PURE INSTRUCTIONS — no `{{X}}` substitution for data. Data lives in its own structured
+    "## Input" section the LLM clearly sees. This decouples prompt-instruction authoring from
+    data-shape authoring, enabling future narrative-output consumers (Insight Engine Matter
+    summaries, work assignment briefings, project status, document review, etc.) to be authored
+    as 1 Action JPS + 1 playbook + 1 destination-field — zero new C# per consumer.
+
+    Documentation deliverable spawns as T111a (architecture doc + maker guide) — operator
+    requirement for Insights Engine + many other areas.
+  </prompt>
+
+  <role>
+    SPAARKE platform developer. Expert in C# generics, Handlebars.NET, and the BFF playbook
+    orchestrator. Follow ADRs strictly. Match the existing TemplateEngine's "graceful on missing"
+    contract — don't throw on unresolved bindings.
+  </role>
+
+  <goal>
+    `PlaybookOrchestrationService` injects `ITemplateEngine`, calls `Render` (not literal Replace)
+    against a merged Parameters + NodeOutputs context dict. `RunContext` carries `NodeOutputs`.
+    Subsequent-node configJson resolution now sees prior nodes' OutputVariable values. xUnit
+    tests prove behavior. Build passes; existing orchestrator tests pass (no regression).
+  </goal>
+
+  <inputs>
+    <file purpose="orchestrator">src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookOrchestrationService.cs</file>
+    <file purpose="run-context">src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookRunContext.cs</file>
+    <file purpose="template-engine">src/server/api/Sprk.Bff.Api/Services/Ai/TemplateEngine.cs</file>
+    <file purpose="template-engine-iface">src/server/api/Sprk.Bff.Api/Services/Ai/ITemplateEngine.cs</file>
+    <file purpose="executor-iface">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/INodeExecutor.cs</file>
+    <file purpose="node-output">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/NodeOutput.cs</file>
+    <file purpose="di-module">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs</file>
+    <file purpose="design-from-110">projects/spaarke-ai-platform-unification-r7/notes/spikes/wave11-orchestrator-resolution-design.md</file>
+    <file purpose="existing-tests">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/PlaybookOrchestrationServiceTests.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-010">DI Minimalism — inject `ITemplateEngine` via constructor; do NOT new it up; no new abstraction layers introduced.</constraint>
+    <constraint source="ADR-013">BFF AI Architecture — orchestrator stays a leaf service in the AI module; no public-contract surface changes.</constraint>
+    <constraint source="ADR-029">BFF Publish Hygiene — single-task delta cap ≤ +2 MB compressed (wave 11 task 119 final gate). This task is C# only — no new packages, no new dependencies. Expected delta ~0.
+    </constraint>
+    <constraint source="ADR-038">Testing Strategy — unit tests mock orchestrator collaborators minimally; use real ITemplateEngine (Handlebars-backed) in tests for end-to-end fidelity; ban Mock&lt;HttpMessageHandler&gt; / DI-registration / ctor null-check tests.</constraint>
+    <constraint source="CLAUDE.md §10">BFF Hygiene checklist applies. State placement decision in commit body. Verify publish-size impact at Wave 11 task 119.</constraint>
+    <constraint source="CLAUDE.md §11">No new component — extension of existing `PlaybookOrchestrationService` + `RunContext`. Component justification not required (modification only).</constraint>
+    <constraint source="design-110">Follow the design doc's signatures + lifecycle. If implementation forces deviation, update the design doc first.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai/playbook-orchestration</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/api.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/adr/ADR-010-di-minimalism.md</file>
+      <file>docs/adr/ADR-013-bff-ai-architecture.md</file>
+      <file>docs/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r7/notes/spikes/wave11-orchestrator-resolution-design.md</file>
+    </files>
+    <patterns>
+      <pattern name="ITemplateEngine usage (existing call sites)" location="src/server/api/Sprk.Bff.Api/Services/Ai/Delivery/EmailTemplateService.cs">
+        EmailTemplateService + WordTemplateService both inject ITemplateEngine and call Render(template, contextDict). Follow this exact pattern in the orchestrator.
+      </pattern>
+      <pattern name="JsonElement → traversable conversion" location="src/server/api/Sprk.Bff.Api/Services/Ai/TemplateEngine.cs">
+        TemplateEngine.ConvertJsonElement(JsonElement) returns Dictionary/List/primitive — call this on NodeOutput.StructuredData before registering in NodeOutputs (so Handlebars can traverse `{{nodeName.field.subfield}}`).
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Today the orchestrator's `ApplyConfigJsonTemplates` only handles `{{paramName}}` literal substitution from the BFF's parameter dictionary. The deployed `DAILY-BRIEFING-NARRATE` playbook uses `{{json start}}`, `{{tldrResult.summary}}`, `{{channelRegistry.channels}}` — all of which need the existing Handlebars-backed `ITemplateEngine`. Wave 11 task 110 designed the wiring; this task implements it.
+    </background>
+    <dependencies>
+      <dependency task="110" status="must-complete-first">Design doc with proposed signatures + lifecycle.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 112 (helpers) and 114 (fan-out) build on this task's NodeOutputs surface.</item>
+      <item>Task 115 (restore ValidateEntityNames config) requires this task complete so source-correct templates can actually resolve.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: FULL · 📋 REASON: bff-api code-impl, modifies multiple .cs, downstream deps · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context + design doc from 110">
+      Read project CLAUDE.md + design doc from task 110 (especially REVISION 2026-06-29 — Two-Layer Architecture section) + bff-extensions.md + ADR-010 + ADR-013.
+    </step>
+    <step order="2" name="Layer 1: Create PlaybookTemplateContextBuilder helper">
+      NEW file `src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookTemplateContextBuilder.cs` with static `Build(runContext)` returning `Dictionary&lt;string, object?&gt;`. Mirrors the pattern from `ReturnResponseNodeExecutor.BuildTemplateContext` lines 312-339: walks `runContext.NodeOutputs` calling `TemplateEngine.ConvertJsonElement` on StructuredData (or TextContent fallback), adds `runContext.Parameters` (Parameters win on collision), adds `run` metadata bag {id, playbookId, tenantId, completedAtUtc, startedAt}.
+    </step>
+    <step order="3" name="Layer 1: Inject ITemplateEngine + rewrite ApplyConfigJsonTemplates">
+      Inject `ITemplateEngine` into `PlaybookOrchestrationService` constructor (already DI-registered at AnalysisServicesModule.cs:860). Rewrite `ApplyConfigJsonTemplates` (line ~1921) to (a) take `runContext` instead of just `parameters`, (b) build merged context via `PlaybookTemplateContextBuilder.Build(runContext)`, (c) call `_templateEngine.Render(node.ConfigJson, context)`. Preserve early-exit for `!ConfigJson.Contains("{{")`. Update call site at line 1198 to pass runContext.
+    </step>
+    <step order="4" name="Layer 1: Refactor duplicate BuildTemplateContext methods">
+      `LoadKnowledgeNodeExecutor.BuildTemplateContext` (line ~277) and `ReturnResponseNodeExecutor.BuildTemplateContext` (lines 312-339) are byte-for-byte duplicates. Replace BOTH with calls to `PlaybookTemplateContextBuilder.Build(...)`. NOTE: existing per-executor `_templateEngine.Render` calls become NO-OPs for templates already resolved by the orchestrator at Step 3 — but the executors keep their own logic for "build output FROM resolved values" (passthrough output, terminal response). This eliminates duplication without breaking existing tests.
+    </step>
+    <step order="5" name="Layer 2: Extend PromptSchemaRenderer with ## Input section">
+      Add new optional parameter `JsonElement? runtimeInput = null` to `PromptSchemaRenderer.Render` (existing method at line 72) AND propagate to `RenderJps` (line 120). In `RenderJps`, between Context (line 205-209) and Document (line 211-218), add new section:
+      ```
+      if (runtimeInput is { ValueKind: not JsonValueKind.Null and not JsonValueKind.Undefined }) {
+          sb.AppendLine("## Input");
+          sb.AppendLine();
+          sb.AppendLine(JsonSerializer.Serialize(runtimeInput.Value, new JsonSerializerOptions { WriteIndented = true }));
+          sb.AppendLine();
+      }
+      ```
+      Renderer does NOT mutate JPS body. Input section is rendered between instructions and downstream sections so the LLM sees: instructions → data → document/skills/knowledge → examples → output schema.
+    </step>
+    <step order="6" name="Wire AiCompletionNodeExecutor to extract inputBinding + pass to renderer">
+      Add helper `ExtractInputBindingAsJsonElement(string? configJson) → JsonElement?` to `AiCompletionNodeExecutor` (private static, returns null if absent or malformed). In `ExecuteAsync` around line 302-316 where `_promptSchemaRenderer.Render(...)` is called, pass the new `runtimeInput` parameter: `runtimeInput: ExtractInputBindingAsJsonElement(context.Node.ConfigJson)`. Existing `templateParameters` continues to flow through for backward-compatibility with non-inputBinding playbook configs.
+    </step>
+    <step order="7" name="AiAnalysisNodeExecutor wiring DEFERRED to DEF-001">
+      **DEFERRED 2026-06-29**: AiAnalysisNodeExecutor does NOT call `_promptSchemaRenderer.Render` directly — it builds a `ToolExecutionContext` passed through 4 tool handlers (GenericAnalysisHandler, SummaryHandler, DocumentClassifierHandler, SemanticSearchToolHandler) that each call Render. Wiring inputBinding through that chain touches ~6 files (vs 1 for AiCompletion). The deployed DAILY-BRIEFING-NARRATE playbook uses only AiCompletion — no AiAnalysis. To keep T111 focused + reviewable, AiAnalysis wiring is deferred via DEF-001 (`notes/defer-issues.md`). When ANY AiAnalysis-based playbook consumer needs structured input, lift DEF-001 — implementation is mechanical (~1-2 hours including tests).
+    </step>
+    <step order="8" name="Write xUnit tests (Layer 1 + Layer 2)">
+      NEW: `PlaybookTemplateContextBuilderTests.cs` (4-6 tests covering NodeOutputs traversal + Parameters merge + run-bag).
+      NEW: `PlaybookOrchestrationService_TemplateResolutionTests.cs` (5 tests: (a) `{{paramName}}` regression, (b) `{{nodeA.field}}` resolves, (c) `{{nodeA.nested.deep}}` resolves, (d) `{{nonexistent}}` empty, (e) Parameters wins on collision).
+      NEW: `PromptSchemaRenderer_InputSectionTests.cs` (5 tests: (a) `runtimeInput: null` renders no Input section (regression — no change vs today), (b) `runtimeInput: JsonElement of object` renders "## Input\\n{indented json}" between Context and Document, (c) `runtimeInput: JsonElement Null/Undefined` renders no section, (d) Input section appears in correct position (before Document, after Context), (e) JPS body NOT mutated by render).
+      NEW: `AiCompletionNodeExecutor_InputBindingTests.cs` (4 tests: (a) configJson with inputBinding → JsonElement extracted + passed to renderer, (b) configJson without inputBinding → renderer gets null, (c) malformed configJson → renderer gets null + no throw, (d) inputBinding with resolved-string values (from Layer 1) round-trips correctly).
+      Refactor existing `ReturnResponseNodeExecutorTests` + `LoadKnowledgeNodeExecutorTests` if needed to confirm BuildTemplateContext extraction didn't regress behavior.
+    </step>
+    <step order="9" name="Run full BFF test suite + verify build">
+      `dotnet build src/server/api/Sprk.Bff.Api/` + `dotnet test tests/unit/Sprk.Bff.Api.Tests/` — confirm new tests pass + zero regressions across orchestrator + LoadKnowledge + ReturnResponse + AiCompletion + AiAnalysis tests.
+    </step>
+    <step order="10" name="Step 9.5 — Quality gates">
+      Invoke `/code-review` on changed/new files. Invoke `/adr-check`. Address any HIGH/CRITICAL before commit.
+    </step>
+    <step order="11" name="Update TASK-INDEX + current-task.md">
+      Mark 111 ✅; advance current-task.md to next pending task (112).
+    </step>
+    <step order="12" name="Commit">
+      Conventional commit. Body documents: two-layer architecture, files added (PlaybookTemplateContextBuilder + AiPromptInputBindingResolver), refactored duplicates (Load/Return), executor edits (AiCompletion + AiAnalysis), test coverage. State BFF placement decision per CLAUDE.md §10. Do NOT push — Wave 11 batch-pushes after T119.
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (orchestrator + RunContext + tests)</tool>
+    <tool>Edit (PlaybookOrchestrationService.cs, PlaybookRunContext.cs)</tool>
+    <tool>Write (new test file)</tool>
+    <tool>Bash (dotnet build + test + git commit)</tool>
+    <tool>Skill (code-review, adr-check)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookTemplateContextBuilder.cs (NEW — Layer 1 shared helper)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookOrchestrationService.cs (edited — inject ITemplateEngine, rewrite ApplyConfigJsonTemplates)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/LoadKnowledgeNodeExecutor.cs (edited — replace BuildTemplateContext with helper call)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/ReturnResponseNodeExecutor.cs (edited — replace BuildTemplateContext with helper call)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PromptSchemaRenderer.cs (edited — Layer 2: new runtimeInput parameter + "## Input" section render)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiCompletionNodeExecutor.cs (edited — extract inputBinding as JsonElement + pass to renderer)</output>
+    <output type="defer">projects/spaarke-ai-platform-unification-r7/notes/defer-issues.md (DEF-001 — AiAnalysis wiring deferred; mechanical follow-up, ~1-2 hours)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/PlaybookTemplateContextBuilderTests.cs (NEW)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/PlaybookOrchestrationService_TemplateResolutionTests.cs (NEW)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/PromptSchemaRenderer_InputSectionTests.cs (NEW)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Nodes/AiCompletionNodeExecutor_InputBindingTests.cs (NEW)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md (advance to 111a)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 111 ✅, spawn 111a)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`dotnet build src/server/api/Sprk.Bff.Api/` succeeds with zero errors</criterion>
+    <criterion testable="true">All pre-existing orchestrator tests still pass (zero regression)</criterion>
+    <criterion testable="true">5 new template-resolution tests pass (paramName regression, nodeA.field, nested dotted, missing-graceful, collision priority)</criterion>
+    <criterion testable="true">Grep for `node.ConfigJson.Replace(placeholder` in PlaybookOrchestrationService returns zero matches (old loop removed)</criterion>
+    <criterion testable="true">PlaybookRunContext.NodeOutputs is publicly accessible and starts empty</criterion>
+    <criterion testable="true">code-review + adr-check return zero HIGH/CRITICAL findings (or all addressed in commit)</criterion>
+    <criterion testable="true">TASK-INDEX.md shows 111 ✅, 112 🔲 ready</criterion>
+  </acceptance-criteria>
+</task>

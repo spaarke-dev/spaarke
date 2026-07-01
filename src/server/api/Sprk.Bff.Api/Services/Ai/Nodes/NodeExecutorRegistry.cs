@@ -4,7 +4,7 @@ namespace Sprk.Bff.Api.Services.Ai.Nodes;
 
 /// <summary>
 /// Registry implementation that manages node executor discovery and resolution.
-/// Uses DI container for executor instances and indexes by ActionType.
+/// Uses DI container for executor instances and indexes by ExecutorType.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -13,7 +13,7 @@ namespace Sprk.Bff.Api.Services.Ai.Nodes;
 /// <list type="number">
 /// <item>At startup, all INodeExecutor implementations are registered in DI</item>
 /// <item>Registry receives executors via constructor injection (IEnumerable)</item>
-/// <item>Executors are indexed by SupportedActionTypes for fast lookup</item>
+/// <item>Executors are indexed by SupportedExecutorTypes for fast lookup</item>
 /// </list>
 /// <para>
 /// Follows ADR-010 DI minimalism by using constructor injection for executors.
@@ -21,7 +21,7 @@ namespace Sprk.Bff.Api.Services.Ai.Nodes;
 /// </remarks>
 public sealed class NodeExecutorRegistry : INodeExecutorRegistry
 {
-    private readonly ConcurrentDictionary<ActionType, INodeExecutor> _executorsByType;
+    private readonly ConcurrentDictionary<ExecutorType, INodeExecutor> _executorsByType;
     private readonly List<INodeExecutor> _allExecutors;
     private readonly ILogger<NodeExecutorRegistry> _logger;
 
@@ -29,7 +29,7 @@ public sealed class NodeExecutorRegistry : INodeExecutorRegistry
         IEnumerable<INodeExecutor> executors,
         ILogger<NodeExecutorRegistry> logger)
     {
-        _executorsByType = new ConcurrentDictionary<ActionType, INodeExecutor>();
+        _executorsByType = new ConcurrentDictionary<ExecutorType, INodeExecutor>();
         _allExecutors = new List<INodeExecutor>();
         _logger = logger;
 
@@ -37,12 +37,12 @@ public sealed class NodeExecutorRegistry : INodeExecutorRegistry
     }
 
     /// <inheritdoc />
-    public INodeExecutor? GetExecutor(ActionType actionType)
+    public INodeExecutor? GetExecutor(ExecutorType executorType)
     {
-        if (_executorsByType.TryGetValue(actionType, out var executor))
+        if (_executorsByType.TryGetValue(executorType, out var executor))
             return executor;
 
-        _logger.LogWarning("No executor registered for ActionType {ActionType}", actionType);
+        _logger.LogWarning("No executor registered for ExecutorType {ExecutorType}", executorType);
         return null;
     }
 
@@ -50,18 +50,18 @@ public sealed class NodeExecutorRegistry : INodeExecutorRegistry
     public IReadOnlyList<INodeExecutor> GetAllExecutors() => _allExecutors.AsReadOnly();
 
     /// <inheritdoc />
-    public bool HasExecutor(ActionType actionType) =>
-        _executorsByType.ContainsKey(actionType);
+    public bool HasExecutor(ExecutorType executorType) =>
+        _executorsByType.ContainsKey(executorType);
 
     /// <inheritdoc />
-    public IReadOnlyList<ActionType> GetSupportedActionTypes() =>
+    public IReadOnlyList<ExecutorType> GetSupportedExecutorTypes() =>
         _executorsByType.Keys.ToList();
 
     /// <inheritdoc />
     public int ExecutorCount => _allExecutors.Count;
 
     /// <summary>
-    /// Registers all provided executors, indexing by supported ActionTypes.
+    /// Registers all provided executors, indexing by supported ExecutorTypes.
     /// </summary>
     private void RegisterExecutors(IEnumerable<INodeExecutor> executors)
     {
@@ -72,26 +72,26 @@ public sealed class NodeExecutorRegistry : INodeExecutorRegistry
         foreach (var executor in executorList)
         {
             var typeName = executor.GetType().Name;
-            var supportedTypes = executor.SupportedActionTypes;
+            var supportedTypes = executor.SupportedExecutorTypes;
 
             if (supportedTypes.Count == 0)
             {
                 _logger.LogWarning(
-                    "Skipping executor {ExecutorType} with no supported ActionTypes",
+                    "Skipping executor {ExecutorType} with no supported ExecutorTypes",
                     typeName);
                 continue;
             }
 
             _allExecutors.Add(executor);
 
-            foreach (var actionType in supportedTypes)
+            foreach (var executorType in supportedTypes)
             {
-                if (!_executorsByType.TryAdd(actionType, executor))
+                if (!_executorsByType.TryAdd(executorType, executor))
                 {
-                    var existingExecutor = _executorsByType[actionType];
+                    var existingExecutor = _executorsByType[executorType];
                     _logger.LogWarning(
-                        "Duplicate executor for ActionType {ActionType} - {ExistingType} already registered, skipping {NewType}",
-                        actionType,
+                        "Duplicate executor for ExecutorType {ExecutorType} - {ExistingType} already registered, skipping {NewType}",
+                        executorType,
                         existingExecutor.GetType().Name,
                         typeName);
                     continue;
@@ -102,7 +102,7 @@ public sealed class NodeExecutorRegistry : INodeExecutorRegistry
         }
 
         _logger.LogInformation(
-            "Node executor registration complete: {ExecutorCount} executors, {ActionTypeCount} action types",
+            "Node executor registration complete: {ExecutorCount} executors, {ExecutorTypeCount} executor types",
             _allExecutors.Count,
             _executorsByType.Count);
     }

@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="135" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Verify per-bullet entity links (EnrichBulletWithEntityRefs) work for all 6 entity types</title>
+    <phase>Wave 12 — MVP Completion</phase>
+    <wave>12</wave>
+    <sub-wave>12.2</sub-wave>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>verification + selective code adjustment if gaps found</rigor-reason>
+    <parallel-group>W12-2</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>depends on T131 (6-entity collector) being complete</parallel-reason>
+    <tags>bff-api, daily-briefing, narrator, testing, wave12</tags>
+    <estimated-effort>0.5 day</estimated-effort>
+    <status>completed</status>
+  </metadata>
+
+  <prompt>
+The R7 W11 POC implemented `EnrichBulletWithEntityRefs` to populate per-bullet `primaryEntityType`/`primaryEntityId`/`primaryEntityName` for click-through. With T131 expanding to 6 entity types (events / documents / matters / projects / todos), verify the enrichment logic correctly resolves entity refs for ALL 6 types — not just events. Fix any gaps.
+  </prompt>
+
+  <role>
+You are a BFF service developer verifying cross-cutting projection logic across new entity types. Targeted code modification if gaps found; investigation otherwise.
+  </role>
+
+  <goal>
+Every bullet rendered in Daily Briefing widget has a working entity link (primaryEntityType / primaryEntityId / primaryEntityName populated) regardless of which of the 6 channels it came from. UAT-verifiable: operator clicks ANY bullet → navigates to correct entity record.
+  </goal>
+
+  <inputs>
+    - Current `EnrichBulletWithEntityRefs` implementation in `DailyBriefingNarrator` (R7 W11)
+    - Entity types to verify: sprk_event (existing), sprk_document, sprk_matter, sprk_project, sprk_todo (new from T131)
+    - BriefingItem projection contains entity metadata per T131
+  </inputs>
+
+  <constraints>
+    - Per CLAUDE.md §10 + §11: modification only if gaps; no new abstractions
+    - Per ADR-038: integration-heavy test pyramid for any new test additions
+    - Each entity type must have a matching enrichment branch (or a generic dispatcher that handles all 5)
+  </constraints>
+
+  <knowledge>
+    <files>
+      - projects/spaarke-ai-platform-unification-r7/notes/wave12-mvp-completion-plan.md (§2.1)
+      - projects/spaarke-ai-platform-unification-r7/CLAUDE.md
+    </files>
+  </knowledge>
+
+  <context>
+    <relevant-files>
+      - src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingNarrator.cs (EnrichBulletWithEntityRefs)
+      - src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingCollector.cs (BriefingItem source)
+      - tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Narrators/DailyBriefingNarratorTests.cs
+    </relevant-files>
+  </context>
+
+  <steps>
+1. **Read current EnrichBulletWithEntityRefs** (15 min)
+2. **Identify how it matches narrative text to input items** (15-30 min):
+   - Today: matches by RegardingName or Title (per session prior context)
+   - Verify this works for sprk_document.name, sprk_matter.sprk_matternumber/name, sprk_project.name, sprk_todo.subject
+3. **Identify gaps per entity type** (30 min):
+   - Per entity type: what's the human-readable name field? What's the navigation URL pattern?
+   - Document each gap or confirm coverage
+4. **Implement fixes for gaps** (0-2 hours depending on gap count):
+   - Smallest-change additions to enrichment dispatch
+5. **Add unit tests covering each entity type's enrichment** (30-45 min):
+   - Mock narrative output containing entity name; verify enrichment resolves the right entity ref
+6. **Build + test verification** (15 min)
+
+  </steps>
+
+  <tools>
+    - Read / Grep / Glob
+    - Edit (selective)
+    - Bash (dotnet test, dotnet build)
+    - TodoWrite
+  </tools>
+
+  <outputs>
+    - EnrichBulletWithEntityRefs gap fixes (if any)
+    - Unit test additions
+    - Verification notes
+  </outputs>
+
+  <acceptance-criteria>
+    - [x] Enrichment branches for all 6 entity types (verified — logic is GENERIC, not per-entity branched; sprk_event/document/matter/project/todo all flow through Tier-1 RegardingId resolution when populated)
+    - [x] Unit tests cover entity-link resolution per entity type (7 theory cases + 2 facts = 9 tests in `DailyBriefingNarratorEntityLinkTests.cs`)
+    - [x] `dotnet test` 0 new failures (34/34 DailyBriefing tests pass; 6 pre-existing failures unrelated)
+    - [x] `dotnet build` 0 errors (Release publish 48.5 MB compressed; well below 60 MB ceiling)
+    - [x] No new abstractions / DI / packages (single field added to existing ChannelItemDto)
+  </acceptance-criteria>
+
+  <notes>
+    **Status**: COMPLETED 2026-06-30 (R7 W12.2 task 135)
+
+    **Verification outcome** — `EnrichBulletWithEntityRefs` is implemented as a generic matcher (not per-entity branches). It works for all 6 entity types in the dominant case (item has a populated RegardingId — either parent matter/project for Tasks/Documents/ToDos, or self for Matter/Project rows).
+
+    **Gap found + fixed**: orphan items (no regarding matter — common for sprk_event tasks without sprk_regardingmatter, and sprk_todo without regarding) produced bullets with empty PrimaryEntityType/Id, causing the widget's click-through link to be hidden (NarrativeBullet.tsx line 390 condition fails). Per task goal "every bullet has a working entity link", this is a real UX defect.
+
+    **Fix**: Three-tier resolution in EnrichBulletWithEntityRefs:
+      - **Tier 1** (dominant): first match with populated `RegardingId` → click goes to matter/project (preserves existing behavior).
+      - **Tier 2** (NEW, orphan fallback): first match with populated `SourceEntityType` + `Id` → click goes to the source entity row (e.g., orphan Task → sprk_event row).
+      - **Tier 3** (defensive): first match overall → name-only (widget hides link).
+
+    **Files modified**:
+      - `src/server/api/Sprk.Bff.Api/Api/Ai/DailyBriefingEndpoints.cs` — added `SourceEntityType` field to `ChannelItemDto` record.
+      - `src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingCollector.cs` — populate `SourceEntityType = i.EntityType` in `ToChannel` projection.
+      - `src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingNarrator.cs` — three-tier `EnrichBulletWithEntityRefs` resolution.
+      - `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Narrators/DailyBriefingNarratorEntityLinkTests.cs` — NEW; 9 tests (7 theory cases per entity type + 2 facts for unmatched / tier-preference).
+
+    **Verification**:
+      - 9 new tests pass; 34/34 DailyBriefing-area tests pass.
+      - Release publish: 48.5 MB compressed (NFR-01 ceiling 60 MB).
+      - No new packages / DI registrations / endpoints / abstractions.
+      - CLAUDE.md §11 component justification satisfied (one field extension to existing DTO with named concrete failure mode).
+  </notes>
+</task>

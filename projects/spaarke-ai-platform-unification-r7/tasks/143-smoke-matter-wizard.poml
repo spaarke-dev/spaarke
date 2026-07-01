@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="143" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>SMOKE Create Matter wizard — verify code path healthy per audit 123</title>
+    <phase>Wave 12 — MVP Completion</phase>
+    <wave>12</wave>
+    <sub-wave>12.3</sub-wave>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>verification + small fix if issue surfaces</rigor-reason>
+    <parallel-group>W12-3</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <tags>wizard, matter, smoke, wave12</tags>
+    <estimated-effort>0.5-2 days (mostly verify; longer only if smoke surfaces an issue)</estimated-effort>
+    <status>completed</status>
+    <completed-date>2026-06-30</completed-date>
+    <completed-by>task-execute (sandboxed agent, parallel Batch 1 Wave 12.3)</completed-by>
+  </metadata>
+
+  <prompt>
+Audit 123 found Create Matter wizard disposition = RESTORE-smoke-first. Code path appears healthy: playbook `2d660cad-d418-f111-8343-7ced8d1dc988` ("Wizard New Matter Create") has 3 nodes + Action FK present. UI: CreateMatterWizard/CreateRecordStep.tsx; BFF: WorkspaceMatterEndpoints.cs + MatterPreFillService.cs. Smoke against spaarkedev1, fix only what surfaces.
+  </prompt>
+
+  <role>
+You are a wizard smoke + minor-fix operator. Verify end-to-end; if working, document; if not, identify minimal fix.
+  </role>
+
+  <goal>
+Create Matter wizard works end-to-end. User invokes wizard → LLM extracts 8 matter fields per ACT-023 schema → prefill populates the Matter create form. If smoke passes, no work needed beyond documentation. If smoke fails, identify + apply minimal fix.
+  </goal>
+
+  <inputs>
+    - Audit notes: projects/spaarke-ai-platform-unification-r7/notes/audits/wave12-123-three-prefill-wizards.md (PRIMARY)
+    - Playbook ID: `2d660cad-d418-f111-8343-7ced8d1dc988` ("Wizard New Matter Create", 3 nodes, Action FK present)
+    - Action ID: ACT-023 (8 fields)
+    - UI: CreateMatterWizard/CreateRecordStep.tsx
+    - BFF: WorkspaceMatterEndpoints.cs + MatterPreFillService.cs (3-tier parser fallback resilience)
+  </inputs>
+
+  <constraints>
+    - **Smoke FIRST** before any code or data change
+    - Per CLAUDE.md §11: no new abstractions; modification only if needed
+    - WA wizard inherits Matter's fix (Work Assignment wizard reuses `/api/workspace/matters/pre-fill` endpoint per audit 123)
+  </constraints>
+
+  <knowledge>
+    <files>
+      - projects/spaarke-ai-platform-unification-r7/notes/audits/wave12-123-three-prefill-wizards.md (PRIMARY — Matter section)
+      - projects/spaarke-ai-platform-unification-r7/CLAUDE.md
+    </files>
+  </knowledge>
+
+  <context>
+    <relevant-files>
+      - src/client/shared/Spaarke.UI.Components/src/components/CreateMatterWizard/CreateRecordStep.tsx:291-649
+      - src/server/api/Sprk.Bff.Api/Api/Workspace/WorkspaceMatterEndpoints.cs:44-155
+      - src/server/api/Sprk.Bff.Api/Services/Workspace/MatterPreFillService.cs:33-772
+    </relevant-files>
+  </context>
+
+  <steps>
+1. **Smoke against spaarkedev1** (30-60 min):
+   - Invoke Create Matter wizard in browser
+   - Verify 8 ACT-023 fields prefill correctly: matterName, matterTypeName, practiceAreaName, matterDescription, summary, attorney, paralegal, outsideCounsel, confidence
+   - Test 2-3 prompts of varying complexity
+2. **If smoke passes**:
+   - Document in audit notes Resolution subsection: "Smoke verified end-to-end. No code change required."
+   - Mark task complete
+3. **If smoke fails** (~0.5-1.5 days):
+   - Capture failure (HTTP response, App Insights trace)
+   - Identify failure mode (config drift? data drift? code regression?)
+   - Apply minimal fix
+   - Re-smoke
+4. **Update audit notes Resolution subsection** (15 min)
+
+  </steps>
+
+  <tools>
+    - Bash (browser smoke; curl if needed)
+    - mcp__dataverse__read_query (verify state)
+    - Read / Edit (only if fix needed)
+    - TodoWrite
+  </tools>
+
+  <outputs>
+    - Smoke result
+    - Fix applied if needed
+    - Append "Resolution" to audits/wave12-123-three-prefill-wizards.md (Matter section)
+  </outputs>
+
+  <acceptance-criteria>
+    - [ ] Create Matter wizard smoke pass against spaarkedev1
+    - [ ] 8 ACT-023 fields populated correctly
+    - [ ] If fix applied: minimal change documented
+    - [x] Audit notes updated
+    - [x] WA wizard (T144) inheritance confirmed (since WA reuses Matter endpoint)
+  </acceptance-criteria>
+
+  <notes>
+Completed 2026-06-30. End-to-end smoke deferred to operator T145 UAT (sandboxed agent has no browser to spaarkedev1; data mutation deferred to operator per CLAUDE.md §6 + Dataverse delete-record consent requirement).
+
+Code-path verification + Dataverse data reads identified TWO deterministic bugs at the Dataverse data layer (no BFF code change required). See audit 123 §10 (newly appended Resolution section) for full diagnosis + recommended fix + scope analysis.
+
+Disposition revised from "likely WORKING" (audit §5.1) → "NOT WORKING — deterministic failure." Audit §5.1 had ranked the EntityNameValidator risk as priority-2 ("stripping output"); T143 found the failure is actually "fails validation, kills entire run, returns empty" — total failure on every invocation.
+
+Primary bug: node 3 "Entity Name Validator" (sprk_playbooknode c3c5226d-5b71-f111-ab0d-7ced8ddc4a05) has stub configJson lacking required candidateText + allowList. Wave 5 backfill (notes/drafts/playbook-node-review-output.csv:61) set executortype=141 by node-name match without verifying configJson contained executor-required inputs.
+
+Secondary bug: node 2 "AI Analysis" (444b06d3-...) configJson has stub systemPrompt override that clobbers ACT-023's real prompt via PromptSchemaOverrideMerger.
+
+Recommended minimal fix is data-layer only (Dataverse Web API or Power Apps Maker edit). Operator applies §10.4 fixes A + B; then T145 UAT can validate end-to-end against Matter + WA together (per §10.5 inheritance).
+
+Sweep query for other EntityNameValidator orphans returned 2 rows: the Matter node (broken) + Daily Briefing ValidateEntityNames (healthy per Wave 11 T116). No further EntityNameValidator orphans exist; scope of cleanup confirmed limited.
+
+T144 (WA wizard) recommendation: WA reuses /api/workspace/matters/pre-fill (audit §1.3). Once Matter §10.4 fix is in, WA AI-prefill path is automatically restored. T144 should be a straightforward verify-and-UAT task — confirm operator has applied Matter fix, then UAT WA at T145 alongside Matter. No separate playbook or fix needed for WA.
+
+Commit: df0dd01ae on work/spaarke-ai-platform-unification-r7.
+  </notes>
+</task>

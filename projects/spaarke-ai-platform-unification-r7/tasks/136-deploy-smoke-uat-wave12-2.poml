@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="136" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Wave 12.2 deploy + smoke + operator UAT — Daily Briefing 6 entities + UI polish end-to-end</title>
+    <phase>Wave 12 — MVP Completion</phase>
+    <wave>12</wave>
+    <sub-wave>12.2</sub-wave>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>deploy + smoke + UAT (operator gate)</rigor-reason>
+    <parallel-group>W12-Gate</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>gate task — depends on T130-T135 complete; coordinates with Wave 12.4 deploy if bundled</parallel-reason>
+    <tags>deploy, smoke, uat, daily-briefing, gate, wave12</tags>
+    <estimated-effort>0.5 day (or part of combined Wave 12.2 + 12.4 deploy event)</estimated-effort>
+  </metadata>
+
+  <prompt>
+After T130-T135 land, deploy BFF + SpaarkeAi widget to spaarkedev1. Smoke Daily Briefing widget end-to-end: 6 channels, membership filter, TLDR↔Notes consistency, per-bullet entity links, 'Add To Do' tool. Operator UAT confirms operator-spec acceptance criteria AC1-AC7 from wave12 plan §3.1.
+
+May be combined with T154 (Wave 12.4 deploy) into a single deploy event if Wave 12.4 code lands at the same time.
+  </prompt>
+
+  <role>
+You are a deployment + smoke + UAT facilitator. Coordinate BFF + widget deploys, run smoke tests, gather operator UAT outcome, escalate failures.
+  </role>
+
+  <goal>
+Daily Briefing widget in spaarkedev1 renders 6 channels per operator spec with real data, TLDR↔Notes consistency, per-bullet entity links, 'Add To Do' tool. Operator confirms via UAT.
+  </goal>
+
+  <inputs>
+    - T130 fix: `IMembershipResolverService` returns correct memberships
+    - T131 collector: 6 entity channels populated
+    - T132 narrator: TLDR↔Notes chained
+    - T133 widget registry: 6 channel labels
+    - T134 widget tools: 'Add To Do' checkmark
+    - T135 entity links: verified across 6 types
+  </inputs>
+
+  <constraints>
+    - Per CLAUDE.md §10: BFF publish-size verification — run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`, report absolute size + diff vs prior R7 baseline
+    - NFR-01 ceiling: ≤60 MB compressed
+    - NFR-02: 0 new HIGH-severity CVEs (`dotnet list package --vulnerable --include-transitive`)
+    - Smoke MUST verify all 7 ACs from wave12 plan §3.1 before requesting operator UAT
+    - If any smoke fails: STOP; file as ISS-NNN per /project-defer-issue-tracking; do NOT request operator UAT until smoke green
+  </constraints>
+
+  <knowledge>
+    <files>
+      - projects/spaarke-ai-platform-unification-r7/notes/wave12-mvp-completion-plan.md (§3.1 ACs)
+      - projects/spaarke-ai-platform-unification-r7/CLAUDE.md
+      - .claude/skills/bff-deploy/SKILL.md
+      - .claude/skills/pcf-deploy/SKILL.md
+      - .claude/constraints/azure-deployment.md (publish-size + CVE rule)
+      - scripts/Deploy-BffApi.ps1
+      - scripts/Deploy-SpaarkeAi.ps1
+    </files>
+  </knowledge>
+
+  <context>
+    <relevant-files>
+      - src/server/api/Sprk.Bff.Api/** (all Wave 12.2 BFF changes)
+      - src/client/shared/Spaarke.DailyBriefing.Components/** (all Wave 12.2 widget changes)
+      - src/solutions/SpaarkeAi/** (widget bundle)
+    </relevant-files>
+  </context>
+
+  <steps>
+1. **Pre-deploy verification** (30 min):
+   - `dotnet build src/server/api/Sprk.Bff.Api/` — 0 errors
+   - `dotnet test tests/unit/Sprk.Bff.Api.Tests/` — 0 new failures vs baseline
+   - `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`
+   - Measure: `du -sh deploy/api-publish/` — report compressed size
+   - Compare vs prior R7 baseline (~47 MB); flag if &gt;55 MB cumulative or &gt;60 MB ceiling
+   - `dotnet list package --vulnerable --include-transitive` — verify 0 new HIGH CVE
+2. **Tag current deployed state** (10 min) — capture currently-deployed BFF commit hash + widget version (rollback target)
+3. **Deploy BFF** (15-30 min):
+   - Use Deploy-BffApi.ps1 to spaarkedev1
+   - Wait for healthz green
+4. **Deploy SpaarkeAi widget** (10-20 min):
+   - Use Deploy-SpaarkeAi.ps1 to spaarkedev1
+   - Wait for web-resource update completion
+5. **Smoke tests** (30-45 min):
+   - Curl `/api/ai/daily-briefing/render` with test OBO token — verify 6 channels in response
+   - Open widget in browser — verify 6 channel UI renders
+   - Click on a bullet's entity link — verify navigation
+   - Click 'Add To Do' checkmark — verify To Do creation
+   - Toggle Dark mode — verify ADR-021 compliance
+   - Verify TLDR mentions are covered in channel narratives (sample 3 items)
+6. **Operator UAT request** (out-of-band):
+   - Document AC1-AC7 status from smoke
+   - Request operator UAT pass via Daily Briefing widget in spaarkedev1
+   - Capture operator feedback as either: ✅ pass / ⚠️ minor issues (file as ISS-NNN) / ❌ critical fail (rollback?)
+7. **Update R7 current-task.md + TASK-INDEX.md** with deploy status (15 min)
+
+  </steps>
+
+  <tools>
+    - Bash (dotnet build / test / publish; scripts; curl smoke)
+    - Read / Edit (update status files)
+    - mcp__dataverse__* (verify any data-side state if smoke surfaces issues)
+    - TodoWrite
+  </tools>
+
+  <outputs>
+    - deploy/api-publish/* (publish artifact)
+    - Publish-size + CVE report
+    - Smoke test results
+    - Operator UAT outcome
+    - current-task.md + TASK-INDEX.md updated
+  </outputs>
+
+  <acceptance-criteria>
+    - [ ] BFF publish size ≤60 MB (NFR-01)
+    - [ ] 0 new HIGH CVE (NFR-02)
+    - [ ] BFF deployed to spaarkedev1; healthz green
+    - [ ] SpaarkeAi widget deployed; web resource updated
+    - [ ] AC1 (6 channels render): operator-verified
+    - [ ] AC2 (real Dataverse records in each channel): operator-verified
+    - [ ] AC3 (membership filter correct): operator-verified
+    - [ ] AC4 (TLDR↔ActivityNotes consistency): operator-verified
+    - [ ] AC5 (per-bullet entity links work): operator-verified
+    - [ ] AC6 ('Add To Do' checkmark + three-dot menu preserved): operator-verified
+    - [ ] AC7 (timezone for date filters): operator-verified
+    - [ ] Operator UAT signoff captured in notes/handoffs/wave12-2-uat-signoff.md
+  </acceptance-criteria>
+</task>

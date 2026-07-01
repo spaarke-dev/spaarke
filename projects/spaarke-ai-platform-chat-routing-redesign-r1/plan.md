@@ -1,7 +1,7 @@
 # Project Plan: Spaarke AI Platform — Chat Routing Redesign (R1)
 
-> **Last Updated**: 2026-06-21
-> **Status**: Draft — Ready for Tasks
+> **Last Updated**: 2026-06-28
+> **Status**: ✅ **Complete** (2026-06-28) — all 7 work packages shipped. Branch merged via PR #491 (2026-06-25); follow-up docs merged via PR #509 (2026-06-28). Per-phase technical acceptance verified; BFF publish-size net-zero contribution (see `notes/handoffs/final-publish-size-summary.md`). See `notes/lessons-learned.md` for retrospective.
 > **Spec**: [spec.md](spec.md) (45 FRs, 19 NFRs, reconciled with architecture v3.3)
 > **Architecture (binding for WP5)**: [architecture/stateful-chat-architecture.md](architecture/stateful-chat-architecture.md)
 

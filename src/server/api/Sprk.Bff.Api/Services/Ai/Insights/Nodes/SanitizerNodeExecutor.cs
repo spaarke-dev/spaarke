@@ -7,7 +7,7 @@ using Sprk.Bff.Api.Services.Ai.Nodes;
 namespace Sprk.Bff.Api.Services.Ai.Insights.Nodes;
 
 /// <summary>
-/// Wave C1 task 020 — node executor for <see cref="ActionType.Sanitization"/> (130). Wraps
+/// Wave C1 task 020 — node executor for <see cref="ExecutorType.Sanitization"/> (130). Wraps
 /// <see cref="IInsightsContentSanitizer"/> (D-50 / D-A25) as the first node of the
 /// universal-ingest@v1 JPS playbook per design-a5 §4 Node 1. Replaced the inline sanitization
 /// step in the code-defined <c>IngestOrchestrator.RunAsync</c> (retired Wave C-G4 / task 022).
@@ -16,7 +16,7 @@ namespace Sprk.Bff.Api.Services.Ai.Insights.Nodes;
 /// <para>
 /// <b>Zone A</b> per SPEC §3.5 — lives under <c>Services/Ai/Insights/Nodes/</c> and freely
 /// imports <see cref="IInsightsContentSanitizer"/> (Zone A). Discovered automatically by
-/// <see cref="NodeExecutorRegistry"/> via <see cref="SupportedActionTypes"/>; the registration
+/// <see cref="NodeExecutorRegistry"/> via <see cref="SupportedExecutorTypes"/>; the registration
 /// is added in <see cref="Sprk.Bff.Api.Infrastructure.DI.InsightsIngestModule"/> alongside the
 /// other ingest pipeline services.
 /// </para>
@@ -76,10 +76,17 @@ public sealed class SanitizerNodeExecutor : INodeExecutor
     }
 
     /// <inheritdoc />
-    public IReadOnlyList<ActionType> SupportedActionTypes { get; } = new[]
+    public IReadOnlyList<ExecutorType> SupportedExecutorTypes { get; } = new[]
     {
-        ActionType.Sanitization
+        ExecutorType.Sanitization
     };
+
+    // R7 task 032 / FR-16 — placeholder schema (no maker-editable fields surfaced yet).
+    /// <inheritdoc />
+    public ExecutorConfigSchema GetConfigSchema() =>
+        ExecutorConfigSchema.Empty(
+            ExecutorType.Sanitization,
+            "Sanitizes raw document text for downstream LLM consumption — strips control characters, retrieval blocks, noise (D-50 / D-A25 LAVERN sanitizer).");
 
     /// <inheritdoc />
     public NodeValidationResult Validate(NodeExecutionContext context)

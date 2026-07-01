@@ -1,0 +1,207 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-100" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>End-to-end verification of all 15 success criteria from spec.md</title>
+    <status>completed</status>
+    <wave>10</wave>
+    <estimated-effort>3-4 hours</estimated-effort>
+    <tags>testing, audit, wave-10</tags>
+    <rigor-level>FULL</rigor-level>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>047, 054, 067, 089d, 096 (all prior waves complete)</dependencies>
+    <fr-coverage>All 15 success criteria from spec.md §Success Criteria</fr-coverage>
+  </metadata>
+
+  <prompt>
+    Wave 10 opens with the comprehensive graduation gate. Every one of the 15 success criteria from spec.md
+    must be verified explicitly with a concrete check: SQL query, grep result, code inspection, UI screenshot,
+    or integration test output. The output is a single verification report at
+    `notes/handoffs/graduation-verification.md` with a pass/fail line per criterion. ANY failure blocks task 101
+    UAT (R4 graduation gate) and project close.
+  </prompt>
+
+  <role>
+    Senior verification engineer running the final pre-graduation sweep. The goal is honest signal — if a
+    criterion is partially met, mark it AMBIGUOUS and surface for owner judgment rather than overstating.
+    No criterion gets a pass without a concrete verification artifact.
+  </role>
+
+  <goal>
+    A verification report at `projects/spaarke-ai-platform-unification-r7/notes/handoffs/graduation-verification.md`
+    that enumerates each of the 15 success criteria and records:
+    - Verification method (SQL / grep / code inspection / UI / integration test)
+    - Verification output (truncated as needed)
+    - Result: PASS / FAIL / AMBIGUOUS (with owner-judgment note)
+
+    Overall status line at top: "Graduation verification: PASSED (15/15)" / "FAILED (X/15)" / "INCOMPLETE (N AMBIGUOUS)".
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="readme-graduation">projects/spaarke-ai-platform-unification-r7/README.md</file>
+    <file purpose="plan">projects/spaarke-ai-platform-unification-r7/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    <file purpose="orchestrator">src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookOrchestrationService.cs</file>
+    <file purpose="ai-completion-executor">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiCompletionNodeExecutor.cs</file>
+    <file purpose="di-module">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AnalysisServicesModule.cs</file>
+    <file purpose="deploy-script">scripts/dataverse/Deploy-Playbook.ps1</file>
+    <file purpose="consumer-wiring-guide">docs/guides/ai-guide-consumer-wiring.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec §Success Criteria">All 15 criteria are verifiable; no criterion is signed off by inspection alone. Each criterion's verification method is enumerated in spec — follow it exactly.</constraint>
+    <constraint source="CLAUDE.md §10">BFF Hygiene — this task does not modify BFF, no publish-size check needed; but it inspects BFF code for criterion-2/3/4 verification.</constraint>
+    <constraint source="ADR-038">Testing Strategy — any new tests this task creates (e.g., integration smoke tests not present yet) must follow ADR-038 (real LLM calls or contract-faithful mocks; banned: Mock&lt;HttpMessageHandler&gt;).</constraint>
+    <constraint source="CLAUDE.md §7">Task Completion — current-task.md state advance + TASK-INDEX update on success.</constraint>
+    <constraint source="bff-extensions.md">No new code added; verification report only.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>verification/graduation-gate</topic>
+    <files>
+      <file>projects/spaarke-ai-platform-unification-r7/spec.md</file>
+      <file>projects/spaarke-ai-platform-unification-r7/README.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Graduation verification report" location="notes/handoffs/">
+        Per-criterion table with Method / Output / Result columns. Honest AMBIGUOUS classification preferred over over-confident PASS.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      This is the final verification before R7 closes. 15 success criteria gate the project. The verification
+      report becomes the authoritative artifact for the wrap-up PR and the R4 graduation handoff (task 101).
+      Owner reviews this report before approving the final merge.
+
+      The 15 criteria (restated):
+      1. Every sprk_playbooknode row has sprk_executortype populated (SQL count = 0 null rows)
+      2. PlaybookOrchestrationService.ExecuteNodeAsync reads dispatch from node.sprk_executortype only
+      3. Every AI dispatch goes through PlaybookOrchestrationService.ExecuteAsync (no ExecuteAnalysisAsync callers — grep)
+      4. AiCompletionNodeExecutor exists, registered, handles prompt-only LLM calls (integration test)
+      5. PlaybookBuilder canvas shows Executor Type dropdown with 33 values + tier grouping
+      6. PlaybookBuilder renders typed config forms for ≥5 executors
+      7. Action authoring surface simplified to prompt + schema + temperature only
+      8. Canonical-truth docs reflect new model (no SUPERSEDED markers)
+      9. Skill bodies (jps-*) align with new model
+      10. Deploy-Playbook.ps1 sets executor type per node; no name-detection
+      11. C# enum + Choice set kept in lockstep
+      12. Documentation tech debt list (§6 design.md) removed
+      13. docs/guides/ai-guide-consumer-wiring.md exists and covers all 6 consumers + chat-summarize case
+      14. chat-summarize consumer routes through IConsumerRoutingService Path A.5
+      15. Playbook Library wired into ≥3 consumer surfaces
+    </background>
+    <dependencies>
+      <dependency task="047" status="not-started-but-required">Wave 4 BFF publish + size check (schema cleanup complete)</dependency>
+      <dependency task="054" status="not-started-but-required">Wave 5 backfill complete (all 94 nodes populated)</dependency>
+      <dependency task="067" status="not-started-but-required">Wave 6 consumer-wiring guide created</dependency>
+      <dependency task="089d" status="not-started-but-required">Wave 8 PlaybookBuilder Code Page deployed to spaarkedev1</dependency>
+      <dependency task="096" status="not-started-but-required">Wave 9 Library wired into 3rd consumer surface</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 101 (UAT /narrate) consumes the criterion-4 verification result as one input to R4 graduation sign-off.</item>
+      <item>Task 090-project-wrap-up cites this report in lessons-learned + PR description.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: FULL · 📋 REASON: graduation-gate verification (tag testing+audit, gates R4 close, multi-system inspection across BFF + Dataverse + docs + UI) — quality gates Step 9.5 required · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read project spec.md §Success Criteria, README.md graduation criteria, plan.md Wave 10. Confirm all prior-wave dependencies (047, 054, 067, 089d, 096) are marked ✅ in TASK-INDEX.md.
+    </step>
+    <step order="2" name="Verify criterion 1 — sprk_executortype populated on all rows">
+      Query Dataverse via MCP: SELECT count(*) FROM sprk_playbooknodes WHERE sprk_executortype IS NULL. Record count; expected 0. If non-zero, FAIL with row-IDs sample.
+    </step>
+    <step order="3" name="Verify criterion 2 — single-hop dispatch">
+      Read PlaybookOrchestrationService.ExecuteNodeAsync; confirm dispatch reads node.sprk_executortype directly (no lookup chain, no Action override branch, no structural fallback ladder). Cite line numbers.
+    </step>
+    <step order="4" name="Verify criterion 3 — no ExecuteAnalysisAsync callers">
+      Grep src/ for `ExecuteAnalysisAsync`. Expected: zero hits in production source (test files OK if asserting removal). Record grep output.
+    </step>
+    <step order="5" name="Verify criterion 4 — AiCompletionNodeExecutor + /narrate integration">
+      Confirm AiCompletionNodeExecutor.cs exists; registered as Singleton in AnalysisServicesModule. Run integration test for /narrate dispatch path (or document that task 101 UAT covers the live UAT — this step does the static + unit-test verification).
+    </step>
+    <step order="6" name="Verify criterion 5 — PlaybookBuilder Executor Type selector">
+      Inspect PlaybookBuilder Code Page source for the executor-type selector component. Confirm 33 values + 6 tier groupings present. If not deployed to spaarkedev1, note as "verified by code inspection; UI confirmed in task 089d".
+    </step>
+    <step order="7" name="Verify criterion 6 — typed config forms for ≥5 executors">
+      Inspect PlaybookBuilder typed-form renderer. Confirm ≥5 executors have schemas + forms (AI Analysis, AI Completion, Condition, EntityNameValidator, CreateNotification at minimum).
+    </step>
+    <step order="8" name="Verify criterion 7 — Action authoring surface simplified">
+      Open sprk_analysisaction model-driven form via maker portal description or solution unpack. Confirm: no Action Type field, no Executor Action Type field. Form shows prompt + schema + temperature only.
+    </step>
+    <step order="9" name="Verify criterion 8 — canonical docs reflect new model">
+      Grep `docs/` for "SUPERSEDED" markers introduced during R7. Expected: zero new instances per NFR-08. Spot-check 3 representative docs (ai-architecture-playbook-runtime.md, ai-architecture-actions-nodes-scopes.md, ai-guide-playbook-deploy-recipe.md) for new-model content.
+    </step>
+    <step order="9.1" name="Verify criterion 9 — jps-* skill bodies align">
+      Read .claude/skills/jps-action-create/SKILL.md, jps-playbook-design, jps-playbook-audit, jps-validate, jps-scope-refresh. Confirm each cites the WHY (R3.1 history) + validates against sprk_executortype.
+    </step>
+    <step order="9.2" name="Verify criterion 10 — Deploy-Playbook.ps1 writes executor type">
+      Read scripts/dataverse/Deploy-Playbook.ps1. Confirm explicit write of node.sprk_executortype; no name-detection workarounds; no __actionType injection.
+    </step>
+    <step order="9.3" name="Verify criterion 11 — C# enum ↔ Choice set lockstep">
+      Confirm the sync mechanism (CI check OR codegen step) chosen in Wave 1. Spot-check that the C# ExecutorType enum value count matches the sprk_playbookexecutortype Choice set count (33+ values).
+    </step>
+    <step order="9.4" name="Verify criterion 12 — documentation tech debt list removed">
+      Re-read design.md §6 (tech debt list). For each item, confirm Wave 6 deliverable resolved it.
+    </step>
+    <step order="9.5" name="Quality gates (FULL rigor) + verify criteria 13-15">
+      Run `/code-review` on the verification report draft + `/adr-check` against ADR-038 (verification tests follow ADR-038 patterns).
+
+      Criterion 13: confirm `docs/guides/ai-guide-consumer-wiring.md` exists and covers all 6 consumers + chat-summarize case study.
+      Criterion 14: integration test for chat-summarize routing through IConsumerRoutingService Path A.5 (run if test exists; else verify code path inspection).
+      Criterion 15: confirm Library modal wired into ≥3 consumer surfaces (spaarke-ai chat, briefing widget, ad-hoc launcher).
+    </step>
+    <step order="10" name="Write verification report">
+      Write `projects/spaarke-ai-platform-unification-r7/notes/handoffs/graduation-verification.md` with:
+      - Header: date, commit SHA, overall PASSED / FAILED / INCOMPLETE status
+      - Per-criterion table (15 rows): # | Criterion | Method | Output snippet | Result (PASS/FAIL/AMBIGUOUS)
+      - Footer: owner sign-off line ("Owner review pending" until 101 UAT closes)
+    </step>
+    <step order="11" name="Update current-task.md + TASK-INDEX">
+      Mark task 100 status complete (only if all 15 PASS or owner pre-approves AMBIGUOUS items). Advance current-task.md to task 101.
+      If any FAIL: STOP — surface to owner for remediation before 101.
+    </step>
+    <step order="12" name="Commit">
+      Commit notes/handoffs/graduation-verification.md with conventional message.
+      Example: docs(r7): Wave 10 task 100 — graduation verification report (15/15 criteria verified)
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (spec, code files, docs, skills)</tool>
+    <tool>Grep (ExecuteAnalysisAsync, SUPERSEDED markers, sprk_nodetype residue)</tool>
+    <tool>Bash (dotnet test for integration tests, git log/show for commit SHA)</tool>
+    <tool>Write (graduation-verification.md report)</tool>
+    <tool>Skill (code-review at Step 9.5)</tool>
+    <tool>Skill (adr-check at Step 9.5)</tool>
+    <tool>MCP dataverse (criterion-1 SQL count query via read_query)</tool>
+  </tools>
+
+  <outputs>
+    <output type="new-file">projects/spaarke-ai-platform-unification-r7/notes/handoffs/graduation-verification.md</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md (advance to task 101)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 100 ✅; 101 🔲 ready)</output>
+    <output type="commit">docs(r7): Wave 10 task 100 — graduation verification report (15 criteria verified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Verification report exists at notes/handoffs/graduation-verification.md</criterion>
+    <criterion>Report enumerates all 15 success criteria from spec.md with concrete verification method + output per criterion</criterion>
+    <criterion>Each criterion has a PASS / FAIL / AMBIGUOUS result; AMBIGUOUS results flag owner judgment</criterion>
+    <criterion>Overall status line at top: "PASSED (15/15)" / "FAILED (X/15)" / "INCOMPLETE (N AMBIGUOUS)"</criterion>
+    <criterion>Criterion 1 verified via Dataverse SQL count (0 null rows expected)</criterion>
+    <criterion>Criteria 2-4 verified via code inspection + grep + integration test as appropriate</criterion>
+    <criterion>Criteria 5-7 verified via PlaybookBuilder Code Page + Power Apps form inspection</criterion>
+    <criterion>Criteria 8-12 verified via doc + skill + script inspection</criterion>
+    <criterion>Criteria 13-15 verified via doc existence + integration test + click-through</criterion>
+    <criterion>code-review + adr-check pass at Step 9.5 on the report</criterion>
+    <criterion>current-task.md updated; if any FAIL, task 100 is NOT complete and owner is notified</criterion>
+    <criterion>TASK-INDEX.md shows 100 ✅, 101 🔲 ready (only if all 15 PASS)</criterion>
+    <criterion>Commit pushed to work/spaarke-ai-platform-unification-r7</criterion>
+  </acceptance-criteria>
+</task>

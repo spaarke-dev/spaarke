@@ -8,7 +8,7 @@ namespace Sprk.Bff.Api.Services.Ai.Nodes;
 /// Reads prior node outputs and evaluates a configured evidence-sufficiency rule per D-P12 +
 /// D-49 (LAVERN Pattern #7). Emits a deterministic <c>sufficient</c> / <c>insufficient</c>
 /// verdict + structured gap analysis. Used as the pre-condition gate before a
-/// <see cref="ActionType.DeclineToFind"/> branch in Insights synthesis playbooks.
+/// <see cref="ExecutorType.DeclineToFind"/> branch in Insights synthesis playbooks.
 /// </summary>
 /// <remarks>
 /// <para>
@@ -41,7 +41,7 @@ namespace Sprk.Bff.Api.Services.Ai.Nodes;
 /// <para>
 /// All rules MUST pass for the verdict to be <c>sufficient</c>. When any rule fails, the
 /// verdict is <c>insufficient</c> and the gap analysis records every failing rule with its
-/// observed-vs-required values so <see cref="ActionType.DeclineToFind"/> can render a
+/// observed-vs-required values so <see cref="ExecutorType.DeclineToFind"/> can render a
 /// structured <see cref="Sprk.Bff.Api.Models.Insights.DeclineResponse"/> per D-49.
 /// </para>
 /// <para>
@@ -70,10 +70,42 @@ public sealed class EvidenceSufficiencyNode : INodeExecutor
     }
 
     /// <inheritdoc />
-    public IReadOnlyList<ActionType> SupportedActionTypes { get; } = new[]
+    public IReadOnlyList<ExecutorType> SupportedExecutorTypes { get; } = new[]
     {
-        ActionType.EvidenceSufficiency
+        ExecutorType.EvidenceSufficiency
     };
+
+    // R7 task 085 / FR-23 — typed config schema for Playbook Builder canvas.
+    // Derived from EvidenceSufficiencyConfig: rules (required, array of EvidenceSufficiencyRule),
+    // sufficientBranch, insufficientBranch.
+    private static readonly ExecutorConfigSchema ConfigSchemaInstance = new(
+        ExecutorTypeName: nameof(ExecutorType.EvidenceSufficiency),
+        ExecutorTypeValue: (int)ExecutorType.EvidenceSufficiency,
+        Description: "Reads prior node outputs and evaluates configured evidence-sufficiency rules. Emits sufficient/insufficient verdict + structured gap analysis (D-49 / LAVERN Pattern #7). All rules MUST pass for sufficient.",
+        Fields: new ConfigSchemaField[]
+        {
+            new(
+                Name: "rules",
+                Type: SchemaFieldType.Array,
+                Required: true,
+                Description: "Array of sufficiency rules. Each rule: { name, from, countFrom?, minCount?, requireNonEmpty?, predicate? ('in'), value? (array), readFrom? }. Each rule MUST specify minCount, requireNonEmpty=true, or predicate. Required.",
+                Default: null),
+            new(
+                Name: "sufficientBranch",
+                Type: SchemaFieldType.String,
+                Required: false,
+                Description: "Optional branch label emitted on selectedBranch when all rules pass. Defaults to 'sufficient'.",
+                Default: "sufficient"),
+            new(
+                Name: "insufficientBranch",
+                Type: SchemaFieldType.String,
+                Required: false,
+                Description: "Optional branch label emitted on selectedBranch when any rule fails. Defaults to 'insufficient'. Typically routed to a DeclineToFind node.",
+                Default: "insufficient")
+        });
+
+    /// <inheritdoc />
+    public ExecutorConfigSchema GetConfigSchema() => ConfigSchemaInstance;
 
     /// <inheritdoc />
     public NodeValidationResult Validate(NodeExecutionContext context)
@@ -425,8 +457,8 @@ internal sealed record EvidenceSufficiencyRule
 
 /// <summary>
 /// Structured output of <see cref="EvidenceSufficiencyNode"/>.
-/// Consumed by downstream <see cref="ActionType.DeclineToFind"/> +
-/// <see cref="ActionType.ReturnInsightArtifact"/> nodes.
+/// Consumed by downstream <see cref="ExecutorType.DeclineToFind"/> +
+/// <see cref="ExecutorType.ReturnInsightArtifact"/> nodes.
 /// </summary>
 public sealed record EvidenceSufficiencyResult
 {

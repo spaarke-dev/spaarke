@@ -1,0 +1,154 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-025" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Delete structural fallback ladder (FR-08, ~150 LOC)</title>
+    <status>completed</status>
+    <wave>2</wave>
+    <estimated-effort>2 hours</estimated-effort>
+    <tags>bff-api, code-impl, deletion, wave-2</tags>
+    <rigor-level>FULL</rigor-level>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>024</dependencies>
+    <fr-coverage>FR-08</fr-coverage>
+  </metadata>
+
+  <prompt>
+    Pure deletion. Task 024 made the structural fallback ladder dead code; this task removes it. Target methods
+    (per spec FR-08 + plan.md): `IsDeployedStartNode`, `IsDeployedLoadKnowledgeNode`, `IsDeployedReturnResponseNode`,
+    `ExtractActionTypeFromConfig` in `PlaybookOrchestrationService.cs` (lines ~863-1079, ~150 LOC). Per FR-08 +
+    spec Q6 (no backward-compat shim): the ladder is DELETED, not deprecated. After this task: grep for those helper
+    names returns zero hits; build + tests pass.
+  </prompt>
+
+  <role>
+    Senior .NET backend developer executing a deletion. Discipline: delete only the named helpers + their call sites
+    inside the dispatch logic. Do NOT touch unrelated methods or refactor adjacent code.
+  </role>
+
+  <goal>
+    The four named helpers (and any private fields they own) are deleted from `PlaybookOrchestrationService.cs`.
+    Any test that exercised them is updated or deleted (tests that asserted structural inference are no longer meaningful).
+    Build + tests stay green. Publish-size shrinks measurably (expect ~5-10 KB decrease from ~150 LOC removed).
+  </goal>
+
+  <inputs>
+    <file purpose="orchestrator">src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookOrchestrationService.cs</file>
+    <file purpose="design-spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    <file purpose="bff-constraints">.claude/constraints/bff-extensions.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-010">DI Minimalism — deletion only; no new abstractions.</constraint>
+    <constraint source="ADR-013">BFF AI Architecture — no facade surface change.</constraint>
+    <constraint source="ADR-029">BFF Publish Hygiene — expected SHRINK (~5-10 KB compressed). Task 029 measures.</constraint>
+    <constraint source="ADR-038">Testing Strategy — tests that asserted structural inference (`IsDeployedStartNode` returning true for "Start" name) are scaffolding now (no behavior to assert) — DELETE per build-vs-maintain. Tests that exercise the new single-hop path stay.</constraint>
+    <constraint source="spec FR-08">REMOVE the structural fallback ladder. No SUPERSEDED markers, no `[Obsolete]` shim.</constraint>
+    <constraint source="spec Q6 RESOLVED">No backward compatibility. Hard delete.</constraint>
+    <constraint source="CLAUDE.md §11">Deletion of existing surface — justification triple NOT required (CLAUDE.md §11 explicitly exempts existing-file modifications).</constraint>
+    <constraint source="bff-extensions.md">Pre-merge checklist applies. Placement decision: deletion from existing service. Test obligation: update PlaybookOrchestrationService tests per §F.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff/playbook-runtime</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/architecture/ai-architecture-playbook-runtime.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      The structural fallback ladder was added in R3.1 / R4 era to handle nodes that didn't have ActionType
+      populated — it inferred dispatch from node name patterns ("Start", "LoadKnowledge", "ReturnResponse").
+      That heuristic was brittle and contributed to the R7 motivation. Post-task 024, the orchestrator reads
+      dispatch directly; the ladder is unreachable code.
+    </background>
+    <dependencies>
+      <dependency task="024" status="must-be-complete">Single-hop dispatch primary path implemented; fallback marked as dead code with comments.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 026 deletes the Action override branch (parallel cleanup).</item>
+      <item>Task 027 updates NodeExecutorRegistry dispatch (parallel cleanup).</item>
+      <item>Task 029 measures publish-size delta — expects SHRINK.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: FULL · 📋 REASON: code-impl in BFF; deletion tag; modifies orchestrator hot path + tests; ADR-038 TEST-MODIFYING override applies (FULL rigor unconditional); quality gates Step 9.5 required · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read CLAUDE.md + spec FR-08 + plan.md Wave 2 + bff-extensions.md.
+    </step>
+    <step order="2" name="Pre-baseline build + test">
+      `dotnet build` + `dotnet test`. Confirm green.
+    </step>
+    <step order="3" name="Locate the four helpers + their call sites">
+      Grep for `IsDeployedStartNode`, `IsDeployedLoadKnowledgeNode`, `IsDeployedReturnResponseNode`, `ExtractActionTypeFromConfig` in `PlaybookOrchestrationService.cs`. Map each helper to its call sites within the file.
+    </step>
+    <step order="4" name="Delete call sites first">
+      Remove every call to the four helpers from within `ExecuteNodeAsync` and any other method that invoked them. After this step, the helpers are unreferenced (Roslyn will warn).
+    </step>
+    <step order="5" name="Delete the four helpers">
+      Remove the method bodies + their XML doc comments + any private fields they exclusively used.
+    </step>
+    <step order="6" name="Sweep adjacent dead code">
+      If the deleted helpers had supporting types (e.g., helper records, internal enums) that are now unused, delete those too. Be conservative — only delete if grep confirms zero references.
+    </step>
+    <step order="7" name="Update tests">
+      Find tests in `tests/unit/Sprk.Bff.Api.Tests/` that asserted the structural inference behavior. Per ADR-038 build-vs-maintain criteria: these are SCAFFOLDING (no behavior remains to assert) — DELETE. Run `/test-diet` mentally — these tests are not in any KEEP category.
+    </step>
+    <step order="8" name="Build + test">
+      `dotnet build` — 0 errors, 0 new warnings (any "unused" warnings indicate missed call sites).
+      `dotnet test` — green.
+    </step>
+    <step order="9" name="Verify grep zero hits">
+      Grep for each helper name across `src/server/api/Sprk.Bff.Api/`. Expected: zero.
+    </step>
+    <step order="9.5" name="Quality gates (FULL rigor)">
+      Run `/code-review` on the diff — focus on missed call sites + appropriate test deletions per ADR-038.
+      Run `/adr-check` against ADR-029 + ADR-038 + bff-extensions.md.
+      Fix any findings.
+    </step>
+    <step order="10" name="Update current-task.md + TASK-INDEX">
+      Mark task 025 complete; advance current-task.md.
+    </step>
+    <step order="11" name="Commit">
+      `refactor(bff/r7): delete structural fallback ladder (Wave 2 task 025, FR-08)`.
+      Body: cite FR-08; list deleted helpers; note tests deleted per ADR-038.
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (orchestrator, tests)</tool>
+    <tool>Edit (PlaybookOrchestrationService.cs — delete helpers + call sites)</tool>
+    <tool>Grep (locate call sites + verify zero hits post-deletion)</tool>
+    <tool>Bash (dotnet build, dotnet test, git commit, git rm for deleted test files)</tool>
+    <tool>Skill (code-review at Step 9.5)</tool>
+    <tool>Skill (adr-check at Step 9.5)</tool>
+  </tools>
+
+  <outputs>
+    <output type="modified-file">src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookOrchestrationService.cs (~150 LOC removed)</output>
+    <output type="deleted-files">Tests in tests/unit/Sprk.Bff.Api.Tests/ that exercised structural inference (per ADR-038 scaffolding classification)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md (advance)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 025 ✅)</output>
+    <output type="commit">refactor(bff/r7): delete structural fallback ladder (Wave 2 task 025, FR-08)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>`IsDeployedStartNode`, `IsDeployedLoadKnowledgeNode`, `IsDeployedReturnResponseNode`, `ExtractActionTypeFromConfig` all DELETED</criterion>
+    <criterion>All call sites within PlaybookOrchestrationService removed</criterion>
+    <criterion>Grep for the four helper names returns zero hits in BFF source</criterion>
+    <criterion>Tests asserting structural inference deleted per ADR-038 scaffolding classification</criterion>
+    <criterion>dotnet build passes: 0 errors, 0 new warnings (no "unused" or "unreachable" warnings)</criterion>
+    <criterion>dotnet test passes: full suite green</criterion>
+    <criterion>code-review + adr-check pass at Step 9.5</criterion>
+    <criterion>~150 LOC removed (per FR-08 / plan.md estimate)</criterion>
+    <criterion>Commit pushed</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,8 +1,10 @@
 # Spaarke AI Platform Unification R6
 
-> **Last Updated**: 2026-06-25 (post-UAT, post-master-merge)
+> **Last Updated**: 2026-06-29 (R6 closed)
 >
-> **Status**: Backend shipped + deployed to master 2026-06-24 (PR #401 / merge `8579d6536`); UAT 2026-06-25 surfaced surface-wiring gaps; **NOT yet closed** — pending surface completion + closeout tasks 089/090
+> **Status**: ✅ **COMPLETE** — Closed 2026-06-29 by task 090. 9 architectural pillars converged across 4 phases + 1 parallel handler workstream + Q7 memory UI expansion. Backend deployed via PR #401 (master commit `8579d6536`) 2026-06-24; closeout follow-on (DEF-001/002/003/004) merged to master via fast-forward `ecb650e44` on 2026-06-29. Lessons-learned + R7 backlog filed.
+>
+> **Completed Date**: 2026-06-29
 >
 > **Type**: Architecture convergence phase (not feature project)
 
@@ -25,13 +27,12 @@ R6 is the convergence phase that aligns the conversational chat-agent with the p
 
 | Metric | Value |
 |--------|-------|
-| **Phase** | Closeout — Surface Completion (post-UAT 2026-06-25) |
-| **Progress** | Backend 100% (Phases A/B/C/D + handler workstream complete); Surface ~70%; Closeout ~10% |
-| **Master merge** | PR #401 merged 2026-06-24 18:43 UTC (commit `8579d6536`); Environment Promotion 19:06 UTC ✅ |
-| **UAT result** | Tier G ✅, Tier F partial; Tiers A/B deferred to focused project; Tiers C/D/E blocked on surface wiring gaps |
-| **Blocking surface gaps** | TIER-C (LLM workspace visibility), task 095 (trace SSE bridge), 097b (`getConversationHistory`), 098 (`AddToAssistantToggle` mount) |
-| **Builder UI gaps** | Tasks 091 (persona dropdown), 093 (destination/widgetType fields) — may carry to R7 |
-| **Closeout** | Tasks 089 (Phase D exit-gate) + 090 (project wrap-up) — gated on UAT pass |
+| **Phase** | ✅ Complete |
+| **Progress** | 100% (Phases A/B/C/D + handler workstream + surface completion + closeout) |
+| **Master merge** | PR #401 (2026-06-24 18:43 UTC `8579d6536`) + closeout follow-on fast-forward (2026-06-29 `ecb650e44`) |
+| **UAT result** | Tier G ✅; Tiers C/D/E surface gaps closed via DEF-001 (BFF context_event SSE) + DEF-002 (persona FK wiring) + DEF-003 (Builder routing UI) + surface completion sprint (095/096/097b/098) |
+| **Deploy state** | Code on master. BFF Azure deploy + PlaybookBuilder maker-portal upload pending (user lifted hold at closeout; not yet executed) |
+| **Closeout artifacts** | [`notes/phase-d-exit-checklist.md`](notes/phase-d-exit-checklist.md), [`notes/lessons-learned.md`](notes/lessons-learned.md), [`notes/r7-backlog.md`](notes/r7-backlog.md) |
 | **Owner** | Spaarke dev team |
 
 ### What's working today (deployed to spaarke-dev)
@@ -74,14 +75,14 @@ R6 ships 9 pillars across 4 phases + 1 parallel handler workstream:
 
 The project is **complete** when:
 
-- [ ] **Phase A exit (Pillars 1, 2, 3, 4)** — Chat-agent tool list driven by `sprk_analysistool` rows; persona data-driven; one generic `invoke_playbook` tool; `SessionSummarizeOrchestrator` routes through `PlaybookExecutionEngine`
-- [ ] **Phase B exit (Pillar 5)** — Workspace renderer handles array + object fields correctly; `outputSchema` declared on action; duplicate-fire eliminated at `CapabilityRouter` (one user intent → one render)
-- [ ] **Phase C exit (Pillars 6, 7, 9)** — Agent has accurate workspace awareness; "Update the summary in Tab 1" works; Send-to-Workspace + Add-to-Assistant + Pin-to-Matter functional; Context pane shows live execution trace; cross-conversation memory recalls prior-matter context; Pinned Memory UI ships
-- [ ] **Phase D exit (Pillar 8 + integration)** — `/help` works; hard slashes bypass LLM (<100ms); soft slashes route via agent with prioritized intent; references resolve at parse time; lightweight eval baseline captured
-- [ ] **8 Typed Handlers** — All 8 implemented as `IToolHandler`, registered via auto-discovery, dispatch from playbook + chat contexts
-- [ ] **Vertical-Slice Validation** — Summarize playbook end-to-end exercises every pillar (per spec §Success Criteria)
-- [ ] **NFR compliance** — BFF publish size ≤+5 MB total (NFR-02); pre-fill flow preserved (NFR-07); no Agent Framework references (NFR-04); 4-channel PaneEventBus + 4-stage shell lifecycle preserved
-- [ ] **Quality gates** — All FULL-rigor tasks pass `code-review` + `adr-check`; integration test coverage for vertical slice; no HIGH-severity CVEs
+- [x] **Phase A exit (Pillars 1, 2, 3, 4)** — Chat-agent tool list driven by `sprk_analysistool` rows; persona data-driven; one generic `invoke_playbook` tool; `SessionSummarizeOrchestrator` routes through `PlaybookExecutionEngine`
+- [x] **Phase B exit (Pillar 5)** — Workspace renderer handles array + object fields correctly; `outputSchema` declared on action; duplicate-fire eliminated at `CapabilityRouter` (one user intent → one render)
+- [x] **Phase C exit (Pillars 6, 7, 9)** — Agent has accurate workspace awareness; "Update the summary in Tab 1" works; Send-to-Workspace + Add-to-Assistant + Pin-to-Matter functional; Context pane shows live execution trace; cross-conversation memory recalls prior-matter context; Pinned Memory UI ships
+- [x] **Phase D exit (Pillar 8 + integration)** — `/help` works; hard slashes bypass LLM (<100ms); soft slashes route via agent with prioritized intent; references resolve at parse time; lightweight eval baseline captured
+- [x] **8 Typed Handlers** — All 8 implemented as `IToolHandler`, registered via auto-discovery, dispatch from playbook + chat contexts
+- [x] **Vertical-Slice Validation** — Summarize playbook end-to-end exercises every pillar (per spec §Success Criteria)
+- [x] **NFR compliance** — BFF publish size ≤+5 MB total (NFR-02); pre-fill flow preserved (NFR-07); no Agent Framework references (NFR-04); 4-channel PaneEventBus + 4-stage shell lifecycle preserved
+- [x] **Quality gates** — All FULL-rigor tasks pass `code-review` + `adr-check`; integration test coverage for vertical slice; no HIGH-severity CVEs
 
 ## Scope
 

@@ -9,7 +9,7 @@ namespace Sprk.Bff.Api.Services.Ai.Nodes;
 
 /// <summary>
 /// Node executor that routes playbook nodes to the Azure AI Foundry Agent Service.
-/// Implements <see cref="INodeExecutor"/> for <see cref="ActionType.AgentService"/> (value 60).
+/// Implements <see cref="INodeExecutor"/> for <see cref="ExecutorType.AgentService"/> (value 60).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -54,10 +54,35 @@ public sealed class AgentServiceNodeExecutor : INodeExecutor
     }
 
     /// <inheritdoc />
-    public IReadOnlyList<ActionType> SupportedActionTypes { get; } = new[]
+    public IReadOnlyList<ExecutorType> SupportedExecutorTypes { get; } = new[]
     {
-        ActionType.AgentService
+        ExecutorType.AgentService
     };
+
+    // R7 task 085 / FR-23 — typed config schema for Playbook Builder canvas.
+    // Derived from AgentServiceNodeConfig (TenantId + Prompt, both required).
+    private static readonly ExecutorConfigSchema ConfigSchemaInstance = new(
+        ExecutorTypeName: nameof(ExecutorType.AgentService),
+        ExecutorTypeValue: (int)ExecutorType.AgentService,
+        Description: "Routes the playbook node to Azure AI Foundry Agent Service (Phase 2). Creates/resumes a tenant-scoped Agent thread (ADR-009 Redis-first) and streams the response.",
+        Fields: new ConfigSchemaField[]
+        {
+            new(
+                Name: "tenantId",
+                Type: SchemaFieldType.String,
+                Required: true,
+                Description: "Tenant identifier used to scope the Redis Agent-thread cache key (agent-thread:{tenantId}). Required.",
+                Default: null),
+            new(
+                Name: "prompt",
+                Type: SchemaFieldType.String,
+                Required: true,
+                Description: "User message sent to the Agent thread. Supports {{var}} template substitution against upstream node outputs. Required.",
+                Default: null)
+        });
+
+    /// <inheritdoc />
+    public ExecutorConfigSchema GetConfigSchema() => ConfigSchemaInstance;
 
     /// <inheritdoc />
     public NodeValidationResult Validate(NodeExecutionContext context)
@@ -110,7 +135,7 @@ public sealed class AgentServiceNodeExecutor : INodeExecutor
             "ai.agent.node_execute", ActivityKind.Internal);
         activity?.SetTag("node.id", context.Node.Id.ToString());
         activity?.SetTag("node.name", context.Node.Name);
-        activity?.SetTag("action_type", 60); // ActionType.AgentService = 60
+        activity?.SetTag("action_type", 60); // ExecutorType.AgentService = 60
 
         _logger.LogDebug(
             "Executing AgentService node {NodeId} ({NodeName})",

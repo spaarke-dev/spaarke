@@ -1,0 +1,22 @@
+Archived: 2026-06-29
+Final status: Completed
+Closing PR: none (R4 closeout merged via Path B direct merge; main R4 scope was PR #406 squash-merged at 80f70a1d4 on 2026-06-23)
+Final commit on master: 7325d9415
+Closeout commits (work/smart-todo-r4-closeout → master via direct merge):
+  027db5d12 — R4-113 delete sprk_todo_dirty_check.js
+  21274208c — R4-112 closeout-wave re-scope + HOST-only docs
+  1c51fd8e2 — R4-112 Bug-1 PCF onRecordTypeChanged fix (v1.1.0 → v1.2.0)
+  96c391900 — R4-118 scope B + MS To Do checkmark icons
+  a8c1e58e3 — R4-114 + R4-115 jest wiring + audit
+  5b7a62812 — R4-112 RegardingResolver Solution scaffold + manifest XSD apostrophe fix (v1.2.0 deployed)
+  9069ee50f — R4-112 XSD failure mode docs (pcf-deploy skill + CHANGELOG + inventory)
+  817685608 — R4-118 partial-completion + R5 R-9 ribbon backlog
+  eda9a00b2 — Post-deploy search-filter wiring hotfix (SmartTodoApp → <SmartToDo>)
+  d8c3a468f — R4-116 R4-092 flip to ✅ + closeout deploy block
+  7fa839111 — R4-117 wrap-up + lessons-learned.md
+  7325d9415 — Portfolio pointer block added to README
+Worktree: c:/code_files/spaarke-wt-smart-todo-r4 (PRESERVED — not removed by /devops-project-archive; clean up separately if desired)
+Remote branch: work/smart-todo-r4-closeout (still on origin)
+Issue: #441 (closed)
+Lessons learned: projects/smart-todo-r4/lessons-learned.md
+Successor: smart-todo-r5 (backlog at projects/smart-todo-r5/design.md)

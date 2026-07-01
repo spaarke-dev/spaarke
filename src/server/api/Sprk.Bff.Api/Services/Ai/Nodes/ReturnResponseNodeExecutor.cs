@@ -5,17 +5,17 @@
 //   DAILY-BRIEFING-NARRATE "ReturnResponse" sprk_playbooknode row carries
 //   nodeType=Control + canvasType=returnResponse + a configJson with a `responseBinding`
 //   (and an `_validationMetadata` sidecar) but NO `__actionType`. Without an explicit
-//   __actionType, the structural fallback routes Control → ActionType.Condition →
+//   __actionType, the structural fallback routes Control → ExecutorType.Condition →
 //   ConditionNodeExecutor, which rejects the node with "Condition expression is
 //   required".
 //
-//   This executor is the first-class pairing for ActionType.ReturnResponse (= 143),
+//   This executor is the first-class pairing for ExecutorType.ReturnResponse (= 143),
 //   modelled exactly on StartNodeExecutor.cs (sibling pattern just landed).
 //
 // Semantics (per daily-briefing-narrate.json ReturnResponse node + design notes
 // projects/spaarke-daily-update-service-r4/notes/design/010-daily-briefing-narrate-node-graph.md):
 //   - NodeType: Control (no Action FK, no scope resolution required).
-//   - ActionType: ReturnResponse = 143.
+//   - ExecutorType: ReturnResponse = 143.
 //   - Terminal node — binds the playbook's final outputs to the run return value,
 //     projected into the DailyBriefingNarrateResponse contract by the playbook-
 //     execution method on AnalysisOrchestrationService.
@@ -30,8 +30,8 @@
 //     value via the existing aggregation contract (code-archaeology §10).
 //
 // Why a dedicated executor, not orchestrator special-casing (mirrors Start's rationale):
-//   - Per canonical-truth §9: NodeType (5 values) and ActionType (31+ enum values) are
-//     orthogonal. Registry indexes by ActionType.
+//   - Per canonical-truth §9: NodeType (5 values) and ExecutorType (31+ enum values) are
+//     orthogonal. Registry indexes by ExecutorType.
 //   - Per node-executor-authoring pattern: every dispatchable node-type has its own
 //     INodeExecutor. The orchestrator stays slim.
 //
@@ -56,7 +56,7 @@ namespace Sprk.Bff.Api.Services.Ai.Nodes;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Implements <see cref="INodeExecutor"/> for <see cref="ActionType.ReturnResponse"/>
+/// Implements <see cref="INodeExecutor"/> for <see cref="ExecutorType.ReturnResponse"/>
 /// (value 143). Registered as a Singleton in <c>AnalysisServicesModule.AddNodeExecutors</c>
 /// (no scope-factory needed — uses <see cref="ITemplateEngine"/> + ILogger only).
 /// </para>
@@ -107,10 +107,30 @@ public sealed class ReturnResponseNodeExecutor : INodeExecutor
     }
 
     /// <inheritdoc />
-    public IReadOnlyList<ActionType> SupportedActionTypes { get; } = new[]
+    public IReadOnlyList<ExecutorType> SupportedExecutorTypes { get; } = new[]
     {
-        ActionType.ReturnResponse
+        ExecutorType.ReturnResponse
     };
+
+    // R7 task 085 / FR-23 — typed config schema for Playbook Builder canvas.
+    // Derived from ReturnResponseConfig: responseBinding (name→template map plus optional
+    // _validationMetadata sidecar).
+    private static readonly ExecutorConfigSchema ConfigSchemaInstance = new(
+        ExecutorTypeName: nameof(ExecutorType.ReturnResponse),
+        ExecutorTypeValue: (int)ExecutorType.ReturnResponse,
+        Description: "Canvas-only Control node — terminal 'return response' projection. Reads responseBinding (a name→template map) and binds the resolved object to OutputVariable (default 'response') as the playbook's final return value. Missing template variables yield empty/null (does not throw).",
+        Fields: new ConfigSchemaField[]
+        {
+            new(
+                Name: "responseBinding",
+                Type: SchemaFieldType.Object,
+                Required: false,
+                Description: "Optional name→Handlebars-template map. Each key becomes a top-level field on the bound response; each value is a template rendered against upstream node outputs + run metadata. Reserved key '_validationMetadata' nests another name→template object as a sidecar.",
+                Default: null)
+        });
+
+    /// <inheritdoc />
+    public ExecutorConfigSchema GetConfigSchema() => ConfigSchemaInstance;
 
     /// <inheritdoc />
     public NodeValidationResult Validate(NodeExecutionContext context)
@@ -291,31 +311,13 @@ public sealed class ReturnResponseNodeExecutor : INodeExecutor
     /// </summary>
     private static Dictionary<string, object?> BuildTemplateContext(NodeExecutionContext context)
     {
-        var templateContext = new Dictionary<string, object?>();
-
-        foreach (var (varName, output) in context.PreviousOutputs)
-        {
-            if (output.StructuredData.HasValue)
-            {
-                templateContext[varName] = TemplateEngine.ConvertJsonElement(output.StructuredData.Value);
-            }
-            else
-            {
-                templateContext[varName] = null;
-            }
-        }
-
-        // The "run" metadata bag — exposes completedAtUtc per the daily-briefing-narrate
-        // contract (responseBinding.generatedAtUtc = "{{run.completedAtUtc}}").
-        templateContext["run"] = new
-        {
-            id = context.RunId.ToString(),
-            playbookId = context.PlaybookId.ToString(),
-            tenantId = context.TenantId,
-            completedAtUtc = DateTimeOffset.UtcNow.ToString("o")
-        };
-
-        return templateContext;
+        // R7 Wave 11 task 111 (Option B): delegates to shared PlaybookTemplateContextBuilder
+        // helper. Prior to Wave 11 this method was byte-for-byte duplicated across
+        // LoadKnowledgeNodeExecutor + ReturnResponseNodeExecutor. The shared helper is the
+        // single source of truth for "what context can templates see" — including the
+        // `run` metadata bag (id + playbookId + tenantId + completedAtUtc) that the
+        // daily-briefing-narrate contract references via `{{run.completedAtUtc}}`.
+        return PlaybookTemplateContextBuilder.Build(context);
     }
 
     /// <summary>

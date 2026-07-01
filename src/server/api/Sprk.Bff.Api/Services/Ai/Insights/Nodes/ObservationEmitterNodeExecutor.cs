@@ -10,7 +10,7 @@ using Sprk.Bff.Api.Services.Ai.PublicContracts;
 namespace Sprk.Bff.Api.Services.Ai.Insights.Nodes;
 
 /// <summary>
-/// Wave C1 task 020 — node executor for <see cref="ActionType.ObservationEmit"/> (140). Final
+/// Wave C1 task 020 — node executor for <see cref="ExecutorType.ObservationEmit"/> (140). Final
 /// node of the universal-ingest@v1 JPS playbook per design-a5 §4 Node 6. Wraps
 /// <see cref="IObservationEmitter"/> + <see cref="IObservationIndexUpserter"/> +
 /// <see cref="IObservationMirror"/>. Replaced the per-field Observation emission portion of
@@ -19,7 +19,7 @@ namespace Sprk.Bff.Api.Services.Ai.Insights.Nodes;
 /// <remarks>
 /// <para>
 /// <b>Zone A</b> per SPEC §3.5 — discovered automatically by <see cref="NodeExecutorRegistry"/>
-/// via <see cref="SupportedActionTypes"/>; registered in
+/// via <see cref="SupportedExecutorTypes"/>; registered in
 /// <see cref="Sprk.Bff.Api.Infrastructure.DI.InsightsIngestModule"/>.
 /// </para>
 /// <para>
@@ -89,10 +89,17 @@ public sealed class ObservationEmitterNodeExecutor : INodeExecutor
     }
 
     /// <inheritdoc />
-    public IReadOnlyList<ActionType> SupportedActionTypes { get; } = new[]
+    public IReadOnlyList<ExecutorType> SupportedExecutorTypes { get; } = new[]
     {
-        ActionType.ObservationEmit
+        ExecutorType.ObservationEmit
     };
+
+    // R7 task 032 / FR-16 — placeholder schema (no maker-editable fields surfaced yet).
+    /// <inheritdoc />
+    public ExecutorConfigSchema GetConfigSchema() =>
+        ExecutorConfigSchema.Empty(
+            ExecutorType.ObservationEmit,
+            "Emits N observations (one per surviving L2 candidate after grounding) + L1 classification — final node of universal-ingest@v1 JPS playbook.");
 
     /// <inheritdoc />
     public NodeValidationResult Validate(NodeExecutionContext context)

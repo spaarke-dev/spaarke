@@ -7,6 +7,7 @@ import {
   MailRegular,
   CalendarAddRegular,
   ClipboardTaskAddRegular,
+  BookRegular,
 } from "@fluentui/react-icons";
 import type { FluentIcon } from "@fluentui/react-icons";
 
@@ -23,7 +24,7 @@ export interface IActionCardConfig {
 }
 
 /**
- * Ordered list of 7 action cards for the Get Started row.
+ * Ordered list of 9 action cards for the Get Started row.
  *
  * Click handlers are wired in WorkspaceGrid.tsx via the `onCardClick` prop:
  *   - "create-new-matter"         → opens WizardDialog (Create Matter, tasks 022-024)
@@ -33,6 +34,8 @@ export interface IActionCardConfig {
  *   - "find-similar"              → Find Similar wizard (dedicated dialog)
  *   - "send-email-message"        → Analysis Builder, intent "email-compose" (task 025)
  *   - "schedule-new-meeting"      → Analysis Builder, intent "meeting-schedule" (task 025)
+ *   - "browse-playbooks"          → Playbook Library Code Page in BROWSE mode
+ *                                   (R7 Wave 9 task 096, FR-18 surface 3 of 3)
  *
  * See ActionCardHandlers.ts and analysisBuilderTypes.ts for the Analysis Builder
  * integration implementation.
@@ -85,5 +88,11 @@ export const ACTION_CARD_CONFIGS: IActionCardConfig[] = [
     label: "Schedule New Meeting",
     icon: CalendarAddRegular,
     ariaLabel: "Schedule a new meeting",
+  },
+  {
+    id: "browse-playbooks",
+    label: "Browse Playbooks",
+    icon: BookRegular,
+    ariaLabel: "Browse the Playbook Library to discover and run any playbook",
   },
 ];

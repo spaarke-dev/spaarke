@@ -11,6 +11,7 @@
 
 import {
   IPlaybook,
+  IPlaybookConsumerMapping,
   IAction,
   ISkill,
   IKnowledge,
@@ -44,24 +45,118 @@ interface IPlaybookWebApi {
 /**
  * Load all active playbooks from sprk_analysisplaybook.
  *
+ * R7 task 094 / FR-18: when `options.includeConsumers === true`, ALSO loads
+ * `sprk_playbookconsumer` rows in a second parallel query and joins them
+ * in-memory on `_sprk_playbook_value`. Each returned `IPlaybook` has a
+ * `consumers` array (possibly empty) listing the consumer surfaces that
+ * invoke it. Two-query approach (vs. `$expand`) intentionally avoids
+ * depending on the auto-generated 1:N relationship navigation name, which
+ * varies by Dataverse maker conventions and is brittle to schema renames.
+ * The cost is one extra round-trip; at the ~10-100 playbook scale this is
+ * negligible and parallelizable via Promise.all.
+ *
  * @param webApi - Dataverse WebAPI accessor (Xrm.WebApi or equivalent).
+ * @param options - Optional flags. `includeConsumers` (default false)
+ *                  triggers the join with `sprk_playbookconsumer`.
  * @returns Resolved array of IPlaybook records.
  */
-export async function loadPlaybooks(webApi: IPlaybookWebApi): Promise<IPlaybook[]> {
-  const result = await webApi.retrieveMultipleRecords(
-    ENTITY_NAMES.playbook,
-    `?$select=${ID_FIELDS.playbook},sprk_name,sprk_description${BASE_FILTER}`
-  );
+export async function loadPlaybooks(
+  webApi: IPlaybookWebApi,
+  options?: { includeConsumers?: boolean }
+): Promise<IPlaybook[]> {
+  const includeConsumers = options?.includeConsumers === true;
 
-  return result.entities.map(
-    (entity: Record<string, unknown>): IPlaybook => ({
-      id: entity[ID_FIELDS.playbook] as string,
+  // Fire playbook query + optional consumer query in parallel — single
+  // round-trip cost even when consumers are joined in.
+  const [playbookResult, consumerMap] = await Promise.all([
+    webApi.retrieveMultipleRecords(
+      ENTITY_NAMES.playbook,
+      `?$select=${ID_FIELDS.playbook},sprk_name,sprk_description${BASE_FILTER}`
+    ),
+    includeConsumers
+      ? loadConsumerMappingsByPlaybookId(webApi)
+      : Promise.resolve(new Map<string, IPlaybookConsumerMapping[]>()),
+  ]);
+
+  return playbookResult.entities.map((entity: Record<string, unknown>): IPlaybook => {
+    const playbookId = entity[ID_FIELDS.playbook] as string;
+    const playbook: IPlaybook = {
+      id: playbookId,
       name: entity.sprk_name as string,
       description: (entity.sprk_description as string) || '',
       icon: 'Lightbulb', // No dedicated icon field in Dataverse
       isDefault: false,
-    })
+    };
+    if (includeConsumers) {
+      // Always assign — empty array signals "expand was requested, no rows"
+      // (a dead-code candidate per design.md §3 consumer-driven model).
+      playbook.consumers = consumerMap.get(playbookId) ?? [];
+    }
+    return playbook;
+  });
+}
+
+/**
+ * Internal helper — fetches every enabled `sprk_playbookconsumer` row and
+ * groups them by playbook id (from `_sprk_playbook_value` OData accessor).
+ *
+ * R7 task 094 / FR-18 support. The query is unfiltered on consumer-type
+ * because the Library modal needs to display the FULL consumer landscape
+ * per playbook (not just one consumer). Disabled rows are EXCLUDED here
+ * since the Library is a maker-facing discovery surface and showing soft-
+ * disabled wiring would confuse the picker. If a future caller needs
+ * disabled rows, add a flag.
+ *
+ * Scale note: this returns the full table (typically 6-20 rows in production).
+ * If the consumer table grows to thousands, replace with a per-playbook
+ * `$filter=_sprk_playbook_value eq <guid>` loop or move to a BFF endpoint
+ * that pre-joins server-side.
+ *
+ * Per DATA-ACCESS-DECISION-CRITERIA: this uses the SAME webApi accessor as
+ * loadPlaybooks (host-context Xrm.WebApi in MDA, BFF proxy in external-SPA).
+ * The choice is delegated to the caller — no NEW data-access path introduced.
+ */
+async function loadConsumerMappingsByPlaybookId(
+  webApi: IPlaybookWebApi
+): Promise<Map<string, IPlaybookConsumerMapping[]>> {
+  const result = await webApi.retrieveMultipleRecords(
+    ENTITY_NAMES.playbookConsumer,
+    // Note: NO $orderby because consumer table doesn't have sprk_name as the
+    // canonical sort field; rely on insertion order. NO statecode filter on
+    // the consumer table because that column controls archival, NOT the
+    // routing-active toggle (which is sprk_enabled). We DO filter enabled=true
+    // because Library should only surface wiring that would actually route.
+    '?$select=sprk_consumertype,sprk_consumercode,sprk_environment,sprk_priority,sprk_enabled,_sprk_playbook_value&$filter=sprk_enabled eq true'
   );
+
+  const byPlaybook = new Map<string, IPlaybookConsumerMapping[]>();
+  for (const entity of result.entities) {
+    // OData lookup accessor convention: `_<lookupcolumn>_value` returns
+    // the target GUID. Per chat-routing-redesign-r1 task 028 evidence the
+    // lookup column on sprk_playbookconsumer is `sprk_playbook` (NOT
+    // `sprk_playbookid`).
+    const playbookId = entity['_sprk_playbook_value'] as string | null | undefined;
+    if (!playbookId) {
+      // Defensive — a consumer row without a lookup target is misconfigured
+      // and not actionable for the Library. Skip silently; the FR-19 maker-
+      // review tool surfaces these gaps separately.
+      continue;
+    }
+    const mapping: IPlaybookConsumerMapping = {
+      consumerType: (entity.sprk_consumertype as string) ?? '',
+      consumerCode: (entity.sprk_consumercode as string) ?? null,
+      environment: (entity.sprk_environment as string) ?? null,
+      enabled: (entity.sprk_enabled as boolean) ?? false,
+      priority: (entity.sprk_priority as number) ?? undefined,
+    };
+    const existing = byPlaybook.get(playbookId);
+    if (existing) {
+      existing.push(mapping);
+    } else {
+      byPlaybook.set(playbookId, [mapping]);
+    }
+  }
+  return byPlaybook;
 }
 
 /**
@@ -237,12 +332,23 @@ export interface IPlaybookData {
  * All five requests are dispatched concurrently via Promise.all so total load
  * time is bounded by the slowest individual query rather than the sum.
  *
+ * R7 task 094 / FR-18: when `options.includeConsumers === true`, playbooks
+ * are joined with their `sprk_playbookconsumer` mappings. Default behavior
+ * (no options arg) is UNCHANGED for back-compat — existing callers
+ * (PlaybookLibraryShell intent-mode, IntentWizardFlow, etc.) keep their
+ * lighter payload.
+ *
  * @param webApi - Dataverse WebAPI accessor.
+ * @param options - Optional flags. `includeConsumers` (default false) opts
+ *                  into the consumer-mapping join.
  * @returns Resolved IPlaybookData containing all entity arrays.
  */
-export async function loadAllData(webApi: IPlaybookWebApi): Promise<IPlaybookData> {
+export async function loadAllData(
+  webApi: IPlaybookWebApi,
+  options?: { includeConsumers?: boolean }
+): Promise<IPlaybookData> {
   const [playbooks, actions, skills, knowledge, tools] = await Promise.all([
-    loadPlaybooks(webApi),
+    loadPlaybooks(webApi, options),
     loadActions(webApi),
     loadSkills(webApi),
     loadKnowledge(webApi),

@@ -3,7 +3,10 @@
     <title>R4-092 — Final deploy notes + flip to ✅</title>
     <phase>Closeout (UAT round 14)</phase>
     <workstream>project-tracking</workstream>
-    <status>not-started</status>
+    <status>completed</status>
+    <completion-2026-06-29>
+      R4-092 flipped to ✅ in both its POML metadata + TASK-INDEX.md status line. 130-line "Deploy session — Closeout wave (2026-06-23 → 2026-06-29)" block appended to R4-092 notes capturing all 8 closeout-wave outcomes (R4-110 height-chain + R4-111 closed + R4-112 RegardingResolver v1.2.0 Bug-1 fix + Solution scaffold + XSD apostrophe-fix + R4-113 dirty-check orphan delete + R4-114 jest wired + R4-115 deferred + R4-118 JS + icons partial + post-deploy search-filter hotfix). Final deployed-surfaces table for spaarkedev1 + R5 deferral references (R-9, R-10). Closure note. R4-117 wrap-up is the only remaining task.
+    </completion-2026-06-29>
     <estimated-effort>30 min</estimated-effort>
     <tags>deploy, project-tracking, closeout</tags>
     <parallel-safe>true</parallel-safe>

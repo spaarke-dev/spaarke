@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="120" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Audit Assistant↔Workspace state — gap list + reproducible UAT failures + scope recommendation</title>
+    <phase>Wave 12 — MVP Completion</phase>
+    <wave>12</wave>
+    <sub-wave>12.1</sub-wave>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Read-only audit; no code modification; output is a notes doc</rigor-reason>
+    <parallel-group>W12-1-Audit</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <tags>audit, bff-api, code-page, assistant, investigation, wave12</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+  </metadata>
+
+  <prompt>
+Audit the current state of Assistant↔Workspace↔Context functionality. Operator reports "nothing fixed" in UAT. Produce a gap list with reproducible failures, root-cause categorization (R7 regression vs missing implementation vs configuration), and disposition recommendation telling us whether Wave 12.4 fixes are plumbing-only (in-scope for MVP), require retrieval over SPE (out of MVP — scope to plumbing-only), or require tool-use (out of MVP).
+  </prompt>
+
+  <role>
+You are a code auditor doing read-only investigation. Do NOT modify code. Do NOT run deployments. Your job is to produce a concrete gap analysis that enables Wave 12.4 task generation with realistic effort estimates.
+  </role>
+
+  <goal>
+Output a notes doc at projects/spaarke-ai-platform-unification-r7/notes/audits/wave12-120-assistant-workspace.md that contains: (1) inventory of shipped Assistant↔Workspace surface, (2) end-to-end UAT scenario results (3-5 scenarios), (3) gap list with each gap categorized, (4) disposition recommendation with effort estimate per disposition.
+  </goal>
+
+  <inputs>
+    - Operator-reported state: "nothing fixed" in UAT (no specific repro yet)
+    - spaarke-ai chat surface (code page) is shipped
+    - LegalWorkspace dashboard is shipped (or retired per docs — verify)
+    - Context passing between them is partial per repo references
+    - Retrieval over SharePoint Embedded is R5 deferred work (placeholder in LoadKnowledgeNodeExecutor)
+    - Tool-use story is Action Engine R1 territory (on hold)
+  </inputs>
+
+  <constraints>
+    - Read-only. No code edits. No deploys. No Dataverse writes.
+    - Investigate only — do NOT propose fixes inside this task. Fix proposals come in Wave 12.4 POMLs generated post-audit.
+    - Do NOT scope-creep into actual remediation. If you find a quick fix that's tempting — document it as recommendation; do NOT apply.
+    - Respect Sub-Agent Write Boundary: writes go ONLY to projects/spaarke-ai-platform-unification-r7/notes/audits/.
+    - Cite file:line references for every claim.
+  </constraints>
+
+  <knowledge>
+    <files>
+      - projects/spaarke-ai-platform-unification-r7/notes/wave12-mvp-completion-plan.md (Wave 12 scope + plan)
+      - projects/spaarke-ai-platform-unification-r7/CLAUDE.md
+      - projects/spaarke-ai-platform-unification-r7/notes/spikes/poc-vs-playbook-engine-architecture.md (architectural foundation)
+      - docs/architecture/AI-ARCHITECTURE.md
+      - docs/architecture/ai-architecture-consumer-routing.md
+      - docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md
+      - docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md
+      - .claude/constraints/bff-extensions.md
+    </files>
+  </knowledge>
+
+  <context>
+    <relevant-files>
+      - src/solutions/SpaarkeAi/src/** (assistant chat surface code page)
+      - src/client/code-pages/LegalWorkspace/src/** (workspace dashboard if exists)
+      - src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs
+      - src/server/api/Sprk.Bff.Api/Services/Ai/Chat/**
+      - src/server/api/Sprk.Bff.Api/Services/Ai/ConsumerRouting/**
+      - src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/LoadKnowledgeNodeExecutor.cs (placeholder)
+    </relevant-files>
+  </context>
+
+  <steps>
+1. **Inventory shipped surface** (60-90 min):
+   - Locate assistant chat code page entry point + main components
+   - Locate LegalWorkspace / SpaarkeAi workspace dashboard + how it embeds the assistant
+   - Locate BFF endpoints the assistant calls (ChatEndpoints + ConsumerRouting + InvokePlaybookAi)
+   - Catalog context-passing mechanism (URL params, sessionStorage, claims, etc.)
+   - Document: what's shipped, where entry points are, how components talk
+
+2. **Define 3-5 UAT scenarios** (45 min):
+   - Scenario A: "I'm in matter X workspace, ask assistant 'what matter am I in?'" — does it know?
+   - Scenario B: "Ask assistant about a recent document in this matter" — does it have any awareness?
+   - Scenario C: "Open assistant from outside a matter context" — degrades gracefully?
+   - Scenario D: "Multi-turn conversation referencing earlier context" — does context persist?
+   - Scenario E (operator-specific from prior notes if you find one): TBD
+
+3. **Reproduce each scenario** (45-90 min):
+   - If spaarkedev1 reachable: run scenarios in browser, capture network calls + responses
+   - If not: trace code paths + identify likely failure points without running
+   - Per scenario: expected behavior, actual behavior, gap location
+
+4. **Categorize each gap** (45 min):
+   - **Plumbing**: claims/context/session bug; fixable in days
+   - **Missing implementation**: scoped but never built
+   - **Configuration**: AppService settings / Dataverse rows / feature flags; fixable in hours
+   - **Inherent dependency**: requires retrieval-over-SPE OR Action Engine tool-use; OUT of MVP
+   - **R7 regression**: enum rename or DI change broke something; restoration
+
+5. **Produce disposition recommendation** (30 min):
+   - Per gap: recommended Wave 12.4 task + effort estimate
+   - Overall: MVP-scope recommendation (plumbing-only / partial-grounding / out-of-scope-retrieval-needed)
+   - Flag any blocking dependencies that change MVP scope
+
+6. **Write notes doc** at projects/spaarke-ai-platform-unification-r7/notes/audits/wave12-120-assistant-workspace.md (60 min)
+
+7. **Update current-task.md** with audit status + next-step pointer
+
+  </steps>
+
+  <tools>
+    - Read (file inspection)
+    - Grep / Glob (code search)
+    - Bash (curl smoke against spaarkedev1 if accessible; az CLI for App Insights queries)
+    - Write (notes doc only — under projects/spaarke-ai-platform-unification-r7/notes/audits/)
+    - TodoWrite (track audit progress)
+  </tools>
+
+  <outputs>
+    - notes/audits/wave12-120-assistant-workspace.md — comprehensive gap analysis
+    - Updated current-task.md with audit completion + Wave 12.4 generation pointer
+  </outputs>
+
+  <acceptance-criteria>
+    - [ ] Inventory of assistant + workspace surface complete (entry points, components, BFF endpoints, context plumbing)
+    - [ ] 3-5 UAT scenarios defined and outcomes documented (reproduced if possible, traced if not)
+    - [ ] Each gap categorized (plumbing / missing impl / config / inherent dep / R7 regression)
+    - [ ] Per-gap disposition recommendation with effort estimate
+    - [ ] Overall MVP-scope recommendation: plumbing-only / partial-grounding / out-of-scope
+    - [ ] notes/audits/wave12-120-assistant-workspace.md exists with file:line references throughout
+    - [ ] current-task.md updated; ready for operator decision on Wave 12.4 generation
+  </acceptance-criteria>
+</task>

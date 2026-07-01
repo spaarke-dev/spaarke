@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-080" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Audit PlaybookBuilder canvas state for `sprk_nodetype` references</title>
+    <status>not-started</status>
+    <wave>8</wave>
+    <estimated-effort>2 hours</estimated-effort>
+    <tags>audit, code-page, wave-8</tags>
+    <rigor-level>STANDARD</rigor-level>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+    <fr-coverage>FR-26 (preparatory for task 088)</fr-coverage>
+  </metadata>
+
+  <prompt>
+    Wave 8 starts here. Before mutating PlaybookBuilder canvas state (task 088), audit every reference
+    to the literal string `sprk_nodetype` across `src/client/code-pages/PlaybookBuilder/src/**/*.{ts,tsx}`.
+    Produce a clean reference inventory so task 088 can replace each call site with `sprk_executortype`
+    without surprises. Also identify the `__actionType` injection hack in `sprk_configjson` that
+    Wave 8 retires.
+  </prompt>
+
+  <role>
+    Senior TypeScript / React developer familiar with the PlaybookBuilder Code Page (xyflow/react v12 canvas,
+    Zustand stores, Dataverse mapping in `services/playbookNodeSync.ts`).
+    Goal: produce a concise reference list — no code edits.
+  </role>
+
+  <goal>
+    A reference inventory at `projects/spaarke-ai-platform-unification-r7/notes/spikes/playbookbuilder-sprk-nodetype-audit.md`
+    that answers:
+    1. Every file + line that contains the literal string `sprk_nodetype` (Grep results)
+    2. Every file + line that contains the literal string `__actionType` (Wave 8 also retires this hack per FR-20)
+    3. Every Dataverse field-mapping comment that mentions Node Type → `sprk_nodetype`
+    4. The canvas-state shape today (PlaybookNodeData type field vs Dataverse `sprk_nodetype` mapping)
+    5. The replacement target for each call site (`sprk_executortype` Choice value or executor-type tier prefix)
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="design-doc">projects/spaarke-ai-platform-unification-r7/design.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    <file purpose="canvas-types">src/client/code-pages/PlaybookBuilder/src/types/canvas.ts</file>
+    <file purpose="canvas-store">src/client/code-pages/PlaybookBuilder/src/stores/canvasStore.ts</file>
+    <file purpose="dataverse-sync">src/client/code-pages/PlaybookBuilder/src/services/playbookNodeSync.ts</file>
+    <file purpose="layout">src/client/code-pages/PlaybookBuilder/src/components/BuilderLayout.tsx</file>
+    <file purpose="properties-dialog">src/client/code-pages/PlaybookBuilder/src/components/properties/NodePropertiesDialog.tsx</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-26">Replace `sprk_nodetype` references in canvas state with `sprk_executortype`. This task only audits — replacement is task 088.</constraint>
+    <constraint source="spec FR-20">No more `__actionType` injection in `sprk_configjson`. Inventory must catch any such hack already in the codebase.</constraint>
+    <constraint source="CLAUDE.md §11">Audit only — do NOT modify any files in this task.</constraint>
+    <constraint source="CLAUDE.md §10">Wave 8 is code-page, not BFF — no publish-size verification needed for this audit task.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>code-page/playbookbuilder</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+      <file>projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="playbookNodeSync canvas → Dataverse mapping" location="src/client/code-pages/PlaybookBuilder/src/services/playbookNodeSync.ts">
+        The mapping layer that translates canvas state ↔ Dataverse columns. Most `sprk_nodetype` references concentrate here.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Wave 8 critical path is 081 → 082 → 086 → 089a-c → 089d. Task 080 unblocks task 088 (canvas-state replacement)
+      by enumerating exactly what to replace. The current canvas serializes nodes with two parallel pieces:
+      (a) `type: PlaybookNodeType` (coarse category like 'aiAnalysis') used by the React Flow node renderer, and
+      (b) Dataverse `sprk_nodetype` Choice column (6-value) populated via `playbookNodeSync.ts`. R7 collapses
+      both into `sprk_executortype` (33-value Choice). The literal `__actionType` was a workaround in legacy
+      deploy scripts to inject the specific executor into `sprk_configjson` — that hack also goes away.
+    </background>
+    <dependencies>
+      <dependency task="none" status="complete">No prior tasks — Wave 8 starts here.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 088 consumes this inventory to perform the actual replacement.</item>
+      <item>Task 055 (Wave 5) updates `Deploy-Playbook.ps1` to write `sprk_executortype` directly — coordinated with this audit.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: STANDARD · 📋 REASON: audit-only task, no source modification, code-page inventory only · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read project CLAUDE.md + spec.md FR-26 + plan.md Wave 8 + design.md §11.
+    </step>
+    <step order="2" name="Grep `sprk_nodetype` in PlaybookBuilder">
+      Run Grep with pattern `sprk_nodetype` across `src/client/code-pages/PlaybookBuilder/src/**/*.{ts,tsx}`.
+      Capture file + line + 1-line surrounding context for each hit.
+    </step>
+    <step order="3" name="Grep `__actionType` in PlaybookBuilder">
+      Run Grep with pattern `__actionType` across the same scope. Capture file + line + context.
+    </step>
+    <step order="4" name="Read canvas type definitions">
+      Read `src/client/code-pages/PlaybookBuilder/src/types/canvas.ts` to confirm the `PlaybookNodeType` discriminator + the comments mapping `type` → `sprk_nodetype`.
+    </step>
+    <step order="5" name="Read playbookNodeSync.ts">
+      Document the exact lines where `sprk_nodetype` is written / read on the Dataverse round-trip.
+    </step>
+    <step order="6" name="Read canvasStore.ts">
+      Identify any node-creation or node-update actions that touch `sprk_nodetype` directly.
+    </step>
+    <step order="7" name="Write audit document">
+      Create `notes/spikes/playbookbuilder-sprk-nodetype-audit.md` with all findings. Include a table:
+      | File | Line | Current text | Replacement target |
+      Plus a section "Canvas-state replacement plan for task 088" enumerating: type-field discriminator strategy, Dataverse field replacement, `__actionType` removal plan.
+    </step>
+    <step order="8" name="Update current-task.md + TASK-INDEX">
+      Mark task 080 status complete; advance current-task.md to the next pending Wave 8 task per dependency graph.
+    </step>
+    <step order="9" name="Commit">
+      Commit `notes/spikes/playbookbuilder-sprk-nodetype-audit.md` with conventional message: `chore(r7): audit PlaybookBuilder sprk_nodetype refs (Wave 8 task 080, FR-26)`. No PR yet — Wave 8 ships as a single Code Page deploy at task 089d.
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (PlaybookBuilder source files)</tool>
+    <tool>Grep (literal-string search for `sprk_nodetype` and `__actionType`)</tool>
+    <tool>Write (audit document)</tool>
+    <tool>Bash (git commit)</tool>
+  </tools>
+
+  <outputs>
+    <output type="document">projects/spaarke-ai-platform-unification-r7/notes/spikes/playbookbuilder-sprk-nodetype-audit.md</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 080 ✅)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Audit document exists at notes/spikes/playbookbuilder-sprk-nodetype-audit.md</criterion>
+    <criterion>Document enumerates every file + line containing `sprk_nodetype` (literal)</criterion>
+    <criterion>Document enumerates every file + line containing `__actionType` (literal)</criterion>
+    <criterion>Document includes a replacement-target table per call site</criterion>
+    <criterion>Document has "Canvas-state replacement plan for task 088" section</criterion>
+    <criterion>No source files modified by this task</criterion>
+    <criterion>TASK-INDEX.md shows 080 ✅</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,6 +1,6 @@
 // R4 spaarke-daily-update-service-r4 — Tests for LoadKnowledgeNodeExecutor (UAT
 // 2026-06-26 follow-on to Start fix). Mirrors StartNodeExecutorTests shape:
-//   - SupportedActionTypes contains LoadKnowledge.
+//   - SupportedExecutorTypes contains LoadKnowledge.
 //   - Validate: null / empty / well-formed / malformed configJson.
 //   - ExecuteAsync: passthroughBinding present → resolves templates from scope.
 //   - ExecuteAsync: passthroughBinding missing → empty object bound to outputVariable.
@@ -41,13 +41,13 @@ public class LoadKnowledgeNodeExecutorTests
         _executor = new LoadKnowledgeNodeExecutor(_templateEngine, _loggerMock.Object);
     }
 
-    #region SupportedActionTypes
+    #region SupportedExecutorTypes
 
     [Fact]
     public void SupportedActionTypes_ContainsLoadKnowledge()
     {
-        _executor.SupportedActionTypes.Should().Contain(ActionType.LoadKnowledge);
-        _executor.SupportedActionTypes.Should().HaveCount(1);
+        _executor.SupportedExecutorTypes.Should().Contain(ExecutorType.LoadKnowledge);
+        _executor.SupportedExecutorTypes.Should().HaveCount(1);
     }
 
     #endregion
@@ -353,9 +353,9 @@ public class LoadKnowledgeNodeExecutorTests
             {
                 Id = Guid.Empty,
                 Name = "LoadKnowledge",
-                ActionType = ActionType.LoadKnowledge
+                ExecutorType = ExecutorType.LoadKnowledge
             },
-            ActionType = ActionType.LoadKnowledge,
+            ExecutorType = ExecutorType.LoadKnowledge,
             Scopes = new ResolvedScopes([], [], []),
             PreviousOutputs = previousOutputs ?? new Dictionary<string, NodeOutput>(),
             Parameters = new Dictionary<string, string>(),

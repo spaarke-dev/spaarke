@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="141" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>RESTORE document create profile — Dataverse config repair + Action JPS alignment + UI cosmetic per audit 122</title>
+    <phase>Wave 12 — MVP Completion</phase>
+    <wave>12</wave>
+    <sub-wave>12.3</sub-wave>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>config drift fix (Dataverse data + Action JPS); minor UI cosmetic; no C# code change required for primary fix</rigor-reason>
+    <parallel-group>W12-3</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <tags>wizard, document, dataverse, config, wave12</tags>
+    <estimated-effort>2-4 hours</estimated-effort>
+  </metadata>
+
+  <prompt>
+Audit 122 found document create profile disposition = Dataverse data fix + UI cosmetic. Root cause: `Save Profile` node (id `c9334fb7-...`) has `sprk_executortype=22` (UpdateRecord) but `sprk_configjson` carries DeliverOutput-shape config (no `entityLogicalName`/`recordId`/`fieldMappings`) — fails `UpdateRecordNodeExecutor.Validate()` on every run. NOT R7 regression, NOT engine bug class.
+
+Primary fix: delete redundant `Save Profile` node OR repair its config. The properly-configured `Update Record` node at execution order 3 already handles PATCH.
+  </prompt>
+
+  <role>
+You are a Dataverse + Action JPS configuration operator. Apply the surgical fix identified in audit 122; minor UI cosmetic touch if needed.
+  </role>
+
+  <goal>
+Document create profile wizard works end-to-end. User uploads document → LLM extracts 7 metadata fields → `sprk_document` record is PATCHed with the extracted values → user reviews + saves.
+  </goal>
+
+  <inputs>
+    - Audit notes: projects/spaarke-ai-platform-unification-r7/notes/audits/wave12-122-document-create-profile.md (full diagnostic with file:line)
+    - Playbook ID: `18cf3cc8-02ec-f011-8406-7c1e520aa4df`
+    - Action ID: `bb356968-ebe9-f011-8406-7ced8d1dc988` (ACT-011 "Document Profiler") — 7 output fields
+    - Redundant node: `Save Profile` (id `c9334fb7-...`) — DELETE or REPAIR
+    - Working node: Update Record at execution order 3 — handles PATCH already
+  </inputs>
+
+  <constraints>
+    - Per CLAUDE.md §11: modification only; no new abstractions
+    - **Preserve Action output schema (operator-tunable surface)** — operators can edit `sprk_outputschemajson` on ACT-011 to add new fields; UI is HARDCODED so adding-new-fields requires code, but EXISTING fields' prompt/temperature remain editable
+    - If DELETE path chosen: verify no other consumer depends on `Save Profile` node
+    - If REPAIR path chosen: align configJson shape with UpdateRecordNodeExecutorConfig (entityLogicalName, recordId from prior node output, fieldMappings)
+  </constraints>
+
+  <knowledge>
+    <files>
+      - projects/spaarke-ai-platform-unification-r7/notes/audits/wave12-122-document-create-profile.md (PRIMARY)
+      - projects/spaarke-ai-platform-unification-r7/notes/wave12-mvp-completion-plan.md (§2.2)
+      - projects/spaarke-ai-platform-unification-r7/CLAUDE.md
+    </files>
+  </knowledge>
+
+  <context>
+    <relevant-files>
+      - src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/UpdateRecordNodeExecutor.cs (Validate() rules)
+      - src/solutions/DocumentUploadWizard/src/components/SummaryStep.tsx (UI Step 2 inline profile card; cosmetic fix may live here)
+      - src/client/shared/Spaarke.UI.Components/src/hooks/useAiSummary.ts (calls /api/ai/analysis/execute with playbook GUID)
+    </relevant-files>
+  </context>
+
+  <steps>
+1. **Decide DELETE vs REPAIR** (15 min):
+   - Use mcp__dataverse__read_query to inspect `Save Profile` node + its predecessor/successor edges
+   - Confirm no other consumer depends on it
+   - If safe to DELETE: simpler path; pick this
+   - If needs to stay: REPAIR configJson per UpdateRecordNodeExecutor schema
+2. **Apply Dataverse fix** (15-30 min):
+   - Option DELETE: mcp__dataverse__delete_record on `sprk_playbooknode(c9334fb7-...)` (verify safe deletion semantics — may need to delete linked edges first)
+   - Option REPAIR: mcp__dataverse__update_record with corrected configJson
+3. **Verify Action JPS alignment** (15-30 min):
+   - Read ACT-011 `sprk_outputschemajson` + `sprk_systemprompt`
+   - Confirm 7 fields match: sprk_filesummary, sprk_filetldr, sprk_extractorganization, sprk_extractpeople, sprk_filetype, sprk_filekeywords, sprk_documenttype
+   - If misalignment found, fix Action with mcp__dataverse__update_record
+4. **Verify Update Record node config** (15 min):
+   - Read node at execution order 3 — confirm entityLogicalName=sprk_document, fieldMappings present
+   - Fix if drift detected
+5. **Smoke against spaarkedev1** (30 min):
+   - Upload test document via wizard
+   - Verify 7 metadata fields extracted + PATCHed to sprk_document
+   - Capture failure modes if any
+6. **UI cosmetic fix (if needed)** (30-60 min):
+   - Per audit, may need minor fix in SummaryStep.tsx
+   - Use Fluent UI v9 + ADR-021 semantic tokens
+7. **Update audit notes** with Resolution (15 min)
+
+  </steps>
+
+  <tools>
+    - mcp__dataverse__describe / read_query / update_record / delete_record
+    - Read / Edit (if UI cosmetic needed)
+    - Bash (smoke test)
+    - TodoWrite
+  </tools>
+
+  <outputs>
+    - Dataverse changes (DELETE or PATCH on playbook node)
+    - Action JPS alignment if needed
+    - UI cosmetic fix if needed
+    - Append "Resolution" subsection to audits/wave12-122-document-create-profile.md
+  </outputs>
+
+  <acceptance-criteria>
+    - [⏭] Document create profile smoke succeeds end-to-end against spaarkedev1 (DEFERRED to T136/T154 deploy gate — no BFF code change in this task; Dataverse fix live immediately)
+    - [✅] All 7 ACT-011 fields populated on sprk_document via PATCH (node 3 fieldMappings now 7, matching JPS)
+    - [✅] Action JPS remains operator-tunable for prompt/temperature edits (preserved surface — ACT-011 sprk_systemprompt unchanged)
+    - [✅] Root cause + resolution documented in audit notes (§13 added to audit doc)
+    - [✅] No new abstractions / DI / packages (Dataverse data-only change)
+  </acceptance-criteria>
+
+  <status>completed</status>
+
+  <notes>
+**Resolution (2026-06-30, STANDARD rigor)**:
+- DELETE path chosen (audit Option A): Save Profile node `c9334fb7-...` removed (no other node consumed its `result` output variable)
+- Update Record node 3 `0fa4e8db-...` configJson PATCHed: 7 fieldMappings now align with all 7 JPS output fields (added sprk_filetype + sprk_documenttype; removed sprk_filesummarystatus + sprk_classification drift mappings that reference non-JPS fields)
+- Action JPS preserved unchanged — operator tunability intact
+- UI cosmetic deferred (audit §7.2 separate concern; existing `?.length > 0` defensive checks in SummaryStep.tsx mean no broken UI state)
+- Smoke test deferred to T136/T154 combined deploy gate
+- See `notes/audits/wave12-122-document-create-profile.md` §13 for full resolution detail
+  </notes>
+</task>

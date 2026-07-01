@@ -1,0 +1,196 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-031" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Add GetConfigSchema() to INodeExecutor interface</title>
+    <status>not-started</status>
+    <wave>3</wave>
+    <estimated-effort>1-2 hours</estimated-effort>
+    <tags>bff-api, code-impl, wave-3</tags>
+    <rigor-level>FULL</rigor-level>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>030</dependencies>
+    <fr-coverage>FR-16 (interface portion)</fr-coverage>
+  </metadata>
+
+  <prompt>
+    Apply the design from task 030 to `INodeExecutor`. Add the `GetConfigSchema()` method, declare the
+    `ExecutorConfigSchema` + `ConfigFieldDescriptor` record types in a co-located file, and provide a
+    default placeholder return shape that prevents the interface addition from breaking every existing
+    implementation. The 33 executor implementations get real implementations in task 032 — this task
+    only opens the seam.
+  </prompt>
+
+  <role>
+    Senior .NET backend developer. Mirror the existing INodeExecutor member style (XML doc, naming
+    conventions). Do NOT over-engineer — no factories, no extension methods, no abstract base class.
+  </role>
+
+  <goal>
+    1. `INodeExecutor` interface gains a new method `ExecutorConfigSchema GetConfigSchema()` (or per task 030 design)
+    2. New record types `ExecutorConfigSchema` + `ConfigFieldDescriptor` exist in a new file `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/ExecutorConfigSchema.cs` (or as nested types per task 030 decision)
+    3. Either: (a) interface method is a `virtual` default returning an empty placeholder `ExecutorConfigSchema(Fields: empty dictionary)`, OR (b) all 33 existing executors get a one-line `return new ExecutorConfigSchema(...)` stub. Pick per task 030 design.
+    4. Build passes: 0 errors. Tests pass.
+    5. No behavior change — existing executors continue to work unchanged.
+  </goal>
+
+  <inputs>
+    <file purpose="design-doc">projects/spaarke-ai-platform-unification-r7/notes/spikes/getconfigschema-design.md</file>
+    <file purpose="design-spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    <file purpose="interface">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/INodeExecutor.cs</file>
+    <file purpose="all-executors">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/*NodeExecutor.cs</file>
+    <file purpose="bff-constraints">.claude/constraints/bff-extensions.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-010">DI Minimalism — method goes on `INodeExecutor` directly. No `IConfigSchemaProvider` abstraction.</constraint>
+    <constraint source="ADR-013">BFF AI Architecture — interface change is additive, NOT a new dispatch axis.</constraint>
+    <constraint source="ADR-029">BFF Publish Hygiene — verify publish-size delta at task 036; this single interface + record addition should be ~0 KB.</constraint>
+    <constraint source="ADR-038">Testing Strategy — interface change is testable via the impl unit tests in task 034. No need to mock the interface here.</constraint>
+    <constraint source="CLAUDE.md §11">Component justification triple satisfied by task 030 design doc. This task implements that decision.</constraint>
+    <constraint source="bff-extensions.md">Pre-merge checklist applies. Placement decision: keep IN BFF — `ExecutorConfigSchema` lives next to its consumer `INodeExecutor`.</constraint>
+    <constraint source="bff-extensions.md §F.1">No conditional DI registration added in this task — does not trigger asymmetric-registration anti-pattern.</constraint>
+    <constraint source="DO NOT BREAK">All 33 existing `*NodeExecutor.cs` files MUST still compile after this change. Choose default-implementation OR stub-each-executor per task 030 — both paths are acceptable, but the build MUST pass.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai/node-executor-authoring</topic>
+    <files>
+      <file>.claude/patterns/ai/node-executor-authoring.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-010-di-minimalism.md</file>
+      <file>docs/adr/ADR-013-bff-ai-architecture.md</file>
+      <file>docs/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="INodeExecutor interface" location="src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/INodeExecutor.cs">
+        Current shape — XML doc style + naming conventions to mirror.
+      </pattern>
+      <pattern name="EntityNameValidatorNodeExecutor" location="src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/EntityNameValidatorNodeExecutor.cs">
+        Reference impl style — how a typical executor is structured (relevant when picking default vs per-class stub strategy).
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Task 030 produced the design decision. This task opens the interface seam: add the method, add
+      the record types, ensure the build still passes across all 33 executors. The real work — each
+      executor declaring its actual schema — happens in task 032.
+    </background>
+    <dependencies>
+      <dependency task="030" status="not-started-but-required">Design document at notes/spikes/getconfigschema-design.md</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 032 fills in real schema implementations on 5 priority executors + placeholders on 28 remaining.</item>
+      <item>Task 033 builds the BFF endpoint serving the registry.</item>
+      <item>Task 022 (Wave 2) renames `ActionType` → `ExecutorType` enum. If task 022 has shipped before this task, the design doc + this task should use `ExecutorType`; if not, use the current `ActionType` name (mechanical rename will sweep this file too).</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: FULL · 📋 REASON: code-impl in BFF (.cs file modification, interface change, tag bff-api, ADR-010+013+029 applicable) — quality gates Step 9.5 required · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read project CLAUDE.md + spec.md FR-16 + plan.md Wave 3 + task 030 design doc + `.claude/constraints/bff-extensions.md`.
+    </step>
+    <step order="2" name="Verify dependency">
+      Confirm `notes/spikes/getconfigschema-design.md` exists. If not, STOP — task 030 must complete first.
+    </step>
+    <step order="3" name="Read INodeExecutor interface">
+      Open `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/INodeExecutor.cs`. Mirror the XML doc style.
+    </step>
+    <step order="4" name="Create ExecutorConfigSchema record file">
+      Create `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/ExecutorConfigSchema.cs` (or co-locate per task 030 design):
+      <![CDATA[
+      namespace Sprk.Bff.Api.Services.Ai.Nodes;
+
+      /// <summary>Per FR-16 — typed config schema for a node executor.</summary>
+      public sealed record ExecutorConfigSchema(IReadOnlyDictionary<string, ConfigFieldDescriptor> Fields)
+      {
+          public static readonly ExecutorConfigSchema Empty = new(new Dictionary<string, ConfigFieldDescriptor>());
+      }
+
+      public sealed record ConfigFieldDescriptor(
+          string Type,
+          bool Required,
+          object? Default,
+          string Description,
+          IReadOnlyList<string>? Enum);
+      ]]>
+      (Exact shape per task 030 design — this is illustrative.)
+    </step>
+    <step order="5" name="Add GetConfigSchema() to INodeExecutor">
+      Add the method with XML doc citing FR-16. Default-implementation OR add separately per task 030 design:
+      <![CDATA[
+      /// <summary>
+      /// Returns the typed config schema declaring the shape of `sprk_configjson` this executor accepts.
+      /// Per FR-16 / Invariant 5. PlaybookBuilder canvas reads schemas via the executor-config-schemas
+      /// endpoint to render typed forms (replacing free-form JSON editing).
+      /// Implementations may return <see cref="ExecutorConfigSchema.Empty"/> as a placeholder.
+      /// </summary>
+      ExecutorConfigSchema GetConfigSchema();
+      ]]>
+    </step>
+    <step order="6" name="Make the build pass">
+      Option A (default impl on interface): provide a `default` impl returning `ExecutorConfigSchema.Empty`. C# 8+ default interface methods.
+      Option B (stub each executor): add `public ExecutorConfigSchema GetConfigSchema() =&gt; ExecutorConfigSchema.Empty;` to all 33 existing executors.
+      Pick per task 030 decision. Document the choice in the commit message.
+    </step>
+    <step order="7" name="Build">
+      Run: dotnet build src/server/api/Sprk.Bff.Api/
+      Goal: 0 errors, 0 NEW warnings.
+    </step>
+    <step order="8" name="Run existing tests">
+      Run: dotnet test (focus on Sprk.Bff.Api.Tests). Goal: no regression. No new tests added in this task (those land in task 034).
+    </step>
+    <step order="9" name="Verify acceptance">
+      Open INodeExecutor.cs + ExecutorConfigSchema.cs in editor; confirm all goal bullets satisfied.
+    </step>
+    <step order="9.5" name="Quality gates (FULL rigor)">
+      Run `/code-review` on changes. Run `/adr-check` against ADR-010 + ADR-013 + ADR-029 + bff-extensions.md.
+      Fix any findings before commit.
+    </step>
+    <step order="10" name="Update current-task.md + TASK-INDEX">
+      Mark task 031 status complete; advance current-task.md to task 032.
+    </step>
+    <step order="11" name="Commit">
+      Commit INodeExecutor.cs + ExecutorConfigSchema.cs (+ any executor stubs if Option B chosen) with conventional message.
+      Example: feat(bff/r7): add INodeExecutor.GetConfigSchema seam (Wave 3 task 031, FR-16)
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (interface + sibling executor + design doc)</tool>
+    <tool>Write (new ExecutorConfigSchema.cs)</tool>
+    <tool>Edit (INodeExecutor.cs + executor stubs if needed)</tool>
+    <tool>Bash (dotnet build, dotnet test, git commit)</tool>
+    <tool>Skill (code-review at Step 9.5)</tool>
+    <tool>Skill (adr-check at Step 9.5)</tool>
+  </tools>
+
+  <outputs>
+    <output type="new-file">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/ExecutorConfigSchema.cs</output>
+    <output type="modified-file">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/INodeExecutor.cs</output>
+    <output type="modified-files-conditional">all 33 *NodeExecutor.cs files (if Option B chosen)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md (advance to task 032)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 031 ✅)</output>
+    <output type="commit">feat(bff/r7): add INodeExecutor.GetConfigSchema seam (Wave 3 task 031, FR-16)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>File ExecutorConfigSchema.cs exists at src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/</criterion>
+    <criterion>INodeExecutor.cs declares GetConfigSchema() method with XML doc citing FR-16</criterion>
+    <criterion>ExecutorConfigSchema record matches task 030 design</criterion>
+    <criterion>ConfigFieldDescriptor record matches task 030 design</criterion>
+    <criterion>Either default interface impl OR per-class stub satisfies "all 33 executors compile"</criterion>
+    <criterion>dotnet build passes: 0 errors, 0 new warnings</criterion>
+    <criterion>dotnet test passes — no regressions</criterion>
+    <criterion>code-review + adr-check pass at Step 9.5 (FULL rigor)</criterion>
+    <criterion>Commit pushed to work/spaarke-ai-platform-unification-r7</criterion>
+    <criterion>current-task.md updated to point at task 032 as next</criterion>
+    <criterion>TASK-INDEX.md shows 031 ✅, 032 🔲 ready</criterion>
+  </acceptance-criteria>
+</task>

@@ -52,12 +52,20 @@ public sealed class DailyBriefingResponseShapeTests
                 System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)
             ?? throw new InvalidOperationException("HandleNarrate not found via reflection");
 
+        // R7 Wave 11 T116 narrator spike: HandleNarrate signature gained two parameters
+        // (IConfiguration, DailyBriefingNarrator). These tests verify the playbook-engine
+        // path (default with feature flag off), so pass an empty IConfiguration (flag
+        // absent → defaults to false) and null narrator (never invoked when flag off).
+        var emptyConfig = new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build();
+
         var task = (Task<IResult>)method.Invoke(null, new object?[]
         {
             request,
             NullLoggerFactory.Instance,
             routing,
             invokePlaybookAi,
+            emptyConfig,
+            null,  // narrator — never accessed when feature flag is off
             new DefaultHttpContext(),
             CancellationToken.None
         })!;

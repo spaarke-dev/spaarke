@@ -29,12 +29,8 @@ import {
   disassociate,
 } from './dataverseClient';
 import type { DataverseRecord } from './dataverseClient';
-import {
-  type PlaybookNodeData,
-  type PlaybookNodeType,
-  NodeTypeToDataverse,
-  NodeTypeToActionType,
-} from '../types/playbook';
+import { type PlaybookNodeData } from '../types/playbook';
+import { getExecutorByName } from '../config/executorMetadata';
 import type { PromptSchema } from '../types/promptSchema';
 import { validatePromptSchema } from '../types/promptSchema';
 import {
@@ -96,7 +92,7 @@ function isGuid(value: string): boolean {
  */
 export async function loadPlaybookNodes(playbookId: string): Promise<DataverseRecord[]> {
   const queryOptions =
-    '$select=sprk_playbooknodeid,sprk_name,sprk_nodetype,sprk_executionorder,' +
+    '$select=sprk_playbooknodeid,sprk_name,sprk_executortype,sprk_executionorder,' +
     'sprk_outputvariable,sprk_configjson,sprk_position_x,sprk_position_y,' +
     'sprk_isactive,sprk_timeoutseconds,sprk_retrycount,sprk_conditionjson,' +
     'sprk_dependsonjson,_sprk_playbookid_value,_sprk_actionid_value,' +
@@ -324,10 +320,11 @@ export {
  * @returns JSON string for sprk_configjson.
  */
 export function buildConfigJson(canvasNodeId: string, data: PlaybookNodeData): string {
-  const actionType = NodeTypeToActionType[data.type as PlaybookNodeType];
+  // R7 FR-20 / FR-26: server reads `sprk_executortype` (Choice) directly via
+  // single-hop dispatch (FR-07); `sprk_configjson` carries only executor-specific
+  // config (no synthetic dispatch keys).
   const config: Record<string, unknown> = {
     __canvasNodeId: canvasNodeId,
-    __actionType: actionType ?? 0,
   };
 
   switch (data.type) {
@@ -336,22 +333,36 @@ export function buildConfigJson(canvasNodeId: string, data: PlaybookNodeData): s
       // SkillIds and KnowledgeIds are handled via N:N tables, not in configjson.
       // But we include model/tool/action references for executor convenience.
       if (data.modelDeploymentId) config.modelDeploymentId = data.modelDeploymentId;
-      // JPS serialization: if promptSchema exists, serialize it as the systemPrompt value.
-      // Otherwise preserve flat text systemPrompt for backward compatibility.
+      // R7 FR-25 KEEP (task 087): the Prompt tab edits a PER-NODE OVERRIDE that is
+      // merged into the Action's base SystemPrompt at runtime via PromptSchemaOverrideMerger.
+      // Serialize data.promptSchema to config.promptSchemaOverride (NOT config.systemPrompt) —
+      // the BFF merger (AiAnalysisNodeExecutor.ApplyPromptSchemaOverride → ExtractOverride)
+      // reads configJson.promptSchemaOverride. Action.SystemPrompt is managed separately
+      // (Action authoring UI / Deploy-Action.ps1), NOT by the canvas. Legacy flat text in
+      // data.systemPrompt is preserved on config.systemPrompt for back-compat with non-JPS
+      // playbooks; the merger ignores it.
       if (data.promptSchema) {
-        config.systemPrompt = JSON.stringify(data.promptSchema);
-      } else if (data.systemPrompt) {
+        config.promptSchemaOverride = JSON.stringify(data.promptSchema);
+      }
+      if (data.systemPrompt) {
         config.systemPrompt = data.systemPrompt;
       }
       break;
 
     case 'aiCompletion':
       // AI Completion: system prompt, user prompt template, temperature, max tokens
-      // JPS serialization: if promptSchema exists, serialize it as the systemPrompt value.
-      // Otherwise preserve flat text systemPrompt for backward compatibility.
+      // R7 FR-25 KEEP (task 087): the Prompt tab edits a PER-NODE OVERRIDE that is
+      // merged into the Action's base SystemPrompt at runtime via PromptSchemaOverrideMerger.
+      // Serialize data.promptSchema to config.promptSchemaOverride (NOT config.systemPrompt) —
+      // the BFF merger (AiCompletionNodeExecutor.ApplyPromptSchemaOverride → ExtractOverride)
+      // reads configJson.promptSchemaOverride. Action.SystemPrompt is managed separately
+      // (Action authoring UI / Deploy-Action.ps1), NOT by the canvas. Legacy flat text in
+      // data.systemPrompt is preserved on config.systemPrompt for back-compat with non-JPS
+      // playbooks; the merger ignores it.
       if (data.promptSchema) {
-        config.systemPrompt = JSON.stringify(data.promptSchema);
-      } else if (data.systemPrompt) {
+        config.promptSchemaOverride = JSON.stringify(data.promptSchema);
+      }
+      if (data.systemPrompt) {
         config.systemPrompt = data.systemPrompt;
       }
       if (data.userPromptTemplate) config.userPromptTemplate = data.userPromptTemplate;
@@ -524,15 +535,25 @@ export function deserializePromptSchema(value: string | null | undefined): Promp
 /**
  * Extract a PromptSchema from a node's configJson string.
  *
- * Parses the configJson blob, checks the `systemPrompt` property for JPS format,
- * and returns the deserialized PromptSchema if valid.
+ * R7 FR-25 (task 087): the canvas Prompt tab edits a PER-NODE OVERRIDE — it does NOT
+ * author the Action's base SystemPrompt. As a result:
+ *   - `promptSchema` (the canvas-side override displayed in the Prompt tab) is read
+ *     from `configJson.promptSchemaOverride` — the same key the BFF
+ *     PromptSchemaOverrideMerger.ExtractOverride consumes.
+ *   - `promptSchemaOverride` is preserved as an alias for callers that want the
+ *     override-named field explicitly. Both fields return the same value.
+ *   - Legacy `configJson.systemPrompt` (set on pre-R7 playbooks where the canvas
+ *     conflated authoring with override) is returned as a fallback for back-compat.
  *
- * Also checks for a `promptSchemaOverride` property in the configJson
- * (reserved for node-level overrides in Phase 5).
+ * Note: this function is currently unused — canvas state round-trips through
+ * `sprk_canvaslayoutjson` (not `sprk_configjson`). It's retained for future BFF
+ * consumers / deployment tooling that needs to recover canvas semantics from the
+ * deployed `sprk_configjson` blob.
  *
  * @param configJson - The raw sprk_configjson string from a Dataverse node record.
- * @returns An object with `promptSchema` (from systemPrompt) and `promptSchemaOverride`
- *          (from configJson.promptSchemaOverride), either or both may be undefined.
+ * @returns An object with `promptSchema` (the per-node override, primary key on R7)
+ *          and `promptSchemaOverride` (alias of the same value). Either may be
+ *          undefined when the node has no per-node override authored.
  */
 export function parseNodeConfigForPromptSchema(configJson: string | null | undefined): {
   promptSchema: PromptSchema | undefined;
@@ -542,12 +563,17 @@ export function parseNodeConfigForPromptSchema(configJson: string | null | undef
 
   try {
     const parsed = JSON.parse(configJson);
-    const systemPromptValue = typeof parsed.systemPrompt === 'string' ? parsed.systemPrompt : undefined;
+    // R7 FR-25 primary: per-node override key.
     const overrideValue = typeof parsed.promptSchemaOverride === 'string' ? parsed.promptSchemaOverride : undefined;
+    // Back-compat fallback: pre-R7 playbooks wrote the override under the (mis-named)
+    // systemPrompt key. Used only when no promptSchemaOverride is present.
+    const legacyValue = typeof parsed.systemPrompt === 'string' ? parsed.systemPrompt : undefined;
+    const effectiveValue = overrideValue ?? legacyValue;
+    const deserialized = deserializePromptSchema(effectiveValue);
 
     return {
-      promptSchema: deserializePromptSchema(systemPromptValue),
-      promptSchemaOverride: deserializePromptSchema(overrideValue),
+      promptSchema: deserialized,
+      promptSchemaOverride: deserialized,
     };
   } catch {
     return { promptSchema: undefined, promptSchemaOverride: undefined };
@@ -584,16 +610,41 @@ function extractRelatedIds(collection: unknown, idField: string): string[] {
     .filter((id: string) => id.length > 0);
 }
 
+/**
+ * Derive the `sprk_executortype` Choice value to persist for a node (R7 FR-26).
+ *
+ * Priority: `data.executorType` (canonical, set by NodePalette drag-drop +
+ * ExecutorTypeSelector property panel) — falls back to looking up the executor
+ * by the canvas type discriminator name (camelCase → PascalCase) for legacy
+ * nodes that pre-date task 082.
+ *
+ * Returns `undefined` if no executor can be derived (caller logs + skips field).
+ */
+function resolveExecutorType(data: PlaybookNodeData, canvasType: string): number | undefined {
+  // Canonical: explicit executorType on the canvas node data (R7 task 082).
+  if (typeof data.executorType === 'number') {
+    return data.executorType;
+  }
+  // Fallback: derive from canvas type discriminator (camelCase → PascalCase).
+  // Used for legacy nodes loaded before task 082 wrote executorType into data.
+  const pascal = canvasType.charAt(0).toUpperCase() + canvasType.slice(1);
+  const meta = getExecutorByName(pascal);
+  if (meta) return meta.value;
+  console.warn(
+    `${LOG_PREFIX} Could not resolve executor type for canvas type '${canvasType}' (no executorType in data and no name match)`
+  );
+  return undefined;
+}
+
 async function createNodeRecord(playbookId: string, node: CanvasNode, executionOrder: number): Promise<string> {
   const data = node.data;
   const name = asString(data.label) ?? asString(data.name as unknown) ?? node.type;
   const outputVariable = asString(data.outputVariable) ?? `output_${node.id}`;
   const configJson = buildConfigJson(node.id, data);
-  const nodeType = NodeTypeToDataverse[node.type as PlaybookNodeType];
+  const executorType = resolveExecutorType(data, node.type);
 
   const payload: Record<string, unknown> = {
     sprk_name: name,
-    sprk_nodetype: nodeType,
     'sprk_playbookid@odata.bind': `/sprk_analysisplaybooks(${playbookId})`,
     sprk_executionorder: executionOrder,
     sprk_outputvariable: outputVariable,
@@ -602,6 +653,11 @@ async function createNodeRecord(playbookId: string, node: CanvasNode, executionO
     sprk_position_y: Math.round(node.position.y),
     sprk_isactive: data.isActive ?? true,
   };
+
+  // R7 FR-26: write sprk_executortype (Choice) — the single dispatch field.
+  // Skipped when the helper couldn't derive a value (logged a warning); the
+  // node record will surface as unknown-executor (see FR-27 / task 089).
+  if (executorType != null) payload['sprk_executortype'] = executorType;
 
   // Optional lookup bindings (only if real GUIDs, skip mock IDs)
   const actionId = asString(data.actionId);
@@ -630,15 +686,17 @@ async function createNodeRecord(playbookId: string, node: CanvasNode, executionO
 async function updateNodeRecord(nodeId: string, node: CanvasNode, executionOrder: number): Promise<void> {
   const data = node.data;
   const configJson = buildConfigJson(node.id, data);
-  const nodeType = NodeTypeToDataverse[node.type as PlaybookNodeType];
+  const executorType = resolveExecutorType(data, node.type);
 
   const payload: Record<string, unknown> = {
-    sprk_nodetype: nodeType,
     sprk_executionorder: executionOrder,
     sprk_configjson: configJson,
     sprk_position_x: Math.round(node.position.x),
     sprk_position_y: Math.round(node.position.y),
   };
+
+  // R7 FR-26: write sprk_executortype (Choice) on update — single dispatch field.
+  if (executorType != null) payload['sprk_executortype'] = executorType;
 
   const name = asString(data.label) ?? asString(data.name as unknown);
   if (name) payload['sprk_name'] = name;

@@ -1,0 +1,197 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-033" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Implement BFF endpoint GET /api/ai/playbook-builder/executor-config-schemas</title>
+    <status>completed</status>
+    <wave>3</wave>
+    <estimated-effort>2-3 hours</estimated-effort>
+    <tags>bff-api, code-impl, wave-3</tags>
+    <rigor-level>FULL</rigor-level>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>032</dependencies>
+    <fr-coverage>FR-16 (endpoint portion)</fr-coverage>
+  </metadata>
+
+  <prompt>
+    With every executor declaring a schema (task 032), expose them via a BFF endpoint. Per FR-16 the
+    working URL is `GET /api/ai/playbook-builder/executor-config-schemas`. The endpoint is a thin
+    facade over the executor registry — it iterates `INodeExecutor` implementations, calls
+    `GetConfigSchema()` on each, and returns a dictionary keyed by the executor's enum integer.
+    PlaybookBuilder canvas (Wave 8 task 083) consumes this endpoint.
+  </prompt>
+
+  <role>
+    Senior .NET backend developer. Follow the existing PlaybookBuilder endpoint pattern. Minimal handler,
+    inject the executor registry (or enumerate `IEnumerable&lt;INodeExecutor&gt;`), return a
+    `Dictionary&lt;int, ExecutorConfigSchema&gt;` payload. AuthN required.
+  </role>
+
+  <goal>
+    1. New endpoint route `GET /api/ai/playbook-builder/executor-config-schemas` registered in BFF
+    2. Handler returns `200 OK` with `Dictionary&lt;int, ExecutorConfigSchema&gt;` keyed by `ExecutorType` integer (post-Wave-2 enum)
+    3. Endpoint requires authentication (uses the same auth policy as sibling PlaybookBuilder endpoints)
+    4. Endpoint is thin — no DTO transformation beyond the schema records themselves
+    5. Build passes; manual smoke (cURL or browser) returns valid JSON
+  </goal>
+
+  <inputs>
+    <file purpose="design-doc">projects/spaarke-ai-platform-unification-r7/notes/spikes/getconfigschema-design.md</file>
+    <file purpose="design-spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    <file purpose="program">src/server/api/Sprk.Bff.Api/Program.cs</file>
+    <file purpose="existing-playbook-builder-endpoints">src/server/api/Sprk.Bff.Api/Api/Ai/ — find existing PlaybookBuilder endpoints to mirror</file>
+    <file purpose="interface">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/INodeExecutor.cs</file>
+    <file purpose="executor-registry">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/NodeExecutorRegistry.cs</file>
+    <file purpose="bff-constraints">.claude/constraints/bff-extensions.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-010">DI Minimalism — endpoint handler is a static method; injects `IEnumerable&lt;INodeExecutor&gt;` (DI built-in) or existing `INodeExecutorRegistry` if registry exposes enumeration.</constraint>
+    <constraint source="ADR-013">BFF AI Architecture — thin facade endpoint, no new dispatch surface.</constraint>
+    <constraint source="ADR-029">BFF Publish Hygiene — verify publish-size delta at task 036.</constraint>
+    <constraint source="ADR-038">Testing Strategy — endpoint integration test in task 034 mocks `IOpenAiClient` only (executors are real). No banned `Mock&lt;HttpMessageHandler&gt;` or DI-registration tests.</constraint>
+    <constraint source="CLAUDE.md §11">Component justification triple:
+      1. Existing: no endpoint serves typed schemas today; PlaybookBuilder canvas hand-edits sprk_configjson.
+      2. Extension: the endpoint is added to the existing PlaybookBuilder endpoint family — not a new endpoint family.
+      3. Cost-of-doing-nothing: Wave 8 task 083 (typed form renderer) cannot ship; FR-23 acceptance criterion blocked.
+    </constraint>
+    <constraint source="bff-extensions.md">Pre-merge checklist applies. Placement decision: keep IN BFF — canvas-facing endpoint, lightweight, no AI internals leakage. Document in commit.</constraint>
+    <constraint source="bff-extensions.md §F.1">No conditional DI registration; endpoint maps unconditionally. No Null-Object kill-switch needed.</constraint>
+    <constraint source="DO NOT CHANGE">Use the URL `GET /api/ai/playbook-builder/executor-config-schemas` per spec FR-16. If a sibling PlaybookBuilder endpoint convention strongly suggests a different shape (e.g., camelCase vs kebab-case), FOLLOW the sibling convention but DOCUMENT the divergence in the commit message and design doc as an Open Question for sign-off.</constraint>
+    <constraint source="AUTH">Endpoint requires authenticated user (same policy as sibling PlaybookBuilder endpoints). Do NOT make it anonymous.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai/node-executor-authoring</topic>
+    <files>
+      <file>.claude/patterns/ai/node-executor-authoring.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-010-di-minimalism.md</file>
+      <file>docs/adr/ADR-013-bff-ai-architecture.md</file>
+      <file>docs/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="existing PlaybookBuilder endpoints" location="src/server/api/Sprk.Bff.Api/Api/Ai/">
+        Mirror route prefix, auth policy, and response style.
+      </pattern>
+      <pattern name="INodeExecutorRegistry" location="src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/NodeExecutorRegistry.cs">
+        If the registry exposes enumeration of registered executors, prefer that over raw `IEnumerable&lt;INodeExecutor&gt;` injection.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      The endpoint is the contract surface between BFF and PlaybookBuilder canvas. Wave 8 task 083
+      hits this URL on canvas load (or per-executor on selection) and uses the response to drive
+      typed form rendering. Schema is static per BFF instance — could cache; spec does NOT require
+      caching in v1 (in-memory is fine, regenerated per request is fine — 33 executors × shallow
+      schemas is negligible compute).
+    </background>
+    <dependencies>
+      <dependency task="032" status="not-started-but-required">All 33 executors return a schema (rich or Empty).</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 034 adds xUnit tests for this endpoint.</item>
+      <item>Task 035 documents the schema shape in `docs/architecture/AI-ARCHITECTURE.md`.</item>
+      <item>Task 083 (Wave 8) is the canvas-side consumer.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: FULL · 📋 REASON: code-impl in BFF (new endpoint, .cs file modification, tag bff-api, ADR-010+013+029+038 applicable) — quality gates Step 9.5 required · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read project CLAUDE.md + spec.md FR-16 + plan.md Wave 3 + task 030 design doc + `.claude/constraints/bff-extensions.md`.
+    </step>
+    <step order="2" name="Verify dependency">
+      Confirm task 032 shipped: all 33 executors have GetConfigSchema().
+    </step>
+    <step order="3" name="Find existing PlaybookBuilder endpoint location">
+      Use Grep to find existing routes prefixed with `/api/ai/playbook-builder/`. Identify the file they live in (likely `Api/Ai/PlaybookBuilderEndpoints.cs` or similar). Mirror auth policy + style.
+    </step>
+    <step order="4" name="Decide handler source for executors">
+      If `INodeExecutorRegistry` exposes `IEnumerable&lt;INodeExecutor&gt; GetAll()` (or similar), inject the registry. Otherwise inject `IEnumerable&lt;INodeExecutor&gt;` — the DI container provides all Singleton registrations.
+    </step>
+    <step order="5" name="Implement the endpoint">
+      Register the route. Sketch:
+      <![CDATA[
+      app.MapGet("/api/ai/playbook-builder/executor-config-schemas",
+          (IEnumerable<INodeExecutor> executors) =>
+          {
+              var registry = new Dictionary<int, ExecutorConfigSchema>();
+              foreach (var executor in executors)
+              {
+                  foreach (var type in executor.SupportedActionTypes)
+                  {
+                      registry[(int)type] = executor.GetConfigSchema();
+                  }
+              }
+              return Results.Ok(registry);
+          })
+          .RequireAuthorization();
+      ]]>
+      (Adapt to existing PlaybookBuilder endpoint style — extract to a typed handler if convention requires.)
+    </step>
+    <step order="6" name="Build">
+      Run: dotnet build src/server/api/Sprk.Bff.Api/
+      Goal: 0 errors, 0 NEW warnings.
+    </step>
+    <step order="7" name="Run existing tests">
+      Run: dotnet test (focus on Sprk.Bff.Api.Tests). Goal: no regression. Endpoint-specific tests land in task 034.
+    </step>
+    <step order="8" name="Manual smoke (optional but recommended)">
+      Run the BFF locally; hit the endpoint with a valid auth token; verify JSON payload includes all 33 executor types as integer keys and the 5 priority schemas have populated `fields`.
+    </step>
+    <step order="9" name="Verify acceptance">
+      Open the endpoint file in editor; confirm all goal bullets satisfied (URL, auth, return shape, no DTO transformation).
+    </step>
+    <step order="9.5" name="Quality gates (FULL rigor)">
+      Run `/code-review` on changes. Run `/adr-check` against ADR-010 + ADR-013 + ADR-029 + ADR-038 + bff-extensions.md.
+      Fix any findings before commit.
+    </step>
+    <step order="10" name="Update current-task.md + TASK-INDEX">
+      Mark task 033 status complete; advance current-task.md to task 034.
+    </step>
+    <step order="11" name="Commit">
+      Commit endpoint file (+ any Program.cs changes if registration there) with conventional message.
+      Example: feat(bff/r7): expose GET executor-config-schemas endpoint (Wave 3 task 033, FR-16)
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (existing PlaybookBuilder endpoints + Program.cs + registry)</tool>
+    <tool>Grep (find existing playbook-builder routes)</tool>
+    <tool>Write or Edit (new endpoint registration)</tool>
+    <tool>Bash (dotnet build, dotnet test, optional curl smoke, git commit)</tool>
+    <tool>Skill (code-review at Step 9.5)</tool>
+    <tool>Skill (adr-check at Step 9.5)</tool>
+  </tools>
+
+  <outputs>
+    <output type="modified-or-new-file">src/server/api/Sprk.Bff.Api/Api/Ai/PlaybookBuilderEndpoints.cs (or sibling existing endpoint file)</output>
+    <output type="modified-file-conditional">src/server/api/Sprk.Bff.Api/Program.cs (if endpoint maps there)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md (advance to task 034)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 033 ✅)</output>
+    <output type="commit">feat(bff/r7): expose GET executor-config-schemas endpoint (Wave 3 task 033, FR-16)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Route GET /api/ai/playbook-builder/executor-config-schemas is registered</criterion>
+    <criterion>Endpoint requires authentication (same policy as sibling PlaybookBuilder endpoints)</criterion>
+    <criterion>Handler returns Dictionary&lt;int, ExecutorConfigSchema&gt; keyed by ExecutorType integer</criterion>
+    <criterion>Handler is thin — no DTO transformation beyond the schema records</criterion>
+    <criterion>Handler enumerates INodeExecutor implementations from DI</criterion>
+    <criterion>All 33 executor types are represented in the response</criterion>
+    <criterion>The 5 priority executors return populated fields; the 28 placeholders return empty fields</criterion>
+    <criterion>dotnet build passes: 0 errors, 0 new warnings</criterion>
+    <criterion>dotnet test passes — no regressions</criterion>
+    <criterion>code-review + adr-check pass at Step 9.5 (FULL rigor)</criterion>
+    <criterion>Commit pushed to work/spaarke-ai-platform-unification-r7</criterion>
+    <criterion>Any URL convention divergence from spec FR-16 is documented as Open Question for sign-off</criterion>
+    <criterion>TASK-INDEX.md shows 033 ✅, 034 🔲 ready</criterion>
+  </acceptance-criteria>
+</task>

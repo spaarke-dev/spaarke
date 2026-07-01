@@ -43,10 +43,42 @@ public sealed class DeliverOutputNodeExecutor : INodeExecutor
     }
 
     /// <inheritdoc />
-    public IReadOnlyList<ActionType> SupportedActionTypes { get; } = new[]
+    public IReadOnlyList<ExecutorType> SupportedExecutorTypes { get; } = new[]
     {
-        ActionType.DeliverOutput
+        ExecutorType.DeliverOutput
     };
+
+    // R7 task 085 / FR-23 — typed config schema for Playbook Builder canvas.
+    // Derived from DeliveryNodeConfig: deliveryType (enum), template, outputFormat.
+    private static readonly ExecutorConfigSchema ConfigSchemaInstance = new(
+        ExecutorTypeName: nameof(ExecutorType.DeliverOutput),
+        ExecutorTypeValue: (int)ExecutorType.DeliverOutput,
+        Description: "Single-action delivery — renders and emits the final playbook output for the consumer. When no template is provided, auto-assembles all upstream node outputs into markdown.",
+        Fields: new ConfigSchemaField[]
+        {
+            new(
+                Name: "deliveryType",
+                Type: SchemaFieldType.Enum,
+                Required: false,
+                Description: "Output format. Defaults to 'markdown'.",
+                Default: "markdown",
+                EnumValues: new[] { "markdown", "json", "text", "html" }),
+            new(
+                Name: "template",
+                Type: SchemaFieldType.String,
+                Required: false,
+                Description: "Optional Handlebars template rendered against upstream outputs (e.g., '## Summary\\n{{summarize.output.summary}}'). When omitted, the executor auto-assembles upstream outputs.",
+                Default: null),
+            new(
+                Name: "outputFormat",
+                Type: SchemaFieldType.Object,
+                Required: false,
+                Description: "Optional format constraints: { includeMetadata: bool, includeSourceCitations: bool, maxLength: int }. Truncates with '...(truncated)' suffix when maxLength is exceeded.",
+                Default: null)
+        });
+
+    /// <inheritdoc />
+    public ExecutorConfigSchema GetConfigSchema() => ConfigSchemaInstance;
 
     /// <inheritdoc />
     public NodeValidationResult Validate(NodeExecutionContext context)

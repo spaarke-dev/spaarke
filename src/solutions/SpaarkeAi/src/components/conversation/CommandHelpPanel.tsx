@@ -122,6 +122,8 @@ const HARD_SLASH_DESCRIPTIONS: Readonly<Record<HardSlashCommand, string>> = {
   '/save-to-matter':
     'Save the conversation to a matter as a pinned memory. Argument: matter id (optional if a matter is in context).',
   '/pin': 'Pin the currently focused workspace tab so it survives session expiry.',
+  '/playbooks':
+    'Browse the Playbook Library — lists every playbook with its consumer mapping; pick one to invoke.',
 };
 
 const SOFT_SLASH_DESCRIPTIONS: Readonly<Record<SoftSlashCommand, string>> = {

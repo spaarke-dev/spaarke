@@ -1,0 +1,211 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-096" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Wire Library modal into ad-hoc launcher (FR-18)</title>
+    <status>completed</status>
+    <wave>9</wave>
+    <estimated-effort>2-3 hours</estimated-effort>
+    <tags>code-page, ui, wave-9</tags>
+    <rigor-level>FULL</rigor-level>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>095</dependencies>
+    <fr-coverage>FR-18 (consumer surface 3 of 3 — closes FR-18 acceptance ≥3 surfaces)</fr-coverage>
+  </metadata>
+
+  <prompt>
+    Wire the Playbook Library modal into one ad-hoc launcher surface — the third and final FR-18
+    consumer surface. The audit (task 093) identified the recommended ad-hoc launcher candidate
+    (likely a LegalWorkspace ad-hoc panel, the Workspace pane menu in SpaarkeAi, or a sibling
+    invocation surface). Add a "Browse Playbooks" affordance at the recommended mount point.
+    Modal opens, lists every playbook with consumer mapping, clicking a playbook invokes it
+    through proper Path A.5 routing. Reuse the shared PlaybookLibraryShell + mirror tasks 094/095
+    Dialog wrapper pattern. This task closes FR-18's ≥3-consumer-surface acceptance criterion.
+  </prompt>
+
+  <role>
+    Senior React / Fluent UI v9 developer familiar with the relevant ad-hoc launcher surface
+    (per task 093 audit recommendation) — LegalWorkspace, SpaarkeAi Workspace pane menu,
+    or similar. Reuse over invention.
+  </role>
+
+  <goal>
+    The audit-recommended ad-hoc launcher now has a "Browse Playbooks" affordance such that:
+    1. Affordance mounted at the location task 093 audit recommended for the ad-hoc launcher
+       (e.g., LegalWorkspace ad-hoc panel toolbar, WorkspacePaneMenu overflow item, or sibling).
+    2. Affordance triggers a modal Dialog wrapping PlaybookLibraryShell — mirrors tasks 094/095
+       Dialog wrapper pattern for consistency across all 3 surfaces.
+    3. Modal lists every playbook with consumer mapping per row.
+    4. Clicking a playbook invokes it through Path A.5 routing — verified via BFF log inspection.
+       Ad-hoc launcher context (current workspace, current entity) MAY be passed to invocation
+       payload if the selected playbook is workspace-aware.
+    5. Affordance follows ADR-021 (dark mode semantic tokens).
+    6. Component test added in the appropriate __tests__ dir mirroring the surrounding pattern.
+    7. Closes FR-18's "≥3 consumer surfaces wired" acceptance — verified by spec checklist update.
+    8. Pattern parity with tasks 094 + 095 confirmed.
+  </goal>
+
+  <inputs>
+    <file purpose="audit-doc">projects/spaarke-ai-platform-unification-r7/notes/spikes/playbook-library-audit.md</file>
+    <file purpose="design-spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    <file purpose="shared-modal-component">src/client/shared/Spaarke.UI.Components/src/components/PlaybookLibraryShell/PlaybookLibraryShell.tsx</file>
+    <file purpose="task-094-pattern">src/solutions/SpaarkeAi/src/components/conversation/{wired-in-094}.tsx</file>
+    <file purpose="task-095-pattern">src/client/shared/Spaarke.DailyBriefing.Components/src/components/{wired-in-095}.tsx</file>
+    <file purpose="ad-hoc-launcher-candidate">per task 093 audit recommendation (e.g., src/client/code-pages/LegalWorkspace/ ad-hoc panel OR src/solutions/SpaarkeAi/src/components/workspace/WorkspacePaneMenu.tsx)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-013">BFF AI Architecture — playbook launch from modal MUST flow through IInvokePlaybookAi triangle (Path A.5).</constraint>
+    <constraint source="ADR-021 (referenced)">Dark mode compliance — semantic Fluent UI tokens, no hardcoded colors.</constraint>
+    <constraint source="spec FR-18">Acceptance: ≥3 consumer surfaces with affordance; modal lists every playbook with consumer mapping; clicking invokes through Path A.5. This task closes the criterion.</constraint>
+    <constraint source="CLAUDE.md §11">Component justification triple:
+      1. Existing: PlaybookLibraryShell shared component already exists. Tasks 094 + 095 established the Dialog wrapper recipe + Path A.5 invocation pattern. Reuse both.
+      2. Extension: this task adds affordance + Dialog wrapper at the third consumer surface. NO new shared component; NO duplicate Dialog wrapper logic (mirror tasks 094/095).
+      3. Cost-of-doing-nothing: ad-hoc users cannot in-flow browse + invoke any playbook from the ad-hoc surface; FR-18 acceptance criterion (≥3 consumer surfaces) NOT met — this is the gating task.
+    </constraint>
+    <constraint source="fluent-v9-component skill">Apply Fluent UI v9 patterns + Spaarke conventions.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>code-pages/ad-hoc-launcher</topic>
+    <files>
+      <file>docs/adr/ADR-013-bff-ai-architecture.md</file>
+      <file>docs/architecture/SPAARKEAI-COMPONENTIZATION-AUDIT.md</file>
+      <file>docs/architecture/LEGALWORKSPACE-RETIREMENT.md</file>
+      <file>.claude/skills/fluent-v9-component/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="PlaybookLibraryShell shared component" location="src/client/shared/Spaarke.UI.Components/src/components/PlaybookLibraryShell/PlaybookLibraryShell.tsx">
+        Reuse via Dialog wrapper.
+      </pattern>
+      <pattern name="Tasks 094 + 095 wiring pattern" location="prior commits">
+        Mirror their Dialog wrapper + Path A.5 invocation. Cross-surface consistency matters.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Third and final consumer surface for FR-18. Tasks 094 + 095 wired spaarke-ai chat + briefing
+      widget. This task closes the criterion at 3 surfaces. Task 093 audit identified the specific
+      ad-hoc launcher candidate. If LegalWorkspace ad-hoc panel was recommended, note per
+      LEGALWORKSPACE-RETIREMENT.md it remains as library (not standalone code page), so wiring is
+      at the component-library level.
+    </background>
+    <dependencies>
+      <dependency task="093" status="required">Audit doc with ad-hoc launcher mount-point recommendation.</dependency>
+      <dependency task="094" status="required">Establishes Dialog wrapper + Path A.5 invocation pattern.</dependency>
+      <dependency task="095" status="required">Confirms pattern parity across consumer surfaces.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 094 — wired spaarke-ai chat (surface 1 of 3).</item>
+      <item>Task 095 — wired briefing widget (surface 2 of 3).</item>
+      <item>This task — closes FR-18 ≥3 surfaces (surface 3 of 3).</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: FULL · 📋 REASON: code-impl in Code Page (.tsx file modification, tags code-page + ui, ADR-013+021 applicable, FR-18 acceptance closing task) — quality gates Step 9.5 required · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read project CLAUDE.md + spec.md (FR-18) + plan.md (Wave 9) + task 093 audit doc.
+      Re-read tasks 094 + 095 wiring (for pattern parity).
+      Invoke the fluent-v9-component skill.
+    </step>
+    <step order="2" name="Verify dependencies">
+      Confirm tasks 094 + 095 are complete + committed. Confirm audit doc's recommended ad-hoc launcher mount point.
+    </step>
+    <step order="3" name="Read ad-hoc launcher host component">
+      Open the file the audit recommended (e.g., LegalWorkspace ad-hoc panel OR WorkspacePaneMenu.tsx
+      OR sibling). Identify the recommended mount point's exact insertion site.
+    </step>
+    <step order="4" name="Read tasks 094 + 095 wiring as pattern template">
+      Open the files modified in tasks 094 + 095. Document the Dialog wrapper structure shared across both.
+      This task mirrors that structure.
+    </step>
+    <step order="5" name="Wire affordance at recommended mount point">
+      Add a "Browse Playbooks" Button at the recommended mount point in the ad-hoc launcher host.
+      Wire onClick to open Dialog state (useState in the host).
+    </step>
+    <step order="6" name="Wrap PlaybookLibraryShell in Dialog">
+      Mirror tasks 094 + 095 Dialog wrapper exactly. Same DialogSurface / DialogBody / DialogContent /
+      DialogActions structure. PlaybookLibraryShell as DialogContent body.
+    </step>
+    <step order="7" name="Wire playbook-selected callback to Path A.5">
+      Mirror invocation pattern. If ad-hoc launcher context (workspace, entity) should be passed,
+      include it in invocation payload. MUST flow through IInvokePlaybookAi (Path A.5).
+    </step>
+    <step order="8" name="ADR-021 dark mode compliance">
+      Semantic tokens. Dark mode toggle smoke.
+    </step>
+    <step order="9" name="Component test">
+      Place test in the appropriate __tests__ dir of the host code page (mirror surrounding pattern).
+      Test: affordance renders + click opens Dialog + onPlaybookSelected fires + Dialog closes.
+    </step>
+    <step order="10" name="Build + test">
+      Run: npm run build:prod for the consuming app (per CLAUDE.md §12 — production build).
+      Run: npm test for the new test.
+      Goal: 0 errors; new test passes.
+    </step>
+    <step order="11" name="Manual smoke + FR-18 close-out verification">
+      Deploy to spaarkedev1 dev. Manual smoke: open the ad-hoc launcher → click "Browse Playbooks" →
+      modal opens → modal lists playbooks WITH consumer mapping → click → invocation flows through
+      Path A.5 (verify via BFF logs).
+      FR-18 close-out: confirm all 3 surfaces (spaarke-ai chat, briefing widget, this ad-hoc launcher)
+      now host the affordance. Update spec.md Success Criterion #15 status (or document in
+      notes/handoffs/) that ≥3 consumer surfaces are wired.
+    </step>
+    <step order="9.5" name="Quality gates (FULL rigor)">
+      Run `/code-review` on new affordance + test. Run `/adr-check` against ADR-013 + ADR-021 + spec FR-18.
+      Verify pattern parity with tasks 094 + 095 (cite the mirror in PR description).
+      Verify FR-18 closure (≥3 surfaces) is documented.
+      Fix any findings before commit.
+    </step>
+    <step order="12" name="Update current-task.md + TASK-INDEX">
+      Mark task 096 status complete. Wave 9 now complete. Advance current-task.md to next pending
+      task (likely Wave 4 task 041, which was blocked on Wave 9 task 091 completion). If TASK-INDEX
+      tracks wave completion, mark Wave 9 ✅ in the status snapshot table.
+    </step>
+    <step order="13" name="Commit">
+      Commit affordance + Dialog wrapper + test + FR-18 close-out note with conventional message.
+      Example: feat(r7/wave9): wire Playbook Library modal into ad-hoc launcher (Wave 9 task 096, FR-18 closes ≥3 surfaces)
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (audit doc, shared component, ad-hoc launcher host, tasks 094/095 wiring)</tool>
+    <tool>Edit (add affordance + Dialog wrapper)</tool>
+    <tool>Write (component test file)</tool>
+    <tool>Bash (npm run build:prod, npm test, git commit)</tool>
+    <tool>Skill (fluent-v9-component for patterns)</tool>
+    <tool>Skill (code-review at Step 9.5)</tool>
+    <tool>Skill (adr-check at Step 9.5)</tool>
+  </tools>
+
+  <outputs>
+    <output type="modified-file">{ad-hoc launcher host per task 093 audit} (affordance + Dialog wrapper)</output>
+    <output type="new-file">{appropriate __tests__ dir}/PlaybookLibraryAffordance.test.tsx</output>
+    <output type="new-or-updated-file">projects/spaarke-ai-platform-unification-r7/notes/handoffs/fr18-closure.md (records ≥3 surfaces wired)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md (advance to next pending task; Wave 9 complete)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 096 ✅; mark Wave 9 ✅ in status snapshot)</output>
+    <output type="commit">feat(r7/wave9): wire Playbook Library modal into ad-hoc launcher (Wave 9 task 096, FR-18 closes ≥3 surfaces)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>"Browse Playbooks" affordance mounted at the audit-recommended ad-hoc launcher location</criterion>
+    <criterion>Click opens Dialog wrapping PlaybookLibraryShell — mirrors tasks 094 + 095 Dialog wrapper pattern</criterion>
+    <criterion>Modal lists every playbook with consumer mapping per row</criterion>
+    <criterion>Clicking a playbook invokes it through Path A.5 routing (verified manually)</criterion>
+    <criterion>NO direct call to AnalysisOrchestrationService.ExecuteAnalysisAsync from launch path</criterion>
+    <criterion>ADR-021 dark mode compliance — semantic tokens only</criterion>
+    <criterion>Component test passes</criterion>
+    <criterion>npm run build:prod passes</criterion>
+    <criterion>code-review + adr-check pass at Step 9.5 (FULL rigor)</criterion>
+    <criterion>Pattern parity with tasks 094 + 095 confirmed in PR description</criterion>
+    <criterion>Manual smoke in spaarkedev1 dev confirms end-to-end flow on all 3 consumer surfaces</criterion>
+    <criterion>FR-18 closure documented in notes/handoffs/fr18-closure.md — ≥3 surfaces wired (spaarke-ai chat + briefing widget + this ad-hoc launcher)</criterion>
+    <criterion>TASK-INDEX.md status snapshot updated to mark Wave 9 ✅ complete</criterion>
+    <criterion>Commit pushed to work/spaarke-ai-platform-unification-r7</criterion>
+  </acceptance-criteria>
+</task>

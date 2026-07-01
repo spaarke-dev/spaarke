@@ -1,0 +1,149 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-118" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Address operator-flagged UAT issues (events, links/tools, two unidentified items)</title>
+    <status>not-started</status>
+    <wave>11</wave>
+    <estimated-effort>variable (2-8 hours depending on findings)</estimated-effort>
+    <tags>investigation, uat, wave-11</tags>
+    <rigor-level>STANDARD</rigor-level>
+    <rigor-reason>Investigation-first task; sub-tasks spawned per finding may individually upgrade to FULL if they involve code modification. STANDARD per task-execute Step 0.5.</rigor-reason>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Operator-context-dependent; spawned sub-tasks may parallelize.</parallel-reason>
+    <dependencies>117</dependencies>
+    <blocks>119</blocks>
+    <fr-coverage>spec.md Success Criteria #11-15 (operator UAT items beyond R4 graduation)</fr-coverage>
+  </metadata>
+
+  <prompt>
+    During Wave 11 UAT cycles 2026-06-29, operator flagged three issues that remain unresolved:
+    (1) "I'm not seeing any events" — only the Tasks Due Soon playbook ever ran in spaarkedev1;
+    other 6 notification playbooks (PB-016 New Documents, PB-018 New Emails, PB-019 New Events,
+    PB-021 Tasks Overdue, PB-017 Matter Activity, PB-022 Work Assignments) never created records
+    (suspected: scheduler/trigger infra doesn't run);
+    (2) "links or the tools do not work" — operator clicking widget action links / tool buttons
+    didn't navigate or trigger expected actions (specifics TBD);
+    (3) "two I don't see where those are coming from" — All Tasks grid shows items not visible
+    in the widget (suspected: different query path or stale view).
+
+    Step 1 = investigate + characterize each. If findings interrelate (e.g., all caused by
+    missing scheduler), one fix-task. If independent, spawn T118a / T118b / T118c with
+    appropriate rigor levels per task-execute.
+  </prompt>
+
+  <role>
+    SPAARKE platform full-stack engineer + UAT investigator. Familiar with notification playbook
+    architecture, widget data flow, MDA navigation. Decompose investigation findings into
+    actionable next steps.
+  </role>
+
+  <goal>
+    Each of the 3 operator-flagged issues has a documented finding in
+    `notes/handoffs/wave11-other-uat-resolutions.md`: root cause, scope assessment (R7-scope or
+    DEF-NNN defer), and either (a) inline fix proposed, (b) sub-task spawned with own rigor level,
+    or (c) deferred via `/project-defer-issue-tracking` with operator approval.
+  </goal>
+
+  <inputs>
+    <file purpose="operator-feedback-source">conversation transcript 2026-06-29 (chat history)</file>
+    <file purpose="notification-playbook-source">projects/spaarke-daily-update-service/notes/playbooks/</file>
+    <file purpose="widget-source">src/client/shared/Spaarke.DailyBriefing.Components/</file>
+    <file purpose="scheduler-investigation-context">src/server/api/Sprk.Bff.Api/Services/Jobs/</file>
+    <file purpose="all-tasks-grid-source">src/client/code-pages/AnalysisWorkspace/ OR src/solutions/LegalWorkspace/</file>
+    <file purpose="ide-defer-skill">.claude/skills/project-defer-issue-tracking/SKILL.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="CLAUDE.md §10">Any BFF code change in spawned sub-tasks loads bff-extensions.md + does publish-size check.</constraint>
+    <constraint source="CLAUDE.md §11">New components in spawned sub-tasks require justification triple.</constraint>
+    <constraint source="defer-vs-fix-decision">If a finding requires &gt; 1 day of work to fix, prefer defer (file as DEF-NNN via /project-defer-issue-tracking) over silently extending Wave 11. Operator approves defer.</constraint>
+    <constraint source="evidence-before-fix">Do NOT fix issues blindly — confirm root cause via grep / read / curl / MCP read_query first.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>uat/investigation-protocol</topic>
+    <files>
+      <file>.claude/skills/project-defer-issue-tracking/SKILL.md</file>
+      <file>projects/spaarke-ai-platform-unification-r7/notes/defer-issues.md</file>
+      <file>projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Investigate-then-decompose pattern" location="projects/spaarke-daily-update-service-r4/notes/canonical-truth/">
+        Per R4 project's canonical-truth loop: investigate code state first, document findings, THEN decide scope. Avoid building fixes against assumed root causes.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Wave 11 T117 (widget UAT) closes R4 graduation gate but leaves 3 operator-flagged issues open. These may or may not be R7-scope; investigation decides. Operator's binding direction 2026-06-29: "even if an issue was 'not something R7 introduced it still needs to be fixed. the goal of this project—regardless of where code was created or bugs developed—is to get the system working. THIS IS CRITICAL at this point" — so default to fix, defer only with explicit approval.
+    </background>
+    <dependencies>
+      <dependency task="117" status="must-complete-first">Widget UAT must produce R4 graduation sign-off (otherwise re-route to fix T117 defects first).</dependency>
+    </dependencies>
+    <related-work>
+      <item>Issue #1 (no events) likely relates to missing notification-playbook scheduler infrastructure — a known open follow-up documented during earlier 2026-06-29 hotfix sequence.</item>
+      <item>Issue #3 (All Tasks grid items not in widget) may relate to query-filter divergence between widget hook and grid view.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: STANDARD · 📋 REASON: investigation-first, sub-tasks may upgrade · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Investigate issue #1 — 'not seeing any events'">
+      Query spaarkedev1: MCP read_query for sprk_backgroundjobrun count (suspected zero — confirms scheduler not running). Query appnotification count by sprk_category — confirm only 'tasks-due-soon' has records. Inspect notification-playbook scheduler code path (likely Services/Jobs/ or a BackgroundService). Document: scheduler exists in code? deployed? configured? running? Identify exact gap.
+    </step>
+    <step order="2" name="Investigate issue #2 — 'links or tools do not work'">
+      Ask operator (AskUserQuestion) for specifics: WHICH links/tools? notification action links (Open / Done / etc.)? Tool buttons in widget header? Hyperlinks in narration text? Capture specifics → identify owning code (widget hook navigation logic + sprk_event/sprk_communication open routes).
+    </step>
+    <step order="3" name="Investigate issue #3 — 'two I don't know where those are coming from'">
+      Ask operator (AskUserQuestion) for screenshot of the 2 items. Inspect All Tasks grid query (likely sprk_event with discriminator filter) vs widget query (likely appnotification with sprk_category filter). Identify divergence: are these tasks-without-notifications? notifications-without-tasks? different time windows?
+    </step>
+    <step order="4" name="Categorize findings: interrelated or independent">
+      If interrelated (e.g., all 3 stem from scheduler-not-running) → ONE consolidated fix-task description.
+      If independent → propose T118a (events/scheduler), T118b (links/tools), T118c (grid items).
+    </step>
+    <step order="5" name="Decide fix-or-defer per finding">
+      For each finding: estimate effort (in hours). If ≤ 1 day → fix in T118 (or spawned sub-task). If &gt; 1 day → propose defer to operator; on approval, invoke `/project-defer-issue-tracking` to file DEF-NNN + matching GitHub issue.
+    </step>
+    <step order="6" name="If fixes in scope — execute (may spawn sub-tasks)">
+      Apply fixes via spawned sub-tasks (T118a/b/c) using task-execute per CLAUDE.md §4. Each spawned sub-task gets its own POML file generated via /task-create.
+    </step>
+    <step order="7" name="Write resolution handoff">
+      Create `notes/handoffs/wave11-other-uat-resolutions.md` with per-issue: finding, root cause, scope decision (fix / defer), action taken (fix commit SHA or DEF-NNN issue link), operator sign-off (if applicable).
+    </step>
+    <step order="8" name="Update TASK-INDEX + current-task.md">
+      Mark 118 ✅ when all 3 issues are resolved or deferred with operator approval. Advance to 119.
+    </step>
+    <step order="9" name="Commit">
+      Commit handoff doc + any code fixes + defer log updates.
+    </step>
+  </steps>
+
+  <tools>
+    <tool>MCP (mcp__dataverse__read_query for spaarkedev1 state)</tool>
+    <tool>Grep (notification-playbook scheduler search)</tool>
+    <tool>Read (widget + scheduler source)</tool>
+    <tool>AskUserQuestion (operator clarifications)</tool>
+    <tool>Skill (task-execute for sub-tasks, project-defer-issue-tracking for defers)</tool>
+    <tool>Bash (git commit, gh issue create via defer skill)</tool>
+    <tool>Write (handoff doc + any sub-task POMLs)</tool>
+  </tools>
+
+  <outputs>
+    <output type="document">projects/spaarke-ai-platform-unification-r7/notes/handoffs/wave11-other-uat-resolutions.md</output>
+    <output type="code">(variable — fix commits per spawned sub-task)</output>
+    <output type="defer">(variable — DEF-NNN entries in notes/defer-issues.md + matching GitHub issues)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Each of the 3 operator-flagged issues has a documented finding (root cause identified)</criterion>
+    <criterion testable="true">Each finding has a clear disposition: in-scope fix (with commit SHA) OR deferred (with DEF-NNN issue link + operator approval)</criterion>
+    <criterion testable="true">If sub-tasks spawned: each has its own POML, rigor level, and task-execute invocation</criterion>
+    <criterion testable="true">Resolution handoff doc captures all 3 dispositions + operator sign-off</criterion>
+    <criterion testable="true">No silent scope extension — any &gt;1-day finding either fixed with explicit operator approval OR formally deferred</criterion>
+  </acceptance-criteria>
+</task>

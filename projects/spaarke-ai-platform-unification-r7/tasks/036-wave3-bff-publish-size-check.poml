@@ -1,0 +1,175 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-036" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Wave 3 BFF publish + size check (NFR-01)</title>
+    <status>completed</status>
+    <wave>3</wave>
+    <estimated-effort>1 hour</estimated-effort>
+    <tags>bff-api, deploy, wave-3</tags>
+    <rigor-level>FULL</rigor-level>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>033, 034</dependencies>
+    <fr-coverage>FR-16 (compliance verification) + NFR-01 (publish-size) + NFR-02 (CVE)</fr-coverage>
+  </metadata>
+
+  <prompt>
+    Wave 3 closes here. Per CLAUDE.md §10 (BFF Hygiene NFR-01) every BFF-touching wave verifies
+    publish-size + CVE on the published artifact. Wave 3 added: the schema seam on INodeExecutor,
+    33 GetConfigSchema() implementations (5 rich + 28 placeholder), the executor-config-schemas
+    endpoint, the endpoint tests, the doc update. Expected size delta: small (≤ a few hundred KB).
+    Cumulative NFR-01 ceiling: ≤+2 MB across the entire R7 project; absolute ceiling 60 MB compressed.
+  </prompt>
+
+  <role>
+    Senior .NET backend developer + release engineer. Run the publish command, measure compressed
+    size, compare against the post-Wave-1 baseline, run the CVE scan, record the result in task notes.
+  </role>
+
+  <goal>
+    1. Successful `dotnet publish -c Release` of Sprk.Bff.Api
+    2. Compressed publish size measured + compared against post-Wave-1 baseline (from task 010)
+    3. Single-task / single-wave delta ≤ +500 KB expected (well under +5 MB single-task escalation threshold)
+    4. Cumulative R7 delta tracked; must stay ≤ +2 MB total per NFR-01 spec target (also well under the binding 60 MB compressed ceiling per `.claude/constraints/azure-deployment.md`)
+    5. `dotnet list package --vulnerable --include-transitive` reports no NEW HIGH-severity CVE introduced by Wave 3
+    6. Result recorded in task notes at `notes/handoffs/wave3-publish-check.md`
+    7. If size delta exceeds expectation, root-cause + document before closing wave
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    <file purpose="bff-constraints">.claude/constraints/bff-extensions.md</file>
+    <file purpose="azure-deployment-constraints">.claude/constraints/azure-deployment.md</file>
+    <file purpose="wave1-baseline">projects/spaarke-ai-platform-unification-r7/notes/handoffs/wave1-publish-check.md (the post-Wave-1 baseline from task 010, if it exists)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec NFR-01">BFF publish-size impact ≤ +2 MB compressed across the entire R7 project. Baseline ~46 MB (post-Phase 5 Outcome A). Absolute binding ceiling 60 MB.</constraint>
+    <constraint source="spec NFR-02">No new HIGH-severity CVE from R7 changes. Pre-existing transitive CVEs (Kiota 1.21.x) carried forward unchanged — NOT a regression.</constraint>
+    <constraint source="azure-deployment.md NFR-01 per-task verification rule">Every BFF-touching task verifies publish-size. Escalation thresholds: ≥+5 MB single-task delta → explicit justification required; cumulative ≥55 MB → architecture review; ≥60 MB → HARD STOP.</constraint>
+    <constraint source="ADR-029">BFF Publish Hygiene — per-task publish-size + CVE verification is binding policy.</constraint>
+    <constraint source="CLAUDE.md §10">Every BFF-touching task runs this verification. Wave 3 closes here.</constraint>
+    <constraint source="DO NOT SKIP">Even if expected delta is tiny, the verification MUST run + be recorded. Skipped verification is a hard CLAUDE.md §10 violation.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>azure-deployment + bff-publish</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>docs/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Wave 3 added a single new endpoint (data-only handler), one new record type file, schema
+      method implementations on 33 executor classes (mostly one-line placeholders), and one xUnit
+      test file. Expected compressed-publish delta: well under +500 KB. CVE delta: zero (no new
+      packages added).
+    </background>
+    <dependencies>
+      <dependency task="033" status="not-started-but-required">Endpoint must be in code for the publish to include it.</dependency>
+      <dependency task="034" status="not-started-but-required">Tests must pass before publishing.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Wave 1 task 010 established baseline; this task compares against that.</item>
+      <item>Wave 2 task 029 may have run an intermediate check — coordinate so Wave 3 baseline is not double-counted.</item>
+      <item>Wave 4 task 047 expects a SHRINK (legacy direct-path code deletion).</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: FULL · 📋 REASON: BFF deploy task (tag bff-api, deploy; NFR-01 verification) — Step 9.5 quality gates required · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read project CLAUDE.md + spec.md NFR-01/NFR-02 + plan.md Wave 3 closure + `.claude/constraints/azure-deployment.md` (NFR-01 per-task rule).
+    </step>
+    <step order="2" name="Verify dependencies">
+      Confirm tasks 033 + 034 shipped: endpoint exists; tests pass.
+    </step>
+    <step order="3" name="Locate Wave 1 baseline">
+      Read `notes/handoffs/wave1-publish-check.md` (if it exists) for the post-Wave-1 baseline size + CVE state. If missing, fall back to the absolute baseline ~46 MB from the post-Phase 5 Outcome A reference in CLAUDE.md §10.
+    </step>
+    <step order="4" name="Build clean">
+      Run: dotnet build -c Release src/server/api/Sprk.Bff.Api/
+      Goal: 0 errors. Pre-existing warnings carry forward; NO new warnings introduced by Wave 3.
+    </step>
+    <step order="5" name="Publish">
+      Run: dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish-wave3/
+      Goal: successful publish.
+    </step>
+    <step order="6" name="Measure compressed size">
+      Compress the publish output (PowerShell `Compress-Archive` or `tar -czf`) to a single archive. Measure size in MB.
+      Compare against Wave 1 baseline (or absolute 46 MB if no baseline).
+      Compute Wave 3 single-wave delta + cumulative R7 delta (if tracking).
+    </step>
+    <step order="7" name="CVE scan">
+      Run: dotnet list package --vulnerable --include-transitive
+      Compare HIGH-severity entries against Wave 1 baseline. Goal: NO new HIGH-severity entries introduced by Wave 3. Pre-existing entries (Kiota 1.21.x) carry forward.
+    </step>
+    <step order="8" name="Evaluate thresholds">
+      - Single-wave delta &lt; +5 MB → PASS, record + close.
+      - Single-wave delta ≥+5 MB → root-cause; document justification or revise; DO NOT auto-close.
+      - Cumulative R7 delta ≥+2 MB → flag in task notes (still within absolute ceiling but exceeds NFR-01 spec target).
+      - Cumulative absolute size ≥55 MB → architecture review required.
+      - Cumulative absolute size ≥60 MB → HARD STOP.
+    </step>
+    <step order="9" name="Write Wave 3 publish-check record">
+      Write `projects/spaarke-ai-platform-unification-r7/notes/handoffs/wave3-publish-check.md` with:
+      - Date, branch, commit SHA
+      - Pre-Wave-3 baseline (size + CVE state)
+      - Post-Wave-3 measurement (size + CVE state)
+      - Single-wave delta, cumulative R7 delta
+      - PASS / WARN / FAIL status against the 4 thresholds (Step 8)
+      - Root cause + justification if WARN or FAIL
+    </step>
+    <step order="9.5" name="Quality gates (FULL rigor)">
+      Run `/code-review` (light pass — focus on whether any Wave 3 commit introduced unintended packages). Run `/adr-check` against ADR-029.
+      For a deploy/verification task, the gates are mostly to confirm NO inadvertent NuGet additions slipped through earlier wave commits.
+    </step>
+    <step order="10" name="Clean up publish artifacts">
+      Delete `deploy/api-publish-wave3/` after measurement (not committed).
+    </step>
+    <step order="11" name="Update current-task.md + TASK-INDEX + mark Wave 3 complete">
+      Mark task 036 status complete; mark Wave 3 ✅ in TASK-INDEX; reset current-task.md (Wave 3 done; next active task is Wave-2-dependent per WBS).
+    </step>
+    <step order="12" name="Commit">
+      Commit `notes/handoffs/wave3-publish-check.md` with conventional message.
+      Example: chore(bff/r7): wave 3 publish + size check passed (Wave 3 task 036, NFR-01/NFR-02)
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (Wave 1 baseline + constraints)</tool>
+    <tool>Write (Wave 3 publish-check record)</tool>
+    <tool>Bash (dotnet build, dotnet publish, archive + measure, dotnet list package --vulnerable, git commit, cleanup)</tool>
+    <tool>Skill (code-review at Step 9.5 — light pass)</tool>
+    <tool>Skill (adr-check at Step 9.5 — ADR-029 focus)</tool>
+  </tools>
+
+  <outputs>
+    <output type="document">projects/spaarke-ai-platform-unification-r7/notes/handoffs/wave3-publish-check.md</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md (Wave 3 complete; advance to next pending task)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 036 ✅ + Wave 3 ✅)</output>
+    <output type="commit">chore(bff/r7): wave 3 publish + size check passed (Wave 3 task 036, NFR-01/NFR-02)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>dotnet build -c Release succeeds: 0 errors, no new warnings from Wave 3</criterion>
+    <criterion>dotnet publish -c Release succeeds</criterion>
+    <criterion>Compressed publish-size measurement recorded</criterion>
+    <criterion>Wave 3 single-wave delta computed and within +5 MB threshold (expected: well under +500 KB)</criterion>
+    <criterion>Cumulative R7 delta computed and within +2 MB NFR-01 spec target</criterion>
+    <criterion>Absolute publish size below 55 MB (architecture review threshold)</criterion>
+    <criterion>dotnet list package --vulnerable --include-transitive shows NO new HIGH-severity CVE</criterion>
+    <criterion>Pre-existing Kiota 1.21.x transitive CVEs (if present) carried forward — NOT counted as regression</criterion>
+    <criterion>notes/handoffs/wave3-publish-check.md written with date/SHA/baseline/measurement/delta/status</criterion>
+    <criterion>Publish artifact deploy/api-publish-wave3/ cleaned up (not committed)</criterion>
+    <criterion>code-review + adr-check pass at Step 9.5</criterion>
+    <criterion>TASK-INDEX.md shows 036 ✅ AND Wave 3 ✅</criterion>
+    <criterion>Commit pushed to work/spaarke-ai-platform-unification-r7</criterion>
+  </acceptance-criteria>
+</task>

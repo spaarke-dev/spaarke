@@ -1,0 +1,192 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-055" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Update Deploy-Playbook.ps1 to write sprk_executortype explicitly + lint reject unknown values (FR-20)</title>
+    <status>completed</status>
+    <wave>5</wave>
+    <estimated-effort>2-3 hours</estimated-effort>
+    <tags>script, wave-5</tags>
+    <rigor-level>FULL</rigor-level>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>054</dependencies>
+    <fr-coverage>FR-20</fr-coverage>
+  </metadata>
+
+  <prompt>
+    Update `scripts/Deploy-Playbook.ps1` so that every node deploy writes `sprk_executortype`
+    explicitly. Remove the legacy name-detection workaround (`if nodeType -eq 'Start' → set sprk_nodetype = X`)
+    and the `__actionType` injection in `configJson`. Add a lint check that rejects deployment
+    if a node has an unknown executor type value (must be in the 33 known `sprk_playbookexecutortype`
+    Choice values, sourced from the C# enum post-Wave 2 rename or via codegen).
+  </prompt>
+
+  <role>
+    Senior platform engineer modifying a load-bearing deployment script. The script is used by
+    every playbook deploy in spaarkedev1; bugs here break every future deploy.
+  </role>
+
+  <goal>
+    `scripts/Deploy-Playbook.ps1` updated such that:
+    1. Each playbook node deploy writes `sprk_executortype` explicitly (sourced from the playbook JSON definition's `executorType` field — new convention)
+    2. The legacy name-detection logic (`if ($node.nodeType -eq 'AIAnalysis') { $nodeTypeValue = ... }`) is REPLACED with explicit `executorType` field lookup. Existing playbook JSON files may still use `nodeType` as a friendly label; the script maps `nodeType` → `executorType` ONLY as a backward-compat input convenience, NOT as the dispatch source (the column being written IS `sprk_executortype`, sourced from definition).
+    3. The legacy `__actionType` injection in `sprk_configjson` is REMOVED. `sprk_configjson` no longer carries dispatch identity (FR-20: "no more `__actionType` injection workarounds").
+    4. A LINT step runs before any Dataverse write: for each node, verify `executorType` is in the 33 known `sprk_playbookexecutortype` Choice values. If unknown, exit 1 with explicit error message naming the offending node + value.
+    5. The lint reference list is sourced authoritatively. Options (pick one in implementation):
+       - Inline constant array of 33 known values + name mapping (simplest; must be updated when enum grows)
+       - Read from the C# enum file via regex (more brittle, but truly single-source)
+       - Read from a generated `executor-types.json` file produced by an existing or new codegen step
+       Default: inline constant array; flag as DEF-{NNN} if codegen approach is preferred later
+    6. Existing playbook deploys (Daily Briefing 5, Insights ~5, chat) continue to work after the change (test in task 056)
+    7. The script's `-DryRun` mode now includes the lint pre-check + prints what `sprk_executortype` would be written per node
+  </goal>
+
+  <inputs>
+    <file purpose="script-to-modify">scripts/Deploy-Playbook.ps1</file>
+    <file purpose="design-spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="plan">projects/spaarke-ai-platform-unification-r7/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md</file>
+    <file purpose="enum-source">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/INodeExecutor.cs</file>
+    <file purpose="reference-playbook-json">scripts/playbooks/</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-20">Update `Deploy-Playbook.ps1` so that every node deploy writes `sprk_executortype` explicitly. No more name-detection workarounds; no more `__actionType` injection. Validates against `sprk_playbookexecutortype` Choice values (33 known values + future). Lint rejects deployment with unknown executor type.</constraint>
+    <constraint source="spec FR-20 acceptance">Acceptance: deploy script writes the column on every node; lint test fires on invalid executor type; existing playbook deploys (Daily Briefing 5 playbooks, Insights pipeline ~5 playbooks, chat playbooks, others) all redeploy cleanly through new script.</constraint>
+    <constraint source="backward-compat-input">Existing playbook JSON files may use `nodeType` as friendly label. The script supports mapping `nodeType` → `executorType` as input convenience (not a runtime fallback). New playbook JSON files SHOULD use `executorType` directly.</constraint>
+    <constraint source="lint-discipline">Lint runs BEFORE any Dataverse write. If lint fails for any node, EXIT 1 — do NOT partial-deploy. (Avoids a state where some nodes have new field + some don't.)</constraint>
+    <constraint source="no-actiontype-injection">Existing `__actionType` injection in `sprk_configjson` (currently inserted by deploy script per the legacy R3/R4 workaround) MUST be removed. Confirm: no code path in deploy script writes `__actionType` field to configJson going forward.</constraint>
+    <constraint source="CLAUDE.md §11">Component justification: this task MODIFIES existing `Deploy-Playbook.ps1` (per CLAUDE.md §11 exemption: "Tasks that ONLY modify existing files... do NOT require justification — the rule applies to NEW surface, not modification.") so the three-question template is not required here.</constraint>
+    <constraint source="CLAUDE.md §10">No BFF surface touched — `scripts/` is outside `src/server/api/Sprk.Bff.Api/`. No publish-size verification needed.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>deployment-script-evolution</topic>
+    <files>
+      <file>scripts/Deploy-Playbook.ps1</file>
+      <file>scripts/dataverse/Migrate-PlaybookNodes-to-ExecutorType.ps1</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/INodeExecutor.cs</file>
+      <file>projects/spaarke-ai-platform-unification-r7/spec.md</file>
+      <file>docs/guides/ai-guide-playbook-deploy-recipe.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Current name-detection (to REMOVE)" location="scripts/Deploy-Playbook.ps1:768">
+        Lines around 768: `$nodeType = if ($node.nodeType) { $node.nodeType } else { 'AIAnalysis' }`; `$nodeTypeValue = $NodeTypeMap[$nodeType]`; writes `sprk_nodetype = $nodeTypeValue` at line 821. Replace with `sprk_executortype = $executorTypeValue` sourced from `$node.executorType`.
+      </pattern>
+      <pattern name="Current __actionType injection (to REMOVE)" location="scripts/Deploy-Playbook.ps1 ~line 321">
+        Comment at line 321 mentions `__actionType` injection. Find + remove the actual injection code path.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      `Deploy-Playbook.ps1` is the canonical deployer for playbook JSON definitions to spaarkedev1.
+      It has accreted workarounds over R3/R4/R7 development:
+      - Name-detection: infer `sprk_nodetype` (Choice column being deleted in Wave 4) from `node.nodeType` string
+      - `__actionType` injection: write the dispatch hint into `sprk_configjson` as a backup
+      Both workarounds become obsolete with R7 single-hop dispatch. This task removes them
+      and replaces with explicit `sprk_executortype` write.
+
+      The lint check ensures future playbook authors can't accidentally write an unknown
+      executor value that would silently fail at runtime.
+    </background>
+    <dependencies>
+      <dependency task="054" status="must-be-complete">All existing nodes already have `sprk_executortype` populated (FR-19) before changing the deploy script. Otherwise a redeploy could overwrite owner-decided values with definition defaults that don't match.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 056 sanity-tests by redeploying 3 representative playbooks (Daily Briefing, Insights, chat).</item>
+      <item>Wave 6 task 063 updates `docs/guides/ai-guide-playbook-deploy-recipe.md` — removes "Control-flow name-detection" steps now obsolete.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: FULL · 📋 REASON: modifies load-bearing deployment script (`scripts/Deploy-Playbook.ps1`), tag `script`, 6+ steps, FR-20 deliverable · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read project CLAUDE.md + spec.md FR-20 + plan.md Wave 5 + current Deploy-Playbook.ps1 source (full file).
+    </step>
+    <step order="2" name="Audit existing name-detection + actionType-injection logic">
+      Use Grep to find all references in Deploy-Playbook.ps1:
+      - `sprk_nodetype` references (likely line ~821)
+      - `__actionType` references (line ~321 comment + actual injection)
+      - `$NodeTypeMap` definition + usage
+      - `nodeType` field references in playbook JSON definitions
+      Catalog the removal + replacement points in a brief notes file at `projects/spaarke-ai-platform-unification-r7/notes/spikes/deploy-playbook-r7-changes.md`.
+    </step>
+    <step order="3" name="Define the executor-type lint list">
+      Inline a PowerShell hashtable at the top of the script:
+      `$KnownExecutorTypes = @{ 0 = 'AiAnalysis'; 1 = 'AiCompletion'; ...; }` covering all 33 values from the C# enum (post-Wave 2 rename — read INodeExecutor.cs to confirm current shape).
+      Add comment: "If C# enum grows, update this list — or replace with codegen step. Tracked as DEF-{NNN}."
+    </step>
+    <step order="4" name="Add lint pre-check function">
+      Define `function Test-PlaybookNodeExecutorType($playbookDef, $knownTypes)`:
+      - For each node, extract `executorType` (preferred) or fall back to `nodeType` (legacy mapping via a small `$LegacyNodeTypeToExecutorType` hashtable)
+      - If neither present OR mapped value not in `$knownTypes` → emit error + return $false
+      - Else return $true
+      Call this function BEFORE the deploy loop. Exit 1 if any node fails lint.
+    </step>
+    <step order="5" name="Replace name-detection block at ~line 768">
+      Find: `$nodeType = if ($node.nodeType) { $node.nodeType } else { 'AIAnalysis' }; $nodeTypeValue = $NodeTypeMap[$nodeType]`
+      Replace with:
+      `$executorTypeValue = if ($node.executorType) { [int]$node.executorType } elseif ($node.nodeType -and $LegacyNodeTypeToExecutorType.ContainsKey($node.nodeType)) { $LegacyNodeTypeToExecutorType[$node.nodeType] } else { Write-Error "Node '$($node.nodeName)' has no executorType + no legacy nodeType mapping. Set 'executorType' explicitly in playbook JSON."; exit 1 }`
+      Find the `sprk_nodetype = $nodeTypeValue` assignment in the node-create payload; change to `sprk_executortype = $executorTypeValue`. (Note: the `sprk_nodetype` Choice column was DELETED in Wave 1 / pre-R7 per spec; this assignment is dead-write that fails on POST anyway. Remove cleanly.)
+    </step>
+    <step order="6" name="Remove __actionType injection in sprk_configjson">
+      Find the code that injects `__actionType` into `sprk_configjson`. Remove the injection. Configjson is now PURE config (no dispatch identity).
+    </step>
+    <step order="7" name="Update canvas-layout switch around line 988 if affected">
+      Line 988 has `$canvasType = switch ($nodeType) { ... }`. This drives canvas-layout JSON, not dispatch. Keep if it still works against `nodeType` friendly labels; otherwise update to switch on `executorType`. Confirm consistent.
+    </step>
+    <step order="8" name="Test against a known playbook JSON (dry-run)">
+      Pick one playbook JSON from `scripts/playbooks/` (e.g., `contract-review.json` if exists, or any Daily Briefing playbook). Run:
+      `pwsh ./scripts/Deploy-Playbook.ps1 -DefinitionFile ./scripts/playbooks/{playbook}.json -DryRun`
+      Confirm: lint passes, dry-run log shows `sprk_executortype = N` being written per node, no `__actionType` references, no `sprk_nodetype` writes.
+    </step>
+    <step order="9" name="Test lint failure path">
+      Create a temporary scratch playbook JSON at `notes/spikes/scratch-bad-executor.json` with one node having `executorType = 9999` (invalid). Run dry-run. Confirm: lint fails, error message names the offending node + value, exit code 1. Delete scratch file.
+    </step>
+    <step order="9.5" name="Quality gates (FULL rigor)">
+      Run `/code-review` on the modified Deploy-Playbook.ps1. Run `/adr-check` against ADR-029 + bff-extensions.md (N/A for scripts but verify) + CLAUDE.md §11 (exempt — modification only).
+      Particular attention: name-detection logic fully removed; `__actionType` injection fully removed; lint actually halts before write loop.
+    </step>
+    <step order="10" name="Update current-task.md + TASK-INDEX">
+      Mark task 055 status complete; advance current-task.md to task 056.
+    </step>
+    <step order="11" name="Commit">
+      Commit modified `scripts/Deploy-Playbook.ps1` + the changes notes file with conventional message.
+      Example: `feat(scripts/r7): Deploy-Playbook.ps1 writes sprk_executortype explicitly + lint check (Wave 5 task 055, FR-20)`
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (Deploy-Playbook.ps1 full file, INodeExecutor.cs for enum source, reference playbook JSON)</tool>
+    <tool>Grep (find `sprk_nodetype` / `__actionType` / `$NodeTypeMap` references)</tool>
+    <tool>Edit (Deploy-Playbook.ps1)</tool>
+    <tool>Write (notes/spikes/deploy-playbook-r7-changes.md)</tool>
+    <tool>Bash (pwsh dry-run tests, git commit)</tool>
+    <tool>Skill (code-review at Step 9.5)</tool>
+    <tool>Skill (adr-check at Step 9.5)</tool>
+  </tools>
+
+  <outputs>
+    <output type="modified-file">scripts/Deploy-Playbook.ps1</output>
+    <output type="new-file">projects/spaarke-ai-platform-unification-r7/notes/spikes/deploy-playbook-r7-changes.md</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md (advance to task 056)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 055 ✅)</output>
+    <output type="commit">feat(scripts/r7): Deploy-Playbook.ps1 writes sprk_executortype explicitly + lint check (Wave 5 task 055, FR-20)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Deploy-Playbook.ps1 writes `sprk_executortype` to every node-create payload</criterion>
+    <criterion>Legacy name-detection logic (`$NodeTypeMap[$nodeType]`) is REMOVED or downgraded to legacy-input mapping only (not dispatch source)</criterion>
+    <criterion>Legacy `__actionType` injection in `sprk_configjson` is REMOVED</criterion>
+    <criterion>Lint pre-check function exists; validates `executorType` against 33 known values; halts deploy on unknown value</criterion>
+    <criterion>Lint failure path tested with scratch invalid JSON — fires correctly with named offending node + exit 1</criterion>
+    <criterion>Dry-run against a known playbook JSON succeeds; logs show `sprk_executortype = N` per node; no `sprk_nodetype` writes</criterion>
+    <criterion>code-review + adr-check pass at Step 9.5 (FULL rigor)</criterion>
+    <criterion>Commit pushed to work/spaarke-ai-platform-unification-r7</criterion>
+  </acceptance-criteria>
+</task>

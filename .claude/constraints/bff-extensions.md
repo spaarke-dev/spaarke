@@ -152,6 +152,52 @@ DO NOT collapse fixture-config gaps into "upstream cluster fix subsumes it" — 
 
 **Cross-reference**: Phase 5 procedure-doc codification at [`docs/procedures/testing-and-code-quality.md`](../../docs/procedures/testing-and-code-quality.md) §18.2.
 
+##### F.2.1 Env-name allow-list parity rule (Binding per spaarke-redis-cache-remediation-r2 FR-06 followup, 2026-06-29)
+
+**Codified 2026-06-29** from the AzureMonitorGuard (R2 task 006) + CacheModule (R1 task 003) twin incident: both shipped startup fail-fast guards that allow-listed only `ASPNETCORE_ENVIRONMENT=Development`. Both broke CI months later when `WebApplicationFactory<Program>` fixtures landed using `ASPNETCORE_ENVIRONMENT=Testing` (the canonical ASP.NET Core test-runtime name). PR #520 surfaced the AzureMonitorGuard breakage; the proactive audit dispatched after that fix found the CacheModule had the same latent bug. Both fixed in PR #521.
+
+**The bug class**:
+- Code throws / returns based on `IHostEnvironment.IsDevelopment()` or `EnvironmentName == "Development"`.
+- The only allow-listed env is `Development`.
+- A `WebApplicationFactory<Program>`-based integration test fixture uses `UseEnvironment("Testing")` (canonical ASP.NET Core convention) and inherits the throwing path.
+- CI is invisibly broken until someone runs full integration tests + sees `InvalidOperationException` at `WebApplicationFactory<>` construction time.
+
+**Binding rule — when adding ANY startup invariant that branches on env name**:
+
+1. **Allow-list `Testing` alongside `Development`** (the default). Use a single helper variable named `isLocalLike` (or equivalent) computed once at the top:
+   ```csharp
+   var isLocalLike = environment.IsDevelopment() ||
+       string.Equals(environment.EnvironmentName, "Testing", StringComparison.OrdinalIgnoreCase);
+   ```
+   App Service uses `ASPNETCORE_ENVIRONMENT=Production`, never `Testing`, so allow-listing it does NOT weaken the deployed-env guarantee. `Staging` / `Demo` / `QA` are deployed envs where the invariant MUST still fire.
+
+2. **OR**, if the gate genuinely needs to throw in `Testing` (rare; argue the case): perform a full §F.2 fixture sweep in the SAME PR, updating EVERY `WebApplicationFactory<Program>`-based fixture that may inherit the throwing path. This is the same protocol R1 task 009 used for the original CacheModule 4-branch fail-fast (337 latent test failures swept in 15 fixtures).
+
+3. **Add a case-insensitive Theory unit test** verifying the env-name allow-list matches ASP.NET Core's convention:
+   ```csharp
+   [Theory]
+   [InlineData("testing")]
+   [InlineData("TESTING")]
+   [InlineData("Testing")]
+   public void Guard_TestingEnvNameIsCaseInsensitive(string envName) { ... }
+   ```
+   The Theory acts as a forcing function: if someone tightens the env-name match later, this test breaks loudly.
+
+4. **Update the InvalidOperationException message** to enumerate the actual allow-list explicitly (e.g., "Development or Testing only", NOT "Development only" or "non-Development"). Operators reading the error need the correct allow-list to debug. The original FR-06 message said "non-Development environments" — accurate-but-misleading; the followup PR #521 changed it to "deployed environments (Staging, Production, etc.)".
+
+5. **Reviewer checklist** (load this section explicitly when reviewing any BFF-touching task that adds a `throw new InvalidOperationException(...)` in `Infrastructure/DI/*Module.cs` or `Infrastructure/Startup/*.cs`):
+   - [ ] Does the gate allow-list `Testing` alongside `Development`? (If no: rule 2 above must be argued.)
+   - [ ] Is the exception message accurate about which envs are allow-listed? (Avoid "non-X" phrasing; enumerate explicitly.)
+   - [ ] Is there a case-insensitive Theory test for the Testing env-name match?
+
+**Audit lineage** (2026-06-29):
+- AzureMonitorGuard.cs — broken on master from 2026-06-27 (PR #489 merge); fixed in PR #521.
+- CacheModule.cs — broken from R1 task 003 (2026-06-25, PR #458 merge); fixed in PR #521.
+- CorsModule.cs — already correctly allow-lists both `Development` AND `Testing` (no fix needed).
+- StartupValidationService.cs — does NOT gate by env; throws on missing required options in any env. No bug class match.
+
+**Cross-reference**: `projects/spaarke-redis-cache-remediation-r2/notes/post-deploy-verification.md` for FR-06 implementation; audit report compiled into PR #521 description.
+
 #### F.3 Empirical-Reproduction-FIRST Protocol (Binding per r2 task 081 / D-13)
 
 **Codified 2026-06-01** from r2 tasks 010 (RB-T044-01), 011 (RB-T028-03/04/05/06 cluster), 012 (RB-T028-02) execution: **r1 ledger entries' recommended fixes were INCOMPLETE in 100% of investigated cases**. Each task's agent surfaced an empirical correction:
@@ -191,33 +237,61 @@ DO NOT collapse fixture-config gaps into "upstream cluster fix subsumes it" — 
 
 **Cross-reference**: [`docs/guides/bff-deploy-coordination.md`](../../docs/guides/bff-deploy-coordination.md) (referenced; expand here if/when a longer narrative is needed). For solo-deploy mechanics see [`.claude/skills/bff-deploy/SKILL.md`](../skills/bff-deploy/SKILL.md).
 
-### G. Action / Node / Playbook Config Boundary (Binding per R4 canonical-truth loop, 2026-06-26)
+### G. Action / Node / Playbook Config Boundary — Dispatch + Prompt + Categorization (Binding per R4 canonical-truth loop 2026-06-26; rewritten per R7 spec FR-29 on 2026-06-29)
 
 **Codified 2026-06-26** from the spaarke-daily-update-service-r4 canonical-truth loop after surfacing a design smell where playbook config gets stuffed into the wrong column (node-level wire-up onto Action row, playbook-level scope decisions in node configjson, or node-graph data in `sprk_analysisplaybook.sprk_configjson` — which the runtime ignores).
 
+**Rewritten 2026-06-29** per R7 single-hop-dispatch reform (FR-07/08/09 + FR-29). The legacy 3-layer dispatch storage (`node.sprk_nodetype` + `Action.sprk_executoractiontype` INT + `Action.sprk_actiontypeid` lookup) was removed; the Wave 4 schema cleanup (tasks 043+044) dropped the two Action-side columns. Dispatch identity now lives single-source-of-truth on the **node**, prompt template still on Action, categorization preserved as decorative table for makers.
+
 **Binding rule**: every new config field added to the playbook surface (column on `sprk_analysisaction`, `sprk_analysisplaybook`, `sprk_playbooknode`; JSON property inside `sprk_canvaslayoutjson` or any `sprk_configjson`; N:N scope entry) MUST be placed in the correct "home" per the decision tree in [`docs/architecture/ai-architecture-actions-nodes-scopes.md`](../../docs/architecture/ai-architecture-actions-nodes-scopes.md):
 
-| Home | What lives here |
+| Home | What lives here (post-R7) |
 |---|---|
-| **A. Action row** | Action-intrinsic behaviour: prompt, temperature, output schema, ActionType FK |
+| **A. Action row** | Action-intrinsic prompt template: `sprk_systemprompt` (Memo), `sprk_outputschemajson` (Memo), `sprk_temperature` (Decimal). Action is a **reusable prompt template for prompt-driven executors** (AiAnalysis, AiCompletion, AiEmbedding). Action does NOT carry dispatch identity post-R7 — the `sprk_actiontypeid` lookup + `sprk_executoractiontype` INT columns were dropped in Wave 4. |
 | **B. Playbook row direct columns** | Playbook header metadata: name, type, capabilities, builder hints, canvas JSON |
-| **C. Node row** (incl. `sprk_configjson`) | Per-node runtime config: action FK, input bindings, dependencies, output variable, position, executor-specific input shape |
-| **D. N:N scope relationships** | Declarative resource scope: which Actions/Skills/Knowledge/Tools the playbook is allowed/expected to use |
+| **C. Node row** (incl. `sprk_configjson`) | **Per-node DISPATCH identity** (`sprk_executortype` Choice — the single-hop dispatch axis; 33 values from global `sprk_playbookexecutortype`) + per-node runtime config: optional Action FK (required for prompt-driven executors, NULL for pure), input bindings, dependencies, output variable, position, executor-specific input shape. |
+| **D. N:N scope relationships** | Declarative resource scope: which Actions/Skills/Knowledge/Tools the playbook is allowed/expected to use. The `sprk_analysisactiontype` lookup table is preserved (FR-05) for decorative maker categorization — NOT for runtime dispatch. |
 
-**Specifically MUST NOT** (anti-patterns identified by code-archaeology §7):
+**Binding MUST rules** (R7 dispatch contract):
+
+- ✅ **MUST dispatch from `sprk_playbooknode.sprk_executortype`** (Choice; required on every node post-FR-19 backfill). `PlaybookOrchestrationService.ExecuteNodeAsync` reads this single-hop and routes to the matching `INodeExecutor` registration.
+- ✅ **MUST read prompt content from Action via `sprk_playbooknode.sprk_actionid`** when the executor is prompt-driven (AiAnalysis / AiCompletion / AiEmbedding). Action FK is OPTIONAL at schema level, REQUIRED at executor `Validate()` for prompt-driven executors. Pure executors (Condition, Start, ReturnResponse, EntityNameValidator, UpdateRecord, SendEmail, etc.) MUST leave Action FK NULL.
+- ✅ **MUST use the `Services/Ai/PublicContracts/` facade** for any CRUD code that needs AI capability (per ADR-013).
+- ✅ **MUST declare `GetConfigSchema()`** on every new `INodeExecutor` (per FR-16 + Wave 3 tasks 030-036); the schema is served by `GET /api/ai/playbook-builder/executor-config-schemas` for canvas-renderer consumption.
+
+**Binding MUST NOT rules** (R7 dispatch anti-patterns):
+
+- ❌ **MUST NOT read `sprk_analysisaction.sprk_actiontypeid`** (lookup column — DROPPED in Wave 4 task 043, 2026-06-29). The column literally does not exist; any request that projects it will 400.
+- ❌ **MUST NOT read `sprk_analysisaction.sprk_executoractiontype`** (INT column — DROPPED in Wave 4 task 044, 2026-06-29). Same 400 failure mode.
+- ❌ **MUST NOT chain through `sprk_analysisactiontype` lookup table for runtime dispatch decisions** — the table is preserved (FR-05) for decorative maker categorization only. Browse-read for picker UI: OK. Dispatch read: forbidden.
+- ❌ **MUST NOT read `sprk_playbooknode.sprk_nodetype`** — column was removed from schema pre-R7. The current canonical column is `sprk_executortype`.
+- ❌ **MUST NOT read `sprk_playbooknode.sprk_configjson.__actionType`** as a fallback dispatch signal — the structural fallback ladder (~150 LOC) was deleted in Wave 2 task 025. Reading `__actionType` is now load-NOT-bearing.
+- ❌ **MUST NOT carry dispatch identity on the Action** in any form. Action JPS describes WHAT the Action does (prompt + schema + temperature); the consuming node describes WHO runs it (executor) and HOW it's wired (config).
+
+**Specifically MUST NOT** (legacy R4-era anti-patterns, still binding):
 
 - ❌ **Stuff node-level wire-up into `sprk_analysisaction.sprk_configjson`** — defeats Action reusability across playbooks. (Note: `sprk_configurationjson` with "uration" does NOT exist on `sprk_analysisaction`; the canonical column is `sprk_configjson` on node + playbook.)
 - ❌ **Stuff playbook-level scope decisions into `sprk_playbooknode.sprk_configjson`** — bypasses `jps-playbook-audit` + `jps-scope-refresh` tooling.
 - ❌ **Use `sprk_analysisplaybook.sprk_configjson` to carry node-graph data when `sprk_playbooknode` rows exist** — runtime reads node rows, not playbook configjson. This was the R4 deploy bug.
 - ❌ **Routing config (destination, widgetType, deliveryType) in node configJson** — current state per `node-routing-config.schema.json`; flagged as tech debt for R5/R6 promotion to first-class columns. Acceptable for now but call out in `design.md` Placement Justification.
 
-**Pre-merge check**: the PR description's Placement Justification section MUST state, for each new config field: (1) which Home the field belongs to; (2) why it does NOT belong to any of the other three Homes; (3) if it lives in `sprk_configjson` (per-node), why first-class columns weren't justified.
+**Decision criteria (3 fast questions)**:
 
-**Cross-reference**: [`docs/architecture/ai-architecture-actions-nodes-scopes.md`](../../docs/architecture/ai-architecture-actions-nodes-scopes.md) — the canonical decision tree + worked examples (R4 surfaces).
+1. **My code needs to decide which executor to run** → read `node.sprk_executortype` Choice. Single-hop. No ladder. No fallback.
+2. **My code needs the prompt template / output schema / temperature** → resolve `node.sprk_actionid` lookup → `sprk_analysisaction` row → read the three Memo/Decimal columns.
+3. **My code is rendering a maker browser / picker / filter** → use the `sprk_analysisactiontype` lookup table (decorative categorization). Do not use it for runtime dispatch.
+
+**Pre-merge check**: the PR description's Placement Justification section MUST state, for each new config field: (1) which Home the field belongs to; (2) why it does NOT belong to any of the other three Homes; (3) if it lives in `sprk_configjson` (per-node), why first-class columns weren't justified. For dispatch-touching code: explicitly cite which of the §G MUST/MUST NOT rules above apply.
+
+**Cross-reference**:
+- [`docs/architecture/ai-architecture-actions-nodes-scopes.md`](../../docs/architecture/ai-architecture-actions-nodes-scopes.md) — the canonical decision tree + worked examples (R4 surfaces, updated R7 Wave 6 task 062 for new 4-Home tree).
+- Root [`CLAUDE.md`](../../CLAUDE.md) §10 BFF Hygiene — invokes this constraint file at every BFF-touching task.
+- [`docs/adr/ADR-013-bff-ai-architecture.md`](../../docs/adr/ADR-013-bff-ai-architecture.md) — BFF AI architecture (IInvokePlaybookAi triangle stays canonical; R7 deepens, doesn't replace).
+- R7 spec FR-07 (single-hop dispatch), FR-08 (delete structural fallback), FR-09 (delete Action override branch), FR-12 (AiCompletionNodeExecutor), FR-29 (this rewrite), FR-16 (typed config schemas).
 
 ---
 
-### G. Hot-Path Declaration (Binding per ci-cd-unit-test-remediation-r1 FR-C04, added 2026-06-26)
+### H. Hot-Path Declaration (Binding per ci-cd-unit-test-remediation-r1 FR-C04, added 2026-06-26; renumbered §G→§H on 2026-06-29 to fix duplicate-§G ambiguity introduced by parallel project landings)
 
 Any project that touches BFF (`src/server/api/Sprk.Bff.Api/**`, `src/server/shared/Spaarke.Core/**`, or `src/server/shared/Spaarke.Dataverse/**`) — or that touches the parallel SpaarkeAi code page at `src/solutions/SpaarkeAi/**` — MUST include a `<hot-path-declaration>` XML block in its `design.md`. The block enumerates the project's hot-path touches across five surfaces so concurrent projects can coordinate ordering.
 

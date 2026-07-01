@@ -7,10 +7,10 @@ namespace Sprk.Bff.Api.Services.Ai;
 /// than blocking until the full response is available.
 /// </summary>
 /// <remarks>
-/// Follows the same pattern as the action-based execution path in
-/// <see cref="AnalysisOrchestrationService.ExecuteAnalysisAsync"/> which
-/// already uses <c>OpenAiClient.StreamCompletionAsync()</c> for per-token SSE.
-/// Non-streaming handlers continue to work unchanged via <see cref="IAnalysisToolHandler.ExecuteAsync"/>.
+/// Follows the per-token streaming pattern used by playbook node executors invoked via
+/// <see cref="IPlaybookOrchestrationService.ExecuteAsync"/> (the canonical AI invocation
+/// surface per ADR-013). Non-streaming handlers continue to work unchanged via
+/// <see cref="IAnalysisToolHandler.ExecuteAsync"/>.
 /// </remarks>
 public interface IStreamingAnalysisToolHandler : IAnalysisToolHandler
 {

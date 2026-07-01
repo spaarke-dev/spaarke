@@ -1,0 +1,209 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-032" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Implement GetConfigSchema() on all 33 executors (~5 with rich schemas, rest placeholders)</title>
+    <status>completed</status>
+    <wave>3</wave>
+    <estimated-effort>4-6 hours</estimated-effort>
+    <tags>bff-api, code-impl, wave-3</tags>
+    <rigor-level>FULL</rigor-level>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>031</dependencies>
+    <fr-coverage>FR-16 (per-executor implementations)</fr-coverage>
+  </metadata>
+
+  <prompt>
+    With the interface seam open (task 031), implement `GetConfigSchema()` on all 33 INodeExecutor
+    implementations. Per FR-16 acceptance criterion: 5 priority executors (AI Analysis, AI Completion,
+    Condition, EntityNameValidator, CreateNotification) get rich schemas describing every config field
+    they actually read; the remaining 28 executors get placeholder schemas (`ExecutorConfigSchema.Empty`
+    or a near-empty equivalent). The 5 rich schemas are the ones Wave 8 task 084 will render as typed
+    forms in the PlaybookBuilder canvas.
+  </prompt>
+
+  <role>
+    Senior .NET backend developer. For each of the 5 priority executors, READ the executor's
+    `Validate()` and `ExecuteAsync()` to discover what fields it actually consumes from `sprk_configjson`,
+    then declare each field accurately. For the 28 placeholder executors, return `ExecutorConfigSchema.Empty`.
+  </role>
+
+  <goal>
+    1. Rich schemas (per FR-16) on these 5 priority executors:
+       - `AiAnalysisNodeExecutor` (ActionType.AiAnalysis = 0)
+       - `AiCompletionNodeExecutor` (ActionType.AiCompletion = 1, built in Wave 1)
+       - `ConditionNodeExecutor` (ActionType.Condition = 30)
+       - `EntityNameValidatorNodeExecutor` (ActionType.EntityNameValidator = 141)
+       - `CreateNotificationNodeExecutor` (ActionType.CreateNotification = 50)
+    2. Placeholder schemas (`ExecutorConfigSchema.Empty`) on the remaining 28 executors (full list enumerated from `ActionType` enum in `INodeExecutor.cs`)
+    3. Each rich schema accurately reflects the executor's actual config consumption (verified by reading the executor's Validate + ExecuteAsync)
+    4. Build passes: 0 errors. Existing tests pass.
+    5. Endpoint test (task 034) can serialize all 33 schemas without runtime errors.
+  </goal>
+
+  <inputs>
+    <file purpose="design-doc">projects/spaarke-ai-platform-unification-r7/notes/spikes/getconfigschema-design.md</file>
+    <file purpose="design-spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    <file purpose="interface">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/INodeExecutor.cs</file>
+    <file purpose="all-executors">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/*NodeExecutor.cs</file>
+    <file purpose="schema-record">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/ExecutorConfigSchema.cs</file>
+    <file purpose="bff-constraints">.claude/constraints/bff-extensions.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-16">5 priority executors (AI Analysis, AI Completion, Condition, EntityNameValidator, CreateNotification) MUST have non-empty schemas. Remaining 28 MAY return Empty.</constraint>
+    <constraint source="ADR-010">DI Minimalism — implementations live in their respective executor classes. No helper extraction unless 3+ executors share identical field descriptors.</constraint>
+    <constraint source="ADR-013">BFF AI Architecture — schemas describe existing config consumption; do NOT introduce new config fields the executor does not read.</constraint>
+    <constraint source="ADR-029">BFF Publish Hygiene — verify publish-size delta at task 036. 33 small methods + 5 field descriptor sets should add &lt;50 KB compressed.</constraint>
+    <constraint source="ADR-038">Testing Strategy — implementations are testable via the endpoint integration test in task 034. No need to write per-executor unit tests for `GetConfigSchema()` alone (would be banned schema-method-presence test per ADR-038 §7).</constraint>
+    <constraint source="CLAUDE.md §11">No new component. Each executor is being EXTENDED with a method. Justification triple satisfied at the interface level (task 031).</constraint>
+    <constraint source="bff-extensions.md">Pre-merge checklist applies. Placement: rich schemas live IN the executor class (next to the fields they describe), NOT in a separate registry file.</constraint>
+    <constraint source="ACCURACY">Each rich schema MUST be derived from the executor's actual config consumption. Do NOT speculate fields the executor doesn't read. If a field is read conditionally (e.g., `if (config.X is not null) ...`), declare it as `Required: false`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai/node-executor-authoring</topic>
+    <files>
+      <file>.claude/patterns/ai/node-executor-authoring.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-010-di-minimalism.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="AiAnalysisNodeExecutor" location="src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiAnalysisNodeExecutor.cs">
+        Priority executor #1 — read its Validate + ExecuteAsync to discover config consumption.
+      </pattern>
+      <pattern name="AiCompletionNodeExecutor" location="src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiCompletionNodeExecutor.cs">
+        Priority executor #2 — built in Wave 1 (tasks 002-006). Schema reflects per-node prompt overrides + temperature override + output binding.
+      </pattern>
+      <pattern name="ConditionNodeExecutor" location="src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/ConditionNodeExecutor.cs">
+        Priority executor #3 — branching expression config.
+      </pattern>
+      <pattern name="EntityNameValidatorNodeExecutor" location="src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/EntityNameValidatorNodeExecutor.cs">
+        Priority executor #4 — allow-list + log policy config.
+      </pattern>
+      <pattern name="CreateNotificationNodeExecutor" location="src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/CreateNotificationNodeExecutor.cs">
+        Priority executor #5 — appnotification creation fields (title, body, recipient).
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Task 031 added the interface seam (and likely default/stub returns). This task fills in the
+      real content: the 5 priority schemas drive PlaybookBuilder canvas rendering (task 084), and
+      every executor having SOME schema (even Empty) means the canvas never blows up rendering an
+      unknown executor's config form.
+    </background>
+    <dependencies>
+      <dependency task="031" status="not-started-but-required">Interface seam at INodeExecutor.GetConfigSchema() + ExecutorConfigSchema record</dependency>
+      <dependency task="006" status="not-started-but-required">AiCompletionNodeExecutor exists (Wave 1 task 006 registered it).</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 033 builds the endpoint that serves these schemas.</item>
+      <item>Task 084 (Wave 8) consumes the 5 rich schemas to render typed forms in PlaybookBuilder canvas.</item>
+      <item>Task 085 (Wave 8) handles the 28 placeholder executors (placeholder forms OK).</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: FULL · 📋 REASON: code-impl in BFF on 33 files (modification across all *NodeExecutor.cs, tag bff-api, ADR-010+013+029 applicable) — quality gates Step 9.5 required · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read project CLAUDE.md + spec.md FR-16 + plan.md Wave 3 + task 030 design doc + `.claude/constraints/bff-extensions.md`.
+    </step>
+    <step order="2" name="Verify dependency">
+      Confirm task 031 shipped: INodeExecutor.GetConfigSchema() exists; ExecutorConfigSchema record exists.
+    </step>
+    <step order="3" name="Enumerate all 33 executors">
+      Use Grep to list every class implementing INodeExecutor in `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/`. Cross-reference with the ActionType enum values (33 total: 0, 1, 2, 10, 11, 12, 20, 21, 22, 23, 24, 30, 31, 32, 33, 40, 41, 42, 50, 51, 52, 60, 70, 80, 90, 100, 110, 120, 130, 140, 141, 142, 143). Write the inventory to scratchpad in `notes/spikes/`.
+    </step>
+    <step order="4" name="Read 5 priority executor sources">
+      For each of the 5 priority executors:
+      - Open the .cs file
+      - Find every read of `config.X` or `configJson.X` in Validate() + ExecuteAsync()
+      - Note: field name, type, required vs optional, default if any, brief description (from XML doc or inline comment)
+      Write the per-executor field inventory to scratchpad.
+    </step>
+    <step order="5" name="Implement rich schemas on 5 priority executors">
+      For each, add a `GetConfigSchema()` returning a populated `ExecutorConfigSchema` with `ConfigFieldDescriptor` entries for each field discovered in Step 4.
+      Example shape for AiCompletionNodeExecutor:
+      <![CDATA[
+      public ExecutorConfigSchema GetConfigSchema() =>
+          new(new Dictionary<string, ConfigFieldDescriptor>
+          {
+              ["temperatureOverride"] = new("number", Required: false, Default: null,
+                  Description: "Override Action's Temperature (0.0–2.0). Optional.",
+                  Enum: null),
+              ["outputVariable"] = new("string", Required: false, Default: "completion",
+                  Description: "Scope variable name to bind result to.",
+                  Enum: null),
+              // ... other discovered fields
+          });
+      ]]>
+    </step>
+    <step order="6" name="Implement placeholder schemas on 28 remaining executors">
+      For each, add `public ExecutorConfigSchema GetConfigSchema() =&gt; ExecutorConfigSchema.Empty;`
+      (or skip if task 031 chose default-interface-method strategy — then this step is a no-op for placeholder executors).
+    </step>
+    <step order="7" name="Build">
+      Run: dotnet build src/server/api/Sprk.Bff.Api/
+      Goal: 0 errors, 0 NEW warnings.
+    </step>
+    <step order="8" name="Run existing tests">
+      Run: dotnet test (focus on Sprk.Bff.Api.Tests). Goal: no regression.
+    </step>
+    <step order="9" name="Verify acceptance">
+      Spot check: open each of the 5 priority executors; confirm schema accurately reflects the fields the executor reads (no fabricated fields, no missing fields).
+    </step>
+    <step order="9.5" name="Quality gates (FULL rigor)">
+      Run `/code-review` on the modified files (33 files — focus on the 5 priority ones). Run `/adr-check` against ADR-010 + ADR-013 + ADR-029 + ADR-038 + bff-extensions.md.
+      Fix any findings before commit.
+    </step>
+    <step order="10" name="Update current-task.md + TASK-INDEX">
+      Mark task 032 status complete; advance current-task.md to task 033.
+    </step>
+    <step order="11" name="Commit">
+      Commit all 33 modified executor files (+ inventory note) with conventional message.
+      Example: feat(bff/r7): implement GetConfigSchema on 33 executors — 5 rich + 28 placeholder (Wave 3 task 032, FR-16)
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (each of 33 executor files)</tool>
+    <tool>Grep (enumerate INodeExecutor implementations)</tool>
+    <tool>Edit (33 executor files)</tool>
+    <tool>Write (per-executor field inventory note)</tool>
+    <tool>Bash (dotnet build, dotnet test, git commit)</tool>
+    <tool>Skill (code-review at Step 9.5)</tool>
+    <tool>Skill (adr-check at Step 9.5)</tool>
+  </tools>
+
+  <outputs>
+    <output type="modified-files">All 33 *NodeExecutor.cs files in src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/</output>
+    <output type="document">projects/spaarke-ai-platform-unification-r7/notes/spikes/executor-config-fields-inventory.md (the per-executor field discovery scratchpad)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md (advance to task 033)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 032 ✅)</output>
+    <output type="commit">feat(bff/r7): implement GetConfigSchema on 33 executors — 5 rich + 28 placeholder (Wave 3 task 032, FR-16)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>All 33 *NodeExecutor.cs files have a working GetConfigSchema() (either explicit override or default-interface-method seal)</criterion>
+    <criterion>5 priority executors return non-empty schemas with at least one ConfigFieldDescriptor</criterion>
+    <criterion>AiAnalysisNodeExecutor schema accurately describes fields read by its Validate + ExecuteAsync</criterion>
+    <criterion>AiCompletionNodeExecutor schema includes temperatureOverride + outputVariable + (per Wave 1 build) any other fields it actually reads</criterion>
+    <criterion>ConditionNodeExecutor schema describes branching expression field(s)</criterion>
+    <criterion>EntityNameValidatorNodeExecutor schema describes allow-list + log policy fields</criterion>
+    <criterion>CreateNotificationNodeExecutor schema describes title + body + recipient fields (+ any others actually read)</criterion>
+    <criterion>28 placeholder executors return ExecutorConfigSchema.Empty (or default)</criterion>
+    <criterion>No fabricated fields in any rich schema (every declared field MUST be read by Validate or ExecuteAsync)</criterion>
+    <criterion>Per-executor field inventory note exists at notes/spikes/executor-config-fields-inventory.md</criterion>
+    <criterion>dotnet build passes: 0 errors, 0 new warnings</criterion>
+    <criterion>dotnet test passes — no regressions</criterion>
+    <criterion>code-review + adr-check pass at Step 9.5 (FULL rigor)</criterion>
+    <criterion>Commit pushed to work/spaarke-ai-platform-unification-r7</criterion>
+    <criterion>TASK-INDEX.md shows 032 ✅, 033 🔲 ready</criterion>
+  </acceptance-criteria>
+</task>

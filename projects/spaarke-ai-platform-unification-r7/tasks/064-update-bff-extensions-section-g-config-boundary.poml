@@ -1,0 +1,166 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-064" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>UPDATE .claude/constraints/bff-extensions.md §G (config boundary) for new node-dispatch model</title>
+    <status>not-started</status>
+    <wave>6</wave>
+    <estimated-effort>1-2 hours</estimated-effort>
+    <tags>docs, skill-directives, wave-6</tags>
+    <rigor-level>STANDARD</rigor-level>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>024</dependencies>
+    <fr-coverage>FR-29 (bff-extensions §G config boundary update)</fr-coverage>
+  </metadata>
+
+  <prompt>
+    UPDATE `.claude/constraints/bff-extensions.md` §G (the config-boundary section) to describe the
+    new R7 dispatch model: node carries dispatch (`node.sprk_executortype`); Action carries prompt
+    template (when prompt-driven); `sprk_analysisactiontype` lookup table is decorative.
+    This task is SEQUENTIAL per CLAUDE.md §3 Sub-Agent Write Boundary — `.claude/` writes happen only
+    in main session, not via sub-agents. Per NFR-08, UPDATE in place: no SUPERSEDED markers.
+  </prompt>
+
+  <role>
+    Constraint-document editor + AI-platform architect. Mirror the existing `.claude/constraints/`
+    voice (binding, prescriptive, decision-criteria-led). Reframe §G to align with the new model
+    without adding new sections or refactoring sibling §A-§F sections.
+  </role>
+
+  <goal>
+    `.claude/constraints/bff-extensions.md` §G updated such that:
+    1. §G heading + framing reflects the new R7 model:
+       - Node carries dispatch decision (`node.sprk_executortype`, Choice column, 33 values)
+       - Action carries prompt template (SystemPrompt, OutputSchema, Temperature) — required ONLY for prompt-driven executors
+       - `sprk_analysisactiontype` lookup table is decorative (maker categorization), advisory only at runtime
+       - Lookup table runtime read is REMOVED — the three-layer chain is collapsed
+    2. NO SUPERSEDED markers (NFR-08)
+    3. Reframes decision criteria for BFF code touching dispatch:
+       - "If your code needs to decide which executor to invoke" → read `node.sprk_executortype`
+       - "If your code needs prompt template content" → resolve Action via `node.sprk_actionid` FK
+       - "Do NOT read from `sprk_analysisaction.sprk_actiontypeid` / `sprk_executoractiontype`" (both deleted in Wave 4)
+    4. Cross-references spec FR-07, FR-12, FR-29 + CLAUDE.md §10 BFF Hygiene
+    5. Preserves §A-§F sections + §G's binding voice (this is a binding constraint, not advisory)
+  </goal>
+
+  <inputs>
+    <file purpose="disposition">projects/spaarke-ai-platform-unification-r7/notes/drafts/wave6-doc-disposition.md</file>
+    <file purpose="target-doc">.claude/constraints/bff-extensions.md</file>
+    <file purpose="spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="claudemd">CLAUDE.md (§10 BFF Hygiene)</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-29">UPDATE §G to describe new model: node carries dispatch; Action carries prompt; lookup table is decorative.</constraint>
+    <constraint source="spec FR-28">UPDATE in place — no SUPERSEDED markers, no parallel "old vs new" sections.</constraint>
+    <constraint source="spec NFR-08">Documentation discipline.</constraint>
+    <constraint source="CLAUDE.md §3 Sub-Agent Write Boundary">SEQUENTIAL — `.claude/` writes happen only in main session. This task MUST run sequentially; cannot parallel with other sub-agent tasks.</constraint>
+    <constraint source="CLAUDE.md §10 BFF Hygiene">§G is itself part of the binding governance — pre-merge checklist + decision criteria for BFF extensions. Updating §G updates the binding governance for downstream BFF tasks.</constraint>
+    <constraint source="CLAUDE.md §11">Cost-of-doing-nothing: future BFF authors reading §G learn a wrong dispatch model — they may inject `IOpenAiClient` or attempt to read Action ActionType at dispatch time, contrary to R7 architecture.</constraint>
+    <constraint source="binding-voice">§G is BINDING — use MUST / MUST NOT phrasing. Match the binding voice of §F (asymmetric-registration rule).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>documentation</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>CLAUDE.md</file>
+      <file>projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Pre-R7, §G described the "config boundary" — i.e., what config a BFF service needs to read to
+      dispatch a node. The model was three-layer: read Node Type Choice, fall back to Action
+      ActionType, fall back to lookup table's executor field. R7 collapses this to single-hop. §G
+      needs to teach the new boundary: dispatch reads node only; prompt content comes from Action
+      (when needed); lookup table is decorative.
+    </background>
+    <dependencies>
+      <dependency task="024" status="not-started-but-required">Single-hop dispatch shipped in PlaybookOrchestrationService — §G describes the actual runtime, not a future state.</dependency>
+      <dependency task="060" status="not-started-but-required">Disposition list confirms §G is UPDATE.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Tasks 061 + 062 + 063 update the architecture / guide docs to reinforce the new model. §G is the CONSTRAINT version of the same message.</item>
+      <item>Tasks 065 + 066 update author guides — §G is the binding source they cite.</item>
+      <item>Task 068 updates root CLAUDE.md if affected.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: STANDARD · 📋 REASON: docs UPDATE task to `.claude/` path (Sub-Agent Write Boundary applies — main session only) — sequential per CLAUDE.md §3 · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read project CLAUDE.md + spec.md FR-29 + NFR-08 + task 060 disposition list + CLAUDE.md §10 BFF Hygiene.
+    </step>
+    <step order="2" name="Open target doc">
+      Read `.claude/constraints/bff-extensions.md` in full. Locate §G (config boundary). Note the original section bounds + binding voice (MUST / MUST NOT phrasing).
+    </step>
+    <step order="3" name="Identify cross-references within constraint file">
+      Grep within the same file for references to "three-layer", "ActionType lookup", "node type", "executor lookup", "structural fallback". Note any sibling-section text that depends on §G's old framing.
+    </step>
+    <step order="4" name="Identify cross-references from CLAUDE.md to §G">
+      Grep root CLAUDE.md for citations to §G or "config boundary". If §G is cited verbatim in CLAUDE.md, those citations remain valid after §G is rewritten (the §G anchor stays the same).
+    </step>
+    <step order="5" name="Draft the rewritten §G">
+      Write the new §G. Structure (match binding voice of §F):
+      - **§G heading** (preserve or adjust per doc convention; e.g., "G. Config Boundary — Dispatch + Prompt + Categorization")
+      - **One-paragraph framing**: "BFF code touching playbook dispatch MUST follow these boundaries."
+      - **Binding rules** (MUST / MUST NOT bullets):
+        - MUST dispatch from `node.sprk_executortype` (Choice; required on every node post-FR-19 backfill)
+        - MUST read prompt template from Action via `node.sprk_actionid` (Lookup; optional — required only for prompt-driven executors AiAnalysis / AiCompletion / AiEmbedding)
+        - MUST NOT read `sprk_analysisaction.sprk_actiontypeid` (deleted in Wave 4)
+        - MUST NOT read `sprk_analysisaction.sprk_executoractiontype` (deleted in Wave 4)
+        - MUST NOT chain through `sprk_analysisactiontype` lookup table for dispatch — it is decorative only (maker categorization)
+      - **Decision criteria** (3 short bullets): "If your code needs to decide which executor → read node.sprk_executortype" / "If your code needs prompt content → resolve Action FK" / "If your code is rendering a maker browser → use the lookup table for grouping"
+      - **Cross-references**: spec FR-07, FR-12, FR-29; CLAUDE.md §10 BFF Hygiene; ADR-013 BFF AI Architecture
+    </step>
+    <step order="6" name="Replace §G in the doc">
+      Edit `.claude/constraints/bff-extensions.md`: replace the §G section body with the new content. Match doc-level formatting + heading style.
+    </step>
+    <step order="7" name="Verify NFR-08 discipline">
+      Grep the modified doc for "SUPERSEDED", "deprecated", "old config boundary". Confirm zero new instances.
+    </step>
+    <step order="8" name="Verify constraint file reads coherently">
+      Read the file end-to-end. §G flows from §F; binding voice preserved; cross-references resolve; no dangling references.
+    </step>
+    <step order="9" name="Update current-task.md + TASK-INDEX">
+      Mark task 064 status complete; advance current-task.md to next pending Wave 6 task.
+    </step>
+    <step order="10" name="Commit">
+      Commit `.claude/constraints/bff-extensions.md` with conventional message.
+      Example: docs(constraints/r7): rewrite §G config boundary for single-hop dispatch (Wave 6 task 064, FR-29)
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (target constraint doc + CLAUDE.md + spec)</tool>
+    <tool>Grep (cross-reference search within constraint file + root CLAUDE.md)</tool>
+    <tool>Edit (rewrite §G section)</tool>
+    <tool>Bash (git commit)</tool>
+  </tools>
+
+  <outputs>
+    <output type="modified-file">.claude/constraints/bff-extensions.md (§G rewritten)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md (advance to next Wave 6 task)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 064 ✅)</output>
+    <output type="commit">docs(constraints/r7): rewrite §G config boundary for single-hop dispatch (Wave 6 task 064, FR-29)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>§G in .claude/constraints/bff-extensions.md rewritten to describe new dispatch model</criterion>
+    <criterion>§G includes MUST / MUST NOT binding rules (matches §F binding voice)</criterion>
+    <criterion>§G describes node.sprk_executortype as dispatch axis</criterion>
+    <criterion>§G describes Action as prompt-template source (optional FK)</criterion>
+    <criterion>§G describes sprk_analysisactiontype lookup as decorative only</criterion>
+    <criterion>§G explicitly prohibits reading deleted fields (sprk_actiontypeid, sprk_executoractiontype)</criterion>
+    <criterion>Cross-references to spec FR-07, FR-12, FR-29, CLAUDE.md §10, ADR-013 present</criterion>
+    <criterion>No SUPERSEDED markers (NFR-08)</criterion>
+    <criterion>Sibling §A-§F sections unchanged</criterion>
+    <criterion>Task ran sequentially (no parallel sub-agent invocations on .claude/ paths)</criterion>
+    <criterion>Commit pushed to work/spaarke-ai-platform-unification-r7</criterion>
+    <criterion>TASK-INDEX.md shows 064 ✅</criterion>
+  </acceptance-criteria>
+</task>

@@ -167,7 +167,7 @@
 | 086 | D-G2 | Natural language regression test (NFR-11 backward compat) (D-D-07) — `natural-language-regression.test.ts` + 50 tests green; 4 NL inputs verified (summarize-this-document / draft-a-reply / what's-the-matter-status / make-it-shorter); each verified for (a) `Intent.command === null` (b) `decorateBody` no-op no `commandIntent` field (c) input body purity (d) NFR-01 conversational primacy preserved for refinement / follow-up; positive anchor (`/summarize` decorates) + negative anchor (`/clear` no decoration) confirm suite integrity; BFF publish-size delta = 0 MB (test-only); `notes/task-086-evidence.md` | ✅ | STANDARD | true | 080 |
 | 087 | D-G3 | **Vertical-slice integration test (all 9 pillars per spec §6) (D-D-08)** — **COMPOSED EVIDENCE** framing per task 078 precedent: 9-pillar evidence map at `notes/vertical-slice-evidence.md` + new `Pillar8ToPlaybookEngineTests.cs` (13 tests PASSED in 23 ms) at the Pillar 8 → Pillar 3 → Pillar 4 → Pillar 5 → Pillar 6c BFF chain; ADR-015 audit, NFR-11 fall-through, voice-memory vs soft-slash ordering, FR-30 playbook ID propagation, Q6 closed-vocabulary integrity; BFF publish-size 46.06 MB compressed (+0.41 MB cumulative R6 — well within ≤+5 MB NFR-02 and 60 MB ADR-029 hard limit); NFR-08 invariant verified (`git diff src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/` empty); `notes/task-087-evidence.md` | ✅ | STANDARD | false | 084, 085, 086, 029, 049, 079 |
 | 088 | D-G4 | Lightweight eval baseline (Q10 markdown transcripts) (D-D-09) — 4 markdown transcripts at `notes/eval-baseline/`: SYS-DEFAULT × summarize-chat (vertical-slice snapshot) + summarize-workspace (Pillar 5 shared-action) + matter-prefill (NFR-07 evidence) + project-prefill (NFR-07 evidence); each cites Q10 + synthetic user messages per ADR-015; full eval harness deferred R7 per spec Owner Clarifications | ✅ | MINIMAL | false | 087 |
-| 089 | D-G5 | Phase D exit-gate validation | 🔲 | MINIMAL | false | 088 |
+| 089 | D-G5 | Phase D exit-gate validation — 5 spec criteria signed off; evidence at `notes/phase-d-exit-checklist.md`; plan.md Phase D marked ✅; BFF publish-size delta = 0 MB | ✅ | MINIMAL | false | 088 |
 
 ### Parallel — 8 Typed Tool Handlers (spans Phase A–C, 10 tasks)
 
@@ -188,7 +188,7 @@
 
 | ID | Wave | Title | Status | Rigor | Parallel-safe | Dependencies |
 |----|------|-------|--------|-------|---------------|--------------|
-| 090 | END | Project wrap-up (code-review + adr-check + repo-cleanup + lessons-learned) | 🔲 | FULL | false | 089 |
+| 090 | END | Project wrap-up — lessons-learned.md + r7-backlog.md authored; README/plan/CLAUDE.md flipped to Complete; 4 phase exit gates signed off; BFF final publish-size 46.71 MB compressed (+0.41 MB cumulative R6 — well within NFR-02 +5 MB); 9 GitHub issues filed for carry-forward (#470-#476, #510, #511) | ✅ | FULL | false | 089 |
 
 ### Closeout Audit — Surface Completion (added 2026-06-21 per `r6-deliverables-audit.md`)
 
@@ -196,17 +196,17 @@ Tasks identified by the R6 deliverables audit after R6 was declared "feature-com
 
 | ID | Pillar | Title | Status | Effort | Notes |
 |----|--------|-------|--------|--------|-------|
-| 091 | 1 | Builder UI: persona dropdown on playbook properties form | 🔲 | ~1 day | Without this, only SYS-DEFAULT persona is reachable; CUST- and playbook-attached layers exist in code but unauthored |
-| 092 | 2 | Verify + remove vestigial `sprk_capabilities` field on playbook entity (if confirmed) | 🔲 | ~1h | Dataverse maker-portal check |
-| 093 | 5 | Builder UI: `destination` + `widgetType` fields on node properties form | 🔲 | ~1 day | Without this, every playbook routes the default way; makers can't configure Q5 |
+| 091 | 1 | Builder UI: persona dropdown on playbook properties form — DESCOPED 2026-06-29; DEF-002 (e16677beb) shipped the BFF wiring fix for `sprk_playbookpersona` FK; user added the field to the maker-portal main form. Dedicated Builder dropdown is nice-to-have, not need-to-have. Tracked in r7-backlog.md if Q3 admin UI project picks it up. | ✅ | STANDARD | false | 089 |
+| 092 | 2 | Verify + remove vestigial `sprk_capabilities` field on playbook entity — DEF-004 (#476 closed 2026-06-29). User removed the column via maker portal after verification confirmed zero production-code references on `sprk_analysisplaybook`. Sister-project bug ISS-003 (#510) surfaced and filed urgent. | ✅ | MINIMAL | false | 089 |
+| 093 | 5 | Builder UI: `destination` + `widgetType` fields on node properties form — DEF-003 (c98fe7f85) shipped 2026-06-29. `DeliverOutputForm.tsx` extended with 5-option destination dropdown + conditional widgetType input; persists `NodeRoutingConfig` JSON to existing `sprk_configjson`. PlaybookBuilder code page built; deployable HTML at `out/sprk_playbookbuilder.html` (2,977 KB) ready for maker portal upload. | ✅ | FULL | false | 089 |
 | ~~094~~ | 6a | ~~Frontend workspace state restore~~ | ❌ | — | **WITHDRAWN** — audit found already wired |
-| 095 | 6c | Server SSE bridge for `context.*` events + client mount for `ExecutionTraceWidget` | 🔲 | ~4h | Events emit (063 ✅) but no rendering surface (Tier D UAT empty) |
-| 096 | 7 | Mount `PinnedMemoryListWidget` in SpaarkeAi shell (visible affordance only) | 🔲 | ~2h | Optional — makes voice-pinned context inspectable |
+| 095 | 6c | Server SSE bridge for `context.*` events + client mount for `ExecutionTraceWidget` — Phase 1+2 (frontend SSE contract + widget mount) shipped pre-checkpoint commit `0a5bc7e05`; Phase 3 BFF emission shipped as DEF-001 (commit 229f30ef9) via `IContextSseRelay` per-request scoped service. Full pipeline now live on master. | ✅ | FULL | false | 089 |
+| 096 | 7 | Mount `PinnedMemoryListWidget` in SpaarkeAi shell — shipped pre-checkpoint (added `pinned-memory` ContextToolId + render branch in `ContextPaneController` + export from `@spaarke/ai-widgets`). | ✅ | STANDARD | false | 089 |
 | 097a | 8 | Wire `createNewSession` callback to POST `/api/ai/chat/sessions` | ✅ | ~30m | Done 2026-06-21 (commit `869bdd777`) |
-| 097b | 8 | Wire `getConversationHistory` to expose SprkChat message-list (ref/callback) | 🔲 | ~2h | `/export` produces empty markdown until this lands |
+| 097b | 8 | Wire `getConversationHistory` to expose SprkChat message-list — shipped pre-checkpoint. Added `onMessagesChange` prop to `ISprkChatProps`; `ConversationPane` snapshots messages into `messagesRef`; `getConversationHistory` returns real chat history for `/export` markdown. | ✅ | FULL | false | 089 |
 | 097c | 8 | Wire `getFocusedTabId` via PaneEventBus `tab_change` subscription | ✅ | ~1h | Done 2026-06-21 (commit `869bdd777`) |
-| 098 | 9 | Render `AddToAssistantToggle` per-tab in tab header + wire PATCH | 🔲 | ~1.5h | Server projection ready; UI mount missing (Tier E UAT untestable) |
-| **TIER-C** | 6 | **Diagnose + fix LLM workspace visibility** (Tier C UAT primary failure) | 🔲 | ~1-2h diag + fix | Most likely: 3 workspace chat tools not registered or system-prompt snapshot empty. PRIMARY UAT blocker per 2026-06-25 walkthrough. |
+| 098 | 9 | Render `AddToAssistantToggle` per-tab in tab header + wire PATCH — shipped pre-checkpoint. `WorkspaceTabManagerComponent` renders the toggle above the active widget; `WorkspacePane` handles PATCH to `/api/ai/chat/sessions/{id}/tabs/{tabId}` with `visibleToAssistant` body. | ✅ | FULL | false | 089 |
+| **TIER-C** | 6 | **Diagnose + fix LLM workspace visibility** — RESOLVED 2026-06-26. Diagnostic confirmed C# wiring was correct (`SprkChatAgentFactory` snapshot path intact); root cause was Dataverse data gap: 2 of 4 workspace handler rows (CLOSE-WORKSPACE-TAB + GET-WORKSPACE-TAB-CONTENT) were missing from `Seed-TypedHandlers.ps1`. Added CLOSE-WORKSPACE-TAB seed entry (commit 738b59de6); deployed both missing rows to spaarke-dev via MCP. LLM now has full workspace visibility via the 4 registered handlers. See `notes/tier-c-diagnostic.md`. | ✅ | DIAG | false | n/a |
 
 **Closeout audit total**: ~12-15 hours surface (095, 097b, 098, TIER-C, optionally 096) + ~2 days Builder UI (091, 093) + ~1h cleanup (092).
 

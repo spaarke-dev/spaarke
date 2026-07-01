@@ -51,10 +51,55 @@ public sealed class DeliverToIndexNodeExecutor : INodeExecutor
     }
 
     /// <inheritdoc />
-    public IReadOnlyList<ActionType> SupportedActionTypes { get; } = new[]
+    public IReadOnlyList<ExecutorType> SupportedExecutorTypes { get; } = new[]
     {
-        ActionType.DeliverToIndex
+        ExecutorType.DeliverToIndex
     };
+
+    // R7 task 085 / FR-23 — typed config schema for Playbook Builder canvas.
+    // Derived from DeliverToIndexNodeConfig: indexName (required), source (document/content),
+    // contentVariable (required when source=content), metadata, parentEntity.
+    private static readonly ExecutorConfigSchema ConfigSchemaInstance = new(
+        ExecutorTypeName: nameof(ExecutorType.DeliverToIndex),
+        ExecutorTypeValue: (int)ExecutorType.DeliverToIndex,
+        Description: "Enqueues a RAG semantic indexing job via Service Bus (fire-and-forget). Reads Graph DriveId/ItemId from DocumentContext.Metadata.",
+        Fields: new ConfigSchemaField[]
+        {
+            new(
+                Name: "indexName",
+                Type: SchemaFieldType.String,
+                Required: true,
+                Description: "Target AI Search index name (e.g., 'knowledge'). Required. Supports {{var}} substitution.",
+                Default: null),
+            new(
+                Name: "source",
+                Type: SchemaFieldType.Enum,
+                Required: false,
+                Description: "Indexing source. Defaults to 'document' (reads from context.Document). Use 'content' to index a string from a prior node output (requires contentVariable).",
+                Default: "document",
+                EnumValues: new[] { "document", "content" }),
+            new(
+                Name: "contentVariable",
+                Type: SchemaFieldType.String,
+                Required: false,
+                Description: "When source='content': name of the upstream node OutputVariable carrying the text to index. Required for source='content'.",
+                Default: null),
+            new(
+                Name: "parentEntity",
+                Type: SchemaFieldType.Object,
+                Required: false,
+                Description: "Optional parent-entity scope: { entityType, entityId, entityName? }. All values support {{var}} substitution. Drives entity-scoped indexing for RAG filtering.",
+                Default: null),
+            new(
+                Name: "metadata",
+                Type: SchemaFieldType.Object,
+                Required: false,
+                Description: "Optional name→value string map written as index document metadata (e.g., { category: 'legal' }). Values support {{var}} substitution.",
+                Default: null)
+        });
+
+    /// <inheritdoc />
+    public ExecutorConfigSchema GetConfigSchema() => ConfigSchemaInstance;
 
     /// <inheritdoc />
     public NodeValidationResult Validate(NodeExecutionContext context)

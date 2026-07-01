@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-020" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Audit all ActionType references via grep (~1000+) across BFF</title>
+    <status>completed</status>
+    <completed-on>2026-06-28</completed-on>
+    <completion-note>464 ActionType refs identified across 82 files (224 BFF + 240 tests; src/server/shared/ clean). Spec FR-10 estimate of ~1000 corrected. Largest cluster: PlaybookOrchestrationService.cs (25 hits — much will disappear in task 024 dispatch deletion). 1 unrelated-symbol gotcha flagged: InlineActionInfo.ActionType string discriminator in AnalysisChatContextResponse.cs MUST be excluded from regex. 32 lowercase "actionType" JSON property hits + SSE wire field deferred to Wave 6 (FR-21 Dataverse schema rename). SupportedActionTypes (97 refs) deferred to task 023. Audit doc at notes/spikes/actiontype-audit.md drives task 021 strategy.</completion-note>
+    <wave>2</wave>
+    <estimated-effort>2-3 hours</estimated-effort>
+    <tags>audit, bff-api, wave-2</tags>
+    <rigor-level>STANDARD</rigor-level>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>W1 complete (task 010)</dependencies>
+    <fr-coverage>FR-10 (preparatory)</fr-coverage>
+  </metadata>
+
+  <prompt>
+    Wave 2 opens with the rename. Before touching code, enumerate every `ActionType` reference in BFF source
+    + tests. The full rename (task 022) needs an accurate count, a per-file breakdown, and a list of edge
+    cases (XML doc comments, string literals, JSON serialization names, attribute arguments) so the rename
+    plan in task 021 can decide PR sizing and conflict-risk windows. This is read-only — no source edits.
+  </prompt>
+
+  <role>
+    Senior .NET backend developer comfortable with large-codebase refactoring.
+    Goal: produce a precise inventory of `ActionType` references so the actual rename is mechanical, not exploratory.
+  </role>
+
+  <goal>
+    An audit report at `projects/spaarke-ai-platform-unification-r7/notes/spikes/actiontype-audit.md` that contains:
+    1. Total reference count (rg-driven) across `src/server/api/Sprk.Bff.Api/` + `src/server/shared/` + `tests/unit/Sprk.Bff.Api.Tests/`
+    2. Per-file breakdown (top 25 by hit count) — file path + count
+    3. Reference categories: enum-value usages (`ActionType.AiCompletion`), type-name usages (`ActionType` in signatures), property names (`SupportedActionTypes`), string literals (`"ActionType"` in JSON), XML doc comments (`&lt;see cref="ActionType"/&gt;`)
+    4. Edge cases needing manual review (JSON property names, attribute string args, log message formatting)
+    5. Out-of-scope confirmations: any references in non-BFF surfaces (PCF, code-pages, scripts) that R7 explicitly does NOT rename per FR-10 scope (BFF only)
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="plan">projects/spaarke-ai-platform-unification-r7/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    <file purpose="enum-source">src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/INodeExecutor.cs</file>
+    <file purpose="bff-constraints">.claude/constraints/bff-extensions.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-10">Full rename across BFF only. Out-of-scope: PCF, code-pages, scripts, docs (handled in Wave 6/8).</constraint>
+    <constraint source="spec NFR-06">No backward compatibility — `ActionType` symbol fully replaced; no aliases, no `[Obsolete]` shim.</constraint>
+    <constraint source="CLAUDE.md §11">Audit only — does NOT introduce new components; no justification triple required for this task.</constraint>
+    <constraint source="bff-extensions.md">Read-only audit — no publish-size check required.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff/refactor-planning</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-010-di-minimalism.md</file>
+      <file>docs/adr/ADR-013-bff-ai-architecture.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      The C# enum `ActionType` is a misnomer post-R7 — its values name executors, not Actions. The Action concept
+      now refers strictly to the `sprk_analysisaction` entity (prompt template + schema). Renaming to `ExecutorType`
+      aligns the type name with the dispatch axis. FR-10 calls the rename ~1000+ references. This audit confirms.
+    </background>
+    <dependencies>
+      <dependency task="010" status="must-be-complete">Wave 1 complete; AiCompletionNodeExecutor compiles + tests green so the rename has a clean baseline.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 021 consumes this audit to draft the rename plan (PR sizing, conflict windows).</item>
+      <item>Task 022 executes the rename mechanically.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: STANDARD · 📋 REASON: audit-only task; no source modification; produces planning artifact · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read project CLAUDE.md + spec.md FR-10 + plan.md Wave 2 section.
+    </step>
+    <step order="2" name="Grep enum-value usages">
+      Pattern: `ActionType\.\w+` across `src/server/api/Sprk.Bff.Api/`, `src/server/shared/`, `tests/`.
+      Capture file paths + counts. These are the bulk of references (likely 600-800).
+    </step>
+    <step order="3" name="Grep type-name usages">
+      Pattern: `\bActionType\b` (whole word) across same paths.
+      Capture file paths + counts; subtract enum-value usages to isolate type references (signatures, generics, params).
+    </step>
+    <step order="4" name="Grep SupportedActionTypes references">
+      Pattern: `SupportedActionTypes`. These will rename to `SupportedExecutorTypes` in task 023.
+    </step>
+    <step order="5" name="Grep string literals + XML doc references">
+      Pattern: `"ActionType"` (string literal) + `cref="ActionType` (XML doc). Edge cases requiring manual judgment during rename.
+    </step>
+    <step order="6" name="Confirm out-of-scope surfaces">
+      Grep `src/client/`, `src/dataverse/`, `scripts/` for `ActionType` references. List but do NOT include in rename scope (FR-10 says BFF-only).
+    </step>
+    <step order="7" name="Compose audit report">
+      Write `notes/spikes/actiontype-audit.md` covering: total counts; per-file top 25; per-category breakdown; edge cases; out-of-scope confirmations. Target: 80-120 lines.
+    </step>
+    <step order="8" name="Update current-task.md + TASK-INDEX">
+      Mark task 020 complete; advance current-task.md to task 021.
+    </step>
+    <step order="9" name="Commit">
+      Commit `notes/spikes/actiontype-audit.md` with conventional message: `chore(r7/audit): catalog ActionType references for Wave 2 rename (task 020, FR-10)`.
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Grep (large-scale reference enumeration)</tool>
+    <tool>Read (CLAUDE.md, spec, plan)</tool>
+    <tool>Write (audit report)</tool>
+    <tool>Bash (git commit)</tool>
+  </tools>
+
+  <outputs>
+    <output type="document">projects/spaarke-ai-platform-unification-r7/notes/spikes/actiontype-audit.md</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md (advance to task 021)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 020 ✅)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Audit report exists at notes/spikes/actiontype-audit.md</criterion>
+    <criterion>Total `ActionType` reference count documented (BFF + tests)</criterion>
+    <criterion>Per-file breakdown table includes top 25 files by hit count</criterion>
+    <criterion>Reference categories enumerated (enum-value / type-name / property / string / XML)</criterion>
+    <criterion>Edge cases listed for manual review during rename</criterion>
+    <criterion>Out-of-scope surfaces explicitly listed and confirmed excluded per FR-10</criterion>
+    <criterion>current-task.md updated to point at task 021 as next</criterion>
+  </acceptance-criteria>
+</task>

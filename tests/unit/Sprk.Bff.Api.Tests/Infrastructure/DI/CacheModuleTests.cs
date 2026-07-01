@@ -158,7 +158,60 @@ public class CacheModuleTests
     }
 
     // ===================================================================
-    // Branch (c) — Redis off + AllowInMemoryFallback + NOT Development → throws
+    // Branch (b) extended — Redis off + AllowInMemoryFallback + Testing
+    // (CI safety carve-out, 2026-06-29 follow-on to AzureMonitorGuard Testing
+    // allow-list; WAF-based integration tests use ASPNETCORE_ENVIRONMENT=Testing).
+    // ===================================================================
+
+    [Fact]
+    public void Redis_Off_AllowFallback_Testing_RegistersInMemoryAndNullMultiplexer()
+    {
+        // Arrange
+        var services = new ServiceCollection();
+        var logging = GetLoggingBuilder(services);
+        var env = new FakeHostEnvironment { EnvironmentName = "Testing" };
+        var config = BuildConfiguration(new Dictionary<string, string?>
+        {
+            ["Redis:Enabled"] = "false",
+            ["Redis:AllowInMemoryFallback"] = "true",
+        });
+
+        // Act
+        services.AddCacheModule(config, logging, env);
+        using var provider = services.BuildServiceProvider();
+        var distCache = provider.GetRequiredService<IDistributedCache>();
+        var multiplexer = provider.GetRequiredService<IConnectionMultiplexer>();
+
+        // Assert — same wiring as Development branch: decorator + Null-Object multiplexer.
+        distCache.Should().BeOfType<MetricsDistributedCache>();
+        multiplexer.Should().BeOfType<NullConnectionMultiplexer>();
+    }
+
+    [Theory]
+    [InlineData("testing")]    // lowercase
+    [InlineData("TESTING")]    // uppercase
+    [InlineData("Testing")]    // canonical
+    public void Redis_Off_AllowFallback_TestingEnvNameIsCaseInsensitive(string envName)
+    {
+        // Mirrors AzureMonitorGuardTests case-insensitive Theory — env name
+        // matching must follow ASP.NET Core convention regardless of casing.
+        var services = new ServiceCollection();
+        var logging = GetLoggingBuilder(services);
+        var env = new FakeHostEnvironment { EnvironmentName = envName };
+        var config = BuildConfiguration(new Dictionary<string, string?>
+        {
+            ["Redis:Enabled"] = "false",
+            ["Redis:AllowInMemoryFallback"] = "true",
+        });
+
+        Action act = () => services.AddCacheModule(config, logging, env);
+
+        act.Should().NotThrow();
+    }
+
+    // ===================================================================
+    // Branch (c) — Redis off + AllowInMemoryFallback + deployed env → throws
+    // (Development AND Testing are allow-listed; Staging/Production/etc. throw.)
     // ===================================================================
 
     [Fact]
@@ -179,12 +232,37 @@ public class CacheModuleTests
 
         // Assert — env-guard fail-fast (FR-03). Error message must surface
         // the actual env name + remediation pointer ("Set Redis:Enabled=true").
+        // The message was updated 2026-06-29 to say "Development and Testing
+        // environments" (plural carve-out) instead of the original "Development
+        // environments" phrasing.
         act.Should()
             .Throw<InvalidOperationException>()
             .Where(ex =>
-                ex.Message.Contains("Development environments", StringComparison.Ordinal) &&
+                ex.Message.Contains("Development and Testing environments", StringComparison.Ordinal) &&
                 ex.Message.Contains("Staging", StringComparison.Ordinal) &&
                 ex.Message.Contains("Redis:Enabled=true", StringComparison.Ordinal));
+    }
+
+    [Fact]
+    public void Redis_Off_AllowFallback_Production_Throws()
+    {
+        // Parity coverage — Production should reject the fallback path just
+        // like Staging. Confirms Testing-allow-listing didn't accidentally
+        // open the Production branch.
+        var services = new ServiceCollection();
+        var logging = GetLoggingBuilder(services);
+        var env = new FakeHostEnvironment { EnvironmentName = "Production" };
+        var config = BuildConfiguration(new Dictionary<string, string?>
+        {
+            ["Redis:Enabled"] = "false",
+            ["Redis:AllowInMemoryFallback"] = "true",
+        });
+
+        Action act = () => services.AddCacheModule(config, logging, env);
+
+        act.Should()
+            .Throw<InvalidOperationException>()
+            .Where(ex => ex.Message.Contains("Production", StringComparison.Ordinal));
     }
 
     // ===================================================================
@@ -208,13 +286,15 @@ public class CacheModuleTests
         Action act = () => services.AddCacheModule(config, logging, env);
 
         // Assert — default fail-fast (FR-02). Error message must list both
-        // remediation paths and mark the in-memory path as Development-only.
+        // remediation paths and mark the in-memory path as Development-or-Testing
+        // only (Testing was added 2026-06-29 as a CI safety carve-out — see
+        // CacheModule.cs branch (b)/(c) comments).
         act.Should()
             .Throw<InvalidOperationException>()
             .Where(ex =>
                 ex.Message.Contains("Redis:Enabled=true", StringComparison.Ordinal) &&
                 ex.Message.Contains("AllowInMemoryFallback=true", StringComparison.Ordinal) &&
-                ex.Message.Contains("Development only", StringComparison.Ordinal));
+                ex.Message.Contains("Development or Testing only", StringComparison.Ordinal));
     }
 
     // ===================================================================

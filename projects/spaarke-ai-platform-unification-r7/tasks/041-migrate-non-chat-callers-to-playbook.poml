@@ -1,0 +1,186 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-041" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Migrate non-chat callers to PlaybookOrchestrationService.ExecuteAsync (FR-11)</title>
+    <status>completed</status>
+    <wave>4</wave>
+    <estimated-effort>3-5 hours (depends on caller count from task 040)</estimated-effort>
+    <tags>bff-api, code-impl, wave-4</tags>
+    <rigor-level>FULL</rigor-level>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>040 (caller audit), 091 (Wave 9 chat-summarize migration done)</dependencies>
+    <fr-coverage>FR-11 (migration portion)</fr-coverage>
+  </metadata>
+
+  <prompt>
+    Using the caller inventory from task 040, migrate every non-chat caller of
+    `AnalysisOrchestrationService.ExecuteAnalysisAsync` to `PlaybookOrchestrationService.ExecuteAsync`
+    via `IInvokePlaybookAi` facade (with degenerate 3-node playbook OR consumer-routing dispatch).
+    The chat-summarize caller (`SessionSummarizeOrchestrator`) is OUT of scope here — it was migrated
+    by Wave 9 task 091. After this task, the only remaining reference to `ExecuteAnalysisAsync` should
+    be the declaration itself (which task 042 deletes). If the caller audit (task 040) showed
+    ONLY the chat-summarize caller existed, this task becomes a no-op except for the verification step
+    — document that explicitly and proceed.
+  </prompt>
+
+  <role>
+    Senior .NET backend developer migrating call sites from a legacy direct-invocation method to the
+    canonical playbook orchestrator facade. Goal: every non-chat caller routes through `IInvokePlaybookAi`
+    without behavior regression. Mirror the migration pattern Wave 9 task 091 established for chat-summarize.
+  </role>
+
+  <goal>
+    Every non-chat caller of `ExecuteAnalysisAsync` migrated to the playbook orchestrator. Specifically:
+    1. Every non-chat call site identified in task 040's audit refactored to call `IInvokePlaybookAi.InvokePlaybookAsync` (or `IConsumerRoutingService.ResolveAsync` + invoke) instead
+    2. If a caller's payload was a "one-shot AI call" shape, replace with a degenerate 3-node playbook (Start → AiAnalysis → ReturnResponse) OR a named-consumer dispatch
+    3. Behavior preserved: same Action/prompt invoked, same return shape parsed, same logging hooks fired
+    4. Unit + integration tests for the migrated call sites updated to mock `IInvokePlaybookAi` instead of `IAnalysisOrchestrationService`
+    5. `dotnet build` and `dotnet test` pass
+    6. Post-task grep for `ExecuteAnalysisAsync` shows only the method declaration (and possibly test fixtures flagged for removal in task 042)
+  </goal>
+
+  <inputs>
+    <file purpose="caller-audit-input">projects/spaarke-ai-platform-unification-r7/notes/spikes/executeanalysisasync-caller-audit.md</file>
+    <file purpose="design-spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="plan">projects/spaarke-ai-platform-unification-r7/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    <file purpose="deletion-target">src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs</file>
+    <file purpose="replacement-canonical">src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookOrchestrationService.cs</file>
+    <file purpose="invoke-facade">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IInvokePlaybookAi.cs</file>
+    <file purpose="reference-migration">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SessionSummarizeOrchestrator.cs</file>
+    <file purpose="bff-constraints">.claude/constraints/bff-extensions.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-11">DELETE `AnalysisOrchestrationService.ExecuteAnalysisAsync` — audit + migrate all callers to `PlaybookOrchestrationService.ExecuteAsync` via degenerate playbook OR consumer-routing dispatch.</constraint>
+    <constraint source="spec NFR-06">Backward compatibility NOT a concern. No transition shim; cleanly migrate or remove.</constraint>
+    <constraint source="ADR-013">BFF AI Architecture — `IInvokePlaybookAi` is the canonical AI invocation surface. All callers route through it (Invariant 1).</constraint>
+    <constraint source="ADR-029">BFF Publish Hygiene — verify publish-size delta at end of task (expected: NEGATIVE — removing direct-path call sites should slightly reduce binary size).</constraint>
+    <constraint source="ADR-038">Testing Strategy — caller test updates follow ADR-038 (mock IInvokePlaybookAi only; no Mock&lt;HttpMessageHandler&gt;; no DI-registration tests).</constraint>
+    <constraint source="CLAUDE.md §11">No new components introduced — modifying existing call sites to point at the canonical facade. Justification rule does not apply (modification, not new surface).</constraint>
+    <constraint source="bff-extensions.md">Pre-merge checklist applies. Test update obligation per §F.6 — caller test updates MUST happen with code change, not deferred.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai/bff-architecture</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-013-bff-ai-architecture.md</file>
+      <file>docs/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/architecture/AI-ARCHITECTURE.md</file>
+      <file>docs/architecture/ai-architecture-consumer-routing.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Wave 9 task 091 migration" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SessionSummarizeOrchestrator.cs">
+        Reference migration. Wave 9 task 091 changed this from direct `ExecuteAnalysisAsync` call to consumer-routing + `IInvokePlaybookAi`. Use as the canonical pattern.
+      </pattern>
+      <pattern name="IInvokePlaybookAi triangle" location="src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IInvokePlaybookAi.cs">
+        Per ADR-013 — facade for all callers. Methods: InvokePlaybookAsync(playbookId, payload, ct).
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Task 040 produced the caller inventory. Wave 9 task 091 migrated the chat-summarize caller
+      (the largest known caller). This task picks up any remaining non-chat callers identified by
+      task 040 and migrates them using the same pattern Wave 9 established. If no other callers
+      exist (entirely plausible — `ExecuteAnalysisAsync` may have been chat-only by R6), this task
+      becomes a verification + no-op; document that and proceed.
+    </background>
+    <dependencies>
+      <dependency task="040" status="must-complete-first">Caller-audit document at notes/spikes/executeanalysisasync-caller-audit.md drives this task's scope.</dependency>
+      <dependency task="091" status="must-complete-first">Wave 9 task 091 migrates SessionSummarizeOrchestrator (chat-summarize). DO NOT re-migrate it here. Per CLAUDE.md / TASK-INDEX.md, Wave 4 is intentionally ordered AFTER Wave 9.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Wave 4 task 042 DELETES `ExecuteAnalysisAsync` immediately after this task — this task's completeness gates task 042.</item>
+      <item>Wave 4 task 046 cleans up `AnalysisActionService` references to dropped schema fields (FR-03, FR-04) — orthogonal to this task.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: FULL · 📋 REASON: code-impl in BFF (.cs file modification, tag bff-api, ADR-013+029+038 applicable) — quality gates Step 9.5 required · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read project CLAUDE.md + spec.md FR-11 + plan.md Wave 4 + .claude/constraints/bff-extensions.md + task 040 caller-audit doc.
+    </step>
+    <step order="2" name="Verify dependencies">
+      Confirm `notes/spikes/executeanalysisasync-caller-audit.md` exists (task 040). Confirm Wave 9 task 091 marked ✅ in TASK-INDEX. If either missing, STOP and report.
+    </step>
+    <step order="3" name="Enumerate non-chat callers">
+      From the audit doc, extract the "Wave 4 task 041 work list" (non-chat callers). If empty, skip to step 9 (verification-only path). If non-empty, proceed step-by-step per caller.
+    </step>
+    <step order="4" name="Per caller — read current implementation">
+      For each non-chat caller, open the source file. Document: Action invoked, payload shape, return parsing, logging hooks. This is the contract to preserve.
+    </step>
+    <step order="5" name="Per caller — choose replacement pattern">
+      Per audit-doc disposition:
+      - **Consumer-routing path** (named consumer exists): inject `IConsumerRoutingService` + `IInvokePlaybookAi`; call `ResolveAsync(consumerName)` → `InvokePlaybookAsync(playbookId, payload)`. Mirror Wave 9 task 091 SessionSummarizeOrchestrator.
+      - **Degenerate-playbook path** (ad-hoc AI call): create a Start→AiAnalysis→ReturnResponse playbook in spaarkedev1 referencing the same Action; replace the call site with `IInvokePlaybookAi.InvokePlaybookAsync(newPlaybookId, payload)`.
+      Document which path chosen per caller.
+    </step>
+    <step order="6" name="Per caller — refactor call site">
+      Replace direct `ExecuteAnalysisAsync` call with the chosen replacement. Preserve: logging, error handling, return-shape parsing. Use `cancellationToken` end-to-end. Maintain DI registration symmetry (Wave 4 task 040 audit flags if registration needs adjustment).
+    </step>
+    <step order="7" name="Per caller — update tests">
+      For each refactored caller, update its corresponding test class to mock `IInvokePlaybookAi` (and `IConsumerRoutingService` if consumer-routing path chosen) instead of `IAnalysisOrchestrationService`. Per ADR-038: NO `Mock&lt;HttpMessageHandler&gt;`, NO DI-registration tests, NO ctor null-check tests.
+    </step>
+    <step order="8" name="Build + run tests">
+      Run: `dotnet build src/server/api/Sprk.Bff.Api/`
+      Run: `dotnet test tests/unit/Sprk.Bff.Api.Tests/`
+      Goal: 0 errors, 0 NEW warnings, all tests pass.
+    </step>
+    <step order="9" name="Verify grep state">
+      Run: Grep pattern="ExecuteAnalysisAsync" glob="**/*.cs"
+      Expected post-task: only the declaration in AnalysisOrchestrationService.cs (and possibly remaining test references flagged for task 042 cleanup). Document the count.
+    </step>
+    <step order="9.5" name="Quality gates (FULL rigor)">
+      Run `/code-review` on the modified call sites + tests. Run `/adr-check` against ADR-013 + ADR-029 + ADR-038 + bff-extensions.md.
+      Fix any findings before commit.
+    </step>
+    <step order="10" name="Publish + size check (NFR-01 partial — running tally toward task 047 wave check)">
+      Run: dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish-task041/
+      Measure compressed size; document delta vs prior baseline. Expected: NEGATIVE (small shrink from removed call sites).
+    </step>
+    <step order="11" name="Update current-task.md + TASK-INDEX">
+      Mark task 041 status complete; advance current-task.md to task 042.
+    </step>
+    <step order="12" name="Commit">
+      Commit migrated call sites + test updates with conventional message.
+      Example: refactor(bff/r7): migrate non-chat ExecuteAnalysisAsync callers to IInvokePlaybookAi (Wave 4 task 041, FR-11)
+      If verification-only (no callers found beyond chat-summarize): document explicitly and commit a notes update only.
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (caller-audit doc + each caller source + reference SessionSummarizeOrchestrator)</tool>
+    <tool>Grep (verify post-migration grep state)</tool>
+    <tool>Edit (call site refactor + test updates)</tool>
+    <tool>Bash (dotnet build, dotnet test, dotnet publish, git commit)</tool>
+    <tool>Skill (code-review at Step 9.5)</tool>
+    <tool>Skill (adr-check at Step 9.5)</tool>
+  </tools>
+
+  <outputs>
+    <output type="modified-files">All non-chat caller source files identified by task 040 audit</output>
+    <output type="modified-tests">Corresponding unit test classes for migrated callers</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md (advance to task 042)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 041 ✅)</output>
+    <output type="commit">refactor(bff/r7): migrate non-chat ExecuteAnalysisAsync callers to IInvokePlaybookAi (Wave 4 task 041, FR-11)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Every non-chat caller identified by task 040 migrated to IInvokePlaybookAi (or documented as no-op if zero callers)</criterion>
+    <criterion>Wave 9 task 091's SessionSummarizeOrchestrator migration NOT touched here (out of scope)</criterion>
+    <criterion>dotnet build passes: 0 errors, 0 new warnings</criterion>
+    <criterion>dotnet test passes (all unit + integration tests green)</criterion>
+    <criterion>Post-task grep for `ExecuteAnalysisAsync` shows only the method declaration in AnalysisOrchestrationService.cs (test-fixture references documented for task 042 cleanup)</criterion>
+    <criterion>code-review + adr-check pass at Step 9.5 (FULL rigor)</criterion>
+    <criterion>Publish size delta documented (expected: NEUTRAL or NEGATIVE)</criterion>
+    <criterion>Commit pushed to work/spaarke-ai-platform-unification-r7</criterion>
+    <criterion>current-task.md updated to point at task 042 as next</criterion>
+  </acceptance-criteria>
+</task>

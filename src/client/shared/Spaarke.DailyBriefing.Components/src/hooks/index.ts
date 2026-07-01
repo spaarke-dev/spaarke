@@ -23,14 +23,20 @@
 export { useInlineTodoCreate } from './useInlineTodoCreate';
 export type { UseInlineTodoCreateResult } from './useInlineTodoCreate';
 
+export { useBriefingRender } from './useBriefingRender';
+export type { UseBriefingRenderResult, BriefingRenderStatus } from './useBriefingRender';
+
+export { useBriefingPreferences } from './useBriefingPreferences';
+export type { UseBriefingPreferencesResult } from './useBriefingPreferences';
+
+// Legacy appnotification-driven hooks — retained for back-compat with consumers
+// that still import them directly (e.g., tests). The widget data path now flows
+// through useBriefingRender (R7 Wave 12 cutover, 2026-06-30).
 export { useBriefingNarration } from './useBriefingNarration';
 export type { UseBriefingNarrationResult } from './useBriefingNarration';
 
 export { useBriefingNotifications } from './useBriefingNotifications';
 export type { UseBriefingNotificationsResult } from './useBriefingNotifications';
-
-export { useBriefingPreferences } from './useBriefingPreferences';
-export type { UseBriefingPreferencesResult } from './useBriefingPreferences';
 
 export { useBriefingActions } from './useBriefingActions';
 export type { UseBriefingActionsResult, BriefingActionOptions } from './useBriefingActions';

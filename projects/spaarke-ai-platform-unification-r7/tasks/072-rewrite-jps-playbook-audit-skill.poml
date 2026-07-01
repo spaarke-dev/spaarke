@@ -1,0 +1,187 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-072" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>REWRITE `.claude/skills/jps-playbook-audit/SKILL.md` (FR-32)</title>
+    <status>not-started</status>
+    <wave>7</wave>
+    <estimated-effort>2-3 hours</estimated-effort>
+    <tags>skill-directives, docs, wave-7</tags>
+    <rigor-level>STANDARD</rigor-level>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>071</dependencies>
+    <fr-coverage>FR-32</fr-coverage>
+  </metadata>
+
+  <prompt>
+    REWRITE the `.claude/skills/jps-playbook-audit/SKILL.md` body to audit existing playbooks AGAINST
+    the new R7 node-first dispatch model. The audit's job is to find drift between the existing 94
+    spaarkedev1 playbook nodes (or any owner-imported playbook) and the new canonical contract.
+
+    The audit must:
+    - VALIDATE every node has `sprk_executortype` Choice set to a valid enum value.
+    - FLAG legacy `sprk_nodetype` Dataverse-column references (column is REMOVED in Wave 4).
+    - FLAG Actions with stale dispatch signals (`sprk_actiontypeid` lookup row references, `sprk_executoractiontype` INT) — these are decorative-only or dropped post-R7.
+    - FLAG prompt-driven executors with NULL Action FK.
+    - FLAG pure executors with non-NULL Action FK.
+    - VERIFY scope hints + ADR-037 compose strategy unchanged.
+
+    Cite the §3.1 WHY (R3.1 history of dispatch-model confusion) so future operators understand WHY
+    these drift patterns exist and are dangerous.
+
+    **Sub-Agent Write Boundary applies — main session executes this. No parallel dispatch.** Per CLAUDE.md §3.
+  </prompt>
+
+  <role>
+    Senior skill author for the Spaarke skill library. You understand both legacy dispatch (3-layer
+    Action → lookup row drift) and the R7 single-hop model. Your job: rewrite the audit skill so it
+    surfaces exactly the drift patterns Wave 5 backfill addresses (94 spaarkedev1 nodes) PLUS the
+    drift patterns future owner-imported playbooks may carry.
+  </role>
+
+  <goal>
+    Updated `.claude/skills/jps-playbook-audit/SKILL.md` that:
+    1. Validates every node has `sprk_executortype` Choice set; flags NULL or invalid values.
+    2. Flags legacy `sprk_nodetype` Dataverse-column references (REMOVED in Wave 4 schema cleanup).
+    3. Flags Actions with stale dispatch signals: `sprk_actiontypeid` lookup row references or `sprk_executoractiontype` INT signals (decorative-only post-R7 per FR-05).
+    4. Flags prompt-driven executors (AiAnalysis, AiCompletion, AiEmbedding) with NULL Action FK.
+    5. Flags pure executors (Condition, Start, ReturnResponse, EntityNameValidator, etc.) with non-NULL Action FK.
+    6. Verifies compose strategy + scope hints (ADR-037) unchanged.
+    7. Cites the §3.1 WHY (R3.1 history of dispatch-model confusion) so future operators understand drift dangers.
+    8. Produces an audit report shape that mirrors the Wave 5 review tool output (sanity alignment).
+    9. `last-reviewed: 2026-06-28`; `Reviewed By: R7 task 072 (FR-32)`.
+  </goal>
+
+  <inputs>
+    <file purpose="rewrite-target">.claude/skills/jps-playbook-audit/SKILL.md</file>
+    <file purpose="design-spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="design-doc-WHY">projects/spaarke-ai-platform-unification-r7/design.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    <file purpose="aligned-prior-rewrites">.claude/skills/jps-action-create/SKILL.md (task 070)</file>
+    <file purpose="aligned-prior-rewrites">.claude/skills/jps-playbook-design/SKILL.md (task 071)</file>
+    <file purpose="wave5-review-tool">scripts/dataverse/Review-PlaybookNodes-Dispatch.ps1 (Wave 5 task 050 — aligned audit shape)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="CLAUDE.md §3 Sub-Agent Write Boundary">Sub-agents CANNOT write to `.claude/` paths. Main session executes this task. No parallel dispatch.</constraint>
+    <constraint source="spec FR-32">Each rewritten skill cites §3.1 WHY history and validates against `node.sprk_executortype`, not Action lookup.</constraint>
+    <constraint source="design.md §2 Invariant 2">Single-hop dispatch — `node.sprk_executortype` is the only load-bearing dispatch signal.</constraint>
+    <constraint source="spec FR-03/FR-04">`sprk_actiontypeid` lookup + `sprk_executoractiontype` INT are dropped/decorative post-R7. Audit flags references.</constraint>
+    <constraint source="spec FR-05">`sprk_analysisactiontype` lookup table survives as decorative Action category browser (e.g., "Summarize", "Analyze"). Audit flags load-bearing usage — references for browse-only are fine.</constraint>
+    <constraint source="CLAUDE.md §11">REWRITE of existing skill — §11 triple does not apply.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>jps-skill-authoring</topic>
+    <files>
+      <file>projects/spaarke-ai-platform-unification-r7/design.md (§2 invariants 1-3, §3 component model, §3.1 WHY)</file>
+      <file>projects/spaarke-ai-platform-unification-r7/spec.md (FR-03, FR-04, FR-05, FR-19, FR-32)</file>
+      <file>.claude/skills/jps-playbook-audit/SKILL.md (rewrite target, ~14 KB)</file>
+      <file>scripts/dataverse/Review-PlaybookNodes-Dispatch.ps1 (Wave 5 — audit shape sanity)</file>
+    </files>
+    <patterns>
+      <pattern name="Drift-flag checklist" location="spec FR-19">
+        Wave 5 review tool produces a CSV per node enumerating dispatch fields + derived `sprk_executortype` candidate. The audit skill body should mirror this shape so manual + scripted audits align.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      jps-playbook-audit currently audits playbooks under the legacy 3-layer model — checking that Action's
+      `sprk_actiontypeid` lookup row's `sprk_executoractiontype` matches the executor that the runtime
+      would dispatch. R7 collapses that to one hop. The audit becomes simpler structurally — but it MUST
+      flag the legacy patterns so owner-imported playbooks (or stale CI/CD-deployed playbooks) surface
+      their drift.
+
+      Sequential order in Wave 7: task 071 (jps-playbook-design) shipped Executor-first mental model; this
+      task ships the inverse — auditing existing playbooks against that model.
+    </background>
+    <dependencies>
+      <dependency task="071" status="prerequisite">jps-playbook-design rewrite must complete first for aligned terminology.</dependency>
+      <dependency task="024" status="prerequisite">Wave 2 single-hop dispatch refactor merged.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Wave 5 task 050 (Review-PlaybookNodes-Dispatch.ps1) is the scripted version of this audit. Skill body should mirror its output shape.</item>
+      <item>Wave 4 (FR-03, FR-04) drops the legacy fields; audit must flag any playbook still referencing them as a deploy-script bug.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: STANDARD · 📋 REASON: skill body rewrite (not ADR-bound code) · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read project CLAUDE.md + spec.md FR-32, FR-03, FR-04, FR-05, FR-19 + design.md §2 invariants 1-3 + §3.1 WHY.
+    </step>
+    <step order="2" name="Read existing skill body">
+      Read full current `.claude/skills/jps-playbook-audit/SKILL.md` (~14 KB).
+    </step>
+    <step order="3" name="Read aligned prior rewrites">
+      Read tasks 070 + 071 outputs for terminology alignment + cross-references.
+    </step>
+    <step order="4" name="Inventory legacy audit logic">
+      Grep skill body for: "ActionType lookup", "sprk_actiontypeid", "sprk_executoractiontype", "3-layer", "lookup row". Each is rewrite-target.
+    </step>
+    <step order="5" name="Rewrite Purpose + Applies When">
+      Reframe: "Audits existing playbooks against the R7 node-first dispatch contract. Flags drift between deployed Dataverse rows and the canonical single-hop model."
+    </step>
+    <step order="6" name="Rewrite audit checklist">
+      New audit steps (the load-bearing rewrite):
+      A. Every node row has `sprk_executortype` set to a valid Choice value (not NULL, not 0-default).
+      B. Every node's `sprk_nodetype` Dataverse-column reference is FLAGGED (column removed Wave 4).
+      C. Every Action row's `sprk_actiontypeid` lookup column carries decorative-only meaning post-R7; FLAG runtime use (browse-only is fine per FR-05).
+      D. Every Action row's `sprk_executoractiontype` INT column is FLAGGED — dropped in Wave 4 (FR-04).
+      E. Prompt-driven executors (executor type 1/2/9 etc — AiCompletion/AiAnalysis/AiEmbedding) have non-NULL `sprk_actionid` FK.
+      F. Pure executors (Condition, Start, ReturnResponse, EntityNameValidator, etc.) have NULL `sprk_actionid` FK.
+      G. Compose strategy + scope hints unchanged per ADR-037 — verify untouched by audit.
+    </step>
+    <step order="7" name="Insert R7 dispatch-model section">
+      Short subsection: "## The R7 dispatch model — what changed and why" citing design.md §3.1 + §2 Invariants 1-3. Explicit WHY: 3-layer storage drift was the root cause; audit's job is to surface playbooks still carrying that drift.
+    </step>
+    <step order="8" name="Define audit report shape">
+      Output schema (mirrors Wave 5 review tool CSV):
+      | node-guid | playbook-name | node-name | current sprk_executortype | sprk_nodetype (legacy, expect NULL) | Action FK | Action ActionType lookup (decorative) | Drift flags | Recommended action |
+      Document the shape inline so a manual audit produces results compatible with the scripted Wave 5 tool.
+    </step>
+    <step order="9" name="Update validation guidance">
+      Validate strictly against `sprk_executortype` Choice values. ANY reliance on Action's lookup row for dispatch = audit FAIL.
+    </step>
+    <step order="10" name="Bump frontmatter">
+      `last-reviewed: 2026-06-28`; `Reviewed By: spaarke-ai-platform-unification-r7 task 072 (FR-32 — node-first audit)`.
+    </step>
+    <step order="11" name="Verify acceptance">
+      Re-read rewritten skill body. Confirm: (a) audit checklist enumerates 7 drift patterns A-G, (b) §3.1 WHY cited inline, (c) report shape aligns with Wave 5 CSV tool, (d) frontmatter bumped.
+    </step>
+    <step order="12" name="Update current-task.md + TASK-INDEX">
+      Mark task 072 status complete; advance current-task.md to task 073.
+    </step>
+    <step order="13" name="Commit-deferred">
+      DO NOT commit. Wave 7 commits at task 075.
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (existing skill body + tasks 070/071 outputs + design.md)</tool>
+    <tool>Grep (legacy audit logic references)</tool>
+    <tool>Edit (rewrite skill body sections in place)</tool>
+    <tool>Write (full rewrite if Edit churn is excessive)</tool>
+  </tools>
+
+  <outputs>
+    <output type="modified-file">.claude/skills/jps-playbook-audit/SKILL.md</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md (advance to task 073)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 072 ✅)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>Audit checklist enumerates the 7 drift patterns A-G (executortype NULL, legacy nodetype, decorative ActionType misused, dropped INT, prompt-driven NULL FK, pure executor non-NULL FK, compose untouched)</criterion>
+    <criterion>Audit report shape aligns with Wave 5 task 050 Review-PlaybookNodes-Dispatch.ps1 CSV output</criterion>
+    <criterion>§3.1 WHY (R3.1 history of dispatch-model confusion) cited inline as rationale</criterion>
+    <criterion>Validates against `node.sprk_executortype` Choice, NOT against Action lookup</criterion>
+    <criterion>Legacy `sprk_nodetype` Dataverse-column reference is FLAGGED (Wave 4 removal)</criterion>
+    <criterion>`sprk_executoractiontype` INT (FR-04 drop) + `sprk_actiontypeid` runtime use (FR-05 decorative-only) are flagged</criterion>
+    <criterion>Frontmatter `last-reviewed: 2026-06-28`; `Reviewed By: R7 task 072`</criterion>
+    <criterion>No commit (Wave 7 batches at task 075)</criterion>
+    <criterion>current-task.md updated to point at task 073</criterion>
+  </acceptance-criteria>
+</task>

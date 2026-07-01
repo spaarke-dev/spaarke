@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="150" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Gap A — Naming convention normalization at BFF boundary (sprk_matter → matter) per audit 120</title>
+    <phase>Wave 12 — MVP Completion</phase>
+    <wave>12</wave>
+    <sub-wave>12.4</sub-wave>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>bff-api + code-impl modifying .cs files; affects 5 BFF surfaces (matter-memory, RAG filter, system prompt enrichment, etc.)</rigor-reason>
+    <parallel-group>W12-4</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <tags>bff-api, code-impl, assistant, normalization, wave12</tags>
+    <estimated-effort>1-2 days</estimated-effort>
+    <status>completed</status>
+    <completion-date>2026-06-30</completion-date>
+    <commit>287e7b0a9</commit>
+  </metadata>
+
+  <prompt>
+Audit 120 identified Gap A as the most-impactful single fix for Assistant↔Workspace: SpaarkeAi client sends raw `sprk_matter`; BFF system-prompt enrichment + matter-memory + RAG filter expect normalized `matter`. Five BFF surfaces fragmented across two conventions. Normalize at BFF boundary (smallest blast radius) — accept either form on inbound, internally canonicalize to one convention, propagate that throughout.
+  </prompt>
+
+  <role>
+You are a BFF developer applying a single boundary-normalization fix that resolves 5 fragmented downstream usages. Surgical edit; preserve all 5 consumer code paths' semantics.
+  </role>
+
+  <goal>
+Assistant chat in workspace context with matter scope renders matter-aware responses. Specifically: system prompt enrichment is no longer guarded out by name-convention mismatch; matter-memory lookups succeed; RAG filter returns matter-scoped hits. Scenario A from audit 120 ("what matter am I in?") returns matter awareness.
+  </goal>
+
+  <inputs>
+    - Audit notes: projects/spaarke-ai-platform-unification-r7/notes/audits/wave12-120-assistant-workspace.md (PRIMARY)
+    - Top finding: 5 BFF surfaces use two conventions (raw `sprk_matter` vs normalized `matter`)
+    - Recommended fix: normalize at BFF boundary (smallest blast radius)
+    - Affected files documented in audit (file:line throughout)
+  </inputs>
+
+  <constraints>
+    - Per CLAUDE.md §10: BFF Hygiene checklist; publish-size impact (expect no material change)
+    - Per CLAUDE.md §11: modification of existing surfaces; no new abstractions
+    - Per ADR-038: integration-heavy tests; ban Mock&lt;HttpMessageHandler&gt; etc.
+    - MUST preserve backward compatibility — clients may send either convention; BFF normalizes both
+    - MUST NOT change client-side code as part of this task (boundary normalization on the BFF only); client-side changes are out of scope (different convention preserved)
+    - Single normalization point: typically a request DTO middleware or service-layer normalization helper
+  </constraints>
+
+  <knowledge>
+    <files>
+      - projects/spaarke-ai-platform-unification-r7/notes/audits/wave12-120-assistant-workspace.md (PRIMARY — Gap A + 5-surface inventory)
+      - projects/spaarke-ai-platform-unification-r7/notes/wave12-mvp-completion-plan.md (§2.3)
+      - projects/spaarke-ai-platform-unification-r7/CLAUDE.md
+      - .claude/constraints/bff-extensions.md
+      - .claude/adr/ADR-038-testing-strategy.md
+    </files>
+  </knowledge>
+
+  <context>
+    <relevant-files>
+      - src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookChatContextProvider.cs (system prompt enrichment + matter memory)
+      - src/server/api/Sprk.Bff.Api/Services/Ai/** RAG filter / DocumentSearchTools
+      - src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs (potential normalization boundary)
+      - src/server/api/Sprk.Bff.Api/Services/Ai/Chat/** (chat session shape)
+    </relevant-files>
+  </context>
+
+  <steps>
+1. **Re-read audit 120 §5 disposition table** (15 min) — confirm full list of 5 surfaces + the normalization-point recommendation
+2. **Identify single normalization boundary** (30 min):
+   - Likely a service-layer helper called once per request as `NormalizeEntityName(input) → canonical form`
+   - OR a request DTO middleware
+   - Pick the smallest-blast-radius point
+3. **Implement normalization** (60-90 min):
+   - Add normalization helper (single method, ~10 LOC)
+   - Apply at boundary (the single point identified)
+   - Propagate canonical form to all 5 downstream usages (audit 120 lists them)
+4. **Add unit tests** (60 min) per ADR-038:
+   - Test: raw `sprk_matter` input → canonical output
+   - Test: already-canonical input → unchanged
+   - Test: unknown entity → graceful handling
+5. **Build + test verification** (15 min)
+6. **Publish-size impact report** (10 min): verify no material change vs prior R7 baseline ~47 MB
+
+  </steps>
+
+  <tools>
+    - Read / Grep / Glob
+    - Edit (BFF normalization point + helper)
+    - Bash (dotnet test, dotnet build, dotnet publish)
+    - TodoWrite
+  </tools>
+
+  <outputs>
+    - Normalization helper (NEW small file or method) — explicitly justified per CLAUDE.md §11 below
+    - 5 downstream surfaces consume canonical form
+    - Unit tests covering normalization
+    - Publish-size report
+  </outputs>
+
+  <justification>
+    <existing>No existing single-point normalization helper for entity names; 5 BFF surfaces each handle raw `sprk_matter` differently (audit 120 lists them with file:line)</existing>
+    <extension>No — extending each of 5 surfaces independently is the anti-pattern that created this Gap. Single normalization point IS the fix.</extension>
+    <cost-of-doing-nothing>Concrete contract failure: `PlaybookChatContextProvider.cs:550` guard expression fails because raw `sprk_matter` doesn't match expected normalized `matter`; system prompt enrichment is unconditionally guarded out; Scenario A ("what matter am I in?") returns no matter awareness. Operator-verified failure in audit 120.</cost-of-doing-nothing>
+  </justification>
+
+  <acceptance-criteria>
+    - [x] Single normalization point implemented at BFF boundary (ChatHostContext init-accessor + new EntityTypeNormalizer helper)
+    - [x] All 5 audit-identified surfaces consume canonical form (3 by side effect + 2 read-site updates in SprkChatAgentFactory + AnalysisChatContextResolver; full mapping in audit §9 Resolution table)
+    - [x] Unit tests cover normalization (30 tests in EntityTypeNormalizerTests.cs — raw → canonical, canonical → unchanged, unknown → unchanged, null/whitespace handling, primary ctor + `with` + JSON round-trip)
+    - [x] `dotnet test` 0 new failures (6 pre-existing failures unrelated to chat HostContext — 13 → 6 means T150 indirectly resolved 7)
+    - [x] `dotnet build` 0 errors
+    - [x] Publish-size diff reported: 47.6 MB compressed (within 60 MB ceiling)
+    - [x] Backward compatibility preserved (both forms accepted; Redis round-trip normalizes on deserialize)
+    - [x] Client-side code unchanged
+  </acceptance-criteria>
+
+  <notes status="completed" completion-date="2026-06-30" commit="287e7b0a9">
+T150 completed via task-execute FULL rigor. Step 9.5 Quality Gates passed (code-review + adr-check 0 violations).
+
+Audit 120 §9 Resolution records full mapping: 1 boundary fix + 3 surfaces unblocked by side effect + 2 read-sites updated (SprkChatAgentFactory.TryParseMatterId and AnalysisChatContextResolver.GetEntityContextColumns + new ToDataverseLogicalName inverse map).
+
+Surfaces NOT touched (audit §3 mentioned but no change needed): StandaloneChatContextProvider (different bounded context), DataverseQueryTools (tool-allow-list operates on raw names), RagEndpoints + BulkRagIndexingJobHandler + PlaybookDispatcher (already operate on canonical).
+
+PlaybookChatContextProvider.cs deliberately NOT modified so T151/T152/T153 (which all touch that file) can layer cleanly. Hand-off: minimal + well-commented changes elsewhere.
+  </notes>
+</task>

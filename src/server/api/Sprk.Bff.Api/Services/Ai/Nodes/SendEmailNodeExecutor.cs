@@ -51,10 +51,60 @@ public sealed class SendEmailNodeExecutor : INodeExecutor
     }
 
     /// <inheritdoc />
-    public IReadOnlyList<ActionType> SupportedActionTypes { get; } = new[]
+    public IReadOnlyList<ExecutorType> SupportedExecutorTypes { get; } = new[]
     {
-        ActionType.SendEmail
+        ExecutorType.SendEmail
     };
+
+    // R7 task 085 / FR-23 — typed config schema for Playbook Builder canvas.
+    // Derived from EmailNodeConfig: to[] (required), cc[], subject (required), body (required),
+    // isHtml (default true), saveToSentItems (default true).
+    private static readonly ExecutorConfigSchema ConfigSchemaInstance = new(
+        ExecutorTypeName: nameof(ExecutorType.SendEmail),
+        ExecutorTypeValue: (int)ExecutorType.SendEmail,
+        Description: "Sends email via Microsoft Graph using OBO authentication (sends as the current user). All string fields support {{var}} substitution against upstream node outputs.",
+        Fields: new ConfigSchemaField[]
+        {
+            new(
+                Name: "to",
+                Type: SchemaFieldType.Array,
+                Required: true,
+                Description: "Array of recipient email addresses. At least one entry required. Supports {{var}} substitution per entry.",
+                Default: null),
+            new(
+                Name: "subject",
+                Type: SchemaFieldType.String,
+                Required: true,
+                Description: "Email subject line. Required. Supports {{var}} substitution.",
+                Default: null),
+            new(
+                Name: "body",
+                Type: SchemaFieldType.String,
+                Required: true,
+                Description: "Email body content. Required. Supports {{var}} substitution. Format controlled by isHtml.",
+                Default: null),
+            new(
+                Name: "cc",
+                Type: SchemaFieldType.Array,
+                Required: false,
+                Description: "Optional array of CC recipient email addresses. Supports {{var}} substitution per entry.",
+                Default: null),
+            new(
+                Name: "isHtml",
+                Type: SchemaFieldType.Boolean,
+                Required: false,
+                Description: "When true, body is sent as HTML; when false, as plain text. Defaults to true.",
+                Default: true),
+            new(
+                Name: "saveToSentItems",
+                Type: SchemaFieldType.Boolean,
+                Required: false,
+                Description: "When true, the sent message is saved to the user's Sent Items folder. Defaults to true.",
+                Default: true)
+        });
+
+    /// <inheritdoc />
+    public ExecutorConfigSchema GetConfigSchema() => ConfigSchemaInstance;
 
     /// <inheritdoc />
     public NodeValidationResult Validate(NodeExecutionContext context)

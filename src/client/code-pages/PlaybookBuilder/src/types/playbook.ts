@@ -27,12 +27,12 @@ export enum PlaybookNodeType {
   Wait = 'wait',
   // R3 P5 (task 042): Resolves the calling user's record memberships for a
   // given entity type via IMembershipResolverService (FR-1B.1). Pairs with
-  // server-side ActionType.LookupUserMembership = 52 and the
+  // server-side ExecutorType.LookupUserMembership = 52 and the
   // LookupUserMembershipNodeExecutor (task 041).
   LookupUserMembership = 'lookupUserMembership',
   // R4 PR 1 (task 004): Tool that scrubs LLM-emitted entity names not present
   // in a maker-supplied allow-list. Pairs with server-side
-  // ActionType.EntityNameValidator = 141 and the EntityNameValidatorNodeExecutor
+  // ExecutorType.EntityNameValidator = 141 and the EntityNameValidatorNodeExecutor
   // (task 003). FR-3 / AC-3c.
   EntityNameValidator = 'entityNameValidator',
 }
@@ -60,115 +60,22 @@ export enum OutputType {
 }
 
 // ---------------------------------------------------------------------------
-// Dataverse sprk_nodetype — Coarse Node Category (4 values)
+// Executor Dispatch (R7 FR-26 / FR-07)
 // ---------------------------------------------------------------------------
-
-/**
- * Coarse node category stored as sprk_nodetype choice on sprk_playbooknode.
- * Determines which scopes the orchestrator resolves before execution.
- *
- *   AI Analysis — requires Action record + resolves Skills, Knowledge, Tools scopes
- *   Output      — structural; no Action or scopes needed
- *   Control     — structural; no Action or scopes needed
- *   Workflow    — rule-based actions; scope TBD
- */
-export enum DataverseNodeType {
-  AIAnalysis = 100_000_000,
-  Output = 100_000_001,
-  Control = 100_000_002,
-  Workflow = 100_000_003,
-  // chat-routing-redesign-r1 / Phase 5R Wave 5-C (FR-52 / ADR-037): multinode
-  // Output composition. Added to sprk_nodetype OptionSet via
-  // scripts/dataverse/Add-NodeTypeChoiceOption.ps1.
-  DeliverComposite = 100_000_004,
-  // R4 task 004 hotfix (2026-06-26, FR-3 / AC-3c): distinct OptionSet value so
-  // the MDA "Node Properties" form surfaces EntityNameValidator as its own type
-  // (not categorized under Workflow). Added via
-  // scripts/dataverse/Add-EntityNameValidatorNodeTypeOption.ps1.
-  EntityNameValidator = 100_000_005,
-}
-
-/**
- * Map canvas PlaybookNodeType → Dataverse sprk_nodetype (coarse category).
- */
-export const NodeTypeToDataverse: Record<PlaybookNodeType, DataverseNodeType> = {
-  [PlaybookNodeType.Start]: DataverseNodeType.Control,
-  [PlaybookNodeType.AiAnalysis]: DataverseNodeType.AIAnalysis,
-  [PlaybookNodeType.AiCompletion]: DataverseNodeType.AIAnalysis,
-  [PlaybookNodeType.Condition]: DataverseNodeType.Control,
-  [PlaybookNodeType.DeliverOutput]: DataverseNodeType.Output,
-  [PlaybookNodeType.DeliverToIndex]: DataverseNodeType.Output,
-  [PlaybookNodeType.UpdateRecord]: DataverseNodeType.Workflow,
-  [PlaybookNodeType.CreateTask]: DataverseNodeType.Workflow,
-  [PlaybookNodeType.SendEmail]: DataverseNodeType.Workflow,
-  [PlaybookNodeType.CreateNotification]: DataverseNodeType.Workflow,
-  [PlaybookNodeType.Wait]: DataverseNodeType.Control,
-  // LookupUserMembership is a data-ops Workflow node — invokes the membership
-  // resolver service in-process and binds the resolved IDs to OutputVariable.
-  [PlaybookNodeType.LookupUserMembership]: DataverseNodeType.Workflow,
-  // EntityNameValidator is a post-LLM Tool — operates purely on text + an
-  // allow-list and emits a scrubbed string. R4 task 004 hotfix (2026-06-26):
-  // re-pointed from Workflow to its OWN distinct OptionSet value so the MDA
-  // "Node Properties" form surfaces it as its own type. See
-  // scripts/dataverse/Add-EntityNameValidatorNodeTypeOption.ps1.
-  [PlaybookNodeType.EntityNameValidator]: DataverseNodeType.EntityNameValidator,
-};
-
-// ---------------------------------------------------------------------------
-// ActionType — Fine-grained executor dispatch (matches server enum)
-// ---------------------------------------------------------------------------
-
-/**
- * Specific action type for executor dispatch.
- * Values match the server-side ActionType enum in INodeExecutor.cs.
- * Stored as __actionType in ConfigJson.
- */
-export enum ActionType {
-  AiAnalysis = 0,
-  AiCompletion = 1,
-  AiEmbedding = 2,
-  RuleEngine = 10,
-  Calculation = 11,
-  DataTransform = 12,
-  CreateTask = 20,
-  SendEmail = 21,
-  UpdateRecord = 22,
-  CallWebhook = 23,
-  SendTeamsMessage = 24,
-  Condition = 30,
-  Parallel = 31,
-  Wait = 32,
-  DeliverOutput = 40,
-  DeliverToIndex = 41,
-  CreateNotification = 50,
-  // R3 P5 (task 042): mirrors server INodeExecutor.cs ActionType.LookupUserMembership.
-  // Slot 52 sits alongside QueryDataverse (51, server-only, not yet exposed in the
-  // canvas) in the Dataverse-data-ops group.
-  LookupUserMembership = 52,
-  // R4 PR 1 (task 002 enum / task 003 executor / task 004 form): mirrors server
-  // INodeExecutor.cs ActionType.EntityNameValidator. Slot 141 sits in the
-  // post-LLM cluster alongside Sanitization (130) and ObservationEmit (140).
-  EntityNameValidator = 141,
-}
-
-/**
- * Map canvas PlaybookNodeType → ActionType (specific executor dispatch).
- */
-export const NodeTypeToActionType: Record<PlaybookNodeType, ActionType> = {
-  [PlaybookNodeType.Start]: ActionType.Condition,
-  [PlaybookNodeType.AiAnalysis]: ActionType.AiAnalysis,
-  [PlaybookNodeType.AiCompletion]: ActionType.AiCompletion,
-  [PlaybookNodeType.Condition]: ActionType.Condition,
-  [PlaybookNodeType.DeliverOutput]: ActionType.DeliverOutput,
-  [PlaybookNodeType.DeliverToIndex]: ActionType.DeliverToIndex,
-  [PlaybookNodeType.UpdateRecord]: ActionType.UpdateRecord,
-  [PlaybookNodeType.CreateTask]: ActionType.CreateTask,
-  [PlaybookNodeType.SendEmail]: ActionType.SendEmail,
-  [PlaybookNodeType.CreateNotification]: ActionType.CreateNotification,
-  [PlaybookNodeType.Wait]: ActionType.Wait,
-  [PlaybookNodeType.LookupUserMembership]: ActionType.LookupUserMembership,
-  [PlaybookNodeType.EntityNameValidator]: ActionType.EntityNameValidator,
-};
+//
+// Server-side `PlaybookOrchestrationService.ExecuteNodeAsync` reads
+// `node.sprk_executortype` directly — single-hop dispatch per FR-07. On the
+// canvas, the source of dispatch truth is `node.data.executorType: number`
+// (mirrors server `ExecutorType` enum value, 0–143). The full 33-entry catalog
+// (value + name + tier + canvasType) lives in `src/config/executorMetadata.ts`
+// and mirrors `INodeExecutor.cs ExecutorType` on the server.
+//
+// Per R7 design.md §3 + project CLAUDE.md "Key Technical Constraints", the canvas
+// `PlaybookNodeType` discriminator (13 string values) survives as an internal
+// React Flow renderer hint — it does NOT need 1:1 mapping with server `ExecutorType`
+// (33 values). Multiple executors may bucket under a single canvas renderer
+// (e.g., RuleEngine, Calculation, DataTransform all render as `aiAnalysis`).
+// The numeric `executorType` field carries dispatch; `type` carries UI only.
 
 // ---------------------------------------------------------------------------
 // Dataverse Record Interfaces
@@ -181,7 +88,12 @@ export const NodeTypeToActionType: Record<PlaybookNodeType, ActionType> = {
 export interface PlaybookNodeRecord {
   sprk_playbooknodeid: string;
   sprk_name: string;
-  sprk_nodetype: number;
+  /**
+   * R7 FR-26: `sprk_executortype` is the 33-value Choice mirroring server
+   * `ExecutorType` enum. Single source of dispatch per FR-07 (single-hop read
+   * in PlaybookOrchestrationService).
+   */
+  sprk_executortype: number;
   sprk_executionorder: number;
   sprk_outputvariable?: string;
   sprk_configjson: string;
@@ -291,7 +203,7 @@ export interface PlaybookNodeData {
 
   // Lookup User Membership config (R3 P5 / task 042) — read by buildConfigJson()
   // and the LookupUserMembershipForm (task 043). Field names use `membership`
-  // prefix on the canvas to avoid colliding with other ActionType fields; they
+  // prefix on the canvas to avoid colliding with other executor fields; they
   // are remapped to the server-expected keys (entityType, roles, includeRelated)
   // when serialized into sprk_configjson.
   membershipEntityType?: string;

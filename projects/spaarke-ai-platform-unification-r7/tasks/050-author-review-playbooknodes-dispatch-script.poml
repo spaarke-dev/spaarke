@@ -1,0 +1,200 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="R7-050" project="spaarke-ai-platform-unification-r7">
+  <metadata>
+    <title>Author Review-PlaybookNodes-Dispatch.ps1 (FR-19) — owner manual-review tool</title>
+    <status>completed</status>
+    <wave>5</wave>
+    <estimated-effort>2-3 hours</estimated-effort>
+    <tags>script, dataverse, wave-5</tags>
+    <rigor-level>FULL</rigor-level>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>024 (W2 dispatch ready — single-hop reader merged)</dependencies>
+    <fr-coverage>FR-19 (review-tool authoring portion)</fr-coverage>
+  </metadata>
+
+  <prompt>
+    Wave 5 starts here. Author the owner manual-review tool that lists every existing
+    `sprk_playbooknode` row in spaarkedev1 with: current Action lookup value, suggested
+    `sprk_executortype` (inferred from Action name + the new ExecutorType enum), node name,
+    playbook name, owner-decision column (blank for owner to fill). The output is a CSV at
+    `notes/drafts/playbook-node-review-input.csv` that drives task 051 (run) and task 052
+    (owner checkpoint).
+
+    Pattern: R4-era PowerShell + Web API + Azure CLI auth, modeled exactly on
+    `scripts/dataverse/Add-EntityNameValidatorNodeTypeOption.ps1` (parameterized environment,
+    `DryRun` switch, idempotent — re-running re-reads + re-emits without state change).
+  </prompt>
+
+  <role>
+    Senior platform engineer comfortable with Dataverse Web API + PowerShell 7 + CSV serialization.
+    Goal: a script the owner can run, get back a complete review CSV, and use to drive the
+    94-node manual review.
+  </role>
+
+  <goal>
+    A new file `scripts/dataverse/Review-PlaybookNodes-Dispatch.ps1` that:
+    1. Authenticates to Dataverse via `az account get-access-token` (same pattern as Deploy-Playbook.ps1)
+    2. Queries every `sprk_playbooknode` row in spaarkedev1 (expand: `sprk_actionid` lookup → Action name + `sprk_executoractiontype` advisory + Action's parent playbook name via `sprk_playbookid` if reachable)
+    3. For each node, computes a SUGGESTED `sprk_executortype` value using simple inference:
+       - If Action name matches "AI Analysis*" → suggest `AiAnalysis (0)`
+       - If Action name matches "AI Completion*" or "Narrate*" or "Summarize*" → suggest `AiCompletion (1)`
+       - If Action name matches "Start*" or node has no Action FK and is a deployed start node → suggest `Start (30)` or equivalent
+       - If Action name matches "EntityNameValidator*" → suggest `EntityNameValidator (5)`
+       - Fallback: use Action's `sprk_executoractiontype` advisory field (with confidence label "low")
+       - If no signal at all → suggest blank (owner must decide)
+    4. Emits a CSV at `projects/spaarke-ai-platform-unification-r7/notes/drafts/playbook-node-review-input.csv`
+       Columns: `node_id, node_name, playbook_name, action_id, action_name, current_advisory_executoractiontype, suggested_executortype, suggested_executortype_label, confidence, owner_decision_executortype, owner_notes`
+       The `owner_decision_executortype` + `owner_notes` columns are LEFT BLANK for the owner to fill in.
+    5. Supports `-DryRun` switch that queries + computes + prints to console without writing the CSV
+    6. Supports `-DataverseUrl` override (default: `$env:DATAVERSE_URL`) — same as Deploy-Playbook.ps1
+    7. Idempotent — re-running emits a fresh CSV (overwrites if exists); does NOT mutate any Dataverse row
+    8. Prints summary at the end: total nodes, total with high-confidence suggestion, total needing owner decision (no suggestion)
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-platform-unification-r7/spec.md</file>
+    <file purpose="plan">projects/spaarke-ai-platform-unification-r7/plan.md</file>
+    <file purpose="project-claude">projects/spaarke-ai-platform-unification-r7/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md</file>
+    <file purpose="pattern-reference">scripts/dataverse/Add-EntityNameValidatorNodeTypeOption.ps1</file>
+    <file purpose="deploy-script-auth-pattern">scripts/Deploy-Playbook.ps1</file>
+    <file purpose="exemplar-poml">projects/spaarke-ai-platform-unification-r7/tasks/002-scaffold-aicompletion-node-executor.poml</file>
+    <file purpose="architecture-doc">docs/architecture/ai-architecture-playbook-runtime.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-19">Review tool lists every node with: current Action lookup value, suggested `sprk_executortype`, node name, playbook name, owner-decision field. Owner reviews + sets each value (94 nodes, small scale, manual per-node review per 2026-06-28 confirmation).</constraint>
+    <constraint source="spec NFR-05">Migration scripts must be idempotent + support dry-run mode. This review tool is read-only (queries Dataverse + emits CSV); idempotency is trivial — re-runs produce fresh CSV without Dataverse state change.</constraint>
+    <constraint source="pattern Add-EntityNameValidatorNodeTypeOption.ps1">Follow exact PowerShell conventions: `param(...)`, `$ErrorActionPreference = 'Stop'`, Azure CLI for auth via `az account get-access-token --resource $DataverseUrl`, Web API REST calls with `Invoke-RestMethod`. PowerShell 7+ required.</constraint>
+    <constraint source="CLAUDE.md §10 BFF Hygiene">This task does NOT touch BFF (`Sprk.Bff.Api/`) — no publish-size verification needed. Hot-path declaration: this script is in `scripts/dataverse/` and does NOT affect BFF, SpaarkeAi, ci-workflows, skill-directives, or root-CLAUDE.md.</constraint>
+    <constraint source="CLAUDE.md §11">Component justification triple:
+      1. Existing: no review tool exists for this purpose. `Deploy-Playbook.ps1` deploys NEW playbooks but does not enumerate + review EXISTING node rows.
+      2. Extension: cannot extend `Deploy-Playbook.ps1` — different intent (deploy from JSON vs read + report from Dataverse).
+      3. Cost-of-doing-nothing: 94 existing nodes cannot be backfilled with `sprk_executortype` because the owner has no per-node enumeration to review. FR-19 cannot complete; Wave 5 backfill blocks Wave 10 graduation.
+    </constraint>
+    <constraint source="output-format flexibility">CSV column shape is the working contract — owner may decide to add a column or use a separate file for decisions. Do NOT hard-code "owner_decision_executortype" assumption downstream; task 053 reads whatever CSV the owner produces in task 052.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>dataverse/web-api-query-patterns</topic>
+    <files>
+      <file>scripts/dataverse/Add-EntityNameValidatorNodeTypeOption.ps1</file>
+      <file>scripts/Deploy-Playbook.ps1</file>
+      <file>docs/architecture/ai-architecture-playbook-runtime.md</file>
+      <file>docs/data-model/sprk_playbooknode.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Web API + Azure CLI auth" location="scripts/dataverse/Add-EntityNameValidatorNodeTypeOption.ps1">
+        Canonical pattern for R7 Dataverse scripts: `az account get-access-token --resource $DataverseUrl` → headers → `Invoke-RestMethod`.
+      </pattern>
+      <pattern name="Idempotent dry-run" location="scripts/dataverse/Add-EntityNameValidatorNodeTypeOption.ps1">
+        `[switch]$DryRun` parameter; when set, print intended operations without committing. For this read-only review tool, DryRun means "compute + console-print but do not write CSV."
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      94 `sprk_playbooknode` rows in spaarkedev1 (per spec §FR-19) need `sprk_executortype` populated.
+      The owner confirmed 2026-06-28 that manual per-node review is the right approach (small scale).
+      This task delivers the tool that enumerates the nodes + computes a best-guess suggestion +
+      hands a CSV to the owner. Task 052 is the owner-checkpoint gate.
+
+      The suggestion logic is heuristic — Action names vary, and some nodes have no Action FK
+      (e.g., Start nodes, ReturnResponse nodes). The owner has authoritative knowledge for the
+      final assignment.
+    </background>
+    <dependencies>
+      <dependency task="024" status="must-be-complete">W2 task 024 (PlaybookOrchestrationService.ExecuteNodeAsync reads `node.sprk_executortype` single-hop) must merge before this task — otherwise the column is not yet load-bearing and the backfill order doesn't matter. R7 design intentionally orders W5 after W2.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 051 runs this script against spaarkedev1 + produces the CSV.</item>
+      <item>Task 052 is the OWNER CHECKPOINT — owner edits the CSV + produces `playbook-node-review-output.csv`.</item>
+      <item>Task 053 authors `Migrate-PlaybookNodes-to-ExecutorType.ps1` (reads owner-output CSV + writes `sprk_executortype`).</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Rigor Declaration">
+      Output: 🔒 RIGOR LEVEL: FULL · 📋 REASON: new script in `scripts/dataverse/`, tags include `script`+`dataverse`, modifies `.ps1` file, 6+ steps · Proceeding with Step 0...
+    </step>
+    <step order="1" name="Load context">
+      Read project CLAUDE.md + spec.md FR-19 + plan.md Wave 5 section + the reference PowerShell pattern (Add-EntityNameValidatorNodeTypeOption.ps1) + Deploy-Playbook.ps1 auth header.
+    </step>
+    <step order="2" name="Verify dependency">
+      Confirm task 024 status in TASK-INDEX.md. If not ✅, STOP — Wave 5 prerequisite not met.
+    </step>
+    <step order="3" name="Inspect sprk_playbooknode schema via MCP">
+      Use `mcp__dataverse__describe` (or equivalent describe tool) to confirm: column `sprk_executortype` exists (Choice), `sprk_actionid` lookup exists, navigation property name for the Action lookup expansion. Note the global Choice set name `sprk_playbookexecutortype` + the 33 values.
+    </step>
+    <step order="4" name="Draft the Web API query">
+      Build the OData query: `GET sprk_playbooknodes?$select=sprk_playbooknodeid,sprk_name,sprk_executortype,_sprk_actionid_value&$expand=sprk_actionid($select=sprk_name,sprk_executoractiontype)`. Add `&$top=200` (over 94-row count) — paging optional but unlikely needed.
+      Also query the Choice set metadata to get the value→label map for `sprk_playbookexecutortype` (used in the `suggested_executortype_label` CSV column).
+    </step>
+    <step order="5" name="Author the script">
+      Create `scripts/dataverse/Review-PlaybookNodes-Dispatch.ps1`. Structure:
+      - Header comment block (Synopsis, Description, Parameters, Example, Notes) — mirror `Add-EntityNameValidatorNodeTypeOption.ps1` style
+      - `param()` block: `[ValidateSet('dev')] [string]$Environment = 'dev'`, `[string]$DataverseUrl = $env:DATAVERSE_URL`, `[switch]$DryRun`, `[string]$OutputPath = 'projects/spaarke-ai-platform-unification-r7/notes/drafts/playbook-node-review-input.csv'`
+      - `$ErrorActionPreference = 'Stop'`
+      - Auth: `az account get-access-token --resource $DataverseUrl` → bearer token
+      - Query the playbooknodes + expand Action
+      - Query the Choice-set metadata for the value→label map
+      - For each node, compute the inferred-suggestion logic (per goal point 3)
+      - Build `[PSCustomObject]` per row with all CSV columns
+      - If `$DryRun`: `$rows | Format-Table -AutoSize` to console
+      - Else: `$rows | Export-Csv -Path $OutputPath -NoTypeInformation -Encoding UTF8`
+      - Print summary: total nodes, high-confidence count, owner-decision-required count
+    </step>
+    <step order="6" name="Test invocation locally with -DryRun (auth-only smoke)">
+      Run `pwsh ./scripts/dataverse/Review-PlaybookNodes-Dispatch.ps1 -DryRun` against spaarkedev1.
+      Confirm: auth succeeds, query returns ~94 rows, inference produces sensible suggestions, summary prints.
+      Do NOT write the CSV in this step (DryRun in effect).
+    </step>
+    <step order="7" name="Verify acceptance criteria">
+      Open the script in editor; confirm all goal bullets satisfied. Confirm idempotency (re-running emits same CSV without state mutation).
+    </step>
+    <step order="9.5" name="Quality gates (FULL rigor)">
+      Run `/code-review` on the new script. Run `/adr-check` against ADR-029 (BFF Publish Hygiene — N/A for scripts but verify no BFF surface inadvertently touched) and CLAUDE.md §11 (component justification).
+      Fix any findings before commit.
+    </step>
+    <step order="10" name="Update current-task.md + TASK-INDEX">
+      Mark task 050 status complete; advance current-task.md to task 051.
+    </step>
+    <step order="11" name="Commit">
+      Commit `scripts/dataverse/Review-PlaybookNodes-Dispatch.ps1` with conventional message.
+      Example: `feat(scripts/r7): add Review-PlaybookNodes-Dispatch.ps1 owner-review tool (Wave 5 task 050, FR-19)`
+    </step>
+  </steps>
+
+  <tools>
+    <tool>Read (reference PowerShell scripts + spec + project CLAUDE.md)</tool>
+    <tool>mcp__dataverse__describe (confirm column + Choice set metadata)</tool>
+    <tool>mcp__dataverse__read_query (sanity-check the query shape against spaarkedev1)</tool>
+    <tool>Write (new Review-PlaybookNodes-Dispatch.ps1)</tool>
+    <tool>Bash (pwsh ./script.ps1 -DryRun, git commit)</tool>
+    <tool>Skill (code-review at Step 9.5)</tool>
+    <tool>Skill (adr-check at Step 9.5)</tool>
+  </tools>
+
+  <outputs>
+    <output type="new-file">scripts/dataverse/Review-PlaybookNodes-Dispatch.ps1</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/current-task.md (advance to task 051)</output>
+    <output type="state-update">projects/spaarke-ai-platform-unification-r7/tasks/TASK-INDEX.md (mark 050 ✅)</output>
+    <output type="commit">feat(scripts/r7): add Review-PlaybookNodes-Dispatch.ps1 owner-review tool (Wave 5 task 050, FR-19)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion>File `scripts/dataverse/Review-PlaybookNodes-Dispatch.ps1` exists</criterion>
+    <criterion>Script uses Azure CLI auth pattern matching Deploy-Playbook.ps1 / Add-EntityNameValidatorNodeTypeOption.ps1</criterion>
+    <criterion>Script queries `sprk_playbooknodes` with Action expansion + Choice-set metadata lookup</criterion>
+    <criterion>Script emits CSV at `notes/drafts/playbook-node-review-input.csv` with required columns (node_id, node_name, playbook_name, action_id, action_name, current_advisory_executoractiontype, suggested_executortype, suggested_executortype_label, confidence, owner_decision_executortype, owner_notes)</criterion>
+    <criterion>Suggested-executortype inference covers AiAnalysis / AiCompletion / EntityNameValidator / Start + advisory-field fallback + blank-no-signal cases</criterion>
+    <criterion>Script supports `-DryRun` (queries + prints to console; does not write CSV)</criterion>
+    <criterion>Script supports `-DataverseUrl` override (default: $env:DATAVERSE_URL)</criterion>
+    <criterion>Script prints summary: total nodes / high-confidence / owner-decision-required counts</criterion>
+    <criterion>Script is idempotent — re-running produces fresh CSV without Dataverse state mutation</criterion>
+    <criterion>code-review + adr-check pass at Step 9.5 (FULL rigor)</criterion>
+    <criterion>Commit pushed to work/spaarke-ai-platform-unification-r7</criterion>
+  </acceptance-criteria>
+</task>
