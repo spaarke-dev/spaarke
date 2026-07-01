@@ -23,13 +23,7 @@
  */
 
 import * as React from 'react';
-import {
-  makeStyles,
-  tokens,
-  Text,
-  Link,
-  Badge,
-} from '@fluentui/react-components';
+import { makeStyles, tokens, Text, Link, Badge } from '@fluentui/react-components';
 import { AlertUrgentRegular } from '@fluentui/react-icons';
 
 import type { HighPriorityItemResult } from '../services/briefingService';

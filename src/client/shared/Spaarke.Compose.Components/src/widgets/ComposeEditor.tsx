@@ -598,16 +598,8 @@ export const ComposeEditor = React.forwardRef<ComposeEditorHandle, ComposeEditor
       >
         <ComposeFormatToolbar editor={editor} disabled={isImporting} />
         {editor ? (
-          <BubbleMenu
-            editor={editor}
-            tippyOptions={{ duration: 100, placement: 'top' }}
-            className={styles.bubbleMenu}
-          >
-            <Toolbar
-              size="small"
-              aria-label="Selection formatting"
-              data-testid="compose-bubble-menu"
-            >
+          <BubbleMenu editor={editor} tippyOptions={{ duration: 100, placement: 'top' }} className={styles.bubbleMenu}>
+            <Toolbar size="small" aria-label="Selection formatting" data-testid="compose-bubble-menu">
               <ToolbarButton
                 appearance={editor.isActive('bold') ? 'primary' : 'subtle'}
                 icon={<TextBold24Regular />}
