@@ -912,4 +912,50 @@ public record NarrativeBulletDto
     /// <summary>Display name of the primary related record.</summary>
     [JsonPropertyName("primaryEntityName")]
     public string PrimaryEntityName { get; init; } = "";
+
+    /// <summary>
+    /// R7 W12 feedback items 2/3/4 (2026-07-01): per-bullet entity references
+    /// for widget-side citation rendering. Each entry maps to a specific record
+    /// referenced by this bullet. Ordered by narrative appearance when possible.
+    /// The widget renders these two ways:
+    /// - Entries with <c>Mentioned=true</c>: replace <c>Name</c> in narrative
+    ///   text with a clickable Link that opens the record modal.
+    /// - Entries with <c>Mentioned=false</c>: append trailing <c>[N]</c>
+    ///   superscript citations after the narrative text.
+    /// Empty array = plain-text bullet (no interactive citations).
+    /// </summary>
+    [JsonPropertyName("references")]
+    public NarrativeBulletReferenceDto[] References { get; init; } = [];
+}
+
+/// <summary>
+/// A single reference from a narrative bullet to a Dataverse record. Drives the
+/// widget's inline hyperlink / trailing citation rendering. Ordered by narrative
+/// appearance when possible (post-processor scans narrative text left-to-right).
+/// </summary>
+public record NarrativeBulletReferenceDto
+{
+    /// <summary>1-based citation index for trailing <c>[N]</c> refs.</summary>
+    [JsonPropertyName("index")]
+    public int Index { get; init; }
+
+    /// <summary>Dataverse logical name of the target entity (e.g., "sprk_matter").</summary>
+    [JsonPropertyName("entityType")]
+    public string EntityType { get; init; } = "";
+
+    /// <summary>GUID of the target record.</summary>
+    [JsonPropertyName("entityId")]
+    public string EntityId { get; init; } = "";
+
+    /// <summary>Display name of the target record.</summary>
+    [JsonPropertyName("entityName")]
+    public string EntityName { get; init; } = "";
+
+    /// <summary>
+    /// True if <c>EntityName</c> appears in the narrative text (widget replaces
+    /// the name span with a clickable Link). False if the reference is only
+    /// implicit (widget renders as trailing <c>[N]</c> citation).
+    /// </summary>
+    [JsonPropertyName("mentioned")]
+    public bool Mentioned { get; init; }
 }

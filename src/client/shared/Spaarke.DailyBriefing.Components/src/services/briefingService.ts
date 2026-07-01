@@ -125,6 +125,28 @@ export interface NarrativeBulletResult {
   primaryEntityType: string;
   primaryEntityId: string;
   primaryEntityName: string;
+  /**
+   * R7 W12 feedback items 2/3/4 (2026-07-01) — per-bullet entity references.
+   * Ordered by first-appearance in narrative text (mentioned refs), then by
+   * channel order (implicit refs). Widget renders:
+   * - `mentioned=true` refs: wrap `entityName` in narrative text as clickable Link.
+   * - `mentioned=false` refs: append trailing `[N]` citations.
+   * Empty array (or field absent) => plain-text bullet, no citations.
+   */
+  references?: NarrativeBulletReferenceResult[];
+}
+
+export interface NarrativeBulletReferenceResult {
+  /** 1-based citation index for trailing `[N]` markers. */
+  index: number;
+  /** Dataverse logical name of the target entity (e.g., "sprk_matter"). */
+  entityType: string;
+  /** GUID of the target record. */
+  entityId: string;
+  /** Display name of the target record. */
+  entityName: string;
+  /** True if `entityName` appears in the narrative text. */
+  mentioned: boolean;
 }
 
 /** Result of a narration fetch attempt. */

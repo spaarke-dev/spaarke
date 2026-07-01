@@ -74,6 +74,15 @@ interface ChannelNarrativeBullet {
   primaryEntityType: string;
   primaryEntityId: string;
   primaryEntityName: string;
+  /** R7 W12 feedback items 2/3/4 — passed through to NarrativeBullet for
+   * inline-link + trailing-[N]-citation rendering. Optional for back-compat. */
+  references?: {
+    index: number;
+    entityType: string;
+    entityId: string;
+    entityName: string;
+    mentioned: boolean;
+  }[];
 }
 
 /** Shape of a channel narrative group. */
@@ -217,6 +226,7 @@ export const ActivityNotesSection: React.FC<ActivityNotesSectionProps> = ({
                 primaryEntityType={bullet.primaryEntityType}
                 primaryEntityId={bullet.primaryEntityId}
                 itemIds={bullet.itemIds}
+                references={bullet.references}
                 onAddToTodo={onAddToTodo}
                 onDismiss={onDismiss}
                 isTodoCreated={isTodoCreated(firstItemId)}
