@@ -82,6 +82,20 @@ public class MembershipFieldDiscoveryService : IMembershipFieldDiscoveryService
         @"\d+$",
         RegexOptions.Compiled | RegexOptions.CultureInvariant);
 
+    // ── R7 W12 T130 follow-up (2026-06-30) — well-known target sets for
+    // polymorphic Owner + Customer attributes. These are fixed by the Dataverse
+    // data model regardless of solution / entity — every Owner column targets
+    // systemuser + team; every Customer column targets account + contact.
+    // Used by FetchLookupAttributesAsync's fallback pass to synthesize
+    // LookupAttributeRow entries when the SDK's `.OfType<LookupAttributeMetadata>()`
+    // filter drops them (Owner/Customer are separate AttributeTypeCode values
+    // but the SDK exposes them without a distinct LookupAttributeMetadata
+    // subclass; see FetchLookupAttributesAsync rationale block for evidence).
+    private static readonly IReadOnlyList<string> OwnerAttributeTargets =
+        new[] { "systemuser", "team" };
+    private static readonly IReadOnlyList<string> CustomerAttributeTargets =
+        new[] { "account", "contact" };
+
     private readonly IDataverseService _dataverse;
     private readonly ITenantCache _cache;
     private readonly IHttpContextAccessor? _httpContextAccessor;
@@ -419,19 +433,7 @@ public class MembershipFieldDiscoveryService : IMembershipFieldDiscoveryService
                 () => serviceClient.Execute(request), ct).ConfigureAwait(false);
 
             var attributes = response.EntityMetadata?.Attributes ?? Array.Empty<AttributeMetadata>();
-            var rows = new List<LookupAttributeRow>();
-            foreach (var attr in attributes.OfType<LookupAttributeMetadata>())
-            {
-                if (string.IsNullOrWhiteSpace(attr.LogicalName))
-                {
-                    continue;
-                }
-
-                rows.Add(new LookupAttributeRow(
-                    LogicalName: attr.LogicalName,
-                    Targets: attr.Targets ?? Array.Empty<string>()));
-            }
-            return rows;
+            return ProjectLookupAttributeRows(attributes);
         }
         catch (OperationCanceledException)
         {
@@ -447,6 +449,104 @@ public class MembershipFieldDiscoveryService : IMembershipFieldDiscoveryService
             throw new InvalidOperationException(
                 $"Entity '{entityLogicalName}' not found in Dataverse metadata.", ex);
         }
+    }
+
+    // ── R7 W12 T130 follow-up (2026-06-30) — testable projection of the
+    // SDK's raw attribute list into LookupAttributeRow[] with polymorphic
+    // Owner + Customer synthesis. Extracted from FetchLookupAttributesAsync
+    // as `internal static` so unit tests can pin the classification
+    // contract without constructing a RetrieveEntityResponse.
+    //
+    // Rationale + evidence (root cause of production symptom "sprk_matter
+    // resolved rows=0 for a user who owns 44 matters via ownerid"):
+    //
+    //   Empirical check on the shipped Microsoft.Xrm.Sdk.dll
+    //   (Microsoft.PowerPlatform.Dataverse.Client v1.1.32 → net6.0 asset)
+    //   confirms:
+    //     * `LookupAttributeMetadata` is `sealed` and inherits directly from
+    //       `AttributeMetadata` — there is no `OwnerAttributeMetadata` subclass
+    //       in the modern SDK's public type surface (verified by enumerating
+    //       every `*AttributeMetadata` type in the loaded assembly).
+    //     * `AttributeMetadata`'s [KnownType] deserialization allow-list does
+    //       NOT include a distinct OwnerAttributeMetadata type either — so
+    //       Owner-typed attributes deserialize as base `AttributeMetadata`
+    //       when the server sends `@odata.type=OwnerAttributeMetadata`.
+    //     * `AttributeTypeCode` has three lookup-shaped values —
+    //       `Lookup = 6`, `Customer = 1`, `Owner = 9`.
+    //
+    //   Observed production symptom (R7 W12, 2026-06-30 App Insights):
+    //   `MembershipFieldDiscoveryService resolved entity=sprk_matter
+    //    (discovered=14, excluded=4, ignored=6)` and
+    //   `MembershipResolverService resolved ... (descriptors=14, conditions=9,
+    //    rows=0)` — but the user OWNS 44 matters via `ownerid = {systemUserId}
+    //    AND statecode = 0` (verified via raw SQL). Only `ownerid` matches
+    //    those 44 rows for that user; the assigned* fields do not. Therefore
+    //    `ownerid` must be missing from the 14 descriptors — meaning the
+    //    `OfType<LookupAttributeMetadata>()` filter dropped it.
+    //
+    // Fix: after the primary LookupAttributeMetadata pass, walk every
+    // attribute whose `AttributeType` is Owner or Customer and synthesize a
+    // LookupAttributeRow using the well-known Dataverse target sets
+    // (Owner → {systemuser, team}; Customer → {account, contact}). The `seen`
+    // set guarantees an attribute captured by the primary path is never
+    // double-counted (belt-and-suspenders for SDK versions where the primary
+    // path DOES pick up the Owner/Customer attributes).
+    internal static IReadOnlyList<LookupAttributeRow> ProjectLookupAttributeRows(
+        IEnumerable<AttributeMetadata> attributes)
+    {
+        ArgumentNullException.ThrowIfNull(attributes);
+
+        var rows = new List<LookupAttributeRow>();
+        var seen = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        // Primary pass: LookupAttributeMetadata (sealed; covers standard Lookup
+        // attributes and — depending on SDK version — some Customer/Owner
+        // deserializations). Extract Targets[] as-is.
+        foreach (var attr in attributes.OfType<LookupAttributeMetadata>())
+        {
+            if (string.IsNullOrWhiteSpace(attr.LogicalName))
+            {
+                continue;
+            }
+
+            rows.Add(new LookupAttributeRow(
+                LogicalName: attr.LogicalName,
+                Targets: attr.Targets ?? Array.Empty<string>()));
+            seen.Add(attr.LogicalName);
+        }
+
+        // Fallback pass: any Owner or Customer attribute the primary pass
+        // didn't catch. Synthesize the well-known target set.
+        foreach (var attr in attributes)
+        {
+            if (attr is null || string.IsNullOrWhiteSpace(attr.LogicalName))
+            {
+                continue;
+            }
+            if (seen.Contains(attr.LogicalName))
+            {
+                continue;
+            }
+
+            var syntheticTargets = attr.AttributeType switch
+            {
+                AttributeTypeCode.Owner    => OwnerAttributeTargets,
+                AttributeTypeCode.Customer => CustomerAttributeTargets,
+                _                          => null
+            };
+
+            if (syntheticTargets is null)
+            {
+                continue;
+            }
+
+            rows.Add(new LookupAttributeRow(
+                LogicalName: attr.LogicalName,
+                Targets: syntheticTargets));
+            seen.Add(attr.LogicalName);
+        }
+
+        return rows;
     }
 
     /// <summary>
