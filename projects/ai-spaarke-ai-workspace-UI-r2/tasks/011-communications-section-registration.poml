@@ -1,7 +1,7 @@
 <task id="R2-011" project="ai-spaarke-ai-workspace-UI-r2">
   <metadata>
     <title>Add Communications section registration</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>1 hour</estimated-effort>
     <phase>2</phase>
     <tags>typescript,react,workspace-widgets,sections,pattern-d</tags>

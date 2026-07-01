@@ -1,7 +1,7 @@
 <task id="R2-010" project="ai-spaarke-ai-workspace-UI-r2">
   <metadata>
     <title>Create Communications sprk_gridconfiguration record</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>1 hour</estimated-effort>
     <phase>2</phase>
     <tags>dataverse,configuration,communications,sprk_communication</tags>

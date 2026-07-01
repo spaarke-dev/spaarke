@@ -18,15 +18,15 @@
 | [`001-audit-existing-config-records.poml`](001-audit-existing-config-records.poml) | ✅ | — | 1 h | Audit 5 existing `sprk_gridconfiguration` records; document current `rowOpen` state |
 | [`002-extend-datagrid-defaultRecordOpen.poml`](002-extend-datagrid-defaultRecordOpen.poml) | ✅ | 001 | 3 h | FR-01/02/03 — extend schema + framework `defaultRecordOpen` for `formId` + Layout 1 unification |
 | [`003-verify-widget-migrations.poml`](003-verify-widget-migrations.poml) | ✅ | 002 | 2 h | FR-04–08 verification — all 5 widgets adopt Layout 1 via framework change |
-| [`004-phase1-pr-and-merge.poml`](004-phase1-pr-and-merge.poml) | 🔲 | 003 | 1 h | Phase 1 PR — CI green, code-review, merge to master |
+| [`004-phase1-pr-and-merge.poml`](004-phase1-pr-and-merge.poml) | 🔄 | 003 | 1 h | Phase 1 PR — CI green, code-review, merge to master — PR #530 open |
 
 ## Phase 2 — Communications widget (PR 2)
 
 | Task | Status | Depends on | Est. | Notes |
 |---|---|---|---|---|
-| [`010-communications-config-record.poml`](010-communications-config-record.poml) | 🔲 | 004 | 1 h | FR-11 — create `sprk_gridconfiguration` record for Communications via `dataverse-create-schema` skill |
-| [`011-communications-section-registration.poml`](011-communications-section-registration.poml) | 🔲 | 010 | 1 h | FR-09 — `communications.registration.ts` + `sectionRegistry.ts` update |
-| [`012-communications-direct-widget.poml`](012-communications-direct-widget.poml) | 🔲 | 010 | 1 h | FR-10 — `communications-list` direct widget in `register-workspace-widgets.ts` |
+| [`010-communications-config-record.poml`](010-communications-config-record.poml) | ✅ | 004 | 1 h | FR-11 — create `sprk_gridconfiguration` record for Communications via `dataverse-create-schema` skill — GUID `e1826c4c-9575-f111-ab0e-7ced8ddc4a05` |
+| [`011-communications-section-registration.poml`](011-communications-section-registration.poml) | ✅ | 010 | 1 h | FR-09 — `communications.registration.ts` + `sectionRegistry.ts` update + `sectionMetadataCatalog.ts` |
+| [`012-communications-direct-widget.poml`](012-communications-direct-widget.poml) | ✅ | 010 | 1 h | FR-10 — `communications-list` direct widget in `register-workspace-widgets.ts` |
 | [`013-phase2-pr-and-merge.poml`](013-phase2-pr-and-merge.poml) | 🔲 | 011, 012 | 1 h | Phase 2 PR — Communications visible as section + direct widget |
 
 ## Phase 3 — SmartTodoModal retirement + documentation (PR 3)
