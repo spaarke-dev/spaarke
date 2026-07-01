@@ -1,0 +1,65 @@
+<task id="R2-002" project="ai-spaarke-ai-workspace-UI-r2">
+  <metadata>
+    <title>Extend DataGrid framework defaultRecordOpen for formId + Layout 1 unification</title>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <phase>1</phase>
+    <tags>datagrid,framework,typescript,react,layout-1</tags>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+Implement FR-01, FR-02, FR-03 together in one focused change to the DataGrid framework:
+
+- **FR-01**: Extend the `configjson.rowOpen` TypeScript type to accept optional `formId?: string`. Backward-compatible (existing records without `formId` deserialize identically to today).
+- **FR-02**: In `DataGrid.defaultRecordOpen`, when `rowOpen.formId` is present, pass it to `entityFormOptions.formId` on the `Xrm.Navigation.navigateTo` call.
+- **FR-03**: Rewrite the `type !== 'formDialog'` branch (currently `window.open('_blank')`) to also call `Xrm.Navigation.navigateTo` with Layout 1 standard options. All row-clicks now open as OOB modals at 85% × 85%.
+
+**Modal size standard (binding)**: `width: { value: 85, unit: '%' }, height: { value: 85, unit: '%' }, position: 1`. Use this exact literal in every Layout 1 call.
+  </prompt>
+
+  <role>Senior TypeScript / React developer familiar with the Spaarke DataGrid framework and Xrm.Navigation Client API.</role>
+
+  <goal>
+`src/client/shared/Spaarke.UI.Components/src/components/DataGrid/DataGrid.tsx` (or its private `defaultRecordOpen`):
+- Accepts optional `formId` in `configjson.rowOpen`
+- Always calls `Xrm.Navigation.navigateTo` (never `window.open`)
+- Uses 85% × 85% size options
+Regression tests for the DataGrid pass; a new test verifies `formId` is honored when supplied.
+  </goal>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-spaarke-ai-workspace-UI-r2/spec.md</file>
+      <file>projects/ai-spaarke-ai-workspace-UI-r2/CLAUDE.md</file>
+      <file>docs/architecture/SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE.md</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
+      <file>docs/adr/ADR-021-fluent-ui-v9.md</file>
+      <file>docs/adr/ADR-012-shared-component-library.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DataGrid/DataGrid.tsx</file>
+      <file>projects/ai-spaarke-ai-workspace-UI-r2/notes/config-record-audit.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Read the current `DataGrid.tsx` — locate `defaultRecordOpen` (around line 885–919 per audit).</step>
+    <step>Locate the TypeScript type for `configjson.rowOpen`. Extend to add `formId?: string`.</step>
+    <step>Update `defaultRecordOpen`: if `rowOpen.formId` present, include `formId` in `entityFormOptions` bag.</step>
+    <step>Rewrite the fallback branch (`type !== 'formDialog'`) to also call `Xrm.Navigation.navigateTo` with 85% × 85% Layout 1 options. Delete or comment out the `window.open` call.</step>
+    <step>Update existing DataGrid unit tests to reflect new behavior. Add a test: given `rowOpen.formId` set, `navigateTo` is called with that `formId`.</step>
+    <step>Verify: `npm run build` in `Spaarke.UI.Components` succeeds; type checks pass.</step>
+    <step>Add a code comment near `defaultRecordOpen` citing the R2 unification decision and the 85% × 85% size standard.</step>
+  </steps>
+
+  <tools>Read · Edit · Bash (npm test, npm build) · Grep</tools>
+
+  <acceptance-criteria>
+    <criterion>`DataGrid.tsx` compiles without type errors.</criterion>
+    <criterion>Existing DataGrid tests pass.</criterion>
+    <criterion>New test verifies `formId` is passed through to `entityFormOptions`.</criterion>
+    <criterion>`window.open` no longer called from `defaultRecordOpen`.</criterion>
+    <criterion>Size options literal is `width: { value: 85, unit: '%' }, height: { value: 85, unit: '%' }, position: 1`.</criterion>
+    <criterion>Code comment cites the R2 unification decision.</criterion>
+    <criterion>Quality gates: code-review + adr-check clean (FULL rigor).</criterion>
+  </acceptance-criteria>
+</task>

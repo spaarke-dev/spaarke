@@ -1,0 +1,61 @@
+<task id="R2-021" project="ai-spaarke-ai-workspace-UI-r2">
+  <metadata>
+    <title>Migrate all SmartTodoModal callsites to Xrm.Navigation.navigateTo</title>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <phase>3</phase>
+    <tags>typescript,react,smarttodomodal,layout-1,migration,iframe-retirement</tags>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+FR-13: For every SmartTodoModal callsite documented in task 020, replace the modal open call with:
+
+```ts
+Xrm.Navigation.navigateTo(
+  { pageType: "entityrecord", entityName: "sprk_todo", entityId },
+  { target: 2, position: 1, width: {value: 85, unit: '%'}, height: {value: 85, unit: '%'} }
+);
+```
+
+Preserve any non-open logic surrounding the call (context tracking, refresh callbacks, etc.) — the modal opening changes, but surrounding behavior stays.
+  </prompt>
+
+  <role>Senior TypeScript / React developer familiar with the SmartTodo module and Xrm.Navigation Client API.</role>
+
+  <goal>
+Every callsite from `notes/smart-todo-modal-callsites.md` now opens the To Do OOB main form via Layout 1. `SmartTodoModal.tsx` is still importable (deletion happens in task 022); no callsite iframes `main.aspx`.
+  </goal>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-spaarke-ai-workspace-UI-r2/spec.md</file>
+      <file>projects/ai-spaarke-ai-workspace-UI-r2/CLAUDE.md</file>
+      <file>projects/ai-spaarke-ai-workspace-UI-r2/notes/smart-todo-modal-callsites.md</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
+      <file>docs/adr/ADR-021-fluent-ui-v9.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>For each callsite in `notes/smart-todo-modal-callsites.md`: open the file at the specified line.</step>
+    <step>Replace the SmartTodoModal open call with the standard `Xrm.Navigation.navigateTo` invocation.</step>
+    <step>Preserve any surrounding logic (refresh callbacks, state updates).</step>
+    <step>Remove the `import` for `SmartTodoModal` from that file (if unused after replacement).</step>
+    <step>Run `npm run build` in the affected packages — verify compile succeeds.</step>
+    <step>Run existing SmartTodo tests — verify none regress.</step>
+    <step>Deploy to dev; smoke test each migrated callsite → Layout 1 opens correctly.</step>
+    <step>Update `notes/smart-todo-modal-callsites.md` with per-callsite migration status (done / skipped / TODO).</step>
+  </steps>
+
+  <tools>Read · Edit · Bash (npm test, npm build) · code-page-deploy skill</tools>
+
+  <acceptance-criteria>
+    <criterion>Every callsite from task 020's audit now uses `Xrm.Navigation.navigateTo` with 85%×85% Layout 1 options.</criterion>
+    <criterion>No callsite iframes `main.aspx`.</criterion>
+    <criterion>Build passes; type checks clean.</criterion>
+    <criterion>Existing tests pass.</criterion>
+    <criterion>Smoke test each callsite in dev — Layout 1 opens; sprk_todo form loads; Save & Close returns.</criterion>
+    <criterion>Quality gates: code-review + adr-check clean (FULL rigor).</criterion>
+  </acceptance-criteria>
+</task>

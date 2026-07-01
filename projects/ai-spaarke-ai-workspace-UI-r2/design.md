@@ -7,6 +7,23 @@
 > **Created**: 2026-07-01
 > **R1 reference**: [`../ai-spaarke-ai-workspace-UI-r1/design.md`](../ai-spaarke-ai-workspace-UI-r1/design.md) — established the `DataverseEntityViewWidget` foundation this project extends
 
+<hot-path-declaration>
+  <bff>N</bff>
+  <spaarke-ai>Y</spaarke-ai>
+  <ci-workflows>N</ci-workflows>
+  <skill-directives>N</skill-directives>
+  <root-CLAUDE-md>Y</root-CLAUDE-md>
+</hot-path-declaration>
+
+<!--
+Hot-path declaration rationale (per CICD-061 / bff-extensions.md §G):
+- bff=N: no `src/server/api/Sprk.Bff.Api/**` touches; all work client-side + one Dataverse config record
+- spaarke-ai=Y: new Communications direct widget in @spaarke/ai-widgets; DataGrid framework change in @spaarke/ui-components consumed by SpaarkeAi widgets
+- ci-workflows=N: no `.github/workflows/**` touches
+- skill-directives=N: adds .claude/patterns/ui/record-modal-selection.md (pattern pointer) but no skill files modified
+- root-CLAUDE-md=Y: added §17 pointer row in preparatory commit 367bdb4a1; no further changes expected during task execution
+-->
+
 ---
 
 ## 1. Purpose

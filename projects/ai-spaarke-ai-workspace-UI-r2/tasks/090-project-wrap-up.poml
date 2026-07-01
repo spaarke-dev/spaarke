@@ -1,0 +1,65 @@
+<task id="R2-090" project="ai-spaarke-ai-workspace-UI-r2">
+  <metadata>
+    <title>Project wrap-up — R2 complete</title>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <phase>wrap-up</phase>
+    <tags>wrap-up,lessons-learned,test-diet,archive</tags>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+Project close-out per CLAUDE.md §7:
+
+- Update `README.md` status to "Complete"
+- Write `notes/lessons-learned.md`
+- Run `/test-diet` (build-vs-maintain classifier per CLAUDE.md §7 — MANDATORY for project-close per FR-B09)
+- Update `projects/INDEX.md` — mark R2 as completed with completion date
+- Archive project artifacts per repo-cleanup skill
+
+Note: `parallel-safe: false` — this task touches `projects/INDEX.md` (a hot-path file) and coordinates with repo-cleanup.
+  </prompt>
+
+  <role>Project owner / release manager.</role>
+
+  <goal>
+R2 project closed cleanly: all artifacts archived; lessons-learned captured; test-diet report produced; portfolio updated. Ready to remove the worktree via `/worktree-setup` remove workflow if desired.
+  </goal>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-spaarke-ai-workspace-UI-r2/README.md</file>
+      <file>projects/ai-spaarke-ai-workspace-UI-r2/spec.md</file>
+      <file>projects/ai-spaarke-ai-workspace-UI-r2/design.md</file>
+      <file>projects/ai-spaarke-ai-workspace-UI-r2/plan.md</file>
+      <file>projects/ai-spaarke-ai-workspace-UI-r2/tasks/TASK-INDEX.md</file>
+      <file>projects/INDEX.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/skills/test-diet/SKILL.md</file>
+      <file>.claude/skills/repo-cleanup/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Verify all 3 PRs merged to master + all 12 phase tasks marked ✅ in TASK-INDEX.</step>
+    <step>Verify all 14 success criteria from spec.md — grep + manual QA per criterion; document pass/fail in `notes/success-criteria-verification.md`.</step>
+    <step>Write `notes/lessons-learned.md`: what worked, what surprised, what would you do differently, any technical debt intentionally accepted, follow-on work.</step>
+    <step>Update README.md status to "Complete" with merge date.</step>
+    <step>Invoke `/test-diet` — produces `notes/test-diet-report.md` classifying test changes as MAINTAIN or SCAFFOLDING per ADR-038.</step>
+    <step>Update `projects/INDEX.md` — mark R2 status as completed with completion date.</step>
+    <step>Optionally invoke `/repo-cleanup` to archive ephemeral files.</step>
+    <step>Optionally invoke `/devops-project-archive` if project was registered on portfolio.</step>
+  </steps>
+
+  <tools>Bash · Grep · Read · Write · Edit · test-diet skill · repo-cleanup skill · devops-project-archive skill (if applicable)</tools>
+
+  <acceptance-criteria>
+    <criterion>README status = "Complete".</criterion>
+    <criterion>All 14 success criteria verified in `notes/success-criteria-verification.md`.</criterion>
+    <criterion>`notes/lessons-learned.md` exists with substantive content.</criterion>
+    <criterion>`notes/test-diet-report.md` produced by `/test-diet` skill.</criterion>
+    <criterion>`projects/INDEX.md` marks R2 completed with date.</criterion>
+    <criterion>All 3 PRs merged to master.</criterion>
+    <criterion>TASK-INDEX shows ✅ for every task.</criterion>
+  </acceptance-criteria>
+</task>

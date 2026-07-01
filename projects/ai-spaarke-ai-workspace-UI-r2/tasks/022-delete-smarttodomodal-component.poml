@@ -1,0 +1,57 @@
+<task id="R2-022" project="ai-spaarke-ai-workspace-UI-r2">
+  <metadata>
+    <title>Delete SmartTodoModal component + iframe-hosting wiring</title>
+    <status>not-started</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <phase>3</phase>
+    <tags>typescript,react,deletion,smarttodomodal,cleanup</tags>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+FR-14: Delete `SmartTodoModal.tsx` and the iframe-hosting wiring (`useLaunchContext.ts` if it exists solely for the iframe pattern). Keep `RecordNavigationModalShell` in `@spaarke/ui-components` intact — it is still consumed by `RichFilePreviewDialog`.
+
+If `useLaunchContext.ts` has legitimate non-iframe concerns (e.g. general launch-context state), refactor to remove ONLY the iframe pieces and preserve the rest. Document any preserved pieces in the commit message.
+  </prompt>
+
+  <role>Cleanup-minded TypeScript developer with git discipline.</role>
+
+  <goal>
+`SmartTodoModal.tsx` deleted from `src/solutions/SmartTodo/**`. `useLaunchContext.ts` either deleted (if solely for iframe) or refactored (if broader). `RecordNavigationModalShell` untouched. Build passes; type checks clean; existing tests pass.
+  </goal>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-spaarke-ai-workspace-UI-r2/spec.md</file>
+      <file>projects/ai-spaarke-ai-workspace-UI-r2/CLAUDE.md</file>
+      <file>projects/ai-spaarke-ai-workspace-UI-r2/notes/smart-todo-modal-callsites.md</file>
+      <file>src/solutions/SmartTodo/src/SmartTodoModal.tsx</file>
+      <file>src/solutions/SmartTodo/src/hooks/useLaunchContext.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/RecordNavigationModalShell/README.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/FilePreview/RichFilePreviewDialog.tsx</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Verify all task 021 callsite migrations completed — grep for `SmartTodoModal` returns only the file itself + tests.</step>
+    <step>Delete `SmartTodoModal.tsx`.</step>
+    <step>Inspect `useLaunchContext.ts` — if solely for iframe pattern → delete. If broader → refactor to remove iframe pieces only.</step>
+    <step>Delete any test files that solely tested the iframe pattern.</step>
+    <step>Grep `src/` again to confirm no remaining imports of `SmartTodoModal`.</step>
+    <step>Verify `RecordNavigationModalShell` still exports normally + `RichFilePreviewDialog` still consumes it → grep confirms 1 production consumer.</step>
+    <step>Run `npm run build` in Spaarke.UI.Components + SmartTodo → passes.</step>
+    <step>Run existing tests → no regressions.</step>
+  </steps>
+
+  <tools>Grep · Bash · Read · Edit</tools>
+
+  <acceptance-criteria>
+    <criterion>`SmartTodoModal.tsx` deleted.</criterion>
+    <criterion>`useLaunchContext.ts` deleted or refactored (iframe pieces gone).</criterion>
+    <criterion>No `iframe.*main\.aspx` in `src/solutions/SmartTodo/**`.</criterion>
+    <criterion>`RecordNavigationModalShell` unchanged; `RichFilePreviewDialog` still works.</criterion>
+    <criterion>Build passes; type checks clean; tests green.</criterion>
+    <criterion>Grep `src/` for `SmartTodoModal` returns 0 matches (no orphan imports).</criterion>
+    <criterion>Quality gates: code-review + adr-check clean (FULL rigor).</criterion>
+  </acceptance-criteria>
+</task>

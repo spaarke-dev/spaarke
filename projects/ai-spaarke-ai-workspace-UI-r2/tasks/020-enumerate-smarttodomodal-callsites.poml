@@ -1,0 +1,50 @@
+<task id="R2-020" project="ai-spaarke-ai-workspace-UI-r2">
+  <metadata>
+    <title>Enumerate all SmartTodoModal callsites</title>
+    <status>not-started</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <phase>3</phase>
+    <tags>audit,smarttodomodal,iframe-retirement,typescript</tags>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+FR-12: Enumerate every production callsite that opens `SmartTodoModal` today. Document in `notes/smart-todo-modal-callsites.md` with file:line references and the calling context (what triggered the open — button click, ribbon, keyboard shortcut, etc.).
+
+Preliminary count from design.md §9.2: 2–3 callsites. If actual count is materially higher (>5) OR any callsite has substantive business logic beyond "open the To Do" that requires preservation, escalate to project owner before task 021.
+  </prompt>
+
+  <role>Codebase auditor / developer familiar with LegalWorkspace and SmartTodo.</role>
+
+  <goal>
+`notes/smart-todo-modal-callsites.md` lists every SmartTodoModal callsite with file:line + calling context. Summary indicates whether task 021 migration is straightforward (all callsites are simple opens) or requires preservation logic.
+  </goal>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-spaarke-ai-workspace-UI-r2/spec.md</file>
+      <file>projects/ai-spaarke-ai-workspace-UI-r2/CLAUDE.md</file>
+      <file>projects/ai-spaarke-ai-workspace-UI-r2/notes/researcher-iframe-main-aspx-2026-07-01.md</file>
+      <file>src/solutions/SmartTodo/src/SmartTodoModal.tsx</file>
+      <file>src/solutions/SmartTodo/src/hooks/useLaunchContext.ts</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Grep `src/` for `SmartTodoModal` and `useLaunchContext`.</step>
+    <step>Categorize each match: import statement (skip) vs. actual open call (record).</step>
+    <step>For each real open callsite: file:line + surrounding function or component name.</step>
+    <step>Note whether the caller has additional logic that must be preserved when swapping to `navigateTo`.</step>
+    <step>Write `notes/smart-todo-modal-callsites.md` with the table + migration plan.</step>
+    <step>If any callsite requires preservation logic beyond trivial replacement, flag for owner review before task 021.</step>
+  </steps>
+
+  <tools>Grep · Read · Write</tools>
+
+  <acceptance-criteria>
+    <criterion>`notes/smart-todo-modal-callsites.md` exists.</criterion>
+    <criterion>Every real SmartTodoModal open callsite listed with file:line + context.</criterion>
+    <criterion>Migration complexity assessment included.</criterion>
+    <criterion>Escalation flagged if any callsite is non-trivial.</criterion>
+  </acceptance-criteria>
+</task>
