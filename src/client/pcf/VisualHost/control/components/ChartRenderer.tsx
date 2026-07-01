@@ -353,13 +353,21 @@ export const ChartRenderer: React.FC<IChartRendererProps> = ({
         fieldValue: dp.fieldValue,
       }));
 
+      // v1.4.24 — title now honors the PCF `showTitle` prop AND hostRenderedTitle
+      // (previously only respected `optionsjson.showTitle`, causing two titles
+      // to render when CardChrome was showing its own).
+      const calendarShowTitle = showTitlePcf !== undefined ? showTitlePcf : config.showTitle !== false;
+
       return (
         <CalendarVisual
           events={events}
-          title={config.showTitle !== false ? sprk_name : undefined}
+          title={hostRenderedTitle || !calendarShowTitle ? undefined : sprk_name}
           onDrillInteraction={onDrillInteraction}
           drillField={drillField}
           showNavigation={config.showNavigation !== false}
+          chartDefinition={chartDefinition}
+          webApi={webApi}
+          contextRecordId={contextRecordId}
         />
       );
     }

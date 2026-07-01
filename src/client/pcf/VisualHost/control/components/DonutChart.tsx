@@ -82,12 +82,47 @@ const useStyles = makeStyles({
     justifyContent: 'center',
     alignItems: 'center',
   },
-  placeholder: {
+  // Empty/zero/null state: faded 3-section donut ring sized to match the real
+  // donut. Rendered inside the same chartWrapper so the placeholder occupies
+  // the exact same location and dimensions as the data version.
+  placeholderRingWrapper: {
+    position: 'relative',
     display: 'flex',
     alignItems: 'center',
     justifyContent: 'center',
-    height: '100%',
+  },
+  // v1.4.21 — text on a single line, placed at 40% from the left margin of
+  // the card (UAT alignment per donut + HSBar consistency).
+  placeholderRingText: {
     color: tokens.colorNeutralForeground3,
+    fontFamily: '"Segoe UI", system-ui, sans-serif',
+    fontSize: '14px',
+    lineHeight: '18px',
+    textAlign: 'left',
+    whiteSpace: 'nowrap',
+  },
+  // Container that positions the placeholder text at exactly 40% from the
+  // left edge of the card. Used in both legend and standard layouts so the
+  // text alignment is consistent regardless of donut placement.
+  placeholderTextRow: {
+    width: '100%',
+    paddingLeft: '40%',
+    boxSizing: 'border-box',
+    display: 'flex',
+    alignItems: 'center',
+  },
+  // v1.4.22 — relative-positioned wrapper that lets the empty-state text
+  // float absolutely at left:40%, vertically centered with the donut row.
+  placeholderOverlayWrapper: {
+    position: 'relative',
+    width: '100%',
+  },
+  placeholderTextAbsolute: {
+    position: 'absolute',
+    left: '40%',
+    top: '50%',
+    transform: 'translateY(-50%)',
+    pointerEvents: 'none',
   },
   // v1.4.4 — placement-driven container styles. One of these is selected by
   // `effectiveLegend.placement` at render time. All produce a CSS grid with
@@ -392,12 +427,126 @@ export const DonutChart: React.FC<IDonutChartProps> = ({
     }
   };
 
-  if (!data || data.length === 0) {
+  // v1.4.19 — fixed arc thickness for donut and empty-state placeholder.
+  // Pre-computed here so the empty-state path can render at the same
+  // chartSize as the data path (preserves layout location + size parity).
+  // v1.4.23 — 50% reduction (26 → 13) per UAT after v1.4.22 looked too chunky.
+  const ARC_THICKNESS_PX = 13;
+  // v1.4.22 — Fluent's @fluentui/react-charting DonutChart unconditionally
+  // subtracts LEGEND_CONTAINER_HEIGHT (40px) from the passed `height` to
+  // derive `_height`, even when `hideLegend` is true. The outer radius is
+  // then computed as `Math.min(_width, _height) / 2`. Result: the donut is
+  // 40px shorter than the passed size and our innerRadius calc must use the
+  // reduced effective outer radius — otherwise the visible arc collapses to
+  // a few pixels. See node_modules/@fluentui/react-charting/.../DonutChart.base.js.
+  const FLUENT_LEGEND_RESERVED_PX = 40;
+  const fluentOuterRadius = (size: number): number => Math.min(size, size - FLUENT_LEGEND_RESERVED_PX) / 2;
+  const standardChartSize = Math.round(Math.min(containerWidth, height) * 0.75);
+
+  // v1.4.20 — pre-resolve legend layout so the empty-state placeholder can use
+  // the same placement grid as the data path. Without this, a chart with a
+  // right-aligned legend would render its placeholder centered, but its real
+  // donut on the left — confusing layout shift when data arrives.
+  const emptyDonutLayout = cardConfig?.donutLayout ?? 'standard';
+  const emptyEffectiveLegend = resolveLegendConfig(cardConfig?.legend, emptyDonutLayout, cardConfig?.showBreakdownRows);
+
+  // Empty/zero/null detection — render a faded 3-section donut placeholder when:
+  //   - no data points, OR
+  //   - every point's source field was null (isNull flag from FieldPivotService), OR
+  //   - every point's value is null/undefined/0 (no slice would draw anyway).
+  // Treating all-zero as empty matches user expectation: a donut with total=0
+  // produces no visible arc, so a placeholder reads better than an invisible ring.
+  const hasNoPoints = !data || data.length === 0;
+  const allNull = !hasNoPoints && data.every(dp => dp.isNull === true);
+  const allZeroOrNullValues = !hasNoPoints && data.every(dp => dp.value == null || dp.value === 0);
+  if (hasNoPoints || allNull || allZeroOrNullValues) {
+    // v1.4.22 — placeholder ring size MUST match Fluent's effective rendered
+    // diameter (which is 40px shorter than the passed size). Without this
+    // compensation the placeholder is ~40px larger than the data version.
+    const phContainerSize = emptyEffectiveLegend
+      ? (() => {
+          const placement = emptyEffectiveLegend.placement;
+          const widthFraction = placement === 'top' || placement === 'bottom' ? 0.75 : 0.45;
+          return Math.round(Math.max(90, Math.min(containerWidth * widthFraction, height) * 0.75));
+        })()
+      : standardChartSize;
+    const phSize = Math.max(60, 2 * fluentOuterRadius(phContainerSize));
+    const phCenter = phSize / 2;
+    const phRadius = Math.max(8, phCenter - ARC_THICKNESS_PX / 2);
+    const phCirc = 2 * Math.PI * phRadius;
+    const phGapPx = 6;
+    const phSegLen = Math.max(0, (phCirc - 3 * phGapPx) / 3);
+
+    const placeholderRingNode = (
+      <div className={styles.placeholderRingWrapper} style={{ width: phSize, height: phSize }}>
+        <svg width={phSize} height={phSize} aria-hidden={true}>
+          <g opacity={0.5}>
+            {[0, 1, 2].map(i => (
+              <circle
+                key={i}
+                cx={phCenter}
+                cy={phCenter}
+                r={phRadius}
+                fill="none"
+                stroke={tokens.colorNeutralStroke2}
+                strokeWidth={ARC_THICKNESS_PX}
+                strokeDasharray={`${phSegLen} ${phCirc}`}
+                transform={`rotate(${-90 + i * 120} ${phCenter} ${phCenter})`}
+              />
+            ))}
+          </g>
+        </svg>
+      </div>
+    );
+
+    // v1.4.22 — text positioned absolutely at left:40%, vertically centered
+    // with the ring. Avoids the v1.4.21 "text at bottom of card" bug where
+    // it landed below the grid container. Single line, Segoe UI 14px.
+    const placeholderTextOverlay = (
+      <Text className={styles.placeholderRingText} aria-live="polite">
+        No data available for this measure
+      </Text>
+    );
+
+    // If the chart def lays the legend on a side, mirror that grid: placeholder
+    // ring sits in the donut cell (same on-screen location as the data path),
+    // legend cell stays empty, and the text overlay is absolutely positioned
+    // at 40%-from-left, vertically centered with the donut row.
+    if (emptyEffectiveLegend) {
+      const placement = emptyEffectiveLegend.placement;
+      const layoutClass =
+        placement === 'right'
+          ? styles.layoutRight
+          : placement === 'left'
+            ? styles.layoutLeft
+            : placement === 'top'
+              ? styles.layoutTop
+              : placement === 'bottom'
+                ? styles.layoutBottom
+                : styles.layoutHidden;
+      return (
+        <div className={styles.container} ref={containerRef}>
+          {title && <Text className={styles.title}>{title}</Text>}
+          <div className={styles.placeholderOverlayWrapper}>
+            <div className={layoutClass}>
+              {(placement === 'left' || placement === 'top') && <div aria-hidden />}
+              <div className={styles.donutCell}>{placeholderRingNode}</div>
+              {(placement === 'right' || placement === 'bottom') && <div aria-hidden />}
+            </div>
+            <div className={styles.placeholderTextAbsolute}>{placeholderTextOverlay}</div>
+          </div>
+        </div>
+      );
+    }
+
+    // Standard layout: ring sits in chartWrapper, text overlay at left:40%,
+    // vertically centered with the ring.
     return (
-      <div className={styles.container}>
+      <div className={styles.container} ref={containerRef}>
         {title && <Text className={styles.title}>{title}</Text>}
-        <div className={styles.placeholder}>
-          <Text>No data available</Text>
+        <div className={styles.placeholderOverlayWrapper}>
+          <div className={styles.chartWrapper}>{placeholderRingNode}</div>
+          <div className={styles.placeholderTextAbsolute}>{placeholderTextOverlay}</div>
         </div>
       </div>
     );
@@ -470,10 +619,13 @@ export const DonutChart: React.FC<IDonutChartProps> = ({
     // container width so the legend has room. For top/bottom, take more width
     // (75%) since the legend stacks vertically. Always honor `height` cap.
     const widthFraction = placement === 'top' || placement === 'bottom' ? 0.75 : 0.45;
-    const donutSize = Math.max(120, Math.min(containerWidth * widthFraction, height));
-    // v1.4.6 — center font 28% of donut diameter (was 36% in v1.4.2),
-    // capped at 72px. UAT feedback: smaller letter reads better at glance.
-    const centerFontSize = `${Math.min(Math.round(donutSize * 0.28), 72)}px`;
+    // v1.4.18 — donut visual sized 75% of the computed size (25% reduction per UAT).
+    // Min bound also scaled 90 (was 120) so very narrow containers stay proportional.
+    const donutSize = Math.round(Math.max(90, Math.min(containerWidth * widthFraction, height) * 0.75));
+    // v1.4.23 — center font fixed at 32px per UAT (was: 28% of donut diameter
+    // capped at 72px). Letter-grade visual now reads consistently across all
+    // donut sizes instead of scaling with the chart.
+    const centerFontSize = '32px';
     const showSwatch =
       effectiveLegend.itemFormat === 'swatchLabelValue' || effectiveLegend.itemFormat === 'swatchLabel';
     const showValue = effectiveLegend.itemFormat === 'swatchLabelValue' || effectiveLegend.itemFormat === 'labelValue';
@@ -489,6 +641,10 @@ export const DonutChart: React.FC<IDonutChartProps> = ({
               ? styles.layoutBottom
               : styles.layoutHidden;
 
+    // v1.4.22 — innerRadius derived from Fluent's effective outer radius
+    // (which accounts for the unconditional 40px legend-row subtraction).
+    // hideLabels=true so Fluent doesn't reserve the 80×40 slice-label margin.
+    const legendInnerRadiusPx = Math.max(8, fluentOuterRadius(donutSize) - ARC_THICKNESS_PX);
     const donutNode = (
       <div className={styles.donutCell}>
         <FluentDonutChart
@@ -496,8 +652,9 @@ export const DonutChart: React.FC<IDonutChartProps> = ({
           width={donutSize}
           height={donutSize}
           hideLegend
+          hideLabels
           hideTooltip={false}
-          innerRadius={innerRadius * (donutSize / 2)}
+          innerRadius={legendInnerRadiusPx}
           {...chartProps}
         />
         {centerOverlayValue !== undefined && (
@@ -597,12 +754,11 @@ export const DonutChart: React.FC<IDonutChartProps> = ({
     );
   }
 
-  // ===== standard layout (DEFAULT — must be byte-identical to pre-FR-VH-01) =====
-  // Note: when colorThresholds/cardConfig are unset, the only behavior change
-  // in the standard path is that `centerValueText` falls through to the same
-  // `total.toLocaleString()` as before. The chartData color fallback chain
-  // also returns the same palette color when `thresholdColor === undefined`.
-  const chartSize = Math.min(containerWidth, height);
+  // ===== standard layout =====
+  // v1.4.18 — donut visual sized 75% of container/height (25% reduction).
+  // v1.4.22 — innerRadius derived from Fluent's effective outer radius.
+  const chartSize = standardChartSize;
+  const innerRadiusPx = Math.max(8, fluentOuterRadius(chartSize) - ARC_THICKNESS_PX);
 
   return (
     <div className={styles.container} ref={containerRef}>
@@ -613,8 +769,9 @@ export const DonutChart: React.FC<IDonutChartProps> = ({
           width={chartSize}
           height={chartSize}
           hideLegend={!showLegend}
+          hideLabels
           hideTooltip={false}
-          innerRadius={innerRadius * (chartSize / 2)}
+          innerRadius={innerRadiusPx}
           valueInsideDonut={valueInside}
           {...chartProps}
         />
