@@ -422,10 +422,24 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       });
 
       if (!response.ok) {
+        // Try to extract ProblemDetails.detail so the banner surfaces the
+        // actual server-side reason (BFF puts exception name + message +
+        // TraceId in `detail`). Fall back to a generic message if the body
+        // isn't JSON.
+        let detail = '';
+        try {
+          const problem = (await response.clone().json()) as {
+            detail?: string;
+            title?: string;
+          };
+          detail = problem.detail ?? problem.title ?? '';
+        } catch {
+          detail = (await response.text().catch(() => '')).slice(0, 400);
+        }
         const msg =
           response.status === 403
-            ? 'You do not have permission to save this document.'
-            : `Failed to save document (HTTP ${response.status}).`;
+            ? `You do not have permission to save this document. ${detail}`.trim()
+            : `Failed to save document (HTTP ${response.status})${detail ? `: ${detail}` : ''}.`;
         dispatch({ kind: 'saveFailed', errorMessage: msg });
         return;
       }
