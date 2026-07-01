@@ -38,6 +38,17 @@ function resolveSharedLibDeps(): import("vite").Plugin {
     // R4 task 020 (2026-06-10): @spaarke/smart-todo-components hoist for the
     // LegalWorkspace todo section + future SpaarkeAi Direct widget (Pattern D).
     path.resolve(__dirname, "../../client/shared/Spaarke.SmartTodo.Components/src"),
+    // spaarkeai-compose-r1 task 043 (2026-06-29): @spaarke/document-operations
+    // hosts the `useDocumentActions` hook (extracted from SemanticSearch in
+    // task 031). Compose toolbar consumes Open-in-Word handlers via this lib
+    // per FR-12 + FR-13.
+    path.resolve(__dirname, "../../client/shared/Spaarke.DocumentOperations/src"),
+    // spaarkeai-compose-r1 task 042 (2026-06-29): @spaarke/compose-components
+    // hosts the TipTap-based ComposeEditor widget (task 045). ComposeWorkspace
+    // orchestrator (this task, lives in SpaarkeAi solution) imports the editor
+    // from this shared lib per W4 architectural lock (shared lib = reusable
+    // editor; solution = workspace-specific surfaces).
+    path.resolve(__dirname, "../../client/shared/Spaarke.Compose.Components/src"),
     // Round 4 Fix 4 (2026-05-21): @spaarke/legal-workspace is aliased to the
     // LegalWorkspace solution source so SpaarkeAi can embed the full
     // workspace experience as a tab widget without copying section factories.
@@ -108,6 +119,17 @@ export default defineConfig({
         // R4 task 020 (2026-06-10): transpile Spaarke.SmartTodo.Components source.
         path.resolve(__dirname, "../../client/shared/Spaarke.SmartTodo.Components/src/**/*.tsx"),
         path.resolve(__dirname, "../../client/shared/Spaarke.SmartTodo.Components/src/**/*.ts"),
+        // spaarkeai-compose-r1 task 043 (2026-06-29): transpile
+        // Spaarke.DocumentOperations source so SpaarkeAi can consume the
+        // `useDocumentActions` hook (FR-12 / FR-13).
+        path.resolve(__dirname, "../../client/shared/Spaarke.DocumentOperations/src/**/*.tsx"),
+        path.resolve(__dirname, "../../client/shared/Spaarke.DocumentOperations/src/**/*.ts"),
+        // spaarkeai-compose-r1 task 042 (2026-06-29): transpile Spaarke.Compose.Components
+        // source so SpaarkeAi can mount ComposeEditor (task 045) via the
+        // @spaarke/compose-components alias. Required for ComposeWorkspace
+        // orchestrator (FR-02 / FR-03).
+        path.resolve(__dirname, "../../client/shared/Spaarke.Compose.Components/src/**/*.tsx"),
+        path.resolve(__dirname, "../../client/shared/Spaarke.Compose.Components/src/**/*.ts"),
         // Round 4 Fix 4 (2026-05-21): transpile LegalWorkspace source so
         // SpaarkeAi can embed LegalWorkspaceApp via the @spaarke/legal-workspace alias.
         path.resolve(__dirname, "../LegalWorkspace/src/**/*.tsx"),
@@ -146,6 +168,18 @@ export default defineConfig({
       // LegalWorkspace todo section (Pattern D dual-use).
       "@spaarke/smart-todo-components/src": path.resolve(__dirname, "../../client/shared/Spaarke.SmartTodo.Components/src"),
       "@spaarke/smart-todo-components": path.resolve(__dirname, "../../client/shared/Spaarke.SmartTodo.Components/src"),
+      // spaarkeai-compose-r1 task 043 (2026-06-29): @spaarke/document-operations
+      // hosts the `useDocumentActions` hook (extracted from SemanticSearch in
+      // task 031 — see notes/spikes/spike-1-tiptap-docx-roundtrip.md §4.5).
+      // FR-12 mandates Compose toolbar Open-in-Word buttons reuse this hook.
+      "@spaarke/document-operations/src": path.resolve(__dirname, "../../client/shared/Spaarke.DocumentOperations/src"),
+      "@spaarke/document-operations": path.resolve(__dirname, "../../client/shared/Spaarke.DocumentOperations/src"),
+      // spaarkeai-compose-r1 task 042 (2026-06-29): @spaarke/compose-components
+      // hosts the TipTap-based ComposeEditor widget (task 045). ComposeWorkspace
+      // orchestrator imports ComposeEditor from this lib. The lib also re-exports
+      // docxBridge helpers for advanced consumers / R2 tests.
+      "@spaarke/compose-components/src": path.resolve(__dirname, "../../client/shared/Spaarke.Compose.Components/src"),
+      "@spaarke/compose-components": path.resolve(__dirname, "../../client/shared/Spaarke.Compose.Components/src"),
       // R2.1 hotfix (2026-06-19): @spaarke/daily-briefing-components hosts the
       // full DailyBriefingApp + the new createDailyBriefingRegistration factory
       // (Fix A retired the narrative-only DailyBriefingSection in

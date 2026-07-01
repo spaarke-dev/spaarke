@@ -26,6 +26,11 @@ const config: Config = {
     '^@spaarke/ai-widgets/(.*)$': '<rootDir>/../../client/shared/Spaarke.AI.Widgets/src/$1',
     '^@spaarke/ui-components$': '<rootDir>/../../client/shared/Spaarke.UI.Components/src/index.ts',
     '^@spaarke/auth$': '<rootDir>/../../client/shared/Spaarke.AI.Widgets/src/__mocks__/@spaarke/auth.ts',
+    // spaarkeai-compose-r1 task 043: `useDocumentActions` hook lives in
+    // @spaarke/document-operations (extracted from SemanticSearch in task 031).
+    // Map to source so ComposeToolbar tests can mock the hook directly.
+    '^@spaarke/document-operations$': '<rootDir>/../../client/shared/Spaarke.DocumentOperations/src/index.ts',
+    '^@spaarke/document-operations/(.*)$': '<rootDir>/../../client/shared/Spaarke.DocumentOperations/src/$1',
     '^@spaarke/ai-context$': '<rootDir>/../../client/shared/Spaarke.AI.Context/src/index.ts',
     '^@spaarke/ai-outputs$': '<rootDir>/../../client/shared/Spaarke.AI.Outputs/src/index.ts',
     // d3-force ships pure ESM — ts-jest's CommonJS transform can't consume it.

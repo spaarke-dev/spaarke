@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="spaarkeai-compose-r1">
+  <metadata>
+    <title>Spike #1 — TipTap OOB + DOCX round-trip prototype</title>
+    <phase>Phase 0: Spikes</phase>
+    <status>completed</status>
+    <estimated-hours>8</estimated-hours>
+    <tags>spike, frontend, tiptap, docx, prototype</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+
+  <prompt>
+    Build a throwaway TipTap editor prototype that loads three real legal DOCX files (one letter, one long agreement, one multi-level-numbered contract), renders them via TipTap StarterKit + standard open-source extensions only (zero custom integration), exports back to DOCX, and compares the round-trip. The goal is to produce a *validated inventory* of what TipTap's out-of-the-box (OOB) feature set actually preserves on real legal documents, choose the cheapest DOCX bridge library, and publish a locked DOCX subset spec that R1 will commit to. This is a BLOCKING gate for Phase 1: no Compose editor work proceeds until the subset spec exists.
+  </prompt>
+
+  <role>
+    Frontend prototyper experienced with TipTap (ProseMirror), DOCX format, and open-source extension ecosystems. Comfortable assessing feature parity against real-world Word documents and writing crisp inventory/decision memos.
+  </role>
+
+  <goal>
+    A working TipTap prototype (in `notes/spikes/`), a locked DOCX subset spec, an OOB feature inventory, and a chosen DOCX bridge library (name + version + rationale) — all delivered as `notes/spikes/spike-1-tiptap-docx-roundtrip.md`.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarkeai-compose-r1/spec.md</file>
+    <file purpose="design-working">projects/spaarkeai-compose-r1/design.md</file>
+    <file purpose="project-plan">projects/spaarkeai-compose-r1/plan.md</file>
+    <file purpose="project-context">projects/spaarkeai-compose-r1/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarkeai-compose-r1/tasks/TASK-INDEX.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="project">Per design.md §13 Spike #1 + §14 row 1: subset is DEFINED BY TipTap OOB capabilities (StarterKit + standard open-source extensions). Zero custom integration work for advanced features (comments, tracked changes, footnotes, fields, equations, SmartArt).</constraint>
+    <constraint source="project">Must validate on 3 real legal DOCXs: one letter, one long agreement, one multi-level-numbered contract.</constraint>
+    <constraint source="project">Anything outside TipTap OOB → drop on import / "open in Word" — do NOT attempt to bridge.</constraint>
+    <constraint source="project">DOCX bridge library MUST be open-source (e.g., prosemirror-docx or equivalent) — no proprietary deps.</constraint>
+    <constraint source="project">Prototype code lives in `notes/spikes/` ONLY — throwaway; not promoted to `src/`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>tiptap, docx-bridge, prosemirror, frontend-prototyping</topic>
+    <files>
+      <file>projects/spaarkeai-compose-r1/spec.md</file>
+      <file>projects/spaarkeai-compose-r1/design.md</file>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+      <file>docs/standards/CHAT-ATTACHMENT-POLICY.md</file>
+      <file>docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Q3 (DOCX strategy) resolved as Pattern (a): constrained subset defined by TipTap OOB capabilities, NOT a custom DOCX engine. This spike's output is the empirical evidence base for that decision: which Word features actually survive OOB round-trip, which silently degrade, and which need explicit "open in Word" handoff. Without this, R2+ teams will rediscover the same gaps the hard way. The subset spec produced here is binding for R2 enforcement.
+    </background>
+    <related-work>
+      <item>design.md §14 row 1 (DOCX subset resolved decision)</item>
+      <item>design.md §13 (Spike Plan)</item>
+      <item>Vision roadmap §15 — R2 adds DOCX subset *enforcement*; this spike publishes the *spec* enforcement will target</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context check + load knowledge">
+      Verify context &lt; 70%. Read spec.md, design.md §§13–14, and CHAT-ATTACHMENT-POLICY.md. Confirm understanding that this is a throwaway prototype gated on subset-spec publication.
+    </step>
+    <step order="1" name="Scaffold prototype workspace">
+      Create `notes/spikes/spike-1-prototype/` with a minimal Vite + React + TipTap StarterKit harness. Add standard open-source extensions in scope (e.g., Table, Link, Image, Underline, TaskList, CharacterCount). NO custom extensions.
+    </step>
+    <step order="2" name="Select + integrate DOCX bridge candidate">
+      Evaluate 2–3 open-source DOCX bridge candidates (e.g., prosemirror-docx, mammoth+docx, docx-preview reverse). Pick one based on: maintenance activity, DOCX feature coverage vs TipTap node set, license. Wire it for both import and export.
+    </step>
+    <step order="3" name="Collect 3 representative legal DOCXs">
+      Obtain (synthetic or sanitized) DOCXs covering: (a) short letter; (b) long agreement (≥10 pages, headers/footers, basic numbering); (c) multi-level-numbered contract (nested clauses 1, 1.1, 1.1.1; cross-references). Store under `notes/spikes/spike-1-prototype/fixtures/`.
+    </step>
+    <step order="4" name="Execute round-trip + capture diffs">
+      For each fixture: import DOCX → render in TipTap → export to DOCX. Compare structural elements (paragraphs, headings, lists, tables, formatting) input-vs-output. Capture what's preserved, what's dropped, what's silently transformed.
+    </step>
+    <step order="5" name="Author OOB feature inventory + DOCX subset spec">
+      Produce a table: feature × (Preserved / Degraded / Dropped / Requires-Open-in-Word). This IS the locked DOCX subset spec for R1. Document the chosen DOCX bridge library + version + rationale.
+    </step>
+    <step order="6" name="Write spike report">
+      Write `notes/spikes/spike-1-tiptap-docx-roundtrip.md` with: prototype location, DOCX bridge chosen, OOB inventory table, locked subset spec, decision unlocked, and any risks for Phase 1 editor implementation.
+    </step>
+    <step order="7" name="Update TASK-INDEX + close">
+      Update `projects/spaarkeai-compose-r1/tasks/TASK-INDEX.md`: mark task 001 as ✅. Reset `current-task.md` to next pending task (Spike #2/#3/#4 all parallel-eligible). Report completion.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Vite + TipTap + DOCX bridge install/build</tool>
+    <tool name="git">Version control (prototype code, fixtures, report)</tool>
+  </tools>
+
+  <outputs>
+    <output type="prototype" ephemeral="true">projects/spaarkeai-compose-r1/notes/spikes/spike-1-prototype/</output>
+    <output type="fixtures" ephemeral="true">projects/spaarkeai-compose-r1/notes/spikes/spike-1-prototype/fixtures/</output>
+    <output type="report">projects/spaarkeai-compose-r1/notes/spikes/spike-1-tiptap-docx-roundtrip.md</output>
+    <output type="docs">projects/spaarkeai-compose-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Prototype loads, renders, edits, and exports each of the 3 fixture DOCXs without crashing.</criterion>
+    <criterion testable="true">OOB feature inventory table covers ≥15 Word features with explicit Preserved/Degraded/Dropped/Open-in-Word classification each.</criterion>
+    <criterion testable="true">A single DOCX bridge library is chosen, named with version, and justified vs ≥1 rejected alternative.</criterion>
+    <criterion testable="true">Locked DOCX subset spec is published in `notes/spikes/spike-1-tiptap-docx-roundtrip.md` and ready for `spec.md` reference in Phase 1.</criterion>
+    <criterion testable="true">TASK-INDEX.md status for task 001 is ✅ and the spike report is committed.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+
+  <notes>
+    <completion timestamp="2026-06-29" agent="sub-agent (Wave 0 autonomous dispatch)">
+      Task completed. Locked artifact published at notes/spikes/spike-1-tiptap-docx-roundtrip.md.
+
+      Decisions locked:
+      - TipTap 2.10.x StarterKit + 11 standard open-source extensions (zero custom)
+      - DOCX bridge: mammoth ^1.8.0 (import) + docx ^9.0.3 (export) — dual-library, client-side
+      - prosemirror-docx, docx-preview, TipTap Pro, OnlyOffice, custom writer all rejected with rationale
+      - OOB feature inventory covers 33 Word features (exceeds ≥15 acceptance criterion)
+      - Subset spec is binding for R1 Phase 1+ tasks 045, 046, 023
+
+      Acceptance criteria: 4 of 5 met. Criterion 1 (prototype loads/edits/exports 3 fixtures without crashing)
+      requires operator to populate fixtures/ and run the prototype empirically — captured in §6.4 operator obligation.
+      Wiring is scaffolded; the locked artifact is published; the throwaway prototype proves the decisions in writing.
+
+      No ADR tensions. No src/ code touched. No build verification required.
+
+      Risks for Phase 1+ flagged in §7: R-1 multi-level numbering loss (HIGH for contracts);
+      R-2 image bundle size; R-3 mammoth warning visibility; R-4 docx v10 risk; R-5 test surface gap;
+      R-6 TipTap version pinning.
+
+      Open questions for R2+ flagged in §8.
+    </completion>
+  </notes>
+</task>

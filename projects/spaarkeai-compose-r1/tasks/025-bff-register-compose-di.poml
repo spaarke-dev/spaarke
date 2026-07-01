@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="025" project="spaarkeai-compose-r1">
+  <metadata>
+    <title>BFF — Register Compose services + map endpoint group in Program.cs</title>
+    <phase>Phase 2: BFF Endpoints + Services</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <tags>bff-api, backend, di, config</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task tags include 'bff-api' (code implementation)</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Mutates Program.cs (shared file); must run after endpoints (024) exist.</parallel-reason>
+    <dependencies>024</dependencies>
+    <blocks>027</blocks>
+  </metadata>
+
+  <prompt>
+    Wire the three Compose services + endpoints into `Program.cs` via a focused `AddComposeModule()` DI extension and a `MapComposeEndpoints()` route registration. Registrations MUST be unconditional (no feature flag) to match endpoints' unconditional mapping (avoids RB-T028 asymmetric-registration anti-pattern per bff-extensions.md §F.1). Follow ADR-010 DI minimalism — one focused `Add{Feature}Module()` extension, not a flat blob in `Program.cs`.
+  </prompt>
+
+  <role>
+    Senior .NET developer expert in ASP.NET Core DI, the Spaarke BFF feature-module convention (per ADR-010), and the bff-extensions.md asymmetric-registration anti-pattern. Comfortable making targeted, additive `Program.cs` edits.
+  </role>
+
+  <goal>
+    `Program.cs` calls `builder.Services.AddComposeModule()` (unconditional) and `app.MapComposeEndpoints()` (unconditional). The new `Infrastructure/Modules/ComposeModule.cs` (or similar location matching existing module convention) registers `IComposeService`, `IComposeDocumentService`, `IComposeSessionService` as scoped services. BFF builds clean; smoke-test endpoints respond.
+  </prompt>
+
+  <context>
+    <background>
+      bff-extensions.md §C #5 mandates "register through a `Map{Feature}Endpoints` extension method," and §F.1 codifies the unconditional-DI/unconditional-mapping rule from RB-T028-03/04/05/06. This task wires both. ADR-010 + plan.md §3 Key Technical Decisions reinforce: feature-module DI, not a flat blob.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Program.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Infrastructure/Modules/ComposeModule.cs (NEW)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-010">DI minimalism — register through focused `AddComposeModule()` extension, NOT a flat blob of registrations in `Program.cs`.</constraint>
+    <constraint source="ADR-013">Compose services must register without pulling AI internals into their dependency graph. Verify by static-scan: no `IOpenAiClient` / `IPlaybookService` in the three Compose service constructors (only PublicContracts facade types if AI is needed — and only the endpoint, not the services, is allowed to inject those).</constraint>
+    <constraint source="project">Registrations MUST be unconditional (no `if (flag)` block). Endpoints map unconditionally in task 024; DI MUST match (bff-extensions.md §F.1).</constraint>
+    <constraint source="project">Service lifetimes: `Scoped` for IComposeService / IComposeDocumentService / IComposeSessionService (match BFF convention — per-request scope inherits auth context).</constraint>
+  </constraints>
+
+  <justification>
+    <existing>`src/server/api/Sprk.Bff.Api/Program.cs` and existing feature-module extensions under `Infrastructure/Modules/` are the established convention. No existing module bundles upload+load+save+promote+session-binding for an editor host.</existing>
+    <extension>Yes for `Program.cs` (two new lines added — pure extension). New for `ComposeModule.cs` because Compose is a discrete feature surface per the spec; matches ADR-010 feature-module convention.</extension>
+    <cost-of-doing-nothing>FR-21 endpoints throw at runtime — services are not in DI; HTTP requests would fail with `InvalidOperationException` on first hit.</cost-of-doing-nothing>
+  </justification>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-compose-r1/spec.md</file>
+      <file>projects/spaarkeai-compose-r1/plan.md</file>
+      <file>projects/spaarkeai-compose-r1/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ConsumerTypes.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ConsumerRoutingService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatSessionManager.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context check + load knowledge">Verify context &lt; 70%. Load Program.cs, an existing `*Module.cs` for convention, and bff-extensions.md §§A,C,F.1.</step>
+    <step order="1" name="Create ComposeModule">Create `Infrastructure/Modules/ComposeModule.cs` with `public static IServiceCollection AddComposeModule(this IServiceCollection services)`. Register: `AddScoped&lt;IComposeService, ComposeService&gt;()`, `AddScoped&lt;IComposeDocumentService, ComposeDocumentService&gt;()`, `AddScoped&lt;IComposeSessionService, ComposeSessionService&gt;()`. Return services.</step>
+    <step order="2" name="Wire Program.cs DI">Add `builder.Services.AddComposeModule();` at the appropriate position in `Program.cs` (near other feature-module registrations). Unconditional — no `if (flag)` wrapper.</step>
+    <step order="3" name="Wire Program.cs endpoint mapping">Add `app.MapComposeEndpoints();` at the appropriate position (with other `Map*Endpoints` calls). Unconditional.</step>
+    <step order="4" name="Static-scan for AI-internal leakage">Per bff-extensions.md §F.1 recipe, grep Compose service constructors for `IOpenAiClient` / `IPlaybookService` / direct AI-internal types. None permitted.</step>
+    <step order="5" name="Build BFF">`dotnet build src/server/api/Sprk.Bff.Api/` — must be clean.</step>
+    <step order="6" name="Smoke-run host">Start the BFF host locally (or via dotnet run) and verify the host boots without DI-resolution errors. Hit an unauthenticated endpoint and confirm 401 (verifies endpoints are mapped + auth works).</step>
+    <step order="7" name="Measure publish-size impact">`dotnet publish -c Release src/server/api/Sprk.Bff.Api/`; report compressed delta vs ~45.65 MB baseline (expect ≤+0.05 MB — pure DI wiring).</step>
+    <step order="8" name="CVE check + update TASK-INDEX">`dotnet list package --vulnerable --include-transitive` — must show no new HIGH-severity CVE. Update `tasks/TASK-INDEX.md`: change task 025 status to ✅. Reset `current-task.md`.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build, run, publish, CVE scan</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/Modules/ComposeModule.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Program.cs (modified)</output>
+    <output type="docs">projects/spaarkeai-compose-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`AddComposeModule()` registers the three Compose services as Scoped, unconditionally.</criterion>
+    <criterion testable="true">`Program.cs` calls `AddComposeModule()` and `MapComposeEndpoints()` without any feature-flag conditional.</criterion>
+    <criterion testable="true">Host boots without DI-resolution errors; unauthenticated `/api/compose/*` returns 401.</criterion>
+    <criterion testable="true">Static scan confirms no AI-internal types injected into Compose service constructors.</criterion>
+    <criterion testable="true">BFF builds clean; publish-size delta ≤+0.3 MB; no new HIGH CVE.</criterion>
+    <criterion testable="true">TASK-INDEX.md status for task 025 is ✅.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+
+  <notes>
+    <completion-summary date="2026-06-29">
+      <files-modified>
+        <file path="src/server/api/Sprk.Bff.Api/Infrastructure/DI/ComposeModule.cs" action="created">
+          New focused feature-module extension. Registers IComposeService, IComposeDocumentService,
+          IComposeSessionService as Scoped, UNCONDITIONALLY. Convention matches OfficeModule precedent
+          (Infrastructure/DI/, not Infrastructure/Modules/ — POML wording was flexible per "or similar
+          location matching existing module convention").
+        </file>
+        <file path="src/server/api/Sprk.Bff.Api/Program.cs" action="modified">
+          +8 lines: builder.Services.AddComposeModule() inserted after AddAgentModule(). UNCONDITIONAL.
+          Comment cites bff-extensions.md §F.1 + RB-T028-03/04/05/06 + R1 no-feature-gates.
+        </file>
+        <file path="src/server/api/Sprk.Bff.Api/Infrastructure/DI/EndpointMappingExtensions.cs" action="modified">
+          +7 lines: app.MapComposeEndpoints() inserted in MapDomainEndpoints() after
+          MapDocumentOperationsEndpoints() per W3-024 recommendation. UNCONDITIONAL. Using directive
+          for Sprk.Bff.Api.Api namespace was already present (line 2).
+        </file>
+      </files-modified>
+      <build status="success" errors="0" warnings="18" delta-warnings="0-vs-baseline" />
+      <publish-size compressed-mb="45.39" delta-mb="≈0 (DI wiring only; no packages added)" baseline-mb="48.42" ceiling-mb="60" />
+      <test-status>
+        Compose-filtered test run: 84 passed / 0 failed / 0 skipped (W2-023 ComposeSessionService unit tests + W3-024 ComposeEndpoints integration-shaped tests; all WebApplicationFactory-based — exercise full DI graph).
+      </test-status>
+      <adr-compliance>
+        ADR-001 ✅ · ADR-008 ✅ · ADR-010 ✅ Scoped focused module · ADR-013 ✅ static-scan clean (no AI internals in Compose ctors) · ADR-019 ✅ · ADR-028 ✅ · ADR-032 N/A no feature gates · ADR-038 ✅ existing test coverage maintained. bff-extensions.md §F.1 symmetric (both DI + endpoints unconditional). No ADR tensions surfaced.
+      </adr-compliance>
+      <cve status="skipped" reason="No new package references added — pure code change. CVE check is a §10 #5 obligation for package additions only." />
+      <open-items>
+        - Task 027 (integration tests) — will verify full /api/compose/* surface end-to-end with the DI wired
+        - Task 060 (smoke test) — Compose vertical-slice readiness check now unblocked from BFF DI standpoint
+      </open-items>
+    </completion-summary>
+  </notes>
+</task>

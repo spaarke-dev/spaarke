@@ -1,0 +1,110 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="024" project="spaarkeai-compose-r1">
+  <metadata>
+    <title>BFF — Create ComposeEndpoints.cs (7 endpoints under /api/compose/)</title>
+    <phase>Phase 2: BFF Endpoints + Services</phase>
+    <status>completed</status>
+    <estimated-hours>6</estimated-hours>
+    <tags>bff-api, backend, endpoints, minimal-api</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task tags include 'bff-api' (code implementation)</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Consumes all 3 Compose services from tasks 021/022/023.</parallel-reason>
+    <dependencies>021,022,023</dependencies>
+    <blocks>025,027</blocks>
+  </metadata>
+
+  <prompt>
+    Create `Api/ComposeEndpoints.cs` exposing seven minimal-API endpoints under the `/api/compose/` route group: upload-to-SPE, load-document, save-document, promote-document, checkout, checkin, and dispatch-action. Each endpoint MUST `RequireAuthorization()` per ADR-008/ADR-028. The dispatch-action endpoint injects `IConsumerRoutingService` + `IInvokePlaybookAi` (PublicContracts facade only — refined ADR-013); all other endpoints delegate to the three Compose services. Endpoints map UNCONDITIONALLY (no feature flag) to match unconditional DI in task 025 — avoids the RB-T028-03/04/05/06 asymmetric-registration anti-pattern.
+  </prompt>
+
+  <role>
+    Senior .NET developer expert in ASP.NET Core Minimal API, endpoint filters, and the Spaarke BFF endpoint conventions. Familiar with `MapGroup` patterning, `Results.Problem` (RFC 7807) error returns, and the BFF's existing auth pipeline.
+  </role>
+
+  <goal>
+    `Api/ComposeEndpoints.cs` exists with `MapComposeEndpoints(this IEndpointRouteBuilder)` extension method that registers seven endpoints under `/api/compose/`. Each has `RequireAuthorization()`. All endpoints return 200/204 on happy path, 401 unauthenticated, 400 on bad input, 500/Problem on failure.
+  </goal>
+
+  <context>
+    <background>
+      FR-21 of spec.md enumerates the seven endpoints. The endpoint shape for dispatch-action (`POST /api/compose/action/{consumerType}`) was locked by Spike #4. Per CLAUDE.md §10 #6 and bff-extensions.md §F.1 + ADR-032, endpoints map unconditionally — there is NO feature gate in R1. The dispatch-action endpoint is where the refined ADR-013 facade rule materializes: `IConsumerRoutingService` + `IInvokePlaybookAi` injected, NEVER `IOpenAiClient`/`IPlaybookService`.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs (NEW)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-001">Minimal API only — use `MapGroup("/api/compose")` + `MapPost`/`MapGet`/etc. with explicit handlers. NO MVC controllers.</constraint>
+    <constraint source="ADR-008">Apply `RequireAuthorization()` (or endpoint filters) on every endpoint — NOT global middleware. Per spec NFR-08, all Compose endpoints are authenticated.</constraint>
+    <constraint source="ADR-013">Dispatch-action endpoint injects `IConsumerRoutingService` + `IInvokePlaybookAi` from `Services/Ai/PublicContracts/` ONLY. MUST NOT inject `IOpenAiClient`, `IPlaybookService`, or other AI internals (refined 2026-05-20).</constraint>
+    <constraint source="ADR-015">Multi-tenant isolation Tier 3 — inherited via auth pipeline + ChatSession binding.</constraint>
+    <constraint source="ADR-019">Group endpoints under `/api/compose/` route prefix.</constraint>
+    <constraint source="ADR-028">Spaarke Auth v2 — endpoints validate via existing auth pipeline (already wired in `Program.cs`).</constraint>
+    <constraint source="project">Endpoints map UNCONDITIONALLY. Service registrations in task 025 MUST also be unconditional (avoids RB-T028 asymmetric-registration anti-pattern per bff-extensions.md §F.1).</constraint>
+    <constraint source="project">Errors use `Results.Problem(...)` (RFC 7807). Validation failures return 400 with structured detail.</constraint>
+  </constraints>
+
+  <justification>
+    <existing>`src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs:GetOpenLinks` is the closest endpoint-pattern precedent (Document/SPE + `RequireAuthorization()` + `Results.Problem`). No existing endpoint group serves the editor-host load/save/promote/checkout/checkin/dispatch surface.</existing>
+    <extension>No — extending `FileAccessEndpoints.cs` would conflate document-access endpoints with editor-host orchestration endpoints. Per ADR-019, Compose has its own route group (`/api/compose/`); per bff-extensions.md §C, endpoints register through a feature-specific `Map{Feature}Endpoints` extension, not by appending to a shared file.</extension>
+    <cost-of-doing-nothing>FR-21 fails — no `/api/compose/*` endpoints exist, Compose UI cannot dispatch actions or save documents, and the smoke test (FR-11) has no server seam to hit.</cost-of-doing-nothing>
+  </justification>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-compose-r1/spec.md</file>
+      <file>projects/spaarkeai-compose-r1/plan.md</file>
+      <file>projects/spaarkeai-compose-r1/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ConsumerTypes.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ConsumerRoutingService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatSessionManager.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context check + load knowledge">Verify context &lt; 70%. Load spec.md FR-21, plan.md Phase 2, bff-extensions.md §§A,C,F.1, and FileAccessEndpoints.cs for endpoint-pattern precedent.</step>
+    <step order="1" name="Define request/response DTOs">Create record DTOs for each endpoint (upload, load, save, promote, checkout, checkin, dispatch-action) — request body + response shape. Keep DTOs alongside endpoints or in `Models/ComposeModels.cs`.</step>
+    <step order="2" name="Implement MapComposeEndpoints extension">In `Api/ComposeEndpoints.cs`, define `public static IEndpointRouteBuilder MapComposeEndpoints(this IEndpointRouteBuilder routes)`. Inside: `var group = routes.MapGroup("/api/compose").RequireAuthorization();` then map seven endpoints:
+      (1) POST /upload (delegates to IComposeService.UploadAsync)
+      (2) GET /documents/{driveItemId} (load — IComposeService.LoadAsync)
+      (3) POST /documents/{driveItemId}/save (save — IComposeService.SaveAsync)
+      (4) POST /documents/{driveItemId}/promote (promote — IComposeService.PromoteIfEphemeralAsync)
+      (5) POST /documents/{driveItemId}/checkout (IComposeDocumentService.AcquireCheckOutAsync)
+      (6) POST /documents/{driveItemId}/checkin (IComposeDocumentService.ReleaseCheckOutAsync)
+      (7) POST /action/{consumerType} (dispatch-action — injects IConsumerRoutingService + IInvokePlaybookAi).</step>
+    <step order="3" name="Wire error returns">Every handler catches expected failures and returns `Results.Problem` with appropriate status code. 400 for validation, 404 for missing doc, 409 for conflict (multi-tab), 500 for unexpected.</step>
+    <step order="4" name="Build BFF">`dotnet build src/server/api/Sprk.Bff.Api/` — must be clean. NOTE: DI registration (task 025) is required before runtime exercise; build only at this step.</step>
+    <step order="5" name="Measure publish-size impact">`dotnet publish -c Release src/server/api/Sprk.Bff.Api/`; report compressed delta vs ~45.65 MB baseline (expect ≤+0.2 MB for endpoint code).</step>
+    <step order="6" name="CVE check">`dotnet list package --vulnerable --include-transitive` — must show no new HIGH-severity CVE.</step>
+    <step order="7" name="Update TASK-INDEX">Update `tasks/TASK-INDEX.md`: change task 024 status to ✅. Reset `current-task.md`.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build, publish, CVE scan</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/ComposeModels.cs (or inline DTOs)</output>
+    <output type="docs">projects/spaarkeai-compose-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 7 endpoints registered under `/api/compose/` via `MapComposeEndpoints` extension; each has `RequireAuthorization()`.</criterion>
+    <criterion testable="true">Dispatch-action handler injects ONLY `IConsumerRoutingService` + `IInvokePlaybookAi` from PublicContracts (no AI internals).</criterion>
+    <criterion testable="true">Errors return `Results.Problem` per RFC 7807; happy-path returns 200/204; unauthenticated returns 401.</criterion>
+    <criterion testable="true">BFF builds clean; publish-size delta ≤+0.5 MB; no new HIGH CVE.</criterion>
+    <criterion testable="true">Endpoints map unconditionally (no feature flag) — matches unconditional DI registration in task 025.</criterion>
+    <criterion testable="true">TASK-INDEX.md status for task 024 is ✅.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

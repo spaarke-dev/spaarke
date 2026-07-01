@@ -39,4 +39,17 @@ declare namespace Xrm {
       };
     };
   }
+
+  // spaarkeai-compose-r1 task 046: DocumentComposeLaunch reads the SPE drive-item
+  // id (and optional drive id + file name) from the open `sprk_document` record
+  // via WebApi.retrieveRecord — only the subset of WebApi declared here.
+  interface WebApi {
+    retrieveRecord(
+      entityLogicalName: string,
+      id: string,
+      options?: string,
+    ): Promise<{ [key: string]: unknown }>;
+  }
+
+  const WebApi: WebApi;
 }

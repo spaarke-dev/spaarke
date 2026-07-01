@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="026" project="spaarkeai-compose-r1">
+  <metadata>
+    <title>BFF — Add unit tests for the 3 Compose services</title>
+    <phase>Phase 2: BFF Endpoints + Services</phase>
+    <status>completed</status>
+    <estimated-hours>4</estimated-hours>
+    <tags>bff-api, backend, testing, unit-test</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task tags include 'bff-api' + 'testing' (tests modify and must follow ADR-038 build-vs-maintain criteria — per root CLAUDE.md §8 TEST-MODIFYING override row)</rigor-reason>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>021,022,023</dependencies>
+    <blocks>none</blocks>
+  </metadata>
+
+  <prompt>
+    Add unit tests for `ComposeService`, `ComposeDocumentService`, and `ComposeSessionService` in `tests/unit/Sprk.Bff.Api.Tests/Services/Compose/`. Tests follow ADR-038 — integration-heavy pyramid, mock-at-boundary only (Graph, Dataverse, ChatSession), use `TimeProvider` over `Stopwatch`. BANNED: `Mock&lt;HttpMessageHandler&gt;`, DI-registration tests, ctor null-check tests. Per CLAUDE.md §10 #6, BFF service additions require matching tests.
+  </prompt>
+
+  <role>
+    Senior .NET developer expert in xUnit, Moq (or NSubstitute — match existing BFF test convention), ADR-038 testing rules, and the BFF test-fixture-contract pattern (per `docs/procedures/test-fixture-contracts.md`).
+  </role>
+
+  <goal>
+    Three test files exist under `tests/unit/Sprk.Bff.Api.Tests/Services/Compose/` exercising the three Compose services. All tests pass; no banned patterns; mocks at service boundaries only. Tests cover the FR-04/05/06/07 behavioral surface: load, save, idempotent first-Save promotion, ephemeral→promoted DocumentId rebind.
+  </goal>
+
+  <context>
+    <background>
+      CLAUDE.md §10 #6 (BFF Hygiene rule 6) makes test additions mandatory whenever `Services/` changes. ADR-038 + `docs/standards/TEST-ARCHITECTURE.md` define the keep-criteria: only MAINTAIN-class tests survive `/test-diet` at project close. Tests added here MUST be MAINTAIN-class (behavioral, deterministic, scoped) — not scaffolding.
+    </background>
+    <relevant-files>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ComposeServiceTests.cs (NEW)</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ComposeDocumentServiceTests.cs (NEW)</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ComposeSessionServiceTests.cs (NEW)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-038">Integration-heavy pyramid; mock at boundaries only (Graph, Dataverse, ChatSession persistence). BANNED: `Mock&lt;HttpMessageHandler&gt;`, DI-registration tests, ctor null-check tests.</constraint>
+    <constraint source="ADR-038">Use `TimeProvider` over `Stopwatch` for any timing assertions. Use deterministic time via `FakeTimeProvider` if needed.</constraint>
+    <constraint source="project">Tests MUST cover idempotent first-Save promotion (FR-06) and ephemeral→promoted rebind (FR-07) — these are the load-bearing behavioral invariants.</constraint>
+    <constraint source="project">Test fixtures (if added) MUST inherit from the canonical fixture pattern per `docs/procedures/test-fixture-contracts.md` (bff-extensions.md §F).</constraint>
+    <constraint source="project">No "trivial" tests (constructor null-checks, DI-resolution tests) — they're banned by ADR-038 and will be removed by `/test-diet` at project close.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-compose-r1/spec.md</file>
+      <file>projects/spaarkeai-compose-r1/plan.md</file>
+      <file>projects/spaarkeai-compose-r1/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ConsumerTypes.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ConsumerRoutingService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatSessionManager.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context check + load knowledge">Verify context &lt; 70%. Load ADR-038, TEST-ARCHITECTURE.md (6 KEEP categories), testing.md constraints, and the three new Compose service files for surface to exercise.</step>
+    <step order="1" name="Scaffold ComposeServiceTests.cs">Add tests for: (a) `PromoteIfEphemeralAsync` returns existing id when already promoted; (b) `PromoteIfEphemeralAsync` creates a new `sprk_documentid` once and is idempotent on second call; (c) `SaveAsync` delegates to `IComposeDocumentService.SaveDocxAsync`. Use mocks at boundaries; do NOT mock internal collaborators.</step>
+    <step order="2" name="Scaffold ComposeDocumentServiceTests.cs">Add tests for: (a) `LoadDocxAsync` returns expected bytes given a mocked `IGraphClientFactory` returning a stubbed drive-item; (b) `SaveDocxAsync` commits a new version and returns the version id; (c) write paths follow the OBO-vs-MI rule per bff-extensions.md §D. Do NOT use `Mock&lt;HttpMessageHandler&gt;` — mock the Graph client factory abstraction instead.</step>
+    <step order="3" name="Scaffold ComposeSessionServiceTests.cs">Add tests for: (a) `EnsureSessionForDocumentAsync` returns a ChatSession with correct DocumentId; (b) `RebindToDocumentIdAsync` is idempotent — second call is a no-op (verify by spy/counter on the underlying session manager); (c) tenant scope inherited from underlying ChatSessionManager (assert tenant flows through).</step>
+    <step order="4" name="Run tests">`dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter "FullyQualifiedName~Services.Compose"` — must be green.</step>
+    <step order="5" name="ADR-038 conformance grep">Grep test files for banned patterns: `Mock&lt;HttpMessageHandler&gt;`, DI-registration assertions, constructor null-check tests. Must return zero hits.</step>
+    <step order="6" name="Measure publish-size (BFF unchanged)">`dotnet publish -c Release src/server/api/Sprk.Bff.Api/`; report compressed delta vs ~45.65 MB baseline (expect 0 MB — tests don't affect BFF publish).</step>
+    <step order="7" name="Update TASK-INDEX">Update `tasks/TASK-INDEX.md`: change task 026 status to ✅. Reset `current-task.md`.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Test, build, publish</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ComposeServiceTests.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ComposeDocumentServiceTests.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ComposeSessionServiceTests.cs</output>
+    <output type="docs">projects/spaarkeai-compose-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Three test files exist; all tests pass on `dotnet test`.</criterion>
+    <criterion testable="true">Idempotent first-Save promotion (FR-06) is covered by a test that asserts the same `sprk_documentid` is returned on second call without creating a duplicate.</criterion>
+    <criterion testable="true">Ephemeral→promoted DocumentId rebind (FR-07) is covered by an idempotency test.</criterion>
+    <criterion testable="true">Grep confirms no banned ADR-038 patterns (`Mock&lt;HttpMessageHandler&gt;`, DI-registration tests, ctor null-check tests).</criterion>
+    <criterion testable="true">BFF publish-size delta unchanged (~0 MB) vs ~45.65 MB baseline.</criterion>
+    <criterion testable="true">TASK-INDEX.md status for task 026 is ✅.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+
+  <notes>
+    <completed-on>2026-06-29</completed-on>
+    <completed-by>Wave 5 parallel dispatch sub-agent (FULL rigor — TEST-MODIFYING override per CLAUDE.md §8)</completed-by>
+    <summary>
+      Added 14 new tests across 3 files in `tests/unit/Sprk.Bff.Api.Tests/Services/Compose/`:
+      - ComposeServiceTests.cs (NEW, 6 tests, KEEP: domain-logic) — FR-06 idempotency happy path,
+        FR-06 first-create + FR-07 rebind, FR-06 repeated-Save invariant (one create across N Saves),
+        FR-06 race-window resolution via alternate key, SaveAsync→Promote wiring, SaveAsync safety
+        invariant (failed SPE write MUST NOT promote).
+      - ComposeDocumentServiceTests.cs (NEW, 7 tests, KEEP: domain-logic) — argument-validation
+        behavior + R1-stub semantics. Path A documented inline (CLAUDE.md §6.5): full SPE round-trip
+        coverage delegated to task 027 (endpoint-contract category) because deeper Graph-SDK mocks
+        would violate ADR-038 B1/B2.
+      - ComposeSessionServiceTests.cs (EXTENDED, +1 test, total 10, KEEP: domain-logic) — added
+        ADR-015 Tier 3 tenant flow-through test (POML step 3c gap).
+
+      All 23 Services.Compose unit tests pass (was 9; +14 from this task). Cumulative Compose tests
+      across the assembly: 118 (was 84 after W4; +14 from this task + 20 from W5-027 endpoint tests).
+
+      Banned-pattern audit: zero `Mock<HttpMessageHandler>` (B1), zero `Mock<IServiceClient>` (B2),
+      zero DI-registration tests (B3), zero ctor null-check tests (B4 — my ArgumentException tests
+      assert ParamName, which is observable behavior, NOT B4's compiler-style guard test), zero
+      mirror tests (B6), zero all-mocks-trivial (B7). All test names follow
+      `{Method}_{Scenario}_{ExpectedResult}` (B13).
+
+      Build: 0 errors / 0 warnings (dotnet build clean). Publish-size delta: 0 MB (test-only
+      changes don't ship in BFF publish).
+    </summary>
+    <files-created>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ComposeServiceTests.cs</file>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ComposeDocumentServiceTests.cs</file>
+    </files-created>
+    <files-modified>
+      <file>tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ComposeSessionServiceTests.cs (+1 test)</file>
+    </files-modified>
+    <adr-tensions-encountered>
+      Path A (project-scoped narrowing) for ComposeDocumentService LoadDocxAsync/SaveDocxAsync —
+      documented inline in test file class summary citing CLAUDE.md §6.5 + ADR-038 §4 (B1/B2 bans) +
+      §7 ("delete the scaffolding once the building stands"). Full SPE round-trip coverage lives in
+      task 027 endpoint-contract tests. Same Path A was already implicit at W2 dispatch ("R1 stubs
+      for checkout methods; pure Graph-SDK wrappers fail 'what production behavior breaks if
+      deleted'"). No new ADR amendment required.
+    </adr-tensions-encountered>
+  </notes>
+</task>

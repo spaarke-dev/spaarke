@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="080" project="spaarkeai-compose-r1">
+  <metadata>
+    <title>Deploy BFF to Azure + verify publish-size delta ≤+2 MB</title>
+    <status>not-started</status>
+    <estimated-effort>0.5 day</estimated-effort>
+    <tags>deploy, azure, bff-api</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <dependencies>070,071,072</dependencies>
+    <parallel-safe>false</parallel-safe>
+    <phase>8</phase>
+  </metadata>
+
+  <prompt>
+    Deploy the Compose-enabled BFF (`Sprk.Bff.Api`) to Azure App
+    Service using the `bff-deploy` skill. Before and after deployment,
+    measure the compressed publish size and verify the delta is
+    ≤+2 MB (per spec NFR-06). The absolute ceiling is ≤60 MB
+    compressed (CLAUDE.md §10 #4). Run smoke tests against the new
+    Compose endpoints in the target environment.
+  </prompt>
+
+  <role>
+    Release engineer who treats publish-size as a first-class
+    metric and verifies smoke endpoints are green before declaring
+    the deploy successful.
+  </role>
+
+  <goal>
+    BFF deployed to the target Azure App Service; `notes/bff-publish-size-report.md`
+    records before/after sizes + delta; smoke tests on the new
+    `/api/compose/*` endpoints return 200/auth-required as expected;
+    no new HIGH CVEs introduced post-deploy.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarkeai-compose-r1/spec.md</file>
+    <file purpose="project-plan">projects/spaarkeai-compose-r1/plan.md</file>
+    <file purpose="project-readme">projects/spaarkeai-compose-r1/README.md</file>
+    <file purpose="project-context">projects/spaarkeai-compose-r1/CLAUDE.md</file>
+    <file purpose="bff-deploy-skill">.claude/skills/bff-deploy/SKILL.md</file>
+    <file purpose="azure-deployment-constraints">.claude/constraints/azure-deployment.md</file>
+    <file purpose="bff-extensions-constraints">.claude/constraints/bff-extensions.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-001">Minimal API pattern preserved post-deploy (no Functions, no controllers introduced)</constraint>
+    <constraint source="project">Publish-size delta MUST be ≤+2 MB vs baseline (spec NFR-06)</constraint>
+    <constraint source="project">Absolute compressed publish size MUST be ≤60 MB (CLAUDE.md §10 #4 hard ceiling)</constraint>
+    <constraint source="project">If single-task delta ≥+5 MB OR cumulative ≥55 MB OR absolute ≥60 MB → HARD STOP, do NOT deploy, escalate</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>BFF deployment + publish-size verification</topic>
+    <files>
+      <file>.claude/skills/bff-deploy/SKILL.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/spaarkeai-compose-r1/spec.md</file>
+      <file>projects/spaarkeai-compose-r1/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Capture baseline publish-size">
+      Check out master at HEAD or the prior deploy commit. Run
+      `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish-baseline/`.
+      Measure compressed size. Record as BASELINE in
+      `notes/bff-publish-size-report.md`.
+    </step>
+    <step order="2" name="Build current branch publish-size">
+      Return to project branch. Run `dotnet publish -c Release
+      src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`. Measure
+      compressed size. Record as CURRENT in the report. Compute delta.
+    </step>
+    <step order="3" name="Verify size gates">
+      Verify: (a) delta ≤+2 MB (spec NFR-06), (b) absolute ≤60 MB
+      (CLAUDE.md §10 #4). If either fails, STOP — do NOT deploy.
+      Escalate with explicit justification per CLAUDE.md §6.5.
+    </step>
+    <step order="4" name="Invoke bff-deploy skill">
+      Invoke the `bff-deploy` skill to push the verified build to
+      the target Azure App Service. Confirm deploy succeeds and
+      health endpoint (`/healthz` or `/ping`) returns 200.
+    </step>
+    <step order="5" name="Smoke-test Compose endpoints">
+      Hit each new `/api/compose/*` endpoint with a valid token
+      (or confirm 401 for unauthenticated, per ADR-008/ADR-028).
+      Confirm responses match expected shapes from the spec.
+    </step>
+    <step order="6" name="Run code-review + adr-check (FULL rigor)">
+      Per root CLAUDE.md §8, FULL rigor for deployment tasks.
+      Invoke code-review and adr-check at Step 9.5 if not already
+      run as part of task-execute Step 9.5.
+    </step>
+    <step order="7" name="Update TASK-INDEX">
+      Update `projects/spaarkeai-compose-r1/tasks/TASK-INDEX.md`
+      status for task 080 to ✅.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">publish + size measurement</tool>
+    <tool name="azure-cli">Trigger App Service deploy via bff-deploy skill</tool>
+    <tool name="curl">Smoke-test endpoints post-deploy</tool>
+  </tools>
+
+  <outputs>
+    <output type="notes" ephemeral="false">projects/spaarkeai-compose-r1/notes/bff-publish-size-report.md</output>
+    <output type="deployment-log">deploy/api-publish/ (artifacts) + Azure App Service deployment record</output>
+    <output type="docs">projects/spaarkeai-compose-r1/tasks/TASK-INDEX.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">BFF deployed successfully to target Azure App Service; `/healthz` returns 200</criterion>
+    <criterion testable="true">Publish-size delta ≤+2 MB vs baseline (per spec NFR-06)</criterion>
+    <criterion testable="true">Absolute compressed publish size ≤60 MB (per CLAUDE.md §10 #4)</criterion>
+    <criterion testable="true">All `/api/compose/*` endpoints smoke-tested and behave per spec (200 for auth'd, 401 for not)</criterion>
+    <criterion testable="true">TASK-INDEX.md updated to ✅ for task 080</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

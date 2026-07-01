@@ -1,0 +1,44 @@
+{
+  "name": "spike-1-tiptap-docx-prototype",
+  "private": true,
+  "version": "0.0.0-spike",
+  "description": "THROWAWAY prototype — Spike #1 for spaarkeai-compose-r1. Validates TipTap OOB + DOCX bridge round-trip. NOT promoted to src/.",
+  "type": "module",
+  "scripts": {
+    "dev": "vite",
+    "build": "vite build",
+    "preview": "vite preview"
+  },
+  "dependencies": {
+    "@tiptap/react": "^2.10.3",
+    "@tiptap/starter-kit": "^2.10.3",
+    "@tiptap/extension-table": "^2.10.3",
+    "@tiptap/extension-table-row": "^2.10.3",
+    "@tiptap/extension-table-cell": "^2.10.3",
+    "@tiptap/extension-table-header": "^2.10.3",
+    "@tiptap/extension-link": "^2.10.3",
+    "@tiptap/extension-image": "^2.10.3",
+    "@tiptap/extension-underline": "^2.10.3",
+    "@tiptap/extension-task-list": "^2.10.3",
+    "@tiptap/extension-task-item": "^2.10.3",
+    "@tiptap/extension-character-count": "^2.10.3",
+    "@tiptap/extension-text-align": "^2.10.3",
+    "mammoth": "^1.8.0",
+    "docx": "^9.0.3",
+    "react": "^18.3.1",
+    "react-dom": "^18.3.1"
+  },
+  "devDependencies": {
+    "@types/react": "^18.3.12",
+    "@types/react-dom": "^18.3.1",
+    "@vitejs/plugin-react": "^4.3.4",
+    "typescript": "^5.6.3",
+    "vite": "^5.4.11"
+  },
+  "spike_metadata": {
+    "purpose": "Validate TipTap OOB feature inventory + DOCX bridge round-trip on legal documents",
+    "throwaway": true,
+    "not_in_src": true,
+    "output_artifact": "../spike-1-tiptap-docx-roundtrip.md (the locked spec)"
+  }
+}

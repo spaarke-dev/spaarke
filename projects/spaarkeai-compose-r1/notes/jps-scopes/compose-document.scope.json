@@ -1,0 +1,82 @@
+{
+  "$schema": "https://spaarke.com/schemas/jps-scope/v1",
+  "$version": 1,
+  "scopeCode": "compose-document",
+  "scopeName": "Compose Document",
+  "description": "Whole document open in Compose. Input contract for playbook actions that operate on the entire document (e.g., compose-summarize, full-document compare, document-wide risk scan). The R1 smoke test (compose-summarize) consumes this scope.",
+  "appliesTo": ["compose-editor"],
+  "inputs": {
+    "fields": [
+      {
+        "name": "documentSpeId",
+        "type": "string",
+        "description": "SharePoint Embedded drive-item id of the open document. The session<>document binding key. Always present (Compose binding rule: every document is in SPE). The BFF dispatch endpoint fetches the DOCX bytes from SPE and extracts text server-side for playbook consumption; only the SPE id crosses the BFF<>UI boundary on this scope.",
+        "required": true
+      },
+      {
+        "name": "documentVersionEtag",
+        "type": "string",
+        "description": "SPE driveItem etag at the moment of dispatch. Lets the playbook detect that the document changed mid-flight and reject stale invocations. Optional; if absent the playbook proceeds without staleness verification.",
+        "required": false
+      },
+      {
+        "name": "documentRecordId",
+        "type": "string",
+        "description": "sprk_document GUID when the document has been promoted (post-first-Save). Null for ephemeral pre-Save docs (Path B). When present, enables matter-binding lookups + audit trail joins + the normal Document AI Search indexing pipeline.",
+        "required": false,
+        "format": "uuid"
+      },
+      {
+        "name": "matterId",
+        "type": "string",
+        "description": "sprk_matter GUID when the document is matter-bound. Null when the document is unbound or pre-Save. When present, enables matter-scoped knowledge retrieval and writes derived insights to the matter's knowledge graph.",
+        "required": false,
+        "format": "uuid"
+      },
+      {
+        "name": "documentName",
+        "type": "string",
+        "description": "Display name of the document (typically the SPE driveItem name). Used by the playbook for UI rendering and citation envelopes. Not the source of truth for identity — that's documentSpeId.",
+        "required": false,
+        "maxLength": 500
+      },
+      {
+        "name": "documentMimeType",
+        "type": "string",
+        "description": "MIME type of the document (typically 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' for DOCX). Carried into RoutingContext.MimeType for content-aware routing (e.g., a future 'summarize-pdf' variant routes off this).",
+        "required": false
+      },
+      {
+        "name": "sessionId",
+        "type": "string",
+        "description": "ChatSession id (Redis/Cosmos/Dataverse three-tier persistence key). The playbook writes its summary output as a structured ChatMessage so prior-session continuity (Compose 'prior sessions for this document' UX) preserves the artifact.",
+        "required": true
+      },
+      {
+        "name": "tenantId",
+        "type": "string",
+        "description": "Azure AD tenant GUID. ADR-015 Tier 3 isolation key; inherited from PlaybookInvocationContext.TenantId.",
+        "required": true,
+        "format": "uuid"
+      }
+    ],
+    "totalCharCap": 1500,
+    "rationale": "The scope carries identifiers + names only — no document text. The playbook fetches DOCX bytes from SPE itself; this keeps the scope payload tiny and avoids re-marshalling the document text through the BFF<>UI boundary on every dispatch."
+  },
+  "outputs": {
+    "expected": "Playbook-shape: terminal-node text + structured fields per the invoked action's JPS output schema. For compose-summarize (R1 smoke test target), the Document Summary playbook (id 47686eb1-9916-f111-8343-7c1e520aa4df) is expected to produce the existing PB-002 Document Profile output shape: { summary, keyParties, dates, obligations, riskFlags, confidence } per file-summary.json precedent."
+  },
+  "datagovernance": {
+    "containsUserContent": false,
+    "doNotLog": [],
+    "loggableFields": ["documentSpeId", "documentRecordId", "matterId", "sessionId", "tenantId", "documentMimeType", "documentName"],
+    "note": "Document TEXT is fetched server-side by the playbook; it does not transit the scope payload. The scope itself contains only deterministic identifiers (ADR-015 compliant)."
+  },
+  "metadata": {
+    "author": "spaarkeai-compose-r1 spike-4",
+    "createdAt": "2026-06-29T00:00:00Z",
+    "tags": ["compose", "document", "input-scope", "r1"],
+    "relatedAdrs": ["ADR-013", "ADR-015"],
+    "consumedBy": "R1 smoke test: compose-summarize → Document Summary playbook (47686eb1-9916-f111-8343-7c1e520aa4df). R2: any whole-document action (e.g., compose-risk-scan, compose-extract-obligations) consumes this scope without retrofit."
+  }
+}

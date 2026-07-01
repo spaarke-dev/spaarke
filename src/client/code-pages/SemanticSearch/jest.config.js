@@ -22,6 +22,14 @@ module.exports = {
     // Map @spaarke/auth path alias (mirrors tsconfig.json) so jest can resolve
     // imports without going through the webpack alias.
     '^@spaarke/auth$': '<rootDir>/../../shared/Spaarke.Auth/src/index',
+    // Map @spaarke/document-operations to source so jest resolves the
+    // canonical hook moved by task 031 (spaarkeai-compose-r1).
+    '^@spaarke/document-operations$': '<rootDir>/../../shared/Spaarke.DocumentOperations/src/index',
+    // Force a single React instance — mirror webpack.config.js. Without this,
+    // jest resolves a second react copy from the shared lib's node_modules
+    // and React-19 hooks throw "Cannot read properties of null (reading 'useState')".
+    '^react$': '<rootDir>/node_modules/react',
+    '^react-dom$': '<rootDir>/node_modules/react-dom',
   },
   transform: {
     '^.+\\.tsx?$': [

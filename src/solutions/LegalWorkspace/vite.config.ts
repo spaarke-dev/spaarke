@@ -33,6 +33,13 @@ function resolveSharedLibDeps(): import("vite").Plugin {
     // consolidated `useWorkspaceLayouts` hook (formerly duplicated in
     // LegalWorkspace + SpaarkeAi). LW's local hook is now a thin adapter.
     path.resolve(__dirname, "../../client/shared/Spaarke.AI.Widgets/src"),
+    // spaarkeai-compose-r1 (2026-06-29): @spaarke/daily-briefing-components
+    // hosts the createDailyBriefingRegistration factory (R2.1 hotfix
+    // 2026-06-19) consumed by sections/dailyBriefing/dailyBriefing.registration.ts.
+    // Missing this entry made the standalone LegalWorkspace Vite build fail
+    // (Rollup couldn't resolve "@spaarke/daily-briefing-components/widgets").
+    // Mirrors the pattern from Events / AI.Widgets above.
+    path.resolve(__dirname, "../../client/shared/Spaarke.DailyBriefing.Components/src"),
   ].map((p) => p.replace(/\\/g, "/"));
 
   const nodeModulesDir = path.resolve(__dirname, "node_modules");
@@ -93,6 +100,10 @@ export default defineConfig({
         // without further vite plumbing).
         path.resolve(__dirname, "../../client/shared/Spaarke.AI.Widgets/src/**/*.tsx"),
         path.resolve(__dirname, "../../client/shared/Spaarke.AI.Widgets/src/**/*.ts"),
+        // spaarkeai-compose-r1 (2026-06-29): transpile Daily Briefing
+        // components source (consumed by sections/dailyBriefing/).
+        path.resolve(__dirname, "../../client/shared/Spaarke.DailyBriefing.Components/src/**/*.tsx"),
+        path.resolve(__dirname, "../../client/shared/Spaarke.DailyBriefing.Components/src/**/*.ts"),
       ],
     }),
     viteSingleFile(),
@@ -112,6 +123,15 @@ export default defineConfig({
       // hook from `@spaarke/ai-widgets/src/hooks/useWorkspaceLayouts.ts`
       // without an intermediate build step. Matches the SpaarkeAi pattern.
       "@spaarke/ai-widgets": path.resolve(__dirname, "../../client/shared/Spaarke.AI.Widgets/src"),
+      // spaarkeai-compose-r1 (2026-06-29): aliased to source so the
+      // `sections/dailyBriefing/dailyBriefing.registration.ts` shim can import
+      // `createDailyBriefingRegistration` (R2.1 hotfix 2026-06-19) from
+      // `@spaarke/daily-briefing-components/widgets`. Without this entry the
+      // standalone LegalWorkspace Vite build was failing (Rollup unresolved
+      // import). The package's exports map has `./widgets` so the subpath
+      // resolves naturally once the bare-package alias is in place. Mirrors
+      // the SpaarkeAi consumption pattern.
+      "@spaarke/daily-briefing-components": path.resolve(__dirname, "../../client/shared/Spaarke.DailyBriefing.Components/src"),
       // @spaarke/sdap-client — pulled in transitively via
       // @spaarke/ui-components/services/EntityCreationService.ts (Phase G of
       // multi-container-multi-index-r1 / PR #369). Mirrors the alias already

@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="004" project="spaarkeai-compose-r1">
+  <metadata>
+    <title>Spike #4 — Consumer-routing E2E smoke + JPS scope registration</title>
+    <phase>Phase 0: Spikes</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <tags>spike, backend, bff-api, ai, prototype</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+
+  <prompt>
+    Validate the end-to-end Compose AI dispatch pathway: `ConsumerTypes.ComposeSummarize` constant → seeded `sprk_playbookconsumer` row → `IConsumerRoutingService.ResolveAsync` → `IInvokePlaybookAi.InvokePlaybookAsync` → existing Document Summary playbook (id `47686eb1-9916-f111-8343-7c1e520aa4df`) returns a result. Simultaneously lock the JPS scope schemas for `compose-selection` and `compose-document` and validate them via `jps-validate`. This is the load-bearing R1 smoke test — it proves the foundation works so R2 can multiply actions through it. Unlocks Phase 5 (Consumer-routing wiring + JPS scope registration).
+  </prompt>
+
+  <role>
+    Senior .NET developer experienced with Spaarke's AI PublicContracts facade, consumer-routing dispatch pattern, JPS playbook schemas, and Dataverse seed data. Familiar with the refined ADR-013 boundary (PublicContracts only, no AI internals in CRUD code).
+  </role>
+
+  <goal>
+    A working BFF spike endpoint that dispatches `compose-summarize` end-to-end via `IConsumerRoutingService` + `IInvokePlaybookAi` against the Document Summary playbook and returns a populated summary. Two JPS scope schemas (`compose-selection`, `compose-document`) drafted and validated via `jps-validate`. Output published as `notes/spikes/spike-4-consumer-routing-jps.md`.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarkeai-compose-r1/spec.md</file>
+    <file purpose="design-working">projects/spaarkeai-compose-r1/design.md</file>
+    <file purpose="project-plan">projects/spaarkeai-compose-r1/plan.md</file>
+    <file purpose="project-context">projects/spaarkeai-compose-r1/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarkeai-compose-r1/tasks/TASK-INDEX.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-013">Per refined ADR-013 (2026-05-20): inject ONLY `IConsumerRoutingService` + `IInvokePlaybookAi` (PublicContracts facade). MUST NOT inject `IOpenAiClient`, `IPlaybookService`, or any other AI internal types into Compose code.</constraint>
+    <constraint source="project">Per design.md §14 row 6: first Compose consumer type is `compose-summarize` linked to Document Summary playbook id `47686eb1-9916-f111-8343-7c1e520aa4df`.</constraint>
+    <constraint source="project">Per design.md §7: scopes `compose-selection` (selected-text inputs) and `compose-document` (whole-doc inputs) MUST be defined and registered via `jps-scope-refresh`. R1 = scopes only, no new actions.</constraint>
+    <constraint source="project">Per design.md §10.5: BFF placement justified; this dispatch endpoint belongs in `Sprk.Bff.Api`.</constraint>
+    <constraint source="ADR-008">Authorization via endpoint filters / `RequireAuthorization()`.</constraint>
+    <constraint source="project">Prototype code lives in `notes/spikes/` ONLY — throwaway; production wiring happens in Phase 5.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai-consumer-routing, jps-scope, playbook-dispatch, public-contracts-facade</topic>
+    <files>
+      <file>projects/spaarkeai-compose-r1/spec.md</file>
+      <file>projects/spaarkeai-compose-r1/design.md</file>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ConsumerTypes.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ConsumerRoutingService.cs</file>
+      <file>docs/guides/HOW-TO-ADD-A-CONSUMER-ROUTING-TYPE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      All Compose AI actions go through JPS playbooks dispatched via consumer routing (design.md §7). Adding new Compose workflows in R2+ should be zero-code (new `sprk_playbookconsumer` row only). For that promise to hold, R1 must prove the dispatch path works end-to-end with at least one Compose consumer type. The Document Summary playbook is the chosen target because it's an existing, stable playbook with predictable success criteria. The two JPS scopes (`compose-selection`, `compose-document`) are the input contracts R2's AI actions will consume — locking the schemas now prevents retrofit pain.
+    </background>
+    <related-work>
+      <item>design.md §7 (Playbook integration + consumer-routing dispatch)</item>
+      <item>design.md §14 row 6 (first consumer type decision)</item>
+      <item>HOW-TO-ADD-A-CONSUMER-ROUTING-TYPE.md (exact procedural steps)</item>
+      <item>spaarke-ai-platform-unification-r6 — handler registry; coordinate any handler-shape constraints</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context check + load knowledge">
+      Verify context &lt; 70%. Read design.md §§7, 10.5, 12, 14 row 6. Load HOW-TO-ADD-A-CONSUMER-ROUTING-TYPE.md and `.claude/constraints/bff-extensions.md`. Inspect existing `ConsumerTypes.cs` + `ConsumerRoutingService.cs` for the exact injection contract.
+    </step>
+    <step order="1" name="Define ConsumerTypes.ComposeSummarize constant (spike-local)">
+      In `notes/spikes/spike-4-prototype/`, draft the `ConsumerTypes.ComposeSummarize = "compose-summarize"` constant in a stub file mirroring the real `ConsumerTypes.cs` location. Do NOT modify production `ConsumerTypes.cs` yet — that's Phase 5.
+    </step>
+    <step order="2" name="Seed sprk_playbookconsumer test row">
+      Via Dataverse Web API (or the Dataverse MCP tool), create a test row in `sprk_playbookconsumer` linking consumer type `compose-summarize` to playbook id `47686eb1-9916-f111-8343-7c1e520aa4df`. Tag as spike data for later cleanup.
+    </step>
+    <step order="3" name="Implement spike dispatch endpoint">
+      Create `POST /spike/compose-action/compose-summarize` that injects `IConsumerRoutingService` + `IInvokePlaybookAi` ONLY (no AI internals — verify via grep). Calls `ResolveAsync(consumerType, ...)` → `InvokePlaybookAsync(...)` and returns the playbook output.
+    </step>
+    <step order="4" name="Execute E2E smoke against real document">
+      Run the spike endpoint with a real SPE document context. Verify: routing resolves to the correct playbook; playbook executes; summary returned in expected shape. Capture full request/response trace.
+    </step>
+    <step order="5" name="Draft + validate JPS scope schemas">
+      Author JSON schemas for `compose-selection` (inputs: selection text, span anchors, document SPE id, matter id, session memory pointer) and `compose-document` (inputs: full document content reference, document SPE id, matter id). Validate each via the `jps-validate` skill / tool. Store under `notes/spikes/spike-4-prototype/scopes/`.
+    </step>
+    <step order="6" name="Verify ADR-013 facade boundary (grep check)">
+      Grep the spike prototype for forbidden types: `IOpenAiClient`, `IPlaybookService`, `OpenAiClient`, direct Azure OpenAI SDK references. Result MUST be empty. Document the grep evidence in the report.
+    </step>
+    <step order="7" name="Write spike report">
+      Write `notes/spikes/spike-4-consumer-routing-jps.md` with: prototype location, E2E trace (request → resolved playbook → response), locked JPS scope schemas + `jps-validate` output, ADR-013 boundary grep evidence, seeded Dataverse row id, cleanup instructions, and any risks for Phase 5.
+    </step>
+    <step order="8" name="Update TASK-INDEX + close">
+      Update `projects/spaarkeai-compose-r1/tasks/TASK-INDEX.md`: mark task 004 as ✅. Update `current-task.md`. Report completion + Phase 0 spike-gate readiness assessment.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build and run the spike BFF slice</tool>
+    <tool name="dataverse-mcp">Seed/cleanup sprk_playbookconsumer rows</tool>
+    <tool name="jps-validate">JPS schema validation</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="prototype" ephemeral="true">projects/spaarkeai-compose-r1/notes/spikes/spike-4-prototype/</output>
+    <output type="scopes" ephemeral="true">projects/spaarkeai-compose-r1/notes/spikes/spike-4-prototype/scopes/</output>
+    <output type="report">projects/spaarkeai-compose-r1/notes/spikes/spike-4-consumer-routing-jps.md</output>
+    <output type="docs">projects/spaarkeai-compose-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Spike endpoint dispatches `compose-summarize` E2E and returns a populated Document Summary result.</criterion>
+    <criterion testable="true">Spike code injects ONLY `IConsumerRoutingService` + `IInvokePlaybookAi`; grep evidence confirms no AI-internal types referenced (ADR-013 compliance).</criterion>
+    <criterion testable="true">Both JPS scope schemas (`compose-selection`, `compose-document`) pass `jps-validate` with zero errors.</criterion>
+    <criterion testable="true">`sprk_playbookconsumer` row seeded + linked to playbook id `47686eb1-9916-f111-8343-7c1e520aa4df`; cleanup instructions documented.</criterion>
+    <criterion testable="true">TASK-INDEX.md status for task 004 is ✅; spike report names Phase 0 gate readiness (all 4 spikes complete + locked artifacts in `notes/spikes/`).</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="071" project="spaarkeai-compose-r1">
+  <metadata>
+    <title>ADR-038 conformance: no banned test patterns; 6 KEEP categories applied</title>
+    <status>not-started</status>
+    <estimated-effort>0.5 day</estimated-effort>
+    <tags>testing, refactoring</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <dependencies>026,027,033,061</dependencies>
+    <parallel-group>H</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <phase>7</phase>
+  </metadata>
+
+  <prompt>
+    Sweep all tests added or modified by this project (BFF service
+    tests, integration tests, shared-lib tests, SpaarkeAi tests)
+    and validate them against ADR-038 — the testing strategy
+    standalone ADR. Two specific checks: (a) no banned patterns
+    (`Mock&lt;HttpMessageHandler&gt;`, DI-registration tests, ctor
+    null-check tests), (b) every new test lives at one of the 6
+    KEEP-category paths.
+  </prompt>
+
+  <role>
+    Test-architecture-minded developer who treats ADR-038 as
+    binding. Reads tests skeptically, refactors banned patterns,
+    moves misplaced tests to the correct KEEP path.
+  </role>
+
+  <goal>
+    `notes/adr-038-conformance.md` exists declaring 0 banned-pattern
+    occurrences and listing every project-added test mapped to one of
+    the 6 KEEP categories. Any violation found is either fixed in this
+    task or filed via `/defer` if scope is too large.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarkeai-compose-r1/spec.md</file>
+    <file purpose="project-plan">projects/spaarkeai-compose-r1/plan.md</file>
+    <file purpose="project-readme">projects/spaarkeai-compose-r1/README.md</file>
+    <file purpose="project-context">projects/spaarkeai-compose-r1/CLAUDE.md</file>
+    <file purpose="adr-038">docs/adr/ADR-038-testing-strategy.md</file>
+    <file purpose="test-architecture">docs/standards/TEST-ARCHITECTURE.md</file>
+    <file purpose="testing-constraints">.claude/constraints/testing.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-038">No `Mock&lt;HttpMessageHandler&gt;` — banned</constraint>
+    <constraint source="ADR-038">No DI-registration tests (asserting service is registered) — banned</constraint>
+    <constraint source="ADR-038">No ctor null-check tests (asserting ArgumentNullException) — banned</constraint>
+    <constraint source="ADR-038">Every new test MUST live at one of the 6 KEEP-category paths (see ADR-038 §6)</constraint>
+    <constraint source="ADR-038">Coverage is OBSERVED never gated — no coverage-percentage assertions in CI</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ADR-038 conformance check on project-added tests</topic>
+    <files>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>projects/spaarkeai-compose-r1/spec.md</file>
+      <file>projects/spaarkeai-compose-r1/plan.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Enumerate project-added tests">
+      Use `git diff master...HEAD --name-only -- tests/` to enumerate
+      every test file added or modified by this project. Record list
+      in `notes/adr-038-conformance.md`.
+    </step>
+    <step order="2" name="Scan for banned patterns">
+      Grep across project-added tests for the 3 banned patterns:
+      `Mock&lt;HttpMessageHandler&gt;`, DI-registration assertions
+      (`provider.GetService&lt;...&gt;()` followed by `.Should().NotBeNull()`
+      or similar), and ctor null-check tests (`new ... null ...
+      ArgumentNullException`). Record every hit with file:line.
+    </step>
+    <step order="3" name="Classify by KEEP category">
+      For each project-added test, classify into one of ADR-038's
+      6 KEEP categories (integration, contract, repository, behavior,
+      authorization, telemetry). Move/rename if misplaced.
+    </step>
+    <step order="4" name="Refactor banned patterns">
+      For each banned-pattern hit: refactor to ADR-038-compliant
+      pattern (use `WebApplicationFactory` instead of
+      `Mock&lt;HttpMessageHandler&gt;`; delete DI-registration tests;
+      delete ctor null-check tests). Verify build + tests still pass.
+    </step>
+    <step order="5" name="Document conformance">
+      In `notes/adr-038-conformance.md`, list final state: total tests
+      reviewed, banned-pattern count = 0, KEEP-category map. Note any
+      tests that needed refactor.
+    </step>
+    <step order="6" name="Update TASK-INDEX">
+      Update `projects/spaarkeai-compose-r1/tasks/TASK-INDEX.md` status
+      for task 071 to ✅.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="git">Diff against master to enumerate changed tests</tool>
+    <tool name="grep">Scan for banned patterns</tool>
+    <tool name="dotnet">Rebuild + retest after refactor</tool>
+  </tools>
+
+  <outputs>
+    <output type="notes" ephemeral="false">projects/spaarkeai-compose-r1/notes/adr-038-conformance.md</output>
+    <output type="code">tests/** (refactored where banned patterns found)</output>
+    <output type="docs">projects/spaarkeai-compose-r1/tasks/TASK-INDEX.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Zero banned-pattern occurrences in project-added tests (Mock&lt;HttpMessageHandler&gt;, DI-registration, ctor null-check)</criterion>
+    <criterion testable="true">Every project-added test mapped to one of ADR-038's 6 KEEP categories in `notes/adr-038-conformance.md`</criterion>
+    <criterion testable="true">All tests still pass after refactor (`dotnet test` green)</criterion>
+    <criterion testable="true">TASK-INDEX.md updated to ✅ for task 071</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

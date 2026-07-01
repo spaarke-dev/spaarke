@@ -1,0 +1,128 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="spaarkeai-compose-r1">
+  <metadata>
+    <title>Frontend — Create six TypeScript interfaces for three-pane coordination data contracts</title>
+    <phase>Phase 4: Frontend — SpaarkeAi Compose Surface</phase>
+    <status>completed</status>
+    <estimated-hours>5</estimated-hours>
+    <tags>frontend, react, typescript, fluent-ui, forms, validation</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task tags include 'fluent-ui' (UI implementation per ADR-021)</rigor-reason>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <parallel-reason>New file in `types/` directory — no edit overlap with 040 or 044.</parallel-reason>
+    <dependencies>002</dependencies>
+    <blocks>042,043,045,046</blocks>
+  </metadata>
+
+  <prompt>
+    Create the six TypeScript interfaces that codify the three-pane coordination data contracts surfaced by Spike #2 (Workspace ↔ Context ↔ Assistant). These are the locked design.md §5 interfaces. Receivers can be stubs in R1 — the contract IS the deliverable per CLAUDE.md (Implementation Notes). Per FR-20, all six must compile and be wired (receivers stubbed); the smoke test (Phase 6) confirms data flow.
+  </prompt>
+
+  <role>
+    Senior TypeScript developer fluent in cross-pane event-bus contracts (PaneEventBus pattern), Fluent UI v9 idioms, and the SpaarkeAi component model.
+  </role>
+
+  <goal>
+    Six interfaces compile cleanly under `strict` mode; exported from `src/solutions/SpaarkeAi/src/types/compose-contracts.ts`; consumed by Tasks 042/045 receivers (stubbed). Build green; ui-test green; dark mode N/A (type-only file but smoke harness must render).
+  </goal>
+
+  <context>
+    <background>
+      FR-20 + design.md §5 + spec.md Affected Areas Frontend lock the six data contracts from Spike #2. CLAUDE.md Implementation Notes mandate that the contracts ship FIRST; receivers can be stubs. This task delivers the contract surface.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Any rendering surface used to validate (smoke harness) MUST honor Fluent v9 dark mode.</constraint>
+    <constraint source="ADR-028">If contracts include any auth-scoped fields, MUST reference `@spaarke/auth` types — do NOT redefine.</constraint>
+    <constraint source="project">REUSE existing types directory conventions; NO new abstraction layer.</constraint>
+    <constraint source="project">Interfaces MUST match the locked Spike #2 artifact in `notes/spikes/spike-three-pane-wiring.md` byte-for-byte (or supersede it with a documented amendment).</constraint>
+  </constraints>
+
+  <justification>
+    <existing>`src/solutions/SpaarkeAi/src/types/` is the canonical types directory (verified via Glob). Existing files (e.g., shell types, conversation types) do NOT cover Workspace↔Context↔Assistant cross-pane flows for Compose.</existing>
+    <extension>No — six new interfaces are needed because Compose introduces three-pane coordination flows not present in any existing surface. Cannot extend existing types without conflating concerns.</extension>
+    <cost-of-doing-nothing>FR-20 fails — TypeScript compilation cannot verify cross-pane data contracts; Tasks 042/043/045 ship with `any` types and silent runtime drift; smoke test (Phase 6) cannot assert payload shape.</cost-of-doing-nothing>
+  </justification>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-compose-r1/spec.md</file>
+      <file>projects/spaarkeai-compose-r1/plan.md</file>
+      <file>projects/spaarkeai-compose-r1/CLAUDE.md</file>
+      <file>projects/spaarkeai-compose-r1/design.md</file>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+      <file>docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+      <file>docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md</file>
+      <file>docs/architecture/LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md</file>
+      <file>src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx</file>
+      <file>src/solutions/SpaarkeAi/src/utils/launch-resolver.ts</file>
+      <file>src/solutions/SpaarkeAi/src/components/shell/ThreePaneShell.tsx</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/CalendarWorkspaceWidget</file>
+      <file>src/solutions/SpaarkeAi/src/types/</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context check + load knowledge">Verify context &lt; 70%. Load design.md §5, spec.md FR-20, and the Spike #2 artifact in `notes/spikes/`.</step>
+    <step order="1" name="Inventory existing types">Glob `src/solutions/SpaarkeAi/src/types/*.ts`; confirm none cover the six Compose flows. Match the file-naming + export-style of neighbors.</step>
+    <step order="2" name="Author six interfaces">Create `compose-contracts.ts` with the six locked interfaces (exact names per Spike #2 artifact). Add JSDoc citing FR-20 + design.md §5 for each.</step>
+    <step order="3" name="Stub receivers minimally">In `compose-contracts.ts`, export a `ComposeEventBusContract` type union so PaneEventBus can validate dispatch shapes. Receivers themselves stay in Tasks 042/043/045.</step>
+    <step order="4" name="Build TypeScript">Run `npm run build` in SpaarkeAi; confirm zero errors under `strict`.</step>
+    <step order="5" name="Run shared client build">Run `pwsh ./scripts/Build-AllClientComponents.ps1`.</step>
+    <step order="6" name="UI test execution">Run the ui-tests defined below — the smoke harness validates type imports + a minimal render.</step>
+    <step order="7" name="Update TASK-INDEX">Update TASK-INDEX.md: task 041 → ✅. Reset `current-task.md`.</step>
+  </steps>
+
+  <ui-tests>
+    <test name="Component Renders">A minimal harness component that imports all six types and renders an empty Fluent v9 `Surface` — no console errors.</test>
+    <test name="Dark Mode Compliance (ADR-021)">Harness surface renders in dark theme using semantic tokens — no hard-coded hex.</test>
+    <test name="Contract Shape Validation">Compile-time assertion: each of the six interfaces is exported, has expected required fields per Spike #2, and the discriminated union `ComposeEventBusContract` covers all six.</test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build TypeScript (strict)</tool>
+    <tool name="pwsh">Run Build-AllClientComponents.ps1</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/types/compose-contracts.ts</output>
+    <output type="docs">projects/spaarkeai-compose-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All six interfaces exported from `compose-contracts.ts`.</criterion>
+    <criterion testable="true">`npm run build` succeeds with no TS errors under `strict`.</criterion>
+    <criterion testable="true">ui-tests green: Component Renders, Dark Mode Compliance, Contract Shape Validation.</criterion>
+    <criterion testable="true">Interfaces match Spike #2 artifact in `notes/spikes/spike-three-pane-wiring.md`.</criterion>
+    <criterion testable="true">TASK-INDEX.md status for task 041 is ✅.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+
+  <notes>
+    Completed 2026-06-29 by Wave 1b autonomous sub-agent.
+
+    Output: `src/solutions/SpaarkeAi/src/types/compose-contracts.ts` (17 named exports).
+
+    Promotion-target decision (Spike #2 §11 open item #2): Path A — solution-local types file at `src/solutions/SpaarkeAi/src/types/compose-contracts.ts`. POML §goal mandated this exact path; CLAUDE.md §11 justification documented in file header (no existing `types/` dir; PaneEventTypes.ts already carries 20+ optional fields per interface — additive merge would bloat the shared bus with Compose-specific concerns; cost-of-doing-nothing is FR-20 fails). Shared-lib additive merge (Path B) deferred to a future task if a second consumer needs the types.
+
+    R1-wired contracts (3): ComposeWorkspaceToContextFlow (Flow 1), ComposeWorkspaceToAssistantFlow (Flow 2), ComposeAssistantToWorkspaceFlow (Flow 5).
+    R1-stub-only contracts (3): ComposeContextToWorkspaceFlow (Flow 3), ComposeContextToAssistantFlow (Flow 4), ComposeAssistantToContextFlow (Flow 6).
+    Plus: ComposeDocumentRef, ComposeSelection, 4 channel-union types (ComposeWorkspaceEvent, ComposeContextEvent, ComposeConversationEvent, AnyComposeFlowEvent), ComposeEventBusContract (PaneChannel-keyed dispatch contract), COMPOSE_FLOW_CHANNEL_MAP, COMPOSE_FLOW_RECEIVER_MATRIX, StubReceiver, logFlowEvent.
+
+    Verification: TypeScript surface-gate ✓ 0 surface-owned errors under strict mode. `grep "compose-contracts"` against full tsc output: 0 matches. Vite production build blocked by a sibling Wave 1b task (040's `composeEditor.registration.ts` is `.ts` containing JSX — should be `.tsx`); that bug is outside task 041's scope and does not affect 041's deliverable.
+
+    ADR tensions: NONE. Compliance: ADR-013 (refined) ✓ (opaque IDs + JPS scope strings only); ADR-015 ✓ (privacy annotations + caps on selectionText/contentHtml/insightText; logFlowEvent strips Tier 3 fields); ADR-030 ✓ (additive on existing 4 channels, no new channel, `unknown` not `any`); ADR-028 N/A; ADR-019 N/A.
+
+    Open items for downstream tasks:
+      - 042 (ComposeWorkspace.tsx) will import `ComposeWorkspaceToContextFlow`, `ComposeWorkspaceToAssistantFlow`, `ComposeDocumentRef`, `ComposeSelection`, `logFlowEvent`.
+      - 045 (ComposeEditor.tsx) will import `ComposeAssistantToWorkspaceFlow` (subscriber stub with manual-confirm gate).
+      - Spike #2 §11 open item #1 (contentHtml format html vs prosemirror-json) remains open for Spike #1 outcome; contract supports BOTH via the `format` discriminant — no churn needed downstream.
+      - The 6-flow contracts file imports `PaneChannel` from `@spaarke/ai-widgets` only; no other shared-lib coupling — safe for cross-wave parallelization.
+  </notes>
+</task>

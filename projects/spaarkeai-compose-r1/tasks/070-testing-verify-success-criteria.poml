@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="070" project="spaarkeai-compose-r1">
+  <metadata>
+    <title>Verify all 22 spec success criteria</title>
+    <status>not-started</status>
+    <estimated-effort>1 day</estimated-effort>
+    <tags>testing, integration-test, acceptance</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <dependencies>020,021,022,023,024,025,026,027,030,031,032,033,040,041,042,043,044,045,046,050,051,052,060,061</dependencies>
+    <parallel-safe>false</parallel-safe>
+    <phase>7</phase>
+  </metadata>
+
+  <prompt>
+    Walk through each of the 22 success criteria declared in `spec.md`
+    and verify each one against the running implementation. Record
+    pass/fail with evidence (test name, log line, observed UI state,
+    or screenshot reference) in `notes/acceptance-verification.md`.
+    This is the project-level acceptance gate before deployment.
+  </prompt>
+
+  <role>
+    QA-minded full-stack engineer comfortable exercising BFF endpoints,
+    SpaarkeAi workspace widgets, Dataverse rows, and JPS scopes
+    end-to-end. Reads the spec literally and tests what it says.
+  </role>
+
+  <goal>
+    `notes/acceptance-verification.md` exists with each of the 22
+    success criteria marked PASS or FAIL, with concrete evidence for
+    each. Any FAIL has a filed defer-issue per CLAUDE.md §10 deferrals
+    protocol. The project is ready for Phase 8 deployment.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarkeai-compose-r1/spec.md</file>
+    <file purpose="project-plan">projects/spaarkeai-compose-r1/plan.md</file>
+    <file purpose="project-readme">projects/spaarkeai-compose-r1/README.md</file>
+    <file purpose="project-context">projects/spaarkeai-compose-r1/CLAUDE.md</file>
+    <file purpose="success-criteria">projects/spaarkeai-compose-r1/spec.md (Success Criteria section)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-038">Verification tests MUST follow ADR-038 integration-heavy pyramid; no banned patterns (`Mock&lt;HttpMessageHandler&gt;`, DI-registration tests, ctor null-check tests)</constraint>
+    <constraint source="project">Every criterion verdict MUST cite concrete evidence (test name, log, screenshot ref) — no "looks good" verdicts</constraint>
+    <constraint source="project">Any FAIL MUST be filed via `/defer` per CLAUDE.md deferrals obligation BEFORE proceeding to Phase 8</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>acceptance verification against spec</topic>
+    <files>
+      <file>projects/spaarkeai-compose-r1/spec.md</file>
+      <file>projects/spaarkeai-compose-r1/plan.md</file>
+      <file>projects/spaarkeai-compose-r1/README.md</file>
+      <file>projects/spaarkeai-compose-r1/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Extract criteria">
+      Read `spec.md` Success Criteria section and copy all 22 criteria
+      verbatim into a working table in `notes/acceptance-verification.md`
+      with columns: ID, Criterion, Verdict, Evidence, Notes.
+    </step>
+    <step order="2" name="Group criteria by surface">
+      Group the 22 criteria by surface (BFF endpoints, SpaarkeAi UI,
+      Dataverse rows, JPS scopes, shared lib, telemetry) to plan
+      efficient verification batches.
+    </step>
+    <step order="3" name="Verify BFF surface criteria">
+      For each BFF-surface criterion, run the relevant unit/integration
+      test, hit the endpoint via curl or Swagger, or inspect logs.
+      Record evidence inline.
+    </step>
+    <step order="4" name="Verify SpaarkeAi UI criteria">
+      For each UI criterion, exercise the Compose widget end-to-end in
+      a dev environment (Path A modal, Path B inline, three-pane,
+      Word handoff, Save→promotion). Capture screenshots into
+      `notes/acceptance-screenshots/` if visual verdict required.
+    </step>
+    <step order="5" name="Verify Dataverse + JPS criteria">
+      Confirm `sprk_workspacelayout` (Compose) + `sprk_playbookconsumer`
+      (compose-summarize) rows exist and route correctly. Confirm any
+      new JPS scope inputs resolve.
+    </step>
+    <step order="6" name="Verify cross-cutting criteria">
+      Telemetry events emitted, publish-size baseline captured, no new
+      HIGH CVEs (Tasks 072 + 080 cover the absolute numbers; this step
+      confirms the criteria reference them correctly).
+    </step>
+    <step order="7" name="File defer-issues for any FAIL">
+      For each FAIL verdict, invoke `/defer` (CLAUDE.md §10) to register
+      both the local `notes/defer-issues.md` entry and the GitHub Issue.
+      Do not silently leave FAIL items.
+    </step>
+    <step order="8" name="Update TASK-INDEX">
+      Update `projects/spaarkeai-compose-r1/tasks/TASK-INDEX.md` status
+      for task 070 to ✅.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Run BFF integration tests</tool>
+    <tool name="npm">Run frontend tests + dev server</tool>
+    <tool name="curl">Hit BFF endpoints</tool>
+    <tool name="gh">File defer-issues</tool>
+  </tools>
+
+  <outputs>
+    <output type="notes" ephemeral="false">projects/spaarkeai-compose-r1/notes/acceptance-verification.md</output>
+    <output type="docs">projects/spaarkeai-compose-r1/tasks/TASK-INDEX.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 22 spec success criteria have a verdict (PASS or FAIL) recorded in `notes/acceptance-verification.md`</criterion>
+    <criterion testable="true">Every verdict cites concrete evidence (test name, log, endpoint response, or screenshot reference)</criterion>
+    <criterion testable="true">Any FAIL has been filed via `/defer` with both local entry and GitHub Issue</criterion>
+    <criterion testable="true">TASK-INDEX.md updated to ✅ for task 070</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

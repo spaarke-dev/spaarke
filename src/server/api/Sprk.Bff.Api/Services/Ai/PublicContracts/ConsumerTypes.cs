@@ -84,6 +84,16 @@ public static class ConsumerTypes
     public const string DailyBriefingNarrate = "daily-briefing-narrate";
 
     /// <summary>
+    /// <c>ComposeService</c> — whole-document summarize dispatch for the
+    /// Compose surface (spaarkeai-compose-r1 FR-09; routes via
+    /// <see cref="IConsumerRoutingService"/> to the Document Summary
+    /// playbook GUID <c>47686eb1-9916-f111-8343-7c1e520aa4df</c> seeded
+    /// in <c>scripts/dataverse/Seed-PlaybookConsumers.ps1</c>). First R1
+    /// Compose consumer type; selection-scoped variants follow in R2.
+    /// </summary>
+    public const string ComposeSummarize = "compose-summarize";
+
+    /// <summary>
     /// Read-only list of all consumer-type constants. Intended for startup
     /// health-log diffing against Dataverse (chat-routing-redesign-r1 task
     /// 028e exit gate).
@@ -97,5 +107,6 @@ public static class ConsumerTypes
         ChatSummarize,
         EmailAnalysis,
         DailyBriefingNarrate,
+        ComposeSummarize,
     };
 }

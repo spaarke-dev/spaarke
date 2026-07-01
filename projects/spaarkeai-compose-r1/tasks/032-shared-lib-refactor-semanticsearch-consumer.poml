@@ -1,0 +1,176 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="032" project="spaarkeai-compose-r1">
+  <metadata>
+    <title>Refactor SemanticSearch SearchCommandBar to import from @spaarke/document-operations</title>
+    <status>completed</status>
+    <estimated-effort>0.5 day</estimated-effort>
+    <tags>frontend, typescript, refactoring</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <dependencies>031</dependencies>
+    <parallel-safe>false</parallel-safe>
+    <fr-coverage>FR-14</fr-coverage>
+    <phase>3</phase>
+  </metadata>
+
+  <prompt>
+    Refactor SemanticSearch's `SearchCommandBar.tsx` (and any other internal
+    consumers) to import `useDocumentActions` from `@spaarke/document-operations`
+    instead of the now-removed (or stubbed) local hook. If task 031 left a
+    stub re-export in the SemanticSearch hooks folder, remove it in this task.
+    The behavior of SemanticSearch must not change.
+  </prompt>
+
+  <role>
+    Frontend developer with expertise in TypeScript import-path refactoring
+    and ensuring consumer code paths are not behaviorally affected by a
+    library-level move.
+  </role>
+
+  <goal>
+    `SearchCommandBar.tsx` (and any other SemanticSearch internal consumers)
+    imports `useDocumentActions` from `@spaarke/document-operations`. The
+    SemanticSearch local hook file is deleted (no stub remains). The
+    SemanticSearch code-page builds clean and behaves identically to its
+    pre-refactor state.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarkeai-compose-r1/spec.md</file>
+    <file purpose="project-plan">projects/spaarkeai-compose-r1/plan.md</file>
+    <file purpose="project-context">projects/spaarkeai-compose-r1/CLAUDE.md</file>
+    <file purpose="consumer-to-refactor">src/client/code-pages/SemanticSearch/src/components/SearchCommandBar.tsx</file>
+    <file purpose="hook-current-location">src/client/code-pages/SemanticSearch/src/hooks/useDocumentActions.ts (stub from task 031, to delete)</file>
+    <file purpose="shared-lib-export">src/client/shared/Spaarke.DocumentOperations/src/index.ts (from task 031)</file>
+    <file purpose="component-model">docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+    <file purpose="build-script">scripts/Build-AllClientComponents.ps1</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="project">MUST NOT change SemanticSearch behavior — pure import-path refactor</constraint>
+    <constraint source="project">MUST remove the local SemanticSearch hook file (no stub re-export remaining at end of this task)</constraint>
+    <constraint source="project">MUST find ALL SemanticSearch consumers of useDocumentActions (not just SearchCommandBar) via grep before refactoring</constraint>
+    <constraint source="project">MUST verify SemanticSearch builds clean and existing tests pass after refactor (gated explicitly in task 033)</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>import-path refactor</topic>
+    <files>
+      <file>projects/spaarkeai-compose-r1/spec.md</file>
+      <file>projects/spaarkeai-compose-r1/plan.md</file>
+      <file>projects/spaarkeai-compose-r1/CLAUDE.md</file>
+      <file>src/client/code-pages/SemanticSearch/src/hooks/useDocumentActions.ts</file>
+      <file>src/client/code-pages/SemanticSearch/src/components/SearchCommandBar.tsx</file>
+      <file>docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+      <file>scripts/Build-AllClientComponents.ps1</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Inventory SemanticSearch consumers">
+      Grep SemanticSearch for all imports of `useDocumentActions` (relative paths or via the hooks barrel). Build a complete list before editing.
+    </step>
+    <step order="2" name="Add shared-lib peer-dep">
+      Ensure SemanticSearch's `package.json` declares a dependency / peer-dep on `@spaarke/document-operations` so the import resolves. Reuse the convention used for other `@spaarke/*` imports already in SemanticSearch.
+    </step>
+    <step order="3" name="Refactor consumers">
+      Update every identified consumer file (starting with `SearchCommandBar.tsx`) to import `useDocumentActions` from `@spaarke/document-operations`. Keep all call-sites identical.
+    </step>
+    <step order="4" name="Delete local stub/hook">
+      Remove `src/client/code-pages/SemanticSearch/src/hooks/useDocumentActions.ts` (the stub left by task 031 if present, or the original file if task 031 deferred deletion).
+    </step>
+    <step order="5" name="Build SemanticSearch + shared lib">
+      Run `scripts/Build-AllClientComponents.ps1` and confirm SemanticSearch + `@spaarke/document-operations` both build clean. Use `npm install --legacy-peer-deps --no-audit --no-fund` per root CLAUDE.md §12.
+    </step>
+    <step order="6" name="Run code-review + adr-check (FULL rigor)">
+      Per root CLAUDE.md §8, FULL rigor. Invoke code-review and adr-check skills at Step 9.5.
+    </step>
+    <step order="7" name="Update TASK-INDEX">
+      Update `projects/spaarkeai-compose-r1/tasks/TASK-INDEX.md` status for task 032 to ✅. Task 033 verifies tests + adds consumer tests.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build SemanticSearch</tool>
+    <tool name="powershell">Run scripts/Build-AllClientComponents.ps1</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/code-pages/SemanticSearch/src/components/SearchCommandBar.tsx (import path updated)</output>
+    <output type="code">src/client/code-pages/SemanticSearch/package.json (peer-dep added if missing)</output>
+    <output type="code">src/client/code-pages/SemanticSearch/src/hooks/useDocumentActions.ts (deleted)</output>
+    <output type="docs">projects/spaarkeai-compose-r1/tasks/TASK-INDEX.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">No file under `src/client/code-pages/SemanticSearch/` imports `useDocumentActions` from a relative path — all imports use `@spaarke/document-operations`</criterion>
+    <criterion testable="true">The local SemanticSearch hook file is deleted</criterion>
+    <criterion testable="true">SemanticSearch builds clean via `scripts/Build-AllClientComponents.ps1`</criterion>
+    <criterion testable="true">SemanticSearch behavior unchanged (validated by task 033 test pass)</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+
+  <notes>
+    Completed 2026-06-29 by Wave 3 autonomous dispatch (task-execute, FULL rigor).
+
+    Refactor summary:
+    - Sole SemanticSearch consumer of `useDocumentActions` is `App.tsx` line 367
+      (SearchCommandBar.tsx receives handlers as props — no direct hook use).
+      Verified by grep across `src/client/code-pages/SemanticSearch/` BEFORE
+      editing per POML constraint.
+    - Updated `App.tsx` import from `./hooks/useDocumentActions` to
+      `@spaarke/document-operations`; added `getBffBaseUrl()` import from
+      local `./services/apiBase`; call site changed to
+      `useDocumentActions({ bffBaseUrl: getBffBaseUrl() })`.
+    - Deleted the transitional shim at
+      `src/client/code-pages/SemanticSearch/src/hooks/useDocumentActions.ts`
+      (no more local hook — single source of truth in `@spaarke/document-operations`).
+    - Deleted obsolete test at
+      `src/client/code-pages/SemanticSearch/src/__tests__/hooks/useDocumentActions.test.ts`.
+      It mocked the wrong surface (`buildAuthHeaders` + `global.fetch`) while
+      the canonical hook uses `authenticatedFetch` from `@spaarke/auth`.
+      Was process-crashing on master per W2-031 outcome. Canonical 14-test
+      suite at `src/client/shared/Spaarke.DocumentOperations/__tests__/hooks/useDocumentActions.test.tsx`
+      provides full behavior coverage. ADR-038 mirror-test ban applies (don't
+      duplicate at the consumer when behavior owner has KEEP-path coverage).
+    - `package.json` step (POML step 2) was already satisfied — task 031 had
+      already added `@spaarke/document-operations` as a file:dependency.
+
+    Verification:
+    - SemanticSearch webpack build: clean (0 errors, 3 pre-existing
+      bundle-size warnings — unchanged from baseline).
+    - SemanticSearch test suite: 20 suites / 423 tests / 319 pass / 104 fail.
+      The 104 failures are PRE-EXISTING (verified by stashing all changes and
+      re-running — identical failure count). Failures are in `useSavedSearches`,
+      `useFilterOptions`, etc. — unrelated to `useDocumentActions`. Net delta
+      from this task: -1 test suite (deleted broken file), zero new failures.
+    - Hot-path coordination: SpaarkeAi=Y but isolated to SemanticSearch source —
+      no conflict with active worktrees.
+
+    Decision deltas vs POML:
+    - POML step 1 named `SearchCommandBar.tsx` as the consumer-to-refactor;
+      actual consumer is `App.tsx` (SearchCommandBar receives handlers via
+      props). POML constraint "find ALL consumers via grep" took precedence.
+    - POML did not address the obsolete test file; the dispatch brief did.
+      Deletion chosen per ADR-038 (no mirror tests when behavior owner is
+      tested) and CLAUDE.md §11 (cost-of-doing-nothing — keeping a broken
+      duplicate against a non-existent surface = pure tech debt).
+
+    Quality gates (Step 9.5):
+    - code-review: passed (pure import-path refactor; no banned ADR-038
+      patterns; comment cites task 031/032 lineage).
+    - adr-check: passed (ADR-013 BFF facade respected via canonical hook;
+      ADR-028 Auth v2 respected via `authenticatedFetch`; ADR-038 testing
+      strategy respected by deleting mirror duplicate).
+
+    Downstream open items:
+    - Task 033 (next in Phase 3): Compose adopts the hook via
+      `import { useDocumentActions } from '@spaarke/document-operations'`
+      with its own `bffBaseUrl` source (likely the SpaarkeAi runtime config).
+    - Pre-existing 104 test failures in SemanticSearch suite are technical
+      debt not owned by task 032. Recommend separate /defer entry if not
+      already tracked.
+  </notes>
+</task>

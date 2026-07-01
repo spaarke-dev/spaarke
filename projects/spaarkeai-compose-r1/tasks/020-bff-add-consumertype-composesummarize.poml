@@ -1,0 +1,96 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="spaarkeai-compose-r1">
+  <metadata>
+    <title>BFF — Add ConsumerTypes.ComposeSummarize constant</title>
+    <phase>Phase 2: BFF Endpoints + Services</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <tags>bff-api, backend</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task tags include 'bff-api' (code implementation)</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Foundational additive change consumed by tasks 021–025; serialized to keep DI surface coherent.</parallel-reason>
+    <dependencies>001,002,003,004</dependencies>
+    <blocks>021,022,023,024,025,026,027</blocks>
+  </metadata>
+
+  <prompt>
+    Add a new public constant `ComposeSummarize = "compose-summarize"` to `Services/Ai/PublicContracts/ConsumerTypes.cs` so downstream Compose code can resolve the routing entry without magic strings. This is the smallest possible additive change to the BFF AI PublicContracts surface and is the prerequisite for Phase 2 services + endpoints (021–025) and the Phase 1 `sprk_playbookconsumer` row.
+  </prompt>
+
+  <role>
+    Senior .NET developer familiar with the Spaarke BFF AI PublicContracts facade (refined ADR-013, 2026-05-20). Comfortable making small additive changes to a heavily-consumed shared file.
+  </role>
+
+  <goal>
+    `ConsumerTypes.ComposeSummarize` constant exists in `ConsumerTypes.cs`, the BFF builds clean, and the constant is consumable by `IConsumerRoutingService` lookups.
+  </goal>
+
+  <context>
+    <background>
+      FR-09 of spec.md mandates the `ComposeSummarize` consumer-type constant. The string value `"compose-summarize"` matches the Phase 1 `sprk_playbookconsumer` row linking to Document Summary playbook id `47686eb1-9916-f111-8343-7c1e520aa4df`. This task is gated on the four Phase 0 spikes (001–004) only because the consumer-routing E2E shape (Spike #4) confirms the wire string.
+    </background>
+    <relevant-files>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ConsumerTypes.cs</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">Additions to PublicContracts MUST be additive constants/strings — do NOT leak AI internals (no `IOpenAiClient` / `IPlaybookService` references in this file).</constraint>
+    <constraint source="project">String literal MUST be `"compose-summarize"` (matches Phase 1 sprk_playbookconsumer row and Spike #4 wire shape).</constraint>
+    <constraint source="project">No new package references; no new DI registrations in this task.</constraint>
+  </constraints>
+
+  <justification>
+    <existing>`src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ConsumerTypes.cs` — the canonical home for consumer-type string constants (7 active types as of 2026-06-29).</existing>
+    <extension>Yes — this task EXTENDS the existing `ConsumerTypes` static class with one additional constant. No new file, no new abstraction. The task title says "add constant" not "create class."</extension>
+    <cost-of-doing-nothing>FR-09 acceptance fails — the constant does not compile, downstream Phase 2 services (021–024) cannot reference it without a magic string, and the smoke test (FR-11) cannot resolve the routing entry symbolically.</cost-of-doing-nothing>
+  </justification>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-compose-r1/spec.md</file>
+      <file>projects/spaarkeai-compose-r1/plan.md</file>
+      <file>projects/spaarkeai-compose-r1/CLAUDE.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ConsumerTypes.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ConsumerRoutingService.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatSessionManager.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/FileAccessEndpoints.cs</file>
+      <file>docs/guides/HOW-TO-ADD-A-CONSUMER-ROUTING-TYPE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context check + load knowledge">Verify context &lt; 70%. Load spec.md FR-09, plan.md Phase 2, bff-extensions.md §A pre-merge checklist, and the existing ConsumerTypes.cs.</step>
+    <step order="1" name="Inspect current ConsumerTypes surface">Read `ConsumerTypes.cs` to confirm style (const string, XML doc, ordering). Verify no existing `compose-summarize` / `ComposeSummarize` name collision.</step>
+    <step order="2" name="Add constant">Add `public const string ComposeSummarize = "compose-summarize";` with an XML doc comment citing FR-09 + the Document Summary playbook id. Match existing constants' formatting.</step>
+    <step order="3" name="Build BFF">Run `dotnet build src/server/api/Sprk.Bff.Api/` — must be clean (no warnings introduced).</step>
+    <step order="4" name="Measure publish-size impact">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`; measure compressed output. Expected: ≤+0.01 MB delta vs ~45.65 MB baseline (single constant). Record in task notes.</step>
+    <step order="5" name="CVE check">Run `dotnet list package --vulnerable --include-transitive` — must show no new HIGH-severity CVE.</step>
+    <step order="6" name="Update TASK-INDEX">Update `projects/spaarkeai-compose-r1/tasks/TASK-INDEX.md`: change task 020 status to ✅. Reset `current-task.md` to next pending task.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build, publish, vulnerable-package scan</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ConsumerTypes.cs</output>
+    <output type="docs">projects/spaarkeai-compose-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`ConsumerTypes.ComposeSummarize` compiles and equals the string `"compose-summarize"`.</criterion>
+    <criterion testable="true">`dotnet build src/server/api/Sprk.Bff.Api/` succeeds with no new warnings.</criterion>
+    <criterion testable="true">Publish-size delta ≤+0.05 MB vs ~45.65 MB baseline.</criterion>
+    <criterion testable="true">`dotnet list package --vulnerable --include-transitive` shows no new HIGH CVE.</criterion>
+    <criterion testable="true">TASK-INDEX.md status for task 020 is ✅.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

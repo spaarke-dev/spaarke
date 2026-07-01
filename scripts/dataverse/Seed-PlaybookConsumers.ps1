@@ -53,12 +53,13 @@
     Spec:             projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md § Phase 1R
 
     GUID provenance (Dev environment, as of 2026-06-24):
-      matter-pre-fill   2d660cad-d418-f111-8343-7ced8d1dc988  (PB-008 Create New Matter Pre-Fill)
-      project-pre-fill  fc343e9c-3460-f111-ab0b-7c1e521b425f  (Create New Project Pre-Fill)
-      ai-summary        18cf3cc8-02ec-f011-8406-7c1e520aa4df  (PB-002 Document Profile)
-      summarize-file    4a72f99c-a119-f111-8343-7ced8d1dc988  (PB-015 Summarize File)
-      chat-summarize    44285d15-1360-f111-ab0b-70a8a59455f4  (summarize-document-for-chat@v1)
-      email-analysis    bc71facf-6af1-f011-8406-7ced8d1dc988  (PB-003 Email Analysis)
+      matter-pre-fill     2d660cad-d418-f111-8343-7ced8d1dc988  (PB-008 Create New Matter Pre-Fill)
+      project-pre-fill    fc343e9c-3460-f111-ab0b-7c1e521b425f  (Create New Project Pre-Fill)
+      ai-summary          18cf3cc8-02ec-f011-8406-7c1e520aa4df  (PB-002 Document Profile)
+      summarize-file      4a72f99c-a119-f111-8343-7ced8d1dc988  (PB-015 Summarize File)
+      chat-summarize      44285d15-1360-f111-ab0b-70a8a59455f4  (summarize-document-for-chat@v1)
+      email-analysis      bc71facf-6af1-f011-8406-7ced8d1dc988  (PB-003 Email Analysis)
+      compose-summarize   47686eb1-9916-f111-8343-7c1e520aa4df  (Document Summary — added by spaarkeai-compose-r1 task 011)
 #>
 
 [CmdletBinding()]
@@ -144,6 +145,16 @@ $Records = @(
         Enabled           = $true
         PlaybookId        = 'bc71facf-6af1-f011-8406-7ced8d1dc988'
         PlaybookComment   = 'PB-003 Email Analysis'
+    },
+    @{
+        Name              = 'Compose Whole-Document Summarize'
+        ConsumerType      = 'compose-summarize'
+        ConsumerCode      = 'default'
+        Environment       = '*'
+        Priority          = 500
+        Enabled           = $true
+        PlaybookId        = '47686eb1-9916-f111-8343-7c1e520aa4df'
+        PlaybookComment   = 'Document Summary (PB-002 reused) — spaarkeai-compose-r1 task 011'
     }
 )
 

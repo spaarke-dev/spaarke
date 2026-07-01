@@ -19,6 +19,12 @@ module.exports = (env) => {
       alias: {
         '@spaarke/auth': path.resolve(__dirname, '../../shared/Spaarke.Auth/src'),
         '@spaarke/ui-components': path.resolve(__dirname, '../../shared/Spaarke.UI.Components/src'),
+        '@spaarke/document-operations': path.resolve(__dirname, '../../shared/Spaarke.DocumentOperations/src'),
+        // Force a single React instance — without this, webpack walks each
+        // shared lib's local node_modules and pulls a second copy. React 19
+        // hooks throw "Invalid hook call" when two instances coexist.
+        react: path.resolve(__dirname, 'node_modules/react'),
+        'react-dom': path.resolve(__dirname, 'node_modules/react-dom'),
       },
     },
     module: {

@@ -41,7 +41,8 @@ import { SearchResultsTreemap } from './components/SearchResultsTreemap';
 import { SearchResultsTimeline } from './components/SearchResultsTimeline';
 import { VisualizationSettings } from './components/VisualizationSettings';
 import { useSavedSearches } from './hooks/useSavedSearches';
-import { useDocumentActions } from './hooks/useDocumentActions';
+import { useDocumentActions } from '@spaarke/document-operations';
+import { getBffBaseUrl } from './services/apiBase';
 import { useSemanticSearch } from './hooks/useSemanticSearch';
 import { useRecordSearch } from './hooks/useRecordSearch';
 import { useFilterOptions } from './hooks/useFilterOptions';
@@ -364,7 +365,11 @@ export const App: React.FC<AppProps> = ({
   const { savedSearches, isLoading: isSavedSearchesLoading, saveSearch } = useSavedSearches();
 
   // --- Document Actions ---
-  const { openInWeb, openInDesktop, download, deleteDocuments, emailLink, sendToIndex } = useDocumentActions();
+  // Hook lives in @spaarke/document-operations (moved by task 031, consumed
+  // directly here by task 032 — local shim deleted, no behavior change).
+  const { openInWeb, openInDesktop, download, deleteDocuments, emailLink, sendToIndex } = useDocumentActions({
+    bffBaseUrl: getBffBaseUrl(),
+  });
 
   // --- Active Domain Derivation ---
   const isDocDomain = activeDomain === 'documents';

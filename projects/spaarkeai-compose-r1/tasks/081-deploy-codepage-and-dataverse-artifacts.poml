@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="081" project="spaarkeai-compose-r1">
+  <metadata>
+    <title>Deploy SpaarkeAi code-page + Dataverse rows (workspacelayout + playbookconsumer)</title>
+    <status>not-started</status>
+    <estimated-effort>0.5 day</estimated-effort>
+    <tags>deploy, dataverse, solution</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <dependencies>070,071,072</dependencies>
+    <parallel-group>I</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <phase>8</phase>
+  </metadata>
+
+  <prompt>
+    Deploy the Compose-enabled SpaarkeAi code page (the workspace
+    widget surface) and the supporting Dataverse rows: the
+    `sprk_workspacelayout` row for Compose and the
+    `sprk_playbookconsumer` row for `compose-summarize`. Use
+    `code-page-deploy` for the SPA and `dataverse-deploy` for the
+    Dataverse solution. Parallel-safe with task 080 (different
+    deployment surface).
+  </prompt>
+
+  <role>
+    Release engineer comfortable with both Code Page (Vite SPA →
+    Power Pages) deploys and Dataverse solution promotion (PAC CLI).
+  </role>
+
+  <goal>
+    SpaarkeAi code page deployed with the Compose workspace widget
+    surface live; `sprk_workspacelayout` (Compose) + `sprk_playbookconsumer`
+    (compose-summarize) rows visible in the target environment;
+    end-to-end smoke verifies a Compose open from the workspace
+    lands in the correct widget.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/spaarkeai-compose-r1/spec.md</file>
+    <file purpose="project-plan">projects/spaarkeai-compose-r1/plan.md</file>
+    <file purpose="project-readme">projects/spaarkeai-compose-r1/README.md</file>
+    <file purpose="project-context">projects/spaarkeai-compose-r1/CLAUDE.md</file>
+    <file purpose="code-page-deploy-skill">.claude/skills/code-page-deploy/SKILL.md</file>
+    <file purpose="dataverse-deploy-skill">.claude/skills/dataverse-deploy/SKILL.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-010">New Dataverse rows MUST be org-owned (no user-owned ownership type)</constraint>
+    <constraint source="project">Deploy MUST be to the agreed target environment (dev/UAT per project deploy plan — not prod without explicit human approval)</constraint>
+    <constraint source="project">Post-deploy smoke MUST exercise the Compose widget end-to-end (open from workspace → render)</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Code-page + Dataverse deploy for SpaarkeAi widget surface</topic>
+    <files>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>projects/spaarkeai-compose-r1/spec.md</file>
+      <file>projects/spaarkeai-compose-r1/plan.md</file>
+      <file>projects/spaarkeai-compose-r1/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1" name="Verify Dataverse row content">
+      Re-confirm the `sprk_workspacelayout` row for Compose and the
+      `sprk_playbookconsumer` row for `compose-summarize` (created
+      by tasks 010 + 011) are exported into the project Dataverse
+      solution ZIP at the latest commit.
+    </step>
+    <step order="2" name="Build SpaarkeAi code page">
+      Run the standard SpaarkeAi build (`npm install --legacy-peer-deps
+      --no-audit --no-fund` then `npm run build` or whatever the
+      code-page-deploy skill prescribes). Confirm clean build.
+    </step>
+    <step order="3" name="Deploy code page via skill">
+      Invoke `code-page-deploy` skill against the SpaarkeAi
+      code-page project. Confirm Static Web Apps / Power Pages
+      deploy completes.
+    </step>
+    <step order="4" name="Deploy Dataverse solution via skill">
+      Invoke `dataverse-deploy` skill to push the solution containing
+      the new rows to the target environment. Confirm import succeeds
+      and rows are visible.
+    </step>
+    <step order="5" name="Smoke-test end-to-end">
+      Open the SpaarkeAi workspace in the target environment, exercise
+      a Compose workflow (Path A or Path B per spec), confirm the
+      widget renders, the Word handoff link works, and a Save promotes
+      to Document idempotently.
+    </step>
+    <step order="6" name="Run code-review + adr-check (FULL rigor)">
+      Per root CLAUDE.md §8, FULL rigor for deployment tasks. Invoke
+      code-review + adr-check at Step 9.5 if not already run via
+      task-execute Step 9.5.
+    </step>
+    <step order="7" name="Update TASK-INDEX">
+      Update `projects/spaarkeai-compose-r1/tasks/TASK-INDEX.md`
+      status for task 081 to ✅.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build SpaarkeAi code page</tool>
+    <tool name="pac">Dataverse solution import</tool>
+    <tool name="swa">Static Web Apps deploy (via code-page-deploy skill)</tool>
+  </tools>
+
+  <outputs>
+    <output type="deployment-log">SpaarkeAi code-page deployment log</output>
+    <output type="deployment-log">Dataverse solution import log</output>
+    <output type="docs">projects/spaarkeai-compose-r1/tasks/TASK-INDEX.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">SpaarkeAi code page deployed to target environment and reachable</criterion>
+    <criterion testable="true">`sprk_workspacelayout` (Compose) + `sprk_playbookconsumer` (compose-summarize) rows visible in target environment</criterion>
+    <criterion testable="true">End-to-end smoke: Compose workflow renders, Word handoff link works, Save promotes idempotently</criterion>
+    <criterion testable="true">TASK-INDEX.md updated to ✅ for task 081</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

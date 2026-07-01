@@ -1,0 +1,155 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="045" project="spaarkeai-compose-r1">
+  <metadata>
+    <title>Frontend — Create `ComposeEditor.tsx` (TipTap editor shell + DOCX bridge from Spike #1)</title>
+    <phase>Phase 4: Frontend — SpaarkeAi Compose Surface</phase>
+    <status>completed</status>
+    <completed-date>2026-06-29</completed-date>
+    <estimated-hours>10</estimated-hours>
+    <tags>frontend, react, typescript, fluent-ui, tiptap</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Task tags include 'fluent-ui' (UI implementation per ADR-021)</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Editor consumes section registry (040) and the locked Spike #1 DOCX-bridge artifact; serialized.</parallel-reason>
+    <dependencies>001,040</dependencies>
+    <blocks>042</blocks>
+  </metadata>
+
+  <prompt>
+    Create `ComposeEditor.tsx` — the TipTap editor shell that hosts the locked OOB-only StarterKit + extensions inventory (per Spike #1) and integrates the DOCX bridge (round-trip converter chosen in Spike #1). The editor exposes a controlled-document API to `ComposeWorkspace` (Task 042) and emits document-state events via PaneEventBus contracts from Task 041. No custom DOCX-feature integration outside TipTap OOB.
+  </prompt>
+
+  <role>
+    Senior React/TypeScript developer fluent in TipTap (ProseMirror), DOCX-bridge converters (`prosemirror-docx` or equivalent), Fluent UI v9, and the SpaarkeAi PaneEventBus contract.
+  </role>
+
+  <goal>
+    `ComposeEditor.tsx` mounts the TipTap shell with the locked Spike #1 extension set, accepts a DOCX byte stream as input, renders editable content, emits change events via PaneEventBus, and exposes a `serialize() → DOCX` API for Save. Build green; ui-test green; dark mode renders.
+  </goal>
+
+  <context>
+    <background>
+      FR-02 + FR-03 lock the editor to TipTap OOB-only. Spike #1 (`notes/spikes/spike-tiptap-docx-roundtrip.md`) produces the validated extension inventory + the chosen DOCX-bridge package. This task IMPLEMENTS what Spike #1 locked. Advanced DOCX features (tracked changes, footnotes, equations, fields, SmartArt) are explicitly out of scope.
+    </background>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Fluent UI v9 dark mode via semantic tokens — the TipTap editor container MUST honor `colorNeutralBackground1` + `colorNeutralForeground1`.</constraint>
+    <constraint source="ADR-028">Auth via `@spaarke/auth` — editor does NOT call SPE directly; receives bytes from the workspace host.</constraint>
+    <constraint source="project">REUSE the TipTap StarterKit + the extensions locked by Spike #1; do NOT add extensions outside that inventory.</constraint>
+    <constraint source="project">No custom DOCX-feature integration outside TipTap OOB (tracked changes, footnotes, equations, fields, SmartArt are forbidden per spec.md MUST NOT).</constraint>
+  </constraints>
+
+  <justification>
+    <existing>No existing TipTap editor component in the Spaarke client codebase (verified via grep `tiptap` in `src/`). SemanticSearch + ConversationPane use plain Fluent inputs, not a rich editor.</existing>
+    <extension>No — there is nothing to extend; this is the first TipTap host. Editing rich DOCX content cannot be retrofitted onto any existing component.</extension>
+    <cost-of-doing-nothing>FR-02 + FR-03 + FR-04 fail — Compose has no editor surface; DOCX files cannot be rendered or edited; the smoke test (Phase 6) cannot operate on any document content.</cost-of-doing-nothing>
+  </justification>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarkeai-compose-r1/spec.md</file>
+      <file>projects/spaarkeai-compose-r1/plan.md</file>
+      <file>projects/spaarkeai-compose-r1/CLAUDE.md</file>
+      <file>projects/spaarkeai-compose-r1/notes/spikes/spike-tiptap-docx-roundtrip.md</file>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+      <file>docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+      <file>docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md</file>
+      <file>docs/architecture/LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md</file>
+      <file>src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx</file>
+      <file>src/solutions/SpaarkeAi/src/utils/launch-resolver.ts</file>
+      <file>src/solutions/SpaarkeAi/src/components/shell/ThreePaneShell.tsx</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/CalendarWorkspaceWidget</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="0" name="Context check + load Spike #1 artifact">Verify context &lt; 70%. Load `notes/spikes/spike-tiptap-docx-roundtrip.md` for the locked extension inventory + DOCX-bridge choice.</step>
+    <step order="1" name="Install dependencies">Add `@tiptap/core`, `@tiptap/react`, `@tiptap/starter-kit`, and the Spike-#1-chosen DOCX-bridge package to the SpaarkeAi `package.json` (versions from Spike #1).</step>
+    <step order="2" name="Scaffold editor">Create `src/solutions/SpaarkeAi/src/components/compose/ComposeEditor.tsx`. Mount TipTap via `useEditor` with the locked extension set.</step>
+    <step order="3" name="Wire DOCX input">Accept a `docxBytes: ArrayBuffer | null` prop; on change, run the DOCX→ProseMirror conversion (Spike #1 path).</step>
+    <step order="4" name="Wire serialize API">Expose an imperative handle (`useImperativeHandle`) with `serialize() → Promise&lt;ArrayBuffer&gt;` that runs ProseMirror→DOCX.</step>
+    <step order="5" name="PaneEventBus events">Emit `compose:document-changed` (contract from Task 041) on debounced editor change.</step>
+    <step order="6" name="Style + dark mode">Style the editor container + ProseMirror content via Fluent v9 semantic tokens — no hex.</step>
+    <step order="7" name="Build + ui-tests">`npm run build`, then `pwsh ./scripts/Build-AllClientComponents.ps1`. Run ui-tests below.</step>
+    <step order="8" name="Update TASK-INDEX">TASK-INDEX.md: task 045 → ✅. Reset `current-task.md`.</step>
+  </steps>
+
+  <ui-tests>
+    <test name="Component Renders">Mount the editor with a small DOCX byte fixture; verify content renders; basic typing + heading + list + table interactions work; zero console errors.</test>
+    <test name="Dark Mode Compliance (ADR-021)">Editor container + ProseMirror content renders correctly in dark theme via Fluent v9 semantic tokens.</test>
+    <test name="DOCX Round-Trip">Load DOCX fixture → mutate → call `serialize()` → reload — content fidelity preserved per the Spike #1 inventory (StarterKit features only).</test>
+    <test name="PaneEventBus Document-Changed">Edit content — verify debounced `compose:document-changed` event fires with the correct contract shape.</test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Install TipTap packages; build TypeScript</tool>
+    <tool name="pwsh">Run Build-AllClientComponents.ps1</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/components/compose/ComposeEditor.tsx</output>
+    <output type="config">src/solutions/SpaarkeAi/package.json (TipTap + DOCX-bridge deps)</output>
+    <output type="docs">projects/spaarkeai-compose-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Editor mounts with TipTap StarterKit + locked Spike #1 extensions.</criterion>
+    <criterion testable="true">DOCX byte input renders as editable content.</criterion>
+    <criterion testable="true">`serialize()` produces a valid DOCX byte stream.</criterion>
+    <criterion testable="true">PaneEventBus `compose:document-changed` event fires on edit.</criterion>
+    <criterion testable="true">`npm run build` + `Build-AllClientComponents.ps1` succeed.</criterion>
+    <criterion testable="true">ui-tests green: Component Renders, Dark Mode Compliance, DOCX Round-Trip, PaneEventBus Document-Changed.</criterion>
+    <criterion testable="true">TASK-INDEX.md status for task 045 is ✅.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+
+  <notes>
+    Completed 2026-06-29 by W4 parallel autonomous dispatch.
+
+    PATH CORRECTION applied at dispatch: POML mentioned `src/solutions/SpaarkeAi/src/components/compose/` (original draft path); W1b follow-up created the canonical shared-lib home at `src/client/shared/Spaarke.Compose.Components/`, which is where ComposeEditor lands. Build orchestrator (`scripts/Build-AllClientComponents.ps1`) registers the shared lib and was re-ordered to build it AFTER `Spaarke.AI.Widgets` (added dep) — see lib-list comment in script.
+
+    FILES CREATED / MODIFIED:
+      • src/client/shared/Spaarke.Compose.Components/package.json (TipTap + bridge + ai-widgets deps; bumped 0.1.0 → 0.2.0)
+      • src/client/shared/Spaarke.Compose.Components/tsconfig.json (added @spaarke/ai-widgets path mapping)
+      • src/client/shared/Spaarke.Compose.Components/src/utils/docxBridge.ts (mammoth import + docx export helpers — lazy-loaded)
+      • src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx (~450 LOC; LOCKED Spike #1 extension set + Flow 1/2 dispatch + 3-min heartbeat)
+      • src/client/shared/Spaarke.Compose.Components/src/index.ts (barrel exports for ComposeEditor + bridge helpers)
+      • scripts/Build-AllClientComponents.ps1 (moved Compose.Components AFTER AI.Widgets — dep-order fix)
+
+    LICENSE AUDIT (16 new deps, all MIT or BSD-2-Clause):
+      • 14 × @tiptap/* (StarterKit + 11 standard extensions) — all MIT
+      • mammoth ^1.8.0 (resolved 1.12.0) — BSD-2-Clause
+      • docx ^9.0.3 (resolved 9.7.1) — MIT
+      • ZERO TipTap Pro. ZERO proprietary.
+
+    BUILD VERIFICATION:
+      • npm run build — 0 errors, 0 warnings (Compose.Components dist clean)
+      • Build-AllClientComponents.ps1 -Component Spaarke.Compose.Components — SUCCESS in 2.4s
+      • npm run typecheck — clean (0 errors)
+
+    ACCEPTANCE CRITERIA STATUS:
+      ✅ Editor mounts with locked extensions  ✅ DOCX byte input renders  ✅ serialize() exposed via ref  ✅ PaneEventBus events emitted (Flow 1 + Flow 2 per compose-contracts; "compose:document-changed" speculative POML name replaced with the locked contract names)  ✅ npm build + orchestrator build pass  ⏭ Browser ui-tests deferred to Phase 6 task 060 (no Chrome integration available in autonomous wave)  ⏭ TASK-INDEX flip handled by main session
+
+    ADR TENSIONS: None. (compose-contracts.ts cross-cast through `unknown`/`any` is documented as adhering to ADR-030 additive contract; compose-contracts is solution-local per Spike #2 §11.)
+
+    HEARTBEAT IMPL: 3-min sliding via setInterval, gated on `document.visibilityState === 'visible'`, calls `POST /api/compose/document/{documentId}/heartbeat` (singular `document` per Spike #3 §8) via `authenticatedFetch`. Defensive: logs warning + swallows non-2xx (W7-052 wires the BFF side; 404 today is expected and tolerated).
+
+    ADR-013 (refined) verified: editor does NOT inject IOpenAiClient/IPlaybookService/AI internals. Only AI surface from editor is `compose_selection_offer` on the conversation channel — ConversationPane is the dispatcher to `POST /api/compose/action/{consumerType}` (W3-024). Facade boundary intact.
+
+    ADR-015 Tier 3 verified: `selectionText` flows through PaneEventBus payloads (subscribers strip when bridging to telemetry per logFlowEvent reference impl). Document content (HTML from mammoth import) is NEVER console.log'd; only mammoth's `messages` array (Tier 1 safe configuration metadata) is logged.
+
+    OPEN ITEMS for downstream tasks:
+      • Task 046 (W6): swap inline `ComposeWorkspacePlaceholder` in `composeEditor.registration.ts` for an import from `@spaarke/compose-components` — currently the registration shim still uses the placeholder.
+      • Task 042 (W5): create `ComposeWorkspace.tsx` that hosts ComposeEditor + ComposeToolbar (043) + ComposeEmptyState (044); threads documentRef/bffBaseUrl/sessionId from the host context.
+      • Task 052 (W7): wire the BFF heartbeat endpoint + DocumentCheckoutService.RefreshHeartbeatAsync (currently client logs 404 + swallows — graceful degradation).
+      • R1-OPEN-1: actual AI-action dispatch from selection (Flow 2 "compose_selection_offer" subscriber) lives in ConversationPane work; not in this task.
+      • R1-OPEN-2: TipTap floating range pin (`~2.10.3`) — Spike #1 §7 R-6 risk; resolved to 2.27.2 here, well within `^2.10.3` semver. Operator may tighten in a follow-up if behavior drifts.
+      • Tests: ADR-038 + project CLAUDE.md guidance says jest tests for shared-lib components remain MAINTAIN-category. Did NOT add tests in this task (W4 frontend lane is implementation-only; W5 task 042 + Phase 5 task 060 provide the integration coverage). Consider follow-up to add a focused unit-test covering selectionUpdate debounce + heartbeat suppression-on-hidden-tab logic.
+  </notes>
+</task>

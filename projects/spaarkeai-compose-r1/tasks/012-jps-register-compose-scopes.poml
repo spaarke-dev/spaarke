@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="spaarkeai-compose-r1">
+  <metadata>
+    <title>Define + register JPS scopes compose-selection + compose-document</title>
+    <phase>Phase 1: Dataverse + JPS Foundations</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <tags>ai, jps, dataverse, solution</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Creates new JPS scope definitions (new artifacts); ADR-013 facade contract applies; validation gate via jps-validate.</rigor-reason>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>004</dependencies>
+    <blocks>060</blocks>
+  </metadata>
+
+  <prompt>
+    Define and register two new JPS scopes: `compose-selection` (selection-level Compose context — e.g., highlighted-text inputs) and `compose-document` (whole-document Compose context). Spike #4 locks the scope schemas; this task creates the scope JSON definitions, deploys them via `jps-scope-refresh`, and validates via `jps-validate`. Per FR-08, the scopes must appear in the JPS scope catalog and pass `jps-validate` — they are the contract surface that Compose UI will use to pass selection / document context to playbooks (no new playbook actions in R1 — these scopes are R2 prep, but registered now so the catalog reflects R1 contract shape).
+  </prompt>
+
+  <role>
+    JPS scope author with experience in the Spaarke JPS playbook system. Familiar with scope JSON schema, the `jps-scope-refresh` deployment skill, and `jps-validate` schema validation. Will follow patterns from existing scopes (e.g., document-level + selection-level scopes already in the catalog).
+  </role>
+
+  <goal>
+    Two new JPS scope definitions (`compose-selection` and `compose-document`) registered in the JPS catalog, validated via `jps-validate` (exit code 0), and appearing in the scope-catalog index for downstream playbook authoring.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarkeai-compose-r1/spec.md</file>
+    <file purpose="design-working">projects/spaarkeai-compose-r1/design.md</file>
+    <file purpose="project-plan">projects/spaarkeai-compose-r1/plan.md</file>
+    <file purpose="project-context">projects/spaarkeai-compose-r1/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarkeai-compose-r1/tasks/TASK-INDEX.md</file>
+    <file purpose="spike-output">projects/spaarkeai-compose-r1/notes/spikes/</file>
+  </inputs>
+
+  <justification>
+    <existing>The JPS catalog includes scopes for other Spaarke surfaces (selection-level + document-level scopes already exist). No scope exists for Compose-level selection or whole-document context (verified by `jps-scope-refresh` catalog index).</existing>
+    <extension>No — JPS scopes are keyed by scope name and bind a distinct context shape (selection vs document) for a distinct surface (Compose). Compose-level scopes are not reachable by reusing another surface's scopes because the input contract differs (e.g., TipTap selection range, ChatSession DocumentId).</extension>
+    <cost-of-doing-nothing>FR-08 fails: without the two scopes registered, future R2 Compose AI actions (Explain clause, Replace with standard, Compare-to-playbook, Draft alternative) cannot be authored against a stable scope contract. The R1 contract surface is also required so the smoke-test (FR-11) can demonstrate Compose-context routing end-to-end.</cost-of-doing-nothing>
+  </justification>
+
+  <constraints>
+    <constraint source="ADR-013">Scope schemas MUST align with the AI PublicContracts facade — they are the input contract for `IInvokePlaybookAi` / `IConsumerRoutingService` consumed by Compose CRUD code. No leakage of AI-internal types into scope schemas.</constraint>
+    <constraint source="project">Scope schemas MUST follow the locked shape published in Spike #4 output (`notes/spikes/spike-4-*.md`).</constraint>
+    <constraint source="project">Scope JSON MUST pass `jps-validate` (exit code 0) before registration is considered complete.</constraint>
+    <constraint source="project">Scopes MUST be registered via `jps-scope-refresh` (NOT inserted manually) so the catalog stays consistent.</constraint>
+    <constraint source="project">No new playbook actions in R1 (per spec.md Scope #9) — only scopes registered.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>jps, ai-scopes, compose</topic>
+    <files>
+      <file>projects/spaarkeai-compose-r1/spec.md</file>
+      <file>projects/spaarkeai-compose-r1/design.md</file>
+      <file>projects/spaarkeai-compose-r1/plan.md</file>
+      <file>docs/guides/HOW-TO-ADD-A-CONSUMER-ROUTING-TYPE.md</file>
+      <file>.claude/skills/jps-scope-refresh/SKILL.md</file>
+      <file>.claude/skills/jps-validate/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Load Spike #4 outputs in `notes/spikes/` — confirm the locked schemas for `compose-selection` and `compose-document` (field names, types, required vs optional, examples).</step>
+    <step order="2">Read `.claude/skills/jps-scope-refresh/SKILL.md` and `.claude/skills/jps-validate/SKILL.md` to confirm the exact file layout the skills expect, and locate one or two existing scope JSONs as patterns to mirror.</step>
+    <step order="3">Author scope JSONs for `compose-selection` (e.g., selection text, selection range, document id, session id) and `compose-document` (e.g., full document id, session id, document metadata) per the locked schemas.</step>
+    <step order="4">Run `/jps-validate` against each scope JSON; iterate until exit code 0.</step>
+    <step order="5">Run `/jps-scope-refresh` to deploy scopes to Dataverse and refresh the catalog index used by Claude Code.</step>
+    <step order="6">Verify both scopes appear in the refreshed scope catalog (per FR-08 acceptance) and that the catalog index file (consumed by `jps-action-create` / `jps-playbook-design`) lists them.</step>
+    <step order="7">Update TASK-INDEX.md status from 🔲 to ✅; reset current-task.md for next pending task.</step>
+  </steps>
+
+  <outputs>
+    <output type="data">Two new JPS scope rows in Dataverse (registered via `jps-scope-refresh`)</output>
+    <output type="code">JPS scope JSON definitions (under JPS catalog path per skill convention)</output>
+    <output type="docs">notes/spikes/ (referenced for locked schemas)</output>
+    <output type="data">Project solution updated if scopes are solution-tracked</output>
+    <output type="notes">projects/spaarkeai-compose-r1/notes/ — any deviation notes</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Scopes appear in JPS catalog; `jps-validate` passes (per spec.md FR-08 Acceptance column).</criterion>
+    <criterion testable="true">Both scope JSONs deploy successfully via `jps-scope-refresh` (no skill errors).</criterion>
+    <criterion testable="true">Scope catalog index reflects both new scopes (visible to downstream `jps-action-create` / `jps-playbook-design` skills).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    Scopes are REGISTERED in R1, but no R1 playbook action consumes them yet (spec.md Scope #9 — no new playbook actions). R2 will author the four AI actions (Explain clause, Replace with standard, Compare-to-playbook, Draft alternative) against these scopes. Registering them now ensures the contract is locked and visible to Compose UI work in Phase 4.
+
+    --- EXECUTION DISCOVERY (2026-06-29) ---
+
+    During execution, the sub-agent surfaced a TASK-SCOPE / TOOL-CONTRACT MISMATCH:
+
+    1. The POML Step 5 instructs running `jps-scope-refresh` to "deploy scopes to Dataverse and refresh the catalog index." Spike #4 §4.3 already flagged this concern: "`jps-validate` targets action JPS files (prompt schemas). Scope files are a different artifact class."
+
+    2. Verified empirically:
+       - `scripts/Refresh-ScopeModelIndex.ps1` (the script `jps-scope-refresh` invokes) queries Dataverse `sprk_analysisactions`, `sprk_analysisskills`, `sprk_analysisknowledges`, `sprk_analysistools` — and regenerates `.claude/catalogs/scope-model-index.json` from those entities only. It does NOT consume `$schema: jps-scope/v1` input-scope files.
+       - There is no `JpsScope` / `InputScope` / `ScopeRegistry` type in `Sprk.Bff.Api` — grep confirms.
+       - There is no Dataverse entity for input-scope schemas — they are NEW artifact class introduced by this project.
+       - The `jps-scope/v1` schema URL is currently aspirational (no JSON-Schema endpoint published).
+
+    3. PRAGMATIC INTERPRETATION applied (Path C — pivot to comply per CLAUDE.md §6.5 protocol, though this is not strictly an ADR conflict): Treat "registration" as PUBLISHING the locked scope JSONs to a permanent, downstream-discoverable location with validation against the scope-specific checks from Spike #4 §4.3. The actual "registration" of input scopes occurs at code-consumption time:
+       - Phase 2 task 020 — `ConsumerTypes.ComposeSummarize` constant + `ComposeActionRequest` C# DTO
+       - Phase 4 tasks 040+ — TypeScript scope-builder + Compose UI dispatch
+       - Phase 5 task 025 — `ComposeEndpoints.MapPost("/action/{consumerType}")`
+
+    4. ARTIFACTS PRODUCED:
+       - `projects/spaarkeai-compose-r1/notes/jps-scopes/compose-document.scope.json` — locked R1 contract
+       - `projects/spaarkeai-compose-r1/notes/jps-scopes/compose-selection.scope.json` — locked R2-prep contract
+       - `projects/spaarkeai-compose-r1/notes/jps-scopes/README.md` — catalog README with consumer registry + validation report (22 PASS, 0 WARN, 0 FAIL)
+
+    5. VALIDATION POSTURE: All 10+ scope-specific checks from Spike #4 §4.3 PASS for both files (valid JSON, $schema=jps-scope/v1, $version=1, scopeCode matches design, description non-empty, metadata.tags present, inputs.fields complete with name+type+description per field, required/optional clearly demarcated, ADR-015 dataGovernance block declares user-content + doNotLog rules, totalCharCap under chat-text caps, ADR-013 boundary preserved).
+
+    6. OPEN ITEMS FOR DOWNSTREAM TASKS:
+       - Task 020 (Phase 2): Author `ComposeActionRequest` DTO matching `compose-document.scope.json` field-by-field (3 required, 5 optional). Reference path: `notes/jps-scopes/compose-document.scope.json`.
+       - Task 040+ (Phase 4): Mirror this contract in TypeScript when authoring the scope-builder.
+       - DEFERRAL NOT FILED: A future enhancement to `jps-scope-refresh` could publish a 2nd catalog (`input-scope-index.json`) tracking these files, but this is out of R1 scope. Not filed because the contract is fully expressible via the locked JSONs in `notes/jps-scopes/` + the README consumer-registry.
+
+    7. NO ADR TENSIONS surfaced. ADR-013 (PublicContracts facade) + ADR-015 (Tier 3 multi-tenant isolation, `doNotLog` for `selectionText`) are both honored in the scope schemas.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>
+      Before starting this task, load all files listed in &lt;knowledge&gt;&lt;files&gt;. Follow the task-execute skill for mandatory pre-execution checklist, then proceed through the &lt;steps&gt; sequence.
+    </protocol>
+  </execution>
+</task>
