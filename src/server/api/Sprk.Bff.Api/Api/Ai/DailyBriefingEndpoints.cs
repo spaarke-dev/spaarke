@@ -141,20 +141,36 @@ public static class DailyBriefingEndpoints
 
         try
         {
-            var payload = await collector.CollectAsync(systemUserId, cancellationToken).ConfigureAwait(false);
+            // R7 W12 feedback item 9 (2026-07-01): fan out the daily-briefing collect
+            // AND the high-priority scan in parallel — they hit disjoint Dataverse
+            // queries and combined latency stays close to the slower of the two.
+            var payloadTask = collector.CollectAsync(systemUserId, cancellationToken);
+            var highPriorityTask = collector.CollectHighPriorityAsync(systemUserId, cancellationToken);
+            await Task.WhenAll(payloadTask, highPriorityTask).ConfigureAwait(false);
+            var payload = await payloadTask.ConfigureAwait(false);
+            var highPriorityItems = await highPriorityTask.ConfigureAwait(false);
+
             if (payload.Channels.Length == 0 && payload.PriorityItems.Length == 0 && payload.Categories.Length == 0)
             {
-                logger.LogInformation("Daily briefing render: no notable items for systemuserid={SystemUserId} — returning empty narrative", systemUserId);
+                logger.LogInformation(
+                    "Daily briefing render: no notable channel items for systemuserid={SystemUserId} — returning narrative-empty response (highPriorityItems={HighPriorityCount})",
+                    systemUserId, highPriorityItems.Length);
+                // High-priority items STILL surface even when channel narrations are empty
+                // — operator wants flagged items visible regardless of channel content.
                 return TypedResults.Ok(new DailyBriefingNarrateResponse
                 {
                     Tldr = new TldrResult { Summary = string.Empty, KeyTakeaways = [], TopAction = string.Empty },
                     ChannelNarratives = [],
                     GeneratedAtUtc = DateTimeOffset.UtcNow,
+                    HighPriorityItems = highPriorityItems,
                 });
             }
 
             var response = await narrator.NarrateAsync(payload, cancellationToken).ConfigureAwait(false);
-            return TypedResults.Ok(response);
+            // Attach high-priority items via record `with` — narrator is unaware of this
+            // field (bypasses LLM per operator design decision — high priority is a
+            // structured list, not narrative content).
+            return TypedResults.Ok(response with { HighPriorityItems = highPriorityItems });
         }
         catch (OperationCanceledException)
         {
@@ -819,6 +835,18 @@ public record DailyBriefingNarrateResponse
     public DateTimeOffset GeneratedAtUtc { get; init; }
 
     /// <summary>
+    /// R7 W12 feedback item 9 (2026-07-01) — HIGH PRIORITY items across the 7 flagged
+    /// entities (sprk_matter, sprk_project, sprk_invoice, sprk_document,
+    /// sprk_workassignment, sprk_event, sprk_todo). Populated by
+    /// <c>DailyBriefingCollector.CollectHighPriorityAsync</c>, bypasses the narrator
+    /// (no LLM call — plain structured list). Widget renders a subtle red banner section
+    /// above the TL;DR when this array is non-empty. Ordered by due date ascending (undated
+    /// items last). Empty array = no flagged items, widget hides the section.
+    /// </summary>
+    [JsonPropertyName("highPriorityItems")]
+    public HighPriorityItemDto[] HighPriorityItems { get; init; } = [];
+
+    /// <summary>
     /// Optional sidecar with post-LLM entity-name validation metadata. Added by R7
     /// Wave 11 narrator spike (2026-06-30) to mirror the original playbook design's
     /// <c>_validationMetadata</c> responseBinding. Null when no scrubbing occurred
@@ -828,6 +856,51 @@ public record DailyBriefingNarrateResponse
     [JsonPropertyName("_validationMetadata")]
     [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
     public ValidationMetadataDto? ValidationMetadata { get; init; }
+}
+
+/// <summary>
+/// A high-priority item from one of the 7 flagged entities. Assembled directly by
+/// <c>DailyBriefingCollector.CollectHighPriorityAsync</c> — no LLM narration. Widget
+/// renders as a compact list of clickable record refs with optional due-date badge.
+/// </summary>
+public record HighPriorityItemDto
+{
+    /// <summary>Dataverse logical name of the source entity (sprk_matter, sprk_event, etc.).</summary>
+    [JsonPropertyName("entityType")]
+    public string EntityType { get; init; } = "";
+
+    /// <summary>GUID of the source record — used by widget's Xrm.Navigation modal open.</summary>
+    [JsonPropertyName("entityId")]
+    public string EntityId { get; init; } = "";
+
+    /// <summary>Display name of the source record (primary name field per entity).</summary>
+    [JsonPropertyName("name")]
+    public string Name { get; init; } = "";
+
+    /// <summary>
+    /// Due date (ISO 8601) when the entity has a meaningful due-date field. Omitted (null)
+    /// for entities without a due date (matter, project, document, invoice). Widget uses
+    /// this to render an overdue/due-today badge next to the entry.
+    /// </summary>
+    [JsonPropertyName("dueDate")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DateTimeOffset? DueDate { get; init; }
+
+    /// <summary>True if <c>sprk_highpriority</c> is Yes on the source record.</summary>
+    [JsonPropertyName("highPriority")]
+    public bool HighPriority { get; init; }
+
+    /// <summary>True if <c>sprk_monitor</c> is Yes on the source record.</summary>
+    [JsonPropertyName("monitor")]
+    public bool Monitor { get; init; }
+
+    /// <summary>
+    /// Optional short entity-label the widget can render next to the name (e.g., "Matter",
+    /// "Project", "Task"). Server-side rendering — widget just prints. Empty when the
+    /// entity's kind is implicit from the parent context.
+    /// </summary>
+    [JsonPropertyName("kindLabel")]
+    public string KindLabel { get; init; } = "";
 }
 
 /// <summary>

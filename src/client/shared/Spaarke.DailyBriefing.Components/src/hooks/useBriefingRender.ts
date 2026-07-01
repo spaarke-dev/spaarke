@@ -65,7 +65,12 @@ function isEmptyResponse(response: NarrateResponse): boolean {
     (tldr?.summary?.trim().length ?? 0) > 0 ||
     (tldr?.topAction?.trim().length ?? 0) > 0 ||
     (Array.isArray(tldr?.keyTakeaways) && tldr.keyTakeaways.length > 0);
-  return !hasTldrText;
+  if (hasTldrText) return false;
+  // R7 W12 feedback item 9 (2026-07-01): high-priority items ALONE are enough
+  // to keep the widget out of the empty state — operators want flagged records
+  // visible even when narrative channels are empty.
+  const hasHighPriority = Array.isArray(response.highPriorityItems) && response.highPriorityItems.length > 0;
+  return !hasHighPriority;
 }
 
 // ---------------------------------------------------------------------------

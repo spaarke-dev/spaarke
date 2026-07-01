@@ -52,6 +52,7 @@ import { TldrSection } from './TldrSection';
 import { ActivityNotesSection } from './ActivityNotesSection';
 import { CaughtUpFooter } from './CaughtUpFooter';
 import { PreferencesDropdown } from './PreferencesDropdown';
+import { HighPrioritySection } from './HighPrioritySection';
 import { useBriefingRender, useInlineTodoCreate, useBriefingPreferences } from '../hooks';
 import { TOASTER_ID } from '../utils/toastUtils';
 import type { IWebApi, NotificationCategory, NotificationItem } from '../types/notifications';
@@ -493,8 +494,9 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
     );
   }
 
-  // Success — render TldrSection + filtered channelNarratives.
+  // Success — render HighPriority (if any) + TldrSection + filtered channelNarratives.
   const tldr = renderData?.tldr ?? null;
+  const highPriorityItems = renderData?.highPriorityItems ?? [];
 
   return (
     <div className={styles.container}>
@@ -506,6 +508,8 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
         onBrowsePlaybooks={onBrowsePlaybooks}
       />
       <div className={styles.scrollContent}>
+        {/* R7 W12 feedback item 9 (2026-07-01): high-priority section above TL;DR. */}
+        <HighPrioritySection items={highPriorityItems} onOpenRecord={handleOpenRecord} />
         <TldrSection
           tldr={tldr}
           isLoading={false}

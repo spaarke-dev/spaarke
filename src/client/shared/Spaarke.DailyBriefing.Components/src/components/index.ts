@@ -47,6 +47,9 @@ export type { NarrativeBulletProps } from './NarrativeBullet';
 export { NarrativeCitedText } from './NarrativeCitedText';
 export type { NarrativeCitedTextProps } from './NarrativeCitedText';
 
+export { HighPrioritySection } from './HighPrioritySection';
+export type { HighPrioritySectionProps } from './HighPrioritySection';
+
 // Sub-list slot components (FR-11..FR-14). Task 020 (Wave 8) lays the
 // skeleton + slot files; tasks 021/022/023 (Wave 9) implement per-row
 // link / To-Do / Dismiss behavior. Slots are exported here so consumers

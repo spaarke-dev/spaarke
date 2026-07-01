@@ -99,6 +99,32 @@ export interface NarrateResponse {
   tldr: TldrResult;
   channelNarratives: ChannelNarrationResult[];
   generatedAtUtc: string;
+  /**
+   * R7 W12 feedback item 9 (2026-07-01) — cross-entity high-priority items.
+   * Populated when any of the 7 flagged entities (matter, project, invoice,
+   * document, workassignment, event, todo) has sprk_HighPriority=true or
+   * sprk_Monitor=true. Widget renders a compact "High Priority" section
+   * above the TL;DR with subtle red background. Absent/empty = no flagged
+   * items → widget hides the section.
+   */
+  highPriorityItems?: HighPriorityItemResult[];
+}
+
+export interface HighPriorityItemResult {
+  /** Dataverse logical name (e.g., "sprk_matter"). */
+  entityType: string;
+  /** GUID of the record. */
+  entityId: string;
+  /** Display name of the record. */
+  name: string;
+  /** ISO 8601 due date, or undefined for entities with no meaningful due date. */
+  dueDate?: string;
+  /** True if sprk_highpriority = Yes on the source record. */
+  highPriority: boolean;
+  /** True if sprk_monitor = Yes on the source record. */
+  monitor: boolean;
+  /** Short entity-kind label (e.g., "Matter", "Task", "To Do"). */
+  kindLabel: string;
 }
 
 export interface TldrResult {
