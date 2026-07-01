@@ -62,19 +62,20 @@ public class PlaybookLookupService : IPlaybookLookupService
             return cachedPlaybook!;
         }
 
-        // Cache miss - query Dataverse using alternate key
+        // Cache miss - query Dataverse. If input parses as a GUID, retrieve by primary
+        // key directly (fast, no alt-key dependency). Otherwise fall through to the
+        // stable-ID alternate-key lookup per Q&A 2026-06-22 Q1. This dual path unblocks
+        // environments where the `sprk_playbookid_key` alternate key was not deployed
+        // while preserving the stable-ID design intent for env-portability.
+        var isGuidInput = Guid.TryParse(playbookId, out var playbookGuid);
+
         _logger.LogInformation(
-            "Playbook {PlaybookId} not in cache, querying Dataverse by alternate key",
-            playbookId);
+            "Playbook {PlaybookId} not in cache; querying Dataverse via {Path}",
+            playbookId,
+            isGuidInput ? "primary key" : "alternate key sprk_playbookid");
 
         try
         {
-            // Build alternate key lookup on the stable-ID column per Q&A 2026-06-22 Q1.
-            var alternateKeyValues = new KeyAttributeCollection
-            {
-                { "sprk_playbookid", playbookId }
-            };
-
             // Columns needed to build PlaybookResponse
             var columns = new[]
             {
@@ -88,12 +89,28 @@ public class PlaybookLookupService : IPlaybookLookupService
                 "statuscode"
             };
 
-            // Retrieve using alternate key (indexed, fast)
-            var entity = await _genericEntityService.RetrieveByAlternateKeyAsync(
-                "sprk_analysisplaybook",
-                alternateKeyValues,
-                columns,
-                ct);
+            Entity entity;
+            if (isGuidInput)
+            {
+                entity = await _genericEntityService.RetrieveAsync(
+                    "sprk_analysisplaybook",
+                    playbookGuid,
+                    columns,
+                    ct);
+            }
+            else
+            {
+                var alternateKeyValues = new KeyAttributeCollection
+                {
+                    { "sprk_playbookid", playbookId }
+                };
+
+                entity = await _genericEntityService.RetrieveByAlternateKeyAsync(
+                    "sprk_analysisplaybook",
+                    alternateKeyValues,
+                    columns,
+                    ct);
+            }
 
             // Map to PlaybookResponse
             var playbook = MapEntityToPlaybookResponse(entity);
