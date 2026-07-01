@@ -15,9 +15,9 @@
 
 | Task | Status | Depends on | Est. | Notes |
 |---|---|---|---|---|
-| [`001-audit-existing-config-records.poml`](001-audit-existing-config-records.poml) | 🔲 | — | 1 h | Audit 5 existing `sprk_gridconfiguration` records; document current `rowOpen` state |
-| [`002-extend-datagrid-defaultRecordOpen.poml`](002-extend-datagrid-defaultRecordOpen.poml) | 🔲 | 001 | 3 h | FR-01/02/03 — extend schema + framework `defaultRecordOpen` for `formId` + Layout 1 unification |
-| [`003-verify-widget-migrations.poml`](003-verify-widget-migrations.poml) | 🔲 | 002 | 2 h | FR-04–08 verification — all 5 widgets adopt Layout 1 via framework change |
+| [`001-audit-existing-config-records.poml`](001-audit-existing-config-records.poml) | ✅ | — | 1 h | Audit 5 existing `sprk_gridconfiguration` records; document current `rowOpen` state |
+| [`002-extend-datagrid-defaultRecordOpen.poml`](002-extend-datagrid-defaultRecordOpen.poml) | ✅ | 001 | 3 h | FR-01/02/03 — extend schema + framework `defaultRecordOpen` for `formId` + Layout 1 unification |
+| [`003-verify-widget-migrations.poml`](003-verify-widget-migrations.poml) | ✅ | 002 | 2 h | FR-04–08 verification — all 5 widgets adopt Layout 1 via framework change |
 | [`004-phase1-pr-and-merge.poml`](004-phase1-pr-and-merge.poml) | 🔲 | 003 | 1 h | Phase 1 PR — CI green, code-review, merge to master |
 
 ## Phase 2 — Communications widget (PR 2)

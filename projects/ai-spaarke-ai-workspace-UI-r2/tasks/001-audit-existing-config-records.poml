@@ -1,7 +1,7 @@
 <task id="R2-001" project="ai-spaarke-ai-workspace-UI-r2">
   <metadata>
     <title>Audit existing sprk_gridconfiguration records for workspace widgets</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>1 hour</estimated-effort>
     <phase>1</phase>
     <tags>dataverse,configuration,audit,workspace-widgets</tags>

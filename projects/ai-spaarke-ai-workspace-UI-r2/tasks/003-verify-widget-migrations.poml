@@ -1,7 +1,7 @@
 <task id="R2-003" project="ai-spaarke-ai-workspace-UI-r2">
   <metadata>
     <title>Verify 5 workspace widgets adopt Layout 1 row-click behavior</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2 hours</estimated-effort>
     <phase>1</phase>
     <tags>testing,regression,workspace-widgets,pcf,manual-qa</tags>

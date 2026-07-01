@@ -1,7 +1,7 @@
 <task id="R2-002" project="ai-spaarke-ai-workspace-UI-r2">
   <metadata>
     <title>Extend DataGrid framework defaultRecordOpen for formId + Layout 1 unification</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>3 hours</estimated-effort>
     <phase>1</phase>
     <tags>datagrid,framework,typescript,react,layout-1</tags>
