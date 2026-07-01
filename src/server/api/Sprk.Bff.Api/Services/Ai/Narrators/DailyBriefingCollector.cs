@@ -173,22 +173,38 @@ public class DailyBriefingCollector
         _logger.LogInformation(
             "DailyBriefingCollector starting for systemUserId={SystemUserId}", systemUserId);
 
-        // ── Phase 1: resolve memberships for the 3 candidate-set entities in parallel.
-        //    sprk_event memberships are used by the Task channels via event-side membership;
-        //    sprk_matter + sprk_project memberships are used by Tasks (regarding edge) and
-        //    Documents (regarding edge). sprk_todo is per-user (no membership query needed).
+        // ── Phase 1: resolve candidate-set IDs for the 3 entities in parallel.
+        //
+        // R7 W12 widget cutover (2026-06-30) — BYPASS of IMembershipResolverService.
+        //   The resolver returns 0 rows for users who own records via `ownerid` on
+        //   sprk_matter / sprk_project / sprk_event, despite the FetchXml running against
+        //   the correct systemUserId. Root cause is in the resolver's descriptor/condition
+        //   translation for the polymorphic Owner attribute; needs deeper investigation and
+        //   affects all consumers of IMembershipResolverService (chat scope resolution,
+        //   knowledge base filtering, etc.). Filed as DEF-NNN for follow-up.
+        //
+        //   For the Daily Briefing MVP tonight, this collector uses direct `owninguser`
+        //   queries — matches the Todos pattern below. Trade-off: collaborators (members
+        //   via sprk_assignedattorney*, sprk_assignedparalegal*, sprk_assignedtointernal,
+        //   etc.) are NOT included in the candidate set. Owner-only scope is the operator-
+        //   accepted MVP fallback until the resolver bug is fixed. Once the resolver is
+        //   fixed, revert to `ResolveMembershipsSafelyAsync` calls to restore collaborator
+        //   scope.
+        //
+        //   Reference: projects/spaarke-ai-platform-unification-r7/notes/handoffs/
+        //              daily-briefing-widget-cutover-restart.md §10 secondary risk.
         var membershipsTask = Task.WhenAll(
-            ResolveMembershipsSafelyAsync(systemUserId, EntityEvent, ct),
-            ResolveMembershipsSafelyAsync(systemUserId, EntityMatter, ct),
-            ResolveMembershipsSafelyAsync(systemUserId, EntityProject, ct));
+            ResolveOwnedIdsAsync(systemUserId, EntityEvent, "sprk_eventid", filterActive: false, ct),
+            ResolveOwnedIdsAsync(systemUserId, EntityMatter, "sprk_matterid", filterActive: true, ct),
+            ResolveOwnedIdsAsync(systemUserId, EntityProject, "sprk_projectid", filterActive: true, ct));
 
         var memberships = await membershipsTask.ConfigureAwait(false);
         var eventIds = memberships[0];
         var matterIds = memberships[1];
         var projectIds = memberships[2];
 
-        _logger.LogDebug(
-            "DailyBriefingCollector memberships resolved: events={EventCount}, matters={MatterCount}, projects={ProjectCount}",
+        _logger.LogInformation(
+            "DailyBriefingCollector owned IDs resolved (resolver bypass — R7 W12): events={EventCount}, matters={MatterCount}, projects={ProjectCount}",
             eventIds.Count, matterIds.Count, projectIds.Count);
 
         // ── Phase 2: query per-channel candidate rows in parallel.
@@ -226,6 +242,64 @@ public class DailyBriefingCollector
     // ──────────────────────────────────────────────────────────────────────────
     // Membership resolution (delegates to IMembershipResolverService)
     // ──────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// R7 W12 widget cutover (2026-06-30) — direct-owner ID query. Returns record IDs of
+    /// <paramref name="entityType"/> where <c>owninguser</c> equals <paramref name="systemUserId"/>.
+    /// Used in place of <see cref="ResolveMembershipsSafelyAsync"/> while the membership
+    /// resolver's polymorphic-Owner classification bug is being investigated (DEF-NNN).
+    /// </summary>
+    /// <param name="systemUserId">The calling user's systemuserid.</param>
+    /// <param name="entityType">Logical name of the target entity (sprk_matter / sprk_project / sprk_event).</param>
+    /// <param name="idColumn">Primary-key column name for the entity (e.g. sprk_matterid).</param>
+    /// <param name="filterActive">If true, adds statecode = 0 (Active). sprk_event doesn't have a statecode filter here — event status is checked in QueryEventsAsync.</param>
+    /// <param name="ct">Cancellation token.</param>
+    /// <returns>List of owned entity IDs. Empty on error (logged as warning) so downstream channels degrade gracefully.</returns>
+    private async Task<IReadOnlyList<Guid>> ResolveOwnedIdsAsync(
+        Guid systemUserId,
+        string entityType,
+        string idColumn,
+        bool filterActive,
+        CancellationToken ct)
+    {
+        try
+        {
+            var query = new QueryExpression(entityType)
+            {
+                NoLock = true,
+                TopCount = 500,
+                ColumnSet = new ColumnSet(idColumn)
+            };
+            query.Criteria.AddCondition("owninguser", ConditionOperator.Equal, systemUserId);
+            if (filterActive)
+            {
+                query.Criteria.AddCondition("statecode", ConditionOperator.Equal, 0);
+            }
+
+            var result = await _entityService.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+            var ids = new List<Guid>(result.Entities.Count);
+            foreach (var e in result.Entities)
+            {
+                var id = e.GetAttributeValue<Guid>(idColumn);
+                if (id != Guid.Empty)
+                {
+                    ids.Add(id);
+                }
+            }
+            return ids;
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "DailyBriefingCollector direct-owner lookup failed for entity={EntityType}; downstream channels will degrade",
+                entityType);
+            return Array.Empty<Guid>();
+        }
+    }
 
     /// <summary>
     /// Resolves membership for a single entity type. Returns empty list on any failure
