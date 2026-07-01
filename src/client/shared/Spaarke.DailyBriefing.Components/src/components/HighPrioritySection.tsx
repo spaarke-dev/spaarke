@@ -158,13 +158,25 @@ interface ActionBadgeStyle {
 function actionToBadge(action: string, dueDate?: string, modifiedOn?: string): ActionBadgeStyle | null {
   switch (action) {
     case 'Overdue':
-      return { label: dueDate ? `Overdue · ${formatShortDate(dueDate)}` : 'Overdue', color: 'danger', appearance: 'filled' };
+      return {
+        label: dueDate ? `Overdue · ${formatShortDate(dueDate)}` : 'Overdue',
+        color: 'danger',
+        appearance: 'filled',
+      };
     case 'DueToday':
       return { label: 'Due today', color: 'warning', appearance: 'filled' };
     case 'DueSoon':
-      return { label: dueDate ? `Due ${formatShortDate(dueDate)}` : 'Due soon', color: 'informative', appearance: 'outline' };
+      return {
+        label: dueDate ? `Due ${formatShortDate(dueDate)}` : 'Due soon',
+        color: 'informative',
+        appearance: 'outline',
+      };
     case 'Recent':
-      return { label: modifiedOn ? `Updated ${formatRelative(modifiedOn)}` : 'Recently updated', color: 'subtle', appearance: 'outline' };
+      return {
+        label: modifiedOn ? `Updated ${formatRelative(modifiedOn)}` : 'Recently updated',
+        color: 'subtle',
+        appearance: 'outline',
+      };
     default:
       return null;
   }

@@ -130,24 +130,7 @@ export interface TldrSectionProps {
  * every fresh /render call (i.e., every refresh). Kept small + lightweight per
  * operator request ("add some fun, not if too much effort").
  */
-const FUN_EMOJI_POOL = [
-  '🚀',
-  '👍',
-  '⛰️',
-  '😊',
-  '☀️',
-  '🎯',
-  '💡',
-  '🌟',
-  '🍀',
-  '🌈',
-  '⚡',
-  '🎉',
-  '🌱',
-  '🔥',
-  '🎨',
-  '🏆',
-];
+const FUN_EMOJI_POOL = ['🚀', '👍', '⛰️', '😊', '☀️', '🎯', '💡', '🌟', '🍀', '🌈', '⚡', '🎉', '🌱', '🔥', '🎨', '🏆'];
 
 function pickTldrEmoji(seed: string | null): string {
   if (!seed) return FUN_EMOJI_POOL[0];
