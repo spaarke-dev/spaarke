@@ -74,6 +74,15 @@ interface ChannelNarrativeBullet {
   primaryEntityType: string;
   primaryEntityId: string;
   primaryEntityName: string;
+  /** R7 W12 feedback items 2/3/4 — passed through to NarrativeBullet for
+   * inline-link + trailing-[N]-citation rendering. Optional for back-compat. */
+  references?: {
+    index: number;
+    entityType: string;
+    entityId: string;
+    entityName: string;
+    mentioned: boolean;
+  }[];
 }
 
 /** Shape of a channel narrative group. */
@@ -160,9 +169,6 @@ export const ActivityNotesSection: React.FC<ActivityNotesSectionProps> = ({
   if (isLoading) {
     return (
       <div>
-        <Text as="h2" size={500} weight="semibold" className={styles.heading}>
-          Activity Notes
-        </Text>
         <Skeleton aria-label="Loading activity notes">
           {[0, 1, 2].map(sectionIdx => (
             <div key={sectionIdx} className={styles.skeletonSection}>
@@ -196,11 +202,10 @@ export const ActivityNotesSection: React.FC<ActivityNotesSectionProps> = ({
     return null;
   }
 
+  // R7 W12 feedback item 10 (2026-07-01): "Activity Notes" title removed;
+  // each ChannelHeading is now the top-level section anchor per operator request.
   return (
     <div>
-      <Text as="h2" size={500} weight="semibold" className={styles.heading}>
-        Activity Notes
-      </Text>
       {filteredNarratives.map(channel => (
         <div key={channel.category} className={styles.channelSection}>
           <ChannelHeading
@@ -221,6 +226,7 @@ export const ActivityNotesSection: React.FC<ActivityNotesSectionProps> = ({
                 primaryEntityType={bullet.primaryEntityType}
                 primaryEntityId={bullet.primaryEntityId}
                 itemIds={bullet.itemIds}
+                references={bullet.references}
                 onAddToTodo={onAddToTodo}
                 onDismiss={onDismiss}
                 isTodoCreated={isTodoCreated(firstItemId)}
