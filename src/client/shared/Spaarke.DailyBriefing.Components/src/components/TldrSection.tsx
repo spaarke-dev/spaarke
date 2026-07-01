@@ -123,6 +123,41 @@ export interface TldrSectionProps {
 // Helpers
 // ---------------------------------------------------------------------------
 
+/**
+ * R7 W12 (2026-07-01) — fun rotating emoji for the TL;DR header. Deterministic
+ * per-briefing pick via a simple hash of the `generatedAt` timestamp so the
+ * emoji stays consistent across re-renders of the same briefing but changes on
+ * every fresh /render call (i.e., every refresh). Kept small + lightweight per
+ * operator request ("add some fun, not if too much effort").
+ */
+const FUN_EMOJI_POOL = [
+  '🚀',
+  '👍',
+  '⛰️',
+  '😊',
+  '☀️',
+  '🎯',
+  '💡',
+  '🌟',
+  '🍀',
+  '🌈',
+  '⚡',
+  '🎉',
+  '🌱',
+  '🔥',
+  '🎨',
+  '🏆',
+];
+
+function pickTldrEmoji(seed: string | null): string {
+  if (!seed) return FUN_EMOJI_POOL[0];
+  let hash = 0;
+  for (let i = 0; i < seed.length; i++) {
+    hash = (hash * 31 + seed.charCodeAt(i)) | 0;
+  }
+  return FUN_EMOJI_POOL[Math.abs(hash) % FUN_EMOJI_POOL.length];
+}
+
 function formatRelativeTime(isoTimestamp: string): string {
   const now = Date.now();
   const generated = new Date(isoTimestamp).getTime();
@@ -156,7 +191,7 @@ export const TldrSection: React.FC<TldrSectionProps> = ({
     return (
       <div className={styles.card}>
         <Text as="h2" size={500} weight="semibold" className={styles.heading}>
-          TL;DR
+          {pickTldrEmoji(generatedAt)} TL;DR
         </Text>
         <Skeleton aria-label="Loading TL;DR summary">
           <div className={styles.skeletonContainer}>
@@ -176,7 +211,7 @@ export const TldrSection: React.FC<TldrSectionProps> = ({
     return (
       <div className={styles.card}>
         <Text as="h2" size={500} weight="semibold" className={styles.heading}>
-          TL;DR
+          {pickTldrEmoji(generatedAt)} TL;DR
         </Text>
         <div className={styles.fallbackContainer}>
           <InfoRegular className={styles.fallbackIcon} />
@@ -193,7 +228,7 @@ export const TldrSection: React.FC<TldrSectionProps> = ({
     return (
       <div className={styles.card}>
         <Text as="h2" size={500} weight="semibold" className={styles.heading}>
-          TL;DR
+          {pickTldrEmoji(generatedAt)} TL;DR
         </Text>
         <div className={styles.fallbackContainer}>
           <InfoRegular className={styles.fallbackIcon} />

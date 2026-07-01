@@ -244,7 +244,7 @@ public class DailyBriefingCollector
     //
     // Cross-entity flag scan: returns every record across the 7 flagged entities
     // (matter, project, invoice, document, workassignment, event, todo) where
-    // sprk_HighPriority = true OR sprk_Monitor = true — regardless of ownership
+    // sprk_highpriority = true OR sprk_monitor = true — regardless of ownership
     // in this MVP (operator flags what THEY care about; scoping by owninguser is
     // a follow-up refinement if the list becomes too broad).
     //
@@ -255,7 +255,7 @@ public class DailyBriefingCollector
     /// <summary>
     /// R7 W12 feedback item 9 (2026-07-01) — collect all high-priority items across the 7
     /// flagged entities. Bypasses membership resolution + narrator. Returns items whose
-    /// <c>sprk_HighPriority</c> OR <c>sprk_Monitor</c> = true, sorted by due date ascending.
+    /// <c>sprk_highpriority</c> OR <c>sprk_monitor</c> = true, sorted by due date ascending.
     /// Empty array on error (per-entity queries are failure-soft).
     /// </summary>
     public virtual async Task<HighPriorityItemDto[]> CollectHighPriorityAsync(
@@ -307,6 +307,7 @@ public class DailyBriefingCollector
             entityType: EntityMatter,
             idColumn: "sprk_matterid",
             nameColumn: "sprk_mattername",
+            descriptionColumn: "sprk_matterdescription",
             dueDateColumn: null,
             kindLabel: "Matter",
             includeStateFilter: true,
@@ -319,6 +320,7 @@ public class DailyBriefingCollector
             entityType: EntityProject,
             idColumn: "sprk_projectid",
             nameColumn: "sprk_projectname",
+            descriptionColumn: "sprk_description",
             dueDateColumn: null,
             kindLabel: "Project",
             includeStateFilter: true,
@@ -333,6 +335,7 @@ public class DailyBriefingCollector
             entityType: "sprk_invoice",
             idColumn: "sprk_invoiceid",
             nameColumn: "sprk_name",
+            descriptionColumn: "sprk_description",
             dueDateColumn: null,
             kindLabel: "Invoice",
             includeStateFilter: true,
@@ -345,6 +348,7 @@ public class DailyBriefingCollector
             entityType: EntityDocument,
             idColumn: "sprk_documentid",
             nameColumn: "sprk_documentname",
+            descriptionColumn: "sprk_documentdescription",
             dueDateColumn: null,
             kindLabel: "Document",
             includeStateFilter: true,
@@ -357,6 +361,7 @@ public class DailyBriefingCollector
             entityType: "sprk_workassignment",
             idColumn: "sprk_workassignmentid",
             nameColumn: "sprk_name",
+            descriptionColumn: "sprk_description",
             dueDateColumn: "sprk_responseduedate",
             kindLabel: "Work Assignment",
             includeStateFilter: true,
@@ -371,6 +376,7 @@ public class DailyBriefingCollector
             entityType: EntityEvent,
             idColumn: "sprk_eventid",
             nameColumn: "sprk_eventname",
+            descriptionColumn: "sprk_eventdescription",
             dueDateColumn: "sprk_finalduedate",
             fallbackDueDateColumn: "sprk_duedate",
             kindLabel: "Task",
@@ -387,6 +393,7 @@ public class DailyBriefingCollector
             entityType: EntityTodo,
             idColumn: "sprk_todoid",
             nameColumn: "sprk_name",
+            descriptionColumn: "sprk_description",
             dueDateColumn: "sprk_duedate",
             kindLabel: "To Do",
             includeStateFilter: true,
@@ -396,7 +403,7 @@ public class DailyBriefingCollector
 
     /// <summary>
     /// Shared query pattern for high-priority items on any of the 7 flagged entities.
-    /// Applies the flag filter (sprk_HighPriority=true OR sprk_Monitor=true), optional
+    /// Applies the flag filter (sprk_highpriority=true OR sprk_monitor=true), optional
     /// state filter (statecode=0), and optional owner filter (owninguser=systemuserid).
     /// Projects into HighPriorityItemDto. Failure-soft: returns empty array on error.
     /// </summary>
@@ -408,12 +415,14 @@ public class DailyBriefingCollector
         string kindLabel,
         bool includeStateFilter,
         CancellationToken ct,
+        string? descriptionColumn = null,
         string? fallbackDueDateColumn = null,
         Guid? ownerUserId = null)
     {
         try
         {
-            var columns = new List<string> { idColumn, nameColumn, "sprk_HighPriority", "sprk_Monitor" };
+            var columns = new List<string> { idColumn, nameColumn, "sprk_highpriority", "sprk_monitor", "modifiedon" };
+            if (!string.IsNullOrEmpty(descriptionColumn)) columns.Add(descriptionColumn);
             if (!string.IsNullOrEmpty(dueDateColumn)) columns.Add(dueDateColumn);
             if (!string.IsNullOrEmpty(fallbackDueDateColumn)) columns.Add(fallbackDueDateColumn);
 
@@ -426,8 +435,8 @@ public class DailyBriefingCollector
 
             // Flag filter: HighPriority OR Monitor
             var flagGroup = new FilterExpression(LogicalOperator.Or);
-            flagGroup.AddCondition("sprk_HighPriority", ConditionOperator.Equal, true);
-            flagGroup.AddCondition("sprk_Monitor", ConditionOperator.Equal, true);
+            flagGroup.AddCondition("sprk_highpriority", ConditionOperator.Equal, true);
+            flagGroup.AddCondition("sprk_monitor", ConditionOperator.Equal, true);
             query.Criteria.AddFilter(flagGroup);
 
             if (includeStateFilter)
@@ -461,8 +470,26 @@ public class DailyBriefingCollector
                     }
                 }
 
-                var highPriority = e.GetAttributeValue<bool?>("sprk_HighPriority") ?? false;
-                var monitor = e.GetAttributeValue<bool?>("sprk_Monitor") ?? false;
+                var highPriority = e.GetAttributeValue<bool?>("sprk_highpriority") ?? false;
+                var monitor = e.GetAttributeValue<bool?>("sprk_monitor") ?? false;
+
+                var description = !string.IsNullOrEmpty(descriptionColumn)
+                    ? (e.GetAttributeValue<string>(descriptionColumn) ?? string.Empty)
+                    : string.Empty;
+
+                DateTimeOffset? modifiedOn = null;
+                var rawModified = e.GetAttributeValue<DateTime?>("modifiedon");
+                if (rawModified.HasValue)
+                {
+                    modifiedOn = new DateTimeOffset(DateTime.SpecifyKind(rawModified.Value, DateTimeKind.Utc));
+                }
+
+                var reason = highPriority && monitor ? "Both"
+                    : highPriority ? "HighPriority"
+                    : monitor ? "Monitor"
+                    : string.Empty;
+
+                var action = ClassifyAction(dueDate, modifiedOn);
 
                 items.Add(new HighPriorityItemDto
                 {
@@ -473,6 +500,10 @@ public class DailyBriefingCollector
                     HighPriority = highPriority,
                     Monitor = monitor,
                     KindLabel = kindLabel,
+                    Description = description,
+                    Action = action,
+                    Reason = reason,
+                    ModifiedOn = modifiedOn,
                 });
             }
             return items.ToArray();
@@ -488,6 +519,39 @@ public class DailyBriefingCollector
                 entityType);
             return Array.Empty<HighPriorityItemDto>();
         }
+    }
+
+    /// <summary>
+    /// R7 W12 feedback (2026-07-01) — server-side classification of the "action" column
+    /// for a high-priority item. Result strings are widget-facing enums:
+    ///   - "Overdue"  — dueDate is before today UTC start
+    ///   - "DueToday" — dueDate is today UTC
+    ///   - "DueSoon"  — dueDate is within next 7 days
+    ///   - "Recent"   — no dueDate but modifiedon within last 7 days (fresh activity)
+    ///   - "None"     — no dueDate + no recent modifiedon
+    /// Widget renders as a badge with distinct intent color per action class.
+    /// </summary>
+    private static string ClassifyAction(DateTimeOffset? dueDate, DateTimeOffset? modifiedOn)
+    {
+        var nowUtc = DateTimeOffset.UtcNow;
+        var todayStart = new DateTimeOffset(nowUtc.UtcDateTime.Date, TimeSpan.Zero);
+        var tomorrowStart = todayStart.AddDays(1);
+        var sevenDaysFromNow = todayStart.AddDays(7);
+        var sevenDaysAgo = todayStart.AddDays(-7);
+
+        if (dueDate.HasValue)
+        {
+            if (dueDate.Value < todayStart) return "Overdue";
+            if (dueDate.Value < tomorrowStart) return "DueToday";
+            if (dueDate.Value < sevenDaysFromNow) return "DueSoon";
+        }
+
+        if (modifiedOn.HasValue && modifiedOn.Value >= sevenDaysAgo)
+        {
+            return "Recent";
+        }
+
+        return "None";
     }
 
     // ──────────────────────────────────────────────────────────────────────────
