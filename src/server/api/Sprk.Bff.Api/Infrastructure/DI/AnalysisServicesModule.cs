@@ -458,6 +458,31 @@ public static class AnalysisServicesModule
         services.AddScoped<SessionSummarizeOrchestrator>(sp =>
             new NullSessionSummarizeOrchestrator(
                 sp.GetRequiredService<ILogger<SessionSummarizeOrchestrator>>()));
+
+        // R7 Wave 12 post-T135 CI fix (2026-06-30) — DailyBriefingNarrator + DailyBriefingCollector
+        // P3 Fail-Fast Null-Objects. Both /api/ai/daily-briefing/render and
+        // /api/ai/daily-briefing/narrate are mapped UNCONDITIONALLY by EndpointMappingExtensions,
+        // and their handlers inject the concrete narrator/collector. The real registrations live
+        // inside AddAnalysisOrchestrationServices (compound-ON only — they depend on
+        // AnalysisActionService typed HttpClient + IOpenAiClient + IEntityNameScrubber, all
+        // compound-gated). Without these Null mirrors, minimal-API parameter inference fails at
+        // host startup with "Failure to infer one or more parameters" (observed in PR #520 CI run
+        // 28482755126 — failing parameter: `narrator`). The Null subclasses throw
+        // FeatureDisabledException on first call; both consuming endpoints have generic
+        // try/catch wrappers that surface a 500 ProblemDetails. ADR-032 §F.1 / CLAUDE.md §10 F.1.
+        // Canonical pattern sibling: NullSessionSummarizeOrchestrator (above).
+        // Also registers IEntityNameScrubber as a Null peer — pure algorithm, no AI deps, but
+        // it lives in the same Narrators namespace and the real registration sits inside the
+        // gate (line 516). Registering the real EntityNameScrubber here as the "Null" path is
+        // safe (it has no AI deps) and keeps the Narrators namespace contract uniform.
+        services.AddSingleton<Sprk.Bff.Api.Services.Ai.Narrators.IEntityNameScrubber,
+                              Sprk.Bff.Api.Services.Ai.Narrators.EntityNameScrubber>();
+        services.AddTransient<Sprk.Bff.Api.Services.Ai.Narrators.DailyBriefingNarrator>(sp =>
+            new Sprk.Bff.Api.Services.Ai.Narrators.NullDailyBriefingNarrator(
+                sp.GetRequiredService<ILogger<Sprk.Bff.Api.Services.Ai.Narrators.DailyBriefingNarrator>>()));
+        services.AddScoped<Sprk.Bff.Api.Services.Ai.Narrators.DailyBriefingCollector>(sp =>
+            new Sprk.Bff.Api.Services.Ai.Narrators.NullDailyBriefingCollector(
+                sp.GetRequiredService<ILogger<Sprk.Bff.Api.Services.Ai.Narrators.DailyBriefingCollector>>()));
     }
 
     private static void AddAnalysisOrchestrationServices(IServiceCollection services, IConfiguration configuration)

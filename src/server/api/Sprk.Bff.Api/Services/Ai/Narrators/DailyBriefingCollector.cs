@@ -76,7 +76,15 @@ internal sealed record BriefingItem
 /// <see cref="DailyBriefingNarrateRequest"/> directly from Dataverse — bypasses
 /// appNotification entirely. 6-channel coverage per operator spec (wave12 §2.1).
 /// </summary>
-public sealed class DailyBriefingCollector
+/// <remarks>
+/// Unsealed (R7 Wave 12 post-T135 CI fix 2026-06-30 — PR #520) so
+/// <see cref="NullDailyBriefingCollector"/> can subclass it for the compound-OFF kill-switch
+/// path. The /api/ai/daily-briefing/render endpoint is mapped unconditionally; without a
+/// Null peer registered when Analysis:Enabled=false || DocumentIntelligence:Enabled=false,
+/// minimal-API parameter inference fails at host startup. Mirrors
+/// <see cref="Chat.NullSessionSummarizeOrchestrator"/> + ADR-032 §F.1.
+/// </remarks>
+public class DailyBriefingCollector
 {
     // sprk_event type GUIDs (consistent with deployed notification playbooks).
     // Source of truth: sprk_eventtype_ref records in spaarkedev1.
@@ -134,11 +142,25 @@ public sealed class DailyBriefingCollector
     }
 
     /// <summary>
+    /// Protected ctor used only by <see cref="NullDailyBriefingCollector"/> so the kill-switch
+    /// subclass can be constructed when the compound AI gate is OFF. The Null override never
+    /// reads the nulled fields — it throws
+    /// <see cref="Sprk.Bff.Api.Configuration.FeatureDisabledException"/> before they are
+    /// dereferenced.
+    /// </summary>
+    protected DailyBriefingCollector(ILogger<DailyBriefingCollector> logger)
+    {
+        _entityService = null!;
+        _membershipResolver = null!;
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
+
+    /// <summary>
     /// Run all 6 channel queries in parallel against Dataverse and build the request
     /// payload the narrator consumes. Empty channels are filtered out of the final
     /// payload (the narrator skips empty channels naturally).
     /// </summary>
-    public async Task<DailyBriefingNarrateRequest> CollectAsync(
+    public virtual async Task<DailyBriefingNarrateRequest> CollectAsync(
         Guid systemUserId,
         CancellationToken ct)
     {

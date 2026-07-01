@@ -40,7 +40,12 @@ namespace Sprk.Bff.Api.Services.Ai.Narrators;
 /// engine path with explicit C# calls when feature flag <c>Features:NarrateUseCodeBasedNarrator</c>
 /// is enabled.
 /// </summary>
-public sealed class DailyBriefingNarrator
+/// <remarks>
+/// Unsealed (R7 Wave 12 post-T135 CI fix 2026-06-30 — PR #520) so
+/// <see cref="NullDailyBriefingNarrator"/> can subclass it for the compound-OFF kill-switch
+/// path (mirrors <see cref="Chat.NullSessionSummarizeOrchestrator"/> + ADR-032 §F.1).
+/// </remarks>
+public class DailyBriefingNarrator
 {
     private const string TldrActionCode = "BRIEF-NARRATE-TLDR";
     private const string ChannelActionCode = "BRIEF-NARRATE-CHANNEL";
@@ -75,10 +80,26 @@ public sealed class DailyBriefingNarrator
     }
 
     /// <summary>
+    /// Protected ctor used only by <see cref="NullDailyBriefingNarrator"/> so the kill-switch
+    /// subclass can be constructed when the compound AI gate is OFF and AI dependencies
+    /// (<see cref="AnalysisActionService"/> + <see cref="IOpenAiClient"/>) are absent. The
+    /// Null override never reads the nulled fields — it throws
+    /// <see cref="Sprk.Bff.Api.Configuration.FeatureDisabledException"/> before they are
+    /// dereferenced. Matches the canonical pattern in <see cref="Chat.SessionSummarizeOrchestrator"/>.
+    /// </summary>
+    protected DailyBriefingNarrator(ILogger<DailyBriefingNarrator> logger)
+    {
+        _actions = null!;
+        _llm = null!;
+        _scrubber = null!;
+        _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
+
+    /// <summary>
     /// Execute the /narrate workflow end-to-end. Loads Actions from Dataverse, calls the LLM
     /// once for TL;DR + once per channel, validates groundedness, returns the assembled response.
     /// </summary>
-    public async Task<DailyBriefingNarrateResponse> NarrateAsync(
+    public virtual async Task<DailyBriefingNarrateResponse> NarrateAsync(
         DailyBriefingNarrateRequest req,
         CancellationToken ct)
     {
