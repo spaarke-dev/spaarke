@@ -23,6 +23,14 @@ If you're not sure whether to add an entry, add one. Too granular is better than
 
 ## [Unreleased]
 
+### Added (2026-07-01 — Modal Decision Criteria standard + pattern pointer)
+- `docs/standards/MODAL-DECISION-CRITERIA.md` — NEW. Binding standard covering the three Spaarke modal families: OOB `Xrm.Navigation.navigateTo` (full main-form fidelity, no browse), proprietary Fluent v9 Dialog (single record / preview / picker), and proprietary + [`RecordNavigationModalShell`](../src/client/shared/Spaarke.UI.Components/src/components/RecordNavigationModalShell/README.md) (browse-in-context "1 of N" pattern). TL;DR decision tree + 5 dimensions + 3 worked examples + 6 anti-patterns + hybrid pattern (proprietary browse + OOB escalation). Modeled on [`docs/standards/DATA-ACCESS-DECISION-CRITERIA.md`](../docs/standards/DATA-ACCESS-DECISION-CRITERIA.md) shape.
+- `.claude/patterns/ui/record-modal-selection.md` — NEW 25-line pattern pointer per CLAUDE.md §14. Points agents to the standard, the shell README, `RichFilePreviewDialog` (canonical consumer), and `ChoiceDialog` (Family 2 canonical).
+- `.claude/patterns/ui/INDEX.md` — added row for `record-modal-selection.md`.
+- `CLAUDE.md` §17 — added pointer row for `MODAL-DECISION-CRITERIA.md` (parallel to `DATA-ACCESS-DECISION-CRITERIA.md`).
+- **Driver**: chat-review session identified that `RecordNavigationModalShell` (production-ready smart-todo-r4 infrastructure) had no adoption guidance — developers were unaware the browse "1 of N" chrome existed as reusable infrastructure and were defaulting to close/reopen UX or considering per-surface rebuilds. This standard closes the documentation gap so the shell becomes the discoverable default for cross-record browsing.
+- **Next step (out of scope for this changelog entry)**: surface inventory to identify which existing modals should migrate to Family 3 (browse-in-context) vs stay Family 1 (OOB `navigateTo`) vs adopt the hybrid pattern.
+
 ### Added (2026-06-29 spaarkeai-compose-r1 — ADR Conflict Resolution Protocol governance)
 - `CLAUDE.md` — new §6.5 "ADR Conflict Resolution Protocol (BINDING)". Introduces the three resolution paths for ADR conflicts: (A) project-scoped exception with documented rationale, (B) ADR amendment when context has changed, (C) pivot to comply when an ADR-compliant alternative exists. Establishes "silent compliance with a sub-optimal ADR is itself a failure mode" as the principle. Binding for ≥6 months from 2026-06-29.
 - `.claude/skills/adr-check/SKILL.md` — new Step 5.5 "Surface Challenge Paths" + updated Output Format Violations block to display the three resolution paths alongside each violation. Reviewer now chooses intentionally instead of defaulting to silent compliance.
