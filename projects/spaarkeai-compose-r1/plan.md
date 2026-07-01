@@ -567,17 +567,78 @@ Phase 8: Deployment + wrap-up (1–2 days)
 
 ---
 
-## 9. Next Steps
+## 9. Plan Extension — Three-Pane Completion (added 2026-07-01)
 
-1. **Review this plan.md** with owner and confirm phase ordering / effort estimates
-2. **Run `/task-create projects/spaarkeai-compose-r1`** to generate task files from this WBS (auto-invoked by `/project-pipeline` Step 3)
-3. **Begin Phase 0 (Spikes)** as Task 001+ — spike outputs are blocking gates for Phases 1–4
+> **Source**: [`spec-supplement-2026-07-01-three-pane-pivot.md`](spec-supplement-2026-07-01-three-pane-pivot.md)
+> **Motivation**: R1 UAT surfaced that Path A modal launch shortcut the canonical three-pane UX (`<ComposeWorkspace>` mounted directly instead of inside `<ThreePaneShell>`). Streaming Summarize was never wired end-to-end (Assistant pane dispatch scaffolded but no BFF SSE + no consumption). Both gaps are R1 completion work per the supplement's baseline-vs-current comparison table.
+
+### Phase 7 — Three-Pane Pivot (~5h)
+
+Bring Path A launch under the canonical SpaarkeAi shell. Move `ComposeWorkspace` into the shared lib so `composeEditor.registration.ts` can consume it without inverting the dependency graph.
+
+| Task | Description | Effort |
+|---|---|---|
+| 091 | Move `ComposeWorkspace` + hooks + types to `@spaarke/compose-components` (mirror Calendar Pattern D packaging) | 3h |
+| 092 | App.tsx: remove Path A special-case; always render `<ThreePaneShell>`; pass composeMode context via layout hint | 1h |
+| 093 | Swap FU-3 placeholder → real `<ComposeWorkspace>` in `composeEditor.registration.ts` | 1h |
+
+**Milestone**: Path A modal launches SpaarkeAi three-pane shell; Compose editor renders inside Workspace pane; other panes render (initially empty for Context; existing Conversation).
+
+### Phase 8 — Streaming SSE Backend (~6.5h)
+
+Extend `IInvokePlaybookAi` for document-context invocation. Add server-side DOCX text extraction using `DocumentFormat.OpenXml` (already in transitive deps). Convert `/api/compose/action/{consumerType}` to SSE — matching `WorkspaceFileEndpoints.SummarizeFileSse` pattern.
+
+| Task | Description | Effort |
+|---|---|---|
+| 094 | Add `IDocxTextExtractor` service (`DocumentFormat.OpenXml`) + unit tests | 2h |
+| 095 | Extend `IInvokePlaybookAi` with document-context overload (userContext + Document optional args) | 1.5h |
+| 096 | Update `InvokePlaybookAi` + `NullInvokePlaybookAi` implementations | 1h |
+| 097 | Convert `/api/compose/action/{consumerType}` endpoint to SSE (reuse `WriteSSEAsync` pattern) | 2h |
+
+**Milestone**: BFF endpoint streams `text/event-stream` events for `compose-summarize` including document context. Existing M365 Copilot Agent parameter-only path unaffected.
+
+### Phase 9 — Assistant Pane Wiring (~3h)
+
+ConversationPane becomes the canonical AI-response surface (matching design intent). Removes banner-based summary UI.
+
+| Task | Description | Effort |
+|---|---|---|
+| 098 | ConversationPane: handle `compose_summarize_request` events + fetch SSE + progressive render | 2.5h |
+| 099 | Remove summary states from `ComposeBannerStack`; keep for import warnings + errors | 0.5h |
+
+**Milestone**: Clicking Summarize dispatches PaneEventBus event → ConversationPane calls BFF → tokens stream progressively in chat-like surface.
+
+### Phase 10 — Polish (~2h)
+
+| Task | Description | Effort |
+|---|---|---|
+| 100 | Workspace-tab suppression in compose mode (keep widget-add extensibility) | 1.5h |
+| 101 | Modal 80% × 80% in `launch-resolver.ts` | ✅ done 2026-07-01 |
+| 102 | ADR-013 amendment (Path B per CLAUDE.md §6.5): file amendment + concise note in `defer-issues.md` | 0.5h |
+
+**Milestone**: Full R1 canonical UX; ADR-013 amendment reflects the widened facade contract.
+
+### Phase 11 — Wrap-up (~0.5h)
+
+Task 110 (renumbered from 090 to reflect expanded scope) runs `/test-diet`, code-review, adr-check on the added scope. Updates README graduation criteria, plan milestones, `notes/lessons-learned.md`. Invokes `/devops-project-archive` for Issue #514.
 
 ---
 
-**Status**: Ready for Tasks
-**Next Action**: `/task-create projects/spaarkeai-compose-r1` (or proceed via `/project-pipeline` Step 3)
+**Total added effort estimate**: ~16.5h across 12 tasks (091–102 + 110). Realistic across 2 focused sessions.
 
 ---
 
-*For Claude Code: This plan provides implementation context. Load relevant phase sections when executing tasks. Phase 0 (Spikes) is the critical-path gate before Phases 1–4 begin.*
+## 10. Next Steps (updated 2026-07-01)
+
+1. **Read** [`spec-supplement-2026-07-01-three-pane-pivot.md`](spec-supplement-2026-07-01-three-pane-pivot.md) alongside this plan
+2. **Begin Phase 7** with task 091 (packaging refactor blocks everything else)
+3. **Fresh session recommended** for Phase 8 + 9 if fatigue permits — deep backend + client work
+
+---
+
+**Status**: Phases 0-6 shipped ✅ · Phases 7-11 planned, execution starts task 091
+**Next Action**: `task-execute` on `tasks/091-refactor-composeworkspace-to-shared-lib.poml`
+
+---
+
+*For Claude Code: This plan provides implementation context. Load relevant phase sections when executing tasks. Phase 7 (packaging refactor) is the critical-path gate before Phases 8–9 (backend + Assistant pane wiring).*

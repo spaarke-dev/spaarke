@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="095" project="spaarkeai-compose-r1">
+  <metadata>
+    <title>Extend IInvokePlaybookAi with document-context overload (userContext + Document)</title>
+    <status>not-started</status>
+    <estimated-effort>1.5 hours</estimated-effort>
+    <tags>bff-api, facade, adr-013, public-contracts, ai-platform</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <dependencies>094</dependencies>
+    <parallel-safe>false</parallel-safe>
+    <phase>8-streaming-sse-backend</phase>
+    <supplement-spec>spec-supplement-2026-07-01-three-pane-pivot.md FR-S4</supplement-spec>
+    <adr-amendment>ADR-013 refined facade contract widened — see task 102</adr-amendment>
+  </metadata>
+
+  <prompt>
+    Extend the `IInvokePlaybookAi` facade with an overload that accepts
+    document-context arguments. The existing parameter-only signature
+    (used by M365 Copilot Agent) MUST continue to work — new args are
+    optional.
+
+    New signature (added to `IInvokePlaybookAi.cs`):
+
+      Task&lt;PlaybookInvocationResult&gt; InvokePlaybookAsync(
+          Guid playbookId,
+          IReadOnlyDictionary&lt;string, string&gt;? parameters,
+          string? userContext,                        // NEW: extracted document text
+          DocumentContext? document,                  // NEW: structured metadata
+          PlaybookInvocationContext context,
+          CancellationToken cancellationToken = default);
+
+    OR extend the existing method with optional args (whichever fits the
+    interface's current C# 8 nullable / OverloadResolution rules).
+
+    Do NOT remove the old signature; both must resolve.
+
+    Rationale (for ADR-013 amendment task 102):
+      The refined facade was designed for parameter-only invocations
+      (M365 Copilot Agent — the only pre-Compose consumer). Document-
+      context invocation is a legitimate use case that a facade extension
+      handles cleanly. Bypassing the facade to use
+      IPlaybookOrchestrationService directly (Compose's alternative)
+      would violate ADR-013's CRUD/AI boundary. This extension is a
+      Path B ADR-013 amendment per CLAUDE.md §6.5.
+
+    Update PlaybookInvocationResult if needed (probably not — existing
+    shape suffices).
+
+    Verify:
+      1. `dotnet build` succeeds
+      2. `IInvokePlaybookAi` still callable via the old 4-arg shape
+      3. Interface tests updated (add mock/stub coverage for new overload)
+  </prompt>
+
+  <role>
+    Facade contract engineer with ADR-013 refinement literacy. Understands
+    the CRUD/AI boundary and why the extension is warranted (not a
+    boundary breach).
+  </role>
+
+  <goal>
+    IInvokePlaybookAi has a document-context overload. Existing callers
+    are unaffected. Ready for task 096 (impl updates) and task 097
+    (endpoint SSE conversion).
+  </goal>
+
+  <inputs>
+    <file purpose="spec-supplement">projects/spaarkeai-compose-r1/spec-supplement-2026-07-01-three-pane-pivot.md</file>
+    <file purpose="current-interface">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IInvokePlaybookAi.cs</file>
+    <file purpose="current-impl">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/InvokePlaybookAi.cs</file>
+    <file purpose="null-impl">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/NullInvokePlaybookAi.cs</file>
+    <file purpose="downstream-request-type">src/server/api/Sprk.Bff.Api/Services/Ai/Playbook/PlaybookRunRequest.cs</file>
+    <file purpose="adr-013-refined">.claude/adr/ADR-013-bff-ai-extraction.md</file>
+    <file purpose="claudemd-adr-conflict-protocol">CLAUDE.md § 6.5</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="adr-013">CRUD code MUST NOT inject AI internals (IOpenAiClient / IPlaybookOrchestrationService). The facade is the seam. Extending it is fine; bypassing it is not.</constraint>
+    <constraint source="claudemd-6.5">Path B ADR amendment MUST land alongside or before the dependent code — task 102 files the amendment</constraint>
+    <constraint source="testing">New overload requires test coverage per §10 #6</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ADR-013 refined facade contract</topic>
+    <topic>CLAUDE.md §6.5 ADR Conflict Resolution Protocol (path B)</topic>
+    <files>
+      <file>docs/architecture/BFF-AI-EXTRACTION-ASSESSMENT-2026-05-20.md</file>
+      <file>docs/assessments/bff-ai-extraction-assessment-2026-05-20.md</file>
+    </files>
+  </knowledge>
+</task>

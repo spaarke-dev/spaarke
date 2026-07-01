@@ -1,0 +1,67 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="093" project="spaarkeai-compose-r1">
+  <metadata>
+    <title>Swap FU-3 placeholder → real ComposeWorkspace in composeEditor.registration.ts</title>
+    <status>not-started</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <tags>frontend, legalworkspace, section-registry, three-pane, pattern-d</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <dependencies>091,092</dependencies>
+    <parallel-safe>false</parallel-safe>
+    <phase>7-three-pane-pivot</phase>
+    <supplement-spec>spec-supplement-2026-07-01-three-pane-pivot.md FR-S1</supplement-spec>
+    <resolves-follow-up>FU-3 (defer-issues.md line 26)</resolves-follow-up>
+  </metadata>
+
+  <prompt>
+    Replace the `ComposeWorkspacePlaceholder` inline component in
+    `src/solutions/LegalWorkspace/src/sections/composeEditor.registration.ts`
+    with an import of the real `ComposeWorkspace` from
+    `@spaarke/compose-components` (moved there in task 091).
+
+    Because the file is `.ts` (not `.tsx`) per the current convention
+    for registration files, the factory must use `React.createElement`.
+
+    Thread the SectionFactoryContext fields (bffBaseUrl + document
+    context from task 092's context extension) to ComposeWorkspace props:
+      - bffBaseUrl → ctx.bffBaseUrl
+      - driveId, tenantId, initialDocumentRef → from ctx (per task 092
+        interface extension) or from a global launch-context provider
+
+    Delete `ComposeWorkspacePlaceholder` (or preserve as a debug fallback).
+
+    Verify:
+      1. Selecting the Compose workspace layout in LegalWorkspace mounts
+         the real editor
+      2. FU-3 is now marked RESOLVED in defer-issues.md
+  </prompt>
+
+  <role>
+    Section-registration engineer. Follows Pattern D pattern exactly
+    (Calendar registration precedent).
+  </role>
+
+  <goal>
+    composeEditor.registration.ts renders real `<ComposeWorkspace>` via
+    `@spaarke/compose-components` import. FU-3 resolved.
+  </goal>
+
+  <inputs>
+    <file purpose="current-file">src/solutions/LegalWorkspace/src/sections/composeEditor.registration.ts</file>
+    <file purpose="calendar-precedent">src/solutions/LegalWorkspace/src/sections/calendar.registration.ts</file>
+    <file purpose="target-import">src/client/shared/Spaarke.Compose.Components/src/index.ts</file>
+    <file purpose="defer-issues">projects/spaarkeai-compose-r1/notes/defer-issues.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="convention">Registration file remains `.ts` (uses React.createElement)</constraint>
+    <constraint source="dependency">Import only from `@spaarke/*` shared libs — NEVER from `src/solutions/SpaarkeAi/*`</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Pattern D calendar precedent</topic>
+    <files>
+      <file>docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md</file>
+    </files>
+  </knowledge>
+</task>

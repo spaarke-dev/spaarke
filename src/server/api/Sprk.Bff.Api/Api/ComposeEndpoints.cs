@@ -415,7 +415,7 @@ public static class ComposeEndpoints
             return Results.Problem(
                 statusCode: StatusCodes.Status500InternalServerError,
                 title: "Internal Server Error",
-                detail: "An unexpected error occurred while saving the document.");
+                detail: $"Save failed: {ex.GetType().Name}: {ex.Message}. TraceId={httpContext.TraceIdentifier}");
         }
     }
 
@@ -671,7 +671,7 @@ public static class ComposeEndpoints
             return Results.Problem(
                 statusCode: StatusCodes.Status500InternalServerError,
                 title: "Internal Server Error",
-                detail: "An unexpected error occurred while dispatching the Compose action.");
+                detail: $"Compose dispatch failed: {ex.GetType().Name}: {ex.Message}. TraceId={httpContext.TraceIdentifier}");
         }
     }
 

@@ -1,0 +1,34 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="101" project="spaarkeai-compose-r1">
+  <metadata>
+    <title>Modal 80% × 80% in launch-resolver (per operator direction 2026-07-01)</title>
+    <status>completed</status>
+    <estimated-effort>0.1 hour</estimated-effort>
+    <tags>frontend, spaarkeai, launch-resolver, polish, trivial</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <dependencies></dependencies>
+    <parallel-safe>true</parallel-safe>
+    <phase>10-polish</phase>
+    <supplement-spec>spec-supplement-2026-07-01-three-pane-pivot.md FR-S8</supplement-spec>
+  </metadata>
+
+  <prompt>
+    Change modal dimensions in
+    `src/solutions/SpaarkeAi/src/utils/launch-resolver.ts` from
+    90% × 90% to 80% × 80%. Both openSpaarkeAi + openSpaarkeAiCompose.
+
+    Already applied 2026-07-01 during R1 UAT close-out session.
+  </prompt>
+
+  <role>
+    Trivial UI adjustment.
+  </role>
+
+  <goal>
+    Xrm.Navigation.navigateTo modal is 80% × 80% instead of 90% × 90%.
+  </goal>
+
+  <inputs>
+    <file purpose="current-file">src/solutions/SpaarkeAi/src/utils/launch-resolver.ts</file>
+  </inputs>
+</task>

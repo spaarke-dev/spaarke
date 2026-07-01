@@ -65,10 +65,14 @@ namespace Sprk.Bff.Api.Services.Compose;
 public class ComposeService : IComposeService
 {
     // Dataverse schema constants for sprk_document promotion.
+    // Verified against spaarkedev1 schema 2026-07-01: primary name field is
+    // sprk_documentname (NVARCHAR(850) NOT NULL); sprk_filename holds the SPE
+    // file name; sprk_name is NOT a real attribute on sprk_document.
     private const string DocumentLogicalName = "sprk_document";
     private const string DocumentIdAttribute = "sprk_documentid";
     private const string GraphItemIdAttribute = "sprk_graphitemid";
-    private const string DisplayNameAttribute = "sprk_name";
+    private const string DisplayNameAttribute = "sprk_documentname";
+    private const string FileNameAttribute = "sprk_filename";
 
     private readonly IComposeDocumentService _documentService;
     private readonly ComposeSessionService _sessionService;
@@ -325,13 +329,21 @@ public class ComposeService : IComposeService
             };
         }
 
-        // 2) Create the sprk_document row. The display name is used when supplied; a
-        //    sensible fallback is derived from the drive-item id (UI can always refine).
+        // 2) Create the sprk_document row. The display name (sprk_documentname —
+        //    the entity's primary name attribute) is used when supplied; a
+        //    sensible fallback is derived from the drive-item id (UI can always
+        //    refine). sprk_filename mirrors the SPE file name for downstream
+        //    consumers (index/RAG pipeline reads it as the source name).
         var entity = new Entity(DocumentLogicalName);
         entity[GraphItemIdAttribute] = request.DocumentSpeId;
-        entity[DisplayNameAttribute] = !string.IsNullOrWhiteSpace(request.DisplayName)
-            ? request.DisplayName
+        var effectiveDisplayName = !string.IsNullOrWhiteSpace(request.DisplayName)
+            ? request.DisplayName!
             : $"Compose document ({request.DocumentSpeId})";
+        entity[DisplayNameAttribute] = effectiveDisplayName;
+        if (!string.IsNullOrWhiteSpace(request.DisplayName))
+        {
+            entity[FileNameAttribute] = request.DisplayName!;
+        }
 
         Guid newId;
         try

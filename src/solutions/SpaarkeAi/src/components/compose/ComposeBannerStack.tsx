@@ -29,9 +29,14 @@ import {
   makeStyles,
   tokens,
   MessageBar,
+  MessageBarActions,
   MessageBarBody,
   MessageBarTitle,
+  Button,
+  Text,
+  Spinner,
 } from '@fluentui/react-components';
+import { DismissRegular } from '@fluentui/react-icons';
 
 import type {
   ComposeCheckoutLockedByInfo,
@@ -46,6 +51,10 @@ export interface ComposeBannerStackProps {
   checkoutFailureMessage: string | null;
   importWarnings: Array<{ type: string; message: string }>;
   pendingAssistantInsert: ComposeAssistantToWorkspaceFlow | null;
+  summaryStatus?: 'idle' | 'in-flight' | 'ready' | 'error';
+  summaryText?: string | null;
+  summaryError?: string | null;
+  onDismissSummary?: () => void;
 }
 
 const useStyles = makeStyles({
@@ -68,12 +77,17 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
     checkoutFailureMessage,
     importWarnings,
     pendingAssistantInsert,
+    summaryStatus = 'idle',
+    summaryText = null,
+    summaryError = null,
+    onDismissSummary,
   } = props;
 
   const showStack =
     importWarnings.length > 0 ||
     !!errorMessage ||
     !!pendingAssistantInsert ||
+    summaryStatus !== 'idle' ||
     checkoutStatus === 'conflict' ||
     checkoutStatus === 'failed' ||
     checkoutStatus === 'cancelled';
@@ -159,6 +173,71 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
             A draft from the Assistant is staged for insertion. (R2 wires the insert action; R1
             acknowledges receipt only.)
           </MessageBarBody>
+        </MessageBar>
+      ) : null}
+
+      {summaryStatus === 'in-flight' ? (
+        <MessageBar
+          intent="info"
+          data-testid="compose-workspace-summary-in-flight-banner"
+          aria-live="polite"
+        >
+          <MessageBarBody>
+            <MessageBarTitle>
+              <Spinner size="tiny" style={{ display: 'inline-block', marginInlineEnd: tokens.spacingHorizontalXS }} />
+              Summarizing document…
+            </MessageBarTitle>
+          </MessageBarBody>
+        </MessageBar>
+      ) : null}
+
+      {summaryStatus === 'ready' && summaryText ? (
+        <MessageBar
+          intent="success"
+          data-testid="compose-workspace-summary-ready-banner"
+          aria-live="polite"
+        >
+          <MessageBarBody>
+            <MessageBarTitle>Document summary</MessageBarTitle>
+            <Text style={{ whiteSpace: 'pre-wrap' }}>{summaryText}</Text>
+          </MessageBarBody>
+          {onDismissSummary ? (
+            <MessageBarActions
+              containerAction={
+                <Button
+                  appearance="transparent"
+                  icon={<DismissRegular />}
+                  aria-label="Dismiss summary"
+                  onClick={onDismissSummary}
+                />
+              }
+            />
+          ) : null}
+        </MessageBar>
+      ) : null}
+
+      {summaryStatus === 'error' && summaryError ? (
+        <MessageBar
+          intent="error"
+          data-testid="compose-workspace-summary-error-banner"
+          aria-live="polite"
+        >
+          <MessageBarBody>
+            <MessageBarTitle>Summarize failed</MessageBarTitle>
+            {summaryError}
+          </MessageBarBody>
+          {onDismissSummary ? (
+            <MessageBarActions
+              containerAction={
+                <Button
+                  appearance="transparent"
+                  icon={<DismissRegular />}
+                  aria-label="Dismiss summary error"
+                  onClick={onDismissSummary}
+                />
+              }
+            />
+          ) : null}
         </MessageBar>
       ) : null}
     </div>

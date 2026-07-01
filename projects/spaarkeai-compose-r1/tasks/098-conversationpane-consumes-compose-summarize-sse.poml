@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="098" project="spaarkeai-compose-r1">
+  <metadata>
+    <title>ConversationPane: handle compose_summarize_request events + fetch SSE + progressive render</title>
+    <status>not-started</status>
+    <estimated-effort>2.5 hours</estimated-effort>
+    <tags>frontend, spaarkeai, conversation-pane, sse, pane-event-bus, ai-response-surface</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <dependencies>097</dependencies>
+    <parallel-safe>false</parallel-safe>
+    <phase>9-assistant-pane-wiring</phase>
+    <supplement-spec>spec-supplement-2026-07-01-three-pane-pivot.md FR-S6</supplement-spec>
+  </metadata>
+
+  <prompt>
+    Add a `compose_summarize_request` handler to the Conversation
+    (Assistant) pane. When received, open a fetch stream against
+    `/api/compose/action/compose-summarize` (SSE endpoint from task 097),
+    consume events, and progressively render response tokens in the
+    pane's chat-like surface.
+
+    Subscribe pattern:
+      usePaneEvent('conversation', (event) => {
+        if (event.type === 'compose_summarize_request') {
+          void handleComposeSummarize(event);
+        }
+        // ...existing chat handlers unchanged
+      });
+
+    Fetch loop (Web Streams API):
+      const response = await authenticatedFetch(url, {
+        method: 'POST',
+        headers: {'Accept': 'text/event-stream',
+                  'Content-Type': 'application/json'},
+        body: JSON.stringify(bodyPayload),
+      });
+      const reader = response.body!.getReader();
+      const decoder = new TextDecoder();
+      let buffer = '';
+      while (true) {
+        const { done, value } = await reader.read();
+        if (done) break;
+        buffer += decoder.decode(value, { stream: true });
+        // split on \n\n; process each "data: {...}" event
+        // append token to conversation state; call setState/dispatch
+      }
+
+    Progress events: display in a subtle "Working…" affordance in the
+    pane. Token events: append to the current AI response bubble.
+    Terminal `data: [DONE]` closes the bubble. Error events: render as an
+    inline error state.
+
+    ComposeWorkspace's existing local Summarize state (summaryStatus,
+    summaryText, summaryError, dismissSummary) is REMOVED — the state
+    now lives in ConversationPane's chat model.
+
+    Verify:
+      1. Click Summarize in Compose toolbar → dispatch event → pane opens
+         a new AI turn → tokens stream in progressively → terminal renders
+      2. Errors show inline (not as a top-level banner)
+      3. Existing chat functionality (playbook selection, etc.) is intact
+      4. Test with mock EventSource / fetch stream
+  </prompt>
+
+  <role>
+    Frontend engineer specializing in SSE stream consumption + React state
+    management. Understands PaneEventBus subscription lifecycle.
+  </role>
+
+  <goal>
+    Compose Summarize response streams progressively into ConversationPane.
+    Full Claude/ChatGPT-like UX. Future AI functions (Rewrite, Find
+    Similar, Lookup References) inherit the same wiring path.
+  </goal>
+
+  <inputs>
+    <file purpose="spec-supplement">projects/spaarkeai-compose-r1/spec-supplement-2026-07-01-three-pane-pivot.md</file>
+    <file purpose="conversationpane">src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx</file>
+    <file purpose="compose-summarize-event-type">src/solutions/SpaarkeAi/src/components/compose/ComposeToolbar.tsx</file>
+    <file purpose="current-compose-workspace-summarize-state">src/solutions/SpaarkeAi/src/components/compose/ComposeWorkspace.tsx</file>
+    <file purpose="authenticated-fetch">src/client/shared/Spaarke.Auth/src/authenticatedFetch.ts</file>
+    <file purpose="existing-sse-consumption-precedent">src/solutions/SpaarkeAi/src/components/conversation/ChatSseHandler.tsx</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="architecture">ConversationPane is the canonical AI-response surface — matches design intent</constraint>
+    <constraint source="ADR-028">authenticatedFetch (no manual token handling)</constraint>
+    <constraint source="ADR-021">Fluent v9 semantic tokens</constraint>
+    <constraint source="testing">Test with mocked stream (WhatWG Streams API)</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Web Streams API + SSE consumption</topic>
+    <topic>PaneEventBus subscription model</topic>
+    <files>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/events/PaneEventBus.ts</file>
+    </files>
+  </knowledge>
+</task>

@@ -292,14 +292,21 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           driveId: string;
           sessionId: string;
           documentRecordId?: string;
-          content: number[];
+          // ASP.NET Core serializes byte[] as a base64-encoded string in JSON,
+          // NOT as a JSON array of numbers. Decode with atob() below.
+          content: string;
           eTag?: string;
           fileName?: string;
           size: number;
           correlationId?: string;
         };
 
-        const bytes = new Uint8Array(payload.content ?? []);
+        // Decode base64 -> bytes. atob() returns a binary string (one char per byte).
+        const binary = atob(payload.content ?? '');
+        const bytes = new Uint8Array(binary.length);
+        for (let i = 0; i < binary.length; i++) {
+          bytes[i] = binary.charCodeAt(i);
+        }
         if (ac.signal.aborted) return;
         dispatch({
           kind: 'loadSucceeded',
@@ -391,6 +398,16 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         state.documentRef.speDriveItemId
       )}/save`;
 
+      // Encode bytes -> base64. ASP.NET Core deserializes byte[] from
+      // base64 strings, NOT from JSON number arrays. Iterate rather than
+      // spread to avoid call-stack overflow on large documents.
+      const view = new Uint8Array(bytes);
+      let binary = '';
+      for (let i = 0; i < view.length; i++) {
+        binary += String.fromCharCode(view[i]);
+      }
+      const base64Content = btoa(binary);
+
       const response = await authenticatedFetch(url, {
         method: 'POST',
         headers: { 'Content-Type': 'application/json' },
@@ -398,17 +415,31 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           driveId,
           tenantId,
           sessionId: state.sessionId,
-          content: Array.from(new Uint8Array(bytes)),
+          content: base64Content,
           documentRecordId: state.documentRef.sprkDocumentId ?? null,
           displayName: state.documentRef.fileName ?? null,
         }),
       });
 
       if (!response.ok) {
+        // Try to extract ProblemDetails.detail so the banner surfaces the
+        // actual server-side reason (BFF puts exception name + message +
+        // TraceId in `detail`). Fall back to a generic message if the body
+        // isn't JSON.
+        let detail = '';
+        try {
+          const problem = (await response.clone().json()) as {
+            detail?: string;
+            title?: string;
+          };
+          detail = problem.detail ?? problem.title ?? '';
+        } catch {
+          detail = (await response.text().catch(() => '')).slice(0, 400);
+        }
         const msg =
           response.status === 403
-            ? 'You do not have permission to save this document.'
-            : `Failed to save document (HTTP ${response.status}).`;
+            ? `You do not have permission to save this document. ${detail}`.trim()
+            : `Failed to save document (HTTP ${response.status})${detail ? `: ${detail}` : ''}.`;
         dispatch({ kind: 'saveFailed', errorMessage: msg });
         return;
       }
@@ -426,6 +457,10 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         sprkDocumentId: payload.documentRecordId,
         etag: payload.eTag ?? null,
       });
+      // Clear the local dirty flag so the Save button disables until the
+      // next edit. ComposeEditor's internal dirtyRef also resets on the
+      // next load; here we mirror that for post-save.
+      setIsDirty(false);
     } catch (err) {
       const message = err instanceof Error ? err.message : String(err);
       dispatch({ kind: 'saveFailed', errorMessage: `Save failed: ${message}` });
@@ -534,9 +569,12 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   // Editor-side callbacks
   // -------------------------------------------------------------------------
 
-  const handleDirtyChange = React.useCallback((_dirty: boolean): void => {
-    // Reducer doesn't track a separate dirty flag — status is source of truth.
-    // R2 may add a "Unsaved changes" indicator via this callback.
+  // Dirty flag is UI-only (drives the Save button's enabled/disabled state
+  // in ComposeToolbar). The reducer's status enum doesn't distinguish clean
+  // vs dirty inside `loaded`; a local flag is the least-invasive surface.
+  const [isDirty, setIsDirty] = React.useState<boolean>(false);
+  const handleDirtyChange = React.useCallback((dirty: boolean): void => {
+    setIsDirty(dirty);
   }, []);
 
   const handleImportWarnings = React.useCallback(
@@ -546,7 +584,17 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     []
   );
 
-  // Toolbar observer — log compose-summarize dispatches (Tier 1 safe).
+  // -------------------------------------------------------------------------
+  // Summarize dispatch (Path A modal has no ConversationPane listener, so
+  // Compose owns the BFF call directly). Fires POST /api/compose/action/
+  // compose-summarize and stores the result for banner rendering.
+  // -------------------------------------------------------------------------
+  const [summaryStatus, setSummaryStatus] = React.useState<
+    'idle' | 'in-flight' | 'ready' | 'error'
+  >('idle');
+  const [summaryText, setSummaryText] = React.useState<string | null>(null);
+  const [summaryError, setSummaryError] = React.useState<string | null>(null);
+
   const handleComposeSummarizeRequest = React.useCallback(
     (payload: ComposeSummarizeRequestEvent): void => {
       // eslint-disable-next-line no-console
@@ -555,9 +603,99 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         timestamp: payload.timestamp,
         documentId: payload.documentRef.documentId,
       });
+
+      if (!state.documentRef?.speDriveItemId || !bffBaseUrl || !tenantId) {
+        setSummaryStatus('error');
+        setSummaryError('Cannot summarize — document, BFF URL, or tenant missing.');
+        return;
+      }
+
+      setSummaryStatus('in-flight');
+      setSummaryText(null);
+      setSummaryError(null);
+
+      const url = `${bffBaseUrl}/api/compose/action/compose-summarize`;
+      const body = {
+        documentSpeId: state.documentRef.speDriveItemId,
+        tenantId,
+        sessionId: state.sessionId || undefined,
+        driveId: driveId || undefined,
+        documentRecordId: state.documentRef.sprkDocumentId || undefined,
+        documentName: state.documentRef.fileName || undefined,
+      };
+
+      void (async () => {
+        try {
+          const response = await authenticatedFetch(url, {
+            method: 'POST',
+            headers: { 'Content-Type': 'application/json' },
+            body: JSON.stringify(body),
+          });
+          if (!response.ok) {
+            const detail =
+              response.status === 429
+                ? 'Rate limit exceeded — try again in a minute.'
+                : response.status === 503
+                  ? 'Summarization service temporarily unavailable.'
+                  : `Summarize failed (HTTP ${response.status}).`;
+            setSummaryStatus('error');
+            setSummaryError(detail);
+            return;
+          }
+          const result = (await response.json()) as {
+            runId: string;
+            success: boolean;
+            textContent: string | null;
+            durationMs: number;
+            errorCode?: string;
+            errorMessage?: string;
+          };
+          // eslint-disable-next-line no-console
+          console.info('[ComposeWorkspace] compose-summarize response', {
+            runId: result.runId,
+            success: result.success,
+            hasText: typeof result.textContent === 'string' && result.textContent.length > 0,
+            textLength: result.textContent?.length ?? 0,
+            durationMs: result.durationMs,
+            errorCode: result.errorCode,
+            errorMessage: result.errorMessage,
+          });
+          if (!result.success || !result.textContent) {
+            setSummaryStatus('error');
+            const parts: string[] = [];
+            if (!result.success) parts.push('playbook returned success=false');
+            if (!result.textContent) parts.push('no text content');
+            if (result.errorMessage) parts.push(result.errorMessage);
+            if (result.errorCode) parts.push(`(code ${result.errorCode})`);
+            parts.push(`runId=${result.runId ?? 'unknown'}`);
+            setSummaryError(`Summarize completed without a text result: ${parts.join('; ')}`);
+            return;
+          }
+          setSummaryStatus('ready');
+          setSummaryText(result.textContent);
+        } catch (err) {
+          const message = err instanceof Error ? err.message : String(err);
+          setSummaryStatus('error');
+          setSummaryError(`Summarize failed: ${message}`);
+        }
+      })();
     },
-    []
+    [
+      state.documentRef?.speDriveItemId,
+      state.documentRef?.sprkDocumentId,
+      state.documentRef?.fileName,
+      state.sessionId,
+      bffBaseUrl,
+      driveId,
+      tenantId,
+    ]
   );
+
+  const dismissSummary = React.useCallback((): void => {
+    setSummaryStatus('idle');
+    setSummaryText(null);
+    setSummaryError(null);
+  }, []);
 
   // -------------------------------------------------------------------------
   // Editor doc-ref shape (shared lib has its own narrower interface)
@@ -621,10 +759,15 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
               bffBaseUrl={bffBaseUrl}
               disabled={state.status === 'saving'}
               onComposeSummarizeRequest={handleComposeSummarizeRequest}
+              onSaveRequested={() => {
+                void triggerSave();
+              }}
+              isDirty={isDirty}
+              isSaving={state.status === 'saving'}
             />
           </div>
 
-          {/* Banner stack — errors / warnings / checkout status / assistant pending */}
+          {/* Banner stack — errors / warnings / checkout status / assistant pending / summary */}
           <ComposeBannerStack
             errorMessage={state.errorMessage}
             checkoutStatus={state.checkoutStatus}
@@ -632,6 +775,10 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             checkoutFailureMessage={state.checkoutFailureMessage}
             importWarnings={state.importWarnings}
             pendingAssistantInsert={state.pendingAssistantInsert}
+            summaryStatus={summaryStatus}
+            summaryText={summaryText}
+            summaryError={summaryError}
+            onDismissSummary={dismissSummary}
           />
 
 

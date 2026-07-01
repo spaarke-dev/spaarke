@@ -55,14 +55,14 @@ import { openSpaarkeAiCompose } from "../utils/launch-resolver";
 // ---------------------------------------------------------------------------
 // `sprk_document` field constants
 //
-// Update these if the schema is ever renamed. The schema is established in
-// existing Document plumbing (see `src/server/api/Sprk.Bff.Api/Api/Documents/`
-// + ChatAttachment endpoints which already read these fields).
+// Verified against live Dataverse schema 2026-07-01 (spaarkedev1). Update
+// these if the schema is ever renamed. See also existing Document plumbing
+// in src/server/api/Sprk.Bff.Api/Api/Documents/ + ChatAttachment endpoints.
 // ---------------------------------------------------------------------------
 const FIELD_DOCUMENT_ID = "sprk_documentid";
 const FIELD_GRAPH_ITEM_ID = "sprk_graphitemid";
-const FIELD_DRIVE_ID = "sprk_driveid";
-const FIELD_DISPLAY_NAME = "sprk_displayname";
+const FIELD_DRIVE_ID = "sprk_graphdriveid";
+const FIELD_DISPLAY_NAME = "sprk_filename";
 
 /**
  * Opens the SpaarkeAi modal directly into the Compose editor surface, pre-seeded

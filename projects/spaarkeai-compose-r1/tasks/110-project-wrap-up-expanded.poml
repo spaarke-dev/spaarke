@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="110" project="spaarkeai-compose-r1">
+  <metadata>
+    <title>Expanded project wrap-up: /test-diet + code-review + adr-check + archive (post supplement)</title>
+    <status>not-started</status>
+    <estimated-effort>0.5 day</estimated-effort>
+    <tags>project-wrap-up, refactoring</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <dependencies>091,092,093,094,095,096,097,098,099,100,101,102</dependencies>
+    <parallel-safe>false</parallel-safe>
+    <phase>11-wrap-up</phase>
+    <supersedes>090-project-wrap-up.poml (baseline scope; keep as historical reference)</supersedes>
+  </metadata>
+
+  <prompt>
+    Renumbered / expanded wrap-up task (supersedes 090). Runs the full
+    close-out sequence across BOTH the baseline R1 scope AND the
+    supplement scope (tasks 091-102 for three-pane pivot + streaming +
+    ADR-013 amendment).
+
+    Sequence (per task-execute Step 11 / CLAUDE.md §7):
+      1. `/code-review` on all NEW code from tasks 091-102 (baseline scope
+         already reviewed for 090 predecessor)
+      2. `/adr-check` — verify ADR-013 amendment landed correctly + no
+         other ADR violations introduced
+      3. `/test-diet` — reconcile MAINTAIN vs SCAFFOLDING tests added
+         in the supplement scope
+      4. `/repo-cleanup` — post-supplement hygiene sweep
+      5. Update `README.md`:
+         - Status = Complete
+         - Progress = 100%
+         - Graduation Criteria ✅ (both baseline + supplement)
+         - Link to spec-supplement-2026-07-01-three-pane-pivot.md
+      6. Update `plan.md` — all phases 0-11 marked ✅
+      7. Update `notes/lessons-learned.md`:
+         - Baseline lessons already captured pre-supplement
+         - Add supplement lessons: implicit-spec-assumption trap,
+           value of formalizing pivots as spec supplements rather than
+           spawning new projects, ADR-013 amendment path B experience
+      8. Update `notes/defer-issues.md`:
+         - Mark FU-3 RESOLVED (task 093 landed)
+         - Add ADR-013 amendment note
+      9. Update `projects/INDEX.md` — reflect R1 completion
+     10. Update `TASK-INDEX.md` — all rows ✅ 091-102 + 110
+     11. Invoke `/devops-project-archive` — close Issue #514 (preserves
+         folder + worktree per CLAUDE.md §7 override)
+
+    Final PR description MUST cite:
+      - notes/test-diet-report.md (or supplement-scope diet report)
+      - spec-supplement-2026-07-01-three-pane-pivot.md
+      - ADR-013 amendment (task 102 output)
+      - R3 seed (../spaarkeai-compose-r3/README.md) as related-work pointer
+  </prompt>
+
+  <role>
+    Project-close release engineer with expanded scope. Applies every
+    binding wrap-up gate for BOTH baseline + supplement scope.
+  </role>
+
+  <goal>
+    R1 fully archived: Issue #514 closed; graduation criteria met;
+    all lessons captured; ADR-013 amendment reflected in
+    /docs/adr + /.claude/adr; worktree preserved per CLAUDE.md §7 override.
+  </goal>
+
+  <inputs>
+    <file purpose="baseline-wrap-up-task">projects/spaarkeai-compose-r1/tasks/090-project-wrap-up.poml</file>
+    <file purpose="spec-supplement">projects/spaarkeai-compose-r1/spec-supplement-2026-07-01-three-pane-pivot.md</file>
+    <file purpose="claudemd-7">CLAUDE.md § 7</file>
+    <file purpose="test-diet-skill">.claude/skills/test-diet/SKILL.md</file>
+    <file purpose="code-review-skill">.claude/skills/code-review/SKILL.md</file>
+    <file purpose="adr-check-skill">.claude/skills/adr-check/SKILL.md</file>
+    <file purpose="repo-cleanup-skill">.claude/skills/repo-cleanup/SKILL.md</file>
+    <file purpose="archive-skill">.claude/skills/devops-project-archive/SKILL.md</file>
+    <file purpose="r3-seed-pointer">projects/spaarkeai-compose-r3/README.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="CLAUDE.md-7">/test-diet gate is BINDING — wrap-up PR MUST cite the report</constraint>
+    <constraint source="CLAUDE.md-7">Worktree preserved on archive per §7 override</constraint>
+    <constraint source="CLAUDE.md-6.5">ADR-013 amendment must be verified filed (task 102 output)</constraint>
+    <constraint source="scope">Both baseline (090's predecessor scope) AND supplement (091-102) are in this wrap-up</constraint>
+  </constraints>
+</task>

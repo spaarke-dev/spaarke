@@ -73,6 +73,7 @@ import {
   OpenRegular,
   DesktopRegular,
   SparkleRegular,
+  SaveRegular,
 } from '@fluentui/react-icons';
 import { useDispatchPaneEvent } from '@spaarke/ai-widgets/events';
 import { useDocumentActions } from '@spaarke/document-operations';
@@ -192,6 +193,27 @@ export interface ComposeToolbarProps {
    * primary effect.
    */
   onComposeSummarizeRequest?: (payload: ComposeSummarizeRequestEvent) => void;
+
+  /**
+   * Save handler. When provided, the toolbar renders a Save button that
+   * calls this on click (in addition to Ctrl+S which stays active in the
+   * host). Omit to hide the Save button.
+   */
+  onSaveRequested?: () => void;
+
+  /**
+   * True when the document has unsaved changes. Drives Save button visual
+   * state — enabled when dirty, disabled when clean. Ignored when
+   * `onSaveRequested` is omitted.
+   */
+  isDirty?: boolean;
+
+  /**
+   * True while a save is in flight. Ignored when `onSaveRequested` is
+   * omitted. The parent typically flips `disabled` as well; kept separate
+   * so the label can read "Saving…" specifically.
+   */
+  isSaving?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -256,6 +278,9 @@ export function ComposeToolbar(props: ComposeToolbarProps): React.JSX.Element {
     disabled,
     className,
     onComposeSummarizeRequest,
+    onSaveRequested,
+    isDirty = false,
+    isSaving = false,
   } = props;
 
   // Shared-lib hook — reuse the SemanticSearch precedent. Per ADR-013 + the
@@ -389,6 +414,30 @@ export function ComposeToolbar(props: ComposeToolbarProps): React.JSX.Element {
           Summarize
         </ToolbarButton>
       </Tooltip>
+
+      {onSaveRequested ? (
+        <Tooltip
+          content={
+            isToolbarDisabled || !hasDocument
+              ? 'No document loaded'
+              : isSaving
+                ? 'Saving…'
+                : isDirty
+                  ? 'Save changes (Ctrl+S)'
+                  : 'No unsaved changes'
+          }
+          relationship="label"
+        >
+          <ToolbarButton
+            icon={<SaveRegular />}
+            disabled={isToolbarDisabled || !hasDocument || isSaving || !isDirty}
+            onClick={onSaveRequested}
+            aria-label={isSaving ? 'Saving' : 'Save changes'}
+          >
+            {isSaving ? 'Saving…' : 'Save'}
+          </ToolbarButton>
+        </Tooltip>
+      ) : null}
     </Toolbar>
   );
 }

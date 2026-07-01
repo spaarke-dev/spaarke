@@ -42,6 +42,7 @@ import { ThreePaneShell } from "./components/shell/ThreePaneShell";
 // full-screen toggle) — no new modal abstraction is created.
 import { ComposeWorkspace } from "./components/compose";
 import type { ComposeDocumentRef } from "./types/compose-contracts";
+import { PaneEventBusProvider } from "@spaarke/ai-widgets/events";
 
 // ---------------------------------------------------------------------------
 // Styles — Fluent v9 tokens only (ADR-021)
@@ -183,16 +184,24 @@ function AppWithAuth(props: AppProps): React.JSX.Element {
         }
       : null;
 
+    // ComposeWorkspace and its children (ComposeToolbar) use usePaneEvent /
+    // useDispatchPaneEvent from @spaarke/ai-widgets/events. The standard
+    // three-pane path gets the bus context from ThreePaneShell's internal
+    // <PaneEventBusProvider>; the Path A modal path bypasses that shell, so
+    // we wrap directly here. Provider creates its own bus instance (no
+    // external bus needed at this mount).
     return (
       <div className={styles.appRoot} data-spaarkeai-mode="compose">
         <div className={styles.layoutShell}>
-          <ComposeWorkspace
-            bffBaseUrl={bffBaseUrl}
-            driveId={props.speDriveId ?? ""}
-            tenantId={tenantId}
-            initialDocumentRef={initialDocumentRef}
-            initialSessionId=""
-          />
+          <PaneEventBusProvider>
+            <ComposeWorkspace
+              bffBaseUrl={bffBaseUrl}
+              driveId={props.speDriveId ?? ""}
+              tenantId={tenantId}
+              initialDocumentRef={initialDocumentRef}
+              initialSessionId=""
+            />
+          </PaneEventBusProvider>
         </div>
       </div>
     );

@@ -193,10 +193,7 @@ async function _discoverNavProps(entityLogicalName: string): Promise<INavPropEnt
  *                 cached in a ref for the hook's lifetime.
  * @returns Object with createTodo, isCreated, isPending, getError, getCreatedId functions.
  */
-export function useInlineTodoCreate(
-  webApi: IWebApi | null,
-  userId?: string
-): UseInlineTodoCreateResult {
+export function useInlineTodoCreate(webApi: IWebApi | null, userId?: string): UseInlineTodoCreateResult {
   const [statusMap, setStatusMap] = useState<Map<string, TodoCreateStatus>>(() => new Map());
   const errorsRef = useRef<Map<string, string>>(new Map());
   const createdIdRef = useRef<Map<string, string>>(new Map());
@@ -227,11 +224,7 @@ export function useInlineTodoCreate(
         // unset (the existing pre-item-7 behavior).
         if (primaryContactRef.current === undefined && userId) {
           try {
-            const user = await webApi.retrieveRecord(
-              'systemuser',
-              userId,
-              '?$select=_sprk_primarycontact_value'
-            );
+            const user = await webApi.retrieveRecord('systemuser', userId, '?$select=_sprk_primarycontact_value');
             const rawContact = (user as Record<string, unknown>)['_sprk_primarycontact_value'];
             primaryContactRef.current = typeof rawContact === 'string' && rawContact.length > 0 ? rawContact : null;
           } catch (lookupErr) {

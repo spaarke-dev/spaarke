@@ -20,6 +20,8 @@
 
 export { ComposeEditor } from './widgets/ComposeEditor';
 export type { ComposeEditorProps, ComposeEditorHandle, ComposeEditorDocumentRef } from './widgets/ComposeEditor';
+export { ComposeFormatToolbar } from './widgets/ComposeFormatToolbar';
+export type { ComposeFormatToolbarProps } from './widgets/ComposeFormatToolbar';
 
 // DOCX bridge helpers — exported for advanced consumers + R2 tests. Most
 // consumers should use ComposeEditor (which orchestrates these internally).

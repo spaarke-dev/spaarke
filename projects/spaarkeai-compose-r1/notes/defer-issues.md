@@ -259,7 +259,7 @@ The 7 SCs operator-deferred to W10/W11 (live verification post-deploy):
 
 | SC | Criterion | Code/test in place | Live verification path |
 |---|---|---|---|
-| **SC4** | Path A modal launch works against real `sprk_document` | W6-046 launch-resolver + ribbon button + W5-042 modal | Operator: deploy ribbon button to Dev → click "Open in Compose" on a `sprk_document` → verify modal opens with `ComposeWorkspace` |
+| **SC4** | Path A modal launch works against real `sprk_document` | W6-046 launch-resolver + ribbon button + W5-042 modal | Ribbon build+deploy path shipped 2026-07-01 (see "SC4 ribbon deploy path" section below). Remaining: operator click-verifies "Open in Compose" launches the modal + document loads. |
 | **SC5** | Path B ephemeral upload works against deployed Assistant | W4-044 EmptyState CTA + W5-042 EmptyState handlers | Operator: deployed Assistant upload → "Open in Compose" → verify ephemeral mount |
 | **SC9-live** | `compose-summarize` E2E against deployed BFF + real playbook | W8-060 in-process trace (7 regression tests) + smoke write-up §7 | Operator: live HTTP call against Dev BFF |
 | **SC10-live** | Open-in-Word web + desktop buttons functional | W2-031 `useDocumentActions` + W4-043 Toolbar buttons | Operator: click each button against a deployed `sprk_document` |
@@ -270,6 +270,21 @@ The 7 SCs operator-deferred to W10/W11 (live verification post-deploy):
 All 7 are normal "live verification belongs to operator post-deploy" items, not project gaps.
 
 **Permanent home**: `notes/audits/success-criteria-audit.md` + W10 task 080/081 POMLs
+
+---
+
+## SC4 ribbon deploy path (added 2026-07-01)
+
+**Context**: SC4 required a working "Open in Compose" ribbon button on the `sprk_document` form command bar. The UI intent (`opencompose-button.xml`) and TS handler (`DocumentComposeLaunch.ts`) had shipped in W4-046 but the build+deploy path to produce the referenced JS web resource (`sprk_spaarkeai_documentcomposelaunch`) was never established for SpaarkeAi. Same gap applied to the two pre-existing ribbon TS files (`WorkspaceLaunch.ts`, `EntityFormLaunch.ts`) — three orphaned sources.
+
+**Path shipped 2026-07-01**:
+
+1. **Build pipeline**: `src/solutions/SpaarkeAi/scripts/build-ribbon.mjs` — esbuild-based script that scans `src/ribbon/*.ts`, produces IIFE bundles with dotted `Sprk.SpaarkeAi.{BaseName}` global names into `dist-ribbon/`. Wired into `npm run build` via `build:ribbon` sub-script.
+2. **Deploy pipeline**: `scripts/Deploy-SpaarkeAiRibbon.ps1` — REST upsert + publish for each bundle as web resource `sprk_spaarkeai_{basename}` (JScript type). Parallels `Deploy-SpaarkeAi.ps1`.
+3. **Ribbon customization**: `opencompose-button.xml` fragment merged into `DocumentRibbons` unmanaged solution via `/ribbon-edit` workflow. New elements: 1 CustomAction, 1 CommandDefinition, 1 DisplayRule + 1 EnableRule, 3 LocLabels. All prefixed `sprk.SpaarkeAi.*` for isolation from existing ribbon elements.
+4. **Deployed to Dev 2026-07-01**: 3 web resources created (documentcomposelaunch, entityformlaunch, workspacelaunch); DocumentRibbons solution imported + published.
+
+**Follow-on wired for future ribbon scripts**: any new `src/ribbon/{Name}.ts` file is automatically picked up by `build:ribbon` and deploys with the same script. No new build path required per ribbon.
 
 ---
 

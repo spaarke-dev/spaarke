@@ -218,8 +218,8 @@ export function openSpaarkeAi(
     },
     {
       target,
-      width: { value: 90, unit: "%" },
-      height: { value: 90, unit: "%" },
+      width: { value: 80, unit: "%" },
+      height: { value: 80, unit: "%" },
     }
   );
 }
@@ -292,8 +292,8 @@ export function openSpaarkeAiCompose(
     {
       // Always modal (target=2) — see header comment for rationale.
       target: 2,
-      width: { value: 90, unit: "%" },
-      height: { value: 90, unit: "%" },
+      width: { value: 80, unit: "%" },
+      height: { value: 80, unit: "%" },
     },
   );
 }

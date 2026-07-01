@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="096" project="spaarkeai-compose-r1">
+  <metadata>
+    <title>Update InvokePlaybookAi + NullInvokePlaybookAi to implement the document-context overload</title>
+    <status>not-started</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <tags>bff-api, facade, adr-013, ai-platform</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <dependencies>095</dependencies>
+    <parallel-safe>false</parallel-safe>
+    <phase>8-streaming-sse-backend</phase>
+    <supplement-spec>spec-supplement-2026-07-01-three-pane-pivot.md FR-S4</supplement-spec>
+  </metadata>
+
+  <prompt>
+    Update the two IInvokePlaybookAi implementations:
+
+    1. `InvokePlaybookAi.cs`:
+       - Add new overload matching task 095's interface change
+       - The impl builds `PlaybookRunRequest` with:
+           UserContext = userContext ?? null,
+           Document = document ?? null,
+           Parameters = parameters,
+           DocumentIds = Array.Empty&lt;Guid&gt;()  (unchanged; document
+                                                  identity flows via
+                                                  Document field, not
+                                                  DocumentIds)
+       - Update logging to include hasUserContext + hasDocument in the
+         "InvokePlaybookAi.InvokePlaybookAsync started" log line
+       - Delegate to orchestrator via existing pipeline (no other changes)
+
+    2. `NullInvokePlaybookAi.cs`:
+       - Add the new overload; returns the same NullObject response
+       - No behavior change (still fails-fast per P3 kill-switch pattern)
+
+    Verify:
+      1. `dotnet build src/server/api/Sprk.Bff.Api/` succeeds
+      2. All existing InvokePlaybookAi unit tests still pass
+      3. Add basic tests for the new overload (mock orchestrator; verify
+         PlaybookRunRequest is populated with UserContext + Document)
+  </prompt>
+
+  <role>
+    Facade implementation engineer. Precise about preserving existing
+    behavior + additive extension.
+  </role>
+
+  <goal>
+    Both InvokePlaybookAi impls implement the document-context overload.
+    Ready for task 097 (endpoint SSE conversion to use the new overload).
+  </goal>
+
+  <inputs>
+    <file purpose="current-impl">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/InvokePlaybookAi.cs</file>
+    <file purpose="current-null-impl">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/NullInvokePlaybookAi.cs</file>
+    <file purpose="downstream-runrequest">src/server/api/Sprk.Bff.Api/Services/Ai/Playbook/PlaybookRunRequest.cs</file>
+    <file purpose="downstream-orchestrator">src/server/api/Sprk.Bff.Api/Services/Ai/Playbook/PlaybookOrchestrationService.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="backward-compat">Existing 4-arg signature MUST continue to work (M365 Copilot Agent depends on it)</constraint>
+    <constraint source="adr-032">NullInvokePlaybookAi is a P3 fail-fast Null-Object — new overload preserves that semantic</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ADR-032 P3 Null-Object pattern (fail-fast)</topic>
+    <files>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+    </files>
+  </knowledge>
+</task>
