@@ -40,6 +40,8 @@ import {
   Toast,
   ToastTitle,
   ToastBody,
+  ToastFooter,
+  Link,
   MessageBar,
   MessageBarBody,
   MessageBarTitle,
@@ -50,6 +52,7 @@ import { TldrSection } from './TldrSection';
 import { ActivityNotesSection } from './ActivityNotesSection';
 import { CaughtUpFooter } from './CaughtUpFooter';
 import { PreferencesDropdown } from './PreferencesDropdown';
+import { HighPrioritySection } from './HighPrioritySection';
 import { useBriefingRender, useInlineTodoCreate, useBriefingPreferences } from '../hooks';
 import { TOASTER_ID } from '../utils/toastUtils';
 import type { IWebApi, NotificationCategory, NotificationItem } from '../types/notifications';
@@ -226,7 +229,19 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
 
   // Inline To Do creation from narrative bullets — writes first-class sprk_todo
   // records per ADR-024 + smart-todo-decoupling-r3 FR-29.
-  const { createTodo, isCreated, isPending, getError: getTodoError } = useInlineTodoCreate(webApi);
+  //
+  // R7 W12 feedback item 7 (2026-07-01): userId is passed so the hook can
+  // look up the user's sprk_primarycontact and bind it to sprk_assignedto on
+  // every created todo.
+  // R7 W12 feedback item 8 (2026-07-01): getCreatedId returns the new sprk_todo
+  // GUID so the success toast can wire an "Open To Do" action.
+  const {
+    createTodo,
+    isCreated,
+    isPending,
+    getError: getTodoError,
+    getCreatedId,
+  } = useInlineTodoCreate(webApi, userId);
 
   // Toaster setup for success/error notifications
   const toasterId = useId(TOASTER_ID);
@@ -309,12 +324,35 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
             { intent: 'error', timeout: 5000 }
           );
         } else {
+          // R7 W12 feedback item 8: 15s timeout + "Open To Do" action link.
+          // Navigates to the newly-created sprk_todo record via the same
+          // Xrm.Navigation modal pattern the regarding-name link uses.
+          const newTodoId = getCreatedId(synthesized.id);
+          const openTodo = (): void => {
+            if (!newTodoId) return;
+            const navigateTo: ((page: object, options?: object) => Promise<unknown>) | undefined =
+              xrm?.Navigation?.navigateTo;
+            if (typeof navigateTo !== 'function') return;
+            navigateTo(
+              { pageType: 'entityrecord', entityName: 'sprk_todo', entityId: newTodoId },
+              { target: 2, width: { value: 80, unit: '%' }, height: { value: 80, unit: '%' } }
+            ).catch(() => {
+              /* user closed dialog */
+            });
+          };
           dispatchToast(
             <Toast>
               <ToastTitle>Added to To Do</ToastTitle>
               <ToastBody>{synthesized.title}</ToastBody>
+              {newTodoId ? (
+                <ToastFooter>
+                  <Link appearance="default" onClick={openTodo}>
+                    Open To Do
+                  </Link>
+                </ToastFooter>
+              ) : null}
             </Toast>,
-            { intent: 'success', timeout: 3000 }
+            { intent: 'success', timeout: 15000 }
           );
         }
       } catch (e) {
@@ -327,7 +365,7 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
         );
       }
     },
-    [bulletIndex, generatedAtIso, createTodo, getTodoError, dispatchToast]
+    [bulletIndex, generatedAtIso, createTodo, getTodoError, getCreatedId, dispatchToast, xrm]
   );
 
   /**
@@ -456,8 +494,9 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
     );
   }
 
-  // Success — render TldrSection + filtered channelNarratives.
+  // Success — render HighPriority (if any) + TldrSection + filtered channelNarratives.
   const tldr = renderData?.tldr ?? null;
+  const highPriorityItems = renderData?.highPriorityItems ?? [];
 
   return (
     <div className={styles.container}>
@@ -469,6 +508,8 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
         onBrowsePlaybooks={onBrowsePlaybooks}
       />
       <div className={styles.scrollContent}>
+        {/* R7 W12 feedback item 9 (2026-07-01): high-priority section above TL;DR. */}
+        <HighPrioritySection items={highPriorityItems} onOpenRecord={handleOpenRecord} />
         <TldrSection
           tldr={tldr}
           isLoading={false}

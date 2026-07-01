@@ -76,15 +76,17 @@ import {
   MenuItem,
 } from '@fluentui/react-components';
 import {
-  MoreHorizontalRegular,
+  MoreVerticalRegular,
   CheckmarkRegular,
   DismissRegular,
   CalendarAddRegular,
   OpenRegular,
 } from '@fluentui/react-icons';
 import type { NotificationItem } from '../types/notifications';
+import type { NarrativeBulletReferenceResult } from '../services/briefingService';
 import { formatDueDate } from '../utils/formatDueDate';
 import { SubRow } from './SubRow';
+import { NarrativeCitedText } from './NarrativeCitedText';
 
 // ---------------------------------------------------------------------------
 // Styles (Fluent v9 semantic tokens only -- ADR-021)
@@ -176,6 +178,16 @@ export interface NarrativeBulletProps {
   primaryEntityId: string;
   /** Notification IDs covered by this bullet. */
   itemIds: string[];
+  /**
+   * R7 W12 feedback items 2/3/4 (2026-07-01) — per-bullet entity references.
+   * When supplied and non-empty, the narrative text is rendered with inline
+   * hyperlinks on mentioned entity names + trailing [N] citations for implicit
+   * refs (via <NarrativeCitedText />). The separate regarding-name link line
+   * below the narrative is suppressed to avoid duplication.
+   * When omitted or empty, the classic plain-text + separate-link render is
+   * preserved (back-compat).
+   */
+  references?: NarrativeBulletReferenceResult[];
   /** Callback to add the covered notifications to To Do. */
   onAddToTodo: (itemIds: string[]) => void;
   /** Callback to dismiss the covered notifications. */
@@ -263,6 +275,7 @@ export const NarrativeBullet: React.FC<NarrativeBulletProps> = ({
   onRemove,
   onKeep,
   onOpenRecord,
+  references,
 }) => {
   const styles = useStyles();
 
@@ -384,10 +397,25 @@ export const NarrativeBullet: React.FC<NarrativeBulletProps> = ({
         &bull;
       </Text>
       <div className={styles.content}>
-        <Text size={300} className={styles.narrativeText}>
-          {narrative}
-        </Text>
-        {primaryEntityName && primaryEntityType && primaryEntityId && (
+        {references && references.length > 0 ? (
+          // R7 W12 feedback items 2/3/4 (2026-07-01): inline entity-name links
+          // + trailing [N] citations. Renderer handles both mentioned + implicit
+          // refs; the separate regarding-name line below is suppressed because
+          // the mentioned refs already surface it inline.
+          <NarrativeCitedText
+            narrative={narrative}
+            references={references}
+            onOpenRecord={onOpenRecord}
+            textSize={300}
+          />
+        ) : (
+          <Text size={300} className={styles.narrativeText}>
+            {narrative}
+          </Text>
+        )}
+        {/* Legacy standalone regarding-name link — only rendered when the
+             bullet has NO references[] (back-compat / narrator degraded path). */}
+        {(!references || references.length === 0) && primaryEntityName && primaryEntityType && primaryEntityId && (
           <Text
             size={300}
             className={styles.entityLink}
@@ -479,7 +507,7 @@ export const NarrativeBullet: React.FC<NarrativeBulletProps> = ({
         */}
         <Menu>
           <MenuTrigger disableButtonEnhancement>
-            <MenuButton appearance="subtle" size="small" icon={<MoreHorizontalRegular />} aria-label="More actions" />
+            <MenuButton appearance="subtle" size="small" icon={<MoreVerticalRegular />} aria-label="More actions" />
           </MenuTrigger>
           <MenuPopover>
             <MenuList>

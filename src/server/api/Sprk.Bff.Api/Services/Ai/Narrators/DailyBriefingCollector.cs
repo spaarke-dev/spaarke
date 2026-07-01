@@ -240,6 +240,257 @@ public class DailyBriefingCollector
     }
 
     // ──────────────────────────────────────────────────────────────────────────
+    // High Priority section (R7 W12 feedback item 9)
+    //
+    // Cross-entity flag scan: returns every record across the 7 flagged entities
+    // (matter, project, invoice, document, workassignment, event, todo) where
+    // sprk_HighPriority = true OR sprk_Monitor = true — regardless of ownership
+    // in this MVP (operator flags what THEY care about; scoping by owninguser is
+    // a follow-up refinement if the list becomes too broad).
+    //
+    // No LLM call — widget renders as a compact list of clickable record refs.
+    // Ordered by due date ascending (undated items last).
+    // ──────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// R7 W12 feedback item 9 (2026-07-01) — collect all high-priority items across the 7
+    /// flagged entities. Bypasses membership resolution + narrator. Returns items whose
+    /// <c>sprk_HighPriority</c> OR <c>sprk_Monitor</c> = true, sorted by due date ascending.
+    /// Empty array on error (per-entity queries are failure-soft).
+    /// </summary>
+    public virtual async Task<HighPriorityItemDto[]> CollectHighPriorityAsync(
+        Guid systemUserId,
+        CancellationToken ct)
+    {
+        if (systemUserId == Guid.Empty)
+        {
+            throw new ArgumentException("systemUserId is required", nameof(systemUserId));
+        }
+        var startedAt = DateTimeOffset.UtcNow;
+
+        _logger.LogInformation(
+            "DailyBriefingCollector.CollectHighPriorityAsync starting for systemUserId={SystemUserId}",
+            systemUserId);
+
+        // 7 parallel queries — one per flagged entity. Each returns HighPriorityItemDto[].
+        // Every query is failure-soft: on Dataverse exception, the entity contributes
+        // an empty array (logged as warning) so the digest still renders.
+        var queries = await Task.WhenAll(
+            QueryHighPriorityMatterAsync(ct),
+            QueryHighPriorityProjectAsync(ct),
+            QueryHighPriorityInvoiceAsync(ct),
+            QueryHighPriorityDocumentAsync(ct),
+            QueryHighPriorityWorkassignmentAsync(ct),
+            QueryHighPriorityEventAsync(ct),
+            QueryHighPriorityTodoAsync(systemUserId, ct)
+        ).ConfigureAwait(false);
+
+        var all = queries.SelectMany(x => x)
+            .OrderBy(x => x.DueDate ?? DateTimeOffset.MaxValue)
+            .ThenBy(x => x.Name, StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        _logger.LogInformation(
+            "DailyBriefingCollector.CollectHighPriorityAsync completed in {DurationMs}ms: total={Total} " +
+            "(matters={M}, projects={P}, invoices={I}, docs={D}, workassignments={W}, events={E}, todos={T})",
+            (long)(DateTimeOffset.UtcNow - startedAt).TotalMilliseconds,
+            all.Length,
+            queries[0].Length, queries[1].Length, queries[2].Length, queries[3].Length,
+            queries[4].Length, queries[5].Length, queries[6].Length);
+
+        return all;
+    }
+
+    private async Task<HighPriorityItemDto[]> QueryHighPriorityMatterAsync(CancellationToken ct)
+    {
+        return await QueryHighPriorityGenericAsync(
+            entityType: EntityMatter,
+            idColumn: "sprk_matterid",
+            nameColumn: "sprk_mattername",
+            dueDateColumn: null,
+            kindLabel: "Matter",
+            includeStateFilter: true,
+            ct: ct).ConfigureAwait(false);
+    }
+
+    private async Task<HighPriorityItemDto[]> QueryHighPriorityProjectAsync(CancellationToken ct)
+    {
+        return await QueryHighPriorityGenericAsync(
+            entityType: EntityProject,
+            idColumn: "sprk_projectid",
+            nameColumn: "sprk_projectname",
+            dueDateColumn: null,
+            kindLabel: "Project",
+            includeStateFilter: true,
+            ct: ct).ConfigureAwait(false);
+    }
+
+    private async Task<HighPriorityItemDto[]> QueryHighPriorityInvoiceAsync(CancellationToken ct)
+    {
+        // Invoice has sprk_invoicedate (invoice date, NOT payment due date) — don't map to
+        // DueDate. Include all flagged invoices regardless of date. Operator can refine later.
+        return await QueryHighPriorityGenericAsync(
+            entityType: "sprk_invoice",
+            idColumn: "sprk_invoiceid",
+            nameColumn: "sprk_name",
+            dueDateColumn: null,
+            kindLabel: "Invoice",
+            includeStateFilter: true,
+            ct: ct).ConfigureAwait(false);
+    }
+
+    private async Task<HighPriorityItemDto[]> QueryHighPriorityDocumentAsync(CancellationToken ct)
+    {
+        return await QueryHighPriorityGenericAsync(
+            entityType: EntityDocument,
+            idColumn: "sprk_documentid",
+            nameColumn: "sprk_documentname",
+            dueDateColumn: null,
+            kindLabel: "Document",
+            includeStateFilter: true,
+            ct: ct).ConfigureAwait(false);
+    }
+
+    private async Task<HighPriorityItemDto[]> QueryHighPriorityWorkassignmentAsync(CancellationToken ct)
+    {
+        return await QueryHighPriorityGenericAsync(
+            entityType: "sprk_workassignment",
+            idColumn: "sprk_workassignmentid",
+            nameColumn: "sprk_name",
+            dueDateColumn: "sprk_responseduedate",
+            kindLabel: "Work Assignment",
+            includeStateFilter: true,
+            ct: ct).ConfigureAwait(false);
+    }
+
+    private async Task<HighPriorityItemDto[]> QueryHighPriorityEventAsync(CancellationToken ct)
+    {
+        // Event has both sprk_duedate and sprk_finalduedate; use sprk_finalduedate first,
+        // fall back to sprk_duedate. This mirrors QueryUpcomingTasksAsync's precedence.
+        return await QueryHighPriorityGenericAsync(
+            entityType: EntityEvent,
+            idColumn: "sprk_eventid",
+            nameColumn: "sprk_eventname",
+            dueDateColumn: "sprk_finalduedate",
+            fallbackDueDateColumn: "sprk_duedate",
+            kindLabel: "Task",
+            includeStateFilter: false,
+            ct: ct).ConfigureAwait(false);
+    }
+
+    private async Task<HighPriorityItemDto[]> QueryHighPriorityTodoAsync(Guid systemUserId, CancellationToken ct)
+    {
+        // R7 W12 fix (2026-07-01): todos scoped to `owninguser = systemUserId` to match
+        // the primary Todos channel — operators shouldn't see other users' flagged todos
+        // in their own briefing.
+        return await QueryHighPriorityGenericAsync(
+            entityType: EntityTodo,
+            idColumn: "sprk_todoid",
+            nameColumn: "sprk_name",
+            dueDateColumn: "sprk_duedate",
+            kindLabel: "To Do",
+            includeStateFilter: true,
+            ownerUserId: systemUserId,
+            ct: ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Shared query pattern for high-priority items on any of the 7 flagged entities.
+    /// Applies the flag filter (sprk_HighPriority=true OR sprk_Monitor=true), optional
+    /// state filter (statecode=0), and optional owner filter (owninguser=systemuserid).
+    /// Projects into HighPriorityItemDto. Failure-soft: returns empty array on error.
+    /// </summary>
+    private async Task<HighPriorityItemDto[]> QueryHighPriorityGenericAsync(
+        string entityType,
+        string idColumn,
+        string nameColumn,
+        string? dueDateColumn,
+        string kindLabel,
+        bool includeStateFilter,
+        CancellationToken ct,
+        string? fallbackDueDateColumn = null,
+        Guid? ownerUserId = null)
+    {
+        try
+        {
+            var columns = new List<string> { idColumn, nameColumn, "sprk_HighPriority", "sprk_Monitor" };
+            if (!string.IsNullOrEmpty(dueDateColumn)) columns.Add(dueDateColumn);
+            if (!string.IsNullOrEmpty(fallbackDueDateColumn)) columns.Add(fallbackDueDateColumn);
+
+            var query = new QueryExpression(entityType)
+            {
+                NoLock = true,
+                TopCount = PerChannelMaxRows,
+                ColumnSet = new ColumnSet(columns.ToArray())
+            };
+
+            // Flag filter: HighPriority OR Monitor
+            var flagGroup = new FilterExpression(LogicalOperator.Or);
+            flagGroup.AddCondition("sprk_HighPriority", ConditionOperator.Equal, true);
+            flagGroup.AddCondition("sprk_Monitor", ConditionOperator.Equal, true);
+            query.Criteria.AddFilter(flagGroup);
+
+            if (includeStateFilter)
+            {
+                query.Criteria.AddCondition("statecode", ConditionOperator.Equal, 0);
+            }
+
+            if (ownerUserId.HasValue && ownerUserId.Value != Guid.Empty)
+            {
+                query.Criteria.AddCondition("owninguser", ConditionOperator.Equal, ownerUserId.Value);
+            }
+
+            var result = await _entityService.RetrieveMultipleAsync(query, ct).ConfigureAwait(false);
+            var items = new List<HighPriorityItemDto>(result.Entities.Count);
+            foreach (var e in result.Entities)
+            {
+                var id = e.GetAttributeValue<Guid>(idColumn);
+                if (id == Guid.Empty) continue;
+
+                DateTimeOffset? dueDate = null;
+                if (!string.IsNullOrEmpty(dueDateColumn))
+                {
+                    var raw = e.GetAttributeValue<DateTime?>(dueDateColumn);
+                    if (!raw.HasValue && !string.IsNullOrEmpty(fallbackDueDateColumn))
+                    {
+                        raw = e.GetAttributeValue<DateTime?>(fallbackDueDateColumn);
+                    }
+                    if (raw.HasValue)
+                    {
+                        dueDate = new DateTimeOffset(DateTime.SpecifyKind(raw.Value, DateTimeKind.Utc));
+                    }
+                }
+
+                var highPriority = e.GetAttributeValue<bool?>("sprk_HighPriority") ?? false;
+                var monitor = e.GetAttributeValue<bool?>("sprk_Monitor") ?? false;
+
+                items.Add(new HighPriorityItemDto
+                {
+                    EntityType = entityType,
+                    EntityId = id.ToString(),
+                    Name = e.GetAttributeValue<string>(nameColumn) ?? "(untitled)",
+                    DueDate = dueDate,
+                    HighPriority = highPriority,
+                    Monitor = monitor,
+                    KindLabel = kindLabel,
+                });
+            }
+            return items.ToArray();
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex,
+                "DailyBriefingCollector.QueryHighPriority failed for entity={EntityType} — returning empty",
+                entityType);
+            return Array.Empty<HighPriorityItemDto>();
+        }
+    }
+
+    // ──────────────────────────────────────────────────────────────────────────
     // Membership resolution (delegates to IMembershipResolverService)
     // ──────────────────────────────────────────────────────────────────────────
 

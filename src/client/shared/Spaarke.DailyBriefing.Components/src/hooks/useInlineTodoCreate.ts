@@ -66,6 +66,12 @@ export interface UseInlineTodoCreateResult {
   isPending: (itemId: string) => boolean;
   /** Returns the error message for a failed creation, or undefined. */
   getError: (itemId: string) => string | undefined;
+  /**
+   * Returns the sprk_todoid of the created record for this notification, or undefined
+   * if creation hasn't succeeded yet. Used by the widget to wire "Open To Do" toast
+   * actions (R7 W12 feedback item 8).
+   */
+  getCreatedId: (itemId: string) => string | undefined;
 }
 
 // ---------------------------------------------------------------------------
@@ -181,11 +187,22 @@ async function _discoverNavProps(entityLogicalName: string): Promise<INavPropEnt
  * Hook for inline To Do creation from notification items.
  *
  * @param webApi - Xrm.WebApi reference (from xrmProvider). Pass null if not yet available.
- * @returns Object with createTodo, isCreated, isPending, getError functions.
+ * @param userId - Optional current-user systemuserid. When supplied, the hook looks up the
+ *                 user's `sprk_primarycontact` and sets it as `sprk_assignedto` on every
+ *                 created sprk_todo (R7 W12 feedback item 7). Primary-contact value is
+ *                 cached in a ref for the hook's lifetime.
+ * @returns Object with createTodo, isCreated, isPending, getError, getCreatedId functions.
  */
-export function useInlineTodoCreate(webApi: IWebApi | null): UseInlineTodoCreateResult {
+export function useInlineTodoCreate(
+  webApi: IWebApi | null,
+  userId?: string
+): UseInlineTodoCreateResult {
   const [statusMap, setStatusMap] = useState<Map<string, TodoCreateStatus>>(() => new Map());
   const errorsRef = useRef<Map<string, string>>(new Map());
+  const createdIdRef = useRef<Map<string, string>>(new Map());
+  // Cache the current user's sprk_primarycontact value. undefined = not looked up yet;
+  // null = looked up + no primary contact configured on the user record.
+  const primaryContactRef = useRef<string | null | undefined>(undefined);
 
   const createTodo = useCallback(
     async (item: NotificationItem): Promise<void> => {
@@ -202,6 +219,30 @@ export function useInlineTodoCreate(webApi: IWebApi | null): UseInlineTodoCreate
       });
 
       try {
+        // R7 W12 feedback item 7 — resolve the current user's sprk_primarycontact
+        // (cached across creates for this hook lifetime). We do the lookup lazily
+        // on first createTodo rather than at hook-mount so consumers that never
+        // add to To Do don't pay the query cost. Fail-soft: if the field is missing
+        // or the query fails, primarycontact stays null and sprk_assignedto is left
+        // unset (the existing pre-item-7 behavior).
+        if (primaryContactRef.current === undefined && userId) {
+          try {
+            const user = await webApi.retrieveRecord(
+              'systemuser',
+              userId,
+              '?$select=_sprk_primarycontact_value'
+            );
+            const rawContact = (user as Record<string, unknown>)['_sprk_primarycontact_value'];
+            primaryContactRef.current = typeof rawContact === 'string' && rawContact.length > 0 ? rawContact : null;
+          } catch (lookupErr) {
+            console.info(
+              '[useInlineTodoCreate] sprk_primarycontact lookup failed — sprk_assignedto will be left unset:',
+              lookupErr
+            );
+            primaryContactRef.current = null;
+          }
+        }
+
         // 1. Build the core sprk_todo record (per entity-schema.md + SmartTodo
         //    DataverseService.createTodo pattern).
         const record: Record<string, unknown> = {
@@ -220,6 +261,13 @@ export function useInlineTodoCreate(webApi: IWebApi | null): UseInlineTodoCreate
           // sprk_notes is the rich-text/long-text body field on sprk_todo
           // (replaces the legacy sprk_event.sprk_description path).
           record['sprk_notes'] = item.body;
+        }
+
+        // R7 W12 feedback item 7 — bind sprk_assignedto to the current user's
+        // primary contact when known. Uses the @odata.bind syntax expected by
+        // Xrm.WebApi.createRecord for lookup fields (target entity set 'contacts').
+        if (primaryContactRef.current) {
+          record['sprk_assignedto@odata.bind'] = `/contacts(${primaryContactRef.current})`;
         }
 
         // 2. Apply regarding (multi-entity resolution per ADR-024) — only when
@@ -262,7 +310,10 @@ export function useInlineTodoCreate(webApi: IWebApi | null): UseInlineTodoCreate
         }
 
         // 3. Create the sprk_todo record (NEVER sprk_event).
-        await webApi.createRecord('sprk_todo', record);
+        const createResult = await webApi.createRecord('sprk_todo', record);
+        if (createResult?.id) {
+          createdIdRef.current.set(item.id, createResult.id);
+        }
 
         // Success
         setStatusMap(prev => {
@@ -292,7 +343,7 @@ export function useInlineTodoCreate(webApi: IWebApi | null): UseInlineTodoCreate
         });
       }
     },
-    [webApi]
+    [webApi, userId]
   );
 
   const isCreated = useCallback((itemId: string): boolean => statusMap.get(itemId) === 'created', [statusMap]);
@@ -307,5 +358,13 @@ export function useInlineTodoCreate(webApi: IWebApi | null): UseInlineTodoCreate
     [statusMap]
   );
 
-  return { createTodo, isCreated, isPending, getError };
+  const getCreatedId = useCallback(
+    (itemId: string): string | undefined => createdIdRef.current.get(itemId),
+    // Depend on statusMap so consumers re-render when creation completes and
+    // pick up the newly-populated id.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+    [statusMap]
+  );
+
+  return { createTodo, isCreated, isPending, getError, getCreatedId };
 }

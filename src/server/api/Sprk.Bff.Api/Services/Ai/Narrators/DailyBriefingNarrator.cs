@@ -347,9 +347,28 @@ public class DailyBriefingNarrator
             }
         }
 
+        // R7 W12 feedback items 2/3/4 (2026-07-01) — build per-bullet references[]
+        // for widget-side inline citations. Two categories:
+        //   - Mentioned refs: item's RegardingName or Title appears in the narrative
+        //     text. Widget wraps the name in a clickable Link (opens modal).
+        //   - Implicit refs: bullet aggregates additional channel items whose names
+        //     don't appear in text (LLM said "several others" instead of naming).
+        //     Widget renders as trailing [N] citations.
+        //
+        // Coverage rule: when the LLM emits aggregated statements ("several to-dos
+        // added recently"), the collector's channel items provide the ground truth.
+        // If the LLM mentioned only ONE item explicitly but the channel has 5 items,
+        // we surface all 5 — mentioned=true for the named one, mentioned=false for
+        // the other 4. Operator can click any of them.
+        var references = BuildBulletReferences(narrativeText, matches, channelItems);
+
         if (matches.Count == 0)
         {
-            return new NarrativeBulletDto { Narrative = narrativeText };
+            return new NarrativeBulletDto
+            {
+                Narrative = narrativeText,
+                References = references,
+            };
         }
 
         var itemIds = matches
@@ -370,6 +389,7 @@ public class DailyBriefingNarrator
                 PrimaryEntityType = primaryByRegarding.RegardingEntityType ?? string.Empty,
                 PrimaryEntityId = primaryByRegarding.RegardingId ?? string.Empty,
                 PrimaryEntityName = primaryByRegarding.RegardingName ?? string.Empty,
+                References = references,
             };
         }
 
@@ -390,6 +410,7 @@ public class DailyBriefingNarrator
                 PrimaryEntityName = !string.IsNullOrEmpty(primaryBySource.Title)
                     ? primaryBySource.Title
                     : (primaryBySource.RegardingName ?? string.Empty),
+                References = references,
             };
         }
 
@@ -403,7 +424,147 @@ public class DailyBriefingNarrator
             PrimaryEntityType = primary.RegardingEntityType ?? string.Empty,
             PrimaryEntityId = primary.RegardingId ?? string.Empty,
             PrimaryEntityName = primary.RegardingName ?? string.Empty,
+            References = references,
         };
+    }
+
+    /// <summary>
+    /// R7 W12 feedback items 2/3/4 — build the References array for a bullet.
+    /// Combines two sources:
+    ///   1. Explicit mentions (RegardingName or Title appears in narrativeText) →
+    ///      <c>Mentioned=true</c>, widget renders name as inline Link.
+    ///   2. Implicit refs from remaining <paramref name="channelItems"/> whose
+    ///      names don't appear in text — <c>Mentioned=false</c>, widget renders
+    ///      as trailing <c>[N]</c> citations.
+    ///
+    /// Each reference resolves to a click-through target using the same tiered
+    /// logic as the primary entity (regarding first, then source entity type).
+    /// Dedupes by target (EntityType + EntityId) so a single record cited by
+    /// both RegardingName and Title only produces one reference.
+    ///
+    /// Ordering: mentioned refs by first-appearance in text (left-to-right),
+    /// then implicit refs by channel-items order. Index numbers reflect this
+    /// order so trailing [1][2][3] citations line up with the narrative reading.
+    /// </summary>
+    private static NarrativeBulletReferenceDto[] BuildBulletReferences(
+        string narrativeText,
+        IReadOnlyList<ChannelItemDto> matches,
+        ChannelItemDto[] channelItems)
+    {
+        if (channelItems is null || channelItems.Length == 0)
+        {
+            return Array.Empty<NarrativeBulletReferenceDto>();
+        }
+
+        // (a) Score matches by first-appearance in narrative text so inline
+        //     links render in reading order. Items not found in text get
+        //     int.MaxValue and sort last.
+        var scored = matches
+            .Select(m => new
+            {
+                Item = m,
+                Position = FirstMentionIndex(narrativeText, m),
+            })
+            .OrderBy(x => x.Position)
+            .ToList();
+
+        // (b) Add channel items that WEREN'T mentioned — implicit refs.
+        var mentionedIds = new HashSet<string>(
+            matches.Select(m => m.Id).Where(id => !string.IsNullOrEmpty(id)),
+            StringComparer.OrdinalIgnoreCase);
+        var implicitItems = channelItems
+            .Where(ci => !string.IsNullOrEmpty(ci.Id) && !mentionedIds.Contains(ci.Id))
+            .ToList();
+
+        var references = new List<NarrativeBulletReferenceDto>();
+        var seenTargets = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        int index = 1;
+
+        foreach (var scoredMatch in scored)
+        {
+            var refDto = BuildReferenceFor(scoredMatch.Item, index, mentioned: true);
+            var targetKey = refDto.EntityType + "|" + refDto.EntityId;
+            if (string.IsNullOrEmpty(refDto.EntityId) || seenTargets.Add(targetKey))
+            {
+                references.Add(refDto);
+                index++;
+            }
+        }
+
+        foreach (var implicitItem in implicitItems)
+        {
+            var refDto = BuildReferenceFor(implicitItem, index, mentioned: false);
+            var targetKey = refDto.EntityType + "|" + refDto.EntityId;
+            if (string.IsNullOrEmpty(refDto.EntityId) || seenTargets.Add(targetKey))
+            {
+                references.Add(refDto);
+                index++;
+            }
+        }
+
+        return references.ToArray();
+    }
+
+    /// <summary>
+    /// Build a NarrativeBulletReferenceDto for one channel item using the same
+    /// tiered click-target logic as the primary entity resolver: regarding first,
+    /// then source entity type, then bare fields as fallback.
+    /// </summary>
+    private static NarrativeBulletReferenceDto BuildReferenceFor(ChannelItemDto item, int index, bool mentioned)
+    {
+        string entityType;
+        string entityId;
+        string entityName;
+
+        if (!string.IsNullOrEmpty(item.RegardingId))
+        {
+            entityType = item.RegardingEntityType ?? string.Empty;
+            entityId = item.RegardingId ?? string.Empty;
+            entityName = item.RegardingName ?? string.Empty;
+        }
+        else if (!string.IsNullOrEmpty(item.SourceEntityType) && !string.IsNullOrEmpty(item.Id))
+        {
+            entityType = item.SourceEntityType ?? string.Empty;
+            entityId = item.Id ?? string.Empty;
+            entityName = !string.IsNullOrEmpty(item.Title) ? item.Title : (item.RegardingName ?? string.Empty);
+        }
+        else
+        {
+            entityType = item.RegardingEntityType ?? string.Empty;
+            entityId = item.RegardingId ?? string.Empty;
+            entityName = item.RegardingName ?? string.Empty;
+        }
+
+        return new NarrativeBulletReferenceDto
+        {
+            Index = index,
+            EntityType = entityType,
+            EntityId = entityId,
+            EntityName = entityName,
+            Mentioned = mentioned,
+        };
+    }
+
+    /// <summary>
+    /// Returns the character index of the first mention of a channel item in
+    /// <paramref name="narrativeText"/>, or int.MaxValue if not mentioned.
+    /// Checks RegardingName first, then Title. Case-insensitive, ≥3-char guard.
+    /// </summary>
+    private static int FirstMentionIndex(string narrativeText, ChannelItemDto item)
+    {
+        int regardingIdx = NameIndex(narrativeText, item.RegardingName);
+        int titleIdx = NameIndex(narrativeText, item.Title);
+        int best = int.MaxValue;
+        if (regardingIdx >= 0 && regardingIdx < best) best = regardingIdx;
+        if (titleIdx >= 0 && titleIdx < best) best = titleIdx;
+        return best;
+    }
+
+    private static int NameIndex(string narrativeText, string? name)
+    {
+        if (string.IsNullOrWhiteSpace(name) || name.Length < 3) return -1;
+        return narrativeText.IndexOf(name, StringComparison.OrdinalIgnoreCase);
     }
 
     /// <summary>

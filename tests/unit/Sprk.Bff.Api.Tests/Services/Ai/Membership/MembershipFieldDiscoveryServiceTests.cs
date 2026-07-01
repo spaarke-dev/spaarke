@@ -467,6 +467,128 @@ public class MembershipFieldDiscoveryServiceTests
     }
 
     // ────────────────────────────────────────────────────────────────────
+    // R7 W12 T130 follow-up (2026-06-30) — polymorphic Owner + Customer
+    // fallback synthesis. Pins the ProjectLookupAttributeRows contract that
+    // fixes the "sprk_matter resolved rows=0 for a user who owns 44 matters"
+    // production symptom. See rationale block in MembershipFieldDiscoveryService
+    // for evidence + root-cause analysis.
+    // ────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public void ProjectLookupAttributeRows_OwnerAttributeAsBaseAttributeMetadata_SynthesizesSystemUserAndTeamTargets()
+    {
+        // Simulates the modern-SDK deserialization behavior for polymorphic
+        // Owner attributes: `ownerid` comes back as base `AttributeMetadata`
+        // with `AttributeType=Owner` because OwnerAttributeMetadata is not a
+        // registered [KnownType] on AttributeMetadata. Without the fallback
+        // synthesis, `.OfType<LookupAttributeMetadata>()` would drop it.
+        var ownerAttr = CreateBaseAttributeMetadata(Microsoft.Xrm.Sdk.Metadata.AttributeTypeCode.Owner);
+        ownerAttr.LogicalName = "ownerid";
+
+        var regularLookup = new Microsoft.Xrm.Sdk.Metadata.LookupAttributeMetadata();
+        regularLookup.LogicalName = "sprk_someregularlookup";
+
+        var attributes = new Microsoft.Xrm.Sdk.Metadata.AttributeMetadata[]
+        {
+            ownerAttr,
+            regularLookup,
+        };
+
+        var rows = MembershipFieldDiscoveryService.ProjectLookupAttributeRows(attributes);
+
+        rows.Should().HaveCount(2);
+
+        var ownerRow = rows.Single(r => r.LogicalName == "ownerid");
+        ownerRow.Targets.Should().BeEquivalentTo(new[] { "systemuser", "team" },
+            because: "polymorphic Owner attributes always target systemuser + team in Dataverse");
+
+        var regularRow = rows.Single(r => r.LogicalName == "sprk_someregularlookup");
+        regularRow.Targets.Should().BeEmpty(
+            because: "the regular Lookup has no Targets configured in this synthetic test");
+    }
+
+    [Fact]
+    public void ProjectLookupAttributeRows_CustomerAttributeAsBaseAttributeMetadata_SynthesizesAccountAndContactTargets()
+    {
+        // Same rationale as the Owner case, but for polymorphic Customer
+        // attributes (targets account + contact — the standard Dataverse
+        // Customer type binding).
+        var customerAttr = CreateBaseAttributeMetadata(Microsoft.Xrm.Sdk.Metadata.AttributeTypeCode.Customer);
+        customerAttr.LogicalName = "customerid";
+
+        var attributes = new[] { customerAttr };
+
+        var rows = MembershipFieldDiscoveryService.ProjectLookupAttributeRows(attributes);
+
+        var customerRow = rows.Should().ContainSingle().Subject;
+        customerRow.LogicalName.Should().Be("customerid");
+        customerRow.Targets.Should().BeEquivalentTo(new[] { "account", "contact" });
+    }
+
+    [Fact]
+    public void ProjectLookupAttributeRows_OwnerAttributeAlreadyCapturedByPrimaryPath_NotDoubleCounted()
+    {
+        // Belt-and-suspenders: if a future SDK version DOES deserialize an
+        // Owner attribute as LookupAttributeMetadata (with Targets already
+        // populated), the primary-pass row must win and the fallback pass
+        // must NOT append a duplicate. The `seen` set is what guards this.
+        var ownerAsLookup = new Microsoft.Xrm.Sdk.Metadata.LookupAttributeMetadata();
+        ownerAsLookup.LogicalName = "ownerid";
+        // Simulate the SDK populating Targets from the server response — the
+        // Targets property is publicly settable via the DataContract surface.
+        typeof(Microsoft.Xrm.Sdk.Metadata.LookupAttributeMetadata)
+            .GetProperty("Targets")!
+            .SetValue(ownerAsLookup, new[] { "systemuser", "team" });
+
+        var attributes = new Microsoft.Xrm.Sdk.Metadata.AttributeMetadata[]
+        {
+            ownerAsLookup,
+        };
+
+        var rows = MembershipFieldDiscoveryService.ProjectLookupAttributeRows(attributes);
+
+        rows.Should().ContainSingle(r => r.LogicalName == "ownerid",
+            because: "the primary LookupAttributeMetadata pass captured it — " +
+                     "the Owner fallback pass must not double-count");
+        rows.Single().Targets.Should().BeEquivalentTo(new[] { "systemuser", "team" });
+    }
+
+    [Fact]
+    public void ProjectLookupAttributeRows_NonLookupNonOwnerNonCustomerAttribute_Ignored()
+    {
+        // Baseline: a String attribute (or anything that isn't Lookup/Owner/
+        // Customer) is not membership-bearing and must not appear.
+        var stringAttr = new Microsoft.Xrm.Sdk.Metadata.StringAttributeMetadata();
+        stringAttr.LogicalName = "sprk_name";
+
+        var intAttr = CreateBaseAttributeMetadata(Microsoft.Xrm.Sdk.Metadata.AttributeTypeCode.Integer);
+        intAttr.LogicalName = "sprk_count";
+
+        var attributes = new Microsoft.Xrm.Sdk.Metadata.AttributeMetadata[]
+        {
+            stringAttr,
+            intAttr,
+        };
+
+        var rows = MembershipFieldDiscoveryService.ProjectLookupAttributeRows(attributes);
+
+        rows.Should().BeEmpty();
+    }
+
+    [Fact]
+    public void ProjectLookupAttributeRows_AttributeWithEmptyLogicalName_Skipped()
+    {
+        var noNameOwner = CreateBaseAttributeMetadata(Microsoft.Xrm.Sdk.Metadata.AttributeTypeCode.Owner);
+        // LogicalName intentionally left null
+
+        var attributes = new[] { noNameOwner };
+
+        var rows = MembershipFieldDiscoveryService.ProjectLookupAttributeRows(attributes);
+
+        rows.Should().BeEmpty();
+    }
+
+    // ────────────────────────────────────────────────────────────────────
     // Helpers
     // ────────────────────────────────────────────────────────────────────
 
@@ -493,6 +615,29 @@ public class MembershipFieldDiscoveryServiceTests
         string logicalName,
         params string[] targets)
         => new(logicalName, targets);
+
+    /// <summary>
+    /// Creates a bare <see cref="Microsoft.Xrm.Sdk.Metadata.AttributeMetadata"/>
+    /// with the requested <paramref name="typeCode"/> via reflection — the
+    /// `AttributeMetadata(AttributeTypeCode)` constructor is `protected` in
+    /// the SDK, but reflection can still invoke it. This mirrors the way the
+    /// SDK's DataContract deserializer materializes attributes that don't
+    /// match a registered `[KnownType]` (i.e., what happens for
+    /// `@odata.type=OwnerAttributeMetadata` responses in modern Dataverse).
+    /// </summary>
+    private static Microsoft.Xrm.Sdk.Metadata.AttributeMetadata CreateBaseAttributeMetadata(
+        Microsoft.Xrm.Sdk.Metadata.AttributeTypeCode typeCode)
+    {
+        var ctor = typeof(Microsoft.Xrm.Sdk.Metadata.AttributeMetadata)
+            .GetConstructor(
+                System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Instance,
+                binder: null,
+                types: new[] { typeof(Microsoft.Xrm.Sdk.Metadata.AttributeTypeCode) },
+                modifiers: null)
+            ?? throw new InvalidOperationException(
+                "AttributeMetadata(AttributeTypeCode) constructor not found — SDK version drift?");
+        return (Microsoft.Xrm.Sdk.Metadata.AttributeMetadata)ctor.Invoke(new object[] { typeCode });
+    }
 
     private static MembershipDescriptor DescriptorFor(DiscoveryResult result, string field)
         => result.DiscoveredFields.SingleOrDefault(d => d.Field == field)
