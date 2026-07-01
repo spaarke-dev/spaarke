@@ -530,9 +530,9 @@ public class MembershipFieldDiscoveryService : IMembershipFieldDiscoveryService
 
             var syntheticTargets = attr.AttributeType switch
             {
-                AttributeTypeCode.Owner    => OwnerAttributeTargets,
+                AttributeTypeCode.Owner => OwnerAttributeTargets,
                 AttributeTypeCode.Customer => CustomerAttributeTargets,
-                _                          => null
+                _ => null
             };
 
             if (syntheticTargets is null)
