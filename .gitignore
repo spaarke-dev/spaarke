@@ -156,3 +156,28 @@ infra/**/modules/*.json
 # Backfill checkpoint files (runtime artifacts; never commit)
 backfill-parent-records-progress.json
 backfill-documents-progress.json
+
+# 2026-06-30 — session/tooling detritus that has been polluting `git status`.
+# These are all machine-local or WIP-external-to-repo:
+#   - .claude/worktrees/: transient parallel-agent worktrees from Claude Code
+#   - .husky/{pre-commit,pre-push,post-checkout,post-commit,post-merge}: Git LFS
+#     hooks auto-installed per developer machine by `git lfs install`
+#   - docs/notes/, docs/ai-knowledge/: exploratory notes not ready to publish
+#   - exports/: PCF / solution bundle exports (large binaries)
+#   - projects/spaarke-production-release-procedure/working/: WIP scratchpad
+#   - projects/x-ai-json-prompt-schema-system/notes/jps-conversions/: JPS
+#     conversion drafts from a different project
+#   - scripts/Deploy-PlaybookBuilder-Inline.ps1: one-off deploy script that
+#     will fold into a permanent Deploy-PlaybookBuilder.ps1 later
+.claude/worktrees/
+.husky/pre-commit
+.husky/pre-push
+.husky/post-checkout
+.husky/post-commit
+.husky/post-merge
+docs/notes/
+docs/ai-knowledge/
+exports/
+projects/spaarke-production-release-procedure/working/
+projects/x-ai-json-prompt-schema-system/notes/jps-conversions/
+scripts/Deploy-PlaybookBuilder-Inline.ps1
