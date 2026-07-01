@@ -1,0 +1,60 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="100" project="spaarkeai-compose-r1">
+  <metadata>
+    <title>Workspace-tab suppression in compose mode (keep widget-add extensibility)</title>
+    <status>not-started</status>
+    <estimated-effort>1.5 hours</estimated-effort>
+    <tags>frontend, spaarkeai, workspace-shell, polish</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <dependencies>092</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <phase>10-polish</phase>
+    <supplement-spec>spec-supplement-2026-07-01-three-pane-pivot.md FR-S7</supplement-spec>
+  </metadata>
+
+  <prompt>
+    When Compose is launched via `composeMode=editor`, the workspace-tab
+    UI (Matters, Documents, Daily Briefing, etc.) MUST be hidden. The
+    user is locked to the Compose surface — no browsing to other
+    workspaces from inside the Compose experience.
+
+    BUT: the widget-add extensibility for the Workspace pane MUST stay
+    functional so future Compose-focused widgets can be added.
+
+    Approach:
+      1. Investigate where SpaarkeAi's ThreePaneShell renders the
+         workspace-layout picker / tab UI (probably in
+         `ThreePaneShell.tsx` or a header component)
+      2. Add a mode-flag or conditional render: when
+         `composeMode === 'editor'`, hide the layout picker
+      3. Preserve the widget-add affordance (probably in the Workspace
+         pane's own header / add-widget button — no change there)
+
+    Verify:
+      1. Ribbon launch (composeMode=editor) → three panes visible → no
+         workspace-tab UI shown
+      2. Non-compose launches (no composeMode) → workspace tabs unchanged
+      3. Widget-add mechanism (e.g., "+" button in Workspace pane header)
+         is still present
+  </prompt>
+
+  <role>
+    Shell UI engineer. Understands the difference between "layout picker"
+    (workspace-level) and "widget picker" (per-workspace).
+  </role>
+
+  <goal>
+    In compose mode, workspace-tab UI hidden. Widget-add functionality
+    preserved. R2+ Compose-focused widgets can be added.
+  </goal>
+
+  <inputs>
+    <file purpose="spec-supplement">projects/spaarkeai-compose-r1/spec-supplement-2026-07-01-three-pane-pivot.md</file>
+    <file purpose="threepane-shell">src/solutions/SpaarkeAi/src/components/shell/ThreePaneShell.tsx</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="architecture">Preserve widget-add mechanism — the goal is "no non-Compose layouts", not "no widget system"</constraint>
+    <constraint source="ADR-021">Fluent v9</constraint>
+  </constraints>
+</task>

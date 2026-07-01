@@ -1,7 +1,7 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-06-30 (by `/context-handoff` — pre-compaction checkpoint)
+> **Last Updated**: 2026-07-01 (R1 UAT surfaced three-pane completion gap; spec supplement + phases 7-11 added)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
@@ -13,12 +13,13 @@
 
 | Field | Value |
 |-------|-------|
-| **Project state** | ✅ **ALL implementation + audits + cleanup + wrap-up artifacts complete.** Ready to deploy. |
-| **Active phase** | **W10 (deploy) — UNPAUSED; operator decided 2026-06-30 to proceed without waiting for r7** |
-| **PR** | [#515](https://github.com/spaarke-dev/spaarke/pull/515) — 6 commits pushed (head: `9a6141167`) |
-| **Why deploy NOW (changed 2026-06-30)** | r7 (`work/spaarke-ai-platform-unification-r7`) is taking significantly longer than expected. Operator confirmed r7 has NOT merged to master and r7's BFF changes are NOT in Dev (r7 only has a local deploy). Compose deploy is safe — file-level overlap with r7 = 0 on critical surfaces; only additive `Seed-PlaybookConsumers.ps1` overlap. |
-| **NEXT ACTION (explicit)** | **Resume W10 deploy**: (1) operator runs `pwsh ./scripts/Deploy-BffApi.ps1 -SkipBuild` → deploys `deploy/api-publish.zip` (45.41 MB, already staged) to `spaarke-bff-dev` in `rg-spaarke-dev`. (2) operator runs `pwsh ./scripts/Deploy-SpaarkeAi.ps1` → deploys `src/solutions/SpaarkeAi/dist/spaarkeai.html` to Dataverse as web resource `sprk_spaarkeai`. (3) Follow the 6-step runbook in [`notes/bff-publish-size-report.md`](notes/bff-publish-size-report.md) §6 (deploy → unauth smoke → auth smoke → FR-06 acceptance → CVE re-scan → live SC verification for SC4/5/9-live/10-live/13/14/15). |
-| **What I (Claude) should do post-compaction** | (a) Confirm operator has run the deploy commands above. (b) Help interpret smoke-test results. (c) If operator wants Claude to dispatch the W10-081 sub-agent for code-page deploy + Dataverse artifact verification, do that. (d) DO NOT revert to "hold for r7" — operator already made the deploy decision 2026-06-30. (e) After deploy succeeds + live SCs verify: merge Compose to master (PR #515). |
+| **Project state** | ✅ **Phases 0-6 shipped + deployed to Dev.** 🔄 **Phases 7-11 planned per [`spec-supplement-2026-07-01-three-pane-pivot.md`](spec-supplement-2026-07-01-three-pane-pivot.md)** — three-pane pivot + streaming SSE + Assistant pane wiring + polish + wrap-up. |
+| **Active phase** | **Phase 7 planning complete; task 091 (ComposeWorkspace shared-lib refactor) is next execution step** |
+| **PR history** | [#515](https://github.com/spaarke-dev/spaarke/pull/515) MERGED to master (commit `81e91d06f`) — R1 baseline. Subsequent commits on `work/spaarkeai-compose-r1` for R1 completion work; new PR to open when phases 7-11 land. |
+| **What was shipped in phases 0-6 (baseline R1)** | Path A modal launch (currently direct `<ComposeWorkspace>` mount — SHORTCUT of the canonical three-pane UX; addressed in Phase 7). BFF Compose endpoints + services + DI. SpaarkeAi Compose components. Dataverse plumbing (`sprk_workspacelayout` "Compose" + `sprk_playbookconsumer` `compose-summarize`). Save works (field-name fix 2026-07-01). Formatting toolbar + BubbleMenu. Save button. Summarize wired (banner UX; not yet streaming). |
+| **What still needs to ship (phases 7-11)** | Three-pane pivot: move ComposeWorkspace to `@spaarke/compose-components`, swap FU-3 placeholder, wrap Path A in ThreePaneShell. Streaming SSE: `IDocxTextExtractor`, `IInvokePlaybookAi` extension, `/api/compose/action/*` → SSE. Assistant pane: ConversationPane consumes `compose_summarize_request` events + streams. Polish: workspace-tab suppression, modal 80×80 (done in launch-resolver 2026-07-01), ADR-013 amendment (Path B per CLAUDE.md §6.5). Wrap-up: /test-diet + close Issue #514. |
+| **NEXT ACTION (explicit)** | **After merge-to-master + fresh deploy cycle completes** (r7 overlap concern on SpaarkeAi + possibly BFF per user 2026-07-01), begin Phase 7 with `task-execute` on [`tasks/091-refactor-composeworkspace-to-shared-lib.poml`](tasks/091-refactor-composeworkspace-to-shared-lib.poml). |
+| **What I (Claude) should do post-compaction** | (a) Read spec-supplement first for full R1 completion scope. (b) Read plan.md §9 for phase 7-11 breakdown. (c) Execute via task-execute skill through the POML files 091 → 099 → 102 in sequence. (d) DO NOT create r2 project — this work is R1 completion, not new project scope (per operator 2026-07-01: "R1 isn't usable without three-pane"). (e) R3 seed is at [`../spaarkeai-compose-r3/README.md`](../spaarkeai-compose-r3/README.md) — Word fidelity work (preserving formatting, track changes, comments) — SEPARATE project, do not conflate. |
 
 ### Files Modified This Session (full Wave 0 → W11)
 

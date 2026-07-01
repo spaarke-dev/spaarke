@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="102" project="spaarkeai-compose-r1">
+  <metadata>
+    <title>File ADR-013 amendment (Path B per CLAUDE.md §6.5) — widened facade for document-context</title>
+    <status>not-started</status>
+    <estimated-effort>0.5 hour</estimated-effort>
+    <tags>adr, documentation, adr-conflict-resolution, path-b</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <dependencies>095</dependencies>
+    <parallel-safe>true</parallel-safe>
+    <phase>10-polish</phase>
+    <supplement-spec>spec-supplement-2026-07-01-three-pane-pivot.md ADR Tension section</supplement-spec>
+    <governance>CLAUDE.md §6.5 ADR Conflict Resolution Protocol Path B</governance>
+  </metadata>
+
+  <prompt>
+    File an ADR-013 amendment that formalizes the widened
+    `IInvokePlaybookAi` facade contract (task 095).
+
+    Steps:
+      1. Read the refined ADR-013 concise at `.claude/adr/ADR-013-bff-ai-extraction.md`
+      2. Read the full ADR at `docs/adr/ADR-013-bff-ai-extraction.md`
+      3. Add an amendment section to the full ADR:
+
+         ## Amendment 2026-07-01 — Document-context invocation
+
+         The refined facade `IInvokePlaybookAi` MAY accept optional
+         document-context arguments (`userContext`, `Document`) for
+         consumers that dispatch playbooks against a specific document.
+         This preserves the CRUD/AI boundary while supporting document-
+         scoped analysis flows.
+
+         **Motivating consumer**: `spaarkeai-compose-r1` — Compose
+         dispatches whole-document + selection-scoped AI functions
+         (Summarize / Rewrite / Find Similar / etc.) that require the
+         playbook to receive the source document's plain text (or a
+         structured DocumentContext).
+
+         **Before**: `InvokePlaybookAsync(playbookId, parameters, context, ct)`
+         — parameter-only invocation. Suitable for M365 Copilot Agent
+         path (Copilot supplies document context via conversation
+         attachments outside the facade).
+
+         **After**: Optional `userContext: string?` and `document:
+         DocumentContext?` overload. The facade forwards these to
+         `PlaybookRunRequest.UserContext` and `PlaybookRunRequest.Document`.
+         Existing parameter-only callers are unaffected.
+
+         **Boundary preserved**: CRUD code (Compose endpoints) STILL
+         only injects `IInvokePlaybookAi` + `IConsumerRoutingService` —
+         NEVER `IPlaybookOrchestrationService` or `IOpenAiClient`.
+
+      4. Update the concise ADR (.claude/adr/) with a summary of the
+         amendment
+      5. Update `.claude/adr/INDEX.md` if it lists amendments
+      6. Append a note to `projects/spaarkeai-compose-r1/notes/defer-issues.md`
+         under an "ADR-013 amendment (2026-07-01 — path B)" section
+      7. Add an entry to `.claude/CHANGELOG.md` referencing the amendment
+
+    Rationale (for the PR description):
+      Per CLAUDE.md §6.5, Path B is the correct resolution when an ADR's
+      prior decision is no longer optimal AND a facade extension is
+      cleaner than bypassing it. Path A (project-scoped exception) would
+      set a bad precedent — every future document-context consumer would
+      need to declare its own exception. Path B lands the amendment once
+      and the facade permanently supports the class of use case.
+  </prompt>
+
+  <role>
+    ADR maintainer / architectural governance engineer. Follows
+    CLAUDE.md §6.5 protocol precisely.
+  </role>
+
+  <goal>
+    ADR-013 amendment filed. Concise ADR updated. INDEX + CHANGELOG
+    reflect the amendment. defer-issues.md documents the R1-scope amendment.
+    Future consumers can invoke document-context playbooks without ADR
+    friction.
+  </goal>
+
+  <inputs>
+    <file purpose="claudemd-protocol">CLAUDE.md § 6.5</file>
+    <file purpose="adr-013-concise">.claude/adr/ADR-013-bff-ai-extraction.md</file>
+    <file purpose="adr-013-full">docs/adr/ADR-013-bff-ai-extraction.md</file>
+    <file purpose="adr-index">.claude/adr/INDEX.md</file>
+    <file purpose="claude-changelog">.claude/CHANGELOG.md</file>
+    <file purpose="defer-issues">projects/spaarkeai-compose-r1/notes/defer-issues.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="CLAUDE.md-6.5">Path B amendment MUST land alongside dependent code (tasks 095, 096, 097) — no silent violation window</constraint>
+    <constraint source="governance">Amendment MUST cite motivating consumer + preserved boundary</constraint>
+  </constraints>
+</task>

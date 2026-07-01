@@ -1,0 +1,88 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="094" project="spaarkeai-compose-r1">
+  <metadata>
+    <title>Add IDocxTextExtractor service using DocumentFormat.OpenXml (server-side DOCX → plain text)</title>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <tags>bff-api, compose, docx, openxml, ai-context, testing</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <dependencies></dependencies>
+    <parallel-safe>true</parallel-safe>
+    <phase>8-streaming-sse-backend</phase>
+    <supplement-spec>spec-supplement-2026-07-01-three-pane-pivot.md FR-S5</supplement-spec>
+  </metadata>
+
+  <prompt>
+    Add a new service `Sprk.Bff.Api.Services.Compose.IDocxTextExtractor`
+    (+ default impl) that takes an ArrayBuffer/byte[]/Stream of DOCX
+    bytes and returns plain-text prose extracted via
+    `DocumentFormat.OpenXml` (already in transitive deps, verified 2026-07-01).
+
+    Contract:
+      Task<string> ExtractPlainTextAsync(Stream docxBytes,
+                                          int maxCharacters = 100_000,
+                                          CancellationToken ct);
+
+    Behavior:
+      - Open DOCX via WordprocessingDocument.Open
+      - Iterate MainDocumentPart.Document.Body.Descendants of
+        DocumentFormat.OpenXml.Wordprocessing.Text
+      - Concatenate text; insert paragraph breaks between paragraphs
+      - Ignore comments, revision marks, headers/footers, tables of
+        contents (for R1 — R3 fidelity project may enrich)
+      - Truncate at maxCharacters (default 100k) with a "[TRUNCATED — X
+        characters more]" suffix
+
+    Register in `Infrastructure/DI/ComposeModule.cs`:
+      services.AddScoped&lt;IDocxTextExtractor, DocxTextExtractor&gt;();
+
+    Unit tests:
+      - Empty DOCX
+      - Simple prose DOCX (mocked fixture)
+      - DOCX with headers/footers/comments (verify skipped)
+      - Truncation boundary
+      - Malformed DOCX (throws or returns empty — decide)
+
+    Add tests at:
+      tests/unit/Sprk.Bff.Api.Tests/Services/Compose/DocxTextExtractorTests.cs
+
+    Verify:
+      1. `dotnet build src/server/api/Sprk.Bff.Api/` succeeds
+      2. `dotnet test tests/unit/Sprk.Bff.Api.Tests/ --filter FullyQualifiedName~DocxTextExtractor`
+         passes
+      3. Publish size delta < 0.5 MB (should be ~0 since OpenXml already present)
+  </prompt>
+
+  <role>
+    BFF service engineer familiar with OpenXml SDK + ADR-038 test patterns.
+    Prefers concrete implementation over over-abstraction (ADR-010).
+  </role>
+
+  <goal>
+    IDocxTextExtractor + default impl + tests shipped. ComposeEndpoints
+    can now load DOCX bytes from SPE and extract text for AI dispatch.
+  </goal>
+
+  <inputs>
+    <file purpose="spec-supplement">projects/spaarkeai-compose-r1/spec-supplement-2026-07-01-three-pane-pivot.md</file>
+    <file purpose="csproj-deps">src/server/api/Sprk.Bff.Api/Sprk.Bff.Api.csproj</file>
+    <file purpose="compose-module">src/server/api/Sprk.Bff.Api/Infrastructure/DI/ComposeModule.cs</file>
+    <file purpose="adr-010">docs/adr/ADR-010-dataverse-fabric.md</file>
+    <file purpose="adr-038">docs/adr/ADR-038-testing-strategy.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-010">Register concrete via `AddScoped&lt;IDocxTextExtractor, DocxTextExtractor&gt;` — interface exists only because it's an external I/O boundary (justified seam)</constraint>
+    <constraint source="ADR-038">Tests belong to the 6 KEEP categories — unit tests here are integration-domain (behavior against DocumentFormat.OpenXml)</constraint>
+    <constraint source="§10-publish-size">Publish delta MUST stay &lt; 1 MB (OpenXml already in transitive deps)</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>DocumentFormat.OpenXml WordprocessingDocument API</topic>
+    <topic>ADR-038 integration-heavy pyramid + 6 KEEP paths</topic>
+    <files>
+      <file>tests/CLAUDE.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+</task>

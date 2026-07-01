@@ -1,0 +1,77 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="092" project="spaarkeai-compose-r1">
+  <metadata>
+    <title>App.tsx: remove Path A special-case; render ThreePaneShell always; pass composeMode via layout hint</title>
+    <status>not-started</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <tags>frontend, spaarkeai, three-pane, app-root, refactor</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <dependencies>091</dependencies>
+    <parallel-safe>false</parallel-safe>
+    <phase>7-three-pane-pivot</phase>
+    <supplement-spec>spec-supplement-2026-07-01-three-pane-pivot.md FR-S1</supplement-spec>
+  </metadata>
+
+  <prompt>
+    Current: `src/solutions/SpaarkeAi/src/App.tsx` has a Path A special-
+    case at lines ~174-199 — when `props.composeMode === 'editor'`, it
+    renders `<ComposeWorkspace>` directly, bypassing ThreePaneShell.
+    This is the shortcut identified in the spec supplement.
+
+    Change: Remove the special-case. App.tsx ALWAYS renders
+    `<ThreePaneShell>`. When `props.composeMode === 'editor'` is set, pass
+    the initial-layout hint down through ThreePaneShell so it selects
+    the "Compose" `sprk_workspacelayout` row on mount. The composeMode
+    document context (sprkDocumentId, speDriveItemId, driveId, fileName)
+    is passed through the SectionFactoryContext or a workspace-level
+    props object.
+
+    Related change: Also update the PaneEventBusProvider wrap. Currently
+    App.tsx wraps `<ComposeWorkspace>` in `<PaneEventBusProvider>`. Since
+    ThreePaneShell provides its own PaneEventBusProvider (see task 091's
+    finding), remove the App.tsx wrap.
+
+    Investigate first: how does ThreePaneShell currently select initial
+    layout? Does it accept an initial-layout prop? If not, either add one
+    or use a URL-param-based selection inside ThreePaneShell.
+
+    Verify:
+      1. Path A modal launch (ribbon → composeMode=editor) → SpaarkeAi
+         opens → three panes visible → workspace pane shows Compose editor
+      2. Non-Compose launches (no composeMode) still open with default
+         layout unchanged
+      3. All existing tests pass
+  </prompt>
+
+  <role>
+    Frontend architect. Balances "least invasive change" against "matches
+    existing patterns" — mirrors how ThreePaneShell handles other launch
+    modes (Daily Briefing, chat sessions).
+  </role>
+
+  <goal>
+    App.tsx renders ThreePaneShell always. composeMode=editor URL param
+    causes ThreePaneShell to select the Compose layout on initial mount.
+    Document context is threaded to ComposeWorkspace via SectionFactoryContext
+    or an equivalent shell prop.
+  </goal>
+
+  <inputs>
+    <file purpose="spec-supplement">projects/spaarkeai-compose-r1/spec-supplement-2026-07-01-three-pane-pivot.md</file>
+    <file purpose="current-apptsx">src/solutions/SpaarkeAi/src/App.tsx</file>
+    <file purpose="threepane-shell">src/solutions/SpaarkeAi/src/components/shell/ThreePaneShell.tsx</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="architecture">ThreePaneShell is the canonical mount for ALL SpaarkeAi launches</constraint>
+    <constraint source="ADR-021">Fluent v9 semantic tokens</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>SpaarkeAi shell + workspace layout system</topic>
+    <files>
+      <file>docs/architecture/SPAARKEAI-WORKSPACE-ARCHITECTURE.md</file>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+    </files>
+  </knowledge>
+</task>

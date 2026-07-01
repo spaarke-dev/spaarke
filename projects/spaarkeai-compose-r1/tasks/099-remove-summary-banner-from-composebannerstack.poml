@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="099" project="spaarkeai-compose-r1">
+  <metadata>
+    <title>Remove summary banner states from ComposeBannerStack (retain import warnings + errors)</title>
+    <status>not-started</status>
+    <estimated-effort>0.5 hour</estimated-effort>
+    <tags>frontend, spaarkeai, cleanup, refactor</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <dependencies>098</dependencies>
+    <parallel-safe>false</parallel-safe>
+    <phase>9-assistant-pane-wiring</phase>
+    <supplement-spec>spec-supplement-2026-07-01-three-pane-pivot.md FR-S6</supplement-spec>
+  </metadata>
+
+  <prompt>
+    Now that ConversationPane owns the Summarize response (task 098),
+    remove the summary banner UI from
+    `src/solutions/SpaarkeAi/src/components/compose/ComposeBannerStack.tsx`.
+
+    Delete:
+      - summaryStatus, summaryText, summaryError, onDismissSummary props
+      - The three MessageBar variants for in-flight / ready / error
+      - Related MessageBarActions + DismissRegular icon
+
+    Keep:
+      - errorMessage banner (Save errors, checkout failures)
+      - checkoutStatus banners (conflict, failed, cancelled)
+      - importWarnings banner (mammoth warnings)
+      - pendingAssistantInsert banner (R2 pattern)
+
+    Also remove from ComposeWorkspace:
+      - summaryStatus/summaryText/summaryError useState hooks
+      - handleComposeSummarizeRequest's BFF-call logic (no longer needed
+        in Compose — ConversationPane handles it)
+      - The console.info-only stub can stay if useful for tracing
+
+    Verify:
+      1. Frontend builds clean
+      2. All Compose tests pass
+      3. Import warnings banner still surfaces (task 093 → task 098 → task
+         099 verifies mammoth still surfaces warnings, but not through
+         summary state)
+  </prompt>
+
+  <role>
+    Cleanup engineer. Precise about deletion boundary (do NOT touch other
+    banner states or unrelated ComposeWorkspace logic).
+  </role>
+
+  <goal>
+    ComposeBannerStack + ComposeWorkspace no longer own Summarize state.
+    Import warnings + errors remain in the banner stack. Test suite passes.
+  </goal>
+
+  <inputs>
+    <file purpose="current-banner-stack">src/solutions/SpaarkeAi/src/components/compose/ComposeBannerStack.tsx</file>
+    <file purpose="current-composeworkspace">src/solutions/SpaarkeAi/src/components/compose/ComposeWorkspace.tsx</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="scope">Only delete summary-related state; do NOT modify banner-stack's other UI</constraint>
+  </constraints>
+</task>

@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="097" project="spaarkeai-compose-r1">
+  <metadata>
+    <title>Convert /api/compose/action/{consumerType} endpoint to SSE streaming</title>
+    <status>not-started</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <tags>bff-api, compose, sse, endpoint, ai-platform</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <dependencies>094,095,096</dependencies>
+    <parallel-safe>false</parallel-safe>
+    <phase>8-streaming-sse-backend</phase>
+    <supplement-spec>spec-supplement-2026-07-01-three-pane-pivot.md FR-S3</supplement-spec>
+  </metadata>
+
+  <prompt>
+    Convert `ComposeEndpoints.DispatchAction` from the current aggregated-
+    JSON `Task&lt;IResult&gt;` shape to an SSE streaming endpoint that emits
+    `Content-Type: text/event-stream` events.
+
+    Reuse the pattern from
+    `src/server/api/Sprk.Bff.Api/Api/Workspace/WorkspaceFileEndpoints.cs`
+    method `SummarizeFileSse` (~line 190-260) which uses `WriteSSEAsync` +
+    `AnalysisStreamChunk` events.
+
+    New flow inside DispatchAction:
+      1. Parameter validation (unchanged — 400 on missing required fields
+         BEFORE SSE headers are set)
+      2. Resolve playbook via `IConsumerRoutingService` (unchanged)
+      3. Set SSE headers (`response.ContentType = "text/event-stream";
+         response.Headers.CacheControl = "no-cache"; response.Headers.Connection = "keep-alive";`)
+      4. Load DOCX from SPE via `IComposeDocumentService.LoadDocxAsync`
+      5. Extract text via `IDocxTextExtractor.ExtractPlainTextAsync` (task 094)
+      6. Progress SSE events:
+           data: { "type": "progress", "stage": "document_loaded" }\n\n
+           data: { "type": "progress", "stage": "extracting_text" }\n\n
+           data: { "type": "progress", "stage": "invoking_playbook" }\n\n
+      7. Invoke playbook via new overload (task 095/096):
+             invokePlaybook.InvokePlaybookAsync(
+                 playbookId,
+                 parameters,
+                 userContext: extractedText,
+                 document: new DocumentContext { ... },
+                 invocationContext,
+                 ct);
+      8. Stream terminal-output events as the playbook's response
+         arrives (see WorkspaceFileEndpoints pattern for how it drains
+         PlaybookInvocationResult tokens)
+      9. Terminal event: data: { "type": "done", "runId": "...",
+                                  "success": true, "correlationId": "..." }\n\n
+     10. Sentinel: data: [DONE]\n\n
+
+    Error handling: emit `data: { "type": "error", "code": "...",
+    "message": "..." }\n\n` on exceptions; DO NOT set 5xx status after
+    SSE headers.
+
+    Response DTO changes: retire `ComposeActionResponse` from the
+    endpoint's `.Produces&lt;&gt;` — replace with `.Produces(StatusCodes.Status200OK, contentType: "text/event-stream")`.
+
+    Verify:
+      1. `dotnet build` clean
+      2. curl the endpoint (with auth) — verify streaming behavior
+      3. Existing ComposeService/ComposeDocumentService flows unchanged
+      4. Publish size delta &lt; 1 MB
+  </prompt>
+
+  <role>
+    BFF endpoint engineer + SSE streaming specialist. Understands ordering
+    (validate BEFORE SSE headers) and error semantics (emit error events,
+    not 5xx after headers).
+  </role>
+
+  <goal>
+    /api/compose/action/{consumerType} streams `text/event-stream` events
+    per the WorkspaceFileEndpoints pattern. Document context threads
+    through to the playbook via task 095's facade extension.
+  </goal>
+
+  <inputs>
+    <file purpose="spec-supplement">projects/spaarkeai-compose-r1/spec-supplement-2026-07-01-three-pane-pivot.md</file>
+    <file purpose="current-endpoint">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs</file>
+    <file purpose="sse-pattern-precedent">src/server/api/Sprk.Bff.Api/Api/Workspace/WorkspaceFileEndpoints.cs</file>
+    <file purpose="analysisstreamchunk-model">src/server/api/Sprk.Bff.Api/Models/Ai/AnalysisStreamChunk.cs</file>
+    <file purpose="facade-new-overload">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IInvokePlaybookAi.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-001">Minimal API pattern preserved</constraint>
+    <constraint source="ADR-008">RequireAuthorization + rate-limiting inheritance preserved</constraint>
+    <constraint source="ADR-013">Uses new facade overload from task 095; does NOT inject IPlaybookOrchestrationService</constraint>
+    <constraint source="ADR-019">Route pattern unchanged (`/api/compose/action/{consumerType}`)</constraint>
+    <constraint source="§10-publish-size">Publish delta reported in PR description</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>SSE streaming in ASP.NET Core minimal APIs</topic>
+    <topic>Rate limiting + auth ordering for SSE endpoints</topic>
+    <files>
+      <file>src/server/api/Sprk.Bff.Api/Api/Workspace/WorkspaceFileEndpoints.cs</file>
+      <file>src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs</file>
+    </files>
+  </knowledge>
+</task>

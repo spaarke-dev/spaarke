@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="091" project="spaarkeai-compose-r1">
+  <metadata>
+    <title>Move ComposeWorkspace + hooks + types to @spaarke/compose-components</title>
+    <status>not-started</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <tags>refactoring, packaging, shared-lib, spaarkeai, compose-components, pattern-d</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <dependencies></dependencies>
+    <parallel-safe>false</parallel-safe>
+    <phase>7-three-pane-pivot</phase>
+    <supplement-spec>spec-supplement-2026-07-01-three-pane-pivot.md FR-S2</supplement-spec>
+  </metadata>
+
+  <prompt>
+    Move ComposeWorkspace + its child components + its hooks + its
+    types from `src/solutions/SpaarkeAi/src/components/compose/` into
+    `src/client/shared/Spaarke.Compose.Components/src/widgets/`.
+    This unblocks LegalWorkspace's `composeEditor.registration.ts` from
+    importing the real widget without inverting the dependency graph
+    (matches Calendar Pattern D packaging precedent).
+
+    File moves (source → target):
+      src/solutions/SpaarkeAi/src/components/compose/
+        ComposeWorkspace.tsx
+        ComposeWorkspace.types.ts
+        ComposeBannerStack.tsx
+        ComposeToolbar.tsx
+        ComposeEmptyState.tsx
+        ComposeConflictDialog.tsx
+        hooks/
+          useComposeBroadcastChannel.ts
+          useComposeCheckoutLifecycle.ts
+          useComposeHeartbeatGate.ts
+          index.ts
+      →
+      src/client/shared/Spaarke.Compose.Components/src/widgets/
+        (same file structure)
+
+    Update imports in ALL affected files:
+      - src/solutions/SpaarkeAi/src/App.tsx (imports ComposeWorkspace)
+      - Any tests reference ComposeWorkspace/ComposeToolbar/etc.
+
+    Add exports to `@spaarke/compose-components/src/index.ts`:
+      export { ComposeWorkspace, ComposeToolbar, ComposeBannerStack,
+               ComposeEmptyState, ComposeConflictDialog } from './widgets/...'
+      export type { ComposeWorkspaceProps, ComposeToolbarProps, ... }
+
+    Verify:
+      1. `npm run build` in `src/client/shared/Spaarke.Compose.Components/`
+         succeeds (tsc clean; no import cycles)
+      2. `npm run build` in `src/solutions/SpaarkeAi/` succeeds
+      3. All tests still pass (npm test in SpaarkeAi + in Spaarke.Compose.Components)
+      4. No import from `src/solutions/SpaarkeAi/*` back into any shared lib
+         (dependency graph unidirectional)
+
+    Keep in mind:
+      - ComposeWorkspace has hook dependencies on @spaarke/ai-widgets/events,
+        @spaarke/auth, @spaarke/document-operations — these are fine, they're
+        shared libs consumed by shared lib.
+      - PaneEventBusProvider wrap that App.tsx currently does may move into
+        ComposeWorkspace itself (or stay in App.tsx). Decide during refactor.
+  </prompt>
+
+  <role>
+    Frontend packaging engineer familiar with Vite + monorepo dependency
+    graphs. Prioritizes zero-regression refactoring; runs full build +
+    test suite after each move.
+  </role>
+
+  <goal>
+    ComposeWorkspace + supporting components + hooks live in
+    `@spaarke/compose-components`. All 3 solutions (SpaarkeAi,
+    LegalWorkspace, Spaarke.Compose.Components itself) build clean.
+    Ready for task 093 (FU-3 placeholder swap) to import the real widget.
+  </goal>
+
+  <inputs>
+    <file purpose="spec-supplement">projects/spaarkeai-compose-r1/spec-supplement-2026-07-01-three-pane-pivot.md</file>
+    <file purpose="calendar-pattern-d-precedent">src/client/shared/Spaarke.Events.Components/src/widgets/CalendarSection.tsx</file>
+    <file purpose="current-composeworkspace">src/solutions/SpaarkeAi/src/components/compose/ComposeWorkspace.tsx</file>
+    <file purpose="current-registration-shim">src/solutions/LegalWorkspace/src/sections/composeEditor.registration.ts</file>
+    <file purpose="target-lib-index">src/client/shared/Spaarke.Compose.Components/src/index.ts</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="architecture">Dependency graph MUST stay unidirectional (SpaarkeAi/LegalWorkspace/etc. depend on shared libs; NEVER the reverse)</constraint>
+    <constraint source="architecture">Calendar Pattern D is the packaging precedent — mirror it</constraint>
+    <constraint source="ADR-021">Fluent v9 semantic tokens preserved (no hex leak during move)</constraint>
+    <constraint source="testing">All existing tests (24 frontend Compose tests + integration) MUST continue passing</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Pattern D shared-lib widget packaging</topic>
+    <files>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+      <file>docs/architecture/SPAARKEAI-COMPONENTIZATION-AUDIT.md</file>
+      <file>docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md</file>
+    </files>
+  </knowledge>
+</task>
