@@ -1,7 +1,7 @@
 <task id="R2-023" project="ai-spaarke-ai-workspace-UI-r2">
   <metadata>
     <title>Sharpen 5 documentation surfaces to reflect two-layout standard</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>3 hours</estimated-effort>
     <phase>3</phase>
     <tags>documentation,markdown,standards,modal-decision-criteria</tags>

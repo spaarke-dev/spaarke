@@ -1,7 +1,7 @@
 <task id="R2-021" project="ai-spaarke-ai-workspace-UI-r2">
   <metadata>
     <title>Migrate all SmartTodoModal callsites to Xrm.Navigation.navigateTo</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2 hours</estimated-effort>
     <phase>3</phase>
     <tags>typescript,react,smarttodomodal,layout-1,migration,iframe-retirement</tags>

@@ -7,9 +7,10 @@
  * Per R3 task 020 / OS-1, the legacy single-row `TodoItem` and the standalone
  * `TodoDetailPane` (R1 list-view detail) were removed when the kanban path
  * repointed at `sprk_todo`. Per R4 task 042 / FR-18, the R3 `TodoDetailPanel`
- * side-pane is also retired; to-do detail editing is handled by the hybrid
- * `<SmartTodoModal>` (R4 task 040 — see `./Modal/`) which embeds the OOB MDA
- * main form in an iframe.
+ * side-pane is also retired. Per ai-spaarke-ai-workspace-UI-r2 FR-14
+ * (2026-07-01), the R4 iframe-hosting `<SmartTodoModal>` (task 040) was also
+ * retired. To-do detail editing now uses `Xrm.Navigation.navigateTo` at
+ * Layout 1 (85% × 85%) — see `../SmartTodoApp.tsx` `openSprkTodoAsLayout1`.
  */
 
 export { SmartToDo } from './SmartToDo';

@@ -2,8 +2,21 @@
 
 > **Status**: Active (binding)
 > **Created**: 2026-07-01
+> **Last sharpened**: 2026-07-01 by `ai-spaarke-ai-workspace-UI-r2` task 023 (FR-15) — added Two-Layout Standard framing + verbatim MS Learn 2025-05-07 quote + 2026 CSP tightening fact.
 > **Audience**: Anyone opening a record, document, form, wizard, confirm, or preview as a modal from any Spaarke client surface (Code Pages, PCF controls, ribbon commands, SPAs)
 > **Companion**: [`.claude/patterns/ui/record-modal-selection.md`](../../.claude/patterns/ui/record-modal-selection.md) (pattern pointer) · [`docs/standards/DATA-ACCESS-DECISION-CRITERIA.md`](DATA-ACCESS-DECISION-CRITERIA.md) (sibling standard for data access decisions)
+
+---
+
+## Two-Layout Standard (added 2026-07-01 by R2)
+
+Spaarke supports exactly **two** modal layouts across every surface. Everything else is either a variant, a wizard (separate concern), or an anti-pattern.
+
+- **Layout 1 (canonical default)** — `Xrm.Navigation.navigateTo({ pageType: "entityrecord", entityName, entityId, formId? }, { target: 2, position: 1, width: {value: 85, unit: '%'}, height: {value: 85, unit: '%'} })`. OOB Dataverse form dialog at a **single fixed size (85% × 85%)** for every entity — do NOT vary per-entity. Used for every entity record row-click across Spaarke workspaces (Documents, Matters, Projects, Invoices, Work Assignments, Communications, To Do). The Spaarke DataGrid framework's `defaultRecordOpen` emits exactly this shape (see [`SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE.md`](../architecture/SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE.md)).
+- **Layout 2 (justified exception)** — `RecordNavigationModalShell` + proprietary Fluent v9 content. Dimensions are content-driven, NOT the 85% × 85% Layout 1 standard. Reference case: [`RichFilePreviewDialog`](../../src/client/shared/Spaarke.UI.Components/src/components/FilePreview/RichFilePreviewDialog.tsx) for document preview (portrait shape `max-width: 1280px; height: 85vh` — matches PDF/Word paper aspect ratio). Layout 2 is justified by the "browse-in-context" or "content-shaped surface" cases; Layout 1 alone cannot serve them.
+- **Retired anti-pattern (Layout 3)** — iframe-hosted OOB `main.aspx` inside a proprietary shell. Contractually unsupported by Microsoft (see anti-pattern §4 below). The `SmartTodoModal` (retired 2026-07-01 by R2 FR-14) was the last Spaarke consumer.
+
+If you are opening a record and it does NOT fit Layout 1 or Layout 2, you are proposing new surface — surface a design conversation before shipping.
 
 ---
 
@@ -254,7 +267,13 @@ Use a plain Fluent v9 `Dialog` with two buttons. `ChoiceDialog` is for 2–4 ric
 
 ### 4. Do not iframe-embed OOB `main.aspx` as a standard pattern
 
-Microsoft does not officially support embedding `main.aspx?pagetype=entityrecord&...` in an iframe. It works today, but any platform update can break it and Spaarke would own the incident. If a project needs iframe-OOB-in-shell as a temporary bridge, treat it as a **stopgap**: document the risk in the project spec's ADR Tensions section (per CLAUDE.md §6.5), name the migration path, and set a review date.
+Microsoft's model-driven-apps iframe/web-resource documentation states verbatim (revision **2025-05-07**, [use-iframe-and-web-resource-controls-on-a-form](https://learn.microsoft.com/en-us/power-apps/developer/model-driven-apps/use-iframe-and-web-resource-controls-on-a-form)):
+
+> "Displaying a form within an IFrame embedded in another form is not supported"
+
+This is a **support-contract statement**, not a Content-Security-Policy one — it applies regardless of same-origin passthrough. Separately, the model-driven CSP admin doc (revision **2026-02-10**, [content-security-policy](https://learn.microsoft.com/en-us/power-platform/admin/content-security-policy)) enforces `Content-Security-Policy: frame-ancestors 'self' https://*.powerapps.com` by default; strict-mode CSP for code apps rolled out **late January 2026** (per 2tolead's Power Apps CSP 2026 Setup Guide). The direction of travel is toward tightening, not relaxing, third-party embedding.
+
+If a project needs iframe-OOB-in-shell as a temporary bridge, treat it as a **stopgap**: document the risk in the project spec's ADR Tensions section (per CLAUDE.md §6.5), name the migration path, and set a review date. Prefer Layout 1 (`Xrm.Navigation.navigateTo`) — that IS the supported path for opening a Dataverse record as a modal from Code Pages / PCFs / SPAs. The `SmartTodoModal` (retired 2026-07-01 by ai-spaarke-ai-workspace-UI-r2 FR-14) was Spaarke's last iframe-hosted-OOB consumer; the evidence trail lives in [`projects/ai-spaarke-ai-workspace-UI-r2/notes/researcher-iframe-main-aspx-2026-07-01.md`](../../projects/ai-spaarke-ai-workspace-UI-r2/notes/researcher-iframe-main-aspx-2026-07-01.md).
 
 ### 5. Do not launch OOB `navigateTo` from within a Fluent v9 Dialog
 

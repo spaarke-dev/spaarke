@@ -1,7 +1,7 @@
 <task id="R2-013" project="ai-spaarke-ai-workspace-UI-r2">
   <metadata>
     <title>Phase 2 PR — Communications widget</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>1 hour</estimated-effort>
     <phase>2</phase>
     <tags>pr,merge,ci,git,communications</tags>

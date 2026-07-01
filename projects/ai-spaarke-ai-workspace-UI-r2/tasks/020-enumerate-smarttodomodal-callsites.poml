@@ -1,7 +1,7 @@
 <task id="R2-020" project="ai-spaarke-ai-workspace-UI-r2">
   <metadata>
     <title>Enumerate all SmartTodoModal callsites</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>1 hour</estimated-effort>
     <phase>3</phase>
     <tags>audit,smarttodomodal,iframe-retirement,typescript</tags>

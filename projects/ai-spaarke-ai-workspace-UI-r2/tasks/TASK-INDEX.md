@@ -27,16 +27,16 @@
 | [`010-communications-config-record.poml`](010-communications-config-record.poml) | ✅ | 004 | 1 h | FR-11 — create `sprk_gridconfiguration` record for Communications via `dataverse-create-schema` skill — GUID `e1826c4c-9575-f111-ab0e-7ced8ddc4a05` |
 | [`011-communications-section-registration.poml`](011-communications-section-registration.poml) | ✅ | 010 | 1 h | FR-09 — `communications.registration.ts` + `sectionRegistry.ts` update + `sectionMetadataCatalog.ts` |
 | [`012-communications-direct-widget.poml`](012-communications-direct-widget.poml) | ✅ | 010 | 1 h | FR-10 — `communications-list` direct widget in `register-workspace-widgets.ts` |
-| [`013-phase2-pr-and-merge.poml`](013-phase2-pr-and-merge.poml) | 🔲 | 011, 012 | 1 h | Phase 2 PR — Communications visible as section + direct widget |
+| [`013-phase2-pr-and-merge.poml`](013-phase2-pr-and-merge.poml) | 🔄 | 011, 012 | 1 h | Phase 2 PR — Communications visible as section + direct widget — folded into PR #530 |
 
 ## Phase 3 — SmartTodoModal retirement + documentation (PR 3)
 
 | Task | Status | Depends on | Est. | Notes |
 |---|---|---|---|---|
-| [`020-enumerate-smarttodomodal-callsites.poml`](020-enumerate-smarttodomodal-callsites.poml) | 🔲 | 013 | 1 h | FR-12 — final callsite enumeration; document in `notes/smart-todo-modal-callsites.md` |
-| [`021-migrate-smarttodomodal-callsites.poml`](021-migrate-smarttodomodal-callsites.poml) | 🔲 | 020 | 2 h | FR-13 — every callsite converts to `Xrm.Navigation.navigateTo` (Layout 1) |
-| [`022-delete-smarttodomodal-component.poml`](022-delete-smarttodomodal-component.poml) | 🔲 | 021 | 1 h | FR-14 — delete `SmartTodoModal.tsx` + iframe-hosting wiring; retain `RecordNavigationModalShell` |
-| [`023-documentation-updates.poml`](023-documentation-updates.poml) | 🔲 | 022 | 3 h | FR-15..FR-19 — sharpen 5 doc surfaces |
+| [`020-enumerate-smarttodomodal-callsites.poml`](020-enumerate-smarttodomodal-callsites.poml) | ✅ | 013 | 1 h | FR-12 — final callsite enumeration; document in `notes/smart-todo-modal-callsites.md` — LOW complexity confirmed |
+| [`021-migrate-smarttodomodal-callsites.poml`](021-migrate-smarttodomodal-callsites.poml) | ✅ | 020 | 2 h | FR-13 — every callsite converts to `Xrm.Navigation.navigateTo` (Layout 1); LegalWorkspace 80%→85% + fallback removed |
+| [`022-delete-smarttodomodal-component.poml`](022-delete-smarttodomodal-component.poml) | ✅ | 021 | 1 h | FR-14 — Modal folder deleted (SmartTodoModal.tsx + buildTodoIframeUrl.ts + tests + barrel); useLaunchContext.ts kept (non-iframe branches); RecordNavigationModalShell intact |
+| [`023-documentation-updates.poml`](023-documentation-updates.poml) | ✅ | 022 | 3 h | FR-15..FR-19 — sharpened 5 doc surfaces (MODAL-DECISION-CRITERIA + record-modal-selection pattern + BUILD-A-NEW-WORKSPACE-WIDGET § 6.6 + SPAARKE-DATAGRID § 6.5 + SPAARKEAI-DASHBOARD § 6.5); CHANGELOG entry added |
 | [`024-phase3-pr-and-merge.poml`](024-phase3-pr-and-merge.poml) | 🔲 | 023 | 1 h | Phase 3 PR — retirement + docs; verify FR-20 + FR-21 |
 
 ## Wrap-up

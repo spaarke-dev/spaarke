@@ -1,7 +1,7 @@
 <task id="R2-022" project="ai-spaarke-ai-workspace-UI-r2">
   <metadata>
     <title>Delete SmartTodoModal component + iframe-hosting wiring</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>1 hour</estimated-effort>
     <phase>3</phase>
     <tags>typescript,react,deletion,smarttodomodal,cleanup</tags>
