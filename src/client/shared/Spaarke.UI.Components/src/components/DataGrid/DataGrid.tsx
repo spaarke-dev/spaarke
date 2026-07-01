@@ -939,18 +939,12 @@ export const DataGrid: React.FC<DataGridProps> = props => {
         return;
       }
 
-      const { pageInput, navOptions } = buildRecordOpenNavArgs(
-        ctx.entityName,
-        recordId,
-        resolved?.rowOpen
-      );
+      const { pageInput, navOptions } = buildRecordOpenNavArgs(ctx.entityName, recordId, resolved?.rowOpen);
 
-      void Promise.resolve(xrm.Navigation.navigateTo(pageInput, navOptions)).catch(
-        (err: unknown) => {
-          // eslint-disable-next-line no-console
-          console.error('[DataGrid] navigateTo failed:', err);
-        }
-      );
+      void Promise.resolve(xrm.Navigation.navigateTo(pageInput, navOptions)).catch((err: unknown) => {
+        // eslint-disable-next-line no-console
+        console.error('[DataGrid] navigateTo failed:', err);
+      });
     },
     [resolved]
   );
