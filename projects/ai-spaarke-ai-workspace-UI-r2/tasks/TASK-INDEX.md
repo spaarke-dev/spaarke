@@ -37,13 +37,13 @@
 | [`021-migrate-smarttodomodal-callsites.poml`](021-migrate-smarttodomodal-callsites.poml) | ✅ | 020 | 2 h | FR-13 — every callsite converts to `Xrm.Navigation.navigateTo` (Layout 1); LegalWorkspace 80%→85% + fallback removed |
 | [`022-delete-smarttodomodal-component.poml`](022-delete-smarttodomodal-component.poml) | ✅ | 021 | 1 h | FR-14 — Modal folder deleted (SmartTodoModal.tsx + buildTodoIframeUrl.ts + tests + barrel); useLaunchContext.ts kept (non-iframe branches); RecordNavigationModalShell intact |
 | [`023-documentation-updates.poml`](023-documentation-updates.poml) | ✅ | 022 | 3 h | FR-15..FR-19 — sharpened 5 doc surfaces (MODAL-DECISION-CRITERIA + record-modal-selection pattern + BUILD-A-NEW-WORKSPACE-WIDGET § 6.6 + SPAARKE-DATAGRID § 6.5 + SPAARKEAI-DASHBOARD § 6.5); CHANGELOG entry added |
-| [`024-phase3-pr-and-merge.poml`](024-phase3-pr-and-merge.poml) | 🔲 | 023 | 1 h | Phase 3 PR — retirement + docs; verify FR-20 + FR-21 |
+| [`024-phase3-pr-and-merge.poml`](024-phase3-pr-and-merge.poml) | 🔄 | 023 | 1 h | Phase 3 PR — folded into PR #530; FR-20 (85%×85%) + FR-21 (RichFilePreviewDialog 1280px × 85vh preserved) grep-verified |
 
 ## Wrap-up
 
 | Task | Status | Depends on | Est. | Notes |
 |---|---|---|---|---|
-| [`090-project-wrap-up.poml`](090-project-wrap-up.poml) | 🔲 | 024 | 2 h | Update README to Complete; write `notes/lessons-learned.md`; run `/test-diet` (per CLAUDE.md §7); archive |
+| [`090-project-wrap-up.poml`](090-project-wrap-up.poml) | ✅ | 024 | 2 h | README status → Complete pending PR #530 merge; `notes/lessons-learned.md`, `notes/test-diet-report.md` (9 MAINTAIN / 0 SCAFFOLDING), `notes/success-criteria-verification.md` (10 of 14 static-verified); `projects/INDEX.md` updated |
 
 ## Dependency graph (critical path)
 

@@ -1,7 +1,7 @@
 <task id="R2-024" project="ai-spaarke-ai-workspace-UI-r2">
   <metadata>
     <title>Phase 3 PR — SmartTodoModal retirement + documentation</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>1 hour</estimated-effort>
     <phase>3</phase>
     <tags>pr,merge,ci,git,retirement,documentation</tags>

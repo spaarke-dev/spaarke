@@ -1,7 +1,7 @@
 <task id="R2-090" project="ai-spaarke-ai-workspace-UI-r2">
   <metadata>
     <title>Project wrap-up — R2 complete</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2 hours</estimated-effort>
     <phase>wrap-up</phase>
     <tags>wrap-up,lessons-learned,test-diet,archive</tags>

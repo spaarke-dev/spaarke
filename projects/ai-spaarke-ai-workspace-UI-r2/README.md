@@ -1,11 +1,15 @@
 # AI SpaarkeAi Workspace UI — R2
 
-> **Status**: Initialized — ready for task execution
+> **Status**: **Complete pending PR #530 merge** (all 13 phase tasks + wrap-up task 090 executed 2026-07-01)
 > **Branch**: `work/ai-spaarke-ai-workspace-UI-r2`
 > **Worktree**: `C:\code_files\spaarke-wt-ai-spaarke-ai-workspace-UI-r2`
 > **Owner**: Ralph Schroeder
 > **Created**: 2026-07-01
-> **PR strategy**: 3 phased PRs
+> **Wrap-up date**: 2026-07-01
+> **PR**: [#530](https://github.com/spaarke-dev/spaarke/pull/530) — folded Phase 1 + 2 + 3 into single PR per operator direction 2026-07-01 ("don't wait for CI — proceed"). Original plan was 3 independent PRs.
+> **Test diet**: PASS (9 MAINTAIN, 0 SCAFFOLDING, 0 AMBIGUOUS) — see [`notes/test-diet-report.md`](notes/test-diet-report.md).
+> **Success criteria**: 10 of 14 static-verified; 4 pending post-deploy manual QA — see [`notes/success-criteria-verification.md`](notes/success-criteria-verification.md).
+> **Lessons learned**: [`notes/lessons-learned.md`](notes/lessons-learned.md).
 
 ## Purpose
 

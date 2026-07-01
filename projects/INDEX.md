@@ -46,7 +46,7 @@ Status legend:
 
 | Project | Branch | Worktree Path | BFF | SpaarkeAi | CI Workflows | Skill Directives | Last Commit | Status |
 |---|---|---|---|---|---|---|---|---|
-| `ai-spaarke-ai-workspace-UI-r2` | `work/ai-spaarke-ai-workspace-UI-r2` | `C:/code_files/spaarke-wt-ai-spaarke-ai-workspace-UI-r2` | N | Y | N | N | 2026-07-01 | Active |
+| `ai-spaarke-ai-workspace-UI-r2` | `work/ai-spaarke-ai-workspace-UI-r2` | `C:/code_files/spaarke-wt-ai-spaarke-ai-workspace-UI-r2` | N | Y | N | N | 2026-07-01 | **Complete pending PR #530 merge (2026-07-01)** |
 | `spaarkeai-compose-r1` | `work/spaarkeai-compose-r1` | `C:/code_files/spaarke-wt-spaarkeai-compose-r1` | Y | Y | N | N | 2026-06-30 | Active |
 | `spaarke-ai-platform-unification-r7` | `work/spaarke-ai-platform-unification-r7` | `C:/code_files/spaarke-wt-spaarke-ai-platform-unification-r7` | Y | N | N | Y | 2026-06-28 | Active |
 | `spaarke-redis-cache-remediation-r2` | `work/spaarke-redis-cache-remediation-r2` | `C:/code_files/spaarke-wt-spaarke-redis-cache-remediation-r2` | Y | N | Y | N | 2026-06-26 | Active |
