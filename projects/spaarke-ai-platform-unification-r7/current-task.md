@@ -1,116 +1,132 @@
-# Current Task State
+# Current Task State — spaarke-ai-platform-unification-r7
 
-> **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-06-30 — Daily Briefing widget cutover DEPLOYED; awaiting operator browser smoke + UAT
+> **Last Updated**: 2026-07-01 (by context-handoff)
+> **Recovery**: Read "Quick Recovery" section first
 
 ---
 
-## Quick Recovery (READ THIS FIRST — POST-/COMPACT)
+## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
-|---|---|
-| **Active Mission** | Daily Briefing widget cutover — `/render` is sole data source |
-| **Status** | ✅ Code shipped + deployed to spaarkedev1 — **AWAITING operator browser smoke** |
-| **Branch** | `work/spaarke-ai-platform-unification-r7` at HEAD `69181bbd9` (pushed) |
-| **Bundle deployed** | sprk_spaarkeai webresource modifiedon 2026-06-30 23:30:14 UTC |
-| **Rollback tag** | `deploy/spaarkedev1/pre-widget-cutover` → commit `9bae5c306` (pushed) |
-| **PR #520** | Still UNSTABLE — CI parameter-binding failure (see restart doc §9.5; separate track) |
+|-------|-------|
+| **Session** | R7 Wave 12 Daily Briefing continuation + UAT feedback |
+| **Status** | in-progress — awaiting operator smoke of latest deploys |
+| **Branch** | `work/spaarke-ai-platform-unification-r7` at HEAD `f6938617a` (pushed) |
+| **Master** | `02962c268` (PR #527 merge; unchanged since ~3 hrs ago) |
+| **Worktree** | `c:/code_files/spaarke-wt-spaarke-ai-platform-unification-r7/` |
+| **Next Action** | Operator force-reloads SpaarkeAi widget + smokes the new HighPriority mini-report layout + verifies inline reference links + confirms LLM prompt tightening reduces hallucination. Then continue with wizard AC8-AC12 + Assistant↔Workspace AC13-AC15 UAT. |
 
-### What was done this session
+### Files modified this session (all committed + pushed + deployed to spaarkedev1)
 
-1. ✅ Phase A audit (mapped 16 widget files referencing appnotification chain; confirmed `/render` shape; identified external consumers all safe)
-2. ✅ Phase B.1: created `useBriefingRender.ts` hook (single-call to /render, no appnotification gate)
-3. ✅ Phase B.2: rewrote `DailyBriefingApp.tsx` — drops `useBriefingNotifications`, `useBriefingActions`, optimistic-overlay, early-exit gate, handleCheck/Remove/Keep
-4. ✅ Phase B.3: refactored `ActivityNotesSection.tsx` — dropped `channels` prop, FR-16 raw-card fallback, per-bullet sub-list
-5. ✅ Phase B.4: test cleanup — deleted obsolete fallback + subList tests, skipped 2 smoke tests pending /render rewrite, fixed callbacks test prop mismatch
-6. ✅ Phase B.5: tagged rollback (`deploy/spaarkedev1/pre-widget-cutover`), built SpaarkeAi bundle (3.98 MB, vite ✓), deployed to spaarkedev1
-7. ✅ Deploy integrity check: bundle contains `/api/ai/daily-briefing/render` URL; old `totalUnreadCount === 0` gate absent
+- `src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingCollector.cs` — case fix (`sprk_HighPriority` → `sprk_highpriority`), new `Description` + `Action` + `Reason` + `ModifiedOn` outputs on HighPriorityItemDto, `ClassifyAction` helper, wiring for description column per entity
+- `src/server/api/Sprk.Bff.Api/Api/Ai/DailyBriefingEndpoints.cs` — HighPriorityItemDto extended with Description + Action + Reason + ModifiedOn fields
+- `src/client/shared/Spaarke.DailyBriefing.Components/src/components/HighPrioritySection.tsx` — rewritten as mini-report layout: [Kind chip · Name link · Action badge · Reason chip] top row + truncated description below
+- `src/client/shared/Spaarke.DailyBriefing.Components/src/components/DailyBriefingApp.tsx` — navigateTo binding fix (called as method, not destructured — resolves `_clientApiExecutor` platform error)
+- `src/client/shared/Spaarke.DailyBriefing.Components/src/components/TldrSection.tsx` — rotating emoji next to "TL;DR" heading (16-emoji pool, deterministic per `generatedAt`)
+- `src/client/shared/Spaarke.DailyBriefing.Components/src/services/briefingService.ts` — HighPriorityItemResult extended (description + action + reason + modifiedOn)
 
-Net code change: -275 LOC in src (refactor + dead code removal), -427 LOC in tests (obsolete + cleanup).
+### Dataverse changes this session (via MCP, direct spaarkedev1 updates — NO git artifact)
 
-### What the operator needs to do next (Phase B.6 + B.7)
+- **BRIEF-NARRATE-CHANNEL Action** (`dc3533c0-fc70-f111-ab0e-7ced8ddc4cc6`) — sprk_systemprompt updated with: PAIRING RULE (title + regarding must come from same input item), GROUNDING CHECK (verify exact { title, regardingName } pair in items[]), AGGREGATION PREFERENCE (prefer aggregated over item-specific bullets). Metadata bumped to $version 2, lastModifiedBy=r7-w12-anti-hallucination-tightening.
+- **BRIEF-NARRATE-TLDR Action** (`ce299eb4-fc70-f111-ab0e-7ced8ddc4cc6`) — sprk_systemprompt updated with: STRUCTURAL PREFERENCE (describes counts + themes, not item titles), same PAIRING RULE. Metadata bumped to $version 2, lastModifiedBy=r7-w12-structural-summary-tightening.
 
-**B.6 — Browser smoke (operator-driven; I cannot open Chrome from CLI)**:
+### Critical context
 
-1. Open spaarkedev1 SpaarkeAi workspace in a fresh browser session (or force-reload to bypass cache)
-2. Open the Daily Briefing widget
-3. Verify ONE of these states renders:
-   - **Records visible**: TLDR + per-channel bullets across the 6 channels (`upcoming-tasks`, `overdue-tasks`, `documents`, `matters`, `projects`, `to-dos`) — GREEN
-   - **EmptyState ("You're all caught up")**: only if there are LEGITIMATELY no records across all 6 channels — operator confirms this matches their Dataverse state
-   - **MessageBar error/unavailable**: AI service down OR /render returned an error — investigate
-4. Open browser dev tools → Network tab → confirm:
-   - `POST /api/ai/daily-briefing/render` fired (NOT `/narrate`)
-   - Request body is `{}` (empty JSON object, no appnotification payload)
-   - Response status 200 with `{ tldr, channelNarratives, generatedAtUtc }`
+Tonight's session shipped a large operator-feedback batch on top of Wave 12's core widget cutover:
 
-**If smoke shows records → proceed to B.7 (operator UAT).**
+- **Waves 6/7/8/10 feedback** (vertical dots, primarycontact wiring, 15s toast + Open link, elevated channel headings) shipped earlier tonight in commit `5988966b8`.
+- **Waves 2/3/4/5 feedback** (Perplexity-style inline hyperlinks + trailing `[N]` citations for narrative bullets) shipped in `ad903e01f`.
+- **Item 9** (High Priority section) shipped in `9a683c2c5` with the initial "compact list with badges" layout.
+- **Post-UAT continuation** (this session's commit `f6938617a`):
+  1. Case-sensitivity fix (`sprk_HighPriority` → `sprk_highpriority`) — collector was filtering on the schema name; Dataverse needs the lowercase logical name, so HighPriority section was empty despite operator having 4 flagged matters.
+  2. `navigateTo` binding fix — destructuring the method breaks its `this` context and throws `_clientApiExecutor undefined`. Fixed both call sites (handleOpenRecord + Open-To-Do toast link).
+  3. Rotating TL;DR emoji.
+  4. HighPriority section rewritten as mini-report cards with description + action badge + reason chip.
+  5. LLM prompts tightened via MCP with PAIRING + GROUNDING + AGGREGATION rules.
+- **DEF sub-agent fix** landed earlier: MembershipFieldDiscoveryService now synthesizes Owner + Customer targets from base AttributeMetadata (root-cause fix for the polymorphic-Owner bug that broke the resolver on `ownerid` fields).
 
-**If smoke shows EmptyState but operator EXPECTS records → investigate**:
-- Check if T130 secondary risk applies: `contact.azureactivedirectoryobjectid` may be missing for the test user → membership resolver returns no team membership → collector queries return 0 rows
-- Check Dataverse: does the test user have any active sprk_todo/sprk_document/sprk_matter/sprk_project/sprk_event records they own?
-- Check App Insights for /render call: did it return empty channels or did it error?
+**Compose-r1 status**: fully merged to master via PR #515 + PR #527. Compose-r1 auto-deployed BFF once at 04:07 UTC + widget once at 16:14 UTC — the widget deploy briefly overwrote my references + high-priority code, which was subsequently restored by rebuild + redeploy from this worktree.
 
-**If smoke shows error → check the MessageBar text + App Insights for the underlying 500**.
+### Deploy safety governance (added 2026-07-01 per operator concern)
 
-**B.7 — Operator UAT**:
-- All 6 channels render with actual records
-- TLDR appears + matches Activity Notes content
-- Per-bullet entity links are clickable + navigate correctly (FR-19)
-- 'Add To Do' checkmark works (creates a sprk_todo with the bullet's primary entity as regarding)
-- Refresh button works (triggers re-fetch of /render)
-- Empty state shows ONLY when legitimately no records
+Going forward, ALWAYS sync master into the worktree BEFORE building + deploying locally, so we never overwrite in-flight master changes from other teams. Standard sequence:
 
----
-
-## What was DEFERRED (not done this session)
-
-- **PR #520 CI parameter-binding failure** (restart doc §9.5) — separate investigation
-- **Summarize endpoint "can't find playbook"** — operator deferred explicitly
-- **5 Wizards UAT** — operator UAT pending; fixes are live (T141 + T142 + T143 + T124-FIX-A)
-- **Assistant↔Workspace UAT** — operator UAT pending; fixes are live (T150 + T151 + T152 + T153)
-- **Wave 12.5 wrap-up** — happens AFTER this widget cutover passes UAT
-- **R7 remaining tasks** — W5 T056, W6 T063/T068/T069, W7 T070-T075, W8 T087/T089/T089d, W11 T119, W10 T101
-- **Test rewrites** — DailyBriefingApp.smoke + CountReconciliation.smoke marked describe.skip pending rewrite for /render path
-- **7 DEF-NNN candidates from Wave 5 backfill audit** — wrap-up territory
-- **spaarkeai-compose-r1 coordination** — after PR #520 merge
-- **ISS-NNN to redis-r2 team** — after wrap-up
+```
+git fetch origin
+git merge --ff-only origin/master  # or --rebase if conflicts
+git log origin/master..HEAD         # sanity check: what am I about to deploy?
+dotnet build src/server/api/Sprk.Bff.Api/
+cd src/solutions/SpaarkeAi && npm run build
+../../.. && ./scripts/Deploy-BffApi.ps1
+./scripts/Deploy-SpaarkeAi.ps1
+```
 
 ---
 
-## Rollback (if operator smoke fails)
+## Deferred / Follow-up items (log here for next session)
 
-Two paths:
+### Operator strategic asks (pending discussion)
+
+- **"Monitored For" schema**: Choice option set on the 7 flagged entities (Matter, Project, Invoice, Document, Workassignment, Event, Todo) that captures WHY each record is being monitored (e.g., "Awaiting reply", "Budget review", "Regulatory deadline"). Replaces the binary Monitor flag with a semantic reason. → Future project (not R7 scope).
+- **Fully-deterministic Activity Notes** (strategic option operator floated but deferred): kill LLM channel narration entirely; render structured item rows per channel. Preserves TL;DR as LLM-generated for the abstract summary. Zero hallucination risk. → Wave 12.5 or new project.
+
+### Code-review follow-ups (from earlier scoped review; 5 medium/high items)
+
+- **Revert collector membership-resolver bypass** now that root cause is fixed via `MembershipFieldDiscoveryService.ProjectLookupAttributeRows`. Owner-only queries silently lose collaborator scope (assigned attorneys, paralegals). Add smoke test that a `sprk_assignedattorney1` user sees their matter.
+- **Author unit tests** for new client-side surfaces: `NarrativeCitedText.buildSegments` (segment splitter + overlap detection), `HighPrioritySection.classifyDueDate` + `actionToBadge`, `useBriefingRender.isEmptyResponse`, `useInlineTodoCreate` primary-contact wiring.
+- **Metadata-drive the 7 QueryHighPriority\* helpers** — collapse into a single method + `record HighPriorityEntitySpec` array.
+- **Fix `useInlineTodoCreate` primary-contact lookup race** — cache a `Promise<string | null>` in the ref instead of the resolved value so concurrent createTodo calls don't issue duplicate lookups.
+- **Doc/code inconsistency**: `bulletToNotificationItem` truncates to 197 chars for "sprk_todo.subject" per comment but actual field is `sprk_name`. Fix comment + read maxLength from metadata.
+
+### CI + governance items
+
+- **CI env-var workarounds still in place**: `.github/workflows/ci-tier1-blocking.yml` has `APPLICATIONINSIGHTS_CONNECTION_STRING` + `Redis__AllowInMemoryFallback` patches (commits `fd657e0b2` + `37ef38c2f`). The underlying redis-r2 startup validations should be relaxed for Testing env so these workarounds can be removed. Not blocking anything.
+- **F.2.1 restoration** (`fix/restore-bff-extensions-F.2.1` branch pushed earlier tonight): F.2.1 rule was restored to master via the compose-r1 PR #527 merge — my branch is not needed. Can be deleted.
+
+### R7 UAT still pending (operator-driven)
+
+- **5 wizards** (AC8-AC12): Matter, Project, Work Assignment, Document Summary, ... — operator to run in spaarkedev1 browser.
+- **Assistant↔Workspace** (AC13-AC15): Scenario A ("what matter am I in?") flow.
+- **Daily Briefing** operator smoke of tonight's changes (HighPriority mini-report + inline references + emoji).
+
+---
+
+## Rollback (if smoke fails)
+
+**Tags for rollback**:
+- `deploy/spaarkedev1/pre-widget-cutover` → commit `9bae5c306` (pre-tonight state)
+- `deploy/spaarkedev1/pre-wave12-batch4` → commit `4fc73ae4a` (pre-batch4)
 
 **Path A — bundle-only rollback**:
 ```powershell
-cd c:/code_files/spaarke-wt-spaarke-ai-platform-unification-r7
 git checkout deploy/spaarkedev1/pre-widget-cutover -- src/client/shared/Spaarke.DailyBriefing.Components/src/
 cd src/solutions/SpaarkeAi && npm run build
-cd ../../.. && .\scripts\Deploy-SpaarkeAi.ps1
-# Then: git restore src/client/shared/Spaarke.DailyBriefing.Components/src/
+../../.. && ./scripts/Deploy-SpaarkeAi.ps1
+git restore src/client/shared/Spaarke.DailyBriefing.Components/src/
 ```
 
-**Path B — branch revert (preserves working tree)**:
+**Path B — branch revert**:
 ```powershell
-cd c:/code_files/spaarke-wt-spaarke-ai-platform-unification-r7
-git revert 69181bbd9 ad53af431 --no-commit
-git commit -m "revert(widget/r7): roll back Daily Briefing widget cutover (smoke failed)"
+git revert f6938617a --no-commit
+git commit -m "revert(r7): roll back tonight's HighPriority + prompt changes (smoke failed)"
+dotnet build src/server/api/Sprk.Bff.Api/
 cd src/solutions/SpaarkeAi && npm run build
-cd ../../.. && .\scripts\Deploy-SpaarkeAi.ps1
+../../.. && ./scripts/Deploy-BffApi.ps1
+./scripts/Deploy-SpaarkeAi.ps1
 git push origin work/spaarke-ai-platform-unification-r7
 ```
 
 ---
 
-## Reference
+## Reference (key docs)
 
+- **This session's continuation commit**: `f6938617a`
+- **PR #520** (R7 wave 12 merge): merged as `e106379462`
+- **PR #524** (R7 wave 12 continuation merge): merged as `2de7509ee`
+- **PR #527** (compose-r1 pull-forward): merged as `02962c268`
 - **Restart doc**: [`notes/handoffs/daily-briefing-widget-cutover-restart.md`](notes/handoffs/daily-briefing-widget-cutover-restart.md)
-- **Cutover commits**:
-  - `ad53af431` — src refactor (useBriefingRender + DailyBriefingApp + ActivityNotesSection + briefingService export + hooks index)
-  - `69181bbd9` — test cleanup
 - **Wave 12 plan**: [`notes/wave12-mvp-completion-plan.md`](notes/wave12-mvp-completion-plan.md)
-- **PR #520**: https://github.com/spaarke-dev/spaarke/pull/520
 
 ---
 
-*End of current-task.md. Operator: please run B.6 smoke + report results back so I can either proceed to UAT or investigate.*
+*End of current-task.md. Ready for /compact or session pause. To resume: read this file's Quick Recovery, then continue with operator smoke of latest deploys.*
