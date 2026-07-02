@@ -13,8 +13,8 @@
 import * as React from 'react';
 import { Badge, Button, makeStyles, MessageBar, MessageBarBody, Text, tokens } from '@fluentui/react-components';
 import { SparkleRegular } from '@fluentui/react-icons';
-import { AiProgressStepper } from '../AiProgressStepper';
-import { DOCUMENT_ANALYSIS_STEPS } from '../AiProgressStepper';
+import { LinearRunProgressList } from '../LinearRunProgress';
+import type { LinearRunEvent } from '../../hooks/useLinearRunProgress';
 import type { ISummarizeResult } from './summarizeTypes';
 import type { SummarizeStatus } from './summarizeTypes';
 
@@ -27,10 +27,14 @@ export interface ISummaryResultsStepProps {
   result: ISummarizeResult | null;
   errorMessage: string | null;
   onRetry: () => void;
-  /** Active step ID driven by SSE progress events from the parent. */
-  activeStepId: string | null;
-  /** Completed step IDs driven by SSE progress events from the parent. */
-  completedStepIds: string[];
+  /**
+   * Wave 12 R7 — server-emitted progress events for the current run.
+   * Rendered by {@link LinearRunProgressList} while `status === 'loading'`.
+   * Replaces the prior hardcoded numbered step visual (which misled users
+   * because the visual steps did not always reflect real backend state and
+   * could not accommodate new server-side steps without a UI change).
+   */
+  events?: LinearRunEvent[];
 }
 
 // ---------------------------------------------------------------------------
@@ -49,9 +53,7 @@ const useStyles = makeStyles({
   loadingContainer: {
     display: 'flex',
     flexDirection: 'column',
-    alignItems: 'center',
-    justifyContent: 'center',
-    gap: tokens.spacingVerticalL,
+    gap: tokens.spacingVerticalM,
     minHeight: '300px',
   },
   sectionHeader: {
@@ -137,23 +139,21 @@ export const SummaryResultsStep: React.FC<ISummaryResultsStepProps> = ({
   result,
   errorMessage,
   onRetry,
-  activeStepId,
-  completedStepIds,
+  events = [],
 }) => {
   const styles = useStyles();
 
-  // Loading state
+  // Loading state — Wave 12 R7 scrolling-text pattern (was numbered stepper).
+  // The list renders whatever the server sent, in order, with no client-side
+  // step interpretation. This matches the Document Upload wizard pattern and
+  // will be reused in SprkChat's Context pane in a follow-on task.
   if (status === 'loading') {
     return (
       <div className={styles.loadingContainer}>
-        <AiProgressStepper
-          variant="inline"
-          steps={DOCUMENT_ANALYSIS_STEPS}
-          activeStepId={activeStepId}
-          completedStepIds={completedStepIds}
-          title="Analyzing Files"
-          isStreaming
-        />
+        <Text as="h2" size={500} weight="semibold" className={styles.stepTitle}>
+          Analyzing Files
+        </Text>
+        <LinearRunProgressList events={events} isStreaming />
       </div>
     );
   }

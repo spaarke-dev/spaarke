@@ -9,6 +9,7 @@ export * from './useOptimisticSave';
 export * from './useWriteMode';
 export { useSseStream, parseSseEvent, parsePaneEvent } from './useSseStream';
 export * from './useAiSummary';
+export * from './useLinearRunProgress';
 export * from './useAiPrefill';
 export * from './useForceSimulation';
 export * from './useInlineAiToolbar';
