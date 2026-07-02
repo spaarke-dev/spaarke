@@ -358,8 +358,7 @@ export function ComposeToolbar(props: ComposeToolbarProps): React.JSX.Element {
   // keys on the SPE drive-item id (NOT on the Dataverse GUID that Open-in-
   // Word uses). If any of the three is missing, the summarize button is
   // inert so we fail closed rather than firing a broken request.
-  const hasSummarizeContext =
-    driveId.length > 0 && tenantId.length > 0 && speDriveItemId.length > 0;
+  const hasSummarizeContext = driveId.length > 0 && tenantId.length > 0 && speDriveItemId.length > 0;
 
   const openInWebDisabled = isToolbarDisabled || !hasDocument || isActing;
   const openInDesktopDisabled = isToolbarDisabled || !hasDocument || isActing;
