@@ -192,6 +192,67 @@ When to choose host filters vs. configjson chips:
 
 ---
 
+## 6.5. Row-open contract — `defaultRecordOpen` + `onRecordOpen` override (added 2026-07-01 by R2 FR-18)
+
+### Default behavior (`defaultRecordOpen`)
+
+When no host handler is supplied, the framework's built-in `defaultRecordOpen` fires on every row-click. As of ai-spaarke-ai-workspace-UI-r2 (2026-07-01, FR-03 / FR-20), it always routes through:
+
+```typescript
+Xrm.Navigation.navigateTo(
+  { pageType: "entityrecord", entityName, entityId, formId? },
+  {
+    target: 2,
+    position: 1,
+    width: { value: 85, unit: '%' },
+    height: { value: 85, unit: '%' },
+  }
+);
+```
+
+This is **Layout 1** (per [`docs/standards/MODAL-DECISION-CRITERIA.md`](../standards/MODAL-DECISION-CRITERIA.md)) — a single 85% × 85% modal geometry for every entity, no per-record or per-entity variation. Prior variants (`rowOpen.type: "formDialog"` with `formDialogWidthPercent/HeightPercent` overrides; fallback `window.open('_blank')` to `main.aspx`) were retired in R2.
+
+### `configjson.rowOpen.formId` (R2 FR-01 / FR-02)
+
+Optional string field on `configjson.rowOpen`. When set to a valid `formid` GUID from the Dataverse `systemform` table, the framework forwards it as `pageInput.formId` on the `Xrm.Navigation.navigateTo` call — opening the specified form variant instead of the user's default main form. When absent, the default main form opens.
+
+Example — configjson pointing at a specific "Workspace" form variant:
+
+```json
+{
+  "_version": "1.0",
+  "source": { "type": "savedquery", "savedQueryId": "..." },
+  "rowOpen": {
+    "type": "formDialog",
+    "formId": "11111111-2222-3333-4444-555555555555"
+  }
+}
+```
+
+Backward compatibility: records without `formId` deserialize identically to today. As of 2026-07-01, no shipped `sprk_gridconfiguration` record sets `formId` — the field is available for future maker-authored "Workspace" form variants (out of R2 scope).
+
+### `formDialogWidthPercent` / `formDialogHeightPercent` (deprecated in R2)
+
+Retained in the schema for backward-compatible deserialization but **IGNORED** at runtime per FR-20 ("one size for every entity, do not vary per-entity"). Marked `@deprecated` in [`DataGridConfiguration.ts`](../../src/client/shared/Spaarke.UI.Components/src/types/DataGridConfiguration.ts). A future project may remove them entirely once no operator config references them.
+
+### Host escape hatch — the `onRecordOpen` prop
+
+Hosts that need custom row-click behavior (registered side panes, bespoke React dialogs, non-`sprk_todo`-style records) can pass an `onRecordOpen` prop to `<DataGrid>` — the framework's default is bypassed entirely and the host owns the open call.
+
+```typescript
+<DataGrid
+  configId={configId}
+  dataverseClient={dataverseClient}
+  onRecordOpen={(recordId, record, ctx) => {
+    // custom behavior — Layout 1 default is bypassed
+  }}
+/>
+```
+
+**Use sparingly**: the framework's default is the standard for a reason (Layout 1 unification, dark-mode compatibility, dirty-check-free simplicity). If a host needs a custom `onRecordOpen`, the reason SHOULD appear in the project's spec.md "ADR Tensions" section per [`CLAUDE.md` §6.5](../../CLAUDE.md#65-adr-conflict-resolution-protocol-binding--added-2026-06-29). Audit as of 2026-07-01: **no** production consumer under `src/solutions/**` passes an `onRecordOpen` override — every consumer inherits the framework default.
+
+---
+
 ## 7. Applicable ADRs
 
 | ADR | What it constrains |

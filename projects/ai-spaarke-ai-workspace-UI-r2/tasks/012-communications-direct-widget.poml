@@ -1,0 +1,52 @@
+<task id="R2-012" project="ai-spaarke-ai-workspace-UI-r2">
+  <metadata>
+    <title>Register communications-list direct widget</title>
+    <status>completed</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <phase>2</phase>
+    <tags>typescript,react,workspace-widgets,direct-widget,pattern-d,spaarke-ai-widgets</tags>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+FR-10: Register `communications-list` direct widget in `src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/register-workspace-widgets.ts`. Mirror the shape of existing `documents-list` / `matters-list` / `invoices-list` registrations. Widget type mounts `<DataverseEntityViewWidget entityName="sprk_communication" configId="<guid-from-task-010>" />`.
+
+**Parallel with task 011** — safe to run concurrently; different files.
+  </prompt>
+
+  <role>React / TypeScript developer familiar with `@spaarke/ai-widgets` direct widget registration.</role>
+
+  <goal>
+`communications-list` is a valid workspace widget type. `PaneEventBus` `widget_load` dispatches for this type render the Communications widget in a Workspace tab.
+  </goal>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-spaarke-ai-workspace-UI-r2/spec.md</file>
+      <file>projects/ai-spaarke-ai-workspace-UI-r2/CLAUDE.md</file>
+      <file>projects/ai-spaarke-ai-workspace-UI-r2/notes/communications-config-record.md</file>
+      <file>src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/register-workspace-widgets.ts</file>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+      <file>docs/adr/ADR-012-shared-component-library.md</file>
+      <file>docs/adr/ADR-021-fluent-ui-v9.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Read `register-workspace-widgets.ts` — locate `documents-list` / `matters-list` / `invoices-list` registrations (around lines 661–724 per earlier audit).</step>
+    <step>Author the `communications-list` registration mirroring the same shape.</step>
+    <step>Widget-data shape: `{ configId, entityName: 'sprk_communication', displayName, category }`.</step>
+    <step>Verify: build Spaarke.AI.Widgets succeeds; type checks clean.</step>
+    <step>Verify: locally, `widget_load` for type `communications-list` renders the widget.</step>
+  </steps>
+
+  <tools>Read · Edit · Bash (npm build)</tools>
+
+  <acceptance-criteria>
+    <criterion>`communications-list` registered in `register-workspace-widgets.ts`.</criterion>
+    <criterion>Registration shape matches existing entity-list direct widgets.</criterion>
+    <criterion>Build passes; type checks clean.</criterion>
+    <criterion>`widget_load` dispatch mounts the widget correctly.</criterion>
+    <criterion>Quality gates: code-review + adr-check clean (FULL rigor).</criterion>
+  </acceptance-criteria>
+</task>

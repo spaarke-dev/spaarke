@@ -1,0 +1,53 @@
+<task id="R2-011" project="ai-spaarke-ai-workspace-UI-r2">
+  <metadata>
+    <title>Add Communications section registration</title>
+    <status>completed</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <phase>2</phase>
+    <tags>typescript,react,workspace-widgets,sections,pattern-d</tags>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+FR-09: Create `src/solutions/LegalWorkspace/src/sections/communications.registration.ts` mirroring the shape of `invoices.registration.ts` (canonical template). Register in `sectionRegistry.ts`. Mounts `<DataverseEntityViewWidget entityName="sprk_communication" configId="<guid-from-task-010>" />`.
+
+**Parallel with task 012** — safe to run concurrently; different files.
+  </prompt>
+
+  <role>React / TypeScript developer familiar with LegalWorkspace section registration pattern.</role>
+
+  <goal>
+Communications appears as a section option in the LegalWorkspace section registry; a user-authored layout can include it; it renders correctly using the config record from task 010.
+  </goal>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-spaarke-ai-workspace-UI-r2/spec.md</file>
+      <file>projects/ai-spaarke-ai-workspace-UI-r2/CLAUDE.md</file>
+      <file>projects/ai-spaarke-ai-workspace-UI-r2/notes/communications-config-record.md</file>
+      <file>src/solutions/LegalWorkspace/src/sections/invoices.registration.ts</file>
+      <file>src/solutions/LegalWorkspace/src/sections/matters.registration.ts</file>
+      <file>src/solutions/LegalWorkspace/src/sectionRegistry.ts</file>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+      <file>docs/adr/ADR-012-shared-component-library.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Read `invoices.registration.ts` as template.</step>
+    <step>Author `communications.registration.ts` — mount `DataverseEntityViewWidget` with `entityName="sprk_communication"` and `configId` from `notes/communications-config-record.md`.</step>
+    <step>Register in `sectionRegistry.ts` alongside existing sections.</step>
+    <step>Verify: build the LegalWorkspace solution succeeds; no type errors.</step>
+    <step>Verify: locally, the Communications section appears in the section-picker UI (via `WorkspaceLayoutWizard`).</step>
+  </steps>
+
+  <tools>Read · Write · Edit · Bash (npm build)</tools>
+
+  <acceptance-criteria>
+    <criterion>`communications.registration.ts` exists and mirrors `invoices.registration.ts` shape.</criterion>
+    <criterion>`sectionRegistry.ts` includes the new registration.</criterion>
+    <criterion>Build passes; type checks clean.</criterion>
+    <criterion>Communications section selectable in `WorkspaceLayoutWizard`.</criterion>
+    <criterion>Quality gates: code-review + adr-check clean (FULL rigor).</criterion>
+  </acceptance-criteria>
+</task>

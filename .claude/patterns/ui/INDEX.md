@@ -8,6 +8,7 @@
 | Pattern | When to Load | Last Reviewed | Status |
 |---|---|---|---|
 | [choice-dialog-pattern.md](choice-dialog-pattern.md) | Implementing choice/selection dialog UI | 2026-04-05 | Verified |
+| [record-modal-selection.md](record-modal-selection.md) | Opening a record / document / form / picker AS a modal — picks between OOB `navigateTo`, proprietary Fluent v9 Dialog, and the browse-shell (`RecordNavigationModalShell`). Load whenever a task involves a modal launch. | 2026-07-01 | Current |
 | [fluent-v9-component-authoring.md](fluent-v9-component-authoring.md) | Authoring/modifying any Fluent v9 React component | 2026-05-26 | Current |
 | [fluent-v9-theming.md](fluent-v9-theming.md) | Theme decisions, FluentProvider wiring, dark mode, Spaarke brand theme | 2026-05-26 | Current |
 | [fluent-v9-portal-gotcha.md](fluent-v9-portal-gotcha.md) | Using Popover / Tooltip / Toast / Dialog / Menu / Combobox dropdown | 2026-05-26 | Current |
