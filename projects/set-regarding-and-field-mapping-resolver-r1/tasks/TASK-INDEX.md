@@ -17,7 +17,7 @@
 
 | # | Task | Status | Rigor | Effort | Parallel-safe |
 |---|---|---|---|---|---|
-| 001 | [Wave-0 discovery audit](./001-wave-0-discovery-audit.poml) | 🔲 | STANDARD | 3h | — |
+| 001 | [Wave-0 discovery audit](./001-wave-0-discovery-audit.poml) | ✅ | STANDARD | 3h | — |
 | 002 | [Populate `sprk_regardingrecordnumberfield` metadata for 10 non-Matter entities](./002-populate-recordtype-metadata.poml) | 🔲 | STANDARD | 2h | after 001 |
 
 ### Wave 1 — Dataverse Schema

@@ -1,12 +1,13 @@
 <task id="SRFR-001" project="set-regarding-and-field-mapping-resolver-r1">
   <metadata>
     <title>Wave 0 discovery audit — Q-06, Q-07, ENTITY_LOOKUP_CONFIGS callers, presave enumeration confirmation</title>
-    <status>not-started</status>
+    <status>complete</status>
     <estimated-effort>3h</estimated-effort>
-    <actual-effort></actual-effort>
-    <assigned>AI Agent</assigned>
-    <started></started>
-    <completed></completed>
+    <actual-effort>~1.5h (MCP-assisted)</actual-effort>
+    <assigned>AI Agent (Claude Opus 4.7)</assigned>
+    <started>2026-07-02</started>
+    <completed>2026-07-02</completed>
+    <notes>All 4 original deliverables satisfied. Surfaced 7 spec/reality divergences (D-1 to D-7) requiring owner escalation before Waves 1-6 can proceed unchanged. See notes/wave-0-discovery.md for full report.</notes>
     <rigor>STANDARD</rigor>
     <parallel-safe>false</parallel-safe>
     <tags>discovery, audit, wave-0</tags>
