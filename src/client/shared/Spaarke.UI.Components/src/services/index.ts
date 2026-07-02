@@ -78,12 +78,23 @@ export type {
   IGridFeatures,
   GridConfigViewType,
 } from './ConfigurationService';
-export { resolveRecordType, buildRecordUrl, findNavProp, applyResolverFields } from './PolymorphicResolverService';
+export {
+  resolveRecordType,
+  buildRecordUrl,
+  findNavProp,
+  applyResolverFields,
+  // FR-A4-01 / FR-C1-01 additions (set-regarding-and-field-mapping-resolver-r1):
+  resolveRecordNumberFieldName,
+  _resetRecordNumberFieldCacheForTests,
+} from './PolymorphicResolverService';
 export type {
   IPolymorphicWebApi,
   IRecordTypeRef,
   INavPropEntry,
   IResolverFieldValues,
+  // FR-A4-01 / FR-C1-01 additions:
+  IApplyResolverFieldsOptions,
+  IApplyResolverFieldsResult,
 } from './PolymorphicResolverService';
 
 // TodoRegardingUpdateBuilder — FR-13 helper for sprk_todo regarding edits.
@@ -134,3 +145,13 @@ export type {
   SelectionChangedPayload,
   ContextChangedPayload,
 } from './SprkChatBridge';
+
+// FieldMappingHandler — regarding-selection field-mapping integration surface.
+// Relocated from AssociationResolver PCF for symmetry with PolymorphicResolverService
+// (spec FR-C1b-01, project set-regarding-and-field-mapping-resolver-r1, task 022).
+// Public surface = handler class + factory + application result + config.
+// The handler's internal SyncMode / IFieldMappingProfile / IFieldMappingRule / IMappingResult
+// shapes are intentionally NOT re-exported — those names are already exported from
+// types/FieldMappingTypes.ts with different (configuration-time) shapes.
+export { FieldMappingHandler, createFieldMappingHandler } from './FieldMappingHandler';
+export type { IFieldMappingHandlerConfig, IFieldMappingApplicationResult } from './FieldMappingHandler';

@@ -2,12 +2,12 @@
 <task id="SRFR-021" project="set-regarding-and-field-mapping-resolver-r1">
   <metadata>
     <title>Extract PolymorphicPicker Fluent v9 shared component</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>6h</estimated-effort>
-    <actual-effort></actual-effort>
+    <actual-effort>~2h</actual-effort>
     <assigned>AI Agent</assigned>
-    <started></started>
-    <completed></completed>
+    <started>2026-07-02</started>
+    <completed>2026-07-02</completed>
     <rigor>FULL</rigor>
     <parallel-safe>true</parallel-safe>
     <parallel-group>A</parallel-group>
@@ -151,4 +151,35 @@ waves.
     <criterion testable="true">Component contract accepts no `ComponentFramework` types (verified by reviewing prop types).</criterion>
     <criterion testable="true">`/fluent-v9-component`, `/code-review`, and `/adr-check` pass at Step 9.5.</criterion>
   </acceptance-criteria>
+
+  <notes>
+Completion summary (2026-07-02):
+
+Deliverables:
+  - src/client/shared/Spaarke.UI.Components/src/components/PolymorphicPicker/PolymorphicPicker.tsx (~290 LOC)
+  - src/client/shared/Spaarke.UI.Components/src/components/PolymorphicPicker/index.ts
+  - src/client/shared/Spaarke.UI.Components/src/components/PolymorphicPicker/__tests__/PolymorphicPicker.test.tsx (~240 LOC, 14 tests)
+  - src/client/shared/Spaarke.UI.Components/src/components/index.ts (add-only export)
+  - projects/set-regarding-and-field-mapping-resolver-r1/notes/task-021-picker-diff.md
+
+Contract (as shipped):
+  - RecordTypeCatalogEntry: recordTypeRefId, displayName, logicalName, regardingField, regardingRecordNumberField?
+  - PolymorphicPickerProps: catalog, onSelect, webApi (narrow shim), disabled?, readOnly?, title?, onError?, className?
+  - No ComponentFramework type imports (ADR-012 verified via Grep)
+  - No @fluentui/react v8 imports (verified via Grep)
+  - No hardcoded colors (verified via Grep; all styling via tokens.*)
+  - No React-18-only APIs (ADR-022 verified)
+  - No `any` usage anywhere (TypeScript strict)
+
+Test results: 14/14 pass in 3.5s, no act() warnings, no console errors.
+Lint: clean.
+Type-check: clean for PolymorphicPicker files (2 pre-existing repo-wide errors in EntityCreationService + FieldMappingHandler are unrelated).
+
+Divergences worth flagging:
+  - Chose Menu+ToolbarButton UX (per task POML §pattern) over the current Dropdown+Button in both PCFs. Consumers in waves 3 and 5 will inherit the improved single-control affordance.
+  - Included optional onError callback (not in the original contract) so consumers can bridge picker errors into their own toast/status pipelines without prop drilling.
+  - webApi prop is included per contract but not yet invoked internally; kept as a future extension seam so consumers standardize on injection now.
+
+Full picker-diff analysis + adoption plan for waves 3/5 in notes/task-021-picker-diff.md.
+  </notes>
 </task>

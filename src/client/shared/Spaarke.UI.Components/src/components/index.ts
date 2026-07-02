@@ -153,3 +153,8 @@ export * from './ViewToggle';
 
 // OrientationToggle - Horizontal ↔ vertical layout toggle icon button (R4 task 012 / F FR-28)
 export * from './OrientationToggle';
+
+// PolymorphicPicker - Shared Fluent v9 entity picker (title + ToolbarButton + Menu)
+// backed by Xrm.Utility.lookupObjects. Extracted from RegardingResolver + AssociationResolver
+// per set-regarding-and-field-mapping-resolver-r1 FR-C2-01 + FR-A1-03 (Wave 2 task 021).
+export * from './PolymorphicPicker';

@@ -1,50 +1,43 @@
 # Current Task
 
 **Project**: set-regarding-and-field-mapping-resolver-r1
-**Wave**: 2 (about to start)
+**Wave**: 3 (about to start) + Wave 4 (parallel)
 **Status**: not-started
 
-## Ready for Wave 2 — Shared library refactor (parallel group A)
+## Ready for Wave 3 (RegardingResolver) + Wave 4 (presave) — mixed parallel groups
 
-4 tasks can execute in parallel (all touch `src/client/shared/Spaarke.UI.Components/` in different files):
+**Wave 3 group B** — RegardingResolver v1.2.0 → v1.3.0 (all touch `src/client/pcf/RegardingResolver/`):
 
 | # | Task | Rigor | Effort | Parallel-safe |
 |---|---|---|---|---|
-| 020 | Extend `PolymorphicResolverService.applyResolverFields()` for 5-field write | FULL | 5h | ✅ |
-| 021 | Extract `PolymorphicPicker` Fluent v9 shared component | FULL | 6h | ✅ |
-| 022 | Relocate `FieldMappingHandler` to `@spaarke/ui-components` | FULL | 3h | ✅ |
-| 023 | Extend `EntityLookupConfig` interface with `regardingRecordNumberField?` | FULL | 1h | ✅ |
+| 030 | 2-row layout + toolbar-icon + PolymorphicPicker consumption | FULL | 6h | ✅ (group B) |
+| 031 | Modal-open on record-number click | FULL | 2h | ✅ (group B) |
+| 032 | Populate `pending.recordNumber` for presave bridge | FULL | 2h | ✅ (group B) |
+| 033 | Preserve read-only + URL; version bump v1.2→v1.3 | FULL | 2h | after 030-032 |
 
-## Wave 0-1 completion summary
+**Wave 4** — Presave webresource update (independent, runs concurrently with Wave 3):
 
-- ✅ SRFR-001 Wave 0 discovery audit (~1.5h)
-- ✅ SRFR-002 Wave 0 data-fix (all 4 workstreams + W1a expansion, ~1.5h)
-- ✅ SRFR-010 Wave 1 schema additions (11 entities + D-12/13 findings, ~30min)
+| # | Task | Rigor | Effort |
+|---|---|---|---|
+| 040 | Update `sprk_todo_regarding_presave.js` v1.1→v1.2 (add recordNumber) | FULL | 2h |
 
-## Cumulative divergences surfaced
+## Wave 2 completion summary
 
-| # | Finding | Resolution |
-|---|---|---|
-| D-1 | sprk_fieldmappingprofile schema (lookups, compatibilitymode) | Accepted; spec Appendix A rewritten |
-| D-2 | sprk_mapping_type field | Added to Dataverse (underscore convention) |
-| D-3 | Per-rule syncmode | Spec updated |
-| D-4 | 3 catalog regardingfield typos | Fixed (Project + Budget; Billing Analysis row deleted) |
-| D-5 | All catalog rows empty | Populated all 10 (2 intentional-null) |
-| D-6 | Contact catalog `sprk_contact` → `contact` | Fixed |
-| D-7 | 13 record types | Accepted (then reduced to 12 via D-9) |
-| D-8 | 3 sprk_ entities missing target-number fields | Added via W1a |
-| D-9 | sprk_billinganalysis table doesn't exist | Catalog row deleted |
-| D-10 | sprk_communication uses `sprk_regardingperson` | Deferred to Wave 5 |
-| D-11 | MCP underscore naming convention | Documented + spec updated |
-| D-12 | Matter didn't have `sprk_regardingrecordnumber` | Added |
-| D-13 | contact/account got entity prefix (contact_/account_) | Documented; Wave 2 task 020 must convention-derive per-target field name |
-| D-14 | Column MaxLength=MAX not =100 | Documented (functionally OK) |
-| D-15 | IsSearchable not explicitly set | Documented (default) |
+- ✅ SRFR-020 — `applyResolverFields` 5-field write, +226 LOC service, +561 LOC tests (23/23 pass), ~13min actual
+- ✅ SRFR-021 — `PolymorphicPicker` Fluent v9 shared component, +290 LOC + 14 tests, ~12min actual
+- ✅ SRFR-022 — `FieldMappingHandler` relocated to shared lib, +563 -547, 54 tests pass, ~14min actual
+- ✅ SRFR-023 — `EntityLookupConfig` extended with `regardingRecordNumberField?`, +24 LOC, ~8min actual
 
-## Recommendation for Wave 2
+**Aggregate**: ~5 min wall-clock (parallel), 91 tests pass, 0 regressions.
 
-Given parallel-safe status, dispatch all 4 tasks concurrently via ONE message with MULTIPLE Skill invocations (per root CLAUDE.md task-execute Step 0.3 parallel mode). Each will be a `task-execute` call.
+## Known issue (pre-existing; deferred)
+
+`src/client/shared/Spaarke.UI.Components/src/services/EntityCreationService.ts` imports `@spaarke/sdap-client` module which is not installed. Blocks full `npm run build` but does NOT affect individual Wave 2 files (tests pass, targeted tsc clean). Must resolve before Wave 8 deploy.
+
+## Recommendation
+
+Wave 3 (group B: 030, 031, 032) can be dispatched in parallel like Wave 2 was. Wave 4 (040) is independent and can also be a 5th parallel agent. Cross-task coordination: 030 (main layout) has small dependencies on 031 (modal handler wired into hyperlink) and 032 (presave global write on selection) — all three touch the RegardingResolver React root, so serialize risk is real. Alternative: run 030 first, then 031+032 in parallel after.
 
 ## Next action
 
-Say `execute wave 2` or `continue` to dispatch parallel Wave 2. Or `execute task 020` to run individually.
+Say `continue` to dispatch 4 parallel agents (Wave 3 group B + Wave 4). Or specify individual task.

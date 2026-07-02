@@ -38,6 +38,20 @@ export interface EntityLookupConfig {
   logicalName: string;
   displayName: string;
   regardingField: string;
+  /**
+   * Source-field logical name on the target entity, from
+   * `sprk_recordtype_ref.sprk_regardingrecordnumberfield`. When set, the resolver
+   * reads this field on the target record (e.g., `sprk_matternumber` on Matter) and
+   * writes its value to the host's `sprk_regardingrecordnumber` column. Optional
+   * because (a) some target entities have no canonical record-number field (OOB
+   * account/contact per Owner Clarification Q-06 / NFR-06 graceful-blank behavior),
+   * and (b) task SRFR-050 populates this dynamically via the config loader —
+   * older callers that pre-date FR-B4-01 continue to compile unchanged.
+   *
+   * Consumers: task SRFR-020 (`PolymorphicResolverService.applyResolverFields` 5-field write)
+   * and task SRFR-050 (AssociationResolver dynamic config loader).
+   */
+  regardingRecordNumberField?: string;
   // Note: regardingRecordTypeValue removed - now using Record Type lookup
 }
 
@@ -203,7 +217,9 @@ export async function loadEntityConfigs(webApi: ComponentFramework.WebApi): Prom
   entityConfigsLoadPromise.promise = (async () => {
     try {
       logger.logInfo('RecordSelection', 'Loading entity configs from sprk_recordtype_ref...');
-      const query = `?$filter=statecode eq 0&$select=sprk_recordtype_refid,sprk_recordlogicalname,sprk_recorddisplayname,sprk_regardingfield&$orderby=sprk_recorddisplayname`;
+      // SRFR-023 (FR-B4-01): include sprk_regardingrecordnumberfield so downstream
+      // resolvers (task SRFR-020) can write the 5th field, sprk_regardingrecordnumber.
+      const query = `?$filter=statecode eq 0&$select=sprk_recordtype_refid,sprk_recordlogicalname,sprk_recorddisplayname,sprk_regardingfield,sprk_regardingrecordnumberfield&$orderby=sprk_recorddisplayname`;
       const result = await webApi.retrieveMultipleRecords('sprk_recordtype_ref', query);
 
       if (result.entities && result.entities.length > 0) {
@@ -213,6 +229,10 @@ export async function loadEntityConfigs(webApi: ComponentFramework.WebApi): Prom
             logicalName: e.sprk_recordlogicalname as string,
             displayName: (e.sprk_recorddisplayname || e.sprk_recordlogicalname) as string,
             regardingField: e.sprk_regardingfield as string,
+            // Optional — undefined when the catalog row leaves it blank
+            // (e.g., OOB account/contact per Owner Clarification Q-06).
+            regardingRecordNumberField:
+              (e.sprk_regardingrecordnumberfield as string | undefined) || undefined,
           }));
 
         logger.logInfo(

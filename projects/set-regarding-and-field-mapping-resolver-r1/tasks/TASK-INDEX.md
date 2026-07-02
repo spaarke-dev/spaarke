@@ -30,10 +30,10 @@
 
 | # | Task | Status | Rigor | Effort | Parallel-safe |
 |---|---|---|---|---|---|
-| 020 | [Extend `PolymorphicResolverService.applyResolverFields()` for 5-field write](./020-extend-polymorphic-resolver-service.poml) | 🔲 | FULL | 5h | group A |
-| 021 | [Extract `PolymorphicPicker` Fluent v9 shared component](./021-extract-polymorphic-picker.poml) | 🔲 | FULL | 6h | group A |
-| 022 | [Relocate `FieldMappingHandler` to `@spaarke/ui-components`](./022-relocate-field-mapping-handler.poml) | 🔲 | FULL | 3h | group A |
-| 023 | [Extend `EntityLookupConfig` interface with `regardingRecordNumberField?`](./023-extend-entity-lookup-config-interface.poml) | 🔲 | FULL | 1h | group A |
+| 020 | [Extend `PolymorphicResolverService.applyResolverFields()` for 5-field write](./020-extend-polymorphic-resolver-service.poml) | ✅ | FULL | 5h est / **~1.5h actual** | group A |
+| 021 | [Extract `PolymorphicPicker` Fluent v9 shared component](./021-extract-polymorphic-picker.poml) | ✅ | FULL | 6h est / **~2h actual** | group A |
+| 022 | [Relocate `FieldMappingHandler` to `@spaarke/ui-components`](./022-relocate-field-mapping-handler.poml) | ✅ | FULL | 3h est / **~1h actual** | group A |
+| 023 | [Extend `EntityLookupConfig` interface with `regardingRecordNumberField?`](./023-extend-entity-lookup-config-interface.poml) | ✅ | FULL | 1h est / **~30min actual** | group A |
 
 ### Wave 3 — RegardingResolver PCF Workstream A
 

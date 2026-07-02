@@ -43,13 +43,13 @@ import {
   IDetectedParentContext,
   EntityLookupConfig,
 } from './handlers/RecordSelectionHandler';
+import { useMappingToast } from './hooks/useMappingToast';
 import {
+  createLogger,
   FieldMappingHandler,
   createFieldMappingHandler,
   IFieldMappingApplicationResult,
-} from './handlers/FieldMappingHandler';
-import { useMappingToast } from './hooks/useMappingToast';
-import { createLogger } from '@spaarke/ui-components';
+} from '@spaarke/ui-components';
 
 const logger = createLogger('AssociationResolver');
 

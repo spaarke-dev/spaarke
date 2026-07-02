@@ -2,12 +2,12 @@
 <task id="SRFR-023" project="set-regarding-and-field-mapping-resolver-r1">
   <metadata>
     <title>Extend EntityLookupConfig interface with regardingRecordNumberField property</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>1h</estimated-effort>
-    <actual-effort></actual-effort>
+    <actual-effort>~30min</actual-effort>
     <assigned>AI Agent</assigned>
-    <started></started>
-    <completed></completed>
+    <started>2026-07-02</started>
+    <completed>2026-07-02</completed>
     <rigor>FULL</rigor>
     <parallel-safe>true</parallel-safe>
     <parallel-group>A</parallel-group>

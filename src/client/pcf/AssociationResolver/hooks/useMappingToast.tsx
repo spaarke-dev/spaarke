@@ -14,7 +14,7 @@
 
 import * as React from 'react';
 import { Toast, ToastTitle, ToastBody, ToastIntent, useToastController, useId } from '@fluentui/react-components';
-import { IFieldMappingApplicationResult } from '../handlers/FieldMappingHandler';
+import { IFieldMappingApplicationResult } from '@spaarke/ui-components';
 
 /** Toast display duration in milliseconds */
 const TOAST_TIMEOUT = 5000;

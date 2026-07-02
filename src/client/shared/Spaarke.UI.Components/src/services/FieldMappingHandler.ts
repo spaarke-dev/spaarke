@@ -1,35 +1,48 @@
 /**
- * FieldMappingHandler - Integrates AssociationResolver with FieldMappingService
+ * FieldMappingHandler - Field mapping integration surface for
+ * regarding-selection flows (e.g., AssociationResolver PCF).
  *
  * After a regarding record is selected, this handler:
  * 1. Queries for an active field mapping profile (source record type -> target record type)
  * 2. If profile exists, fetches source record values
- * 3. Applies mappings to the Event form fields
+ * 3. Applies mappings to the target form fields
  * 4. Returns mapping results for UI feedback
  *
- * SCHEMA UPDATE (Feb 2026):
+ * SCHEMA (per sprk_fieldmappingprofile Record Type migration):
  * - Profile.Source Entity -> Profile.Source Record Type (lookup to sprk_recordtype_ref)
  * - Profile.Target Entity -> Profile.Target Record Type (lookup to sprk_recordtype_ref)
  * - sprk_recordtype_ref fields: sprk_recordlogicalname, sprk_recorddisplayname, sprk_regardingfield
  *
  * ADR Compliance:
- * - ADR-012: Uses FieldMappingService from @spaarke/ui-components
- * - ADR-006: Logic in PCF control code, not Business Rules
+ * - ADR-012: Shared component library (this file lives in @spaarke/ui-components/services/,
+ *            symmetric with PolymorphicResolverService)
+ * - ADR-006: Logic in TypeScript control code, not Business Rules
  *
- * @see spec.md - Field Mapping Framework section
+ * @see projects/set-regarding-and-field-mapping-resolver-r1/spec.md — Appendix A (Field Mapping subsystem spec)
  */
 
-import { createLogger } from '@spaarke/ui-components';
+import { createLogger } from '../utils/logger';
 
+// Logger prefix preserved as 'AssociationResolver' to keep existing log-scraping / diagnostics
+// contracts unchanged during this behavior-preserving relocation.
 const logger = createLogger('AssociationResolver');
 
-// Local type definitions (inlined from @spaarke/ui-components to avoid build dependency issues)
-export enum SyncMode {
+// -------------------------------------------------------------------------
+// Local type definitions (INTERNAL to this handler)
+// -------------------------------------------------------------------------
+// These type names intentionally do NOT re-use the shared lib's public
+// `SyncMode` / `IFieldMappingProfile` / `IFieldMappingRule` / `IMappingResult`
+// exports from `types/FieldMappingTypes.ts` — those model a different
+// (configuration-time) shape with different fields. The shapes below model
+// the runtime shape returned by the Record-Type-lookup query pattern and
+// are intentionally NOT re-exported through `services/index.ts` to avoid a
+// duplicate-export collision at the package barrel.
+enum SyncMode {
   OneTime = 0,
   ManualRefresh = 1,
 }
 
-export interface IFieldMappingProfile {
+interface IFieldMappingProfile {
   id: string;
   name: string;
   sourceRecordTypeId: string;
@@ -41,7 +54,7 @@ export interface IFieldMappingProfile {
   rules: IFieldMappingRule[];
 }
 
-export interface IFieldMappingRule {
+interface IFieldMappingRule {
   id: string;
   sourceField: string;
   targetField: string;
@@ -50,7 +63,7 @@ export interface IFieldMappingRule {
   executionOrder: number;
 }
 
-export interface IMappingResult {
+interface IMappingResult {
   success: boolean;
   appliedRules: number;
   skippedRules: number;
@@ -58,9 +71,24 @@ export interface IMappingResult {
   mappedValues: Record<string, unknown>;
 }
 
-export interface IFieldMappingServiceConfig {
+interface IFieldMappingServiceConfig {
   webApi: ComponentFramework.WebApi;
   enableCache?: boolean;
+}
+
+/**
+ * Minimal structural typing for the subset of `Xrm.Page` that this handler
+ * uses at runtime — `getAttribute()` returning an attribute with `getIsDirty()`
+ * and `setValue()`. Declared inline so the shared lib does not need to take a
+ * dependency on `@types/xrm`. Runtime remains identical.
+ */
+interface IXrmPageAttributeLike {
+  getIsDirty(): boolean;
+  setValue(value: unknown): void;
+}
+
+interface IXrmPageLike {
+  getAttribute(name: string): IXrmPageAttributeLike | null | undefined;
 }
 
 /**
@@ -472,8 +500,7 @@ export class FieldMappingHandler {
         }
 
         const value = mappedValues[fieldName];
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        attr.setValue(value as any);
+        attr.setValue(value);
         appliedCount++;
         logger.logDebug('FieldMappingHandler', `Set ${fieldName} to:`, value);
       } catch (error) {
@@ -518,13 +545,15 @@ export class FieldMappingHandler {
   }
 
   /**
-   * Get Xrm.Page from parent window (PCF runs in iframe)
+   * Get Xrm.Page from parent window (PCF runs in iframe).
+   * Returns the minimal structural type used by this handler; the runtime
+   * object is the full `Xrm.Page` provided by the model-driven-app host.
    */
-  private getXrmPage(): Xrm.Page | null {
+  private getXrmPage(): IXrmPageLike | null {
     try {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const xrm = (window as any).Xrm || (window.parent as any)?.Xrm;
-      return xrm?.Page || null;
+      return (xrm?.Page as IXrmPageLike | undefined) ?? null;
     } catch (error) {
       logger.logWarn('FieldMappingHandler', 'Unable to access Xrm.Page', error);
       return null;
