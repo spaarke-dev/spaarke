@@ -2,12 +2,13 @@
 <task id="SRFR-010" project="set-regarding-and-field-mapping-resolver-r1">
   <metadata>
     <title>Add sprk_regardingrecordnumber column to 11 target entities</title>
-    <status>not-started</status>
+    <status>complete</status>
     <estimated-effort>4h</estimated-effort>
-    <actual-effort></actual-effort>
-    <assigned>AI Agent</assigned>
-    <started></started>
-    <completed></completed>
+    <actual-effort>~30min (MCP-assisted)</actual-effort>
+    <assigned>AI Agent (Claude Opus 4.7)</assigned>
+    <started>2026-07-02</started>
+    <completed>2026-07-02</completed>
+    <notes>Added sprk_regardingrecordnumber to 11 target entities (10 non-Matter per POML + Matter per D-12). D-13: contact + account got entity-prefix instead of sprk_ (contact_regardingrecordnumber, account_regardingrecordnumber). D-14/D-15: MCP tool doesn't expose MaxLength/IsSearchable — accepted defaults (VARCHAR MAX, IsSearchable unset). See notes/wave-1-schema-additions.log.</notes>
     <rigor>STANDARD</rigor>
     <parallel-safe>false</parallel-safe>
     <tags>dataverse,schema,wave-1</tags>

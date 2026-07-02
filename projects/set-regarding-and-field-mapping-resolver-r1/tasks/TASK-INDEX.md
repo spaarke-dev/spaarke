@@ -24,7 +24,7 @@
 
 | # | Task | Status | Rigor | Effort | Parallel-safe |
 |---|---|---|---|---|---|
-| 010 | [Add `sprk_regardingrecordnumber` column to **11** target entities (incl. Billing Analysis per D-7)](./010-add-regardingrecordnumber-column.poml) | 🔲 | STANDARD | 4h | — |
+| 010 | [Add `sprk_regardingrecordnumber` column to 11 target entities (incl. Matter per D-12; Billing Analysis excluded per D-9)](./010-add-regardingrecordnumber-column.poml) | ✅ | STANDARD | 4h est / **~30min actual** | — |
 
 ### Wave 2 — Shared library (`@spaarke/ui-components`)
 

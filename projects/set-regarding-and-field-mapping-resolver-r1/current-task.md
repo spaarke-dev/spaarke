@@ -1,30 +1,50 @@
 # Current Task
 
 **Project**: set-regarding-and-field-mapping-resolver-r1
-**Task ID**: SRFR-010 (ready to start)
-**Task File**: [`tasks/010-add-regardingrecordnumber-column.poml`](./tasks/010-add-regardingrecordnumber-column.poml)
-**Wave**: 1
+**Wave**: 2 (about to start)
 **Status**: not-started
 
-## Ready
+## Ready for Wave 2 — Shared library refactor (parallel group A)
 
-Wave 0 complete (SRFR-001 + SRFR-002). Catalog + `sprk_fieldmappingrule` schema are now aligned with spec's revised Appendix A. Ready to begin Wave 1 schema additions.
+4 tasks can execute in parallel (all touch `src/client/shared/Spaarke.UI.Components/` in different files):
 
-## Recently completed
+| # | Task | Rigor | Effort | Parallel-safe |
+|---|---|---|---|---|
+| 020 | Extend `PolymorphicResolverService.applyResolverFields()` for 5-field write | FULL | 5h | ✅ |
+| 021 | Extract `PolymorphicPicker` Fluent v9 shared component | FULL | 6h | ✅ |
+| 022 | Relocate `FieldMappingHandler` to `@spaarke/ui-components` | FULL | 3h | ✅ |
+| 023 | Extend `EntityLookupConfig` interface with `regardingRecordNumberField?` | FULL | 1h | ✅ |
 
-- ✅ SRFR-002 Wave 0 data-fix (2026-07-02) — all 4 workstreams + owner-decision W1a expansion successful in ~1.5h (vs 5h estimate)
+## Wave 0-1 completion summary
 
-## New Wave 0 findings (documented in notes/wave-0-metadata-population.log)
+- ✅ SRFR-001 Wave 0 discovery audit (~1.5h)
+- ✅ SRFR-002 Wave 0 data-fix (all 4 workstreams + W1a expansion, ~1.5h)
+- ✅ SRFR-010 Wave 1 schema additions (11 entities + D-12/13 findings, ~30min)
 
-- **D-8** (resolved via W1a): 3 target entities were missing `sprk_Xnumber` fields → added
-- **D-9** (resolved via W4a): Billing Analysis table doesn't exist → catalog row removed. **SRFR-010 scope adjustment**: now 10 target entities not 11 (Billing Analysis excluded)
-- **D-10** (deferred to Wave 5): `sprk_communication` uses `sprk_regardingperson` while catalog says `sprk_regardingcontact` — asymmetry across hosts for Person target
-- **D-11** (documented): MCP tool converts spaces to underscores in logical names → new attributes are `sprk_mapping_type`, `sprk_analysis_number`, `sprk_organization_number`, `sprk_document_number`
+## Cumulative divergences surfaced
 
-## SRFR-010 scope adjustment (D-9)
+| # | Finding | Resolution |
+|---|---|---|
+| D-1 | sprk_fieldmappingprofile schema (lookups, compatibilitymode) | Accepted; spec Appendix A rewritten |
+| D-2 | sprk_mapping_type field | Added to Dataverse (underscore convention) |
+| D-3 | Per-rule syncmode | Spec updated |
+| D-4 | 3 catalog regardingfield typos | Fixed (Project + Budget; Billing Analysis row deleted) |
+| D-5 | All catalog rows empty | Populated all 10 (2 intentional-null) |
+| D-6 | Contact catalog `sprk_contact` → `contact` | Fixed |
+| D-7 | 13 record types | Accepted (then reduced to 12 via D-9) |
+| D-8 | 3 sprk_ entities missing target-number fields | Added via W1a |
+| D-9 | sprk_billinganalysis table doesn't exist | Catalog row deleted |
+| D-10 | sprk_communication uses `sprk_regardingperson` | Deferred to Wave 5 |
+| D-11 | MCP underscore naming convention | Documented + spec updated |
+| D-12 | Matter didn't have `sprk_regardingrecordnumber` | Added |
+| D-13 | contact/account got entity prefix (contact_/account_) | Documented; Wave 2 task 020 must convention-derive per-target field name |
+| D-14 | Column MaxLength=MAX not =100 | Documented (functionally OK) |
+| D-15 | IsSearchable not explicitly set | Documented (default) |
 
-Original SRFR-010 target list was 11 entities. After D-9 (Billing Analysis catalog row removed), scope is **10 target entities**: Project, Invoice, Event, Analysis, Organization, contact, Document, WorkAssignment, Budget, Account. (Matter already has `sprk_regardingrecordnumber` column from 2026-07-01.)
+## Recommendation for Wave 2
+
+Given parallel-safe status, dispatch all 4 tasks concurrently via ONE message with MULTIPLE Skill invocations (per root CLAUDE.md task-execute Step 0.3 parallel mode). Each will be a `task-execute` call.
 
 ## Next action
 
-Say `execute task 010` or `continue` to run SRFR-010 (add `sprk_regardingrecordnumber` text column to 10 target entities).
+Say `execute wave 2` or `continue` to dispatch parallel Wave 2. Or `execute task 020` to run individually.
