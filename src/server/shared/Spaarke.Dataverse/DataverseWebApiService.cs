@@ -1097,11 +1097,9 @@ public class DataverseWebApiService : IDataverseService
         if (_entitySetNameCache.TryGetValue(entityLogicalName, out var cached))
             return cached;
 
-        // Dataverse Web API metadata: query EntityDefinitions with $filter (the direct
-        // key-accessor form `EntityDefinitions(LogicalName='X')` returns 500 from this
-        // environment even for valid names — reason unclear but $filter is a documented
-        // alternative that works reliably).
-        var url = $"EntityDefinitions?$select=EntitySetName&$filter=LogicalName eq '{entityLogicalName}'";
+        // Web API metadata endpoint returns the plural collection name for a logical name.
+        // Faster than pulling the full EntityDefinition; only $select the one column.
+        var url = $"EntityDefinitions(LogicalName='{entityLogicalName}')?$select=EntitySetName";
         var response = await SendGetAsync(url, ct);
 
         if (!response.IsSuccessStatusCode)
@@ -1113,21 +1111,19 @@ public class DataverseWebApiService : IDataverseService
             response.EnsureSuccessStatusCode();
         }
 
-        var payload = await response.Content.ReadFromJsonAsync<EntityDefinitionsCollectionResponse>(cancellationToken: ct);
-        var entitySetName = payload?.Value?.FirstOrDefault()?.EntitySetName;
-        if (string.IsNullOrWhiteSpace(entitySetName))
+        var payload = await response.Content.ReadFromJsonAsync<EntitySetNameResponse>(cancellationToken: ct);
+        if (payload is null || string.IsNullOrWhiteSpace(payload.EntitySetName))
         {
             throw new InvalidOperationException(
                 $"GetEntitySetNameAsync: EntityDefinitions returned no EntitySetName for '{entityLogicalName}'.");
         }
 
-        _entitySetNameCache[entityLogicalName] = entitySetName;
-        _logger.LogDebug("Resolved EntitySetName '{Set}' for '{Logical}'", entitySetName, entityLogicalName);
-        return entitySetName;
+        _entitySetNameCache[entityLogicalName] = payload.EntitySetName;
+        _logger.LogDebug("Resolved EntitySetName '{Set}' for '{Logical}'", payload.EntitySetName, entityLogicalName);
+        return payload.EntitySetName;
     }
 
-    private sealed record EntityDefinitionsCollectionResponse(EntitySetNameEntry[] Value);
-    private sealed record EntitySetNameEntry(string EntitySetName);
+    private sealed record EntitySetNameResponse(string EntitySetName);
 
     public Task<LookupNavigationMetadata> GetLookupNavigationAsync(
         string childEntityLogicalName,
