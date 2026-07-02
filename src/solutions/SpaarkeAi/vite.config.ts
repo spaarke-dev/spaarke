@@ -49,9 +49,12 @@ function resolveSharedLibDeps(): import("vite").Plugin {
     // from this shared lib per W4 architectural lock (shared lib = reusable
     // editor; solution = workspace-specific surfaces).
     path.resolve(__dirname, "../../client/shared/Spaarke.Compose.Components/src"),
-    // Round 4 Fix 4 (2026-05-21): @spaarke/legal-workspace is aliased to the
-    // LegalWorkspace solution source so SpaarkeAi can embed the full
-    // workspace experience as a tab widget without copying section factories.
+    // R2 FR-10 (spaarke-dataset-grid-framework-r2, 2026-07-02, task 022):
+    // Spaarke.LegalWorkspace shared package resolves via a proper file: dep
+    // in package.json (barrel re-exports the LegalWorkspace solution's src).
+    // Both paths need dep-resolution because the re-export follows source
+    // files that still physically live under src/solutions/LegalWorkspace/src.
+    path.resolve(__dirname, "../../client/shared/Spaarke.LegalWorkspace/src"),
     path.resolve(__dirname, "../LegalWorkspace/src"),
   ].map((p) => p.replace(/\\/g, "/"));
 
@@ -130,8 +133,14 @@ export default defineConfig({
         // orchestrator (FR-02 / FR-03).
         path.resolve(__dirname, "../../client/shared/Spaarke.Compose.Components/src/**/*.tsx"),
         path.resolve(__dirname, "../../client/shared/Spaarke.Compose.Components/src/**/*.ts"),
+        // R2 FR-10 (spaarke-dataset-grid-framework-r2, 2026-07-02, task 022):
+        // transpile the Spaarke.LegalWorkspace shared-package barrel; it
+        // re-exports LegalWorkspace/src (below) — both trees need inclusion.
+        path.resolve(__dirname, "../../client/shared/Spaarke.LegalWorkspace/src/**/*.tsx"),
+        path.resolve(__dirname, "../../client/shared/Spaarke.LegalWorkspace/src/**/*.ts"),
         // Round 4 Fix 4 (2026-05-21): transpile LegalWorkspace source so
-        // SpaarkeAi can embed LegalWorkspaceApp via the @spaarke/legal-workspace alias.
+        // SpaarkeAi can embed LegalWorkspaceApp via the Spaarke.LegalWorkspace
+        // file: dep (which re-exports LegalWorkspace/src via barrel — see R2 task 021 notes).
         path.resolve(__dirname, "../LegalWorkspace/src/**/*.tsx"),
         path.resolve(__dirname, "../LegalWorkspace/src/**/*.ts"),
       ],
@@ -193,13 +202,14 @@ export default defineConfig({
       "@spaarke/daily-briefing-components/utils": path.resolve(__dirname, "../../client/shared/Spaarke.DailyBriefing.Components/src/utils"),
       "@spaarke/daily-briefing-components/src": path.resolve(__dirname, "../../client/shared/Spaarke.DailyBriefing.Components/src"),
       "@spaarke/daily-briefing-components": path.resolve(__dirname, "../../client/shared/Spaarke.DailyBriefing.Components/src"),
-      // Round 4 Fix 4 (2026-05-21): alias the LegalWorkspace solution source as
-      // a "package" so SpaarkeAi can embed the full workspace experience inside
-      // a workspace pane tab via `import { LegalWorkspaceApp } from "@spaarke/legal-workspace"`.
-      // Standalone LegalWorkspace's main.tsx → App.tsx entry is unaffected
-      // (FR-25 / NFR-10 — only NEW exports added to LegalWorkspace).
-      "@spaarke/legal-workspace/src": path.resolve(__dirname, "../LegalWorkspace/src"),
-      "@spaarke/legal-workspace": path.resolve(__dirname, "../LegalWorkspace/src"),
+      // R2 FR-10 (spaarke-dataset-grid-framework-r2, 2026-07-02, task 022):
+      // Two Spaarke.LegalWorkspace source-alias entries were REMOVED here.
+      // Package is now resolved via a proper file: dep in package.json
+      // (`file:../../client/shared/Spaarke.LegalWorkspace`), which re-exports
+      // LegalWorkspace/src via a barrel (see R2 task 021). This closes the
+      // dual-deploy trap where editing shared code in LegalWorkspace/src did
+      // not force a matching SpaarkeAi rebuild. Node resolution now flows
+      // through node_modules symlink -> Spaarke.LegalWorkspace/src/index.ts.
       // R4 task 102 (E-1, 2026-06-18): @spaarke/sdap-client — pulled in
       // transitively via @spaarke/ui-components/services/EntityCreationService.ts
       // (Phase G of multi-container-multi-index-r1 / PR #369). Mirrors the

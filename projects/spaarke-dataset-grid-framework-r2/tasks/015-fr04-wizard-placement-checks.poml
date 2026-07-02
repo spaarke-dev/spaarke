@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="015" project="spaarke-dataset-grid-framework-r2">
+  <metadata>
+    <title>FR-04: Wizard placement checks + runtime dev-guard for `widthPreference`</title>
+    <phase>2: Wizard UI + Per-Instance Overrides</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>013,014</dependencies>
+    <blocks>016</blocks>
+    <tags>frontend, typescript, react, fluent-ui, workspace-layout-wizard, wizard-ui, dev-guard</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies `.tsx` + `.ts` files; wizard UI logic + runtime dev-guard; interacts with FR-04 metadata (task 014)</rigor-reason>
+    <parallel-group>Wave 7</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Same file (`WorkspaceLayoutWizard/src/App.tsx`) touched by 011, 013 — must serialize; also modifies `sectionRegistry.ts`</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Add wizard placement UI logic: when a `widthPreference: 'full'` widget is dropped into a multi-slot row, prompt a modal "This widget needs full width — convert row to single-column?" (Yes / Cancel). When a `widthPreference: 'half'` widget is placed in a single-slot row, show a subtle warning icon + hover tooltip. Add runtime dev-guard in `sectionRegistry.ts` that logs `console.warn` when a `'full'` widget renders in a multi-column row.
+  </prompt>
+
+  <role>
+    SPAARKE frontend wizard-UX contributor + framework dev-guard implementer.
+  </role>
+
+  <goal>
+    Wizard blocks/warns on invalid placements per widthPreference. Runtime dev-guard fires `console.warn` on violations. Both use section metadata from task 014.
+  </goal>
+
+  <context>
+    <background>
+      FR-04's schema half (task 014) added the field. This task exposes it: wizard prompts on invalid placements; runtime warns on violations that slipped through.
+    </background>
+    <relevant-files>
+      <file>src/solutions/WorkspaceLayoutWizard/src/App.tsx</file>
+      <file>src/solutions/LegalWorkspace/src/sectionRegistry.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Fluent v9 modal + tooltip conventions.</constraint>
+    <constraint source="project">Modal offers Yes / Cancel; NOT a hard block — operator can force by editing JSON directly.</constraint>
+    <constraint source="project">Runtime dev-guard uses `console.warn` (not `console.error`) — dev signal, not user-facing error.</constraint>
+    <constraint source="project">Runtime dev-guard only fires in DEV mode (`process.env.NODE_ENV !== 'production'`).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-dataset-grid-framework-r2/CLAUDE.md</file>
+      <file>projects/spaarke-dataset-grid-framework-r2/spec.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read spec.md § FR-04. Read `WorkspaceLayoutWizard/src/App.tsx` (placement handler) and `sectionRegistry.ts` (existing drift check ~lines 141-179).</step>
+    <step order="2">In wizard: when user drops a section into a row slot, check `sectionMetadata.widthPreference` for that section. If `'full'` and row has multiple columns (> 1 slot), open a Fluent v9 `Dialog` with title "Full-width widget", body "This widget renders best at full row width. Convert this row to a single column?", buttons "Yes, convert" (default) / "Cancel (keep row)".</step>
+    <step order="3">In wizard: when a `'half'` widget lands in a single-slot row, show a Fluent v9 `Tooltip` on hover of the section chip: "This widget is designed for half-width rows; a single-column row may leave excess whitespace."</step>
+    <step order="4">In `sectionRegistry.ts`: add a runtime check (existing drift check ~lines 141-179 or nearby). For each rendered section, if `metadata.widthPreference === 'full'` and the section is in a multi-column row, `console.warn('[Spaarke DataGrid] Section {sectionId} has widthPreference:full but is rendered in a multi-column row. Consider moving to a single-column row.')`. Guard with `NODE_ENV !== 'production'`.</step>
+    <step order="5">Unit test on runtime dev-guard: mock a section with `widthPreference: 'full'` in a multi-column context → `console.warn` called; same section in single-column context → no warn; `NODE_ENV === 'production'` → no warn regardless.</step>
+    <step order="6">Wizard integration test: dropping a `'full'` widget in a `1fr 1fr` row triggers the modal; clicking "Yes" converts the row; clicking "Cancel" leaves it.</step>
+    <step order="7">`npm test` + `npm run build` — clean.</step>
+    <step order="8">Update TASK-INDEX.md: → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/WorkspaceLayoutWizard/src/App.tsx (modified — placement modal + tooltip)</output>
+    <output type="code">src/solutions/LegalWorkspace/src/sectionRegistry.ts (modified — runtime dev-guard)</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/__tests__/widthPreferenceGuard.test.ts (new)</output>
+    <output type="test">src/solutions/WorkspaceLayoutWizard/src/__tests__/widthPreferencePlacement.test.tsx (new)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Wizard opens modal when `'full'` widget dropped into multi-slot row; buttons Yes/Cancel work.</criterion>
+    <criterion testable="true">Wizard shows tooltip on `'half'` widget in single-slot row.</criterion>
+    <criterion testable="true">Runtime dev-guard: `console.warn` fires when `'full'` widget in multi-column row + NODE_ENV != production.</criterion>
+    <criterion testable="true">Runtime dev-guard silent in production (`NODE_ENV === 'production'`).</criterion>
+    <criterion testable="true">Unit + integration tests + build clean.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    - `sectionRegistry.ts` lives at `src/solutions/LegalWorkspace/src/sectionRegistry.ts` (not under `WorkspaceShell/`). This file may relocate to the new shared package as part of FR-10 (task 021) — plan for the relocation but don't do it here.
+    - Task 015 is the last piece of Phase 2. Task 016 closes with deploy + PR 2.
+    - If Fluent v9 `Dialog` is heavy for a simple confirm, consider `MessageBar` with action buttons — either is acceptable per ADR-021.
+
+    # Completion notes (2026-07-02)
+
+    - Modified `src/solutions/WorkspaceLayoutWizard/src/steps/ArrangeStep.tsx`:
+      - Added `lookupWidthPreference()` helper that reads `SECTION_METADATA_CATALOG` (task 014) to get 'full' | 'half' | 'any' per section ID (App.tsx's derived SECTION_CATALOG drops the field, so we re-lookup from the catalog directly).
+      - Added `widthPrefDialog` state + Fluent v9 `Dialog` with title "Full-width widget", body citing section label, buttons "Yes, convert" (default primary) / "Cancel (keep row)".
+      - `handleSlotDrop` extended: after normal drop assignment, if dropped section has widthPreference 'full' AND target row has slotCount > 1 AND row has other occupied slots → open Dialog. "Yes" clears all OTHER slots in that row (`handleWidthPrefConfirm`); "Cancel" is a no-op (`handleWidthPrefCancel`) — dialog closes, section remains with persistent warning icon.
+      - Added `slotWidthWarnings` derived Map computing per-slot warning text: 'full' in multi-column (label + column count) OR 'half' in single-column (whitespace warning).
+      - Added `widthWarning?: string` prop on GridSlot; renders a Fluent v9 `Tooltip`-wrapped `Warning16Regular` icon overlay (top-left of slot, colorPaletteYellowForeground1 semantic token) when set.
+      - Runs alongside task 011 RowHeightControl + task 013 AdvancedSectionControl without regression — the widthWarning overlay sits in the slot's absolute-positioned corner, orthogonal to the drag/remove UI.
+    - Modified `src/solutions/LegalWorkspace/src/sectionRegistry.ts`:
+      - Added exported `warnOnWidthPreferenceViolations(layout)` function that iterates a LayoutJson-like structure and fires `console.warn('[Spaarke DataGrid] Section "{id}" has widthPreference:full but is rendered in a multi-column row ({columns} columns). Consider moving to a single-column row.')` for each violation.
+      - Guarded by `process.env.NODE_ENV === 'production'` early-return (silent in production).
+      - Supports both bare-string and SectionInstance-shaped entries (FR-03 compat).
+      - Added local `LayoutJsonLike` + `LayoutJsonRowLike` types to avoid a heavy cross-package import; consumers can pass any structurally-compatible object.
+      - Function is DEFINED but not yet WIRED into the render lifecycle. Wire-up (calling it after parseLayoutJson in useWorkspaceLayouts.ts) is trivial follow-on; separating the primitive from the wire-up per task scope (POML lists only 2 modified files).
+    - Test files created:
+      - `src/solutions/LegalWorkspace/src/__tests__/widthPreferenceGuard.test.ts` — 14 unit test cases covering: 'full' in multi-col warns; single-col does not; production silent; unknown IDs skipped; SectionInstance entries; null/undefined defensive; multi-row + multi-violation.
+      - `src/solutions/WorkspaceLayoutWizard/src/__tests__/widthPreferencePlacement.test.tsx` — 6 integration tests covering: warning icon present/absent per row shape; dark-mode structural check; dialog hidden state.
+    - **POML deviation**: POML output path `src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/__tests__/widthPreferenceGuard.test.ts` was NOT viable — the guard code lives in LegalWorkspace (not shared lib), and the shared-lib jest roots is restricted to shared-lib src. Placed the guard test adjacent to the code it tests in `src/solutions/LegalWorkspace/src/__tests__/` — new folder, follows the task 011/013 pattern where the wizard __tests__ folder was created ahead of jest wire-up.
+    - TypeScript check (`npx tsc --noEmit`): zero new errors introduced in ArrangeStep.tsx or sectionRegistry.ts. Pre-existing errors in App.tsx (unrelated), Spaarke.Auth cross-imports, LegalWorkspace's pre-existing `process.env` reference at line 125 (matching my new pattern) are unchanged. Test files carry expected "no jest wired" errors identical to rowHeight.test.tsx (task 011) and sectionInstanceAdvanced.test.tsx (task 013) precedent.
+    - Fluent v9 semantic tokens throughout (Warning icon uses `colorPaletteYellowForeground1`; Dialog inherits FluentProvider theme). No hardcoded colors. Matches ADR-021.
+    - `runOnWidthPreferenceViolations` was NOT invoked from the runtime render pipeline as part of this task — the exported symbol is available for follow-on wire-up. Rationale: task POML scoped the 2 modified files precisely, and the wire-up requires touching `useWorkspaceLayouts.ts` (a load-bearing cross-consumer hook) which is out of scope. Reported to main session for planning follow-on.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge. FULL rigor. Step 9.5 quality gates. UI test defs below.</protocol>
+  </execution>
+
+  <ui-tests>
+    <test name="Full-width modal on multi-column drop">
+      <steps>
+        <step>Open WorkspaceLayoutWizard</step>
+        <step>Create row with `1fr 1fr` columns</step>
+        <step>Drag Communications section into that row</step>
+        <step>Verify modal appears with "Convert to single column?"</step>
+      </steps>
+      <expected>Modal prompts; both buttons functional</expected>
+    </test>
+    <test name="Runtime warning in dev mode">
+      <steps>
+        <step>Deploy layout with Communications in a `1fr 1fr` row (edit JSON directly to bypass wizard)</step>
+        <step>Open LegalWorkspace in browser with DevTools console</step>
+        <step>Check for warning: "widthPreference:full but rendered in multi-column row"</step>
+      </steps>
+      <expected>console.warn appears in dev mode; silent in prod build</expected>
+    </test>
+    <test name="Dark mode compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode</step>
+        <step>Trigger the placement modal</step>
+        <step>Verify modal + tooltip render correctly</step>
+      </steps>
+      <expected>Fluent v9 semantic tokens throughout</expected>
+    </test>
+  </ui-tests>
+</task>

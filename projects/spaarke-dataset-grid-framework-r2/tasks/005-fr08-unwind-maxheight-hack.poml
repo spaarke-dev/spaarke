@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="005" project="spaarke-dataset-grid-framework-r2">
+  <metadata>
+    <title>FR-08: Unwind tactical `maxHeight` hack from 6 sections + set `contentSizing: 'clamped'` in metadata catalog</title>
+    <phase>1: Framework Schema + Consumer Unwind</phase>
+    <status>completed</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>006</blocks>
+    <tags>frontend, typescript, legal-workspace, section-registrations, multi-file, cleanup</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies 7 `.ts` files across shared lib + solution; multi-file coordinated edit; blocks Phase 1 close</rigor-reason>
+    <parallel-group>Wave 2</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    After FR-01 (`contentSizing` framework field) has landed, unwind the tactical `maxHeight: '480px'` + `display: 'flex'` additions from the 6 entity-list section registration files in LegalWorkspace. Simultaneously add `contentSizing: 'clamped'` to the 6 corresponding metadata catalog entries. Consider using parallel subagents for the 6 identical registration edits per CLAUDE.md § Multi-File Work Decomposition.
+  </prompt>
+
+  <role>
+    SPAARKE frontend framework developer coordinating a multi-file cleanup pass. Uses parallel-subagent decomposition for the 6 identical registration edits.
+  </role>
+
+  <goal>
+    (a) `sectionMetadataCatalog.ts`: 6 entries have `contentSizing: 'clamped'`. (b) 6 registration files: no `maxHeight`, no `display: 'flex'` in `style` block (framework now provides these via `contentSizing`). (c) Grep confirms zero `maxHeight` in `src/solutions/LegalWorkspace/src/sections/{communications,documents,invoices,matters,projects,workAssignments}.registration.ts`.
+  </goal>
+
+  <context>
+    <background>
+      The tactical fix deployed 2026-07-01 during `ai-spaarke-ai-workspace-UI-r2` follow-up added `maxHeight: '480px'` to 6 entity-list section registrations to force scrollbars in Dashboard II. This section-level hack violates the "framework decides sizing; sections declare intent" principle and wastes vertical space on single-section full-page layouts (e.g., Documents system layout). FR-01 replaces the hack with `contentSizing: 'clamped'` metadata; FR-08 removes the hack.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/sectionMetadataCatalog.ts</file>
+      <file>src/solutions/LegalWorkspace/src/sections/communications.registration.ts</file>
+      <file>src/solutions/LegalWorkspace/src/sections/documents.registration.ts</file>
+      <file>src/solutions/LegalWorkspace/src/sections/invoices.registration.ts</file>
+      <file>src/solutions/LegalWorkspace/src/sections/matters.registration.ts</file>
+      <file>src/solutions/LegalWorkspace/src/sections/projects.registration.ts</file>
+      <file>src/solutions/LegalWorkspace/src/sections/workAssignments.registration.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">Framework metadata lives in shared lib; consumer registrations reference it.</constraint>
+    <constraint source="project">Depends on FR-01 (task 001) — do NOT start this before 001 is ✅.</constraint>
+    <constraint source="project">Identical edit pattern across 6 files — good candidate for parallel subagent decomposition.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-dataset-grid-framework-r2/CLAUDE.md</file>
+      <file>projects/spaarke-dataset-grid-framework-r2/spec.md</file>
+      <file>projects/spaarke-dataset-grid-framework-r2/plan.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/patterns/ui/embedded-widget-sizing.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Confirm task 001 is ✅ completed (FR-01 framework `contentSizing` shipped).</step>
+    <step order="2">Update `sectionMetadataCatalog.ts`: add `contentSizing: 'clamped'` to the 6 entries: `communications`, `documents`, `invoices`, `matters`, `projects`, `workAssignments`. (Serial — single file.)</step>
+    <step order="3">**Parallel subagent decomposition** — dispatch 6 subagents (one per section file), each with instructions: "In `src/solutions/LegalWorkspace/src/sections/{sectionName}.registration.ts`, locate the `style` object in the section registration. Remove the `maxHeight: '480px'` key and the `display: 'flex'` key. Keep `overflow: 'hidden'` if present (harmless; framework applies it via contentSizing). Do not remove anything else. Return: 'edited' + git diff line count."</step>
+    <step order="4">After all 6 subagents complete, grep to verify: `grep -n "maxHeight" src/solutions/LegalWorkspace/src/sections/{communications,documents,invoices,matters,projects,workAssignments}.registration.ts` → zero hits.</step>
+    <step order="5">Rebuild shared lib + LegalWorkspace + SpaarkeAi: `powershell scripts/Build-AllClientComponents.ps1` (or equivalent per current script). Build succeeds.</step>
+    <step order="6">Manual smoke test locally (before task 006 formal deploy): open LegalWorkspace Dashboard II — Communications section shows visible scrollbar + lazy-load on scroll. Sanity check on Documents single-section full-page: no longer capped at 480px (fills more of the tab; final `rowHeight` override lands in FR-02).</step>
+    <step order="7">Update TASK-INDEX.md: status → ✅ completed.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build</tool>
+    <tool name="terminal">Grep, run build script</tool>
+    <tool name="Agent">Dispatch 6 parallel subagents for identical registration edits</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/sectionMetadataCatalog.ts (modified — 6 entries get contentSizing)</output>
+    <output type="code">src/solutions/LegalWorkspace/src/sections/communications.registration.ts (modified)</output>
+    <output type="code">src/solutions/LegalWorkspace/src/sections/documents.registration.ts (modified)</output>
+    <output type="code">src/solutions/LegalWorkspace/src/sections/invoices.registration.ts (modified)</output>
+    <output type="code">src/solutions/LegalWorkspace/src/sections/matters.registration.ts (modified)</output>
+    <output type="code">src/solutions/LegalWorkspace/src/sections/projects.registration.ts (modified)</output>
+    <output type="code">src/solutions/LegalWorkspace/src/sections/workAssignments.registration.ts (modified)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Grep on 6 registration files finds zero `maxHeight` occurrences.</criterion>
+    <criterion testable="true">Grep on 6 metadata catalog entries confirms `contentSizing: 'clamped'` present.</criterion>
+    <criterion testable="true">`npm run build` succeeds in `Spaarke.UI.Components` + LegalWorkspace + SpaarkeAi + WorkspaceLayoutWizard.</criterion>
+    <criterion testable="true">Local smoke test: Dashboard II Communications shows visible scrollbar; page-2 fetch triggers on scroll.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    - This is the payoff for FR-01 — the framework fix reaches production only after this unwind.
+    - Parallel subagent pattern: dispatch all 6 in a SINGLE message with 6 Agent tool calls (concurrent). Each agent handles one file. Wait for all 6 to complete before step 4 grep verification.
+    - If any subagent reports "no `maxHeight` found" (unexpected), investigate — either the file was already cleaned OR the tactical hack was in a different form.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge. FULL rigor. Use parallel subagent decomposition at step 3. Step 9.5 quality gates.</protocol>
+  </execution>
+</task>

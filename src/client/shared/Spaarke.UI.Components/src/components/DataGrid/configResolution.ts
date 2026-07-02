@@ -30,7 +30,7 @@ import type {
   RowOpenConfig,
   SecondaryAction,
 } from '../../types/DataGridConfiguration';
-import type { EntityMetadata } from '../../services/IDataverseClient';
+import type { EntityMetadata, SavedQuerySummary } from '../../services/IDataverseClient';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Overrides shape (from props.overrides on <DataGrid />)
@@ -116,9 +116,12 @@ type ResolvedBehavior = Required<Omit<BehaviorConfig, 'parentContextFilter'>> &
 
 const FRAMEWORK_DEFAULT_BEHAVIOR: ResolvedBehavior = {
   selectionMode: 'multi',
-  // Lazy-load contexts default to 100 per FR-DG-12 ("page size default 100 ...
-  // override via configjson.behavior.pageSize"). Non-lazy users may still override.
-  pageSize: 100,
+  // Framework default pageSize: 25 (FR-07, spaarke-dataset-grid-framework-r2,
+  // owner clarification 2026-07-02). Workspace-embedded widgets are the
+  // dominant use case; drill-through / full-page consumers should override
+  // explicitly to 50 or 100 via `sprk_configjson.behavior.pageSize`.
+  // Supersedes the FR-DG-12 default of 100.
+  pageSize: 25,
   enableSorting: true,
   enableColumnResize: true,
   enableKeyboardNavigation: true,
@@ -392,6 +395,127 @@ function defaultAlignFor(attributeType: string | undefined): 'left' | 'center' |
     return 'right';
   }
   return 'left';
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// availableViews allowlist filter (FR-05, spaarke-dataset-grid-framework-r2)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Filter a savedquery summary list by an optional GUID allowlist.
+ *
+ * Consumed by `<DataGrid />` after `IDataverseClient.retrieveSavedQueriesForEntity`
+ * returns, before the result feeds the `<ViewSelector>` dropdown. Implements the
+ * `SourceSavedQuery.availableViews` allowlist described in FR-05.
+ *
+ * Semantics:
+ * - `allowlist === undefined` → return `views` verbatim (back-compat).
+ * - `allowlist` is an empty array `[]` → return `views` verbatim (safer
+ *   default: an empty array is treated as "no filter" to avoid the accidental
+ *   empty-picker footgun; see FR-05 owner note in `spec.md`).
+ * - `allowlist` is a non-empty array → return only entries whose `id` is in
+ *   the allowlist. Order follows `views` (not `allowlist`) — the framework
+ *   preserves Dataverse's savedquery ordering.
+ *
+ * Case-insensitive GUID comparison — Dataverse returns lowercase GUIDs, but
+ * makers may author allowlist GUIDs with braces or mixed case in the config
+ * record. Comparison is done on lowercased, brace-stripped values.
+ *
+ * @param views     Sibling savedqueries returned by Dataverse for the entity.
+ * @param allowlist Optional GUID allowlist from `SourceSavedQuery.availableViews`.
+ * @returns The filtered (or unfiltered) view list. Never `undefined`.
+ */
+export function filterAvailableViews(
+  views: ReadonlyArray<SavedQuerySummary>,
+  allowlist: ReadonlyArray<string> | undefined
+): ReadonlyArray<SavedQuerySummary> {
+  if (!allowlist || allowlist.length === 0) {
+    return views;
+  }
+  const normalize = (g: string): string =>
+    g
+      .trim()
+      .toLowerCase()
+      .replace(/^\{|\}$/g, '');
+  const allowed = new Set<string>(allowlist.map(normalize));
+  return views.filter(v => allowed.has(normalize(v.id)));
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// FR-03 (task 012, spaarke-dataset-grid-framework-r2) — per-instance overrides
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Resolve the effective savedquery allowlist from the two-tier precedence chain.
+ *
+ * Precedence (highest wins):
+ *   1. `instanceLevel` — `SectionInstance.overrides.availableViews` (FR-03).
+ *   2. `configLevel`   — `SourceSavedQuery.availableViews` from the config
+ *                        record (FR-05).
+ *   3. undefined       — no filter (all sibling views shown).
+ *
+ * Semantics decision: **REPLACE**, not sequential-apply intersection.
+ *
+ * Rationale: `SectionInstance.overrides.availableViews` is the more specific
+ * rule (per-placement). Applying both filters sequentially would prevent an
+ * operator from ever widening the allowlist at the instance level — the
+ * config-level list would always be an upper bound. That is not the intent per
+ * spec.md line 98 ("the per-instance value takes precedence over the global
+ * config-level allowlist when both are set"). "Takes precedence" reads as
+ * authoritative-replace: when the operator sets a per-placement allowlist,
+ * they know what they want and the config-level restriction is silenced.
+ *
+ * Empty-array semantics mirror `filterAvailableViews`: an empty array at
+ * either tier is treated as "no filter" (safer default; avoids the empty-picker
+ * footgun).
+ *
+ * @param views          Sibling savedqueries returned by Dataverse for the entity.
+ * @param configLevel    Optional allowlist from `SourceSavedQuery.availableViews`.
+ * @param instanceLevel  Optional allowlist from `SectionInstance.overrides.availableViews`.
+ *                       Highest precedence — when set (non-empty), config-level is silenced.
+ * @returns The filtered view list. Never `undefined`.
+ */
+export function resolveEffectiveAvailableViews(
+  views: ReadonlyArray<SavedQuerySummary>,
+  configLevel: ReadonlyArray<string> | undefined,
+  instanceLevel: ReadonlyArray<string> | undefined
+): ReadonlyArray<SavedQuerySummary> {
+  // Instance-level replaces (does not intersect with) config-level when set.
+  // Empty array at instance level falls through to config level (per
+  // filterAvailableViews empty-array semantics).
+  if (instanceLevel && instanceLevel.length > 0) {
+    return filterAvailableViews(views, instanceLevel);
+  }
+  return filterAvailableViews(views, configLevel);
+}
+
+/**
+ * Resolve the effective `pageSize` from the three-tier precedence chain.
+ *
+ * Precedence (highest wins):
+ *   1. `instanceLevel`     — `SectionInstance.overrides.pageSize` (FR-03).
+ *   2. `configRecordLevel` — `sprk_configjson.behavior.pageSize`.
+ *   3. Framework default — 25 (FR-07, `FRAMEWORK_DEFAULT_BEHAVIOR.pageSize`).
+ *
+ * A `pageSize` of 0 or a negative number at any tier is treated as "unset"
+ * (falls through to the next tier). This mirrors the DataGrid's runtime
+ * validation and prevents an operator from accidentally disabling paging.
+ *
+ * @param instanceLevel     Optional pageSize from `SectionInstance.overrides.pageSize`.
+ * @param configRecordLevel Optional pageSize from `sprk_configjson.behavior.pageSize`.
+ * @returns The effective pageSize (always a positive integer).
+ */
+export function resolveEffectivePageSize(
+  instanceLevel: number | undefined,
+  configRecordLevel: number | undefined
+): number {
+  if (typeof instanceLevel === 'number' && Number.isFinite(instanceLevel) && instanceLevel > 0) {
+    return instanceLevel;
+  }
+  if (typeof configRecordLevel === 'number' && Number.isFinite(configRecordLevel) && configRecordLevel > 0) {
+    return configRecordLevel;
+  }
+  return FRAMEWORK_DEFAULT_BEHAVIOR.pageSize;
 }
 
 function humanizeLogicalName(logicalName: string): string {
