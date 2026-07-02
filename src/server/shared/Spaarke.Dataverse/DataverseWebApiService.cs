@@ -1089,45 +1089,63 @@ public class DataverseWebApiService : IDataverseService
     private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _entitySetNameCache =
         new(StringComparer.OrdinalIgnoreCase);
 
-    public async Task<string> GetEntitySetNameAsync(string entityLogicalName, CancellationToken ct = default)
+    public Task<string> GetEntitySetNameAsync(string entityLogicalName, CancellationToken ct = default)
     {
         if (string.IsNullOrWhiteSpace(entityLogicalName))
             throw new ArgumentException("Entity logical name is required", nameof(entityLogicalName));
 
         if (_entitySetNameCache.TryGetValue(entityLogicalName, out var cached))
-            return cached;
+            return Task.FromResult(cached);
 
-        // Dataverse Web API metadata: query EntityDefinitions with $filter (the direct
-        // key-accessor form `EntityDefinitions(LogicalName='X')` returns 500 from this
-        // environment even for valid names — reason unclear but $filter is a documented
-        // alternative that works reliably).
-        var url = $"EntityDefinitions?$select=EntitySetName&$filter=LogicalName eq '{entityLogicalName}'";
-        var response = await SendGetAsync(url, ct);
-
-        if (!response.IsSuccessStatusCode)
-        {
-            var errorBody = await response.Content.ReadAsStringAsync(ct);
-            _logger.LogError(
-                "GetEntitySetNameAsync failed for '{Entity}': {StatusCode}. Response: {ErrorBody}",
-                entityLogicalName, response.StatusCode, errorBody);
-            response.EnsureSuccessStatusCode();
-        }
-
-        var payload = await response.Content.ReadFromJsonAsync<EntityDefinitionsCollectionResponse>(cancellationToken: ct);
-        var entitySetName = payload?.Value?.FirstOrDefault()?.EntitySetName;
-        if (string.IsNullOrWhiteSpace(entitySetName))
-        {
-            throw new InvalidOperationException(
-                $"GetEntitySetNameAsync: EntityDefinitions returned no EntitySetName for '{entityLogicalName}'.");
-        }
-
-        _entitySetNameCache[entityLogicalName] = entitySetName;
-        _logger.LogDebug("Resolved EntitySetName '{Set}' for '{Logical}'", entitySetName, entityLogicalName);
-        return entitySetName;
+        // Dataverse Web API metadata endpoint (`/EntityDefinitions`) returns 500 with an
+        // empty response body under this environment's MI auth path — reason unresolved,
+        // but reproducible across accessor + $filter forms. Rather than block Update Record
+        // on a metadata query we can't complete, use deterministic pluralization: works for
+        // all `sprk_*` custom entities in this repo and standard OOB tables with irregulars
+        // handled by an override list. If a new irregular ever surfaces, add it here.
+        var setName = PluralizeEntitySetName(entityLogicalName);
+        _entitySetNameCache[entityLogicalName] = setName;
+        _logger.LogDebug("Resolved EntitySetName '{Set}' for '{Logical}' (heuristic)", setName, entityLogicalName);
+        return Task.FromResult(setName);
     }
 
-    private sealed record EntityDefinitionsCollectionResponse(EntitySetNameEntry[] Value);
-    private sealed record EntitySetNameEntry(string EntitySetName);
+    // Dataverse EntitySetName override list — irregular pluralizations from the standard
+    // OOB schema that don't follow simple append-'s' or 'y' → 'ies' rules. All `sprk_*`
+    // custom entities in this repo pluralize by appending 's' (verified against the
+    // Dataverse schema browser). Extend on demand for other standard OOB names when
+    // touched by playbooks.
+    private static readonly Dictionary<string, string> EntitySetOverrides = new(StringComparer.OrdinalIgnoreCase)
+    {
+        ["activity"] = "activitypointers",
+        ["businessunit"] = "businessunits",
+        ["annotation"] = "annotations",
+    };
+
+    private static string PluralizeEntitySetName(string logicalName)
+    {
+        if (EntitySetOverrides.TryGetValue(logicalName, out var overridden))
+            return overridden;
+
+        // 'y' preceded by consonant -> 'ies' (activity would match but is in overrides)
+        if (logicalName.Length >= 2 &&
+            logicalName.EndsWith('y') &&
+            !"aeiou".Contains(char.ToLowerInvariant(logicalName[^2])))
+        {
+            return string.Concat(logicalName.AsSpan(0, logicalName.Length - 1), "ies");
+        }
+
+        // 's' / 'x' / 'z' / 'ch' / 'sh' endings need 'es' (rare in Dataverse but safe)
+        if (logicalName.EndsWith("s", StringComparison.OrdinalIgnoreCase) ||
+            logicalName.EndsWith("x", StringComparison.OrdinalIgnoreCase) ||
+            logicalName.EndsWith("z", StringComparison.OrdinalIgnoreCase) ||
+            logicalName.EndsWith("ch", StringComparison.OrdinalIgnoreCase) ||
+            logicalName.EndsWith("sh", StringComparison.OrdinalIgnoreCase))
+        {
+            return logicalName + "es";
+        }
+
+        return logicalName + "s";
+    }
 
     public Task<LookupNavigationMetadata> GetLookupNavigationAsync(
         string childEntityLogicalName,
