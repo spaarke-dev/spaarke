@@ -1,21 +1,23 @@
 /**
  * HighPrioritySection — cross-entity flagged-item roll-up shown above the TL;DR.
  *
- * R7 W12 feedback item 9 (2026-07-01):
- *   "create a top section above TL;DR with a light subtle red background title
- *    'High Priority'; this lists items that are due today or that are overdue
- *    and the associated record has value sprk_monitor = yes or sprk_priority
- *    (renamed sprk_highpriority in the shipped schema) = yes."
+ * R7 W12 feedback item 9 + follow-up (2026-07-01):
+ *   Renders every record from the 7 flagged entities (matter, project, invoice,
+ *   document, workassignment, event, todo) where sprk_highpriority = true OR
+ *   sprk_monitor = true. Compact "mini-report" layout: each row is a card with
+ *   Kind + Name link + Description + Action badge + reason chip so the operator
+ *   sees at a glance WHY the record is here + WHAT triggered attention.
  *
- * MVP behavior (aligned with operator intent):
- *   - Renders the section only when items[].length > 0. Empty state → null
- *     (no wasted vertical space; the classic TL;DR fills the top).
- *   - Each item is a clickable Link that opens the record in a Dataverse modal
- *     (target:2, 80%×80%) via the parent's onOpenRecord callback.
- *   - Compact single-line rows: [kindLabel] · Name · optional overdue/today badge.
- *   - Subtle-red banner background using Fluent v9 semantic tokens
- *     (colorPaletteRedBackground1) — passes dark-mode adaptation per ADR-021.
- *   - Server-side sort is preserved (due-ascending, undated last).
+ * Layout (per operator feedback):
+ *   ┌─────────────────────────────────────────────────────────────────────────┐
+ *   │ [Kind chip]  Name ↗                              [Action badge] [Reason] │
+ *   │              Description text (truncated when long)                     │
+ *   └─────────────────────────────────────────────────────────────────────────┘
+ *
+ * Interactions:
+ *   - Item name click → opens Dataverse record modal via onOpenRecord
+ *     (parent handles Xrm.Navigation.navigateTo call).
+ *   - Renders null when items.length === 0 (no wasted vertical space).
  *
  * Constraints:
  *   - ADR-021: Fluent v9 tokens only, dark-mode via semantic tokens.
@@ -34,8 +36,6 @@ import type { HighPriorityItemResult } from '../services/briefingService';
 
 const useStyles = makeStyles({
   container: {
-    // Subtle red banner. colorPaletteRedBackground1 is Fluent's lightest red;
-    // adapts in dark mode. Border adds visual anchor without heavy weight.
     backgroundColor: tokens.colorPaletteRedBackground1,
     borderTopWidth: '1px',
     borderRightWidth: '1px',
@@ -57,7 +57,7 @@ const useStyles = makeStyles({
     display: 'flex',
     alignItems: 'center',
     gap: tokens.spacingHorizontalXS,
-    marginBottom: tokens.spacingVerticalS,
+    marginBottom: tokens.spacingVerticalM,
   },
   headerIcon: {
     fontSize: '20px',
@@ -67,36 +67,65 @@ const useStyles = makeStyles({
     color: tokens.colorPaletteRedForeground1,
     fontWeight: tokens.fontWeightSemibold,
   },
-  itemRow: {
+  itemCard: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalXXS,
+    paddingTop: tokens.spacingVerticalS,
+    paddingBottom: tokens.spacingVerticalS,
+    paddingLeft: tokens.spacingHorizontalS,
+    paddingRight: tokens.spacingHorizontalS,
+    borderBottomWidth: '1px',
+    borderBottomStyle: 'solid',
+    borderBottomColor: tokens.colorPaletteRedBorderActive,
+    // Last row has no bottom border for a cleaner list edge.
+    ':last-child': {
+      borderBottomWidth: '0',
+    },
+  },
+  itemRowTop: {
     display: 'flex',
     alignItems: 'center',
     gap: tokens.spacingHorizontalS,
-    paddingTop: tokens.spacingVerticalXXS,
-    paddingBottom: tokens.spacingVerticalXXS,
     flexWrap: 'wrap',
   },
-  kindLabel: {
+  kindChip: {
     color: tokens.colorNeutralForeground3,
     fontSize: tokens.fontSizeBase200,
-    minWidth: '90px',
+    fontWeight: tokens.fontWeightSemibold,
+    minWidth: '110px',
   },
   itemLink: {
     color: tokens.colorBrandForeground1,
     textDecorationLine: 'none',
     cursor: 'pointer',
+    fontWeight: tokens.fontWeightSemibold,
     ':hover': {
       textDecorationLine: 'underline',
     },
-    // Allow the name to grow but not push badges off-screen.
     flexShrink: 1,
     minWidth: 0,
+    flex: 1,
   },
-  badgeOverdue: {
-    // Use Fluent's `severe` intent for overdue; distinct from the container's
-    // red background so it still reads as urgent.
+  descriptionRow: {
+    paddingLeft: 'calc(110px + ' + tokens.spacingHorizontalS + ')',
+    color: tokens.colorNeutralForeground2,
+    // Truncate long descriptions to 2 lines.
+    display: '-webkit-box',
+    WebkitLineClamp: 2,
+    WebkitBoxOrient: 'vertical' as const,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
   },
-  badgeDueToday: {
-    // `warning` intent for due-today — softer than overdue.
+  badgeGroup: {
+    display: 'flex',
+    gap: tokens.spacingHorizontalXS,
+    flexShrink: 0,
+  },
+  reasonChip: {
+    color: tokens.colorNeutralForeground3,
+    fontSize: tokens.fontSizeBase200,
+    fontStyle: 'italic',
   },
 });
 
@@ -115,40 +144,82 @@ export interface HighPrioritySectionProps {
 // Helpers
 // ---------------------------------------------------------------------------
 
-/**
- * Classify a due date relative to "today UTC start" for badge selection.
- * Undated → null (no badge). Past → "overdue". Today → "today". Future → null
- * (no badge — the section is already showing them because they're flagged).
- */
-type DueClassification = 'overdue' | 'today' | 'future' | null;
+interface ActionBadgeStyle {
+  label: string;
+  color: 'danger' | 'warning' | 'informative' | 'subtle';
+  appearance: 'filled' | 'outline';
+}
 
-function classifyDueDate(iso: string | undefined): DueClassification {
-  if (!iso) return null;
-  try {
-    const due = new Date(iso);
-    if (Number.isNaN(due.getTime())) return null;
-    const now = new Date();
-    const todayStart = new Date(Date.UTC(now.getUTCFullYear(), now.getUTCMonth(), now.getUTCDate()));
-    const tomorrowStart = new Date(todayStart.getTime() + 24 * 60 * 60 * 1000);
-    if (due < todayStart) return 'overdue';
-    if (due < tomorrowStart) return 'today';
-    return 'future';
-  } catch {
-    return null;
+/**
+ * Map the server-computed `action` string to a Fluent v9 Badge style + label.
+ * Adds the due date when known so the badge is self-explanatory. Falls back
+ * to modifiedon relative time for the "Recent" action.
+ */
+function actionToBadge(action: string, dueDate?: string, modifiedOn?: string): ActionBadgeStyle | null {
+  switch (action) {
+    case 'Overdue':
+      return {
+        label: dueDate ? `Overdue · ${formatShortDate(dueDate)}` : 'Overdue',
+        color: 'danger',
+        appearance: 'filled',
+      };
+    case 'DueToday':
+      return { label: 'Due today', color: 'warning', appearance: 'filled' };
+    case 'DueSoon':
+      return {
+        label: dueDate ? `Due ${formatShortDate(dueDate)}` : 'Due soon',
+        color: 'informative',
+        appearance: 'outline',
+      };
+    case 'Recent':
+      return {
+        label: modifiedOn ? `Updated ${formatRelative(modifiedOn)}` : 'Recently updated',
+        color: 'subtle',
+        appearance: 'outline',
+      };
+    default:
+      return null;
   }
 }
 
-function formatDueLabel(iso: string | undefined, classification: DueClassification): string | null {
-  if (!iso || classification === null) return null;
+function formatShortDate(iso: string): string {
   try {
-    const due = new Date(iso);
-    if (Number.isNaN(due.getTime())) return null;
-    const shortDate = new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(due);
-    if (classification === 'overdue') return `Overdue · ${shortDate}`;
-    if (classification === 'today') return `Due today`;
-    return `Due ${shortDate}`;
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '';
+    return new Intl.DateTimeFormat(undefined, { month: 'short', day: 'numeric' }).format(d);
   } catch {
-    return null;
+    return '';
+  }
+}
+
+function formatRelative(iso: string): string {
+  try {
+    const d = new Date(iso);
+    if (Number.isNaN(d.getTime())) return '';
+    const days = Math.floor((Date.now() - d.getTime()) / (1000 * 60 * 60 * 24));
+    if (days === 0) return 'today';
+    if (days === 1) return 'yesterday';
+    if (days < 7) return `${days}d ago`;
+    return formatShortDate(iso);
+  } catch {
+    return '';
+  }
+}
+
+/**
+ * Translate the reason enum into a short chip label. Empty string when reason
+ * is missing (widget just omits the chip).
+ */
+function reasonToLabel(reason?: string): string {
+  switch (reason) {
+    case 'Both':
+      return 'HighPriority + Monitor';
+    case 'HighPriority':
+      return 'HighPriority';
+    case 'Monitor':
+      return 'Monitor';
+    default:
+      return '';
   }
 }
 
@@ -177,41 +248,45 @@ export const HighPrioritySection: React.FC<HighPrioritySectionProps> = ({ items,
         </Text>
       </div>
       {items.map(item => {
-        const classification = classifyDueDate(item.dueDate);
-        const dueLabel = formatDueLabel(item.dueDate, classification);
+        const badge = actionToBadge(item.action ?? 'None', item.dueDate, item.modifiedOn);
+        const reasonLabel = reasonToLabel(item.reason);
         return (
-          <div key={`${item.entityType}-${item.entityId}`} className={styles.itemRow}>
-            {item.kindLabel && (
-              <Text size={200} className={styles.kindLabel}>
-                {item.kindLabel}
+          <div key={`${item.entityType}-${item.entityId}`} className={styles.itemCard}>
+            <div className={styles.itemRowTop}>
+              {item.kindLabel && (
+                <Text size={200} className={styles.kindChip}>
+                  {item.kindLabel}
+                </Text>
+              )}
+              <Link
+                appearance="default"
+                className={styles.itemLink}
+                onClick={() => handleOpen(item.entityType, item.entityId)}
+                role="link"
+                tabIndex={0}
+                onKeyDown={(e: React.KeyboardEvent) => {
+                  if (e.key === 'Enter' || e.key === ' ') handleOpen(item.entityType, item.entityId);
+                }}
+              >
+                {item.name || '(untitled)'}&nbsp;&#8599;
+              </Link>
+              <div className={styles.badgeGroup}>
+                {badge && (
+                  <Badge appearance={badge.appearance} color={badge.color} size="small">
+                    {badge.label}
+                  </Badge>
+                )}
+                {reasonLabel && (
+                  <Text size={200} className={styles.reasonChip} title={`Flagged because ${reasonLabel} = Yes`}>
+                    · {reasonLabel}
+                  </Text>
+                )}
+              </div>
+            </div>
+            {item.description && (
+              <Text size={200} className={styles.descriptionRow}>
+                {item.description}
               </Text>
-            )}
-            <Link
-              appearance="default"
-              className={styles.itemLink}
-              onClick={() => handleOpen(item.entityType, item.entityId)}
-              role="link"
-              tabIndex={0}
-              onKeyDown={(e: React.KeyboardEvent) => {
-                if (e.key === 'Enter' || e.key === ' ') handleOpen(item.entityType, item.entityId);
-              }}
-            >
-              {item.name || '(untitled)'}&nbsp;&#8599;
-            </Link>
-            {classification === 'overdue' && dueLabel && (
-              <Badge appearance="filled" color="danger" size="small" className={styles.badgeOverdue}>
-                {dueLabel}
-              </Badge>
-            )}
-            {classification === 'today' && dueLabel && (
-              <Badge appearance="filled" color="warning" size="small" className={styles.badgeDueToday}>
-                {dueLabel}
-              </Badge>
-            )}
-            {classification === 'future' && dueLabel && (
-              <Badge appearance="outline" color="informative" size="small">
-                {dueLabel}
-              </Badge>
             )}
           </div>
         );

@@ -1,0 +1,48 @@
+<task id="R2-001" project="ai-spaarke-ai-workspace-UI-r2">
+  <metadata>
+    <title>Audit existing sprk_gridconfiguration records for workspace widgets</title>
+    <status>completed</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <phase>1</phase>
+    <tags>dataverse,configuration,audit,workspace-widgets</tags>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+Enumerate the 5 existing `sprk_gridconfiguration` records that back the workspace widgets (Documents, Matters, Projects, Invoices, Work Assignments). For each: record the GUID, name, entity, current `configjson.rowOpen.type` value, and current `configjson.rowOpen.formId` value (if any). Document findings in a project notes file. This audit informs task 002 (framework change) and task 003 (verification).
+
+The framework change in task 002 will unify all row-click behavior to Layout 1 regardless of `rowOpen.type` — so this audit is not gating that change. It IS the input for task 003's verification (baseline behavior before framework change vs. after).
+  </prompt>
+
+  <role>Dataverse-familiar developer with Spaarke schema knowledge.</role>
+
+  <goal>
+A committed file `notes/config-record-audit.md` listing all 5 records with GUID / name / entity / current `rowOpen.type` / current `rowOpen.formId`. Includes a summary line: "N records use `formDialog`, M use `newTab`, K have `formId` set."
+  </goal>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-spaarke-ai-workspace-UI-r2/spec.md</file>
+      <file>projects/ai-spaarke-ai-workspace-UI-r2/CLAUDE.md</file>
+      <file>docs/architecture/SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE.md</file>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Use dataverse MCP `read_query` to fetch all `sprk_gridconfiguration` records where the config is used by workspace widgets (query by name pattern or via section registration file references).</step>
+    <step>Cross-reference by reading `src/solutions/LegalWorkspace/src/sections/*.registration.ts` files to identify the exact `configId` values used by Documents, Matters, Projects, Invoices, Work Assignments.</step>
+    <step>For each identified record: parse `configjson`, extract `rowOpen.type` and `rowOpen.formId`.</step>
+    <step>Write `notes/config-record-audit.md` with a table and summary.</step>
+    <step>Verify no other Spaarke widgets consume these same records.</step>
+  </steps>
+
+  <tools>Bash · Read · Write · Grep · dataverse MCP (read_query, describe_table)</tools>
+
+  <acceptance-criteria>
+    <criterion>File `notes/config-record-audit.md` exists with all 5 records enumerated.</criterion>
+    <criterion>Each row has GUID + name + entity + rowOpen.type + rowOpen.formId (or "none").</criterion>
+    <criterion>Summary line reports counts of formDialog / newTab / with-formId / without-formId.</criterion>
+    <criterion>No config records are missed — cross-verified against section registration files.</criterion>
+  </acceptance-criteria>
+</task>

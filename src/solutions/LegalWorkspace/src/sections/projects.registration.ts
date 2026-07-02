@@ -41,11 +41,25 @@ export const projectsRegistration: SectionRegistration = {
       type: "content",
       title: "Projects",
       style: { overflow: "hidden" },
+      // Height-chain fix v2 — see communications.registration.ts for rationale.
       renderContent: () =>
-        React.createElement(DataverseEntityViewWidget, {
-          data: { configId: PROJECTS_CONFIG_ID },
-          widgetType: "projects-list",
-        }),
+        React.createElement(
+          "div",
+          {
+            style: {
+              display: "flex",
+              flexDirection: "column",
+              flex: "1 1 auto",
+              maxHeight: "80vh",
+              minHeight: 0,
+              overflow: "hidden",
+            },
+          },
+          React.createElement(DataverseEntityViewWidget, {
+            data: { configId: PROJECTS_CONFIG_ID },
+            widgetType: "projects-list",
+          }),
+        ),
     };
   },
 };

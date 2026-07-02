@@ -1,0 +1,59 @@
+<task id="R2-003" project="ai-spaarke-ai-workspace-UI-r2">
+  <metadata>
+    <title>Verify 5 workspace widgets adopt Layout 1 row-click behavior</title>
+    <status>completed</status>
+    <estimated-effort>2 hours</estimated-effort>
+    <phase>1</phase>
+    <tags>testing,regression,workspace-widgets,pcf,manual-qa</tags>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+Verify FR-04 through FR-08: Documents, Matters, Projects, Invoices, Work Assignments row-click now opens Layout 1 (OOB modal at 85% × 85%) via the framework change from task 002.
+
+No per-widget code change is needed — behavior change flows from the DataGrid `defaultRecordOpen` update. This task is verification-only, per-widget smoke test.
+
+If ANY of the 5 widgets doesn't behave correctly, investigate and either (a) file a bug in task 002 or (b) document a per-widget exception via `onRecordOpen` prop override with rationale.
+  </prompt>
+
+  <role>QA engineer familiar with the SpaarkeAi workspace UI and Dataverse model-driven forms.</role>
+
+  <goal>
+Manual QA sign-off document `notes/phase1-verification.md` confirming: click a row in each of the 5 widgets → OOB modal opens at 85% × 85% showing the entity's default main form → Save & Close returns to workspace. Screenshots or Loom optional. Deviations documented per widget.
+  </goal>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-spaarke-ai-workspace-UI-r2/spec.md</file>
+      <file>projects/ai-spaarke-ai-workspace-UI-r2/CLAUDE.md</file>
+      <file>projects/ai-spaarke-ai-workspace-UI-r2/notes/config-record-audit.md</file>
+      <file>src/solutions/LegalWorkspace/src/sections/documents.registration.ts</file>
+      <file>src/solutions/LegalWorkspace/src/sections/matters.registration.ts</file>
+      <file>src/solutions/LegalWorkspace/src/sections/projects.registration.ts</file>
+      <file>src/solutions/LegalWorkspace/src/sections/invoices.registration.ts</file>
+      <file>src/solutions/LegalWorkspace/src/sections/workAssignments.registration.ts</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Deploy the updated Spaarke.UI.Components + LegalWorkspace to the dev environment (build + code-page-deploy).</step>
+    <step>Open LegalWorkspace / SpaarkeAi in dev, navigate to a workspace containing each widget.</step>
+    <step>Documents widget: click a document row → verify OOB modal opens at 85%×85% showing Document main form.</step>
+    <step>Matters widget: click a matter row → verify same behavior for Matter main form.</step>
+    <step>Projects widget: click → verify Project main form.</step>
+    <step>Invoices widget: click → verify Invoice main form.</step>
+    <step>Work Assignments widget: click → verify Work Assignment main form.</step>
+    <step>For each: verify ESC closes; Save & Close returns to workspace; no browser new-tab.</step>
+    <step>Document results in `notes/phase1-verification.md` — one row per widget with pass/fail + notes.</step>
+    <step>If any widget deviates, investigate root cause (config record misconfig? DataGrid regression?) — coordinate with task 002 if code fix needed.</step>
+  </steps>
+
+  <tools>Bash · Read · Write · code-page-deploy skill · ui-test skill (optional)</tools>
+
+  <acceptance-criteria>
+    <criterion>All 5 widgets tested; results documented in `notes/phase1-verification.md`.</criterion>
+    <criterion>Each widget opens OOB modal at 85%×85% (Layout 1); no new-tab behavior anywhere.</criterion>
+    <criterion>ESC + Save & Close work correctly on each modal.</criterion>
+    <criterion>Any deviations investigated with documented root cause (either fixed in task 002 or documented as Path A exception).</criterion>
+  </acceptance-criteria>
+</task>

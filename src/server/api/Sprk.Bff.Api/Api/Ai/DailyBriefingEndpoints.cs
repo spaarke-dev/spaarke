@@ -901,6 +901,39 @@ public record HighPriorityItemDto
     /// </summary>
     [JsonPropertyName("kindLabel")]
     public string KindLabel { get; init; } = "";
+
+    /// <summary>
+    /// R7 W12 feedback (2026-07-01) — description / subject text from the source record.
+    /// Empty when the entity has no description field or the field is blank. Widget
+    /// truncates for compact display.
+    /// </summary>
+    [JsonPropertyName("description")]
+    public string Description { get; init; } = "";
+
+    /// <summary>
+    /// R7 W12 feedback (2026-07-01) — computed action classification for the "action"
+    /// column: <c>"Overdue"</c> / <c>"DueToday"</c> / <c>"DueSoon"</c> / <c>"Recent"</c> /
+    /// <c>"None"</c>. Derived server-side from due-date proximity or modifiedon recency.
+    /// Widget renders as a badge with intent color.
+    /// </summary>
+    [JsonPropertyName("action")]
+    public string Action { get; init; } = "None";
+
+    /// <summary>
+    /// R7 W12 feedback (2026-07-01) — reason the item appears in High Priority. One of:
+    /// <c>"HighPriority"</c> / <c>"Monitor"</c> / <c>"Both"</c>. Widget renders as a
+    /// short "flag" hint so operator sees WHY each record is here.
+    /// </summary>
+    [JsonPropertyName("reason")]
+    public string Reason { get; init; } = "";
+
+    /// <summary>
+    /// R7 W12 feedback (2026-07-01) — modifiedon timestamp for the "Recent" action fallback.
+    /// Kept as JSON only; widget uses to compute relative age when action is Recent.
+    /// </summary>
+    [JsonPropertyName("modifiedOn")]
+    [JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    public DateTimeOffset? ModifiedOn { get; init; }
 }
 
 /// <summary>

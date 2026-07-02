@@ -259,8 +259,13 @@ export function useInlineTodoCreate(webApi: IWebApi | null, userId?: string): Us
         // R7 W12 feedback item 7 — bind sprk_assignedto to the current user's
         // primary contact when known. Uses the @odata.bind syntax expected by
         // Xrm.WebApi.createRecord for lookup fields (target entity set 'contacts').
+        // Navigation-property name is the attribute SchemaName (PascalCase), not the
+        // logical name — using the lowercase logical name causes OData 400
+        // "undeclared property … only has property annotations in the payload but no
+        // property value was found". Matches the convention used across
+        // SmartTodoWidget, SmartToDo, and TodoDetail.
         if (primaryContactRef.current) {
-          record['sprk_assignedto@odata.bind'] = `/contacts(${primaryContactRef.current})`;
+          record['sprk_AssignedTo@odata.bind'] = `/contacts(${primaryContactRef.current})`;
         }
 
         // 2. Apply regarding (multi-entity resolution per ADR-024) — only when

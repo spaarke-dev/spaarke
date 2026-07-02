@@ -49,6 +49,10 @@ import { projectsRegistration } from "./sections/projects.registration";
 import { invoicesRegistration } from "./sections/invoices.registration";
 import { workAssignmentsRegistration } from "./sections/workAssignments.registration";
 import { mattersRegistration } from "./sections/matters.registration";
+// ai-spaarke-ai-workspace-UI-r2 FR-09 (2026-07-01): Communications section —
+// fifth Dataverse-entity-view section for sprk_communication (email/Teams/SMS/
+// notifications). Pattern D dual-use with `communications-list` direct widget.
+import { communicationsRegistration } from "./sections/communications.registration";
 // spaarkeai-compose-r1 task 040 (2026-06-29): Compose editor section. Mounted
 // by the "Compose" workspace layout (system row, task 010). Renders an inline
 // Skeleton placeholder in R1; task 042 swaps in the real TipTap widget.
@@ -112,6 +116,7 @@ export function createLegalWorkspaceSectionRegistry(
     projectsRegistration,
     invoicesRegistration,
     workAssignmentsRegistration,
+    communicationsRegistration,
     createLegalWorkspaceDailyBriefingRegistration(options.dailyBriefing ?? {}),
     calendarRegistration,
     composeEditorRegistration,

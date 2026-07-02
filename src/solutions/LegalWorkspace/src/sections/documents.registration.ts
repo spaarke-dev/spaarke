@@ -57,11 +57,25 @@ export const documentsRegistration: SectionRegistration = {
       type: "content",
       title: "My Documents",
       style: { overflow: "hidden" },
+      // Height-chain fix v2 — see communications.registration.ts for rationale.
       renderContent: () =>
-        React.createElement(DataverseEntityViewWidget, {
-          data: { configId: DOCUMENTS_CONFIG_ID },
-          widgetType: "documents-list",
-        }),
+        React.createElement(
+          "div",
+          {
+            style: {
+              display: "flex",
+              flexDirection: "column",
+              flex: "1 1 auto",
+              maxHeight: "80vh",
+              minHeight: 0,
+              overflow: "hidden",
+            },
+          },
+          React.createElement(DataverseEntityViewWidget, {
+            data: { configId: DOCUMENTS_CONFIG_ID },
+            widgetType: "documents-list",
+          }),
+        ),
     };
   },
 };

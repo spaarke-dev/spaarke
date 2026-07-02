@@ -125,6 +125,14 @@ export interface HighPriorityItemResult {
   monitor: boolean;
   /** Short entity-kind label (e.g., "Matter", "Task", "To Do"). */
   kindLabel: string;
+  /** Description / subject text from the record. Empty when unavailable. */
+  description?: string;
+  /** Server-computed action classification: 'Overdue' | 'DueToday' | 'DueSoon' | 'Recent' | 'None'. */
+  action?: string;
+  /** Reason the item appears here: 'HighPriority' | 'Monitor' | 'Both' | ''. */
+  reason?: string;
+  /** ISO 8601 modifiedon timestamp (used for 'Recent' action label). */
+  modifiedOn?: string;
 }
 
 export interface TldrResult {

@@ -330,10 +330,11 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
           const newTodoId = getCreatedId(synthesized.id);
           const openTodo = (): void => {
             if (!newTodoId) return;
-            const navigateTo: ((page: object, options?: object) => Promise<unknown>) | undefined =
-              xrm?.Navigation?.navigateTo;
-            if (typeof navigateTo !== 'function') return;
-            navigateTo(
+            // R7 W12 fix (2026-07-01): call xrm.Navigation.navigateTo as a method
+            // (not destructured) — the platform's implementation relies on `this`
+            // to access its internal _clientApiExecutor. Destructuring breaks it.
+            if (typeof xrm?.Navigation?.navigateTo !== 'function') return;
+            xrm.Navigation.navigateTo(
               { pageType: 'entityrecord', entityName: 'sprk_todo', entityId: newTodoId },
               { target: 2, width: { value: 80, unit: '%' }, height: { value: 80, unit: '%' } }
             ).catch(() => {
@@ -397,13 +398,17 @@ export const DailyBriefingApp: React.FC<DailyBriefingAppProps> = ({ params: _par
           { intent: 'warning', timeout: 5000 }
         );
       };
-      const navigateTo: ((page: object, options?: object) => Promise<unknown>) | undefined =
-        xrm?.Navigation?.navigateTo;
-      if (typeof navigateTo !== 'function') {
+      // R7 W12 fix (2026-07-01): call xrm.Navigation.navigateTo as a method (not
+      // destructured) — the platform's implementation relies on `this` to access
+      // its internal _clientApiExecutor. Destructuring like
+      //   `const navigateTo = xrm.Navigation.navigateTo`
+      //   `navigateTo(...)`
+      // throws `Cannot read properties of undefined ('_clientApiExecutor')`.
+      if (typeof xrm?.Navigation?.navigateTo !== 'function') {
         dispatchAccessToast();
         return;
       }
-      navigateTo(
+      xrm.Navigation.navigateTo(
         {
           pageType: 'entityrecord',
           entityName: entityType,
