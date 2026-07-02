@@ -1,12 +1,20 @@
 /**
  * SmartTodoApp — Main layout component for the SmartTodo Code Page.
  *
- * Renders the Kanban board (or List view, per R4 task 033 / FR-09) as the
- * primary surface. To-do detail editing is handled by the hybrid
- * `<SmartTodoModal>` (R4 task 040) which embeds the OOB MDA main form in an
- * iframe — see `./components/Modal`. The legacy R3 `TodoDetailPanel` side-pane
- * is retired per R4 FR-18 / task 042 (UAT OD-4: no save + Completed broken
- * were inherent to the side-pane pattern).
+ * Renders the Kanban board as the primary surface. To-do detail editing opens
+ * the OOB `sprk_todo` main form via `Xrm.Navigation.navigateTo` at Layout 1
+ * (85% × 85% centered modal, target 2). See `notes/smart-todo-modal-callsites.md`
+ * in `projects/ai-spaarke-ai-workspace-UI-r2/` for the R2 migration context.
+ *
+ * ai-spaarke-ai-workspace-UI-r2 FR-13/FR-14 (2026-07-01) retired the hybrid
+ * `<SmartTodoModal>` (R4 task 040) which embedded the OOB MDA main form in an
+ * iframe — Microsoft Learn cites iframe-hosting `main.aspx` as a contractually
+ * unsupported anti-pattern. The R2 replacement uses the OOB
+ * `Xrm.Navigation.navigateTo` centered-modal path.
+ *
+ * Trade-off: the R4 modal's `<` / `>` record-navigation feature (walking the
+ * current filter set) is INTENTIONALLY dropped in R2 per FR-13. Users navigating
+ * between records return to the workspace and pick the next one.
  *
  * Layout (R4-104 — single consolidated chrome row, was R4-030's 4-row):
  *   TodoProvider (shared state)
@@ -14,11 +22,10 @@
  *     │           toggles + selection-aware actions)
  *     └── SmartToDo (Kanban, with `hideHeader` so inner KanbanHeader is
  *           suppressed — chrome lives in the consolidated Header above)
- *         OR ListView (toggled via header view-mode, FR-09)
  *
- * Modal:
- *   <SmartTodoModal> mounts only when `modalTodoId !== null`. Open is driven
- *   by the `OPEN_TODOS_EVENT` window event (toolbar Open + card double-click).
+ * Open triggers (all route to `openSprkTodoAsLayout1` below):
+ *   • `OPEN_TODOS_EVENT` window event — toolbar Open + card double-click + card Open icon
+ *   • `useLaunchContext` → `openTodo` action — URL-param launch (parent-form ribbon path)
  *
  * @see ADR-021 - Fluent UI v9 design system (makeStyles + tokens only)
  */
@@ -45,11 +52,49 @@ import { Header } from "./components/Header";
 import { useCurrentContactId } from "@spaarke/smart-todo-components";
 import { createToolbarActions, OPEN_TODOS_EVENT } from "./components/Toolbar";
 import type { ITodoActionWebApi, OpenTodosEventDetail } from "./components/Toolbar";
-import { SmartTodoModal, todosToModalRecords } from "./components/Modal";
 import { getWebApi, getUserId, getSpeContainerIdFromBusinessUnit } from "./services/xrmProvider";
 import { useLaunchContext } from "./hooks/useLaunchContext";
 import { useUserPreferences } from "./hooks/useUserPreferences";
 // SmartTodoViewMode type import removed 2026-06-19 — see viewMode removal above.
+
+// ---------------------------------------------------------------------------
+// R2 FR-13 — Layout 1 open helper
+//
+// Opens the OOB `sprk_todo` main form at Layout 1 (85% × 85% centered modal via
+// `Xrm.Navigation.navigateTo`). Replaces the R4 iframe-hosted `<SmartTodoModal>`
+// per ai-spaarke-ai-workspace-UI-r2 FR-13 (iframe-hosting `main.aspx` is a
+// contractually unsupported anti-pattern per Microsoft Learn 2025-05-07).
+//
+// Called from two open triggers below: the `OPEN_TODOS_EVENT` listener and the
+// `useLaunchContext` openTodo effect. Both funnel through this helper so the
+// Layout 1 geometry (FR-20 binding: 85% × 85%, position 1, target 2) stays in
+// one place.
+// ---------------------------------------------------------------------------
+
+function openSprkTodoAsLayout1(todoId: string): void {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const xrm = (window.parent as any)?.Xrm ?? (window as any).Xrm;
+  if (!xrm?.Navigation?.navigateTo) {
+    // eslint-disable-next-line no-console
+    console.warn("[SmartTodoApp] Xrm.Navigation.navigateTo unavailable; open aborted.");
+    return;
+  }
+  const cleanId = todoId.replace(/[{}]/g, "");
+  void Promise.resolve(
+    xrm.Navigation.navigateTo(
+      { pageType: "entityrecord", entityName: "sprk_todo", entityId: cleanId },
+      {
+        target: 2,
+        position: 1,
+        width: { value: 85, unit: "%" },
+        height: { value: 85, unit: "%" },
+      },
+    ),
+  ).catch((err: unknown) => {
+    // eslint-disable-next-line no-console
+    console.error("[SmartTodoApp] navigateTo failed:", err);
+  });
+}
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -57,12 +102,9 @@ import { useUserPreferences } from "./hooks/useUserPreferences";
 
 const useStyles = makeStyles({
   /**
-   * Outer page frame — vertical stack: 4-row Header on top, primary surface
-   * (kanban / list) below. R4 task 030 (FR-06).
-   *
-   * R4 task 042 (FR-18): the R3 two-pane (kanban + TodoDetailPanel) layout is
-   * retired. The hybrid `<SmartTodoModal>` (task 040) replaces the side-pane,
-   * so this frame now hosts a single primary surface beneath the Header.
+   * Outer page frame — vertical stack: Header on top, primary Kanban surface
+   * below. R4 task 030 (FR-06); R2 FR-14 (2026-07-01) retired the side-pane
+   * `<SmartTodoModal>` mount that previously overlaid this frame.
    */
   page: {
     display: "flex",
@@ -165,76 +207,40 @@ function SmartTodoLayout(): React.ReactElement {
     () => new Set<string>(),
   );
 
-  // ── R4 task 040 — Card-open modal state ──────────────────────────────────
-  //
-  // `modalTodoId` is the GUID of the to-do currently rendered inside the
-  // <SmartTodoModal>. `null` means the modal is closed. Setting it (via the
-  // `OPEN_TODOS_EVENT` window listener below OR the R4-100 `openTodo` launch
-  // context auto-mount) mounts the modal; the modal's `<` / `>` nav writes
-  // back to update the iframe src.
-  //
-  // Spec FR-16 / FR-17 — the hybrid modal works in BOTH MDA context (this
-  // Code Page launched from a parent-form subgrid / Visual Host
-  // drill-through) AND Code Page context (standalone Code Page). The shell
-  // is host-agnostic by construction (no MDA-only API calls).
-  const [modalTodoId, setModalTodoId] = React.useState<string | null>(null);
+  // R2 FR-13 (2026-07-01) — The hybrid `<SmartTodoModal>` (R4 task 040) that
+  // used to overlay this component has been retired. The `OPEN_TODOS_EVENT`
+  // listener and the `useLaunchContext` openTodo effect (below) now call
+  // `openSprkTodoAsLayout1` directly, which uses `Xrm.Navigation.navigateTo` at
+  // 85% × 85% (Layout 1 standard per FR-20). No local modal state remains.
 
-  // ── R4 task 100 / W-2 — openTodo launch-context auto-mount ───────────────
+  // ── openTodo launch-context — routes to Layout 1 ─────────────────────────
   //
   // When the LegalWorkspace SmartTodo widget's Open button launches this Code
   // Page with `?action=openTodo&todoId=<guid>`, `useLaunchContext` returns the
-  // `openTodo` discriminator. We project that into `modalTodoId` so the modal
-  // auto-mounts on the requested record (closes UAT issue 4 from the 2026-06-18
-  // widget-parity audit — clicking Open must show the To Do main form, NOT the
-  // bare Kanban).
-  //
-  // Coexistence with `LaunchCreateTodoWizardHost` (below): both consumers of
-  // `useLaunchContext` are safe to run in parallel. The hook's `useMemo` reads
-  // `window.location.search` once per consumer on first render (so both see
-  // the SAME URL state); the `useEffect` clear is idempotent (no-op when the
-  // keys are already gone). createTodo and openTodo are mutually exclusive
-  // launch actions (different `action` discriminator values), so each branch
-  // only fires for its own action.
-  //
-  // Regression-safety with the R4-040 OPEN_TODOS_EVENT path (Code Page direct
-  // entry → toolbar Open / card double-click): both paths converge on
-  // `setModalTodoId`. Order of operations on first render:
-  //   1. `useLaunchContext` runs in render → returns `{action: 'openTodo', todoId}`.
-  //   2. This effect runs after commit → calls `setModalTodoId(todoId)`.
-  //   3. OPEN_TODOS_EVENT listener (below) is also installed in commit — it
-  //      stays dormant until a user-initiated event fires. No race.
+  // `openTodo` discriminator. R2 FR-13 (2026-07-01) — this path now calls
+  // `openSprkTodoAsLayout1` directly (was setModalTodoId under R4-100/W-2).
   const launchContext = useLaunchContext();
   React.useEffect(() => {
     if (launchContext?.action === 'openTodo') {
-      setModalTodoId(launchContext.todoId);
+      openSprkTodoAsLayout1(launchContext.todoId);
     }
     // Run once on mount — `launchContext` is memoised by the hook for the
     // component's lifetime and won't change.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // ── R4 task 040 — Filter-set projection for modal navigation ─────────────
-  // The modal's `<` / `>` nav walks the CURRENT filter set — the items array
-  // from TodoContext (which reflects search + facets per task 031). We
-  // memoize the projection so the modal sees a stable record list per
-  // items-array identity.
-  const modalRecords = React.useMemo(
-    () => todosToModalRecords(items),
-    [items],
-  );
-
-  // ── R4 task 040 — Subscribe to OPEN_TODOS_EVENT ──────────────────────────
+  // ── Subscribe to OPEN_TODOS_EVENT — routes to Layout 1 ────────────────────
   // Task 032's `createToolbarActions` Open handler dispatches a window
   // `CustomEvent` with shape `{selectedIds: string[], firstId: string}`
   // whenever the user clicks the toolbar Open. Task 060 ALSO dispatches the
-  // same event from card double-click + the per-card Open icon. Subscribing
-  // here makes the modal the SINGLE consumer of the event — any launcher
-  // just dispatches.
+  // same event from card double-click + the per-card Open icon. R2 FR-13
+  // (2026-07-01) — the listener now calls `openSprkTodoAsLayout1` directly
+  // (was setModalTodoId under R4-040). Dispatchers are unchanged.
   React.useEffect(() => {
     const handler = (ev: Event): void => {
       const detail = (ev as CustomEvent<OpenTodosEventDetail>).detail;
       if (detail?.firstId) {
-        setModalTodoId(detail.firstId);
+        openSprkTodoAsLayout1(detail.firstId);
       }
     };
     window.addEventListener(OPEN_TODOS_EVENT, handler);
@@ -284,10 +290,11 @@ function SmartTodoLayout(): React.ReactElement {
   // handler reads the LATEST items + selectedIds at click time (avoids
   // recreating handlers on every render).
   //
-  // Open  — dispatches `sprk-smarttodo:open-todos` on window. Task 040 will
-  //         subscribe and route to <RecordNavigationModalShell> + To Do main
-  //         form iframe. Until 040's listener lands, the event is observed
-  //         only by `console.info` (smoke-test safe).
+  // Open  — dispatches `sprk-smarttodo:open-todos` on window. The listener
+  //         above (R2 FR-13, 2026-07-01) calls `openSprkTodoAsLayout1` — opens
+  //         the OOB sprk_todo main form via `Xrm.Navigation.navigateTo` at
+  //         Layout 1 (85% × 85%). (Was: R4-040 iframe-hosted `<SmartTodoModal>`,
+  //         retired per FR-14.)
   // Delete — confirms via window.confirm, deletes selected, refetches via
   //          TodoContext.
   // Email  — composes a mailto: with selected todo names + due dates.
@@ -402,10 +409,10 @@ function SmartTodoLayout(): React.ReactElement {
 
   // ── R4 task 042 (FR-18) — TodoDetailPanel side-pane retired ──────────────
   // The R3 two-pane layout (kanban + collapsible TodoDetailPanel separated by
-  // a draggable PanelSplitter) is gone. To-do detail editing is handled by
-  // the hybrid `<SmartTodoModal>` mounted below (R4 task 040). The single
-  // remaining primary surface — Kanban or List view — fills the page below
-  // the Header.
+  // a draggable PanelSplitter) is gone. R2 FR-13 (2026-07-01) further retired
+  // the R4 hybrid `<SmartTodoModal>` in favor of `Xrm.Navigation.navigateTo`
+  // at Layout 1 (see `openSprkTodoAsLayout1` at module scope). The single
+  // remaining primary surface — Kanban — fills the page below the Header.
 
   return (
     <div className={styles.page}>
@@ -468,19 +475,10 @@ function SmartTodoLayout(): React.ReactElement {
         />
       </div>
 
-      {/* ── R4 task 040 — Card-open modal (HYBRID modal pattern, FR-13/16/17)
-          ──────────────────────────────────────────────────────────────────
-          Conditionally mounted so the iframe / dialog DOM only exists when
-          the modal is open. Closing the modal (X / ESC / backdrop) unmounts
-          and disposes the iframe so the next open is a fresh load. */}
-      {modalTodoId !== null && (
-        <SmartTodoModal
-          todos={modalRecords}
-          currentId={modalTodoId}
-          onNavigateToId={setModalTodoId}
-          onClose={() => setModalTodoId(null)}
-        />
-      )}
+      {/* R2 FR-14 (2026-07-01) — the R4 hybrid `<SmartTodoModal>` mount was
+          retired here. Open triggers now call `openSprkTodoAsLayout1` which
+          opens the OOB sprk_todo main form via `Xrm.Navigation.navigateTo` at
+          Layout 1 (85% × 85%). See notes/smart-todo-modal-callsites.md. */}
     </div>
   );
 }

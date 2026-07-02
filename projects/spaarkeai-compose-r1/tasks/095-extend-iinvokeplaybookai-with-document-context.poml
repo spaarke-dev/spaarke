@@ -2,7 +2,8 @@
 <task id="095" project="spaarkeai-compose-r1">
   <metadata>
     <title>Extend IInvokePlaybookAi with document-context overload (userContext + Document)</title>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-07-01</completed>
     <estimated-effort>1.5 hours</estimated-effort>
     <tags>bff-api, facade, adr-013, public-contracts, ai-platform</tags>
     <rigor-hint>FULL</rigor-hint>
@@ -88,4 +89,127 @@
       <file>docs/assessments/bff-ai-extraction-assessment-2026-05-20.md</file>
     </files>
   </knowledge>
+
+  <notes>
+    Completed 2026-07-01 (~1 h vs 1.5 h estimate).
+
+    Design decision: chose **optional parameters** over an overload.
+      - The C# compiler auto-fills defaults for existing 4-arg call sites
+        (chat-tool handler, M365 Copilot gateway, DailyBriefing) — zero
+        source changes required at call time.
+      - Single method, single impl — no maintenance burden of two identical
+        code paths.
+      - Ordering: `userContext` + `document` inserted AFTER `cancellationToken`
+        (all three have defaults, so positional order is legal) to preserve
+        the pre-existing 4-arg positional shape. Callers passing ct as arg
+        #4 continue to compile without switching to named-arg form.
+
+    Signature (before → after):
+      Before:
+        Task&lt;PlaybookInvocationResult&gt; InvokePlaybookAsync(
+            Guid playbookId,
+            IReadOnlyDictionary&lt;string, string&gt;? parameters,
+            PlaybookInvocationContext context,
+            CancellationToken cancellationToken = default);
+      After:
+        Task&lt;PlaybookInvocationResult&gt; InvokePlaybookAsync(
+            Guid playbookId,
+            IReadOnlyDictionary&lt;string, string&gt;? parameters,
+            PlaybookInvocationContext context,
+            CancellationToken cancellationToken = default,
+            string? userContext = null,                       // NEW
+            DocumentContext? document = null);                // NEW
+
+    Implementation changes:
+      - `IInvokePlaybookAi.cs`: signature extended + `using Sprk.Bff.Api.Services.Ai`
+        + XML docs updated (Phase 2 consumer section + parameter docs +
+        backward-compatibility note).
+      - `InvokePlaybookAi.cs`: forwards `userContext` and `document` onto
+        `PlaybookRunRequest.UserContext` and `PlaybookRunRequest.Document`.
+        Telemetry updated to log `hasUserContext` + `userContextLength` +
+        `hasDocument` + `documentTextLength` (presence + counts only per
+        ADR-015 — never the text bodies).
+      - `NullInvokePlaybookAi.cs`: signature updated to match interface;
+        kill-switch semantics unchanged (throws before touching new args
+        so ADR-032 P3 contract holds for Phase 1 + Phase 2 consumers alike).
+
+    ADR-013 amendment ratification:
+      The existing `PhaseAVerticalSliceTests.ADR013_InvokePlaybookAiFacade_DoesNotExposeAiInternalTypesInSurface`
+      reflection test asserts that NO type from `Sprk.Bff.Api.Services.Ai`
+      namespace appears on the facade surface. My widening adds `DocumentContext`
+      (which lives in that namespace). Per CLAUDE.md §6.5 Path B — this is
+      the ADR-013 amendment the POML deliberately calls for. Test updated
+      to accept `DocumentContext` via an explicit `amendmentAllowedTypes`
+      HashSet with cited rationale (task 095 + task 102 formal amendment).
+      Silent bypass would have been wrong (§6.5 forbids); an explicit
+      allow-list with a citation is the correct Path B posture.
+
+    Moq expression-tree fix (CS0854):
+      C# forbids optional arguments in expression trees; Moq `Setup(...)` and
+      `Verify(...)` calls use expression trees. Adding 2 more optional args
+      broke 25+ Setup/Verify sites across 5 test files:
+        - `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Handlers/InvokePlaybookHandlerTests.cs` (11 sites + 1 Callback lambda)
+        - `tests/unit/Sprk.Bff.Api.Tests/Api/Ai/DailyBriefingEndpointsTests.cs` (3 sites + 1 Callback lambda)
+        - `tests/unit/Sprk.Bff.Api.Tests/Api/Ai/DailyBriefingResponseShapeTests.cs` (1 site)
+        - `tests/integration/contract/Api/Compose/ComposeEndpointsContractTests.cs` (5 sites)
+        - `tests/integration/regression/Compose/ComposeSummarizeRoundtripSmokeTests.cs` (7 sites + 2 Callback lambdas)
+      Each site got `It.IsAny<string?>()` + `It.IsAny<Sprk.Bff.Api.Services.Ai.DocumentContext?>()`
+      appended to satisfy the expression tree. Callback generics extended
+      from 4 → 6 type params + lambdas expanded from 4 → 6 args.
+
+    New tests added to `InvokePlaybookAiTests.cs`:
+      1. `InvokePlaybookAsync_WithUserContextAndDocument_ForwardsToRequest` —
+         asserts widened args flow verbatim onto `PlaybookRunRequest.UserContext`
+         + `PlaybookRunRequest.Document` (BeSameAs reference identity).
+      2. `InvokePlaybookAsync_WithoutUserContextOrDocument_BackwardCompatibleRequestShape` —
+         regression guard: the 4-arg call shape produces null UserContext +
+         null Document on the request (byte-identical to pre-widening).
+      3. `NullInvokePlaybookAi_WithWidenedArgs_StillThrowsFeatureDisabled` —
+         kill-switch peer short-circuits regardless of widened args
+         (prevents document-context callers from silently reaching a
+         fake-success path).
+
+    Verification (all POML acceptance criteria):
+      - #1 `dotnet build` succeeds: ✅ 0 errors / 19 warnings (baseline).
+      - #2 `IInvokePlaybookAi` still callable via the old 4-arg shape:
+        ✅ verified — all 4 existing production callers
+        (`InvokePlaybookHandler.cs`, `DailyBriefingEndpoints.cs`,
+        `SprkChatAgentFactory.cs`, `PlaybookInvocationService.cs`,
+        `ComposeEndpoints.cs`) compiled unchanged. Backward-compat regression
+        test covers this.
+      - #3 Interface tests updated: ✅ 3 new tests in `InvokePlaybookAiTests.cs`.
+        94/94 affected tests pass (facade + boundary + all consumer setups).
+
+    Pre-existing failures preserved:
+      Full BFF suite has 7 pre-existing failures (6 ComposeServiceTests
+      Save/Promote + 1 DailyBriefingCollectorTests) — verified via git stash
+      + baseline re-test. These tests do NOT reference `IInvokePlaybookAi`.
+      Task 095 introduces zero test regressions.
+
+    Files touched (git status summary):
+      - M `src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IInvokePlaybookAi.cs`
+      - M `src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/InvokePlaybookAi.cs`
+      - M `src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/NullInvokePlaybookAi.cs`
+      - M `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/PublicContracts/InvokePlaybookAiTests.cs`
+      - M `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Handlers/InvokePlaybookHandlerTests.cs`
+      - M `tests/unit/Sprk.Bff.Api.Tests/Api/Ai/DailyBriefingEndpointsTests.cs`
+      - M `tests/unit/Sprk.Bff.Api.Tests/Api/Ai/DailyBriefingResponseShapeTests.cs`
+      - M `tests/unit/Sprk.Bff.Api.Tests/Integration/PhaseAVerticalSliceTests.cs`
+      - M `tests/integration/contract/Api/Compose/ComposeEndpointsContractTests.cs`
+      - M `tests/integration/regression/Compose/ComposeSummarizeRoundtripSmokeTests.cs`
+      - M `projects/spaarkeai-compose-r1/current-task.md`
+      - M `projects/spaarkeai-compose-r1/tasks/TASK-INDEX.md`
+      - M `projects/spaarkeai-compose-r1/tasks/095-extend-iinvokeplaybookai-with-document-context.poml`
+
+    Downstream unblocked:
+      - Task 096 (impl updates): `ComposeService`/`ComposeEndpoints` can now
+        call the widened facade with UserContext + Document sourced from
+        `IDocxTextExtractor` (task 094).
+      - Task 097 (SSE endpoint conversion): same facade signature — no
+        additional changes required beyond the SSE wiring.
+      - Task 102 (ADR-013 amendment formalization): the amendment allow-list
+        annotation in `PhaseAVerticalSliceTests.cs` gives task 102 a concrete
+        artifact to cite when filing the amendment in `docs/adr/` +
+        `.claude/adr/`.
+  </notes>
 </task>

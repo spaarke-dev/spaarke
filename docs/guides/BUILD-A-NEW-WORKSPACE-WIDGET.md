@@ -514,6 +514,33 @@ Same shape as §3.2. `category: 'wizard'` is appropriate for modal launchers.
 
 ---
 
+## 6.6. Row-click behavior for entity-list widgets (added 2026-07-01 by R2 FR-17)
+
+Any workspace widget that renders a list of Dataverse records (Documents, Matters, Projects, Invoices, Work Assignments, Communications, To Do, …) inherits **Layout 1** row-click behavior from the Spaarke DataGrid framework — **no per-widget wiring required**.
+
+### The contract
+Every row-click routes through the framework's `defaultRecordOpen`, which calls `Xrm.Navigation.navigateTo({ pageType: "entityrecord", entityName, entityId, formId? }, { target: 2, position: 1, width: {value: 85, unit: '%'}, height: {value: 85, unit: '%'} })`. This is Layout 1 (per [`docs/standards/MODAL-DECISION-CRITERIA.md`](../standards/MODAL-DECISION-CRITERIA.md)) — one modal size for every entity (**85% × 85%**, R2 FR-20 binding).
+
+### What you get for free
+- Row-click opens the user's default main form for the entity (or the form GUID specified in `configjson.rowOpen.formId` — see [`SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE.md`](../architecture/SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE.md) `configjson.rowOpen`)
+- OOB modal with native Save & Close, ESC dismissal, entity ribbon, business rules, form scripts
+- The current SpaarkeAi / LegalWorkspace tab stays mounted behind the modal — no navigation-away
+
+### Reference example (canonical)
+Communications workspace widget — shipped 2026-07-01 by ai-spaarke-ai-workspace-UI-r2 Phase 2:
+- Section shim: [`src/solutions/LegalWorkspace/src/sections/communications.registration.ts`](../../src/solutions/LegalWorkspace/src/sections/communications.registration.ts)
+- Direct widget: [`src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/register-workspace-widgets.ts`](../../src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/register-workspace-widgets.ts) (`communications-list` block)
+- Config record: `sprk_gridconfiguration` GUID `e1826c4c-9575-f111-ab0e-7ced8ddc4a05`, `configjson.rowOpen.type: "formDialog"`, `formId` omitted (opens user's default `sprk_communication` main form)
+
+### To vary row-click behavior (rare)
+Do NOT pass a bespoke `onRecordOpen` handler unless you have a documented reason. The framework's default handler IS the standard. If you truly need custom behavior:
+1. Document the reason in your project's `spec.md` "ADR Tensions" section per [`CLAUDE.md` §6.5](../../CLAUDE.md#65-adr-conflict-resolution-protocol-binding--added-2026-06-29)
+2. Verify your custom handler still lands at Layout 1 (85% × 85%) unless a Layout 2 case applies
+
+**Anti-pattern**: iframe-hosting OOB `main.aspx` inside a proprietary shell. Retired 2026-07-01 by R2 FR-14 (`SmartTodoModal` was the last Spaarke consumer). See [`docs/standards/MODAL-DECISION-CRITERIA.md` § anti-pattern 4](../standards/MODAL-DECISION-CRITERIA.md#4-do-not-iframe-embed-oob-mainaspx-as-a-standard-pattern) for the verbatim MS Learn 2025-05-07 quote.
+
+---
+
 ## 7. Cheat sheet — file edits per archetype
 
 | Archetype | Files created | Files edited | Scripts run | Deploys |

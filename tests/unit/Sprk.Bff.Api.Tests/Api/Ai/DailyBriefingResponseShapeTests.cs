@@ -136,7 +136,9 @@ public sealed class DailyBriefingResponseShapeTests
                 It.IsAny<Guid>(),
                 It.IsAny<IReadOnlyDictionary<string, string>?>(),
                 It.IsAny<PlaybookInvocationContext>(),
-                It.IsAny<CancellationToken>()))
+                It.IsAny<CancellationToken>(),
+                It.IsAny<string?>(),
+                It.IsAny<Sprk.Bff.Api.Services.Ai.DocumentContext?>()))
             .ReturnsAsync(result);
         return mock;
     }

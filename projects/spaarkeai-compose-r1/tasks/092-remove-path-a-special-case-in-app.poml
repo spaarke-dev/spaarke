@@ -2,7 +2,8 @@
 <task id="092" project="spaarkeai-compose-r1">
   <metadata>
     <title>App.tsx: remove Path A special-case; render ThreePaneShell always; pass composeMode via layout hint</title>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-07-01</completed>
     <estimated-effort>1 hour</estimated-effort>
     <tags>frontend, spaarkeai, three-pane, app-root, refactor</tags>
     <rigor-hint>FULL</rigor-hint>
@@ -74,4 +75,104 @@
       <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
     </files>
   </knowledge>
+
+  <notes>
+    Completed 2026-07-01 (~45 min, under 1 h estimate).
+
+    Investigation finding: ThreePaneShell has no built-in layout-selection
+    prop. Layout selection lives in WorkspacePane via `useWorkspaceLayouts`
+    (BFF-driven `activeLayout` + optional sessionStorage
+    `spaarke.workspace.activeLayoutId` pin). The "Compose" `sprk_workspacelayout`
+    row (id `c09d26be-e173-f111-ab0e-7ced8ddc4a05`, sprk_name="Compose") is
+    live in Dev. The `compose-editor` section registration exists but renders
+    `ComposeWorkspacePlaceholder` (Skeleton) — task 093 swaps that for the
+    real widget consuming ComposeLaunchContext.
+
+    Approach chosen (informs task 093):
+      Added a new React context `ComposeLaunchContext` on ThreePaneShell
+      exposing `{ composeMode: 'editor', document, driveId }` when the app
+      was launched via the ribbon modal. This is a lightweight, name-based
+      layout override (no client-side GUID pinning; no sessionStorage
+      side-effect that would leak across sessions).
+
+    File changes:
+      - `src/solutions/SpaarkeAi/src/App.tsx`:
+          * Removed the Path A special-case block entirely (was ~34 LOC).
+          * Removed unused imports: `ComposeWorkspace`, `PaneEventBusProvider`,
+            `getTenantId`, and the `tenantId` local resolver.
+          * App now ALWAYS renders `<ThreePaneShell>` and forwards the compose
+            launch context as 3 new optional props (composeMode, composeDocument,
+            composeDriveId).
+          * `data-spaarkeai-mode="compose"` attribute preserved on root div
+            for e2e-test discriminability when composeMode is set.
+
+      - `src/solutions/SpaarkeAi/src/components/shell/ThreePaneShell.tsx`:
+          * Added exported `ComposeLaunchContextValue` interface + context
+            + `useComposeLaunch()` consumer hook.
+          * Added 3 optional props on `ThreePaneShellProps`: composeMode,
+            composeDocument, composeDriveId.
+          * Wrapped the existing provider tree in `<ComposeLaunchContext.Provider>`
+            (memoized value — null when composeMode is unset).
+          * Added `import type { ComposeDocumentRef } from '@spaarke/compose-components'`.
+
+      - `src/solutions/SpaarkeAi/src/components/workspace/WorkspacePane.tsx`:
+          * Added `useComposeLaunch` import from `../shell/ThreePaneShell`.
+          * Introduced `layoutForAutoInstall` memo: if composeMode='editor'
+            AND the "Compose" layout is present in `layouts`, use it;
+            otherwise fall through to `activeLayout` (BFF default) — no
+            behavior change for non-compose launches.
+          * Rewired the existing auto-install effect to use
+            `layoutForAutoInstall` instead of `activeLayout`.
+          * Disabled the pinned-list skip in compose-launch mode (so we
+            always land in the Compose editor regardless of user's pin list).
+          * Updated the `console.info` label to distinguish "compose" vs
+            "default" auto-install for debug visibility.
+
+    Verification (all POML acceptance criteria):
+      - #1 "Path A modal launch → three panes visible → workspace pane shows
+        Compose editor": Three panes render via ThreePaneShell + Compose
+        layout auto-selected. Actual editor mount is task 093's swap.
+        Partial ✅ (three panes + Compose layout auto-select) with 093 as
+        the remaining wire-up.
+      - #2 "Non-Compose launches still open with default layout unchanged":
+        ✅ `layoutForAutoInstall` falls through to `activeLayout` when
+        composeMode is unset. Zero code-path change for the standard case.
+      - #3 "All existing tests pass": ✅ Full jest baseline preserved
+        (12 failed / 18 passed suites; 5 failed / 470 passed tests) —
+        identical to post-091 baseline.
+      - Vite build: ✅ 3579 modules / 13.86s / 3991.14 kB / gzip 1088.21 kB
+        (bundle REDUCED ~886 kB / 269 kB gzip because ComposeWorkspace +
+        TipTap chain is no longer eager — Vite tree-shakes it since nothing
+        eagerly imports it now that App.tsx doesn't; will come back through
+        the section factory when task 093 lands).
+      - Ribbon build: ✅ 3 scripts / DocumentComposeLaunch + EntityFormLaunch
+        + WorkspaceLaunch clean.
+
+    Contract satisfied:
+      Established the `ComposeLaunchContext` seam that task 093 will consume
+      to thread the document pointer to the real ComposeWorkspace mount.
+      No shortcut / no hardcoded document ref in the section factory — the
+      pattern matches the "receiver reads context" convention used by other
+      SpaarkeAi widget factories (e.g. WorkspaceLayoutWidget → SectionFactoryContext).
+
+    Follow-ups:
+      - Task 093 will:
+          (a) modify `src/solutions/LegalWorkspace/src/sections/composeEditor.registration.ts`
+              to render the real `<ComposeWorkspace>` from `@spaarke/compose-components`
+              instead of the Skeleton placeholder;
+          (b) inside the section factory, call `useComposeLaunch()` to get
+              document context and pass through to ComposeWorkspace's
+              `initialDocumentRef` prop;
+          (c) verify the bundle grows back to include ComposeWorkspace
+              chain (~4.9 MB) when the swap lands.
+      - No new deferred issues raised.
+
+    Files touched (git status summary):
+      - M `src/solutions/SpaarkeAi/src/App.tsx`
+      - M `src/solutions/SpaarkeAi/src/components/shell/ThreePaneShell.tsx`
+      - M `src/solutions/SpaarkeAi/src/components/workspace/WorkspacePane.tsx`
+      - M `projects/spaarkeai-compose-r1/current-task.md`
+      - M `projects/spaarkeai-compose-r1/tasks/TASK-INDEX.md`
+      - M `projects/spaarkeai-compose-r1/tasks/092-remove-path-a-special-case-in-app.poml`
+  </notes>
 </task>

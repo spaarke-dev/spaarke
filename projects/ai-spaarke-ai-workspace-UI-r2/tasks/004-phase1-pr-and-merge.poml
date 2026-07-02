@@ -1,0 +1,53 @@
+<task id="R2-004" project="ai-spaarke-ai-workspace-UI-r2">
+  <metadata>
+    <title>Phase 1 PR — framework + widget migration</title>
+    <status>not-started</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <phase>1</phase>
+    <tags>pr,merge,ci,git</tags>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+Prepare Phase 1 PR containing tasks 001, 002, 003 changes. Push branch, create PR, wait for CI green, resolve any code-review feedback, merge to master.
+
+Phase 1 PR body should cite: FR-01/02/03/04-08, the modal decision criteria standard, the R1 → R2 progression, and the phased-PR strategy (this is 1 of 3).
+  </prompt>
+
+  <role>Developer shepherding a PR through CI + review to merge.</role>
+
+  <goal>
+PR 1 merged to master. `work/ai-spaarke-ai-workspace-UI-r2` branch synced with master post-merge. TASK-INDEX updated: 001–004 marked ✅.
+  </goal>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-spaarke-ai-workspace-UI-r2/spec.md</file>
+      <file>projects/ai-spaarke-ai-workspace-UI-r2/design.md</file>
+      <file>projects/ai-spaarke-ai-workspace-UI-r2/notes/phase1-verification.md</file>
+      <file>projects/ai-spaarke-ai-workspace-UI-r2/notes/config-record-audit.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Verify local branch is clean, build passes, tests pass.</step>
+    <step>Push branch to origin (already pushed from scaffolding; push any new commits).</step>
+    <step>Invoke `/push-to-github` skill (or `gh pr create`) with a Phase 1 PR body citing: spec FR-01/02/03/04-08, MODAL-DECISION-CRITERIA.md, 3-of-3 phased-PR strategy.</step>
+    <step>Wait for CI checks green.</step>
+    <step>Invoke `/code-review` for PR-level review + resolve feedback.</step>
+    <step>Once approved: merge to master (squash-merge preferred per repo convention).</step>
+    <step>Post-merge: sync local branch with master via `/worktree-sync` or `git fetch origin master:master`.</step>
+    <step>Update TASK-INDEX marking 001–004 as ✅ complete.</step>
+  </steps>
+
+  <tools>Bash · push-to-github skill · code-review skill · gh CLI · Read · Edit</tools>
+
+  <acceptance-criteria>
+    <criterion>PR merged to master.</criterion>
+    <criterion>CI green; no test regressions.</criterion>
+    <criterion>Code-review approved.</criterion>
+    <criterion>Local `work/ai-spaarke-ai-workspace-UI-r2` branch synced post-merge.</criterion>
+    <criterion>TASK-INDEX updated with ✅ for 001–004.</criterion>
+  </acceptance-criteria>
+</task>

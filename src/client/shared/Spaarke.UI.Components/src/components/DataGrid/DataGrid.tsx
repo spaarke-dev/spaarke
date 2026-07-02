@@ -430,15 +430,61 @@ const useStyles = makeStyles({
 // ─────────────────────────────────────────────────────────────────────────────
 
 /**
- * Clamp a percentage value to 1..100, falling back to the supplied default for
- * undefined / null / NaN / out-of-range inputs. Used by the `formDialog`
- * rowOpen handler for `Xrm.Navigation.navigateTo` width/height options.
+ * Layout 1 modal size — binding standard per ai-spaarke-ai-workspace-UI-r2 FR-20.
+ * Every row-open from a Spaarke DataGrid uses this exact geometry regardless of
+ * entity or `rowOpen.type`. See `projects/ai-spaarke-ai-workspace-UI-r2/spec.md`.
  */
-function clampPercent(value: number | undefined | null, fallback: number): number {
-  if (value === null || value === undefined) return fallback;
-  if (!Number.isFinite(value)) return fallback;
-  if (value < 1 || value > 100) return fallback;
-  return Math.round(value);
+const LAYOUT_1_NAV_OPTIONS = Object.freeze({
+  target: 2,
+  position: 1,
+  width: Object.freeze({ value: 85, unit: '%' as const }),
+  height: Object.freeze({ value: 85, unit: '%' as const }),
+});
+
+/**
+ * Pure helper — computes the `pageInput` + `navOptions` payload for
+ * `Xrm.Navigation.navigateTo` when the DataGrid's default `onRecordOpen`
+ * handler is invoked.
+ *
+ * Extracted from `defaultRecordOpen` so it can be unit-tested in isolation
+ * (per ai-spaarke-ai-workspace-UI-r2 task 002 acceptance criterion "New test
+ * verifies `formId` is passed through").
+ *
+ * R2 unification (FR-02, FR-03, FR-20):
+ *   - `formId` from `rowOpen.formId` is forwarded on the pageInput when set.
+ *   - Nav options are ALWAYS the Layout 1 standard (85% × 85%, position 1,
+ *     target 2). No per-entity or per-record variation.
+ *   - This function does NOT dispatch on `rowOpen.type` — all row-clicks now
+ *     route through `Xrm.Navigation.navigateTo`.
+ */
+export function buildRecordOpenNavArgs(
+  entityName: string,
+  recordId: string,
+  rowOpen: { formId?: string } | undefined | null
+): {
+  pageInput: {
+    pageType: 'entityrecord';
+    entityName: string;
+    entityId: string;
+    formId?: string;
+  };
+  navOptions: typeof LAYOUT_1_NAV_OPTIONS;
+} {
+  const cleanId = recordId.replace(/[{}]/g, '');
+  const pageInput: {
+    pageType: 'entityrecord';
+    entityName: string;
+    entityId: string;
+    formId?: string;
+  } = {
+    pageType: 'entityrecord',
+    entityName,
+    entityId: cleanId,
+  };
+  if (rowOpen?.formId) {
+    pageInput.formId = rowOpen.formId;
+  }
+  return { pageInput, navOptions: LAYOUT_1_NAV_OPTIONS };
 }
 
 function renderCellValue(value: unknown, renderer: string): string {
@@ -867,53 +913,38 @@ export const DataGrid: React.FC<DataGridProps> = props => {
   }, [chipDescriptors]);
 
   /**
-   * Default record-open handler — dispatches on the configjson `rowOpen.type`.
+   * Default record-open handler — R2 unified Layout 1 (see ai-spaarke-ai-workspace-UI-r2 FR-03).
    *
-   * Supported types today:
-   *   - `formDialog` → `Xrm.Navigation.navigateTo({pageType:'entityrecord'},
-   *     {target:2,position:1,...})` — Dataverse-native centered modal of the
-   *     entity record form. Width/height default to 80% if not specified in
-   *     the configjson.
-   *   - anything else (including `navigateToForm` and `undefined`) → opens the
-   *     record's form in a new browser tab via `window.open` against the MDA
-   *     URL. This is the legacy default ("open in new tab") behavior.
+   * Every row-click routes through `Xrm.Navigation.navigateTo` with the Layout 1
+   * standard size (`LAYOUT_1_NAV_OPTIONS`: 85% × 85%, position 1, target 2)
+   * regardless of `rowOpen.type`. Prior branches (`formDialog` per-record size
+   * overrides + `window.open('_blank')` fallback) were retired per R2 FR-20
+   * ("One size for every entity — do not vary per-entity").
+   *
+   * Optional `rowOpen.formId` (R2 FR-01, FR-02) selects a specific form variant;
+   * absence uses the user's default main form.
    *
    * Used only when the host did NOT pass `onRecordOpen`. Hosts can still pass
-   * `onRecordOpen` to override anything in the configjson (escape hatch for
-   * surfaces that need custom side panes, registered React dialogs, etc.).
+   * `onRecordOpen` to override entirely (escape hatch for surfaces that need
+   * custom side panes, registered React dialogs, etc.).
    */
   const defaultRecordOpen = React.useCallback(
     (recordId: string, _record: Record<string, unknown>, ctx: DataGridHostContext) => {
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       const xrm = (window.parent as any)?.Xrm ?? (window as any).Xrm;
       if (!ctx.entityName || !recordId) return;
-
-      const rowOpen = resolved?.rowOpen;
-      if (rowOpen?.type === 'formDialog' && xrm?.Navigation?.navigateTo) {
-        const cleanId = recordId.replace(/[{}]/g, '');
-        const widthPct = clampPercent(rowOpen.formDialogWidthPercent, 80);
-        const heightPct = clampPercent(rowOpen.formDialogHeightPercent, 80);
-        const pageInput = { pageType: 'entityrecord', entityName: ctx.entityName, entityId: cleanId };
-        const navOptions = {
-          target: 2,
-          position: 1,
-          width: { value: widthPct, unit: '%' },
-          height: { value: heightPct, unit: '%' },
-        };
-        void Promise.resolve(xrm.Navigation.navigateTo(pageInput, navOptions)).catch((err: unknown) => {
-          // eslint-disable-next-line no-console
-          console.error('[DataGrid] formDialog navigateTo failed:', err);
-        });
+      if (!xrm?.Navigation?.navigateTo) {
+        // eslint-disable-next-line no-console
+        console.warn('[DataGrid] Xrm.Navigation.navigateTo unavailable; row-open aborted.');
         return;
       }
 
-      // Legacy default: open in new tab
-      const clientUrl = xrm?.Utility?.getGlobalContext?.().getClientUrl?.();
-      if (!clientUrl) return;
-      const url =
-        `${clientUrl}/main.aspx?pagetype=entityrecord` +
-        `&etn=${encodeURIComponent(ctx.entityName)}&id=${encodeURIComponent(recordId)}`;
-      window.open(url, '_blank', 'noopener,noreferrer');
+      const { pageInput, navOptions } = buildRecordOpenNavArgs(ctx.entityName, recordId, resolved?.rowOpen);
+
+      void Promise.resolve(xrm.Navigation.navigateTo(pageInput, navOptions)).catch((err: unknown) => {
+        // eslint-disable-next-line no-console
+        console.error('[DataGrid] navigateTo failed:', err);
+      });
     },
     [resolved]
   );

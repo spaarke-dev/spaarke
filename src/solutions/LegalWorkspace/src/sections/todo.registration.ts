@@ -87,17 +87,13 @@ const SPRK_TODO_CHANNEL_NAME = "sprk_todo:lifecycle";
 const SPRK_TODO_CREATED = "sprk_todo:created";
 
 // ---------------------------------------------------------------------------
-// R4 task 100 (W-2) — Open-to-form launch contract constants.
-//
-// MUST stay in lockstep with `src/solutions/SmartTodo/src/hooks/useLaunchContext.ts`
-// (the parser side). Inlined here rather than imported because LegalWorkspace
-// does not (and should not) depend on the SmartTodo Code Page's package.
+// SmartTodo Code Page name — used when the widget's Open handler is called
+// with no selected todoId (the "just open the app" case). R2 FR-13 retired
+// the `openTodo` launch-context params (they routed through the retired
+// iframe-hosted SmartTodoModal); only the base Code Page name remains.
 // ---------------------------------------------------------------------------
 
 const SMART_TODO_CODE_PAGE_NAME = "sprk_smarttodo";
-const LAUNCH_PARAM_ACTION = "action";
-const LAUNCH_PARAM_TODO_ID = "todoId";
-const LAUNCH_ACTION_OPEN_TODO = "openTodo";
 
 // ---------------------------------------------------------------------------
 // FeedSync bridge — subscribes to LW-internal FeedTodoSyncContext and forwards
@@ -127,17 +123,16 @@ const FeedSyncBridgeHost: React.FC<IFeedSyncBridgeHostProps> = ({ ctx }) => {
     [notifyTodoChange, subscribe],
   );
 
-  // UAT 2026-06-21 round 5 — split Open behaviour by selection AND open as
-  // a true DIALOG (not page-nav):
+  // Open behaviour splits by selection state:
   //
-  //   - todoId PRESENT → open the OOB sprk_todo record FORM as a dialog via
-  //     `Xrm.Navigation.navigateTo({pageType:'entityrecord', ...}, {target:2})`.
-  //     `target: 2` = dialog mode (modal overlay over the current page).
-  //     The current SpaarkeAi page stays mounted underneath, so when the
-  //     dialog closes, the user is back exactly where they were (widget
-  //     context preserved). This fixes UAT round 5 issues #2 (was opening as
-  //     full-page nav via openForm) and #3 (save/close was landing the user
-  //     on SpaarkeAi instead of returning to the widget context).
+  //   - todoId PRESENT → open the OOB sprk_todo record FORM at Layout 1 via
+  //     `Xrm.Navigation.navigateTo({pageType:'entityrecord', ...}, {target:2,
+  //     position:1, width:85%, height:85%})` per ai-spaarke-ai-workspace-UI-r2
+  //     FR-13/FR-20 (85% × 85% is the binding modal size standard; was 80% × 80%
+  //     under the pre-R2 UAT 2026-06-21 round 5 fix). `target: 2` = dialog mode
+  //     (modal overlay over the current page); the current SpaarkeAi page stays
+  //     mounted so when the dialog closes, the user is back exactly where they
+  //     were (widget context preserved).
   //
   //   - todoId ABSENT  → open the SmartTodo Code Page (no launch data) so
   //     `useLaunchContext` returns undefined → app renders its default 3-col
@@ -159,7 +154,7 @@ const FeedSyncBridgeHost: React.FC<IFeedSyncBridgeHostProps> = ({ ctx }) => {
           };
         }).Xrm;
         if (xrm?.Navigation?.navigateTo) {
-          // target: 2 = dialog. Width/height keep the dialog roomy but inset.
+          // Layout 1 (R2 FR-20 binding): 85% × 85%, centered, dialog target.
           void xrm.Navigation.navigateTo(
             {
               pageType: "entityrecord",
@@ -169,8 +164,8 @@ const FeedSyncBridgeHost: React.FC<IFeedSyncBridgeHostProps> = ({ ctx }) => {
             {
               target: 2,
               position: 1, // 1 = center
-              width: { value: 80, unit: "%" },
-              height: { value: 80, unit: "%" },
+              width: { value: 85, unit: "%" },
+              height: { value: 85, unit: "%" },
             },
           );
           return;
@@ -184,14 +179,14 @@ const FeedSyncBridgeHost: React.FC<IFeedSyncBridgeHostProps> = ({ ctx }) => {
           });
           return;
         }
-        // Last-resort fallback: Code-Page-hop (legacy path).
-        const data =
-          `${LAUNCH_PARAM_ACTION}=${LAUNCH_ACTION_OPEN_TODO}` +
-          `&${LAUNCH_PARAM_TODO_ID}=${encodeURIComponent(todoId)}`;
-        ctx.onOpenWizard(SMART_TODO_CODE_PAGE_NAME, data, {
-          width: { value: 85, unit: "%" },
-          height: { value: 85, unit: "%" },
-        });
+        // Nothing more to do — Xrm.Navigation isn't available. (The pre-R2
+        // Code-Page-hop last-resort fallback was retired per R2 FR-13; it
+        // routed through `openTodo` launch context to open the retired
+        // iframe modal, which no longer exists.)
+        // eslint-disable-next-line no-console
+        console.warn(
+          "[todo.registration] Xrm.Navigation unavailable; cannot open sprk_todo",
+        );
         return;
       }
 

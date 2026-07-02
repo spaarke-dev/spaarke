@@ -350,6 +350,18 @@ If you cannot answer these clearly, re-read §2 and §4. The two wrappers are in
 
 ---
 
+## 6.5. Modal UX standard for record row-clicks (added 2026-07-01 by R2 FR-19)
+
+Whenever a workspace widget opens a Dataverse record — from a row-click, a "Details" button, a ribbon command, a card menu action — the modal it opens MUST conform to the [Two-Layout Standard](../standards/MODAL-DECISION-CRITERIA.md#two-layout-standard-added-2026-07-01-by-r2) defined in [`docs/standards/MODAL-DECISION-CRITERIA.md`](../standards/MODAL-DECISION-CRITERIA.md):
+
+- **Layout 1 (canonical default)** — OOB Dataverse form dialog via `Xrm.Navigation.navigateTo` at **85% × 85%, position 1, target 2**. Used for every entity row-click across Spaarke workspaces (Documents, Matters, Projects, Invoices, Work Assignments, Communications, To Do). The Spaarke DataGrid framework's `defaultRecordOpen` emits this shape automatically — no per-widget wiring required. See [`SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE.md` § 6.5](./SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE.md#65-row-open-contract--defaultrecordopen--onrecordopen-override-added-2026-07-01-by-r2-fr-18) for the framework contract.
+- **Layout 2 (justified exception)** — proprietary Fluent v9 content composed in `RecordNavigationModalShell`. Dimensions are content-driven, not the 85% × 85% Layout 1 standard. Reference case: [`RichFilePreviewDialog`](../../src/client/shared/Spaarke.UI.Components/src/components/FilePreview/RichFilePreviewDialog.tsx) for document preview.
+- **Retired anti-pattern (Layout 3)** — iframe-hosting OOB `main.aspx` inside a proprietary shell. Microsoft's model-driven docs (revision 2025-05-07) state verbatim: "Displaying a form within an IFrame embedded in another form is not supported." Retired 2026-07-01 by ai-spaarke-ai-workspace-UI-r2 FR-14 (`SmartTodoModal` was the last Spaarke consumer). See [`MODAL-DECISION-CRITERIA.md` § anti-pattern 4](../standards/MODAL-DECISION-CRITERIA.md#4-do-not-iframe-embed-oob-mainaspx-as-a-standard-pattern) for the verbatim quote and 2026 CSP tightening context.
+
+Widget authors do NOT need to decide the modal each time — the DataGrid framework enforces Layout 1 for entity-list row-clicks; RecordNavigationModalShell is the only Layout 2 path. New surface designs proposing a third modal shape should surface a design conversation before shipping.
+
+---
+
 ## 7. Cross-references
 
 ### 7.1 Architecture docs

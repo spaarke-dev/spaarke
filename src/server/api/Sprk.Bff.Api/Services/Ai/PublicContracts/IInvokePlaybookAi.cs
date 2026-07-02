@@ -1,4 +1,5 @@
 using Microsoft.AspNetCore.Http;
+using Sprk.Bff.Api.Services.Ai; // DocumentContext (task 095 widening)
 
 namespace Sprk.Bff.Api.Services.Ai.PublicContracts;
 
@@ -47,15 +48,26 @@ namespace Sprk.Bff.Api.Services.Ai.PublicContracts;
 ///   tool call into a single call to <see cref="InvokePlaybookAsync"/>.</item>
 /// </list>
 /// </para>
+/// <para>
+/// <b>Phase 2 consumer (spaarkeai-compose-r1 task 095 — document-context widening)</b>:
+/// The Compose dispatch path (<c>POST /api/compose/action/{consumerType}</c>) invokes
+/// document-scoped playbooks (Summarize / Rewrite / Find Similar / etc.) that require
+/// the extracted plain text of the source DOCX. This widens the facade with the
+/// optional <c>userContext</c> + <c>document</c> parameters that forward to
+/// <see cref="PlaybookRunRequest.UserContext"/> and <see cref="PlaybookRunRequest.Document"/>.
+/// The M365 Copilot Agent path (Phase 1) continues to work unchanged because Copilot
+/// supplies document context via conversation attachments OUTSIDE the facade.
+/// Formalized as the Path B ADR-013 amendment (per CLAUDE.md §6.5) — see task 102.
+/// </para>
 /// </remarks>
 public interface IInvokePlaybookAi
 {
     /// <summary>
-    /// Invoke a playbook by ID with caller-supplied parameters and return a single
-    /// aggregated result. Internally executes the playbook through
-    /// <see cref="IPlaybookOrchestrationService.ExecuteAsync"/>, consumes the SSE event
-    /// stream, and projects terminal node outputs + citation metadata into the
-    /// domain-shape <see cref="PlaybookInvocationResult"/>.
+    /// Invoke a playbook by ID with caller-supplied parameters and (optionally) pre-loaded
+    /// document context, returning a single aggregated result. Internally executes the
+    /// playbook through <see cref="IPlaybookOrchestrationService.ExecuteAsync"/>, consumes
+    /// the SSE event stream, and projects terminal node outputs + citation metadata into
+    /// the domain-shape <see cref="PlaybookInvocationResult"/>.
     /// </summary>
     /// <param name="playbookId">Identifier of the playbook to invoke. Required.</param>
     /// <param name="parameters">Caller-supplied parameter map for template substitution in
@@ -65,6 +77,20 @@ public interface IInvokePlaybookAi
     /// <param name="context">Invocation context carrying tenant id, correlation id, and
     /// HTTP context for OBO authentication. See <see cref="PlaybookInvocationContext"/>
     /// for field semantics. Required.</param>
+    /// <param name="userContext">
+    /// Optional user-context string forwarded to <see cref="PlaybookRunRequest.UserContext"/>.
+    /// Consumers use this to ship free-form guidance to the playbook (e.g. the user's
+    /// selection text in a Compose "Summarize selection" flow). Null when no user context
+    /// applies. **Widened surface, spaarkeai-compose-r1 task 095 — see ADR-013 amendment 2026-07-01.**
+    /// </param>
+    /// <param name="document">
+    /// Optional pre-loaded document context forwarded to <see cref="PlaybookRunRequest.Document"/>.
+    /// When provided, the orchestration layer sets it on <c>PlaybookRunContext.Document</c>
+    /// so every downstream node shares the same extracted text without re-downloading from SPE.
+    /// The Compose consumer builds this via <c>IDocxTextExtractor</c> (task 094). Null when
+    /// the playbook is not document-scoped (e.g. the M365 Copilot parameter-only path).
+    /// **Widened surface, spaarkeai-compose-r1 task 095 — see ADR-013 amendment 2026-07-01.**
+    /// </param>
     /// <param name="cancellationToken">Cancellation token. Pair with a timeout suited to
     /// the playbook — chat-tool consumers typically cap at the chat-turn budget; M365
     /// Copilot consumers cap at the agent-turn budget. Internal default is no timeout
@@ -79,11 +105,22 @@ public interface IInvokePlaybookAi
     /// 503 ProblemDetails.</exception>
     /// <exception cref="OperationCanceledException">When <paramref name="cancellationToken"/>
     /// is signalled.</exception>
+    /// <remarks>
+    /// <para>
+    /// <b>Backward compatibility</b>: the existing 4-arg call shape
+    /// <c>InvokePlaybookAsync(playbookId, parameters, context, cancellationToken)</c> continues
+    /// to compile unchanged — the C# compiler fills null defaults for the new
+    /// <paramref name="userContext"/> + <paramref name="document"/> parameters. Phase 1
+    /// consumers (chat-tool adapter, M365 Copilot gateway) require no code changes.
+    /// </para>
+    /// </remarks>
     Task<PlaybookInvocationResult> InvokePlaybookAsync(
         Guid playbookId,
         IReadOnlyDictionary<string, string>? parameters,
         PlaybookInvocationContext context,
-        CancellationToken cancellationToken = default);
+        CancellationToken cancellationToken = default,
+        string? userContext = null,
+        DocumentContext? document = null);
 }
 
 /// <summary>

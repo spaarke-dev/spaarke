@@ -290,9 +290,11 @@ public sealed class InvokePlaybookHandlerTests : TypedToolHandlerTestFixture
                 playbookId,
                 It.IsAny<IReadOnlyDictionary<string, string>?>(),
                 It.IsAny<PlaybookInvocationContext>(),
-                It.IsAny<CancellationToken>()))
-            .Callback<Guid, IReadOnlyDictionary<string, string>?, PlaybookInvocationContext, CancellationToken>(
-                (_, p, ctx, _) =>
+                It.IsAny<CancellationToken>(),
+                It.IsAny<string?>(),
+                It.IsAny<Sprk.Bff.Api.Services.Ai.DocumentContext?>()))
+            .Callback<Guid, IReadOnlyDictionary<string, string>?, PlaybookInvocationContext, CancellationToken, string?, Sprk.Bff.Api.Services.Ai.DocumentContext?>(
+                (_, p, ctx, _, _, _) =>
                 {
                     capturedParameters = p;
                     capturedContext = ctx;
@@ -311,7 +313,7 @@ public sealed class InvokePlaybookHandlerTests : TypedToolHandlerTestFixture
             playbookId,
             It.IsAny<IReadOnlyDictionary<string, string>?>(),
             It.IsAny<PlaybookInvocationContext>(),
-            It.IsAny<CancellationToken>()), Times.Once);
+            It.IsAny<CancellationToken>(), It.IsAny<string?>(), It.IsAny<Sprk.Bff.Api.Services.Ai.DocumentContext?>()), Times.Once);
 
         capturedParameters.Should().NotBeNull();
         capturedParameters!["matter"].Should().Be("M-123");
@@ -338,7 +340,7 @@ public sealed class InvokePlaybookHandlerTests : TypedToolHandlerTestFixture
         _invokeFacadeMock
             .Setup(f => f.InvokePlaybookAsync(
                 playbookId, It.IsAny<IReadOnlyDictionary<string, string>?>(),
-                It.IsAny<PlaybookInvocationContext>(), It.IsAny<CancellationToken>()))
+                It.IsAny<PlaybookInvocationContext>(), It.IsAny<CancellationToken>(), It.IsAny<string?>(), It.IsAny<Sprk.Bff.Api.Services.Ai.DocumentContext?>()))
             .ReturnsAsync(BuildSuccessResult(playbookId, citations: citations));
 
         var handler = CreateHandler();
@@ -369,7 +371,7 @@ public sealed class InvokePlaybookHandlerTests : TypedToolHandlerTestFixture
         _invokeFacadeMock
             .Setup(f => f.InvokePlaybookAsync(
                 playbookId, It.IsAny<IReadOnlyDictionary<string, string>?>(),
-                It.IsAny<PlaybookInvocationContext>(), It.IsAny<CancellationToken>()))
+                It.IsAny<PlaybookInvocationContext>(), It.IsAny<CancellationToken>(), It.IsAny<string?>(), It.IsAny<Sprk.Bff.Api.Services.Ai.DocumentContext?>()))
             .ReturnsAsync(BuildSuccessResult(playbookId));
 
         var handler = CreateHandler();
@@ -411,7 +413,7 @@ public sealed class InvokePlaybookHandlerTests : TypedToolHandlerTestFixture
             It.IsAny<Guid>(),
             It.IsAny<IReadOnlyDictionary<string, string>?>(),
             It.IsAny<PlaybookInvocationContext>(),
-            It.IsAny<CancellationToken>()),
+            It.IsAny<CancellationToken>(), It.IsAny<string?>(), It.IsAny<Sprk.Bff.Api.Services.Ai.DocumentContext?>()),
             Times.Never,
             "tenant-visibility check must short-circuit before facade dispatch");
     }
@@ -457,7 +459,7 @@ public sealed class InvokePlaybookHandlerTests : TypedToolHandlerTestFixture
         _invokeFacadeMock
             .Setup(f => f.InvokePlaybookAsync(
                 playbookId, It.IsAny<IReadOnlyDictionary<string, string>?>(),
-                It.IsAny<PlaybookInvocationContext>(), It.IsAny<CancellationToken>()))
+                It.IsAny<PlaybookInvocationContext>(), It.IsAny<CancellationToken>(), It.IsAny<string?>(), It.IsAny<Sprk.Bff.Api.Services.Ai.DocumentContext?>()))
             .ReturnsAsync(BuildSuccessResult(playbookId));
 
         var handler = CreateHandler();
@@ -491,7 +493,7 @@ public sealed class InvokePlaybookHandlerTests : TypedToolHandlerTestFixture
         _invokeFacadeMock
             .Setup(f => f.InvokePlaybookAsync(
                 playbookId, It.IsAny<IReadOnlyDictionary<string, string>?>(),
-                It.IsAny<PlaybookInvocationContext>(), It.IsAny<CancellationToken>()))
+                It.IsAny<PlaybookInvocationContext>(), It.IsAny<CancellationToken>(), It.IsAny<string?>(), It.IsAny<Sprk.Bff.Api.Services.Ai.DocumentContext?>()))
             .ReturnsAsync(BuildSuccessResult(playbookId));
 
         var handler = CreateHandler();
@@ -508,7 +510,7 @@ public sealed class InvokePlaybookHandlerTests : TypedToolHandlerTestFixture
             "ADR-014 per-tenant cache: second lookup for the same tenant+playbook must be cached");
         _invokeFacadeMock.Verify(f => f.InvokePlaybookAsync(
             playbookId, It.IsAny<IReadOnlyDictionary<string, string>?>(),
-            It.IsAny<PlaybookInvocationContext>(), It.IsAny<CancellationToken>()), Times.Exactly(2));
+            It.IsAny<PlaybookInvocationContext>(), It.IsAny<CancellationToken>(), It.IsAny<string?>(), It.IsAny<Sprk.Bff.Api.Services.Ai.DocumentContext?>()), Times.Exactly(2));
     }
 
     // ═════════════════════════════════════════════════════════════════════════════
@@ -525,7 +527,7 @@ public sealed class InvokePlaybookHandlerTests : TypedToolHandlerTestFixture
         _invokeFacadeMock
             .Setup(f => f.InvokePlaybookAsync(
                 playbookId, It.IsAny<IReadOnlyDictionary<string, string>?>(),
-                It.IsAny<PlaybookInvocationContext>(), It.IsAny<CancellationToken>()))
+                It.IsAny<PlaybookInvocationContext>(), It.IsAny<CancellationToken>(), It.IsAny<string?>(), It.IsAny<Sprk.Bff.Api.Services.Ai.DocumentContext?>()))
             .ReturnsAsync(new PlaybookInvocationResult
             {
                 RunId = Guid.NewGuid(),
@@ -578,7 +580,7 @@ public sealed class InvokePlaybookHandlerTests : TypedToolHandlerTestFixture
         _invokeFacadeMock
             .Setup(f => f.InvokePlaybookAsync(
                 playbookId, It.IsAny<IReadOnlyDictionary<string, string>?>(),
-                It.IsAny<PlaybookInvocationContext>(), It.IsAny<CancellationToken>()))
+                It.IsAny<PlaybookInvocationContext>(), It.IsAny<CancellationToken>(), It.IsAny<string?>(), It.IsAny<Sprk.Bff.Api.Services.Ai.DocumentContext?>()))
             .ThrowsAsync(new FeatureDisabledException("invoke_playbook", "Compound AI disabled."));
 
         var handler = CreateHandler();
@@ -602,7 +604,7 @@ public sealed class InvokePlaybookHandlerTests : TypedToolHandlerTestFixture
         _invokeFacadeMock
             .Setup(f => f.InvokePlaybookAsync(
                 playbookId, It.IsAny<IReadOnlyDictionary<string, string>?>(),
-                It.IsAny<PlaybookInvocationContext>(), It.IsAny<CancellationToken>()))
+                It.IsAny<PlaybookInvocationContext>(), It.IsAny<CancellationToken>(), It.IsAny<string?>(), It.IsAny<Sprk.Bff.Api.Services.Ai.DocumentContext?>()))
             .ThrowsAsync(new InvalidOperationException("unexpected orchestrator failure"));
 
         var handler = CreateHandler();
@@ -709,7 +711,7 @@ public sealed class InvokePlaybookHandlerTests : TypedToolHandlerTestFixture
         _invokeFacadeMock
             .Setup(f => f.InvokePlaybookAsync(
                 playbookId, It.IsAny<IReadOnlyDictionary<string, string>?>(),
-                It.IsAny<PlaybookInvocationContext>(), It.IsAny<CancellationToken>()))
+                It.IsAny<PlaybookInvocationContext>(), It.IsAny<CancellationToken>(), It.IsAny<string?>(), It.IsAny<Sprk.Bff.Api.Services.Ai.DocumentContext?>()))
             .ReturnsAsync(BuildSuccessResult(
                 playbookId,
                 text: $"Playbook summary referencing {SentinelClientName} sensitive details."));

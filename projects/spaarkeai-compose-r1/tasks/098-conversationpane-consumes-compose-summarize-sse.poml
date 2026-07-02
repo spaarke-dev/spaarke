@@ -2,7 +2,7 @@
 <task id="098" project="spaarkeai-compose-r1">
   <metadata>
     <title>ConversationPane: handle compose_summarize_request events + fetch SSE + progressive render</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2.5 hours</estimated-effort>
     <tags>frontend, spaarkeai, conversation-pane, sse, pane-event-bus, ai-response-surface</tags>
     <rigor-hint>FULL</rigor-hint>
@@ -96,4 +96,61 @@
       <file>src/client/shared/Spaarke.AI.Widgets/src/events/PaneEventBus.ts</file>
     </files>
   </knowledge>
+
+  <notes>
+    2026-07-01 — task 098 shipped. Summary of implementation:
+
+    1. Orchestrator (NEW): `src/client/shared/Spaarke.Compose.Components/src/orchestrators/executeComposeSummarize.ts`
+       - Pure module mirroring `executeSummarizeIntent` (SpaarkeAi/R5 task 036) pattern.
+       - Consumes `POST /api/compose/action/compose-summarize` SSE (task 097).
+       - Uses raw fetch + fresh access-token header (Auth v2 §H-4 / D-AUTH-7) rather than `authenticatedFetch` (which drains the ReadableStream body).
+       - Frame parsing: `\n\n` event separator + `data:` line prefix + `[DONE]` terminal sentinel.
+       - AnalysisStreamChunk demultiplexing: `type='progress'|'result'|'done'|'error'`.
+       - Non-throwing: all failures surface through `onError` + `onDone` callbacks. AbortSignal is caller-intentional (invokes `onDone` only, no `onError`).
+       - Barrel-exported from `@spaarke/compose-components` alongside `ComposeSummarizeResult`.
+
+    2. ConversationPane subscription (SpaarkeAi):
+       - Added `usePaneEvent("conversation", ...)` branch for `compose_summarize_request` — additive per ADR-030 (double-cast widen to read additive fields).
+       - Local `composeSummarizeStatus: string | null` drives a subtle "Working…" strip rendered above the chat surface (Fluent v9 brand background2, Spinner + Text). Progress events update the strip text verbatim ("Loading document from SharePoint Embedded…" → "Extracting document text…" → "Invoking playbook…").
+       - Terminal-success: `pendingInjection` (existing SprkChat surface) receives the parsed `textContent` as a local Assistant message via `makeLocalAssistantMessage`. Same for terminal-error (prefixed "Summarize failed:").
+       - AbortController in a ref; successive requests supersede previous; unmount aborts + cleans.
+
+    3. Event payload widening (ComposeToolbar):
+       - Added `driveId` + `tenantId` as REQUIRED props (needed for BFF invocation; ConversationPane cannot re-resolve).
+       - Added optional `sprkDocumentId` (forwarded as `documentRecordId` for post-promotion Dataverse correlation).
+       - Event payload gained `driveId`, `tenantId`, and `documentRef.sprkDocumentId` fields.
+       - Summarize button now also gates on `driveId.length > 0 && tenantId.length > 0`.
+
+    4. ComposeWorkspace + ComposeBannerStack cleanup:
+       - Removed the workspace-local Summarize orchestration (~100 LOC): `summaryStatus`, `summaryText`, `summaryError`, `handleComposeSummarizeRequest`, `dismissSummary`. The BFF invocation now flows through ConversationPane exclusively.
+       - Removed `summaryStatus` / `summaryText` / `summaryError` / `onDismissSummary` props from ComposeBannerStack.
+       - Removed the 3 summary MessageBar blocks (in-flight / ready / error) from ComposeBannerStack render — 90+ LOC of dead render code.
+       - Removed unused imports (`Spinner`, `Text`, `Button`, `MessageBarActions`, `DismissRegular`) that supported the removed banners.
+
+    5. Test updates:
+       - `src/solutions/SpaarkeAi/src/__tests__/compose/ComposeToolbar.test.tsx`: added `FIXED_DRIVE_ID` + `FIXED_TENANT_ID` constants; passed them to every ComposeToolbar render; added 2 new tests for `driveId=""` / `tenantId=""` disabling summarize; added payload assertions for `driveId` + `tenantId`.
+       - Result: **14 pass / 0 fail**. All 12 pre-existing tests still green; 2 new tests green.
+
+    6. Verification:
+       - **compose-components shared lib**: `npm run build` → tsc clean (0 errors).
+       - **LegalWorkspace standalone Vite build**: 3918 modules / 0 errors / 3743 kB gzipped 1050 kB.
+       - **SpaarkeAi Vite build**: 3716 modules / 0 errors / 4878 kB gzipped 1358 kB. Delta vs pre-098: +1 kB (rounding).
+       - **BFF `dotnet build`**: 0 errors / 0 warnings.
+       - **BFF `dotnet test`**: 14 fail / 7682 pass / 111 skip (7807 total). Task 098 introduced 0 net regressions vs pre-098 baseline. Delta: +9 previously-failing tests now pass (all in ComposeEndpointsTests — DI-mock fixes from task 097 fully landed).
+       - **BFF publish size** (linux-x64 Release, compressed): 46.81 MB. Well under 60 MB ceiling. No BFF code changes in this task; delta vs task-097 baseline reflects incremental publish state, not a task-098 code change.
+
+    7. Deferred (filed): FU-98a — stand up jest infrastructure for `@spaarke/compose-components` package + author unit tests for `executeComposeSummarize` covering happy path / error chunk / HTTP failure / abort / malformed frames. Deferred because standing up jest config would exceed the 2.5h budget; the orchestrator is a pure module mirroring the tested `executeSummarizeIntent` pattern.
+
+    Files touched: 8.
+    - `src/client/shared/Spaarke.Compose.Components/src/orchestrators/executeComposeSummarize.ts` (NEW; 320 LOC)
+    - `src/client/shared/Spaarke.Compose.Components/src/index.ts` (add exports)
+    - `src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx` (remove ~100 LOC summary state; add driveId/tenantId/sprkDocumentId toolbar bindings)
+    - `src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeToolbar.tsx` (widen event shape + props)
+    - `src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeBannerStack.tsx` (remove summary props + 3 render blocks; 90+ LOC)
+    - `src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx` (add compose_summarize_request handler + "Working…" affordance)
+    - `src/solutions/SpaarkeAi/src/__tests__/compose/ComposeToolbar.test.tsx` (update all renders + add 2 new tests + payload assertions)
+    - `projects/spaarkeai-compose-r1/notes/defer-issues.md` (add FU-98a row)
+
+    Phase 9 posture: Task 098 is the wiring task. Task 099 (retire summary banner from ComposeBannerStack) was completed atomically as part of 098 to keep the deletion coherent with the state removal (the banner rendering + state cannot cleanly separate across tasks).
+  </notes>
 </task>

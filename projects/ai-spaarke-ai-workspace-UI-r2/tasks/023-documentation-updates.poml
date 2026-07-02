@@ -1,0 +1,65 @@
+<task id="R2-023" project="ai-spaarke-ai-workspace-UI-r2">
+  <metadata>
+    <title>Sharpen 5 documentation surfaces to reflect two-layout standard</title>
+    <status>completed</status>
+    <estimated-effort>3 hours</estimated-effort>
+    <phase>3</phase>
+    <tags>documentation,markdown,standards,modal-decision-criteria</tags>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>
+Update 5 documentation surfaces to reflect the R2 two-layout standard and the researcher's Microsoft Learn iframe anti-pattern citations.
+
+**Note**: `parallel-safe: false` because this task touches `.claude/patterns/**` — sub-agents cannot write to `.claude/` paths per CLAUDE.md §3. Main session executes this task sequentially.
+
+Five doc surfaces to update:
+
+- **FR-15**: `docs/standards/MODAL-DECISION-CRITERIA.md` — sharpen with "Layout 1 canonical / Layout 2 justified exception" framing, add verbatim Microsoft Learn quote from `notes/researcher-iframe-main-aspx-2026-07-01.md`, CSP direction-of-travel fact, remove "canonical hybrid" framing of SmartTodoModal.
+- **FR-16**: `.claude/patterns/ui/record-modal-selection.md` — 25-line pointer, update for two-layout framing.
+- **FR-17**: `docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md` — add row-click section citing Communications as reference example.
+- **FR-18**: `docs/architecture/SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE.md` — document `onRecordOpen` override contract + new `configjson.rowOpen.formId` field.
+- **FR-19**: `docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md` — add modal-UX section cross-referencing MODAL-DECISION-CRITERIA.
+  </prompt>
+
+  <role>Documentation-minded developer with familiarity of the Spaarke doc layer hierarchy per CLAUDE.md §14.</role>
+
+  <goal>
+All 5 docs reflect the two-layout standard consistently. Cross-references between docs are correct. `MODAL-DECISION-CRITERIA.md` cites Microsoft Learn with verbatim quote + 2025-05-07 date. Pattern INDEX + CLAUDE.md §17 remain accurate (already committed).
+  </goal>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-spaarke-ai-workspace-UI-r2/spec.md</file>
+      <file>projects/ai-spaarke-ai-workspace-UI-r2/design.md</file>
+      <file>projects/ai-spaarke-ai-workspace-UI-r2/notes/researcher-iframe-main-aspx-2026-07-01.md</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
+      <file>.claude/patterns/ui/record-modal-selection.md</file>
+      <file>docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md</file>
+      <file>docs/architecture/SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE.md</file>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+      <file>.claude/CHANGELOG.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>MODAL-DECISION-CRITERIA.md: rewrite TL;DR to lead with "Layout 1 canonical / Layout 2 justified exception" framing. Add MS Learn quote block with date. Remove SmartTodoModal as "canonical hybrid" reference. Add CSP tightening fact.</step>
+    <step>record-modal-selection.md: update pointer file to reflect two-layout naming. Keep ≤25 lines.</step>
+    <step>BUILD-A-NEW-WORKSPACE-WIDGET.md: add new section "Row-click behavior for entity-list widgets" with Layout 1 default + Communications reference.</step>
+    <step>SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE.md: add `onRecordOpen` override + `formId` field documentation.</step>
+    <step>SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md: add modal-UX cross-reference section.</step>
+    <step>Add CHANGELOG entry for the doc sharpening.</step>
+    <step>Verify all cross-links resolve (relative paths correct).</step>
+  </steps>
+
+  <tools>Read · Edit · Grep</tools>
+
+  <acceptance-criteria>
+    <criterion>All 5 doc surfaces updated per spec FR-15..FR-19.</criterion>
+    <criterion>MODAL-DECISION-CRITERIA.md cites MS Learn 2025-05-07 quote verbatim.</criterion>
+    <criterion>Two-layout language consistent across docs.</criterion>
+    <criterion>Cross-links resolve (grep-verifiable).</criterion>
+    <criterion>CHANGELOG entry added.</criterion>
+    <criterion>Quality gates: code-review + adr-check clean.</criterion>
+  </acceptance-criteria>
+</task>

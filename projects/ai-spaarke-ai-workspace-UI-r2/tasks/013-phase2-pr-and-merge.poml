@@ -1,0 +1,47 @@
+<task id="R2-013" project="ai-spaarke-ai-workspace-UI-r2">
+  <metadata>
+    <title>Phase 2 PR — Communications widget</title>
+    <status>completed</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <phase>2</phase>
+    <tags>pr,merge,ci,git,communications</tags>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+Verify Communications widget end-to-end (as section AND direct widget); prepare Phase 2 PR; ship.
+  </prompt>
+
+  <role>Developer + QA shepherding a PR.</role>
+
+  <goal>
+PR 2 merged to master. Communications widget usable in both mount paths. TASK-INDEX 010–013 marked ✅.
+  </goal>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-spaarke-ai-workspace-UI-r2/spec.md</file>
+      <file>projects/ai-spaarke-ai-workspace-UI-r2/notes/communications-config-record.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Deploy the new sections + direct widget to dev env.</step>
+    <step>Test: create a layout via `WorkspaceLayoutWizard` including Communications; verify section renders.</step>
+    <step>Test: `widget_load` dispatch for `communications-list` opens as a standalone workspace tab.</step>
+    <step>Test: row-click a communication → Layout 1 modal opens with `sprk_communication` main form (85%×85%).</step>
+    <step>Document verification in `notes/phase2-verification.md`.</step>
+    <step>Push branch; create PR; wait for CI green; code-review; merge.</step>
+    <step>Post-merge: sync branch; update TASK-INDEX marking 010–013 as ✅.</step>
+  </steps>
+
+  <tools>Bash · push-to-github skill · code-review skill · gh CLI · code-page-deploy skill · Read · Edit</tools>
+
+  <acceptance-criteria>
+    <criterion>Communications visible + functional as both section and direct widget.</criterion>
+    <criterion>Row-click opens Layout 1 (85%×85%) sprk_communication main form.</criterion>
+    <criterion>PR merged to master.</criterion>
+    <criterion>CI green; code-review approved.</criterion>
+    <criterion>TASK-INDEX updated with ✅ for 010–013.</criterion>
+  </acceptance-criteria>
+</task>

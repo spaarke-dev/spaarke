@@ -2,7 +2,7 @@
 <task id="102" project="spaarkeai-compose-r1">
   <metadata>
     <title>File ADR-013 amendment (Path B per CLAUDE.md §6.5) — widened facade for document-context</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>0.5 hour</estimated-effort>
     <tags>adr, documentation, adr-conflict-resolution, path-b</tags>
     <rigor-hint>STANDARD</rigor-hint>

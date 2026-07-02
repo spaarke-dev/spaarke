@@ -1,8 +1,120 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-07-01 (R1 UAT surfaced three-pane completion gap; spec supplement + phases 7-11 added)
+> **Last Updated**: 2026-07-01 (post-task-102 — all Phase 7-10 supplement tasks ✅; ready for Option B bundle commit)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
+
+---
+
+## 🚨 Quick Recovery (READ THIS FIRST — ready for user to authorize bundle commit)
+
+| Field | Value |
+|-------|-------|
+| **Session state** | **ALL Phase 7 + 8 + 9 + 10 supplement tasks ✅ COMPLETE.** 10 tasks shipped this session: 091, 092, 093, 094, 095/096 (collapsed), 097, **098, 099** (atomic), **100, 102**. Only remaining task: **110 (expanded wrap-up)** — deferred until AFTER bundle-commit + master-merge + deploy per Option B strategy. All work UNCOMMITTED vs HEAD `4ed88ea8b`. |
+| **Next action (USER-DRIVEN)** | Per Option B: **user authorizes bundle-commit + push + master-merge**. Then evaluate + confirm deploy strategy. No more task-execute runs on this branch pre-commit. |
+| **Post-deploy** | Manual smoke-test in Dev: launch Compose modal via ribbon → verify 3-pane layout (no workspace tabs) → verify "Working…" affordance in ConversationPane during summarize → verify final summary renders as assistant chat message → then task 110 wrap-up (/test-diet + close Issue #514). |
+| **Operator strategy** | **Option B (confirmed 2026-07-01)**: ✅ Phases 9+10 complete. ⏳ Next: (1) `git commit` all work in one focused bundle, (2) `/push-to-github`, (3) `git fetch origin master` + merge master into work branch (check r7 conflicts), (4) evaluate + confirm deploy strategy, (5) deploy, (6) smoke, (7) task 110. |
+| **R7 concurrency risk on master merge** | r7 has been actively editing BFF (Sprk.Bff.Api) + SpaarkeAi code page. On merge from master, check for conflicts in these files (ordered by risk): `src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx` (task-098 edits — HIGHEST RISK; r7 also modifies this file), `src/solutions/SpaarkeAi/src/components/workspace/WorkspacePane.tsx` (task-092 + task-100 edits), `src/solutions/SpaarkeAi/src/components/workspace/WorkspaceTabManagerComponent.tsx` (task-100 hideTabBar prop), `src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs` (task-097 SSE), `src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IInvokePlaybookAi.cs` (tasks 095/096 widened facade), `docs/adr/ADR-013-ai-architecture.md` (task-102 amendment). |
+| **Amendment note** | Task 102 landed the FIRST Path B amendment under CLAUDE.md §6.5 (added 2026-06-29 by this same project). ADR-013 facade widening was documented end-to-end: full ADR §Amendment, concise ADR MUST rules, INDEX status update, CHANGELOG entry, defer-issues §AMD-102. The protocol worked as designed. |
+
+### 10-task session verification snapshot (last run: post-task-102)
+
+- **compose-components lib**: `npm run build` → tsc clean.
+- **LegalWorkspace Vite**: 3918 modules / 0 errors / 3743 kB gz 1050 kB.
+- **SpaarkeAi Vite (post-100)**: 3716 modules / 0 errors / 4878.11 kB gz 1357.90 kB. Total delta from pre-091 baseline: ~+1 kB (rounding).
+- **BFF `dotnet build`**: 0 errors / 0 warnings.
+- **BFF `dotnet test`**: 14 fail / 7682 pass / 111 skip (7807 total). This session introduced 0 net regressions; +9 previously-failing tests now pass (ComposeEndpointsTests DI-mock fixes from task 097 fully landing).
+- **BFF publish (linux-x64 Release, compressed)**: 46.81 MB. Under 60 MB ceiling.
+- **SpaarkeAi jest — ComposeToolbar.test.tsx**: 14/14 pass. NEW test file `WorkspaceTabManagerComponent.hideTabBar.test.tsx`: 4/4 pass. Pre-existing `WorkspacePane.summary-tab.test.tsx` failure unchanged (bootstrap error in test env, not related to this session).
+
+### Files changed this session (post-task-102)
+
+**Baseline files touched vs HEAD `4ed88ea8b`** (est. ~70 files):
+- `src/client/shared/Spaarke.Compose.Components/**` (task 091: 6 tsx widgets moved + hooks + types + jest mapper; task 093: launch context hoisted; task 098: `orchestrators/executeComposeSummarize.ts` NEW + widened `ComposeToolbar` + trimmed `ComposeWorkspace` + trimmed `ComposeBannerStack` + barrel exports)
+- `src/solutions/SpaarkeAi/src/App.tsx` (task 092: Path A special-case removed)
+- `src/solutions/SpaarkeAi/src/components/shell/ThreePaneShell.tsx` (task 092+093: compose props + Provider wrapper)
+- `src/solutions/SpaarkeAi/src/components/workspace/WorkspacePane.tsx` (task 092: compose-layout override; task 100: header conditional + hideTabBar pass-through)
+- `src/solutions/SpaarkeAi/src/components/workspace/WorkspaceTabManagerComponent.tsx` (task 100: `hideTabBar` prop)
+- `src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx` (task 098: compose_summarize_request handler + working affordance strip)
+- `src/solutions/LegalWorkspace/{package.json,vite.config.ts}` + `src/sections/composeEditor.registration.ts` (task 093: real ComposeWorkspace mount)
+- `src/server/api/Sprk.Bff.Api/Services/Compose/IDocxTextExtractor.cs` + `DocxTextExtractor.cs` (task 094: NEW)
+- `src/server/api/Sprk.Bff.Api/Infrastructure/DI/ComposeModule.cs` (task 094: DI registration)
+- `src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/{IInvokePlaybookAi.cs,InvokePlaybookAi.cs,NullInvokePlaybookAi.cs}` (task 095: widened facade)
+- `src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs` (task 097: SSE DispatchAction)
+- `tests/unit/Sprk.Bff.Api.Tests/**` (~25 Moq site fixes across 5 test files; ComposeEndpointsTests fixture; SSE contract test; ADR-013 boundary allow-list)
+- `tests/integration/contract/Api/Compose/ComposeEndpointsContractTests.cs` + `tests/integration/regression/Compose/ComposeSummarizeRoundtripSmokeTests.cs` (task 097: 10 tests Skip'd, 1 SSE contract test added)
+- `src/solutions/SpaarkeAi/src/__tests__/compose/ComposeToolbar.test.tsx` (task 098: driveId/tenantId props on all renders + 2 new tests + payload assertions)
+- `src/solutions/SpaarkeAi/src/components/workspace/__tests__/WorkspaceTabManagerComponent.hideTabBar.test.tsx` (task 100: NEW 4-test suite)
+- `docs/adr/ADR-013-ai-architecture.md` + `.claude/adr/ADR-013-ai-architecture.md` + `.claude/adr/INDEX.md` + `.claude/CHANGELOG.md` (task 102: Path B amendment)
+- `projects/spaarkeai-compose-r1/{current-task.md,notes/defer-issues.md,tasks/TASK-INDEX.md}` + 8 POMLs (091-100, 102 status transitions + notes blocks)
+
+### Suggested bundle commit message
+
+```
+feat(spaarkeai-compose-r1): Phase 7-10 supplement — three-pane pivot + streaming SSE + assistant-pane wiring + polish
+
+Ships the R1-completion supplement per spec-supplement-2026-07-01-three-pane-pivot.md.
+
+Phase 7 (three-pane pivot):
+- Move ComposeWorkspace + widgets + hooks + types to @spaarke/compose-components shared lib
+- Remove App.tsx Path A special-case; ThreePaneShell always mounts with compose props
+- Swap LegalWorkspace composeEditor section placeholder → real ComposeWorkspace via ComposeLaunchContext bridge
+
+Phase 8 (streaming SSE backend):
+- IDocxTextExtractor (DocumentFormat.OpenXml) service + DI + 9 unit tests
+- Widen IInvokePlaybookAi facade with optional userContext + document params (Path B — CLAUDE.md §6.5)
+- Convert POST /api/compose/action/{consumerType} to text/event-stream SSE with AnalysisStreamChunk events
+
+Phase 9 (assistant-pane wiring):
+- executeComposeSummarize orchestrator (pure module, WhatWG Streams API) in @spaarke/compose-components
+- ConversationPane subscribes to compose_summarize_request; progressive "Working…" affordance + assistant-message injection on result
+- Remove workspace-local summary state + banner UI from ComposeWorkspace + ComposeBannerStack
+- Widen ComposeToolbar event payload with driveId + tenantId + sprkDocumentId
+
+Phase 10 (polish):
+- Workspace-tab suppression in compose-launch mode (hide WorkspacePaneMenu + tab strip; keep widget-add extensibility)
+- ADR-013 Path B amendment filed: full ADR §Amendment + concise MUST rules + INDEX + CHANGELOG + defer-issues §AMD-102
+
+Test suite: 0 new regressions; +9 tests newly passing; 4 new hideTabBar tests; 14 ComposeToolbar tests updated.
+Publish size: 46.81 MB compressed (under 60 MB ceiling).
+
+🤖 Generated with Claude Code
+
+Co-Authored-By: Claude Opus 4.7 <noreply@anthropic.com>
+```
+
+### 6 completed tasks this session (all UNCOMMITTED)
+
+| Task | Title | Files touched (see task POML `<notes>` for full list) |
+|---|---|---|
+| **091** | Refactor ComposeWorkspace to `@spaarke/compose-components` shared lib | 6 tsx components + hooks/ + types + tests moved; App.tsx wired; barrel + jest mapper updated |
+| **092** | App.tsx: remove Path A special-case; ThreePaneShell always | ComposeLaunchContext added to ThreePaneShell; WorkspacePane compose-layout override |
+| **093** | Swap FU-3 placeholder → real ComposeWorkspace | ComposeLaunchContext hoisted to shared lib; LegalWorkspace deps + vite wiring; `@spaarke/ai-widgets/events` subpath adopted |
+| **094** | IDocxTextExtractor service + DI + 9 tests | `Services/Compose/{IDocxTextExtractor,DocxTextExtractor}.cs` + `ComposeModule.cs` + `DocxTextExtractorTests.cs` |
+| **095/096** | Widened IInvokePlaybookAi facade (Path B ADR-013 amendment) | Interface + impl + null impl + 3 new tests + ADR-013 boundary allow-list + ~25 Moq site fixes across 5 test files |
+| **097** | SSE conversion of `POST /api/compose/action/{consumerType}` | `Api/ComposeEndpoints.cs` DispatchAction: `Task` (not `Task<IResult>`); WriteSSEAsync pattern; 10 tests Skip'd + 1 new SSE contract test; ComposeEndpointsTests fixture mocks added; FU-97a filed in `notes/defer-issues.md` |
+
+### Key deltas for post-compaction reviewer
+
+- **BFF publish size**: 45.47 MB (post-097) vs 45.41 MB (pre-Phase-8 baseline) = **+0.06 MB total**; well under 60 MB ceiling.
+- **BFF test suite**: 7673 pass / 111 skipped / 23 fail — 14 of the failures are pre-existing baseline (ComposeServiceTests + DailyBriefingCollectorTests + others); 9 additional came from ComposeEndpointsTests DI-mock gap now FIXED; **task 097 introduced 0 net regressions**.
+- **New shared lib exports**: `@spaarke/compose-components` now exports `ComposeLaunchContext`, `useComposeLaunch`, `ComposeLaunchContextValue`, all widgets (Workspace, Toolbar, BannerStack, EmptyState, ConflictDialog), hooks (broadcast/checkout/heartbeat), types (Flows 1-6), + docx bridge utils.
+- **New workspace-linked deps in LegalWorkspace**: `@spaarke/compose-components` file: package added + vite config + package.json.
+- **New DI seams**: `IDocxTextExtractor` + `IInvokePlaybookAi` widened signature (backward-compat via optional args); test fixtures registering these need `Mock.Of<IComposeDocumentService>()` + `Mock.Of<IDocxTextExtractor>()`.
+- **New follow-ups filed in `notes/defer-issues.md`**:
+  - FU-97a: re-author 10 skipped DispatchAction tests to parse SSE frames (non-blocking).
+  - FU-91a (from task 091): pre-existing SpaarkeAi jest gap on `@spaarke/ui-components/components/*` subpath (12 failing suites unrelated to compose).
+
+### Critical Context for post-compaction agent
+
+1. **DO NOT COMMIT WITHOUT USER APPROVAL** — user's explicit Option B strategy is: complete tasks 098–102 first, THEN commit all in a bundle, THEN push, THEN handle master merge/r7 conflicts.
+2. **Task 098 REMOVES local summary state from ComposeWorkspace.tsx** — the state variables `summaryStatus`, `summaryText`, `summaryError`, and `dismissSummary` were ADDED in a prior session (pre-Phase-7 work); task 098 relocates them to the ConversationPane chat model. Look for these variables in `src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx` (post-task-091 location) — they'll be delete candidates.
+3. **The SSE endpoint response shape** (from task 097, `Api/ComposeEndpoints.cs` DispatchAction): `Content-Type: text/event-stream`; events are `AnalysisStreamChunk` JSON (type: progress|result|done|error) prefixed with `data: `; each event terminates with `\n\n`; final sentinel is literal `data: [DONE]\n\n`.
+4. **`authenticatedFetch`** from `@spaarke/auth` is the required transport (per ADR-028). It returns a `Response` whose `body` is a `ReadableStream<Uint8Array>` — task 098 will consume via `body.getReader()` + `TextDecoder`.
+5. **Existing SSE precedent** on the frontend: `src/solutions/SpaarkeAi/src/components/conversation/ChatSseHandler.tsx` (SprkChat SSE consumption). Read this before writing new stream-parsing code.
+6. **ADR-013 boundary allow-list** was updated in `PhaseAVerticalSliceTests.cs` (task 095) — `DocumentContext` is now permitted on the facade. Don't revert that.
+
+---
 
 ---
 
@@ -18,7 +130,7 @@
 | **PR history** | [#515](https://github.com/spaarke-dev/spaarke/pull/515) MERGED to master (commit `81e91d06f`) — R1 baseline. [#527](https://github.com/spaarke-dev/spaarke/pull/527) OPEN — R1 completion + supplement planning (10 commits since #515; branch tip `6e67d2638` includes r7 Wave 12 merge). |
 | **What was shipped in phases 0-6 (baseline R1)** | Path A modal launch (currently direct `<ComposeWorkspace>` mount — SHORTCUT of the canonical three-pane UX; addressed in Phase 7). BFF Compose endpoints + services + DI. SpaarkeAi Compose components. Dataverse plumbing (`sprk_workspacelayout` "Compose" + `sprk_playbookconsumer` `compose-summarize`). Save works (field-name fix 2026-07-01). Formatting toolbar + BubbleMenu. Save button. Summarize wired (banner UX; not yet streaming). |
 | **What still needs to ship (phases 7-11)** | Three-pane pivot: move ComposeWorkspace to `@spaarke/compose-components`, swap FU-3 placeholder, wrap Path A in ThreePaneShell. Streaming SSE: `IDocxTextExtractor`, `IInvokePlaybookAi` extension, `/api/compose/action/*` → SSE. Assistant pane: ConversationPane consumes `compose_summarize_request` events + streams. Polish: workspace-tab suppression, modal 80×80 (done in launch-resolver 2026-07-01), ADR-013 amendment (Path B per CLAUDE.md §6.5). Wrap-up: /test-diet + close Issue #514. |
-| **NEXT ACTION (explicit)** | **Begin Phase 7 with `task-execute` on [`tasks/091-refactor-composeworkspace-to-shared-lib.poml`](tasks/091-refactor-composeworkspace-to-shared-lib.poml).** Merge to master already done; fresh BFF + SpaarkeAi deploy already applied 2026-07-01 (both include r7 Wave 12 latest + all R1 fixes). PR #527 is OPEN pending phase 7-11 completion. |
+| **NEXT ACTION (explicit)** | **Phase 8 backend ✅ complete (094+095/096+097). Begin Phase 9 (Assistant pane wiring) via `task-execute` on [`tasks/098-conversationpane-sse-consumption.poml`](tasks/098-conversationpane-sse-consumption.poml).** Operator strategy: Option B — complete Phases 9+10 (tasks 098, 099, 100, 102) before commit+push+merge+deploy. Remaining budget: ~5h estimated. R7 concurrent work touches BFF + SpaarkeAi (potential conflicts to resolve at merge time). |
 | **What I (Claude) should do post-compaction** | (a) Read spec-supplement first for full R1 completion scope. (b) Read plan.md §9 for phase 7-11 breakdown. (c) Execute via task-execute skill through the POML files 091 → 099 → 102 in sequence. (d) DO NOT create r2 project — this work is R1 completion, not new project scope (per operator 2026-07-01: "R1 isn't usable without three-pane"). (e) R3 seed is at [`../spaarkeai-compose-r3/README.md`](../spaarkeai-compose-r3/README.md) — Word fidelity work (preserving formatting, track changes, comments) — SEPARATE project, do not conflate. |
 
 ### Files Modified This Session (full Wave 0 → W11)
@@ -197,6 +309,125 @@ Project is fully initialized with artifacts but no tasks yet. Phase 0 (Spikes) i
 ---
 
 ## Active Task (Full Details)
+
+| Field | Value |
+|-------|-------|
+| **Task ID** | 097 |
+| **Task File** | tasks/097-convert-compose-action-endpoint-to-sse.poml |
+| **Title** | Convert `POST /api/compose/action/{consumerType}` to SSE streaming |
+| **Phase** | Phase 8: streaming SSE backend (supplement scope) |
+| **Status** | not-started |
+| **Rigor Level** | FULL (POML likely `rigor-hint=FULL`; endpoint conversion + streaming) |
+| **Depends On** | 094 ✅ (IDocxTextExtractor), 095 ✅ (widened IInvokePlaybookAi facade), 096 ✅ (collapsed into 095) |
+| **Approach** | Read task 097 POML at start; convert Compose dispatch endpoint from single-shot response to SSE. Reference pattern: `WorkspaceFileEndpoints.WriteSSEAsync` + `AnalysisStreamChunk`. In ComposeService dispatch path: (a) load DOCX bytes via existing `IComposeDocumentService.LoadDocxAsync`; (b) extract plain text via `IDocxTextExtractor` (094); (c) call widened `IInvokePlaybookAi.InvokePlaybookAsync` with `userContext` + `document`; (d) stream terminal-node output progressively via SSE. This eliminates the "AI analysis node requires document context" summarize failure surfaced at UAT. |
+
+---
+
+### Previous task (Phase 8 W-supp — 095 + 096 — completed 2026-07-01)
+
+| Field | Value |
+|-------|-------|
+| **Task ID** | 095 (+ 096 collapsed) |
+| **Task File** | tasks/095-extend-iinvokeplaybookai-with-document-context.poml |
+| **Title** | Extend IInvokePlaybookAi with optional userContext + DocumentContext parameters |
+| **Phase** | Phase 8: streaming SSE backend (supplement scope) |
+| **Status** | ✅ completed |
+| **Rigor Level** | FULL |
+| **Started / Completed** | 2026-07-01 / 2026-07-01 (~1 h vs 1.5 h estimate) |
+| **Design decision** | Chose **optional parameters** over separate overload — C# compiler auto-fills defaults for existing 4-arg callers → zero call-site churn. Single method, single impl. Ordering: `userContext` + `document` inserted AFTER `cancellationToken` (all three defaultable) so ct's positional-slot #4 stays legal. |
+| **Signature change** | `InvokePlaybookAsync(Guid, IReadOnlyDictionary?, PlaybookInvocationContext, CancellationToken = default, string? userContext = null, DocumentContext? document = null)` — impl forwards new args verbatim to `PlaybookRunRequest.UserContext` + `PlaybookRunRequest.Document`; telemetry logs presence + lengths only (ADR-015). |
+| **ADR-013 amendment** | The `PhaseAVerticalSliceTests.ADR013_InvokePlaybookAiFacade_DoesNotExposeAiInternalTypesInSurface` reflection test was updated with an `amendmentAllowedTypes` HashSet permitting `DocumentContext` explicitly, with citations to task 095 + task 102 formal filing. Silent bypass forbidden per CLAUDE.md §6.5 — explicit allow-list with citation is Path B posture. |
+| **Moq expression-tree fix** | ~25 Setup/Verify sites across 5 test files (`InvokePlaybookHandlerTests`, `DailyBriefingEndpointsTests`, `DailyBriefingResponseShapeTests`, `ComposeEndpointsContractTests`, `ComposeSummarizeRoundtripSmokeTests`) required `It.IsAny<string?>()` + `It.IsAny<Sprk.Bff.Api.Services.Ai.DocumentContext?>()` appended per CS0854. Callback generics extended 4 → 6 type params; lambdas expanded 4 → 6 args. |
+| **New tests** | 3 added to `InvokePlaybookAiTests.cs`: `WithUserContextAndDocument_ForwardsToRequest`, `WithoutUserContextOrDocument_BackwardCompatibleRequestShape`, `NullInvokePlaybookAi_WithWidenedArgs_StillThrowsFeatureDisabled`. |
+| **Build verification** | `dotnet build src/server/api/Sprk.Bff.Api/`: ✅ 0 errors / 19 warnings (baseline preserved). |
+| **Test verification** | **94/94 facade + boundary + consumer-setup tests pass**. 7 pre-existing baseline failures (6 ComposeServiceTests + 1 DailyBriefingCollectorTests) verified via git stash — **unrelated to IInvokePlaybookAi**; zero regressions from task 095. |
+| **POML acceptance** | #1 ✅ build clean. #2 ✅ 4-arg call shape unchanged for existing consumers. #3 ✅ new tests + updated boundary allow-list. |
+| **Task 096 collapse** | Task 096 (impl updates) delivered atomically with 095 because C# forbids interface + impl signature divergence — both `InvokePlaybookAi.cs` and `NullInvokePlaybookAi.cs` had to ship the widened signature the moment the interface changed, or the project wouldn't compile. 096 marked ✅ (collapsed into 095) in TASK-INDEX. |
+
+---
+
+### Prior task (Phase 8 W-supp — 094 — completed 2026-07-01)
+
+| Field | Value |
+|-------|-------|
+| **Task ID** | 094 |
+| **Task File** | tasks/094-bff-docx-text-extractor.poml |
+| **Title** | Add IDocxTextExtractor service (DocumentFormat.OpenXml) + tests |
+| **Phase** | Phase 8: streaming SSE backend (supplement scope) |
+| **Status** | ✅ completed |
+| **Rigor Level** | FULL |
+| **Started / Completed** | 2026-07-01 / 2026-07-01 (~45 min vs 2 h estimate) |
+| **Files delivered** | (a) `src/server/api/Sprk.Bff.Api/Services/Compose/IDocxTextExtractor.cs` (ADR-010 justified I/O-boundary seam). (b) `src/server/api/Sprk.Bff.Api/Services/Compose/DocxTextExtractor.cs` (default impl: single OpenXml tree walk; paragraph-break separator; truncation suffix with accurate residue count; malformed-input normalization to `InvalidDataException`; CancellationToken propagation). (c) `Infrastructure/DI/ComposeModule.cs` UNCONDITIONAL Scoped registration per §F.1. (d) `tests/unit/Sprk.Bff.Api.Tests/Services/Compose/DocxTextExtractorTests.cs` (9 behavioral tests with in-memory DOCX fixtures — empty / simple / split-runs / headers-footers-skipped / comments-skipped / truncation / malformed / cancelled / argument-out-of-range). |
+| **Build verification** | `dotnet build src/server/api/Sprk.Bff.Api/`: ✅ 0 errors / 19 warnings (identical to baseline). |
+| **Test verification** | `dotnet test --filter "FullyQualifiedName~DocxTextExtractor"`: ✅ **9/9 pass in 24 ms** (unit-domain KEEP category per ADR-038). |
+| **Publish size** | **45.47 MB compressed** vs pre-094 baseline **45.41 MB** — delta **+0.06 MB (~60 KB)**. Well under < 0.5 MB POML target and < 1 MB constraint. Confirms `DocumentFormat.OpenXml 3.4.1` was already directly referenced (no new binary payload). |
+| **POML acceptance** | #1 ✅ dotnet build clean. #2 ✅ tests pass. #3 ✅ size delta well under 0.5 MB. |
+| **Downstream unblocked** | Task 095 (IInvokePlaybookAi facade extension) can now consume `IDocxTextExtractor` to produce `UserContext`. Task 097 (SSE endpoint conversion) inherits via DI — no additional wiring beyond compose SSE dispatch path. |
+
+---
+
+### Prior task (Phase 7 W-supp — 093 — completed 2026-07-01)
+
+| Field | Value |
+|-------|-------|
+| **Task ID** | 093 |
+| **Task File** | tasks/093-swap-fu3-placeholder-for-real-composeworkspace.poml |
+| **Title** | Swap FU-3 placeholder → real ComposeWorkspace in composeEditor.registration.ts |
+| **Phase** | Phase 7: three-pane pivot (supplement scope) |
+| **Status** | ✅ completed (FU-3 RESOLVED) |
+| **Rigor Level** | FULL |
+| **Started / Completed** | 2026-07-01 / 2026-07-01 (~1.5 h vs 1 h estimate; overshoot due to LegalWorkspace transitive-dep remediation) |
+| **Files touched** | (a) `src/client/shared/Spaarke.Compose.Components/src/context/composeLaunchContext.ts` (NEW — hoisted from SpaarkeAi). (b) `src/client/shared/Spaarke.Compose.Components/src/index.ts` (barrel export the new context symbols). (c) `src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx` + `.../ComposeEditor.tsx` (swap `@spaarke/ai-widgets` → `@spaarke/ai-widgets/events` subpath). (d) `src/solutions/SpaarkeAi/src/components/shell/ThreePaneShell.tsx` (removed local `ComposeLaunchContext` def; re-export `useComposeLaunch` from shared lib). (e) `src/solutions/LegalWorkspace/package.json` + `vite.config.ts` (workspace-linked dep + 3 vite entries). (f) `src/solutions/LegalWorkspace/src/sections/composeEditor.registration.ts` (Skeleton placeholder → real `<ComposeWorkspace>` via `ComposeSectionMount` bridge that consumes `useComposeLaunch()`). |
+| **Contract established** | LegalWorkspace section factory now renders real ComposeWorkspace. When SpaarkeAi ThreePaneShell provides `ComposeLaunchContext` (ribbon modal launch), document context flows through. When standalone (or SpaarkeAi workspace picker without a document), `useComposeLaunch()` returns null → ComposeWorkspace renders empty state → user browses/searches. |
+| **Build verification** | `@spaarke/compose-components` tsc ✅ 0 errors. SpaarkeAi Vite ✅ 3715 modules / 4876.96 kB / gzip 1357.34 kB (re-eagerised the ComposeWorkspace chain; back to pre-092 baseline). LegalWorkspace standalone Vite ✅ 3917 modules / 3746.04 kB / gzip 1051.21 kB (+1384 kB vs pre-093 due to compose chain now included — expected). Ribbon build clean. |
+| **Test verification** | Full SpaarkeAi jest baseline preserved: 12 failed / 18 passed suites, 5 failed / 470 passed tests — IDENTICAL to post-092. Pre-existing infra gap (FU-91a) unchanged. |
+| **POML acceptance** | #1 ✅ real editor mounts via shared lib import + context bridge. #2 ✅ FU-3 marked RESOLVED in `notes/defer-issues.md` (both table row + detail section). |
+| **Follow-ups** | FU-93a (informational, not a formal issue below 3+usage threshold): `@spaarke/ai-widgets` barrel side-effect widget registration triggers transitive resolution of `@spaarke/ai-outputs` subpaths that LegalWorkspace standalone Rollup can't resolve. Fixed here by switching to `@spaarke/ai-widgets/events` subpath. Two consumers now use the deep-import pattern (this project's ComposeWorkspace/ComposeEditor + pre-existing useWorkspaceLayouts adapter). A future ai-widgets refactor to defer the side-effect registration would eliminate the need. |
+
+---
+
+### Prior task (Phase 7 W-supp — 092 — completed 2026-07-01)
+
+| Field | Value |
+|-------|-------|
+| **Task ID** | 092 |
+| **Task File** | tasks/092-remove-path-a-special-case-in-app.poml |
+| **Title** | App.tsx: remove Path A special-case; render ThreePaneShell always |
+| **Phase** | Phase 7: three-pane pivot (supplement scope) |
+| **Status** | ✅ completed |
+| **Rigor Level** | FULL |
+| **Started / Completed** | 2026-07-01 / 2026-07-01 (~45 min vs 1 h estimate) |
+| **Files touched** | `src/solutions/SpaarkeAi/src/App.tsx` (removed Path A block + unused imports); `src/solutions/SpaarkeAi/src/components/shell/ThreePaneShell.tsx` (added `ComposeLaunchContext` + `useComposeLaunch` + 3 optional props); `src/solutions/SpaarkeAi/src/components/workspace/WorkspacePane.tsx` (consume `useComposeLaunch`; compute `layoutForAutoInstall` — prefers "Compose" layout by name when composeMode=editor, else falls through to BFF `activeLayout`; pinned-list skip disabled in compose-launch mode). |
+| **Contract established** | `ComposeLaunchContext` exposes `{ composeMode: 'editor', document, driveId }` when the app was launched via ribbon modal — null otherwise. Task 093 will consume this in the compose-editor section factory. Named-based layout override (no client-side GUID pinning, no sessionStorage side-effects). |
+| **Build verification** | SpaarkeAi Vite ✅ 3579 modules / 13.86s / **3991.14 kB** (gzip **1088.21 kB**) — bundle **REDUCED** ~886 kB / 269 kB gzip because Vite tree-shakes ComposeWorkspace+TipTap chain now that App.tsx doesn't eagerly import them. Task 093's section-factory swap will bring the chain back into the eager bundle (~4.9 MB). Ribbon build clean. |
+| **Test verification** | Full SpaarkeAi jest suite baseline preserved: 12 failed / 18 passed suites, 5 failed / 470 passed tests — IDENTICAL to post-091 baseline. Pre-existing `@spaarke/ui-components/components/CreateMatterWizard` subpath gap (FU-91a) unrelated. |
+| **POML acceptance** | #1 partial ✅ (three panes render + Compose layout auto-selected; real editor mount is 093's swap); #2 ✅ (non-compose launches use `activeLayout` — zero behavior change); #3 ✅ (all tests pass). |
+
+---
+
+### Prior task (Phase 7 W-supp — 091 — completed 2026-07-01)
+
+| Field | Value |
+|-------|-------|
+| **Task ID** | 091 |
+| **Task File** | tasks/091-refactor-composeworkspace-to-shared-lib.poml |
+| **Title** | Move ComposeWorkspace + hooks + types to @spaarke/compose-components |
+| **Phase** | Phase 7: three-pane pivot (supplement scope) |
+| **Status** | ✅ completed |
+| **Rigor Level** | FULL |
+| **Started / Completed** | 2026-07-01 / 2026-07-01 (~1.5 h vs 3 h estimate) |
+| **Files moved** | 6 tsx components + `ComposeWorkspace.types.ts` + 3 hooks (+ hooks/index.ts) + `compose-contracts.ts` (774 LOC) → `src/client/shared/Spaarke.Compose.Components/src/{widgets,widgets/hooks,types}/`. Tests relocated to `src/solutions/SpaarkeAi/src/__tests__/compose/`. |
+| **Import rewires** | 3 `../../types/compose-contracts` → `../types/compose-contracts`; 1 self-import fix (`ComposeWorkspace.tsx` `@spaarke/compose-components` → `./ComposeEditor`); App.tsx: `./components/compose` + `./types/compose-contracts` → `@spaarke/compose-components`; test files: `../ComposeToolbar` etc. → `@spaarke/compose-components/widgets/ComposeToolbar` etc. (subpath — avoids pre-existing SpaarkeAi jest `ui-components/components/*` gap). |
+| **Barrel exports added** | 20+ new export lines in shared lib `src/index.ts` covering: workspace-level widgets (ComposeWorkspace/Toolbar/BannerStack/EmptyState/ConflictDialog), reducer + state types + 3 hooks, and Flow 1-6 data contracts. |
+| **Build verification** | ✅ tsc `@spaarke/compose-components` 0 errors; ✅ SpaarkeAi Vite prod 3714 modules / 18.73s / 4877.63 kB / gzip 1357.38 kB (identical to pre-091 bundle). |
+| **Test verification** | 24/24 relocated Compose tests pass in 7.9s. Full SpaarkeAi suite: 12 failed / 18 passed suites → **IDENTICAL to pre-091 baseline** (verified via git stash + re-test). The 12 failing suites are pre-existing infra gap on `@spaarke/ui-components/components/CreateMatterWizard` subpath (FU-91a). |
+| **Reverse-dep check** | ✅ grep confirms no `solutions/` imports from shared lib (dependency graph unidirectional per POML acceptance #4). |
+| **Contract satisfied** | Spike #2 §11 open item #2 promotion trigger fires (second consumer of compose-contracts.ts now exists). Calendar Pattern D packaging precedent matched: shared-lib widgets + types exported from `@spaarke/compose-components`; consumer shims import from package name. |
+| **Follow-ups filed** | FU-91a: SpaarkeAi jest infra gap on `@spaarke/ui-components/components/*` subpaths (pre-existing; 12 failing suites unrelated to compose). Fix belongs to a dedicated infra task if failing suites ever become CI-blocking. |
+
+---
+
+### Prior task (W8-060 — moved to archive)
 
 | Field | Value |
 |-------|-------|

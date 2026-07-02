@@ -614,12 +614,15 @@ registerWorkspaceWidget(
 //  - projects:         'Active Projects (Workspace)'     (created 2026-06-08)
 //  - invoices:         'Invoice Matter Budget Performance' (pre-existing)
 //  - workAssignments:  'Active Work Assignments (Workspace)' (created 2026-06-08)
+//  - communications:   'Active Communications (Workspace)' (created 2026-07-01,
+//                       ai-spaarke-ai-workspace-UI-r2 task 010)
 const ENTITY_VIEW_CONFIG_IDS = {
   documents: '1cdd19d2-3964-f111-ab0c-7ced8ddc4cc6',
   matters: '113ad380-9e63-f111-ab0c-70a8a53ec687',
   projects: '97ee98e7-7a63-f111-ab0c-70a8a53ec687',
   invoices: 'd021827b-9b5e-f111-ab0c-7c1e521545d7',
   workAssignments: '9c5b0ee7-7a63-f111-ab0c-000d3a4d8152',
+  communications: 'e1826c4c-9575-f111-ab0e-7ced8ddc4a05',
 } as const;
 
 /**
@@ -720,6 +723,23 @@ registerWorkspaceWidget(
     defaultOrder: 230,
   },
   createEntityViewFactory(ENTITY_VIEW_CONFIG_IDS.workAssignments),
+  tableWidgetVisibility
+);
+
+// ai-spaarke-ai-workspace-UI-r2 FR-10 (2026-07-01): Communications direct widget.
+// Pattern D dual-use with the `communications` section in LegalWorkspace.
+// Row-click opens Layout 1 (OOB modal via `Xrm.Navigation.navigateTo` at 85% × 85%)
+// per the Phase-1 framework unification (FR-03/FR-20).
+registerWorkspaceWidget(
+  'communications-list',
+  {
+    displayName: 'Communications',
+    category: 'data',
+    icon: 'MailRegular',
+    allowMultiple: true,
+    defaultOrder: 240,
+  },
+  createEntityViewFactory(ENTITY_VIEW_CONFIG_IDS.communications),
   tableWidgetVisibility
 );
 

@@ -199,12 +199,24 @@ export interface RowOpenConfig {
   dialogComponent?: string;
 
   // type = 'formDialog' — Dataverse-native centered modal dialog of the
-  // entity record form (Xrm.Navigation.navigateTo with target=2). Width
-  // and height default to 80% if omitted.
-  /** Dialog width percentage (1-100). Default 80. */
+  // entity record form (Xrm.Navigation.navigateTo with target=2).
+  //
+  // R2 note (ai-spaarke-ai-workspace-UI-r2, FR-20): the framework now emits
+  // a single Layout 1 modal size (85% × 85%, position 1) for every row-open
+  // regardless of `rowOpen.type`. The per-record `formDialogWidthPercent` and
+  // `formDialogHeightPercent` overrides are retained in the schema for
+  // backward-compatible deserialization but are IGNORED by `defaultRecordOpen`.
+  /** @deprecated R2 FR-20: ignored by `defaultRecordOpen`; retained for schema compatibility. */
   formDialogWidthPercent?: number;
-  /** Dialog height percentage (1-100). Default 80. */
+  /** @deprecated R2 FR-20: ignored by `defaultRecordOpen`; retained for schema compatibility. */
   formDialogHeightPercent?: number;
+
+  /**
+   * R2 FR-01: optional form GUID passed as `pageInput.formId` on the
+   * `Xrm.Navigation.navigateTo` call. When set, opens the specified form
+   * variant; when absent, opens the user's default main form for the entity.
+   */
+  formId?: string;
 
   // type = 'webResource'
   webResource?: string;

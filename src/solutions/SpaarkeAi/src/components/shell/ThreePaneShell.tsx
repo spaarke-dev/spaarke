@@ -77,6 +77,20 @@ import { useSessionRestore } from "../../hooks/useSessionRestore";
 import type { SessionRestoreSpec } from "../../hooks/useSessionRestore";
 import { usePaneCollapse } from "../../hooks/usePaneCollapse";
 import type { PaneId } from "../../hooks/usePaneCollapse";
+// spaarkeai-compose-r1 task 093: `ComposeLaunchContext` + `useComposeLaunch`
+// were hoisted from this file into `@spaarke/compose-components` so
+// LegalWorkspace's compose section factory can consume them without importing
+// from `src/solutions/SpaarkeAi/*` (unidirectional dep graph per task 091).
+// This file continues to PROVIDE the context value (via the Provider inside
+// ThreePaneShell) and re-exports `useComposeLaunch` for SpaarkeAi consumers
+// (e.g. WorkspacePane) so the local import path stays stable.
+import {
+  ComposeLaunchContext,
+  type ComposeLaunchContextValue,
+  type ComposeDocumentRef,
+} from "@spaarke/compose-components";
+export { useComposeLaunch } from "@spaarke/compose-components";
+export type { ComposeLaunchContextValue } from "@spaarke/compose-components";
 
 // ---------------------------------------------------------------------------
 // ShellStage — lifecycle state type (four-stage, design.md Section 2.3)
@@ -192,6 +206,24 @@ export interface ThreePaneShellProps {
   matterId?: string;
   /** Session ID for session restore flow (AIPU2-106). When present, triggers restore before first render. */
   sessionId?: string;
+
+  // spaarkeai-compose-r1 task 092 (Phase 7 three-pane pivot).
+  //
+  // When the ribbon "Open in Compose" modal launches SpaarkeAi with
+  // `?composeMode=editor&sprkDocumentId=…&speDriveItemId=…&…`, App.tsx passes
+  // these fields through so ThreePaneShell can (a) auto-select the "Compose"
+  // workspace layout in WorkspacePane and (b) thread the document pointer
+  // to the compose-editor section factory via ComposeLaunchContext.
+  //
+  // Omitting all three preserves the default three-pane experience (BFF's
+  // default active layout, no document context).
+
+  /** Set to `'editor'` when the app was launched via ribbon Open-in-Compose. */
+  composeMode?: "editor";
+  /** Document pointer forwarded from the ribbon URL params (Path A entry). */
+  composeDocument?: ComposeDocumentRef | null;
+  /** SPE container/drive id from URL — optional; resolved at runtime if absent. */
+  composeDriveId?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -572,7 +604,32 @@ export function ThreePaneShell(props: ThreePaneShellProps): React.JSX.Element {
   // consumed by this shell — auth state is read via useAiSession() (which
   // wraps useAuth()) inside the panes. The props on ThreePaneShellProps are
   // retained for now to avoid churning App.tsx; task 021 removes them entirely.
-  const { bffBaseUrl, entityLogicalName, entityId, matterId, sessionId } = props;
+  const {
+    bffBaseUrl,
+    entityLogicalName,
+    entityId,
+    matterId,
+    sessionId,
+    composeMode,
+    composeDocument = null,
+    composeDriveId = "",
+  } = props;
+
+  // spaarkeai-compose-r1 task 092: assemble the Compose launch context so
+  // downstream panes can respond to modal-launch mode. `null` when the app is
+  // not in Compose mode — consumers use `useComposeLaunch()` and fall through
+  // to default behaviour when the value is null.
+  const composeLaunch = React.useMemo<ComposeLaunchContextValue | null>(
+    () =>
+      composeMode === "editor"
+        ? {
+            composeMode: "editor",
+            document: composeDocument,
+            driveId: composeDriveId,
+          }
+        : null,
+    [composeMode, composeDocument, composeDriveId],
+  );
 
   // Build the entity context for AiSessionProvider from URL params.
   // R2: entityContext is resolved at the shell level and passed down via
@@ -614,6 +671,7 @@ export function ThreePaneShell(props: ThreePaneShellProps): React.JSX.Element {
   const toggleRight = React.useCallback(() => paneCollapse.toggle("context"), [paneCollapse]);
 
   return (
+    <ComposeLaunchContext.Provider value={composeLaunch}>
     <PaneEventBusProvider>
       <AiSessionProvider
         bffBaseUrl={bffBaseUrl}
@@ -696,5 +754,6 @@ export function ThreePaneShell(props: ThreePaneShellProps): React.JSX.Element {
         </ShellStageManager>
       </AiSessionProvider>
     </PaneEventBusProvider>
+    </ComposeLaunchContext.Provider>
   );
 }

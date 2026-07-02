@@ -1,0 +1,52 @@
+<task id="R2-024" project="ai-spaarke-ai-workspace-UI-r2">
+  <metadata>
+    <title>Phase 3 PR — SmartTodoModal retirement + documentation</title>
+    <status>completed</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <phase>3</phase>
+    <tags>pr,merge,ci,git,retirement,documentation</tags>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+Verify Phase 3 changes (retirement + docs); confirm FR-20 (Layout 1 size standard is 85%×85% grep-verifiable) + FR-21 (Layout 2 dimensions preserved); prepare Phase 3 PR; ship.
+  </prompt>
+
+  <role>Developer + QA shepherding a PR.</role>
+
+  <goal>
+PR 3 merged to master. `SmartTodoModal` retired. All 5 docs sharpened. `RichFilePreviewDialog` dimensions verified unchanged. TASK-INDEX 020–024 marked ✅.
+  </goal>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-spaarke-ai-workspace-UI-r2/spec.md</file>
+      <file>projects/ai-spaarke-ai-workspace-UI-r2/notes/smart-todo-modal-callsites.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Grep verification (FR-20): every `Xrm.Navigation.navigateTo` callsite touched in R2 uses `width: {value: 85, unit: '%'}, height: {value: 85, unit: '%'}`.</step>
+    <step>Grep verification (FR-21): `RichFilePreviewDialog` still uses `max-width: 1280px, height: 85vh` — dimensions unchanged.</step>
+    <step>Grep verification: `iframe.*main\.aspx` returns 0 matches in `src/solutions/` and `src/client/`.</step>
+    <step>Grep verification: `SmartTodoModal` returns 0 imports (deletion complete).</step>
+    <step>Deploy to dev; A/B compare Documents preview (should be identical to before R2).</step>
+    <step>Deploy to dev; smoke test one To Do open → Layout 1 opens correctly.</step>
+    <step>Document verification in `notes/phase3-verification.md`.</step>
+    <step>Push branch; create PR; wait for CI green; code-review; merge.</step>
+    <step>Post-merge: sync branch; update TASK-INDEX marking 020–024 as ✅.</step>
+  </steps>
+
+  <tools>Bash · Grep · push-to-github skill · code-review skill · gh CLI · code-page-deploy skill · Read · Edit</tools>
+
+  <acceptance-criteria>
+    <criterion>Grep confirms 85%×85% size in all touched navigateTo callsites (FR-20).</criterion>
+    <criterion>Grep confirms RichFilePreviewDialog dimensions unchanged (FR-21).</criterion>
+    <criterion>Grep confirms no iframe of main.aspx in src/ (NFR-03).</criterion>
+    <criterion>Grep confirms no SmartTodoModal orphan imports.</criterion>
+    <criterion>Documents preview A/B compared — identical.</criterion>
+    <criterion>PR merged to master.</criterion>
+    <criterion>CI green; code-review approved.</criterion>
+    <criterion>TASK-INDEX updated with ✅ for 020–024.</criterion>
+  </acceptance-criteria>
+</task>

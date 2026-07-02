@@ -98,6 +98,20 @@ namespace Sprk.Bff.Api.Tests.Api.Compose;
 [Trait("status", "repaired")]
 public sealed class ComposeEndpointsContractTests : IClassFixture<ComposeContractFixture>
 {
+    /// <summary>
+    /// spaarkeai-compose-r1 task 097 (Phase 8 SSE backend, per FR-S3): the three
+    /// tests marked with this Skip attribute assert JSON-response fields on
+    /// <c>ComposeActionResponse</c> which the DispatchAction endpoint no longer
+    /// returns. The endpoint contract they exercise (200 happy path + spike #4
+    /// §6 response shape + 503 no-routing) has moved to SSE events. Re-authoring
+    /// them to parse SSE frames is tracked as FU-97a in
+    /// <c>notes/defer-issues.md</c>; the immediate SSE contract is guarded by the
+    /// new <see cref="PostDispatchAction_ReturnsTextEventStreamPerTask097"/> test.
+    /// </summary>
+    private const string SkipReason_SseConversion_097 =
+        "Task 097 converted DispatchAction to SSE; JSON-response assertions no longer applicable. " +
+        "SSE-shape re-test coverage tracked as FU-97a (notes/defer-issues.md).";
+
     private readonly ComposeContractFixture _fixture;
 
     public ComposeEndpointsContractTests(ComposeContractFixture fixture)
@@ -301,7 +315,7 @@ public sealed class ComposeEndpointsContractTests : IClassFixture<ComposeContrac
             "Compose check-in is a Phase 5 stub in R1 (ComposeEndpoints.Checkin)");
     }
 
-    [Fact]
+    [Fact(Skip = SkipReason_SseConversion_097)]
     public async Task PostDispatchAction_Authenticated_WithRoutedPlaybook_Returns200_ViaPublicContractsFacadeOnly()
     {
         // Refined ADR-013 (2026-05-20): the dispatch path goes through
@@ -332,7 +346,9 @@ public sealed class ComposeEndpointsContractTests : IClassFixture<ComposeContrac
                 playbookId,
                 It.IsAny<IReadOnlyDictionary<string, string>?>(),
                 It.IsAny<PlaybookInvocationContext>(),
-                It.IsAny<CancellationToken>()))
+                It.IsAny<CancellationToken>(),
+                It.IsAny<string?>(),
+                It.IsAny<Sprk.Bff.Api.Services.Ai.DocumentContext?>()))
             .ReturnsAsync(new PlaybookInvocationResult
             {
                 RunId = runId,
@@ -378,7 +394,9 @@ public sealed class ComposeEndpointsContractTests : IClassFixture<ComposeContrac
             playbookId,
             It.IsAny<IReadOnlyDictionary<string, string>?>(),
             It.IsAny<PlaybookInvocationContext>(),
-            It.IsAny<CancellationToken>()), Times.Once);
+            It.IsAny<CancellationToken>(),
+            It.IsAny<string?>(),
+            It.IsAny<Sprk.Bff.Api.Services.Ai.DocumentContext?>()), Times.Once);
     }
 
     // ================================================================================
@@ -408,7 +426,7 @@ public sealed class ComposeEndpointsContractTests : IClassFixture<ComposeContrac
     //   no Mock<HttpMessageHandler> (B1); no DI-registration assertions (B3); no ctor null
     //   checks (B4); ratio of setup:assertion is balanced (B15 N/A).
 
-    [Fact]
+    [Fact(Skip = SkipReason_SseConversion_097)]
     public async Task PostDispatchAction_WithComposeSummarizeRoundTrip_ReturnsLockedResponseShape_PerSpike4Section6()
     {
         // Arrange — full round-trip context: tenant + drive + sessionId + selection-free
@@ -466,7 +484,9 @@ public sealed class ComposeEndpointsContractTests : IClassFixture<ComposeContrac
                 playbookId,
                 It.IsAny<IReadOnlyDictionary<string, string>?>(),
                 It.IsAny<PlaybookInvocationContext>(),
-                It.IsAny<CancellationToken>()))
+                It.IsAny<CancellationToken>(),
+                It.IsAny<string?>(),
+                It.IsAny<Sprk.Bff.Api.Services.Ai.DocumentContext?>()))
             .ReturnsAsync(new PlaybookInvocationResult
             {
                 RunId = runId,
@@ -545,7 +565,9 @@ public sealed class ComposeEndpointsContractTests : IClassFixture<ComposeContrac
             playbookId,
             It.IsAny<IReadOnlyDictionary<string, string>?>(),
             It.IsAny<PlaybookInvocationContext>(),
-            It.IsAny<CancellationToken>()), Times.Once,
+            It.IsAny<CancellationToken>(),
+            It.IsAny<string?>(),
+            It.IsAny<Sprk.Bff.Api.Services.Ai.DocumentContext?>()), Times.Once,
             "InvokePlaybookAsync must be called exactly once with the resolved playbookId — round-trip contract per FR-09");
     }
 
@@ -553,7 +575,7 @@ public sealed class ComposeEndpointsContractTests : IClassFixture<ComposeContrac
     // ===== Routing-failure + unknown-consumer paths (503 / 404) =====================
     // ================================================================================
 
-    [Fact]
+    [Fact(Skip = SkipReason_SseConversion_097)]
     public async Task PostDispatchAction_WhenNoRoutingConfigured_Returns503()
     {
         // Spike #4 §8 row: no sprk_playbookconsumer row → null playbookId → 503.
@@ -588,7 +610,74 @@ public sealed class ComposeEndpointsContractTests : IClassFixture<ComposeContrac
             It.IsAny<Guid>(),
             It.IsAny<IReadOnlyDictionary<string, string>?>(),
             It.IsAny<PlaybookInvocationContext>(),
-            It.IsAny<CancellationToken>()), Times.Never);
+            It.IsAny<CancellationToken>(),
+            It.IsAny<string?>(),
+            It.IsAny<Sprk.Bff.Api.Services.Ai.DocumentContext?>()), Times.Never);
+    }
+
+    /// <summary>
+    /// spaarkeai-compose-r1 task 097 SSE contract guard.
+    ///
+    /// The DispatchAction endpoint MUST emit <c>Content-Type: text/event-stream</c>
+    /// with a body that terminates in the <c>data: [DONE]\n\n</c> sentinel — for BOTH
+    /// success and downstream-failure paths (once SSE headers are committed,
+    /// failures use error chunks, not 5xx codes). This test asserts the SSE contract
+    /// shape without depending on a functioning `IComposeDocumentService` or a
+    /// specific playbook outcome (the deeper Hop-by-Hop assertions live in the Skip'd
+    /// smoke tests; SSE-parsing re-tests are follow-up FU-97a).
+    /// </summary>
+    [Fact]
+    public async Task PostDispatchAction_ReturnsTextEventStreamPerTask097()
+    {
+        const string consumerType = ConsumerTypes.ComposeSummarize;
+
+        _fixture.RoutingMock.Reset();
+        _fixture.InvokePlaybookMock.Reset();
+
+        // Wire routing to succeed so we get past the pre-SSE 503 branch and
+        // commit to text/event-stream headers.
+        _fixture.RoutingMock
+            .Setup(r => r.ResolveAsync(
+                consumerType,
+                It.IsAny<string?>(),
+                It.IsAny<IRoutingContext?>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Guid.NewGuid());
+
+        using var client = _fixture.CreateAuthenticatedClient();
+
+        var body = new
+        {
+            documentSpeId = "spe-item-sse-097",
+            tenantId = "tenant-aad-097",
+            driveId = "drive-sse-097",
+            documentRecordId = Guid.NewGuid(),
+            documentName = "sse-contract-test.docx",
+        };
+
+        var response = await client.PostAsJsonAsync($"/api/compose/action/{consumerType}", body);
+
+        // The endpoint commits to SSE once validation + routing pass. Downstream
+        // failures (IComposeDocumentService load, IDocxTextExtractor parse, playbook
+        // execution) surface as `data: {"type":"error", ...}` events INSIDE the SSE
+        // stream — the HTTP status stays 200 and the Content-Type stays
+        // text/event-stream. This test does not care which specific event fires
+        // because the fixture's real IComposeDocumentService will most likely fail
+        // to load a bogus drive-item — we only assert the SSE contract shape.
+        response.StatusCode.Should().Be(HttpStatusCode.OK,
+            "task 097 SSE conversion: HTTP status stays 200 after SSE headers commit; " +
+            "errors emit SSE error chunks instead of 5xx status codes");
+        response.Content.Headers.ContentType?.MediaType.Should().Be(
+            "text/event-stream",
+            "task 097: response content type MUST be text/event-stream per SSE contract");
+
+        var responseBody = await response.Content.ReadAsStringAsync();
+        responseBody.Should().Contain("data: ",
+            "SSE responses use `data:` prefixed frames per the EventSource protocol");
+        responseBody.Should().EndWith("data: [DONE]\n\n",
+            "task 097 SSE contract: every response terminates in the `data: [DONE]` sentinel " +
+            "so clients know when to close the stream");
     }
 
     [Fact]

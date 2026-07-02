@@ -43,7 +43,9 @@ public sealed class InvokePlaybookAi : IInvokePlaybookAi
         Guid playbookId,
         IReadOnlyDictionary<string, string>? parameters,
         PlaybookInvocationContext context,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? userContext = null,
+        Sprk.Bff.Api.Services.Ai.DocumentContext? document = null)
     {
         if (playbookId == Guid.Empty)
         {
@@ -55,21 +57,39 @@ public sealed class InvokePlaybookAi : IInvokePlaybookAi
         var startedAt = DateTimeOffset.UtcNow;
         var stopwatch = Stopwatch.StartNew();
 
+        // ADR-015 telemetry hygiene: log presence + lengths only, never the
+        // userContext / document text bodies. `hasDocument` + `documentTextLength`
+        // let operators size prompt budgets from telemetry without leaking content.
         _logger.LogInformation(
-            "InvokePlaybookAi.InvokePlaybookAsync started (playbookId={PlaybookId}, tenantId={TenantId}, parameterCount={ParameterCount}).",
+            "InvokePlaybookAi.InvokePlaybookAsync started (playbookId={PlaybookId}, tenantId={TenantId}, parameterCount={ParameterCount}, hasUserContext={HasUserContext}, userContextLength={UserContextLength}, hasDocument={HasDocument}, documentTextLength={DocumentTextLength}).",
             playbookId,
             context.TenantId,
-            parameters?.Count ?? 0);
+            parameters?.Count ?? 0,
+            userContext is not null,
+            userContext?.Length ?? 0,
+            document is not null,
+            document?.TextLength ?? 0);
 
-        // Construct the orchestration request. Note: the facade does NOT accept
-        // documentIds today — invoke_playbook callers pass parameters only. The
-        // orchestration service interprets an empty documentIds array as "no
-        // document context" (consistent with the existing M365 Copilot adapter path).
+        // Construct the orchestration request.
+        //
+        // spaarkeai-compose-r1 task 095 widening (Path B ADR-013 amendment, per
+        // CLAUDE.md §6.5 — filed formally in task 102):
+        //   `UserContext` + `Document` are forwarded from the new facade parameters.
+        //   When both are null (existing Phase 1 chat-tool + M365 Copilot callers),
+        //   the request shape is byte-identical to the pre-widening path — the
+        //   orchestration service treats null Document + empty DocumentIds as
+        //   "no document context" (consistent with the pre-Compose behaviour).
+        //
+        //   `DocumentIds` remains empty in the widened path because Compose supplies
+        //   the pre-loaded document directly via `Document` — no re-fetch from
+        //   Dataverse is required (per PlaybookRunRequest.Document XML doc).
         var request = new PlaybookRunRequest
         {
             PlaybookId = playbookId,
             DocumentIds = Array.Empty<Guid>(),
             Parameters = parameters,
+            UserContext = userContext,
+            Document = document,
         };
 
         Guid runId = Guid.Empty;

@@ -2,11 +2,11 @@
 
 | Field | Value |
 |-------|-------|
-| Status | **Accepted (refined 2026-05-20)** |
+| Status | **Accepted (refined 2026-05-20; amended 2026-07-01 — document-context invocation)** |
 | Date | 2025-12-05 |
-| Updated | 2026-05-20 |
+| Updated | 2026-07-01 |
 | Authors | Spaarke Engineering |
-| Sprint | Sprint 7 - AI Foundation (R3 Phases 1-5 Complete) |
+| Sprint | Sprint 7 - AI Foundation (R3 Phases 1-5 Complete); amendment lands with `spaarkeai-compose-r1` |
 
 ---
 
@@ -585,6 +585,72 @@ public class AiIndexingJobHandler : IJobHandler<AiIndexingJob>
 
 ---
 
+## Amendment 2026-07-01 — Document-context invocation on `IInvokePlaybookAi` facade
+
+**Path B amendment** per [`CLAUDE.md §6.5`](../../CLAUDE.md) ADR Conflict Resolution Protocol. Motivating consumer: `spaarkeai-compose-r1` (Compose R1 drafting workspace).
+
+### What changed
+
+The refined facade `IInvokePlaybookAi` (Services/Ai/PublicContracts) now accepts two OPTIONAL document-context arguments in addition to the pre-existing `playbookId + parameters + context + cancellationToken` shape:
+
+| Argument | Type | Purpose |
+|---|---|---|
+| `userContext` | `string?` | Plain-text projection of the document body (post-DOCX extraction). Forwarded to `PlaybookRunRequest.UserContext` so the playbook prompt template can inline the document text via `## Input`. |
+| `document` | `DocumentContext?` (from `Services/Ai/`) | Structured document pointer (DocumentId + Name + FileName + ContentType + ExtractedText). Forwarded to `PlaybookRunRequest.Document` for downstream logging + storage. |
+
+Existing callers (Insights, chat, other consumers) pass no additional arguments and are unaffected — the new parameters both default to `null`, and they follow `CancellationToken` in the signature so the 4-argument positional shape is preserved.
+
+The C# signature after the amendment:
+
+```csharp
+Task<PlaybookInvocationResult> InvokePlaybookAsync(
+    Guid playbookId,
+    IReadOnlyDictionary<string, string>? parameters,
+    PlaybookInvocationContext context,
+    CancellationToken cancellationToken = default,
+    string? userContext = null,
+    DocumentContext? document = null);
+```
+
+### Why this is Path B (amendment) and not Path A (project-scoped exception)
+
+Compose is the FIRST document-context consumer of the facade, but not the last. Rewrite / Find Similar / Lookup References (Compose R2+) and downstream document-scoped AI actions from Matter, Communication, and Insights all share the same technical need: dispatch a playbook against a specific source document's plain text without giving CRUD-side code direct access to `IOpenAiClient` / `IPlaybookService` / `IPlaybookOrchestrationService` / `IPlaybookExecutionEngine`. A per-project exception (Path A) would force every future consumer to declare its own carve-out; the amendment lands the extension once and every future consumer inherits it clean.
+
+### Boundary preserved
+
+The refined ADR-013 (2026-05-20) MUST NOT rule against direct injection of AI-internal types into CRUD-side code (`IOpenAiClient`, `IPlaybookService`, `IPlaybookOrchestrationService`, `IPlaybookExecutionEngine`) remains in force. Compose CRUD-side code (`ComposeEndpoints.DispatchAction`) STILL only injects `IInvokePlaybookAi` + `IConsumerRoutingService` + `IComposeDocumentService` + `IDocxTextExtractor`. The facade is widened; the boundary is not weakened.
+
+The reflection test that guards the facade contract at compile time (`tests/unit/Sprk.Bff.Api.Tests/Integration/PhaseAVerticalSliceTests.cs` — `ADR013_InvokePlaybookAiFacade_DoesNotExposeAiInternalTypesInSurface`) was updated in task 095 with a NAMED, cited allow-list permitting `Sprk.Bff.Api.Services.Ai.DocumentContext` on the facade surface. New types added later will need explicit allow-list entries with rationale — silent bypass is forbidden.
+
+### Motivating consumer surface
+
+`spaarkeai-compose-r1` task 097 (SSE conversion of `POST /api/compose/action/{consumerType}`) is the first caller. The DispatchAction handler loads DOCX bytes via `IComposeDocumentService` (OBO to SPE), extracts plain text via `IDocxTextExtractor` (DocumentFormat.OpenXml), builds a `DocumentContext` DTO, and dispatches:
+
+```csharp
+var result = await invokePlaybook.InvokePlaybookAsync(
+    playbookId.Value,
+    parameters,
+    invocationContext,
+    ct,
+    userContext: extractedText,
+    document: documentContext);
+```
+
+The BFF forwards these into `PlaybookRunRequest.UserContext` + `.Document`; downstream playbook execution consumes them through the existing Playbook-Driven LLM Output Pattern (Layer 1 orchestrator template resolution + Layer 2 `PromptSchemaRenderer` `## Input` section). No changes needed in the playbook execution engine.
+
+### Traceability
+
+| Artifact | Path |
+|---|---|
+| Facade interface (post-amendment) | [`src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IInvokePlaybookAi.cs`](../../src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IInvokePlaybookAi.cs) |
+| Real implementation | `Services/Ai/PublicContracts/InvokePlaybookAi.cs` |
+| Kill-switch null-impl (ADR-032 P3) | `Services/Ai/PublicContracts/NullInvokePlaybookAi.cs` |
+| First consumer | `Api/ComposeEndpoints.cs` (`DispatchAction`) |
+| Compile-time boundary guard | `tests/unit/Sprk.Bff.Api.Tests/Integration/PhaseAVerticalSliceTests.cs` |
+| Motivating project | [`projects/spaarkeai-compose-r1/`](../../projects/spaarkeai-compose-r1/) — tasks 094 / 095 / 096 / 097 |
+
+---
+
 ## Changelog
 
 | Date | Author | Change |
@@ -593,6 +659,7 @@ public class AiIndexingJobHandler : IJobHandler<AiIndexingJob>
 | 2026-01-02 | Spaarke Engineering | R3 Phases 1-5 complete: RAG, Export, Monitoring, Security |
 | 2026-02-24 | Spaarke Engineering | SprkChat system: ChatHostContext, entity-scoped RAG, playbook discovery, boolean filter logic |
 | 2026-05-20 | Spaarke Engineering | Decision rationale refined per BFF AI extraction assessment ([docs/assessments/bff-ai-extraction-assessment-2026-05-20.md](../assessments/bff-ai-extraction-assessment-2026-05-20.md)). Categorical "no separate AI microservice" rule replaced with four technical exception criteria. External CRUD consumers must use `Services/Ai/PublicContracts/` facades — direct injection of AI-internal types into CRUD code prohibited. |
+| 2026-07-01 | Spaarke Engineering | **Amendment (Path B per CLAUDE.md §6.5)**: `IInvokePlaybookAi` facade widened with optional `userContext: string?` + `document: DocumentContext?` parameters (both default to null; positional shape preserved). Motivating consumer: `spaarkeai-compose-r1`. Boundary preserved — CRUD code still consumes ONLY facade types, not AI internals. Reflection guard updated with named allow-list for `DocumentContext`. See §"Amendment 2026-07-01 — Document-context invocation on `IInvokePlaybookAi` facade" above. |
 
 ---
 

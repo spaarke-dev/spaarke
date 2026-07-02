@@ -41,6 +41,7 @@ import {
   BriefcaseRegular,
   BriefcaseSearchRegular,
   EditRegular,
+  MailRegular,
 } from '@fluentui/react-icons';
 import type { SectionCategory } from './types';
 
@@ -156,6 +157,19 @@ export const SECTION_METADATA_CATALOG: readonly SectionMetadata[] = [
     description: 'Work assignments routed to you',
     category: 'data',
     icon: BriefcaseRegular,
+    defaultHeight: '480px',
+  },
+  // ai-spaarke-ai-workspace-UI-r2 FR-09 (2026-07-01): Communications section —
+  // fifth Dataverse-entity-view section sharing <DataverseEntityViewWidget>.
+  // Config record 'Active Communications (Workspace)' (task 010, GUID
+  // e1826c4c-…) points at the OOB 'Active Communications' savedquery. Opens
+  // rows via Layout 1 per the Phase-1 framework unification (FR-03/FR-20).
+  {
+    id: 'communications',
+    label: 'Communications',
+    description: 'Email, Teams, SMS, and notifications related to your work',
+    category: 'data',
+    icon: MailRegular,
     defaultHeight: '480px',
   },
   {

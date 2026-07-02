@@ -149,7 +149,9 @@ public sealed class DailyBriefingEndpointsTests
                 It.IsAny<Guid>(),
                 It.IsAny<IReadOnlyDictionary<string, string>?>(),
                 It.IsAny<PlaybookInvocationContext>(),
-                It.IsAny<CancellationToken>()))
+                It.IsAny<CancellationToken>(),
+                It.IsAny<string?>(),
+                It.IsAny<Sprk.Bff.Api.Services.Ai.DocumentContext?>()))
             .ReturnsAsync(result);
         return mock;
     }
@@ -212,9 +214,11 @@ public sealed class DailyBriefingEndpointsTests
                 It.IsAny<Guid>(),
                 It.IsAny<IReadOnlyDictionary<string, string>?>(),
                 It.IsAny<PlaybookInvocationContext>(),
-                It.IsAny<CancellationToken>()))
-            .Callback<Guid, IReadOnlyDictionary<string, string>?, PlaybookInvocationContext, CancellationToken>(
-                (id, parameters, ctx, _) =>
+                It.IsAny<CancellationToken>(),
+                It.IsAny<string?>(),
+                It.IsAny<Sprk.Bff.Api.Services.Ai.DocumentContext?>()))
+            .Callback<Guid, IReadOnlyDictionary<string, string>?, PlaybookInvocationContext, CancellationToken, string?, Sprk.Bff.Api.Services.Ai.DocumentContext?>(
+                (id, parameters, ctx, _, _, _) =>
                 {
                     capturedPlaybookId = id;
                     capturedParameters = parameters;
@@ -442,7 +446,9 @@ public sealed class DailyBriefingEndpointsTests
                 It.IsAny<Guid>(),
                 It.IsAny<IReadOnlyDictionary<string, string>?>(),
                 It.IsAny<PlaybookInvocationContext>(),
-                It.IsAny<CancellationToken>()))
+                It.IsAny<CancellationToken>(),
+                It.IsAny<string?>(),
+                It.IsAny<Sprk.Bff.Api.Services.Ai.DocumentContext?>()))
             .ThrowsAsync(new FeatureDisabledException("ai.briefing.disabled", "AI disabled"));
 
         // Act
@@ -467,7 +473,9 @@ public sealed class DailyBriefingEndpointsTests
                 It.IsAny<Guid>(),
                 It.IsAny<IReadOnlyDictionary<string, string>?>(),
                 It.IsAny<PlaybookInvocationContext>(),
-                It.IsAny<CancellationToken>()))
+                It.IsAny<CancellationToken>(),
+                It.IsAny<string?>(),
+                It.IsAny<Sprk.Bff.Api.Services.Ai.DocumentContext?>()))
             .ThrowsAsync(new InvalidOperationException("unexpected playbook engine failure"));
 
         // Act
@@ -491,7 +499,9 @@ public sealed class DailyBriefingEndpointsTests
                 It.IsAny<Guid>(),
                 It.IsAny<IReadOnlyDictionary<string, string>?>(),
                 It.IsAny<PlaybookInvocationContext>(),
-                It.IsAny<CancellationToken>()))
+                It.IsAny<CancellationToken>(),
+                It.IsAny<string?>(),
+                It.IsAny<Sprk.Bff.Api.Services.Ai.DocumentContext?>()))
             .ThrowsAsync(new OperationCanceledException("caller cancelled"));
 
         // Act + Assert — exception bubbles out (test framework observes it).

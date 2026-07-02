@@ -41,11 +41,25 @@ export const workAssignmentsRegistration: SectionRegistration = {
       type: "content",
       title: "Work Assignments",
       style: { overflow: "hidden" },
+      // Height-chain fix v2 — see communications.registration.ts for rationale.
       renderContent: () =>
-        React.createElement(DataverseEntityViewWidget, {
-          data: { configId: WORK_ASSIGNMENTS_CONFIG_ID },
-          widgetType: "work-assignments-list",
-        }),
+        React.createElement(
+          "div",
+          {
+            style: {
+              display: "flex",
+              flexDirection: "column",
+              flex: "1 1 auto",
+              maxHeight: "80vh",
+              minHeight: 0,
+              overflow: "hidden",
+            },
+          },
+          React.createElement(DataverseEntityViewWidget, {
+            data: { configId: WORK_ASSIGNMENTS_CONFIG_ID },
+            widgetType: "work-assignments-list",
+          }),
+        ),
     };
   },
 };

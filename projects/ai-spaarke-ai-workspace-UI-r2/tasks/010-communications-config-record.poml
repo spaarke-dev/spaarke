@@ -1,0 +1,49 @@
+<task id="R2-010" project="ai-spaarke-ai-workspace-UI-r2">
+  <metadata>
+    <title>Create Communications sprk_gridconfiguration record</title>
+    <status>completed</status>
+    <estimated-effort>1 hour</estimated-effort>
+    <phase>2</phase>
+    <tags>dataverse,configuration,communications,sprk_communication</tags>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+Create the `sprk_gridconfiguration` record backing the new Communications workspace widget (FR-11). Entity: `sprk_communication`. Columns per spec §5.4: subject/summary, `sprk_communicationtype`, direction (in/out), sender, recipient(s), sent-on datetime, regarding record, status. `rowOpen.type: 'formDialog'`, `formId` omitted (opens user's default `sprk_communication` main form via Layout 1).
+
+Use the `dataverse-create-schema` skill for the create operation.
+  </prompt>
+
+  <role>Dataverse solution developer with dataverse-create-schema skill familiarity.</role>
+
+  <goal>
+A new `sprk_gridconfiguration` record exists in the dev Dataverse environment. Its GUID is recorded in `notes/communications-config-record.md` for use by tasks 011 and 012.
+  </goal>
+
+  <knowledge>
+    <files>
+      <file>projects/ai-spaarke-ai-workspace-UI-r2/spec.md</file>
+      <file>projects/ai-spaarke-ai-workspace-UI-r2/CLAUDE.md</file>
+      <file>docs/guides/DATAGRID-FRAMEWORK-CONFIGURATION-GUIDE.md</file>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Verify `sprk_communication` entity exists in Dataverse via MCP `describe_table` — confirm the columns per spec §5.4 exist on the entity.</step>
+    <step>If any column missing, escalate (out of scope for this task; requires separate schema change).</step>
+    <step>Construct the `configjson` payload with the required columns + `rowOpen.type: 'formDialog'`.</step>
+    <step>Invoke `/dataverse-create-schema` (or dataverse MCP `create_record`) to create the `sprk_gridconfiguration` record.</step>
+    <step>Record the created record's GUID.</step>
+    <step>Write `notes/communications-config-record.md` with the GUID + column list + configjson snapshot for reference by tasks 011 and 012.</step>
+  </steps>
+
+  <tools>dataverse MCP · dataverse-create-schema skill · Write</tools>
+
+  <acceptance-criteria>
+    <criterion>`sprk_gridconfiguration` record exists in dev Dataverse.</criterion>
+    <criterion>Columns match spec §5.4.</criterion>
+    <criterion>`rowOpen.type` = 'formDialog'; `formId` omitted.</criterion>
+    <criterion>GUID recorded in `notes/communications-config-record.md`.</criterion>
+  </acceptance-criteria>
+</task>

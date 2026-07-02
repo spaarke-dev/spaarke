@@ -82,18 +82,18 @@
 | 080 | Deploy BFF + measure publish-size | 8 | 🔲 | deploy, azure, bff-api | FULL | 070,071,072 | — | ❌ |
 | 081 | Deploy code-page + Dataverse artifacts | 8 | 🔲 | deploy, dataverse, solution | FULL | 070,071,072 | I | ✅ |
 | 090 | Project wrap-up (code-review, adr-check, test-diet, archive) — **SUPERSEDED BY 110** | Wrap-up | ⏸ | project-wrap-up, refactoring | FULL | 080,081 | — | ❌ |
-| 091 | Move ComposeWorkspace + hooks + types to `@spaarke/compose-components` | 7-supp | 🔲 | refactoring, packaging, shared-lib, pattern-d | FULL | none | J | ❌ |
-| 092 | App.tsx: remove Path A special-case; render ThreePaneShell always | 7-supp | 🔲 | frontend, three-pane, app-root | FULL | 091 | — | ❌ |
-| 093 | Swap FU-3 placeholder → real ComposeWorkspace | 7-supp | 🔲 | frontend, section-registry, three-pane, pattern-d | FULL | 091,092 | — | ❌ |
-| 094 | Add IDocxTextExtractor service (DocumentFormat.OpenXml) + tests | 8-supp | 🔲 | bff-api, compose, docx, openxml | FULL | none | K | ✅ |
-| 095 | Extend IInvokePlaybookAi with document-context overload | 8-supp | 🔲 | bff-api, facade, adr-013 | FULL | 094 | — | ❌ |
-| 096 | Update InvokePlaybookAi + NullInvokePlaybookAi implementations | 8-supp | 🔲 | bff-api, facade | STANDARD | 095 | — | ❌ |
-| 097 | Convert /api/compose/action/{consumerType} to SSE streaming | 8-supp | 🔲 | bff-api, compose, sse, endpoint | FULL | 094,095,096 | — | ❌ |
-| 098 | ConversationPane consumes compose_summarize_request + SSE | 9-supp | 🔲 | frontend, conversation-pane, sse | FULL | 097 | — | ❌ |
-| 099 | Remove summary banner from ComposeBannerStack | 9-supp | 🔲 | frontend, cleanup | STANDARD | 098 | — | ❌ |
-| 100 | Workspace-tab suppression in compose mode | 10-supp | 🔲 | frontend, workspace-shell | STANDARD | 092 | L | ✅ |
+| 091 | Move ComposeWorkspace + hooks + types to `@spaarke/compose-components` | 7-supp | ✅ | refactoring, packaging, shared-lib, pattern-d | FULL | none | J | ❌ |
+| 092 | App.tsx: remove Path A special-case; render ThreePaneShell always | 7-supp | ✅ | frontend, three-pane, app-root | FULL | 091 | — | ❌ |
+| 093 | Swap FU-3 placeholder → real ComposeWorkspace | 7-supp | ✅ | frontend, section-registry, three-pane, pattern-d | FULL | 091,092 | — | ❌ |
+| 094 | Add IDocxTextExtractor service (DocumentFormat.OpenXml) + tests | 8-supp | ✅ | bff-api, compose, docx, openxml | FULL | none | K | ✅ |
+| 095 | Extend IInvokePlaybookAi with document-context overload | 8-supp | ✅ | bff-api, facade, adr-013 | FULL | 094 | — | ❌ |
+| 096 | Update InvokePlaybookAi + NullInvokePlaybookAi implementations | 8-supp | ✅ (collapsed into 095) | bff-api, facade | STANDARD | 095 | — | ❌ |
+| 097 | Convert /api/compose/action/{consumerType} to SSE streaming | 8-supp | ✅ | bff-api, compose, sse, endpoint | FULL | 094,095,096 | — | ❌ |
+| 098 | ConversationPane consumes compose_summarize_request + SSE | 9-supp | ✅ | frontend, conversation-pane, sse | FULL | 097 | — | ❌ |
+| 099 | Remove summary banner from ComposeBannerStack | 9-supp | ✅ | frontend, cleanup | STANDARD | 098 | — | ❌ |
+| 100 | Workspace-tab suppression in compose mode | 10-supp | ✅ | frontend, workspace-shell | STANDARD | 092 | L | ✅ |
 | 101 | Modal 80% × 80% in launch-resolver | 10-supp | ✅ | frontend, launch-resolver, trivial | MINIMAL | none | L | ✅ |
-| 102 | ADR-013 amendment (Path B) — widened facade | 10-supp | 🔲 | adr, documentation, path-b | STANDARD | 095 | L | ✅ |
+| 102 | ADR-013 amendment (Path B) — widened facade | 10-supp | ✅ | adr, documentation, path-b | STANDARD | 095 | L | ✅ |
 | 110 | Expanded project wrap-up (baseline + supplement scope) | 11-supp | 🔲 | project-wrap-up | FULL | 091,092,093,094,095,096,097,098,099,100,101,102 | — | ❌ |
 
 ---

@@ -36,11 +36,25 @@ export const mattersRegistration: SectionRegistration = {
       type: "content",
       title: "Matters",
       style: { overflow: "hidden" },
+      // Height-chain fix v2 — see communications.registration.ts for rationale.
       renderContent: () =>
-        React.createElement(DataverseEntityViewWidget, {
-          data: { configId: MATTERS_CONFIG_ID },
-          widgetType: "matters-list",
-        }),
+        React.createElement(
+          "div",
+          {
+            style: {
+              display: "flex",
+              flexDirection: "column",
+              flex: "1 1 auto",
+              maxHeight: "80vh",
+              minHeight: 0,
+              overflow: "hidden",
+            },
+          },
+          React.createElement(DataverseEntityViewWidget, {
+            data: { configId: MATTERS_CONFIG_ID },
+            widgetType: "matters-list",
+          }),
+        ),
     };
   },
 };
