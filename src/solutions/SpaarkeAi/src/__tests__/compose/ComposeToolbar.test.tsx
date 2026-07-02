@@ -87,6 +87,10 @@ const FIXED_BFF_URL = 'https://bff.example.com';
 // the summarize action so the event payload carries them into ConversationPane.
 const FIXED_DRIVE_ID = 'drive-container-xyz';
 const FIXED_TENANT_ID = 'tenant-guid-0000';
+// 2026-07-02 smoke-2 hotfix — the SPE drive-item id is now a separate
+// required prop (differs from `documentId` which prefers the Dataverse GUID
+// for Open-in-Word).
+const FIXED_SPE_DRIVE_ITEM_ID = 'spe-drive-item-abcdef';
 
 /**
  * Render the toolbar with a real PaneEventBus + FluentProvider. Returns the
@@ -122,6 +126,7 @@ describe('ComposeToolbar', () => {
           bffBaseUrl={FIXED_BFF_URL}
           driveId={FIXED_DRIVE_ID}
           tenantId={FIXED_TENANT_ID}
+          speDriveItemId={FIXED_SPE_DRIVE_ITEM_ID}
         />,
       );
 
@@ -144,6 +149,7 @@ describe('ComposeToolbar', () => {
           bffBaseUrl={FIXED_BFF_URL}
           driveId={FIXED_DRIVE_ID}
           tenantId={FIXED_TENANT_ID}
+          speDriveItemId={FIXED_SPE_DRIVE_ITEM_ID}
         />,
       );
       expect(
@@ -159,6 +165,7 @@ describe('ComposeToolbar', () => {
           bffBaseUrl={FIXED_BFF_URL}
           driveId={FIXED_DRIVE_ID}
           tenantId={FIXED_TENANT_ID}
+          speDriveItemId={FIXED_SPE_DRIVE_ITEM_ID}
         />,
       );
       expect(
@@ -180,6 +187,7 @@ describe('ComposeToolbar', () => {
           bffBaseUrl={FIXED_BFF_URL}
           driveId={FIXED_DRIVE_ID}
           tenantId={FIXED_TENANT_ID}
+          speDriveItemId={FIXED_SPE_DRIVE_ITEM_ID}
         />,
       );
       // Open-in-Word buttons remain enabled because they don't require a session.
@@ -203,6 +211,7 @@ describe('ComposeToolbar', () => {
           bffBaseUrl={FIXED_BFF_URL}
           driveId=""
           tenantId={FIXED_TENANT_ID}
+          speDriveItemId={FIXED_SPE_DRIVE_ITEM_ID}
         />,
       );
       expect(
@@ -218,6 +227,23 @@ describe('ComposeToolbar', () => {
           bffBaseUrl={FIXED_BFF_URL}
           driveId={FIXED_DRIVE_ID}
           tenantId=""
+          speDriveItemId={FIXED_SPE_DRIVE_ITEM_ID}
+        />,
+      );
+      expect(
+        screen.getByRole('button', { name: /summarize with assistant/i }),
+      ).toBeDisabled();
+    });
+
+    it('disables summarize button when speDriveItemId is empty (smoke-2 hotfix)', () => {
+      renderWithBus(
+        <ComposeToolbar
+          documentId={FIXED_DOCUMENT_ID}
+          sessionId={FIXED_SESSION_ID}
+          bffBaseUrl={FIXED_BFF_URL}
+          driveId={FIXED_DRIVE_ID}
+          tenantId={FIXED_TENANT_ID}
+          speDriveItemId=""
         />,
       );
       expect(
@@ -233,6 +259,7 @@ describe('ComposeToolbar', () => {
           bffBaseUrl={FIXED_BFF_URL}
           driveId={FIXED_DRIVE_ID}
           tenantId={FIXED_TENANT_ID}
+          speDriveItemId={FIXED_SPE_DRIVE_ITEM_ID}
           disabled
         />,
       );
@@ -257,6 +284,7 @@ describe('ComposeToolbar', () => {
           bffBaseUrl={FIXED_BFF_URL}
           driveId={FIXED_DRIVE_ID}
           tenantId={FIXED_TENANT_ID}
+          speDriveItemId={FIXED_SPE_DRIVE_ITEM_ID}
         />,
       );
 
@@ -277,6 +305,7 @@ describe('ComposeToolbar', () => {
           bffBaseUrl={FIXED_BFF_URL}
           driveId={FIXED_DRIVE_ID}
           tenantId={FIXED_TENANT_ID}
+          speDriveItemId={FIXED_SPE_DRIVE_ITEM_ID}
           disabled
         />,
       );
@@ -300,6 +329,7 @@ describe('ComposeToolbar', () => {
           bffBaseUrl={FIXED_BFF_URL}
           driveId={FIXED_DRIVE_ID}
           tenantId={FIXED_TENANT_ID}
+          speDriveItemId={FIXED_SPE_DRIVE_ITEM_ID}
         />,
       );
 
@@ -324,6 +354,7 @@ describe('ComposeToolbar', () => {
           bffBaseUrl={FIXED_BFF_URL}
           driveId={FIXED_DRIVE_ID}
           tenantId={FIXED_TENANT_ID}
+          speDriveItemId={FIXED_SPE_DRIVE_ITEM_ID}
         />,
       );
       bus.subscribe('conversation', (ev) => events.push(ev));
@@ -344,6 +375,9 @@ describe('ComposeToolbar', () => {
       // ConversationPane can invoke the BFF directly.
       expect(payload.driveId).toBe(FIXED_DRIVE_ID);
       expect(payload.tenantId).toBe(FIXED_TENANT_ID);
+      // 2026-07-02 smoke-2 hotfix: speDriveItemId carried as a separate field
+      // so the BFF's LoadDocxAsync receives the SPE ID (not the Dataverse GUID).
+      expect(payload.documentRef.speDriveItemId).toBe(FIXED_SPE_DRIVE_ITEM_ID);
       // ISO-8601 UTC timestamp format
       expect(payload.timestamp).toMatch(
         /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/,
@@ -360,6 +394,7 @@ describe('ComposeToolbar', () => {
           bffBaseUrl={FIXED_BFF_URL}
           driveId={FIXED_DRIVE_ID}
           tenantId={FIXED_TENANT_ID}
+          speDriveItemId={FIXED_SPE_DRIVE_ITEM_ID}
           onComposeSummarizeRequest={(p) => observerEvents.push(p)}
         />,
       );
@@ -385,6 +420,7 @@ describe('ComposeToolbar', () => {
           bffBaseUrl={FIXED_BFF_URL}
           driveId={FIXED_DRIVE_ID}
           tenantId={FIXED_TENANT_ID}
+          speDriveItemId={FIXED_SPE_DRIVE_ITEM_ID}
         />,
       );
       bus.subscribe('conversation', (ev) => events.push(ev));
@@ -405,6 +441,7 @@ describe('ComposeToolbar', () => {
           bffBaseUrl={FIXED_BFF_URL}
           driveId={FIXED_DRIVE_ID}
           tenantId={FIXED_TENANT_ID}
+          speDriveItemId={FIXED_SPE_DRIVE_ITEM_ID}
         />,
       );
       bus.subscribe('conversation', (ev) => events.push(ev));

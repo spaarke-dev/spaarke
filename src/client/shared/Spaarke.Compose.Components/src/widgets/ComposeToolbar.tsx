@@ -95,18 +95,25 @@ export interface ComposeSummarizeRequestEvent {
   /** Always 'compose_summarize_request' — additive on `conversation` channel. */
   type: 'compose_summarize_request';
   /**
-   * Document pointer. `documentId` is the SPE drive-item id (for ephemeral
-   * Path B docs) OR the `sprk_documentid` (after first-Save promotion). The
-   * BFF `/api/compose/action/compose-summarize` endpoint handles both shapes.
+   * Document pointer.
    *
-   * Task 098 (Phase 9) note: for Path B ephemeral docs, `documentId` MUST be
-   * the SPE drive-item id (not the sprk_documentid) because the BFF's Load
-   * endpoint keys on `documentSpeId`. Post-promotion, the payload adds the
-   * `sprkDocumentId` field so the ConversationPane consumer forwards it to
-   * the BFF as `documentRecordId` (Dataverse correlation).
+   * - `documentId` — pass-through of the toolbar's `documentId` prop. May be
+   *   either the SPE drive-item id or the `sprk_documentid` depending on how
+   *   the parent tuned the toolbar for Open-in-Word (which prefers the
+   *   Dataverse GUID because `GET /api/documents/{id}/open-links` requires it).
+   *   Retained for backwards compatibility + telemetry.
+   * - `speDriveItemId` — ALWAYS the SPE drive-item id. Added in the 2026-07-02
+   *   smoke-2 hotfix so the ConversationPane consumer can pass it verbatim to
+   *   the BFF's `documentSpeId` field (LoadDocxAsync keys on SPE, not on
+   *   Dataverse). Before this fix, `documentId` was used and produced Graph 404
+   *   ODataErrors when the toolbar was tuned to prefer the Dataverse GUID.
+   * - `sprkDocumentId` — `sprk_documentid` GUID (post-promotion). Forwarded to
+   *   the BFF as `documentRecordId` for Dataverse correlation.
+   * - `fileName` — human-readable label for logging + UI.
    */
   documentRef: {
     documentId: string;
+    speDriveItemId: string;
     sprkDocumentId?: string;
     fileName?: string;
   };
@@ -191,6 +198,17 @@ export interface ComposeToolbarProps {
    * Empty string disables the summarize button.
    */
   tenantId: string;
+
+  /**
+   * SPE drive-item id — ALWAYS the SPE-side identifier (matches Graph's
+   * drive-item id shape). Added in the 2026-07-02 smoke-2 hotfix so the
+   * `compose_summarize_request` event carries the SPE ID separately from
+   * `documentId` (which may be the Dataverse GUID for Open-in-Word).
+   *
+   * Empty string disables the summarize button (no SPE ID = no way to load
+   * DOCX bytes on the BFF side).
+   */
+  speDriveItemId: string;
 
   /**
    * Optional `sprk_documentid` GUID (post-promotion). When present, forwarded
@@ -307,6 +325,7 @@ export function ComposeToolbar(props: ComposeToolbarProps): React.JSX.Element {
     bffBaseUrl,
     driveId,
     tenantId,
+    speDriveItemId,
     sprkDocumentId,
     disabled,
     className,
@@ -334,10 +353,13 @@ export function ComposeToolbar(props: ComposeToolbarProps): React.JSX.Element {
   const isToolbarDisabled = disabled === true;
   const hasDocument = documentId.length > 0 && bffBaseUrl.length > 0;
   const hasSession = sessionId.length > 0;
-  // Task 098 (Phase 9): the summarize action ALSO requires driveId + tenantId
-  // now — the event carries them so ConversationPane can invoke the BFF
-  // without re-resolving. If either is missing, the button is inert.
-  const hasSummarizeContext = driveId.length > 0 && tenantId.length > 0;
+  // Task 098 (Phase 9) + 2026-07-02 smoke-2 hotfix: the summarize action
+  // requires driveId + tenantId + speDriveItemId — the BFF's LoadDocxAsync
+  // keys on the SPE drive-item id (NOT on the Dataverse GUID that Open-in-
+  // Word uses). If any of the three is missing, the summarize button is
+  // inert so we fail closed rather than firing a broken request.
+  const hasSummarizeContext =
+    driveId.length > 0 && tenantId.length > 0 && speDriveItemId.length > 0;
 
   const openInWebDisabled = isToolbarDisabled || !hasDocument || isActing;
   const openInDesktopDisabled = isToolbarDisabled || !hasDocument || isActing;
@@ -360,6 +382,11 @@ export function ComposeToolbar(props: ComposeToolbarProps): React.JSX.Element {
       type: 'compose_summarize_request',
       documentRef: {
         documentId,
+        // 2026-07-02 smoke-2 hotfix — carry the SPE ID separately from
+        // `documentId` so ConversationPane can forward it verbatim to the
+        // BFF's `documentSpeId` field (LoadDocxAsync keys on SPE, not on
+        // the Dataverse GUID).
+        speDriveItemId,
         sprkDocumentId,
         fileName,
       },
@@ -385,6 +412,7 @@ export function ComposeToolbar(props: ComposeToolbarProps): React.JSX.Element {
     summarizeDisabled,
     dispatch,
     documentId,
+    speDriveItemId,
     sprkDocumentId,
     fileName,
     sessionId,

@@ -628,6 +628,11 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           <div className={styles.toolbarSlot}>
             <ComposeToolbar
               documentId={toolbarDocumentId}
+              // 2026-07-02 smoke-2 hotfix — pass the SPE drive-item id
+              // explicitly (separate from `documentId` which prefers the
+              // Dataverse GUID for Open-in-Word). Compose-summarize needs
+              // the SPE ID because LoadDocxAsync keys on SPE.
+              speDriveItemId={state.documentRef?.speDriveItemId ?? ''}
               sprkDocumentId={state.documentRef?.sprkDocumentId}
               fileName={state.documentRef?.fileName}
               sessionId={state.sessionId}
