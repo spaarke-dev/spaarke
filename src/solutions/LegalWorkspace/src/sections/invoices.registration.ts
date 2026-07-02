@@ -39,13 +39,26 @@ export const invoicesRegistration: SectionRegistration = {
       id: "invoices",
       type: "content",
       title: "Invoices",
-      // Height-chain fix (2026-07-01) — see communications.registration.ts for rationale.
-      style: { overflow: "hidden", maxHeight: "480px", display: "flex" },
+      style: { overflow: "hidden" },
+      // Height-chain fix v2 — see communications.registration.ts for rationale.
       renderContent: () =>
-        React.createElement(DataverseEntityViewWidget, {
-          data: { configId: INVOICES_CONFIG_ID },
-          widgetType: "invoices-list",
-        }),
+        React.createElement(
+          "div",
+          {
+            style: {
+              display: "flex",
+              flexDirection: "column",
+              flex: "1 1 auto",
+              maxHeight: "80vh",
+              minHeight: 0,
+              overflow: "hidden",
+            },
+          },
+          React.createElement(DataverseEntityViewWidget, {
+            data: { configId: INVOICES_CONFIG_ID },
+            widgetType: "invoices-list",
+          }),
+        ),
     };
   },
 };

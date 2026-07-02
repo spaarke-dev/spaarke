@@ -31,8 +31,9 @@ R1 shipped the `<DataGrid configId=... />` framework as the canonical shared-lib
 | 9 | **P3** | **Unwind ai-spaarke-ai-workspace-UI-r2 tactical `maxHeight` hack** — replace per-section maxHeight with #1's proper fix | ~30 min |
 | 10 | **P3** | **Scrollbar UX polish (deferred, not blocking)** — Fluent's native scrollbar is fine; document decision | 0 |
 | 11 | **P3** | **Better default `pageSize`** — currently 100; consider 50 for workspace-embedded default | ~15 min + reviewer discussion |
+| 12 | **P2** | **SpaarkeAi build-time alias for LegalWorkspace** — deploying LegalWorkspace alone doesn't update SpaarkeAi consumers (cost ~30 min debug time to discover during 2026-07-01 UAT). Options: doc-only warning OR proper shared-package extraction. | 1 hour (doc) / 1 day (extract) |
 
-**Total estimated effort**: ~2.5 days of focused work + a deploy cycle.
+**Total estimated effort**: ~2.5 days of focused work + a deploy cycle (or +1 day for Issue 12 Option B).
 
 ## Who benefits
 

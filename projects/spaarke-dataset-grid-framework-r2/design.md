@@ -403,6 +403,58 @@ During ai-spaarke-ai-workspace-UI-r2 follow-up, the operator asked about hiding 
 
 ---
 
+## Issue 12 — SpaarkeAi build-time alias for LegalWorkspace source (P2, operational gotcha)
+
+### Symptom
+
+During the ai-spaarke-ai-workspace-UI-r2 follow-up investigation (2026-07-01), a fix to `src/solutions/LegalWorkspace/src/sections/*.registration.ts` was applied and LegalWorkspace was rebuilt + redeployed. But the runtime consumer (`SpaarkeAi`, viewed by the user in the browser) continued serving the OLD bundle with none of the fix visible in the DOM.
+
+Root cause discovered by comparing the built LegalWorkspace HTML (had 6 `maxHeight:"480px"` hits) against the built SpaarkeAi HTML (had 0 hits from the new code, 1 pre-existing unrelated hit).
+
+### Root cause
+
+`src/solutions/SpaarkeAi/vite.config.ts` includes:
+
+```typescript
+resolve: {
+  alias: {
+    "@spaarke/legal-workspace/src": path.resolve(__dirname, "../LegalWorkspace/src"),
+    "@spaarke/legal-workspace":     path.resolve(__dirname, "../LegalWorkspace/src"),
+  }
+}
+```
+
+This is a Vite alias — at SpaarkeAi's BUILD time, imports of `@spaarke/legal-workspace` resolve directly to `../LegalWorkspace/src/**` and Vite bundles that source into SpaarkeAi's output. There is **no npm dependency on LegalWorkspace**; there is **no built `dist/` from LegalWorkspace shared**.
+
+Consequence:
+- Deploying `LegalWorkspace` (as `sprk_corporateworkspace`) updates the STANDALONE LegalWorkspace code page only
+- SpaarkeAi (as `sprk_spaarkeai`) keeps whatever code it bundled at its own last build
+- Section registration edits require BOTH code pages to be rebuilt + redeployed for the change to reach every consumer
+
+### Impact
+
+- Operational: any future edit under `src/solutions/LegalWorkspace/src/**` must be paired with a SpaarkeAi rebuild + redeploy. Deploying LegalWorkspace alone is a NO-OP for SpaarkeAi consumers (which is the majority use case).
+- Debug time: during the 2026-07-01 investigation, ~30 minutes of DOM diagnostics were spent chasing the "why doesn't my fix show up?" question before checking whether the bundle contained the change.
+- Future incidents: any developer touching section registrations without knowing this alias exists will hit the same trap.
+
+### Options
+
+- **Option A** — Add a warning to `code-page-deploy` skill + `BUILD-A-NEW-WORKSPACE-WIDGET.md` making the SpaarkeAi dual-deploy requirement visible. Low-cost documentation fix.
+- **Option B** — Extract LegalWorkspace's section registry into a proper shared package (`@spaarke/legal-workspace` in `src/client/shared/`). SpaarkeAi consumes the built shared package via a normal file: dependency. Then deploying LegalWorkspace becomes moot for SpaarkeAi — SpaarkeAi's build picks up whatever the shared package published.
+- **Option C** — Add a preflight check to `Deploy-CorporateWorkspace.ps1` / `Deploy-AllDataGridConsumers.ps1` that WARNS if SpaarkeAi's build timestamp is older than the section source files. Non-blocking warning + suggestion to also deploy SpaarkeAi.
+
+### Recommendation
+
+**Option A now** (~1 hour: warning in the skill + guide reference), **Option B as follow-on architectural work** (~1 day: proper shared library extraction; touches all workspace-hosting code pages).
+
+### Effort
+
+- Option A: ~1 hour
+- Option B: ~1 day (architectural change; requires broader review)
+- Option C: ~30 min
+
+---
+
 ## Issue 11 — Better default `pageSize` (P3)
 
 ### Discussion
