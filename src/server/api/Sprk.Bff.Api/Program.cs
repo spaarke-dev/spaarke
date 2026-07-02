@@ -4,6 +4,7 @@ using Sprk.Bff.Api.Api.Reporting;
 using Sprk.Bff.Api.Api.Dataverse;                  // Dataverse passthrough endpoints (Phase B)
 using Sprk.Bff.Api.Infrastructure.DI;
 using Sprk.Bff.Api.Infrastructure.Startup;         // R2 FR-06: AzureMonitorGuard
+using Sprk.Bff.Api.Services.Ai.LinearConsumers;    // R7 Wave 12 — Linear AI Consumer library
 using Sprk.Bff.Api.Services.Dataverse.Extensions;  // Dataverse DI extension methods (Phase B)
 using Sprk.Bff.Api.Workers.Office;
 
@@ -124,6 +125,13 @@ builder.Services.AddGraphModule(builder.Configuration);
 
 // Document Intelligence, Analysis, Playbook, Builder, RAG, and Record Matching services
 builder.Services.AddAnalysisServicesModule(builder.Configuration);
+
+// R7 Wave 12 (2026-07-02): Linear AI Consumer library. Code-defined services for
+// linear (Start → LLM → deterministic steps → return) consumers — replaces the
+// Playbook Engine for Document Profile / File Summarize / Prefills. Playbook
+// Engine remains for its rightful consumers (Chat, Insight Engine, Daily Briefing).
+// See docs/architecture/SPAARKE-LINEAR-AI-CONSUMER-ARCHITECTURE.md.
+builder.Services.AddLinearConsumers(builder.Configuration);
 
 // Consumer→playbook routing (Phase 1R per chat-routing-redesign-r1 spec FR-1R-02).
 // Replaces Workspace__*PlaybookId env vars with Dataverse-backed `sprk_playbookconsumer`

@@ -1,6 +1,6 @@
 # Current Task State — spaarke-ai-platform-unification-r7
 
-> **Last Updated**: 2026-07-01 (by context-handoff)
+> **Last Updated**: 2026-07-02 (Phase A done + Phase B code shipped, awaiting deploy + smoke)
 > **Recovery**: Read "Quick Recovery" section first
 
 ---
@@ -9,124 +9,119 @@
 
 | Field | Value |
 |-------|-------|
-| **Session** | R7 Wave 12 Daily Briefing continuation + UAT feedback |
-| **Status** | in-progress — awaiting operator smoke of latest deploys |
-| **Branch** | `work/spaarke-ai-platform-unification-r7` at HEAD `f6938617a` (pushed) |
-| **Master** | `02962c268` (PR #527 merge; unchanged since ~3 hrs ago) |
+| **Session** | Wave 12 Linear AI Consumer migration — Doc Upload path built. |
+| **Status** | **Phase A DONE** (bandaids reverted). **Phase B code DONE** (Linear primitives + DocumentProfileService + endpoint dispatch + DI wiring, build clean). **Awaiting**: unit tests → deploy → operator smoke. |
+| **Branch** | `work/spaarke-ai-platform-unification-r7` — HEAD is `c2d26986d` (feat: Linear AI Consumer library + Document Profile migration). |
+| **Local commits ahead of origin** | **5** (4 reverts + Phase B feature commit). NOT YET PUSHED. |
 | **Worktree** | `c:/code_files/spaarke-wt-spaarke-ai-platform-unification-r7/` |
-| **Next Action** | Operator force-reloads SpaarkeAi widget + smokes the new HighPriority mini-report layout + verifies inline reference links + confirms LLM prompt tightening reduces hallucination. Then continue with wizard AC8-AC12 + Assistant↔Workspace AC13-AC15 UAT. |
-
-### Files modified this session (all committed + pushed + deployed to spaarkedev1)
-
-- `src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingCollector.cs` — case fix (`sprk_HighPriority` → `sprk_highpriority`), new `Description` + `Action` + `Reason` + `ModifiedOn` outputs on HighPriorityItemDto, `ClassifyAction` helper, wiring for description column per entity
-- `src/server/api/Sprk.Bff.Api/Api/Ai/DailyBriefingEndpoints.cs` — HighPriorityItemDto extended with Description + Action + Reason + ModifiedOn fields
-- `src/client/shared/Spaarke.DailyBriefing.Components/src/components/HighPrioritySection.tsx` — rewritten as mini-report layout: [Kind chip · Name link · Action badge · Reason chip] top row + truncated description below
-- `src/client/shared/Spaarke.DailyBriefing.Components/src/components/DailyBriefingApp.tsx` — navigateTo binding fix (called as method, not destructured — resolves `_clientApiExecutor` platform error)
-- `src/client/shared/Spaarke.DailyBriefing.Components/src/components/TldrSection.tsx` — rotating emoji next to "TL;DR" heading (16-emoji pool, deterministic per `generatedAt`)
-- `src/client/shared/Spaarke.DailyBriefing.Components/src/services/briefingService.ts` — HighPriorityItemResult extended (description + action + reason + modifiedOn)
-
-### Dataverse changes this session (via MCP, direct spaarkedev1 updates — NO git artifact)
-
-- **BRIEF-NARRATE-CHANNEL Action** (`dc3533c0-fc70-f111-ab0e-7ced8ddc4cc6`) — sprk_systemprompt updated with: PAIRING RULE (title + regarding must come from same input item), GROUNDING CHECK (verify exact { title, regardingName } pair in items[]), AGGREGATION PREFERENCE (prefer aggregated over item-specific bullets). Metadata bumped to $version 2, lastModifiedBy=r7-w12-anti-hallucination-tightening.
-- **BRIEF-NARRATE-TLDR Action** (`ce299eb4-fc70-f111-ab0e-7ced8ddc4cc6`) — sprk_systemprompt updated with: STRUCTURAL PREFERENCE (describes counts + themes, not item titles), same PAIRING RULE. Metadata bumped to $version 2, lastModifiedBy=r7-w12-structural-summary-tightening.
-
-### Critical context
-
-Tonight's session shipped a large operator-feedback batch on top of Wave 12's core widget cutover:
-
-- **Waves 6/7/8/10 feedback** (vertical dots, primarycontact wiring, 15s toast + Open link, elevated channel headings) shipped earlier tonight in commit `5988966b8`.
-- **Waves 2/3/4/5 feedback** (Perplexity-style inline hyperlinks + trailing `[N]` citations for narrative bullets) shipped in `ad903e01f`.
-- **Item 9** (High Priority section) shipped in `9a683c2c5` with the initial "compact list with badges" layout.
-- **Post-UAT continuation** (this session's commit `f6938617a`):
-  1. Case-sensitivity fix (`sprk_HighPriority` → `sprk_highpriority`) — collector was filtering on the schema name; Dataverse needs the lowercase logical name, so HighPriority section was empty despite operator having 4 flagged matters.
-  2. `navigateTo` binding fix — destructuring the method breaks its `this` context and throws `_clientApiExecutor undefined`. Fixed both call sites (handleOpenRecord + Open-To-Do toast link).
-  3. Rotating TL;DR emoji.
-  4. HighPriority section rewritten as mini-report cards with description + action badge + reason chip.
-  5. LLM prompts tightened via MCP with PAIRING + GROUNDING + AGGREGATION rules.
-- **DEF sub-agent fix** landed earlier: MembershipFieldDiscoveryService now synthesizes Owner + Customer targets from base AttributeMetadata (root-cause fix for the polymorphic-Owner bug that broke the resolver on `ownerid` fields).
-
-**Compose-r1 status**: fully merged to master via PR #515 + PR #527. Compose-r1 auto-deployed BFF once at 04:07 UTC + widget once at 16:14 UTC — the widget deploy briefly overwrote my references + high-priority code, which was subsequently restored by rebuild + redeploy from this worktree.
-
-### Deploy safety governance (added 2026-07-01 per operator concern)
-
-Going forward, ALWAYS sync master into the worktree BEFORE building + deploying locally, so we never overwrite in-flight master changes from other teams. Standard sequence:
-
-```
-git fetch origin
-git merge --ff-only origin/master  # or --rebase if conflicts
-git log origin/master..HEAD         # sanity check: what am I about to deploy?
-dotnet build src/server/api/Sprk.Bff.Api/
-cd src/solutions/SpaarkeAi && npm run build
-../../.. && ./scripts/Deploy-BffApi.ps1
-./scripts/Deploy-SpaarkeAi.ps1
-```
+| **Next Action** | Decide: (a) add unit tests + deploy tonight; OR (b) skip unit tests, deploy now, operator smokes end-to-end. Task plan says B15/B16 (unit tests) → B17 (deploy) → B18 (smoke). |
 
 ---
 
-## Deferred / Follow-up items (log here for next session)
+## Three companion docs (READ IN THIS ORDER)
 
-### Operator strategic asks (pending discussion)
-
-- **"Monitored For" schema**: Choice option set on the 7 flagged entities (Matter, Project, Invoice, Document, Workassignment, Event, Todo) that captures WHY each record is being monitored (e.g., "Awaiting reply", "Budget review", "Regulatory deadline"). Replaces the binary Monitor flag with a semantic reason. → Future project (not R7 scope).
-- **Fully-deterministic Activity Notes** (strategic option operator floated but deferred): kill LLM channel narration entirely; render structured item rows per channel. Preserves TL;DR as LLM-generated for the abstract summary. Zero hallucination risk. → Wave 12.5 or new project.
-
-### Code-review follow-ups (from earlier scoped review; 5 medium/high items)
-
-- **Revert collector membership-resolver bypass** now that root cause is fixed via `MembershipFieldDiscoveryService.ProjectLookupAttributeRows`. Owner-only queries silently lose collaborator scope (assigned attorneys, paralegals). Add smoke test that a `sprk_assignedattorney1` user sees their matter.
-- **Author unit tests** for new client-side surfaces: `NarrativeCitedText.buildSegments` (segment splitter + overlap detection), `HighPrioritySection.classifyDueDate` + `actionToBadge`, `useBriefingRender.isEmptyResponse`, `useInlineTodoCreate` primary-contact wiring.
-- **Metadata-drive the 7 QueryHighPriority\* helpers** — collapse into a single method + `record HighPriorityEntitySpec` array.
-- **Fix `useInlineTodoCreate` primary-contact lookup race** — cache a `Promise<string | null>` in the ref instead of the resolved value so concurrent createTodo calls don't issue duplicate lookups.
-- **Doc/code inconsistency**: `bulletToNotificationItem` truncates to 197 chars for "sprk_todo.subject" per comment but actual field is `sprk_name`. Fix comment + read maxLength from metadata.
-
-### CI + governance items
-
-- **CI env-var workarounds still in place**: `.github/workflows/ci-tier1-blocking.yml` has `APPLICATIONINSIGHTS_CONNECTION_STRING` + `Redis__AllowInMemoryFallback` patches (commits `fd657e0b2` + `37ef38c2f`). The underlying redis-r2 startup validations should be relaxed for Testing env so these workarounds can be removed. Not blocking anything.
-- **F.2.1 restoration** (`fix/restore-bff-extensions-F.2.1` branch pushed earlier tonight): F.2.1 rule was restored to master via the compose-r1 PR #527 merge — my branch is not needed. Can be deleted.
-
-### R7 UAT still pending (operator-driven)
-
-- **5 wizards** (AC8-AC12): Matter, Project, Work Assignment, Document Summary, ... — operator to run in spaarkedev1 browser.
-- **Assistant↔Workspace** (AC13-AC15): Scenario A ("what matter am I in?") flow.
-- **Daily Briefing** operator smoke of tonight's changes (HighPriority mini-report + inline references + emoji).
+1. **Architecture** — [`docs/architecture/SPAARKE-LINEAR-AI-CONSUMER-ARCHITECTURE.md`](../../docs/architecture/SPAARKE-LINEAR-AI-CONSUMER-ARCHITECTURE.md)
+2. **Work spec** — [`notes/wave12-linear-consumer-migration.md`](notes/wave12-linear-consumer-migration.md)
+3. **Task plan** — [`notes/wave12-linear-consumer-tasks.md`](notes/wave12-linear-consumer-tasks.md) — Phase A + B core marked complete.
 
 ---
 
-## Rollback (if smoke fails)
+## Phase A summary (bandaids reverted)
 
-**Tags for rollback**:
-- `deploy/spaarkedev1/pre-widget-cutover` → commit `9bae5c306` (pre-tonight state)
-- `deploy/spaarkedev1/pre-wave12-batch4` → commit `4fc73ae4a` (pre-batch4)
+Reverts executed in **reverse chronological order** (safer than plan-listed order because A1–A3 replaced each other on the same `GetEntitySetNameAsync` function):
 
-**Path A — bundle-only rollback**:
-```powershell
-git checkout deploy/spaarkedev1/pre-widget-cutover -- src/client/shared/Spaarke.DailyBriefing.Components/src/
-cd src/solutions/SpaarkeAi && npm run build
-../../.. && ./scripts/Deploy-SpaarkeAi.ps1
-git restore src/client/shared/Spaarke.DailyBriefing.Components/src/
-```
+- `a648dedce` — Revert `15511117b` (nested-JSON skip)
+- `1332a5a02` — Revert `1909b4432` (heuristic pluralization)
+- `06040244e` — Revert `2021028da` ($filter form)
+- `42a83ff7c` — Revert `4facf26ef` (accessor form)
 
-**Path B — branch revert**:
-```powershell
-git revert f6938617a --no-commit
-git commit -m "revert(r7): roll back tonight's HighPriority + prompt changes (smoke failed)"
-dotnet build src/server/api/Sprk.Bff.Api/
-cd src/solutions/SpaarkeAi && npm run build
-../../.. && ./scripts/Deploy-BffApi.ps1
-./scripts/Deploy-SpaarkeAi.ps1
-git push origin work/spaarke-ai-platform-unification-r7
-```
+Build after reverts: 0 errors, 19 pre-existing warnings.
+
+## Phase B core summary (Linear AI Consumer library shipped)
+
+Single commit `c2d26986d` — 17 files changed, 967 insertions.
+
+New folder: `src/server/api/Sprk.Bff.Api/Services/Ai/LinearConsumers/`
+
+Primitives:
+- `LinearRunContext.cs`, `DocumentText.cs` — records
+- `IActionResolver` + `ActionResolver.cs` — config-driven (`LinearConsumersOptions.ActionIds` maps consumerType → ActionId; delegates to `IScopeResolverService.GetActionAsync`)
+- `IDocumentTextSource` + `DocumentTextSource.cs` — composes `AnalysisDocumentLoader` (SPE + OBO) + `ITextExtractor` (direct-file)
+- `IActionRunner` + `ActionRunner.cs` — wraps `IOpenAiClient.GetStructuredCompletionRawAsync` with a single `{{document.extractedText}}` placeholder binding
+
+Consumer service:
+- `DocumentProfileService.cs` — emits `AnalysisStreamChunk` SSE events; reuses existing `DocumentProfileFieldMapper` + `DocumentTypeMapper` (Choice coercion); persists via `IDocumentDataverseService.UpdateDocumentFieldsAsync` (typed SDK path — no metadata calls); enqueues RAG indexing via `IPostUploadIndexingEnqueuer.EnqueueIfApplicableAsync` (OBO path)
+
+DI + wiring:
+- `LinearConsumersModule.cs` + `LinearConsumersOptions.cs`
+- `Program.cs` — `AddLinearConsumers(builder.Configuration)` after `AddAnalysisServicesModule`
+- `AnalysisEndpoints.ExecuteAnalysis` — dispatches by playbookId: if match in `LinearConsumersOptions.PlaybookIds`, routes to `DocumentProfileService`; otherwise falls through to Playbook Engine (preserves engine for Chat / Insights / Daily Briefing)
+- `ConsumerTypes.DocumentProfile` — new constant `document-profile`
+
+Config:
+- `appsettings.template.json` — new `LinearConsumers` section with:
+  - `ActionIds["document-profile"]` = `bb356968-ebe9-f011-8406-7ced8d1dc988`
+  - `PlaybookIds["document-profile"]` = `18cf3cc8-02ec-f011-8406-7c1e520aa4df`
+
+Build: 0 errors. dotnet test not yet run.
 
 ---
 
-## Reference (key docs)
+## What's left for Phase B (B14–B19)
 
-- **This session's continuation commit**: `f6938617a`
-- **PR #520** (R7 wave 12 merge): merged as `e106379462`
-- **PR #524** (R7 wave 12 continuation merge): merged as `2de7509ee`
-- **PR #527** (compose-r1 pull-forward): merged as `02962c268`
-- **Restart doc**: [`notes/handoffs/daily-briefing-widget-cutover-restart.md`](notes/handoffs/daily-briefing-widget-cutover-restart.md)
-- **Wave 12 plan**: [`notes/wave12-mvp-completion-plan.md`](notes/wave12-mvp-completion-plan.md)
+| Task | Status | Notes |
+|---|---|---|
+| B14 build | ✅ 0 errors | |
+| B15 unit tests | ⏸️ NOT DONE | `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/LinearConsumers/DocumentProfileServiceTests.cs` — happy path / Action-not-configured / LLM-fails |
+| B16 `dotnet test` | ⏸️ NOT DONE | |
+| B17 deploy BFF | ⏸️ NOT DONE | `pwsh scripts/Deploy-BffApi.ps1` — needs operator approval (visible to UAT users) |
+| B18 operator smoke | ⏸️ NOT DONE | Document Upload wizard end-to-end |
+| B19 commit + push | Partial — commit done as `c2d26986d`; **push NOT DONE** | 5 commits ahead of origin |
 
 ---
 
-*End of current-task.md. Ready for /compact or session pause. To resume: read this file's Quick Recovery, then continue with operator smoke of latest deploys.*
+## Deferred / follow-up items
+
+- Playbook-to-code compilation for remaining engine consumers (Chat, Insight Engine, summarize Assistant) — hits when we UAT summarize Assistant.
+- Daily Briefing narrator formal refactor to shared Linear primitives — deferred to a follow-on cleanup pass. Do NOT touch during this migration.
+- R5 Doc 06 Choice-field coercion pattern — DocumentProfileService reuses `DocumentTypeMapper.ToDataverseValue` today; may want dynamic metadata-cache lookup later.
+- Phases C-G of task plan (File Summarize, Prefills, data cleanup, coexistence check, docs wrap-up) — sequential after Doc Upload passes UAT.
+
+## Rollback for Phase B
+
+If Phase B causes regressions:
+- Revert `c2d26986d` — removes the whole Linear consumer library + endpoint dispatch + Program.cs wiring in one shot
+- Then either revert the four Phase A reverts (to restore bandaids) OR leave them reverted (base is R7 pre-bandaid state)
+- Cost: Doc Upload UAT blocks; operator falls back to whatever worked pre-Wave-12
+
+---
+
+## Design decisions taken during Phase B (may need review)
+
+1. **Revert order deviation** — plan listed A1→A4 (oldest first) but I did A4→A1 (newest first) because A1-A3 replaced each other on the same function; reverting oldest-first would have conflicted. Same end state. Documented inline in the task plan checklist.
+2. **`IActionResolver` = config-driven** rather than routing-table-driven — chose `LinearConsumersOptions.ActionIds` (IOptions map) over the plan's suggested `IConsumerRoutingService` → `IScopeResolverService.GetActionAsync` chain because (a) routing table returns playbookId not actionId — still need indirection to get to ActionId, and (b) config-driven is simpler for tonight's velocity. Can promote to routing-driven later without churning consumer service code (still calls `IActionResolver.ResolveAsync`).
+3. **`IDocumentDataverseService.UpdateProfileAsync` was NOT added** — the existing `UpdateDocumentFieldsAsync(string, Dictionary<string, object?>, ct)` already serves the exact need (typed field map → SDK-based write, no metadata calls). Plan called for a new typed method; deemed unnecessary.
+4. **Endpoint dispatch happens BEFORE DocumentContext pre-load** for the Linear path — avoids double-loading text since `DocumentTextSource.ExtractFromDocumentIdAsync` inside `DocumentProfileService` does the load itself. Engine path retains the pre-load unchanged.
+5. **`IPostUploadIndexingEnqueuer.EnqueueIfApplicableAsync`** (OBO path) is used instead of the app-only path, because Doc Upload files were written by the user via OBO — MI cannot read them without a container-type app-registration (see SPE writer-identity rule in `PostUploadIndexingEnqueuer.cs`).
+
+## Commits from this session
+
+- Phase A reverts: `a648dedce`, `1332a5a02`, `06040244e`, `42a83ff7c` (4 commits, reverse chronological)
+- Phase B feature: `c2d26986d`
+
+All 5 are **LOCAL ONLY** — not pushed to origin yet. Task B19 will push after B15-B18 complete.
+
+---
+
+## Reference
+
+- Architecture: [`docs/architecture/SPAARKE-LINEAR-AI-CONSUMER-ARCHITECTURE.md`](../../docs/architecture/SPAARKE-LINEAR-AI-CONSUMER-ARCHITECTURE.md)
+- Work spec: [`notes/wave12-linear-consumer-migration.md`](notes/wave12-linear-consumer-migration.md)
+- Task plan: [`notes/wave12-linear-consumer-tasks.md`](notes/wave12-linear-consumer-tasks.md)
+- Historical doc-processing architecture: [`docs/architecture/sdap-document-processing-architecture.md`](../../docs/architecture/sdap-document-processing-architecture.md)
+- Companion pattern (Playbook Engine + Daily Briefing narrator model): [`docs/architecture/SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md`](../../docs/architecture/SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md)
+- Wizard integration: [`docs/guides/DOCUMENT-UPLOAD-WIZARD-INTEGRATION-GUIDE.md`](../../docs/guides/DOCUMENT-UPLOAD-WIZARD-INTEGRATION-GUIDE.md)
+
+---
+
+*End of current-task.md. Recovery point: Phase B core code shipped (commit `c2d26986d`), build clean, awaiting deploy/smoke decision from operator.*

@@ -9,6 +9,8 @@ using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services;
 using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.LinearConsumers;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 
 namespace Sprk.Bff.Api.Api.Ai;
 
@@ -240,7 +242,10 @@ public static class AnalysisEndpoints
     private static async Task ExecuteAnalysis(
         AnalysisExecuteRequest request,
         IPlaybookOrchestrationService playbookOrchestrationService,
+        AnalysisDocumentLoader documentLoader,
         IOptions<AnalysisOptions> options,
+        IOptions<LinearConsumersOptions> linearOptions,
+        DocumentProfileService documentProfileService,
         NotificationService notificationService,
         IGenericEntityService entityService,
         HttpContext context,
@@ -293,14 +298,128 @@ public static class AnalysisEndpoints
             "Starting analysis execution for documents [{DocumentIds}], ActionId={ActionId}, PlaybookId={PlaybookId}, TraceId={TraceId}",
             string.Join(",", request.DocumentIds), request.ActionId, request.PlaybookId, context.TraceIdentifier);
 
+        // R7 Wave 12 (2026-07-02): Linear AI Consumer dispatch. When the incoming
+        // playbookId matches a configured LinearConsumers entry (e.g., the Document
+        // Profile playbook), route through the code-defined DocumentProfileService
+        // rather than the Playbook Engine — same client SSE contract, no
+        // interpreter tax. Fall-through preserves engine dispatch for all other
+        // consumers (Chat / Insight Engine / etc.). See
+        // docs/architecture/SPAARKE-LINEAR-AI-CONSUMER-ARCHITECTURE.md.
+        var consumerTypeForLinear = linearOptions.Value.GetConsumerTypeForPlaybookId(request.PlaybookId.Value);
+        logger.LogInformation(
+            "[LinearDispatch] PlaybookId={PlaybookId} LinearMapSize={MapSize} PlaybookMapKeys=[{Keys}] PlaybookMapValues=[{Values}] MatchedConsumer={Consumer} ConsumerTypesDocumentProfile={ExpectedConsumer}",
+            request.PlaybookId.Value,
+            linearOptions.Value.PlaybookIds.Count,
+            string.Join(",", linearOptions.Value.PlaybookIds.Keys),
+            string.Join(",", linearOptions.Value.PlaybookIds.Values.Select(v => v.ToString())),
+            consumerTypeForLinear ?? "(none)",
+            ConsumerTypes.DocumentProfile);
+
+        if (string.Equals(consumerTypeForLinear, ConsumerTypes.DocumentProfile, StringComparison.OrdinalIgnoreCase))
+        {
+            if (request.DocumentIds.Length != 1)
+            {
+                await WriteSSEAsync(response,
+                    AnalysisStreamChunk.FromError("Document Profile requires exactly one documentId."),
+                    cancellationToken);
+                await response.WriteAsync("data: [DONE]\n\n", cancellationToken);
+                await response.Body.FlushAsync(cancellationToken);
+                return;
+            }
+
+            try
+            {
+                await foreach (var chunk in documentProfileService.ExecuteAsync(
+                    request.DocumentIds[0], context, parentEntity: null, cancellationToken))
+                {
+                    await WriteSSEAsync(response, chunk, cancellationToken);
+                }
+                await response.WriteAsync("data: [DONE]\n\n", cancellationToken);
+                await response.Body.FlushAsync(cancellationToken);
+
+                logger.LogInformation(
+                    "Linear Document Profile completed for TraceId={TraceId}", context.TraceIdentifier);
+
+                _ = SendAnalysisCompleteNotificationAsync(
+                    context.User, request, notificationService, entityService, logger, context.TraceIdentifier);
+            }
+            catch (OperationCanceledException)
+            {
+                logger.LogInformation(
+                    "Client disconnected during Linear Document Profile, TraceId={TraceId}",
+                    context.TraceIdentifier);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error during Linear Document Profile, TraceId={TraceId}", context.TraceIdentifier);
+                if (!cancellationToken.IsCancellationRequested)
+                {
+                    await WriteSSEAsync(response, AnalysisStreamChunk.FromError(ex.Message), CancellationToken.None);
+                }
+            }
+            return;
+        }
+
         // R7 task 041 (FR-11): Construct PlaybookRunRequest from AnalysisExecuteRequest. Per audit
         // R-040-3, AnalysisId is not part of PlaybookRunRequest (the existing AnalysisRecord is
         // referenced elsewhere by AnalysisOrchestrationService.ExecutePlaybookAsync via
         // AdditionalContext upstream; AnalysisId pass-through review left for follow-on as needed).
+        //
+        // R7 W12 2026-07-01: Pre-load DocumentContext when a single documentId is supplied.
+        // AiAnalysisNodeExecutor.Validate() requires context.Document != null with non-empty
+        // ExtractedText; the R2 dispatch refactor removed the AnalysisOrchestrationService
+        // legacy path that used to load documents itself. Callers of /api/ai/analysis/execute
+        // (e.g., Document Upload wizard's useAiSummary hook) supply documentIds but expect the
+        // BFF to load + extract text. Fail-soft: if load fails, we still invoke the orchestrator
+        // and let node validation surface a specific error to the client.
+        DocumentContext? documentContext = null;
+        if (request.DocumentIds.Length == 1)
+        {
+            var documentId = request.DocumentIds[0].ToString();
+            try
+            {
+                var document = await documentLoader.GetDocumentAsync(documentId, cancellationToken);
+                if (document != null)
+                {
+                    var extractedText = await documentLoader.ExtractDocumentTextAsync(document, context, cancellationToken);
+                    documentContext = new DocumentContext
+                    {
+                        DocumentId = Guid.TryParse(document.Id, out var docGuid) ? docGuid : request.DocumentIds[0],
+                        Name = document.Name ?? "Unknown",
+                        FileName = document.FileName,
+                        ExtractedText = extractedText,
+                        // Metadata carries downstream-node inputs. GraphDriveId + GraphItemId are
+                        // required by DeliverToIndexNodeExecutor (executortype=41) to enqueue the
+                        // SPE-scoped RAG indexing job. Populated when the DocumentEntity has SPE
+                        // linkage; nodes that don't need them ignore the entries.
+                        Metadata = new Dictionary<string, object?>
+                        {
+                            ["GraphDriveId"] = document.GraphDriveId,
+                            ["GraphItemId"] = document.GraphItemId,
+                        },
+                    };
+                    logger.LogInformation(
+                        "Loaded document context for analysis. DocumentId={DocumentId}, TextLength={TextLength}",
+                        documentId, extractedText?.Length ?? 0);
+                }
+                else
+                {
+                    logger.LogWarning("Document {DocumentId} not found in Dataverse; proceeding without document context.", documentId);
+                }
+            }
+            catch (Exception loadEx)
+            {
+                logger.LogWarning(loadEx,
+                    "Failed to load document context for {DocumentId}; proceeding without it. Node validation may reject the run.",
+                    documentId);
+            }
+        }
+
         var playbookRequest = new PlaybookRunRequest
         {
             PlaybookId = request.PlaybookId.Value,
-            DocumentIds = request.DocumentIds
+            DocumentIds = request.DocumentIds,
+            Document = documentContext
         };
 
         try

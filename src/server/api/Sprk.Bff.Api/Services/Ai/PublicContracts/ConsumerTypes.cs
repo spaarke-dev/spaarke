@@ -94,6 +94,19 @@ public static class ConsumerTypes
     public const string ComposeSummarize = "compose-summarize";
 
     /// <summary>
+    /// <c>DocumentProfileService</c> — Document Upload / Profile Document
+    /// linear consumer. R7 Wave 12 (2026-07-02) — migrated off the Playbook
+    /// Engine per <c>docs/architecture/SPAARKE-LINEAR-AI-CONSUMER-ARCHITECTURE.md</c>.
+    /// Routes via <see cref="LinearConsumers.LinearConsumersOptions.ActionIds"/>
+    /// rather than the routing table; the corresponding entry in
+    /// <see cref="LinearConsumers.LinearConsumersOptions.PlaybookIds"/> is
+    /// used by <c>AnalysisEndpoints.ExecuteAnalysis</c> to dispatch when the
+    /// incoming request's <c>PlaybookId</c> matches (preserving the client
+    /// contract during migration).
+    /// </summary>
+    public const string DocumentProfile = "document-profile";
+
+    /// <summary>
     /// Read-only list of all consumer-type constants. Intended for startup
     /// health-log diffing against Dataverse (chat-routing-redesign-r1 task
     /// 028e exit gate).
@@ -108,5 +121,6 @@ public static class ConsumerTypes
         EmailAnalysis,
         DailyBriefingNarrate,
         ComposeSummarize,
+        DocumentProfile,
     };
 }
