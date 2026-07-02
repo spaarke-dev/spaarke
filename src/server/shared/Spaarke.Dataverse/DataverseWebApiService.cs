@@ -1083,16 +1083,47 @@ public class DataverseWebApiService : IDataverseService
     // These are stub implementations to satisfy the interface contract
     // ========================================
 
-    public Task<string> GetEntitySetNameAsync(string entityLogicalName, CancellationToken ct = default)
-    {
-        _logger.LogWarning(
-            "GetEntitySetNameAsync called on DataverseWebApiService (not implemented). " +
-            "Consider using DataverseServiceClientImpl for metadata operations.");
+    // In-process cache of EntitySetName per logical name. Metadata is stable across a
+    // process lifetime; caching avoids repeated `/EntityDefinitions(...)` metadata calls
+    // (~50-100ms each) on the hot Update Record path.
+    private static readonly System.Collections.Concurrent.ConcurrentDictionary<string, string> _entitySetNameCache =
+        new(StringComparer.OrdinalIgnoreCase);
 
-        throw new NotImplementedException(
-            "Metadata operations via Web API are not yet implemented. " +
-            "Use DataverseServiceClientImpl for full metadata support.");
+    public async Task<string> GetEntitySetNameAsync(string entityLogicalName, CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(entityLogicalName))
+            throw new ArgumentException("Entity logical name is required", nameof(entityLogicalName));
+
+        if (_entitySetNameCache.TryGetValue(entityLogicalName, out var cached))
+            return cached;
+
+        // Web API metadata endpoint returns the plural collection name for a logical name.
+        // Faster than pulling the full EntityDefinition; only $select the one column.
+        var url = $"EntityDefinitions(LogicalName='{entityLogicalName}')?$select=EntitySetName";
+        var response = await SendGetAsync(url, ct);
+
+        if (!response.IsSuccessStatusCode)
+        {
+            var errorBody = await response.Content.ReadAsStringAsync(ct);
+            _logger.LogError(
+                "GetEntitySetNameAsync failed for '{Entity}': {StatusCode}. Response: {ErrorBody}",
+                entityLogicalName, response.StatusCode, errorBody);
+            response.EnsureSuccessStatusCode();
+        }
+
+        var payload = await response.Content.ReadFromJsonAsync<EntitySetNameResponse>(cancellationToken: ct);
+        if (payload is null || string.IsNullOrWhiteSpace(payload.EntitySetName))
+        {
+            throw new InvalidOperationException(
+                $"GetEntitySetNameAsync: EntityDefinitions returned no EntitySetName for '{entityLogicalName}'.");
+        }
+
+        _entitySetNameCache[entityLogicalName] = payload.EntitySetName;
+        _logger.LogDebug("Resolved EntitySetName '{Set}' for '{Logical}'", payload.EntitySetName, entityLogicalName);
+        return payload.EntitySetName;
     }
+
+    private sealed record EntitySetNameResponse(string EntitySetName);
 
     public Task<LookupNavigationMetadata> GetLookupNavigationAsync(
         string childEntityLogicalName,
