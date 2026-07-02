@@ -8,12 +8,12 @@ Compact checklist. Read the two companion docs for context. Mark tasks complete 
 
 ## Phase A — Revert engine bandaids + set clean baseline
 
-- [ ] **A1**. Revert commit `4facf26ef` (`GetEntitySetNameAsync` accessor form). `git revert 4facf26ef --no-edit`
-- [ ] **A2**. Revert commit `2021028da` (`$filter` form). `git revert 2021028da --no-edit`
-- [ ] **A3**. Revert commit `1909b4432` (heuristic pluralization). `git revert 1909b4432 --no-edit`
-- [ ] **A4**. Revert commit `15511117b` (nested-JSON skip). `git revert 15511117b --no-edit`
-- [ ] **A5**. Rebuild BFF locally. `dotnet build src/server/api/Sprk.Bff.Api/` — must be 0 errors
-- [ ] **A6**. Commit any resulting resolution. Do NOT deploy yet — the reverts leave the engine path broken for Doc Upload, which is expected because Phase B replaces it.
+- [x] **A1**. Revert commit `4facf26ef` (`GetEntitySetNameAsync` accessor form). Reverted as `42a83ff7c` (done reverse-chronological — see A6).
+- [x] **A2**. Revert commit `2021028da` (`$filter` form). Reverted as `06040244e`.
+- [x] **A3**. Revert commit `1909b4432` (heuristic pluralization). Reverted as `1332a5a02`.
+- [x] **A4**. Revert commit `15511117b` (nested-JSON skip). Reverted as `a648dedce`.
+- [x] **A5**. Rebuild BFF locally. `dotnet build src/server/api/Sprk.Bff.Api/` — **0 errors, 19 pre-existing warnings** (2026-07-02).
+- [x] **A6**. Reverts executed in **reverse chronological order** (A4 → A3 → A2 → A1) rather than plan-listed order, because A1–A3 replaced each other on `GetEntitySetNameAsync` — reverting oldest-first would have conflicted; reverting newest-first peeled each layer cleanly. Same end state. No additional resolution commit needed. Deploy deferred to end of Phase B.
 
 ## Phase B — Shared primitives + Doc Upload (tonight's target)
 

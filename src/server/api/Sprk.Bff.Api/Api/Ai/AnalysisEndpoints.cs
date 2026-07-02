@@ -9,6 +9,8 @@ using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services;
 using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.LinearConsumers;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 
 namespace Sprk.Bff.Api.Api.Ai;
 
@@ -242,6 +244,8 @@ public static class AnalysisEndpoints
         IPlaybookOrchestrationService playbookOrchestrationService,
         AnalysisDocumentLoader documentLoader,
         IOptions<AnalysisOptions> options,
+        IOptions<LinearConsumersOptions> linearOptions,
+        DocumentProfileService documentProfileService,
         NotificationService notificationService,
         IGenericEntityService entityService,
         HttpContext context,
@@ -293,6 +297,59 @@ public static class AnalysisEndpoints
         logger.LogInformation(
             "Starting analysis execution for documents [{DocumentIds}], ActionId={ActionId}, PlaybookId={PlaybookId}, TraceId={TraceId}",
             string.Join(",", request.DocumentIds), request.ActionId, request.PlaybookId, context.TraceIdentifier);
+
+        // R7 Wave 12 (2026-07-02): Linear AI Consumer dispatch. When the incoming
+        // playbookId matches a configured LinearConsumers entry (e.g., the Document
+        // Profile playbook), route through the code-defined DocumentProfileService
+        // rather than the Playbook Engine — same client SSE contract, no
+        // interpreter tax. Fall-through preserves engine dispatch for all other
+        // consumers (Chat / Insight Engine / etc.). See
+        // docs/architecture/SPAARKE-LINEAR-AI-CONSUMER-ARCHITECTURE.md.
+        var consumerTypeForLinear = linearOptions.Value.GetConsumerTypeForPlaybookId(request.PlaybookId.Value);
+        if (string.Equals(consumerTypeForLinear, ConsumerTypes.DocumentProfile, StringComparison.OrdinalIgnoreCase))
+        {
+            if (request.DocumentIds.Length != 1)
+            {
+                await WriteSSEAsync(response,
+                    AnalysisStreamChunk.FromError("Document Profile requires exactly one documentId."),
+                    cancellationToken);
+                await response.WriteAsync("data: [DONE]\n\n", cancellationToken);
+                await response.Body.FlushAsync(cancellationToken);
+                return;
+            }
+
+            try
+            {
+                await foreach (var chunk in documentProfileService.ExecuteAsync(
+                    request.DocumentIds[0], context, parentEntity: null, cancellationToken))
+                {
+                    await WriteSSEAsync(response, chunk, cancellationToken);
+                }
+                await response.WriteAsync("data: [DONE]\n\n", cancellationToken);
+                await response.Body.FlushAsync(cancellationToken);
+
+                logger.LogInformation(
+                    "Linear Document Profile completed for TraceId={TraceId}", context.TraceIdentifier);
+
+                _ = SendAnalysisCompleteNotificationAsync(
+                    context.User, request, notificationService, entityService, logger, context.TraceIdentifier);
+            }
+            catch (OperationCanceledException)
+            {
+                logger.LogInformation(
+                    "Client disconnected during Linear Document Profile, TraceId={TraceId}",
+                    context.TraceIdentifier);
+            }
+            catch (Exception ex)
+            {
+                logger.LogError(ex, "Error during Linear Document Profile, TraceId={TraceId}", context.TraceIdentifier);
+                if (!cancellationToken.IsCancellationRequested)
+                {
+                    await WriteSSEAsync(response, AnalysisStreamChunk.FromError(ex.Message), CancellationToken.None);
+                }
+            }
+            return;
+        }
 
         // R7 task 041 (FR-11): Construct PlaybookRunRequest from AnalysisExecuteRequest. Per audit
         // R-040-3, AnalysisId is not part of PlaybookRunRequest (the existing AnalysisRecord is
