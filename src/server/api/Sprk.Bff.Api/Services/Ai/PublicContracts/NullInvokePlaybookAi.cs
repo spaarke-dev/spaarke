@@ -59,8 +59,14 @@ public sealed class NullInvokePlaybookAi : IInvokePlaybookAi
         Guid playbookId,
         IReadOnlyDictionary<string, string>? parameters,
         PlaybookInvocationContext context,
-        CancellationToken cancellationToken = default)
+        CancellationToken cancellationToken = default,
+        string? userContext = null,
+        Sprk.Bff.Api.Services.Ai.DocumentContext? document = null)
     {
+        // Widened surface per task 095. The kill-switch semantics are unchanged: any
+        // invocation attempt while the AI feature is disabled fails fast regardless of
+        // whether document context was supplied. Failing before touching the widened
+        // args keeps the ADR-032 P3 contract intact for Phase 1 + Phase 2 consumers alike.
         _logger.LogDebug(
             "NullInvokePlaybookAi.InvokePlaybookAsync invoked while AI feature is disabled (errorCode={ErrorCode}).",
             ErrorCode);

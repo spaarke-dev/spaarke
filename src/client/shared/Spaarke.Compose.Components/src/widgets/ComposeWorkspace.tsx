@@ -63,17 +63,23 @@ import {
   ComposeEditor,
   type ComposeEditorHandle,
   type ComposeEditorDocumentRef,
-} from '@spaarke/compose-components';
+} from './ComposeEditor';
+// spaarkeai-compose-r1 task 093: deep-import from `@spaarke/ai-widgets/events`
+// rather than the barrel `@spaarke/ai-widgets` to skip the barrel's side-effect
+// widget registration (`register-workspace-widgets.ts` transitively pulls in
+// `@spaarke/ai-outputs` subpaths, which LegalWorkspace's standalone Rollup
+// cannot resolve). Matches the SpaarkeAi `useWorkspaceLayouts` adapter pattern
+// (documented in `src/solutions/SpaarkeAi/src/hooks/useWorkspaceLayouts.ts`).
 import {
   useDispatchPaneEvent,
   usePaneEvent,
   type WorkspacePaneEvent,
   type ContextPaneEvent,
   type ConversationPaneEvent,
-} from '@spaarke/ai-widgets';
+} from '@spaarke/ai-widgets/events';
 import { authenticatedFetch } from '@spaarke/auth';
 
-import { ComposeToolbar, type ComposeSummarizeRequestEvent } from './ComposeToolbar';
+import { ComposeToolbar } from './ComposeToolbar';
 import { ComposeEmptyState } from './ComposeEmptyState';
 import { ComposeConflictDialog } from './ComposeConflictDialog';
 import { composeWorkspaceReducer, INITIAL_STATE } from './ComposeWorkspace.types';
@@ -87,7 +93,7 @@ import type {
   ComposeAssistantToWorkspaceFlow,
   ComposeWorkspaceToContextFlow,
   ComposeWorkspaceToAssistantFlow,
-} from '../../types/compose-contracts';
+} from '../types/compose-contracts';
 
 // Re-export types for backwards-compatible consumer imports.
 export type {
@@ -585,117 +591,25 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   );
 
   // -------------------------------------------------------------------------
-  // Summarize dispatch (Path A modal has no ConversationPane listener, so
-  // Compose owns the BFF call directly). Fires POST /api/compose/action/
-  // compose-summarize and stores the result for banner rendering.
+  // Summarize dispatch — DELEGATED to ConversationPane (task 098 / Phase 9).
+  //
+  // Prior to Phase 9, ComposeWorkspace owned the BFF /api/compose/action/
+  // compose-summarize call directly and rendered progress + result via the
+  // ComposeBannerStack summary banners. That shortcut existed because the
+  // Path A modal did not (yet) mount the ThreePaneShell + ConversationPane.
+  //
+  // Phase 7 wired ThreePaneShell on the Path A modal (task 092) and Phase 9
+  // (task 098) wires ConversationPane as the canonical consumer of the
+  // `compose_summarize_request` PaneEventBus event. Compose no longer owns
+  // the BFF call — the ComposeToolbar dispatches the event, ConversationPane
+  // consumes it via `executeComposeSummarize`, and the streamed response
+  // renders progressively into the Assistant pane's chat surface.
+  //
+  // This matches the design intent: the Assistant pane is the SINGLE
+  // AI-response surface across all future Compose actions (Rewrite, Find
+  // Similar, Lookup References). The same PaneEventBus wiring pattern
+  // inherits automatically.
   // -------------------------------------------------------------------------
-  const [summaryStatus, setSummaryStatus] = React.useState<
-    'idle' | 'in-flight' | 'ready' | 'error'
-  >('idle');
-  const [summaryText, setSummaryText] = React.useState<string | null>(null);
-  const [summaryError, setSummaryError] = React.useState<string | null>(null);
-
-  const handleComposeSummarizeRequest = React.useCallback(
-    (payload: ComposeSummarizeRequestEvent): void => {
-      // eslint-disable-next-line no-console
-      console.info('[ComposeWorkspace] compose-summarize dispatched', {
-        sessionId: payload.sessionId,
-        timestamp: payload.timestamp,
-        documentId: payload.documentRef.documentId,
-      });
-
-      if (!state.documentRef?.speDriveItemId || !bffBaseUrl || !tenantId) {
-        setSummaryStatus('error');
-        setSummaryError('Cannot summarize — document, BFF URL, or tenant missing.');
-        return;
-      }
-
-      setSummaryStatus('in-flight');
-      setSummaryText(null);
-      setSummaryError(null);
-
-      const url = `${bffBaseUrl}/api/compose/action/compose-summarize`;
-      const body = {
-        documentSpeId: state.documentRef.speDriveItemId,
-        tenantId,
-        sessionId: state.sessionId || undefined,
-        driveId: driveId || undefined,
-        documentRecordId: state.documentRef.sprkDocumentId || undefined,
-        documentName: state.documentRef.fileName || undefined,
-      };
-
-      void (async () => {
-        try {
-          const response = await authenticatedFetch(url, {
-            method: 'POST',
-            headers: { 'Content-Type': 'application/json' },
-            body: JSON.stringify(body),
-          });
-          if (!response.ok) {
-            const detail =
-              response.status === 429
-                ? 'Rate limit exceeded — try again in a minute.'
-                : response.status === 503
-                  ? 'Summarization service temporarily unavailable.'
-                  : `Summarize failed (HTTP ${response.status}).`;
-            setSummaryStatus('error');
-            setSummaryError(detail);
-            return;
-          }
-          const result = (await response.json()) as {
-            runId: string;
-            success: boolean;
-            textContent: string | null;
-            durationMs: number;
-            errorCode?: string;
-            errorMessage?: string;
-          };
-          // eslint-disable-next-line no-console
-          console.info('[ComposeWorkspace] compose-summarize response', {
-            runId: result.runId,
-            success: result.success,
-            hasText: typeof result.textContent === 'string' && result.textContent.length > 0,
-            textLength: result.textContent?.length ?? 0,
-            durationMs: result.durationMs,
-            errorCode: result.errorCode,
-            errorMessage: result.errorMessage,
-          });
-          if (!result.success || !result.textContent) {
-            setSummaryStatus('error');
-            const parts: string[] = [];
-            if (!result.success) parts.push('playbook returned success=false');
-            if (!result.textContent) parts.push('no text content');
-            if (result.errorMessage) parts.push(result.errorMessage);
-            if (result.errorCode) parts.push(`(code ${result.errorCode})`);
-            parts.push(`runId=${result.runId ?? 'unknown'}`);
-            setSummaryError(`Summarize completed without a text result: ${parts.join('; ')}`);
-            return;
-          }
-          setSummaryStatus('ready');
-          setSummaryText(result.textContent);
-        } catch (err) {
-          const message = err instanceof Error ? err.message : String(err);
-          setSummaryStatus('error');
-          setSummaryError(`Summarize failed: ${message}`);
-        }
-      })();
-    },
-    [
-      state.documentRef?.speDriveItemId,
-      state.documentRef?.sprkDocumentId,
-      state.documentRef?.fileName,
-      state.sessionId,
-      bffBaseUrl,
-      driveId,
-      tenantId,
-    ]
-  );
-
-  const dismissSummary = React.useCallback((): void => {
-    setSummaryStatus('idle');
-    setSummaryText(null);
-    setSummaryError(null);
-  }, []);
 
   // -------------------------------------------------------------------------
   // Editor doc-ref shape (shared lib has its own narrower interface)
@@ -754,11 +668,17 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           <div className={styles.toolbarSlot}>
             <ComposeToolbar
               documentId={toolbarDocumentId}
+              sprkDocumentId={state.documentRef?.sprkDocumentId}
               fileName={state.documentRef?.fileName}
               sessionId={state.sessionId}
               bffBaseUrl={bffBaseUrl}
+              driveId={driveId}
+              tenantId={tenantId}
               disabled={state.status === 'saving'}
-              onComposeSummarizeRequest={handleComposeSummarizeRequest}
+              // spaarkeai-compose-r1 task 098 (Phase 9): the toolbar's
+              // built-in `useDispatchPaneEvent('conversation', ...)` fires
+              // the `compose_summarize_request` event; ConversationPane is
+              // the sole consumer. Compose no longer owns the BFF call.
               onSaveRequested={() => {
                 void triggerSave();
               }}
@@ -767,7 +687,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             />
           </div>
 
-          {/* Banner stack — errors / warnings / checkout status / assistant pending / summary */}
+          {/* Banner stack — errors / warnings / checkout status / assistant pending */}
           <ComposeBannerStack
             errorMessage={state.errorMessage}
             checkoutStatus={state.checkoutStatus}
@@ -775,10 +695,6 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             checkoutFailureMessage={state.checkoutFailureMessage}
             importWarnings={state.importWarnings}
             pendingAssistantInsert={state.pendingAssistantInsert}
-            summaryStatus={summaryStatus}
-            summaryText={summaryText}
-            summaryError={summaryError}
-            onDismissSummary={dismissSummary}
           />
 
 

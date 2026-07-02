@@ -293,6 +293,23 @@ export interface WorkspaceTabManagerComponentProps {
    * callback is the missing UI mount point.
    */
   onToggleVisibility?: (tabId: string, visibleToAssistant: boolean) => void;
+
+  /**
+   * When true, suppress the tab-bar strip and render only the active
+   * widget content area. Used by `spaarkeai-compose-r1` task 100 (Phase 10
+   * polish, FR-S7): when SpaarkeAi is launched in `composeMode="editor"`,
+   * the user is locked to the Compose surface and MUST NOT see the
+   * workspace-tab UI (Matters, Documents, Daily Briefing, etc.).
+   *
+   * The active widget still renders normally. The widget-add extensibility
+   * (via PaneEventBus `widget_load` events) is also preserved — new tabs
+   * can still be added to the manager state; they simply have no visible
+   * switcher UI in compose mode. Future Compose-focused widgets can layer
+   * on top by dispatching `widget_load`.
+   *
+   * Defaults to `false` so non-compose consumers see no behaviour change.
+   */
+  hideTabBar?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -356,6 +373,7 @@ export function WorkspaceTabManagerComponent({
   onTabClose,
   chatSessionId,
   onToggleVisibility,
+  hideTabBar = false,
 }: WorkspaceTabManagerComponentProps): React.JSX.Element {
   const styles = useStyles();
 
@@ -499,6 +517,7 @@ export function WorkspaceTabManagerComponent({
       {/* Arrow buttons stay rendered (visibility: hidden when unreachable)    */}
       {/* so the tab strip width doesn't jitter as overflow state changes.     */}
       {/* ------------------------------------------------------------------ */}
+      {!hideTabBar && (
       <div className={styles.tabBar}>
         <Button
           className={mergeClasses(
@@ -583,6 +602,7 @@ export function WorkspaceTabManagerComponent({
           data-testid="workspace-tabs-scroll-right"
         />
       </div>
+      )}
 
       {/* ------------------------------------------------------------------ */}
       {/* Active tab content                                                   */}

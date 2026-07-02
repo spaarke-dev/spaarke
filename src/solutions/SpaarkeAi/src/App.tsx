@@ -33,16 +33,17 @@ import {
   setupCodePageThemeListener,
 } from "@spaarke/ui-components";
 import { getAuthProvider } from "@spaarke/auth";
-import { getBffBaseUrl, getTenantId } from "./config/runtimeConfig";
+import { getBffBaseUrl } from "./config/runtimeConfig";
 import { ThreePaneShell } from "./components/shell/ThreePaneShell";
-// spaarkeai-compose-r1 task 046 (Path A entry per design.md §14 row 3):
-// When the modal is launched with `composeMode=editor`, render ComposeWorkspace
-// directly inside the SpaarkeAi modal shell instead of the three-pane shell.
-// Reuses the existing Xrm modal chrome (target=2, 90%×90% — platform-provided
-// full-screen toggle) — no new modal abstraction is created.
-import { ComposeWorkspace } from "./components/compose";
-import type { ComposeDocumentRef } from "./types/compose-contracts";
-import { PaneEventBusProvider } from "@spaarke/ai-widgets/events";
+// spaarkeai-compose-r1 task 092 (Phase 7 three-pane pivot, supersedes task 046's
+// Path A shortcut per spec-supplement-2026-07-01-three-pane-pivot.md FR-S1):
+// When the modal is launched with `?composeMode=editor&…`, we NO LONGER render
+// <ComposeWorkspace> directly here. Instead, App.tsx always renders
+// ThreePaneShell (the canonical mount) and forwards the compose launch params
+// so the shell can (a) auto-select the "Compose" workspace layout in
+// WorkspacePane and (b) expose the document ref to the compose-editor section
+// factory via ComposeLaunchContext (consumed in task 093).
+import type { ComposeDocumentRef } from "@spaarke/compose-components";
 
 // ---------------------------------------------------------------------------
 // Styles — Fluent v9 tokens only (ADR-021)
@@ -152,28 +153,25 @@ function AppWithAuth(props: AppProps): React.JSX.Element {
     }
   })();
 
-  const tenantId = (() => {
-    try {
-      return getTenantId();
-    } catch {
-      return "";
-    }
-  })();
-
   // -------------------------------------------------------------------------
-  // Path A entry (spaarkeai-compose-r1 task 046, design.md §14 row 3)
+  // Canonical mount (spaarkeai-compose-r1 task 092, supersedes task 046 Path A).
   //
-  // When `composeMode === 'editor'`, mount `ComposeWorkspace` directly inside
-  // the SpaarkeAi modal shell instead of the standard three-pane shell. The
-  // modal chrome (Xrm dialog with platform-provided expand-to-full-screen
-  // button) is the "modal with full-screen toggle" UX from the locked decision.
+  // App.tsx ALWAYS renders ThreePaneShell now, including the ribbon
+  // "Open in Compose" modal launch. When `composeMode === 'editor'`, we
+  // forward the document pointer + drive id so ThreePaneShell can (a)
+  // auto-select the "Compose" workspace layout in WorkspacePane (task 092)
+  // and (b) expose the document ref via `ComposeLaunchContext` for the
+  // compose-editor section factory to consume (task 093).
+  //
+  // The Xrm dialog chrome (target=2, 80%×80%, platform-provided expand-to-
+  // full-screen button) provides the modal UX from the locked design decision.
   //
   // Auth is still gated via the AppWithAuth probe — if `isAuthenticated` is
   // false ComposeWorkspace's BFF load will simply surface the standard
   // unauthorized error via its existing MessageBar (no special handling here).
   // -------------------------------------------------------------------------
-  if (props.composeMode === "editor") {
-    const initialDocumentRef: ComposeDocumentRef | null = props.speDriveItemId
+  const initialComposeDocument: ComposeDocumentRef | null =
+    props.composeMode === "editor" && props.speDriveItemId
       ? {
           speDriveItemId: props.speDriveItemId,
           sprkDocumentId: props.sprkDocumentId,
@@ -184,31 +182,11 @@ function AppWithAuth(props: AppProps): React.JSX.Element {
         }
       : null;
 
-    // ComposeWorkspace and its children (ComposeToolbar) use usePaneEvent /
-    // useDispatchPaneEvent from @spaarke/ai-widgets/events. The standard
-    // three-pane path gets the bus context from ThreePaneShell's internal
-    // <PaneEventBusProvider>; the Path A modal path bypasses that shell, so
-    // we wrap directly here. Provider creates its own bus instance (no
-    // external bus needed at this mount).
-    return (
-      <div className={styles.appRoot} data-spaarkeai-mode="compose">
-        <div className={styles.layoutShell}>
-          <PaneEventBusProvider>
-            <ComposeWorkspace
-              bffBaseUrl={bffBaseUrl}
-              driveId={props.speDriveId ?? ""}
-              tenantId={tenantId}
-              initialDocumentRef={initialDocumentRef}
-              initialSessionId=""
-            />
-          </PaneEventBusProvider>
-        </div>
-      </div>
-    );
-  }
-
   return (
-    <div className={styles.appRoot}>
+    <div
+      className={styles.appRoot}
+      data-spaarkeai-mode={props.composeMode === "editor" ? "compose" : undefined}
+    >
       <div className={styles.layoutShell}>
         <ThreePaneShell
           bffBaseUrl={bffBaseUrl}
@@ -217,6 +195,9 @@ function AppWithAuth(props: AppProps): React.JSX.Element {
           entityId={props.entityId}
           matterId={props.matterId}
           sessionId={props.sessionId}
+          composeMode={props.composeMode}
+          composeDocument={initialComposeDocument}
+          composeDriveId={props.speDriveId ?? ""}
         />
       </div>
     </div>

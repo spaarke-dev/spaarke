@@ -2,7 +2,8 @@
 <task id="096" project="spaarkeai-compose-r1">
   <metadata>
     <title>Update InvokePlaybookAi + NullInvokePlaybookAi to implement the document-context overload</title>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-07-01 (collapsed into task 095)</completed>
     <estimated-effort>1 hour</estimated-effort>
     <tags>bff-api, facade, adr-013, ai-platform</tags>
     <rigor-hint>STANDARD</rigor-hint>
@@ -68,4 +69,42 @@
       <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
     </files>
   </knowledge>
+
+  <notes>
+    Completed 2026-07-01 as part of task 095 (atomic collapse).
+
+    Reason for collapse:
+      Task 095 chose the **optional parameters** design (over separate
+      overload). C# forbids interface method signatures whose implementations
+      diverge in parameter count — both `InvokePlaybookAi.cs` and
+      `NullInvokePlaybookAi.cs` MUST have the exact widened signature the
+      moment `IInvokePlaybookAi.cs` gains the new optional args, or the
+      project fails to compile. Therefore the tasks 095 + 096 work is
+      inherently atomic: interface + both impls + tests ship together.
+
+    Task 096's explicit acceptance requirements were satisfied by task 095:
+      - ✅ `InvokePlaybookAi.cs`: signature updated; `PlaybookRunRequest`
+        built with `UserContext = userContext, Document = document`,
+        `Parameters = parameters`, `DocumentIds = Array.Empty&lt;Guid&gt;()`.
+      - ✅ Logging updated with `hasUserContext` + `userContextLength` +
+        `hasDocument` + `documentTextLength` (presence + counts only per
+        ADR-015 — no text bodies logged).
+      - ✅ `NullInvokePlaybookAi.cs`: signature updated; kill-switch
+        fail-fast semantics preserved (ADR-032 P3 pattern intact for
+        both Phase 1 + Phase 2 consumers).
+      - ✅ 3 new tests in `InvokePlaybookAiTests.cs`:
+        `InvokePlaybookAsync_WithUserContextAndDocument_ForwardsToRequest`,
+        `InvokePlaybookAsync_WithoutUserContextOrDocument_BackwardCompatibleRequestShape`,
+        `NullInvokePlaybookAi_WithWidenedArgs_StillThrowsFeatureDisabled`.
+
+    Verification:
+      - Task 095 build + test verification IS task 096 build + test
+        verification (same commit, same file set).
+      - `dotnet build src/server/api/Sprk.Bff.Api/`: ✅ 0 errors / 19
+        warnings (baseline preserved).
+      - 94/94 relevant tests pass (InvokePlaybookAi + boundary + all
+        consumer setups).
+
+    See task 095 notes for the full change log + files-touched list.
+  </notes>
 </task>

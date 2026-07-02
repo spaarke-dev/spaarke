@@ -2,7 +2,7 @@
 <task id="099" project="spaarkeai-compose-r1">
   <metadata>
     <title>Remove summary banner states from ComposeBannerStack (retain import warnings + errors)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>0.5 hour</estimated-effort>
     <tags>frontend, spaarkeai, cleanup, refactor</tags>
     <rigor-hint>STANDARD</rigor-hint>

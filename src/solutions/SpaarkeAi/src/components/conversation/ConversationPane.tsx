@@ -145,6 +145,18 @@ import {
   executeSummarizeIntent,
   type HeldFile,
 } from "./executeSummarizeIntent";
+// spaarkeai-compose-r1 task 098 (Phase 9) — ConversationPane consumes the
+// compose-summarize SSE endpoint on receipt of a `compose_summarize_request`
+// event from the ComposeToolbar. The orchestrator handles the full stream
+// lifecycle; ConversationPane owns the progressive-render + terminal-inject
+// UX via `pendingInjection` + a local "Working…" affordance.
+//
+// The orchestrator lives in `@spaarke/compose-components` so the same wiring
+// works for both the Path A modal and any future embedded compose surface.
+import {
+  executeComposeSummarize,
+  type ComposeSummarizeResult,
+} from "@spaarke/compose-components";
 
 // ---------------------------------------------------------------------------
 // Types
@@ -656,6 +668,30 @@ const useStyles = makeStyles({
     overflowY: "auto",
     lineHeight: tokens.lineHeightBase200,
   },
+  // ── Compose summarize "Working…" affordance (task 098 / Phase 9) ────────
+  //
+  // A subtle info-tinted strip shown at the top of the chat region while a
+  // compose-summarize SSE stream is in flight. Non-blocking; the user can
+  // still send other messages. The strip text is updated on each server
+  // progress event (`document_loaded` → `extracting_text` →
+  // `invoking_playbook`) and cleared on terminal event.
+  composeSummarizeStatusStrip: {
+    flexShrink: 0,
+    display: "flex",
+    alignItems: "center",
+    gap: tokens.spacingHorizontalXS,
+    paddingLeft: tokens.spacingHorizontalM,
+    paddingRight: tokens.spacingHorizontalM,
+    paddingTop: tokens.spacingVerticalXS,
+    paddingBottom: tokens.spacingVerticalXS,
+    backgroundColor: tokens.colorBrandBackground2,
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorBrandForeground2,
+    borderBottomWidth: "1px",
+    borderBottomStyle: "solid",
+    borderBottomColor: tokens.colorBrandStroke2,
+  },
+
   restoreStaleWarning: {
     flexShrink: 0,
     display: "flex",
@@ -823,6 +859,118 @@ export function ConversationPane(): React.JSX.Element {
       }
     };
   }, []);
+
+  // ── Compose summarize state (spaarkeai-compose-r1 task 098 / Phase 9) ────
+  //
+  // When the ComposeToolbar dispatches a `compose_summarize_request` event
+  // on the `conversation` channel, this pane owns the full response UX:
+  //
+  //   1. `composeSummarizeStatus` — displays a subtle "Working…" strip at
+  //      the top of the chat region. `null` = idle. String = latest server
+  //      progress message ("Loading document…" / "Extracting text…" /
+  //      "Invoking playbook…"). Cleared on terminal event.
+  //
+  //   2. Terminal-success — the parsed `textContent` from the SSE result
+  //      chunk is injected as a local Assistant message via the existing
+  //      `pendingInjection` surface (SprkChat appends on null → non-null).
+  //
+  //   3. Terminal-failure — the error message is injected as a local
+  //      Assistant message with an "error" prefix so it renders inline in
+  //      the chat surface. Consistent with the R5 executeSummarizeIntent
+  //      chat-thread error affordance.
+  //
+  //   4. Abort — an AbortController is held in `composeSummarizeAbortRef`
+  //      so successive summarize requests cancel any in-flight predecessor.
+  //      Also aborted on unmount.
+  //
+  // See @spaarke/compose-components `executeComposeSummarize` for the SSE
+  // consumer + `ComposeToolbar` for the event dispatcher.
+  const [composeSummarizeStatus, setComposeSummarizeStatus] = React.useState<
+    string | null
+  >(null);
+  const composeSummarizeAbortRef = React.useRef<AbortController | null>(null);
+
+  // Abort any in-flight compose-summarize on unmount.
+  React.useEffect(() => {
+    return () => {
+      if (composeSummarizeAbortRef.current !== null) {
+        composeSummarizeAbortRef.current.abort();
+        composeSummarizeAbortRef.current = null;
+      }
+    };
+  }, []);
+
+  // Subscribe to `compose_summarize_request` on the conversation channel.
+  //
+  // Additive discriminant per ADR-030 (see ComposeToolbar §"Additive
+  // discriminant" note). The typed `ConversationPaneEvent` union does not
+  // include this discriminant, so we widen the handler's event type to
+  // `Record<string, unknown>` to read the additive fields safely.
+  usePaneEvent("conversation", (event) => {
+    if ((event as { type?: string }).type !== "compose_summarize_request") return;
+
+    // Widen the payload to the additive shape carried by ComposeToolbar.
+    const payload = event as unknown as {
+      documentRef: {
+        documentId: string;
+        sprkDocumentId?: string;
+        fileName?: string;
+      };
+      sessionId: string;
+      driveId: string;
+      tenantId: string;
+    };
+
+    // Cancel any prior in-flight summarize — successive requests supersede.
+    if (composeSummarizeAbortRef.current !== null) {
+      composeSummarizeAbortRef.current.abort();
+    }
+    const controller = new AbortController();
+    composeSummarizeAbortRef.current = controller;
+
+    setComposeSummarizeStatus("Preparing summary…");
+
+    void executeComposeSummarize({
+      bffBaseUrl,
+      documentSpeId: payload.documentRef.documentId,
+      driveId: payload.driveId,
+      tenantId: payload.tenantId,
+      sessionId: payload.sessionId,
+      documentRecordId: payload.documentRef.sprkDocumentId,
+      documentName: payload.documentRef.fileName,
+      getAccessToken,
+      signal: controller.signal,
+      onProgress: (_step, message) => {
+        // Server progress messages are already user-facing ("Loading document
+        // from SharePoint Embedded…", "Extracting document text…",
+        // "Invoking playbook…"). Surface verbatim in the affordance strip.
+        setComposeSummarizeStatus(message || "Working…");
+      },
+      onResult: (result: ComposeSummarizeResult) => {
+        // Success — clear the affordance + inject the assistant response as
+        // a local chat message.
+        setComposeSummarizeStatus(null);
+        setPendingInjection(makeLocalAssistantMessage(result.textContent));
+      },
+      onError: (message) => {
+        // Failure — clear the affordance + inject an error message. Prefixed
+        // with a stable label so the user knows the source of the error.
+        setComposeSummarizeStatus(null);
+        setPendingInjection(
+          makeLocalAssistantMessage(`Summarize failed: ${message}`)
+        );
+      },
+      onDone: () => {
+        // Guard against a stream that closes without a terminal chunk (rare;
+        // handled defensively by the orchestrator). Clear the affordance so
+        // the UI doesn't stay "Working…" forever.
+        setComposeSummarizeStatus((prev) => (prev !== null ? null : prev));
+        if (composeSummarizeAbortRef.current === controller) {
+          composeSummarizeAbortRef.current = null;
+        }
+      },
+    });
+  });
 
   // ── Selection chip state (AIPU2-101) ────────────────────────────────────
   //
@@ -2298,6 +2446,23 @@ export function ConversationPane(): React.JSX.Element {
         {/* Chat region — ALWAYS rendered. Hosts the restore banners,
             "Refine this?" chip bar, and SprkChat itself. */}
         <div className={styles.chatWrapper}>
+          {/* ── Compose summarize "Working…" affordance (task 098 / Phase 9) ──
+              Shown while a compose-summarize SSE stream is in flight; the
+              strip text is updated on each server progress event and cleared
+              on terminal event (result or error → assistant chat message via
+              pendingInjection). */}
+          {composeSummarizeStatus !== null && (
+            <div
+              className={styles.composeSummarizeStatusStrip}
+              role="status"
+              aria-live="polite"
+              data-testid="conversation-compose-summarize-strip"
+            >
+              <Spinner size="tiny" />
+              <Text size={200}>{composeSummarizeStatus}</Text>
+            </div>
+          )}
+
           {/* ── Stale entity warning (AIPU2-106) ── */}
           {restoreCtx?.hasStaleEntities && (
             <div className={styles.restoreStaleWarning} role="alert">

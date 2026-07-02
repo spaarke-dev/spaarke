@@ -350,8 +350,24 @@ public class PhaseAVerticalSliceTests : IClassFixture<WorkspaceTestFixture>
         // any AI-internal type. The facade's surface is the binding contract between
         // CRUD-side consumers (chat tool, M365 Copilot adapter, future R7+ consumers) and
         // the AI-internal orchestration layer.
+        //
+        // ADR-013 amendment (spaarkeai-compose-r1 task 095 widening; formally filed by
+        // task 102 per CLAUDE.md §6.5 Path B): the facade MAY expose
+        // `Sprk.Bff.Api.Services.Ai.DocumentContext` as an optional parameter type.
+        // DocumentContext is a pure data record (Guid + strings only) — NOT an
+        // orchestration engine type — and reusing it prevents duplication with the
+        // DTO that Compose's dispatch path already populates. See task 095 POML +
+        // IInvokePlaybookAi.cs "Phase 2 consumer" section +
+        // `.claude/adr/ADR-013-bff-ai-extraction.md` amendment section (2026-07-01).
         var facadeType = typeof(IInvokePlaybookAi);
         var publicMethods = facadeType.GetMethods(BindingFlags.Public | BindingFlags.Instance);
+
+        // Explicit allow-list for types that live in `Services.Ai` for historical reasons
+        // but ARE part of the facade's binding public surface (ADR-013 amendments).
+        var amendmentAllowedTypes = new HashSet<string>
+        {
+            typeof(Sprk.Bff.Api.Services.Ai.DocumentContext).FullName!,
+        };
 
         foreach (var method in publicMethods)
         {
@@ -364,11 +380,16 @@ public class PhaseAVerticalSliceTests : IClassFixture<WorkspaceTestFixture>
 
             foreach (var t in allTypes)
             {
-                t!.Namespace.Should().NotBe(
+                if (amendmentAllowedTypes.Contains(t!.FullName!))
+                {
+                    continue; // ADR-013 amendment 2026-07-01 (tasks 095 / 102) permits this type.
+                }
+
+                t.Namespace.Should().NotBe(
                     "Sprk.Bff.Api.Services.Ai",
                     $"ADR-013: IInvokePlaybookAi.{method.Name} must NOT expose the AI-internal " +
                     $"type '{t.FullName}'; only PublicContracts-namespace types are permitted in " +
-                    "the facade's surface");
+                    "the facade's surface (unless explicitly listed as an ADR amendment allowance)");
             }
         }
 

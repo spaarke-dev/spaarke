@@ -29,7 +29,7 @@ This directory contains AI-optimized versions of Architecture Decision Records. 
 | ADR-008 | Endpoint filters for auth | No global auth middleware | Accepted |
 | ADR-010 | DI minimalism | ≤15 non-framework DI registrations | Accepted |
 | ADR-012 | Shared component library | `@spaarke/ui-components` as single source of truth; abstracted services via `IDataService` | Accepted (Revised 2026-03-19) |
-| ADR-013 | AI Architecture | AI Tool Framework; extend BFF | Accepted |
+| ADR-013 | AI Architecture | AI Tool Framework; extend BFF; `IInvokePlaybookAi` facade widened for document-context (2026-07-01 amendment) | Accepted (amended 2026-07-01) |
 | ADR-021 | Fluent UI v9 Design System | All UI uses Fluent v9; React 19 for Code Pages; dark mode required | Accepted |
 | ADR-022 | PCF Platform Libraries | PCF uses React 16/17 platform-provided; Code Pages use React 19 bundled | Accepted |
 | ADR-023 | ~~Choice Dialog Pattern~~ | _Superseded — demoted to pattern_ | Superseded (2026-03-19) |

@@ -110,9 +110,16 @@ export interface ComposeSummarizeRequestEvent {
    * Document pointer. `documentId` is the SPE drive-item id (for ephemeral
    * Path B docs) OR the `sprk_documentid` (after first-Save promotion). The
    * BFF `/api/compose/action/compose-summarize` endpoint handles both shapes.
+   *
+   * Task 098 (Phase 9) note: for Path B ephemeral docs, `documentId` MUST be
+   * the SPE drive-item id (not the sprk_documentid) because the BFF's Load
+   * endpoint keys on `documentSpeId`. Post-promotion, the payload adds the
+   * `sprkDocumentId` field so the ConversationPane consumer forwards it to
+   * the BFF as `documentRecordId` (Dataverse correlation).
    */
   documentRef: {
     documentId: string;
+    sprkDocumentId?: string;
     fileName?: string;
   };
   /**
@@ -122,6 +129,15 @@ export interface ComposeSummarizeRequestEvent {
   jpsScope: 'compose-document';
   /** Active ChatSession id (Tier 1 safe identifier). */
   sessionId: string;
+  /**
+   * SPE driveId — required query param for the BFF Load endpoint. Added in
+   * task 098 (Phase 9) so ConversationPane can invoke the BFF directly.
+   */
+  driveId: string;
+  /**
+   * Microsoft Entra tenant id (ADR-015 Tier 3 scoping). Added in task 098.
+   */
+  tenantId: string;
   /** ISO-8601 UTC timestamp. */
   timestamp: string;
 }
@@ -168,6 +184,32 @@ export interface ComposeToolbarProps {
    * Empty string disables all actions.
    */
   bffBaseUrl: string;
+
+  /**
+   * SPE driveId of the container that holds the Compose document. Added in
+   * task 098 (Phase 9) — carried into the `compose_summarize_request` event
+   * so ConversationPane can invoke `POST /api/compose/action/compose-summarize`
+   * with the required `driveId` body field.
+   *
+   * Empty string disables the summarize button.
+   */
+  driveId: string;
+
+  /**
+   * Microsoft Entra tenant id (ADR-015 Tier 3 scoping). Added in task 098 —
+   * carried into the `compose_summarize_request` event so ConversationPane
+   * can invoke the BFF with the required `tenantId` body field.
+   *
+   * Empty string disables the summarize button.
+   */
+  tenantId: string;
+
+  /**
+   * Optional `sprk_documentid` GUID (post-promotion). When present, forwarded
+   * on the `compose_summarize_request` event so ConversationPane can pass it
+   * to the BFF as `documentRecordId` (Dataverse correlation). Task 098.
+   */
+  sprkDocumentId?: string;
 
   /**
    * Disable the toolbar entirely (e.g. while the host is hydrating the
@@ -275,6 +317,9 @@ export function ComposeToolbar(props: ComposeToolbarProps): React.JSX.Element {
     fileName,
     sessionId,
     bffBaseUrl,
+    driveId,
+    tenantId,
+    sprkDocumentId,
     disabled,
     className,
     onComposeSummarizeRequest,
@@ -301,10 +346,15 @@ export function ComposeToolbar(props: ComposeToolbarProps): React.JSX.Element {
   const isToolbarDisabled = disabled === true;
   const hasDocument = documentId.length > 0 && bffBaseUrl.length > 0;
   const hasSession = sessionId.length > 0;
+  // Task 098 (Phase 9): the summarize action ALSO requires driveId + tenantId
+  // now — the event carries them so ConversationPane can invoke the BFF
+  // without re-resolving. If either is missing, the button is inert.
+  const hasSummarizeContext = driveId.length > 0 && tenantId.length > 0;
 
   const openInWebDisabled = isToolbarDisabled || !hasDocument || isActing;
   const openInDesktopDisabled = isToolbarDisabled || !hasDocument || isActing;
-  const summarizeDisabled = isToolbarDisabled || !hasDocument || !hasSession;
+  const summarizeDisabled =
+    isToolbarDisabled || !hasDocument || !hasSession || !hasSummarizeContext;
 
   const handleOpenInWeb = React.useCallback((): void => {
     if (openInWebDisabled) return;
@@ -323,10 +373,13 @@ export function ComposeToolbar(props: ComposeToolbarProps): React.JSX.Element {
       type: 'compose_summarize_request',
       documentRef: {
         documentId,
+        sprkDocumentId,
         fileName,
       },
       jpsScope: 'compose-document',
       sessionId,
+      driveId,
+      tenantId,
       timestamp: new Date().toISOString(),
     };
 
@@ -348,8 +401,11 @@ export function ComposeToolbar(props: ComposeToolbarProps): React.JSX.Element {
     summarizeDisabled,
     dispatch,
     documentId,
+    sprkDocumentId,
     fileName,
     sessionId,
+    driveId,
+    tenantId,
     onComposeSummarizeRequest,
   ]);
 

@@ -1,9 +1,11 @@
 # ADR-013: AI Architecture (Concise)
 
-> **Status**: Accepted
+> **Status**: Accepted (amended 2026-07-01)
 > **Domain**: AI/ML Integration
-> **Last Updated**: 2026-05-20
-> **Updated By**: Refined per [`docs/assessments/bff-ai-extraction-assessment-2026-05-20.md`](../../docs/assessments/bff-ai-extraction-assessment-2026-05-20.md) — the categorical "no separate AI microservice" rule is replaced with technical criteria. Bulk of AI still lives in BFF for documented latency + transactional reasons; specific exceptions are now permitted.
+> **Last Updated**: 2026-07-01 (amendment: document-context invocation on `IInvokePlaybookAi` facade)
+> **Updated By**:
+> - 2026-05-20 refinement — refined per [`docs/assessments/bff-ai-extraction-assessment-2026-05-20.md`](../../docs/assessments/bff-ai-extraction-assessment-2026-05-20.md); categorical "no separate AI microservice" rule replaced with technical criteria; direct CRUD→AI injection prohibited (must use `Services/Ai/PublicContracts/` facades).
+> - **2026-07-01 amendment (Path B per CLAUDE.md §6.5)** — `IInvokePlaybookAi` facade widened with optional `userContext` + `document` parameters (defaults preserve existing callers). Motivating consumer: `spaarkeai-compose-r1`. See [`docs/adr/ADR-013-ai-architecture.md`](../../docs/adr/ADR-013-ai-architecture.md) §"Amendment 2026-07-01" for the full rationale; the boundary against direct CRUD→AI-internal injection is UNCHANGED.
 
 ---
 
@@ -39,6 +41,8 @@ Workloads meeting all four:
 - **MUST** use RagSearchOptions boolean filters for knowledge source scoping
 - **MUST** keep new AI synthesis/chat/orchestration in BFF unless ALL four exception criteria above are met
 - **MUST** route external CRUD-side AI consumers (Finance, Workspace, Jobs, etc.) through documented facade types in `Services/Ai/PublicContracts/` — do not inject `IOpenAiClient`, `IPlaybookService`, or other AI-internal types directly into CRUD code
+- **MUST** use the optional `userContext` + `document` parameters on `IInvokePlaybookAi.InvokePlaybookAsync` when dispatching a playbook against a specific source document (per the 2026-07-01 amendment). Do NOT create a bypass path around the facade to reach `IPlaybookOrchestrationService` for document-context invocation — the facade already supports it.
+- **MUST** update the reflection guard test (`PhaseAVerticalSliceTests.ADR013_InvokePlaybookAiFacade_DoesNotExposeAiInternalTypesInSurface`) with a NAMED allow-list entry + citation when adding NEW types to the facade surface. Silent bypass is forbidden per CLAUDE.md §6.5.
 
 ### ❌ MUST NOT
 

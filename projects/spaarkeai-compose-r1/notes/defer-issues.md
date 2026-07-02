@@ -23,8 +23,11 @@
 | **FU-1** | Follow-up | ComposeEditor (W4-045) should pause heartbeat when `checkoutStatus !== 'acquired'` | ✅ **RESOLVED 2026-06-29** in code-review cleanup R3 (PR #515 commit `fcb69ed17`) — heartbeat hoisted to `useComposeHeartbeatGate` hook with `checkoutStatus === 'acquired'` guard | n/a (in-PR fix) |
 | **FU-4** | Follow-up | Remove `virtual` modifiers from `ComposeSessionService` by rewriting `ComposeServiceTests` to use real instance + `ChatSessionManager` test double (R4 Option C trade-off; small testability smell) | 📋 OPEN (non-blocking; documented in `ComposeSessionService.cs` XML doc) | this file + `ComposeSessionService.cs` XML doc |
 | **FU-2** | Follow-up | FR-06 concurrent-Save live test against deployed BFF + live Dataverse Alt Key | 📋 OPEN (belongs to W10 smoke-after-deploy OR separate `tests/integration/Spe.Integration.Tests/` track) | this file + W8-061 POML notes |
-| **FU-3** | Follow-up | Pattern D placeholder swap: `LegalWorkspace/sections/composeEditor.registration.ts` (W1b-040 inline placeholder → `@spaarke/compose-components` real widget) | 📋 OPEN (intentionally deferred; Path A modal launch is R1 mount path) | W4-042 agent report + design notes |
+| **FU-3** | Follow-up | Pattern D placeholder swap: `LegalWorkspace/sections/composeEditor.registration.ts` (W1b-040 inline placeholder → `@spaarke/compose-components` real widget) | ✅ **RESOLVED** by task 093 (Phase 7 pivot, 2026-07-01) — real `<ComposeWorkspace>` now mounts via `@spaarke/compose-components`; `ComposeLaunchContext` bridges document context from SpaarkeAi ThreePaneShell into the section factory; LegalWorkspace standalone build ✅ clean | W4-042 agent report + design notes + task 093 |
 | **DEF-7SCs** | Deferred SCs | 7 success criteria from spec.md require live Dev BFF verification (SC4/SC5/SC9-live/SC10-live/SC13/SC14/SC15) | 📋 OPEN — operator runs at W10/W11 | `notes/audits/success-criteria-audit.md` + W10 task 080/081 |
+| **FU-97a** | Follow-up | Re-author the 10 Compose `DispatchAction` tests skipped by task 097 SSE conversion to parse SSE frames + assert on `AnalysisStreamChunk` event shape (currently marked `[Fact(Skip = ...)]` in `ComposeEndpointsContractTests.cs` + `ComposeSummarizeRoundtripSmokeTests.cs`). Immediate SSE contract is guarded by the new `PostDispatchAction_ReturnsTextEventStreamPerTask097` test; the Skip'd tests cover deeper Hop-by-Hop pipeline assertions that are still valuable but require SSE-parsing helpers. | 📋 OPEN — non-blocking; SSE contract is guarded by the new test; deeper Hop coverage tracked here | this file + `notes/task-097-sse-conversion.md` (created below) |
+| **FU-98a** | Follow-up | Stand up jest infrastructure for `@spaarke/compose-components` package (currently declares `"test": "jest"` in package.json but has no jest.config.js + no *.test.tsx files). Then author unit tests for `executeComposeSummarize` covering: (a) mocked WhatWG ReadableStream + progress→result→[DONE] happy path, (b) `type='error'` chunk → onError, (c) HTTP failure → onError, (d) AbortSignal → onDone without onError, (e) malformed data frames → skipped defensively. Pattern: mirror `executeSummarizeIntent` test coverage in the SpaarkeAi jest suite. Impact: task 098 orchestrator ships without in-package unit tests; behavior guarded only by TypeScript surface + downstream ConversationPane wiring (which itself lacks a jest integration test — see FU-91a for the pre-existing SpaarkeAi jest gap). | 📋 OPEN — non-blocking; the orchestrator is a pure module mirroring the tested `executeSummarizeIntent` pattern. Deferred because standing up jest config for a fresh package would exceed the 2.5h budget for task 098. | this file |
+| **AMD-102** | ADR amendment | ADR-013 Path B amendment (2026-07-01) — `IInvokePlaybookAi` facade widened with optional `userContext: string?` + `document: DocumentContext?` parameters. Documented in [`docs/adr/ADR-013-ai-architecture.md`](../../../docs/adr/ADR-013-ai-architecture.md) §"Amendment 2026-07-01". First Path B amendment landed under CLAUDE.md §6.5 protocol (added 2026-06-29 by this same project). | ✅ SHIPPED (task 102) | `docs/adr/ADR-013-ai-architecture.md` §Amendment; `.claude/adr/ADR-013-ai-architecture.md` header + MUST rules; `.claude/adr/INDEX.md`; `.claude/CHANGELOG.md` [Unreleased]; this file §AMD-102 |
 
 ---
 
@@ -234,20 +237,21 @@ cd src/solutions/SpaarkeAi && npm audit --omit=dev
 
 **Source**: W4-042 + W5-042 architectural analysis
 
-**Status**: INTENTIONALLY DEFERRED per Calendar Pattern D precedent
+**Status**: ✅ **RESOLVED 2026-07-01** by task 093 (Phase 7 three-pane pivot per spec-supplement-2026-07-01-three-pane-pivot.md FR-S1)
 
-**Issue**: `src/solutions/LegalWorkspace/src/sections/composeEditor.registration.ts` (W1b-040) renders an inline `ComposeWorkspacePlaceholder` Skeleton. The "real" replacement would be to import `ComposeWorkspace` from `@spaarke/compose-components` — but this creates a circular dep (`@spaarke/legal-workspace → SpaarkeAi`).
+**Original issue**: `src/solutions/LegalWorkspace/src/sections/composeEditor.registration.ts` (W1b-040) rendered an inline `ComposeWorkspacePlaceholder` Skeleton. The "real" replacement would be to import `ComposeWorkspace` from `@spaarke/compose-components` — but the pre-Phase-7 state had `ComposeWorkspace` living in `src/solutions/SpaarkeAi/*`, which would have created a reverse-direction dep (`@spaarke/legal-workspace → SpaarkeAi`).
 
-**R1 resolution**: Compose's R1 mount path is **Path A modal launch** (via `launch-resolver.ts` → SpaarkeAi modal). The LegalWorkspace standalone workspace-picker mount path is a SECONDARY surface that retains the placeholder. Matches Calendar (`CalendarWorkspaceWidget` from `@spaarke/events-components` mounts; standalone LegalWorkspace doesn't expose the rich widget).
+**How task 093 resolved it**: The Phase 7 pivot fixed the underlying dependency direction by (a) task 091: moving `ComposeWorkspace` + siblings + hooks + `compose-contracts.ts` INTO `@spaarke/compose-components` (per Spike #2 §11 open item #2 promotion trigger); (b) task 092: introducing `ComposeLaunchContext` on the SpaarkeAi ThreePaneShell to expose the ribbon launch document ref; (c) task 093: hoisting `ComposeLaunchContext` to `@spaarke/compose-components` (so LegalWorkspace can consume it without touching `solutions/SpaarkeAi/*`) + swapping the Skeleton placeholder for a real `<ComposeWorkspace>` mount inside an inner `ComposeSectionMount` bridge component. The bridge consumes `useComposeLaunch()` and forwards the document ref + drive id to ComposeWorkspace props.
 
-**Cost-of-doing-nothing**: standalone LegalWorkspace's "Compose" workspace layout shows the placeholder, not the real editor. Users intended to reach Compose via the modal launch path — they will encounter the rich editor; the workspace-picker path remains an R2+ enhancement.
+**Fix impact**:
+- LegalWorkspace `package.json` + `vite.config.ts` gained `@spaarke/compose-components` workspace-linked dependency (mirrors the daily-briefing-components precedent).
+- `ComposeWorkspace.tsx` + `ComposeEditor.tsx` swapped `@spaarke/ai-widgets` barrel imports → `@spaarke/ai-widgets/events` subpath imports to avoid the barrel's side-effect widget registration (`register-workspace-widgets.ts` dynamically imports `@spaarke/ai-outputs` subpaths that LegalWorkspace's standalone Rollup cannot resolve).
+- LegalWorkspace standalone build: ✅ 3917 modules / 3746 kB / gzip 1051 kB.
+- SpaarkeAi build: 3715 modules / 4876 kB / gzip 1357 kB (back to pre-092 size; the section-factory mount re-eagerises the ComposeWorkspace chain that task 092 had tree-shaken).
 
-**Future resolution paths**:
-- (a) SpaarkeAi-side `SECTION_REGISTRY.register('compose-editor', …)` sentinel at bootstrap (factory-injection pattern)
-- (b) Migrate `ComposeWorkspace` to `@spaarke/compose-components` (shared lib) — requires refactoring its dependencies
-- (c) Accept Pattern D limitation indefinitely (Calendar precedent)
+**Standalone LegalWorkspace behaviour**: when a user selects the "Compose" workspace layout in LegalWorkspace's standalone bundle, `useComposeLaunch()` returns null (no `<ComposeLaunchContext.Provider>` in the tree) → ComposeWorkspace mounts on its empty state → user picks a document via Browse / Search affordances (`ComposeEmptyState` — task 044). Full editor + save + summarize path works from that entry.
 
-**Permanent home**: this file (registry) + W1b-040 / W4-042 / W5-042 POML notes + design.md (mount-path section)
+**Permanent home**: this file (registry) + W1b-040 / W4-042 / W5-042 / task 093 POML notes + design.md (mount-path section)
 
 ---
 
@@ -285,6 +289,35 @@ All 7 are normal "live verification belongs to operator post-deploy" items, not 
 4. **Deployed to Dev 2026-07-01**: 3 web resources created (documentcomposelaunch, entityformlaunch, workspacelaunch); DocumentRibbons solution imported + published.
 
 **Follow-on wired for future ribbon scripts**: any new `src/ribbon/{Name}.ts` file is automatically picked up by `build:ribbon` and deploys with the same script. No new build path required per ribbon.
+
+---
+
+## AMD-102 — ADR-013 Path B amendment (document-context invocation on `IInvokePlaybookAi` facade)
+
+**Type**: ADR amendment (Path B per CLAUDE.md §6.5)
+**Status**: ✅ **SHIPPED 2026-07-01** in task 102.
+**Motivating consumer**: `spaarkeai-compose-r1` (this project).
+**Governance**: CLAUDE.md §6.5 (added 2026-06-29 by this same project).
+
+**What changed**: `IInvokePlaybookAi.InvokePlaybookAsync` gained two optional parameters `userContext: string?` and `document: DocumentContext?`, both defaulted to `null`, positioned AFTER `cancellationToken` so existing 4-arg positional callers are unaffected. Forwarded to `PlaybookRunRequest.UserContext` + `.Document`; consumed downstream via the existing Playbook-Driven LLM Output Pattern (Layer 1 orchestrator + Layer 2 `PromptSchemaRenderer` `## Input` section) with no execution-engine changes.
+
+**Boundary preserved**: The 2026-05-20 refined ADR-013 rule that CRUD-side code MUST NOT directly inject AI-internal types (`IOpenAiClient`, `IPlaybookService`, `IPlaybookOrchestrationService`, `IPlaybookExecutionEngine`) is UNCHANGED. Compose CRUD-side code (`ComposeEndpoints.DispatchAction`) still consumes ONLY the widened facade + `IConsumerRoutingService` + `IComposeDocumentService` + `IDocxTextExtractor`.
+
+**Why Path B (amendment) not Path A (project-scoped exception)**:
+- Compose is the FIRST document-context consumer, not the last. Rewrite / Find Similar / Lookup References (Compose R2+) and downstream document-scoped AI actions from Matter, Communication, and Insights all share the same technical need.
+- Per-project exceptions (Path A) would force every future consumer to declare its own carve-out — a proliferation pattern.
+- The amendment lands the facade extension once; every future document-context consumer inherits it cleanly with no ADR friction.
+
+**Compile-time boundary guard**: The reflection test `PhaseAVerticalSliceTests.ADR013_InvokePlaybookAiFacade_DoesNotExposeAiInternalTypesInSurface` was updated in task 095 with a NAMED allow-list containing `Sprk.Bff.Api.Services.Ai.DocumentContext`, citing tasks 095 + 102 for traceability. New types added to the facade surface will need explicit allow-list entries + rationale — silent bypass is forbidden per CLAUDE.md §6.5.
+
+**Trail**:
+- Full ADR §Amendment: [`docs/adr/ADR-013-ai-architecture.md`](../../../docs/adr/ADR-013-ai-architecture.md) §"Amendment 2026-07-01 — Document-context invocation on `IInvokePlaybookAi` facade"
+- Concise ADR: [`.claude/adr/ADR-013-ai-architecture.md`](../../../.claude/adr/ADR-013-ai-architecture.md) header + MUST rules
+- ADR INDEX: [`.claude/adr/INDEX.md`](../../../.claude/adr/INDEX.md) ADR-013 row (status "Accepted (amended 2026-07-01)")
+- Procedure-surface changelog: [`.claude/CHANGELOG.md`](../../../.claude/CHANGELOG.md) `[Unreleased]` → "Changed (2026-07-01 spaarkeai-compose-r1 task 102 — ADR-013 Path B amendment)"
+- Boundary guard test: [`tests/unit/Sprk.Bff.Api.Tests/Integration/PhaseAVerticalSliceTests.cs`](../../../tests/unit/Sprk.Bff.Api.Tests/Integration/PhaseAVerticalSliceTests.cs)
+
+**Historical note**: This is the FIRST Path B amendment landed since the §6.5 protocol was added on 2026-06-29 (by this same project). Path B was exercised end-to-end: (a) refined-facade-only surface preserved for existing callers, (b) named allow-list on reflection guard, (c) full amendment section written, (d) INDEX + CHANGELOG updated. The protocol worked as designed.
 
 ---
 

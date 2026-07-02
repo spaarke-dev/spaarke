@@ -14,7 +14,7 @@
  * @see src/solutions/SpaarkeAi/src/components/compose/ComposeWorkspace.tsx
  */
 
-import type { ComposeAssistantToWorkspaceFlow, ComposeDocumentRef } from '../../types/compose-contracts';
+import type { ComposeAssistantToWorkspaceFlow, ComposeDocumentRef } from '../types/compose-contracts';
 
 // ---------------------------------------------------------------------------
 // Document-context state machine

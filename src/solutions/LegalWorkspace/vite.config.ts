@@ -40,6 +40,12 @@ function resolveSharedLibDeps(): import("vite").Plugin {
     // (Rollup couldn't resolve "@spaarke/daily-briefing-components/widgets").
     // Mirrors the pattern from Events / AI.Widgets above.
     path.resolve(__dirname, "../../client/shared/Spaarke.DailyBriefing.Components/src"),
+    // spaarkeai-compose-r1 task 093 (2026-07-01): @spaarke/compose-components
+    // hosts the real ComposeWorkspace + ComposeLaunchContext consumed by
+    // sections/composeEditor.registration.ts (FU-3 resolution: swap the
+    // Skeleton placeholder for the real TipTap editor). Mirrors the
+    // daily-briefing-components entry above.
+    path.resolve(__dirname, "../../client/shared/Spaarke.Compose.Components/src"),
   ].map((p) => p.replace(/\\/g, "/"));
 
   const nodeModulesDir = path.resolve(__dirname, "node_modules");
@@ -104,6 +110,10 @@ export default defineConfig({
         // components source (consumed by sections/dailyBriefing/).
         path.resolve(__dirname, "../../client/shared/Spaarke.DailyBriefing.Components/src/**/*.tsx"),
         path.resolve(__dirname, "../../client/shared/Spaarke.DailyBriefing.Components/src/**/*.ts"),
+        // spaarkeai-compose-r1 task 093 (2026-07-01): transpile Compose
+        // components source (consumed by sections/composeEditor.registration.ts).
+        path.resolve(__dirname, "../../client/shared/Spaarke.Compose.Components/src/**/*.tsx"),
+        path.resolve(__dirname, "../../client/shared/Spaarke.Compose.Components/src/**/*.ts"),
       ],
     }),
     viteSingleFile(),
@@ -132,6 +142,11 @@ export default defineConfig({
       // resolves naturally once the bare-package alias is in place. Mirrors
       // the SpaarkeAi consumption pattern.
       "@spaarke/daily-briefing-components": path.resolve(__dirname, "../../client/shared/Spaarke.DailyBriefing.Components/src"),
+      // spaarkeai-compose-r1 task 093 (2026-07-01): aliased to source so
+      // `sections/composeEditor.registration.ts` can import `ComposeWorkspace`
+      // + `useComposeLaunch` from `@spaarke/compose-components` (barrel).
+      // Mirrors the daily-briefing entry above.
+      "@spaarke/compose-components": path.resolve(__dirname, "../../client/shared/Spaarke.Compose.Components/src"),
       // @spaarke/sdap-client — pulled in transitively via
       // @spaarke/ui-components/services/EntityCreationService.ts (Phase G of
       // multi-container-multi-index-r1 / PR #369). Mirrors the alias already

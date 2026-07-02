@@ -77,7 +77,12 @@ import {
   LinkDismiss24Regular,
 } from '@fluentui/react-icons';
 import { ComposeFormatToolbar } from './ComposeFormatToolbar';
-import { useDispatchPaneEvent, type DispatchPaneEvent } from '@spaarke/ai-widgets';
+// spaarkeai-compose-r1 task 093: deep-import from `@spaarke/ai-widgets/events`
+// rather than the barrel `@spaarke/ai-widgets` to skip the side-effect widget
+// registration (`register-workspace-widgets.ts` transitively pulls in
+// `@spaarke/ai-outputs` subpaths that LegalWorkspace standalone Rollup cannot
+// resolve). Same rationale as ComposeWorkspace.tsx above.
+import { useDispatchPaneEvent, type DispatchPaneEvent } from '@spaarke/ai-widgets/events';
 
 import { docxToTipTapHtml, tipTapToDocxBytes } from '../utils/docxBridge';
 

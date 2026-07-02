@@ -2,7 +2,7 @@
 <task id="100" project="spaarkeai-compose-r1">
   <metadata>
     <title>Workspace-tab suppression in compose mode (keep widget-add extensibility)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>1.5 hours</estimated-effort>
     <tags>frontend, spaarkeai, workspace-shell, polish</tags>
     <rigor-hint>STANDARD</rigor-hint>
@@ -57,4 +57,30 @@
     <constraint source="architecture">Preserve widget-add mechanism — the goal is "no non-Compose layouts", not "no widget system"</constraint>
     <constraint source="ADR-021">Fluent v9</constraint>
   </constraints>
+
+  <notes>
+    2026-07-01 — task 100 shipped.
+
+    Suppression approach: two-surface gate driven by `useComposeLaunch()` returning `composeMode === "editor"`:
+
+    1. **`WorkspacePane.tsx`** — `isComposeLaunchMode` boolean derived once. Passed to two places:
+       - `PaneHeader.rightSlot` conditionally renders `<WorkspacePaneMenu>` (the layout picker with "Select Workspace" list + "+ New Workspace" wizard + "Manage workspaces"). In compose mode: `rightSlot={undefined}` — the workspace-tab UI is suppressed at the pane header.
+       - `<WorkspaceTabManagerComponent>` receives new prop `hideTabBar={isComposeLaunchMode}`.
+
+    2. **`WorkspaceTabManagerComponent.tsx`** — added `hideTabBar?: boolean` prop (default `false`). When true, the entire tab-bar `<div>` (containing the two scroll arrows + `<TabList>` scroll container) is omitted from the render. The active-widget content area (below the tab bar) renders unchanged.
+
+    Widget-add extensibility preserved: `widget_load` events still create tabs in the manager state; those tabs' widgets render normally as the active widget. Only the tab STRIP (visual switcher) is hidden. Future Compose-focused widgets can dispatch `widget_load` and become the visible active widget in the pane without a tab strip.
+
+    Files touched: 3.
+    - `src/solutions/SpaarkeAi/src/components/workspace/WorkspaceTabManagerComponent.tsx` (add `hideTabBar` prop + conditional wrap around tab-bar `<div>`)
+    - `src/solutions/SpaarkeAi/src/components/workspace/WorkspacePane.tsx` (derive `isComposeLaunchMode`; conditionally render `WorkspacePaneMenu` in `rightSlot`; pass `hideTabBar` to tab manager)
+    - `src/solutions/SpaarkeAi/src/components/workspace/__tests__/WorkspaceTabManagerComponent.hideTabBar.test.tsx` (NEW; 4 tests covering default / explicit-false / true / active-widget-still-renders)
+
+    Verification:
+    - **SpaarkeAi Vite build**: 3716 modules / 0 errors / 4878.11 kB gzipped 1357.90 kB. Delta vs pre-100: +0.10 kB (essentially rounding).
+    - **New tests**: 4/4 pass in `WorkspaceTabManagerComponent.hideTabBar.test.tsx`. Coverage: (a) default omission renders bar, (b) explicit `hideTabBar=false` renders bar, (c) `hideTabBar=true` hides both scroll arrows + per-tab elements, (d) active widget content STILL renders when `hideTabBar=true`.
+    - **Pre-existing test suite state**: `WorkspacePane.summary-tab.test.tsx` continues to fail with a bootstrap error unrelated to task 100 (safeRegister export missing in test env for register-workspace-widgets.ts); all 88 other workspace-suite tests pass. Task 100 introduced 0 regressions.
+
+    Not touched: BFF (0 backend changes). No publish-size delta.
+  </notes>
 </task>

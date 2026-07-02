@@ -31,6 +31,12 @@ const config: Config = {
     // Map to source so ComposeToolbar tests can mock the hook directly.
     '^@spaarke/document-operations$': '<rootDir>/../../client/shared/Spaarke.DocumentOperations/src/index.ts',
     '^@spaarke/document-operations/(.*)$': '<rootDir>/../../client/shared/Spaarke.DocumentOperations/src/$1',
+    // spaarkeai-compose-r1 task 091 (Phase 7): ComposeWorkspace + siblings
+    // promoted from `src/solutions/SpaarkeAi/src/components/compose/` to
+    // `@spaarke/compose-components` (Calendar Pattern D precedent). Map to
+    // source so component tests can import the widgets by package name.
+    '^@spaarke/compose-components$': '<rootDir>/../../client/shared/Spaarke.Compose.Components/src/index.ts',
+    '^@spaarke/compose-components/(.*)$': '<rootDir>/../../client/shared/Spaarke.Compose.Components/src/$1',
     '^@spaarke/ai-context$': '<rootDir>/../../client/shared/Spaarke.AI.Context/src/index.ts',
     '^@spaarke/ai-outputs$': '<rootDir>/../../client/shared/Spaarke.AI.Outputs/src/index.ts',
     // d3-force ships pure ESM — ts-jest's CommonJS transform can't consume it.

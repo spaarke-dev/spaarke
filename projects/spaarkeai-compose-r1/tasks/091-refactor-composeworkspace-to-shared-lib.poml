@@ -2,7 +2,8 @@
 <task id="091" project="spaarkeai-compose-r1">
   <metadata>
     <title>Move ComposeWorkspace + hooks + types to @spaarke/compose-components</title>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-07-01</completed>
     <estimated-effort>3 hours</estimated-effort>
     <tags>refactoring, packaging, shared-lib, spaarkeai, compose-components, pattern-d</tags>
     <rigor-hint>FULL</rigor-hint>
@@ -98,4 +99,76 @@
       <file>docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md</file>
     </files>
   </knowledge>
+
+  <notes>
+    Completed 2026-07-01 (~1.5 h; under 3 h estimate).
+
+    Executed:
+      - `git mv` for 6 tsx components + ComposeWorkspace.types.ts + 4 hook files
+        (3 hooks + hooks/index.ts) + compose-contracts.ts (774 LOC) into
+        `src/client/shared/Spaarke.Compose.Components/src/{widgets,widgets/hooks,types}`.
+      - Test files relocated to `src/solutions/SpaarkeAi/src/__tests__/compose/`
+        (staying in SpaarkeAi jest infra — Events.Components precedent has no
+        jest infra either; scope creep to add jest here for R2).
+      - 3 relative-path fixes inside moved files: `../../types/compose-contracts`
+        → `../types/compose-contracts` (widgets/ is one level deeper than components/).
+      - 1 self-import fix: ComposeWorkspace.tsx imported `ComposeEditor` from
+        `@spaarke/compose-components` (would circular through the barrel now
+        that it's IN the barrel) → changed to `./ComposeEditor`.
+      - App.tsx: `./components/compose` → `@spaarke/compose-components` (+
+        `./types/compose-contracts` → same package for ComposeDocumentRef).
+      - Test imports: use subpath `@spaarke/compose-components/widgets/ComposeToolbar`
+        (and same for ComposeConflictDialog) instead of barrel — avoids the
+        pre-existing SpaarkeAi jest gap on `@spaarke/ui-components/components/CreateMatterWizard`
+        subpath resolution surfaced when tests hit the shared-lib barrel.
+      - Deleted stale SpaarkeAi files: `src/components/compose/index.ts` + empty
+        dirs (components/compose, components/compose/hooks, components/compose/__tests__)
+        + `src/types/compose-contracts.ts` + empty `src/types/`.
+      - Updated shared lib `src/index.ts` with 20+ new export lines organized
+        into 3 sections: workspace-level widgets, reducer/state types + hooks,
+        data contracts (Flows 1-6 + ComposeDocumentRef + ComposeSelection).
+      - Added `@spaarke/compose-components` + subpath mapping to SpaarkeAi
+        jest.config.ts moduleNameMapper (paralleling existing `@spaarke/ai-widgets`
+        + `@spaarke/document-operations` mappings).
+
+    Verification:
+      - `@spaarke/compose-components` tsc build: ✅ 0 errors
+      - SpaarkeAi Vite prod build: ✅ 3714 modules transformed / 18.73s /
+        4877.63 kB / gzip 1357.38 kB (identical to pre-091 bundle size)
+      - Ribbon build: ✅ 3 scripts / DocumentComposeLaunch + EntityFormLaunch
+        + WorkspaceLaunch clean
+      - Reverse-dep grep: ✅ NO `solutions/` imports from shared lib
+        (dependency graph unidirectional per POML acceptance #4)
+      - SpaarkeAi jest full suite: 12 failed / 18 passed / 30 total suites,
+        5 failed / 470 passed / 475 tests → IDENTICAL to pre-091 baseline
+        (verified via git stash + re-test); 12 failing suites all hit
+        pre-existing `@spaarke/ui-components/components/CreateMatterWizard`
+        subpath jest infra gap, NOT compose-related.
+      - Relocated compose tests specifically: 24/24 pass in 7.9s.
+
+    Contract satisfied:
+      - Spike #2 §11 open item #2 promotion trigger fires (second consumer of
+        compose-contracts now exists via ComposeWorkspace's shared-lib home).
+      - Calendar Pattern D packaging precedent matched: shared-lib widgets +
+        types exported from single `@spaarke/compose-components` package;
+        consumer shims (App.tsx Path A; LegalWorkspace registration in task 093)
+        import from the package name.
+
+    Deferred / follow-ups:
+      - FU-91a: SpaarkeAi jest infra gap on `@spaarke/ui-components/components/*`
+        subpaths is pre-existing (12 failing suites unrelated to compose).
+        Fix belongs to a dedicated infra task if the failing suites are ever
+        promoted to CI-blocking; out of scope here.
+      - Task 092 (App.tsx Path A removal) is unblocked and next.
+      - Task 093 (FU-3 placeholder swap in LegalWorkspace section shim) is
+        unblocked pending task 092.
+
+    Files touched (git status summary):
+      - 12 A (adds) in `src/client/shared/Spaarke.Compose.Components/src/`
+      - 2 A in `src/solutions/SpaarkeAi/src/__tests__/compose/`
+      - 3 M (`src/index.ts` barrel; `jest.config.ts`; `App.tsx`)
+      - 12 D (deletes) under `src/solutions/SpaarkeAi/src/components/compose/`
+        + `src/types/compose-contracts.ts`
+      - 1 M `projects/spaarkeai-compose-r1/current-task.md`
+  </notes>
 </task>

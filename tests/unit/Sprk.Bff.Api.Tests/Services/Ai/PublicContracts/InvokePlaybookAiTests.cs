@@ -154,6 +154,139 @@ public sealed class InvokePlaybookAiTests
         result.Success.Should().BeTrue();
     }
 
+    // ────────────────────────────────────────────────────────────────────────
+    // Widened surface (task 095): document-context invocation path
+    //
+    // Per spec-supplement-2026-07-01-three-pane-pivot.md FR-S4 + Path B
+    // ADR-013 amendment (per CLAUDE.md §6.5, filed formally in task 102):
+    // the widened facade accepts optional `userContext` + `document` args
+    // and MUST forward them onto `PlaybookRunRequest.UserContext` +
+    // `PlaybookRunRequest.Document`. Existing parameter-only callers stay
+    // unaffected.
+    // ────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task InvokePlaybookAsync_WithUserContextAndDocument_ForwardsToRequest()
+    {
+        // Arrange — Compose consumer flow: extracts DOCX text via IDocxTextExtractor
+        // (task 094), builds a DocumentContext, and calls the widened facade with
+        // both `userContext` (selection text) and `document` (pre-loaded extract).
+        var playbookId = Guid.NewGuid();
+        var runId = Guid.NewGuid();
+        var documentId = Guid.NewGuid();
+        var parameters = new Dictionary<string, string> { ["intent"] = "summarize" };
+        var userContext = "Please focus on the tax implications of Section 3.";
+        var document = new Sprk.Bff.Api.Services.Ai.DocumentContext
+        {
+            DocumentId = documentId,
+            Name = "Engagement letter draft",
+            FileName = "engagement-letter.docx",
+            ContentType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
+            ExtractedText = "This engagement letter dated 2026-07-01 covers professional services...",
+        };
+        var httpContext = new DefaultHttpContext();
+        var context = new PlaybookInvocationContext
+        {
+            TenantId = "tenant-compose",
+            HttpContext = httpContext,
+        };
+
+        var orchestrator = new Mock<IPlaybookOrchestrationService>(MockBehavior.Strict);
+        PlaybookRunRequest? capturedRequest = null;
+        orchestrator
+            .Setup(o => o.ExecuteAsync(It.IsAny<PlaybookRunRequest>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
+            .Returns((PlaybookRunRequest req, HttpContext ctx, CancellationToken ct) =>
+            {
+                capturedRequest = req;
+                return YieldEvents(new[]
+                {
+                    PlaybookStreamEvent.RunStarted(runId, playbookId, nodeCount: 1),
+                    PlaybookStreamEvent.RunCompleted(runId, playbookId, new PlaybookRunMetrics { TotalNodes = 1, CompletedNodes = 1 }),
+                });
+            });
+
+        var sut = new InvokePlaybookAi(orchestrator.Object, NullLogger<InvokePlaybookAi>.Instance);
+
+        // Act — call the widened facade with the new named arguments.
+        var result = await sut.InvokePlaybookAsync(
+            playbookId,
+            parameters,
+            context,
+            CancellationToken.None,
+            userContext: userContext,
+            document: document);
+
+        // Assert — the widened args are forwarded verbatim on PlaybookRunRequest.
+        capturedRequest.Should().NotBeNull();
+        capturedRequest!.UserContext.Should().Be(userContext, "userContext MUST flow through the widened facade to the orchestration request");
+        capturedRequest.Document.Should().BeSameAs(document, "document MUST flow through the widened facade so downstream nodes share the pre-extracted text (no re-download from SPE)");
+        capturedRequest.Parameters.Should().BeSameAs(parameters, "existing parameters path stays intact");
+        capturedRequest.DocumentIds.Should().BeEmpty("Compose supplies the pre-loaded document directly via Document — no Dataverse re-fetch");
+        result.Success.Should().BeTrue();
+    }
+
+    [Fact]
+    public async Task InvokePlaybookAsync_WithoutUserContextOrDocument_BackwardCompatibleRequestShape()
+    {
+        // Regression guard: the existing 4-arg call shape (Phase 1 chat-tool +
+        // M365 Copilot consumers) MUST produce a request with null UserContext +
+        // null Document. Byte-identical to the pre-widening path.
+        var playbookId = Guid.NewGuid();
+        var runId = Guid.NewGuid();
+        var httpContext = new DefaultHttpContext();
+        var context = new PlaybookInvocationContext { TenantId = "tenant-phase-1", HttpContext = httpContext };
+
+        var orchestrator = new Mock<IPlaybookOrchestrationService>(MockBehavior.Strict);
+        PlaybookRunRequest? capturedRequest = null;
+        orchestrator
+            .Setup(o => o.ExecuteAsync(It.IsAny<PlaybookRunRequest>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()))
+            .Returns((PlaybookRunRequest req, HttpContext ctx, CancellationToken ct) =>
+            {
+                capturedRequest = req;
+                return YieldEvents(new[]
+                {
+                    PlaybookStreamEvent.RunStarted(runId, playbookId, 1),
+                    PlaybookStreamEvent.RunCompleted(runId, playbookId, new PlaybookRunMetrics { TotalNodes = 1, CompletedNodes = 1 }),
+                });
+            });
+
+        var sut = new InvokePlaybookAi(orchestrator.Object, NullLogger<InvokePlaybookAi>.Instance);
+
+        // Act — the pre-widening 4-arg call shape (no new named args).
+        await sut.InvokePlaybookAsync(playbookId, parameters: null, context, CancellationToken.None);
+
+        // Assert
+        capturedRequest.Should().NotBeNull();
+        capturedRequest!.UserContext.Should().BeNull();
+        capturedRequest.Document.Should().BeNull();
+    }
+
+    [Fact]
+    public async Task NullInvokePlaybookAi_WithWidenedArgs_StillThrowsFeatureDisabled()
+    {
+        // The kill-switch peer MUST short-circuit regardless of whether the
+        // widened args are supplied. Prevents document-context callers from
+        // silently reaching a fake-success path.
+        var sut = new NullInvokePlaybookAi(NullLogger<NullInvokePlaybookAi>.Instance);
+        var document = new Sprk.Bff.Api.Services.Ai.DocumentContext
+        {
+            DocumentId = Guid.NewGuid(),
+            Name = "Any doc",
+            ExtractedText = "Any text",
+        };
+
+        var act = () => sut.InvokePlaybookAsync(
+            Guid.NewGuid(),
+            parameters: null,
+            new PlaybookInvocationContext { TenantId = "t", HttpContext = new DefaultHttpContext() },
+            CancellationToken.None,
+            userContext: "any",
+            document: document);
+
+        (await act.Should().ThrowAsync<FeatureDisabledException>())
+            .Which.ErrorCode.Should().Be(NullInvokePlaybookAi.ErrorCode);
+    }
+
     [Fact]
     public async Task InvokePlaybookAsync_AggregatesTerminalNodeOutput()
     {

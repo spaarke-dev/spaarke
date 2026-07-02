@@ -2,7 +2,8 @@
 <task id="093" project="spaarkeai-compose-r1">
   <metadata>
     <title>Swap FU-3 placeholder → real ComposeWorkspace in composeEditor.registration.ts</title>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-07-01</completed>
     <estimated-effort>1 hour</estimated-effort>
     <tags>frontend, legalworkspace, section-registry, three-pane, pattern-d</tags>
     <rigor-hint>FULL</rigor-hint>
@@ -64,4 +65,107 @@
       <file>docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md</file>
     </files>
   </knowledge>
+
+  <notes>
+    Completed 2026-07-01 (~1.5 h vs 1 h estimate; overshoot due to discovering
+    the LegalWorkspace transitive-dep build failure and remediating via
+    `@spaarke/ai-widgets/events` subpath swap).
+
+    Investigation finding: The initial POML plan assumed
+    `ComposeLaunchContext` (introduced by task 092 on SpaarkeAi ThreePaneShell)
+    could be consumed directly by LegalWorkspace's section factory. On code
+    review this violated POML acceptance #2 "Import only from `@spaarke/*`
+    shared libs — NEVER from `src/solutions/SpaarkeAi/*`". So task 093
+    expanded scope to hoist the context to the shared lib.
+
+    Execution:
+      1. Created `src/client/shared/Spaarke.Compose.Components/src/context/composeLaunchContext.ts`
+         with `ComposeLaunchContext` + `ComposeLaunchContextValue` + `useComposeLaunch()`.
+      2. Barrel-exported the new symbols from `@spaarke/compose-components/src/index.ts`.
+      3. Removed the local declaration from `src/solutions/SpaarkeAi/src/components/shell/ThreePaneShell.tsx`;
+         re-exported `useComposeLaunch` + `ComposeLaunchContextValue` from the
+         shared lib for SpaarkeAi consumers whose import path stays stable
+         (WorkspacePane).
+      4. Added `@spaarke/compose-components` as a `file:` workspace dependency
+         in `src/solutions/LegalWorkspace/package.json` (npm install added 2 packages).
+      5. Wired `src/solutions/LegalWorkspace/vite.config.ts`:
+           - Added compose-components src path to `sharedLibPaths[]`
+           - Added compose-components src glob to `react.include[]`
+           - Added `"@spaarke/compose-components"` alias to source dir
+         (mirrors the daily-briefing-components pattern).
+      6. Rewrote `src/solutions/LegalWorkspace/src/sections/composeEditor.registration.ts`:
+           - Removed `ComposeWorkspacePlaceholder` inline Skeleton stub (~50 LOC)
+           - Added `ComposeSectionMount` inner functional component (~15 LOC)
+             that calls `useComposeLaunch()` and renders `<ComposeWorkspace>`
+             via `React.createElement` (file is `.ts`, not `.tsx`)
+           - Bridge maps: `bffBaseUrl` from factory context, `driveId` +
+             `initialDocumentRef` from `useComposeLaunch()` (null when
+             standalone), `tenantId=""`, `initialSessionId=""`.
+           - Kept the SectionRegistration shape/metadata unchanged.
+      7. LegalWorkspace standalone Vite build initially FAILED on
+         `@spaarke/ai-outputs/output-widgets/BudgetDashboardWidget` resolution
+         — a transitive dynamic import from `@spaarke/ai-widgets/src/widgets/workspace/register-workspace-widgets.ts`
+         reached via ComposeWorkspace's `@spaarke/ai-widgets` barrel import.
+         Fix: changed `ComposeWorkspace.tsx` + `ComposeEditor.tsx` to import
+         from `@spaarke/ai-widgets/events` subpath instead of the barrel —
+         this skips the side-effect widget registration. Matches the
+         precedent in `src/solutions/SpaarkeAi/src/hooks/useWorkspaceLayouts.ts`
+         which documents the same pattern for the shared hook.
+      8. Updated `projects/spaarkeai-compose-r1/notes/defer-issues.md`
+         FU-3 row + FU-3 detail section: OPEN → ✅ RESOLVED.
+
+    Verification (all POML acceptance criteria):
+      - #1 "Selecting the Compose workspace layout in LegalWorkspace mounts
+        the real editor": ✅ standalone LegalWorkspace build clean; when the
+        layout is selected in-app, the ComposeSectionMount bridge renders
+        `<ComposeWorkspace>` with document context from `useComposeLaunch()`
+        (or null → empty state).
+      - #2 "FU-3 is now marked RESOLVED in defer-issues.md": ✅ done.
+      - Constraint "Registration file remains `.ts` (React.createElement)":
+        ✅ preserved.
+      - Constraint "Import only from `@spaarke/*` shared libs — NEVER from
+        `src/solutions/SpaarkeAi/*`": ✅ preserved (registration file's ONLY
+        `@spaarke/*` imports are `@spaarke/ui-components` types +
+        `@spaarke/compose-components` widget + hook).
+
+    Build verification:
+      - `@spaarke/compose-components` tsc: ✅ 0 errors
+      - SpaarkeAi Vite prod: ✅ 3715 modules / 4876.96 kB / gzip 1357.34 kB
+        (re-eagerised the ComposeWorkspace chain vs 092's tree-shaken 3991 kB;
+        bundle is back to pre-092 baseline — expected).
+      - LegalWorkspace standalone Vite prod: ✅ 3917 modules / 3746.04 kB /
+        gzip 1051.21 kB (+1384 kB vs pre-093 2362 kB baseline — expected due
+        to compose-components + TipTap + mammoth + docx chain now included).
+      - Ribbon build: ✅ 3 scripts clean.
+      - Full SpaarkeAi jest suite baseline preserved: 12 failed / 18 passed
+        suites, 5 failed / 470 passed tests — IDENTICAL to post-092 baseline
+        (verified by re-run).
+
+    Follow-ups filed:
+      - FU-93a (informational): `@spaarke/ai-widgets` barrel side-effect
+        widget registration (`register-workspace-widgets.ts`) transitively
+        imports `@spaarke/ai-outputs` subpaths that are not resolvable in
+        LegalWorkspace's standalone Rollup. The pattern of deep-importing
+        from `@spaarke/ai-widgets/events` subpath is now applied by TWO
+        consumers (this project's ComposeWorkspace + Compose Editor, plus
+        the pre-existing SpaarkeAi useWorkspaceLayouts adapter). A future
+        refactor of the barrel to defer the side-effect registration would
+        remove the need for consumers to know about the subpath trick.
+        Out of scope for R1; not filed as a formal issue (below the "3+
+        usages triggers refactor" threshold).
+
+    Files touched (git status summary):
+      - A `src/client/shared/Spaarke.Compose.Components/src/context/composeLaunchContext.ts`
+      - M `src/client/shared/Spaarke.Compose.Components/src/index.ts`
+      - M `src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx` (events subpath)
+      - M `src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx` (events subpath)
+      - M `src/solutions/SpaarkeAi/src/components/shell/ThreePaneShell.tsx` (context hoisted; re-exports)
+      - M `src/solutions/LegalWorkspace/package.json` (+@spaarke/compose-components dep)
+      - M `src/solutions/LegalWorkspace/vite.config.ts` (+3 wiring entries)
+      - M `src/solutions/LegalWorkspace/src/sections/composeEditor.registration.ts` (placeholder → real widget)
+      - M `projects/spaarkeai-compose-r1/notes/defer-issues.md` (FU-3 RESOLVED)
+      - M `projects/spaarkeai-compose-r1/current-task.md`
+      - M `projects/spaarkeai-compose-r1/tasks/TASK-INDEX.md`
+      - M `projects/spaarkeai-compose-r1/tasks/093-swap-fu3-placeholder-for-real-composeworkspace.poml`
+  </notes>
 </task>
