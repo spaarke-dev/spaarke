@@ -2,12 +2,12 @@
 <task id="SRFR-033" project="set-regarding-and-field-mapping-resolver-r1">
   <metadata>
     <title>RegardingResolver preserve read-only mode + URL field; version bump v1.2.0 → v1.3.0 across 4 locations</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>2h</estimated-effort>
-    <actual-effort></actual-effort>
+    <actual-effort>~1h</actual-effort>
     <assigned>AI Agent</assigned>
-    <started></started>
-    <completed></completed>
+    <started>2026-07-02</started>
+    <completed>2026-07-02</completed>
     <rigor>FULL</rigor>
     <parallel-safe>false</parallel-safe>
     <parallel-group>B</parallel-group>

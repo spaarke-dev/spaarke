@@ -1,83 +1,107 @@
 /**
- * RegardingResolverApp — main UI for the polymorphic regarding picker.
+ * RegardingResolverApp — v1.3 streamlined 2-row UI for the polymorphic regarding picker.
  *
- * Layout (single-row form-line):
+ * Layout (2-row form-line):
  *
  *   ┌────────────────────────────────────────────────────────────────────────┐
- *   │  Record Type:  [ Matter  ▼ ]      [ Select Record 🔍 ]                │
- *   │                                                                        │
- *   │  ✅ Smith v. Jones (Matter)                  [ Open ]  [ ✕ Clear ]   │
+ *   │  Related Record                                                    [🔍] │  ← Row 1: title + toolbar icon
+ *   ├────────────────────────────────────────────────────────────────────────┤
+ *   │  MTR-2025-0142     Smith v. Jones                                       │  ← Row 2: record-number link + record-name
  *   └────────────────────────────────────────────────────────────────────────┘
  *
- * When read-only (FR-24), the dropdown / Select Record / Clear are hidden;
- * only the selected target's clickable link is rendered.
+ * Row 1: Title text (from `title` manifest input, default "Related Record") +
+ *        right-aligned toolbar icon. The icon is provided by the shared
+ *        `PolymorphicPicker` (Wave 2 task 021 / FR-C2-01); clicking it reveals a
+ *        Menu of entity types from the catalog. Selecting an entity opens
+ *        `Xrm.Utility.lookupObjects` scoped to that entity type. The picked
+ *        record flows through `onSelect(entityType, recordId, recordName)` back
+ *        into this component's `applyRegardingSelection` handler which delegates
+ *        to `PolymorphicResolverService.applyResolverFields` per FR-A4-01.
+ *
+ * Row 2: `sprk_regardingrecordnumber` hyperlink placeholder (SRFR-031 will wire
+ *        the click to `Xrm.Navigation.navigateTo` modal open) + plain
+ *        `sprk_regardingrecordname` text. Field names are resolved from the
+ *        `regardingRecordNumberField` and `regardingRecordNameField` bound
+ *        manifest properties (defaults `sprk_regardingrecordnumber` and
+ *        `sprk_regardingrecordname`) so makers can rebind either field on a new
+ *        host entity without code change (FR-A1-02).
  *
  * # HOST-only usage (binding contract — R4-112 clarification 2026-06-24)
  *
  * Bind this PCF ONLY to entities that HOST the polymorphic regarding fields
- * (`sprk_regardingrecordtype` lookup + `sprk_regardingrecordid` / `name` /
- * `url` text fields + the 11 `sprk_Regarding<X>` entity-specific lookups).
+ * (`sprk_regardingrecordtype` lookup + `sprk_regardingrecordid` / `name` / `url`
+ * + `sprk_regardingrecordnumber` text fields + the 11 `sprk_Regarding<X>`
+ * entity-specific lookups). Currently host entities: `sprk_todo`,
+ * `sprk_communication` (FR-22).
  *
- * Currently host entities: `sprk_todo`, `sprk_communication` (FR-22).
+ * # Read-only mode (FR-A5-01 / NFR-04) — preserved by SRFR-033
  *
- * Do NOT bind to target entities (the things a To Do can be regarding):
- * `sprk_matter`, `sprk_project`, `sprk_event`, `sprk_invoice`,
- * `sprk_workassignment`, `sprk_budget`, `sprk_analysis`,
- * `sprk_organization`, `contact`, `sprk_document`. These entities do NOT
- * have the resolver fields, so a save will fail with HTTP 400
- * "Error identified in Payload provided by the user for Entity:''".
+ * When read-only (either `context.parameters.readOnly.raw === true` OR
+ * `context.mode.isControlDisabled === true`, resolved by RegardingResolverHost),
+ * Row 1 hides the toolbar icon (PolymorphicPicker gates the trigger on
+ * `!readOnly` internally); Row 2 continues to render the record-number
+ * hyperlink + record-name pair. The hyperlink click handler stays active
+ * because opening the related record in a modal is a VIEW action — safe
+ * under read-only per FR-A5-01. handlePickerSelect has a defensive
+ * write-gate (line ~282) that refuses to write if a race reaches it while
+ * readOnly is true.
  *
- * If the desired UX is "from a target record, see/create related To Dos",
- * use the inverse direction: a To Do subgrid on the target form (1:N
- * relationship via the `sprk_Regarding<X>` lookup).
+ * # CREATE-mode presave bridge (FR-A5-02)
  *
- * # Behavior
- *
- *  - Renders the 11-entity picker (via TODO_REGARDING_CATALOG)
- *  - Calls `applyRegardingSelection` from the local handler on selection.
- *    That handler wraps `applyResolverFields` (ADR-024 / FR-21) — there is
- *    NO field-write logic in this component.
- *  - Notifies the PCF class via `onRecordTypeChanged` so the bound lookup
- *    output is kept in sync (the form picks it up via getOutputs()).
- *  - Auto-seeds the picker on mount from the bound `regardingRecordType`
- *    lookup if it's already populated (mirrors AssociationResolver's
- *    "auto-detect existing parent" pattern).
- *  - On CREATE-mode forms (formType===1, no host record id), publishes the
- *    selection payload on `window.__sprk_regarding_pending__` so the
- *    companion OnSave handler (`sprk_todo_regarding_presave.js`) can stage
- *    the 4 companion fields into the form's pending-attribute buffer for
- *    the INSERT transaction.
+ * On CREATE forms (no host record id), the selection payload is published on
+ * `window.__sprk_regarding_pending__` so the companion OnSave handler
+ * (`sprk_todo_regarding_presave.js`) can stage the fields into the form's
+ * pending-attribute buffer for the INSERT transaction. SRFR-032 owns the
+ * `recordNumber` extension of that bridge payload; this task keeps the shape
+ * consistent (recordId / recordName / recordUrl / entityType).
  */
 
 import * as React from 'react';
 import {
-  Button,
-  Dropdown,
-  Label,
   Link,
   MessageBar,
   MessageBarBody,
-  Option,
-  Spinner,
   Text,
   makeStyles,
   tokens,
 } from '@fluentui/react-components';
-import { DismissRegular, Open16Regular, SearchRegular } from '@fluentui/react-icons';
 import {
-  TODO_REGARDING_CATALOG,
+  PolymorphicPicker as PolymorphicPickerRaw,
   buildRecordUrl,
   resolveRecordType,
+  type IPolymorphicPickerWebApi,
   type ITodoRegardingTargetCatalogEntry,
+  type PolymorphicPickerProps,
+  type RecordTypeCatalogEntry,
 } from '@spaarke/ui-components';
+
+/**
+ * The shared library's `.d.ts` bundle exposes `PolymorphicPicker` as
+ * `React.FC<PolymorphicPickerProps>`, but that `React.FC` is emitted against
+ * the shared lib's own `@types/react` (React 19-family), whose FC return type
+ * (`ReactNode | Promise<ReactNode>`) is incompatible with React 16's JSX
+ * element type. PCFs pin `@types/react` to 16.x per ADR-022. Cast to the React
+ * 16 `React.ComponentType` shape at the seam so the JSX use-site typechecks
+ * against the local React 16 types. Runtime is unaffected — the compiled JS
+ * module is the same regardless of which type version emitted the `.d.ts`.
+ */
+const PolymorphicPicker =
+  PolymorphicPickerRaw as unknown as React.ComponentType<PolymorphicPickerProps>;
 import { IInputs } from './generated/ManifestTypes';
 import {
   applyRegardingSelection,
-  clearRegarding,
   resolveAllowedCatalog,
   type IRegardingSelection,
   type IResolverWriteContext,
 } from './handlers/ResolverWriteHandler';
+
+// ---------------------------------------------------------------------------
+// Build date embedded in the version footer per src/client/pcf/CLAUDE.md
+// "Version Footer Requirement (MANDATORY)". Bump alongside the CONTROL_VERSION
+// in index.ts and the manifest attributes on every release (SRFR-033).
+// ---------------------------------------------------------------------------
+
+const BUILD_DATE = '2026-07-02';
 
 // ---------------------------------------------------------------------------
 // Styles (Fluent v9 semantic tokens only — ADR-021)
@@ -87,46 +111,41 @@ const useStyles = makeStyles({
   container: {
     display: 'flex',
     flexDirection: 'column',
-    gap: tokens.spacingVerticalS,
+    gap: tokens.spacingVerticalXS,
     padding: tokens.spacingHorizontalS,
     height: '100%',
     boxSizing: 'border-box',
   },
-  searchSection: {
-    display: 'flex',
-    gap: tokens.spacingHorizontalS,
-    alignItems: 'flex-end',
-    flexWrap: 'wrap',
-  },
-  dropdownWrapper: {
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalXXS,
-  },
-  dropdown: {
-    minWidth: '200px',
-  },
-  selectedRecord: {
+  row1: {
     display: 'flex',
     alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-    padding: tokens.spacingVerticalS,
-    backgroundColor: tokens.colorNeutralBackground2,
-    borderRadius: tokens.borderRadiusMedium,
+    justifyContent: 'space-between',
+    minHeight: '32px',
   },
-  selectedLabel: {
+  row2: {
+    display: 'grid',
+    gridTemplateColumns: 'auto 1fr',
+    columnGap: tokens.spacingHorizontalM,
+    alignItems: 'baseline',
+    padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalXS}`,
+    minHeight: '24px',
+  },
+  recordNumber: {
     fontWeight: tokens.fontWeightSemibold,
   },
-  readOnlyDisplay: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-    padding: tokens.spacingVerticalS,
+  recordName: {
+    color: tokens.colorNeutralForeground1,
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
+  },
+  emptyRow2: {
+    color: tokens.colorNeutralForeground3,
+    fontStyle: 'italic',
   },
   footer: {
     marginTop: 'auto',
     paddingTop: tokens.spacingVerticalS,
-    borderTop: `1px solid ${tokens.colorNeutralStroke1}`,
     display: 'flex',
     justifyContent: 'flex-end',
     alignItems: 'center',
@@ -148,29 +167,24 @@ const useStyles = makeStyles({
 function getXrm():
   | {
       Utility?: {
-        lookupObjects: (opts: unknown) => Promise<{ id: string; name: string; entityType?: string }[]>;
         getGlobalContext?: () => unknown;
       };
-      Navigation?: { openForm: (opts: unknown) => void };
       Page?: Xrm.Page;
+      Navigation?: {
+        navigateTo?: (
+          pageInput: { pageType: 'entityrecord'; entityName: string; entityId: string },
+          navigationOptions: {
+            target: 1 | 2;
+            width: { value: number; unit: '%' | 'px' };
+            height: { value: number; unit: '%' | 'px' };
+          }
+        ) => Promise<unknown>;
+      };
     }
   | undefined {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const w = window as any;
   return w.Xrm ?? w.parent?.Xrm ?? w.top?.Xrm;
-}
-
-/** Open the host record's regarding parent in a new form. */
-function navigateToRecord(entityLogicalName: string, recordId: string): void {
-  const xrm = getXrm();
-  if (xrm?.Navigation?.openForm) {
-    xrm.Navigation.openForm({
-      entityName: entityLogicalName,
-      entityId: recordId.replace(/[{}]/g, ''),
-    });
-  } else {
-    console.warn('[RegardingResolver] Xrm.Navigation.openForm not available');
-  }
 }
 
 /** Try to resolve the host record's GUID from `Xrm.Page`. */
@@ -187,6 +201,28 @@ function getHostRecordId(): string | undefined {
     /* ignore */
   }
   return undefined;
+}
+
+/**
+ * Adapt the internal `TODO_REGARDING_CATALOG` shape (used by the write path
+ * per ADR-024) to the shared `RecordTypeCatalogEntry` shape consumed by
+ * `PolymorphicPicker`. The shared picker only needs a stable key, display
+ * label, and logical name; the recordTypeRefId is derived from `entityType`
+ * (a stable string) since the picker doesn't touch the actual
+ * `sprk_recordtype_ref` GUID.
+ */
+function adaptCatalogForPicker(
+  catalog: ReadonlyArray<ITodoRegardingTargetCatalogEntry>
+): RecordTypeCatalogEntry[] {
+  return catalog.map(entry => ({
+    recordTypeRefId: entry.entityType,
+    displayName: entry.entityType,
+    logicalName: entry.entityType,
+    regardingField: entry.lookupAttribute,
+    // regardingRecordNumberField intentionally omitted at the adapter layer —
+    // the write path (applyResolverFields) resolves this from
+    // sprk_recordtype_ref.sprk_regardingrecordnumberfield per FR-A4-01.
+  }));
 }
 
 // ---------------------------------------------------------------------------
@@ -211,40 +247,34 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
   // Host entity (FR-22 lever — single config point, no code branching).
   const hostEntity = (context.parameters.entity?.raw ?? '').trim();
 
+  // Row-1 title from manifest input property (FR-A1-01). Falls back to the
+  // default "Related Record" if the maker omits the property or clears it.
+  const titleRaw = context.parameters.title?.raw ?? null;
+  const title = titleRaw && titleRaw.trim().length > 0 ? titleRaw.trim() : 'Related Record';
+
+  // Row-2 record-number and record-name — read from bound manifest properties
+  // (FR-A1-02). Values come straight from the host record's column values as
+  // the framework passes them. When the maker binds to a different column
+  // (default `sprk_regardingrecordnumber` / `sprk_regardingrecordname`), the
+  // raw already reflects that column's value; we render as-is.
+  const boundRecordNumber = context.parameters.regardingRecordNumberField?.raw ?? null;
+  const boundRecordName = context.parameters.regardingRecordNameField?.raw ?? null;
+
   // Allowed regarding targets (subset of TODO_REGARDING_CATALOG).
   const catalog = React.useMemo<readonly ITodoRegardingTargetCatalogEntry[]>(
     () => resolveAllowedCatalog(context.parameters.regardingTargets?.raw),
     [context.parameters.regardingTargets?.raw]
   );
 
-  // The default selection comes from the bound `regardingRecordType` lookup if set.
-  // The bound lookup is a Lookup.Simple to sprk_recordtype_ref; we use its `name`
-  // (display name) to display the existing selection, but the catalog entry for
-  // a given record type is keyed on the parent entity logical name. Since we don't
-  // have that mapping from the lookup alone, we render whatever name is bound; the
-  // user can re-select to overwrite.
-  const boundRecordType = (() => {
-    const raw = context.parameters.regardingRecordType?.raw;
-    if (!raw) return null;
-    const ref = Array.isArray(raw) ? raw[0] : raw;
-    if (!ref || !ref.id) return null;
-    return { id: ref.id, name: ref.name ?? '' };
-  })();
+  const pickerCatalog = React.useMemo<RecordTypeCatalogEntry[]>(
+    () => adaptCatalogForPicker(catalog),
+    [catalog]
+  );
 
-  const [selectedEntityType, setSelectedEntityType] = React.useState<string>(() => catalog[0]?.entityType ?? '');
-  const [selectedTarget, setSelectedTarget] = React.useState<IRegardingSelection | null>(null);
-  const [isLookupPending, setIsLookupPending] = React.useState(false);
-  const [isWriting, setIsWriting] = React.useState(false);
+  // Local transient state — errors + write-in-flight indicator.
   const [error, setError] = React.useState<string | null>(null);
-  const [statusMsg, setStatusMsg] = React.useState<string | null>(null);
-
-  // Sync default when catalog changes (e.g. user changes the regardingTargets input).
-  React.useEffect(() => {
-    if (!catalog.find(c => c.entityType === selectedEntityType)) {
-      setSelectedEntityType(catalog[0]?.entityType ?? '');
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [catalog]);
+  const [isWriting, setIsWriting] = React.useState(false);
+  const [selectedTarget, setSelectedTarget] = React.useState<IRegardingSelection | null>(null);
 
   // ---------------- Write context ----------------
   const writeCtx = React.useMemo<IResolverWriteContext>(
@@ -257,303 +287,224 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
     [context.webAPI, hostEntity]
   );
 
-  // ---------------- Handlers ----------------
+  // ---------------- PolymorphicPicker onSelect ----------------
 
-  const handleEntityTypeChange = (_ev: unknown, data: { optionValue?: string }): void => {
-    if (data.optionValue) {
-      setSelectedEntityType(data.optionValue);
-      setError(null);
-      setStatusMsg(null);
-    }
-  };
-
-  const handleSelectRecord = async (): Promise<void> => {
-    // FR-24 — Defensive write-gate: in read-only mode the edit UI is not
-    // rendered, but if a race or programmatic invocation reaches this handler
-    // (e.g. transition during prop change), refuse to write anything.
-    // This is belt-and-suspenders alongside the early read-only render branch.
-    if (readOnly) {
-      console.warn('[RegardingResolver] handleSelectRecord invoked in read-only mode — write skipped (FR-24).');
-      return;
-    }
-    if (!selectedEntityType) {
-      setError('Please select an entity type first.');
-      return;
-    }
-    if (!hostEntity) {
-      setError("Host entity is not configured (manifest 'entity' input property is empty).");
-      return;
-    }
-
-    setIsLookupPending(true);
-    setError(null);
-    setStatusMsg(null);
-
-    try {
-      const xrm = getXrm();
-      if (!xrm?.Utility?.lookupObjects) {
-        throw new Error('Xrm.Utility.lookupObjects is not available.');
-      }
-
-      const results = await xrm.Utility.lookupObjects({
-        defaultEntityType: selectedEntityType,
-        entityTypes: [selectedEntityType],
-        allowMultiSelect: false,
-      });
-
-      if (!results || results.length === 0) {
-        // User cancelled lookup.
+  const handlePickerSelect = React.useCallback(
+    async (entityType: string, recordId: string, recordName: string): Promise<void> => {
+      // FR-24 — Defensive write-gate: read-only mode hides the picker trigger,
+      // but if a race reaches this handler, refuse to write.
+      if (readOnly) {
+        console.warn('[RegardingResolver] handlePickerSelect invoked in read-only mode — write skipped (FR-A5-01).');
         return;
       }
-
-      const picked = results[0];
-      const cleanId = picked.id.replace(/[{}]/g, '').toLowerCase();
+      if (!hostEntity) {
+        setError("Host entity is not configured (manifest 'entity' input property is empty).");
+        return;
+      }
 
       const selection: IRegardingSelection = {
-        entityType: selectedEntityType,
-        recordId: cleanId,
-        recordName: picked.name,
+        entityType,
+        recordId,
+        recordName,
       };
 
+      setError(null);
       setIsWriting(true);
-      const result = await applyRegardingSelection(writeCtx, selection);
-      if (!result.success) {
-        setError(result.error ?? 'Failed to apply regarding fields.');
-        return;
-      }
-
-      setSelectedTarget(selection);
-
-      // CREATE-mode bridge for the form's OnSave handler (R4-051 follow-up):
-      // On UPDATE forms, applyResolverFields persisted all 5 fields directly
-      // via webApi.updateRecord — no further action needed. On CREATE forms,
-      // the row doesn't exist yet so persistence was deferred. Surface the
-      // resolved payload on a stable global so sprk_todo_regarding_presave.js
-      // can stage the 4 companion fields (sprk_regarding<X>, recordid,
-      // recordname, recordurl) onto the form's pending-attribute buffer via
-      // getAttribute().setValue() so they ride the INSERT transaction.
-      // sprk_regardingrecordtype is already propagated via notifyOutputChanged.
-      // See projects/smart-todo-r4/notes/d-form-bind-instructions.md.
-      if (!writeCtx.hostRecordId) {
-        (
-          window as unknown as {
-            __sprk_regarding_pending__?: Record<string, unknown>;
-          }
-        ).__sprk_regarding_pending__ = {
-          hostEntity: writeCtx.hostEntity,
-          entityType: selection.entityType,
-          entitySet: result.catalogEntry?.entitySet,
-          lookupAttribute: result.catalogEntry?.lookupAttribute,
-          recordId: selection.recordId,
-          recordName: selection.recordName,
-          recordUrl: buildRecordUrl(selection.entityType, selection.recordId),
-        };
-      }
-
-      // Notify PCF class so the bound `sprk_regardingrecordtype` lookup output
-      // is kept in sync. CRITICAL (Bug-1 fix 2026-06-24): the bound lookup
-      // targets `sprk_recordtype_ref` — NOT the parent entity. We MUST pass
-      // the matching `sprk_recordtype_ref` record's id + 'sprk_recordtype_ref'
-      // as the entityType. Passing the parent (e.g., `sprk_matter` GUID +
-      // entityType) causes MDA to throw:
-      //   "Unable to find many-to-one relationship, entity: sprk_todo,
-      //    referenced entity: sprk_matter, field: sprk_regardingrecordtype"
-      // because that m:1 path doesn't exist.
-      //
-      // `resolveRecordType` queries sprk_recordtype_ref for the entry where
-      // sprk_recordlogicalname === selection.entityType and is cached per page.
-      // `applyResolverFields` already used this internally to write the
-      // host record's @odata.bind, so this is a cache hit in practice.
       try {
-        const recordType = await resolveRecordType(writeCtx.webApi, selection.entityType);
-        if (recordType) {
-          onRecordTypeChanged({
-            id: recordType.id,
-            name: recordType.name,
-            entityType: 'sprk_recordtype_ref',
-          });
-        } else {
-          // No matching record-type-ref — clear the bound output rather than
-          // setting it to a stale value.
+        // Delegate to the shared write path — nav-prop discovery + 15-field
+        // clear-and-set + applyResolverFields for the SET group. This is the
+        // ONLY write logic (FR-A4-01 / ADR-024).
+        const result = await applyRegardingSelection(writeCtx, selection);
+        if (!result.success) {
+          setError(result.error ?? 'Failed to apply regarding fields.');
+          return;
+        }
+
+        setSelectedTarget(selection);
+
+        // CREATE-mode bridge: populate the well-known window global so the
+        // presave OnSave handler can stage the resolver payload into the form
+        // buffer for the INSERT transaction. UPDATE-mode already persisted via
+        // webApi.updateRecord inside applyRegardingSelection.
+        //
+        // SRFR-032 (FR-A5-04 client half): propagates the resolved
+        // `recordNumber` from the shared applyResolverFields result so the
+        // v1.2.0+ presave webresource can stage `sprk_regardingrecordnumber`
+        // onto the form. Backward compat: presave < v1.2.0 ignores the extra
+        // key (its TEXT_FIELDS array explicitly enumerates the 3 legacy
+        // fields; unrecognized keys are simply not consumed).
+        if (!writeCtx.hostRecordId) {
+          (
+            window as unknown as {
+              __sprk_regarding_pending__?: Record<string, unknown>;
+            }
+          ).__sprk_regarding_pending__ = {
+            hostEntity: writeCtx.hostEntity,
+            entityType: selection.entityType,
+            entitySet: result.catalogEntry?.entitySet,
+            lookupAttribute: result.catalogEntry?.lookupAttribute,
+            recordId: selection.recordId,
+            recordName: selection.recordName,
+            recordUrl: buildRecordUrl(selection.entityType, selection.recordId),
+            recordNumber: result.recordNumber ?? null,
+          };
+        }
+
+        // Notify the PCF class so the bound `sprk_regardingrecordtype` lookup
+        // output tracks the picked entity's record-type-ref (per Bug-1 fix
+        // 2026-06-24: the bound lookup targets `sprk_recordtype_ref`, NOT the
+        // parent entity itself).
+        try {
+          const recordType = await resolveRecordType(writeCtx.webApi, selection.entityType);
+          if (recordType) {
+            onRecordTypeChanged({
+              id: recordType.id,
+              name: recordType.name,
+              entityType: 'sprk_recordtype_ref',
+            });
+          } else {
+            onRecordTypeChanged(null);
+          }
+        } catch (rtErr) {
+          console.warn('[RegardingResolver] resolveRecordType for output notify failed:', rtErr);
           onRecordTypeChanged(null);
         }
-      } catch (rtErr) {
-        console.warn('[RegardingResolver] resolveRecordType for output notify failed:', rtErr);
-        onRecordTypeChanged(null);
+      } catch (err) {
+        console.error('[RegardingResolver] handlePickerSelect error:', err);
+        setError(err instanceof Error ? err.message : 'Selection failed.');
+      } finally {
+        setIsWriting(false);
       }
+    },
+    [readOnly, hostEntity, writeCtx, onRecordTypeChanged]
+  );
 
-      setStatusMsg(`Associated with ${selection.recordName}.`);
-    } catch (err) {
-      console.error('[RegardingResolver] handleSelectRecord error:', err);
-      setError(err instanceof Error ? err.message : 'Lookup failed.');
-    } finally {
-      setIsLookupPending(false);
-      setIsWriting(false);
-    }
-  };
+  // Row-2 record-number click handler (SRFR-031 / FR-A2-01) — opens the related
+  // record in a Dataverse MODAL via `Xrm.Navigation.navigateTo`.
+  //
+  // Design contract (verbatim per spec FR-A2-01):
+  //   Xrm.Navigation.navigateTo(
+  //     { pageType: 'entityrecord', entityName, entityId },
+  //     { target: 2, width: { value: 80, unit: '%' }, height: { value: 80, unit: '%' } }
+  //   )
+  //
+  // `target: 2` = modal (per docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md#L513
+  // and MS Learn PageInput type). `target: 1` would REPLACE main content —
+  // do NOT confuse the two.
+  //
+  // Entity name + id come from live control state (`selectedTarget`) —
+  // populated by the PolymorphicPicker onSelect handler. On initial mount
+  // before any picker selection, the state is null and this handler is a
+  // silent no-op (there is no target to open). Xrm-unavailable path
+  // (test harness / missing SDK) logs warn and no-ops without throwing so
+  // the host form is never broken by a click on an inert link.
+  const handleRecordNumberClick = React.useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
 
-  const handleClear = async (): Promise<void> => {
-    // FR-24 — Defensive write-gate: read-only mode renders no Clear button, but
-    // if a race or programmatic invocation reaches this handler, refuse to write.
-    if (readOnly) {
-      console.warn('[RegardingResolver] handleClear invoked in read-only mode — write skipped (FR-24).');
-      return;
-    }
-    if (!hostEntity) {
-      setError("Host entity is not configured (manifest 'entity' input property is empty).");
-      return;
-    }
+      const entityName = selectedTarget?.entityType;
+      const entityId = selectedTarget?.recordId;
 
-    setIsWriting(true);
-    setError(null);
-    setStatusMsg(null);
-
-    try {
-      const result = await clearRegarding(writeCtx);
-      if (!result.success) {
-        setError(result.error ?? 'Failed to clear regarding fields.');
+      // Empty-state guard — no picker selection yet, or selection cleared.
+      // Silent no-op is intentional (link may be rendered from a bound field
+      // that reflects the persisted record but no in-memory target exists
+      // until the picker fires; SRFR-033 will polish read-only navigation).
+      if (!entityName || !entityId) {
         return;
       }
-      setSelectedTarget(null);
-      onRecordTypeChanged(null);
-      setStatusMsg('Regarding cleared.');
-    } catch (err) {
-      console.error('[RegardingResolver] handleClear error:', err);
-      setError(err instanceof Error ? err.message : 'Clear failed.');
-    } finally {
-      setIsWriting(false);
-    }
-  };
 
-  // ---------------- Render: read-only (FR-24) ----------------
-  if (readOnly) {
-    return (
-      <div className={styles.container} data-testid="regarding-resolver-readonly">
-        {selectedTarget || boundRecordType ? (
-          <div className={styles.readOnlyDisplay}>
-            <Text className={styles.selectedLabel}>Regarding:</Text>
-            {selectedTarget ? (
-              <Link
-                onClick={(e: React.MouseEvent) => {
-                  e.preventDefault();
-                  navigateToRecord(selectedTarget.entityType, selectedTarget.recordId);
-                }}
-                style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}
-              >
-                {selectedTarget.recordName}
-                <Open16Regular />
-              </Link>
-            ) : (
-              <Text>{boundRecordType?.name ?? '(unknown)'}</Text>
-            )}
-          </div>
-        ) : (
-          <Text className={styles.selectedLabel}>No regarding selected.</Text>
-        )}
-        <div className={styles.footer}>
-          <Text className={styles.versionText}>v{version}</Text>
-        </div>
-      </div>
-    );
-  }
+      const xrm = getXrm();
+      const navigateTo = xrm?.Navigation?.navigateTo;
+      if (typeof navigateTo !== 'function') {
+        // Xrm unavailable — test harness, canvas app, or missing SDK. Warn
+        // (developer-visible), do not throw (host-safe).
+        console.warn(
+          '[RegardingResolver] Xrm.Navigation.navigateTo unavailable; cannot open regarding record modal.'
+        );
+        return;
+      }
 
-  // ---------------- Render: edit mode ----------------
-  const selectedCatalogEntry = catalog.find(c => c.entityType === selectedEntityType);
-  const selectedEntityTypeLabel = selectedCatalogEntry?.entityType ?? '';
+      // Promise handling: navigateTo returns a Promise per MS docs. Rejection
+      // (record deleted, no privilege, user cancelled) must NOT surface as an
+      // unhandled rejection or crash the host form.
+      try {
+        const result = navigateTo(
+          { pageType: 'entityrecord', entityName, entityId },
+          {
+            target: 2,
+            width: { value: 80, unit: '%' },
+            height: { value: 80, unit: '%' },
+          }
+        );
+        if (result && typeof (result as Promise<unknown>).catch === 'function') {
+          (result as Promise<unknown>).catch((err: unknown) => {
+            console.warn('[RegardingResolver] Xrm.Navigation.navigateTo rejected:', err);
+          });
+        }
+      } catch (err) {
+        // Defensive: synchronous throw from a stubbed / non-conformant Xrm.
+        console.warn('[RegardingResolver] Xrm.Navigation.navigateTo threw:', err);
+      }
+    },
+    [selectedTarget]
+  );
+
+  const hasRecordNumber = typeof boundRecordNumber === 'string' && boundRecordNumber.trim().length > 0;
+  const hasRecordName = typeof boundRecordName === 'string' && boundRecordName.trim().length > 0;
+
+  // ---------------- Render ----------------
 
   return (
-    <div className={styles.container} data-testid="regarding-resolver-edit">
+    <div className={styles.container} data-testid="regarding-resolver-root">
       {error && (
-        <MessageBar intent="error">
+        <MessageBar intent="error" data-testid="regarding-resolver-error">
           <MessageBarBody>{error}</MessageBarBody>
         </MessageBar>
       )}
-      {statusMsg && !error && (
-        <MessageBar intent="success">
-          <MessageBarBody>{statusMsg}</MessageBarBody>
-        </MessageBar>
-      )}
 
-      <div className={styles.searchSection}>
-        <div className={styles.dropdownWrapper}>
-          <Label id="regarding-resolver-entity-type-label" size="small" weight="semibold">
-            Record Type
-          </Label>
-          <Dropdown
-            className={styles.dropdown}
-            aria-labelledby="regarding-resolver-entity-type-label"
-            data-testid="regarding-resolver-entity-type-dropdown"
-            value={catalog.find(c => c.entityType === selectedEntityType) ? selectedEntityType : ''}
-            selectedOptions={selectedEntityType ? [selectedEntityType] : []}
-            onOptionSelect={handleEntityTypeChange}
-            disabled={isLookupPending || isWriting}
-          >
-            {catalog.map(c => (
-              <Option key={c.entityType} value={c.entityType}>
-                {c.entityType}
-              </Option>
-            ))}
-          </Dropdown>
-        </div>
-
-        <Button
-          data-testid="regarding-resolver-select-record-button"
-          appearance="primary"
-          icon={isLookupPending ? <Spinner size="tiny" /> : <SearchRegular />}
-          onClick={handleSelectRecord}
-          disabled={!selectedEntityType || isLookupPending || isWriting}
-        >
-          {isLookupPending ? 'Opening…' : 'Select Record'}
-        </Button>
+      {/* Row 1 — title + right-aligned toolbar icon (from PolymorphicPicker) */}
+      <div className={styles.row1} data-testid="regarding-resolver-row-1">
+        <PolymorphicPicker
+          catalog={pickerCatalog}
+          webApi={context.webAPI as unknown as IPolymorphicPickerWebApi}
+          title={title}
+          onSelect={handlePickerSelect}
+          readOnly={readOnly}
+          disabled={isWriting}
+          onError={setError}
+        />
       </div>
 
-      {selectedTarget && (
-        <div className={styles.selectedRecord}>
-          <Text className={styles.selectedLabel}>{selectedTarget.entityType}:</Text>
+      {/* Row 2 — record-number hyperlink + record-name text */}
+      <div className={styles.row2} data-testid="regarding-resolver-row-2">
+        {hasRecordNumber ? (
           <Link
-            onClick={(e: React.MouseEvent) => {
-              e.preventDefault();
-              navigateToRecord(selectedTarget.entityType, selectedTarget.recordId);
-            }}
-            style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}
+            className={styles.recordNumber}
+            role="link"
+            data-testid="regarding-resolver-record-number"
+            onClick={handleRecordNumberClick}
           >
-            {selectedTarget.recordName}
-            <Open16Regular />
+            {boundRecordNumber}
           </Link>
-          <Button
-            appearance="subtle"
-            icon={<DismissRegular />}
-            size="small"
-            onClick={handleClear}
-            disabled={isLookupPending || isWriting}
-            aria-label="Clear selection"
-          >
-            Clear
-          </Button>
-        </div>
-      )}
-
-      {!selectedTarget && boundRecordType && (
-        <div className={styles.selectedRecord}>
-          <Text className={styles.selectedLabel}>Currently:</Text>
-          <Text>{boundRecordType.name}</Text>
-          <Button
-            appearance="subtle"
-            icon={<DismissRegular />}
-            size="small"
-            onClick={handleClear}
-            disabled={isLookupPending || isWriting}
-            aria-label="Clear current regarding"
-          >
-            Clear
-          </Button>
-        </div>
-      )}
+        ) : (
+          <Text className={styles.emptyRow2} data-testid="regarding-resolver-record-number-empty">
+            —
+          </Text>
+        )}
+        {hasRecordName ? (
+          <Text className={styles.recordName} data-testid="regarding-resolver-record-name">
+            {boundRecordName}
+          </Text>
+        ) : (
+          <Text className={styles.emptyRow2} data-testid="regarding-resolver-record-name-empty">
+            {selectedTarget?.recordName ?? ''}
+          </Text>
+        )}
+      </div>
 
       <div className={styles.footer}>
         <Text className={styles.versionText} data-testid="regarding-resolver-version">
-          v{version}
-          {selectedEntityTypeLabel ? ` • ${selectedEntityTypeLabel}` : ''}
+          v{version} • Built {BUILD_DATE}
         </Text>
       </div>
     </div>

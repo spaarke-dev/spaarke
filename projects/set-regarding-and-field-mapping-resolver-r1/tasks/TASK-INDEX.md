@@ -39,16 +39,16 @@
 
 | # | Task | Status | Rigor | Effort | Parallel-safe |
 |---|---|---|---|---|---|
-| 030 | [RegardingResolver 2-row layout + toolbar-icon + PolymorphicPicker consumption](./030-regarding-resolver-2-row-layout.poml) | 🔲 | FULL | 6h | group B |
-| 031 | [RegardingResolver modal-open on record-number click](./031-regarding-resolver-modal-open.poml) | 🔲 | FULL | 2h | group B |
-| 032 | [RegardingResolver populates `pending.recordNumber` for presave bridge](./032-regarding-resolver-presave-record-number.poml) | 🔲 | FULL | 2h | group B |
-| 033 | [Preserve read-only mode + URL field; version bump v1.2.0 → v1.3.0](./033-regarding-resolver-preserve-and-version.poml) | 🔲 | FULL | 2h | after 030–032 |
+| 030 | [RegardingResolver 2-row layout + toolbar-icon + PolymorphicPicker consumption](./030-regarding-resolver-2-row-layout.poml) | ✅ | FULL | 6h | group B |
+| 031 | [RegardingResolver modal-open on record-number click](./031-regarding-resolver-modal-open.poml) | ✅ | FULL | 2h est / **~40min actual** | group B |
+| 032 | [RegardingResolver populates `pending.recordNumber` for presave bridge](./032-regarding-resolver-presave-record-number.poml) | ✅ | FULL | 2h est / **~1h actual** | group B |
+| 033 | [Preserve read-only mode + URL field; version bump v1.2.0 → v1.3.0](./033-regarding-resolver-preserve-and-version.poml) | ✅ | FULL | 2h est / **~1h actual** | after 030–032 |
 
 ### Wave 4 — Presave webresource (independent, parallel with Wave 3)
 
 | # | Task | Status | Rigor | Effort | Parallel-safe |
 |---|---|---|---|---|---|
-| 040 | [Update `sprk_todo_regarding_presave.js` to v1.2.0 (add recordNumber)](./040-presave-webresource-recordnumber.poml) | 🔲 | FULL | 2h | parallel with Wave 3 |
+| 040 | [Update `sprk_todo_regarding_presave.js` to v1.2.0 (add recordNumber)](./040-presave-webresource-recordnumber.poml) | ✅ | FULL | 2h est / **~10min actual** | parallel with Wave 3 |
 
 ### Wave 5 — AssociationResolver PCF Workstream B
 

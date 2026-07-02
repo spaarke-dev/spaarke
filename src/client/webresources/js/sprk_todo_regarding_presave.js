@@ -41,7 +41,10 @@
  *     navProp: "sprk_RegardingMatter",   // navigation property name (PascalCase)
  *     recordId: "00000000-0000-0000-0000-000000000000",
  *     recordName: "Smith v. Jones",
- *     recordUrl: "https://contoso.crm.dynamics.com/main.aspx?..."   // optional
+ *     recordUrl: "https://contoso.crm.dynamics.com/main.aspx?...",  // optional
+ *     recordNumber: "MAT-2026-00042"     // optional; target's business-key number
+ *                                        //   from sprk_regardingrecordnumberfield
+ *                                        //   (populated by SRFR-020/032)
  *   };
  *   ```
  *
@@ -75,6 +78,7 @@
  *
  * # Version
  *
+ * v1.2.0 — SRFR-040: sprk_regardingrecordnumber support (2026-07-02)
  * v1.1.0 — R4-052: read-only / disabled form-type defensive skip (2026-06-11)
  * v1.0.0 — initial implementation (smart-todo-r4 task R4-051, 2026-06-10)
  *
@@ -94,13 +98,13 @@ Spaarke.SmartTodo.RegardingPreSave = Spaarke.SmartTodo.RegardingPreSave || {};
     // -----------------------------------------------------------------------
 
     /** Version for diagnostic logging. */
-    ns.VERSION = "1.1.0";
+    ns.VERSION = "1.2.0";
 
     /**
      * Resolver text/url fields written verbatim from the pending payload.
      * The lookup @odata.bind keys are dynamic per selected entity type.
      */
-    var TEXT_FIELDS = ["sprk_regardingrecordid", "sprk_regardingrecordname", "sprk_regardingrecordurl"];
+    var TEXT_FIELDS = ["sprk_regardingrecordid", "sprk_regardingrecordname", "sprk_regardingrecordurl", "sprk_regardingrecordnumber"];
 
     /** Global seam name shared with the RegardingResolver PCF. */
     var PENDING_GLOBAL = "__sprk_regarding_pending__";
@@ -259,6 +263,7 @@ Spaarke.SmartTodo.RegardingPreSave = Spaarke.SmartTodo.RegardingPreSave || {};
         switch (fieldName) {
             case "sprk_regardingrecordid": return "recordId";
             case "sprk_regardingrecordname": return "recordName";
+            case "sprk_regardingrecordnumber": return "recordNumber";
             case "sprk_regardingrecordurl": return "recordUrl";
             default: return fieldName;
         }

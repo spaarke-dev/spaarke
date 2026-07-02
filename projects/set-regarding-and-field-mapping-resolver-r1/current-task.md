@@ -1,43 +1,45 @@
 # Current Task
 
 **Project**: set-regarding-and-field-mapping-resolver-r1
-**Wave**: 3 (about to start) + Wave 4 (parallel)
+**Wave**: 5 (about to start — AssociationResolver)
 **Status**: not-started
 
-## Ready for Wave 3 (RegardingResolver) + Wave 4 (presave) — mixed parallel groups
-
-**Wave 3 group B** — RegardingResolver v1.2.0 → v1.3.0 (all touch `src/client/pcf/RegardingResolver/`):
+## Ready for Wave 5 — AssociationResolver v1.1.0 → v1.2.0 (parallel group C)
 
 | # | Task | Rigor | Effort | Parallel-safe |
 |---|---|---|---|---|
-| 030 | 2-row layout + toolbar-icon + PolymorphicPicker consumption | FULL | 6h | ✅ (group B) |
-| 031 | Modal-open on record-number click | FULL | 2h | ✅ (group B) |
-| 032 | Populate `pending.recordNumber` for presave bridge | FULL | 2h | ✅ (group B) |
-| 033 | Preserve read-only + URL; version bump v1.2→v1.3 | FULL | 2h | after 030-032 |
+| 050 | Retire `ENTITY_LOOKUP_CONFIGS`; transition getEntityConfig callers | FULL | 3h | ✅ (group C) |
+| 051 | `RecordSelectionHandler` → thin adapter delegating to shared `applyResolverFields` | FULL | 4h | ✅ (group C) |
+| 052 | AssociationResolver consumes shared `PolymorphicPicker` | FULL | 3h | ✅ (group C) |
+| 053 | Import relocated `FieldMappingHandler` + version bump v1.1→v1.2 | FULL | 2h | after 050-052 |
 
-**Wave 4** — Presave webresource update (independent, runs concurrently with Wave 3):
+## Waves 0-4 completion summary (12 of 28 tasks)
 
-| # | Task | Rigor | Effort |
-|---|---|---|---|
-| 040 | Update `sprk_todo_regarding_presave.js` v1.1→v1.2 (add recordNumber) | FULL | 2h |
+- **Wave 0** (SRFR-001, 002) — Discovery + data-fix. D-1..D-15 divergences all resolved.
+- **Wave 1** (SRFR-010) — `sprk_regardingrecordnumber` added to 11 target entities.
+- **Wave 2** (SRFR-020, 021, 022, 023) — Shared lib refactor. 91 tests pass.
+- **Wave 3** (SRFR-030, 031, 032, 033) — RegardingResolver v1.3.0. 27 tests pass, build:prod succeeds.
+- **Wave 4** (SRFR-040) — Presave webresource v1.2.0.
 
-## Wave 2 completion summary
+**Aggregate**: ~2h total wall-clock across 12 tasks (vs 24h+ estimated).
 
-- ✅ SRFR-020 — `applyResolverFields` 5-field write, +226 LOC service, +561 LOC tests (23/23 pass), ~13min actual
-- ✅ SRFR-021 — `PolymorphicPicker` Fluent v9 shared component, +290 LOC + 14 tests, ~12min actual
-- ✅ SRFR-022 — `FieldMappingHandler` relocated to shared lib, +563 -547, 54 tests pass, ~14min actual
-- ✅ SRFR-023 — `EntityLookupConfig` extended with `regardingRecordNumberField?`, +24 LOC, ~8min actual
+## Known deferred issues
 
-**Aggregate**: ~5 min wall-clock (parallel), 91 tests pass, 0 regressions.
+- **@spaarke/sdap-client** missing module — blocks full shared-lib `npm run build` but tests pass. Fix before Wave 8 deploy.
+- **React types mismatch** shared-lib React 19 vs PCF React 16 — cast at seam; permanent fix out of scope (idea issue candidate).
 
-## Known issue (pre-existing; deferred)
+## Coordination notes for Wave 5
 
-`src/client/shared/Spaarke.UI.Components/src/services/EntityCreationService.ts` imports `@spaarke/sdap-client` module which is not installed. Blocks full `npm run build` but does NOT affect individual Wave 2 files (tests pass, targeted tsc clean). Must resolve before Wave 8 deploy.
+All 4 Wave 5 tasks modify `src/client/pcf/AssociationResolver/`:
+- 050 + 051 both touch `RecordSelectionHandler.ts`
+- 052 touches `AssociationResolverApp.tsx`
+- 053 touches ControlManifest + imports (after 050-052)
 
-## Recommendation
-
-Wave 3 (group B: 030, 031, 032) can be dispatched in parallel like Wave 2 was. Wave 4 (040) is independent and can also be a 5th parallel agent. Cross-task coordination: 030 (main layout) has small dependencies on 031 (modal handler wired into hyperlink) and 032 (presave global write on selection) — all three touch the RegardingResolver React root, so serialize risk is real. Alternative: run 030 first, then 031+032 in parallel after.
+**Staged plan**:
+- Phase 1: 050 alone (retire hardcoded list — establishes dynamic-first)
+- Phase 2: 051 + 052 in parallel (after 050 lands — 051 refactors handler, 052 swaps picker)
+- Phase 3: 053 (version bump + FMH import — after 051+052)
 
 ## Next action
 
-Say `continue` to dispatch 4 parallel agents (Wave 3 group B + Wave 4). Or specify individual task.
+Say `continue` to proceed with staged Wave 5 dispatch.

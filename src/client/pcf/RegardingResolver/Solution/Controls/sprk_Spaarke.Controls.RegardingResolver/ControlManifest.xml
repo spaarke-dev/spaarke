@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="UTF-8" standalone="yes"?>
 <manifest>
-  <control namespace="Spaarke.Controls" constructor="RegardingResolver" version="1.2.0" display-name-key="Regarding Resolver" description-key="Virtual PCF: 11-entity regarding picker bound to sprk_regardingrecordtype; wraps applyResolverFields (ADR-024) — HOST-only (sprk_todo, sprk_communication per FR-22); do NOT bind to target entities like sprk_matter/sprk_event" control-type="virtual" api-version="1.3.18">
+  <control namespace="Spaarke.Controls" constructor="RegardingResolver" version="1.3.0" display-name-key="Regarding Resolver" description-key="Virtual PCF: 11-entity regarding picker bound to sprk_regardingrecordtype; wraps applyResolverFields (ADR-024) — HOST-only (sprk_todo, sprk_communication per FR-22); do NOT bind to target entities like sprk_matter/sprk_event" control-type="virtual" api-version="1.3.18">
     <external-service-usage enabled="false"/>
     <property name="regardingRecordType" display-name-key="Regarding Record Type" description-key="Lookup to sprk_recordtype_ref — the resolver discriminator. Bind to the host entity sprk_regardingrecordtype hidden lookup field." of-type="Lookup.Simple" usage="bound" required="true"/>
     <property name="entity" display-name-key="Host Entity" description-key="Dataverse logical name of the host entity (sprk_todo or sprk_communication). FR-22 reusability lever — set once per form, no entity-specific code branches in the PCF." of-type="SingleLine.Text" usage="input" required="true"/>

@@ -67,6 +67,17 @@ export interface IResolverWriteResult {
   catalogEntry?: ITodoRegardingTargetCatalogEntry;
   /** The full payload that was written (or staged for the form save). */
   payload?: Record<string, unknown>;
+  /**
+   * Resolved `sprk_regardingrecordnumber` value from the target record, as
+   * returned by the shared `applyResolverFields` service (SRFR-020). `null` when
+   * metadata was missing OR the target's value was null/empty (NFR-06
+   * graceful-blank — e.g., Contact / Account intentional-null per Q-06). The
+   * CREATE-mode presave bridge (`__sprk_regarding_pending__.recordNumber`)
+   * propagates this to the OnSave handler so it can stage
+   * `sprk_regardingrecordnumber` onto the form for the INSERT transaction
+   * (SRFR-032 / SRFR-040 FR-A5-04).
+   */
+  recordNumber?: string | null;
   /** Error message if any step failed. */
   error?: string;
 }
@@ -213,9 +224,14 @@ export async function applyRegardingSelection(
     payload[`${key}@odata.bind`] = null;
   }
 
-  // 2. Delegate to the shared service for the SET path (chosen lookup + 4 resolver fields).
+  // 2. Delegate to the shared service for the SET path (chosen lookup + 5 resolver fields).
   //    THIS IS THE SOLE WRITE LOGIC — never reimplemented per FR-21 / ADR-024.
-  await applyResolverFields(
+  //    Since SRFR-020, the shared service returns an IApplyResolverFieldsResult
+  //    payload including `recordNumber` (the resolved value from
+  //    sprk_recordtype_ref.sprk_regardingrecordnumberfield → target record).
+  //    Forward that value on the write result so the caller (RegardingResolverApp)
+  //    can propagate it into the CREATE-mode presave bridge (SRFR-032 FR-A5-04).
+  const applyResult = await applyResolverFields(
     ctx.webApi,
     payload,
     navProps,
@@ -236,12 +252,18 @@ export async function applyRegardingSelection(
         success: false,
         catalogEntry,
         payload,
+        recordNumber: applyResult.recordNumber,
         error: err instanceof Error ? err.message : 'updateRecord failed',
       };
     }
   }
 
-  return { success: true, catalogEntry, payload };
+  return {
+    success: true,
+    catalogEntry,
+    payload,
+    recordNumber: applyResult.recordNumber,
+  };
 }
 
 // ---------------------------------------------------------------------------

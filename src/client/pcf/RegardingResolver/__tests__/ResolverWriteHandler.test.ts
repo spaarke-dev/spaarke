@@ -100,16 +100,24 @@ jest.mock('@spaarke/ui-components', () => {
         parentEntitySet: string,
         parentRecordId: string,
         parentRecordName: string,
-        _entityLookupHint?: string
+        _entityLookupHint?: string,
+        _options?: unknown
       ) => {
         // Mirror the real service's behavior at the payload level: set the
-        // chosen entity-specific @odata.bind + 4 resolver fields.
+        // chosen entity-specific @odata.bind + resolver text/url fields.
         const cleanId = parentRecordId.replace(/[{}]/g, '').toLowerCase();
         entity[`mock_${parentEntityLogicalName}@odata.bind`] = `/${parentEntitySet}(${cleanId})`;
         entity['sprk_regardingrecordid'] = cleanId;
         entity['sprk_regardingrecordname'] = parentRecordName;
         entity['sprk_regardingrecordurl'] = `https://example.com/${parentEntityLogicalName}/${cleanId}`;
+        entity['sprk_regardingrecordnumber'] = `MOCK-${parentEntityLogicalName.toUpperCase()}-001`;
         entity['mock_recordtype@odata.bind'] = `/sprk_recordtype_refs(rt-${parentEntityLogicalName})`;
+        // SRFR-020 return shape: forwarded by ResolverWriteHandler on
+        // IResolverWriteResult.recordNumber (SRFR-032 propagation).
+        return {
+          recordNumber: `MOCK-${parentEntityLogicalName.toUpperCase()}-001`,
+          recordNumberSourceField: `${parentEntityLogicalName}_number`,
+        };
       }
     ),
   };
@@ -394,5 +402,87 @@ describe('ResolverWriteHandler', () => {
 
     const result = await discoverHostNavProps('sprk_communication', fetchSpy as unknown as typeof fetch);
     expect(result).toEqual([]);
+  });
+
+  // -------------------------------------------------------------------------
+  // SRFR-032 / FR-A5-04 — recordNumber forwarded on IResolverWriteResult
+  // -------------------------------------------------------------------------
+
+  test('SRFR-032 — successful UPDATE result forwards recordNumber from applyResolverFields', async () => {
+    const result = await applyRegardingSelection(
+      {
+        webApi: { retrieveMultipleRecords: mockRetrieveMultipleRecords, updateRecord: mockUpdateRecord },
+        hostEntity: 'sprk_todo',
+        hostRecordId: '22222222-2222-2222-2222-222222222222',
+      },
+      { entityType: 'sprk_matter', recordId: '33333333-3333-3333-3333-333333333333', recordName: 'X' },
+      undefined,
+      mockFetch as unknown as typeof fetch
+    );
+
+    expect(result.success).toBe(true);
+    // The mock returns `MOCK-<ENTITY>-001`; forwarded verbatim.
+    expect(result.recordNumber).toBe('MOCK-SPRK_MATTER-001');
+  });
+
+  test('SRFR-032 — CREATE-mode result also forwards recordNumber (no updateRecord call)', async () => {
+    const result = await applyRegardingSelection(
+      {
+        webApi: { retrieveMultipleRecords: mockRetrieveMultipleRecords, updateRecord: mockUpdateRecord },
+        hostEntity: 'sprk_todo',
+        hostRecordId: undefined,
+      },
+      { entityType: 'sprk_project', recordId: '55555555-5555-5555-5555-555555555555', recordName: 'X' },
+      undefined,
+      mockFetch as unknown as typeof fetch
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.recordNumber).toBe('MOCK-SPRK_PROJECT-001');
+    expect(mockUpdateRecord).not.toHaveBeenCalled();
+  });
+
+  test('SRFR-032 — graceful-blank: shared service null propagates as null on result', async () => {
+    // Override the mock once to simulate the NFR-06 graceful-blank case
+    // (Contact/Account intentional-null per Q-06, or metadata missing).
+    applyResolverFieldsMock.mockImplementationOnce(async () => ({
+      recordNumber: null,
+      recordNumberSourceField: null,
+    }));
+
+    const result = await applyRegardingSelection(
+      {
+        webApi: { retrieveMultipleRecords: mockRetrieveMultipleRecords, updateRecord: mockUpdateRecord },
+        hostEntity: 'sprk_todo',
+        hostRecordId: undefined,
+      },
+      { entityType: 'contact', recordId: '66666666-6666-6666-6666-666666666666', recordName: 'Jane Doe' },
+      undefined,
+      mockFetch as unknown as typeof fetch
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.recordNumber).toBeNull();
+  });
+
+  test('SRFR-032 — updateRecord failure still surfaces recordNumber for diagnostics', async () => {
+    mockUpdateRecord.mockRejectedValueOnce(new Error('403 forbidden'));
+
+    const result = await applyRegardingSelection(
+      {
+        webApi: { retrieveMultipleRecords: mockRetrieveMultipleRecords, updateRecord: mockUpdateRecord },
+        hostEntity: 'sprk_todo',
+        hostRecordId: '22222222-2222-2222-2222-222222222222',
+      },
+      { entityType: 'sprk_matter', recordId: '33333333-3333-3333-3333-333333333333', recordName: 'X' },
+      undefined,
+      mockFetch as unknown as typeof fetch
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/403 forbidden/);
+    // Even on failure, the resolved recordNumber is available on the result
+    // (the shared service ran to completion; only updateRecord failed).
+    expect(result.recordNumber).toBe('MOCK-SPRK_MATTER-001');
   });
 });

@@ -2,12 +2,12 @@
 <task id="SRFR-030" project="set-regarding-and-field-mapping-resolver-r1">
   <metadata>
     <title>RegardingResolver 2-row streamlined layout + toolbar-icon entity picker + PolymorphicPicker consumption + manifest properties</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>6h</estimated-effort>
-    <actual-effort></actual-effort>
+    <actual-effort>~1.5h</actual-effort>
     <assigned>AI Agent</assigned>
-    <started></started>
-    <completed></completed>
+    <started>2026-07-02</started>
+    <completed>2026-07-02</completed>
     <rigor>FULL</rigor>
     <parallel-safe>true</parallel-safe>
     <parallel-group>B</parallel-group>
