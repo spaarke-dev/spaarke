@@ -133,18 +133,6 @@ public static class PlaybookTemplateContextBuilder
         //    Object outputs (StructuredData JsonElement) are converted to traversable
         //    Dictionary/List/primitives so Handlebars can walk {{nodeName.field.subfield}}.
         //    Text-only outputs surface as plain strings.
-        //
-        //    Dual-shape exposure — the same OutputVariable is registered TWICE:
-        //      (a) Raw shape: {{nodeName.field}} — top-level dict keys (Wave 11 narrator
-        //          playbooks, e.g. Daily Briefing, are authored against this shape).
-        //      (b) Wrapped shape: {{nodeName.output.field}} + {{nodeName.text}} +
-        //          {{nodeName.success}} — matches the pre-Wave-11 per-executor
-        //          BuildTemplateContext convention still used by playbooks authored via
-        //          the canvas Update Record / Deliver To Index / etc. blocks (e.g. Document
-        //          Profile playbook binds `{{output_aiAnalysis.output.sprk_filesummary}}`).
-        //    Layer 1 runs first and would render the wrapped-shape references to empty
-        //    if only the raw shape were exposed. Adding both keeps both playbook
-        //    conventions working with no author-side changes.
         foreach (var (varName, output) in nodeOutputs)
         {
             if (string.IsNullOrEmpty(varName))
@@ -152,54 +140,19 @@ public static class PlaybookTemplateContextBuilder
                 continue;
             }
 
-            object? rawValue;
             if (output.StructuredData is JsonElement element && element.ValueKind != JsonValueKind.Null && element.ValueKind != JsonValueKind.Undefined)
             {
-                rawValue = TemplateEngine.ConvertJsonElement(element);
+                context[varName] = TemplateEngine.ConvertJsonElement(element);
             }
             else if (!string.IsNullOrEmpty(output.TextContent))
             {
-                rawValue = output.TextContent;
+                context[varName] = output.TextContent;
             }
             else
             {
                 // Output produced no usable content — register as null so missing-reference
                 // {{nodeName.field}} renders as empty (graceful per Handlebars config).
-                rawValue = null;
-            }
-
-            // (a) Raw shape — legacy Wave 11 narrator convention
-            context[varName] = rawValue;
-
-            // (b) Wrapped shape — pre-Wave-11 per-executor BuildTemplateContext convention
-            //     ({{nodeName.output.X}} / .text / .success). The key differs from (a) —
-            //     add "_wrapped" suffix, then… actually, Handlebars can't have two keys
-            //     with the same name pointing to different objects. Instead, if raw is
-            //     an object/dict, we embed the wrapper INTO it so both paths resolve:
-            //       - {{nodeName.field}} → dict.field (via rawValue path)
-            //       - {{nodeName.output.field}} → dict["output"].field (via merged wrapper)
-            //     For non-dict raw (text/null), we replace with the wrapper record only.
-            if (rawValue is Dictionary<string, object?> rawDict)
-            {
-                if (!rawDict.ContainsKey("output"))
-                    rawDict["output"] = rawValue;
-                if (!rawDict.ContainsKey("text"))
-                    rawDict["text"] = output.TextContent;
-                if (!rawDict.ContainsKey("success"))
-                    rawDict["success"] = output.Success;
-                // context[varName] already points to rawDict — no reassignment needed
-            }
-            else
-            {
-                // Text-only or null output: expose only the wrapped shape (raw text
-                // access {{nodeName}} still works because Handlebars will stringify
-                // the wrapper object; the more useful access is {{nodeName.text}}).
-                context[varName] = new Dictionary<string, object?>(StringComparer.Ordinal)
-                {
-                    ["output"] = rawValue,
-                    ["text"] = output.TextContent,
-                    ["success"] = output.Success,
-                };
+                context[varName] = null;
             }
         }
 

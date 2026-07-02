@@ -2346,6 +2346,23 @@ public class PlaybookOrchestrationService : IPlaybookOrchestrationService
                     return;
                 }
 
+                // R7 W12 2026-07-02: nested-JSON string preservation. When a string value
+                // contains embedded JSON (starts with `{` or `[`) AND has template markers,
+                // the target executor's ParseConfig re-parses the string as JSON and does
+                // its own per-value template render — with the correct executor-local
+                // context shape (e.g. UpdateRecordNodeExecutor wraps outputs in `.output/.text/.success`).
+                // Rendering this string at Layer 1 with Handlebars corrupts the enclosed JSON
+                // whenever a substituted value contains characters that need JSON-escaping
+                // (a `"`, backslash, or unescaped newline). Skip Layer 1 rendering here — the
+                // executor handles it. Top-level configJson templates (pure-template pattern
+                // and non-JSON mixed strings) are unaffected and continue to render as before.
+                var trimmedRaw = raw.AsSpan().TrimStart();
+                if (trimmedRaw.Length > 0 && (trimmedRaw[0] == '{' || trimmedRaw[0] == '['))
+                {
+                    writer.WriteStringValue(raw);
+                    return;
+                }
+
                 if (IsPureTemplate(raw))
                 {
                     // R7 Wave 11 Option D auto-wrap: source authors write natural Handlebars
