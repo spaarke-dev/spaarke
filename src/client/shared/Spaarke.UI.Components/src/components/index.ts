@@ -68,6 +68,11 @@ export * from './AiFieldTag';
 // AiProgressStepper - Multi-step progress indicator for AI analysis operations
 export * from './AiProgressStepper';
 
+// LinearRunProgress - Presenter for Linear AI Consumer SSE progress events
+// (paired with the `useLinearRunProgress` hook). Wave 12 R7 — shared substrate
+// for Document Upload + Summarize + Context-pane consumers.
+export * from './LinearRunProgress';
+
 // InlineAiToolbar - Floating AI action toolbar that appears on text selection
 export * from './InlineAiToolbar';
 

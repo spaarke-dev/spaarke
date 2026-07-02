@@ -25,6 +25,20 @@ export type AuthenticatedFetchFn = (input: RequestInfo | URL, init?: RequestInit
 export interface StreamSummarizeCallbacks {
   /** Called when a progress step event is received (step = "document_loaded" | "extracting_text" | ...) */
   onProgress?: (stepId: string) => void;
+  /**
+   * Wave 12 R7 — called for EVERY progress chunk, with the raw server-emitted
+   * `step` key and human-readable `message`. Preserves the server's ordering
+   * without any client-side interpretation. Callers that want the shared
+   * scrolling-text presenter (`LinearRunProgressList`) build `LinearRunEvent[]`
+   * from these values; callers that still want the legacy numbered stepper
+   * use `onProgress` above.
+   *
+   * NOTE: New consumers should prefer the `useLinearRunProgress` hook directly
+   * (see `../../hooks/useLinearRunProgress.ts`). This callback exists so the
+   * existing Summarize wizard can adopt the shared presenter without a full
+   * hook-migration in the same PR.
+   */
+  onProgressEvent?: (step: string, message: string) => void;
 }
 
 /**
@@ -100,6 +114,7 @@ export async function streamSummarize(
 
           if (chunk.type === 'progress' && chunk.step) {
             callbacks.onProgress?.(chunk.step);
+            callbacks.onProgressEvent?.(chunk.step, chunk.content ?? '');
           } else if (chunk.type === 'result' && chunk.content) {
             try {
               rawResult = JSON.parse(chunk.content);

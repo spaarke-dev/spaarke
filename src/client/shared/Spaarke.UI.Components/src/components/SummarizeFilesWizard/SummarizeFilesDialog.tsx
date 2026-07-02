@@ -44,7 +44,7 @@ import { SummarizeAnalysisStep } from './SummarizeAnalysisStep';
 import { streamSummarize } from './summarizeService';
 import type { AuthenticatedFetchFn } from './summarizeService';
 import type { ISummarizeResult, SummarizeStatus } from './summarizeTypes';
-import { DOCUMENT_ANALYSIS_STEPS } from '../AiProgressStepper';
+import type { LinearRunEvent } from '../../hooks/useLinearRunProgress';
 import type { ICreateProjectFormState } from '../CreateProjectWizard/projectFormTypes';
 import { EMPTY_PROJECT_FORM } from '../CreateProjectWizard/projectFormTypes';
 import { ProjectService } from '../CreateProjectWizard/projectService';
@@ -160,10 +160,14 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
   const [summarizeError, setSummarizeError] = React.useState<string | null>(null);
   const abortControllerRef = React.useRef<AbortController | null>(null);
 
-  // ── SSE progress step state (driven by real backend events) ──────────
-  const ALL_STEP_IDS = React.useMemo(() => DOCUMENT_ANALYSIS_STEPS.map(s => s.id), []);
-  const [activeStepId, setActiveStepId] = React.useState<string | null>(null);
-  const [completedStepIds, setCompletedStepIds] = React.useState<string[]>([]);
+  // ── SSE progress event history (Wave 12 R7) ───────────────────────────
+  // Replaces the prior hardcoded numbered step visual. Every `progress`
+  // chunk from the BFF /api/workspace/files/summarize SSE stream is appended
+  // verbatim and rendered by <LinearRunProgressList> in SummaryResultsStep.
+  // The same event shape is what `useLinearRunProgress` produces, so a
+  // follow-on refactor can drop `streamSummarize`'s bespoke SSE loop in
+  // favor of the shared hook without changing the UI wiring below.
+  const [progressEvents, setProgressEvents] = React.useState<LinearRunEvent[]>([]);
 
   // ── Next Steps state ──────────────────────────────────────────────────
   const [selectedActions, setSelectedActions] = React.useState<SummaryActionId[]>([]);
@@ -185,8 +189,7 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
       setSummarizeStatus('idle');
       setSummarizeResult(null);
       setSummarizeError(null);
-      setActiveStepId(null);
-      setCompletedStepIds([]);
+      setProgressEvents([]);
       setSelectedActions([]);
       setIncludeShortSummary(false);
       setEmailTo('');
@@ -248,20 +251,27 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
 
     setSummarizeStatus('loading');
     setSummarizeError(null);
-    setActiveStepId(ALL_STEP_IDS[0] ?? null);
-    setCompletedStepIds([]);
+    setProgressEvents([]);
 
     try {
       const result = await streamSummarize(
         fileState.uploadedFiles,
         {
-          onProgress: stepId => {
+          // Wave 12 R7 — each server-emitted `progress` chunk is appended to
+          // the LinearRunEvent history verbatim. No client-side step
+          // interpretation; the shared LinearRunProgressList renders these
+          // as scrolling text.
+          onProgressEvent: (step, message) => {
             if (controller.signal.aborted) return;
-            setActiveStepId(stepId);
-            setCompletedStepIds(prev => {
-              const idx = ALL_STEP_IDS.indexOf(stepId);
-              return idx > 0 ? ALL_STEP_IDS.slice(0, idx) : prev;
-            });
+            setProgressEvents(prev => [
+              ...prev,
+              {
+                kind: 'progress',
+                step,
+                content: message,
+                timestamp: new Date(),
+              },
+            ]);
           },
         },
         controller.signal,
@@ -271,8 +281,6 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
       if (!controller.signal.aborted) {
         setSummarizeResult(result);
         setSummarizeStatus('success');
-        setCompletedStepIds(ALL_STEP_IDS);
-        setActiveStepId(null);
       }
     } catch (err: unknown) {
       if (!controller.signal.aborted) {
@@ -281,7 +289,7 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
         setSummarizeStatus('error');
       }
     }
-  }, [fileState.uploadedFiles, ALL_STEP_IDS, authenticatedFetch, bffBaseUrl]);
+  }, [fileState.uploadedFiles, authenticatedFetch, bffBaseUrl]);
 
   // Auto-run analysis when entering Step 2 (on first visit with files)
   const analysisAttemptedRef = React.useRef(false);
@@ -292,8 +300,7 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
     setSummarizeStatus('idle');
     setSummarizeResult(null);
     setSummarizeError(null);
-    setActiveStepId(null);
-    setCompletedStepIds([]);
+    setProgressEvents([]);
   }, [fileState.uploadedFiles.length]);
 
   // ── Skip handler for follow-on steps ────────────────────────────────
@@ -576,8 +583,7 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
               result={summarizeResult}
               errorMessage={summarizeError}
               onRetry={runAnalysis}
-              activeStepId={activeStepId}
-              completedStepIds={completedStepIds}
+              events={progressEvents}
             />
           );
         },
@@ -607,6 +613,7 @@ export const SummarizeFilesDialog: React.FC<ISummarizeFilesDialogProps> = ({
       summarizeError,
       selectedActions,
       includeShortSummary,
+      progressEvents,
       styles,
       handleFilesAccepted,
       handleValidationErrors,

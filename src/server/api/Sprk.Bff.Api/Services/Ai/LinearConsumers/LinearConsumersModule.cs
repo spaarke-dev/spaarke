@@ -32,6 +32,7 @@ public static class LinearConsumersModule
 
         // Consumer services.
         services.AddScoped<DocumentProfileService>();
+        services.AddScoped<FileSummarizeService>();
 
         return services;
     }

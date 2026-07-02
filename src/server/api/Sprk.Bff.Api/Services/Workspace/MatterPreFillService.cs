@@ -8,6 +8,7 @@ using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.LinearConsumers;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 
 namespace Sprk.Bff.Api.Services.Workspace;
@@ -40,6 +41,16 @@ public sealed class MatterPreFillService
     private readonly WorkspaceOptions _workspaceOptions;
     private readonly SharePointEmbeddedOptions _speOptions;
     private readonly ILogger<MatterPreFillService> _logger;
+
+    // R7 Wave 12 Phase D (2026-07-02): Linear AI Consumer dependencies. When
+    // LinearConsumersOptions.ActionIds has an entry for ConsumerTypes.MatterPreFill,
+    // GetPreFillAsync routes through the Linear path (IActionResolver + IActionRunner
+    // + existing ParseAiResponse) instead of the Playbook Engine. Nullable to keep
+    // existing constructors (unit-test) compiling; DI-registered instances always
+    // supply non-null values.
+    private readonly IActionResolver? _linearActionResolver;
+    private readonly IActionRunner? _linearActionRunner;
+    private readonly LinearConsumersOptions? _linearOptions;
 
     // FR-1R-05 routing-table resolution (chat-routing-redesign-r1 task 028c / Pattern A):
     // Phase 1R replaces the prior WorkspaceOptions.MatterPreFillPlaybookId env-var
@@ -89,7 +100,10 @@ public sealed class MatterPreFillService
         IOptions<WorkspaceOptions> workspaceOptions,
         IOptions<SharePointEmbeddedOptions> speOptions,
         ILogger<MatterPreFillService> logger,
-        IWorkspacePrefillAi? prefillAi = null)
+        IWorkspacePrefillAi? prefillAi = null,
+        IActionResolver? linearActionResolver = null,
+        IActionRunner? linearActionRunner = null,
+        IOptions<LinearConsumersOptions>? linearOptions = null)
     {
         _speFileStore = speFileStore ?? throw new ArgumentNullException(nameof(speFileStore));
         _textExtractor = textExtractor ?? throw new ArgumentNullException(nameof(textExtractor));
@@ -98,6 +112,9 @@ public sealed class MatterPreFillService
         _workspaceOptions = (workspaceOptions ?? throw new ArgumentNullException(nameof(workspaceOptions))).Value;
         _speOptions = (speOptions ?? throw new ArgumentNullException(nameof(speOptions))).Value;
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _linearActionResolver = linearActionResolver;
+        _linearActionRunner = linearActionRunner;
+        _linearOptions = linearOptions?.Value;
         _prefillAi = prefillAi; // Nullable: AI feature flags may be disabled. RequireAi() throws at use site.
     }
 
@@ -193,8 +210,103 @@ public sealed class MatterPreFillService
             "Text extraction complete. TotalChars={TotalChars}. RequestId={RequestId}",
             combinedText.Length, requestId);
 
-        // --- Step 2: Invoke playbook for structured extraction ---
+        // --- Step 2: Invoke AI for structured extraction ---
+        // R7 Wave 12 Phase D (2026-07-02): Linear AI Consumer dispatch. When LinearConsumers
+        // is configured for ConsumerTypes.MatterPreFill, route through the code-defined path
+        // (IActionResolver + IActionRunner) rather than the Playbook Engine. Preserves the
+        // existing PreFillResponse contract + all ParseAiResponse fallbacks. Fall-through to
+        // ExtractFieldsViaPlaybookAsync preserves engine dispatch when unconfigured.
+        if (_linearActionResolver != null && _linearActionRunner != null
+            && _linearOptions != null
+            && _linearOptions.TryGetActionId(ConsumerTypes.MatterPreFill, out _))
+        {
+            return await ExtractFieldsViaLinearAsync(combinedText, requestId, httpContext, cancellationToken);
+        }
+
         return await ExtractFieldsViaPlaybookAsync(combinedText, requestId, httpContext, cancellationToken);
+    }
+
+    /// <summary>
+    /// R7 Wave 12 Phase D — Linear AI Consumer path for Matter Prefill.
+    /// Composes <see cref="IActionResolver"/> + <see cref="IActionRunner"/> instead of
+    /// running through the Playbook Engine. Emits the same <see cref="PreFillResponse"/>
+    /// contract by feeding the raw JSON through the existing <see cref="ParseAiResponse"/>
+    /// (which handles the direct-schema / entity-extraction / partial-JSON fallbacks the
+    /// wizard client depends on).
+    /// </summary>
+    private async Task<PreFillResponse> ExtractFieldsViaLinearAsync(
+        string documentText,
+        Guid requestId,
+        HttpContext httpContext,
+        CancellationToken cancellationToken)
+    {
+        // Truncate to ~80KB to mirror ExtractFieldsViaPlaybookAsync's guard.
+        const int maxTextChars = 80_000;
+        if (documentText.Length > maxTextChars)
+        {
+            _logger.LogDebug(
+                "Truncating combined text from {Original} to {Truncated} chars. RequestId={RequestId}",
+                documentText.Length, maxTextChars, requestId);
+            documentText = documentText[..maxTextChars] + "\n\n[... content truncated ...]";
+        }
+
+        try
+        {
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeoutCts.CancelAfter(TimeSpan.FromSeconds(45));
+
+            var action = await _linearActionResolver!.ResolveAsync(ConsumerTypes.MatterPreFill, timeoutCts.Token);
+
+            var tenantId = httpContext.User?.FindFirst("tid")?.Value
+                ?? httpContext.User?.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value;
+
+            var docText = new DocumentText
+            {
+                DocumentId = null,
+                FileName = "matter-prefill-input",
+                ExtractedText = documentText,
+            };
+            var runContext = new LinearRunContext
+            {
+                ConsumerType = ConsumerTypes.MatterPreFill,
+                CorrelationId = httpContext.TraceIdentifier,
+                TenantId = tenantId,
+            };
+
+            _logger.LogInformation(
+                "Invoking Linear Matter Prefill action. ActionId={ActionId}, TextLength={TextLength}, RequestId={RequestId}",
+                action.Id, documentText.Length, requestId);
+
+            var jsonElement = await _linearActionRunner!.RunAsync(action, docText, runContext, timeoutCts.Token);
+            var preFillJson = jsonElement.GetRawText();
+
+            var confidence = 0.0;
+            if (jsonElement.ValueKind == JsonValueKind.Object
+                && jsonElement.TryGetProperty("confidence", out var confElement)
+                && confElement.ValueKind == JsonValueKind.Number)
+            {
+                confidence = confElement.GetDouble();
+            }
+
+            _logger.LogInformation(
+                "Linear Matter Prefill extraction complete. ResponseLength={Length}, Confidence={Confidence}. " +
+                "RequestId={RequestId}",
+                preFillJson.Length, confidence, requestId);
+
+            return ParseAiResponse(preFillJson, confidence, requestId);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogWarning(
+                "Linear Matter Prefill request timed out after 45s. RequestId={RequestId}", requestId);
+            return PreFillResponse.Empty("TIMEOUT: linear prefill timed out after 45s");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "Linear Matter Prefill call failed. RequestId={RequestId}", requestId);
+            return PreFillResponse.Empty($"EXCEPTION: {ex.Message}");
+        }
     }
 
     /// <summary>
