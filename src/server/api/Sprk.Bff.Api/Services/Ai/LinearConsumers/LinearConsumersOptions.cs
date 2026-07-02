@@ -60,6 +60,16 @@ public sealed class LinearConsumersOptions
     public Dictionary<string, string> ModelDeployments { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
+    /// Optional per-consumer max output token override. Falls back to
+    /// <c>DocumentIntelligence:MaxOutputTokens</c> (default 500) when absent.
+    /// Needed for consumers whose output is a large structured payload
+    /// (File Summary produces up to ~2500 tokens; Doc Profile fits in ~800).
+    /// Range enforced by <see cref="Sprk.Bff.Api.Services.Ai.OpenAiClient"/>
+    /// implementation.
+    /// </summary>
+    public Dictionary<string, int> MaxOutputTokens { get; set; } = new(StringComparer.OrdinalIgnoreCase);
+
+    /// <summary>
     /// Reverse-lookup: given a playbookId (as sent by the client), return the
     /// consumer-type key that owns it — always normalized to the hyphen form
     /// (matches <see cref="Sprk.Bff.Api.Services.Ai.PublicContracts.ConsumerTypes"/>
@@ -124,6 +134,28 @@ public sealed class LinearConsumersOptions
             return true;
 
         deployment = null;
+        return false;
+    }
+
+    /// <summary>
+    /// Look up an optional max-output-tokens override with the same hyphen/
+    /// underscore normalization semantics as <see cref="TryGetActionId"/>.
+    /// </summary>
+    public bool TryGetMaxOutputTokens(string consumerType, out int maxTokens)
+    {
+        maxTokens = 0;
+        if (MaxOutputTokens.TryGetValue(consumerType, out maxTokens) && maxTokens > 0)
+            return true;
+
+        var underscoreForm = consumerType.Replace('-', '_');
+        if (MaxOutputTokens.TryGetValue(underscoreForm, out maxTokens) && maxTokens > 0)
+            return true;
+
+        var hyphenForm = consumerType.Replace('_', '-');
+        if (MaxOutputTokens.TryGetValue(hyphenForm, out maxTokens) && maxTokens > 0)
+            return true;
+
+        maxTokens = 0;
         return false;
     }
 }
