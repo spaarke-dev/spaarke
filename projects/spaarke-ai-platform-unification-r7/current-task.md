@@ -1,6 +1,6 @@
 # Current Task State — spaarke-ai-platform-unification-r7
 
-> **Last Updated**: 2026-07-02 (by context-handoff, mid-Wave-12 Doc Upload debugging + Linear AI Consumer decision)
+> **Last Updated**: 2026-07-02 (Phase A done + Phase B code shipped, awaiting deploy + smoke)
 > **Recovery**: Read "Quick Recovery" section first
 
 ---
@@ -9,95 +9,119 @@
 
 | Field | Value |
 |-------|-------|
-| **Session** | R7 Wave 12 Doc Upload UAT surfaced a class of Playbook Engine interpreter bugs. Operator + I concluded: two-path architecture — Linear code for linear consumers, Playbook Engine for dynamic ones. Doc Upload is the first migration. |
-| **Status** | Design approved. Docs written. Ready to execute the migration. |
-| **Branch** | `work/spaarke-ai-platform-unification-r7` — HEAD is `15511117b` (last engine bandaid — to be reverted per plan) |
+| **Session** | Wave 12 Linear AI Consumer migration — Doc Upload path built. |
+| **Status** | **Phase A DONE** (bandaids reverted). **Phase B code DONE** (Linear primitives + DocumentProfileService + endpoint dispatch + DI wiring, build clean). **Awaiting**: unit tests → deploy → operator smoke. |
+| **Branch** | `work/spaarke-ai-platform-unification-r7` — HEAD is `c2d26986d` (feat: Linear AI Consumer library + Document Profile migration). |
+| **Local commits ahead of origin** | **5** (4 reverts + Phase B feature commit). NOT YET PUSHED. |
 | **Worktree** | `c:/code_files/spaarke-wt-spaarke-ai-platform-unification-r7/` |
-| **Next Action** | Read the three companion docs (below). Execute Phase A of the task plan: revert engine bandaid commits. Then Phase B: build shared primitives + Doc Upload consumer service. |
+| **Next Action** | Decide: (a) add unit tests + deploy tonight; OR (b) skip unit tests, deploy now, operator smokes end-to-end. Task plan says B15/B16 (unit tests) → B17 (deploy) → B18 (smoke). |
 
 ---
 
 ## Three companion docs (READ IN THIS ORDER)
 
 1. **Architecture** — [`docs/architecture/SPAARKE-LINEAR-AI-CONSUMER-ARCHITECTURE.md`](../../docs/architecture/SPAARKE-LINEAR-AI-CONSUMER-ARCHITECTURE.md)
-   The pattern: two-path classifier, shared primitives, consumer service shape, data model, coexistence guardrails.
-
 2. **Work spec** — [`notes/wave12-linear-consumer-migration.md`](notes/wave12-linear-consumer-migration.md)
-   The goal + scope, per-consumer reference info (current wire, target service, Action rows kept, Playbook rows retired), tonight's revert + preservation list, verification checklist.
-
-3. **Task plan** — [`notes/wave12-linear-consumer-tasks.md`](notes/wave12-linear-consumer-tasks.md)
-   Phase A (revert bandaids), Phase B (Doc Upload — tonight's target), Phase C (File Summarize), Phase D (Prefills), Phase E (data cleanup), Phase F (coexistence check), Phase G (docs + wrap-up). Mark tasks complete inline.
+3. **Task plan** — [`notes/wave12-linear-consumer-tasks.md`](notes/wave12-linear-consumer-tasks.md) — Phase A + B core marked complete.
 
 ---
 
-## Session summary (2026-07-01 into 2026-07-02)
+## Phase A summary (bandaids reverted)
 
-Started with R7 Wave 12 UAT of the Doc Upload wizard. Cascading 500 errors during Update Record. I chased each surface symptom with a fix; operator stepped back and asked whether the R7 architecture was actually right for this use case.
+Reverts executed in **reverse chronological order** (safer than plan-listed order because A1–A3 replaced each other on the same `GetEntitySetNameAsync` function):
 
-Root-cause conclusion: **the Playbook Engine (data-driven interpreter) is over-applied to linear workflows**. Same lesson as Wave 11 Daily Briefing narrator — for `Start → LLM → deterministic steps → return` flows, a code-defined service is ~10× less code + 0 vs ~6 bug classes. Two paths coexist; each consumer sits on exactly one.
+- `a648dedce` — Revert `15511117b` (nested-JSON skip)
+- `1332a5a02` — Revert `1909b4432` (heuristic pluralization)
+- `06040244e` — Revert `2021028da` ($filter form)
+- `42a83ff7c` — Revert `4facf26ef` (accessor form)
 
-Six consumers are migrating off the engine onto the Linear pattern:
+Build after reverts: 0 errors, 19 pre-existing warnings.
 
-1. Document Upload / Profile Document (tonight)
-2. File Summarize
-3. Matter Prefill
-4. Project Prefill
-5. Work Assignment Prefill
-6. Document Create Profile
+## Phase B core summary (Linear AI Consumer library shipped)
 
-Chat, Insight Engine, Daily Briefing narration stay on their existing paths.
+Single commit `c2d26986d` — 17 files changed, 967 insertions.
 
-The Playbook Engine (`PlaybookOrchestrationService`, node executors, template engine) remains for its rightful consumers. When Playbook Engine consumers hit the same interpreter tax in future UAT (operator flagged: summarize Assistant), we address via playbook-to-code compilation — deferred to R7 W12+ or R8.
+New folder: `src/server/api/Sprk.Bff.Api/Services/Ai/LinearConsumers/`
 
-## Commits from tonight's Doc Upload debugging cycle
+Primitives:
+- `LinearRunContext.cs`, `DocumentText.cs` — records
+- `IActionResolver` + `ActionResolver.cs` — config-driven (`LinearConsumersOptions.ActionIds` maps consumerType → ActionId; delegates to `IScopeResolverService.GetActionAsync`)
+- `IDocumentTextSource` + `DocumentTextSource.cs` — composes `AnalysisDocumentLoader` (SPE + OBO) + `ITextExtractor` (direct-file)
+- `IActionRunner` + `ActionRunner.cs` — wraps `IOpenAiClient.GetStructuredCompletionRawAsync` with a single `{{document.extractedText}}` placeholder binding
 
-Kept (correct regardless of path):
+Consumer service:
+- `DocumentProfileService.cs` — emits `AnalysisStreamChunk` SSE events; reuses existing `DocumentProfileFieldMapper` + `DocumentTypeMapper` (Choice coercion); persists via `IDocumentDataverseService.UpdateDocumentFieldsAsync` (typed SDK path — no metadata calls); enqueues RAG indexing via `IPostUploadIndexingEnqueuer.EnqueueIfApplicableAsync` (OBO path)
 
-- `17f432b13` — `PlaybookLookupService` dual-path GUID + alt-key
-- `d75de048b` — `AnalysisEndpoints.ExecuteAnalysis` pre-loads `DocumentContext`
-- `a4cf7560d` — populate `Metadata.GraphDriveId` + `GraphItemId`
-- `3eb0aacbb` — expose `{{document.*}}` at Layer 1
-- `0a8d200ba` — PATCH payload diagnostic log
+DI + wiring:
+- `LinearConsumersModule.cs` + `LinearConsumersOptions.cs`
+- `Program.cs` — `AddLinearConsumers(builder.Configuration)` after `AddAnalysisServicesModule`
+- `AnalysisEndpoints.ExecuteAnalysis` — dispatches by playbookId: if match in `LinearConsumersOptions.PlaybookIds`, routes to `DocumentProfileService`; otherwise falls through to Playbook Engine (preserves engine for Chat / Insights / Daily Briefing)
+- `ConsumerTypes.DocumentProfile` — new constant `document-profile`
 
-To be reverted in Phase A (engine bandaids the Linear path replaces):
+Config:
+- `appsettings.template.json` — new `LinearConsumers` section with:
+  - `ActionIds["document-profile"]` = `bb356968-ebe9-f011-8406-7ced8d1dc988`
+  - `PlaybookIds["document-profile"]` = `18cf3cc8-02ec-f011-8406-7c1e520aa4df`
 
-- `4facf26ef` — metadata accessor form
-- `2021028da` — metadata $filter form
-- `1909b4432` — heuristic pluralization
-- `15511117b` — Layer 1 nested-JSON skip
+Build: 0 errors. dotnet test not yet run.
 
-Dataverse-side patches tonight (reversible when playbook rows retire in Phase E):
+---
 
-- Dropped `sprk_documenttype` from Update Record fieldMappings on Doc Profile playbook
-- Added Start node + modelDeploymentId to Project prefill playbook
+## What's left for Phase B (B14–B19)
+
+| Task | Status | Notes |
+|---|---|---|
+| B14 build | ✅ 0 errors | |
+| B15 unit tests | ⏸️ NOT DONE | `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/LinearConsumers/DocumentProfileServiceTests.cs` — happy path / Action-not-configured / LLM-fails |
+| B16 `dotnet test` | ⏸️ NOT DONE | |
+| B17 deploy BFF | ⏸️ NOT DONE | `pwsh scripts/Deploy-BffApi.ps1` — needs operator approval (visible to UAT users) |
+| B18 operator smoke | ⏸️ NOT DONE | Document Upload wizard end-to-end |
+| B19 commit + push | Partial — commit done as `c2d26986d`; **push NOT DONE** | 5 commits ahead of origin |
 
 ---
 
 ## Deferred / follow-up items
 
-- **Playbook-to-code compilation** for the remaining engine consumers (Chat, Insight Engine, summarize Assistant when we get to it). Design captured in the architecture doc §"Future: Playbook-to-code compilation."
-- **R5 Doc 06** already logs the `sprk_documenttype` Choice-field coercion pattern for reference; still relevant if the field mapping pattern comes up in Doc Profile or other Linear consumers.
-- **Daily Briefing narrator formal refactor to shared Linear primitives** — deferred to a follow-on cleanup. Do NOT touch during this migration.
+- Playbook-to-code compilation for remaining engine consumers (Chat, Insight Engine, summarize Assistant) — hits when we UAT summarize Assistant.
+- Daily Briefing narrator formal refactor to shared Linear primitives — deferred to a follow-on cleanup pass. Do NOT touch during this migration.
+- R5 Doc 06 Choice-field coercion pattern — DocumentProfileService reuses `DocumentTypeMapper.ToDataverseValue` today; may want dynamic metadata-cache lookup later.
+- Phases C-G of task plan (File Summarize, Prefills, data cleanup, coexistence check, docs wrap-up) — sequential after Doc Upload passes UAT.
 
-## Rollback
+## Rollback for Phase B
 
-If Phase B / Doc Upload conversion causes unexpected regressions:
+If Phase B causes regressions:
+- Revert `c2d26986d` — removes the whole Linear consumer library + endpoint dispatch + Program.cs wiring in one shot
+- Then either revert the four Phase A reverts (to restore bandaids) OR leave them reverted (base is R7 pre-bandaid state)
+- Cost: Doc Upload UAT blocks; operator falls back to whatever worked pre-Wave-12
 
-- Revert the Phase B commits (all under `LinearConsumers/` folder + endpoint modification)
-- Return to `d75de048b` + the historical revert of `1909b4432` back to the last engine-working state
-- Cost: operator UAT for Doc Upload remains blocked; other engine consumers unaffected
+---
 
-The Linear migration itself is architecturally safe — worst case is we discover a specific primitive shape is wrong and iterate.
+## Design decisions taken during Phase B (may need review)
+
+1. **Revert order deviation** — plan listed A1→A4 (oldest first) but I did A4→A1 (newest first) because A1-A3 replaced each other on the same function; reverting oldest-first would have conflicted. Same end state. Documented inline in the task plan checklist.
+2. **`IActionResolver` = config-driven** rather than routing-table-driven — chose `LinearConsumersOptions.ActionIds` (IOptions map) over the plan's suggested `IConsumerRoutingService` → `IScopeResolverService.GetActionAsync` chain because (a) routing table returns playbookId not actionId — still need indirection to get to ActionId, and (b) config-driven is simpler for tonight's velocity. Can promote to routing-driven later without churning consumer service code (still calls `IActionResolver.ResolveAsync`).
+3. **`IDocumentDataverseService.UpdateProfileAsync` was NOT added** — the existing `UpdateDocumentFieldsAsync(string, Dictionary<string, object?>, ct)` already serves the exact need (typed field map → SDK-based write, no metadata calls). Plan called for a new typed method; deemed unnecessary.
+4. **Endpoint dispatch happens BEFORE DocumentContext pre-load** for the Linear path — avoids double-loading text since `DocumentTextSource.ExtractFromDocumentIdAsync` inside `DocumentProfileService` does the load itself. Engine path retains the pre-load unchanged.
+5. **`IPostUploadIndexingEnqueuer.EnqueueIfApplicableAsync`** (OBO path) is used instead of the app-only path, because Doc Upload files were written by the user via OBO — MI cannot read them without a container-type app-registration (see SPE writer-identity rule in `PostUploadIndexingEnqueuer.cs`).
+
+## Commits from this session
+
+- Phase A reverts: `a648dedce`, `1332a5a02`, `06040244e`, `42a83ff7c` (4 commits, reverse chronological)
+- Phase B feature: `c2d26986d`
+
+All 5 are **LOCAL ONLY** — not pushed to origin yet. Task B19 will push after B15-B18 complete.
+
+---
 
 ## Reference
 
-- Architecture doc: [`docs/architecture/SPAARKE-LINEAR-AI-CONSUMER-ARCHITECTURE.md`](../../docs/architecture/SPAARKE-LINEAR-AI-CONSUMER-ARCHITECTURE.md)
+- Architecture: [`docs/architecture/SPAARKE-LINEAR-AI-CONSUMER-ARCHITECTURE.md`](../../docs/architecture/SPAARKE-LINEAR-AI-CONSUMER-ARCHITECTURE.md)
 - Work spec: [`notes/wave12-linear-consumer-migration.md`](notes/wave12-linear-consumer-migration.md)
 - Task plan: [`notes/wave12-linear-consumer-tasks.md`](notes/wave12-linear-consumer-tasks.md)
-- Historical doc-processing architecture (soon to be split): [`docs/architecture/sdap-document-processing-architecture.md`](../../docs/architecture/sdap-document-processing-architecture.md)
+- Historical doc-processing architecture: [`docs/architecture/sdap-document-processing-architecture.md`](../../docs/architecture/sdap-document-processing-architecture.md)
 - Companion pattern (Playbook Engine + Daily Briefing narrator model): [`docs/architecture/SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md`](../../docs/architecture/SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md)
 - Wizard integration: [`docs/guides/DOCUMENT-UPLOAD-WIZARD-INTEGRATION-GUIDE.md`](../../docs/guides/DOCUMENT-UPLOAD-WIZARD-INTEGRATION-GUIDE.md)
 
 ---
 
-*End of current-task.md. Ready for `/compact` or session pause. To resume: read Quick Recovery, then the three companion docs, then execute Phase A of the task plan.*
+*End of current-task.md. Recovery point: Phase B core code shipped (commit `c2d26986d`), build clean, awaiting deploy/smoke decision from operator.*
