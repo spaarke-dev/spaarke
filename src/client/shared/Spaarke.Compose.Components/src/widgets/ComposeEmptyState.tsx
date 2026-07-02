@@ -68,17 +68,8 @@
  */
 
 import * as React from 'react';
-import {
-  makeStyles,
-  tokens,
-  Button,
-  Card,
-  Text,
-} from '@fluentui/react-components';
-import {
-  DocumentArrowUpRegular,
-  SearchRegular,
-} from '@fluentui/react-icons';
+import { makeStyles, tokens, Button, Card, Text } from '@fluentui/react-components';
+import { DocumentArrowUpRegular, SearchRegular } from '@fluentui/react-icons';
 
 // ---------------------------------------------------------------------------
 // Styles — Fluent v9 semantic tokens only (ADR-021)
@@ -224,8 +215,7 @@ export function ComposeEmptyState({
           Open a document to start composing
         </Text>
         <Text size={300} className={styles.description}>
-          Browse and upload a file to draft from, or search for an existing
-          Spaarke document.
+          Browse and upload a file to draft from, or search for an existing Spaarke document.
         </Text>
 
         <div className={styles.actions} role="group" aria-label="Open document options">

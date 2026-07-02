@@ -37,10 +37,7 @@ export type { ComposeEmptyStateProps } from './widgets/ComposeEmptyState';
 export { ComposeConflictDialog } from './widgets/ComposeConflictDialog';
 
 // Reducer / state types
-export {
-  composeWorkspaceReducer,
-  INITIAL_STATE,
-} from './widgets/ComposeWorkspace.types';
+export { composeWorkspaceReducer, INITIAL_STATE } from './widgets/ComposeWorkspace.types';
 export type {
   ComposeWorkspaceStatus,
   ComposeCheckoutStatus,
@@ -50,11 +47,7 @@ export type {
 } from './widgets/ComposeWorkspace.types';
 
 // Hooks
-export {
-  useComposeBroadcastChannel,
-  useComposeCheckoutLifecycle,
-  useComposeHeartbeatGate,
-} from './widgets/hooks';
+export { useComposeBroadcastChannel, useComposeCheckoutLifecycle, useComposeHeartbeatGate } from './widgets/hooks';
 export type {
   UseComposeBroadcastChannelResult,
   UseComposeCheckoutLifecycleOptions,
@@ -66,10 +59,7 @@ export type {
 // SpaarkeAi ThreePaneShell so LegalWorkspace's compose section factory can
 // consume it via a unidirectional dependency).
 // -------------------------------------------------------------------------
-export {
-  ComposeLaunchContext,
-  useComposeLaunch,
-} from './context/composeLaunchContext';
+export { ComposeLaunchContext, useComposeLaunch } from './context/composeLaunchContext';
 export type { ComposeLaunchContextValue } from './context/composeLaunchContext';
 
 // -------------------------------------------------------------------------
@@ -112,7 +102,4 @@ export type { MammothConversionResult } from './utils/docxBridge';
 // Consumed by ConversationPane in SpaarkeAi (Path A + embedded modes).
 // -------------------------------------------------------------------------
 export { executeComposeSummarize } from './orchestrators/executeComposeSummarize';
-export type {
-  ExecuteComposeSummarizeInputs,
-  ComposeSummarizeResult,
-} from './orchestrators/executeComposeSummarize';
+export type { ExecuteComposeSummarizeInputs, ComposeSummarizeResult } from './orchestrators/executeComposeSummarize';

@@ -28,22 +28,20 @@
  *      — consumes the value inside the section factory mount
  */
 
-import * as React from "react";
-import type { ComposeDocumentRef } from "../types/compose-contracts";
+import * as React from 'react';
+import type { ComposeDocumentRef } from '../types/compose-contracts';
 
 export interface ComposeLaunchContextValue {
   /** Set to `'editor'` when the app was launched via ribbon Open-in-Compose. */
-  composeMode: "editor";
+  composeMode: 'editor';
   /** Document pointer forwarded from the ribbon URL params (Path A entry). */
   document: ComposeDocumentRef | null;
   /** SPE container/drive id (may be empty; resolved at runtime if absent). */
   driveId: string;
 }
 
-export const ComposeLaunchContext = React.createContext<ComposeLaunchContextValue | null>(
-  null,
-);
-ComposeLaunchContext.displayName = "ComposeLaunchContext";
+export const ComposeLaunchContext = React.createContext<ComposeLaunchContextValue | null>(null);
+ComposeLaunchContext.displayName = 'ComposeLaunchContext';
 
 /**
  * Consume the Compose launch context from within any pane / section factory.

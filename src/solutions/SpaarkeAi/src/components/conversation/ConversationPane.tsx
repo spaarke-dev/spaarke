@@ -910,9 +910,14 @@ export function ConversationPane(): React.JSX.Element {
     if ((event as { type?: string }).type !== "compose_summarize_request") return;
 
     // Widen the payload to the additive shape carried by ComposeToolbar.
+    // 2026-07-02 smoke-2 hotfix: `speDriveItemId` is now a required field on
+    // `documentRef` — used for the BFF's `documentSpeId` (LoadDocxAsync keys
+    // on SPE). `documentId` is retained for backwards compat + telemetry but
+    // NOT used for the BFF call.
     const payload = event as unknown as {
       documentRef: {
         documentId: string;
+        speDriveItemId: string;
         sprkDocumentId?: string;
         fileName?: string;
       };
@@ -932,7 +937,10 @@ export function ConversationPane(): React.JSX.Element {
 
     void executeComposeSummarize({
       bffBaseUrl,
-      documentSpeId: payload.documentRef.documentId,
+      // 2026-07-02 smoke-2 hotfix — use speDriveItemId (SPE Graph ID) not
+      // documentId (which may be the Dataverse GUID). LoadDocxAsync on the
+      // BFF keys on SPE; passing the Dataverse GUID caused ODataError 404.
+      documentSpeId: payload.documentRef.speDriveItemId,
       driveId: payload.driveId,
       tenantId: payload.tenantId,
       sessionId: payload.sessionId,
