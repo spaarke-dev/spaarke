@@ -1,177 +1,123 @@
 /**
  * composeEditor.registration.ts — SectionRegistration for the Compose editor workspace.
  *
- * Task 040 of `spaarkeai-compose-r1` (FR-02). The Compose workspace layout
- * (system row created in task 010, label "Compose", template `single-column`,
- * section `compose-editor`) needs this registration to mount when selected
- * via the SpaarkeAi workspace picker.
+ * Task 040 of `spaarkeai-compose-r1` (FR-02) created this file as an inline
+ * Skeleton placeholder pending shared-lib packaging. Task 093 (Phase 7 pivot,
+ * 2026-07-01) swaps the placeholder for the REAL `<ComposeWorkspace>` widget
+ * from `@spaarke/compose-components` (moved there in task 091), resolving
+ * FU-3 (`projects/spaarkeai-compose-r1/notes/defer-issues.md`).
  *
- * R1 scope (this file):
- *   - Register the `compose-editor` ID so `SECTION_REGISTRY.get('compose-editor')`
- *     resolves (FR-02 acceptance + task POML acceptance-criteria).
- *   - Render an inline Fluent v9 `Skeleton` placeholder so the build stays
- *     green and selecting the Compose layout mounts SOMETHING (not silent
- *     factory-lookup failure).
+ * The Compose workspace layout (system row created in task 010, label
+ * "Compose", template `single-column`, section `compose-editor`) mounts here
+ * when selected via the SpaarkeAi workspace picker OR when the ribbon
+ * "Open in Compose" modal launches SpaarkeAi with `?composeMode=editor`
+ * (task 092's App.tsx canonical mount).
  *
- * Task 042 (Phase 4): replace `ComposeWorkspacePlaceholder` below with an import
- * from a proper shared package (per `plan.md` Phase 4: "Implement ComposeWorkspace.tsx
- * (TipTap host + toolbar wrapper)"). The placeholder is intentionally inline
- * here (not a separate `.tsx` file under `src/solutions/SpaarkeAi/`) for two
- * reasons:
- *   1. Calendar Pattern D precedent (calendar.registration.ts): a thin shim
- *      that delegates rendering to a widget. Mirrors that shape.
- *   2. Avoids a circular dependency: `@spaarke/legal-workspace` is consumed by
- *      SpaarkeAi; importing a SpaarkeAi-side file here would invert the
- *      dependency graph. When task 042 lands the real `ComposeWorkspaceWidget`,
- *      it will live in a shared lib (`@spaarke/compose-components` or similar
- *      per `plan.md` Phase 4) — the same way Calendar lives in
- *      `@spaarke/events-components`.
+ * Document context threading:
+ *   The section factory consumes `useComposeLaunch()` from
+ *   `@spaarke/compose-components` (hoisted from SpaarkeAi's ThreePaneShell in
+ *   task 093). When SpaarkeAi's ThreePaneShell provides a value (Path A
+ *   modal launch), the document ref + drive id flow through to
+ *   ComposeWorkspace's `initialDocumentRef` / `driveId` props. When the value
+ *   is null (standalone LegalWorkspace mount or user-picked the Compose
+ *   layout without a document context), the workspace opens on its empty
+ *   state — user browses/searches for a document via the empty-state
+ *   affordances (see `ComposeEmptyState` — task 044).
  *
- * Standalone LegalWorkspace impact: this registration loads in the standalone
- * bundle too (no separate registry), but renders only if a layout references
- * `compose-editor`. The Compose layout row (sprk_workspacelayoutid
- * c09d26be-e173-f111-ab0e-7ced8ddc4a05) is `sprk_issystem=true`; standalone
- * LegalWorkspace's layout picker exposes it only if the org has the row. The
- * placeholder is intentionally minimal so any accidental mount in standalone
- * shows a clear "Compose editor (placeholder)" message rather than crashing.
- * FR-25 / NFR-10 bundle-size impact is one small registration + Skeleton —
- * negligible.
+ * Component justification (CLAUDE.md §11):
+ *   Existing: `ComposeWorkspacePlaceholder` (Skeleton stub) — replaced.
+ *   Extension: not applicable — swap-in of the real widget is the
+ *   deliverable per POML 093 + FR-S1 supplement scope.
+ *   Cost-of-doing-nothing: users selecting the "Compose" workspace layout
+ *   see a stub instead of the editor; the ribbon Path A → three-pane flow
+ *   ends at a Skeleton; FR-S1 fails.
  *
- * Hot-path coordination: SECTION_REGISTRY is shared with 8 other active
- * SpaarkeAi-touching projects (per `projects/INDEX.md`). The reviewer
- * sequences this addition against any concurrent SECTION_REGISTRY edits.
+ * Bundle-size impact:
+ *   Task 092 measured SpaarkeAi Vite bundle at 3991 kB (gzip 1088 kB) with
+ *   ComposeWorkspace tree-shaken. This change re-eagerises the compose
+ *   chain (TipTap StarterKit + 11 extensions + mammoth + docx) via the
+ *   section factory — expect bundle to grow back to ~4877 kB (gzip 1357 kB)
+ *   pre-091 baseline, or slightly higher due to task 092's
+ *   ComposeLaunchContext + task 093's mount bridge. This is EXPECTED and
+ *   was accounted for in the task 092 completion notes.
  *
- * Standards: ADR-012 (shared components), ADR-021 (Fluent v9 + dark mode via
- *            semantic tokens), ADR-028 (Spaarke Auth v2 — no token re-acquisition
- *            inside the section).
+ * Standalone LegalWorkspace impact:
+ *   This registration loads in the standalone bundle too. The Compose
+ *   layout row (`sprk_workspacelayoutid=c09d26be-e173-f111-ab0e-7ced8ddc4a05`)
+ *   is `sprk_issystem=true`; standalone LegalWorkspace's layout picker
+ *   exposes it only if the org has the row. `useComposeLaunch()` returns
+ *   null there (no ThreePaneShell in the tree), so ComposeWorkspace opens
+ *   on the empty state — user picks a document via Browse / Search
+ *   affordances. The full editor + save + summarize path works from that
+ *   entry.
+ *
+ * Convention note:
+ *   The file remains `.ts` (not `.tsx`) matching the convention of every
+ *   other registration file in this directory (calendar, todo, getStarted,
+ *   etc.). esbuild does not parse JSX in `.ts` files, so React tree
+ *   construction uses `React.createElement`. The inner mount bridge
+ *   `ComposeSectionMount` is declared as `React.FC` to keep the hook call
+ *   inside a functional component (React rule of hooks).
+ *
+ * Standards: ADR-012 (shared components), ADR-021 (Fluent v9 tokens +
+ *            dark mode via semantic tokens), ADR-028 (Spaarke Auth v2 —
+ *            ComposeWorkspace internally uses `authenticatedFetch` from
+ *            `@spaarke/auth`; no token re-acquisition here).
  */
 
 import * as React from "react";
 import { EditRegular } from "@fluentui/react-icons";
-import {
-  Skeleton,
-  SkeletonItem,
-  Text,
-  makeStyles,
-  tokens,
-} from "@fluentui/react-components";
 import type {
   SectionRegistration,
   SectionFactoryContext,
   ContentSectionConfig,
 } from "@spaarke/ui-components";
+import {
+  ComposeWorkspace,
+  useComposeLaunch,
+} from "@spaarke/compose-components";
 
 // ---------------------------------------------------------------------------
-// Placeholder component (R1 stub — replaced in task 042 by the real TipTap
-// editor widget loaded from a shared lib).
+// ComposeSectionMount — inner functional component that bridges the Section
+// factory context (bffBaseUrl) with the ComposeLaunchContext (document ref +
+// drive id from the ribbon modal launcher) into ComposeWorkspace props.
 //
-// Dark-mode compliance (ADR-021): uses Fluent v9 semantic tokens only
-// (`colorNeutralBackground1`, `colorNeutralForeground1`,
-// `colorNeutralForeground2`, `colorNeutralStroke1`). No hard-coded hex.
+// Kept inside this file (not moved to a separate module) so the registration
+// stays a single-file Pattern D shim — matches the calendar / dailyBriefing
+// registration file shape. The functional-component wrapper is required to
+// call `useComposeLaunch()` per React's rule of hooks.
+//
+// Bridge fields:
+//   - bffBaseUrl        — always from factory context (workspace-scoped)
+//   - initialDocumentRef — from ComposeLaunchContext.document (null on
+//                          standalone / picker mount → empty state)
+//   - driveId           — from ComposeLaunchContext.driveId (empty string
+//                          when no launch context → ComposeWorkspace's
+//                          Load call resolves at runtime)
+//   - tenantId          — empty string (not present on either context; BFF
+//                          authorizes via auth claims, not this prop)
+//   - initialSessionId  — empty string (fresh ChatSession per mount by
+//                          convention; matches SpaarkeAi's pre-093 Path A
+//                          direct-mount shape)
 // ---------------------------------------------------------------------------
 
-const usePlaceholderStyles = makeStyles({
-  container: {
-    height: "100%",
-    width: "100%",
-    boxSizing: "border-box",
-    display: "flex",
-    flexDirection: "column",
-    backgroundColor: tokens.colorNeutralBackground1,
-    color: tokens.colorNeutralForeground1,
-    padding: tokens.spacingHorizontalL,
-    rowGap: tokens.spacingVerticalM,
-    border: `1px solid ${tokens.colorNeutralStroke1}`,
-    borderRadius: tokens.borderRadiusMedium,
-  },
-  header: {
-    display: "flex",
-    flexDirection: "column",
-    rowGap: tokens.spacingVerticalXS,
-  },
-  caption: {
-    color: tokens.colorNeutralForeground2,
-  },
-  skeletonArea: {
-    flex: 1,
-    display: "flex",
-    flexDirection: "column",
-    rowGap: tokens.spacingVerticalS,
-  },
-});
+interface ComposeSectionMountProps {
+  bffBaseUrl: string;
+}
 
-/**
- * Compose editor placeholder. Replaced by `ComposeWorkspace` in task 042.
- * Renders a Fluent v9 `Skeleton` shell that resembles a paragraph-style editor
- * surface so reviewers see editor-shaped chrome even before TipTap is wired.
- *
- * NOTE: uses `React.createElement` (NOT JSX) because this file is `.ts`, not
- * `.tsx` — matching the convention of every other registration file in this
- * directory (calendar, todo, getStarted, etc.). esbuild does not parse JSX in
- * `.ts` files. When task 042 lands the real `ComposeWorkspace` (likely as
- * `.tsx` inside a shared lib), this file remains the thin registration shim
- * and imports the component.
- *
- * EXPORTED so tests + future task-042 swap paths can reference the symbol.
- */
-export const ComposeWorkspacePlaceholder: React.FC = () => {
-  const styles = usePlaceholderStyles();
-  return React.createElement(
-    "div",
-    {
-      className: styles.container,
-      role: "region",
-      "aria-label": "Compose editor (placeholder)",
-    },
-    React.createElement(
-      "div",
-      { className: styles.header },
-      React.createElement(
-        Text,
-        { weight: "semibold" as const, size: 500 },
-        "Compose",
-      ),
-      React.createElement(
-        Text,
-        { size: 200, className: styles.caption },
-        "Editor placeholder — the TipTap editor lands in task 042.",
-      ),
-    ),
-    React.createElement(
-      Skeleton,
-      { className: styles.skeletonArea, appearance: "translucent" as const },
-      React.createElement(SkeletonItem, { shape: "rectangle" as const, size: 16 }),
-      React.createElement(SkeletonItem, {
-        shape: "rectangle" as const,
-        size: 16,
-        style: { width: "92%" },
-      }),
-      React.createElement(SkeletonItem, {
-        shape: "rectangle" as const,
-        size: 16,
-        style: { width: "78%" },
-      }),
-      React.createElement(SkeletonItem, {
-        shape: "rectangle" as const,
-        size: 16,
-        style: { width: "85%" },
-      }),
-      React.createElement(SkeletonItem, {
-        shape: "rectangle" as const,
-        size: 16,
-        style: { width: "60%" },
-      }),
-    ),
-  );
+const ComposeSectionMount: React.FC<ComposeSectionMountProps> = ({ bffBaseUrl }) => {
+  const composeLaunch = useComposeLaunch();
+  return React.createElement(ComposeWorkspace, {
+    bffBaseUrl,
+    driveId: composeLaunch?.driveId ?? "",
+    tenantId: "",
+    initialDocumentRef: composeLaunch?.document ?? null,
+    initialSessionId: "",
+  });
 };
 
 // ---------------------------------------------------------------------------
 // Registration — Pattern D thin shim (mirrors calendar.registration.ts)
-//
-// Factory does NOT consume any `SectionFactoryContext` fields in R1 — the
-// placeholder is self-contained. Task 042 will thread `ctx.bffBaseUrl`,
-// `ctx.userId`, etc., into the real widget when it needs to call the Compose
-// BFF endpoints (added in Phase 2, tasks 020-027).
 // ---------------------------------------------------------------------------
 
 export const composeEditorRegistration: SectionRegistration = {
@@ -185,13 +131,16 @@ export const composeEditorRegistration: SectionRegistration = {
   // a typical editor surface; the layout's row sizing still wins.
   defaultHeight: "720px",
 
-  factory(_context: SectionFactoryContext): ContentSectionConfig {
+  factory(context: SectionFactoryContext): ContentSectionConfig {
     return {
       id: "compose-editor",
       type: "content",
       title: "Compose",
       style: { overflow: "hidden" },
-      renderContent: () => React.createElement(ComposeWorkspacePlaceholder),
+      renderContent: () =>
+        React.createElement(ComposeSectionMount, {
+          bffBaseUrl: context.bffBaseUrl,
+        }),
     };
   },
 };

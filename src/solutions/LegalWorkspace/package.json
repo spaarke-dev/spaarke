@@ -33,6 +33,7 @@
     "@microsoft/applicationinsights-web": "^3.3.11",
     "@spaarke/ai-widgets": "file:../../client/shared/Spaarke.AI.Widgets",
     "@spaarke/auth": "file:../../client/shared/Spaarke.Auth",
+    "@spaarke/compose-components": "file:../../client/shared/Spaarke.Compose.Components",
     "@spaarke/daily-briefing-components": "file:../../client/shared/Spaarke.DailyBriefing.Components",
     "@spaarke/events-components": "file:../../client/shared/Spaarke.Events.Components",
     "@spaarke/sdap-client": "file:../../client/shared/Spaarke.SdapClient",

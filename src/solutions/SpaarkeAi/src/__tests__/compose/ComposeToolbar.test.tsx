@@ -73,7 +73,7 @@ jest.mock('@spaarke/document-operations', () => ({
 import {
   ComposeToolbar,
   type ComposeSummarizeRequestEvent,
-} from '../ComposeToolbar';
+} from '@spaarke/compose-components/widgets/ComposeToolbar';
 
 // ---------------------------------------------------------------------------
 // Helpers
@@ -83,6 +83,10 @@ const FIXED_DOCUMENT_ID = 'doc-abc123';
 const FIXED_FILE_NAME = 'Contract Draft v3.docx';
 const FIXED_SESSION_ID = 'session-xyz789';
 const FIXED_BFF_URL = 'https://bff.example.com';
+// spaarkeai-compose-r1 task 098 — driveId + tenantId are now required for
+// the summarize action so the event payload carries them into ConversationPane.
+const FIXED_DRIVE_ID = 'drive-container-xyz';
+const FIXED_TENANT_ID = 'tenant-guid-0000';
 
 /**
  * Render the toolbar with a real PaneEventBus + FluentProvider. Returns the
@@ -116,6 +120,8 @@ describe('ComposeToolbar', () => {
           fileName={FIXED_FILE_NAME}
           sessionId={FIXED_SESSION_ID}
           bffBaseUrl={FIXED_BFF_URL}
+          driveId={FIXED_DRIVE_ID}
+          tenantId={FIXED_TENANT_ID}
         />,
       );
 
@@ -136,6 +142,8 @@ describe('ComposeToolbar', () => {
           documentId={FIXED_DOCUMENT_ID}
           sessionId={FIXED_SESSION_ID}
           bffBaseUrl={FIXED_BFF_URL}
+          driveId={FIXED_DRIVE_ID}
+          tenantId={FIXED_TENANT_ID}
         />,
       );
       expect(
@@ -149,6 +157,8 @@ describe('ComposeToolbar', () => {
           documentId=""
           sessionId={FIXED_SESSION_ID}
           bffBaseUrl={FIXED_BFF_URL}
+          driveId={FIXED_DRIVE_ID}
+          tenantId={FIXED_TENANT_ID}
         />,
       );
       expect(
@@ -168,6 +178,8 @@ describe('ComposeToolbar', () => {
           documentId={FIXED_DOCUMENT_ID}
           sessionId=""
           bffBaseUrl={FIXED_BFF_URL}
+          driveId={FIXED_DRIVE_ID}
+          tenantId={FIXED_TENANT_ID}
         />,
       );
       // Open-in-Word buttons remain enabled because they don't require a session.
@@ -183,12 +195,44 @@ describe('ComposeToolbar', () => {
       ).toBeDisabled();
     });
 
+    it('disables summarize button when driveId is empty (task 098)', () => {
+      renderWithBus(
+        <ComposeToolbar
+          documentId={FIXED_DOCUMENT_ID}
+          sessionId={FIXED_SESSION_ID}
+          bffBaseUrl={FIXED_BFF_URL}
+          driveId=""
+          tenantId={FIXED_TENANT_ID}
+        />,
+      );
+      expect(
+        screen.getByRole('button', { name: /summarize with assistant/i }),
+      ).toBeDisabled();
+    });
+
+    it('disables summarize button when tenantId is empty (task 098)', () => {
+      renderWithBus(
+        <ComposeToolbar
+          documentId={FIXED_DOCUMENT_ID}
+          sessionId={FIXED_SESSION_ID}
+          bffBaseUrl={FIXED_BFF_URL}
+          driveId={FIXED_DRIVE_ID}
+          tenantId=""
+        />,
+      );
+      expect(
+        screen.getByRole('button', { name: /summarize with assistant/i }),
+      ).toBeDisabled();
+    });
+
     it('disables all buttons when `disabled` prop is true', () => {
       renderWithBus(
         <ComposeToolbar
           documentId={FIXED_DOCUMENT_ID}
           sessionId={FIXED_SESSION_ID}
           bffBaseUrl={FIXED_BFF_URL}
+          driveId={FIXED_DRIVE_ID}
+          tenantId={FIXED_TENANT_ID}
           disabled
         />,
       );
@@ -211,6 +255,8 @@ describe('ComposeToolbar', () => {
           documentId={FIXED_DOCUMENT_ID}
           sessionId={FIXED_SESSION_ID}
           bffBaseUrl={FIXED_BFF_URL}
+          driveId={FIXED_DRIVE_ID}
+          tenantId={FIXED_TENANT_ID}
         />,
       );
 
@@ -229,6 +275,8 @@ describe('ComposeToolbar', () => {
           documentId={FIXED_DOCUMENT_ID}
           sessionId={FIXED_SESSION_ID}
           bffBaseUrl={FIXED_BFF_URL}
+          driveId={FIXED_DRIVE_ID}
+          tenantId={FIXED_TENANT_ID}
           disabled
         />,
       );
@@ -250,6 +298,8 @@ describe('ComposeToolbar', () => {
           documentId={FIXED_DOCUMENT_ID}
           sessionId={FIXED_SESSION_ID}
           bffBaseUrl={FIXED_BFF_URL}
+          driveId={FIXED_DRIVE_ID}
+          tenantId={FIXED_TENANT_ID}
         />,
       );
 
@@ -272,6 +322,8 @@ describe('ComposeToolbar', () => {
           fileName={FIXED_FILE_NAME}
           sessionId={FIXED_SESSION_ID}
           bffBaseUrl={FIXED_BFF_URL}
+          driveId={FIXED_DRIVE_ID}
+          tenantId={FIXED_TENANT_ID}
         />,
       );
       bus.subscribe('conversation', (ev) => events.push(ev));
@@ -288,6 +340,10 @@ describe('ComposeToolbar', () => {
       expect(payload.documentRef.fileName).toBe(FIXED_FILE_NAME);
       expect(payload.jpsScope).toBe('compose-document');
       expect(payload.sessionId).toBe(FIXED_SESSION_ID);
+      // Task 098 (Phase 9): driveId + tenantId carried on the event so
+      // ConversationPane can invoke the BFF directly.
+      expect(payload.driveId).toBe(FIXED_DRIVE_ID);
+      expect(payload.tenantId).toBe(FIXED_TENANT_ID);
       // ISO-8601 UTC timestamp format
       expect(payload.timestamp).toMatch(
         /^\d{4}-\d{2}-\d{2}T\d{2}:\d{2}:\d{2}\.\d{3}Z$/,
@@ -302,6 +358,8 @@ describe('ComposeToolbar', () => {
           fileName={FIXED_FILE_NAME}
           sessionId={FIXED_SESSION_ID}
           bffBaseUrl={FIXED_BFF_URL}
+          driveId={FIXED_DRIVE_ID}
+          tenantId={FIXED_TENANT_ID}
           onComposeSummarizeRequest={(p) => observerEvents.push(p)}
         />,
       );
@@ -325,6 +383,8 @@ describe('ComposeToolbar', () => {
           documentId={FIXED_DOCUMENT_ID}
           sessionId=""
           bffBaseUrl={FIXED_BFF_URL}
+          driveId={FIXED_DRIVE_ID}
+          tenantId={FIXED_TENANT_ID}
         />,
       );
       bus.subscribe('conversation', (ev) => events.push(ev));
@@ -343,6 +403,8 @@ describe('ComposeToolbar', () => {
           documentId={FIXED_DOCUMENT_ID}
           sessionId={FIXED_SESSION_ID}
           bffBaseUrl={FIXED_BFF_URL}
+          driveId={FIXED_DRIVE_ID}
+          tenantId={FIXED_TENANT_ID}
         />,
       );
       bus.subscribe('conversation', (ev) => events.push(ev));

@@ -47,7 +47,7 @@ import type { WorkspacePaneEvent, ConversationPaneEvent } from "@spaarke/ai-widg
 // (executeSummarizeIntent.ts + FilePreviewContextWidget.dispatchSummarizeOnly)
 // own them now.
 import { buildBffApiUrl } from "@spaarke/auth";
-import { usePaneCollapseContext } from "../shell/ThreePaneShell";
+import { usePaneCollapseContext, useComposeLaunch } from "../shell/ThreePaneShell";
 import { WorkspaceTabManager } from "./WorkspaceTabManager";
 import type {
   ActiveTabSnapshot,
@@ -390,15 +390,31 @@ export function WorkspacePane(): React.JSX.Element {
     isAuthenticated,
   });
 
+  // spaarkeai-compose-r1 task 092: when App.tsx was launched with
+  // `composeMode=editor` (ribbon Open-in-Compose modal path), override the
+  // BFF-default active layout with the "Compose" workspace layout (system
+  // row `sprk_workspacelayoutid=c09d26be-e173-f111-ab0e-7ced8ddc4a05` created
+  // by W1a-010). Resolved by NAME here so no client-side GUID pinning is
+  // required. Falls back to the BFF default when the Compose row is missing
+  // from the returned layouts (defensive — should never happen post-deploy).
+  const composeLaunch = useComposeLaunch();
+  const layoutForAutoInstall = React.useMemo(() => {
+    if (composeLaunch?.composeMode === "editor") {
+      const composeRow = layouts.find((l) => l.name === "Compose");
+      if (composeRow) return composeRow;
+    }
+    return activeLayout;
+  }, [composeLaunch, layouts, activeLayout]);
+
   const autoInstalledDefaultRef = React.useRef<boolean>(false);
   React.useEffect(() => {
     if (!isAuthenticated) return;
     if (autoInstalledDefaultRef.current) return; // run once per mount
-    if (!activeLayout) return; // wait for the BFF default to resolve, or stay empty if null
+    if (!layoutForAutoInstall) return; // wait for the layout to resolve, or stay empty if null
 
     // Defer the guard arming until after we actually have a default to
-    // process so a transient `activeLayout === null` (cold load before fetch
-    // resolves) doesn't lock the effect out.
+    // process so a transient `layoutForAutoInstall === null` (cold load before
+    // fetch resolves) doesn't lock the effect out.
     autoInstalledDefaultRef.current = true;
 
     const manager = managerRef.current;
@@ -410,16 +426,20 @@ export function WorkspacePane(): React.JSX.Element {
       .tabs.some((t) => {
         if (t.widgetType !== "workspace") return false;
         const data = t.widgetData as { layoutId?: string } | null;
-        return data?.layoutId === activeLayout.id;
+        return data?.layoutId === layoutForAutoInstall.id;
       });
     if (alreadyOpen) return;
 
     // Skip if the default is in the pinned list — the pin auto-open effect
-    // below will open it; we don't want to double-dispatch.
-    const isPinned = getPinnedWorkspaces().some(
-      (p) => p.layoutId === activeLayout.id,
-    );
-    if (isPinned) return;
+    // below will open it; we don't want to double-dispatch. This check does
+    // NOT apply in compose-launch mode: we always want the Compose layout on
+    // top so the user lands in the editor regardless of their pin list.
+    if (composeLaunch?.composeMode !== "editor") {
+      const isPinned = getPinnedWorkspaces().some(
+        (p) => p.layoutId === layoutForAutoInstall.id,
+      );
+      if (isPinned) return;
+    }
 
     // Defer to a macrotask so usePaneEvent's subscription effect (declared
     // later in this component) has registered. Identical pattern to the pin
@@ -428,26 +448,28 @@ export function WorkspacePane(): React.JSX.Element {
     const timerId = window.setTimeout(() => {
       // eslint-disable-next-line no-console
       console.info(
-        `[WorkspacePane] Auto-installing default workspace: ${activeLayout.name} (${activeLayout.id})`,
+        `[WorkspacePane] Auto-installing ${
+          composeLaunch?.composeMode === "editor" ? "compose" : "default"
+        } workspace: ${layoutForAutoInstall.name} (${layoutForAutoInstall.id})`,
       );
       dispatch("workspace", {
         type: "widget_load",
         widgetType: "workspace",
         widgetData: {
-          layoutId: activeLayout.id,
-          layoutName: activeLayout.name,
+          layoutId: layoutForAutoInstall.id,
+          layoutName: layoutForAutoInstall.name,
         },
-        displayName: activeLayout.name,
+        displayName: layoutForAutoInstall.name,
       });
     }, 0);
 
     return () => {
       window.clearTimeout(timerId);
     };
-    // Run once when both auth AND activeLayout are ready; the ref guard
-    // prevents re-runs on subsequent dependency changes (e.g. refetch).
+    // Run once when both auth AND layoutForAutoInstall are ready; the ref
+    // guard prevents re-runs on subsequent dependency changes (e.g. refetch).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAuthenticated, activeLayout]);
+  }, [isAuthenticated, layoutForAutoInstall]);
 
   // ---------------------------------------------------------------------------
   // Auto-open pinned workspaces — task 092 / round 5 / task 101 fix
@@ -901,6 +923,21 @@ export function WorkspacePane(): React.JSX.Element {
   }, [paneCollapse]);
   const isWorkspaceExpanded = !(paneCollapse?.isCollapsed("workspace") ?? false);
 
+  // spaarkeai-compose-r1 task 100 (Phase 10 polish, FR-S7):
+  //
+  // In compose-launch mode (`composeMode="editor"`) the user is locked to
+  // the Compose surface — the workspace-layout picker (WorkspacePaneMenu:
+  // "Select Workspace" list + "+ New Workspace" wizard + "Manage workspaces")
+  // and the tab bar (WorkspaceTabManagerComponent tab strip) are suppressed
+  // so the user cannot browse to Matters / Documents / Daily Briefing /
+  // other layouts from inside a compose session.
+  //
+  // Widget-add extensibility is PRESERVED — future Compose-focused widgets
+  // can still be dispatched via `widget_load` PaneEventBus events; they
+  // will render normally (the tab manager still creates tabs; only the tab
+  // strip UI is hidden). See `hideTabBar` prop on WorkspaceTabManagerComponent.
+  const isComposeLaunchMode = composeLaunch?.composeMode === "editor";
+
   const header = (
     <PaneHeader
       title="Workspace"
@@ -908,12 +945,14 @@ export function WorkspacePane(): React.JSX.Element {
       onCollapse={paneCollapse ? handleHeaderCollapse : undefined}
       expanded={isWorkspaceExpanded}
       rightSlot={
-        <WorkspacePaneMenu
-          tabs={tabs}
-          activeTabId={activeTabId}
-          onTabSelect={handleTabChange}
-          onTabClose={handleTabClose}
-        />
+        isComposeLaunchMode ? undefined : (
+          <WorkspacePaneMenu
+            tabs={tabs}
+            activeTabId={activeTabId}
+            onTabSelect={handleTabChange}
+            onTabClose={handleTabClose}
+          />
+        )
       }
     />
   );
@@ -943,6 +982,10 @@ export function WorkspacePane(): React.JSX.Element {
         // R6 Pillar 9 / task 098 — per-tab "Visible to assistant" toggle.
         chatSessionId={chatSessionId}
         onToggleVisibility={handleToggleVisibility}
+        // spaarkeai-compose-r1 task 100 — suppress the tab strip in compose
+        // mode; the Compose widget renders full-pane. See the block comment
+        // above the header definition for rationale + widget-add contract.
+        hideTabBar={isComposeLaunchMode}
       />
     </div>
   );

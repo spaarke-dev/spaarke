@@ -16,6 +16,12 @@
  * The whole stack renders only when at least one row would surface; the parent
  * decides whether to mount it at all. This keeps the DOM minimal.
  *
+ * Summary banners REMOVED in task 098 (Phase 9). The compose-summarize flow
+ * is now streamed into the ConversationPane's chat surface via
+ * `executeComposeSummarize` — Compose does not render summary text or errors
+ * as workspace banners anymore. See ConversationPane's compose_summarize_request
+ * subscription for the canonical rendering path.
+ *
  * Constraints:
  *   - ADR-021: Fluent v9 only; semantic tokens; no hex colors.
  *   - ADR-022: React 19; pure functional component.
@@ -29,20 +35,15 @@ import {
   makeStyles,
   tokens,
   MessageBar,
-  MessageBarActions,
   MessageBarBody,
   MessageBarTitle,
-  Button,
-  Text,
-  Spinner,
 } from '@fluentui/react-components';
-import { DismissRegular } from '@fluentui/react-icons';
 
 import type {
   ComposeCheckoutLockedByInfo,
   ComposeCheckoutStatus,
 } from './ComposeWorkspace.types';
-import type { ComposeAssistantToWorkspaceFlow } from '../../types/compose-contracts';
+import type { ComposeAssistantToWorkspaceFlow } from '../types/compose-contracts';
 
 export interface ComposeBannerStackProps {
   errorMessage: string | null;
@@ -51,10 +52,6 @@ export interface ComposeBannerStackProps {
   checkoutFailureMessage: string | null;
   importWarnings: Array<{ type: string; message: string }>;
   pendingAssistantInsert: ComposeAssistantToWorkspaceFlow | null;
-  summaryStatus?: 'idle' | 'in-flight' | 'ready' | 'error';
-  summaryText?: string | null;
-  summaryError?: string | null;
-  onDismissSummary?: () => void;
 }
 
 const useStyles = makeStyles({
@@ -77,17 +74,12 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
     checkoutFailureMessage,
     importWarnings,
     pendingAssistantInsert,
-    summaryStatus = 'idle',
-    summaryText = null,
-    summaryError = null,
-    onDismissSummary,
   } = props;
 
   const showStack =
     importWarnings.length > 0 ||
     !!errorMessage ||
     !!pendingAssistantInsert ||
-    summaryStatus !== 'idle' ||
     checkoutStatus === 'conflict' ||
     checkoutStatus === 'failed' ||
     checkoutStatus === 'cancelled';
@@ -173,71 +165,6 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
             A draft from the Assistant is staged for insertion. (R2 wires the insert action; R1
             acknowledges receipt only.)
           </MessageBarBody>
-        </MessageBar>
-      ) : null}
-
-      {summaryStatus === 'in-flight' ? (
-        <MessageBar
-          intent="info"
-          data-testid="compose-workspace-summary-in-flight-banner"
-          aria-live="polite"
-        >
-          <MessageBarBody>
-            <MessageBarTitle>
-              <Spinner size="tiny" style={{ display: 'inline-block', marginInlineEnd: tokens.spacingHorizontalXS }} />
-              Summarizing document…
-            </MessageBarTitle>
-          </MessageBarBody>
-        </MessageBar>
-      ) : null}
-
-      {summaryStatus === 'ready' && summaryText ? (
-        <MessageBar
-          intent="success"
-          data-testid="compose-workspace-summary-ready-banner"
-          aria-live="polite"
-        >
-          <MessageBarBody>
-            <MessageBarTitle>Document summary</MessageBarTitle>
-            <Text style={{ whiteSpace: 'pre-wrap' }}>{summaryText}</Text>
-          </MessageBarBody>
-          {onDismissSummary ? (
-            <MessageBarActions
-              containerAction={
-                <Button
-                  appearance="transparent"
-                  icon={<DismissRegular />}
-                  aria-label="Dismiss summary"
-                  onClick={onDismissSummary}
-                />
-              }
-            />
-          ) : null}
-        </MessageBar>
-      ) : null}
-
-      {summaryStatus === 'error' && summaryError ? (
-        <MessageBar
-          intent="error"
-          data-testid="compose-workspace-summary-error-banner"
-          aria-live="polite"
-        >
-          <MessageBarBody>
-            <MessageBarTitle>Summarize failed</MessageBarTitle>
-            {summaryError}
-          </MessageBarBody>
-          {onDismissSummary ? (
-            <MessageBarActions
-              containerAction={
-                <Button
-                  appearance="transparent"
-                  icon={<DismissRegular />}
-                  aria-label="Dismiss summary error"
-                  onClick={onDismissSummary}
-                />
-              }
-            />
-          ) : null}
         </MessageBar>
       ) : null}
     </div>

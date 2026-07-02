@@ -60,6 +60,16 @@ public static class ComposeModule
         services.AddScoped<ComposeSessionService>(); // Concrete (ADR-010 strict; interface collapsed 2026-06-29 cleanup)
         services.AddScoped<IComposeService, ComposeService>();
 
+        // spaarkeai-compose-r1 task 094 (Phase 8 SSE backend, per FR-S5):
+        // IDocxTextExtractor provides plain-text extraction from DOCX bytes for AI-
+        // context building. Consumed by ComposeService + /api/compose/action/* (task
+        // 097 SSE endpoint) to ship UserContext through the widened IInvokePlaybookAi
+        // facade (task 095). ADR-010 justified seam: the default impl calls the
+        // DocumentFormat.OpenXml SDK — a real I/O-shaped API surface that higher-
+        // level integration tests need to mock without binding to WordprocessingDocument
+        // parse behavior. UNCONDITIONAL registration per §F.1.
+        services.AddScoped<IDocxTextExtractor, DocxTextExtractor>();
+
         // ============================================================================
         // Stale checkout sweeper (Spaarke Compose R1 — Spike #3 §4.3, task 052)
         // ============================================================================

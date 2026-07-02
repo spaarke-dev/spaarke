@@ -2,7 +2,8 @@
 <task id="094" project="spaarkeai-compose-r1">
   <metadata>
     <title>Add IDocxTextExtractor service using DocumentFormat.OpenXml (server-side DOCX → plain text)</title>
-    <status>not-started</status>
+    <status>completed</status>
+    <completed>2026-07-01</completed>
     <estimated-effort>2 hours</estimated-effort>
     <tags>bff-api, compose, docx, openxml, ai-context, testing</tags>
     <rigor-hint>FULL</rigor-hint>
@@ -85,4 +86,81 @@
       <file>docs/adr/ADR-038-testing-strategy.md</file>
     </files>
   </knowledge>
+
+  <notes>
+    Completed 2026-07-01 (~45 min, under 2 h estimate).
+
+    Delivered:
+      - `src/server/api/Sprk.Bff.Api/Services/Compose/IDocxTextExtractor.cs` (interface;
+        ADR-010 justified I/O-boundary seam so higher-level integration tests can mock
+        without binding to WordprocessingDocument parse behavior).
+      - `src/server/api/Sprk.Bff.Api/Services/Compose/DocxTextExtractor.cs` (default impl):
+          * Opens WordprocessingDocument read-only from the incoming Stream
+          * Materializes paragraph text lists once (single OpenXml tree walk)
+          * Concatenates paragraphs with `\n` separator
+          * Truncates at maxCharacters with suffix ` [TRUNCATED — {N} characters more]`
+            where N sums truncated-paragraph residue + remaining paragraphs' chars
+            + paragraph-break newlines (accurate residue for prompt-budget telemetry)
+          * Normalizes malformed input exceptions to `InvalidDataException` per the
+            interface contract
+          * Propagates CancellationToken at entry + between paragraph reads
+      - `Infrastructure/DI/ComposeModule.cs` — UNCONDITIONAL Scoped registration per §F.1
+        (matches unconditional endpoint mapping).
+      - `tests/unit/Sprk.Bff.Api.Tests/Services/Compose/DocxTextExtractorTests.cs`:
+        9 behavioral tests using in-memory DOCX fixtures (no binary files checked in;
+        every scenario transparent in the test source):
+          1. WithEmptyDocx_ReturnsEmptyString
+          2. WithSimpleParagraphs_ConcatenatesWithParagraphBreaks
+          3. WithMultipleRunsPerParagraph_ConcatenatesInDocumentOrder
+             (Word split-run semantics: formatting-mid-paragraph splits into runs)
+          4. WithHeadersAndFooters_SkipsThem
+          5. WithCommentsPart_SkipsThem
+          6. WhenTextExceedsMaxCharacters_TruncatesWithSuffix
+             (verifies exact residue count: 21 remaining B's + newline + 50 C's = 72)
+          7. WithMalformedDocxBytes_ThrowsInvalidDataException
+          8. WithCancelledToken_ThrowsOperationCanceledException
+          9. WithMaxCharactersLessThanOne_ThrowsArgumentOutOfRangeException
+
+    Verification (all POML acceptance criteria):
+      - #1 `dotnet build src/server/api/Sprk.Bff.Api/`: ✅ 0 errors / 19 warnings
+        (all pre-existing; identical to baseline).
+      - #2 `dotnet test ... --filter "FullyQualifiedName~DocxTextExtractor"`:
+        ✅ **9/9 tests pass in 24 ms** (unit-domain KEEP category per ADR-038).
+      - #3 Publish size: **45.47 MB compressed** (deploy/api-publish-t094.zip).
+        Baseline post-W10 was **45.41 MB** — delta **+0.06 MB (~60 KB)** which is
+        well under the < 0.5 MB POML target and the < 1 MB constraint. Confirms
+        DocumentFormat.OpenXml 3.4.1 was already directly referenced in the .csproj
+        (transitive presence + direct ref both verified); this task added no new
+        binary payload beyond ~2 KB of our own .cs source.
+
+    ADR-038 conformance:
+      - Test category = `domain-logic` (unit-domain): the SUT is a pure function of
+        its input stream. OpenXml is in-process; no HttpMessageHandler mocks (B1
+        banned), no DI-registration tests (B3 banned), no ctor null-check tests
+        (B4 banned), no mirror tests (B6 banned), no coverage-fillers (B10 banned).
+      - Test path = `tests/unit/Sprk.Bff.Api.Tests/Services/Compose/**` — matches
+        established BFF unit-test layout convention accepted by W9-071 audit and
+        by the /test-diet report for R1.
+      - Names conform to `{Method}_{Scenario}_{ExpectedResult}` (B13 compliance).
+      - No `Stopwatch` / `DateTime.UtcNow` in tests (uses only cancellation +
+        deterministic string content).
+
+    Files touched (git status summary):
+      - A `src/server/api/Sprk.Bff.Api/Services/Compose/IDocxTextExtractor.cs`
+      - A `src/server/api/Sprk.Bff.Api/Services/Compose/DocxTextExtractor.cs`
+      - M `src/server/api/Sprk.Bff.Api/Infrastructure/DI/ComposeModule.cs`
+      - A `tests/unit/Sprk.Bff.Api.Tests/Services/Compose/DocxTextExtractorTests.cs`
+      - M `projects/spaarkeai-compose-r1/current-task.md`
+      - M `projects/spaarkeai-compose-r1/tasks/TASK-INDEX.md`
+      - M `projects/spaarkeai-compose-r1/tasks/094-bff-docx-text-extractor.poml`
+
+    Downstream:
+      - Task 095 (IInvokePlaybookAi facade extension, per FR-S4) will consume
+        `IDocxTextExtractor` in ComposeService (or in the endpoint layer, TBD by 095)
+        to produce the `UserContext` string that the widened facade forwards to
+        `PlaybookRunRequest.UserContext`.
+      - Task 097 (SSE endpoint conversion) inherits this service via the same DI
+        registration — no changes needed there beyond wiring the extractor into the
+        Compose SSE dispatch path.
+  </notes>
 </task>

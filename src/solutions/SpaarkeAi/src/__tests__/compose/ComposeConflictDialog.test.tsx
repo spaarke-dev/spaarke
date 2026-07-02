@@ -30,7 +30,7 @@ import { render, screen } from '@testing-library/react';
 import userEvent from '@testing-library/user-event';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 
-import { ComposeConflictDialog } from '../ComposeConflictDialog';
+import { ComposeConflictDialog } from '@spaarke/compose-components/widgets/ComposeConflictDialog';
 
 // ---------------------------------------------------------------------------
 // Helpers

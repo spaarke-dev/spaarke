@@ -71,6 +71,14 @@ public sealed class ComposeEndpointsTests
         builder.Services.AddSingleton(Mock.Of<IConsumerRoutingService>());
         builder.Services.AddSingleton(Mock.Of<IInvokePlaybookAi>());
 
+        // spaarkeai-compose-r1 task 097 (Phase 8 SSE backend): DispatchAction now
+        // consumes IComposeDocumentService (to load DOCX bytes via OBO) and
+        // IDocxTextExtractor (to project bytes → prose for the widened
+        // IInvokePlaybookAi facade). Mock them here so RequestDelegateFactory can
+        // discover the endpoint's parameter services during shape materialization.
+        builder.Services.AddSingleton(Mock.Of<IComposeDocumentService>());
+        builder.Services.AddSingleton(Mock.Of<IDocxTextExtractor>());
+
         var app = builder.Build();
         app.MapComposeEndpoints();
 
