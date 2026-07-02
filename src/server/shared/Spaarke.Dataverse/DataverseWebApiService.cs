@@ -1767,12 +1767,21 @@ public class DataverseWebApiService : IDataverseService
         if (!response.IsSuccessStatusCode)
         {
             var errorBody = await response.Content.ReadAsStringAsync(ct);
+            // R7 W12 debug: include the serialized payload body (with values, not just field
+            // names) so we can identify AI outputs that Dataverse rejects (e.g., object-shape
+            // values written to a string column). Values truncated at 500 chars per field to
+            // keep the log line bounded.
+            var truncatedFields = fields.ToDictionary(
+                kvp => kvp.Key,
+                kvp => (object?)(kvp.Value?.ToString() is { Length: > 500 } s ? s[..500] + "..." : kvp.Value));
+            var payloadJson = System.Text.Json.JsonSerializer.Serialize(truncatedFields);
             _logger.LogError(
-                "UpdateRecordFieldsAsync PATCH failed: {StatusCode} for {Entity}({Id}). Fields: [{FieldNames}]. Response: {ErrorBody}",
+                "UpdateRecordFieldsAsync PATCH failed: {StatusCode} for {Entity}({Id}). Fields: [{FieldNames}]. Payload: {Payload}. Response: {ErrorBody}",
                 response.StatusCode,
                 entityLogicalName,
                 recordId,
                 string.Join(", ", fields.Keys),
+                payloadJson,
                 errorBody);
             response.EnsureSuccessStatusCode(); // still throw for the caller
         }
