@@ -76,7 +76,7 @@ Before the migration begins, the following commits from tonight's Doc Upload deb
 
 **Target service**: `DocumentProfileService` (new). Composes four shared primitives + `IDocumentDataverseService` + `IJobEnqueueService`.
 
-**Action row (KEEP)**: `bb356968-ebe9-f011-8406-7ced8d1dc988` (`sprk_analysisaction` "Document Profiler") — JPS prompt + output schema.
+**Action row (KEEP)**: `bb356968-ebe9-f011-8406-7ced8d1dc988` (`sprk_analysisaction` **"Document Profiler"** — note the trailing 'r'; there is no row called "Document Profile") — JPS prompt + output schema (`sprk_outputschemajson` populated 2026-07-02 during Phase B, without `sprk_filetype` because the binary format is derived from the file extension deterministically in code).
 
 **Consumer routing (KEEP)**: `sprk_playbookconsumer` row for `document-profile` consumer type. Verify present; add if missing.
 
@@ -107,7 +107,7 @@ Before the migration begins, the following commits from tonight's Doc Upload deb
 
 **Follow-on effect**: `IJobEnqueueService.EnqueueRagIndexingAsync(documentId, driveId, itemId, tenantId, ct)` — the RAG indexing job enqueue that Deliver To Index was doing.
 
-### 2. File Summarize
+### 2. File Summary (a.k.a. File Summarize consumer)
 
 **Current wire**:
 - Endpoint: [`WorkspaceFileEndpoints.SummarizeFilesAsync`](../../../src/server/api/Sprk.Bff.Api/Api/Workspace/WorkspaceFileEndpoints.cs) — `POST /api/workspace/files/summarize` (SSE)
@@ -115,7 +115,9 @@ Before the migration begins, the following commits from tonight's Doc Upload deb
 
 **Target service**: `FileSummarizeService` — resolves Summarize Action, extracts text from all uploaded files, calls LLM, emits SSE progress + final result.
 
-**Action row (KEEP)**: resolved via `ConsumerTypes.SummarizeFile` routing; fallback env var `Workspace__SummarizePlaybookId`.
+**Action row (KEEP)**: `ddaa441e-9f19-f111-8343-7c1e520aa4df` (`sprk_analysisaction` **"File Summary"** — note the row is called "File Summary", not "File Summarize"; consumer key is `summarize-file` per `ConsumerTypes.SummarizeFile`). Also resolvable via env var `Workspace__SummarizePlaybookId` fallback.
+
+**⚠ Phase C pre-flight (blocker)**: This row has NO `sprk_outputschemajson` populated (confirmed 2026-07-02). Phase C must populate the schema BEFORE first-smoke, otherwise `ActionRunner` will throw "empty OutputSchemaJson; linear consumers require a constrained-decoding schema." Design the schema based on the summarize output contract: a top-level `summary` string plus any per-file section fields the SSE `result` chunk requires. See Phase B.5 action-schema-audit gate.
 
 **Playbook rows (RETIRE)**: `sprk_analysisplaybook` `4a72f99c-a119-f111-8343-7ced8d1dc988` ("Summarize File") + its nodes.
 

@@ -37,8 +37,19 @@ Compact checklist. Read the two companion docs for context. Mark tasks complete 
 - [ ] **B18**. Operator smoke Document Upload wizard end-to-end. Verify: doc row created; SPE upload succeeds; RAG index enqueued; `sprk_filesummary` + `sprk_filetldr` + `sprk_filekeywords` + `sprk_extractorganization` + `sprk_extractpeople` + `sprk_filetype` + `sprk_documenttype` all populated on the doc row.
 - [ ] **B19**. Commit + push (operator smoke result note; final push of 5+ commits to origin).
 
-## Phase C — File Summarize migration
+## Phase B.5 — Action schema audit (new gate — added 2026-07-02)
 
+Before Phase C begins, every Linear-target Action row MUST have `sprk_outputschemajson` populated. Discovered as a blocker during Phase B smoke: the "File Summary" Action (`ddaa441e-9f19-f111-8343-7c1e520aa4df`) has an empty column; same likely true for other candidates.
+
+- [ ] **B5-1**. Query each candidate Action row via MCP `read_query` on `sprk_analysisaction`: `File Summary` (`ddaa441e-…`), `New Matter Field Extraction` (ACT-023, `89cc641a-df18-f111-8343-7c1e520aa4df`), `New Project Field Extraction` (ACT-024, `1e838114-7919-f111-8343-7ced8d1dc988`), Work Assignment prefill Action (TBD), Document Create Profile Action (TBD).
+- [ ] **B5-2**. Confirm each row has non-empty `sprk_systemprompt` (JPS or plain text) — record which format each uses.
+- [ ] **B5-3**. Populate `sprk_outputschemajson` on each row that's empty. Derive from the JPS `output.fields` if present; otherwise design from scratch to match the client-side DTO the endpoint returns.
+- [ ] **B5-4**. Verify each schema against Azure OpenAI Structured Outputs constraints: `type: "object"`, `additionalProperties: false`, all properties in `required` list, no `maxLength` / `minLength` / `format` keywords, `enum` values match the Choice-field labels (or downstream `DocumentTypeMapper` equivalent).
+- [ ] **B5-5**. Cross-check every AI-produced field name against the target Dataverse column max-length. Any field whose LLM output could exceed the column size must either (a) shrink the column, (b) shrink the LLM instruction, or (c) be derived deterministically in code (per the R7 W12 `sprk_filetype` decision — deterministic values NEVER come from the LLM).
+
+## Phase C — File Summary migration
+
+- [ ] **C0**. Prerequisite: Phase B.5 audit complete + File Summary Action row has `sprk_outputschemajson` populated.
 - [ ] **C1**. Trace current call site: `WorkspaceFileEndpoints.RunSummarizePlaybookAsSSEAsync` — note its SSE emission pattern.
 - [ ] **C2**. Add `FileSummarizeService.cs` — composes `IActionResolver` + `IDocumentTextSource` + `IActionRunner`. Emits SSE progress + final via an injected `SseEmitter` helper (extract from `WorkspaceFileEndpoints` shared helpers).
 - [ ] **C3**. Add `ConsumerTypes.SummarizeFile` if not present; verify routing row.

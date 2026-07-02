@@ -1,6 +1,7 @@
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
+using Microsoft.Xrm.Sdk;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Models.Ai;
@@ -113,33 +114,36 @@ public sealed class DocumentProfileService
             yield break;
         }
 
-        // Step 4: Build Dataverse field mapping using the existing DocumentProfileFieldMapper.
-        //         Convert JsonElement properties → string dict → sprk_* field dict.
-        var outputsAsStrings = ExtractOutputsAsStrings(aiOutput);
-        var parentName = parentEntity?.EntityName;
-        var parentType = parentEntity?.EntityType;
-        var fields = DocumentProfileFieldMapper.CreateFieldMapping(
-            outputsAsStrings,
-            parentEntityName: parentName,
-            parentEntityType: parentType,
-            fileName: docText.FileName);
-
-        // Choice-field coercion for sprk_documenttype (string label → int option value).
-        if (fields.TryGetValue("sprk_documenttype", out var docTypeRaw) && docTypeRaw is string docTypeLabel)
+        // Emit the summary text as a chunk so the client's summary display area
+        // renders the actual content (matches the engine path's streaming-tokens
+        // behavior). Prefer sprk_filesummary; fall back to sprk_filetldr.
+        if (TryGetStringProperty(aiOutput, "sprk_filesummary", out var summaryText)
+            || TryGetStringProperty(aiOutput, "sprk_filetldr", out summaryText))
         {
-            var optionValue = DocumentTypeMapper.ToDataverseValue(docTypeLabel);
-            if (optionValue.HasValue)
+            if (!string.IsNullOrWhiteSpace(summaryText))
             {
-                fields["sprk_documenttype"] = optionValue.Value;
-            }
-            else
-            {
-                _logger.LogWarning(
-                    "Could not coerce documentType='{DocType}' to a Dataverse Choice value; dropping the field",
-                    docTypeLabel);
-                fields.Remove("sprk_documenttype");
+                yield return AnalysisStreamChunk.TextChunk(summaryText);
             }
         }
+
+        // Step 4: Build Dataverse field mapping directly from the AI output.
+        //         The output schema uses sprk_* property names natively, so no
+        //         name-translation layer is needed — pass through with typed
+        //         Choice coercion for sprk_documenttype + a search profile.
+        var fields = BuildDataverseFields(aiOutput, docText.FileName, parentEntity);
+
+        // sprk_filetype is deterministic (comes from the file extension) — don't
+        // ask the LLM for it. Column is 10 chars; extension without leading dot,
+        // upper-cased, capped defensively.
+        var extension = Path.GetExtension(docText.FileName)?.TrimStart('.').ToUpperInvariant();
+        if (!string.IsNullOrWhiteSpace(extension))
+        {
+            fields["sprk_filetype"] = extension.Length > 10 ? extension[..10] : extension;
+        }
+
+        _logger.LogInformation(
+            "Document {DocumentId} profile — mapped {FieldCount} fields for update: {Fields}",
+            documentId, fields.Count, string.Join(",", fields.Keys));
 
         // Step 5: Persist via the SDK-based document service (no PATCH construction).
         yield return AnalysisStreamChunk.Progress("updating_record", "Updating document record…");
@@ -271,31 +275,123 @@ public sealed class DocumentProfileService
     }
 
     /// <summary>
-    /// Convert the structured-output JSON's top-level properties into a
-    /// <c>Dictionary&lt;string, string?&gt;</c> compatible with
-    /// <see cref="DocumentProfileFieldMapper.CreateFieldMapping"/>. Complex
-    /// values (arrays, objects) are serialized as their JSON representation
-    /// so the mapper's Entities branch (JSON validation) works as-is.
+    /// Case-insensitive top-level string property accessor for the AI structured
+    /// output. Returns false when the property is absent or not a string.
     /// </summary>
-    private static Dictionary<string, string?> ExtractOutputsAsStrings(JsonElement root)
+    private static bool TryGetStringProperty(JsonElement root, string propertyName, out string? value)
     {
-        var result = new Dictionary<string, string?>(StringComparer.OrdinalIgnoreCase);
-        if (root.ValueKind != JsonValueKind.Object) return result;
+        value = null;
+        if (root.ValueKind != JsonValueKind.Object) return false;
 
         foreach (var prop in root.EnumerateObject())
         {
-            var value = prop.Value.ValueKind switch
+            if (prop.Name.Equals(propertyName, StringComparison.OrdinalIgnoreCase)
+                && prop.Value.ValueKind == JsonValueKind.String)
             {
-                JsonValueKind.String => prop.Value.GetString(),
-                JsonValueKind.Null => null,
-                JsonValueKind.True or JsonValueKind.False => prop.Value.GetBoolean().ToString(),
-                JsonValueKind.Number => prop.Value.GetRawText(),
-                JsonValueKind.Array or JsonValueKind.Object => prop.Value.GetRawText(),
-                _ => prop.Value.GetRawText(),
-            };
-            result[prop.Name] = value;
+                value = prop.Value.GetString();
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Directly maps the AI structured output (whose top-level property names
+    /// are the target sprk_document field names per the Action's
+    /// <c>sprk_outputschemajson</c>) into a Dataverse-ready field dictionary.
+    /// Special handling:
+    /// <list type="bullet">
+    /// <item><c>sprk_documenttype</c> — string label coerced to Choice option
+    /// value via <see cref="DocumentTypeMapper.ToDataverseValue"/>.</item>
+    /// <item><c>sprk_entities</c> — array/object values serialized to JSON.</item>
+    /// <item><c>sprk_searchprofile</c> — computed from the collected outputs
+    /// via <see cref="DocumentProfileFieldMapper.BuildSearchProfile"/>.</item>
+    /// </list>
+    /// Non-string, non-array, non-object properties (numbers, booleans, nulls)
+    /// are copied through as their string representation for logging safety;
+    /// consumer schemas today are string-typed so this branch is defensive.
+    /// </summary>
+    private Dictionary<string, object?> BuildDataverseFields(
+        JsonElement root,
+        string fileName,
+        ParentEntityContext? parentEntity)
+    {
+        var fields = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        if (root.ValueKind != JsonValueKind.Object) return fields;
+
+        // Sibling dict of stringified outputs used for BuildSearchProfile below.
+        var stringOutputs = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var prop in root.EnumerateObject())
+        {
+            var name = prop.Name;
+            var kind = prop.Value.ValueKind;
+
+            switch (kind)
+            {
+                case JsonValueKind.Null:
+                case JsonValueKind.Undefined:
+                    continue;
+
+                case JsonValueKind.String:
+                {
+                    var stringValue = prop.Value.GetString();
+                    if (string.IsNullOrWhiteSpace(stringValue)) continue;
+
+                    if (name.Equals("sprk_documenttype", StringComparison.OrdinalIgnoreCase))
+                    {
+                        var optionValue = DocumentTypeMapper.ToDataverseValue(stringValue);
+                        if (optionValue.HasValue)
+                        {
+                            // Dataverse SDK Choice/OptionSet attributes require OptionSetValue,
+                            // not a raw int. R5 Doc 06 Choice-field coercion pattern.
+                            fields[name] = new OptionSetValue(optionValue.Value);
+                            stringOutputs[name] = stringValue;
+                        }
+                        else
+                        {
+                            _logger.LogWarning(
+                                "Could not coerce documentType='{DocType}' to a Dataverse Choice value; dropping the field",
+                                stringValue);
+                        }
+                    }
+                    else
+                    {
+                        fields[name] = stringValue;
+                        stringOutputs[name] = stringValue;
+                    }
+                    break;
+                }
+
+                case JsonValueKind.Array:
+                case JsonValueKind.Object:
+                {
+                    var jsonBlob = prop.Value.GetRawText();
+                    fields[name] = jsonBlob;
+                    stringOutputs[name] = jsonBlob;
+                    break;
+                }
+
+                default:
+                {
+                    var raw = prop.Value.GetRawText();
+                    fields[name] = raw;
+                    stringOutputs[name] = raw;
+                    break;
+                }
+            }
         }
 
-        return result;
+        var searchProfile = DocumentProfileFieldMapper.BuildSearchProfile(
+            stringOutputs,
+            parentEntityName: parentEntity?.EntityName,
+            parentEntityType: parentEntity?.EntityType,
+            fileName: fileName);
+        if (!string.IsNullOrWhiteSpace(searchProfile))
+        {
+            fields["sprk_searchprofile"] = searchProfile;
+        }
+
+        return fields;
     }
 }

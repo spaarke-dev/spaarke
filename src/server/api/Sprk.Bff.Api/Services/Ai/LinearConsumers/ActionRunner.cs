@@ -1,5 +1,6 @@
 using System.Text.Json;
 using Microsoft.Extensions.Options;
+using Sprk.Bff.Api.Services.Ai.Schemas;
 
 namespace Sprk.Bff.Api.Services.Ai.LinearConsumers;
 
@@ -8,11 +9,20 @@ namespace Sprk.Bff.Api.Services.Ai.LinearConsumers;
 /// <see cref="IOpenAiClient.GetStructuredCompletionRawAsync"/>.
 /// </summary>
 /// <remarks>
+/// <para>
 /// Registered as Singleton — stateless, dependencies are Singleton-safe.
+/// </para>
+/// <para>
+/// Uses the same <see cref="PromptSchemaRenderer"/> the Playbook Engine's
+/// <c>AiCompletionNodeExecutor</c> uses so JPS-format Action prompts render
+/// identically on both paths (natural-language sections vs raw JSON-as-prompt).
+/// Plain-text prompts pass through unchanged.
+/// </para>
 /// </remarks>
 public sealed class ActionRunner : IActionRunner
 {
     private readonly IOpenAiClient _openAi;
+    private readonly PromptSchemaRenderer _promptRenderer;
     private readonly IOptions<LinearConsumersOptions> _options;
     private readonly ILogger<ActionRunner> _logger;
 
@@ -20,10 +30,12 @@ public sealed class ActionRunner : IActionRunner
 
     public ActionRunner(
         IOpenAiClient openAi,
+        PromptSchemaRenderer promptRenderer,
         IOptions<LinearConsumersOptions> options,
         ILogger<ActionRunner> logger)
     {
         _openAi = openAi;
+        _promptRenderer = promptRenderer;
         _options = options;
         _logger = logger;
     }
@@ -53,7 +65,7 @@ public sealed class ActionRunner : IActionRunner
                 $"DocumentText for {documentText.FileName} is empty; nothing to send to the LLM.");
         }
 
-        var prompt = BindPrompt(action.SystemPrompt, documentText);
+        var prompt = BuildPrompt(action.SystemPrompt, documentText);
         var jsonSchema = BinaryData.FromString(action.OutputSchemaJson);
         var schemaName = SanitizeSchemaName(action.Name);
         var temperature = (float?)action.Temperature;
@@ -79,17 +91,33 @@ public sealed class ActionRunner : IActionRunner
     }
 
     /// <summary>
-    /// Replace the single supported placeholder <c>{{document.extractedText}}</c>
-    /// with the extracted text. Kept intentionally simple — the linear path has
-    /// no template engine.
+    /// Build the prompt. Two paths:
+    /// 1. JPS (JSON Prompt Schema) — Action's SystemPrompt starts with a <c>{</c>
+    ///    and contains <c>$schema</c>: render via <see cref="PromptSchemaRenderer"/>
+    ///    (natural-language sections, embedded document text in the "## Input"
+    ///    section). Matches the Playbook Engine's AiCompletion executor behavior.
+    /// 2. Flat text — plain prompt: fall back to the simple single-placeholder
+    ///    <c>{{document.extractedText}}</c> substitution (or append the text after
+    ///    a "## Input" separator when no placeholder is present).
     /// </summary>
-    private static string BindPrompt(string systemPrompt, DocumentText documentText)
+    private string BuildPrompt(string systemPrompt, DocumentText documentText)
     {
+        var rendered = _promptRenderer.Render(
+            rawPrompt: systemPrompt,
+            skillContext: null,
+            knowledgeContext: null,
+            documentText: documentText.ExtractedText,
+            templateParameters: null,
+            downstreamNodes: null);
+
+        if (rendered.Format == PromptFormat.JsonPromptSchema && !string.IsNullOrWhiteSpace(rendered.PromptText))
+        {
+            return rendered.PromptText;
+        }
+
+        // Flat-text path — original single-placeholder substitution.
         if (!systemPrompt.Contains(PlaceholderExtractedText, StringComparison.Ordinal))
         {
-            // No placeholder in the Action's SystemPrompt — append the text after a
-            // separator. Preserves compat with Actions whose author expected an
-            // engine to append the extracted text as an input section.
             return systemPrompt +
                 "\n\n## Input\n\n" +
                 "Document: " + documentText.FileName + "\n\n" +
