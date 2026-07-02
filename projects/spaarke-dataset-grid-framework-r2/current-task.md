@@ -1,7 +1,7 @@
 # Current Task State — spaarke-dataset-grid-framework-r2
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-07-02 (by task-execute for task 020)
+> **Last Updated**: 2026-07-02 (by task 090 wrap-up)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
@@ -10,109 +10,53 @@
 
 | Field | Value |
 |---|---|
-| **Task** | 020 — FR-10 Scaffold new shared package for LegalWorkspace section registry |
-| **Step** | 8 of 8 (complete) |
-| **Status** | completed |
-| **Next Action** | Main session to update TASK-INDEX.md 020 → ✅ and commit; consider next parallel-safe Wave 9 task |
-| **Rigor Level** | FULL |
-| **Rigor Reason** | Creates NEW shared package (CLAUDE.md §11 justification gate); modifies build config; tags include frontend + shared-library + package-scaffolding |
+| **Task** | none — project code complete |
+| **Step** | Wrap-up complete; PR merge + deploy + regression pending |
+| **Status** | none |
+| **Next Action** | User merges PR [#537](https://github.com/spaarke-dev/spaarke/pull/537), deploys to spaarkedev1, runs browser regression per PR test plan. Then optionally `/repo-cleanup` + `/merge-to-master`. |
 
 ### Critical Context
 
-Task 020 scaffolds `src/client/shared/Spaarke.LegalWorkspace/` (npm: `@spaarke/legal-workspace`) as a proper package so SpaarkeAi can consume the LegalWorkspace section registry via a package boundary instead of a source alias. RE-EXPORT strategy chosen (documented in `notes/fr10-migration-strategy.md`) — task 021 populates `src/index.ts` with re-exports; task 022 flips SpaarkeAi's alias; source files stay under `src/solutions/LegalWorkspace/`.
+R2 project executed autonomously on 2026-07-02:
+- `/design-to-spec` produced spec.md with owner-clarified pageSize 100→25, Issue 12 Option B in scope, widthPreference 'full' on all 6 widgets
+- `/project-pipeline` scaffolded 21 POML tasks + PR #537 draft
+- 14 subagent dispatches across 11 waves completed all Phase 1/2/3 code + docs
+- 3 phased commits on `work/spaarke-dataset-grid-framework-r2`, all pushed
+- PR #537 updated with per-phase summaries + deferred concerns
+- Wrap-up (task 090) captured lessons-learned + finalized state files
 
-Package name matches SpaarkeAi's existing `@spaarke/legal-workspace` alias — no consumer rename needed.
-
----
-
-## Active Task (Full Details)
-
-| Field | Value |
-|---|---|
-| **Task ID** | 020 |
-| **Task File** | tasks/020-fr10-scaffold-shared-package.poml |
-| **Title** | FR-10: Scaffold new shared package for LegalWorkspace section registry |
-| **Phase** | 3: Shared Package Extraction + Documentation |
-| **Status** | in-progress |
-| **Started** | 2026-07-02 |
+`/test-diet` DEFERRED per user-authorized autonomous mode — PR body notes this; will run once PR merges + deploys succeed (per CLAUDE.md §7 wrap-up gate treated as post-merge in this specific autonomous flow).
 
 ---
 
-## Progress
+## Deferred / follow-on work
 
-### Knowledge Files Loaded
+See [`notes/defer-issues.md`](notes/defer-issues.md) for 8 filed items:
 
-- projects/spaarke-dataset-grid-framework-r2/CLAUDE.md
-- projects/spaarke-dataset-grid-framework-r2/tasks/020-fr10-scaffold-shared-package.poml
-- .claude/adr/ADR-012-shared-components.md
-- src/client/shared/CLAUDE.md
-- src/client/shared/Spaarke.DailyBriefing.Components/package.json (structural analogue)
-- src/client/shared/Spaarke.DailyBriefing.Components/tsconfig.json
-- src/client/shared/Spaarke.DailyBriefing.Components/src/index.ts
-- src/solutions/SpaarkeAi/vite.config.ts (existing @spaarke/legal-workspace alias)
-
-### Applicable ADRs
-
-- ADR-012 (Shared Component Library): SSOT rule — new package for domain-specific section registry follows same pattern as Spaarke.DailyBriefing.Components (per-domain shared lib, ADR-012 §"When to Add to Shared Library")
-- ADR-022 (React compat): peerDeps span React 16-19 for PCF compat safety (matches DailyBriefing template)
-- ADR-021 (Fluent v9): peer dep on @fluentui/react-components ^9.0.0
-
-### Constraints Loaded
-
-- CLAUDE.md §11 (Component Justification) — verified in POML `<justification>` block: existing = DailyBriefing (structural analogue, different domain, no overlap); extension = not viable (different domain, ADR-012 SSOT prohibits putting LegalWorkspace-specific code in @spaarke/ui-components); cost-of-doing-nothing = concrete (SpaarkeAi ← LegalWorkspace alias trap → dual-rebuild coordination burden + onboarding friction, documented in design.md § Issue 12).
-
-### Completed Steps
-
-- [x] Step 0.5: Determined rigor level (FULL) + declared
-- [x] Step 1: Loaded task POML + knowledge files
-- [x] Step 2: Updated current-task.md (this file)
-- [x] Step 4: Loaded knowledge files (DailyBriefing analogue, ADR-012, shared CLAUDE.md)
-- [x] Step 5: Reviewed ADR-012 concise constraints
-- [x] Step 8.1: Read DailyBriefing structure (package.json, tsconfig.json, index.ts)
-- [x] Step 8.2: Confirmed package name `@spaarke/legal-workspace` matches SpaarkeAi's existing alias
-- [x] Step 8.3-8.6: Created folder + package.json + tsconfig.json + src/index.ts
-- [x] Documented RE-EXPORT strategy in notes/fr10-migration-strategy.md
-- [x] Step 8.7: Verified build succeeds (`npm install` + `npm run build` = tsc --noEmit exit 0)
-- [x] Step 9: Verified acceptance criteria (folder exists, package.json fields correct, tsc compiles, no root workspace changes needed)
-- [x] Step 9.5: Quality gates — adr-check ✅ clean; code-review ✅ 0 critical, 0 warnings, 2 advisory suggestions
-- [x] Step 10: Updated task POML `<status>` to completed + added completion-notes block
-
-### Files Modified
-
-- projects/spaarke-dataset-grid-framework-r2/notes/fr10-migration-strategy.md (new — strategy decision)
-- projects/spaarke-dataset-grid-framework-r2/current-task.md (this file, updated)
-- src/client/shared/Spaarke.LegalWorkspace/package.json (new)
-- src/client/shared/Spaarke.LegalWorkspace/tsconfig.json (new)
-- src/client/shared/Spaarke.LegalWorkspace/src/index.ts (new, empty placeholder)
-
-### Decisions Made
-
-- **2026-07-02** — RE-EXPORT strategy chosen over MOVE for FR-10 (documented in `notes/fr10-migration-strategy.md`). Rationale: smaller blast radius per spec.md; preserves optionality for future LegalWorkspace retirement; matches R2 owner clarification.
-- **2026-07-02** — Package folder = `Spaarke.LegalWorkspace` (no `.Components` suffix — package exports registry factories + shell orchestration, not raw components, mirrors `Spaarke.Auth` precedent). npm name = `@spaarke/legal-workspace` (matches SpaarkeAi's existing alias — zero consumer rename).
-- **2026-07-02** — No root package.json workspaces update needed — root package.json has no `workspaces` array (packages are independent). Task 022 will handle vite.config.ts alias update; nothing at repo root to touch here.
+- **DEF-001** Wizard test runner setup (~1 hr)
+- **DEF-002** configId picker real Dataverse query (BFF endpoint or metadata extension, ~3 hr or ~1 day)
+- **DEF-003** availableViews TagPicker (~2 hr, follows DEF-002)
+- **DEF-004** Wire `warnOnWidthPreferenceViolations` into render pipeline (~15 min)
+- **DEF-005** Consumer factories consume `context.sectionInstance` overrides (~2-3 hr)
+- **ISS-001** Pre-existing App.tsx baseline type errors
+- **ISS-002** Pre-existing `sectionMetadataCatalog.test.ts` drift
+- **ISS-003** Vite standalone build peer-package dependency
 
 ---
 
-## Next Action
+## Recovery Instructions
 
-Verify build succeeds → run quality gates → mark task POML `<status>` completed.
+**If continuing R2 follow-on work:**
+1. Read this file for status
+2. Read [`notes/lessons-learned.md`](notes/lessons-learned.md) for context
+3. Read [`notes/defer-issues.md`](notes/defer-issues.md) for prioritized follow-ons
+4. Check PR [#537](https://github.com/spaarke-dev/spaarke/pull/537) for merge/deploy status
 
----
-
-## Session Notes
-
-### Current Session
-- Started: 2026-07-02
-- Focus: Task 020 — FR-10 scaffold new shared package
-
----
-
-## Quick Reference
-
-### Project Context
-- **Project**: `spaarke-dataset-grid-framework-r2`
-- **Branch**: `work/spaarke-dataset-grid-framework-r2`
+**If starting a new project:**
+1. `/design-to-spec` on the new design doc
+2. `/project-pipeline` on the new project folder
+3. See lessons-learned.md § "Recommendations for future projects"
 
 ---
 
-*This file is the primary source of truth for active work state. Keep it updated.*
+*This file is now archival — the active task pointer is `none`.*

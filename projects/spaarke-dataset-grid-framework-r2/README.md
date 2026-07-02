@@ -1,6 +1,8 @@
 # Spaarke DataGrid Framework — R2
 
-> **Status**: Ready for Implementation (spec + plan + tasks generated 2026-07-02)
+> **Status**: **Code Complete** (all 10 FRs implemented, 21 tasks executed, 3 phased commits on `work/spaarke-dataset-grid-framework-r2`, PR [#537](https://github.com/spaarke-dev/spaarke/pull/537) — pending merge + deploy + regression)
+> **Completed**: 2026-07-02 (single-day autonomous execution via `/design-to-spec` → `/project-pipeline` → 14 subagent task dispatches across 11 waves)
+> **Wrap-up notes**: [`notes/lessons-learned.md`](notes/lessons-learned.md), [`notes/defer-issues.md`](notes/defer-issues.md), [`notes/fr10-migration-strategy.md`](notes/fr10-migration-strategy.md)
 > **Predecessor**: [`spaarke-datagrid-framework-r1/`](../spaarke-datagrid-framework-r1/) (framework R1, shipped 2026-06)
 > **Discovery session**: 2026-07-01 (`ai-spaarke-ai-workspace-UI-r2` post-merge investigation)
 > **Related shipped work**: [`ai-spaarke-ai-workspace-UI-r2/`](../ai-spaarke-ai-workspace-UI-r2/) (Layout 1 unification — orthogonal to R2's sizing/configuration work)

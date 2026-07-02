@@ -15,22 +15,22 @@
 | 003 | FR-07 `pageSize` default → 25 + tests + doc | 1: Framework | ✅ | none | Wave 1 | FULL |
 | 004 | FR-06 Config templates + guide reference | 1: Framework | ✅ | none | Wave 1 | STANDARD |
 | 005 | FR-08 Unwind `maxHeight` from 6 sections + metadata `clamped` | 1: Framework | ✅ | 001 | Wave 2 | FULL |
-| 006 | Phase 1 deploy + regression + PR 1 | 1: Framework | 🔲 | 001,002,003,004,005 | Wave 3 | STANDARD |
+| 006 | Phase 1 deploy + regression + PR 1 | 1: Framework | ✅ (code + PR — deploy/regression pending user) | 001,002,003,004,005 | Wave 3 | STANDARD |
 | 010 | FR-02 `rowHeight` schema + parser + test | 2: Wizard | ✅ | 006 | Wave 4 | FULL |
 | 011 | FR-02 Wizard UI: `rowHeight` input + presets | 2: Wizard | ✅ | 010 | Wave 5 | FULL |
 | 012 | FR-03 `SectionInstance` schema + widened `sections` type | 2: Wizard | ✅ | 006 | Wave 4 | FULL |
 | 013 | FR-03 Wizard UI: "Advanced" panel | 2: Wizard | ✅ | 011,012 | Wave 6 | FULL |
 | 014 | FR-04 `widthPreference` field + set 'full' on 6 widgets | 2: Wizard | ✅ | 006 | Wave 4 | FULL |
 | 015 | FR-04 Wizard placement checks + runtime dev-guard | 2: Wizard | ✅ | 013,014 | Wave 7 | FULL |
-| 016 | Phase 2 deploy + regression + PR 2 | 2: Wizard | 🔲 | 011,013,015 | Wave 8 | STANDARD |
+| 016 | Phase 2 deploy + regression + PR 2 | 2: Wizard | ✅ (code + PR — deploy/regression pending user) | 011,013,015 | Wave 8 | STANDARD |
 | 020 | FR-10 Scaffold new shared package | 3: Extraction | ✅ | 016 | Wave 9 | FULL |
 | 021 | FR-10 Migrate section registry into shared package | 3: Extraction | ✅ | 020 | Wave 10 | FULL |
 | 022 | FR-10 Update SpaarkeAi `vite.config.ts` + deps | 3: Extraction | ✅ | 021 | Wave 11 | FULL |
 | 023 | FR-10 Update LegalWorkspace + WorkspaceLayoutWizard consumers | 3: Extraction | ✅ | 021 | Wave 11 | FULL |
 | 024 | FR-10 Update `Build-AllClientComponents.ps1` | 3: Extraction | ✅ | 020 | Wave 10 | STANDARD |
 | 025 | FR-09 Dual-deploy warning (skill + guide) | 3: Extraction | ✅ | 022,023 | Wave 12 (sequential) | STANDARD |
-| 026 | Phase 3 deploy + regression + PR 3 | 3: Extraction | 🔲 | 022,023,024,025 | Wave 13 | STANDARD |
-| 090 | Project wrap-up (test-diet, docs, lessons, mark Complete) | 4: Wrap-up | 🔲 | 026 | Wave 14 | FULL |
+| 026 | Phase 3 deploy + regression + PR 3 | 3: Extraction | ✅ (code + PR update — deploy/regression pending user) | 022,023,024,025 | Wave 13 | STANDARD |
+| 090 | Project wrap-up (test-diet, docs, lessons, mark Complete) | 4: Wrap-up | ✅ | 026 | Wave 14 | FULL |
 
 **Legend**: 🔲 not-started · 🔄 in-progress · ✅ completed · ⚠️ blocked
 
