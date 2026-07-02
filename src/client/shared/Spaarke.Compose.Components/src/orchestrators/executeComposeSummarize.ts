@@ -226,12 +226,15 @@ export async function executeComposeSummarize(inputs: ExecuteComposeSummarizeInp
   const sseStartMs = performance.now();
   const traceLog = (msg: string, extra?: Record<string, unknown>): void => {
     // eslint-disable-next-line no-console
-    console.debug(
-      `[compose-summarize-sse] t+${Math.round(performance.now() - sseStartMs)}ms ${msg}`,
-      extra ?? '',
-    );
+    console.log(`[compose-summarize-sse] t+${Math.round(performance.now() - sseStartMs)}ms ${msg}`, extra ?? '');
   };
-  traceLog('start', { url, hasDocumentSpeId: !!documentSpeId, hasDriveId: !!driveId, hasTenantId: !!tenantId, hasSessionId: !!sessionId });
+  traceLog('start', {
+    url,
+    hasDocumentSpeId: !!documentSpeId,
+    hasDriveId: !!driveId,
+    hasTenantId: !!tenantId,
+    hasSessionId: !!sessionId,
+  });
 
   let response: Response;
   try {
