@@ -31,8 +31,8 @@ Consolidates two overlapping cross-entity utility PCFs (RegardingResolver, Assoc
 - B1: Author the missing Field Mapping subsystem spec (profile schema, rules schema, sync-mode semantics, dirty-field protection, cascade endpoint contract, OOB-mapping mutual-exclusivity anti-pattern)
 - B2: Native MDA form for `sprk_fieldmappingprofile` authoring with `sprk_fieldmappingrules` editable subgrid
 - B3: "Push Updates to Related Records" ribbon button on parent forms (sequential multi-target push; reject-with-error for >500 children)
-- B3b: **Admin batch-cascade service** (deferred to follow-on project or expanded scope — see §Placement Justification)
-- B4: Retire hardcoded 8-entity list (`ENTITY_LOOKUP_CONFIGS`) in AssociationResolver; unify on `sprk_recordtype_ref`
+- B3b: **Admin batch-cascade service — DEFERRED to follow-on project `admin-cascade-batch-job-r1`** (owner decision 2026-07-02). R1's error message tells the user to contact their administrator; no BFF surface change in R1.
+- B4: Retire hardcoded 8-entity list (`ENTITY_LOOKUP_CONFIGS`) in AssociationResolver; unify on `sprk_recordtype_ref` (partially in place via `loadEntityConfigs()`; two residual call sites remain — see FR-B4-01)
 - B5: AssociationResolver writes `sprk_regardingrecordnumber` (free once C1 lands)
 - B6: OOB Dataverse mapping audit + report (report-only, no auto-delete)
 - B7: AssociationResolver v1.1.0 → v1.2.0
@@ -71,7 +71,7 @@ Consolidates two overlapping cross-entity utility PCFs (RegardingResolver, Assoc
 
 **Dataverse — Schema**
 - 10 entities gain `sprk_regardingrecordnumber` column (Project, Invoice, Event, Analysis, Organization, Contact, Document, WorkAssignment, Budget, Account)
-- `sprk_recordtype_ref.sprk_regardingrecordnumberfield` — already added 2026-07-01; populate values
+- `sprk_recordtype_ref.sprk_regardingrecordnumberfield` — column exists (2026-07-01); **currently populated ONLY for Matter** (owner confirmed 2026-07-02). This project populates it for the remaining 10 entities as a first-order deliverable (FR-A4-02).
 
 **Dataverse — Ribbon customizations**
 - "Push Updates to Related Records" ribbon button on Matter, Project, Invoice, and any other source-entity forms with active `sprk_fieldmappingprofile`
@@ -113,11 +113,23 @@ Consolidates two overlapping cross-entity utility PCFs (RegardingResolver, Assoc
 6. **FR-A4-01 (Data-driven resolution)**: `PolymorphicResolverService.applyResolverFields()` looks up `sprk_recordtype_ref` for the selected entity, reads `sprk_regardingrecordnumberfield`, queries the target record for that field's value, and writes it to host's `sprk_regardingrecordnumber`.
    - Acceptance: Selecting any of the 11 entities writes the correct record-number value to host; no hardcoded field-name map exists in code.
 
+6a. **FR-A4-02 (Populate `sprk_regardingrecordnumberfield` metadata for the 10 non-Matter entities)**: The `sprk_recordtype_ref.sprk_regardingrecordnumberfield` column already exists (2026-07-01) but is populated ONLY for the Matter row. This project populates it for the remaining 10 rows: Project → `sprk_projectnumber`, Invoice → `sprk_invoicenumber`, Event → `sprk_eventnumber`, Analysis → `sprk_analysisnumber`, Organization → `sprk_organizationnumber`, Contact → (owner-designated business-key text field, e.g., `contactid`-derived or a new number column — Wave 0 confirms), Document → `sprk_documentnumber`, WorkAssignment → `sprk_workassignmentnumber`, Budget → `sprk_budgetnumber`, Account → (owner-designated, e.g., `accountnumber`).
+   - Acceptance: Web API query `sprk_recordtype_refs?$select=sprk_name,sprk_regardingrecordnumberfield` returns non-null values for all 11 rows; each named field EXISTS on its target entity's metadata (verified via `EntityDefinitions('X')/Attributes`).
+   - Owner clarification: Confirmed 2026-07-02 (only Matter is populated; create for other entities as project deliverable).
+
 7. **FR-A5-01 (Read-only mode)**: In read-only mode, RegardingResolver renders row 2 only (no toolbar icon on row 1, or row 1 hidden).
    - Acceptance: `readOnly` control property confirmed via manifest; UI reflects state.
 
 8. **FR-A5-02 (CREATE-mode presave bridge)**: `window.__sprk_regarding_pending__` + `sprk_todo_regarding_presave.js` continue to stage regarding writes prior to first save, now including `sprk_regardingrecordnumber` alongside the existing 4 fields.
    - Acceptance: Create-then-save flow on `sprk_todo` persists all 5 fields correctly; verified in UAT.
+
+8a. **FR-A5-04 (Presave targeted update — explicit)**: Wave 0 investigation confirmed [`sprk_todo_regarding_presave.js`](../../src/client/webresources/js/sprk_todo_regarding_presave.js) uses an EXPLICIT enumerated `TEXT_FIELDS = ["sprk_regardingrecordid", "sprk_regardingrecordname", "sprk_regardingrecordurl"]` array plus a `textKeyForField()` switch statement — NOT generic iteration over the pending payload. Adding `sprk_regardingrecordnumber` requires explicit updates:
+   1. Append `"sprk_regardingrecordnumber"` to `TEXT_FIELDS` (line ~103).
+   2. Add a case to `textKeyForField()` mapping `"sprk_regardingrecordnumber"` → `"recordNumber"` (line ~258).
+   3. Update the docstring contract for `window.__sprk_regarding_pending__` (lines 37-46) to include a `recordNumber: string` key.
+   4. RegardingResolver PCF must populate `pending.recordNumber` alongside the existing keys when calling the shared write path.
+   5. Bump presave webresource `VERSION` v1.1.0 → v1.2.0.
+   - Acceptance: `TEXT_FIELDS.length === 4`; new CREATE-mode `sprk_todo` record persists `sprk_regardingrecordnumber` on the INSERT transaction (verified by Web API query on freshly-created record).
 
 9. **FR-A5-03 (URL field preserved)**: `PolymorphicResolverService` continues to populate `sprk_regardingrecordurl`; only visual rendering changes (URL not shown in streamlined layout).
    - Acceptance: Host record's URL field still populated post-selection; validated via Web API query.
@@ -131,7 +143,14 @@ Consolidates two overlapping cross-entity utility PCFs (RegardingResolver, Assoc
     - Acceptance: Maker can create a Matter → Event profile end-to-end via form alone; rules can be added, edited, deleted, reordered.
 
 12. **FR-B3-01 (Ribbon button — "Push Updates to Related Records")**: Ribbon button visible on parent forms of any entity that is a source in at least one active `sprk_fieldmappingprofile`. Visibility rule queries `GET /profiles?sourceEntity=X` at ribbon-load; button hidden if no profiles.
-    - Acceptance: Ribbon appears on Matter form (given active Matter→Event profile); hidden on Contact form (no active source profile).
+    - **Canonical implementation reference**: [`infrastructure/dataverse/ribbon/CommunicationRibbons/Entities/sprk_communication/RibbonDiff.xml`](../../infrastructure/dataverse/ribbon/CommunicationRibbons/Entities/sprk_communication/RibbonDiff.xml) — the Communication "Send" button. Structure to mirror:
+      - `<CustomAction Location="Mscrm.Form.{entity}.MainTab.Actions.Controls._children">` for the form command bar
+      - `<CommandDefinition>` with `<EnableRule>` referencing a `<CustomRule Library="$webresource:sprk_fieldmapping_push" FunctionName="Sprk.FieldMapping.Push.hasSourceProfile">` — the visibility-check JS call
+      - `<Actions><JavaScriptFunction Library="$webresource:sprk_fieldmapping_push" FunctionName="Sprk.FieldMapping.Push.pushUpdates">` with `<CrmParameter Value="PrimaryControl" />` — the action JS call
+      - `<LocLabels>` for button text, tooltip, alt-text
+    - **Deploy path**: use `/ribbon-edit` skill (owner confirmation 2026-07-02) to export the source solution, edit the `RibbonDiff.xml`, and re-import. New web resource `sprk_fieldmapping_push.js` deploys via `dataverse-deploy` alongside the ribbon.
+    - Acceptance: Ribbon appears on Matter form (given active Matter→Event profile); hidden on Contact form (no active source profile); `/ribbon-edit` skill used for deploy round-trip.
+    - Owner clarification: Confirmed 2026-07-02 (investigate + use existing pattern; ensure `/ribbon-edit`).
 
 13. **FR-B3-02 (Confirm dialog)**: Clicking the ribbon button shows a confirmation dialog: "This will push field-mapping updates from this record to related child records. Continue?"
     - Acceptance: Dialog appears with Continue/Cancel; Cancel aborts silently.
@@ -141,14 +160,19 @@ Consolidates two overlapping cross-entity utility PCFs (RegardingResolver, Assoc
     - Owner clarification: Confirmed 2026-07-02 (option b — push all sequentially).
 
 15. **FR-B3-04 (>500-child guard — reject with error)**: If the `/push` endpoint returns an over-limit error (parent has >500 children for a target), the ribbon button shows: "Too many related records to push interactively (X > 500). Contact your administrator to run the batch cascade job."
-    - Acceptance: >500-child parent shows the specific message and does not partially update; message references the admin batch service (see FR-B3b-01).
-    - Owner clarification: Confirmed 2026-07-02 (reject-with-error + admin batch service is the sanctioned path).
+    - Acceptance: >500-child parent shows the specific message and does not partially update; toast wording verbatim as above; no reference to "future" — administrator is presented as the action path.
+    - Owner clarification: Confirmed 2026-07-02 (reject-with-error + admin batch service handled as follow-on project).
 
-16. **FR-B3b-01 (Admin batch-cascade service — scope note)**: An admin-invocable batch service that can execute cascades for parents with >500 children is required to complete the story. This service's implementation is **flagged for scope decision** (see §Placement Justification and §Unresolved Questions Q-01) — it may ship in R1 as a follow-on workstream or be split into `admin-cascade-batch-job-r1`.
-    - Acceptance: Scope decision recorded in `TASK-INDEX.md` before Wave planning begins; if in-R1, admin CLI or Foundry-agent trigger produces same field-update outcome as `/push`.
+16. **FR-B3b-01 (Admin batch-cascade service — OUT OF SCOPE for R1)**: Deferred to follow-on project **`admin-cascade-batch-job-r1`** (owner decision 2026-07-02). R1 delivers the interactive ribbon button (FR-B3-01..04) only. The `/push` endpoint's 500-child limit remains the interactive cap; anything above requires the follow-on service.
+    - Acceptance: R1 wrap-up delivers a stub Idea Issue for `admin-cascade-batch-job-r1` (via `/devops-idea-create`) so the story is tracked; R1's hot-path declaration stays `<bff>N</bff>` and `bff-extensions.md` decision criteria are NOT triggered by this project.
 
-17. **FR-B4-01 (Retire hardcoded entity list)**: `ENTITY_LOOKUP_CONFIGS` constant in `AssociationResolver/handlers/RecordSelectionHandler.ts` deleted. Entity metadata sourced at runtime from `sprk_recordtype_ref`.
-    - Acceptance: `grep -R ENTITY_LOOKUP_CONFIGS src/client/pcf/AssociationResolver` returns zero hits; AssociationResolver supports all 11 entities the RegardingResolver supports.
+17. **FR-B4-01 (Retire hardcoded entity list — complete the transition)**: Wave 0 investigation confirmed the retirement is **partially complete**: `loadEntityConfigs()` (line ~191) already queries `sprk_recordtype_ref` dynamically and populates `dynamicEntityConfigs`. The hardcoded `ENTITY_LOOKUP_CONFIGS: EntityLookupConfig[]` array remains only as a fallback and is referenced directly by two functions:
+   - `getEntityConfig(logicalName)` (line ~527) → transition to consult `dynamicEntityConfigs` first (mirror `getEntityConfigs()`'s pattern), fall back to hardcoded ONLY if `dynamicEntityConfigs` has not loaded.
+   - `getAllEntityConfigs()` (line ~534) → same transition.
+
+   Then delete the `ENTITY_LOOKUP_CONFIGS` const array once the two functions are transitioned. The `EntityLookupConfig` INTERFACE (line ~37) is retained; it is imported by `AssociationResolverApp.tsx:44` as the shape type. Extend the interface with `regardingRecordNumberField?: string` to carry the new data-driven field (FR-A4-01/02).
+   - Acceptance: `grep -RE "ENTITY_LOOKUP_CONFIGS\b" src/client/pcf/AssociationResolver` returns zero hits (const array deleted); `EntityLookupConfig` interface still exported; `AssociationResolverApp.tsx` compiles; AssociationResolver supports all 11 entities the RegardingResolver supports.
+   - Owner clarification: Confirmed 2026-07-02 (investigate and fix if conflicts found). Wave 0 investigation found NO external wizard/form consumers of the const — only internal handler references. Fix is scoped to two internal call sites + one interface extension.
 
 18. **FR-B5-01 (Regarding-record-number write)**: AssociationResolver writes `sprk_regardingrecordnumber` on selection (free once C1 lands; explicit write otherwise).
     - Acceptance: Selecting a target via AssociationResolver persists all 5 regarding fields identically to RegardingResolver.
@@ -218,15 +242,13 @@ Consolidates two overlapping cross-entity utility PCFs (RegardingResolver, Assoc
 
 This project's ONLY BFF touch is **consumption of existing `/api/v1/field-mappings/*` endpoints** from a new ribbon-button client caller. No new BFF services, DI registrations, NuGet packages, or endpoints are added — hence the `<bff>N</bff>` declaration in §Hot-Path Declaration.
 
-**Open placement decision** — the admin batch-cascade service (FR-B3b-01) may or may not fit in this project's scope:
+**Admin batch-cascade service** (FR-B3b-01) → **deferred to follow-on `admin-cascade-batch-job-r1`** (owner decision 2026-07-02). Rationale:
 
-| Option | Placement | Scope impact | Hot-path impact |
-|---|---|---|---|
-| **In R1 — as BFF endpoint** | New `/api/v1/field-mappings/batch-cascade` (admin-only auth) | Adds ~2-3 tasks; flips `<bff>` to Y; triggers full `bff-extensions.md` checklist | Y |
-| **In R1 — as Foundry-agent trigger** | New Foundry workflow with admin-only entry | Adds ~2-3 tasks; hot-path SpaarkeAi possible depending on wiring | Partial |
-| **Follow-on — `admin-cascade-batch-job-r1`** | Separate worktree; this project's FR-B3-04 error message points at "future admin service" | R1 scope unchanged; admin story remains theoretical until follow-on | N (this project) |
+- R1 already carries 3 workstreams + a schema change + a shared-component extraction + a ribbon-button + an audit + a metadata-catalog data-entry deliverable. Adding a new BFF surface (or Foundry-agent workflow) late is exactly the scope-drift `bff-extensions.md` was written to prevent.
+- The follow-on project has a clean placement decision matrix of its own (BFF endpoint vs Foundry-agent vs admin CLI) and can be sized in isolation.
+- R1's FR-B3-04 error message directs the user to "contact your administrator to run the batch cascade job" — the admin's action path is a human handoff for R1; the follow-on adds the tooling.
 
-**Recommendation for spec-review**: Follow-on. R1 already carries 3 workstreams + a schema change + a shared-component extraction + a ribbon-button + an audit. Adding a new BFF surface late is exactly the drift §10 was written to prevent. Owner should confirm before Wave 0.
+Wrap-up deliverable: R1 opens an Idea Issue for `admin-cascade-batch-job-r1` via `/devops-idea-create` so the story survives R1 close-out.
 
 ---
 
@@ -283,8 +305,10 @@ This project's ONLY BFF touch is **consumption of existing `/api/v1/field-mappin
 7. [ ] OOB-mapping audit report delivered in `projects/set-regarding-and-field-mapping-resolver-r1/notes/oob-mapping-audit.md` — Verify: file exists; enumerates all overlaps or explicitly states "none found."
 8. [ ] Field Mapping subsystem spec (Appendix A of this document) merged; stale inline reference in `FieldMappingHandler.ts:10` updated — Verify: cross-link exists; `grep -R "spec.md Field Mapping Framework section"` returns updated reference.
 9. [ ] ADR-024's "Fields written" section updated to reflect 5-field write set — Verify: git diff on `docs/adr/ADR-024-*` shows the extension.
-10. [ ] FR-B3b-01 scope decision recorded — Verify: `TASK-INDEX.md` or `README.md` states whether admin batch service ships in R1 or as follow-on.
-11. [ ] `/test-diet` run at project close per CLAUDE.md §7 — Verify: `notes/test-diet-report.md` exists.
+10. [ ] Follow-on Idea Issue `admin-cascade-batch-job-r1` opened via `/devops-idea-create` at R1 wrap-up — Verify: GitHub Issue exists with `type=Idea` label, references FR-B3b-01 as the source, blocked-until-scoped.
+11. [ ] `sprk_recordtype_ref.sprk_regardingrecordnumberfield` populated for all 11 entities (FR-A4-02) — Verify: `sprk_recordtype_refs?$select=sprk_name,sprk_regardingrecordnumberfield` returns non-null for all rows (or explicitly documented graceful-blank for Contact/Account per A-07).
+12. [ ] Presave webresource v1.2.0 deployed with `sprk_regardingrecordnumber` in `TEXT_FIELDS` (FR-A5-04) — Verify: source file diff shows all 5 fields; freshly-created `sprk_todo` on CREATE-mode form persists all 5 regarding fields.
+13. [ ] `/test-diet` run at project close per CLAUDE.md §7 — Verify: `notes/test-diet-report.md` exists.
 
 ---
 
@@ -306,14 +330,26 @@ This project's ONLY BFF touch is **consumption of existing `/api/v1/field-mappin
 
 ## Owner Clarifications
 
-Answers captured during design-to-spec interview 2026-07-02:
+Answers captured during design-to-spec interview 2026-07-02 (initial) + spec-review Q&A 2026-07-02 (second pass):
+
+**Initial interview (from `design.md` §9):**
 
 | Topic | Question | Answer | Impact |
 |---|---|---|---|
 | B3 multi-target UX | When a parent's entity type is source in multiple profiles, how should the button behave? | **Push all targets sequentially** with combined progress report. | FR-B3-03: no target picker; toast aggregates counts across N target entities. |
-| B3 >500 children | What happens when parent has >500 children? | **Reject with clear error; set up an admin service that can do as a batch job.** | FR-B3-04: interactive reject with specific error message. FR-B3b-01: admin batch-cascade service added to scope with placement-decision flag (§Placement Justification). |
+| B3 >500 children | What happens when parent has >500 children? | **Reject with clear error; set up an admin service that can do as a batch job.** | FR-B3-04: interactive reject with specific error message. FR-B3b-01: admin batch service handled as follow-on project (see next section). |
 | C1 FieldMappingHandler location | Should FieldMappingHandler also move to `@spaarke/ui-components`? | **Yes — move to shared lib for symmetry.** | FR-C1b-01 added; AssociationResolver imports from `@spaarke/ui-components`. |
 | A1 field binding | Should the two bound fields be hardcoded or manifest properties? | **Manifest properties with sensible defaults.** | FR-A1-02: manifest properties confirmed; defaults match current known hosts. |
+
+**Second-pass spec-review Q&A (was §Unresolved Questions Q-01..Q-05):**
+
+| Topic | Question | Answer | Impact |
+|---|---|---|---|
+| Q-01 Admin batch-cascade scope | Ship admin batch service in R1 or as follow-on? | **Batch is future project.** | FR-B3b-01 rewritten as "OUT OF SCOPE for R1"; deferred to `admin-cascade-batch-job-r1`. R1 wrap-up opens the Idea Issue. Hot-path `<bff>N</bff>` confirmed. |
+| Q-02 Presave field enumeration | Does `sprk_todo_regarding_presave.js` iterate `window.__sprk_regarding_pending__` generically, or enumerate fields explicitly? | **Investigation confirmed: EXPLICIT enumeration** (`TEXT_FIELDS = [3 fields]` + `textKeyForField()` switch). Recommendation: targeted update — append `sprk_regardingrecordnumber` to `TEXT_FIELDS`, add case to `textKeyForField()`, extend pending-payload docstring, bump v1.1.0 → v1.2.0. | FR-A5-04 added with the explicit 5-step update. Presave webresource bumps version. Docstring contract extended. |
+| Q-03 `ENTITY_LOOKUP_CONFIGS` consumers | Does retiring the hardcoded 8-entity list break wizards/forms? | **Investigation confirmed: NO external consumers.** `loadEntityConfigs()` already dynamically loads from `sprk_recordtype_ref` and populates `dynamicEntityConfigs`. Only two internal call sites (`getEntityConfig`, `getAllEntityConfigs`) still reference the const directly. `EntityLookupConfig` interface is imported by `AssociationResolverApp.tsx` (line 44) and stays. | FR-B4-01 rewritten to focus on transitioning two internal call sites + extending the interface with `regardingRecordNumberField?: string`. Const array deletion is the endpoint. |
+| Q-04 Ribbon-button canonical pattern | Which existing Spaarke ribbon is the reference? | **[`CommunicationRibbons/.../sprk_communication/RibbonDiff.xml`](../../infrastructure/dataverse/ribbon/CommunicationRibbons/Entities/sprk_communication/RibbonDiff.xml)** — the Send button. Uses `Mscrm.Form.{entity}.MainTab.Actions.Controls._children` location, `CustomAction` + `CommandDefinition` + `EnableRule` (`<CustomRule Library="$webresource:...">`) + `LocLabels`. Owner confirmed use `/ribbon-edit` skill for deploy. | FR-B3-01 extended with canonical reference + deploy path (`/ribbon-edit`); Wave B ribbon-authoring task specifies mirroring the Send-button structure. |
+| Q-05 `sprk_regardingrecordnumberfield` catalog population | Is the catalog field populated for all 11 entities? | **Only Matter is populated (owner confirmed 2026-07-02). Create for the other 10 entities as project deliverable.** | FR-A4-02 added — populate the metadata for Project, Invoice, Event, Analysis, Organization, Contact, Document, WorkAssignment, Budget, Account. Wave 0 confirms specific target-field names for Contact + Account (which may need a new column or existing business-key). |
 
 ---
 
@@ -322,23 +358,23 @@ Answers captured during design-to-spec interview 2026-07-02:
 Proceeding with these assumptions (owner did not specify or design.md left implicit):
 
 - **A-01 (Ribbon-button scope entities)**: Ribbon button ships on Matter first (highest priority); other parent forms (Project, Invoice, etc.) get the button only where an active `sprk_fieldmappingprofile` names them as source. Wave 0 audit determines the initial set.
-- **A-02 (Presave handler symmetry)**: Q4 in design.md §9 (does `sprk_todo_regarding_presave.js` need explicit writes to `sprk_regardingrecordnumber`?) is treated as a code-check task, NOT a design decision. Assuming existing "pending-fields" iteration in presave handles the new field uniformly; explicit update task added if grep proves otherwise.
+- **A-02 (Presave targeted update)**: **RESOLVED — no longer an assumption.** Wave 0 investigation confirmed explicit-enumeration model; FR-A5-04 defines the exact 5-step update. See Owner Clarifications Q-02.
 - **A-03 (Sync-mode set frozen)**: `{ OneTime, ManualRefresh }` is the entire supported set for R1 per design §9 Q6. Any new mode is a follow-on project.
 - **A-04 (Audit-script location)**: Per design §9 Q8 recommendation, audit script lives at `projects/set-regarding-and-field-mapping-resolver-r1/scripts/` — project-ephemeral, not repo-permanent.
 - **A-05 (One shared-lib release)**: All shared-lib changes (`PolymorphicResolverService` extension, `PolymorphicPicker` addition, `FieldMappingHandler` relocation) ship in ONE `@spaarke/ui-components` minor release, not three. Reduces client-consumer coordination.
 - **A-06 (`sprk_regardingrecordurl` unchanged in payload)**: `PolymorphicResolverService` continues to compute + write the URL exactly as today (5-field-write becomes 5+1 including URL; the "5" in this spec refers to number + name + type + regarding-lookup + regardingrecordnumber; URL is the 6th unchanged).
+- **A-07 (Contact + Account record-number source field)**: Wave 0 confirms the target-field name for these two OOB entities. If no natural business-key text field exists, a new column MAY be introduced (folded into FR-A3-01's schema-addition scope for symmetry) OR the layout gracefully renders the number cell blank for these entities (per NFR-06 warn-and-continue rule). Recommendation: prefer graceful-blank over ad-hoc new column on OOB entities unless owner confirms.
 
 ---
 
 ## Unresolved Questions
 
-Still need answers before Wave planning; may block specific Waves rather than the whole project:
+All initial spec-review questions (Q-01..Q-05) resolved 2026-07-02 — see §Owner Clarifications (second-pass section).
 
-- [ ] **Q-01**: FR-B3b-01 scope decision — does the admin batch-cascade service ship in R1, or as follow-on `admin-cascade-batch-job-r1`? Blocks: FR-B3-04 error-message wording (reference to "future" vs. "administrator") and hot-path declaration (`<bff>` flips to Y if in-R1 as BFF endpoint).
-- [ ] **Q-02**: FR-A5-02 presave verification — does `sprk_todo_regarding_presave.js` iterate `window.__sprk_regarding_pending__` generically, or does it enumerate the current 4 fields explicitly? Blocks: Wave A code-check task; explicit update task added if enumerated.
-- [ ] **Q-03**: FR-B4-01 downstream consumer impact — does retiring `ENTITY_LOOKUP_CONFIGS` break any existing wizards or forms that rely on its ordering or filter? Blocks: Wave B refactor; grep-and-check task at Wave 0.
-- [ ] **Q-04**: Ribbon-button canonical pattern — which existing Spaarke ribbon-button-with-visibility-rule is the reference implementation for FR-B3-01? Blocks: Wave B ribbon-authoring; Wave 0 discovery task.
-- [ ] **Q-05**: `sprk_recordtype_ref.sprk_regardingrecordnumberfield` population state — is this field populated for all 11 entities today, or does data-entry belong in this project's scope? Blocks: FR-A4-01 (data-driven resolution) requires populated values; if empty, add data-entry task.
+Residual items for Wave 0 discovery (small; do not block spec sign-off):
+
+- [ ] **Q-06 (from A-07)**: Confirm target-field name for Contact and Account entries in `sprk_recordtype_ref.sprk_regardingrecordnumberfield`. If no natural business-key exists, decide: graceful-blank (recommended) vs new column. Wave 0 task.
+- [ ] **Q-07 (from FR-B3-01)**: Confirm which parent-entity forms carry the new ribbon button beyond Matter (per A-01 auditing profiles). Wave 0 task; drives ribbon-edit deploy scope.
 
 ---
 

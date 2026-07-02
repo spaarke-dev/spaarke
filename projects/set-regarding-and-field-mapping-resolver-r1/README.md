@@ -40,10 +40,12 @@ ADR-006 (PCF over Webresources) · ADR-012 (Shared Component Library) · ADR-022
 </hot-path-declaration>
 ```
 
-BFF=N pending resolution of FR-B3b-01 (admin batch-cascade service) — see [`spec.md § Placement Justification`](./spec.md#placement-justification-per-claudemd-10--bff-hygiene). Flips to Y if that service ships as a BFF endpoint in R1.
+BFF=N is CONFIRMED (owner resolution 2026-07-02): admin batch-cascade service deferred to follow-on `admin-cascade-batch-job-r1`. R1 only consumes existing BFF endpoints via a new ribbon-button client caller.
 
 ## Next Steps
 
-1. Resolve **Q-01** (admin batch-cascade service scope: in-R1 or follow-on)
-2. Run `/project-pipeline projects/set-regarding-and-field-mapping-resolver-r1` to generate `plan.md` + task decomposition
-3. Set projected Target Date via GitHub Project #2 UI once WBS gives effort estimate
+1. ~~Resolve Q-01 (admin batch-cascade scope)~~ — RESOLVED 2026-07-02: deferred to follow-on `admin-cascade-batch-job-r1`.
+2. ~~Q-02..Q-05~~ — RESOLVED 2026-07-02 (see [`spec.md § Owner Clarifications`](./spec.md#owner-clarifications), second-pass table).
+3. Run `/project-pipeline projects/set-regarding-and-field-mapping-resolver-r1` to generate `plan.md` + task decomposition.
+4. Set projected Target Date via GitHub Project #2 UI once WBS gives effort estimate.
+5. At R1 wrap-up: run `/devops-idea-create` for `admin-cascade-batch-job-r1` to preserve the story.
