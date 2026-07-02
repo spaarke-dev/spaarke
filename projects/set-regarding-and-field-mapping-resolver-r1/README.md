@@ -2,7 +2,7 @@
 
 > **Portfolio**: [Project #536](https://github.com/spaarke-dev/spaarke/issues/536) · Epic [#535 ENTITY FUNCTIONALITY](https://github.com/spaarke-dev/spaarke/issues/535) · [Board](https://github.com/users/spaarke-dev/projects/2) · Type: **Tools & Utilities**
 >
-> **Status**: In Progress · **Worktree**: `C:/code_files/spaarke-wt-set-regarding-and-field-mapping-resolver-r1` · **Branch**: `work/set-regarding-and-field-mapping-resolver-r1` · **Start Date**: 2026-07-02
+> **Status**: In Progress · **Worktree**: `C:/code_files/spaarke-wt-set-regarding-and-field-mapping-resolver-r1` · **Branch**: `work/set-regarding-and-field-mapping-resolver-r1` · **Start Date**: 2026-07-02 · **Target Date**: 2026-07-31 (aggressive, 4-week)
 
 ## Summary
 
