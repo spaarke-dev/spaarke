@@ -1,6 +1,7 @@
 # AI SpaarkeAi Workspace UI — R2
 
-> **Status**: **Complete pending PR #530 merge** (all 13 phase tasks + wrap-up task 090 executed 2026-07-01)
+> **Portfolio**: [Issue #532](https://github.com/spaarke-dev/spaarke/issues/532) · Parent Epic [#430 Insights/Widgets/Search](https://github.com/spaarke-dev/spaarke/issues/430) · [Portfolio Board](https://github.com/users/spaarke-dev/projects/2)
+> **Status**: **Complete** (PR #530 + PR #531 merged; both PRs shipped 2026-07-01/02; project registered on portfolio 2026-07-02 via backfill)
 > **Branch**: `work/ai-spaarke-ai-workspace-UI-r2`
 > **Worktree**: `C:\code_files\spaarke-wt-ai-spaarke-ai-workspace-UI-r2`
 > **Owner**: Ralph Schroeder
