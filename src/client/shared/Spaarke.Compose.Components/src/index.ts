@@ -29,7 +29,7 @@ export type { ComposeFormatToolbarProps } from './widgets/ComposeFormatToolbar';
 export { ComposeWorkspace } from './widgets/ComposeWorkspace';
 export type { ComposeWorkspaceProps } from './widgets/ComposeWorkspace';
 export { ComposeToolbar } from './widgets/ComposeToolbar';
-export type { ComposeToolbarProps, ComposeSummarizeRequestEvent } from './widgets/ComposeToolbar';
+export type { ComposeToolbarProps } from './widgets/ComposeToolbar';
 export { ComposeBannerStack } from './widgets/ComposeBannerStack';
 export type { ComposeBannerStackProps } from './widgets/ComposeBannerStack';
 export { ComposeEmptyState } from './widgets/ComposeEmptyState';
@@ -93,13 +93,3 @@ export type {
 export { docxToTipTapHtml, tipTapToDocxBytes } from './utils/docxBridge';
 export type { MammothConversionResult } from './utils/docxBridge';
 
-// -------------------------------------------------------------------------
-// SSE orchestrators (Phase 9 task 098 — Assistant-pane streaming)
-//
-// `executeComposeSummarize` consumes the `POST /api/compose/action/
-// compose-summarize` SSE endpoint (task 097 backend) and forwards
-// progress / result / error events through caller-supplied callbacks.
-// Consumed by ConversationPane in SpaarkeAi (Path A + embedded modes).
-// -------------------------------------------------------------------------
-export { executeComposeSummarize } from './orchestrators/executeComposeSummarize';
-export type { ExecuteComposeSummarizeInputs, ComposeSummarizeResult } from './orchestrators/executeComposeSummarize';
