@@ -8,7 +8,7 @@
 ---
 
 <hot-path-declaration>
-BFF: N — no changes to `src/server/api/Sprk.Bff.Api/` or its consumed shared libs.
+BFF: Y — DEF-002 follow-on (post-wrap-up 2026-07-02) adds `GET /api/dataverse/gridconfigurations/{entityLogicalName}` endpoint + `GridConfigurationService` + `GridConfigurationSummaryDto` + DI extension + `MapGridConfigurationEndpoints` wiring in `Program.cs`. Reuses existing `DataverseAuthorizationFilter` (no new auth surface). DEF-003 reuses the pre-existing `GET /api/dataverse/savedqueries/{entityLogicalName}` endpoint — no BFF addition. Compressed publish-size delta expected <0.1 MB (one small service + DTO + endpoint class).
 SpaarkeAi: Y — FR-08 rebuild reaches SpaarkeAi via shared-lib update; FR-10 (Issue 12 Option B) restructures how `@spaarke/legal-workspace` is consumed by SpaarkeAi's Vite build.
 ci-workflows: N — no changes to `.github/workflows/**`.
 skill-directives: Y — FR-09 (Issue 12 Option A) adds a dual-deploy warning to the `code-page-deploy` skill.

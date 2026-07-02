@@ -19,6 +19,7 @@ import {
   AccordionPanel,
   Button,
   Checkbox,
+  Combobox,
   Dialog,
   DialogActions,
   DialogBody,
@@ -31,6 +32,7 @@ import {
   Label,
   Option,
   SpinButton,
+  Spinner,
   Text,
   Tooltip,
   makeStyles,
@@ -72,6 +74,23 @@ function lookupWidthPreference(
 ): "full" | "half" | "any" {
   const meta = SECTION_METADATA_CATALOG.find((m) => m.id === sectionId);
   return meta?.widthPreference ?? "any";
+}
+
+// ---------------------------------------------------------------------------
+// DEF-002 / DEF-003 (spaarke-dataset-grid-framework-r2) — entity-name lookup
+//
+// `SectionMetadata.entityName` is the logical name of the Dataverse entity a
+// section renders (populated on the 6 entity-list sections: documents, matters,
+// projects, invoices, work-assignments, communications). Used by the Advanced
+// panel to hydrate the configId picker + availableViews picker via BFF.
+//
+// Non-entity-list sections (dailyBriefing, quickSummary, getStarted, etc.)
+// return `undefined` and the pickers gracefully collapse to their no-data
+// state instead of triggering a network round-trip.
+// ---------------------------------------------------------------------------
+function lookupEntityName(sectionId: string): string | undefined {
+  const meta = SECTION_METADATA_CATALOG.find((m) => m.id === sectionId);
+  return meta?.entityName;
 }
 
 // ---------------------------------------------------------------------------
@@ -167,6 +186,14 @@ export interface ArrangeStepProps {
   sectionInstances: Map<string, SectionInstance>;
   /** FR-03 (task 013) — Callback when the section-instances map changes. */
   onSectionInstancesChange: (sectionInstances: Map<string, SectionInstance>) => void;
+  /**
+   * DEF-002 / DEF-003 (spaarke-dataset-grid-framework-r2) — authenticated fetch
+   * used by the Advanced panel to hydrate the configId picker + availableViews
+   * picker via BFF. Passed through from App.tsx (which receives it from
+   * @spaarke/auth). When a section has no `entityName` metadata, the pickers
+   * short-circuit without a network call.
+   */
+  authenticatedFetch: (url: string, init?: RequestInit) => Promise<Response>;
 }
 
 // ---------------------------------------------------------------------------
@@ -854,46 +881,141 @@ const RowHeightControl: React.FC<{
 // section as a bare string (back-compat with every pre-R2 published record).
 // Any single field set = SectionInstance object emitted.
 //
-// PLACEHOLDER STATUS — configId picker + availableViews are currently
-// placeholder-stubbed (see CONFIG_ID_STUB_LIST + AVAILABLE_VIEWS_INPUT below).
-// The wizard is a standalone Vite app; it has NO `Xrm.WebApi` in scope (it
-// receives an `authenticatedFetch` for BFF calls, not `Xrm`). The section
-// metadata catalog (`SECTION_METADATA_CATALOG` in `@spaarke/ui-components`)
-// also does not expose the entity name — that lives inside each
-// `sprk_gridconfiguration` record's `configjson.entity`. Wiring the picker
-// to a real Dataverse query requires either:
-//   1. A BFF endpoint that returns `{ id, name, entity }` for all
-//      `sprk_gridconfiguration` records (preferred; auth via existing
-//      authenticatedFetch), OR
-//   2. Passing an `Xrm.WebApi`-backed data client through the wizard from the
-//      hosting webresource dialog (higher blast radius).
-// Both approaches are follow-on work. For now the picker offers a
-// hardcoded "None (use default)" option only, and the availableViews field
-// accepts a free-text comma-separated list of savedquery IDs (which is what
-// the schema stores anyway). See task report for follow-on prioritization.
+// DEF-002 / DEF-003 (spaarke-dataset-grid-framework-r2) — RESOLVED. The
+// configId picker + availableViews field now query Dataverse via BFF:
+//   - configId picker → GET /api/dataverse/gridconfigurations/{entity}
+//     (new endpoint added by DEF-002)
+//   - availableViews  → GET /api/dataverse/savedqueries/{entity}
+//     (existing endpoint from spaarke-datagrid-framework-r1 FR-BFF-02)
+//
+// Both endpoints resolve `entity` from `SectionMetadata.entityName` (populated
+// on the 6 entity-list sections). Non-entity-list sections short-circuit both
+// pickers and fall back to helpful "no override applicable" copy.
+//
+// The pickers use `useEntityPickerData` (below) which caches results per-entity
+// for the lifetime of the wizard step, avoiding refetches when the operator
+// expands multiple Advanced accordions.
 // ---------------------------------------------------------------------------
 
-/**
- * Placeholder configId picker options.
- *
- * FOLLOW-UP: replace with a live query of `sprk_gridconfiguration` records
- * filtered by the section's entity. The section entity is NOT in
- * `SectionMetadata` (as of task 013); either extend the metadata catalog OR
- * add a BFF `GET /api/grid-configurations?entity={name}` endpoint, then swap
- * `CONFIG_ID_STUB_OPTIONS` for the fetched list.
- *
- * The "None (use default)" option always exists — selecting it clears the
- * configIdOverride from the SectionInstance (empty override → bare string).
- */
+/** Configuration picker option — mirrors GridConfigurationSummaryDto from BFF. */
 interface ConfigIdOption {
   key: string; // "" = None (clears the override)
   label: string;
+  isDefault?: boolean;
+}
+
+/** Saved-query picker option — mirrors SavedQuerySummaryDto from BFF. */
+interface SavedQueryOption {
+  id: string;
+  name: string;
+  isDefault: boolean;
 }
 
 const CONFIG_ID_NONE_KEY = "";
-const CONFIG_ID_STUB_OPTIONS: readonly ConfigIdOption[] = [
-  { key: CONFIG_ID_NONE_KEY, label: "None (use default)" },
-];
+const CONFIG_ID_NONE_OPTION: ConfigIdOption = {
+  key: CONFIG_ID_NONE_KEY,
+  label: "None (use default)",
+};
+
+/**
+ * BFF response shape for GET /api/dataverse/gridconfigurations/{entity}.
+ * Mirrors GridConfigurationSummaryDto — payload names are camelCase per the
+ * BFF's PropertyNamingPolicy.CamelCase serializer.
+ */
+interface GridConfigurationSummaryPayload {
+  id: string;
+  name: string;
+  entityLogicalName: string;
+  isDefault: boolean;
+  sortOrder: number;
+}
+
+/**
+ * BFF response shape for GET /api/dataverse/savedqueries/{entity}.
+ * Mirrors SavedQuerySummaryDto (existing endpoint from framework R1).
+ */
+interface SavedQuerySummaryPayload {
+  id: string;
+  name: string;
+  isDefault: boolean;
+  queryType: number;
+}
+
+/**
+ * Loader state shared by both pickers.
+ */
+type PickerLoadState<T> =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { status: "ready"; data: T }
+  | { status: "error"; message: string };
+
+/**
+ * Cached picker data keyed by entityLogicalName. Lives at the ArrangeStep
+ * component level and is threaded through AdvancedSectionControl so multiple
+ * expanded accordions for the same entity share one fetch.
+ */
+interface EntityPickerCache {
+  configs: Map<string, PickerLoadState<ConfigIdOption[]>>;
+  savedQueries: Map<string, PickerLoadState<SavedQueryOption[]>>;
+}
+
+/**
+ * Fetch grid configurations for an entity via BFF. Returns [None + fetched].
+ * Errors surface as a picker with only "None (use default)" available so
+ * makers can still edit the layout — DEF-002 explicitly requires graceful
+ * degradation, not a hard block.
+ */
+async function fetchGridConfigurations(
+  entityLogicalName: string,
+  authenticatedFetch: (url: string, init?: RequestInit) => Promise<Response>,
+  signal: AbortSignal,
+): Promise<ConfigIdOption[]> {
+  const url = `/api/dataverse/gridconfigurations/${encodeURIComponent(entityLogicalName)}`;
+  const res = await authenticatedFetch(url, { signal });
+  if (!res.ok) {
+    throw new Error(
+      `Failed to load grid configurations for ${entityLogicalName} (HTTP ${res.status})`,
+    );
+  }
+  const payload = (await res.json()) as GridConfigurationSummaryPayload[];
+  // Prepend "None" so it's always available. Backend already sorts by
+  // sortOrder then name; preserve that ordering.
+  const options: ConfigIdOption[] = [
+    CONFIG_ID_NONE_OPTION,
+    ...payload.map((c) => ({
+      key: c.id,
+      label: c.isDefault ? `${c.name} (default)` : c.name,
+      isDefault: c.isDefault,
+    })),
+  ];
+  return options;
+}
+
+/**
+ * Fetch savedqueries for an entity via BFF. Returns the raw list; the picker
+ * ignores queryType (both user-owned = 0 and main app view = 64 are
+ * user-selectable in the availableViews allowlist).
+ */
+async function fetchSavedQueries(
+  entityLogicalName: string,
+  authenticatedFetch: (url: string, init?: RequestInit) => Promise<Response>,
+  signal: AbortSignal,
+): Promise<SavedQueryOption[]> {
+  const url = `/api/dataverse/savedqueries/${encodeURIComponent(entityLogicalName)}`;
+  const res = await authenticatedFetch(url, { signal });
+  if (!res.ok) {
+    throw new Error(
+      `Failed to load saved queries for ${entityLogicalName} (HTTP ${res.status})`,
+    );
+  }
+  const payload = (await res.json()) as SavedQuerySummaryPayload[];
+  return payload.map((s) => ({
+    id: s.id,
+    name: s.name,
+    isDefault: s.isDefault,
+  }));
+}
 
 /**
  * Read the SectionInstance for a slot from the wizard's map, or return an
@@ -933,9 +1055,118 @@ const AdvancedSectionControl: React.FC<{
   sectionLabel: string;
   sectionInstances: Map<string, SectionInstance>;
   onSectionInstancesChange: (next: Map<string, SectionInstance>) => void;
-}> = ({ slotKey, sectionId, sectionLabel, sectionInstances, onSectionInstancesChange }) => {
+  /** DEF-002 / DEF-003 — pickers hydrate against BFF via this fetch. */
+  authenticatedFetch: (url: string, init?: RequestInit) => Promise<Response>;
+  /** DEF-002 / DEF-003 — shared entity-picker cache across all accordions. */
+  pickerCache: EntityPickerCache;
+  /** Notify parent when a fetch completes so state re-renders + shared cache updates. */
+  onPickerCacheChange: (cache: EntityPickerCache) => void;
+}> = ({
+  slotKey,
+  sectionId,
+  sectionLabel,
+  sectionInstances,
+  onSectionInstancesChange,
+  authenticatedFetch,
+  pickerCache,
+  onPickerCacheChange,
+}) => {
   const classes = useStyles();
   const instance = readInstanceForSlot(sectionInstances, slotKey, sectionId);
+
+  // DEF-002 / DEF-003 — resolve entityName + kick off BFF fetch on mount if we
+  // haven't fetched for this entity yet. Both pickers share the same cache
+  // keyed by entity so parallel expansions of Advanced accordions for the
+  // same section don't re-request.
+  const entityName = React.useMemo(() => lookupEntityName(sectionId), [sectionId]);
+
+  const configState = entityName
+    ? pickerCache.configs.get(entityName) ?? { status: "idle" as const }
+    : ({ status: "idle" as const });
+  const savedQueriesState = entityName
+    ? pickerCache.savedQueries.get(entityName) ?? { status: "idle" as const }
+    : ({ status: "idle" as const });
+
+  React.useEffect(() => {
+    if (!entityName) return;
+    const controller = new AbortController();
+
+    // Fetch grid configurations if not yet started.
+    if (configState.status === "idle") {
+      // Mark loading in the cache immediately to prevent duplicate parallel fetches.
+      const next: EntityPickerCache = {
+        configs: new Map(pickerCache.configs),
+        savedQueries: new Map(pickerCache.savedQueries),
+      };
+      next.configs.set(entityName, { status: "loading" });
+      onPickerCacheChange(next);
+
+      void (async () => {
+        try {
+          const options = await fetchGridConfigurations(entityName, authenticatedFetch, controller.signal);
+          if (controller.signal.aborted) return;
+          const updated: EntityPickerCache = {
+            configs: new Map(next.configs),
+            savedQueries: new Map(next.savedQueries),
+          };
+          updated.configs.set(entityName, { status: "ready", data: options });
+          onPickerCacheChange(updated);
+        } catch (err) {
+          if (controller.signal.aborted) return;
+          const updated: EntityPickerCache = {
+            configs: new Map(next.configs),
+            savedQueries: new Map(next.savedQueries),
+          };
+          updated.configs.set(entityName, {
+            status: "error",
+            message: err instanceof Error ? err.message : String(err),
+          });
+          onPickerCacheChange(updated);
+        }
+      })();
+    }
+
+    // Fetch savedqueries if not yet started.
+    if (savedQueriesState.status === "idle") {
+      const next: EntityPickerCache = {
+        configs: new Map(pickerCache.configs),
+        savedQueries: new Map(pickerCache.savedQueries),
+      };
+      next.savedQueries.set(entityName, { status: "loading" });
+      onPickerCacheChange(next);
+
+      void (async () => {
+        try {
+          const options = await fetchSavedQueries(entityName, authenticatedFetch, controller.signal);
+          if (controller.signal.aborted) return;
+          const updated: EntityPickerCache = {
+            configs: new Map(next.configs),
+            savedQueries: new Map(next.savedQueries),
+          };
+          updated.savedQueries.set(entityName, { status: "ready", data: options });
+          onPickerCacheChange(updated);
+        } catch (err) {
+          if (controller.signal.aborted) return;
+          const updated: EntityPickerCache = {
+            configs: new Map(next.configs),
+            savedQueries: new Map(next.savedQueries),
+          };
+          updated.savedQueries.set(entityName, {
+            status: "error",
+            message: err instanceof Error ? err.message : String(err),
+          });
+          onPickerCacheChange(updated);
+        }
+      })();
+    }
+
+    return () => controller.abort();
+    // NOTE: intentionally NOT depending on `pickerCache` here — the effect
+    // reads it via closure and enqueues a state update. Depending on it would
+    // re-fire on every cache update and produce a loop. `entityName` +
+    // status fields are the load-bearing triggers.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entityName, configState.status, savedQueriesState.status, authenticatedFetch]);
 
   // Central update helper — applies a mutation to the current instance,
   // then normalizes: if the resulting instance has NO override set, DELETE it
@@ -1001,13 +1232,12 @@ const AdvancedSectionControl: React.FC<{
     [updateInstance],
   );
 
-  const handleAvailableViewsChange = React.useCallback(
-    (_ev: unknown, data: { value: string }) => {
-      // Parse comma-separated list; empty tokens dropped.
-      const tokens = data.value
-        .split(",")
-        .map((s) => s.trim())
-        .filter((s) => s.length > 0);
+  // DEF-003 — Combobox multi-select handler. Fluent v9 Combobox emits the
+  // FULL set of selected option values on each change (not deltas), so we can
+  // write them straight into the instance override.
+  const handleAvailableViewsSelect = React.useCallback(
+    (_ev: unknown, data: { selectedOptions: string[] }) => {
+      const tokens = data.selectedOptions.filter((s) => s.length > 0);
       updateInstance((d) => {
         if (tokens.length === 0) {
           if (d.overrides) {
@@ -1023,12 +1253,24 @@ const AdvancedSectionControl: React.FC<{
 
   // Resolve controlled-value strings.
   const currentConfigIdKey = instance.configIdOverride ?? CONFIG_ID_NONE_KEY;
+  // Build the effective configId option list: real data if ready, else fall
+  // back to "None" only (matches graceful-degradation contract).
+  const configOptions: readonly ConfigIdOption[] =
+    configState.status === "ready" ? configState.data : [CONFIG_ID_NONE_OPTION];
   const currentConfigIdOption =
-    CONFIG_ID_STUB_OPTIONS.find((o) => o.key === currentConfigIdKey) ??
-    CONFIG_ID_STUB_OPTIONS[0];
+    configOptions.find((o) => o.key === currentConfigIdKey) ??
+    configOptions[0] ??
+    CONFIG_ID_NONE_OPTION;
   const currentLabelValue = instance.label ?? "";
   const currentPageSize = instance.overrides?.pageSize;
-  const currentAvailableViewsValue = (instance.overrides?.availableViews ?? []).join(", ");
+  const currentAvailableViewIds = instance.overrides?.availableViews ?? [];
+  const savedQueryOptions: readonly SavedQueryOption[] =
+    savedQueriesState.status === "ready" ? savedQueriesState.data : [];
+  // Combobox displayValue: prefer resolved names, fall back to raw IDs when
+  // the list hasn't loaded yet (avoids GUIDs disappearing during hydration).
+  const currentAvailableViewsDisplay = currentAvailableViewIds
+    .map((id) => savedQueryOptions.find((sq) => sq.id === id)?.name ?? id)
+    .join(", ");
 
   return (
     <Accordion
@@ -1048,7 +1290,7 @@ const AdvancedSectionControl: React.FC<{
           </Text>
         </AccordionHeader>
         <AccordionPanel className={classes.advancedPanel}>
-          {/* (a) configId picker */}
+          {/* (a) configId picker — DEF-002 real Dataverse query */}
           <div className={classes.advancedField}>
             <Label
               htmlFor={`advanced-configid-${slotKey}`}
@@ -1056,6 +1298,14 @@ const AdvancedSectionControl: React.FC<{
               className={classes.advancedFieldLabel}
             >
               Grid configuration
+              {configState.status === "loading" && (
+                <Spinner
+                  size="tiny"
+                  aria-label="Loading grid configurations"
+                  data-testid={`advanced-configid-spinner-${slotKey}`}
+                  style={{ marginLeft: "6px", display: "inline-block" }}
+                />
+              )}
             </Label>
             <Dropdown
               id={`advanced-configid-${slotKey}`}
@@ -1065,17 +1315,36 @@ const AdvancedSectionControl: React.FC<{
               onOptionSelect={handleConfigIdSelect}
               aria-label={`Grid configuration override for ${sectionLabel}`}
               data-testid={`advanced-configid-dropdown-${slotKey}`}
+              disabled={!entityName}
             >
-              {CONFIG_ID_STUB_OPTIONS.map((o) => (
+              {configOptions.map((o) => (
                 <Option key={o.key || "none"} value={o.key}>
                   {o.label}
                 </Option>
               ))}
             </Dropdown>
-            <Text className={classes.advancedFieldHelp}>
-              Point this section at a different sprk_gridconfiguration record.
-              Leave as &quot;None&quot; to use the registration&#39;s default.
-            </Text>
+            {configState.status === "error" && (
+              <Text
+                className={classes.advancedFieldHelp}
+                style={{ color: tokens.colorPaletteRedForeground1 }}
+                data-testid={`advanced-configid-error-${slotKey}`}
+              >
+                Could not load configurations: {configState.message}. Only
+                &quot;None (use default)&quot; is available.
+              </Text>
+            )}
+            {!entityName && (
+              <Text className={classes.advancedFieldHelp}>
+                This section has no Dataverse entity — configId override is not
+                applicable.
+              </Text>
+            )}
+            {entityName && configState.status !== "error" && (
+              <Text className={classes.advancedFieldHelp}>
+                Point this section at a different sprk_gridconfiguration record.
+                Leave as &quot;None&quot; to use the registration&#39;s default.
+              </Text>
+            )}
           </div>
 
           {/* (b) label override */}
@@ -1131,28 +1400,71 @@ const AdvancedSectionControl: React.FC<{
             </Text>
           </div>
 
-          {/* (d) availableViews override */}
+          {/* (d) availableViews override — DEF-003 real savedquery multi-select */}
           <div className={classes.advancedField}>
             <Label
               htmlFor={`advanced-views-${slotKey}`}
               size="small"
               className={classes.advancedFieldLabel}
             >
-              Available views (savedquery IDs)
+              Available views
+              {savedQueriesState.status === "loading" && (
+                <Spinner
+                  size="tiny"
+                  aria-label="Loading saved queries"
+                  data-testid={`advanced-views-spinner-${slotKey}`}
+                  style={{ marginLeft: "6px", display: "inline-block" }}
+                />
+              )}
             </Label>
-            <Input
+            <Combobox
               id={`advanced-views-${slotKey}`}
               size="small"
               appearance="outline"
-              value={currentAvailableViewsValue}
-              onChange={handleAvailableViewsChange}
-              placeholder="00000000-0000-0000-0000-000000000000, ..."
+              multiselect
+              value={currentAvailableViewsDisplay}
+              selectedOptions={currentAvailableViewIds}
+              onOptionSelect={handleAvailableViewsSelect}
+              placeholder={
+                savedQueryOptions.length === 0
+                  ? entityName
+                    ? savedQueriesState.status === "loading"
+                      ? "Loading views…"
+                      : "No saved queries available"
+                    : "N/A — no Dataverse entity"
+                  : "Select one or more views…"
+              }
               aria-label={`Available views override for ${sectionLabel}`}
-              data-testid={`advanced-views-input-${slotKey}`}
-            />
-            <Text className={classes.advancedFieldHelp}>
-              Comma-separated savedquery IDs. Empty = use config-level allowlist.
-            </Text>
+              data-testid={`advanced-views-combobox-${slotKey}`}
+              disabled={!entityName || savedQueryOptions.length === 0}
+            >
+              {savedQueryOptions.map((sq) => (
+                <Option key={sq.id} value={sq.id}>
+                  {sq.isDefault ? `${sq.name} (default)` : sq.name}
+                </Option>
+              ))}
+            </Combobox>
+            {savedQueriesState.status === "error" && (
+              <Text
+                className={classes.advancedFieldHelp}
+                style={{ color: tokens.colorPaletteRedForeground1 }}
+                data-testid={`advanced-views-error-${slotKey}`}
+              >
+                Could not load saved queries: {savedQueriesState.message}.
+              </Text>
+            )}
+            {!entityName && (
+              <Text className={classes.advancedFieldHelp}>
+                This section has no Dataverse entity — availableViews override
+                is not applicable.
+              </Text>
+            )}
+            {entityName && savedQueriesState.status !== "error" && (
+              <Text className={classes.advancedFieldHelp}>
+                Select one or more saved views this section should offer. Leave
+                empty to use the config-level allowlist.
+              </Text>
+            )}
           </div>
 
           {/* Help block covering all four fields */}
@@ -1186,10 +1498,19 @@ export const ArrangeStep: React.FC<ArrangeStepProps> = ({
   onPinToStartChange,
   onRowHeightsChange,
   onSectionInstancesChange,
+  authenticatedFetch,
 }) => {
   const classes = useStyles();
   const template = getLayoutTemplate(templateId);
   const dragSourceRef = React.useRef<{ sectionId: string; slotId: string } | null>(null);
+
+  // DEF-002 / DEF-003 — shared picker cache across all Advanced accordions in
+  // this step. Keyed by entityLogicalName so opening Documents advanced +
+  // Matters advanced fires 2 fetches total (not N per accordion).
+  const [pickerCache, setPickerCache] = React.useState<EntityPickerCache>(() => ({
+    configs: new Map(),
+    savedQueries: new Map(),
+  }));
 
   // FR-04 (task 015) — widthPreference placement dialog state. When the user
   // drops a `widthPreference: 'full'` section into a multi-slot row, we open a
@@ -1551,6 +1872,9 @@ export const ArrangeStep: React.FC<ArrangeStepProps> = ({
                         sectionLabel={section.label}
                         sectionInstances={sectionInstances}
                         onSectionInstancesChange={onSectionInstancesChange}
+                        authenticatedFetch={authenticatedFetch}
+                        pickerCache={pickerCache}
+                        onPickerCacheChange={setPickerCache}
                       />
                     )}
                   </div>

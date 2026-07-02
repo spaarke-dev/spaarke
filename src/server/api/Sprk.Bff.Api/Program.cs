@@ -68,6 +68,7 @@ builder.Services.AddDataverseSavedQueryServices();   // task 011: shared infra (
 builder.Services.AddDataverseMetadataServices();     // task 012: metadata endpoint (6h cache)
 builder.Services.AddDataverseFetchServices();        // task 013: fetch endpoint + FetchXmlEntityExtractor (security-critical)
 builder.Services.AddDataverseRecordServices();       // task 014: record endpoint ($select projection)
+builder.Services.AddDataverseGridConfigurationServices(); // spaarke-dataset-grid-framework-r2 DEF-002: sprk_gridconfiguration picker list
 
 // Workers module (Service Bus + BackgroundService)
 builder.Services.AddWorkersModule(builder.Configuration);
@@ -220,6 +221,7 @@ app.MapSavedQueryEndpoints();   // task 011: GET /api/dataverse/savedquery/{id} 
 app.MapMetadataEndpoints();     // task 012: GET /api/dataverse/metadata/{entity}
 app.MapFetchEndpoints();        // task 013: POST /api/dataverse/fetch (cross-entity privilege check)
 app.MapRecordEndpoints();       // task 014: GET /api/dataverse/record/{entity}/{id}
+app.MapGridConfigurationEndpoints(); // spaarke-dataset-grid-framework-r2 DEF-002: GET /api/dataverse/gridconfigurations/{entity}
 
 app.Run();
 

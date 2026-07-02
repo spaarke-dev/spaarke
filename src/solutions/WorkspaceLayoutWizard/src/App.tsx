@@ -763,6 +763,7 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
               onPinToStartChange={setPinToStart}
               onRowHeightsChange={setRowHeights}
               onSectionInstancesChange={setSectionInstances}
+              authenticatedFetch={authenticatedFetch}
             />
           ) : null,
       },

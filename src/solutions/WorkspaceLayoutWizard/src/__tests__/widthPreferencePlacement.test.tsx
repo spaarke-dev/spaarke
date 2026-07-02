@@ -97,6 +97,10 @@ function renderArrangeStep(overrides: {
         onPinToStartChange={jest.fn()}
         onRowHeightsChange={jest.fn()}
         onSectionInstancesChange={jest.fn()}
+        authenticatedFetch={jest.fn().mockResolvedValue({
+          ok: true,
+          json: async () => [],
+        })}
       />
     </FluentProvider>,
   );

@@ -98,6 +98,19 @@ export interface SectionMetadata {
    * Spec ref: FR-04, spaarke-dataset-grid-framework-r2.
    */
   readonly widthPreference?: 'full' | 'half' | 'any';
+  /**
+   * Optional. Logical name of the Dataverse entity this section renders. Used by
+   * the WorkspaceLayoutWizard "Advanced" panel to filter `sprk_gridconfiguration`
+   * records + savedqueries to those matching the entity.
+   *
+   * Populate on entity-list sections (communications, documents, invoices,
+   * matters, projects, work-assignments). Non-entity-list sections (dailyBriefing,
+   * quickSummary, getStarted, latestUpdates, composeEditor, todo, calendar) may
+   * omit this field.
+   *
+   * Spec ref: FR-03 DEF-002/003 wiring, spaarke-dataset-grid-framework-r2.
+   */
+  readonly entityName?: string;
 }
 
 /**
@@ -158,6 +171,7 @@ export const SECTION_METADATA_CATALOG: readonly SectionMetadata[] = [
     defaultHeight: '480px',
     contentSizing: 'clamped',
     widthPreference: 'full',
+    entityName: 'sprk_document',
   },
   // ai-spaarke-ai-workspace-UI-r1 #4 (2026-06-08): three new entity-view
   // sections sharing <DataverseEntityViewWidget>. Each needs an operator-
@@ -172,6 +186,7 @@ export const SECTION_METADATA_CATALOG: readonly SectionMetadata[] = [
     defaultHeight: '480px',
     contentSizing: 'clamped',
     widthPreference: 'full',
+    entityName: 'sprk_matter',
   },
   {
     id: 'projects',
@@ -182,6 +197,7 @@ export const SECTION_METADATA_CATALOG: readonly SectionMetadata[] = [
     defaultHeight: '480px',
     contentSizing: 'clamped',
     widthPreference: 'full',
+    entityName: 'sprk_project',
   },
   {
     id: 'invoices',
@@ -192,6 +208,7 @@ export const SECTION_METADATA_CATALOG: readonly SectionMetadata[] = [
     defaultHeight: '480px',
     contentSizing: 'clamped',
     widthPreference: 'full',
+    entityName: 'sprk_invoice',
   },
   {
     id: 'work-assignments',
@@ -202,6 +219,7 @@ export const SECTION_METADATA_CATALOG: readonly SectionMetadata[] = [
     defaultHeight: '480px',
     contentSizing: 'clamped',
     widthPreference: 'full',
+    entityName: 'sprk_workassignment',
   },
   // ai-spaarke-ai-workspace-UI-r2 FR-09 (2026-07-01): Communications section —
   // fifth Dataverse-entity-view section sharing <DataverseEntityViewWidget>.
@@ -217,6 +235,7 @@ export const SECTION_METADATA_CATALOG: readonly SectionMetadata[] = [
     defaultHeight: '480px',
     contentSizing: 'clamped',
     widthPreference: 'full',
+    entityName: 'sprk_communication',
   },
   {
     id: 'daily-briefing',

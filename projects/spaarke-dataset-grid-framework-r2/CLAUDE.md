@@ -31,7 +31,7 @@
 - **Type**: Client-side framework enhancement (shared library + wizard code page + consumer unwind)
 - **Complexity**: Medium — 10 FRs across 4 phases, 3 phased PRs, ~3.5 days
 - **Worktree**: `C:/code_files/spaarke-wt-spaarke-dataset-grid-framework-r2` on branch `work/spaarke-dataset-grid-framework-r2`
-- **Hot Paths**: BFF=N, SpaarkeAi=Y, ci-workflows=N, skill-directives=Y, root-CLAUDE=N
+- **Hot Paths**: BFF=Y (DEF-002 follow-on 2026-07-02 — see spec.md hot-path-declaration), SpaarkeAi=Y, ci-workflows=N, skill-directives=Y, root-CLAUDE=N
 
 ---
 
@@ -120,7 +120,7 @@ See [task-execute SKILL.md Step 8.0](../../.claude/skills/task-execute/SKILL.md)
 - ✅ Shared-lib framework code stays React-16-safe for PCF consumer compat (ADR-022)
 - ✅ New shared package (FR-10) follows `Spaarke.DailyBriefing.Components` structural template
 - ❌ MUST NOT introduce Fluent UI v8 imports (ADR-021)
-- ❌ MUST NOT add BFF endpoints/services/DI (BFF hot-path = N; CLAUDE.md §10 not triggered)
+- ⚠️ **UPDATE 2026-07-02** — BFF hot-path flipped from N → Y via DEF-002 follow-on. CLAUDE.md §10 now applies. One new BFF endpoint (`GET /api/dataverse/gridconfigurations/{entity}`) + one new service (`GridConfigurationService`) + one DTO. Placement justified in [`design.md § Placement Justification (DEF-002)`](design.md).
 
 **Wizard code lives in Vite app:**
 - Wizard UI additions (FR-02/03/04) live in `src/solutions/WorkspaceLayoutWizard/` — Vite React 18 app

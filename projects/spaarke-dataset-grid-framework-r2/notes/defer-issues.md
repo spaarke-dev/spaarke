@@ -29,7 +29,7 @@
 
 ## DEF-002 — configId picker: real Dataverse query
 
-**Status**: Deferred to follow-on project (out of R2 scope per task 013 report)
+**Status**: ✅ **RESOLVED** 2026-07-02 (post-wrap-up follow-on). Commit: _(main session fills in hash)_. Implemented Option A per original recommendation — new BFF endpoint `GET /api/dataverse/gridconfigurations/{entityLogicalName}` returns active `sprk_gridconfiguration` records filtered by entity. Wizard's `AdvancedSectionControl` in `src/solutions/WorkspaceLayoutWizard/src/steps/ArrangeStep.tsx` now hydrates the configId Dropdown from BFF via existing `authenticatedFetch`. `SectionMetadata.entityName` field added to `sectionMetadataCatalog.ts` interface + populated on 6 entity-list entries (documents, matters, projects, invoices, work-assignments, communications). Loading + error + graceful-degradation states rendered. New files: `Api/Dataverse/GridConfigurationEndpoints.cs`, `Services/Dataverse/GridConfigurationService.cs`, `Services/Dataverse/Models/GridConfigurationSummaryDto.cs`, `Services/Dataverse/Extensions/GridConfigurationServiceExtensions.cs`, `tests/integration/Sprk.Bff.Api.IntegrationTests/Api/Dataverse/GridConfigurationEndpointsTests.cs` (4 tests). This flips BFF hot-path from N → Y — see `spec.md` + `design.md` Placement Justification.
 **Discovered by**: Task 013
 **Concrete failure without work**: Wizard "Advanced" panel `configId` dropdown shows ONLY "None (use default)" — cannot select real `sprk_gridconfiguration` records because:
 1. Wizard is standalone Vite app with no `Xrm.WebApi` in scope (only `authenticatedFetch` for BFF)
@@ -49,7 +49,7 @@
 
 ## DEF-003 — availableViews: TagPicker instead of comma-separated input
 
-**Status**: Deferred, same root cause as DEF-002
+**Status**: ✅ **RESOLVED** 2026-07-02 (post-wrap-up follow-on). Commit: _(main session fills in hash)_. Implemented via **reuse of existing** `GET /api/dataverse/savedqueries/{entityLogicalName}` (originally shipped by `spaarke-datagrid-framework-r1` FR-BFF-02) — no new BFF endpoint needed. Wizard's `AdvancedSectionControl` now renders a Fluent v9 `Combobox` in `multiselect` mode instead of a comma-separated `Input`. Selected values track `savedqueryid`s; display shows friendly names (with "(default)" suffix on the entity's default view). Same graceful-degradation semantics as DEF-002. **Chose `Combobox multiselect` over `TagPicker`** — Combobox is already imported by the wizard, has narrower API surface, and produces the same UX + accessibility properties as TagPicker for this bounded (small-N) allowlist use case. Files changed: `src/solutions/WorkspaceLayoutWizard/src/steps/ArrangeStep.tsx` only.
 **Discovered by**: Task 013
 **Concrete failure without work**: FR-03 `overrides.availableViews` requires makers to type savedquery GUIDs comma-separated. No autocomplete, no visual confirmation the GUIDs match real savedqueries.
 

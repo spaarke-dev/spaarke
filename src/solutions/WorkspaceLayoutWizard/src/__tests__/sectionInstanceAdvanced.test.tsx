@@ -96,6 +96,10 @@ function renderArrangeStep(overrides?: {
         onPinToStartChange={jest.fn()}
         onRowHeightsChange={jest.fn()}
         onSectionInstancesChange={onSectionInstancesChange}
+        authenticatedFetch={jest.fn().mockResolvedValue({
+          ok: true,
+          json: async () => [],
+        })}
       />
     </FluentProvider>,
   );
@@ -123,7 +127,9 @@ describe('ArrangeStep Advanced accordion — FR-03 UI (task 013)', () => {
     expect(screen.getByTestId(/^advanced-configid-dropdown-/)).toBeInTheDocument();
     expect(screen.getByTestId(/^advanced-label-input-/)).toBeInTheDocument();
     expect(screen.getByTestId(/^advanced-pagesize-spinbutton-/)).toBeInTheDocument();
-    expect(screen.getByTestId(/^advanced-views-input-/)).toBeInTheDocument();
+    // DEF-003 (spaarke-dataset-grid-framework-r2): availableViews Input replaced
+    // by Combobox multiselect wired to BFF savedqueries. Testid changed.
+    expect(screen.getByTestId(/^advanced-views-combobox-/)).toBeInTheDocument();
   });
 
   // -------------------------------------------------------------------------
@@ -136,6 +142,11 @@ describe('ArrangeStep Advanced accordion — FR-03 UI (task 013)', () => {
   // -------------------------------------------------------------------------
 
   it('configIdDropdown_OpensWithNoneOption_PlaceholderStubbedForNow', () => {
+    // DEF-002 (spaarke-dataset-grid-framework-r2): configId picker now hydrates
+    // real records via BFF. With authenticatedFetch stubbed to return `[]`, the
+    // effective option list is `[None (use default)]` only — same shape as the
+    // pre-DEF-002 placeholder. The test still validates the None entry is
+    // present as the default fallback option.
     renderArrangeStep();
 
     const header = screen.getByTestId(/^advanced-accordion-/).querySelector('button');
@@ -143,7 +154,9 @@ describe('ArrangeStep Advanced accordion — FR-03 UI (task 013)', () => {
 
     const dropdown = screen.getByTestId(/^advanced-configid-dropdown-/);
     fireEvent.click(dropdown);
-    expect(screen.getByText('None (use default)')).toBeInTheDocument();
+    // Fluent v9 Dropdown renders the selected value in the button AND in the
+    // listbox option — getAllByText correctly matches both instances.
+    expect(screen.getAllByText('None (use default)').length).toBeGreaterThanOrEqual(1);
   });
 
   // -------------------------------------------------------------------------

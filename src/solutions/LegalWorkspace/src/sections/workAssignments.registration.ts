@@ -38,7 +38,16 @@ export const workAssignmentsRegistration: SectionRegistration = {
   // prior tactical 80vh clamp wrapper. See communications.registration.ts.
   contentSizing: "clamped",
 
-  factory(_context: SectionFactoryContext): ContentSectionConfig {
+  factory(context: SectionFactoryContext): ContentSectionConfig {
+    // spaarke-dataset-grid-framework-r2 DEF-005 / DEF-005b+c (2026-07-02, FR-03
+    // end-to-end wiring): honor per-instance overrides from the LayoutJsonRow
+    // SectionInstance. Bare-string entries + omitted overrides fall through to
+    // the baked-in default configId / config-record / framework defaults.
+    // Widget forwards to `<DataGrid />` which delegates precedence to
+    // `resolveEffectivePageSize` + `resolveEffectiveAvailableViews`.
+    const effectiveConfigId =
+      context.sectionInstance?.configIdOverride ?? WORK_ASSIGNMENTS_CONFIG_ID;
+    const instanceOverrides = context.sectionInstance?.overrides;
     return {
       id: "work-assignments",
       type: "content",
@@ -46,7 +55,11 @@ export const workAssignmentsRegistration: SectionRegistration = {
       style: { overflow: "hidden" },
       renderContent: () =>
         React.createElement(DataverseEntityViewWidget, {
-          data: { configId: WORK_ASSIGNMENTS_CONFIG_ID },
+          data: {
+            configId: effectiveConfigId,
+            pageSize: instanceOverrides?.pageSize,
+            availableViews: instanceOverrides?.availableViews,
+          },
           widgetType: "work-assignments-list",
         }),
     };
