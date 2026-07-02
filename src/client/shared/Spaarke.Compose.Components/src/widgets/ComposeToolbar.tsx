@@ -61,20 +61,8 @@
  */
 
 import * as React from 'react';
-import {
-  Toolbar,
-  ToolbarButton,
-  Tooltip,
-  makeStyles,
-  mergeClasses,
-  tokens,
-} from '@fluentui/react-components';
-import {
-  OpenRegular,
-  DesktopRegular,
-  SparkleRegular,
-  SaveRegular,
-} from '@fluentui/react-icons';
+import { Toolbar, ToolbarButton, Tooltip, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
+import { OpenRegular, DesktopRegular, SparkleRegular, SaveRegular } from '@fluentui/react-icons';
 import { useDispatchPaneEvent } from '@spaarke/ai-widgets/events';
 import { useDocumentActions } from '@spaarke/document-operations';
 
@@ -353,8 +341,7 @@ export function ComposeToolbar(props: ComposeToolbarProps): React.JSX.Element {
 
   const openInWebDisabled = isToolbarDisabled || !hasDocument || isActing;
   const openInDesktopDisabled = isToolbarDisabled || !hasDocument || isActing;
-  const summarizeDisabled =
-    isToolbarDisabled || !hasDocument || !hasSession || !hasSummarizeContext;
+  const summarizeDisabled = isToolbarDisabled || !hasDocument || !hasSession || !hasSummarizeContext;
 
   const handleOpenInWeb = React.useCallback((): void => {
     if (openInWebDisabled) return;
@@ -391,10 +378,7 @@ export function ComposeToolbar(props: ComposeToolbarProps): React.JSX.Element {
     // dispatch in this codebase — see `compose-contracts.ts` §"IMPORTANT —
     // additive contract" and `SendToWorkspaceButton.tsx` for the precedent
     // (workspace.widget_load + custom widgetData shape).
-    dispatch(
-      'conversation',
-      payload as unknown as Parameters<typeof dispatch<'conversation'>>[1],
-    );
+    dispatch('conversation', payload as unknown as Parameters<typeof dispatch<'conversation'>>[1]);
 
     onComposeSummarizeRequest?.(payload);
   }, [
@@ -410,17 +394,9 @@ export function ComposeToolbar(props: ComposeToolbarProps): React.JSX.Element {
   ]);
 
   return (
-    <Toolbar
-      className={mergeClasses(styles.toolbar, className)}
-      size="small"
-      aria-label="Compose document actions"
-    >
+    <Toolbar className={mergeClasses(styles.toolbar, className)} size="small" aria-label="Compose document actions">
       <Tooltip
-        content={
-          hasDocument
-            ? 'Open this document in Word for the Web'
-            : 'No document loaded'
-        }
+        content={hasDocument ? 'Open this document in Word for the Web' : 'No document loaded'}
         relationship="label"
       >
         <ToolbarButton
@@ -434,11 +410,7 @@ export function ComposeToolbar(props: ComposeToolbarProps): React.JSX.Element {
       </Tooltip>
 
       <Tooltip
-        content={
-          hasDocument
-            ? 'Open this document in the Word desktop app'
-            : 'No document loaded'
-        }
+        content={hasDocument ? 'Open this document in the Word desktop app' : 'No document loaded'}
         relationship="label"
       >
         <ToolbarButton

@@ -59,11 +59,7 @@ import {
   Spinner,
 } from '@fluentui/react-components';
 import { ComposeBannerStack } from './ComposeBannerStack';
-import {
-  ComposeEditor,
-  type ComposeEditorHandle,
-  type ComposeEditorDocumentRef,
-} from './ComposeEditor';
+import { ComposeEditor, type ComposeEditorHandle, type ComposeEditorDocumentRef } from './ComposeEditor';
 // spaarkeai-compose-r1 task 093: deep-import from `@spaarke/ai-widgets/events`
 // rather than the barrel `@spaarke/ai-widgets` to skip the barrel's side-effect
 // widget registration (`register-workspace-widgets.ts` transitively pulls in
@@ -83,11 +79,7 @@ import { ComposeToolbar } from './ComposeToolbar';
 import { ComposeEmptyState } from './ComposeEmptyState';
 import { ComposeConflictDialog } from './ComposeConflictDialog';
 import { composeWorkspaceReducer, INITIAL_STATE } from './ComposeWorkspace.types';
-import {
-  useComposeBroadcastChannel,
-  useComposeCheckoutLifecycle,
-  useComposeHeartbeatGate,
-} from './hooks';
+import { useComposeBroadcastChannel, useComposeCheckoutLifecycle, useComposeHeartbeatGate } from './hooks';
 import type {
   ComposeDocumentRef,
   ComposeAssistantToWorkspaceFlow,
@@ -96,11 +88,7 @@ import type {
 } from '../types/compose-contracts';
 
 // Re-export types for backwards-compatible consumer imports.
-export type {
-  ComposeCheckoutStatus,
-  ComposeWorkspaceState,
-  ComposeWorkspaceAction,
-} from './ComposeWorkspace.types';
+export type { ComposeCheckoutStatus, ComposeWorkspaceState, ComposeWorkspaceAction } from './ComposeWorkspace.types';
 
 // ---------------------------------------------------------------------------
 // Props
@@ -261,8 +249,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       dispatch({
         kind: 'loadFailed',
         errorMessage:
-          'SPE drive id and tenant id are required to load Compose documents. ' +
-          'Check the host configuration.',
+          'SPE drive id and tenant id are required to load Compose documents. ' + 'Check the host configuration.',
       });
       return;
     }
@@ -276,9 +263,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
         if (docRef.sprkDocumentId) qs.set('documentRecordId', docRef.sprkDocumentId);
         if (docRef.fileName) qs.set('displayName', docRef.fileName);
 
-        const url = `${bffBaseUrl}/api/compose/documents/${encodeURIComponent(
-          docRef.speDriveItemId
-        )}?${qs.toString()}`;
+        const url = `${bffBaseUrl}/api/compose/documents/${encodeURIComponent(docRef.speDriveItemId)}?${qs.toString()}`;
 
         const response = await authenticatedFetch(url, { method: 'GET', signal: ac.signal });
 
@@ -367,11 +352,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   // Previously lived in ComposeEditor and fired regardless of checkout state;
   // hoisted here and gated so a cancelled tab no longer heart-beats a lock it
   // doesn't hold.
-  useComposeHeartbeatGate(
-    state.checkoutStatus,
-    state.documentRef?.sprkDocumentId,
-    bffBaseUrl
-  );
+  useComposeHeartbeatGate(state.checkoutStatus, state.documentRef?.sprkDocumentId, bffBaseUrl);
 
   // -------------------------------------------------------------------------
   // Conflict dialog handler — "Go to that session"
@@ -400,9 +381,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     dispatch({ kind: 'requestSave' });
     try {
       const bytes = await editorRef.current.serialize();
-      const url = `${bffBaseUrl}/api/compose/documents/${encodeURIComponent(
-        state.documentRef.speDriveItemId
-      )}/save`;
+      const url = `${bffBaseUrl}/api/compose/documents/${encodeURIComponent(state.documentRef.speDriveItemId)}/save`;
 
       // Encode bytes -> base64. ASP.NET Core deserializes byte[] from
       // base64 strings, NOT from JSON number arrays. Iterate rather than
@@ -471,14 +450,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       const message = err instanceof Error ? err.message : String(err);
       dispatch({ kind: 'saveFailed', errorMessage: `Save failed: ${message}` });
     }
-  }, [
-    state.status,
-    state.documentRef,
-    state.sessionId,
-    bffBaseUrl,
-    driveId,
-    tenantId,
-  ]);
+  }, [state.status, state.documentRef, state.sessionId, bffBaseUrl, driveId, tenantId]);
 
   // Keyboard shortcut: Ctrl/Cmd+S → save.
   React.useEffect(() => {
@@ -583,12 +555,9 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     setIsDirty(dirty);
   }, []);
 
-  const handleImportWarnings = React.useCallback(
-    (warnings: Array<{ type: string; message: string }>): void => {
-      dispatch({ kind: 'importWarnings', warnings });
-    },
-    []
-  );
+  const handleImportWarnings = React.useCallback((warnings: Array<{ type: string; message: string }>): void => {
+    dispatch({ kind: 'importWarnings', warnings });
+  }, []);
 
   // -------------------------------------------------------------------------
   // Summarize dispatch — DELEGATED to ConversationPane (task 098 / Phase 9).
@@ -624,8 +593,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     : undefined;
 
   // Toolbar documentId (Open-in-Word handoff) — accepts SPE id or sprk_documentid.
-  const toolbarDocumentId =
-    state.documentRef?.sprkDocumentId ?? state.documentRef?.speDriveItemId ?? '';
+  const toolbarDocumentId = state.documentRef?.sprkDocumentId ?? state.documentRef?.speDriveItemId ?? '';
 
   // -------------------------------------------------------------------------
   // Render
@@ -643,20 +611,12 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     >
       {/* Empty state — Path A/B picker */}
       {state.status === 'empty' ? (
-        <ComposeEmptyState
-          onBrowseRequested={handleBrowseRequested}
-          onSearchRequested={handleSearchRequested}
-        />
+        <ComposeEmptyState onBrowseRequested={handleBrowseRequested} onSearchRequested={handleSearchRequested} />
       ) : null}
 
       {/* Loading spinner */}
       {state.status === 'loading' ? (
-        <div
-          className={styles.loadingState}
-          role="status"
-          aria-live="polite"
-          data-testid="compose-workspace-loading"
-        >
+        <div className={styles.loadingState} role="status" aria-live="polite" data-testid="compose-workspace-loading">
           <Spinner size="medium" />
           <Text size={300}>Loading document…</Text>
         </div>
@@ -697,7 +657,6 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             pendingAssistantInsert={state.pendingAssistantInsert}
           />
 
-
           <div className={styles.editorSlot}>
             <ComposeEditor
               ref={editorRef}
@@ -730,11 +689,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
 
       {/* Error state — load failed; no document loaded */}
       {state.status === 'error' ? (
-        <div
-          className={styles.bannerStack}
-          data-testid="compose-workspace-error-empty"
-          role="alert"
-        >
+        <div className={styles.bannerStack} data-testid="compose-workspace-error-empty" role="alert">
           <MessageBar intent="error">
             <MessageBarBody>
               <MessageBarTitle>Cannot load document</MessageBarTitle>

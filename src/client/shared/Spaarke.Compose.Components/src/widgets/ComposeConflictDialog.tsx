@@ -273,31 +273,18 @@ export function ComposeConflictDialog(props: ComposeConflictDialogProps): React.
         aria-describedby="compose-conflict-dialog-content"
       >
         <DialogBody>
-          <DialogTitle id="compose-conflict-dialog-title">
-            This document is open in another Compose session
-          </DialogTitle>
-          <DialogContent
-            id="compose-conflict-dialog-content"
-            className={styles.content}
-          >
+          <DialogTitle id="compose-conflict-dialog-title">This document is open in another Compose session</DialogTitle>
+          <DialogContent id="compose-conflict-dialog-content" className={styles.content}>
             <Text className={styles.paragraph}>
-              You already have{' '}
-              {documentDisplayName ? (
-                <strong>{documentDisplayName}</strong>
-              ) : (
-                'this document'
-              )}{' '}
-              open in another tab or window. Only one editing session per
-              document is allowed at a time.
+              You already have {documentDisplayName ? <strong>{documentDisplayName}</strong> : 'this document'} open in
+              another tab or window. Only one editing session per document is allowed at a time.
             </Text>
             {openedAtDisplay ? (
               <Text className={styles.meta} data-testid="compose-conflict-opened-at">
                 Other session opened: {openedAtDisplay}
               </Text>
             ) : null}
-            <Text className={styles.paragraph}>
-              Choose how to continue:
-            </Text>
+            <Text className={styles.paragraph}>Choose how to continue:</Text>
           </DialogContent>
           <DialogActions
             // Fluent v9 DialogActions is internally a flex row; we override
@@ -321,11 +308,7 @@ export function ComposeConflictDialog(props: ComposeConflictDialogProps): React.
               {/* FR-16 verbatim — do not change wording. */}
               Go to that session
             </Button>
-            <Button
-              appearance="subtle"
-              onClick={onCancel}
-              data-testid="compose-conflict-cancel-button"
-            >
+            <Button appearance="subtle" onClick={onCancel} data-testid="compose-conflict-cancel-button">
               Cancel — close this tab
             </Button>
           </DialogActions>

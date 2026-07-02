@@ -220,10 +220,7 @@ export function useComposeCheckoutLifecycle(
 
     const ac = new AbortController();
 
-    const probeUrl = buildBffApiUrl(
-      bffBaseUrl,
-      `/documents/${encodeURIComponent(sprkDocumentId)}/checkout-status`
-    );
+    const probeUrl = buildBffApiUrl(bffBaseUrl, `/documents/${encodeURIComponent(sprkDocumentId)}/checkout-status`);
 
     // eslint-disable-next-line no-console
     console.info('[ComposeWorkspace] SPE check-out probe requested', {
@@ -253,8 +250,7 @@ export function useComposeCheckoutLifecycle(
               checkedOutAt?: string | null;
               isCurrentUser?: boolean;
             };
-            probeIsCurrentUser =
-              probeBody.isCheckedOut === true && probeBody.isCurrentUser === true;
+            probeIsCurrentUser = probeBody.isCheckedOut === true && probeBody.isCurrentUser === true;
             probeCheckedOutAt = probeBody.checkedOutAt ?? null;
             // eslint-disable-next-line no-console
             console.info('[ComposeWorkspace] SPE check-out probe result', {
@@ -324,10 +320,7 @@ export function useComposeCheckoutLifecycle(
     });
     dispatch({ kind: 'checkoutDiscarding' });
 
-    const discardUrl = buildBffApiUrl(
-      bffBaseUrl,
-      `/documents/${encodeURIComponent(sprkDocumentId)}/discard`
-    );
+    const discardUrl = buildBffApiUrl(bffBaseUrl, `/documents/${encodeURIComponent(sprkDocumentId)}/discard`);
 
     try {
       const discardResponse = await authenticatedFetch(discardUrl, { method: 'POST' });
