@@ -73,7 +73,11 @@ export { SECTION_METADATA_CATALOG, SECTION_METADATA_IDS, getSectionMetadata } fr
 export type { SectionMetadata } from './sectionMetadataCatalog';
 
 // Dynamic workspace config builder (hoisted in task 067 from LegalWorkspace)
-export { buildDynamicWorkspaceConfig, SYSTEM_DEFAULT_LAYOUT_JSON, normalizeSection } from './buildDynamicWorkspaceConfig';
+export {
+  buildDynamicWorkspaceConfig,
+  SYSTEM_DEFAULT_LAYOUT_JSON,
+  normalizeSection,
+} from './buildDynamicWorkspaceConfig';
 export type { LayoutJson, LayoutJsonRow, WorkspaceScope, SectionInstance } from './buildDynamicWorkspaceConfig';
 
 // Style hooks (optional, for advanced consumers)

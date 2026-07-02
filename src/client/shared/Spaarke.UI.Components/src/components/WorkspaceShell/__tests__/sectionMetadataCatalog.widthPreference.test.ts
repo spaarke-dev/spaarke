@@ -10,11 +10,7 @@
  * Runtime dev-guard + wizard placement warnings ship in task 015.
  */
 
-import {
-  SECTION_METADATA_CATALOG,
-  getSectionMetadata,
-  type SectionMetadata,
-} from '../sectionMetadataCatalog';
+import { SECTION_METADATA_CATALOG, getSectionMetadata, type SectionMetadata } from '../sectionMetadataCatalog';
 
 describe('SectionMetadata.widthPreference (FR-04)', () => {
   // Type-level asserts: TypeScript compilation IS the test. If the field type is

@@ -43,10 +43,7 @@ import {
   type SectionInstance,
 } from '../buildDynamicWorkspaceConfig';
 import type { SectionFactoryContext, SectionRegistration } from '../types';
-import {
-  resolveEffectiveAvailableViews,
-  resolveEffectivePageSize,
-} from '../../DataGrid/configResolution';
+import { resolveEffectiveAvailableViews, resolveEffectivePageSize } from '../../DataGrid/configResolution';
 import type { SavedQuerySummary } from '../../../services/IDataverseClient';
 
 // ---------------------------------------------------------------------------
@@ -84,7 +81,7 @@ function makeSpyRegistration(id: string, label = id): SpyRegistration {
     description: `test section ${id}`,
     icon: (() => null) as unknown as SectionRegistration['icon'],
     category: 'data',
-    factory: (ctx) => {
+    factory: ctx => {
       calls.push(ctx);
       return {
         id,
@@ -98,10 +95,7 @@ function makeSpyRegistration(id: string, label = id): SpyRegistration {
 }
 
 /** Layout JSON with a single row + arbitrary section entries. */
-function makeLayoutJson(
-  entries: Array<string | SectionInstance>,
-  columns = '1fr',
-): LayoutJson {
+function makeLayoutJson(entries: Array<string | SectionInstance>, columns = '1fr'): LayoutJson {
   return {
     schemaVersion: 1,
     rows: [
@@ -144,11 +138,7 @@ describe('buildDynamicWorkspaceConfig — SectionInstance (FR-03)', () => {
   it('(a) bare-string entry produces a SectionConfig with the registration title (back-compat)', () => {
     const spy = makeSpyRegistration('communications', 'Communications');
 
-    const config = buildDynamicWorkspaceConfig(
-      makeLayoutJson(['communications']),
-      [spy.registration],
-      ctx,
-    );
+    const config = buildDynamicWorkspaceConfig(makeLayoutJson(['communications']), [spy.registration], ctx);
 
     expect(config.sections).toHaveLength(1);
     expect(config.sections[0].title).toBe('Communications');
@@ -175,9 +165,7 @@ describe('buildDynamicWorkspaceConfig — SectionInstance (FR-03)', () => {
     buildDynamicWorkspaceConfig(makeLayoutJson([instance]), [spy.registration], ctx);
 
     expect(spy.calls).toHaveLength(1);
-    expect(spy.calls[0].sectionInstance?.configIdOverride).toBe(
-      '11111111-1111-1111-1111-111111111111',
-    );
+    expect(spy.calls[0].sectionInstance?.configIdOverride).toBe('11111111-1111-1111-1111-111111111111');
     // Registration `id` still matches — the override does not rename the section.
     expect(spy.calls[0].sectionInstance?.id).toBe('communications');
   });
@@ -190,11 +178,7 @@ describe('buildDynamicWorkspaceConfig — SectionInstance (FR-03)', () => {
     const spy = makeSpyRegistration('communications', 'Communications');
     const instance: SectionInstance = { id: 'communications', label: 'Email' };
 
-    const config = buildDynamicWorkspaceConfig(
-      makeLayoutJson([instance]),
-      [spy.registration],
-      ctx,
-    );
+    const config = buildDynamicWorkspaceConfig(makeLayoutJson([instance]), [spy.registration], ctx);
 
     // Render-time title uses the override.
     expect(config.sections[0].title).toBe('Email');
@@ -208,11 +192,7 @@ describe('buildDynamicWorkspaceConfig — SectionInstance (FR-03)', () => {
     const spy = makeSpyRegistration('communications', 'Communications');
     const instance: SectionInstance = { id: 'communications', label: '' };
 
-    const config = buildDynamicWorkspaceConfig(
-      makeLayoutJson([instance]),
-      [spy.registration],
-      ctx,
-    );
+    const config = buildDynamicWorkspaceConfig(makeLayoutJson([instance]), [spy.registration], ctx);
 
     expect(config.sections[0].title).toBe('Communications');
   });
@@ -248,10 +228,7 @@ describe('buildDynamicWorkspaceConfig — SectionInstance (FR-03)', () => {
     buildDynamicWorkspaceConfig(makeLayoutJson([instance]), [spy.registration], ctx);
 
     expect(spy.calls).toHaveLength(1);
-    expect(spy.calls[0].sectionInstance?.overrides?.availableViews).toEqual([
-      'view-a',
-      'view-b',
-    ]);
+    expect(spy.calls[0].sectionInstance?.overrides?.availableViews).toEqual(['view-a', 'view-b']);
   });
 
   // -------------------------------------------------------------------------
@@ -260,10 +237,7 @@ describe('buildDynamicWorkspaceConfig — SectionInstance (FR-03)', () => {
 
   it('SectionInstance with an empty id is silently skipped (matches empty-slot policy)', () => {
     const spy = makeSpyRegistration('communications');
-    const layout = makeLayoutJson([
-      { id: '' } as SectionInstance,
-      'communications',
-    ]);
+    const layout = makeLayoutJson([{ id: '' } as SectionInstance, 'communications']);
 
     const config = buildDynamicWorkspaceConfig(layout, [spy.registration], ctx);
 
@@ -298,11 +272,11 @@ describe('buildDynamicWorkspaceConfig — SectionInstance (FR-03)', () => {
     const config = buildDynamicWorkspaceConfig(
       layout,
       [s1.registration, s2.registration, s3.registration, s4.registration, s5.registration],
-      ctx,
+      ctx
     );
 
     // All five sections rendered.
-    expect(config.sections.map((s) => s.id)).toEqual([
+    expect(config.sections.map(s => s.id)).toEqual([
       'get-started',
       'quick-summary',
       'latest-updates',
@@ -343,11 +317,7 @@ describe('buildDynamicWorkspaceConfig — SectionInstance (FR-03)', () => {
       ],
     };
 
-    const config = buildDynamicWorkspaceConfig(
-      layout,
-      [s1.registration, s2.registration],
-      ctx,
-    );
+    const config = buildDynamicWorkspaceConfig(layout, [s1.registration, s2.registration], ctx);
 
     expect(config.sections[0].title).toBe('get-started'); // bare-string entry
     expect(config.sections[1].title).toBe('Email'); // label override
@@ -374,24 +344,20 @@ describe('resolveEffectiveAvailableViews (FR-03 × FR-05 precedence)', () => {
 
   it('config-level only (instance undefined) → config-level applied (FR-05 behavior)', () => {
     const result = resolveEffectiveAvailableViews(fiveViews, ['view-1', 'view-2'], undefined);
-    expect(result.map((v) => v.id)).toEqual(['view-1', 'view-2']);
+    expect(result.map(v => v.id)).toEqual(['view-1', 'view-2']);
   });
 
   it('instance-level only (config undefined) → instance-level applied', () => {
     const result = resolveEffectiveAvailableViews(fiveViews, undefined, ['view-3']);
-    expect(result.map((v) => v.id)).toEqual(['view-3']);
+    expect(result.map(v => v.id)).toEqual(['view-3']);
   });
 
   it('BOTH tiers set → instance-level REPLACES config-level (FR-03 precedence)', () => {
     // config-level: [view-1, view-2] (would restrict picker to A + B)
     // instance-level: [view-4] (per-placement narrows to D only)
     // Sequential-intersection would return []; REPLACE returns [view-4].
-    const result = resolveEffectiveAvailableViews(
-      fiveViews,
-      ['view-1', 'view-2'],
-      ['view-4'],
-    );
-    expect(result.map((v) => v.id)).toEqual(['view-4']);
+    const result = resolveEffectiveAvailableViews(fiveViews, ['view-1', 'view-2'], ['view-4']);
+    expect(result.map(v => v.id)).toEqual(['view-4']);
   });
 
   it('BOTH tiers set with disjoint sets → instance-level wins (widening allowed)', () => {
@@ -400,14 +366,14 @@ describe('resolveEffectiveAvailableViews (FR-03 × FR-05 precedence)', () => {
     // Under REPLACE semantics, the operator can widen at the instance tier —
     // exactly the scenario spec.md line 98 calls out.
     const result = resolveEffectiveAvailableViews(fiveViews, ['view-1'], ['view-5']);
-    expect(result.map((v) => v.id)).toEqual(['view-5']);
+    expect(result.map(v => v.id)).toEqual(['view-5']);
   });
 
   it('instance-level empty array → falls through to config-level (safer default)', () => {
     // Empty-array semantics mirror filterAvailableViews: instance-level `[]`
     // means "no per-instance filter", so config-level applies.
     const result = resolveEffectiveAvailableViews(fiveViews, ['view-1', 'view-2'], []);
-    expect(result.map((v) => v.id)).toEqual(['view-1', 'view-2']);
+    expect(result.map(v => v.id)).toEqual(['view-1', 'view-2']);
   });
 
   it('both tiers empty array → no filter (all views)', () => {

@@ -219,10 +219,7 @@ describe('buildDynamicWorkspaceConfig — contentSizing (FR-01)', () => {
  */
 
 /** Layout JSON factory that accepts a rowHeight override. */
-function makeLayoutJsonWithRowHeight(
-  sectionId: string,
-  rowHeight?: string,
-): LayoutJson {
+function makeLayoutJsonWithRowHeight(sectionId: string, rowHeight?: string): LayoutJson {
   return {
     schemaVersion: 1,
     rows: [
@@ -247,11 +244,7 @@ describe('buildDynamicWorkspaceConfig — rowHeight (FR-02)', () => {
       }),
     ];
 
-    const config = buildDynamicWorkspaceConfig(
-      makeLayoutJsonWithRowHeight('grow-section'),
-      registry,
-      ctx,
-    );
+    const config = buildDynamicWorkspaceConfig(makeLayoutJsonWithRowHeight('grow-section'), registry, ctx);
 
     expect(config.rows).toBeDefined();
     expect(config.rows![0].maxHeight).toBeUndefined();
@@ -266,11 +259,7 @@ describe('buildDynamicWorkspaceConfig — rowHeight (FR-02)', () => {
       }),
     ];
 
-    const config = buildDynamicWorkspaceConfig(
-      makeLayoutJsonWithRowHeight('grow-section', '80vh'),
-      registry,
-      ctx,
-    );
+    const config = buildDynamicWorkspaceConfig(makeLayoutJsonWithRowHeight('grow-section', '80vh'), registry, ctx);
 
     expect(config.rows).toBeDefined();
     expect(config.rows![0].maxHeight).toBe('80vh');
@@ -289,11 +278,7 @@ describe('buildDynamicWorkspaceConfig — rowHeight (FR-02)', () => {
       }),
     ];
 
-    const config = buildDynamicWorkspaceConfig(
-      makeLayoutJsonWithRowHeight('clamped-section', '100vh'),
-      registry,
-      ctx,
-    );
+    const config = buildDynamicWorkspaceConfig(makeLayoutJsonWithRowHeight('clamped-section', '100vh'), registry, ctx);
 
     // Row-level ceiling is authoritative
     expect(config.rows).toBeDefined();
