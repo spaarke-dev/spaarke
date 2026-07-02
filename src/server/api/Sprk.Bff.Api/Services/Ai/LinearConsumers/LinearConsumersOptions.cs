@@ -61,16 +61,69 @@ public sealed class LinearConsumersOptions
 
     /// <summary>
     /// Reverse-lookup: given a playbookId (as sent by the client), return the
-    /// consumer-type key that owns it — or null if none. Used by the endpoint
-    /// dispatch.
+    /// consumer-type key that owns it — always normalized to the hyphen form
+    /// (matches <see cref="Sprk.Bff.Api.Services.Ai.PublicContracts.ConsumerTypes"/>
+    /// constants). Returns null if no map entry matches.
     /// </summary>
+    /// <remarks>
+    /// Key normalization: App Service env-var rules forbid hyphens in the last
+    /// segment of a hierarchical setting name, so operators configure entries
+    /// as e.g. <c>LinearConsumers__PlaybookIds__document_profile</c>. Source-
+    /// controlled appsettings can use the hyphen form <c>document-profile</c>.
+    /// This method converts underscores → hyphens so both configurations map
+    /// to the same <c>ConsumerTypes.*</c> constant.
+    /// </remarks>
     public string? GetConsumerTypeForPlaybookId(Guid playbookId)
     {
         foreach (var kvp in PlaybookIds)
         {
             if (kvp.Value == playbookId)
-                return kvp.Key;
+                return kvp.Key.Replace('_', '-');
         }
         return null;
+    }
+
+    /// <summary>
+    /// Look up an ActionId by consumer-type key, accepting both hyphen and
+    /// underscore forms of the key (see remarks on
+    /// <see cref="GetConsumerTypeForPlaybookId"/>).
+    /// </summary>
+    public bool TryGetActionId(string consumerType, out Guid actionId)
+    {
+        if (ActionIds.TryGetValue(consumerType, out actionId) && actionId != Guid.Empty)
+            return true;
+
+        var underscoreForm = consumerType.Replace('-', '_');
+        if (ActionIds.TryGetValue(underscoreForm, out actionId) && actionId != Guid.Empty)
+            return true;
+
+        var hyphenForm = consumerType.Replace('_', '-');
+        if (ActionIds.TryGetValue(hyphenForm, out actionId) && actionId != Guid.Empty)
+            return true;
+
+        actionId = Guid.Empty;
+        return false;
+    }
+
+    /// <summary>
+    /// Look up an optional model-deployment override with the same hyphen/
+    /// underscore normalization semantics as <see cref="TryGetActionId"/>.
+    /// </summary>
+    public bool TryGetModelDeployment(string consumerType, out string? deployment)
+    {
+        deployment = null;
+        if (ModelDeployments.TryGetValue(consumerType, out deployment) && !string.IsNullOrWhiteSpace(deployment))
+            return true;
+
+        var underscoreForm = consumerType.Replace('-', '_');
+        if (ModelDeployments.TryGetValue(underscoreForm, out deployment) && !string.IsNullOrWhiteSpace(deployment))
+            return true;
+
+        var hyphenForm = consumerType.Replace('_', '-');
+        if (ModelDeployments.TryGetValue(hyphenForm, out deployment) && !string.IsNullOrWhiteSpace(deployment))
+            return true;
+
+        deployment = null;
+        return false;
     }
 }

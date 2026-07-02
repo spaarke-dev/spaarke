@@ -30,12 +30,12 @@ Compact checklist. Read the two companion docs for context. Mark tasks complete 
 - [ ] **B11**. Modify `AnalysisEndpoints.ExecuteAnalysis` — before invoking `IPlaybookOrchestrationService.ExecuteAsync`, check whether `playbookId` matches the Document Profile playbook id. If so, invoke `DocumentProfileService.ExecuteAsync` and return; otherwise fall through to the existing engine path (for backward compat with any other endpoints hitting the same route).
 - [ ] **B12**. Ensure `ConsumerTypes.DocumentProfile` constant exists (or add it) with routing configured in `sprk_playbookconsumer`.
 - [ ] **B13**. Register the new services in `Program.cs` / appropriate DI module: `services.AddLinearConsumers();`
-- [ ] **B14**. Build BFF locally (`dotnet build`) — 0 errors.
-- [ ] **B15**. Add unit tests for `DocumentProfileService` — happy path, Action-not-configured, LLM-fails. `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/LinearConsumers/DocumentProfileServiceTests.cs`
-- [ ] **B16**. `dotnet test` — all pass, no new failures.
+- [x] **B14**. Build BFF locally (`dotnet build`) — 0 errors, 19 pre-existing warnings.
+- [~] **B15**. SKIPPED per **ADR-038 §7** binding rule + [`tests/CLAUDE.md`](../../../tests/CLAUDE.md) ban B7 ("all-mocks + trivial assertion"). The three planned tests (happy / Action-not-configured / LLM-fails) would require mocking every collaborator on `DocumentProfileService` — the exact antipattern ADR-038 bans. `tests/unit/Sprk.Bff.Api.Tests/...` is also NOT one of the 6 KEEP paths. Operator (2026-07-02) chose Path C: operator smoke is the validation gate; regression tests added later under `tests/integration/regression/` if bugs surface.
+- [~] **B16**. SKIPPED (dependency on B15).
 - [ ] **B17**. Deploy BFF (`pwsh scripts/Deploy-BffApi.ps1`) — healthz green.
 - [ ] **B18**. Operator smoke Document Upload wizard end-to-end. Verify: doc row created; SPE upload succeeds; RAG index enqueued; `sprk_filesummary` + `sprk_filetldr` + `sprk_filekeywords` + `sprk_extractorganization` + `sprk_extractpeople` + `sprk_filetype` + `sprk_documenttype` all populated on the doc row.
-- [ ] **B19**. Commit + push.
+- [ ] **B19**. Commit + push (operator smoke result note; final push of 5+ commits to origin).
 
 ## Phase C — File Summarize migration
 

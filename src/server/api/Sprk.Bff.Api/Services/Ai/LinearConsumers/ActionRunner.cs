@@ -58,7 +58,7 @@ public sealed class ActionRunner : IActionRunner
         var schemaName = SanitizeSchemaName(action.Name);
         var temperature = (float?)action.Temperature;
 
-        _options.Value.ModelDeployments.TryGetValue(context.ConsumerType, out var modelDeployment);
+        _options.Value.TryGetModelDeployment(context.ConsumerType, out var modelDeployment);
 
         _logger.LogInformation(
             "Linear run: consumer={ConsumerType} action={ActionName} promptLen={PromptLen} model={Model} temp={Temperature}",

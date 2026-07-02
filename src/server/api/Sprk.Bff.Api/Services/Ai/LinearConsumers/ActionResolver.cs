@@ -35,11 +35,12 @@ public sealed class ActionResolver : IActionResolver
             throw new ArgumentException("consumerType is required", nameof(consumerType));
         }
 
-        if (!_options.Value.ActionIds.TryGetValue(consumerType, out var actionId) || actionId == Guid.Empty)
+        if (!_options.Value.TryGetActionId(consumerType, out var actionId))
         {
             throw new InvalidOperationException(
                 $"Linear consumer '{consumerType}' has no ActionId configured. " +
-                $"Add a LinearConsumers:ActionIds:{consumerType} entry to appsettings.");
+                $"Add a LinearConsumers:ActionIds:{consumerType} entry to appsettings " +
+                $"(or LinearConsumers__ActionIds__{consumerType.Replace('-', '_')} in App Service settings).");
         }
 
         var action = await _scopeResolver.GetActionAsync(actionId, cancellationToken)
