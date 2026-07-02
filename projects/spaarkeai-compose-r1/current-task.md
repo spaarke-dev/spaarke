@@ -1,12 +1,61 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-07-01 (post-task-102 — all Phase 7-10 supplement tasks ✅; ready for Option B bundle commit)
+> **Last Updated**: 2026-07-02 15:XX UTC (context-handoff — smoke debug BLOCKED on r7 coordination)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
 
-## 🚨 Quick Recovery (READ THIS FIRST — ready for user to authorize bundle commit)
+## 🚨 Quick Recovery (READ THIS FIRST — 2026-07-02 checkpoint, mid-smoke debug)
+
+| Field | Value |
+|-------|-------|
+| **Session state** | Post-merge smoke debug on Dev. **All Phase 7-10 supplement code is on master** (PRs #534, #538 merged 2026-07-01/02). Two BFF hotfixes + SSE trace instrumentation shipped. Deploy-cycle debug identified R7 vs Compose R1 overwriting each other on shared `spaarke-bff-dev`. **BFF DEPLOYS HALTED per operator directive.** |
+| **Latest commit (pushed, no PR yet)** | `3603f3b05` debug: SSE trace `console.debug` → `console.log` for default visibility (single-line fix; Chrome default filter hides debug messages) |
+| **Deploy state (2026-07-02 ~16:35 UTC)** | BFF `spaarke-bff-dev` runs Compose R1 binary (task 097 SSE + trace + hotfixes; all 4 file hashes MATCH after Kudu zip-push while stopped). SpaarkeAi code page + ribbon on Dataverse have hotfix client bundle (`speDriveItemId` split + `resolveTenantIdSync` for tenantId + `console.log` trace). |
+| **Blocking issue** | Operator directed no more BFF deploys until R7 team + Compose R1 team coordinate. R7 team was overwriting our binary and vice versa (both deploying to the SHARED `spaarke-bff-dev` from different working branches). |
+| **NEXT ACTION (explicit)** | (1) Wait for operator confirmation that R7 coordination is resolved. (2) When cleared: user hard-refreshes browser (Ctrl+Shift+R), opens DevTools console with filter `compose-summarize-sse`, clicks Summarize once. (3) Paired trace lines from client console + server logs will diagnose the SSE stream failure (network-error OR stream-ended-without-terminal cause). (4) If summarize succeeds end-to-end → PR + auto-merge → task 110 wrap-up (/test-diet + close Issue #514). |
+| **Do NOT do** | Deploy the BFF. Even if it looks like nothing changed. Even for a "small" fix. Coordinate with R7 first. |
+
+### Files modified this session (all committed + pushed; not yet in a PR)
+
+- `src/solutions/LegalWorkspace/src/sections/composeEditor.registration.ts` — smoke-1 hotfix: `tenantId: ""` → `resolveTenantIdSync()` from `@spaarke/auth`
+- `src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeToolbar.tsx` — smoke-2 hotfix: added `speDriveItemId` prop + event field (SPE ID separate from Dataverse GUID `documentId`)
+- `src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx` — smoke-2: pass `speDriveItemId={state.documentRef?.speDriveItemId ?? ''}` to toolbar
+- `src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx` — smoke-2: use `payload.documentRef.speDriveItemId` for `documentSpeId` (not `payload.documentRef.documentId`)
+- `src/solutions/SpaarkeAi/src/__tests__/compose/ComposeToolbar.test.tsx` — smoke-2 test updates + 1 new test for `speDriveItemId=''` disabling summarize
+- `src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs` — SSE trace instrumentation: `[T+{ms}ms]` INFO logs at each stage (SSE headers → playbook resolved → LoadDocxAsync returned → text extraction complete → InvokePlaybookAsync returned → pipeline complete). Every log includes `clientAborted` flag. New catch branch: `catch (OperationCanceledException) when (ct.IsCancellationRequested)` logs "CLIENT DISCONNECTED mid-stream"
+- `src/client/shared/Spaarke.Compose.Components/src/orchestrators/executeComposeSummarize.ts` — client-side trace: `performance.now()` anchor + `[compose-summarize-sse] t+{ms}ms` prefix; traces every raw byte read + every SSE frame text (truncated 400 chars) + all loop exit paths + counters. Uses `console.log` (was `console.debug` — Chrome default filter was hiding it).
+- `projects/spaarkeai-compose-r1/notes/r7-coordination-ask-2026-07-02.md` — full 9-surface coordination doc + R7 team's per-surface response + our acceptance reply + resolution status table. Landed in commit `41a5ed439` via PR #538.
+
+### Critical context — the deploy war discovery
+
+**Symptom sequence** (why this debug took so long):
+1. Client saw "Summarize failed: Compose dispatch failed: ODataError: The resource could not be found" → thought it was code bug → shipped speDriveItemId hotfix (correct fix but ALSO shipped)
+2. After smoke-2 redeploy: client saw "stream read failed — network error" → added client + server SSE tracing → redeployed
+3. Client console trace revealed: `content-type: application/json` (should be `text/event-stream`) + server log said `Compose dispatch:` (should be `Compose dispatch SSE:` per task 097 source) → **PROOF the deployed binary was NOT our task 097 code**
+4. Force stop + Kudu zip-push while stopped + start → all 4 file hashes MATCH → NOW our task 097 code is actually on the server
+5. Then discovered: R7 team also deploys to same `spaarke-bff-dev` from their working branch → their binary lacks our task 097 SSE conversion → their deploys were overwriting ours → OUR deploys overwrite theirs
+
+**This is why the earlier `Deploy-BffApi.ps1` hash-verify passed initially but subsequent smokes showed old code**: the hash-verify was against the LOCAL publish (which had our fresh code) and the REMOTE (which had our fresh code AT THE MOMENT of the hash check). Then between the hash check and the user's smoke click, R7 team deployed their branch, replacing our binary.
+
+**PR history for context**:
+- **PR #515** (merged 2026-07-01) — R1 baseline (before this session)
+- **PR #527** (merged 2026-07-01) — R1 supplement planning
+- **PR #534** (merged 2026-07-01 at commit `7111712f1`) — **Phase 7-10 supplement** (tasks 091, 092, 093, 094, 095/096, 097, 098, 099, 100, 102)
+- **PR #538** (merged 2026-07-02 at commit `86a93d2f1`) — **Smoke hotfixes** (`tenantId` + `speDriveItemId` split) **+ SSE trace instrumentation** + R7 coordination doc
+- **`3603f3b05`** — pushed but no PR yet (single-line `console.debug` → `console.log` for trace visibility)
+
+### Post-context-handoff decision points (for the resuming agent)
+
+1. **First question to operator**: "Has R7 coordination happened yet? What's the agreed deploy strategy (Option A master-only, B per-PR coordination, C separate dev environments)?"
+2. **If cleared to proceed**: verify the current BFF binary is still Compose R1's (hash-verify per bff-deploy skill Manual Verification section); if R7 team overwrote it again, we're back to square one on deploy coordination.
+3. **If binary is still ours + operator says go**: user hard-refreshes browser, opens DevTools console with verbose level enabled, filters `compose-summarize-sse`, clicks Summarize; simultaneously pull `az webapp log tail --name spaarke-bff-dev --resource-group rg-spaarke-dev`. Paired traces will finish the diagnosis.
+4. **If SSE succeeds end-to-end** — new PR against master for the `3603f3b05` commit (single-line trace visibility fix); merge; run task 110 wrap-up (`/test-diet` + close Issue #514 + expanded lessons-learned including the deploy-war finding).
+
+---
+
+## 🚨 Quick Recovery (SUPERSEDED — 2026-07-01 ready for user to authorize bundle commit)
 
 | Field | Value |
 |-------|-------|
