@@ -274,6 +274,22 @@ export interface SectionRegistration {
   category: SectionCategory;
   /** Suggested default height (e.g., "560px"). Undefined = auto. */
   defaultHeight?: string;
+  /**
+   * How `defaultHeight` should be applied by `buildDynamicWorkspaceConfig`.
+   *
+   * - `'grow'` (default when omitted) — applies `defaultHeight` as `min-height` (a
+   *   floor). Section can grow taller than `defaultHeight` to fit intrinsic content.
+   *
+   * - `'clamped'` — applies `defaultHeight` as `max-height` and adds
+   *   `overflow: hidden` + `display: flex` so the SectionPanel becomes a fixed-size
+   *   viewport. Content taller than `defaultHeight` scrolls inside the widget.
+   *   Required for dense entity-list grids so the framework produces visible
+   *   Fluent scrollbars + lazy-load-on-scroll behavior.
+   *
+   * Spec ref: FR-01, spaarke-dataset-grid-framework-r2.
+   * See also `.claude/patterns/ui/embedded-widget-sizing.md`.
+   */
+  contentSizing?: 'grow' | 'clamped';
   /** Thumbnail preview for wizard Step 3 (optional static image or icon). */
   previewIcon?: FluentIcon;
   /**

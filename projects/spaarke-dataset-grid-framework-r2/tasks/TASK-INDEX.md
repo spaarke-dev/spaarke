@@ -10,11 +10,11 @@
 
 | ID | Title | Phase | Status | Dependencies | Parallel | Rigor |
 |---|---|---|---|---|---|---|
-| 001 | FR-01 `contentSizing` framework field + tests | 1: Framework | 🔲 | none | Wave 1 | FULL |
-| 002 | FR-05 `availableViews` allowlist + tests | 1: Framework | 🔲 | none | Wave 1 | FULL |
-| 003 | FR-07 `pageSize` default → 25 + tests + doc | 1: Framework | 🔲 | none | Wave 1 | FULL |
-| 004 | FR-06 Config templates + guide reference | 1: Framework | 🔲 | none | Wave 1 | STANDARD |
-| 005 | FR-08 Unwind `maxHeight` from 6 sections + metadata `clamped` | 1: Framework | 🔲 | 001 | Wave 2 | FULL |
+| 001 | FR-01 `contentSizing` framework field + tests | 1: Framework | ✅ | none | Wave 1 | FULL |
+| 002 | FR-05 `availableViews` allowlist + tests | 1: Framework | ✅ | none | Wave 1 | FULL |
+| 003 | FR-07 `pageSize` default → 25 + tests + doc | 1: Framework | ✅ | none | Wave 1 | FULL |
+| 004 | FR-06 Config templates + guide reference | 1: Framework | ✅ | none | Wave 1 | STANDARD |
+| 005 | FR-08 Unwind `maxHeight` from 6 sections + metadata `clamped` | 1: Framework | ✅ | 001 | Wave 2 | FULL |
 | 006 | Phase 1 deploy + regression + PR 1 | 1: Framework | 🔲 | 001,002,003,004,005 | Wave 3 | STANDARD |
 | 010 | FR-02 `rowHeight` schema + parser + test | 2: Wizard | 🔲 | 006 | Wave 4 | FULL |
 | 011 | FR-02 Wizard UI: `rowHeight` input + presets | 2: Wizard | 🔲 | 010 | Wave 5 | FULL |

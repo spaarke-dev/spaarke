@@ -34,6 +34,9 @@ export const projectsRegistration: SectionRegistration = {
   icon: FolderRegular,
   category: "data",
   defaultHeight: "480px",
+  // spaarke-dataset-grid-framework-r2 FR-08 (task 005, 2026-07-02): replaces the
+  // prior tactical 80vh clamp wrapper. See communications.registration.ts.
+  contentSizing: "clamped",
 
   factory(_context: SectionFactoryContext): ContentSectionConfig {
     return {
@@ -41,25 +44,11 @@ export const projectsRegistration: SectionRegistration = {
       type: "content",
       title: "Projects",
       style: { overflow: "hidden" },
-      // Height-chain fix v2 — see communications.registration.ts for rationale.
       renderContent: () =>
-        React.createElement(
-          "div",
-          {
-            style: {
-              display: "flex",
-              flexDirection: "column",
-              flex: "1 1 auto",
-              maxHeight: "80vh",
-              minHeight: 0,
-              overflow: "hidden",
-            },
-          },
-          React.createElement(DataverseEntityViewWidget, {
-            data: { configId: PROJECTS_CONFIG_ID },
-            widgetType: "projects-list",
-          }),
-        ),
+        React.createElement(DataverseEntityViewWidget, {
+          data: { configId: PROJECTS_CONFIG_ID },
+          widgetType: "projects-list",
+        }),
     };
   },
 };

@@ -3,7 +3,7 @@
   <metadata>
     <title>FR-08: Unwind tactical `maxHeight` hack from 6 sections + set `contentSizing: 'clamped'` in metadata catalog</title>
     <phase>1: Framework Schema + Consumer Unwind</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>1</estimated-hours>
     <dependencies>001</dependencies>
     <blocks>006</blocks>

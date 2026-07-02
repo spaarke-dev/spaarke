@@ -42,6 +42,12 @@ export const communicationsRegistration: SectionRegistration = {
   icon: MailRegular,
   category: "data",
   defaultHeight: "480px",
+  // spaarke-dataset-grid-framework-r2 FR-08 (task 005, 2026-07-02): replaces the
+  // prior tactical 80vh clamp wrapper inside renderContent. The framework now
+  // applies the clamp to the SectionPanel via `contentSizing: 'clamped'` (see
+  // `buildDynamicWorkspaceConfig`), producing visible Fluent scrollbars +
+  // lazy-load-on-scroll behavior for the dense entity-list grid.
+  contentSizing: "clamped",
 
   factory(_context: SectionFactoryContext): ContentSectionConfig {
     return {
@@ -49,32 +55,11 @@ export const communicationsRegistration: SectionRegistration = {
       type: "content",
       title: "Communications",
       style: { overflow: "hidden" },
-      // ai-spaarke-ai-workspace-UI-r2 follow-up v2 (2026-07-01) height-chain fix:
-      // Wrap the widget in a div with maxHeight + minHeight:0 INSIDE the content
-      // slot. Setting maxHeight on the section.style (which applies to the
-      // SectionPanel card) is defeated by SectionPanel's `content` div having
-      // default `min-height: auto` — content refuses to shrink below intrinsic
-      // minimum, forcing card to grow beyond its max-height. Wrapping HERE puts
-      // the clamp inside the content flex-item slot where minHeight:0 propagates
-      // correctly to the DataverseEntityViewWidget flex chain.
       renderContent: () =>
-        React.createElement(
-          "div",
-          {
-            style: {
-              display: "flex",
-              flexDirection: "column",
-              flex: "1 1 auto",
-              maxHeight: "80vh",
-              minHeight: 0,
-              overflow: "hidden",
-            },
-          },
-          React.createElement(DataverseEntityViewWidget, {
-            data: { configId: COMMUNICATIONS_CONFIG_ID },
-            widgetType: "communications-list",
-          }),
-        ),
+        React.createElement(DataverseEntityViewWidget, {
+          data: { configId: COMMUNICATIONS_CONFIG_ID },
+          widgetType: "communications-list",
+        }),
     };
   },
 };

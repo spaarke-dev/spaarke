@@ -30,7 +30,7 @@ import type {
   RowOpenConfig,
   SecondaryAction,
 } from '../../types/DataGridConfiguration';
-import type { EntityMetadata } from '../../services/IDataverseClient';
+import type { EntityMetadata, SavedQuerySummary } from '../../services/IDataverseClient';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Overrides shape (from props.overrides on <DataGrid />)
@@ -116,9 +116,12 @@ type ResolvedBehavior = Required<Omit<BehaviorConfig, 'parentContextFilter'>> &
 
 const FRAMEWORK_DEFAULT_BEHAVIOR: ResolvedBehavior = {
   selectionMode: 'multi',
-  // Lazy-load contexts default to 100 per FR-DG-12 ("page size default 100 ...
-  // override via configjson.behavior.pageSize"). Non-lazy users may still override.
-  pageSize: 100,
+  // Framework default pageSize: 25 (FR-07, spaarke-dataset-grid-framework-r2,
+  // owner clarification 2026-07-02). Workspace-embedded widgets are the
+  // dominant use case; drill-through / full-page consumers should override
+  // explicitly to 50 or 100 via `sprk_configjson.behavior.pageSize`.
+  // Supersedes the FR-DG-12 default of 100.
+  pageSize: 25,
   enableSorting: true,
   enableColumnResize: true,
   enableKeyboardNavigation: true,
@@ -392,6 +395,46 @@ function defaultAlignFor(attributeType: string | undefined): 'left' | 'center' |
     return 'right';
   }
   return 'left';
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
+// availableViews allowlist filter (FR-05, spaarke-dataset-grid-framework-r2)
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Filter a savedquery summary list by an optional GUID allowlist.
+ *
+ * Consumed by `<DataGrid />` after `IDataverseClient.retrieveSavedQueriesForEntity`
+ * returns, before the result feeds the `<ViewSelector>` dropdown. Implements the
+ * `SourceSavedQuery.availableViews` allowlist described in FR-05.
+ *
+ * Semantics:
+ * - `allowlist === undefined` → return `views` verbatim (back-compat).
+ * - `allowlist` is an empty array `[]` → return `views` verbatim (safer
+ *   default: an empty array is treated as "no filter" to avoid the accidental
+ *   empty-picker footgun; see FR-05 owner note in `spec.md`).
+ * - `allowlist` is a non-empty array → return only entries whose `id` is in
+ *   the allowlist. Order follows `views` (not `allowlist`) — the framework
+ *   preserves Dataverse's savedquery ordering.
+ *
+ * Case-insensitive GUID comparison — Dataverse returns lowercase GUIDs, but
+ * makers may author allowlist GUIDs with braces or mixed case in the config
+ * record. Comparison is done on lowercased, brace-stripped values.
+ *
+ * @param views     Sibling savedqueries returned by Dataverse for the entity.
+ * @param allowlist Optional GUID allowlist from `SourceSavedQuery.availableViews`.
+ * @returns The filtered (or unfiltered) view list. Never `undefined`.
+ */
+export function filterAvailableViews(
+  views: ReadonlyArray<SavedQuerySummary>,
+  allowlist: ReadonlyArray<string> | undefined
+): ReadonlyArray<SavedQuerySummary> {
+  if (!allowlist || allowlist.length === 0) {
+    return views;
+  }
+  const normalize = (g: string): string => g.trim().toLowerCase().replace(/^\{|\}$/g, '');
+  const allowed = new Set<string>(allowlist.map(normalize));
+  return views.filter(v => allowed.has(normalize(v.id)));
 }
 
 function humanizeLogicalName(logicalName: string): string {

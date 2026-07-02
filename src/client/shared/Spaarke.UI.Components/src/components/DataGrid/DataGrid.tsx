@@ -55,7 +55,13 @@ import {
   type DataGridParentContext,
 } from '../../hooks/useDataGridContext';
 import { dataGridTokens } from './tokens';
-import { resolveConfig, type DataGridOverrides, type ResolvedConfig, type ResolvedColumn } from './configResolution';
+import {
+  resolveConfig,
+  filterAvailableViews,
+  type DataGridOverrides,
+  type ResolvedConfig,
+  type ResolvedColumn,
+} from './configResolution';
 import { useLazyLoad } from './useLazyLoad';
 import { overlayParentContextFilter, overlayHostFilters, type HostFilterCondition } from './fetchXmlOverlay';
 import { CommandBar as DataGridCommandBar } from './commandBar/CommandBar';
@@ -739,11 +745,18 @@ export const DataGrid: React.FC<DataGridProps> = props => {
         }
         // Fetch metadata + sibling saved views in parallel. View list is best-effort;
         // on failure we fall back to a single-view ViewSelector (just the active view).
-        const [entityMetadata, availableViews] = await Promise.all([
+        const [entityMetadata, siblingViews] = await Promise.all([
           dataverseClient.retrieveEntityMetadata(entityName),
           dataverseClient.retrieveSavedQueriesForEntity(entityName).catch(() => [] as SavedQuerySummary[]),
         ]);
         if (cancelled || !isMountedRef.current) return;
+        // FR-05 (spaarke-dataset-grid-framework-r2): if the config record uses
+        // a `savedquery` source with a non-empty `availableViews` allowlist,
+        // restrict the picker to those sibling views. Absent / empty array
+        // preserves current behavior (all siblings show).
+        const configLevelAllowlist =
+          configRecord?.source?.type === 'savedquery' ? configRecord.source.availableViews : undefined;
+        const availableViews = filterAvailableViews(siblingViews, configLevelAllowlist);
         setLoadState({
           configRecord,
           savedQuery,
@@ -844,7 +857,13 @@ export const DataGrid: React.FC<DataGridProps> = props => {
     chipState,
   ]);
   const entityNameForLoad = resolved?.entityName ?? '';
-  const pageSize = resolved?.behavior.pageSize ?? 100;
+  // FR-07 (spaarke-dataset-grid-framework-r2, task 003): framework default 25.
+  // Workspace-embedded widgets are the dominant use case; drill-through /
+  // full-page consumers explicitly override to 50 or 100 via
+  // `sprk_configjson.behavior.pageSize`. The authoritative default lives in
+  // `configResolution.ts` (`FRAMEWORK_DEFAULT_BEHAVIOR.pageSize`); this
+  // fallback covers the pre-resolution render path only.
+  const pageSize = resolved?.behavior.pageSize ?? 25;
 
   const {
     records,

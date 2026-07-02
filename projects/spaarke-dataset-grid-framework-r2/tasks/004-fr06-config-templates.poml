@@ -3,7 +3,7 @@
   <metadata>
     <title>FR-06: Create 3 DataGrid config templates + guide reference</title>
     <phase>1: Framework Schema + Consumer Unwind</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>1</estimated-hours>
     <dependencies>none</dependencies>
     <blocks>006</blocks>

@@ -164,12 +164,39 @@ export function buildDynamicWorkspaceConfig(
       // Call the factory to produce the SectionConfig
       const sectionConfig = registration.factory(effectiveContext);
 
-      // Apply defaultHeight from registration if factory didn't set minHeight
-      if (registration.defaultHeight && !sectionConfig.style?.minHeight) {
-        sectionConfig.style = {
-          ...sectionConfig.style,
-          minHeight: registration.defaultHeight,
-        };
+      // Apply defaultHeight from registration based on contentSizing intent.
+      //
+      // Spec ref: FR-01 (spaarke-dataset-grid-framework-r2). Sections declare
+      // whether their `defaultHeight` should be a FLOOR (`'grow'`, default) or a
+      // CEILING (`'clamped'`). The framework then applies the correct CSS key.
+      //
+      // - `'clamped'` (dense grids etc.) → `max-height` + `overflow: hidden` +
+      //   `display: flex`. The SectionPanel becomes a fixed-size viewport and the
+      //   widget must supply its own inner scroll surface (see
+      //   `.claude/patterns/ui/embedded-widget-sizing.md`).
+      // - `'grow'` or omitted (back-compat with existing sections) → `min-height`.
+      //   The section grows to fit intrinsic content. This preserves current
+      //   behavior for every registration that does not set `contentSizing`.
+      //
+      // In both branches, operator-set styles (`style.minHeight` or `style.maxHeight`
+      // supplied by the factory) are NOT overwritten — this preserves the existing
+      // "factory wins" contract.
+      if (registration.defaultHeight) {
+        if (registration.contentSizing === 'clamped') {
+          if (!sectionConfig.style?.maxHeight) {
+            sectionConfig.style = {
+              ...sectionConfig.style,
+              maxHeight: registration.defaultHeight,
+              overflow: 'hidden',
+              display: 'flex',
+            };
+          }
+        } else if (!sectionConfig.style?.minHeight) {
+          sectionConfig.style = {
+            ...sectionConfig.style,
+            minHeight: registration.defaultHeight,
+          };
+        }
       }
 
       allSections.push(sectionConfig);
