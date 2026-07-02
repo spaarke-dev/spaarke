@@ -3,7 +3,7 @@
   <metadata>
     <title>FR-10: Update SpaarkeAi vite.config.ts + package.json dependency</title>
     <phase>3: Shared Package Extraction + Documentation</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>1</estimated-hours>
     <dependencies>021</dependencies>
     <blocks>025,026</blocks>

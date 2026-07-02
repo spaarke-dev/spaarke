@@ -3,7 +3,7 @@
   <metadata>
     <title>FR-09: Add dual-deploy warning to code-page-deploy skill + widget-authoring guide</title>
     <phase>3: Shared Package Extraction + Documentation</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>1</estimated-hours>
     <dependencies>022,023</dependencies>
     <blocks>026</blocks>

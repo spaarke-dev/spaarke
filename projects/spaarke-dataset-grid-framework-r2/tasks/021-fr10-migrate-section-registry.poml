@@ -3,7 +3,7 @@
   <metadata>
     <title>FR-10: Migrate LegalWorkspace section registry into new shared package</title>
     <phase>3: Shared Package Extraction + Documentation</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>020</dependencies>
     <blocks>022,023</blocks>
@@ -96,4 +96,20 @@
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Load knowledge. FULL rigor. Step 9.5 quality gates.</protocol>
   </execution>
+
+  <completion-notes date="2026-07-02">
+    - Strategy applied: **RE-EXPORT** per `notes/fr10-migration-strategy.md` (owner-approved 2026-07-02, task 020).
+    - Populated `src/client/shared/Spaarke.LegalWorkspace/src/index.ts` with a single-line re-export of the LegalWorkspace public barrel: `export * from '../../../../solutions/LegalWorkspace/src/index.ts'`.
+    - Chose barrel-level re-export (not per-file) because the LegalWorkspace barrel already curates the exact public surface consumers need: `LegalWorkspaceApp` + `ILegalWorkspaceAppProps` type, `LegalWorkspaceRenderer`, `setLegalWorkspaceRuntimeConfig`, `SECTION_REGISTRY`, `createLegalWorkspaceSectionRegistry`, `getSectionById`, `getSectionsByCategory`, `LegalWorkspaceSectionRegistryOptions` type, `SectionRegistration` type. Byte-for-byte parity with SpaarkeAi's current `@spaarke/legal-workspace → ../LegalWorkspace/src` alias — task 022's alias flip becomes a no-op behaviorally.
+    - Grep-verified SpaarkeAi consumers: only `src/solutions/SpaarkeAi/src/main.tsx` line 70 imports 3 symbols (`LegalWorkspaceApp`, `createLegalWorkspaceSectionRegistry`, `setLegalWorkspaceRuntimeConfig`). All 3 covered by the barrel re-export.
+    - Relative path corrected to 4-up (`../../../../solutions/...`) — POML's suggested 3-up was wrong for the layout (from `src/client/shared/Spaarke.LegalWorkspace/src/index.ts` requires 4 up-levels to reach `src/`).
+    - `package.json` `exports` map unchanged (already exposes `.` → `./src/index.ts`); description updated to document the DailyBriefing precedent.
+    - `tsconfig.json` unchanged (`include: ["src"]`).
+    - **Standalone `npm run build` intentionally fails** with `TS2307 Cannot find module '@spaarke/*'` + duplicate-type errors from LegalWorkspace's `node_modules/@fluentui/*`. This matches the DailyBriefing precedent (`scripts/Build-AllClientComponents.ps1` line 8 documents the pattern: source-only libs with `@spaarke/*` peerDependencies cannot type-check standalone). Task 024 excludes `Spaarke.LegalWorkspace` from the `$SharedLibs` orchestrator list on the same basis. Type-check happens via SpaarkeAi + LegalWorkspace consumer tsc passes.
+    - No changes to `LegalWorkspace/src/*` (files stay in place per RE-EXPORT strategy).
+    - No changes to `src/solutions/SpaarkeAi/vite.config.ts` (task 022's job).
+    - Quality gates: ADR-012 (SSOT — content in one place, facade only) ✅; ADR-021 (Fluent v9 peer dep) ✅; ADR-022 (React 16-19 peer range) ✅; ADR-028 (@spaarke/auth peer dep) ✅.
+    - Handoff to task 022: flip SpaarkeAi's `@spaarke/legal-workspace` alias from `../LegalWorkspace/src` to `../../client/shared/Spaarke.LegalWorkspace/src`; consumer import sites (main.tsx line 66-70) do not change.
+    - Handoff to task 024: exclude `Spaarke.LegalWorkspace` from `scripts/Build-AllClientComponents.ps1` `$SharedLibs` list (same DailyBriefing pattern).
+  </completion-notes>
 </task>

@@ -23,12 +23,12 @@
 | 014 | FR-04 `widthPreference` field + set 'full' on 6 widgets | 2: Wizard | ✅ | 006 | Wave 4 | FULL |
 | 015 | FR-04 Wizard placement checks + runtime dev-guard | 2: Wizard | ✅ | 013,014 | Wave 7 | FULL |
 | 016 | Phase 2 deploy + regression + PR 2 | 2: Wizard | 🔲 | 011,013,015 | Wave 8 | STANDARD |
-| 020 | FR-10 Scaffold new shared package | 3: Extraction | 🔲 | 016 | Wave 9 | FULL |
-| 021 | FR-10 Migrate section registry into shared package | 3: Extraction | 🔲 | 020 | Wave 10 | FULL |
-| 022 | FR-10 Update SpaarkeAi `vite.config.ts` + deps | 3: Extraction | 🔲 | 021 | Wave 11 | FULL |
-| 023 | FR-10 Update LegalWorkspace + WorkspaceLayoutWizard consumers | 3: Extraction | 🔲 | 021 | Wave 11 | FULL |
-| 024 | FR-10 Update `Build-AllClientComponents.ps1` | 3: Extraction | 🔲 | 020 | Wave 10 | STANDARD |
-| 025 | FR-09 Dual-deploy warning (skill + guide) | 3: Extraction | 🔲 | 022,023 | Wave 12 (sequential) | STANDARD |
+| 020 | FR-10 Scaffold new shared package | 3: Extraction | ✅ | 016 | Wave 9 | FULL |
+| 021 | FR-10 Migrate section registry into shared package | 3: Extraction | ✅ | 020 | Wave 10 | FULL |
+| 022 | FR-10 Update SpaarkeAi `vite.config.ts` + deps | 3: Extraction | ✅ | 021 | Wave 11 | FULL |
+| 023 | FR-10 Update LegalWorkspace + WorkspaceLayoutWizard consumers | 3: Extraction | ✅ | 021 | Wave 11 | FULL |
+| 024 | FR-10 Update `Build-AllClientComponents.ps1` | 3: Extraction | ✅ | 020 | Wave 10 | STANDARD |
+| 025 | FR-09 Dual-deploy warning (skill + guide) | 3: Extraction | ✅ | 022,023 | Wave 12 (sequential) | STANDARD |
 | 026 | Phase 3 deploy + regression + PR 3 | 3: Extraction | 🔲 | 022,023,024,025 | Wave 13 | STANDARD |
 | 090 | Project wrap-up (test-diet, docs, lessons, mark Complete) | 4: Wrap-up | 🔲 | 026 | Wave 14 | FULL |
 

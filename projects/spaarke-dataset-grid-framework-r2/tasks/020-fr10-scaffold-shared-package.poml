@@ -3,7 +3,7 @@
   <metadata>
     <title>FR-10: Scaffold new shared package for LegalWorkspace section registry</title>
     <phase>3: Shared Package Extraction + Documentation</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>1</estimated-hours>
     <dependencies>016</dependencies>
     <blocks>021,024</blocks>
@@ -101,4 +101,15 @@
     <skill>.claude/skills/task-execute/SKILL.md</skill>
     <protocol>Load knowledge. FULL rigor. Step 9.5 quality gates. CLAUDE.md §11 justification block validated.</protocol>
   </execution>
+
+  <completion-notes date="2026-07-02">
+    - Package scaffolded at `src/client/shared/Spaarke.LegalWorkspace/` with npm name `@spaarke/legal-workspace` (matches SpaarkeAi's existing alias — zero consumer rename).
+    - Structure mirrors `Spaarke.DailyBriefing.Components` (package.json + tsconfig.json + src/index.ts).
+    - `src/index.ts` empty with header comment referencing task 021 (populates re-exports).
+    - Build verified: `npm install --legacy-peer-deps --no-audit --no-fund` succeeded (97 packages), `npm run build` (tsc --noEmit) exit 0.
+    - Strategy decision documented in `projects/spaarke-dataset-grid-framework-r2/notes/fr10-migration-strategy.md`: **RE-EXPORT** chosen over MOVE (smaller blast radius, preserves optionality, matches R2 owner clarification).
+    - No root package.json changes needed (repo has no npm workspaces — packages are independent).
+    - Quality gates: adr-check ✅ clean (ADR-012, ADR-021, ADR-022, ADR-028 all compliant); code-review ✅ 0 critical, 0 warnings, 2 advisory suggestions; §11 justification block concrete.
+    - Handoff: task 021 should read `notes/fr10-migration-strategy.md` before populating `src/index.ts`. Task 022/024 should exclude `Spaarke.LegalWorkspace` from `scripts/Build-AllClientComponents.ps1` `$SharedLibs` (matching DailyBriefing precedent — source-only lib with `@spaarke/*` peerDeps + `tsc --noEmit` can't standalone-typecheck).
+  </completion-notes>
 </task>
