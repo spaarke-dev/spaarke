@@ -22,7 +22,7 @@ Consolidates two overlapping cross-entity utility PCFs (RegardingResolver, Assoc
 **Workstream A — RegardingResolver UI redesign**
 - A1: 2-row streamlined layout (title + toolbar icon; number-hyperlink + name)
 - A2: Modal open on record-number click (`Xrm.Navigation.navigateTo` with `target: 2`, 80% × 80%)
-- A3: Add `sprk_regardingrecordnumber` (text, 100 chars, indexed) to 10 target entities: Project, Invoice, Event, Analysis, Organization, Contact, Document, WorkAssignment, Budget, Account
+- A3: Add `sprk_regardingrecordnumber` (text, 100 chars, indexed) to **11 target entities** (revised per D-7 + D-6): Project, Invoice, Event, Analysis, Organization, **contact (OOB)**, Document, WorkAssignment, Budget, Account, **Billing Analysis (`sprk_billinganalysis`)**
 - A4: Data-driven record-number resolution via `sprk_recordtype_ref.sprk_regardingrecordnumberfield`
 - A5: Preserve read-only mode, CREATE-mode presave bridge, `sprk_regardingrecordurl` population
 - A6: RegardingResolver v1.2.0 → v1.3.0; `PolymorphicResolverService` minor bump
@@ -391,41 +391,109 @@ The Field Mapping subsystem propagates values from a source (parent) record to r
 
 ## A.2 Data model
 
+> **Revised 2026-07-02 (post-Wave 0 SRFR-001)**: this section reflects the ACTUAL Dataverse schema. Prior spec versions (before D-1/D-2/D-3 divergence findings) described a text-field + per-profile-syncmode model that never matched reality.
+
 ### A.2.1 `sprk_fieldmappingprofile`
 
-Top-level admin-authored container. One profile per source→target entity pair.
+Top-level admin-authored container. One profile per source→target `sprk_recordtype_ref` pair.
 
 | Field | Type | Purpose |
 |---|---|---|
 | `sprk_fieldmappingprofileid` | GUID | PK |
-| `sprk_name` | Text | Human name (e.g., "Matter → Event field inheritance") |
-| `sprk_sourceentity` | Text (logical name) | Source entity logical name (e.g., `sprk_matter`) |
-| `sprk_targetentity` | Text (logical name) | Target entity logical name (e.g., `sprk_event`) |
-| `sprk_syncmode` | OptionSet | `OneTime = 1` \| `ManualRefresh = 2` (see §A.3) |
-| `statecode` | State | Active / Inactive (standard) |
+| `sprk_name` | Text (NVARCHAR 850) | Human name (e.g., "Matter to Event") |
+| `sprk_sourcerecordtype` | **LOOKUP → `sprk_recordtype_ref`** | Source recordtype ref (drives the "source entity" resolution via `sprk_recordlogicalname`) |
+| `sprk_targetrecordtype` | **LOOKUP → `sprk_recordtype_ref`** | Target recordtype ref (drives the "target entity" resolution) |
+| `sprk_compatibilitymode` | Choice | `Strict (0)` \| `Resolve (1)` — profile-level type-coercion policy (see §A.4a) |
+| `sprk_defaultvalue` | Text (NVARCHAR 1000) | Profile-level default value (rarely used; per-rule defaults override) |
+| `sprk_description` | Multiline text | Free-form maker documentation |
+| `statecode` / `statuscode` | State/Status | Active/Inactive (standard) |
 
-### A.2.2 `sprk_fieldmappingrules`
+**Note**: There is NO `sprk_syncmode` on the profile. Sync mode is per-rule (see §A.2.2, §A.3).
 
-One row per field-level mapping. N:1 to `sprk_fieldmappingprofile`.
+**Callers** must resolve the source entity logical name via a two-step lookup:
+```
+profile.sprk_sourcerecordtype → sprk_recordtype_ref.sprk_recordlogicalname
+```
+
+### A.2.2 `sprk_fieldmappingrule` (singular; collection = `sprk_fieldmappingrules`)
+
+One row per field-level mapping. N:1 to `sprk_fieldmappingprofile` via `sprk_fieldmappingprofile` lookup.
 
 | Field | Type | Purpose |
 |---|---|---|
 | `sprk_fieldmappingruleid` | GUID | PK |
-| `sprk_fieldmappingprofileid` | Lookup | Parent profile |
-| `sprk_sourcefield` | Text (logical name) | Source field on source entity |
-| `sprk_targetfield` | Text (logical name) | Target field on target entity |
-| `sprk_mappingtype` | OptionSet | `Copy` \| `Default` \| `Concat` \| `Template` (extensible per WI) |
-| `sprk_defaultvalue` | Text | Used when `mappingtype = Default` |
+| `sprk_fieldmappingprofile` | Lookup → `sprk_fieldmappingprofile` | Parent profile |
+| `sprk_name` | Text (NVARCHAR 850) | Rule name (usually source→target field summary) |
+| `sprk_sourcefield` | Text (NVARCHAR 100) | Source field logical name on source entity |
+| `sprk_targetfield` | Text (NVARCHAR 100) | Target field logical name on target entity |
+| `sprk_sourcefieldtype` | Choice: `Text (0)` \| `Lookup (1)` \| `Option Set (2)` \| `Number (3)` \| `Date Time (4)` \| `Boolean (5)` \| `Memo (6)` | Schematic type of the source field — used for value coercion + validation |
+| `sprk_targetfieldtype` | Choice (same options as sourcefieldtype) | Schematic type of the target field |
+| `sprk_mappingtype` | **Choice: `Copy (0)` \| `Default (1)` \| `Concat (2)` \| `Template (3)`** | **How to combine source→target values** (added to Dataverse by SRFR-002 per D-2) |
+| `sprk_defaultvalue` | Text (NVARCHAR 100) | Used when `sprk_mappingtype = Default` — value written when source is empty |
 | `sprk_executionorder` | Whole Number | Determines apply order; ties broken by insertion order |
+| `sprk_mappingdirection` | Choice: `Parent to Child (0)` \| `Child to Parent (1)` \| `Bidirectional (2)` | Direction of value propagation |
+| `sprk_syncmode` | **Choice: `One-time (0)` \| `Manual Refresh (1)`** | **PER-RULE** sync mode (see §A.3) |
+| `sprk_compatibilitymode` | Choice: `Strict (0)` \| `Resolve (1)` | Per-rule override of profile's compatibility mode |
+| `sprk_iscascadingsource` | Bit | If true, this rule participates in the /push cascade; if false, the rule is selection-time-only |
+| `sprk_isrequired` | Bit | If true, treat rule failure as a hard error; if false, log-and-continue |
+| `statecode` / `statuscode` | State/Status | Active/Inactive |
 
-## A.3 Sync-mode semantics
+### A.2.3 `sprk_recordtype_ref` (catalog — read-only from this project's perspective)
 
-| Mode | Selection-time | Push-time | Dirty-field behavior |
+Metadata catalog resolving entity discriminators and per-entity resolver hints.
+
+| Field | Type | Purpose |
+|---|---|---|
+| `sprk_recordtype_refid` | GUID | PK; used as lookup target from profile |
+| `sprk_recordtypename` | Text (NVARCHAR 850, required) | Display-friendly name (e.g., "Matter", "Event") |
+| `sprk_recordlogicalname` | Text (NVARCHAR 100) | Entity logical name (e.g., `sprk_matter`, `contact`) |
+| `sprk_recorddisplayname` | Text (NVARCHAR 100) | Alternate display label |
+| `sprk_recordtypecode` | Text (NVARCHAR 10) | Legacy code (rarely populated) |
+| `sprk_regardingfield` | Text (NVARCHAR 100) | Entity-specific regarding LOOKUP field name on the HOST entity (e.g., `sprk_regardingmatter`) |
+| `sprk_regardingrecordnumberfield` | Text (NVARCHAR 100) | Source-field name on the TARGET entity from which record-number is read (e.g., `sprk_matternumber`) — populated by task 002 |
+
+## A.3 Sync-mode semantics — **per RULE, not per PROFILE** (revised per D-3)
+
+Sync mode is declared on each `sprk_fieldmappingrule` individually (`sprk_syncmode` choice: `One-time (0)` \| `Manual Refresh (1)`). Different rules within the SAME profile can have different sync modes — this is a **feature**, not an accident.
+
+| Rule mode | Selection-time (AssociationResolver picks parent) | Push-time (ribbon /push) | Dirty-field behavior |
 |---|---|---|---|
-| **OneTime** | Applied once on parent-selection; never re-applied even if parent changes | Ignored (skips profile) | Overwrites unconditionally on selection; never touches after |
-| **ManualRefresh** | Applied on parent-selection AND anytime the "Refresh from Parent" button is clicked on the child form | Applied on ribbon-button push | Respects dirty-field protection (§A.4) |
+| **One-time (0)** | Applied once on parent-selection; never re-applied thereafter | **Skipped** by /push (this rule is selection-only) | Overwrites unconditionally on selection; never touches after |
+| **Manual Refresh (1)** | Applied on parent-selection AND on subsequent "Refresh from Parent" button clicks | **Included** in /push cascade | Respects dirty-field protection (§A.4) |
 
-**Explicitly NOT supported in R1** (deferred): `Automatic = 2` mode that watches parent changes and cascades without manual trigger. Requires a BFF Change Feed / Service Bus subscription; not in this project.
+**Interaction with `sprk_iscascadingsource`**: even a `Manual Refresh` rule is EXCLUDED from /push if `sprk_iscascadingsource = false`. The `iscascadingsource` flag is the outer gate; syncmode is the inner mode.
+
+**Push iteration algorithm** (informative):
+```
+for rule in profile.rules(where iscascadingsource=true and syncmode=ManualRefresh):
+    for child in cascadableChildren(parent, targetEntity):
+        if not dirtyFieldGuard(child, rule.targetfield):
+            write(child, rule.targetfield, coerce(source[rule.sourcefield], rule.mappingtype, rule.defaultvalue))
+```
+
+**Explicitly NOT supported in R1** (deferred): an `Automatic = 2` sync mode that watches parent changes and cascades without manual trigger. Requires a BFF Change Feed / Service Bus subscription; not in this project.
+
+## A.3a Mapping-type semantics (per rule)
+
+`sprk_mappingtype` (added to Dataverse by SRFR-002 per D-2) drives how source→target values are combined:
+
+| Type | Behavior | Requires `sprk_defaultvalue`? |
+|---|---|---|
+| **Copy (0)** | Write source value verbatim to target. If source is null, write null (subject to dirty-field guard). | No |
+| **Default (1)** | If source has a value, write it; else write `sprk_defaultvalue`. | Yes |
+| **Concat (2)** | Concatenate multiple rules with the same `sprk_targetfield` in `sprk_executionorder` order, separated by space (or delimiter TBD). Only rules with `mappingtype = Concat` participate. | No |
+| **Template (3)** | Interpret `sprk_defaultvalue` as a template with `{sourcefield}` placeholders; resolve against the parent record. E.g., `"{sprk_matternumber} — {sprk_mattername}"`. | Yes (template string) |
+
+## A.4a Compatibility-mode semantics
+
+`sprk_compatibilitymode` (on both profile and rule) drives type-coercion behavior when `sprk_sourcefieldtype` ≠ `sprk_targetfieldtype`:
+
+| Mode | Behavior |
+|---|---|
+| **Strict (0)** | Type mismatch = hard error; rule fails; if `sprk_isrequired = true`, the entire push aborts. |
+| **Resolve (1)** | Best-effort coercion (e.g., Number → Text via `.toString()`, Lookup → Text via record name). If coercion fails, log warning and skip. |
+
+Per-rule `sprk_compatibilitymode` overrides the profile's default.
 
 ## A.4 Dirty-field protection
 
@@ -474,9 +542,27 @@ Response (over-limit, 400):
 **Limit**: 500 children per push. Enforced server-side; client (FR-B3-04) surfaces the specific message.
 
 **Other endpoints in scope for consumption (unchanged)**:
-- `GET /api/v1/field-mappings/profiles?sourceEntity=X` — visibility rule for ribbon button
+- `GET /api/v1/field-mappings/profiles?sourceRecordTypeId={guid}` — visibility rule for ribbon button (revised per D-1: filter by `sprk_recordtype_ref` GUID, not text entity name)
 - `GET /api/v1/field-mappings/profiles/{id}` — profile detail (used by BFF cascade logic)
 - `GET /api/v1/field-mappings/profiles/{id}/rules` — rules detail (used by BFF cascade logic)
+
+**Client-side lookup-resolution pattern** (Wave 6 tasks 061/062 must implement):
+```js
+// Step 1: current entity → sprk_recordtype_ref GUID
+const rtRef = await Xrm.WebApi.retrieveMultipleRecords(
+  'sprk_recordtype_ref',
+  `?$filter=sprk_recordlogicalname eq '${currentEntity}'&$select=sprk_recordtype_refid`
+);
+if (!rtRef.entities.length) return false;  // catalog gap — treat as no profiles
+const sourceRtId = rtRef.entities[0].sprk_recordtype_refid;
+
+// Step 2: profiles where source = this recordtype
+const profiles = await Xrm.WebApi.retrieveMultipleRecords(
+  'sprk_fieldmappingprofile',
+  `?$filter=_sprk_sourcerecordtype_value eq ${sourceRtId} and statecode eq 0&$select=sprk_fieldmappingprofileid,_sprk_targetrecordtype_value`
+);
+return profiles.entities.length > 0;
+```
 
 ## A.6 OOB Dataverse mapping mutual-exclusivity (Anti-pattern)
 

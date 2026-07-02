@@ -1,7 +1,7 @@
 <?xml version="1.0" encoding="UTF-8"?>
 <task id="SRFR-062" project="set-regarding-and-field-mapping-resolver-r1">
   <metadata>
-    <title>Add Push Updates ribbon button to Matter (and per Q-07 inventory) via /ribbon-edit</title>
+    <title>Add Push Updates ribbon button to Matter AND Project (per SRFR-001 Q-07 finding) via /ribbon-edit</title>
     <status>not-started</status>
     <estimated-effort>3h</estimated-effort>
     <actual-effort></actual-effort>
@@ -17,8 +17,10 @@
   </metadata>
 
   <prompt><![CDATA[
-Add a "Push Updates to Related Records" ribbon button to the Matter main form
-(and any additional parent forms identified in SRFR-001's Q-07 inventory).
+Add a "Push Updates to Related Records" ribbon button to BOTH the Matter main
+form AND the Project main form. SRFR-001 Q-07 confirmed 2 active profiles
+2026-07-02: `Matter to Event` (source: `sprk_matter`) and `Project to Event`
+(source: `sprk_project`). Both source entities require the ribbon button.
 
 The ribbon customization mirrors the CANONICAL pattern already shipped for the
 Communication Send button at

@@ -18,13 +18,13 @@
 | # | Task | Status | Rigor | Effort | Parallel-safe |
 |---|---|---|---|---|---|
 | 001 | [Wave-0 discovery audit](./001-wave-0-discovery-audit.poml) | ✅ | STANDARD | 3h | — |
-| 002 | [Populate `sprk_regardingrecordnumberfield` metadata for 10 non-Matter entities](./002-populate-recordtype-metadata.poml) | 🔲 | STANDARD | 2h | after 001 |
+| 002 | [Wave 0 data-fix (D-2 mappingtype + D-4 typo recreates + D-5 all 13 + D-6 contact fix)](./002-populate-recordtype-metadata.poml) | 🔲 | STANDARD | **5h** (revised) | after 001 |
 
 ### Wave 1 — Dataverse Schema
 
 | # | Task | Status | Rigor | Effort | Parallel-safe |
 |---|---|---|---|---|---|
-| 010 | [Add `sprk_regardingrecordnumber` column to 10 target entities](./010-add-regardingrecordnumber-column.poml) | 🔲 | STANDARD | 4h | — |
+| 010 | [Add `sprk_regardingrecordnumber` column to **11** target entities (incl. Billing Analysis per D-7)](./010-add-regardingrecordnumber-column.poml) | 🔲 | STANDARD | 4h | — |
 
 ### Wave 2 — Shared library (`@spaarke/ui-components`)
 

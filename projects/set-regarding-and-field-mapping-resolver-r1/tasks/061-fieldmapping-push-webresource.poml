@@ -22,16 +22,26 @@ exposes TWO functions on the `Spaarke.FieldMapping.Push` namespace:
 
   1. `hasSourceProfile(primaryControl)` — ribbon visibility rule. Returns true
      iff any active `sprk_fieldmappingprofile` has the current form's entity as
-     source. Uses `Xrm.WebApi.retrieveMultipleRecords(...)` (NOT `fetch`, NOT
-     `@spaarke/auth` — plain JS webresources cannot import shared-lib modules).
-     Result cached per (entity, form-id) via `sessionStorage`.
+     source. Per spec Appendix A §A.5 revised (D-1 lookup-based query): TWO-STEP
+     resolution — (a) query sprk_recordtype_ref by `sprk_recordlogicalname eq
+     '<currentEntity>'` to get the recordtype-ref GUID, (b) query
+     sprk_fieldmappingprofile by `_sprk_sourcerecordtype_value eq <guid>` and
+     `statecode eq 0`. Uses `Xrm.WebApi.retrieveMultipleRecords(...)` (NOT `fetch`,
+     NOT `@spaarke/auth`). Result cached per (entity, form-id) via `sessionStorage`.
 
-  2. `pushUpdates(primaryControl)` — ribbon action. Shows `Xrm.Navigation.openConfirmDialog`,
-     then sequentially calls the BFF `POST /api/v1/field-mappings/push` endpoint
-     for each target entity that has an active profile from this source. Aggregates
-     updated / skipped / errors / childCount across targets and shows a summary
-     toast. On BFF over-limit (400 with `error === "over_limit"`), shows the
-     EXACT wording specified by FR-B3-04.
+  2. `pushUpdates(primaryControl)` — ribbon action. Shows
+     `Xrm.Navigation.openConfirmDialog`, then sequentially calls the BFF
+     `POST /api/v1/field-mappings/push` endpoint for each target entity (resolve
+     via `_sprk_targetrecordtype_value` → sprk_recordtype_ref → sprk_recordlogicalname).
+     Aggregates updated / skipped / errors / childCount across targets and shows
+     a summary toast. On BFF over-limit (400 with `error === "over_limit"`),
+     shows the EXACT wording specified by FR-B3-04.
+
+     **Per-rule syncmode semantics** (spec §A.3 revised — D-3): the BFF
+     `/push` endpoint SHOULD honor per-rule syncmode (skip One-time rules,
+     include Manual Refresh rules) + `sprk_iscascadingsource` gate. Client
+     side does NOT need to filter rules — that's server-side logic. The
+     client just invokes /push per (source, target) pair.
 
 Style + structure mirrors `src/client/webresources/js/sprk_todo_regarding_presave.js`:
 IIFE, namespace scaffold (`window.Spaarke = window.Spaarke || {}`), `ns.VERSION = "1.0.0"`.

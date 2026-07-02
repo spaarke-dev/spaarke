@@ -22,11 +22,19 @@ with an editable subgrid for the child `sprk_fieldmappingrules` entity. This is
 the MVP authoring UX per FR-B2-01 — NO custom PCF, NO Code Page, NO Fluent v9
 wrapper. Admins create/edit profiles + rules end-to-end via the native form.
 
-The parent form MUST expose the profile identity fields
-(sprk_name, sprk_sourceentity, sprk_targetentity, sprk_syncmode, statecode) and
-MUST embed a truly editable subgrid of `sprk_fieldmappingrules` with columns
-sprk_sourcefield, sprk_targetfield, sprk_mappingtype, sprk_defaultvalue,
-sprk_executionorder. The subgrid must not be read-only. Deploy via the standard
+The parent form MUST expose the REAL profile fields per spec Appendix A §A.2.1
+revised 2026-07-02 (Wave 0 SRFR-001 divergence D-1):
+sprk_name, sprk_sourcerecordtype (LOOKUP to sprk_recordtype_ref),
+sprk_targetrecordtype (LOOKUP to sprk_recordtype_ref), sprk_compatibilitymode
+(Choice Strict/Resolve), sprk_description, statecode.
+
+MUST embed a truly editable subgrid of `sprk_fieldmappingrules` (collection;
+table is singular `sprk_fieldmappingrule`) with columns per spec §A.2.2 revised:
+sprk_sourcefield, sprk_targetfield, sprk_sourcefieldtype (Choice), sprk_targetfieldtype
+(Choice), sprk_mappingtype (Choice Copy/Default/Concat/Template — added to Dataverse
+by SRFR-002 W1), sprk_defaultvalue, sprk_executionorder, sprk_mappingdirection
+(Choice), sprk_syncmode (Choice One-time/Manual Refresh — PER-RULE), sprk_compatibilitymode,
+sprk_iscascadingsource (Bit), sprk_isrequired (Bit). The subgrid must not be read-only. Deploy via the standard
 Dataverse solution round-trip (unpack → edit → repack → import).
 
 Success = an admin creates a Matter → Event profile end-to-end via the form

@@ -1,25 +1,40 @@
 # Current Task
 
 **Project**: set-regarding-and-field-mapping-resolver-r1
-**Task ID**: SRFR-002 (not-started)
+**Task ID**: SRFR-002 (ready to start)
 **Task File**: [`tasks/002-populate-recordtype-metadata.poml`](./tasks/002-populate-recordtype-metadata.poml)
 **Wave**: 0
-**Status**: BLOCKED — pending owner decisions on Wave 0 divergence findings
+**Status**: not-started
 
-## 🚨 Wave 0 escalation required before SRFR-002 begins
+## Ready
 
-`notes/wave-0-discovery.md` surfaced **7 spec/reality divergences** (D-1..D-7). Task 002's scope needs owner input on:
+Owner resolved all 7 Wave 0 divergences (D-1 through D-7) on 2026-07-02. Post-resolution updates completed:
 
-- **D-5**: `sprk_regardingrecordnumberfield` is EMPTY for ALL rows including Matter (owner's 2026-07-02 claim was incorrect). Task 002 scope → populate ALL 12+ rows, not just 10.
-- **D-6**: Contact catalog value `sprk_contact` doesn't exist as a table. Fix to OOB `contact`, or plan a custom entity?
-- **D-7**: 13 catalog rows including Billing Analysis (`sprk_billinganalysis`). In scope for task 002 population + task 010 schema add?
-- **D-4**: Data-quality typos in `sprk_regardingfield` for Project, Budget, Billing Analysis. Authorize inline fix in task 002?
-- **D-1..D-3**: `sprk_fieldmappingprofile` + `sprk_fieldmappingrule` schemas don't match spec Appendix A. Affects Waves 6 tasks 060/061/062 substantially. Spec rewrite recommended.
+- ✅ `spec.md` Appendix A §A.2 + §A.3 + §A.3a + §A.4a + §A.5 rewritten to match real schema
+- ✅ SRFR-002 POML expanded from 2h → 5h with 4 workstreams (W1 add `sprk_mappingtype`, W2 recreate 3 typo'd lookups, W3 populate all 13 catalog rows, W4 fix Person catalog to OOB `contact`)
+- ✅ SRFR-010 POML expanded from 10 → 11 target entities (adds Billing Analysis per D-7)
+- ✅ SRFR-060 POML updated for real profile + rule schema (lookups instead of text; `sprk_compatibilitymode`; per-rule fields)
+- ✅ SRFR-061 POML updated for two-step lookup-based profile query per revised §A.5
+- ✅ SRFR-062 POML: title + prompt updated to reflect **BOTH Matter AND Project** ribbon deploys (Q-07)
+- ✅ TASK-INDEX effort updated (SRFR-002: 2h → 5h)
 
-## Recent completion
+## Owner decisions (2026-07-02)
 
-- ✅ SRFR-001 Wave 0 discovery audit — completed 2026-07-02
+| Divergence | Decision |
+|---|---|
+| D-1 (profile schema) | Accept as-is; spec rewritten |
+| D-2 (`sprk_mappingtype`) | Add to Dataverse via SRFR-002 W1 |
+| D-3 (per-rule syncmode) | Update spec accordingly |
+| D-4 (lookup typos) | Remove + recreate with correct logical names via SRFR-002 W2 |
+| D-5 (all 13 rows empty) | Populate all 13 via SRFR-002 W3 |
+| D-6 (`sprk_contact` → `contact`) | Fix catalog via SRFR-002 W4 |
+| D-7 (13 record types) | Confirmed; SRFR-010 scope expanded to include Billing Analysis |
 
 ## Next action
 
-**Blocking**: present `notes/wave-0-discovery.md` to owner; obtain decisions on D-1..D-7; then update spec.md and adjust task 002/010/060/061/062 scopes before invoking `task-execute` on SRFR-002.
+Say `execute task 002` or `continue` to run SRFR-002 (Wave 0 data-fix task, ~5h).
+
+## Recently completed
+
+- ✅ SRFR-001 Wave 0 discovery audit — 2026-07-02
+- ✅ Divergence resolution pass — spec.md + 5 POML files updated 2026-07-02
