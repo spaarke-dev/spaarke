@@ -76,6 +76,15 @@ import {
   ComposeWorkspace,
   useComposeLaunch,
 } from "@spaarke/compose-components";
+// spaarkeai-compose-r1 hotfix 2026-07-02 (smoke-1): `ComposeWorkspace` requires
+// `tenantId` as a required prop (widened facade for compose-summarize per
+// task 095 / ADR-013 amendment 2026-07-01). Neither `SectionFactoryContext`
+// nor `ComposeLaunchContext` carries the tenant, so we read the shared MSAL
+// singleton directly. `resolveTenantIdSync` reads from `@spaarke/auth`'s
+// `getAuthProvider()` — populated during `initAuth` — and falls back to
+// `Xrm.Utility.getGlobalContext().organizationSettings.tenantId` if the
+// auth provider is not yet ready.
+import { resolveTenantIdSync } from "@spaarke/auth";
 
 // ---------------------------------------------------------------------------
 // ComposeSectionMount — inner functional component that bridges the Section
@@ -107,10 +116,17 @@ interface ComposeSectionMountProps {
 
 const ComposeSectionMount: React.FC<ComposeSectionMountProps> = ({ bffBaseUrl }) => {
   const composeLaunch = useComposeLaunch();
+  // 2026-07-02 smoke-1 hotfix — read tenantId from the MSAL singleton so
+  // ComposeWorkspace's Load endpoint gate passes. `resolveTenantIdSync` is
+  // synchronous + safe to call inside render. Xrm.Utility fallback covers
+  // any race where MSAL cache is empty on first paint (auth provider is
+  // always initialized before this mount because SpaarkeAi + LegalWorkspace
+  // both bootstrap `initAuth` before `createRoot(...).render(...)`).
+  const tenantId = resolveTenantIdSync();
   return React.createElement(ComposeWorkspace, {
     bffBaseUrl,
     driveId: composeLaunch?.driveId ?? "",
-    tenantId: "",
+    tenantId,
     initialDocumentRef: composeLaunch?.document ?? null,
     initialSessionId: "",
   });
