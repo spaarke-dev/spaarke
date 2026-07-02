@@ -2,12 +2,12 @@
 <task id="SRFR-053" project="set-regarding-and-field-mapping-resolver-r1">
   <metadata>
     <title>AssociationResolver imports relocated FieldMappingHandler from shared lib; version bump v1.1.0 → v1.2.0</title>
-    <status>not-started</status>
+    <status>complete</status>
     <estimated-effort>2h</estimated-effort>
-    <actual-effort></actual-effort>
+    <actual-effort>~40min</actual-effort>
     <assigned>AI Agent</assigned>
-    <started></started>
-    <completed></completed>
+    <started>2026-07-02</started>
+    <completed>2026-07-02</completed>
     <rigor>FULL</rigor>
     <parallel-safe>false</parallel-safe>
     <parallel-group>C</parallel-group>

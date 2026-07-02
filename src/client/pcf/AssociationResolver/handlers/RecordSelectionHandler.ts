@@ -3,22 +3,46 @@
  *
  * When a user selects a related record in AssociationResolver:
  * 1. Sets the entity-specific lookup field (e.g., sprk_regardingmatter for Matter)
- * 2. Sets denormalized fields (sprk_regardingrecordname, sprk_regardingrecordtype)
- * 3. Clears the other 7 entity-specific lookup fields
+ * 2. Sets 5 denormalized resolver fields (name, id, url, type, number)
+ * 3. Clears the other N-1 entity-specific lookup fields
  *
- * Uses Xrm.Page.getAttribute() for form field access.
- * Uses WebAPI for Record Type lookup queries.
+ * SRFR-051 refactor: this handler is now a THIN ADAPTER over the shared
+ * `@spaarke/ui-components` primitives. It no longer duplicates the
+ * denormalized-write logic that lives in `PolymorphicResolverService`:
+ *
+ *   - Record Type lookup     → `resolveRecordType`         (was local `getRecordTypeByEntityLogicalName`)
+ *   - Record URL construction → `buildRecordUrl`            (was local `buildRecordUrl` + `getAppIdFromUrl`)
+ *   - Record Number source-field → `resolveRecordNumberFieldName` (new — 5th field per FR-B5-01)
+ *
+ * The handler retains a form-mode write path because AssociationResolver
+ * writes to a MDA form's attributes via `Xrm.Page.getAttribute().setValue()`
+ * — a fundamentally different data pathway from the payload-mutation
+ * semantics of `applyResolverFields()` (which produces `@odata.bind`
+ * payloads for `webApi.createRecord()` / `webApi.updateRecord()`). The
+ * form-write orchestration lives here per ADR-012 (context-agnostic
+ * shared lib) while the field-name decisions and metadata lookups are
+ * fully delegated to the shared service.
  *
  * ADR Compliance:
  * - ADR-006: Logic in PCF control code, not Business Rules
+ * - ADR-012: Shared services consumed via `@spaarke/ui-components` public exports only
  * - ADR-021: No UI changes here (Fluent UI v9 in components)
+ * - ADR-024: Dual-field invariants preserved (5th field per FR-A4-01 project amendment / Path B)
+ * - ADR-038: No `Mock<HttpMessageHandler>` in tests — inject `webApi` shim
  *
- * STUB: [CONFIG] - S021-01: Lookup field names should come from configuration, not hardcoded
+ * Entity configuration is loaded dynamically from `sprk_recordtype_ref`
+ * (see `loadEntityConfigs()` below). The former hardcoded
+ * `ENTITY_LOOKUP_CONFIGS` const was retired in SRFR-050 per FR-B4-01.
  *
- * @version 1.1.0 - Updated to use Record Type lookup instead of OptionSet
+ * @version 1.1.0 → 1.2.0 (SRFR-051 refactor; version bumped in SRFR-053)
  */
 
-import { createLogger } from '@spaarke/ui-components';
+import {
+  createLogger,
+  buildRecordUrl,
+  resolveRecordType,
+  resolveRecordNumberFieldName,
+} from '@spaarke/ui-components';
 
 const logger = createLogger('AssociationResolver');
 
@@ -52,144 +76,22 @@ export interface EntityLookupConfig {
    * and task SRFR-050 (AssociationResolver dynamic config loader).
    */
   regardingRecordNumberField?: string;
-  // Note: regardingRecordTypeValue removed - now using Record Type lookup
 }
 
-// STUB: [CONFIG] - S021-01: Lookup field names should come from configuration, not hardcoded
-// These must match ENTITY_CONFIGS in AssociationResolverApp.tsx and spec.md
-const ENTITY_LOOKUP_CONFIGS: EntityLookupConfig[] = [
-  {
-    logicalName: 'sprk_matter',
-    displayName: 'Matter',
-    regardingField: 'sprk_regardingmatter',
-  },
-  {
-    logicalName: 'sprk_project',
-    displayName: 'Project',
-    regardingField: 'sprk_regardingproject',
-  },
-  {
-    logicalName: 'sprk_invoice',
-    displayName: 'Invoice',
-    regardingField: 'sprk_regardinginvoice',
-  },
-  {
-    logicalName: 'sprk_analysis',
-    displayName: 'Analysis',
-    regardingField: 'sprk_regardinganalysis',
-  },
-  {
-    logicalName: 'account',
-    displayName: 'Account',
-    regardingField: 'sprk_regardingaccount',
-  },
-  {
-    logicalName: 'contact',
-    displayName: 'Contact',
-    regardingField: 'sprk_regardingcontact',
-  },
-  {
-    logicalName: 'sprk_workassignment',
-    displayName: 'Work Assignment',
-    regardingField: 'sprk_regardingworkassignment',
-  },
-  {
-    logicalName: 'sprk_budget',
-    displayName: 'Budget',
-    regardingField: 'sprk_regardingbudget',
-  },
-];
-
-// Denormalized field names for unified views
+/**
+ * Denormalized resolver field names.
+ *
+ * SRFR-051: `recordNumber` (5th field) added to reflect FR-B5-01. The
+ * corresponding write is delegated to the shared service's data-driven
+ * `resolveRecordNumberFieldName` helper — no field-list duplication here.
+ */
 const DENORMALIZED_FIELDS = {
   recordName: 'sprk_regardingrecordname',
   recordId: 'sprk_regardingrecordid',
-  recordType: 'sprk_regardingrecordtype', // Now a Lookup to sprk_recordtype_ref
-  recordUrl: 'sprk_regardingrecordurl', // URL field - clickable link to parent record
-};
-
-/**
- * Build the Dataverse record URL for navigation
- * Generates a fully qualified URL that's portable between environments
- * Uses Xrm.Utility.getGlobalContext() for dynamic org URL and app ID
- */
-function buildRecordUrl(entityLogicalName: string, recordId: string): string {
-  const cleanId = recordId.replace(/[{}]/g, '').toLowerCase();
-
-  try {
-    const xrm = (window as any).Xrm || (window.parent as any)?.Xrm;
-
-    if (xrm?.Utility?.getGlobalContext) {
-      const globalContext = xrm.Utility.getGlobalContext();
-
-      // Get the org URL dynamically (e.g., https://{org}.crm.dynamics.com)
-      const clientUrl = globalContext.getClientUrl?.() || '';
-
-      // Get the current app ID
-      let appId = '';
-      if (globalContext.getCurrentAppId) {
-        // getCurrentAppId returns a promise in some versions
-        const appIdResult = globalContext.getCurrentAppId();
-        if (typeof appIdResult === 'string') {
-          appId = appIdResult;
-        } else if (appIdResult && typeof appIdResult.then === 'function') {
-          // It's a promise - we can't await here, so use sync fallback
-          // Try to get from URL instead
-          appId = getAppIdFromUrl();
-        }
-      }
-
-      // Fallback: try to get app ID from current URL
-      if (!appId) {
-        appId = getAppIdFromUrl();
-      }
-
-      if (clientUrl) {
-        // Build fully qualified URL
-        const url = new URL('/main.aspx', clientUrl);
-        if (appId) {
-          url.searchParams.set('appid', appId.replace(/[{}]/g, '').toLowerCase());
-        }
-        url.searchParams.set('pagetype', 'entityrecord');
-        url.searchParams.set('etn', entityLogicalName);
-        url.searchParams.set('id', cleanId);
-
-        logger.logDebug('RecordSelection', `Built record URL: ${url.toString()}`);
-        return url.toString();
-      }
-    }
-  } catch (error) {
-    logger.logWarn('RecordSelection', 'Error building record URL, using fallback:', error);
-  }
-
-  // Fallback to relative URL if context not available
-  return `/main.aspx?pagetype=entityrecord&etn=${entityLogicalName}&id=${cleanId}`;
-}
-
-/**
- * Extract app ID from current page URL
- * Fallback when Xrm.Utility.getGlobalContext().getCurrentAppId() is not available
- */
-function getAppIdFromUrl(): string {
-  try {
-    // Check both current window and parent window URLs
-    const urls = [window.location.href, window.parent?.location?.href].filter(Boolean);
-
-    for (const urlStr of urls) {
-      const url = new URL(urlStr as string);
-      const appId = url.searchParams.get('appid');
-      if (appId) {
-        return appId.replace(/[{}]/g, '').toLowerCase();
-      }
-    }
-  } catch (error) {
-    // Cross-origin or other error - ignore
-  }
-  return '';
-}
-
-// Cache for Record Type lookups to avoid repeated queries
-const recordTypeCache = new Map<string, { id: string; name: string }>();
+  recordType: 'sprk_regardingrecordtype',
+  recordUrl: 'sprk_regardingrecordurl',
+  recordNumber: 'sprk_regardingrecordnumber',
+} as const;
 
 // Dynamic entity config cache - loaded from sprk_recordtype_ref
 let dynamicEntityConfigs: EntityLookupConfig[] | null = null;
@@ -199,8 +101,13 @@ const entityConfigsLoadPromise: {
 } = { promise: null };
 
 /**
- * Load entity configurations dynamically from sprk_recordtype_ref
- * This replaces the hardcoded ENTITY_LOOKUP_CONFIGS
+ * Load entity configurations dynamically from sprk_recordtype_ref.
+ *
+ * The former hardcoded ENTITY_LOOKUP_CONFIGS const was retired in SRFR-050
+ * (FR-B4-01). The dynamic catalog is now the sole source of entity configs.
+ * If the catalog query fails or returns zero rows, we resolve to an empty
+ * array so consumers can gracefully degrade (dropdown empty, no fields
+ * cleared/set) rather than silently binding to a stale hardcoded list.
  */
 export async function loadEntityConfigs(webApi: ComponentFramework.WebApi): Promise<EntityLookupConfig[]> {
   // Return cached if available
@@ -242,13 +149,20 @@ export async function loadEntityConfigs(webApi: ComponentFramework.WebApi): Prom
         );
         return dynamicEntityConfigs;
       } else {
-        logger.logWarn('RecordSelection', 'No Record Types found, falling back to hardcoded configs');
-        dynamicEntityConfigs = [...ENTITY_LOOKUP_CONFIGS];
+        logger.logWarn(
+          'RecordSelection',
+          'No Record Types returned from sprk_recordtype_ref — resolving to empty config list'
+        );
+        dynamicEntityConfigs = [];
         return dynamicEntityConfigs;
       }
     } catch (error) {
-      logger.logError('RecordSelection', 'Error loading entity configs, using fallback', error);
-      dynamicEntityConfigs = [...ENTITY_LOOKUP_CONFIGS];
+      logger.logError(
+        'RecordSelection',
+        'Error loading entity configs from sprk_recordtype_ref — resolving to empty config list',
+        error
+      );
+      dynamicEntityConfigs = [];
       return dynamicEntityConfigs;
     } finally {
       entityConfigsLoading = false;
@@ -259,10 +173,15 @@ export async function loadEntityConfigs(webApi: ComponentFramework.WebApi): Prom
 }
 
 /**
- * Get entity configs (sync version - returns cached or fallback)
+ * Get entity configs (sync accessor over the dynamic catalog cache).
+ *
+ * Returns the cached `dynamicEntityConfigs` from the last successful
+ * `loadEntityConfigs()` call. Returns an empty array during the initial
+ * pre-load window (before `loadEntityConfigs()` has resolved). Callers
+ * that require populated configs must `await loadEntityConfigs()` first.
  */
 export function getEntityConfigs(): EntityLookupConfig[] {
-  return dynamicEntityConfigs || ENTITY_LOOKUP_CONFIGS;
+  return dynamicEntityConfigs ?? [];
 }
 
 /**
@@ -368,43 +287,160 @@ function setTextValue(fieldName: string, value: string | null): boolean {
 }
 
 /**
- * Query Record Type entity by entity logical name
- * Returns the Record Type record ID and name for the given entity
+ * Result of resolving the 5-field denormalized write via shared primitives.
+ * Consumed by the form-write path (setValue) — not a create/update payload.
  */
-async function getRecordTypeByEntityLogicalName(
+interface IResolvedResolverFields {
+  recordName: string;
+  recordId: string;
+  recordUrl: string;
+  recordTypeLookup: { id: string; name: string } | null;
+  recordNumber: string | null;
+  recordNumberSourceField: string | null;
+}
+
+/**
+ * Resolve the 5 denormalized resolver-field values using shared primitives.
+ *
+ * SRFR-051 core delegation: all metadata + URL + record-number logic is
+ * sourced from `@spaarke/ui-components` — no local duplication remains.
+ * Returned values are then written to the form via `applyResolvedFieldsToForm()`
+ * (or omitted per NFR-06 graceful-blank when null).
+ *
+ * @param webApi                    WebApi shim
+ * @param parentEntityLogicalName   Target entity (e.g., "sprk_matter")
+ * @param parentRecordId            GUID of target record (with or without braces)
+ * @param parentRecordName          Display name of target record
+ * @param sourceRecordNumberField   Optional override for the record-number
+ *                                  source-field name. When omitted, resolved
+ *                                  via shared `resolveRecordNumberFieldName`.
+ */
+async function resolveResolverFields(
   webApi: ComponentFramework.WebApi,
-  entityLogicalName: string
-): Promise<{ id: string; name: string } | null> {
-  // Check cache first
-  const cached = recordTypeCache.get(entityLogicalName);
-  if (cached) {
-    logger.logDebug('RecordSelection', `Record Type cache hit for ${entityLogicalName}: ${cached.id}`);
-    return cached;
+  parentEntityLogicalName: string,
+  parentRecordId: string,
+  parentRecordName: string,
+  sourceRecordNumberField?: string
+): Promise<IResolvedResolverFields> {
+  const cleanId = parentRecordId.replace(/[{}]/g, '').toLowerCase();
+
+  // 1. Record URL — delegated to shared `buildRecordUrl`
+  const recordUrl = buildRecordUrl(parentEntityLogicalName, cleanId);
+
+  // 2. Record Type lookup — delegated to shared `resolveRecordType`
+  const recordTypeLookup = await resolveRecordType(webApi, parentEntityLogicalName);
+  if (!recordTypeLookup) {
+    logger.logWarn(
+      'RecordSelection',
+      `Record Type not found for entity: ${parentEntityLogicalName}`
+    );
   }
 
-  try {
-    // Query sprk_recordtype_ref by sprk_recordlogicalname
-    const query = `?$filter=sprk_recordlogicalname eq '${entityLogicalName}' and statecode eq 0&$select=sprk_recordtype_refid,sprk_recorddisplayname`;
-    const result = await webApi.retrieveMultipleRecords('sprk_recordtype_ref', query);
+  // 3. Record Number — delegated to shared `resolveRecordNumberFieldName`
+  //    then query the target record for the source-field VALUE.
+  //    NFR-06 graceful-blank: null-in → null-out; log warn; do not throw.
+  const explicitOverride =
+    typeof sourceRecordNumberField === 'string' && sourceRecordNumberField.trim().length > 0
+      ? sourceRecordNumberField.trim()
+      : null;
 
-    if (result.entities && result.entities.length > 0) {
-      const recordType = result.entities[0];
-      const id = recordType.sprk_recordtype_refid as string;
-      const name = recordType.sprk_recorddisplayname as string;
+  const recordNumberSourceField =
+    explicitOverride ??
+    (await resolveRecordNumberFieldName(webApi, parentEntityLogicalName));
 
-      // Cache the result
-      recordTypeCache.set(entityLogicalName, { id, name });
-
-      logger.logInfo('RecordSelection', `Found Record Type for ${entityLogicalName}: ${name} (${id})`);
-      return { id, name };
-    } else {
-      logger.logWarn('RecordSelection', `No Record Type found for entity: ${entityLogicalName}`);
-      return null;
+  let recordNumber: string | null = null;
+  if (recordNumberSourceField) {
+    try {
+      const primaryIdAttr = `${parentEntityLogicalName}id`;
+      const query = `?$filter=${primaryIdAttr} eq ${cleanId}&$select=${recordNumberSourceField}&$top=1`;
+      const result = await webApi.retrieveMultipleRecords(parentEntityLogicalName, query, 1);
+      if (result.entities && result.entities.length > 0) {
+        const raw = result.entities[0][recordNumberSourceField];
+        if (typeof raw === 'string' && raw.trim().length > 0) {
+          recordNumber = raw.trim();
+        } else if (typeof raw === 'number') {
+          recordNumber = String(raw);
+        }
+      }
+      if (recordNumber === null) {
+        logger.logWarn(
+          'RecordSelection',
+          `Target ${parentEntityLogicalName}(${cleanId}) has null/empty "${recordNumberSourceField}"; skipping sprk_regardingrecordnumber write (NFR-06).`
+        );
+      }
+    } catch (err) {
+      logger.logWarn(
+        'RecordSelection',
+        `Failed to read "${recordNumberSourceField}" from ${parentEntityLogicalName}(${cleanId}) — skipping sprk_regardingrecordnumber write (NFR-06).`,
+        err
+      );
     }
-  } catch (error) {
-    logger.logError('RecordSelection', `Error querying Record Type for ${entityLogicalName}`, error);
-    return null;
+  } else {
+    logger.logWarn(
+      'RecordSelection',
+      `No sprk_regardingrecordnumberfield mapping for "${parentEntityLogicalName}"; skipping sprk_regardingrecordnumber write (NFR-06).`
+    );
   }
+
+  return {
+    recordName: parentRecordName,
+    recordId: cleanId,
+    recordUrl,
+    recordTypeLookup,
+    recordNumber,
+    recordNumberSourceField,
+  };
+}
+
+/**
+ * Apply the resolved denormalized fields to the Xrm.Page form via
+ * `setValue()` calls. This is the form-mode adapter half of the thin
+ * adapter — the shared service provides the VALUES, this function
+ * writes them to the form.
+ *
+ * @returns `true` if all writes that were attempted succeeded (skipped
+ *          writes for graceful-blank are not considered failures).
+ */
+function applyResolvedFieldsToForm(resolved: IResolvedResolverFields): boolean {
+  const errors: string[] = [];
+
+  if (!setTextValue(DENORMALIZED_FIELDS.recordName, resolved.recordName)) {
+    errors.push(DENORMALIZED_FIELDS.recordName);
+  }
+
+  if (!setTextValue(DENORMALIZED_FIELDS.recordId, resolved.recordId)) {
+    errors.push(DENORMALIZED_FIELDS.recordId);
+  }
+
+  if (!setTextValue(DENORMALIZED_FIELDS.recordUrl, resolved.recordUrl)) {
+    errors.push(DENORMALIZED_FIELDS.recordUrl);
+  }
+
+  if (resolved.recordTypeLookup) {
+    if (
+      !setLookupValue(
+        DENORMALIZED_FIELDS.recordType,
+        'sprk_recordtype_ref',
+        resolved.recordTypeLookup.id,
+        resolved.recordTypeLookup.name
+      )
+    ) {
+      errors.push(DENORMALIZED_FIELDS.recordType);
+    }
+  } else {
+    // Record Type unresolved — treat as a write failure so the caller
+    // surfaces the correct error to the user.
+    errors.push(DENORMALIZED_FIELDS.recordType);
+  }
+
+  // 5th field (SRFR-051 / FR-B5-01) — graceful-blank when null (NFR-06).
+  if (resolved.recordNumber !== null) {
+    if (!setTextValue(DENORMALIZED_FIELDS.recordNumber, resolved.recordNumber)) {
+      errors.push(DENORMALIZED_FIELDS.recordNumber);
+    }
+  }
+
+  return errors.length === 0;
 }
 
 /**
@@ -422,13 +458,12 @@ export interface IRecordSelectionResult {
  * Handle record selection - main entry point (async)
  *
  * When a record is selected:
- * 1. Clear all 8 entity-specific lookup fields
+ * 1. Clear all N entity-specific lookup fields
  * 2. Set the selected entity's lookup field
- * 3. Set denormalized fields (name, id, type)
- * 4. Query Record Type and set as lookup
+ * 3. Resolve + write the 5 denormalized fields (via shared primitives)
  *
  * @param selection - The selected record details
- * @param webApi - WebAPI for Record Type queries
+ * @param webApi - WebAPI for Record Type + record-number queries
  */
 export async function handleRecordSelection(
   selection: IRecordSelection,
@@ -454,6 +489,8 @@ export async function handleRecordSelection(
   }
 
   // Step 1: Clear ALL entity-specific lookup fields first (including the one we'll set)
+  //         This is the AssociationResolver-specific behavior that wraps around the
+  //         shared 5-field write — preserved verbatim by SRFR-051.
   for (const config of getEntityConfigs()) {
     if (clearLookupValue(config.regardingField)) {
       result.otherLookupsCleared++;
@@ -474,50 +511,34 @@ export async function handleRecordSelection(
     result.errors.push(`Failed to set ${selectedConfig.regardingField}`);
   }
 
-  // Step 3: Set denormalized fields
-  let denormalizedSuccess = true;
+  // Step 3: Resolve + write the 5 denormalized fields via shared primitives
+  //         (SRFR-051 delegation: all field-value construction, URL, record-type,
+  //          and record-number logic now lives in @spaarke/ui-components.)
+  const resolved = await resolveResolverFields(
+    webApi,
+    selection.entityType,
+    selection.recordId,
+    selection.recordName,
+    selectedConfig.regardingRecordNumberField
+  );
 
-  // Set record name
-  if (!setTextValue(DENORMALIZED_FIELDS.recordName, selection.recordName)) {
-    denormalizedSuccess = false;
-    result.errors.push(`Failed to set ${DENORMALIZED_FIELDS.recordName}`);
-  }
-
-  // Set record ID (GUID without braces)
-  const formattedId = selection.recordId.replace(/[{}]/g, '');
-  if (!setTextValue(DENORMALIZED_FIELDS.recordId, formattedId)) {
-    denormalizedSuccess = false;
-    result.errors.push(`Failed to set ${DENORMALIZED_FIELDS.recordId}`);
-  }
-
-  // Set record URL (clickable link to parent record)
-  const recordUrl = buildRecordUrl(selection.entityType, selection.recordId);
-  if (!setTextValue(DENORMALIZED_FIELDS.recordUrl, recordUrl)) {
-    denormalizedSuccess = false;
-    result.errors.push(`Failed to set ${DENORMALIZED_FIELDS.recordUrl}`);
-  }
-
-  // Step 4: Query Record Type and set as lookup (async operation)
-  const recordType = await getRecordTypeByEntityLogicalName(webApi, selection.entityType);
-  if (recordType) {
-    // Set record type as a lookup value to sprk_recordtype_ref entity
-    if (!setLookupValue(DENORMALIZED_FIELDS.recordType, 'sprk_recordtype_ref', recordType.id, recordType.name)) {
-      denormalizedSuccess = false;
-      result.errors.push(`Failed to set ${DENORMALIZED_FIELDS.recordType}`);
-    }
-  } else {
-    denormalizedSuccess = false;
-    result.errors.push(`Record Type not found for entity: ${selection.entityType}`);
-  }
-
+  const denormalizedSuccess = applyResolvedFieldsToForm(resolved);
   result.denormalizedFieldsSet = denormalizedSuccess;
+
+  if (!denormalizedSuccess) {
+    if (!resolved.recordTypeLookup) {
+      result.errors.push(`Record Type not found for entity: ${selection.entityType}`);
+    } else {
+      result.errors.push('Failed to write one or more denormalized fields');
+    }
+  }
 
   // Overall success if lookup was set (denormalized fields are secondary)
   result.success = result.lookupFieldSet;
 
   logger.logInfo(
     'RecordSelection',
-    `Result: success=${result.success}, lookupSet=${result.lookupFieldSet}, denormalized=${result.denormalizedFieldsSet}, cleared=${result.otherLookupsCleared}`
+    `Result: success=${result.success}, lookupSet=${result.lookupFieldSet}, denormalized=${result.denormalizedFieldsSet}, cleared=${result.otherLookupsCleared}, recordNumber=${resolved.recordNumber ?? 'null'}`
   );
 
   return result;
@@ -534,33 +555,34 @@ export function clearAllRegardingFields(): void {
     clearLookupValue(config.regardingField);
   }
 
-  // Clear denormalized fields
+  // Clear denormalized fields (5 fields per SRFR-051)
   setTextValue(DENORMALIZED_FIELDS.recordName, null);
   setTextValue(DENORMALIZED_FIELDS.recordId, null);
-  setTextValue(DENORMALIZED_FIELDS.recordUrl, null); // Clear the URL field
-  clearLookupValue(DENORMALIZED_FIELDS.recordType); // Now a lookup, use clearLookupValue
+  setTextValue(DENORMALIZED_FIELDS.recordUrl, null);
+  setTextValue(DENORMALIZED_FIELDS.recordNumber, null);
+  clearLookupValue(DENORMALIZED_FIELDS.recordType); // lookup — use clearLookupValue
 }
 
 /**
- * Get the entity config for a logical name
+ * Get the entity config for a logical name.
+ *
+ * Reads from `dynamicEntityConfigs` (populated by `loadEntityConfigs()`).
+ * Returns `undefined` if the catalog has not yet loaded or does not contain
+ * the requested logical name — callers must handle the not-found case.
  */
 export function getEntityConfig(logicalName: string): EntityLookupConfig | undefined {
-  return ENTITY_LOOKUP_CONFIGS.find(c => c.logicalName === logicalName);
+  return (dynamicEntityConfigs ?? []).find(c => c.logicalName === logicalName);
 }
 
 /**
- * Get all entity configs (for dropdown population)
+ * Get all entity configs (for dropdown population).
+ *
+ * Returns a shallow copy of the dynamic catalog. Returns `[]` during the
+ * initial pre-load window — dropdowns should render "loading" state until
+ * `loadEntityConfigs()` resolves.
  */
 export function getAllEntityConfigs(): EntityLookupConfig[] {
-  return [...ENTITY_LOOKUP_CONFIGS];
-}
-
-/**
- * Clear the Record Type cache (useful for testing or when data changes)
- */
-export function clearRecordTypeCache(): void {
-  recordTypeCache.clear();
-  logger.logDebug('RecordSelection', 'Record Type cache cleared');
+  return [...(dynamicEntityConfigs ?? [])];
 }
 
 /**
@@ -578,7 +600,7 @@ export interface IDetectedParentContext {
  * Detect if any regarding lookup field is pre-populated (from subgrid context)
  *
  * When creating an Event from a parent's subgrid, Dataverse can auto-populate
- * the lookup field via relationship mapping. This function checks all 8
+ * the lookup field via relationship mapping. This function checks all
  * entity-specific lookup fields to find which one (if any) is populated.
  *
  * @returns The detected parent context, or null if no parent is detected
@@ -630,11 +652,11 @@ export function detectPrePopulatedParent(): IDetectedParentContext | null {
  * Complete the association for a detected parent context
  *
  * When a parent is auto-detected from a subgrid, this function:
- * 1. Sets the denormalized fields (sprk_regardingrecordtype, sprk_regardingrecordid, sprk_regardingrecordname)
+ * 1. Resolves + writes the 5 denormalized fields via shared primitives
  * 2. Does NOT clear other lookups (only one should be populated from subgrid)
  *
  * @param detectedParent - The detected parent context from detectPrePopulatedParent()
- * @param webApi - WebAPI for Record Type queries
+ * @param webApi - WebAPI for Record Type + record-number queries
  * @returns Result of the operation
  */
 export async function completeAutoDetectedAssociation(
@@ -654,46 +676,35 @@ export async function completeAutoDetectedAssociation(
     `Completing auto-detected association: ${detectedParent.entityDisplayName} - ${detectedParent.recordName}`
   );
 
-  // Set denormalized fields
-  let denormalizedSuccess = true;
+  // Look up the source-field override (if the loaded config has it).
+  // Absent config → let the shared service resolve via metadata.
+  const config = getEntityConfig(detectedParent.entityType);
 
-  // Set record name
-  if (!setTextValue(DENORMALIZED_FIELDS.recordName, detectedParent.recordName)) {
-    denormalizedSuccess = false;
-    result.errors.push(`Failed to set ${DENORMALIZED_FIELDS.recordName}`);
-  }
+  // Resolve + write the 5 denormalized fields via shared primitives
+  const resolved = await resolveResolverFields(
+    webApi,
+    detectedParent.entityType,
+    detectedParent.recordId,
+    detectedParent.recordName,
+    config?.regardingRecordNumberField
+  );
 
-  // Set record ID (GUID without braces)
-  if (!setTextValue(DENORMALIZED_FIELDS.recordId, detectedParent.recordId)) {
-    denormalizedSuccess = false;
-    result.errors.push(`Failed to set ${DENORMALIZED_FIELDS.recordId}`);
-  }
-
-  // Set record URL (clickable link to parent record)
-  const recordUrl = buildRecordUrl(detectedParent.entityType, detectedParent.recordId);
-  if (!setTextValue(DENORMALIZED_FIELDS.recordUrl, recordUrl)) {
-    denormalizedSuccess = false;
-    result.errors.push(`Failed to set ${DENORMALIZED_FIELDS.recordUrl}`);
-  }
-
-  // Query Record Type and set as lookup
-  const recordType = await getRecordTypeByEntityLogicalName(webApi, detectedParent.entityType);
-  if (recordType) {
-    if (!setLookupValue(DENORMALIZED_FIELDS.recordType, 'sprk_recordtype_ref', recordType.id, recordType.name)) {
-      denormalizedSuccess = false;
-      result.errors.push(`Failed to set ${DENORMALIZED_FIELDS.recordType}`);
-    }
-  } else {
-    denormalizedSuccess = false;
-    result.errors.push(`Record Type not found for entity: ${detectedParent.entityType}`);
-  }
-
+  const denormalizedSuccess = applyResolvedFieldsToForm(resolved);
   result.denormalizedFieldsSet = denormalizedSuccess;
+
+  if (!denormalizedSuccess) {
+    if (!resolved.recordTypeLookup) {
+      result.errors.push(`Record Type not found for entity: ${detectedParent.entityType}`);
+    } else {
+      result.errors.push('Failed to write one or more denormalized fields');
+    }
+  }
+
   result.success = denormalizedSuccess;
 
   logger.logInfo(
     'RecordSelection',
-    `Auto-detection completion result: success=${result.success}, denormalized=${result.denormalizedFieldsSet}`
+    `Auto-detection completion result: success=${result.success}, denormalized=${result.denormalizedFieldsSet}, recordNumber=${resolved.recordNumber ?? 'null'}`
   );
 
   return result;

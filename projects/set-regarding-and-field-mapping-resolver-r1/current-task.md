@@ -1,45 +1,52 @@
 # Current Task
 
 **Project**: set-regarding-and-field-mapping-resolver-r1
-**Wave**: 5 (about to start — AssociationResolver)
-**Status**: not-started
+**Wave**: 5 (SRFR-053 complete; SRFR-050 still pending)
+**Task**: none active
+**Status**: idle
+**Started**: —
+**Rigor**: —
 
-## Ready for Wave 5 — AssociationResolver v1.1.0 → v1.2.0 (parallel group C)
+## Quick Recovery
 
-| # | Task | Rigor | Effort | Parallel-safe |
-|---|---|---|---|---|
-| 050 | Retire `ENTITY_LOOKUP_CONFIGS`; transition getEntityConfig callers | FULL | 3h | ✅ (group C) |
-| 051 | `RecordSelectionHandler` → thin adapter delegating to shared `applyResolverFields` | FULL | 4h | ✅ (group C) |
-| 052 | AssociationResolver consumes shared `PolymorphicPicker` | FULL | 3h | ✅ (group C) |
-| 053 | Import relocated `FieldMappingHandler` + version bump v1.1→v1.2 | FULL | 2h | after 050-052 |
+| Field | Value |
+|-------|-------|
+| **Task** | — (SRFR-053 complete) |
+| **Step** | — |
+| **Status** | idle |
+| **Next Action** | Await SRFR-050 (Wave 5 group C last-open task); once complete, Wave 5 closes and Wave 6/7 begin per plan. |
 
-## Waves 0-4 completion summary (12 of 28 tasks)
+## Session Notes / Key Learnings (SRFR-053)
 
-- **Wave 0** (SRFR-001, 002) — Discovery + data-fix. D-1..D-15 divergences all resolved.
-- **Wave 1** (SRFR-010) — `sprk_regardingrecordnumber` added to 11 target entities.
-- **Wave 2** (SRFR-020, 021, 022, 023) — Shared lib refactor. 91 tests pass.
-- **Wave 3** (SRFR-030, 031, 032, 033) — RegardingResolver v1.3.0. 27 tests pass, build:prod succeeds.
-- **Wave 4** (SRFR-040) — Presave webresource v1.2.0.
+- FMH import verification: SRFR-022 delivered cleanly — zero local `FieldMappingHandler` file in `AssociationResolver/handlers/`; all 5 references resolve to `@spaarke/ui-components`. No consumer-side rewiring needed.
+- Version bump followed SRFR-033 pattern exactly: 7 anchors (ControlManifest.Input.xml + index.ts CONTROL_VERSION + AssociationResolverApp.tsx BUILD_DATE + 2 footer sites + package.json + Solution/solution.xml + Solution/Controls/.../ControlManifest.xml + Solution/pack.ps1). `package.json` was previously stale at `1.0.0` — bumped to `1.2.0` to match the whole set.
+- Refreshed `Solution/Controls/.../bundle.js` + `styles.css` from `out/` per SRFR-033 discipline so packed solution embeds v1.2.0-compiled `CONTROL_VERSION`.
+- Auto-mode footer format extended: `v{version} • Built {BUILD_DATE} • Auto` (preserves auto marker while adding the Built-date convention).
+- FR-B5-01 (5th-field `sprk_regardingrecordnumber` write): fully covered by SRFR-051's existing test suite — 8/8 tests pass including "nulls all 5 denormalized fields including sprk_regardingrecordnumber". No new tests authored.
 
-**Aggregate**: ~2h total wall-clock across 12 tasks (vs 24h+ estimated).
+## Applicable ADRs (session-level)
 
-## Known deferred issues
+- ADR-012: Shared Component Library — verified FMH imports resolve to shared lib.
+- ADR-021: Fluent v9 — semantic tokens preserved in footer.
+- ADR-022: PCF Platform Libraries — virtual pattern + platform-library declarations preserved across both source and packed manifests.
+- ADR-038: Testing Strategy — no scaffolding tests added; SRFR-051 coverage sufficient.
 
-- **@spaarke/sdap-client** missing module — blocks full shared-lib `npm run build` but tests pass. Fix before Wave 8 deploy.
-- **React types mismatch** shared-lib React 19 vs PCF React 16 — cast at seam; permanent fix out of scope (idea issue candidate).
+## Files Modified This Session
 
-## Coordination notes for Wave 5
+- `src/client/pcf/AssociationResolver/ControlManifest.Input.xml` — version attr + description-key parenthetical bump.
+- `src/client/pcf/AssociationResolver/index.ts` — `CONTROL_VERSION` bump.
+- `src/client/pcf/AssociationResolver/AssociationResolverApp.tsx` — +5 LoC `BUILD_DATE` const + 2 footer format updates.
+- `src/client/pcf/AssociationResolver/package.json` — version bump (`1.0.0` → `1.2.0`).
+- `src/client/pcf/AssociationResolver/Solution/solution.xml` — `<Version>` bump.
+- `src/client/pcf/AssociationResolver/Solution/Controls/sprk_Spaarke.Controls.AssociationResolver/ControlManifest.xml` — version attr + description-key.
+- `src/client/pcf/AssociationResolver/Solution/Controls/sprk_Spaarke.Controls.AssociationResolver/bundle.js` + `styles.css` — refreshed from build.
+- `src/client/pcf/AssociationResolver/Solution/pack.ps1` — `$version` bump.
+- `projects/set-regarding-and-field-mapping-resolver-r1/notes/wave-5-task-053.log` — new.
+- `projects/set-regarding-and-field-mapping-resolver-r1/tasks/053-*.poml` — status → complete.
+- `projects/set-regarding-and-field-mapping-resolver-r1/tasks/TASK-INDEX.md` — 053 🔲 → ✅.
 
-All 4 Wave 5 tasks modify `src/client/pcf/AssociationResolver/`:
-- 050 + 051 both touch `RecordSelectionHandler.ts`
-- 052 touches `AssociationResolverApp.tsx`
-- 053 touches ControlManifest + imports (after 050-052)
+## Next Action
 
-**Staged plan**:
-- Phase 1: 050 alone (retire hardcoded list — establishes dynamic-first)
-- Phase 2: 051 + 052 in parallel (after 050 lands — 051 refactors handler, 052 swaps picker)
-- Phase 3: 053 (version bump + FMH import — after 051+052)
-
-## Next action
-
-Say `continue` to proceed with staged Wave 5 dispatch.
+- Await SRFR-050 completion (last open Wave 5 task per TASK-INDEX).
+- Once SRFR-050 lands, Wave 5 closes and TASK-INDEX Wave 5 section can be summary-marked complete.
+- Wave 8 SRFR-081 (AssociationResolver v1.2.0 deploy) has an artifact ready.

@@ -7,12 +7,19 @@
  * Task 022: Integrated FieldMappingService to auto-apply field mappings
  * after record selection.
  * Task 024: Added toast notifications for mapping results.
+ * Task SRFR-052 (Wave 5, 2026-07-02): Refactored to consume the shared
+ * `PolymorphicPicker` Fluent v9 component from `@spaarke/ui-components`.
+ * The private Dropdown+SearchButton picker (and its `handleEntityTypeChange`
+ * + `handleLookupClick` handlers) is deleted; entity-type selection and
+ * `Xrm.Utility.lookupObjects` invocation now live inside the shared component.
+ * A thin `handlePickerSelect` handler wires `onSelect(entityType, recordId,
+ * recordName)` back into `handleRecordSelection` (the SRFR-051 refactored
+ * entry point) so the write path is unchanged. See notes/task-052-inventory.md
+ * for the mapping between the retired private picker and the shared contract.
  */
 
 import * as React from 'react';
 import {
-  Dropdown,
-  Option,
   Button,
   Text,
   Link,
@@ -29,7 +36,13 @@ import {
   DialogActions,
   Toaster,
 } from '@fluentui/react-components';
-import { Search20Regular, ArrowSync20Regular, Dismiss20Regular, Open16Regular } from '@fluentui/react-icons';
+import { ArrowSync20Regular, Dismiss20Regular, Open16Regular } from '@fluentui/react-icons';
+import {
+  PolymorphicPicker as PolymorphicPickerRaw,
+  type IPolymorphicPickerWebApi,
+  type PolymorphicPickerProps,
+  type RecordTypeCatalogEntry,
+} from '@spaarke/ui-components';
 import { IInputs } from './generated/ManifestTypes';
 import {
   handleRecordSelection,
@@ -51,7 +64,23 @@ import {
   IFieldMappingApplicationResult,
 } from '@spaarke/ui-components';
 
+/**
+ * Cast at the seam per SRFR-030 pattern (see wave-3-task-030.log §Divergences 1).
+ * The shared lib bundles `React.FC` from React 19 types; PCF pins React 16 per
+ * ADR-022. The React 19 `React.FC` return type is not a valid React 16 JSX
+ * element type. Casting to `React.ComponentType<PolymorphicPickerProps>` at the
+ * import seam typechecks the JSX use-site against the local React 16 types.
+ * Runtime is unaffected — the compiled JS module is the same regardless of
+ * which type version emitted the `.d.ts`.
+ */
+const PolymorphicPicker =
+  PolymorphicPickerRaw as unknown as React.ComponentType<PolymorphicPickerProps>;
+
 const logger = createLogger('AssociationResolver');
+
+// Build date for UI footer per src/client/pcf/CLAUDE.md Version Update Checklist.
+// Bump alongside CONTROL_VERSION (see index.ts) whenever a new deploy ships.
+const BUILD_DATE = '2026-07-02';
 
 // Entity configuration type - now loaded dynamically from sprk_recordtype_ref
 // Using EntityLookupConfig from RecordSelectionHandler for consistency
@@ -102,14 +131,6 @@ const useStyles = makeStyles({
     alignItems: 'center',
     gap: tokens.spacingHorizontalS,
   },
-  searchSection: {
-    display: 'flex',
-    gap: tokens.spacingHorizontalS,
-    alignItems: 'flex-end',
-  },
-  dropdown: {
-    minWidth: '200px',
-  },
   selectedRecord: {
     display: 'flex',
     alignItems: 'center',
@@ -132,10 +153,30 @@ const useStyles = makeStyles({
   },
 });
 
+/**
+ * Adapt `EntityLookupConfig[]` (loaded from `sprk_recordtype_ref`) into the
+ * shared `RecordTypeCatalogEntry[]` shape consumed by `PolymorphicPicker`.
+ *
+ * The shared component only needs a stable key, display label, and logical
+ * name; `recordTypeRefId` is populated from `logicalName` since the picker
+ * doesn't touch the actual `sprk_recordtype_ref` GUID. Regarding-field
+ * metadata is passed through unchanged (harmless — shared picker ignores it).
+ * Matches the adapter shape used by RegardingResolverApp per SRFR-030.
+ */
+function adaptCatalogForPicker(catalog: readonly EntityLookupConfig[]): RecordTypeCatalogEntry[] {
+  return catalog.map(cfg => ({
+    recordTypeRefId: cfg.logicalName,
+    displayName: cfg.displayName,
+    logicalName: cfg.logicalName,
+    regardingField: cfg.regardingField,
+    regardingRecordNumberField: cfg.regardingRecordNumberField,
+  }));
+}
+
 export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
   context,
   regardingRecordType,
-  apiBaseUrl,
+  apiBaseUrl: _apiBaseUrl,
   onRecordSelected,
   version,
 }) => {
@@ -172,6 +213,13 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
     }
     return null;
   }, [context?.webAPI]);
+
+  // SRFR-052: Adapter memo — EntityLookupConfig[] → RecordTypeCatalogEntry[]
+  // for the shared PolymorphicPicker.
+  const pickerCatalog = React.useMemo<RecordTypeCatalogEntry[]>(
+    () => adaptCatalogForPicker(entityConfigs),
+    [entityConfigs]
+  );
 
   // Load entity configs dynamically from sprk_recordtype_ref on mount
   React.useEffect(() => {
@@ -327,15 +375,6 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
     checkProfileExists();
   }, [fieldMappingHandler, selectedEntityType, selectedRecord]);
 
-  const handleEntityTypeChange = (_event: unknown, data: { optionValue?: string; optionText?: string }) => {
-    if (data.optionValue) {
-      setSelectedEntityType(data.optionValue);
-      setSelectedRecord(null);
-      setError(null);
-      setMappingStatus(null);
-    }
-  };
-
   /**
    * Apply field mappings from source entity to Event (sprk_event)
    * Task 022: Integrates with FieldMappingService after record selection
@@ -403,88 +442,80 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
     }
   };
 
-  const handleLookupClick = async () => {
-    if (!selectedEntityType) {
-      setError('Please select an entity type first');
-      return;
-    }
-
-    setIsLoading(true);
+  /**
+   * SRFR-052: Handle record selection from the shared `PolymorphicPicker`.
+   *
+   * `PolymorphicPicker` internally invokes `Xrm.Utility.lookupObjects` scoped to
+   * the picked entity type and returns the picked record's `entityType`,
+   * `recordId` (cleaned GUID), and `recordName` here.
+   *
+   * This handler is a thin adapter: it constructs the `IRecordSelection`
+   * payload and delegates to `handleRecordSelection` (the SRFR-051 refactored
+   * entry point), preserving the existing partial-success semantics + field
+   * mapping side effects. Replaces the pre-SRFR-052 `handleLookupClick` /
+   * `handleEntityTypeChange` handler pair.
+   */
+  const handlePickerSelect = async (
+    entityType: string,
+    recordId: string,
+    recordName: string
+  ): Promise<void> => {
+    setSelectedEntityType(entityType);
     setError(null);
     setMappingStatus(null);
+    setIsLoading(true);
 
     try {
-      // Open lookup dialog using Xrm.Utility.lookupObjects
-      const lookupOptions = {
-        defaultEntityType: selectedEntityType,
-        entityTypes: [selectedEntityType],
-        allowMultiSelect: false,
+      const selection: IRecordSelection = {
+        entityType,
+        recordId,
+        recordName,
       };
 
-      // Access Xrm from parent window (PCF runs in iframe)
-      const xrm = (window as any).Xrm || (window.parent as any)?.Xrm;
-      if (!xrm?.Utility?.lookupObjects) {
-        throw new Error('Xrm.Utility.lookupObjects not available');
-      }
+      // Call handler to populate regarding fields and clear others (async - queries Record Type)
+      const result: IRecordSelectionResult = await handleRecordSelection(selection, context.webAPI);
 
-      const results = await xrm.Utility.lookupObjects(lookupOptions);
-      if (results && results.length > 0) {
-        const selected = results[0];
-        const recordId = selected.id.replace(/[{}]/g, '');
-        const recordName = selected.name;
+      if (result.success) {
+        setSelectedRecord({
+          id: recordId,
+          name: recordName,
+        });
+        onRecordSelected(recordId, recordName);
 
-        // Create selection object for handler
-        const selection: IRecordSelection = {
-          entityType: selectedEntityType,
-          recordId: recordId,
-          recordName: recordName,
-        };
+        // Show initial success message
+        const clearedCount = result.otherLookupsCleared;
+        setMappingStatus(`Regarding fields set. ${clearedCount} other lookups cleared.`);
 
-        // Call handler to populate regarding fields and clear others (async - queries Record Type)
-        const result: IRecordSelectionResult = await handleRecordSelection(selection, context.webAPI);
-
-        if (result.success) {
-          setSelectedRecord({
-            id: recordId,
-            name: recordName,
-          });
-          onRecordSelected(recordId, recordName);
-
-          // Show initial success message
-          const clearedCount = result.otherLookupsCleared;
-          setMappingStatus(`Regarding fields set. ${clearedCount} other lookups cleared.`);
-
-          // Task 022: Apply field mappings from source entity to Event
-          // This auto-populates Event fields based on mapping profiles
-          const mappingResult = await applyFieldMappings(selectedEntityType, recordId);
-          if (mappingResult && mappingResult.fieldsMapped > 0) {
-            // Status already updated by applyFieldMappings
-            // Append to show both actions
-            const entityConfig = entityConfigs.find(c => c.logicalName === selectedEntityType);
-            const entityName = entityConfig?.displayName || selectedEntityType;
-            setMappingStatus(
-              `Regarding fields set. ${mappingResult.fieldsMapped} fields auto-populated from ${entityName}.`
-            );
-          }
-        } else {
-          // Partial success - fields may have been set but with errors
-          setSelectedRecord({
-            id: recordId,
-            name: recordName,
-          });
-          onRecordSelected(recordId, recordName);
-
-          if (result.errors.length > 0) {
-            setError(`Warning: ${result.errors.join(', ')}`);
-          }
-
-          // Still try to apply field mappings even on partial success
-          await applyFieldMappings(selectedEntityType, recordId);
+        // Task 022: Apply field mappings from source entity to Event
+        // This auto-populates Event fields based on mapping profiles
+        const mappingResult = await applyFieldMappings(entityType, recordId);
+        if (mappingResult && mappingResult.fieldsMapped > 0) {
+          // Status already updated by applyFieldMappings
+          // Append to show both actions
+          const entityConfig = entityConfigs.find(c => c.logicalName === entityType);
+          const entityName = entityConfig?.displayName || entityType;
+          setMappingStatus(
+            `Regarding fields set. ${mappingResult.fieldsMapped} fields auto-populated from ${entityName}.`
+          );
         }
+      } else {
+        // Partial success - fields may have been set but with errors
+        setSelectedRecord({
+          id: recordId,
+          name: recordName,
+        });
+        onRecordSelected(recordId, recordName);
+
+        if (result.errors.length > 0) {
+          setError(`Warning: ${result.errors.join(', ')}`);
+        }
+
+        // Still try to apply field mappings even on partial success
+        await applyFieldMappings(entityType, recordId);
       }
     } catch (err) {
-      logger.logError('AssociationResolver', 'Lookup error:', err);
-      setError(err instanceof Error ? err.message : 'Failed to open lookup');
+      logger.logError('AssociationResolver', 'Selection error:', err);
+      setError(err instanceof Error ? err.message : 'Failed to process selection');
     } finally {
       setIsLoading(false);
     }
@@ -696,13 +727,13 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
         </Dialog>
 
         <div className={styles.footer}>
-          <Text className={styles.versionText}>v{version} • Auto</Text>
+          <Text className={styles.versionText}>v{version} • Built {BUILD_DATE} • Auto</Text>
         </div>
       </div>
     );
   }
 
-  // Manual selection mode: Show full selection UI
+  // Manual selection mode: Show full selection UI backed by shared PolymorphicPicker
   return (
     <div className={styles.container}>
       {/* Task 024: Toaster for mapping result notifications */}
@@ -735,29 +766,23 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
         </MessageBar>
       )}
 
-      <div className={styles.searchSection}>
-        <Dropdown
-          className={styles.dropdown}
-          placeholder="Select entity type"
-          value={selectedEntityConfig?.displayName || ''}
-          onOptionSelect={handleEntityTypeChange}
-        >
-          {entityConfigs.map(config => (
-            <Option key={config.logicalName} value={config.logicalName}>
-              {config.displayName}
-            </Option>
-          ))}
-        </Dropdown>
-
-        <Button
-          appearance="primary"
-          icon={<Search20Regular />}
-          onClick={handleLookupClick}
-          disabled={!selectedEntityType || isLoading || isApplyingMappings}
-        >
-          {isLoading || isApplyingMappings ? <Spinner size="tiny" /> : 'Select Record'}
-        </Button>
-      </div>
+      {/*
+        SRFR-052: Shared PolymorphicPicker replaces the private Dropdown +
+        Search button + Xrm.Utility.lookupObjects wiring. The picker renders
+        title + toolbar-icon; clicking the icon shows a Menu of entities from
+        `pickerCatalog`; picking an entity opens lookupObjects and, on
+        selection, invokes `handlePickerSelect(entityType, id, name)`. Errors
+        from the picker's internal lookup path surface via `onError` into
+        the shared MessageBar above.
+      */}
+      <PolymorphicPicker
+        catalog={pickerCatalog}
+        webApi={context.webAPI as unknown as IPolymorphicPickerWebApi}
+        title="Select Parent Record"
+        onSelect={handlePickerSelect}
+        disabled={isLoading || isApplyingMappings}
+        onError={setError}
+      />
 
       {selectedRecord && selectedEntityType && (
         <div className={styles.selectedRecord}>
@@ -819,7 +844,7 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
       </Dialog>
 
       <div className={styles.footer}>
-        <Text className={styles.versionText}>v{version}</Text>
+        <Text className={styles.versionText}>v{version} • Built {BUILD_DATE}</Text>
       </div>
     </div>
   );

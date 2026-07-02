@@ -11,5 +11,12 @@
       "@spaarke/ui-components/*": ["../../shared/Spaarke.UI.Components/dist/*"]
     },
     "baseUrl": "."
-  }
+  },
+  "exclude": [
+    "node_modules",
+    "out",
+    "__tests__",
+    "**/*.test.ts",
+    "**/*.test.tsx"
+  ]
 }

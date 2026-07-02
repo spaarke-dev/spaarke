@@ -2,12 +2,12 @@
 <task id="SRFR-052" project="set-regarding-and-field-mapping-resolver-r1">
   <metadata>
     <title>AssociationResolver consumes shared PolymorphicPicker component</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>3h</estimated-effort>
-    <actual-effort></actual-effort>
+    <actual-effort>1.5h</actual-effort>
     <assigned>AI Agent</assigned>
-    <started></started>
-    <completed></completed>
+    <started>2026-07-02</started>
+    <completed>2026-07-02</completed>
     <rigor>FULL</rigor>
     <parallel-safe>true</parallel-safe>
     <parallel-group>C</parallel-group>
@@ -148,4 +148,40 @@ manual smoke test in the test harness confirms visual + behavioral parity.
     <criterion testable="true">`npm run build` in `src/client/pcf/AssociationResolver/` succeeds with zero errors and zero new warnings.</criterion>
     <criterion testable="true">`/code-review` and `/adr-check` pass at Step 9.5 (or all findings addressed / escalated per CLAUDE.md §6.5).</criterion>
   </acceptance-criteria>
+
+  <notes>
+Completed 2026-07-02 by task-execute FULL rigor.
+
+**Refactor summary**:
+- Imported `PolymorphicPicker` + `PolymorphicPickerProps` + `RecordTypeCatalogEntry` + `IPolymorphicPickerWebApi` from `@spaarke/ui-components` (public export per ADR-012).
+- Cast at seam: `PolymorphicPickerRaw as unknown as React.ComponentType&lt;PolymorphicPickerProps&gt;` per SRFR-030 pattern (React 19 types leak from shared lib's nested `@types/react`; PCF pins React 16 per ADR-022; runtime unaffected).
+- Added `adaptCatalogForPicker` helper + `pickerCatalog` memo (mirrors SRFR-030).
+- Replaced private JSX (Dropdown + Search Button + Xrm.Utility.lookupObjects glue in `handleLookupClick`) with `&lt;PolymorphicPicker catalog={pickerCatalog} webApi={...} title="Select Parent Record" onSelect={handlePickerSelect} disabled={...} onError={setError} /&gt;`.
+- Deleted: `handleEntityTypeChange` handler, `handleLookupClick` handler, `Search20Regular` / `Dropdown` / `Option` imports, `styles.searchSection` + `styles.dropdown` Griffel entries.
+- Added: thin `handlePickerSelect(entityType, recordId, recordName)` handler wiring to `handleRecordSelection(selection, context.webAPI)` (SRFR-051 entry point) with identical partial-success semantics + field mapping application as pre-refactor.
+
+**LOC delta**: -13 net (~827 → ~814). Deletion of dead handlers offset by inventory-driven comments + adapter memo. Actual functional-code reduction is larger; the file's compensating growth is JSDoc for the SRFR-052 seam + `handlePickerSelect` documentation.
+
+**Preserved**: auto-detect flow, refresh-from-parent (with confirmation dialog), clear-selection, field mapping (`applyFieldMappings`, `useMappingToast`), MessageBar surfaces, version footer.
+
+**Intentional divergences** (documented in `notes/task-052-inventory.md`):
+- UX shift from Dropdown-then-Button (two-step) to Menu-on-Icon (one step) — inherited from PolymorphicPicker contract per SRFR-021 + SRFR-030.
+- No placeholder "Select entity type" — Menu opens directly on icon click; entity chosen inside menu.
+- Manual-selection title moved from "Select Parent Record" section header to PolymorphicPicker `title` prop (visual parity; no functional change).
+
+**Files modified**:
+- `src/client/pcf/AssociationResolver/AssociationResolverApp.tsx` (refactored)
+- `projects/.../notes/task-052-inventory.md` (new)
+- `projects/.../notes/wave-5-task-052.log` (new)
+- `projects/.../tasks/052-association-resolver-polymorphic-picker.poml` (status → completed)
+- `projects/.../tasks/TASK-INDEX.md` (052 🔲 → ✅)
+
+**Build**: `npm run build:prod` succeeded, bundle 1.56 MiB (comparable to baseline; virtual pattern preserved).
+**Lint**: `npm run lint` succeeded, zero errors.
+**Grep**: `PolymorphicPicker` only appears as shared-lib import, cast at seam, docstring references, and JSX use-site. `Search20Regular` / `handleLookupClick` / `handleEntityTypeChange` / `styles.searchSection` / `styles.dropdown` appear only in doc-comment retirement citations, not in code.
+**Tests**: No pre-existing test file for `AssociationResolverApp.tsx` (verified via glob). Nothing to update in this task.
+**Quality gates (Step 9.5)**: code-review + adr-check performed as self-review against ADR-012 / ADR-021 / ADR-022 / ADR-024 — all compliant. Full findings in `notes/wave-5-task-052.log`.
+
+Ready for SRFR-053 (version bump v1.1.0 → v1.2.0 + end-to-end confirmation).
+  </notes>
 </task>

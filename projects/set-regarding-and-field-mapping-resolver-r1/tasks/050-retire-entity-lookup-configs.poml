@@ -2,12 +2,13 @@
 <task id="SRFR-050" project="set-regarding-and-field-mapping-resolver-r1">
   <metadata>
     <title>Retire ENTITY_LOOKUP_CONFIGS const; transition getEntityConfig + getAllEntityConfigs to dynamic-first</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>3h</estimated-effort>
-    <actual-effort></actual-effort>
-    <assigned>AI Agent</assigned>
-    <started></started>
-    <completed></completed>
+    <actual-effort>~25min</actual-effort>
+    <assigned>AI Agent (Claude Opus 4.7)</assigned>
+    <started>2026-07-02</started>
+    <completed>2026-07-02</completed>
+    <notes>ENTITY_LOOKUP_CONFIGS const retired (-44 hardcoded data rows). Three accessors (getEntityConfigs, getEntityConfig, getAllEntityConfigs) unified on dynamicEntityConfigs. Graceful-degrade fallback: `?? []` instead of stale 8-row hardcoded list. Net LOC -18. /code-review PASS (0 findings). See notes/wave-5-task-050.log.</notes>
     <rigor>FULL</rigor>
     <parallel-safe>true</parallel-safe>
     <parallel-group>C</parallel-group>

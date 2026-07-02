@@ -54,10 +54,10 @@
 
 | # | Task | Status | Rigor | Effort | Parallel-safe |
 |---|---|---|---|---|---|
-| 050 | [Retire `ENTITY_LOOKUP_CONFIGS` const; transition getEntityConfig callers](./050-retire-entity-lookup-configs.poml) | 🔲 | FULL | 3h | group C |
-| 051 | [`RecordSelectionHandler` → thin adapter delegating to `PolymorphicResolverService`](./051-record-selection-thin-adapter.poml) | 🔲 | FULL | 4h | group C |
-| 052 | [AssociationResolver consumes shared `PolymorphicPicker`](./052-association-resolver-polymorphic-picker.poml) | 🔲 | FULL | 3h | group C |
-| 053 | [AssociationResolver imports relocated FMH; version bump v1.1.0 → v1.2.0](./053-association-resolver-fmh-version.poml) | 🔲 | FULL | 2h | after 050–052 |
+| 050 | [Retire `ENTITY_LOOKUP_CONFIGS` const; transition getEntityConfig callers](./050-retire-entity-lookup-configs.poml) | ✅ | FULL | 3h est / **~25min actual** | group C |
+| 051 | [`RecordSelectionHandler` → thin adapter delegating to `PolymorphicResolverService`](./051-record-selection-thin-adapter.poml) | ✅ | FULL | 4h | group C |
+| 052 | [AssociationResolver consumes shared `PolymorphicPicker`](./052-association-resolver-polymorphic-picker.poml) | ✅ | FULL | 3h | group C |
+| 053 | [AssociationResolver imports relocated FMH; version bump v1.1.0 → v1.2.0](./053-association-resolver-fmh-version.poml) | ✅ | FULL | 2h est / **~40min actual** | after 050–052 |
 
 ### Wave 6 — Field Mapping subsystem: MDA form + ribbon + push handler
 
