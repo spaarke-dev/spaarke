@@ -27,6 +27,7 @@ Start with `01-llm-hallucinations-and-determinism.md` — it frames the biggest 
 | 3 | `03-code-review-followups.md` | MEDIUM | Code quality — 5 items from R7 code-review |
 | 4 | `04-latent-bugs.md` | LOW-MEDIUM | Latent bug — same pattern as R7 W12 fix |
 | 5 | `05-deploy-safety-governance.md` | PROCESS | Coordination — not code |
+| 6 | `06-choice-field-coercion-in-updaterecord.md` | MEDIUM | Executor / authoring — Choice fields declared `type:"string"` break Update Record with Dataverse 500 |
 
 ## What R7 already delivered (do NOT re-scope in R5)
 
