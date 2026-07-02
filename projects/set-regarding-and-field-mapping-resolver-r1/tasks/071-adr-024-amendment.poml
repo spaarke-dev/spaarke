@@ -1,0 +1,140 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="SRFR-071" project="set-regarding-and-field-mapping-resolver-r1">
+  <metadata>
+    <title>ADR-024 amendment: extend Fields written section 4 → 5 (add sprk_regardingrecordnumber)</title>
+    <status>not-started</status>
+    <estimated-effort>1h</estimated-effort>
+    <actual-effort></actual-effort>
+    <assigned>AI Agent</assigned>
+    <started></started>
+    <completed></completed>
+    <rigor>MINIMAL</rigor>
+    <parallel-safe>true</parallel-safe>
+    <parallel-group>E</parallel-group>
+    <tags>adr,docs,wave-7</tags>
+    <depends-on></depends-on>
+    <wave>7</wave>
+  </metadata>
+
+  <prompt><![CDATA[
+Documentation-only amendment to ADR-024 "Polymorphic Resolver Pattern".
+Extend the "Fields written" section from 4 → 5 to reflect the addition of
+`sprk_regardingrecordnumber` — the denormalized copy of the target record's
+business-key number, resolved via `sprk_recordtype_ref.sprk_regardingrecordnumberfield`.
+
+This is CLAUDE.md §6.5 Path B (documentation-only amendment) — no MUST / MUST
+NOT rule changes. Just extends the field-write set to match the shipped
+behavior of task SRFR-020 (PolymorphicResolverService.applyResolverFields
+5-field write).
+
+Both the full ADR at `docs/adr/ADR-024-*.md` AND the concise version at
+`.claude/adr/ADR-024-*.md` must be updated for parity.
+  ]]></prompt>
+
+  <role>Architecture documentation maintainer familiar with the two-copy ADR structure (concise `.claude/adr/` + full `docs/adr/`), documentation-only Path B amendments per CLAUDE.md §6.5, and revision-log conventions.</role>
+
+  <goal><![CDATA[
+Both ADR-024 files (concise + full) reference 5 fields in the "Fields written"
+section instead of 4. `sprk_regardingrecordnumber` is added with the
+description: "Denormalized copy of the target record's business-key number,
+resolved via `sprk_recordtype_ref.sprk_regardingrecordnumberfield` metadata."
+A revision-log line is appended stating "2026-07-XX (SRFR-071): Extended field
+write from 4 → 5 (added `sprk_regardingrecordnumber`); no MUST/MUST NOT rule
+changes." Grep confirms `sprk_regardingrecordnumber` appears in both files.
+No unrelated content is modified.
+  ]]></goal>
+
+  <inputs>
+    <file purpose="spec">projects/set-regarding-and-field-mapping-resolver-r1/spec.md</file>
+    <file purpose="plan">projects/set-regarding-and-field-mapping-resolver-r1/plan.md</file>
+    <file purpose="project-claude">projects/set-regarding-and-field-mapping-resolver-r1/CLAUDE.md</file>
+    <file purpose="adr-concise">.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+    <file purpose="adr-full">docs/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+    <file purpose="protocol">CLAUDE.md §6.5 (ADR Conflict Resolution Protocol — Path B)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="CLAUDE.md §6.5 Path B">Documentation-only amendment. NO MUST / MUST NOT rule changes. Cite Path B in the revision-log line.</constraint>
+    <constraint source="repo pattern">Both ADR copies (concise `.claude/adr/` + full `docs/adr/`) MUST be updated for parity — the concise copy is a strict subset of the full copy.</constraint>
+    <constraint source="project">The 5th field's description matches: "Denormalized copy of the target record's business-key number, resolved via `sprk_recordtype_ref.sprk_regardingrecordnumberfield` metadata."</constraint>
+    <constraint source="project">Revision-log line format: `YYYY-MM-DD (SRFR-071): Extended field write from 4 → 5 (added `sprk_regardingrecordnumber`); no MUST/MUST NOT rule changes.`</constraint>
+    <constraint source="project">Do NOT touch any other section of ADR-024. This edit is scoped strictly to the "Fields written" section and the revision-log.</constraint>
+    <constraint source="project">Do NOT change ADR-024's decision, status, context, or consequences sections.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>docs/adr/authoring-conventions</topic>
+    <files>
+      <file>CLAUDE.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>docs/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+    </files>
+    <patterns>
+      <pattern name="Path B documentation-only amendment" location="CLAUDE.md §6.5">
+        The ADR's decision remains correct in general; this project extends the
+        surface area (4 → 5 fields) without amending any binding rule. Path B
+        is the sanctioned mechanism.
+      </pattern>
+      <pattern name="Two-copy ADR parity" location=".claude/adr/ + docs/adr/">
+        The concise `.claude/adr/` copy summarizes MUST / MUST NOT rules. The
+        full `docs/adr/` copy carries rationale + history. Both must reference
+        the same field set after this amendment.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Task SRFR-020 extended `PolymorphicResolverService.applyResolverFields()`
+      from a 4-field write to a 5-field write to carry the new
+      `sprk_regardingrecordnumber` denormalization. ADR-024 documents the
+      4-field baseline. This amendment brings the ADR into sync with the
+      shipped behavior; without it, ADR-024 will read as stale for future
+      readers.
+    </background>
+    <dependencies>
+      <dependency task="SRFR-020" status="pending">
+        Task SRFR-020 is the substantive change; this task simply reflects it
+        in ADR-024. Ordering between the two is flexible — the amendment can
+        merge before, alongside, or after SRFR-020 as long as it lands before
+        Wave 8 deploy.
+      </dependency>
+    </dependencies>
+    <related-work>
+      <item>SRFR-040 (Wave 4 presave webresource) participates in the 5-field write on CREATE mode.</item>
+      <item>SRFR-072 updates the FieldMappingHandler.ts stale inline reference — separate scope from this task.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check">Verify context &lt; 60%. Read CLAUDE.md §6.5 Path B rules.</step>
+    <step order="1" name="Locate Fields Written Section">Read both ADR-024 files. Locate the "Fields written" section (or equivalent naming — may be "Fields the resolver writes", "Client-side field write set", etc.). Confirm current baseline is 4 fields.</step>
+    <step order="2" name="Edit Concise ADR">Edit `.claude/adr/ADR-024-polymorphic-resolver-pattern.md`. In the "Fields written" section, add `sprk_regardingrecordnumber` as the 5th entry with the description: "Denormalized copy of the target record's business-key number, resolved via `sprk_recordtype_ref.sprk_regardingrecordnumberfield` metadata." Update any adjacent count or list-length reference.</step>
+    <step order="3" name="Edit Full ADR">Repeat the field addition in `docs/adr/ADR-024-polymorphic-resolver-pattern.md`. Update any diagrams / tables / sample-code blocks that enumerate the 4 fields.</step>
+    <step order="4" name="Append Revision-Log Line">In BOTH files, append the revision-log line: `YYYY-MM-DD (SRFR-071): Extended field write from 4 → 5 (added `sprk_regardingrecordnumber`); no MUST/MUST NOT rule changes.` Use today's date.</step>
+    <step order="5" name="Confirm No Other Changes">Diff both files against HEAD. Verify only the "Fields written" section and the revision-log are touched. No other section may be modified.</step>
+    <step order="6" name="Grep Verification">Run `grep -c "sprk_regardingrecordnumber" .claude/adr/ADR-024-polymorphic-resolver-pattern.md` and `grep -c "sprk_regardingrecordnumber" docs/adr/ADR-024-polymorphic-resolver-pattern.md`. Both must return ≥ 1.</step>
+    <step order="7" name="Update Task Status">Update TASK-INDEX.md 🔲 → ✅ for SRFR-071. Reset current-task.md for next task.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read both ADR files + CLAUDE.md §6.5</tool>
+    <tool name="Edit">Apply targeted edits to both ADR files</tool>
+    <tool name="Grep">Verify field name appears in both files; verify no unrelated diffs</tool>
+    <tool name="Bash">`git diff` to confirm scoped changes only</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">.claude/adr/ADR-024-polymorphic-resolver-pattern.md (5-field update + revision-log line)</output>
+    <output type="docs">docs/adr/ADR-024-polymorphic-resolver-pattern.md (5-field update + revision-log line)</output>
+    <output type="docs">projects/set-regarding-and-field-mapping-resolver-r1/tasks/TASK-INDEX.md (🔲 → ✅ for SRFR-071)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Both ADR-024 files (concise + full) reference 5 fields in the "Fields written" section; `sprk_regardingrecordnumber` appears in both (grep confirms ≥ 1 hit each).</criterion>
+    <criterion testable="true">The 5th field's description matches the specified wording: "Denormalized copy of the target record's business-key number, resolved via `sprk_recordtype_ref.sprk_regardingrecordnumberfield` metadata."</criterion>
+    <criterion testable="true">Revision-log line is appended to both files with SRFR-071 reference and today's date.</criterion>
+    <criterion testable="true">No MUST / MUST NOT rules were changed — `git diff` shows only the "Fields written" section and the revision-log line as modified.</criterion>
+    <criterion testable="true">No other section (decision, status, context, consequences) is touched.</criterion>
+  </acceptance-criteria>
+</task>

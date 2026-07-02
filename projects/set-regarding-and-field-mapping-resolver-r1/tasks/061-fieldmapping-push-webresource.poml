@@ -1,0 +1,165 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="SRFR-061" project="set-regarding-and-field-mapping-resolver-r1">
+  <metadata>
+    <title>New sprk_fieldmapping_push.js webresource (v1.0.0) — visibility check + push action</title>
+    <status>not-started</status>
+    <estimated-effort>6h</estimated-effort>
+    <actual-effort></actual-effort>
+    <assigned>AI Agent</assigned>
+    <started></started>
+    <completed></completed>
+    <rigor>FULL</rigor>
+    <parallel-safe>true</parallel-safe>
+    <parallel-group>D</parallel-group>
+    <tags>webresource,javascript,field-mapping,wave-6</tags>
+    <depends-on></depends-on>
+    <wave>6</wave>
+  </metadata>
+
+  <prompt><![CDATA[
+Author a NEW plain-JS webresource `sprk_fieldmapping_push.js` (v1.0.0) that
+exposes TWO functions on the `Spaarke.FieldMapping.Push` namespace:
+
+  1. `hasSourceProfile(primaryControl)` — ribbon visibility rule. Returns true
+     iff any active `sprk_fieldmappingprofile` has the current form's entity as
+     source. Uses `Xrm.WebApi.retrieveMultipleRecords(...)` (NOT `fetch`, NOT
+     `@spaarke/auth` — plain JS webresources cannot import shared-lib modules).
+     Result cached per (entity, form-id) via `sessionStorage`.
+
+  2. `pushUpdates(primaryControl)` — ribbon action. Shows `Xrm.Navigation.openConfirmDialog`,
+     then sequentially calls the BFF `POST /api/v1/field-mappings/push` endpoint
+     for each target entity that has an active profile from this source. Aggregates
+     updated / skipped / errors / childCount across targets and shows a summary
+     toast. On BFF over-limit (400 with `error === "over_limit"`), shows the
+     EXACT wording specified by FR-B3-04.
+
+Style + structure mirrors `src/client/webresources/js/sprk_todo_regarding_presave.js`:
+IIFE, namespace scaffold (`window.Spaarke = window.Spaarke || {}`), `ns.VERSION = "1.0.0"`.
+
+**Auth resolution**: BFF `/push` requires OBO. Plain JS webresources have no
+`@spaarke/auth` module. Two viable paths:
+  (a) Use `Xrm.WebApi.online.execute` bound to a Dataverse custom action that
+      proxies to BFF (adds a server hop but re-uses form-user auth).
+  (b) Call BFF directly with credentials/cookie/embedded token strategy IF the
+      BFF is configured to accept host-context auth.
+
+If neither is trivially resolvable within the 6h budget, DOCUMENT the decision
+in `notes/wave-6-auth-decision.md` and escalate to owner (do NOT ship silent
+failure). Do NOT invent a new auth mechanism.
+  ]]></prompt>
+
+  <role>JavaScript webresource author familiar with Dataverse form scripting (`Xrm.WebApi`, `Xrm.Navigation`), plain-JS namespace patterns, sequential-await orchestration, and BFF integration constraints.</role>
+
+  <goal><![CDATA[
+`src/client/webresources/js/sprk_fieldmapping_push.js` exists at v1.0.0. Two
+functions on `Spaarke.FieldMapping.Push`: `hasSourceProfile(primaryControl)`
+(visibility check, cached, non-blocking) and `pushUpdates(primaryControl)`
+(confirm → sequential per-target push → aggregate toast). Over-limit toast
+matches FR-B3-04 wording verbatim. Success toast reports updated / skipped /
+errors / childCount aggregated across all target entities. JS syntax valid,
+IIFE-scoped, no bundler required. Auth path either implemented or decision
+documented + escalated in `notes/wave-6-auth-decision.md`.
+  ]]></goal>
+
+  <inputs>
+    <file purpose="spec">projects/set-regarding-and-field-mapping-resolver-r1/spec.md</file>
+    <file purpose="plan">projects/set-regarding-and-field-mapping-resolver-r1/plan.md</file>
+    <file purpose="project-claude">projects/set-regarding-and-field-mapping-resolver-r1/CLAUDE.md</file>
+    <file purpose="style-reference">src/client/webresources/js/sprk_todo_regarding_presave.js</file>
+    <file purpose="endpoint-contract">src/server/api/Sprk.Bff.Api/Api/FieldMappings/FieldMappingEndpoints.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-B3-01">Function `hasSourceProfile(primaryControl)` returns boolean, is safe to call from a ribbon EnableRule (non-blocking, caches per-session).</constraint>
+    <constraint source="spec FR-B3-02">Function `pushUpdates(primaryControl)` opens a confirm dialog before invoking any BFF call.</constraint>
+    <constraint source="spec FR-B3-03">Multi-target pushes run SEQUENTIALLY (not in parallel), with a single aggregated toast — per Owner Clarification B3 UX.</constraint>
+    <constraint source="spec FR-B3-04">Over-limit toast MUST match this exact wording: `"Too many related records to push interactively ({childCount} > 500). Contact your administrator to run the batch cascade job."` — `{childCount}` is substituted from the BFF error payload.</constraint>
+    <constraint source="webresource">Plain JS — NO npm imports, NO bundler, NO ES modules, NO `@spaarke/auth`. Only `window.Xrm`, `Xrm.WebApi`, `Xrm.Navigation`, `Xrm.Utility`.</constraint>
+    <constraint source="webresource">IIFE wrapper. Namespace `window.Spaarke.FieldMapping.Push`. `ns.VERSION = "1.0.0"` declared exactly once.</constraint>
+    <constraint source="project">MUST NOT swallow auth failures silently. If auth cannot be resolved inline, document decision in `notes/wave-6-auth-decision.md` and escalate.</constraint>
+    <constraint source="ADR-006">This is a webresource — an approved surface for ribbon-adjacent host scripting (not a custom PCF or Code Page).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>dataverse/webresources/ribbon-scripting</topic>
+    <files>
+      <file>src/client/webresources/js/sprk_todo_regarding_presave.js</file>
+      <file>projects/set-regarding-and-field-mapping-resolver-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Namespace + IIFE scaffold" location="src/client/webresources/js/sprk_todo_regarding_presave.js">
+        `(function () { window.Spaarke = window.Spaarke || {}; var ns = window.Spaarke.X = window.Spaarke.X || {}; ns.VERSION = "..."; ... })();`
+      </pattern>
+      <pattern name="Xrm.WebApi retrieveMultipleRecords for visibility" location="Xrm.WebApi docs">
+        `Xrm.WebApi.retrieveMultipleRecords('sprk_fieldmappingprofile', "?$filter=sprk_sourceentity eq 'X' and statecode eq 0&amp;$select=sprk_fieldmappingprofileid,sprk_targetentity")` returns a promise; do NOT await inside an EnableRule — cache eagerly on first call and short-circuit thereafter.
+      </pattern>
+      <pattern name="Sequential BFF calls with aggregation" location="ES2017 async/await">
+        `for (var i = 0; i &lt; targets.length; i++) { var result = await pushOne(targets[i]); aggregate(result); }` — one target at a time; toast once at the end.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Wave 6 introduces the ribbon-driven "Push Updates" flow. Task SRFR-062
+      wires the ribbon button on the Matter form (and others from SRFR-001's
+      Q-07 inventory); this task provides the two functions the ribbon invokes.
+      Without this webresource, the ribbon button has nothing to bind to.
+      Owner Clarification B3 confirmed sequential multi-target with aggregated
+      toast (no picker dialog).
+    </background>
+    <dependencies>
+      <dependency task="SRFR-062" status="future">
+        SRFR-062 references `Sprk.FieldMapping.Push.hasSourceProfile` +
+        `Sprk.FieldMapping.Push.pushUpdates` — this task must land first.
+      </dependency>
+    </dependencies>
+    <related-work>
+      <item>BFF `POST /api/v1/field-mappings/push` endpoint contract per spec Appendix A §A.5. Not modified by this project.</item>
+      <item>`sprk_todo_regarding_presave.js` style reference — same author conventions.</item>
+      <item>Follow-on `admin-cascade-batch-job-r1` Idea Issue (Wave 9) covers the &gt;500-child batch path this webresource redirects users to.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check">Verify context &lt; 60%. Read spec.md FR-B3-01/02/03/04 and Appendix A §A.5 (push endpoint contract). Read `sprk_todo_regarding_presave.js` as style reference.</step>
+    <step order="1" name="Auth Decision">Determine whether BFF `/push` can be called via (a) `Xrm.WebApi.online.execute` bound to a Dataverse custom action, or (b) direct fetch with host-context auth. If neither is resolvable, WRITE `notes/wave-6-auth-decision.md` describing the two options + escalate to owner. Do not proceed to implementation until auth is resolved.</step>
+    <step order="2" name="Scaffold File">Create `src/client/webresources/js/sprk_fieldmapping_push.js`. Add file-header docstring, IIFE wrapper, namespace scaffold `window.Spaarke.FieldMapping.Push`, `ns.VERSION = "1.0.0"`.</step>
+    <step order="3" name="Implement hasSourceProfile">Add `ns.hasSourceProfile = function (primaryControl) { ... }`. Read entity via `primaryControl.data.entity.getEntityName()`. Read form-id via `primaryControl.data.entity.getId()`. Build cache key `sprk_fieldmapping_hasSource_{entity}_{formId}`. Check `sessionStorage` first. On miss, call `Xrm.WebApi.retrieveMultipleRecords('sprk_fieldmappingprofile', "?$filter=sprk_sourceentity eq '{entity}' and statecode eq 0&amp;$select=sprk_fieldmappingprofileid,sprk_targetentity")`, cache boolean + target list on `sessionStorage`, return boolean. On error, return false (never block ribbon).</step>
+    <step order="4" name="Implement pushUpdates">Add `ns.pushUpdates = function (primaryControl) { ... }`. Read current entity + record-id. Show `Xrm.Navigation.openConfirmDialog({ title: "Push Updates", text: "This will push field-mapping updates from this record to related child records. Continue?" })`. On confirm, retrieve target-entities list (from cache or re-query). Sequentially call BFF `/push` for each target (per auth decision from step 1). Aggregate `updated`, `skipped`, `errors`, `childCount`.</step>
+    <step order="5" name="Over-Limit Handling">On any per-target response indicating `error === "over_limit"` (BFF 400), record the childCount and short-circuit remaining targets. Show toast with EXACT wording from FR-B3-04, substituting `{childCount}`.</step>
+    <step order="6" name="Success Toast">On non-over-limit completion, show a summary toast: `"Updated X of Y records across N target entities. Z skipped, W errors."` — with computed values.</step>
+    <step order="7" name="Error Toast">On BFF errors other than over-limit, aggregate into the errors counter; show a warning-tier toast if errors &gt; 0.</step>
+    <step order="8" name="Syntax Validation">Verify file loads without ParseError. Run `node --check src/client/webresources/js/sprk_fieldmapping_push.js` if node is available.</step>
+    <step order="9" name="Grep Verification">Confirm `grep -c 'ns.VERSION = "1.0.0"' src/client/webresources/js/sprk_fieldmapping_push.js` returns 1. Confirm FR-B3-04 toast wording appears verbatim (grep for `"Too many related records to push interactively"`).</step>
+    <step order="9.5" name="Quality Gate (FULL rigor)">Invoke `/code-review` and `/adr-check` on the new file. Address findings; document any auth decisions as ADR path-A exceptions per CLAUDE.md §6.5 if the auth path required judgment.</step>
+    <step order="10" name="Update Task Status">Update TASK-INDEX.md 🔲 → ✅ for SRFR-061. Reset current-task.md for next task.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read spec, style-reference webresource, BFF endpoint file</tool>
+    <tool name="Write">Create the new webresource file</tool>
+    <tool name="Grep">Verify VERSION string, FR-B3-04 wording, function names</tool>
+    <tool name="Bash">Run `node --check` for syntax validation if available</tool>
+    <tool name="code-review">Step 9.5 quality gate per FULL rigor</tool>
+    <tool name="adr-check">Step 9.5 quality gate per FULL rigor</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/webresources/js/sprk_fieldmapping_push.js (v1.0.0)</output>
+    <output type="notes" ephemeral="true">projects/set-regarding-and-field-mapping-resolver-r1/notes/wave-6-auth-decision.md (only if auth path required documented decision)</output>
+    <output type="docs">projects/set-regarding-and-field-mapping-resolver-r1/tasks/TASK-INDEX.md (🔲 → ✅ for SRFR-061)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">File exists at `src/client/webresources/js/sprk_fieldmapping_push.js`.</criterion>
+    <criterion testable="true">`grep -c 'ns.VERSION = "1.0.0"' src/client/webresources/js/sprk_fieldmapping_push.js` returns 1.</criterion>
+    <criterion testable="true">Two exported functions: `Spaarke.FieldMapping.Push.hasSourceProfile` and `Spaarke.FieldMapping.Push.pushUpdates` (grep confirms both).</criterion>
+    <criterion testable="true">Over-limit toast wording matches FR-B3-04 verbatim (grep confirms `"Too many related records to push interactively"` and `"Contact your administrator to run the batch cascade job."`).</criterion>
+    <criterion testable="true">JS syntax valid (no ParseError; `node --check` exits 0 if available).</criterion>
+    <criterion testable="true">Per-target BFF calls run sequentially (no `Promise.all` over the targets array); aggregate summary produced.</criterion>
+    <criterion testable="true">`hasSourceProfile` caches per-session (grep for `sessionStorage` returns at least 2 hits: get + set).</criterion>
+    <criterion testable="true">Auth path either implemented OR decision documented in `notes/wave-6-auth-decision.md` with escalation to owner.</criterion>
+    <criterion testable="true">`/code-review` and `/adr-check` pass at Step 9.5 (or findings addressed / escalated per CLAUDE.md §6.5).</criterion>
+  </acceptance-criteria>
+</task>

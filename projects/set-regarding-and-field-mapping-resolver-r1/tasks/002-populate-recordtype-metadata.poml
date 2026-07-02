@@ -1,0 +1,180 @@
+<task id="SRFR-002" project="set-regarding-and-field-mapping-resolver-r1">
+  <metadata>
+    <title>Populate `sprk_recordtype_ref.sprk_regardingrecordnumberfield` for 10 non-Matter entities</title>
+    <status>not-started</status>
+    <estimated-effort>2h</estimated-effort>
+    <actual-effort></actual-effort>
+    <assigned>AI Agent</assigned>
+    <started></started>
+    <completed></completed>
+    <rigor>STANDARD</rigor>
+    <parallel-safe>false</parallel-safe>
+    <depends-on>SRFR-001</depends-on>
+    <tags>data-entry, dataverse, metadata, wave-0</tags>
+  </metadata>
+
+  <prompt>
+    FR-A4-02 deliverable. The `sprk_recordtype_ref.sprk_regardingrecordnumberfield`
+    column already exists (2026-07-01) but is populated ONLY for the Matter row
+    (owner confirmed 2026-07-02, spec §Owner Clarifications Q-05). This task
+    populates the remaining 10 rows so that the data-driven code in
+    `PolymorphicResolverService.applyResolverFields()` (FR-A4-01, Wave 2 task 020)
+    can read record-number-source field names at runtime with no hardcoded map.
+    Contact and Account use the recommendation from SRFR-001 Deliverable 1
+    (Q-06 recommendation — typically graceful-blank on OOB entities per NFR-06).
+    Every named field MUST be verified to EXIST on its target entity BEFORE writing.
+  </prompt>
+
+  <role>
+    Dataverse maker + metadata engineer. Comfortable with EntityDefinitions Web API
+    queries for pre-write field existence verification, and with either
+    `/dataverse-create-schema` or the Dataverse MCP `update_record` tool for the
+    writes. Careful about idempotency — this data-entry task must be safely re-runnable.
+  </role>
+
+  <goal>
+    All 11 `sprk_recordtype_ref` rows have `sprk_regardingrecordnumberfield`
+    populated per the mapping in this task (with Contact + Account per SRFR-001's
+    Q-06 recommendation, which may be null for graceful-blank). Every non-null
+    value references a field that EXISTS on its target entity, verified via
+    `EntityDefinitions('X')/Attributes(name)` before write. A log at
+    `notes/wave-0-metadata-population.log` records every update attempt +
+    verification result.
+  </goal>
+
+  <inputs>
+    <file purpose="dependency-output">projects/set-regarding-and-field-mapping-resolver-r1/notes/wave-0-discovery.md</file>
+    <file purpose="project-spec">projects/set-regarding-and-field-mapping-resolver-r1/spec.md</file>
+    <file purpose="project-plan">projects/set-regarding-and-field-mapping-resolver-r1/plan.md</file>
+    <file purpose="project-claude">projects/set-regarding-and-field-mapping-resolver-r1/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec-FR-A4-02">Acceptance requires Web API query `sprk_recordtype_refs?$select=sprk_name,sprk_regardingrecordnumberfield` to return non-null values for at least the 8 `sprk_` entities. Contact and Account MAY be null if SRFR-001 recommended graceful-blank.</constraint>
+    <constraint source="spec-FR-A4-02">Every named `sprk_regardingrecordnumberfield` value MUST reference a field that EXISTS on its target entity, verified via `EntityDefinitions('X')/Attributes(logicalName)?$select=LogicalName` before write. A write that would set a non-existent field name is a hard failure — halt and escalate.</constraint>
+    <constraint source="spec-Q-05">Owner-confirmed 2026-07-02: only Matter is populated today; do NOT overwrite the existing Matter row. This task is create-or-update on the other 10 rows only.</constraint>
+    <constraint source="CLAUDE.md-§11">No new OOB-entity columns without explicit owner sign-off. If SRFR-001's Q-06 recommends a new column on Contact/Account, DO NOT create it in this task — escalate to owner. This task ONLY writes existing OOB fields OR graceful-blank.</constraint>
+    <constraint source="project">Idempotency — re-running this task must be safe. Use upsert semantics or skip-if-already-set logic. Log every action.</constraint>
+    <constraint source="spec-NFR-06">If graceful-blank is the SRFR-001 recommendation for Contact/Account, leave the field null AND note the intent in the log so a future maintainer sees the deliberate omission.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>dataverse/metadata-write</topic>
+    <files>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>.claude/skills/dataverse-mcp-usage/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="entity-metadata-existence-check" location=".claude/skills/dataverse-create-schema/SKILL.md">
+        Before writing a field name into `sprk_regardingrecordnumberfield`, verify the
+        named field exists on the target entity by querying
+        `EntityDefinitions('X')/Attributes(logicalName)?$select=LogicalName`. A 404 or
+        empty response means the field doesn't exist — do NOT write; escalate.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      This task is the second half of Wave 0. It converts spec §Owner Clarification Q-05
+      ("only Matter is populated") into the data state that FR-A4-01's data-driven
+      resolver code needs at runtime. Without this task, Wave 2 task 020's
+      `PolymorphicResolverService.applyResolverFields()` extension would ship
+      code that reads null field names for 10 of 11 entities — a hidden runtime
+      degradation.
+    </background>
+    <dependencies>
+      <dependency task="SRFR-001" status="not-started">
+        Provides Q-06 recommendation for Contact + Account (graceful-blank OR specific
+        field name). SRFR-002 cannot start until SRFR-001 completes.
+      </dependency>
+    </dependencies>
+    <related-work>
+      <item>Wave 1 task 010 (add `sprk_regardingrecordnumber` column to 10 entities) does NOT depend on this task, but Wave 2 task 020 (extend `applyResolverFields`) DOES — the resolver reads this metadata at runtime.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check">
+      Confirm context &lt; 60%. If &gt; 60%, run `context-handoff`.
+    </step>
+    <step order="1" name="Load SRFR-001 output">
+      Read `notes/wave-0-discovery.md`. Extract the Q-06 recommendation for Contact + Account.
+      If Q-06 recommends "new column" (against constraint above), STOP and escalate.
+    </step>
+    <step order="2" name="Load spec + CLAUDE.md">
+      Read spec.md FR-A4-02 acceptance criteria + spec §Owner Clarifications Q-05. Read
+      CLAUDE.md §11 for the no-new-OOB-column guardrail.
+    </step>
+    <step order="3" name="Enumerate current sprk_recordtype_ref state">
+      Query `sprk_recordtype_refs?$select=sprk_name,sprk_regardingrecordnumberfield,sprk_targetentitylogicalname`.
+      Confirm Matter row already has non-null value; note the current value for the log.
+      Record the GUID of each of the 10 non-Matter rows for the upsert step.
+    </step>
+    <step order="4" name="Verify field existence for each mapping">
+      For each of the following (source entity → field name) pairs, run
+      `EntityDefinitions('X')/Attributes(fieldname)?$select=LogicalName`:
+      - `sprk_project` → `sprk_projectnumber`
+      - `sprk_invoice` → `sprk_invoicenumber`
+      - `sprk_event` → `sprk_eventnumber`
+      - `sprk_analysis` → `sprk_analysisnumber`
+      - `sprk_organization` → `sprk_organizationnumber`
+      - `sprk_document` → `sprk_documentnumber`
+      - `sprk_workassignment` → `sprk_workassignmentnumber`
+      - `sprk_budget` → `sprk_budgetnumber`
+      - `contact` → per SRFR-001 Q-06 (may be null)
+      - `account` → per SRFR-001 Q-06 (may be null, or `accountnumber` if owner confirmed)
+      Any 404 → HALT and escalate; do NOT write a non-existent field name.
+    </step>
+    <step order="5" name="Update sprk_recordtype_ref rows">
+      For each row whose field existence verified in step 4:
+      (a) If already populated with the correct value → skip; log "skip — already set correctly".
+      (b) If empty or wrong → `mcp__dataverse__update_record` (or Web API PATCH) setting
+      `sprk_regardingrecordnumberfield = &lt;field-name&gt;`; log the operation.
+      (c) For Contact/Account with graceful-blank recommendation → do NOT write; log
+      "intentional-null per SRFR-001 Q-06 recommendation + NFR-06 graceful-blank".
+    </step>
+    <step order="6" name="Post-write verification">
+      Re-run the enumeration query from step 3. Confirm:
+      - At least the 8 `sprk_` entities show non-null values matching the mapping above.
+      - Contact + Account show the SRFR-001-recommended state (null for graceful-blank,
+        or the specific value if owner confirmed a named field).
+      Attach the final query result to the log.
+    </step>
+    <step order="7" name="Compose log file">
+      Write `notes/wave-0-metadata-population.log` with (i) input snapshot from step 3,
+      (ii) field-existence verification results from step 4, (iii) each update attempted
+      + outcome from step 5, (iv) final query snapshot from step 6. Cap at ~150 lines.
+    </step>
+    <step order="8" name="Update TASK-INDEX + current-task">
+      Mark SRFR-002 complete in TASK-INDEX.md; advance current-task.md to the first
+      Wave 1 task (SRFR-010 add-column-to-10-entities).
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read SRFR-001 output + spec docs</tool>
+    <tool name="Bash">Web API queries via curl / PowerShell (fallback if MCP unavailable)</tool>
+    <tool name="mcp__dataverse__read_query">Enumerate current sprk_recordtype_ref state; run EntityDefinitions attribute existence check</tool>
+    <tool name="mcp__dataverse__update_record">Upsert `sprk_regardingrecordnumberfield` on each of the 10 rows</tool>
+    <tool name="mcp__dataverse__describe">Alternative to EntityDefinitions for attribute enumeration</tool>
+  </tools>
+
+  <outputs>
+    <output type="dataverse-data">Updated `sprk_recordtype_ref` records (10 rows; Matter untouched)</output>
+    <output type="notes" ephemeral="false">projects/set-regarding-and-field-mapping-resolver-r1/notes/wave-0-metadata-population.log</output>
+    <output type="docs">projects/set-regarding-and-field-mapping-resolver-r1/tasks/TASK-INDEX.md (status update)</output>
+    <output type="docs">projects/set-regarding-and-field-mapping-resolver-r1/current-task.md (advance to SRFR-010)</output>
+    <output type="report">Completion report summarizing which rows populated, which intentionally-null, any verification failures</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Web API query `sprk_recordtype_refs?$select=sprk_name,sprk_regardingrecordnumberfield` returns non-null values for at least the 8 `sprk_` entities (Project, Invoice, Event, Analysis, Organization, Document, WorkAssignment, Budget).</criterion>
+    <criterion testable="true">Every named `sprk_regardingrecordnumberfield` value references a field that EXISTS on its target entity — verified in log against `EntityDefinitions('X')/Attributes(logicalName)?$select=LogicalName` responses.</criterion>
+    <criterion testable="true">Contact and Account rows match SRFR-001's Q-06 recommendation — either specific field name (if owner-confirmed and the field exists) OR intentionally null (graceful-blank per NFR-06) with the intent captured in the log.</criterion>
+    <criterion testable="true">Matter row is unchanged from its pre-task state (this task must not touch Matter).</criterion>
+    <criterion testable="true">Log file `notes/wave-0-metadata-population.log` records each update attempt with target entity, target field name, verification result, write result (or skip reason).</criterion>
+    <criterion testable="true">Task is idempotent — re-running yields "skip — already set correctly" for all 10 rows.</criterion>
+    <criterion testable="true">TASK-INDEX.md status for SRFR-002 flipped from 🔲 to ✅; current-task.md advanced to the first Wave 1 task.</criterion>
+  </acceptance-criteria>
+</task>

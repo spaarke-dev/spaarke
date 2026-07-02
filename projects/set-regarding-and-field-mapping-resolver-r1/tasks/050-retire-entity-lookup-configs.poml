@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="SRFR-050" project="set-regarding-and-field-mapping-resolver-r1">
+  <metadata>
+    <title>Retire ENTITY_LOOKUP_CONFIGS const; transition getEntityConfig + getAllEntityConfigs to dynamic-first</title>
+    <status>not-started</status>
+    <estimated-effort>3h</estimated-effort>
+    <actual-effort></actual-effort>
+    <assigned>AI Agent</assigned>
+    <started></started>
+    <completed></completed>
+    <rigor>FULL</rigor>
+    <parallel-safe>true</parallel-safe>
+    <parallel-group>C</parallel-group>
+    <tags>pcf,association-resolver,refactor,wave-5</tags>
+    <depends-on>SRFR-023</depends-on>
+    <wave>5</wave>
+  </metadata>
+
+  <prompt><![CDATA[
+Wave 0 investigation confirmed that `loadEntityConfigs()` (line ~191 of
+`src/client/pcf/AssociationResolver/handlers/RecordSelectionHandler.ts`) already
+queries `sprk_recordtype_ref` dynamically and populates `dynamicEntityConfigs`.
+Only two functions still direct-reference the hardcoded `ENTITY_LOOKUP_CONFIGS`
+const array: `getEntityConfig(logicalName)` (line ~527) and `getAllEntityConfigs()`
+(line ~534). This task transitions those two functions to consult
+`dynamicEntityConfigs` first (mirroring the pattern already used by
+`getEntityConfigs()`), then deletes the hardcoded const array entirely.
+
+This is FR-B4-01 from spec.md. Owner clarification Q-03 confirmed there are NO
+external wizard/form consumers of the const — only internal handler references.
+The `EntityLookupConfig` INTERFACE (line ~37) is retained because
+`AssociationResolverApp.tsx:44` imports it as a shape type; the interface is
+extended with an optional `regardingRecordNumberField?: string` field to carry
+the new data-driven metadata (aligned with FR-A4-01 / FR-A4-02). The
+`loadEntityConfigs()` metadata query is extended to populate this new interface
+field from the queried `sprk_regardingrecordnumberfield` column.
+  ]]></prompt>
+
+  <role>Senior TypeScript developer familiar with the AssociationResolver PCF, the RecordSelectionHandler pattern, and Dataverse metadata-driven configuration loading via ComponentFramework.WebApi.</role>
+
+  <goal><![CDATA[
+`ENTITY_LOOKUP_CONFIGS` const array is deleted from
+`RecordSelectionHandler.ts`. `getEntityConfig(logicalName)` and
+`getAllEntityConfigs()` consult `dynamicEntityConfigs` first (initial-load
+fallback removed once transition confirmed safe). The local `EntityLookupConfig`
+interface gains an optional `regardingRecordNumberField?: string` field.
+`loadEntityConfigs()` populates that field from
+`sprk_recordtype_ref.sprk_regardingrecordnumberfield`. `AssociationResolverApp.tsx`
+compiles without change. No leftover imports of the deleted const exist in the
+AssociationResolver package or elsewhere. Build passes; grep for
+`ENTITY_LOOKUP_CONFIGS\b` returns zero hits.
+  ]]></goal>
+
+  <inputs>
+    <file purpose="spec">projects/set-regarding-and-field-mapping-resolver-r1/spec.md</file>
+    <file purpose="plan">projects/set-regarding-and-field-mapping-resolver-r1/plan.md</file>
+    <file purpose="project-claude">projects/set-regarding-and-field-mapping-resolver-r1/CLAUDE.md</file>
+    <file purpose="source">src/client/pcf/AssociationResolver/handlers/RecordSelectionHandler.ts</file>
+    <file purpose="source">src/client/pcf/AssociationResolver/AssociationResolverApp.tsx</file>
+    <file purpose="adr">.claude/adr/ADR-012-shared-component-library.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-012">Interface extension is optional-field-only (backward compatible); no cross-package leakage introduced by the transition</constraint>
+    <constraint source="spec FR-B4-01">The const array must be deleted, not merely bypassed. `EntityLookupConfig` interface is retained. Interface gains `regardingRecordNumberField?: string`.</constraint>
+    <constraint source="spec Q-03">Wave 0 confirmed no external consumers — but re-validate immediately before deletion via `grep -R "ENTITY_LOOKUP_CONFIGS" src/client/pcf/AssociationResolver`. Zero hits required.</constraint>
+    <constraint source="spec FR-A4-02">`loadEntityConfigs()` populates `regardingRecordNumberField` from the queried metadata column `sprk_regardingrecordnumberfield`</constraint>
+    <constraint source="project">Behavior parity: any code path that previously resolved a config via `getEntityConfig` or `getAllEntityConfigs` must resolve identically after the transition (once `dynamicEntityConfigs` has loaded)</constraint>
+    <constraint source="project">TypeScript strict mode. No `any`. Prefer explicit types.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>dataverse/polymorphic-resolver</topic>
+    <files>
+      <file>.claude/adr/ADR-012-shared-component-library.md</file>
+      <file>.claude/patterns/dataverse/polymorphic-resolver.md</file>
+    </files>
+    <patterns>
+      <pattern name="Dynamic-first config resolution" location="src/client/pcf/AssociationResolver/handlers/RecordSelectionHandler.ts">
+        Mirror the existing `getEntityConfigs()` pattern: check `dynamicEntityConfigs`
+        first; fall back to hardcoded ONLY during the transient pre-load window.
+        Once the const is deleted, the fallback disappears entirely — dynamic
+        becomes the sole source.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      AssociationResolver historically maintained a hardcoded 8-entity list to
+      resolve entity-specific lookup fields. `sprk_recordtype_ref` has grown to
+      cover 11 entities and the drift is now observable (spec §Component
+      Justification). Wave 0 investigation confirmed the retirement is
+      partially complete: dynamic metadata loading is already wired. This task
+      finishes the transition and unlocks FR-A4-01's data-driven record-number
+      resolution consumed by task SRFR-051's thin-adapter refactor.
+    </background>
+    <dependencies>
+      <dependency task="SRFR-023" status="pending">
+        Shared-lib extended `EntityLookupConfig` interface with `regardingRecordNumberField?: string`. This task extends the AssociationResolver's LOCAL interface (line ~37 of RecordSelectionHandler.ts) to the same shape, or imports the shared interface directly if SRFR-023 exports it.
+      </dependency>
+    </dependencies>
+    <related-work>
+      <item>Task SRFR-051 depends on this transition to consume the dynamic config path via the shared PolymorphicResolverService.</item>
+      <item>Task SRFR-053 verifies the wired-up 5-field write end-to-end at v1.2.0.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check">Verify context &lt; 60%. Read spec.md FR-B4-01, Q-03 clarification, and Appendix A. Read `RecordSelectionHandler.ts` in full.</step>
+    <step order="1" name="Pre-Deletion Validation">Run `grep -R "ENTITY_LOOKUP_CONFIGS" src/client/pcf/AssociationResolver` and confirm ONLY the const-definition site + the two internal call sites appear. Zero external references required.</step>
+    <step order="2" name="Design Interface Extension">Decide: extend the LOCAL `EntityLookupConfig` interface (line ~37) OR import the extended interface from `@spaarke/ui-components` per task SRFR-023. Prefer import if the shared export exists; otherwise extend locally with `regardingRecordNumberField?: string`.</step>
+    <step order="3" name="Extend loadEntityConfigs Query">Update the metadata query in `loadEntityConfigs()` (line ~191) to read `sprk_regardingrecordnumberfield` from `sprk_recordtype_ref`. Populate `regardingRecordNumberField` on each row of `dynamicEntityConfigs`.</step>
+    <step order="4" name="Transition getEntityConfig">Modify `getEntityConfig(logicalName)` (line ~527) to consult `dynamicEntityConfigs` first (mirroring `getEntityConfigs()`'s pattern). Fall back to the hardcoded const ONLY when `dynamicEntityConfigs === null` (initial-load window).</step>
+    <step order="5" name="Transition getAllEntityConfigs">Modify `getAllEntityConfigs()` (line ~534) with the same dynamic-first pattern.</step>
+    <step order="6" name="Delete Const">Delete the `ENTITY_LOOKUP_CONFIGS` const array (lines ~46-87) and the temporary fallback branches in the two functions (they are now unreachable). Rely entirely on `dynamicEntityConfigs`.</step>
+    <step order="7" name="Verify No Stragglers">Run `grep -RE "ENTITY_LOOKUP_CONFIGS\b" src/client/pcf/AssociationResolver` — MUST return zero hits. Run `grep -R "EntityLookupConfig\b" src/client/pcf/AssociationResolver` to confirm interface still imported and referenced.</step>
+    <step order="8" name="Build">Run `npm run build` in `src/client/pcf/AssociationResolver/`. Fix any TS strict errors. Confirm `AssociationResolverApp.tsx` compiles unchanged.</step>
+    <step order="9" name="Step 9.5 Quality Gate">Invoke `/code-review` and `/adr-check` on `RecordSelectionHandler.ts`. Address findings.</step>
+    <step order="10" name="Update Task Status">Update TASK-INDEX.md 🔲 → ✅ for SRFR-050. Reset current-task.md for next task.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Load source, spec, ADRs</tool>
+    <tool name="Edit">Modify RecordSelectionHandler.ts</tool>
+    <tool name="Grep">Verify no external consumers of the const remain</tool>
+    <tool name="Bash">Run `npm run build` in AssociationResolver package</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/AssociationResolver/handlers/RecordSelectionHandler.ts</output>
+    <output type="docs">projects/set-regarding-and-field-mapping-resolver-r1/tasks/TASK-INDEX.md (🔲 → ✅ for SRFR-050)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`grep -RE "ENTITY_LOOKUP_CONFIGS\b" src/client/pcf/AssociationResolver` returns zero hits.</criterion>
+    <criterion testable="true">`EntityLookupConfig` interface exposes an optional `regardingRecordNumberField?: string` field (either locally extended or imported from `@spaarke/ui-components`).</criterion>
+    <criterion testable="true">`AssociationResolverApp.tsx` compiles unchanged (import of `EntityLookupConfig` continues to resolve; consumer code sees the extended interface transparently).</criterion>
+    <criterion testable="true">`loadEntityConfigs()` populates `regardingRecordNumberField` from the queried `sprk_regardingrecordnumberfield` metadata column on every row of `dynamicEntityConfigs`.</criterion>
+    <criterion testable="true">`getEntityConfig` and `getAllEntityConfigs` return values from `dynamicEntityConfigs` after the initial load; the hardcoded fallback branches are removed once the const is deleted.</criterion>
+    <criterion testable="true">`npm run build` in `src/client/pcf/AssociationResolver/` succeeds with zero errors and zero new warnings.</criterion>
+    <criterion testable="true">`/code-review` and `/adr-check` pass at Step 9.5 (or all findings addressed / escalated per CLAUDE.md §6.5).</criterion>
+  </acceptance-criteria>
+</task>

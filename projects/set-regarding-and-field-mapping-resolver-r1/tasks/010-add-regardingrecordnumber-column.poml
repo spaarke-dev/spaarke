@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="SRFR-010" project="set-regarding-and-field-mapping-resolver-r1">
+  <metadata>
+    <title>Add sprk_regardingrecordnumber column to 10 target entities</title>
+    <status>not-started</status>
+    <estimated-effort>4h</estimated-effort>
+    <actual-effort></actual-effort>
+    <assigned>AI Agent</assigned>
+    <started></started>
+    <completed></completed>
+    <rigor>STANDARD</rigor>
+    <parallel-safe>false</parallel-safe>
+    <tags>dataverse,schema,wave-1</tags>
+    <depends-on>SRFR-002</depends-on>
+    <wave>1</wave>
+  </metadata>
+
+  <prompt><![CDATA[
+Every target entity referenced in `sprk_recordtype_ref` (except Matter, which was
+completed 2026-07-01) must carry a `sprk_regardingrecordnumber` text column so that
+the streamlined RegardingResolver 2-row layout can render + write it uniformly across
+all 11 supported host entities. This is FR-A3-01 from spec.md.
+
+Add the column to Project, Invoice, Event, Analysis, Organization, Contact, Document,
+WorkAssignment, Budget, and Account via one Dataverse solution package. Verify each
+entity carries the column via `EntityDefinitions('X')/Attributes(...)` Web API query.
+  ]]></prompt>
+
+  <role>Dataverse schema engineer familiar with the Web API metadata surface, PAC CLI solution operations, and the Spaarke publisher-prefix convention.</role>
+
+  <goal><![CDATA[
+`sprk_regardingrecordnumber` (String, MaxLength=100, IsSearchable=true) exists on
+all 10 target entities (Project, Invoice, Event, Analysis, Organization, Contact,
+Document, WorkAssignment, Budget, Account). Solution export confirms; Matter is
+unchanged. A per-entity result log is written to notes/.
+  ]]></goal>
+
+  <inputs>
+    <file purpose="spec">projects/set-regarding-and-field-mapping-resolver-r1/spec.md</file>
+    <file purpose="plan">projects/set-regarding-and-field-mapping-resolver-r1/plan.md</file>
+    <file purpose="project-claude">projects/set-regarding-and-field-mapping-resolver-r1/CLAUDE.md</file>
+    <file purpose="pattern">.claude/patterns/dataverse/polymorphic-resolver.md</file>
+    <file purpose="reference-schema">infrastructure/dataverse/</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-A3-01">Column type MUST be String (text), MaxLength=100, IsSearchable=true</constraint>
+    <constraint source="spec NFR-04">Nullable addition — no non-null constraint; existing records must remain saveable</constraint>
+    <constraint source="spec">Target entities: sprk_project, sprk_invoice, sprk_event, sprk_analysis, sprk_organization, contact, sprk_document, sprk_workassignment, sprk_budget, account</constraint>
+    <constraint source="spec">Matter (sprk_matter) is out of scope — column added 2026-07-01</constraint>
+    <constraint source="convention">Publisher prefix `sprk_` — required for column adds to OOB entities (contact, account) to avoid collision</constraint>
+    <constraint source="CLAUDE.md">Hot-path declaration: bff=N, spaarkeAi=N — no BFF touches in this task</constraint>
+    <constraint source="A-07">Contact + Account business-key field for `sprk_regardingrecordnumberfield` is orthogonal — this task only adds the denormalized column; population is FR-A4-02 (task 002 territory)</constraint>
+    <constraint source="ADR-024">Denormalized column is part of the polymorphic-resolver pattern's 5-field write set</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>dataverse/schema-management</topic>
+    <files>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/patterns/dataverse/polymorphic-resolver.md</file>
+      <file>docs/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+    </files>
+    <patterns>
+      <pattern name="Column-add via Web API" location=".claude/skills/dataverse-create-schema/SKILL.md">
+        POST to `EntityDefinitions('LOGICAL_NAME')/Attributes` with a `StringAttributeMetadata`
+        payload including `@odata.type`, `SchemaName`, `LogicalName`, `MaxLength`, `IsSearchable`,
+        and `DisplayName`/`Description` localized labels. PAC CLI wraps this or use the Web API
+        directly via `Invoke-RestMethod`.
+      </pattern>
+      <pattern name="Solution round-trip" location=".claude/skills/dataverse-deploy/SKILL.md">
+        Add each new attribute to a single solution (unmanaged in dev; export as managed for
+        higher environments to match neighbor solutions' packaging conventions).
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      The RegardingResolver v1.3.0 streamlined 2-row layout renders `sprk_regardingrecordnumber`
+      as a hyperlink label on Row 2. For the label to render on any host entity, the column
+      must physically exist. Matter is done; this task closes the 10-entity gap. Without this,
+      the layout would render blank cells for 10 of 11 supported entities.
+    </background>
+    <dependencies>
+      <dependency task="SRFR-002" status="pending">
+        Wave 0 populates `sprk_recordtype_ref.sprk_regardingrecordnumberfield` for the 10 non-Matter
+        entities. This task (010) is the schema counterpart — the referenced FIELD (the target-record's
+        business-key column) is orthogonal to the HOST column added here.
+      </dependency>
+    </dependencies>
+    <related-work>
+      <item>Matter's `sprk_regardingrecordnumber` was added 2026-07-01 as pre-work.</item>
+      <item>Downstream Wave 2 task 020 extends `PolymorphicResolverService.applyResolverFields()` to write this column.</item>
+      <item>Downstream Wave 4 task 040 updates the presave webresource `TEXT_FIELDS` array to include this column.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check">Verify context &lt; 60%. Read spec.md FR-A3-01 and plan.md Wave 1.</step>
+    <step order="1" name="Verify Prerequisite">Confirm Matter's `sprk_regardingrecordnumber` exists via Web API: `EntityDefinitions('sprk_matter')/Attributes(LogicalName='sprk_regardingrecordnumber')?$select=LogicalName,AttributeType,MaxLength`. Record baseline in notes/schema-changes.log.</step>
+    <step order="2" name="Determine Solution Strategy">Inspect neighbor solution manifests under `infrastructure/dataverse/` for existing publisher + solution-uniquename patterns. Decide unmanaged (dev) vs export-as-managed path; document choice in notes/schema-changes.log.</step>
+    <step order="3" name="Author Column Payload">Draft the `StringAttributeMetadata` payload template (SchemaName=`sprk_RegardingRecordNumber`, LogicalName=`sprk_regardingrecordnumber`, MaxLength=100, IsSearchable=true, DisplayName="Regarding Record Number", Description referencing ADR-024 5-field write).</step>
+    <step order="4" name="Apply to 10 Entities">Iterate the 10 target entities. For each, POST the attribute metadata to `EntityDefinitions('X')/Attributes`. Append per-entity result (HTTP status, MetadataId) to notes/schema-changes.log. Handle OOB entities (contact, account) with special attention to publisher-prefix collision detection.</step>
+    <step order="5" name="Publish Customizations">POST to `PublishAllXml` (or targeted publish) to make the new attributes queryable and available in views/forms.</step>
+    <step order="6" name="Verify Presence per Entity">For each of the 11 target entities (Matter + 10 new), query `EntityDefinitions('X')/Attributes?$filter=LogicalName eq 'sprk_regardingrecordnumber'&amp;$select=LogicalName,AttributeType,MaxLength,IsSearchable` and confirm exactly one match with the expected metadata shape.</step>
+    <step order="7" name="Regression Check">Save an existing record on 2-3 sample entities (e.g., existing Contact, existing sprk_project) to confirm no non-null constraint violation. Document result in notes/schema-changes.log.</step>
+    <step order="8" name="Export Solution">Export the solution ZIP (`pac solution export` or Web API export). Store output reference in notes/ (path or solution unique name).</step>
+    <step order="9" name="Update Task Status">Update TASK-INDEX.md 🔲 → ✅ for SRFR-010. Reset current-task.md for next task.</step>
+  </steps>
+
+  <tools>
+    <tool name="Bash">Web API calls via curl/Invoke-RestMethod for metadata POSTs and verification GETs</tool>
+    <tool name="pac">Power Platform CLI for solution create/add-attribute/export operations</tool>
+    <tool name="dataverse-create-schema">Skill wrapper for column-add via Web API</tool>
+    <tool name="dataverse-deploy">Skill wrapper for solution operations</tool>
+  </tools>
+
+  <outputs>
+    <output type="schema">sprk_regardingrecordnumber attribute on 10 target entities</output>
+    <output type="solution">projects/set-regarding-and-field-mapping-resolver-r1/notes/schema-solution.zip (or reference by solution unique-name)</output>
+    <output type="log">projects/set-regarding-and-field-mapping-resolver-r1/notes/schema-changes.log</output>
+    <output type="docs">projects/set-regarding-and-field-mapping-resolver-r1/tasks/TASK-INDEX.md (🔲 → ✅ for SRFR-010)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">For each of the 11 target entities (sprk_matter, sprk_project, sprk_invoice, sprk_event, sprk_analysis, sprk_organization, contact, sprk_document, sprk_workassignment, sprk_budget, account), the Web API query `EntityDefinitions('X')/Attributes?$filter=LogicalName eq 'sprk_regardingrecordnumber'` returns exactly ONE attribute.</criterion>
+    <criterion testable="true">Attribute metadata on all 11 entities: `AttributeType eq 'String'`, `MaxLength eq 100`, `IsSearchable eq true`.</criterion>
+    <criterion testable="true">Existing records on all 11 entities remain saveable (no non-null constraint violation introduced by this addition).</criterion>
+    <criterion testable="true">Solution containing the 10 new attribute definitions exports cleanly (ZIP file or solution export reference stored in notes/).</criterion>
+    <criterion testable="true">notes/schema-changes.log documents per-entity result (HTTP status, MetadataId) for all 10 additions and the Matter baseline check.</criterion>
+    <criterion testable="true">Matter's `sprk_regardingrecordnumber` is unchanged by this task (baseline metadata query pre/post shows identical MetadataId).</criterion>
+  </acceptance-criteria>
+</task>

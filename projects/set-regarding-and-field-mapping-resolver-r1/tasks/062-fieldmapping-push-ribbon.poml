@@ -1,0 +1,161 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="SRFR-062" project="set-regarding-and-field-mapping-resolver-r1">
+  <metadata>
+    <title>Add Push Updates ribbon button to Matter (and per Q-07 inventory) via /ribbon-edit</title>
+    <status>not-started</status>
+    <estimated-effort>3h</estimated-effort>
+    <actual-effort></actual-effort>
+    <assigned>AI Agent</assigned>
+    <started></started>
+    <completed></completed>
+    <rigor>STANDARD</rigor>
+    <parallel-safe>false</parallel-safe>
+    <parallel-group></parallel-group>
+    <tags>ribbon,dataverse,field-mapping,wave-6</tags>
+    <depends-on>SRFR-061</depends-on>
+    <wave>6</wave>
+  </metadata>
+
+  <prompt><![CDATA[
+Add a "Push Updates to Related Records" ribbon button to the Matter main form
+(and any additional parent forms identified in SRFR-001's Q-07 inventory).
+
+The ribbon customization mirrors the CANONICAL pattern already shipped for the
+Communication Send button at
+`infrastructure/dataverse/ribbon/CommunicationRibbons/Entities/sprk_communication/RibbonDiff.xml`.
+Structure: `<CustomAction>` with unique per-entity ID, `<CommandDefinition>`
+with `<EnableRule>` referencing a `<CustomRule Library="$webresource:sprk_fieldmapping_push"
+FunctionName="Spaarke.FieldMapping.Push.hasSourceProfile" Default="false">`, and
+`<Actions>` invoking `Spaarke.FieldMapping.Push.pushUpdates` with `PrimaryControl`.
+
+Deploy via the `/ribbon-edit` skill — the round-trip export/edit/import path.
+DO NOT hand-edit a solution zip. This is FR-B3-01's deploy path.
+  ]]></prompt>
+
+  <role>Dataverse ribbon customization author familiar with `RibbonDiffXml`, `CustomAction` / `CommandDefinition` / `EnableRule` / `<CrmParameter Value="PrimaryControl" />` patterns, and the `/ribbon-edit` skill's round-trip workflow.</role>
+
+  <goal><![CDATA[
+Ribbon `CustomAction` "Push Updates to Related Records" is deployed to the
+Matter main form (and any additional parent forms from Q-07 inventory) on
+spaarkedev1. The button is enabled only when
+`Spaarke.FieldMapping.Push.hasSourceProfile(primaryControl)` returns true; on
+click, it invokes `Spaarke.FieldMapping.Push.pushUpdates(primaryControl)`. The
+RibbonDiffXml is versioned in the repo under
+`infrastructure/dataverse/ribbon/MatterRibbons/` (or the equivalent path per
+existing convention). Import completes cleanly and UAT verifies visibility +
+invocation.
+  ]]></goal>
+
+  <inputs>
+    <file purpose="spec">projects/set-regarding-and-field-mapping-resolver-r1/spec.md</file>
+    <file purpose="plan">projects/set-regarding-and-field-mapping-resolver-r1/plan.md</file>
+    <file purpose="project-claude">projects/set-regarding-and-field-mapping-resolver-r1/CLAUDE.md</file>
+    <file purpose="canonical-pattern">infrastructure/dataverse/ribbon/CommunicationRibbons/Entities/sprk_communication/RibbonDiff.xml</file>
+    <file purpose="wave-0-inventory">projects/set-regarding-and-field-mapping-resolver-r1/notes/wave-0-discovery.md</file>
+    <file purpose="skill">.claude/skills/ribbon-edit/SKILL.md</file>
+    <file purpose="webresource-dependency">src/client/webresources/js/sprk_fieldmapping_push.js</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-B3-01">Ribbon button is scoped to parent forms whose entity appears as `sourceEntity` in at least one active `sprk_fieldmappingprofile`. Matter is the guaranteed minimum. Additional forms per SRFR-001 Q-07 inventory.</constraint>
+    <constraint source="repo pattern">Ribbon structure MUST mirror the Communication Send button pattern at `infrastructure/dataverse/ribbon/CommunicationRibbons/Entities/sprk_communication/RibbonDiff.xml`.</constraint>
+    <constraint source="repo pattern">`CustomAction` IDs are unique per entity (e.g., `sprk.matter.fieldmapping.push.CustomAction`). Reuse of an ID across entities is an import failure.</constraint>
+    <constraint source="repo pattern">Deploy via `/ribbon-edit` skill (export solution → unpack → edit RibbonDiff.xml → repack → import). Do NOT hand-edit a solution zip.</constraint>
+    <constraint source="dependency">Web resource `sprk_fieldmapping_push` must be deployed to the target environment before the ribbon customization imports successfully (`$webresource:sprk_fieldmapping_push` reference).</constraint>
+    <constraint source="project">EnableRule's `Default` attribute is `false` — the button is hidden unless `hasSourceProfile` explicitly returns true.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>dataverse/ribbon-customization</topic>
+    <files>
+      <file>infrastructure/dataverse/ribbon/CommunicationRibbons/Entities/sprk_communication/RibbonDiff.xml</file>
+      <file>.claude/skills/ribbon-edit/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="CustomRule EnableRule against webresource function" location="Communication Send button RibbonDiff.xml"><![CDATA[
+        `<EnableRule Id="...">
+           <CustomRule Library="$webresource:sprk_fieldmapping_push"
+                       FunctionName="Spaarke.FieldMapping.Push.hasSourceProfile"
+                       Default="false">
+             <CrmParameter Value="PrimaryControl" />
+           </CustomRule>
+         </EnableRule>`
+      ]]></pattern>
+      <pattern name="Actions block invoking webresource function" location="Communication Send button RibbonDiff.xml"><![CDATA[
+        `<Actions>
+           <JavaScriptFunction Library="$webresource:sprk_fieldmapping_push"
+                               FunctionName="Spaarke.FieldMapping.Push.pushUpdates">
+             <CrmParameter Value="PrimaryControl" />
+           </JavaScriptFunction>
+         </Actions>`
+      ]]></pattern>
+      <pattern name="LocLabels for accessibility" location="Communication Send button RibbonDiff.xml"><![CDATA[
+        Every user-facing string (Button label, tooltip title, tooltip description, alt-text) is a `<LocLabel>` with a `LanguageCode="1033"` entry — do NOT inline literals.
+      ]]></pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Ribbon-based invocation is the correct surface for a single-command action
+      that operates on the current record (per ADR-006 UI Surface Architecture).
+      This surface has one canonical pattern in the repo — the Communication
+      Send button — and mirroring it minimizes ribbon-customization drift. The
+      `/ribbon-edit` skill handles the export/edit/import round-trip so we
+      don't hand-modify solution zips (a known source of import failures).
+    </background>
+    <dependencies>
+      <dependency task="SRFR-061" status="pending">
+        `sprk_fieldmapping_push.js` webresource must be authored and its
+        `Spaarke.FieldMapping.Push.hasSourceProfile` + `pushUpdates` functions
+        must exist. The ribbon references them by name.
+      </dependency>
+      <dependency task="SRFR-001" status="assumed-complete">
+        Wave 0 discovery Q-07 identified the full set of parent forms that need
+        the button. Matter is guaranteed; others per that inventory.
+      </dependency>
+    </dependencies>
+    <related-work>
+      <item>SRFR-082 (Wave 8) deploys web resources + ribbon customizations to UAT.</item>
+      <item>Communication Send button is the closest canonical pattern.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check">Verify context &lt; 60%. Read SRFR-061 acceptance criteria to confirm the webresource is ready. Read the Communication Send button RibbonDiff.xml as the pattern reference.</step>
+    <step order="1" name="Q-07 Inventory Load">Read `notes/wave-0-discovery.md` for the Q-07 parent-form inventory. Matter is guaranteed; enumerate any additional entities requiring the button (list may be empty for MVP).</step>
+    <step order="2" name="Author Matter RibbonDiff">Author (or amend) `infrastructure/dataverse/ribbon/MatterRibbons/Entities/sprk_Matter/RibbonDiff.xml` with a `CustomAction` under `Mscrm.Form.sprk_matter.MainTab.Actions.Controls._children` (or the correct group per canonical pattern). Fields: unique ID `sprk.matter.fieldmapping.push.CustomAction`, sequence value picked to avoid collision.</step>
+    <step order="3" name="CommandDefinition + EnableRule">Add `&lt;CommandDefinition Id="sprk.matter.fieldmapping.push.Command"&gt;` with `&lt;EnableRule&gt;` referencing `Spaarke.FieldMapping.Push.hasSourceProfile` (Default="false") and `&lt;Actions&gt;` invoking `Spaarke.FieldMapping.Push.pushUpdates`. Pass `&lt;CrmParameter Value="PrimaryControl" /&gt;` to both.</step>
+    <step order="4" name="LocLabels">Add `&lt;LocLabels&gt;` for label ("Push Updates"), tooltip title, tooltip description, alt-text. LanguageCode 1033 minimum.</step>
+    <step order="5" name="ModernImage">Reference a ModernImage icon (e.g., "Sync" or "Send") consistent with the canonical Communication pattern.</step>
+    <step order="6" name="Repeat for Q-07 Entities">For each additional parent entity in Q-07 inventory, repeat steps 2-5 with a per-entity unique CustomAction ID (e.g., `sprk.&lt;entity&gt;.fieldmapping.push.CustomAction`). If the inventory is Matter-only, skip.</step>
+    <step order="7" name="Deploy via /ribbon-edit">Invoke the `/ribbon-edit` skill to execute the round-trip: `pac solution export` → unpack → apply edited RibbonDiff.xml → repack → `pac solution import` targeting spaarkedev1. Capture the import log.</step>
+    <step order="8" name="UAT Smoke">In spaarkedev1: open a Matter record. Confirm the "Push Updates" button appears ONLY when at least one active `sprk_fieldmappingprofile` has sourceEntity=sprk_matter. Click the button; confirm dialog appears; on confirm, `pushUpdates` runs; toast reports outcomes.</step>
+    <step order="9" name="Update Task Status">Update TASK-INDEX.md 🔲 → ✅ for SRFR-062. Reset current-task.md for next task.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read canonical RibbonDiff.xml, Wave 0 inventory, skill definition</tool>
+    <tool name="Write">Create MatterRibbons/Entities/sprk_Matter/RibbonDiff.xml</tool>
+    <tool name="Edit">Amend existing RibbonDiff.xml if one already exists for Matter</tool>
+    <tool name="Bash">Run `pac solution export/import` orchestrated by /ribbon-edit</tool>
+    <tool name="Skill:/ribbon-edit">Round-trip export/edit/import path</tool>
+  </tools>
+
+  <outputs>
+    <output type="artifact">infrastructure/dataverse/ribbon/MatterRibbons/Entities/sprk_Matter/RibbonDiff.xml (created or amended)</output>
+    <output type="artifact">Ribbon customizations for any additional Q-07 entities (path per repo convention)</output>
+    <output type="notes" ephemeral="true">Solution import log excerpt in notes/mda-form-notes.md or new notes/wave-6-ribbon-deploy.md</output>
+    <output type="docs">projects/set-regarding-and-field-mapping-resolver-r1/tasks/TASK-INDEX.md (🔲 → ✅ for SRFR-062)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">RibbonDiff.xml exists in the repo for Matter (and any additional Q-07 entities) with a `CustomAction` referencing `Spaarke.FieldMapping.Push.pushUpdates`.</criterion>
+    <criterion testable="true">`EnableRule` references `Spaarke.FieldMapping.Push.hasSourceProfile` with `Default="false"`.</criterion>
+    <criterion testable="true">CustomAction IDs are unique per entity (grep confirms no duplicates across the repo).</criterion>
+    <criterion testable="true">Deploy via `/ribbon-edit` completes with zero import errors on spaarkedev1.</criterion>
+    <criterion testable="true">UAT: ribbon button appears on Matter form when at least one active `sprk_fieldmappingprofile` has sourceEntity=sprk_matter.</criterion>
+    <criterion testable="true">UAT: ribbon button hidden when no matching profile exists (or on a Matter that has none associated as source).</criterion>
+    <criterion testable="true">UAT: click → confirm dialog → confirm → toast reports push outcomes.</criterion>
+  </acceptance-criteria>
+</task>

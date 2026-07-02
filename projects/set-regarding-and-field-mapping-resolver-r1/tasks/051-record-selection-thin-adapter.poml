@@ -1,0 +1,166 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="SRFR-051" project="set-regarding-and-field-mapping-resolver-r1">
+  <metadata>
+    <title>RecordSelectionHandler becomes thin adapter delegating to PolymorphicResolverService</title>
+    <status>not-started</status>
+    <estimated-effort>4h</estimated-effort>
+    <actual-effort></actual-effort>
+    <assigned>AI Agent</assigned>
+    <started></started>
+    <completed></completed>
+    <rigor>FULL</rigor>
+    <parallel-safe>true</parallel-safe>
+    <parallel-group>C</parallel-group>
+    <tags>pcf,association-resolver,refactor,wave-5</tags>
+    <depends-on>SRFR-020,SRFR-022</depends-on>
+    <wave>5</wave>
+  </metadata>
+
+  <prompt><![CDATA[
+Currently `RecordSelectionHandler` in AssociationResolver duplicates the 4-field
+denormalized-write logic that `PolymorphicResolverService.applyResolverFields()`
+also performs. Per spec §1: "The overlap is 100% on relationship-creation."
+This task refactors AssociationResolver's handler into a thin adapter over the
+shared service.
+
+New primary flow (`selectRecord` or equivalent):
+1. Call `applyResolverFields()` from `@spaarke/ui-components` (extended in task
+   SRFR-020 to write 5 fields including `sprk_regardingrecordnumber`), passing
+   `sourceRecordNumberField` sourced from the entity config's
+   `regardingRecordNumberField` (populated in task SRFR-050).
+2. Call `FieldMappingHandler.applyMappingsForSelection()` (relocated to
+   `@spaarke/ui-components` in task SRFR-022) for the field-inheritance side
+   that AssociationResolver adds on top.
+3. Preserve the AssociationResolver-specific step of clearing the OTHER
+   entity-specific lookup fields (7 of 8, corresponding to the entities NOT
+   selected). This wraps around the shared calls; it is not duplicated by
+   `applyResolverFields`.
+
+This is FR-C1-01 (consumer side). ADR-024 dual-field invariants are preserved
+because the shared service enforces them. ADR-012 shared-lib boundary is
+respected because AssociationResolver consumes public exports only.
+  ]]></prompt>
+
+  <role>Senior TypeScript developer familiar with the AssociationResolver PCF's RecordSelectionHandler, the PolymorphicResolverService contract, and the polymorphic-resolver pattern (ADR-024).</role>
+
+  <goal><![CDATA[
+`RecordSelectionHandler.ts` no longer contains any duplicate 4-field write
+logic. `applyResolverFields()` from `@spaarke/ui-components` is imported and
+invoked as the sole denormalized-write path. `FieldMappingHandler.applyMappingsForSelection()`
+is invoked immediately after for the AssociationResolver-specific field
+inheritance. The "clear the other 7 entity-specific lookup fields" behavior is
+preserved and wraps around the shared calls. Unit tests confirm the selection
+flow writes all 5 denormalized fields (from the shared service), invokes the
+field-mapping handler with correct args, and clears the other lookups. Build
+passes; behavior parity with prior AssociationResolver v1.1.0 selection flow is
+preserved (except for the intentional 5th-field addition).
+  ]]></goal>
+
+  <inputs>
+    <file purpose="spec">projects/set-regarding-and-field-mapping-resolver-r1/spec.md</file>
+    <file purpose="plan">projects/set-regarding-and-field-mapping-resolver-r1/plan.md</file>
+    <file purpose="project-claude">projects/set-regarding-and-field-mapping-resolver-r1/CLAUDE.md</file>
+    <file purpose="source">src/client/pcf/AssociationResolver/handlers/RecordSelectionHandler.ts</file>
+    <file purpose="source">src/client/shared/Spaarke.UI.Components/src/services/PolymorphicResolverService.ts</file>
+    <file purpose="pattern">.claude/patterns/dataverse/polymorphic-resolver.md</file>
+    <file purpose="adr">.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+    <file purpose="adr">.claude/adr/ADR-012-shared-component-library.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-024">Dual-field strategy invariants preserved via `applyResolverFields` — entity-specific lookup + denormalized fields written atomically as a single payload</constraint>
+    <constraint source="ADR-012">Shared services consumed via `@spaarke/ui-components` public exports only. No cross-PCF imports.</constraint>
+    <constraint source="ADR-038">No `Mock&lt;HttpMessageHandler&gt;` in tests. Test via injected `webApi` shim + mocked `applyResolverFields` / `FieldMappingHandler` imports.</constraint>
+    <constraint source="spec FR-C1-01">Duplicate 4-field write logic MUST be removed from `RecordSelectionHandler.ts`. Grep must confirm no `updateRecord({...sprk_regardingrecordid...})` or equivalent remains in the handler.</constraint>
+    <constraint source="spec FR-B5-01">The 5-field write is achieved through delegation to the shared service — no explicit write of `sprk_regardingrecordnumber` in the handler itself.</constraint>
+    <constraint source="project">Behavior parity: existing selection flow (5-field denormalized write, entity-specific lookup, clearing other lookups, field-mapping inheritance) end-to-end unchanged; only the write path is unified.</constraint>
+    <constraint source="project">TypeScript strict mode. No `any`. Prefer explicit types.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>dataverse/polymorphic-resolver</topic>
+    <files>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/adr/ADR-012-shared-component-library.md</file>
+      <file>.claude/patterns/dataverse/polymorphic-resolver.md</file>
+    </files>
+    <patterns>
+      <pattern name="Thin-adapter delegation" location=".claude/patterns/dataverse/polymorphic-resolver.md">
+        Handler orchestrates: (1) call shared service for denormalized write,
+        (2) call domain-specific hook for inheritance side-effects,
+        (3) preserve local invariants that are NOT part of the shared contract
+        (e.g., clearing other entity-specific lookups).
+      </pattern>
+      <pattern name="applyResolverFields consumption" location="src/client/shared/Spaarke.UI.Components/src/services/PolymorphicResolverService.ts">
+        Post-task SRFR-020: accepts `sourceRecordNumberField?: string` (optional).
+        Supply it from `entityConfig.regardingRecordNumberField` (populated by
+        task SRFR-050 from `sprk_recordtype_ref.sprk_regardingrecordnumberfield`).
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      AssociationResolver has always been a functional twin of RegardingResolver
+      on the write side. The duplicated logic causes drift (e.g., the current
+      8-vs-11 entity discrepancy) and doubles the test surface for identical
+      behavior. Consolidating on `applyResolverFields()` unifies the write path,
+      lets ADR-024's invariants live in one place, and lets AssociationResolver
+      focus on its unique contributions: field-mapping inheritance and the
+      other-lookup-clearing behavior.
+    </background>
+    <dependencies>
+      <dependency task="SRFR-020" status="pending">
+        `PolymorphicResolverService.applyResolverFields()` extended for 5-field
+        write with optional `sourceRecordNumberField` input. This handler
+        depends on that signature being live in `@spaarke/ui-components`.
+      </dependency>
+      <dependency task="SRFR-022" status="pending">
+        `FieldMappingHandler` relocated to `@spaarke/ui-components/src/services/`.
+        Import path changes from `./FieldMappingHandler` to `@spaarke/ui-components`.
+      </dependency>
+    </dependencies>
+    <related-work>
+      <item>Task SRFR-050 populates `EntityLookupConfig.regardingRecordNumberField`, which this handler forwards to `applyResolverFields`.</item>
+      <item>Task SRFR-053 completes the version bump and confirms end-to-end 5-field write.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check">Verify context &lt; 60%. Read spec.md FR-C1-01, FR-B5-01. Read `RecordSelectionHandler.ts` in full. Read `PolymorphicResolverService.ts` (post-SRFR-020 shape).</step>
+    <step order="1" name="Inventory Duplicate Logic">Enumerate every `updateRecord`/write call in `RecordSelectionHandler.ts` that writes any of `sprk_regardingrecordid`, `sprk_regardingrecordname`, `sprk_regardingrecordurl`, `sprk_regardingrecordtype`, or the entity-specific `sprk_regarding&lt;X&gt;` lookup. Capture in notes/task-051-inventory.md.</step>
+    <step order="2" name="Design Adapter Flow">Sketch the new selection flow: (a) resolve `entityConfig` via dynamic-first lookup (SRFR-050 output); (b) call `applyResolverFields({ webApi, hostEntityRef, entityType, recordId, recordName, sourceRecordNumberField: config.regardingRecordNumberField })`; (c) call `FieldMappingHandler.applyMappingsForSelection({...})`; (d) clear the other 7 entity-specific lookups.</step>
+    <step order="3" name="Import Shared Services">Add imports for `applyResolverFields` and `FieldMappingHandler` from `@spaarke/ui-components`. Verify public-export path resolves (per SRFR-020 and SRFR-022).</step>
+    <step order="4" name="Implement Adapter">Replace the duplicate write logic in `selectRecord` (or equivalent entry point) with the sequenced calls from Step 2. Preserve the other-lookup-clearing step as an explicit step around the shared calls.</step>
+    <step order="5" name="Remove Dead Code">Delete now-unreachable local helpers that duplicated the shared service's payload construction. Do NOT delete anything that supports the other-lookup-clearing or field-mapping-inheritance step.</step>
+    <step order="6" name="Update Unit Tests">Rewrite the RecordSelectionHandler unit tests to (a) mock `applyResolverFields` + `FieldMappingHandler` from `@spaarke/ui-components`, (b) verify `applyResolverFields` is invoked with correct args including `sourceRecordNumberField`, (c) verify `FieldMappingHandler.applyMappingsForSelection` is invoked with correct args, (d) verify the other-lookup-clearing step still runs. Add regression test confirming the 5th field ends up in the write payload via the shared service.</step>
+    <step order="7" name="Build + Test">Run `npm run build` and `npm test` in `src/client/pcf/AssociationResolver/`. Fix any TS strict errors or test failures.</step>
+    <step order="8" name="Grep Verification">Run `grep -E "sprk_regardingrecordid|sprk_regardingrecordurl" src/client/pcf/AssociationResolver/handlers/RecordSelectionHandler.ts` — MUST show references only as read-side lookups or in the other-lookup-clearing step, NOT as write-payload construction.</step>
+    <step order="9" name="Step 9.5 Quality Gate">Invoke `/code-review` and `/adr-check` on the changed files. Address findings.</step>
+    <step order="10" name="Update Task Status">Update TASK-INDEX.md 🔲 → ✅ for SRFR-051. Reset current-task.md for next task.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Load source, spec, ADRs, pattern docs</tool>
+    <tool name="Edit">Modify RecordSelectionHandler.ts + tests</tool>
+    <tool name="Grep">Verify no duplicate write logic remains</tool>
+    <tool name="Bash">Run `npm run build` and `npm test` in AssociationResolver package</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/AssociationResolver/handlers/RecordSelectionHandler.ts</output>
+    <output type="test">src/client/pcf/AssociationResolver/handlers/__tests__/RecordSelectionHandler.test.ts</output>
+    <output type="notes">projects/set-regarding-and-field-mapping-resolver-r1/notes/task-051-inventory.md</output>
+    <output type="docs">projects/set-regarding-and-field-mapping-resolver-r1/tasks/TASK-INDEX.md (🔲 → ✅ for SRFR-051)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`RecordSelectionHandler.ts` no longer constructs a denormalized-field write payload directly; grep confirms no `updateRecord({...sprk_regardingrecordid...})` or equivalent write-payload literal remains.</criterion>
+    <criterion testable="true">`applyResolverFields` from `@spaarke/ui-components` is imported and invoked in the selection flow with `sourceRecordNumberField` supplied from the entity config.</criterion>
+    <criterion testable="true">`FieldMappingHandler.applyMappingsForSelection` is invoked immediately after `applyResolverFields` for the AssociationResolver-specific inheritance step.</criterion>
+    <criterion testable="true">The other-lookup-clearing behavior (clearing the 7 non-selected entity-specific lookups) is preserved and covered by unit test.</criterion>
+    <criterion testable="true">Unit tests mock `applyResolverFields` + `FieldMappingHandler` and confirm the selection flow writes all 5 denormalized fields (via delegation) + entity-specific lookup + clears others.</criterion>
+    <criterion testable="true">`npm run build` and `npm test` in `src/client/pcf/AssociationResolver/` succeed with zero errors.</criterion>
+    <criterion testable="true">`/code-review` and `/adr-check` pass at Step 9.5 (or all findings addressed / escalated per CLAUDE.md §6.5).</criterion>
+  </acceptance-criteria>
+</task>

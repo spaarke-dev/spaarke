@@ -1,0 +1,173 @@
+<task id="SRFR-001" project="set-regarding-and-field-mapping-resolver-r1">
+  <metadata>
+    <title>Wave 0 discovery audit — Q-06, Q-07, ENTITY_LOOKUP_CONFIGS callers, presave enumeration confirmation</title>
+    <status>not-started</status>
+    <estimated-effort>3h</estimated-effort>
+    <actual-effort></actual-effort>
+    <assigned>AI Agent</assigned>
+    <started></started>
+    <completed></completed>
+    <rigor>STANDARD</rigor>
+    <parallel-safe>false</parallel-safe>
+    <tags>discovery, audit, wave-0</tags>
+    <blocks>ALL — Wave 0 gate; no downstream Wave may begin until this task's deliverable exists</blocks>
+  </metadata>
+
+  <prompt>
+    Wave-0 discovery audit that closes residual investigation items before code work begins.
+    The project spec (spec.md §Unresolved Questions + §Assumptions A-07) carries two residual
+    questions (Q-06, Q-07) plus two pre-checks (ENTITY_LOOKUP_CONFIGS caller audit,
+    presave enumeration confirmation) that must be resolved BEFORE Waves 1–8 can start.
+    Deliverable is a single markdown report at
+    `projects/set-regarding-and-field-mapping-resolver-r1/notes/wave-0-discovery.md`
+    with 4 subheadings (one per deliverable). No code changes in this task.
+  </prompt>
+
+  <role>
+    Dataverse-savvy investigator + code auditor. Comfortable with (a) Web API metadata
+    queries against `sprk_recordtype_ref` and `sprk_fieldmappingprofile`, (b) TypeScript
+    grep-and-trace on the AssociationResolver package, (c) reading a JS webresource
+    and reconciling it against the FR-A5-04 5-step update plan.
+  </role>
+
+  <goal>
+    A single markdown report `notes/wave-0-discovery.md` populated with concrete
+    findings + owner-actionable recommendations for all four deliverables:
+    (1) Q-06 Contact/Account target-field recommendation with rationale,
+    (2) Q-07 parent-form ribbon scope inventory sourced from live
+    `sprk_fieldmappingprofile` data, (3) ENTITY_LOOKUP_CONFIGS external-consumer
+    audit result, (4) presave enumeration confirmation OR corrections to FR-A5-04.
+  </goal>
+
+  <inputs>
+    <file purpose="project-spec">projects/set-regarding-and-field-mapping-resolver-r1/spec.md</file>
+    <file purpose="project-plan">projects/set-regarding-and-field-mapping-resolver-r1/plan.md</file>
+    <file purpose="project-claude">projects/set-regarding-and-field-mapping-resolver-r1/CLAUDE.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="handler-under-audit">src/client/pcf/AssociationResolver/handlers/RecordSelectionHandler.ts</file>
+    <file purpose="associationresolver-app">src/client/pcf/AssociationResolver/AssociationResolverApp.tsx</file>
+    <file purpose="presave-webresource">src/client/webresources/js/sprk_todo_regarding_presave.js</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-024">Dual-field write invariants: any change to the resolver payload must preserve the existing 4-field write; Q-06 recommendation must not add ambiguity about which entity's field is authoritative.</constraint>
+    <constraint source="CLAUDE.md-§11">Component justification — default to reuse. Creating a NEW column on an OOB entity (contact, account) requires concrete cost-of-doing-nothing that natural business-key + graceful-blank cannot satisfy. Prefer graceful-blank (per NFR-06) unless owner explicitly requests a new column.</constraint>
+    <constraint source="spec-NFR-06">If `sprk_recordtype_ref.sprk_regardingrecordnumberfield` is empty for an entity, the layout renders the number cell blank AND logs a warning; this is a supported degraded mode, not a hard failure. Q-06 may exploit this to avoid an OOB-entity column addition.</constraint>
+    <constraint source="spec-FR-A5-04">Presave webresource uses EXPLICIT `TEXT_FIELDS` array + `textKeyForField()` switch, NOT generic iteration. Any deviation from this shape found during confirmation invalidates the 5-step update plan and MUST be flagged as a corrections list.</constraint>
+    <constraint source="spec-FR-B4-01">The `EntityLookupConfig` INTERFACE (line ~37) must remain exported — it is imported by `AssociationResolverApp.tsx:44` as the shape type. Only the `ENTITY_LOOKUP_CONFIGS` const array is targeted for deletion. Audit MUST distinguish the two.</constraint>
+    <constraint source="project">Read-only audit — no source file edits. All output lives in `notes/wave-0-discovery.md`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>dataverse/polymorphic-resolver</topic>
+    <files>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/patterns/dataverse/polymorphic-resolver.md</file>
+    </files>
+    <patterns>
+      <pattern name="polymorphic-resolver" location=".claude/patterns/dataverse/polymorphic-resolver.md">
+        Client + server resolver dual-field strategy. Grounding for understanding what
+        `sprk_regardingrecordnumberfield` unlocks in `PolymorphicResolverService.applyResolverFields()`.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Wave 0 exists specifically to eliminate ambiguity that would otherwise propagate
+      into Waves 1–8 as rework. Two spec assumptions (A-07 Contact/Account, A-01 ribbon
+      scope) require live-data confirmation. Two spec claims (FR-A5-04 presave shape,
+      FR-B4-01 external-consumer count) require code-level confirmation that the
+      "already investigated" state is still accurate at Wave 0 start.
+    </background>
+    <dependencies>
+      <dependency task="none" status="n/a">Wave 0 has no prerequisite tasks; it is the project start gate.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Prior Wave-0-style investigations captured in spec §Owner Clarifications Q-02, Q-03, Q-04, Q-05 (all resolved 2026-07-02). This task confirms those findings still hold and closes the residual Q-06 + Q-07.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check">
+      Confirm context usage &lt; 60% before starting. If &gt; 60%, run `context-handoff`.
+    </step>
+    <step order="1" name="Load spec + plan + CLAUDE.md">
+      Read spec.md §Unresolved Questions, §Assumptions (A-01, A-07), FR-A4-02, FR-A5-04, FR-B4-01. Read plan.md Wave 0 exit criteria. Read CLAUDE.md §11.
+    </step>
+    <step order="2" name="Deliverable 1 — Q-06 Contact + Account target-field recommendation">
+      For `contact`: (a) query EntityDefinitions to enumerate text/business-key candidates
+      (`accountnumber`-style natural key). Contact has NO OOB `contactnumber` field; the
+      natural candidates are `fullname` (display, not identifier) or `emailaddress1`
+      (identifier-ish). Neither is a "record number" in the Matter/Project sense.
+      (b) For `account`: `accountnumber` is an OOB field designed exactly for this
+      purpose. (c) Weigh graceful-blank (NFR-06) vs specific-field-name; recommend per
+      CLAUDE.md §11 (prefer graceful-blank on OOB entities without natural business-key).
+      Write recommendation with rationale.
+    </step>
+    <step order="3" name="Deliverable 2 — Q-07 parent-form ribbon scope inventory">
+      Query Dataverse for all `sprk_fieldmappingprofile` records where `statecode = 0`
+      (Active). Group by `sprk_sourceentity`. Report: (a) distinct set of source entity
+      logical names, (b) Matter is expected to be the first entry (spec §Success Criteria
+      #5 mentions Matter → Event as the UAT scenario), (c) any additional source entities
+      surface here dictate Wave 6 task 062 ribbon-edit scope. If ZERO active profiles
+      exist today, note that Wave 6 task 060 must create a Matter → Event profile as
+      part of its own scope BEFORE task 062 can deploy the ribbon.
+    </step>
+    <step order="4" name="Deliverable 3 — ENTITY_LOOKUP_CONFIGS caller audit">
+      Grep `src/client/pcf/AssociationResolver/` for the identifier `ENTITY_LOOKUP_CONFIGS`.
+      Confirm findings match spec FR-B4-01: (a) `loadEntityConfigs()` at ~line 191
+      already populates `dynamicEntityConfigs` from `sprk_recordtype_ref`, (b) two
+      internal call sites still consult the hardcoded const: `getEntityConfig` at ~L527
+      and `getAllEntityConfigs` at ~L534. Also grep broader `src/client/` for external
+      consumers of the const OR the `EntityLookupConfig` interface (interface stays,
+      const goes). Report the exact match count + file paths + line numbers.
+    </step>
+    <step order="5" name="Deliverable 4 — Presave enumeration confirmation">
+      Read `src/client/webresources/js/sprk_todo_regarding_presave.js`. Confirm:
+      (a) `TEXT_FIELDS` is an explicit array with the 3 fields spec FR-A5-04 names
+      (`sprk_regardingrecordid`, `sprk_regardingrecordname`, `sprk_regardingrecordurl`);
+      (b) `textKeyForField()` is a switch statement mapping field logical names to
+      pending-payload keys; (c) the pending-payload docstring lives around lines 37–46;
+      (d) current `VERSION` constant reads `1.1.0`. If any of the four items disagrees,
+      list corrections needed to FR-A5-04's 5-step plan.
+    </step>
+    <step order="6" name="Compose report">
+      Write `notes/wave-0-discovery.md` with 4 subheadings mirroring the 4 deliverables above.
+      Each subheading contains: (i) what was found (evidence — grep output, Web API result,
+      metadata query result); (ii) the recommendation OR confirmation; (iii) any escalation
+      needed to the owner. Cap at ~300 lines.
+    </step>
+    <step order="7" name="Verify acceptance criteria">
+      Re-read acceptance criteria; confirm each is satisfied by the report.
+    </step>
+    <step order="8" name="Update TASK-INDEX + current-task">
+      Mark SRFR-001 complete in TASK-INDEX.md; update current-task.md to point at SRFR-002.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read source files and spec docs</tool>
+    <tool name="Grep">Search for ENTITY_LOOKUP_CONFIGS, EntityLookupConfig, TEXT_FIELDS, textKeyForField</tool>
+    <tool name="Bash">Web API queries via curl / PowerShell if MCP unavailable</tool>
+    <tool name="mcp__dataverse__read_query">Query `sprk_recordtype_ref` and `sprk_fieldmappingprofile` records</tool>
+    <tool name="mcp__dataverse__describe">Enumerate Contact + Account text attributes for Q-06</tool>
+  </tools>
+
+  <outputs>
+    <output type="notes" ephemeral="false">projects/set-regarding-and-field-mapping-resolver-r1/notes/wave-0-discovery.md</output>
+    <output type="docs">projects/set-regarding-and-field-mapping-resolver-r1/tasks/TASK-INDEX.md (status update)</output>
+    <output type="docs">projects/set-regarding-and-field-mapping-resolver-r1/current-task.md (advance to SRFR-002)</output>
+    <output type="report">Completion report to caller with summary of the 4 deliverables' key findings</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">File `projects/set-regarding-and-field-mapping-resolver-r1/notes/wave-0-discovery.md` exists.</criterion>
+    <criterion testable="true">Report contains 4 subheadings, one per deliverable (Q-06, Q-07, ENTITY_LOOKUP_CONFIGS caller audit, presave enumeration confirmation).</criterion>
+    <criterion testable="true">Q-06 subheading contains a documented recommendation for BOTH Contact and Account (graceful-blank OR specific field name), each with rationale citing CLAUDE.md §11 and/or NFR-06.</criterion>
+    <criterion testable="true">Q-07 subheading lists at least the Matter → Event profile source entity (per spec §Success Criteria #5). If ZERO active profiles exist, that state is explicitly documented with the downstream implication for Wave 6.</criterion>
+    <criterion testable="true">ENTITY_LOOKUP_CONFIGS subheading reports the external-consumer grep result explicitly (expected: empty across `src/client/` outside the AssociationResolver package) AND confirms the two internal call sites at approx L527 (`getEntityConfig`) and L534 (`getAllEntityConfigs`).</criterion>
+    <criterion testable="true">Presave subheading reconfirms `TEXT_FIELDS` (3 fields), `textKeyForField()` switch, docstring location (lines 37–46), and current `VERSION = 1.1.0` — OR lists concrete corrections needed to FR-A5-04's 5-step update plan.</criterion>
+    <criterion testable="true">TASK-INDEX.md status for SRFR-001 flipped from 🔲 to ✅; current-task.md advanced to SRFR-002.</criterion>
+  </acceptance-criteria>
+</task>

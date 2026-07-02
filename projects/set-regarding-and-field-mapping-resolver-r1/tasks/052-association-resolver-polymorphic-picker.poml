@@ -1,0 +1,151 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="SRFR-052" project="set-regarding-and-field-mapping-resolver-r1">
+  <metadata>
+    <title>AssociationResolver consumes shared PolymorphicPicker component</title>
+    <status>not-started</status>
+    <estimated-effort>3h</estimated-effort>
+    <actual-effort></actual-effort>
+    <assigned>AI Agent</assigned>
+    <started></started>
+    <completed></completed>
+    <rigor>FULL</rigor>
+    <parallel-safe>true</parallel-safe>
+    <parallel-group>C</parallel-group>
+    <tags>pcf,association-resolver,fluent-v9,wave-5</tags>
+    <depends-on>SRFR-021,SRFR-051</depends-on>
+    <wave>5</wave>
+  </metadata>
+
+  <prompt><![CDATA[
+Replace AssociationResolver's private picker UI with the shared `PolymorphicPicker`
+Fluent v9 component (extracted in task SRFR-021). Symmetric with RegardingResolver's
+consumption (task SRFR-030). This is FR-C2 (consumer side).
+
+The shared component contract (from SRFR-021):
+- Props: `catalog` (from `sprk_recordtype_ref`), `onSelect(entityType, recordId, recordName)`, `disabled`, `readOnly`
+- Renders entity-type dropdown + toolbar icon, opens `Xrm.Utility.lookupObjects` scoped to selection
+
+`onSelect` wires to `RecordSelectionHandler.selectRecord(...)` (the SRFR-051
+refactored thin-adapter entry point). Private picker JSX and associated styles
+in `AssociationResolverApp.tsx` are deleted. If any AR-specific quirk (e.g., a
+custom filter chip) cannot be expressed by the shared component's props, either
+extend the component's contract (via a task SRFR-021 addendum) or document the
+gap in the task completion report as a known intentional divergence.
+  ]]></prompt>
+
+  <role>Senior React + Fluent UI v9 developer familiar with the AssociationResolver PCF host, the Spaarke shared component library, and PCF virtual-pattern authoring per ADR-022.</role>
+
+  <goal><![CDATA[
+`AssociationResolverApp.tsx` imports and renders `<PolymorphicPicker>` from
+`@spaarke/ui-components`, wiring `onSelect` to
+`RecordSelectionHandler.selectRecord(...)`. All private picker JSX and
+associated styles are deleted (or documented as retained-with-reason). The
+existing selection UX (dropdown of entities from `sprk_recordtype_ref` →
+lookup dialog → selection callback) is preserved end-to-end. Build passes;
+manual smoke test in the test harness confirms visual + behavioral parity.
+  ]]></goal>
+
+  <inputs>
+    <file purpose="spec">projects/set-regarding-and-field-mapping-resolver-r1/spec.md</file>
+    <file purpose="plan">projects/set-regarding-and-field-mapping-resolver-r1/plan.md</file>
+    <file purpose="project-claude">projects/set-regarding-and-field-mapping-resolver-r1/CLAUDE.md</file>
+    <file purpose="source">src/client/pcf/AssociationResolver/AssociationResolverApp.tsx</file>
+    <file purpose="source">src/client/shared/Spaarke.UI.Components/src/components/PolymorphicPicker/PolymorphicPicker.tsx</file>
+    <file purpose="pattern">.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+    <file purpose="pattern">.claude/patterns/pcf/fluent-v9-modern-theming.md</file>
+    <file purpose="adr">.claude/adr/ADR-012-shared-component-library.md</file>
+    <file purpose="adr">.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-012">Shared component consumed via `@spaarke/ui-components` public export only. No cross-PCF direct imports.</constraint>
+    <constraint source="ADR-022">PCF remains on the virtual pattern; Fluent v9 remains a platform-library. No bundling of react or fluentui in PCF output.</constraint>
+    <constraint source="spec FR-C2-01">AssociationResolver MUST consume the shared `PolymorphicPicker`. Private picker MUST be deleted or explicitly documented as retained-with-reason.</constraint>
+    <constraint source="project">Behavior parity: entity-type dropdown, lookup dialog scoping, disabled/readOnly semantics must match prior AssociationResolver v1.1.0 behavior. Any intentional divergence must be documented in the completion report.</constraint>
+    <constraint source="project">TypeScript strict mode. No `any`. Prefer explicit types on props and event handlers.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ui/fluent-v9-component-authoring</topic>
+    <files>
+      <file>.claude/adr/ADR-012-shared-component-library.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/pcf/fluent-v9-modern-theming.md</file>
+    </files>
+    <patterns>
+      <pattern name="Shared Fluent v9 component consumption" location=".claude/patterns/ui/fluent-v9-component-authoring.md">
+        Import from `@spaarke/ui-components` public entry; wire props with
+        explicit types; delete private equivalents. Do NOT re-declare styles
+        that the shared component owns via Griffel.
+      </pattern>
+      <pattern name="PCF virtual pattern" location=".claude/patterns/pcf/fluent-v9-modern-theming.md">
+        PCF stays virtual; Fluent v9 is a platform-library declared in the
+        control manifest. Do not add react or fluentui as bundled deps.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      AssociationResolver and RegardingResolver have historically each maintained
+      their own picker JSX. Drift is visible today (8 vs 11 entity discrepancy).
+      Extracting the picker into `@spaarke/ui-components` (SRFR-021) unblocks
+      polish work (typeahead, recent selections, keyboard shortcuts) to happen
+      in one place. This task lands AssociationResolver as a consumer.
+    </background>
+    <dependencies>
+      <dependency task="SRFR-021" status="pending">
+        `PolymorphicPicker` shared component available in `@spaarke/ui-components`
+        with props: `catalog`, `onSelect`, `disabled`, `readOnly`.
+      </dependency>
+      <dependency task="SRFR-051" status="pending">
+        `RecordSelectionHandler.selectRecord(...)` is the thin-adapter entry
+        point this picker wires into. Signature stable per SRFR-051.
+      </dependency>
+    </dependencies>
+    <related-work>
+      <item>Task SRFR-030 lands RegardingResolver as the sibling consumer of the same shared component.</item>
+      <item>Task SRFR-053 completes the version bump and confirms end-to-end.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check">Verify context &lt; 60%. Read spec.md FR-C2-01. Read `AssociationResolverApp.tsx` in full. Read the shared `PolymorphicPicker.tsx` public contract (post-SRFR-021).</step>
+    <step order="1" name="Inventory Private Picker">Enumerate all files under `src/client/pcf/AssociationResolver/` that participate in the private picker (JSX, styles, hooks). Capture in notes/task-052-inventory.md. Flag any AR-specific quirks not expressed by the shared component's props.</step>
+    <step order="2" name="Import Shared Component">Add `import { PolymorphicPicker } from '@spaarke/ui-components'` to `AssociationResolverApp.tsx`. Verify the export resolves.</step>
+    <step order="3" name="Replace JSX">Replace the inline picker JSX in the React root with `&lt;PolymorphicPicker catalog={entityConfigs} onSelect={handleSelect} disabled={disabled} readOnly={readOnly} /&gt;`. Wire `handleSelect` to invoke `RecordSelectionHandler.selectRecord(entityType, recordId, recordName)`.</step>
+    <step order="4" name="Delete Private Picker">Delete the now-unused private picker JSX + associated styles. If any file is entirely obsoleted, delete the file. Do NOT delete files still used for other AssociationResolver responsibilities.</step>
+    <step order="5" name="Handle Divergences">If any AR-specific quirk cannot be expressed via the shared component's props, choose ONE: (a) file an addendum to SRFR-021 to extend the shared contract; (b) document the retained private code as intentional divergence in notes/task-052-inventory.md. Prefer (a) unless the quirk is truly AR-only.</step>
+    <step order="6" name="Build">Run `npm run build` in `src/client/pcf/AssociationResolver/`. Fix any TS strict errors or missing imports.</step>
+    <step order="7" name="Smoke Test">Run the AssociationResolver test harness (or `npm start` if available). Verify: dropdown shows all 11 entities from `sprk_recordtype_ref`; selecting an entity opens `Xrm.Utility.lookupObjects` scoped correctly; disabled/readOnly render as expected. Capture screenshot or note in notes/task-052-smoke.md.</step>
+    <step order="8" name="Grep Verification">Run `grep -R "PolymorphicPicker" src/client/pcf/AssociationResolver` — MUST show only the import from `@spaarke/ui-components` and its JSX usage; no private definition.</step>
+    <step order="9" name="Step 9.5 Quality Gate">Invoke `/code-review` and `/adr-check` on the changed files. Address findings.</step>
+    <step order="10" name="Update Task Status">Update TASK-INDEX.md 🔲 → ✅ for SRFR-052. Reset current-task.md for next task.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Load source, spec, ADRs, pattern docs</tool>
+    <tool name="Edit">Modify AssociationResolverApp.tsx; delete obsolete files</tool>
+    <tool name="Grep">Verify no private picker definition remains</tool>
+    <tool name="Bash">Run `npm run build` in AssociationResolver package; optionally run harness</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/AssociationResolver/AssociationResolverApp.tsx</output>
+    <output type="code" conditional="if-obsoleted">Deleted private picker JSX + styles under src/client/pcf/AssociationResolver/</output>
+    <output type="notes">projects/set-regarding-and-field-mapping-resolver-r1/notes/task-052-inventory.md</output>
+    <output type="notes" conditional="if-smoke-run">projects/set-regarding-and-field-mapping-resolver-r1/notes/task-052-smoke.md</output>
+    <output type="docs">projects/set-regarding-and-field-mapping-resolver-r1/tasks/TASK-INDEX.md (🔲 → ✅ for SRFR-052)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`AssociationResolverApp.tsx` imports `PolymorphicPicker` from `@spaarke/ui-components` and renders it in place of the prior private picker JSX.</criterion>
+    <criterion testable="true">`onSelect` handler wires to `RecordSelectionHandler.selectRecord(entityType, recordId, recordName)` — the thin-adapter entry point from SRFR-051.</criterion>
+    <criterion testable="true">Private picker JSX + styles are deleted OR retained-with-reason is documented in notes/task-052-inventory.md.</criterion>
+    <criterion testable="true">Grep confirms no private `PolymorphicPicker`-equivalent JSX remains in `src/client/pcf/AssociationResolver/`.</criterion>
+    <criterion testable="true">Smoke test in harness confirms: 11 entities appear in dropdown; lookup scoped correctly on selection; disabled + readOnly states render as expected.</criterion>
+    <criterion testable="true">`npm run build` in `src/client/pcf/AssociationResolver/` succeeds with zero errors and zero new warnings.</criterion>
+    <criterion testable="true">`/code-review` and `/adr-check` pass at Step 9.5 (or all findings addressed / escalated per CLAUDE.md §6.5).</criterion>
+  </acceptance-criteria>
+</task>

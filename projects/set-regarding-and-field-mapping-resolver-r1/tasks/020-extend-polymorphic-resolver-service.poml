@@ -1,0 +1,149 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="SRFR-020" project="set-regarding-and-field-mapping-resolver-r1">
+  <metadata>
+    <title>Extend PolymorphicResolverService.applyResolverFields() for 5-field write + data-driven record-number lookup</title>
+    <status>not-started</status>
+    <estimated-effort>5h</estimated-effort>
+    <actual-effort></actual-effort>
+    <assigned>AI Agent</assigned>
+    <started></started>
+    <completed></completed>
+    <rigor>FULL</rigor>
+    <parallel-safe>true</parallel-safe>
+    <parallel-group>A</parallel-group>
+    <tags>shared-lib,polymorphic-resolver,wave-2,spaarke-ui-components</tags>
+    <depends-on>SRFR-010</depends-on>
+    <wave>2</wave>
+  </metadata>
+
+  <prompt><![CDATA[
+Current `applyResolverFields()` writes 4 denormalized fields to the host record
+(sprk_regardingrecordid, sprk_regardingrecordname, sprk_regardingrecordurl, and
+the entity-specific `sprk_regarding<X>` lookup) plus the discriminator lookup
+`sprk_regardingrecordtype`. This task extends the write to include a FIFTH
+denormalized field, `sprk_regardingrecordnumber`, sourced via data-driven
+resolution over `sprk_recordtype_ref.sprk_regardingrecordnumberfield`.
+
+This is FR-A4-01 + FR-C1-01 from spec.md. The resolver reads the metadata-mapped
+source-field name for the target entity, then queries the target record for that
+field's value, then writes it to the host's `sprk_regardingrecordnumber` column.
+When metadata is not populated (Contact/Account per Q-06 graceful-blank), the
+resolver logs a warn and skips the record-number write; the host cell renders
+blank instead of failing.
+  ]]></prompt>
+
+  <role>Senior TypeScript developer familiar with the Spaarke shared component library, the polymorphic-resolver pattern (ADR-024), and the Dataverse Web API surface exposed via ComponentFramework.WebApi.</role>
+
+  <goal><![CDATA[
+`PolymorphicResolverService.applyResolverFields()` writes a 5-field payload
+(existing 4 + `sprk_regardingrecordnumber`) with the record-number sourced by
+resolving `sprk_recordtype_ref.sprk_regardingrecordnumberfield` for the target
+entity, then querying the target record. Backward compatibility preserved for
+callers not supplying the new optional input. Metadata-null case logs warn and
+skips gracefully. Unit tests cover the happy path, metadata-null, and target-
+record-null-value scenarios. TypeScript strict mode passes.
+  ]]></goal>
+
+  <inputs>
+    <file purpose="spec">projects/set-regarding-and-field-mapping-resolver-r1/spec.md</file>
+    <file purpose="plan">projects/set-regarding-and-field-mapping-resolver-r1/plan.md</file>
+    <file purpose="project-claude">projects/set-regarding-and-field-mapping-resolver-r1/CLAUDE.md</file>
+    <file purpose="source">src/client/shared/Spaarke.UI.Components/src/services/PolymorphicResolverService.ts</file>
+    <file purpose="pattern">.claude/patterns/dataverse/polymorphic-resolver.md</file>
+    <file purpose="adr">.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+    <file purpose="adr">.claude/adr/ADR-012-shared-component-library.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-024">Dual-field strategy invariants preserved — entity-specific lookup + denormalized fields written atomically as a single payload</constraint>
+    <constraint source="ADR-012">Shared lib boundary — no direct cross-PCF imports; consumers use `@spaarke/ui-components` public exports only</constraint>
+    <constraint source="ADR-038">No `Mock&lt;HttpMessageHandler&gt;` in tests; test via injected `webApi` shim (TypeScript equivalent — no direct fetch/XHR mocking)</constraint>
+    <constraint source="spec NFR-06">Metadata-null case MUST log `console.warn` and skip the record-number write. MUST NOT throw or hard-fail.</constraint>
+    <constraint source="spec FR-A4-01">Optional `sourceRecordNumberField?: string` extension on the input payload — backward compatible</constraint>
+    <constraint source="spec FR-C1-01">5-field write is the new invariant; existing callers not supplying the field still succeed with 4-field write (no regression)</constraint>
+    <constraint source="project">Pending-payload bridge shape `window.__sprk_regarding_pending__` must gain `recordNumber` key for CREATE-mode consumption by presave (task SRFR-040)</constraint>
+    <constraint source="project">TypeScript strict mode. No `any`. Prefer explicit types.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>dataverse/polymorphic-resolver</topic>
+    <files>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/adr/ADR-012-shared-component-library.md</file>
+      <file>.claude/patterns/dataverse/polymorphic-resolver.md</file>
+      <file>docs/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+    </files>
+    <patterns>
+      <pattern name="Data-driven field resolution" location=".claude/patterns/dataverse/polymorphic-resolver.md">
+        Read `sprk_recordtype_ref` for the target entity, extract the source-field name,
+        then query the target record for that field. Encapsulate as a helper so tests can
+        inject a stub webApi.
+      </pattern>
+      <pattern name="Graceful-blank metadata handling" location=".claude/patterns/dataverse/polymorphic-resolver.md">
+        NFR-06 mandates warn + skip when metadata is missing. Never throw from a missing
+        optional mapping — the user experience is a blank cell, not a broken form.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      The RegardingResolver v1.3.0 streamlined 2-row layout renders `sprk_regardingrecordnumber`
+      as a hyperlink label on Row 2. For the label to render, the host record must physically
+      carry the value. The value comes from the resolver at set-regarding time and is written
+      atomically alongside the existing 4-field payload. Contact and Account are expected to
+      resolve to null because there is no obvious business-key text field on OOB tables — the
+      resolver must degrade gracefully rather than fail.
+    </background>
+    <dependencies>
+      <dependency task="SRFR-010" status="pending">
+        `sprk_regardingrecordnumber` column landed on the 10 target host entities. Without
+        this, the write payload will fail on those entities.
+      </dependency>
+    </dependencies>
+    <related-work>
+      <item>Task SRFR-040 consumes `window.__sprk_regarding_pending__.recordNumber` in CREATE-mode presave.</item>
+      <item>Task SRFR-030 (RegardingResolver v1.3.0) surfaces the new field in the streamlined layout.</item>
+      <item>Task SRFR-071 amends ADR-024 documentation for the 4→5 field-count change.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check">Verify context &lt; 60%. Read spec.md FR-A4-01, FR-A4-02, FR-C1-01, Appendix A §A.2. Read `PolymorphicResolverService.ts` in full.</step>
+    <step order="1" name="Inventory Current Behavior">Enumerate all callers of `applyResolverFields()` across the repo via Grep. Capture current input shape + output payload keys in notes/task-020-inventory.md.</step>
+    <step order="2" name="Design Extension">Design the optional `sourceRecordNumberField?: string` input and the `resolveRecordNumberFieldName()` helper. Sketch the payload delta. Confirm backward compat: absent input → identical 4-field output.</step>
+    <step order="3" name="Implement Helper">Add `resolveRecordNumberFieldName(entityType, webApi): Promise&lt;string | null&gt;` querying `sprk_recordtype_refs?$filter=sprk_targetentity eq '&lt;X&gt;'&amp;$select=sprk_regardingrecordnumberfield`. Return `null` when no row matches OR when the field is null/empty.</step>
+    <step order="4" name="Implement Payload Extension">Extend `applyResolverFields()` to invoke the helper when `sourceRecordNumberField` is not supplied, then query the target record for that field name, then add `sprk_regardingrecordnumber` to the update payload. On null resolution, `console.warn` per NFR-06 and skip.</step>
+    <step order="5" name="Extend CREATE-Bridge Payload">Update the pending-payload emitted to `window.__sprk_regarding_pending__` to include `recordNumber`. Preserve existing keys.</step>
+    <step order="6" name="Unit Tests">Add tests covering: (a) 11 entities including Matter → happy path 5-field write; (b) Contact/Account → metadata returns null → warn + 4-field write; (c) metadata resolves but target record has null value in the source field → warn + 4-field write; (d) backward-compat: caller without `sourceRecordNumberField` still gets 4-field write.</step>
+    <step order="7" name="Public Surface">If new helper is public, export from `src/index.ts`. Verify no breaking export changes.</step>
+    <step order="8" name="Build + Test">Run `npm run build` and `npm test` in `src/client/shared/Spaarke.UI.Components/`. Fix any TS strict errors.</step>
+    <step order="9" name="Step 9.5 Quality Gate">Invoke `/code-review` and `/adr-check` on the changed files. Address findings.</step>
+    <step order="10" name="Update Task Status">Update TASK-INDEX.md 🔲 → ✅ for SRFR-020. Reset current-task.md for next task.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Load source, spec, ADRs, pattern docs</tool>
+    <tool name="Edit">Modify PolymorphicResolverService.ts + tests</tool>
+    <tool name="Grep">Find callers of applyResolverFields across repo</tool>
+    <tool name="Bash">Run `npm run build` and `npm test` in shared lib package</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/services/PolymorphicResolverService.ts</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/services/__tests__/PolymorphicResolverService.test.ts</output>
+    <output type="code" conditional="if-new-public-export">src/client/shared/Spaarke.UI.Components/src/index.ts</output>
+    <output type="notes">projects/set-regarding-and-field-mapping-resolver-r1/notes/task-020-inventory.md</output>
+    <output type="docs">projects/set-regarding-and-field-mapping-resolver-r1/tasks/TASK-INDEX.md (🔲 → ✅ for SRFR-020)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`applyResolverFields()` write payload includes `sprk_regardingrecordnumber` when metadata resolves AND target record has non-null value in the source field.</criterion>
+    <criterion testable="true">Backward-compat: existing callers not supplying `sourceRecordNumberField` still receive 4-field write behavior; no regression in existing tests.</criterion>
+    <criterion testable="true">Unit tests cover all four scenarios: happy-path 5-field write, metadata-null, target-record-null-value, backward-compat 4-field write.</criterion>
+    <criterion testable="true">Metadata-null case logs exactly one `console.warn` and does NOT throw.</criterion>
+    <criterion testable="true">TypeScript compiles under strict mode with zero errors and zero `any` usages in changed lines.</criterion>
+    <criterion testable="true">`window.__sprk_regarding_pending__` bridge shape includes `recordNumber` when CREATE-mode payload is emitted.</criterion>
+    <criterion testable="true">`/code-review` and `/adr-check` pass at Step 9.5 (or all findings addressed / escalated per CLAUDE.md §6.5).</criterion>
+  </acceptance-criteria>
+</task>

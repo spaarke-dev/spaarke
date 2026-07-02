@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="SRFR-033" project="set-regarding-and-field-mapping-resolver-r1">
+  <metadata>
+    <title>RegardingResolver preserve read-only mode + URL field; version bump v1.2.0 → v1.3.0 across 4 locations</title>
+    <status>not-started</status>
+    <estimated-effort>2h</estimated-effort>
+    <actual-effort></actual-effort>
+    <assigned>AI Agent</assigned>
+    <started></started>
+    <completed></completed>
+    <rigor>FULL</rigor>
+    <parallel-safe>false</parallel-safe>
+    <parallel-group>B</parallel-group>
+    <tags>pcf,regarding-resolver,version-bump,wave-3</tags>
+    <depends-on>SRFR-030,SRFR-031,SRFR-032</depends-on>
+    <wave>3</wave>
+  </metadata>
+
+  <prompt><![CDATA[
+Read-only mode (per NFR-04 and FR-A5-01) must render Row 2 only — no toolbar
+icon on Row 1, or Row 1 hidden entirely. URL field (FR-A5-03) continues to
+be populated by `PolymorphicResolverService` (not visually shown but still
+written). Add a regression test to confirm the URL write path.
+
+Then perform the version bump v1.2.0 → v1.3.0 across all 4 locations per
+`src/client/pcf/CLAUDE.md` Version Update Checklist:
+1. `ControlManifest.Input.xml` version attribute
+2. UI footer component (`v1.3.0 • Built YYYY-MM-DD`)
+3. Solution manifest `solution.xml` `<Version>` element (if a per-control
+   solution exists)
+4. Solution Control Manifest version attribute
+
+Discipline: all 4 locations bump together to avoid version drift.
+  ]]></prompt>
+
+  <role>PCF developer familiar with the Spaarke PCF version-discipline checklist (`src/client/pcf/CLAUDE.md`), read-only rendering conventions, and Fluent v9 canvas-vs-MDA disabled patterns.</role>
+
+  <goal><![CDATA[
+RegardingResolver v1.3.0 is buildable with all 4 version-anchor locations
+bumped. Read-only mode renders Row 2 only (or hides Row 1's toolbar icon).
+`sprk_regardingrecordurl` is still written by the resolver (verified via
+regression test on the 4-field baseline plus the new 5th field). Build
+passes. All PCF virtual-pattern requirements from ADR-022 preserved.
+No behavior change beyond read-only rendering + verified URL write.
+  ]]></goal>
+
+  <inputs>
+    <file purpose="spec">projects/set-regarding-and-field-mapping-resolver-r1/spec.md</file>
+    <file purpose="plan">projects/set-regarding-and-field-mapping-resolver-r1/plan.md</file>
+    <file purpose="project-claude">projects/set-regarding-and-field-mapping-resolver-r1/CLAUDE.md</file>
+    <file purpose="checklist">src/client/pcf/CLAUDE.md</file>
+    <file purpose="source">src/client/pcf/RegardingResolver/RegardingResolver/RegardingResolverApp.tsx</file>
+    <file purpose="source">src/client/pcf/RegardingResolver/RegardingResolver/ControlManifest.Input.xml</file>
+    <file purpose="source">src/client/pcf/RegardingResolver/Solution</file>
+    <file purpose="pattern">.claude/patterns/pcf/fluent-v9-canvas-vs-mda-disabled.md</file>
+    <file purpose="skill">.claude/skills/pcf-deploy/SKILL.md</file>
+    <file purpose="adr">.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-022">Virtual pattern preserved. Platform-library declarations (React 16 + Fluent 9) unchanged. No bundling regression.</constraint>
+    <constraint source="spec FR-A5-01">Read-only mode renders Row 2 only. Row 1's toolbar icon is either hidden or the entire Row 1 is not rendered. Detection uses `context.mode.isControlDisabled` OR `context.parameters.readOnly.raw === true` — pick the pattern already used in current RegardingResolver code and stay consistent.</constraint>
+    <constraint source="spec FR-A5-03">`sprk_regardingrecordurl` continues to be written by `PolymorphicResolverService.applyResolverFields()`. This task adds a regression test — no code change to the URL write path itself.</constraint>
+    <constraint source="src/client/pcf/CLAUDE.md — Version Update Checklist">ALL 4 locations bumped together: (1) ControlManifest.Input.xml version attribute, (2) UI footer component version+build-date string, (3) solution.xml `&lt;Version&gt;` (if solution exists), (4) Solution Control Manifest version attribute. Missing any = a HARD warning per the checklist.</constraint>
+    <constraint source="project">Build date embedded in the UI footer follows `YYYY-MM-DD` format matching the day of the version bump.</constraint>
+    <constraint source="project">No behavior change beyond (a) read-only rendering and (b) regression test for URL write. Do not refactor unrelated code.</constraint>
+    <constraint source="project">TypeScript strict mode; no `any`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>pcf/version-discipline</topic>
+    <files>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>.claude/skills/pcf-deploy/SKILL.md</file>
+      <file>.claude/patterns/pcf/fluent-v9-canvas-vs-mda-disabled.md</file>
+    </files>
+    <patterns>
+      <pattern name="Read-only PCF rendering (MDA vs Canvas)" location=".claude/patterns/pcf/fluent-v9-canvas-vs-mda-disabled.md">
+        MDA form read-only signal is `context.mode.isControlDisabled`; canvas apps use a bound `readOnly` property. Support whichever is already in use; do not introduce both patterns.
+      </pattern>
+      <pattern name="Version-anchor locations" location="src/client/pcf/CLAUDE.md">
+        Every PCF release bumps four locations together. Grep for the OLD version string across the PCF folder to catch any straggling references before finalizing.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      SRFR-030/031/032 land the functional changes; this task hardens the release. Read-only mode preserves the "view but do not change" UX for locked forms. The URL field remains a first-class denormalized field even though the streamlined layout no longer shows it — downstream consumers (email templates, notifications) still expect it to be populated. Version discipline exists because Dataverse silently accepts a control with a stale version, then makers see a "1.2.0" footer next to a v1.3.0 layout and file a bug — which is entirely preventable with the checklist.
+    </background>
+    <dependencies>
+      <dependency task="SRFR-030" status="pending">2-row layout landed (this task adjusts Row 1 rendering under read-only).</dependency>
+      <dependency task="SRFR-031" status="pending">Modal-open handler landed (must still work under read-only — Row 2 hyperlink stays active).</dependency>
+      <dependency task="SRFR-032" status="pending">CREATE-mode seam landed (unchanged by this task, but tests must not regress).</dependency>
+    </dependencies>
+    <related-work>
+      <item>SRFR-080 (Wave 8) deploys the v1.3.0 solution to UAT.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check">Verify context &lt; 60%. Read spec.md FR-A5-01, FR-A5-03, NFR-04. Read `src/client/pcf/CLAUDE.md` Version Update Checklist section in full. Grep for existing `v1.2.0` occurrences under `src/client/pcf/RegardingResolver/` to enumerate every anchor.</step>
+    <step order="1" name="Read-only Detection Inventory">Confirm which read-only signal current RegardingResolver already uses (`context.mode.isControlDisabled` vs `context.parameters.readOnly.raw`). Record in notes/task-033-inventory.md.</step>
+    <step order="2" name="Read-only Rendering">In `RegardingResolverApp.tsx`, gate Row 1's toolbar icon (or the entire Row 1) on `!isReadOnly`. Row 2 renders unchanged (hyperlink remains active under read-only — the record-open modal is a "view" action). Confirm no other interactive affordances remain visible under read-only.</step>
+    <step order="3" name="URL Regression Test">Add a test asserting that on `applyResolverFields()` successful selection, the update payload includes `sprk_regardingrecordurl` with a non-empty value. If the test infrastructure is in the shared lib (task SRFR-020's test file), add the test to RegardingResolver's own test file instead to keep the regression at the consumer surface.</step>
+    <step order="4" name="Version Bump — Location 1 (ControlManifest.Input.xml)">Edit the `version` attribute from "1.2.0" to "1.3.0" in `ControlManifest.Input.xml`. Preserve all other attributes verbatim.</step>
+    <step order="5" name="Version Bump — Location 2 (UI Footer)">Locate the UI footer component (typically in `RegardingResolverApp.tsx` or a small `Footer.tsx`). Update the version+build-date string to `v1.3.0 • Built {today}` using the ISO date of the bump.</step>
+    <step order="6" name="Version Bump — Location 3 (Solution Manifest)">Locate `Solution/src/Other/Solution.xml` (or equivalent under `src/client/pcf/RegardingResolver/Solution/`). If a per-control solution exists, update the `&lt;Version&gt;` element to `1.3.0`. If no per-control solution exists, note this in the inventory doc and skip.</step>
+    <step order="7" name="Version Bump — Location 4 (Solution Control Manifest)">Locate the Solution's Control Manifest (typically under `Solution/src/Controls/{ControlName}/ControlManifest.xml`). Update the `version` attribute to "1.3.0".</step>
+    <step order="8" name="Grep Verification">Grep for `1.2.0` under `src/client/pcf/RegardingResolver/`. Assert zero straggling references (except CHANGELOG/history if any). Also assert exactly ONE `version="1.3.0"` on the main ControlManifest.Input.xml.</step>
+    <step order="9" name="Build">Run `npm run build:prod` in `src/client/pcf/RegardingResolver/`. Confirm build passes. Confirm bundle-size delta is not indicative of accidental bundling regression (per ADR-022).</step>
+    <step order="9.5" name="Quality Gate">Invoke `/code-review` and `/adr-check` on the changed files. Address findings or escalate per CLAUDE.md §6.5.</step>
+    <step order="10" name="Update Task Status">Update TASK-INDEX.md 🔲 → ✅ for SRFR-033. Reset current-task.md for next task. Report Wave 3 complete.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Load spec, CLAUDE.md checklist, ADR-022, current source</tool>
+    <tool name="Edit">Bump 4 version locations, gate Row 1 on read-only</tool>
+    <tool name="Grep">Verify no straggling `1.2.0` references; confirm single `1.3.0` on main manifest</tool>
+    <tool name="Bash">Run `npm run build:prod`</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/RegardingResolver/RegardingResolver/ControlManifest.Input.xml</output>
+    <output type="code">src/client/pcf/RegardingResolver/RegardingResolver/RegardingResolverApp.tsx</output>
+    <output type="code" conditional="if-solution-exists">src/client/pcf/RegardingResolver/Solution/src/Other/Solution.xml</output>
+    <output type="code" conditional="if-solution-exists">src/client/pcf/RegardingResolver/Solution/src/Controls/RegardingResolver/ControlManifest.xml</output>
+    <output type="test">src/client/pcf/RegardingResolver/__tests__/RegardingResolverApp.test.tsx</output>
+    <output type="notes">projects/set-regarding-and-field-mapping-resolver-r1/notes/task-033-inventory.md</output>
+    <output type="docs">projects/set-regarding-and-field-mapping-resolver-r1/tasks/TASK-INDEX.md (🔲 → ✅ for SRFR-033)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`grep -c 'version="1.3.0"' src/client/pcf/RegardingResolver/RegardingResolver/ControlManifest.Input.xml` returns exactly 1.</criterion>
+    <criterion testable="true">`grep -R '1.2.0' src/client/pcf/RegardingResolver/` returns zero non-CHANGELOG hits.</criterion>
+    <criterion testable="true">UI footer component renders `v1.3.0 • Built {YYYY-MM-DD}` with the ISO date of the bump.</criterion>
+    <criterion testable="true">Read-only mode unit test: DOM has no toolbar-icon button element; Row 2 hyperlink is still present and clickable.</criterion>
+    <criterion testable="true">URL regression test: on selection, the resolver payload includes `sprk_regardingrecordurl` with a non-empty string value.</criterion>
+    <criterion testable="true">Solution manifest and Solution Control Manifest bumped to 1.3.0 (or documented "no per-control solution exists" in inventory doc if not applicable).</criterion>
+    <criterion testable="true">`npm run build:prod` succeeds with zero errors; bundle size delta remains consistent with virtual pattern (no framework bundled).</criterion>
+    <criterion testable="true">Platform-library declarations for React 16 and Fluent 9 preserved in ControlManifest.Input.xml (grep confirms).</criterion>
+    <criterion testable="true">`/code-review` and `/adr-check` pass at Step 9.5 (or all findings addressed / escalated per CLAUDE.md §6.5).</criterion>
+  </acceptance-criteria>
+</task>

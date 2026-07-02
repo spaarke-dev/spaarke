@@ -1,0 +1,154 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="SRFR-040" project="set-regarding-and-field-mapping-resolver-r1">
+  <metadata>
+    <title>Update sprk_todo_regarding_presave.js to v1.2.0 (add sprk_regardingrecordnumber)</title>
+    <status>not-started</status>
+    <estimated-effort>2h</estimated-effort>
+    <actual-effort></actual-effort>
+    <assigned>AI Agent</assigned>
+    <started></started>
+    <completed></completed>
+    <rigor>FULL</rigor>
+    <parallel-safe>true</parallel-safe>
+    <tags>webresource,javascript,presave,wave-4</tags>
+    <depends-on>SRFR-010</depends-on>
+    <wave>4</wave>
+  </metadata>
+
+  <prompt><![CDATA[
+Wave 0 investigation confirmed `sprk_todo_regarding_presave.js` uses an EXPLICIT
+enumerated `TEXT_FIELDS = [3 fields]` array plus a `textKeyForField()` switch statement,
+NOT generic iteration over the pending payload. To add `sprk_regardingrecordnumber` to
+the CREATE-mode staging path, we must perform a targeted 5-step update. This is FR-A5-04
+from spec.md.
+
+Add the fourth field ("sprk_regardingrecordnumber") to TEXT_FIELDS, add a corresponding
+case in textKeyForField() mapping to `"recordNumber"`, extend the docstring contract for
+the `window.__sprk_regarding_pending__` payload, and bump the module version v1.1.0 → v1.2.0.
+
+MUST preserve the "never block the save" invariant and the `formType === 3 || formType === 4`
+defensive skip (R4-052 lesson). MUST NOT change function signatures.
+  ]]></prompt>
+
+  <role>JavaScript webresource maintainer familiar with Dataverse form scripting, defensive coding patterns, and the CREATE-mode presave bridge established by smart-todo-r4 R4-112.</role>
+
+  <goal><![CDATA[
+`src/client/webresources/js/sprk_todo_regarding_presave.js` reaches v1.2.0 with
+`sprk_regardingrecordnumber` added to TEXT_FIELDS, a case for it in textKeyForField()
+mapping to `"recordNumber"`, docstring updated to include `recordNumber: string` in the
+pending-payload contract, and module VERSION bumped to "1.2.0". No other behavioral
+changes; the "never block save" invariant and formType 3/4 defensive skip are preserved.
+  ]]></goal>
+
+  <inputs>
+    <file purpose="target">src/client/webresources/js/sprk_todo_regarding_presave.js</file>
+    <file purpose="spec">projects/set-regarding-and-field-mapping-resolver-r1/spec.md</file>
+    <file purpose="plan">projects/set-regarding-and-field-mapping-resolver-r1/plan.md</file>
+    <file purpose="project-claude">projects/set-regarding-and-field-mapping-resolver-r1/CLAUDE.md</file>
+    <file purpose="pattern">.claude/patterns/dataverse/polymorphic-resolver.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-A5-04">Presave webresource uses EXPLICIT enumeration — MUST update TEXT_FIELDS, textKeyForField(), and the docstring, not "hope generic iteration picks it up"</constraint>
+    <constraint source="R4-052">MUST preserve `formType === 3 || formType === 4` defensive skip — bulk-edit and read-only form-types skip the presave path</constraint>
+    <constraint source="spec FR-A5-02 / NFR-04">MUST preserve the "never block the save" invariant — all errors caught + logged, silent-continue on failure</constraint>
+    <constraint source="spec">MUST NOT change function signatures — no breaking-change to existing consumers</constraint>
+    <constraint source="spec">MUST NOT introduce new external dependencies — plain JS webresource, no bundler, no ES modules</constraint>
+    <constraint source="spec">Version bump v1.1.0 → v1.2.0 required</constraint>
+    <constraint source="spec">The presave field-key mapping is `sprk_regardingrecordnumber` → `"recordNumber"` (matches the pending-payload key convention used by RegardingResolver PCF task 032)</constraint>
+    <constraint source="ADR-024">Aligns with the 5-field-write set formalized by ADR-024 amendment (task 071)</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>dataverse/webresources/presave-bridge</topic>
+    <files>
+      <file>.claude/patterns/dataverse/polymorphic-resolver.md</file>
+      <file>projects/set-regarding-and-field-mapping-resolver-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="CREATE-mode presave bridge" location=".claude/patterns/dataverse/polymorphic-resolver.md">
+        `window.__sprk_regarding_pending__` is a global staging seam populated by
+        RegardingResolver PCF during CREATE-mode (before the first save flushes the
+        record). `sprk_todo_regarding_presave.js` reads that object on OnSave and
+        applies the pending values via `attribute.setValue()` so the INSERT transaction
+        carries them.
+      </pattern>
+      <pattern name="Explicit field enumeration" location="Wave 0 investigation">
+        The presave webresource does NOT loop over `Object.keys(pending)`. It uses:
+        (1) `TEXT_FIELDS` array — the whitelist of fields we set,
+        (2) `textKeyForField()` switch — maps each host-column name to the pending-payload key.
+        Adding a new field requires touching BOTH.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Smart Todo R4-112 shipped RegardingResolver v1.2.0 with a CREATE-mode presave bridge
+      that stages regarding writes in `window.__sprk_regarding_pending__` prior to the first
+      save. This webresource is the receiver: it reads that global on OnSave and applies the
+      pending values via `getAttribute().setValue()` so they persist on the INSERT transaction.
+      Adding `sprk_regardingrecordnumber` to the 5-field-write set requires threading it
+      through this receiver, otherwise CREATE-mode records would save with a blank
+      regarding-record-number even though the PCF populated the pending payload.
+    </background>
+    <dependencies>
+      <dependency task="SRFR-010" status="pending">
+        The host `sprk_regardingrecordnumber` column must exist on the host entity
+        (sprk_todo already has it; sprk_communication and other future hosts covered by
+        Wave 1). Without the column, `setValue()` would fail silently.
+      </dependency>
+      <dependency task="SRFR-032" status="pending">
+        Wave 3 task 032 has RegardingResolver populate `pending.recordNumber` on the
+        global seam. This task extends the receiver; the sender comes from task 032.
+        Order between 032 and 040 does not matter (they can ship separately) — the
+        webresource is defensive and treats a missing key as "no-op for that field".
+      </dependency>
+    </dependencies>
+    <related-work>
+      <item>RegardingResolver v1.2.0 (smart-todo-r4 R4-112) established this bridge.</item>
+      <item>ADR-024 amendment (Wave 7 task 071) formalizes the 5-field-write set that this update participates in.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check">Verify context &lt; 60%. Confirm dependency SRFR-010 status.</step>
+    <step order="1" name="Read Target File">Read `src/client/webresources/js/sprk_todo_regarding_presave.js` entirely. Locate the four update sites: TEXT_FIELDS (~line 103), textKeyForField() (~line 258), pending-payload docstring (~lines 37-46), ns.VERSION (~line 97), and module-version-log (~line 76).</step>
+    <step order="2" name="Edit 1 — TEXT_FIELDS">Append `"sprk_regardingrecordnumber"` to the TEXT_FIELDS array literal so it reads: `var TEXT_FIELDS = ["sprk_regardingrecordid", "sprk_regardingrecordname", "sprk_regardingrecordurl", "sprk_regardingrecordnumber"];`</step>
+    <step order="3" name="Edit 2 — textKeyForField() case">Add a case to the switch: `case "sprk_regardingrecordnumber": return "recordNumber";` — placed alphabetically with existing cases or adjacent to the url case.</step>
+    <step order="4" name="Edit 3 — Docstring contract">Extend the `window.__sprk_regarding_pending__` docstring block (lines ~37-46) to include: `recordNumber: string  // optional; the target record's sprk_&lt;X&gt;number field value (SRFR task 020 writes this)`.</step>
+    <step order="5" name="Edit 4 — Version bump">Change `ns.VERSION = "1.1.0";` → `ns.VERSION = "1.2.0";` (line ~97).</step>
+    <step order="6" name="Edit 5 — Module-version-log">Update the module docstring "Version" section (line ~76) to add a v1.2.0 log entry above the existing v1.1.0 entry: `v1.2.0 — SRFR-040: sprk_regardingrecordnumber support (2026-07-XX)`.</step>
+    <step order="7" name="Preserve Invariants">Re-scan the file to confirm: (a) `formType === 3 || formType === 4` defensive skip is intact, (b) all try/catch blocks preserve silent-continue on error, (c) no function signatures changed, (d) no new external dependencies added.</step>
+    <step order="8" name="Syntax Validation">Use Grep to verify TEXT_FIELDS literal has exactly 4 entries and `ns.VERSION = "1.2.0"` appears exactly once. Load file in a browser Console (or `node --check` if applicable) to confirm no syntax errors.</step>
+    <step order="9" name="Regression Verification">Verify existing 3-field behavior preserved: `textKeyForField()` still returns `"recordId"`, `"recordName"`, `"recordUrl"` for the original three fields; only the new fourth case is added.</step>
+    <step order="9.5" name="Quality Gate (FULL rigor)">Invoke `/code-review` and `/adr-check` on the modified file. Expected: no critical findings; ADR-024 alignment reinforced (task participates in the 5-field write set).</step>
+    <step order="10" name="Update Task Status">Update TASK-INDEX.md 🔲 → ✅ for SRFR-040. Reset current-task.md for next task.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read the target webresource file</tool>
+    <tool name="Edit">Apply the 5 targeted edits (no Write — must be targeted edits only)</tool>
+    <tool name="Grep">Verify edit results (TEXT_FIELDS length, VERSION string, case presence)</tool>
+    <tool name="code-review">Step 9.5 quality gate per FULL rigor</tool>
+    <tool name="adr-check">Step 9.5 quality gate per FULL rigor</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/webresources/js/sprk_todo_regarding_presave.js (v1.2.0)</output>
+    <output type="docs">projects/set-regarding-and-field-mapping-resolver-r1/tasks/TASK-INDEX.md (🔲 → ✅ for SRFR-040)</output>
+    <output type="report">Task completion report noting version bump + acceptance-criteria verification</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`grep -c "sprk_regardingrecordnumber" src/client/webresources/js/sprk_todo_regarding_presave.js` returns at least 3 hits (TEXT_FIELDS, textKeyForField case, docstring).</criterion>
+    <criterion testable="true">`grep -c 'ns.VERSION = "1.2.0"' src/client/webresources/js/sprk_todo_regarding_presave.js` returns exactly 1.</criterion>
+    <criterion testable="true">`TEXT_FIELDS` array literal has exactly 4 entries: sprk_regardingrecordid, sprk_regardingrecordname, sprk_regardingrecordurl, sprk_regardingrecordnumber.</criterion>
+    <criterion testable="true">`textKeyForField()` switch has a `case "sprk_regardingrecordnumber":` returning the string `"recordNumber"`.</criterion>
+    <criterion testable="true">JavaScript syntax valid — file loads in a browser console without ParseError; if `node --check` is available, it exits 0.</criterion>
+    <criterion testable="true">Existing 3-field behavior preserved — the `textKeyForField()` mappings for the original three fields (`sprk_regardingrecordid` → `"recordId"`, `sprk_regardingrecordname` → `"recordName"`, `sprk_regardingrecordurl` → `"recordUrl"`) are unchanged.</criterion>
+    <criterion testable="true">Defensive `formType === 3 || formType === 4` skip is intact — grep for this predicate returns at least one hit.</criterion>
+    <criterion testable="true">No function signatures changed — external callers (RegardingResolver PCF's OnLoad wiring) still work without recompile.</criterion>
+    <criterion testable="true">Module docstring "Version" section lists v1.2.0 entry above v1.1.0.</criterion>
+  </acceptance-criteria>
+</task>

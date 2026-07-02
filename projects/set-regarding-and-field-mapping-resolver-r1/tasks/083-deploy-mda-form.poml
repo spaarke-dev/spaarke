@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="SRFR-083" project="set-regarding-and-field-mapping-resolver-r1">
+  <metadata>
+    <title>Deploy sprk_fieldmappingprofile MDA form + editable rules subgrid to spaarkedev1</title>
+    <status>not-started</status>
+    <estimated-effort>1h</estimated-effort>
+    <actual-effort></actual-effort>
+    <assigned>AI Agent</assigned>
+    <started></started>
+    <completed></completed>
+    <rigor>STANDARD</rigor>
+    <parallel-safe>false</parallel-safe>
+    <parallel-group></parallel-group>
+    <tags>deploy,mda-form,field-mapping,wave-8</tags>
+    <depends-on>SRFR-082</depends-on>
+    <wave>8</wave>
+  </metadata>
+
+  <prompt><![CDATA[
+Deploy the `sprk_fieldmappingprofile` MDA form + editable rules subgrid
+authored in Wave 6 (SRFR-060) to spaarkedev1. Standard solution round-trip:
+pack the solution containing the form (path recorded in SRFR-060's
+`notes/mda-form-notes.md`), import via `pac solution import`, run
+`pac solution publish-all`. Then smoke-test: navigate to the entity in
+spaarkedev1, confirm the form renders as the default, confirm the subgrid
+displays existing rules (if any) and supports add + edit.
+
+This task depends on SRFR-082 completing so the ribbon customization + push
+webresource are already in place before the profile form goes live — that
+lets the UAT (SRFR-084) run end-to-end without ordering surprises.
+  ]]></prompt>
+
+  <role>Dataverse deployment engineer familiar with `/dataverse-deploy`, PAC CLI solution round-trip, and MDA form deploy verification.</role>
+
+  <goal><![CDATA[
+The `sprk_fieldmappingprofile` main form authored in SRFR-060 is deployed to
+spaarkedev1 and set as the default. Navigating to the entity renders the form
+with the editable subgrid of `sprk_fieldmappingrules`. Add-rule and edit-rule
+flows work interactively. Deploy is logged in `notes/wave-8-deploy-log.md`.
+  ]]></goal>
+
+  <inputs>
+    <file purpose="spec">projects/set-regarding-and-field-mapping-resolver-r1/spec.md</file>
+    <file purpose="plan">projects/set-regarding-and-field-mapping-resolver-r1/plan.md</file>
+    <file purpose="skill">.claude/skills/dataverse-deploy/SKILL.md</file>
+    <file purpose="prior-task-notes">projects/set-regarding-and-field-mapping-resolver-r1/notes/mda-form-notes.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="repo pattern">Deploy via `pac solution pack` + `pac solution import --force-overwrite --publish-changes`. Do NOT hand-edit the solution zip.</constraint>
+    <constraint source="spec FR-B2-01">Subgrid MUST be editable (verified in SRFR-060). This task is deploy-only — do NOT re-edit FormXml.</constraint>
+    <constraint source="project">Depends on SRFR-082 (webresources + ribbon) so the ribbon-side of the field-mapping story is already live when the form comes online.</constraint>
+    <constraint source="project">Do not deploy if SRFR-060 is incomplete or `notes/mda-form-notes.md` does not record a valid solution zip path.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>dataverse/deployment</topic>
+    <files>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="Solution round-trip deploy" location=".claude/skills/dataverse-deploy/SKILL.md">
+        Pack from unpacked path → import with force-overwrite + publish-changes →
+        publish-all → verify.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      SRFR-060 authored the form + editable subgrid and recorded the solution
+      zip path in `notes/mda-form-notes.md`. This task carries the artifact
+      into spaarkedev1 UAT so the profile-authoring UX is ready for SRFR-084
+      end-to-end testing.
+    </background>
+    <dependencies>
+      <dependency task="SRFR-060" status="pending">Form authored + solution artifact recorded.</dependency>
+      <dependency task="SRFR-082" status="pending">Webresources + ribbon deployed; must precede this task per Wave-8 sequencing.</dependency>
+    </dependencies>
+    <related-work>
+      <item>SRFR-084 UAT scenario 1 creates a Matter→Event profile using this form.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check">Verify context &lt; 60%. Read `.claude/skills/dataverse-deploy/SKILL.md` + `notes/mda-form-notes.md`.</step>
+    <step order="1" name="Precondition Check">Verify SRFR-060 ✅ and SRFR-082 ✅. Confirm solution zip path exists (from mda-form-notes.md). `pac org who` targets spaarkedev1.</step>
+    <step order="2" name="Pack">If the notes recorded an unpacked path only, `pac solution pack` into a fresh zip. If the notes recorded a packed zip, skip.</step>
+    <step order="3" name="Import">`pac solution import --path &lt;solution.zip&gt; --force-overwrite --publish-changes`. Capture the import log.</step>
+    <step order="4" name="Publish All">`pac solution publish-all`.</step>
+    <step order="5" name="Smoke Test — Form Renders">In spaarkedev1, open the Spaarke app, navigate to `sprk_fieldmappingprofile`. Create a new record or open an existing one. Confirm the form loads with the five identity fields visible.</step>
+    <step order="6" name="Smoke Test — Editable Subgrid">In the subgrid on the form, click "+ New" (or the add row control). Confirm a new rule row can be added inline. Edit an existing rule field. Save. Confirm persistence via Web API.</step>
+    <step order="7" name="Log Deployment">Append to `notes/wave-8-deploy-log.md`: artifact (form solution), import log summary, smoke-test outcome, timestamp.</step>
+    <step order="8" name="Update Task Status">Update TASK-INDEX.md 🔲 → ✅ for SRFR-083. Reset current-task.md for SRFR-084.</step>
+  </steps>
+
+  <tools>
+    <tool name="Bash">Run pac CLI commands + Web API queries</tool>
+    <tool name="Read">Read skill docs + mda-form-notes.md</tool>
+    <tool name="Write">Append to notes/wave-8-deploy-log.md</tool>
+  </tools>
+
+  <outputs>
+    <output type="deploy">sprk_fieldmappingprofile MDA form deployed to spaarkedev1</output>
+    <output type="notes" ephemeral="true">projects/set-regarding-and-field-mapping-resolver-r1/notes/wave-8-deploy-log.md</output>
+    <output type="docs">projects/set-regarding-and-field-mapping-resolver-r1/tasks/TASK-INDEX.md (🔲 → ✅ for SRFR-083)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Navigating to `sprk_fieldmappingprofile` in spaarkedev1 renders the SRFR-060 form.</criterion>
+    <criterion testable="true">Subgrid of `sprk_fieldmappingrules` is present, displays existing rules (if any), supports inline add + edit.</criterion>
+    <criterion testable="true">A rule added via the subgrid persists to Dataverse (Web API verified).</criterion>
+    <criterion testable="true">Import log confirms zero errors.</criterion>
+    <criterion testable="true">`notes/wave-8-deploy-log.md` records this deploy.</criterion>
+  </acceptance-criteria>
+</task>

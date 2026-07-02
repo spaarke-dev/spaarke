@@ -1,0 +1,160 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="SRFR-053" project="set-regarding-and-field-mapping-resolver-r1">
+  <metadata>
+    <title>AssociationResolver imports relocated FieldMappingHandler from shared lib; version bump v1.1.0 → v1.2.0</title>
+    <status>not-started</status>
+    <estimated-effort>2h</estimated-effort>
+    <actual-effort></actual-effort>
+    <assigned>AI Agent</assigned>
+    <started></started>
+    <completed></completed>
+    <rigor>FULL</rigor>
+    <parallel-safe>false</parallel-safe>
+    <parallel-group>C</parallel-group>
+    <tags>pcf,association-resolver,version-bump,wave-5</tags>
+    <depends-on>SRFR-050,SRFR-051,SRFR-052,SRFR-022</depends-on>
+    <wave>5</wave>
+  </metadata>
+
+  <prompt><![CDATA[
+All Wave 2 shared-lib migrations complete; AssociationResolver now delegates
+denormalized writes (SRFR-051), consumes the shared picker (SRFR-052), and uses
+the relocated `FieldMappingHandler` (SRFR-022). This task finalizes the
+consumer-side migration: update all `FieldMappingHandler` imports to
+`@spaarke/ui-components`, verify the local file has been fully deleted, and
+bump the AssociationResolver PCF version v1.1.0 → v1.2.0 across the 4 canonical
+locations per `src/client/pcf/CLAUDE.md`'s version-update checklist.
+
+This is FR-C1b-01 (consumer) + FR-B7 from spec.md. FR-B5-01 (regarding-record-
+number write) is verified free — SRFR-051's delegation to `applyResolverFields`
+handles the 5th field with no explicit write in AssociationResolver. Tests
+assert the footer version string equals "1.2.0" and the selection flow writes
+all 5 denormalized fields (integration test).
+  ]]></prompt>
+
+  <role>Senior TypeScript / PCF developer familiar with the AssociationResolver PCF, the shared component library import discipline, and the 4-location PCF version-update pattern documented in `src/client/pcf/CLAUDE.md`.</role>
+
+  <goal><![CDATA[
+Every `FieldMappingHandler` import in AssociationResolver resolves to
+`@spaarke/ui-components`. The local
+`src/client/pcf/AssociationResolver/handlers/FieldMappingHandler.ts` file is
+absent (deleted or moved by SRFR-022). AssociationResolver PCF version is
+"1.2.0" at all 4 canonical locations: `ControlManifest.Input.xml`, UI footer
+string, per-control solution manifest, Solution Control Manifest. UI footer
+displays `v1.2.0 • Built YYYY-MM-DD`. Integration test confirms the selection
+flow writes all 5 denormalized fields (via delegation). Build passes.
+  ]]></goal>
+
+  <inputs>
+    <file purpose="spec">projects/set-regarding-and-field-mapping-resolver-r1/spec.md</file>
+    <file purpose="plan">projects/set-regarding-and-field-mapping-resolver-r1/plan.md</file>
+    <file purpose="project-claude">projects/set-regarding-and-field-mapping-resolver-r1/CLAUDE.md</file>
+    <file purpose="module-claude">src/client/pcf/CLAUDE.md</file>
+    <file purpose="source">src/client/pcf/AssociationResolver/ControlManifest.Input.xml</file>
+    <file purpose="source">src/client/pcf/AssociationResolver/AssociationResolverApp.tsx</file>
+    <file purpose="source">src/client/pcf/AssociationResolver/handlers/RecordSelectionHandler.ts</file>
+    <file purpose="adr">.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+    <file purpose="adr">.claude/adr/ADR-012-shared-component-library.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-022">Virtual PCF pattern preserved; Fluent v9 remains a platform-library. No return to legacy shadow-DOM pattern.</constraint>
+    <constraint source="ADR-012">Shared services consumed via `@spaarke/ui-components` public exports only; no leftover local `FieldMappingHandler` file.</constraint>
+    <constraint source="spec FR-B7">AssociationResolver version bumps v1.1.0 → v1.2.0. Bump MUST be applied at all 4 canonical locations per `src/client/pcf/CLAUDE.md` Version Update Checklist.</constraint>
+    <constraint source="spec FR-B5-01">The 5th-field write (`sprk_regardingrecordnumber`) is achieved via SRFR-051's delegation to `applyResolverFields`. No explicit write of the field in AssociationResolver code.</constraint>
+    <constraint source="spec FR-C1b-01">Zero local FieldMappingHandler file remains in AssociationResolver; all imports resolve to `@spaarke/ui-components`.</constraint>
+    <constraint source="project">TypeScript strict mode. No `any`. Prefer explicit types.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>pcf/version-update-discipline</topic>
+    <files>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/adr/ADR-012-shared-component-library.md</file>
+      <file>.claude/skills/pcf-deploy/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="4-location PCF version bump" location="src/client/pcf/CLAUDE.md">
+        (1) ControlManifest.Input.xml version="X.Y.Z"; (2) UI footer string
+        `vX.Y.Z • Built YYYY-MM-DD`; (3) per-control solution manifest
+        `&lt;Version&gt;X.Y.Z&lt;/Version&gt;` (if the control ships in its own solution);
+        (4) Solution Control Manifest `version="X.Y.Z"`. All four MUST match.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      This is the wrap-up task for Wave 5. It confirms all three preceding
+      Wave 5 tasks (SRFR-050, SRFR-051, SRFR-052) have landed cleanly, verifies
+      the shared-lib migration is complete, and stamps the PCF at v1.2.0 so
+      the Wave 8 deploy has a versioned artifact to publish. Because
+      AssociationResolver's write path now delegates entirely to
+      `applyResolverFields`, FR-B5-01 (5th-field write) is satisfied without
+      any explicit write of `sprk_regardingrecordnumber` in AssociationResolver
+      code.
+    </background>
+    <dependencies>
+      <dependency task="SRFR-050" status="pending">
+        `ENTITY_LOOKUP_CONFIGS` const retired; dynamic-first resolution live.
+      </dependency>
+      <dependency task="SRFR-051" status="pending">
+        `RecordSelectionHandler` is a thin adapter over the shared service.
+      </dependency>
+      <dependency task="SRFR-052" status="pending">
+        `PolymorphicPicker` consumed from `@spaarke/ui-components`.
+      </dependency>
+      <dependency task="SRFR-022" status="pending">
+        `FieldMappingHandler` relocated to `@spaarke/ui-components/src/services/`.
+        Local copy in AssociationResolver deleted by that task; this task
+        verifies + updates any residual imports.
+      </dependency>
+    </dependencies>
+    <related-work>
+      <item>Task SRFR-081 (Wave 8) packs + deploys the resulting v1.2.0 artifact to UAT.</item>
+      <item>Task SRFR-071 (Wave 7) amends ADR-024 for the 4→5 field-count documentation change.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check">Verify context &lt; 60%. Read spec.md FR-B5-01, FR-B7, FR-C1b-01. Read `src/client/pcf/CLAUDE.md` Version Update Checklist.</step>
+    <step order="1" name="Verify Local FieldMappingHandler Deleted">Run `ls src/client/pcf/AssociationResolver/handlers/FieldMappingHandler.ts` — MUST return not-found. If present, either SRFR-022 is incomplete (escalate) or it needs deletion here.</step>
+    <step order="2" name="Update Imports">Run `grep -RE "['\"]\\./handlers/FieldMappingHandler['\"]|['\"]\\.\\./handlers/FieldMappingHandler['\"]" src/client/pcf/AssociationResolver` to find any stragglers. Rewrite each to `import { FieldMappingHandler } from '@spaarke/ui-components'`.</step>
+    <step order="3" name="Bump ControlManifest">Edit `src/client/pcf/AssociationResolver/ControlManifest.Input.xml`: set `version="1.2.0"` on the `&lt;control&gt;` element.</step>
+    <step order="4" name="Bump UI Footer">Locate the footer version string in the AssociationResolver React root (typically `AssociationResolverApp.tsx` or a dedicated footer component). Update to `v1.2.0 • Built YYYY-MM-DD` using today's date.</step>
+    <step order="5" name="Bump Solution Manifests">Locate the per-control solution manifest (if the control ships in its own solution) and the Solution Control Manifest. Update both to `1.2.0`. Confirm all 4 locations match.</step>
+    <step order="6" name="Update Tests">Update the version-footer unit test (or snapshot) to assert `"1.2.0"`. Add or update a smoke test that confirms the selection flow writes all 5 denormalized fields via the shared service (mocked `applyResolverFields` call assertion is sufficient).</step>
+    <step order="7" name="Build">Run `npm run build:prod` in `src/client/pcf/AssociationResolver/` per the mandatory PCF prod-build convention (see root CLAUDE.md §12 and FAILURE-MODES.md AP-1). Fix any errors.</step>
+    <step order="8" name="Grep Verification">Run `grep -c 'version="1.2.0"' src/client/pcf/AssociationResolver/ControlManifest.Input.xml` — MUST return 1. Run `grep -R "'\\.\\./handlers/FieldMappingHandler\\|\\./handlers/FieldMappingHandler" src/client/pcf/AssociationResolver` — MUST return zero.</step>
+    <step order="9" name="Step 9.5 Quality Gate">Invoke `/code-review` and `/adr-check` on the changed files. Address findings.</step>
+    <step order="10" name="Update Task Status">Update TASK-INDEX.md 🔲 → ✅ for SRFR-053. Reset current-task.md for next task. Mark Wave 5 complete in TASK-INDEX.md summary if applicable.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Load source, spec, ADRs, module CLAUDE.md</tool>
+    <tool name="Edit">Modify ControlManifest.Input.xml, footer, solution manifests, imports</tool>
+    <tool name="Grep">Verify version consistency and import cleanliness</tool>
+    <tool name="Bash">Run `npm run build:prod` in AssociationResolver package</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/AssociationResolver/ControlManifest.Input.xml</output>
+    <output type="code">src/client/pcf/AssociationResolver/AssociationResolverApp.tsx (footer)</output>
+    <output type="code" conditional="if-per-control-solution">src/client/pcf/AssociationResolver/Solution/Other/Solution.xml (or equivalent per-control solution manifest)</output>
+    <output type="code" conditional="if-solution-control-manifest">Solution Control Manifest referencing AssociationResolver</output>
+    <output type="test">src/client/pcf/AssociationResolver/**/__tests__/*version*.test.ts (updated)</output>
+    <output type="docs">projects/set-regarding-and-field-mapping-resolver-r1/tasks/TASK-INDEX.md (🔲 → ✅ for SRFR-053; Wave 5 marked complete)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`grep -c 'version="1.2.0"' src/client/pcf/AssociationResolver/ControlManifest.Input.xml` returns 1.</criterion>
+    <criterion testable="true">UI footer displays `v1.2.0 • Built YYYY-MM-DD` (today's date at build time).</criterion>
+    <criterion testable="true">Per-control solution manifest and Solution Control Manifest (if applicable) both show `1.2.0`.</criterion>
+    <criterion testable="true">`grep -RE "['\"]\\./handlers/FieldMappingHandler['\"]|['\"]\\.\\./handlers/FieldMappingHandler['\"]" src/client/pcf/AssociationResolver` returns zero hits (all imports resolve to `@spaarke/ui-components`).</criterion>
+    <criterion testable="true">`src/client/pcf/AssociationResolver/handlers/FieldMappingHandler.ts` is absent (deleted by SRFR-022 or this task).</criterion>
+    <criterion testable="true">Version-footer test asserts `"1.2.0"`; smoke/integration test confirms the selection flow writes all 5 denormalized fields via the shared `applyResolverFields` delegation (FR-B5-01 verification).</criterion>
+    <criterion testable="true">`npm run build:prod` in `src/client/pcf/AssociationResolver/` succeeds with zero errors.</criterion>
+    <criterion testable="true">`/code-review` and `/adr-check` pass at Step 9.5 (or all findings addressed / escalated per CLAUDE.md §6.5).</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="SRFR-082" project="set-regarding-and-field-mapping-resolver-r1">
+  <metadata>
+    <title>Deploy presave v1.2.0 + push v1.0.0 webresources + Matter ribbon customization to spaarkedev1</title>
+    <status>not-started</status>
+    <estimated-effort>2h</estimated-effort>
+    <actual-effort></actual-effort>
+    <assigned>AI Agent</assigned>
+    <started></started>
+    <completed></completed>
+    <rigor>STANDARD</rigor>
+    <parallel-safe>true</parallel-safe>
+    <parallel-group>F</parallel-group>
+    <tags>deploy,webresource,ribbon,wave-8</tags>
+    <depends-on>SRFR-040,SRFR-061,SRFR-062</depends-on>
+    <wave>8</wave>
+  </metadata>
+
+  <prompt><![CDATA[
+Deploy the two webresources (updated `sprk_todo_regarding_presave.js` v1.2.0
+from Wave 4 and NEW `sprk_fieldmapping_push.js` v1.0.0 from Wave 6) plus the
+Matter ribbon customization from Wave 6 (SRFR-062) to spaarkedev1. Use the
+`/dataverse-deploy` skill for webresources and the `/ribbon-edit` skill for
+the ribbon (per Owner Clarification Q-04). Do NOT hand-edit solution zips.
+After import, `pac solution publish-all` to publish dependencies.
+
+Verify: on a Matter form with an active Matter→Event `sprk_fieldmappingprofile`,
+the "Push Updates to Related Records" ribbon button appears; on a Contact form
+with no active source profile, the button is hidden. Regression: `sprk_todo`
+CREATE-mode form still stages all 5 regarding fields on save.
+  ]]></prompt>
+
+  <role>Dataverse solution author familiar with the `/dataverse-deploy` skill, `/ribbon-edit` skill, PAC CLI solution round-trip, `pac solution publish-all`, and web-resource + ribbon-customization deploy patterns.</role>
+
+  <goal><![CDATA[
+All three artifacts are deployed to spaarkedev1:
+1. `sprk_todo_regarding_presave.js` v1.2.0 replaces v1.1.0 in-place.
+2. `sprk_fieldmapping_push.js` v1.0.0 is created new.
+3. Matter ribbon customization from `infrastructure/dataverse/ribbon/MatterRibbons/`
+   (SRFR-062 output) is applied — the Push button appears on Matter forms with
+   an active source profile, hidden on forms without one.
+Regression check: `sprk_todo` CREATE-mode form still stages all 5 regarding
+fields on save. Deploy is logged in `notes/wave-8-deploy-log.md`.
+  ]]></goal>
+
+  <inputs>
+    <file purpose="spec">projects/set-regarding-and-field-mapping-resolver-r1/spec.md</file>
+    <file purpose="plan">projects/set-regarding-and-field-mapping-resolver-r1/plan.md</file>
+    <file purpose="skill">.claude/skills/dataverse-deploy/SKILL.md</file>
+    <file purpose="skill">.claude/skills/ribbon-edit/SKILL.md</file>
+    <file purpose="canonical-ribbon">infrastructure/dataverse/ribbon/CommunicationRibbons/Entities/sprk_communication/RibbonDiff.xml</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="Owner Clarification Q-04">Ribbon deploys via `/ribbon-edit` skill (export → edit → import round-trip). Do NOT manually edit RibbonDiff.xml in a solution zip.</constraint>
+    <constraint source="spec FR-B3-01">Ribbon must appear on Matter forms with an active Matter→X profile; hidden on Contact forms with no active source profile.</constraint>
+    <constraint source="spec FR-A5-04">Presave webresource v1.2.0 must maintain the CREATE-mode contract — TEXT_FIELDS.length === 4 (updated set) and textKeyForField maps recordNumber → sprk_regardingrecordnumber.</constraint>
+    <constraint source="project">Coordinate three artifacts into a single solution import where the repo convention allows; otherwise sequence the deploys in the order presave → push → ribbon and publish-all at the end.</constraint>
+    <constraint source="project">Do not deploy if SRFR-040, SRFR-061, or SRFR-062 are incomplete.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>dataverse/deployment</topic>
+    <files>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>.claude/skills/ribbon-edit/SKILL.md</file>
+      <file>infrastructure/dataverse/ribbon/CommunicationRibbons/Entities/sprk_communication/RibbonDiff.xml</file>
+    </files>
+    <patterns>
+      <pattern name="Solution round-trip deploy" location=".claude/skills/dataverse-deploy/SKILL.md">
+        `pac solution export/unpack/pack/import` — never hand-edit zip contents.
+      </pattern>
+      <pattern name="Ribbon round-trip" location=".claude/skills/ribbon-edit/SKILL.md">
+        Export ribbon-containing solution → unpack → edit RibbonDiff.xml →
+        repack → import. `publish-all` at the end.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Wave 4 updated the presave webresource to v1.2.0 (adding
+      sprk_regardingrecordnumber to TEXT_FIELDS). Wave 6 authored the new
+      `sprk_fieldmapping_push.js` webresource v1.0.0 and the Matter ribbon
+      customization pointing at that webresource. This task deploys all three
+      together so the ribbon-button end-to-end path works in spaarkedev1
+      before UAT (SRFR-084).
+    </background>
+    <dependencies>
+      <dependency task="SRFR-040" status="pending">Presave webresource v1.2.0 authored + tested.</dependency>
+      <dependency task="SRFR-061" status="pending">Push webresource v1.0.0 authored + tested.</dependency>
+      <dependency task="SRFR-062" status="pending">Matter ribbon RibbonDiff.xml authored + exports cleanly.</dependency>
+    </dependencies>
+    <related-work>
+      <item>SRFR-083 deploys the MDA form (depends on this task completing).</item>
+      <item>SRFR-084 UAT scenario 1 exercises the ribbon-button end-to-end.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check">Verify context &lt; 60%. Read `.claude/skills/dataverse-deploy/SKILL.md` + `.claude/skills/ribbon-edit/SKILL.md`.</step>
+    <step order="1" name="Precondition Check">Verify SRFR-040 / 061 / 062 all ✅ in TASK-INDEX.md. `pac org who` targets spaarkedev1.</step>
+    <step order="2" name="Deploy Presave v1.2.0">Via `/dataverse-deploy`: upload replacement `sprk_todo_regarding_presave.js` v1.2.0. Verify Web API `webresourceset?$filter=name eq 'sprk_todo_regarding_presave.js'` returns v1.2.0 content marker.</step>
+    <step order="3" name="Deploy Push Webresource v1.0.0">Via `/dataverse-deploy`: upload new `sprk_fieldmapping_push.js` v1.0.0. Verify Web API returns the new webresource with expected function names (`Sprk.FieldMapping.Push.hasSourceProfile`, `Sprk.FieldMapping.Push.pushUpdates`).</step>
+    <step order="4" name="Deploy Ribbon">Via `/ribbon-edit`: export the Matter ribbon solution → unpack → confirm the RibbonDiff.xml matches SRFR-062 output → repack → import to spaarkedev1. Capture import log.</step>
+    <step order="5" name="Publish All">`pac solution publish-all` to publish dependencies + ensure the ribbon customization is active.</step>
+    <step order="6" name="Verify Ribbon Visibility">Open a Matter form with an active Matter→Event `sprk_fieldmappingprofile` — confirm "Push Updates to Related Records" button appears. Open a Contact form with no active source profile — confirm the button is hidden.</step>
+    <step order="7" name="Regression — Presave">Create a new `sprk_todo` on a CREATE-mode form; set regarding via RegardingResolver; save. Query Web API on the freshly-created record and confirm all 5 fields persist (sprk_regardingrecordid, sprk_regardingrecordname, sprk_regardingrecordurl, sprk_regardingrecordnumber, sprk_regardingmatter/type lookup).</step>
+    <step order="8" name="Log Deployment">Append to `notes/wave-8-deploy-log.md`: three artifacts, versions, import log summaries, verification results, timestamp.</step>
+    <step order="9" name="Update Task Status">Update TASK-INDEX.md 🔲 → ✅ for SRFR-082. Reset current-task.md for SRFR-083.</step>
+  </steps>
+
+  <tools>
+    <tool name="Bash">Run pac CLI commands + Web API queries</tool>
+    <tool name="Read">Read skill docs + ribbon XML</tool>
+    <tool name="Write">Append to notes/wave-8-deploy-log.md</tool>
+  </tools>
+
+  <outputs>
+    <output type="deploy">Presave v1.2.0 + Push v1.0.0 + Matter ribbon customization deployed to spaarkedev1</output>
+    <output type="notes" ephemeral="true">projects/set-regarding-and-field-mapping-resolver-r1/notes/wave-8-deploy-log.md</output>
+    <output type="docs">projects/set-regarding-and-field-mapping-resolver-r1/tasks/TASK-INDEX.md (🔲 → ✅ for SRFR-082)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Web API `webresourceset` query confirms `sprk_todo_regarding_presave.js` v1.2.0 in spaarkedev1.</criterion>
+    <criterion testable="true">Web API confirms `sprk_fieldmapping_push.js` v1.0.0 exists in spaarkedev1.</criterion>
+    <criterion testable="true">Matter form with active source profile shows the ribbon button; Contact form (no active profile) hides it.</criterion>
+    <criterion testable="true">Regression: fresh `sprk_todo` CREATE-mode record persists all 5 regarding fields (Web API verified).</criterion>
+    <criterion testable="true">`notes/wave-8-deploy-log.md` records all three artifacts with import-log summaries.</criterion>
+  </acceptance-criteria>
+</task>

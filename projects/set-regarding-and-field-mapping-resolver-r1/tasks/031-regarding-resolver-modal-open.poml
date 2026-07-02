@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="SRFR-031" project="set-regarding-and-field-mapping-resolver-r1">
+  <metadata>
+    <title>RegardingResolver — modal-open on record-number hyperlink click via Xrm.Navigation.navigateTo</title>
+    <status>not-started</status>
+    <estimated-effort>2h</estimated-effort>
+    <actual-effort></actual-effort>
+    <assigned>AI Agent</assigned>
+    <started></started>
+    <completed></completed>
+    <rigor>FULL</rigor>
+    <parallel-safe>true</parallel-safe>
+    <parallel-group>B</parallel-group>
+    <tags>pcf,regarding-resolver,modal,xrm-navigation,wave-3</tags>
+    <depends-on>SRFR-020</depends-on>
+    <wave>3</wave>
+  </metadata>
+
+  <prompt><![CDATA[
+In the 2-row layout landed by SRFR-030, Row 2's `sprk_regardingrecordnumber`
+cell renders as a hyperlink. Clicking it opens the related record in a
+Dataverse modal via `Xrm.Navigation.navigateTo({ pageType: 'entityrecord',
+entityName, entityId }, { target: 2, width: { value: 80, unit: '%' },
+height: { value: 80, unit: '%' } })`. `target: 2` = modal (spec.md FR-A2-01
+confirmed via `docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md#L513`), not new
+tab / not main content.
+
+Wire the click handler on the Fluent v9 `<Link>` cell. Handler reads the
+current control state's regarding entity name and record ID; calls
+`Xrm.Navigation.navigateTo(...)` with the exact params above. If Xrm is
+not available (test harness) or the record doesn't exist, log warn and
+emit a short toast rather than crashing.
+  ]]></prompt>
+
+  <role>PCF developer with expertise in Xrm client API navigation surfaces (`Xrm.Navigation.navigateTo`, page-input target modes) and Fluent v9 &lt;Link&gt; component styling.</role>
+
+  <goal><![CDATA[
+The record-number hyperlink in RegardingResolver v1.3.0 Row 2 opens the
+related record in a Dataverse MODAL (`target: 2`) sized at 80% × 80% width
+and height. Entity name and record ID are read from live control state,
+never hardcoded. Xrm-unavailable path warns and toasts (no crash). Unit
+test simulates click with valid entity/id and asserts navigateTo was called
+with the exact expected page-input + navigation-options.
+  ]]></goal>
+
+  <inputs>
+    <file purpose="spec">projects/set-regarding-and-field-mapping-resolver-r1/spec.md</file>
+    <file purpose="plan">projects/set-regarding-and-field-mapping-resolver-r1/plan.md</file>
+    <file purpose="project-claude">projects/set-regarding-and-field-mapping-resolver-r1/CLAUDE.md</file>
+    <file purpose="source">src/client/pcf/RegardingResolver/RegardingResolver/RegardingResolverApp.tsx</file>
+    <file purpose="pattern">.claude/patterns/ui/record-modal-selection.md</file>
+    <file purpose="reference-doc">docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md</file>
+    <file purpose="standard">docs/standards/MODAL-DECISION-CRITERIA.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-A2-01">MUST use `target: 2` in navigateTo options — modal, NOT `target: 1` (main content) and NOT new tab. Value is a literal integer.</constraint>
+    <constraint source="spec FR-A2-01">Dimensions MUST be `width: { value: 80, unit: '%' }` and `height: { value: 80, unit: '%' }` — verbatim.</constraint>
+    <constraint source="ADR-021 (implicit)">Use Fluent v9 &lt;Link&gt; from `@fluentui/react-components` for hyperlink styling. Semantic tokens for color; dark-mode-safe.</constraint>
+    <constraint source="project">Entity name and record ID MUST come from live control state (context.parameters or a state hook that reflects current regarding). MUST NOT be hardcoded literals.</constraint>
+    <constraint source="spec NFR-04">Xrm-unavailable case (test harness, missing SDK, or record deleted) MUST log `console.warn` and emit a short toast. MUST NOT throw an uncaught exception that breaks the host form.</constraint>
+    <constraint source="MODAL-DECISION-CRITERIA">This is the OOB `navigateTo` path — do NOT introduce a proprietary Fluent v9 Dialog or RecordNavigationModalShell for this single-record open.</constraint>
+    <constraint source="project">TypeScript strict mode; no `any`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ui/record-modal-selection</topic>
+    <files>
+      <file>.claude/patterns/ui/record-modal-selection.md</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
+      <file>docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md</file>
+    </files>
+    <patterns>
+      <pattern name="Xrm.Navigation.navigateTo modal open" location=".claude/patterns/ui/record-modal-selection.md">
+        `Xrm.Navigation.navigateTo({ pageType: 'entityrecord', entityName, entityId }, { target: 2, width: { value: N, unit: '%' }, height: { value: N, unit: '%' } })` — target 2 is the modal mode; target 1 replaces main content; omitted target opens inline.
+      </pattern>
+      <pattern name="Guarded Xrm access in PCF" location=".claude/patterns/pcf/fluent-v9-modern-theming.md">
+        Check `typeof Xrm !== 'undefined'` before calling. In test harness, Xrm is undefined — fall through to warn + no-op or toast fallback.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      The Row-2 record-number cell is the primary navigation affordance in the streamlined layout. Clicking it should feel like clicking a hyperlink in any Model-Driven App — with the record opening inline as a modal, letting the user close and return to the parent record's context without navigation churn. `target: 2` is the Xrm modal mode; other targets do not match the design intent.
+    </background>
+    <dependencies>
+      <dependency task="SRFR-030" status="pending">2-row layout landed; the Row-2 &lt;Link&gt; cell exists with click handler stubbed for this task.</dependency>
+      <dependency task="SRFR-020" status="pending">Resolver writes `sprk_regardingrecordid` + `sprk_regardingrecordtype`; state hook reads these for the click handler.</dependency>
+    </dependencies>
+    <related-work>
+      <item>SRFR-033 handles read-only mode where the Row-1 icon is hidden but Row-2 hyperlink remains active.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check">Verify context &lt; 60%. Read spec.md FR-A2-01, `record-modal-selection.md` pattern, `MODAL-DECISION-CRITERIA.md`, and BUILD-A-NEW-WORKSPACE-WIDGET.md around line 513 for the reference navigateTo call.</step>
+    <step order="1" name="Inventory Row-2 Cell">Locate the &lt;Link&gt; element added by SRFR-030 for the record-number hyperlink. Confirm state hook / prop shape carrying entity name and record ID.</step>
+    <step order="2" name="Author Click Handler">Add `openRegardingRecord(entityName: string, entityId: string): void` callback. Guard `typeof Xrm !== 'undefined' &amp;&amp; Xrm.Navigation?.navigateTo`. Invoke with exact page-input + navigation-options shape from FR-A2-01. Await promise, catch rejection, log warn + toast on failure.</step>
+    <step order="3" name="Wire onClick">Wire the &lt;Link&gt;'s `onClick` prop to the handler, passing current-state entity name and record ID. Prevent default browser navigation.</step>
+    <step order="4" name="Handle Empty State">If `entityName` or `entityId` is missing/empty, no-op (nothing to open). If Xrm is missing, `console.warn('[RegardingResolver] Xrm unavailable; cannot open modal')` + optional Fluent v9 toast. If navigateTo rejects, same treatment plus the rejection error.</step>
+    <step order="5" name="Unit Tests">Add tests covering: (a) click with valid entity/id → assert `Xrm.Navigation.navigateTo` called with exact page-input `{ pageType: 'entityrecord', entityName, entityId }` and options `{ target: 2, width: { value: 80, unit: '%' }, height: { value: 80, unit: '%' } }`; (b) click with Xrm undefined → warn logged, no throw; (c) navigateTo rejects → warn logged, no throw; (d) click with empty entity/id → navigateTo NOT called.</step>
+    <step order="6" name="Build">Run `npm run build:prod` in `src/client/pcf/RegardingResolver/`. Verify build.</step>
+    <step order="6.5" name="Grep Verification">Grep for `target: 2` in the changed file; assert single occurrence. Grep for `width: { value: 80, unit: '%' }` and `height: { value: 80, unit: '%' }`; assert both present.</step>
+    <step order="9.5" name="Quality Gate">Invoke `/code-review` and `/adr-check` on the changed files. Address findings or escalate per CLAUDE.md §6.5.</step>
+    <step order="10" name="Update Task Status">Update TASK-INDEX.md 🔲 → ✅ for SRFR-031. Reset current-task.md for next task.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Load source, pattern docs, spec section</tool>
+    <tool name="Edit">Add click handler + wire onClick in RegardingResolverApp.tsx</tool>
+    <tool name="Grep">Verify literal target/width/height values in output</tool>
+    <tool name="Bash">Run `npm run build:prod` and `npm test`</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/RegardingResolver/RegardingResolver/RegardingResolverApp.tsx</output>
+    <output type="test">src/client/pcf/RegardingResolver/__tests__/RegardingResolverApp.test.tsx</output>
+    <output type="docs">projects/set-regarding-and-field-mapping-resolver-r1/tasks/TASK-INDEX.md (🔲 → ✅ for SRFR-031)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Grep on the changed file confirms exactly one `target: 2` literal inside the navigateTo options object.</criterion>
+    <criterion testable="true">Grep confirms `width: { value: 80, unit: '%' }` and `height: { value: 80, unit: '%' }` present in the same options object.</criterion>
+    <criterion testable="true">Click handler reads entity name and entity ID from live control state (grep confirms no hardcoded GUID or entity-name string in the handler body).</criterion>
+    <criterion testable="true">Unit test simulates click with valid entity/id → asserts `Xrm.Navigation.navigateTo` called once with the expected page-input + navigation-options.</criterion>
+    <criterion testable="true">Unit test simulates click with `Xrm` undefined (test harness path) → `console.warn` logged; no exception thrown.</criterion>
+    <criterion testable="true">Unit test simulates click with empty entity/id → navigateTo NOT called.</criterion>
+    <criterion testable="true">Fluent v9 &lt;Link&gt; from `@fluentui/react-components` is the styling primitive (import path confirmed via grep).</criterion>
+    <criterion testable="true">`/code-review` and `/adr-check` pass at Step 9.5 (or all findings addressed / escalated per CLAUDE.md §6.5).</criterion>
+  </acceptance-criteria>
+</task>

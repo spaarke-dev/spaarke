@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="SRFR-081" project="set-regarding-and-field-mapping-resolver-r1">
+  <metadata>
+    <title>Build + deploy AssociationResolver v1.2.0 to spaarkedev1 UAT</title>
+    <status>not-started</status>
+    <estimated-effort>2h</estimated-effort>
+    <actual-effort></actual-effort>
+    <assigned>AI Agent</assigned>
+    <started></started>
+    <completed></completed>
+    <rigor>STANDARD</rigor>
+    <parallel-safe>true</parallel-safe>
+    <parallel-group>F</parallel-group>
+    <tags>deploy,pcf,association-resolver,wave-8</tags>
+    <depends-on>SRFR-053</depends-on>
+    <wave>8</wave>
+  </metadata>
+
+  <prompt><![CDATA[
+Build a production bundle of AssociationResolver v1.2.0 (Wave 5 output) and
+deploy it to spaarkedev1 UAT via the same 7-step PCF workflow as SRFR-080:
+`npm run build:prod` (NOT `npm run build`) — version-verify 4 locations —
+pack — import — Custom Page republish (if applicable) — hard-refresh —
+verify footer + log.
+
+AssociationResolver v1.2.0 is a thin-adapter release that delegates writes to
+`PolymorphicResolverService.applyResolverFields()` and consumes the shared
+`PolymorphicPicker`. The consuming forms (wizards, Matter main form) must
+still function post-deploy — verify via a smoke test on Matter main form.
+  ]]></prompt>
+
+  <role>PCF release engineer familiar with the Spaarke `pcf-deploy` skill, PAC CLI, `npm run build:prod`, PCF version alignment across ControlManifest, footer, solution.xml, and Solution Control Manifest.</role>
+
+  <goal><![CDATA[
+AssociationResolver v1.2.0 is deployed to spaarkedev1. All 4 version locations
+report v1.2.0. The rendered UI footer shows v1.2.0. Consuming forms
+(wizards + Matter main form) still function post-deploy. Deployment is logged
+in `notes/wave-8-deploy-log.md` (append).
+  ]]></goal>
+
+  <inputs>
+    <file purpose="spec">projects/set-regarding-and-field-mapping-resolver-r1/spec.md</file>
+    <file purpose="plan">projects/set-regarding-and-field-mapping-resolver-r1/plan.md</file>
+    <file purpose="pcf-claude">src/client/pcf/CLAUDE.md</file>
+    <file purpose="skill">.claude/skills/pcf-deploy/SKILL.md</file>
+    <file purpose="guide">docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+    <file purpose="failure-modes">.claude/FAILURE-MODES.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="FAILURE-MODES.md AP-1">Use `npm run build:prod` — NOT `npm run build`.</constraint>
+    <constraint source="spec FR-B7">Target version is v1.2.0 (baseline v1.1.0).</constraint>
+    <constraint source="pcf-deploy skill">All 4 version locations MUST agree on v1.2.0. Any mismatch = HALT.</constraint>
+    <constraint source="pcf-deploy skill">Deploy via solution zip round-trip. Do NOT hand-edit the solution zip.</constraint>
+    <constraint source="project">Pre-deploy smoke: `grep -RE "ENTITY_LOOKUP_CONFIGS\b" src/client/pcf/AssociationResolver` returns zero (const array retired per Wave 5).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>pcf/deployment</topic>
+    <files>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>.claude/skills/pcf-deploy/SKILL.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="7-step PCF deploy" location="src/client/pcf/CLAUDE.md">
+        Same workflow as SRFR-080. Footer verification is the load-bearing
+        success signal.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Wave 5 (SRFR-050..053) shipped AssociationResolver v1.2.0 as a thin
+      adapter delegating to `PolymorphicResolverService`. This task carries
+      it into spaarkedev1 UAT alongside RegardingResolver v1.3.0 (SRFR-080)
+      and the webresources + ribbon (SRFR-082).
+    </background>
+    <dependencies>
+      <dependency task="SRFR-053" status="pending">
+        AssociationResolver v1.2.0 is buildable; unit tests confirm write
+        parity with RegardingResolver; ENTITY_LOOKUP_CONFIGS const retired.
+      </dependency>
+    </dependencies>
+    <related-work>
+      <item>SRFR-080 deploys RegardingResolver v1.3.0 in parallel.</item>
+      <item>SRFR-082 deploys webresources + ribbon in parallel.</item>
+      <item>SRFR-084 UAT scenario 3 verifies AssociationResolver delegation.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check">Verify context &lt; 60%. Read `src/client/pcf/CLAUDE.md` Deployment Workflow.</step>
+    <step order="1" name="Precondition Check">Verify SRFR-053 ✅. Run `grep -RE "ENTITY_LOOKUP_CONFIGS\b" src/client/pcf/AssociationResolver` — must return zero. Confirm `pac org who` targets spaarkedev1.</step>
+    <step order="2" name="Build:prod">In `src/client/pcf/AssociationResolver/`, run `npm run build:prod`. Confirm bundle emitted.</step>
+    <step order="3" name="Version Verify">Confirm all 4 locations report v1.2.0. Halt on mismatch.</step>
+    <step order="4" name="Pack">`pac solution pack --zipfile Solution_AssociationResolver_v1.2.0.zip --folder &lt;extracted-path&gt;`.</step>
+    <step order="5" name="Import">`pac solution import --path Solution_AssociationResolver_v1.2.0.zip --force-overwrite --publish-changes`. Capture import log.</step>
+    <step order="6" name="Custom Page Republish">If AssociationResolver embeds in a Custom Page, republish it. Then `pac solution publish-all`.</step>
+    <step order="7" name="Hard-Refresh Verify">In spaarkedev1, hard-refresh Matter main form (a canonical AssociationResolver consumer). Confirm footer v1.2.0. Confirm the picker renders and no console errors.</step>
+    <step order="8" name="Consumer Smoke">Also open one wizard-form consumer (per Wave 0 discovery) and confirm AssociationResolver still renders + is interactive.</step>
+    <step order="9" name="Log Deployment">Append to `notes/wave-8-deploy-log.md`: artifact, version, env, import log summary, footer verification, timestamp.</step>
+    <step order="10" name="Update Task Status">Update TASK-INDEX.md 🔲 → ✅ for SRFR-081. Reset current-task.md for the next Wave-8 task.</step>
+  </steps>
+
+  <tools>
+    <tool name="Bash">Run npm and pac CLI commands</tool>
+    <tool name="Grep">Verify ENTITY_LOOKUP_CONFIGS retirement</tool>
+    <tool name="Read">Read version files + skill docs</tool>
+    <tool name="Write">Append to notes/wave-8-deploy-log.md</tool>
+  </tools>
+
+  <outputs>
+    <output type="deploy">AssociationResolver v1.2.0 deployed to spaarkedev1</output>
+    <output type="notes" ephemeral="true">projects/set-regarding-and-field-mapping-resolver-r1/notes/wave-8-deploy-log.md</output>
+    <output type="docs">projects/set-regarding-and-field-mapping-resolver-r1/tasks/TASK-INDEX.md (🔲 → ✅ for SRFR-081)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`pac solution list` reports AssociationResolver v1.2.0 in spaarkedev1.</criterion>
+    <criterion testable="true">Rendered UI footer shows v1.2.0.</criterion>
+    <criterion testable="true">Matter main form + one wizard-form consumer still render + function post-deploy.</criterion>
+    <criterion testable="true">`notes/wave-8-deploy-log.md` records this deploy.</criterion>
+    <criterion testable="true">Build command used was `npm run build:prod`.</criterion>
+  </acceptance-criteria>
+</task>
