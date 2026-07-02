@@ -322,6 +322,15 @@ public static class AnalysisEndpoints
                         Name = document.Name ?? "Unknown",
                         FileName = document.FileName,
                         ExtractedText = extractedText,
+                        // Metadata carries downstream-node inputs. GraphDriveId + GraphItemId are
+                        // required by DeliverToIndexNodeExecutor (executortype=41) to enqueue the
+                        // SPE-scoped RAG indexing job. Populated when the DocumentEntity has SPE
+                        // linkage; nodes that don't need them ignore the entries.
+                        Metadata = new Dictionary<string, object?>
+                        {
+                            ["GraphDriveId"] = document.GraphDriveId,
+                            ["GraphItemId"] = document.GraphItemId,
+                        },
                     };
                     logger.LogInformation(
                         "Loaded document context for analysis. DocumentId={DocumentId}, TextLength={TextLength}",
