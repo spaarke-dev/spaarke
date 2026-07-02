@@ -52,18 +52,19 @@ function StubComposeWidget(): React.JSX.Element {
 }
 
 function makeTab(id: string, displayName: string): WorkspaceTab {
+  // Cast through `unknown` per WorkspaceTab.Component's typing (React.ComponentType<any>).
+  // Fields match the WorkspaceTabManager.ts schema (kind: 'home'|'widget'; no `error` field
+  // — errors surface via the isLoading/Component pair per `ActiveWidgetContent`).
   return {
     id,
+    kind: 'widget',
     widgetType: 'compose-editor',
     displayName,
     widgetData: null,
     Component: StubComposeWidget as unknown as WorkspaceTab['Component'],
     isLoading: false,
-    error: null,
-    // `visibleToAssistant` is required by WorkspaceTab in current schema.
-    // Set to true so the test doesn't inadvertently exercise the disabled path.
     visibleToAssistant: true,
-  } as WorkspaceTab;
+  };
 }
 
 function renderInProviders(node: React.ReactNode): void {
