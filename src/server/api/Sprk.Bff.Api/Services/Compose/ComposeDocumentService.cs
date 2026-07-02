@@ -83,10 +83,10 @@ public sealed class ComposeDocumentService : IComposeDocumentService
             }
 
             // Then stream content. SPE returns null for missing content; we surface that as NotFound.
-            var stream = await graphClient.Drives[driveId].Items[itemId].Content
+            var graphStream = await graphClient.Drives[driveId].Items[itemId].Content
                 .GetAsync(cancellationToken: ct);
 
-            if (stream == null)
+            if (graphStream == null)
             {
                 _logger.LogWarning(
                     "Compose load: drive-item {DriveId}/{ItemId} metadata exists but content stream is null",
@@ -94,13 +94,23 @@ public sealed class ComposeDocumentService : IComposeDocumentService
                 return ComposeLoadResult.NotFound;
             }
 
+            // Buffer to a seekable MemoryStream. Graph returns a non-seekable HttpBaseStream
+            // whose Length/Position throw NotSupportedException; DocumentFormat.OpenXml
+            // (used downstream for text extract) also requires a seekable stream.
+            var buffered = new MemoryStream(capacity: (int)Math.Min(item.Size ?? 0, int.MaxValue));
+            await using (graphStream.ConfigureAwait(false))
+            {
+                await graphStream.CopyToAsync(buffered, ct).ConfigureAwait(false);
+            }
+            buffered.Position = 0;
+
             _logger.LogInformation(
-                "Compose load DOCX succeeded for {DriveId}/{ItemId}, size={Size}",
-                driveId, itemId, item.Size);
+                "Compose load DOCX succeeded for {DriveId}/{ItemId}, size={Size} bufferedBytes={BufferedBytes}",
+                driveId, itemId, item.Size, buffered.Length);
 
             return new ComposeLoadResult(
                 Found: true,
-                Content: stream,
+                Content: buffered,
                 FileName: item.Name,
                 ETag: item.ETag,
                 Size: item.Size);
