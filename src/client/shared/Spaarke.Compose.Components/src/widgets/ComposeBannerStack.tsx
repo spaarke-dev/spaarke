@@ -31,18 +31,9 @@
  */
 
 import * as React from 'react';
-import {
-  makeStyles,
-  tokens,
-  MessageBar,
-  MessageBarBody,
-  MessageBarTitle,
-} from '@fluentui/react-components';
+import { makeStyles, tokens, MessageBar, MessageBarBody, MessageBarTitle } from '@fluentui/react-components';
 
-import type {
-  ComposeCheckoutLockedByInfo,
-  ComposeCheckoutStatus,
-} from './ComposeWorkspace.types';
+import type { ComposeCheckoutLockedByInfo, ComposeCheckoutStatus } from './ComposeWorkspace.types';
 import type { ComposeAssistantToWorkspaceFlow } from '../types/compose-contracts';
 
 export interface ComposeBannerStackProps {
@@ -98,11 +89,7 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
       ) : null}
 
       {checkoutStatus === 'conflict' && checkoutLockedBy ? (
-        <MessageBar
-          intent="warning"
-          data-testid="compose-workspace-checkout-conflict-banner"
-          aria-live="polite"
-        >
+        <MessageBar intent="warning" data-testid="compose-workspace-checkout-conflict-banner" aria-live="polite">
           <MessageBarBody>
             <MessageBarTitle>Document is checked out</MessageBarTitle>
             {checkoutLockedBy.checkedOutAt
@@ -113,11 +100,7 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
       ) : null}
 
       {checkoutStatus === 'failed' && checkoutFailureMessage ? (
-        <MessageBar
-          intent="info"
-          data-testid="compose-workspace-checkout-failed-banner"
-          aria-live="polite"
-        >
+        <MessageBar intent="info" data-testid="compose-workspace-checkout-failed-banner" aria-live="polite">
           <MessageBarBody>
             <MessageBarTitle>Lock not acquired</MessageBarTitle>
             {checkoutFailureMessage}
@@ -126,44 +109,29 @@ export function ComposeBannerStack(props: ComposeBannerStackProps): React.JSX.El
       ) : null}
 
       {checkoutStatus === 'cancelled' ? (
-        <MessageBar
-          intent="info"
-          data-testid="compose-workspace-checkout-cancelled-banner"
-          aria-live="polite"
-        >
+        <MessageBar intent="info" data-testid="compose-workspace-checkout-cancelled-banner" aria-live="polite">
           <MessageBarBody>
             <MessageBarTitle>This session is no longer active</MessageBarTitle>
-            This document is open in another Compose session. Refresh this page to attempt to
-            acquire the lock again, or close this tab.
+            This document is open in another Compose session. Refresh this page to attempt to acquire the lock again, or
+            close this tab.
           </MessageBarBody>
         </MessageBar>
       ) : null}
 
       {importWarnings.length > 0 ? (
-        <MessageBar
-          intent="warning"
-          data-testid="compose-workspace-import-warning-banner"
-          aria-live="polite"
-        >
+        <MessageBar intent="warning" data-testid="compose-workspace-import-warning-banner" aria-live="polite">
           <MessageBarBody>
-            <MessageBarTitle>
-              Document opened with {importWarnings.length} simplification(s)
-            </MessageBarTitle>
+            <MessageBarTitle>Document opened with {importWarnings.length} simplification(s)</MessageBarTitle>
             Some advanced features may not be preserved on save.
           </MessageBarBody>
         </MessageBar>
       ) : null}
 
       {pendingAssistantInsert ? (
-        <MessageBar
-          intent="info"
-          data-testid="compose-workspace-pending-assistant-banner"
-          aria-live="polite"
-        >
+        <MessageBar intent="info" data-testid="compose-workspace-pending-assistant-banner" aria-live="polite">
           <MessageBarBody>
-            <MessageBarTitle>Assistant draft ready</MessageBarTitle>
-            A draft from the Assistant is staged for insertion. (R2 wires the insert action; R1
-            acknowledges receipt only.)
+            <MessageBarTitle>Assistant draft ready</MessageBarTitle>A draft from the Assistant is staged for insertion.
+            (R2 wires the insert action; R1 acknowledges receipt only.)
           </MessageBarBody>
         </MessageBar>
       ) : null}

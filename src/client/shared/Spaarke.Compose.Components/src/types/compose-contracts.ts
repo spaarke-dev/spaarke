@@ -578,23 +578,17 @@ export interface ComposeAssistantToContextFlow {
  * Subscribers narrow first on event.type === 'compose_*' to handle
  * Compose flows distinctly from existing workspace events.
  */
-export type ComposeWorkspaceEvent =
-  | ComposeContextToWorkspaceFlow
-  | ComposeAssistantToWorkspaceFlow;
+export type ComposeWorkspaceEvent = ComposeContextToWorkspaceFlow | ComposeAssistantToWorkspaceFlow;
 
 /**
  * Compose-specific additions to the existing `context` channel.
  */
-export type ComposeContextEvent =
-  | ComposeWorkspaceToContextFlow
-  | ComposeAssistantToContextFlow;
+export type ComposeContextEvent = ComposeWorkspaceToContextFlow | ComposeAssistantToContextFlow;
 
 /**
  * Compose-specific additions to the existing `conversation` channel.
  */
-export type ComposeConversationEvent =
-  | ComposeWorkspaceToAssistantFlow
-  | ComposeContextToAssistantFlow;
+export type ComposeConversationEvent = ComposeWorkspaceToAssistantFlow | ComposeContextToAssistantFlow;
 
 /**
  * Catch-all union of every Compose flow event for diagnostics / logging.

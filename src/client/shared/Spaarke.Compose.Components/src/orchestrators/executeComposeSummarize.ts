@@ -167,9 +167,7 @@ export interface ExecuteComposeSummarizeInputs {
  * error). The caller may `await` this promise to know when the stream is
  * fully drained.
  */
-export async function executeComposeSummarize(
-  inputs: ExecuteComposeSummarizeInputs
-): Promise<void> {
+export async function executeComposeSummarize(inputs: ExecuteComposeSummarizeInputs): Promise<void> {
   const {
     bffBaseUrl,
     documentSpeId,
@@ -187,9 +185,7 @@ export async function executeComposeSummarize(
   } = inputs;
 
   if (!bffBaseUrl || !documentSpeId || !driveId || !tenantId) {
-    onError?.(
-      'Compose summarize: missing required inputs (bffBaseUrl, documentSpeId, driveId, tenantId).'
-    );
+    onError?.('Compose summarize: missing required inputs (bffBaseUrl, documentSpeId, driveId, tenantId).');
     onDone?.();
     return;
   }
