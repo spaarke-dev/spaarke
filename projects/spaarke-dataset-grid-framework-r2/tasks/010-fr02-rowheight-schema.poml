@@ -3,7 +3,7 @@
   <metadata>
     <title>FR-02: Add `rowHeight` to LayoutJsonRow schema + parser + test</title>
     <phase>2: Wizard UI + Per-Instance Overrides</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>1</estimated-hours>
     <dependencies>006</dependencies>
     <blocks>011,016</blocks>
@@ -81,6 +81,17 @@
   <notes>
     - This is the schema half of FR-02. The wizard UI (task 011) exposes the field to makers.
     - Framework only enforces height at the row level; overflow behavior lives on the DataGrid's inner scroll surface per existing height-chain contract.
+    - COMPLETION NOTES (2026-07-02, task-execute FULL rigor):
+      • `LayoutJsonRow` located in `src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/buildDynamicWorkspaceConfig.ts` (co-located with `LayoutJson` and `WorkspaceScope`, NOT under `src/types/`).
+      • Added `readonly rowHeight?: string;` field with JSDoc documenting the contentSizing interaction.
+      • Extended `WorkspaceRowConfig` in `types.ts` with `maxHeight?: string;` + `overflow?: React.CSSProperties['overflow'];` fields (framework-internal contract populated by `buildDynamicWorkspaceConfig`).
+      • Wired `buildDynamicWorkspaceConfig.ts` to propagate `rowHeight` → `{ maxHeight, overflow: 'hidden' }` on the row wrapper. Propagates to overflow-split rows too.
+      • Wired `WorkspaceShell.tsx` row `<div>` to apply `row.maxHeight` and `row.overflow` on inline style.
+      • Added 4 new tests (f)/(g)/(h)/(i) covering: back-compat (omitted rowHeight), rowHeight set, interaction with `contentSizing: 'clamped'`, and overflow-row propagation.
+      • Interaction: when both `rowHeight` (row) AND `contentSizing: 'clamped'` (section) are set, both apply — row `maxHeight` + `overflow: hidden` is authoritative on the wrapper; section's own `maxHeight` (from FR-01 clamped) still applies on the inner card style. The row's `overflow: hidden` ensures no over-constraint. Test (h) verifies this contract explicitly.
+      • Tests: 10/10 buildDynamicWorkspaceConfig tests pass (6 FR-01 + 4 FR-02).
+      • Build: `tsc` clean (no output).
+      • Pre-existing failures in unrelated files (EntityCreationService, XrmDataverseClient, RichFilePreview, sectionMetadataCatalog — task 014's territory) are NOT caused by this task.
   </notes>
 
   <execution>

@@ -441,6 +441,83 @@ export function filterAvailableViews(
   return views.filter(v => allowed.has(normalize(v.id)));
 }
 
+// ─────────────────────────────────────────────────────────────────────────────
+// FR-03 (task 012, spaarke-dataset-grid-framework-r2) — per-instance overrides
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Resolve the effective savedquery allowlist from the two-tier precedence chain.
+ *
+ * Precedence (highest wins):
+ *   1. `instanceLevel` — `SectionInstance.overrides.availableViews` (FR-03).
+ *   2. `configLevel`   — `SourceSavedQuery.availableViews` from the config
+ *                        record (FR-05).
+ *   3. undefined       — no filter (all sibling views shown).
+ *
+ * Semantics decision: **REPLACE**, not sequential-apply intersection.
+ *
+ * Rationale: `SectionInstance.overrides.availableViews` is the more specific
+ * rule (per-placement). Applying both filters sequentially would prevent an
+ * operator from ever widening the allowlist at the instance level — the
+ * config-level list would always be an upper bound. That is not the intent per
+ * spec.md line 98 ("the per-instance value takes precedence over the global
+ * config-level allowlist when both are set"). "Takes precedence" reads as
+ * authoritative-replace: when the operator sets a per-placement allowlist,
+ * they know what they want and the config-level restriction is silenced.
+ *
+ * Empty-array semantics mirror `filterAvailableViews`: an empty array at
+ * either tier is treated as "no filter" (safer default; avoids the empty-picker
+ * footgun).
+ *
+ * @param views          Sibling savedqueries returned by Dataverse for the entity.
+ * @param configLevel    Optional allowlist from `SourceSavedQuery.availableViews`.
+ * @param instanceLevel  Optional allowlist from `SectionInstance.overrides.availableViews`.
+ *                       Highest precedence — when set (non-empty), config-level is silenced.
+ * @returns The filtered view list. Never `undefined`.
+ */
+export function resolveEffectiveAvailableViews(
+  views: ReadonlyArray<SavedQuerySummary>,
+  configLevel: ReadonlyArray<string> | undefined,
+  instanceLevel: ReadonlyArray<string> | undefined
+): ReadonlyArray<SavedQuerySummary> {
+  // Instance-level replaces (does not intersect with) config-level when set.
+  // Empty array at instance level falls through to config level (per
+  // filterAvailableViews empty-array semantics).
+  if (instanceLevel && instanceLevel.length > 0) {
+    return filterAvailableViews(views, instanceLevel);
+  }
+  return filterAvailableViews(views, configLevel);
+}
+
+/**
+ * Resolve the effective `pageSize` from the three-tier precedence chain.
+ *
+ * Precedence (highest wins):
+ *   1. `instanceLevel`     — `SectionInstance.overrides.pageSize` (FR-03).
+ *   2. `configRecordLevel` — `sprk_configjson.behavior.pageSize`.
+ *   3. Framework default — 25 (FR-07, `FRAMEWORK_DEFAULT_BEHAVIOR.pageSize`).
+ *
+ * A `pageSize` of 0 or a negative number at any tier is treated as "unset"
+ * (falls through to the next tier). This mirrors the DataGrid's runtime
+ * validation and prevents an operator from accidentally disabling paging.
+ *
+ * @param instanceLevel     Optional pageSize from `SectionInstance.overrides.pageSize`.
+ * @param configRecordLevel Optional pageSize from `sprk_configjson.behavior.pageSize`.
+ * @returns The effective pageSize (always a positive integer).
+ */
+export function resolveEffectivePageSize(
+  instanceLevel: number | undefined,
+  configRecordLevel: number | undefined
+): number {
+  if (typeof instanceLevel === 'number' && Number.isFinite(instanceLevel) && instanceLevel > 0) {
+    return instanceLevel;
+  }
+  if (typeof configRecordLevel === 'number' && Number.isFinite(configRecordLevel) && configRecordLevel > 0) {
+    return configRecordLevel;
+  }
+  return FRAMEWORK_DEFAULT_BEHAVIOR.pageSize;
+}
+
 function humanizeLogicalName(logicalName: string): string {
   // 'sprk_eventname' → 'Event Name'; 'name' → 'Name'.
   // Best-effort fallback when metadata DisplayName not available in this projection.

@@ -192,3 +192,153 @@ describe('buildDynamicWorkspaceConfig — contentSizing (FR-01)', () => {
     expect(clamped.sections[0].style?.maxHeight).toBeUndefined();
   });
 });
+
+// ---------------------------------------------------------------------------
+// FR-02 tests: LayoutJsonRow.rowHeight (row-level height ceiling)
+// ---------------------------------------------------------------------------
+
+/**
+ * FR-02 (spaarke-dataset-grid-framework-r2, task 010, 2026-07-02) invariants:
+ *
+ *   (f) A row WITHOUT `rowHeight` produces a `WorkspaceRowConfig` with
+ *       `maxHeight === undefined` and `overflow === undefined` — back-compat with
+ *       every existing published layout JSON (rows currently omit `rowHeight`).
+ *   (g) A row WITH `rowHeight: '80vh'` produces a `WorkspaceRowConfig` where
+ *       `maxHeight === '80vh'` and `overflow === 'hidden'`.
+ *   (h) When a row has `rowHeight` set AND a section in the row has
+ *       `contentSizing: 'clamped'`, BOTH constraints coexist: the row wrapper
+ *       carries the `maxHeight`/`overflow: 'hidden'` ceiling, and the section
+ *       still applies its own `defaultHeight` on the inner card style. This is
+ *       the "row's ceiling wins for the outer wrapper" contract — the row's
+ *       overflow prevents any over-constraint from the section's inner style.
+ *   (i) A row that overflows its column template (more sections than slots)
+ *       propagates `rowHeight` to every auto-appended overflow row.
+ *
+ * Classification (ADR-038 §7): MAINTAIN-class framework-contract tests. Same
+ * classification as the FR-01 tests above.
+ */
+
+/** Layout JSON factory that accepts a rowHeight override. */
+function makeLayoutJsonWithRowHeight(
+  sectionId: string,
+  rowHeight?: string,
+): LayoutJson {
+  return {
+    schemaVersion: 1,
+    rows: [
+      {
+        id: 'row-1',
+        columns: '1fr',
+        sections: [sectionId],
+        ...(rowHeight !== undefined ? { rowHeight } : {}),
+      },
+    ],
+  };
+}
+
+describe('buildDynamicWorkspaceConfig — rowHeight (FR-02)', () => {
+  const ctx = makeContext();
+
+  it('(f) row without rowHeight leaves WorkspaceRowConfig.maxHeight + overflow undefined (back-compat)', () => {
+    const registry = [
+      makeRegistration('grow-section', {
+        defaultHeight: '480px',
+        contentSizing: 'grow',
+      }),
+    ];
+
+    const config = buildDynamicWorkspaceConfig(
+      makeLayoutJsonWithRowHeight('grow-section'),
+      registry,
+      ctx,
+    );
+
+    expect(config.rows).toBeDefined();
+    expect(config.rows![0].maxHeight).toBeUndefined();
+    expect(config.rows![0].overflow).toBeUndefined();
+  });
+
+  it('(g) row with rowHeight: "80vh" produces maxHeight: "80vh" + overflow: "hidden" on WorkspaceRowConfig', () => {
+    const registry = [
+      makeRegistration('grow-section', {
+        defaultHeight: '480px',
+        contentSizing: 'grow',
+      }),
+    ];
+
+    const config = buildDynamicWorkspaceConfig(
+      makeLayoutJsonWithRowHeight('grow-section', '80vh'),
+      registry,
+      ctx,
+    );
+
+    expect(config.rows).toBeDefined();
+    expect(config.rows![0].maxHeight).toBe('80vh');
+    expect(config.rows![0].overflow).toBe('hidden');
+  });
+
+  it('(h) row rowHeight + section contentSizing:"clamped" — row ceiling coexists with section defaultHeight (row wins on outer wrapper)', () => {
+    // Section is clamped with defaultHeight 480px; row imposes a 100vh ceiling.
+    // Expected: WorkspaceRowConfig carries maxHeight:100vh + overflow:hidden
+    // (row wrapper wins). The section still carries its own maxHeight:480px on
+    // the inner card style — but the row's overflow:hidden prevents over-constraint.
+    const registry = [
+      makeRegistration('clamped-section', {
+        defaultHeight: '480px',
+        contentSizing: 'clamped',
+      }),
+    ];
+
+    const config = buildDynamicWorkspaceConfig(
+      makeLayoutJsonWithRowHeight('clamped-section', '100vh'),
+      registry,
+      ctx,
+    );
+
+    // Row-level ceiling is authoritative
+    expect(config.rows).toBeDefined();
+    expect(config.rows![0].maxHeight).toBe('100vh');
+    expect(config.rows![0].overflow).toBe('hidden');
+
+    // Section still gets its own maxHeight (per FR-01 clamped behavior);
+    // the row wrapper's overflow:hidden ensures the section's inner style
+    // does not over-constrain the outer wrapper.
+    const section = config.sections[0];
+    expect(section.style?.maxHeight).toBe('480px');
+    expect(section.style?.overflow).toBe('hidden');
+    expect(section.style?.display).toBe('flex');
+  });
+
+  it('(i) row overflow (more sections than slots) — rowHeight propagates to every auto-appended overflow row', () => {
+    // Layout: single column template ("1fr") with 3 sections and rowHeight: "80vh".
+    // Expected: 3 rows total (1 original + 2 overflow), each carrying maxHeight:80vh
+    // + overflow:hidden. Confirms the row-height ceiling is not lost during
+    // overflow splitting.
+    const registry = [
+      makeRegistration('s1', { defaultHeight: '200px' }),
+      makeRegistration('s2', { defaultHeight: '200px' }),
+      makeRegistration('s3', { defaultHeight: '200px' }),
+    ];
+
+    const layoutJson: LayoutJson = {
+      schemaVersion: 1,
+      rows: [
+        {
+          id: 'row-1',
+          columns: '1fr',
+          sections: ['s1', 's2', 's3'],
+          rowHeight: '80vh',
+        },
+      ],
+    };
+
+    const config = buildDynamicWorkspaceConfig(layoutJson, registry, ctx);
+
+    expect(config.rows).toBeDefined();
+    expect(config.rows!.length).toBe(3);
+    for (const row of config.rows!) {
+      expect(row.maxHeight).toBe('80vh');
+      expect(row.overflow).toBe('hidden');
+    }
+  });
+});

@@ -151,6 +151,23 @@ export interface WorkspaceRowConfig {
    * Defaults to "1fr" (single column).
    */
   gridTemplateColumnsSmall?: string;
+  /**
+   * Optional height ceiling for the row wrapper (any CSS length: '480px', '80vh').
+   * When set, the framework applies this as `maxHeight` + `overflow: hidden` on
+   * the row `<div>`. Populated from `LayoutJsonRow.rowHeight` by
+   * `buildDynamicWorkspaceConfig` (FR-02).
+   *
+   * Interaction with section-level `contentSizing`: when both row `maxHeight` and
+   * a section's `contentSizing: 'clamped'` are set, the row's ceiling wins for
+   * the outer wrapper; the section's `defaultHeight` still applies to its inner
+   * card style, but the row's `overflow: hidden` prevents any over-constraint.
+   */
+  maxHeight?: string;
+  /**
+   * Optional CSS overflow value applied to the row wrapper. Populated as
+   * `'hidden'` by `buildDynamicWorkspaceConfig` when `rowHeight` is set (FR-02).
+   */
+  overflow?: React.CSSProperties['overflow'];
 }
 
 /**
@@ -255,6 +272,26 @@ export interface SectionFactoryContext {
   scope?: 'my' | 'all';
   /** User's business unit ID (GUID). Required when scope="all". */
   businessUnitId?: string;
+  /**
+   * FR-03 (task 012, spaarke-dataset-grid-framework-r2): the resolved
+   * `SectionInstance` for the section being rendered. Populated by
+   * `buildDynamicWorkspaceConfig` on a per-section basis (each section factory
+   * call receives a context augmented with the corresponding instance).
+   *
+   * Factories that embed a `<DataGrid />` should:
+   *   - use `sectionInstance.configIdOverride ?? <baked-in-default-configId>`
+   *     to select which `sprk_gridconfiguration` record to render.
+   *   - forward `sectionInstance.overrides` to the `<DataGrid />`
+   *     effective-pageSize + effective-availableViews chains (see
+   *     `configResolution.resolveEffectivePageSize` +
+   *     `resolveEffectiveAvailableViews`).
+   *
+   * Factories that do not embed a DataGrid (action-cards, metric-cards, static
+   * content) may safely ignore this field. Absent when the workspace was NOT
+   * built via `buildDynamicWorkspaceConfig` (e.g., tests, ad-hoc consumers) —
+   * factories MUST treat it as optional.
+   */
+  sectionInstance?: import('./buildDynamicWorkspaceConfig').SectionInstance;
 }
 
 /**

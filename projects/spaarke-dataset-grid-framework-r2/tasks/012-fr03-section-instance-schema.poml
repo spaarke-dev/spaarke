@@ -3,7 +3,7 @@
   <metadata>
     <title>FR-03: Widen LayoutJsonRow.sections + add SectionInstance type + parser back-compat</title>
     <phase>2: Wizard UI + Per-Instance Overrides</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>006</dependencies>
     <blocks>013,016</blocks>
@@ -95,6 +95,15 @@
     - Folds Issue 6 (per-instance rename) via `label` field — no separate task.
     - Precedence order for `availableViews`: (highest) `SectionInstance.overrides.availableViews` > (middle) `SourceSavedQuery.availableViews` from FR-05 > (lowest) all views from `retrieveSavedQueriesForEntity`.
     - Precedence order for `pageSize`: (highest) `SectionInstance.overrides.pageSize` > (middle) config record's `behavior.pageSize` > (lowest) framework default (25 per FR-07).
+
+    **Completion notes (2026-07-02):**
+    - `SectionInstance` type + `normalizeSection` helper co-located in `buildDynamicWorkspaceConfig.ts` alongside `LayoutJsonRow` (per task 010's placement precedent — types not under `src/types/`).
+    - Per-instance overrides surfaced to section factories via `SectionFactoryContext.sectionInstance?` field. Factories that embed `<DataGrid />` read `configIdOverride`, `overrides.pageSize`, `overrides.availableViews` from context to forward to the grid; factories that ignore it (action-cards, metric-cards) are unaffected.
+    - `label` override applied POST-factory by `buildDynamicWorkspaceConfig` (overwrites `SectionConfig.title`); empty-string labels are treated as "no override" per wizard save contract.
+    - New helpers `resolveEffectiveAvailableViews` + `resolveEffectivePageSize` added to `configResolution.ts` (exported from DataGrid barrel). Consumed by section factories at DataGrid-render time. Precedence for `availableViews` uses REPLACE semantics — see `sectionInstance.test.ts` for rationale.
+    - Barrel exports updated: `WorkspaceShell/index.ts` exports `SectionInstance` type + `normalizeSection`; `DataGrid/index.ts` exports the two new resolve helpers + `filterAvailableViews`.
+    - Tests: 23 new tests in `sectionInstance.test.ts` covering all 6 required branches + normalizer + empty-slot + mixed-shape + precedence-widening + zero/negative pageSize edge cases. All pass. Full suite regression check: 5 pre-existing failures in untouched files (RichFilePreview, XrmDataverseClient, EntityCreationService.cascade) + one in `sectionMetadataCatalog.test.ts` (predates my changes — expects 7 sections but 12 registered). Stash-and-restore verified failures are baseline, not new.
+    - Build: `npm run build` clean.
   </notes>
 
   <execution>

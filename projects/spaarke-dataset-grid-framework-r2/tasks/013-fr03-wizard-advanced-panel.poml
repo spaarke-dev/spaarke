@@ -3,7 +3,7 @@
   <metadata>
     <title>FR-03: Wizard "Advanced" panel — per-instance overrides</title>
     <phase>2: Wizard UI + Per-Instance Overrides</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>011,012</dependencies>
     <blocks>015,016</blocks>

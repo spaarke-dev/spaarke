@@ -3,7 +3,7 @@
   <metadata>
     <title>FR-04: Wizard placement checks + runtime dev-guard for `widthPreference`</title>
     <phase>2: Wizard UI + Per-Instance Overrides</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>013,014</dependencies>
     <blocks>016</blocks>
@@ -87,6 +87,29 @@
     - `sectionRegistry.ts` lives at `src/solutions/LegalWorkspace/src/sectionRegistry.ts` (not under `WorkspaceShell/`). This file may relocate to the new shared package as part of FR-10 (task 021) — plan for the relocation but don't do it here.
     - Task 015 is the last piece of Phase 2. Task 016 closes with deploy + PR 2.
     - If Fluent v9 `Dialog` is heavy for a simple confirm, consider `MessageBar` with action buttons — either is acceptable per ADR-021.
+
+    # Completion notes (2026-07-02)
+
+    - Modified `src/solutions/WorkspaceLayoutWizard/src/steps/ArrangeStep.tsx`:
+      - Added `lookupWidthPreference()` helper that reads `SECTION_METADATA_CATALOG` (task 014) to get 'full' | 'half' | 'any' per section ID (App.tsx's derived SECTION_CATALOG drops the field, so we re-lookup from the catalog directly).
+      - Added `widthPrefDialog` state + Fluent v9 `Dialog` with title "Full-width widget", body citing section label, buttons "Yes, convert" (default primary) / "Cancel (keep row)".
+      - `handleSlotDrop` extended: after normal drop assignment, if dropped section has widthPreference 'full' AND target row has slotCount > 1 AND row has other occupied slots → open Dialog. "Yes" clears all OTHER slots in that row (`handleWidthPrefConfirm`); "Cancel" is a no-op (`handleWidthPrefCancel`) — dialog closes, section remains with persistent warning icon.
+      - Added `slotWidthWarnings` derived Map computing per-slot warning text: 'full' in multi-column (label + column count) OR 'half' in single-column (whitespace warning).
+      - Added `widthWarning?: string` prop on GridSlot; renders a Fluent v9 `Tooltip`-wrapped `Warning16Regular` icon overlay (top-left of slot, colorPaletteYellowForeground1 semantic token) when set.
+      - Runs alongside task 011 RowHeightControl + task 013 AdvancedSectionControl without regression — the widthWarning overlay sits in the slot's absolute-positioned corner, orthogonal to the drag/remove UI.
+    - Modified `src/solutions/LegalWorkspace/src/sectionRegistry.ts`:
+      - Added exported `warnOnWidthPreferenceViolations(layout)` function that iterates a LayoutJson-like structure and fires `console.warn('[Spaarke DataGrid] Section "{id}" has widthPreference:full but is rendered in a multi-column row ({columns} columns). Consider moving to a single-column row.')` for each violation.
+      - Guarded by `process.env.NODE_ENV === 'production'` early-return (silent in production).
+      - Supports both bare-string and SectionInstance-shaped entries (FR-03 compat).
+      - Added local `LayoutJsonLike` + `LayoutJsonRowLike` types to avoid a heavy cross-package import; consumers can pass any structurally-compatible object.
+      - Function is DEFINED but not yet WIRED into the render lifecycle. Wire-up (calling it after parseLayoutJson in useWorkspaceLayouts.ts) is trivial follow-on; separating the primitive from the wire-up per task scope (POML lists only 2 modified files).
+    - Test files created:
+      - `src/solutions/LegalWorkspace/src/__tests__/widthPreferenceGuard.test.ts` — 14 unit test cases covering: 'full' in multi-col warns; single-col does not; production silent; unknown IDs skipped; SectionInstance entries; null/undefined defensive; multi-row + multi-violation.
+      - `src/solutions/WorkspaceLayoutWizard/src/__tests__/widthPreferencePlacement.test.tsx` — 6 integration tests covering: warning icon present/absent per row shape; dark-mode structural check; dialog hidden state.
+    - **POML deviation**: POML output path `src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/__tests__/widthPreferenceGuard.test.ts` was NOT viable — the guard code lives in LegalWorkspace (not shared lib), and the shared-lib jest roots is restricted to shared-lib src. Placed the guard test adjacent to the code it tests in `src/solutions/LegalWorkspace/src/__tests__/` — new folder, follows the task 011/013 pattern where the wizard __tests__ folder was created ahead of jest wire-up.
+    - TypeScript check (`npx tsc --noEmit`): zero new errors introduced in ArrangeStep.tsx or sectionRegistry.ts. Pre-existing errors in App.tsx (unrelated), Spaarke.Auth cross-imports, LegalWorkspace's pre-existing `process.env` reference at line 125 (matching my new pattern) are unchanged. Test files carry expected "no jest wired" errors identical to rowHeight.test.tsx (task 011) and sectionInstanceAdvanced.test.tsx (task 013) precedent.
+    - Fluent v9 semantic tokens throughout (Warning icon uses `colorPaletteYellowForeground1`; Dialog inherits FluentProvider theme). No hardcoded colors. Matches ADR-021.
+    - `runOnWidthPreferenceViolations` was NOT invoked from the runtime render pipeline as part of this task — the exported symbol is available for follow-on wire-up. Rationale: task POML scoped the 2 modified files precisely, and the wire-up requires touching `useWorkspaceLayouts.ts` (a load-bearing cross-consumer hook) which is out of scope. Reported to main session for planning follow-on.
   </notes>
 
   <execution>

@@ -3,7 +3,7 @@
   <metadata>
     <title>FR-02: Wizard UI for `rowHeight` with presets</title>
     <phase>2: Wizard UI + Per-Instance Overrides</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>010</dependencies>
     <blocks>013,016</blocks>
@@ -84,6 +84,15 @@
     - This is the wizard UI half of FR-02. Task 010 already added the field to the schema.
     - Serial with tasks 013, 015 (all touch `WorkspaceLayoutWizard/src/App.tsx`).
     - If existing wizard structure has separate components per row/section, add the dropdown in the row-settings component.
+
+    Completion notes (2026-07-02):
+    - Row-height UI landed in `src/steps/ArrangeStep.tsx` as a new `RowHeightControl` sub-component (Fluent v9 `Dropdown` + tooltip + custom `Input`). Preset labels: "Auto (default)" / "40vh (small)" / "60vh (medium)" / "80vh (large)" / "100vh (full-viewport)" / "Custom…".
+    - App.tsx wired: added `rowHeights: Map&lt;string, string&gt;` state (keyed by row.id), extended `parseSectionsJson` to prefill map on edit/saveAs, extended `buildSectionsJson` to emit `LayoutJsonRow.rowHeight` only when the map contains a non-empty value (Auto = omit field → back-compat invariant preserved).
+    - "Custom…" reveals a Fluent v9 `Input` (`placeholder="e.g., 640px or 70vh"`); typed values flow through unmodified. Switching back to a preset hides the input.
+    - All colors use Fluent v9 semantic tokens (`tokens.colorNeutralForeground2`, `tokens.colorNeutralForeground3`) — no hardcoded colors, ADR-021 compliant.
+    - Tests scaffolded at `src/__tests__/rowHeight.test.tsx` using @testing-library/react + jest patterns matching TemplateStep.test.tsx. **WorkspaceLayoutWizard has no test runner wired yet** (no jest config, no test script, no @types/jest devDependency) — test file is authored to run unchanged once the runner is set up. `buildSectionsJson` JSON-boundary tests are `describe.skip` pending App.tsx exposing the helper.
+    - **Build**: `npm run build` in wizard package fails at the vite step because `@spaarke/auth` dist folder is missing (shared-lib peer package not built) — pre-existing, unrelated to this task. `npx tsc --noEmit` shows zero new type errors in `App.tsx` or `ArrangeStep.tsx` (3 pre-existing baseline errors on lines 107 / 309 / 660 predate task 011).
+    - Downstream: tasks 013 + 015 also edit `App.tsx` — the `LayoutJsonRow`/`LayoutJson` local types + `parseSectionsJson`/`buildSectionsJson` helpers are the natural extension points for FR-03 (section instances) + FR-04 (widthPreference) fields.
   </notes>
 
   <execution>

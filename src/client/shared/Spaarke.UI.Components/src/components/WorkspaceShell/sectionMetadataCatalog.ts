@@ -82,6 +82,22 @@ export interface SectionMetadata {
    * Spec ref: FR-01, spaarke-dataset-grid-framework-r2.
    */
   readonly contentSizing?: 'grow' | 'clamped';
+  /**
+   * Optional. Signals to the WorkspaceLayoutWizard whether this section renders
+   * best at 'full' row width, 'half' width, or is flexible ('any').
+   *
+   * - `'any'` (default when omitted) — no wizard warnings; section can be placed
+   *   in any row slot configuration.
+   * - `'full'` — wizard warns/blocks placement in multi-slot rows. Suitable for
+   *   dense grids (Communications, Documents, Invoices, Matters, Projects, Work
+   *   Assignments) whose columns read best at full row width without truncation.
+   * - `'half'` — wizard warns on single-slot placement (too much whitespace).
+   *
+   * Runtime dev-guard + wizard warnings implemented in FR-04 companion task 015.
+   *
+   * Spec ref: FR-04, spaarke-dataset-grid-framework-r2.
+   */
+  readonly widthPreference?: 'full' | 'half' | 'any';
 }
 
 /**
@@ -141,6 +157,7 @@ export const SECTION_METADATA_CATALOG: readonly SectionMetadata[] = [
     icon: DocumentRegular,
     defaultHeight: '480px',
     contentSizing: 'clamped',
+    widthPreference: 'full',
   },
   // ai-spaarke-ai-workspace-UI-r1 #4 (2026-06-08): three new entity-view
   // sections sharing <DataverseEntityViewWidget>. Each needs an operator-
@@ -154,6 +171,7 @@ export const SECTION_METADATA_CATALOG: readonly SectionMetadata[] = [
     icon: BriefcaseSearchRegular,
     defaultHeight: '480px',
     contentSizing: 'clamped',
+    widthPreference: 'full',
   },
   {
     id: 'projects',
@@ -163,6 +181,7 @@ export const SECTION_METADATA_CATALOG: readonly SectionMetadata[] = [
     icon: FolderRegular,
     defaultHeight: '480px',
     contentSizing: 'clamped',
+    widthPreference: 'full',
   },
   {
     id: 'invoices',
@@ -172,6 +191,7 @@ export const SECTION_METADATA_CATALOG: readonly SectionMetadata[] = [
     icon: ReceiptRegular,
     defaultHeight: '480px',
     contentSizing: 'clamped',
+    widthPreference: 'full',
   },
   {
     id: 'work-assignments',
@@ -181,6 +201,7 @@ export const SECTION_METADATA_CATALOG: readonly SectionMetadata[] = [
     icon: BriefcaseRegular,
     defaultHeight: '480px',
     contentSizing: 'clamped',
+    widthPreference: 'full',
   },
   // ai-spaarke-ai-workspace-UI-r2 FR-09 (2026-07-01): Communications section —
   // fifth Dataverse-entity-view section sharing <DataverseEntityViewWidget>.
@@ -195,6 +216,7 @@ export const SECTION_METADATA_CATALOG: readonly SectionMetadata[] = [
     icon: MailRegular,
     defaultHeight: '480px',
     contentSizing: 'clamped',
+    widthPreference: 'full',
   },
   {
     id: 'daily-briefing',

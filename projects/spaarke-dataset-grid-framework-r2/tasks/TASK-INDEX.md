@@ -16,12 +16,12 @@
 | 004 | FR-06 Config templates + guide reference | 1: Framework | ✅ | none | Wave 1 | STANDARD |
 | 005 | FR-08 Unwind `maxHeight` from 6 sections + metadata `clamped` | 1: Framework | ✅ | 001 | Wave 2 | FULL |
 | 006 | Phase 1 deploy + regression + PR 1 | 1: Framework | 🔲 | 001,002,003,004,005 | Wave 3 | STANDARD |
-| 010 | FR-02 `rowHeight` schema + parser + test | 2: Wizard | 🔲 | 006 | Wave 4 | FULL |
-| 011 | FR-02 Wizard UI: `rowHeight` input + presets | 2: Wizard | 🔲 | 010 | Wave 5 | FULL |
-| 012 | FR-03 `SectionInstance` schema + widened `sections` type | 2: Wizard | 🔲 | 006 | Wave 4 | FULL |
-| 013 | FR-03 Wizard UI: "Advanced" panel | 2: Wizard | 🔲 | 011,012 | Wave 6 | FULL |
-| 014 | FR-04 `widthPreference` field + set 'full' on 6 widgets | 2: Wizard | 🔲 | 006 | Wave 4 | FULL |
-| 015 | FR-04 Wizard placement checks + runtime dev-guard | 2: Wizard | 🔲 | 013,014 | Wave 7 | FULL |
+| 010 | FR-02 `rowHeight` schema + parser + test | 2: Wizard | ✅ | 006 | Wave 4 | FULL |
+| 011 | FR-02 Wizard UI: `rowHeight` input + presets | 2: Wizard | ✅ | 010 | Wave 5 | FULL |
+| 012 | FR-03 `SectionInstance` schema + widened `sections` type | 2: Wizard | ✅ | 006 | Wave 4 | FULL |
+| 013 | FR-03 Wizard UI: "Advanced" panel | 2: Wizard | ✅ | 011,012 | Wave 6 | FULL |
+| 014 | FR-04 `widthPreference` field + set 'full' on 6 widgets | 2: Wizard | ✅ | 006 | Wave 4 | FULL |
+| 015 | FR-04 Wizard placement checks + runtime dev-guard | 2: Wizard | ✅ | 013,014 | Wave 7 | FULL |
 | 016 | Phase 2 deploy + regression + PR 2 | 2: Wizard | 🔲 | 011,013,015 | Wave 8 | STANDARD |
 | 020 | FR-10 Scaffold new shared package | 3: Extraction | 🔲 | 016 | Wave 9 | FULL |
 | 021 | FR-10 Migrate section registry into shared package | 3: Extraction | 🔲 | 020 | Wave 10 | FULL |
