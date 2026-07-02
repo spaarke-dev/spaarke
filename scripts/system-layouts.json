@@ -41,6 +41,38 @@
       "sortOrder": 4,
       "isDefault": false,
       "description": "Round-9 task 115. CalendarWorkspaceWidget from @spaarke/events-components — 3-month strip + date-range filter + EventsPage toolbar + view selector + grid of all events+tasks the user has access to. Event detail opens via Xrm.Navigation.navigateTo modal (NOT Xrm.App.sidePanes)."
+    },
+    {
+      "name": "Communications",
+      "sectionId": "communications",
+      "layoutTemplateId": "single-column",
+      "sortOrder": 6,
+      "isDefault": false,
+      "description": "ai-spaarke-ai-workspace-UI-r2 post-merge parity (2026-07-01). LegalWorkspace communications section (Active Communications — sprk_communication, all types: Email/Teams/SMS/Notification). Row-click opens Layout 1 (85%×85%) via DataGrid framework's defaultRecordOpen per FR-03/FR-20. Note: sortOrder 6 chosen so Compose (added by spaarkeai-compose-r1 at sortOrder 5) is not disturbed."
+    },
+    {
+      "name": "Projects",
+      "sectionId": "projects",
+      "layoutTemplateId": "single-column",
+      "sortOrder": 7,
+      "isDefault": false,
+      "description": "ai-spaarke-ai-workspace-UI-r2 post-merge parity (2026-07-01). LegalWorkspace projects section (Active Projects — sprk_project). Row-click opens Layout 1 (85%×85%)."
+    },
+    {
+      "name": "Invoices",
+      "sectionId": "invoices",
+      "layoutTemplateId": "single-column",
+      "sortOrder": 8,
+      "isDefault": false,
+      "description": "ai-spaarke-ai-workspace-UI-r2 post-merge parity (2026-07-01). LegalWorkspace invoices section (Invoice Matter Budget Performance — sprk_invoice). Row-click opens Layout 1 (85%×85%)."
+    },
+    {
+      "name": "Work Assignments",
+      "sectionId": "work-assignments",
+      "layoutTemplateId": "single-column",
+      "sortOrder": 9,
+      "isDefault": false,
+      "description": "ai-spaarke-ai-workspace-UI-r2 post-merge parity (2026-07-01). LegalWorkspace work-assignments section (Active Work Assignments — sprk_workassignment). Row-click opens Layout 1 (85%×85%)."
     }
   ]
 }
