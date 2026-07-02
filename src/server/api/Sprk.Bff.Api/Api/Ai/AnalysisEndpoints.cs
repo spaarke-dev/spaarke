@@ -240,6 +240,7 @@ public static class AnalysisEndpoints
     private static async Task ExecuteAnalysis(
         AnalysisExecuteRequest request,
         IPlaybookOrchestrationService playbookOrchestrationService,
+        AnalysisDocumentLoader documentLoader,
         IOptions<AnalysisOptions> options,
         NotificationService notificationService,
         IGenericEntityService entityService,
@@ -297,10 +298,53 @@ public static class AnalysisEndpoints
         // R-040-3, AnalysisId is not part of PlaybookRunRequest (the existing AnalysisRecord is
         // referenced elsewhere by AnalysisOrchestrationService.ExecutePlaybookAsync via
         // AdditionalContext upstream; AnalysisId pass-through review left for follow-on as needed).
+        //
+        // R7 W12 2026-07-01: Pre-load DocumentContext when a single documentId is supplied.
+        // AiAnalysisNodeExecutor.Validate() requires context.Document != null with non-empty
+        // ExtractedText; the R2 dispatch refactor removed the AnalysisOrchestrationService
+        // legacy path that used to load documents itself. Callers of /api/ai/analysis/execute
+        // (e.g., Document Upload wizard's useAiSummary hook) supply documentIds but expect the
+        // BFF to load + extract text. Fail-soft: if load fails, we still invoke the orchestrator
+        // and let node validation surface a specific error to the client.
+        DocumentContext? documentContext = null;
+        if (request.DocumentIds.Length == 1)
+        {
+            var documentId = request.DocumentIds[0].ToString();
+            try
+            {
+                var document = await documentLoader.GetDocumentAsync(documentId, cancellationToken);
+                if (document != null)
+                {
+                    var extractedText = await documentLoader.ExtractDocumentTextAsync(document, context, cancellationToken);
+                    documentContext = new DocumentContext
+                    {
+                        DocumentId = Guid.TryParse(document.Id, out var docGuid) ? docGuid : request.DocumentIds[0],
+                        Name = document.Name ?? "Unknown",
+                        FileName = document.FileName,
+                        ExtractedText = extractedText,
+                    };
+                    logger.LogInformation(
+                        "Loaded document context for analysis. DocumentId={DocumentId}, TextLength={TextLength}",
+                        documentId, extractedText?.Length ?? 0);
+                }
+                else
+                {
+                    logger.LogWarning("Document {DocumentId} not found in Dataverse; proceeding without document context.", documentId);
+                }
+            }
+            catch (Exception loadEx)
+            {
+                logger.LogWarning(loadEx,
+                    "Failed to load document context for {DocumentId}; proceeding without it. Node validation may reject the run.",
+                    documentId);
+            }
+        }
+
         var playbookRequest = new PlaybookRunRequest
         {
             PlaybookId = request.PlaybookId.Value,
-            DocumentIds = request.DocumentIds
+            DocumentIds = request.DocumentIds,
+            Document = documentContext
         };
 
         try
