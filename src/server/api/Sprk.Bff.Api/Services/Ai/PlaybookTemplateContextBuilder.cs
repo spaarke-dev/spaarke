@@ -61,7 +61,8 @@ public static class PlaybookTemplateContextBuilder
             runContext.RunId,
             runContext.PlaybookId,
             runContext.TenantId,
-            runContext.StartedAt);
+            runContext.StartedAt,
+            runContext.Document);
     }
 
     /// <summary>
@@ -93,7 +94,8 @@ public static class PlaybookTemplateContextBuilder
             nodeContext.RunId,
             nodeContext.PlaybookId,
             nodeContext.TenantId,
-            startedAt: null);
+            startedAt: null,
+            nodeContext.Document);
     }
 
     /// <summary>
@@ -107,9 +109,25 @@ public static class PlaybookTemplateContextBuilder
         Guid runId,
         Guid playbookId,
         string tenantId,
-        DateTimeOffset? startedAt)
+        DateTimeOffset? startedAt,
+        DocumentContext? document = null)
     {
         var context = new Dictionary<string, object?>(StringComparer.Ordinal);
+
+        // Expose the run's DocumentContext (when supplied by the caller) as a top-level
+        // "document" bag. Playbook config templates like {{document.id}}, {{document.name}},
+        // {{document.fileName}}, {{document.extractedText}} resolve here. Missing when the
+        // request path is document-less; templates against a null document render empty.
+        if (document is not null)
+        {
+            context["document"] = new
+            {
+                id = document.DocumentId.ToString(),
+                name = document.Name,
+                fileName = document.FileName,
+                extractedText = document.ExtractedText,
+            };
+        }
 
         // 1. NodeOutputs first — each prior node's OutputVariable becomes a top-level key.
         //    Object outputs (StructuredData JsonElement) are converted to traversable
