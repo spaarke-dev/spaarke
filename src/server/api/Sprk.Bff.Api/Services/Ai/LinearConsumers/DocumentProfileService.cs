@@ -334,51 +334,51 @@ public sealed class DocumentProfileService
                     continue;
 
                 case JsonValueKind.String:
-                {
-                    var stringValue = prop.Value.GetString();
-                    if (string.IsNullOrWhiteSpace(stringValue)) continue;
-
-                    if (name.Equals("sprk_documenttype", StringComparison.OrdinalIgnoreCase))
                     {
-                        var optionValue = DocumentTypeMapper.ToDataverseValue(stringValue);
-                        if (optionValue.HasValue)
+                        var stringValue = prop.Value.GetString();
+                        if (string.IsNullOrWhiteSpace(stringValue)) continue;
+
+                        if (name.Equals("sprk_documenttype", StringComparison.OrdinalIgnoreCase))
                         {
-                            // Dataverse SDK Choice/OptionSet attributes require OptionSetValue,
-                            // not a raw int. R5 Doc 06 Choice-field coercion pattern.
-                            fields[name] = new OptionSetValue(optionValue.Value);
-                            stringOutputs[name] = stringValue;
+                            var optionValue = DocumentTypeMapper.ToDataverseValue(stringValue);
+                            if (optionValue.HasValue)
+                            {
+                                // Dataverse SDK Choice/OptionSet attributes require OptionSetValue,
+                                // not a raw int. R5 Doc 06 Choice-field coercion pattern.
+                                fields[name] = new OptionSetValue(optionValue.Value);
+                                stringOutputs[name] = stringValue;
+                            }
+                            else
+                            {
+                                _logger.LogWarning(
+                                    "Could not coerce documentType='{DocType}' to a Dataverse Choice value; dropping the field",
+                                    stringValue);
+                            }
                         }
                         else
                         {
-                            _logger.LogWarning(
-                                "Could not coerce documentType='{DocType}' to a Dataverse Choice value; dropping the field",
-                                stringValue);
+                            fields[name] = stringValue;
+                            stringOutputs[name] = stringValue;
                         }
+                        break;
                     }
-                    else
-                    {
-                        fields[name] = stringValue;
-                        stringOutputs[name] = stringValue;
-                    }
-                    break;
-                }
 
                 case JsonValueKind.Array:
                 case JsonValueKind.Object:
-                {
-                    var jsonBlob = prop.Value.GetRawText();
-                    fields[name] = jsonBlob;
-                    stringOutputs[name] = jsonBlob;
-                    break;
-                }
+                    {
+                        var jsonBlob = prop.Value.GetRawText();
+                        fields[name] = jsonBlob;
+                        stringOutputs[name] = jsonBlob;
+                        break;
+                    }
 
                 default:
-                {
-                    var raw = prop.Value.GetRawText();
-                    fields[name] = raw;
-                    stringOutputs[name] = raw;
-                    break;
-                }
+                    {
+                        var raw = prop.Value.GetRawText();
+                        fields[name] = raw;
+                        stringOutputs[name] = raw;
+                        break;
+                    }
             }
         }
 
