@@ -35,7 +35,8 @@ export const mattersRegistration: SectionRegistration = {
       id: "matters",
       type: "content",
       title: "Matters",
-      style: { overflow: "hidden" },
+      // Height-chain fix (2026-07-01) — see communications.registration.ts for rationale.
+      style: { overflow: "hidden", maxHeight: "480px", display: "flex" },
       renderContent: () =>
         React.createElement(DataverseEntityViewWidget, {
           data: { configId: MATTERS_CONFIG_ID },

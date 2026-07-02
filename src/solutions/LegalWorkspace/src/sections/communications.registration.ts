@@ -48,7 +48,14 @@ export const communicationsRegistration: SectionRegistration = {
       id: "communications",
       type: "content",
       title: "Communications",
-      style: { overflow: "hidden" },
+      // ai-spaarke-ai-workspace-UI-r2 follow-up (2026-07-01) height-chain fix:
+      // The framework's `buildDynamicWorkspaceConfig` applies SectionMetadata's
+      // `defaultHeight` as `min-height` (a floor), leaving the ceiling unbounded.
+      // Without a `max-height` ceiling, the section grows to fit all N rows and
+      // the DataGrid's internal scroll surface never overflows → no scrollbar,
+      // no lazy-load-on-scroll trigger. Setting `maxHeight` here clamps the
+      // section so the DataGrid scrolls internally and lazy-load works.
+      style: { overflow: "hidden", maxHeight: "480px", display: "flex" },
       renderContent: () =>
         React.createElement(DataverseEntityViewWidget, {
           data: { configId: COMMUNICATIONS_CONFIG_ID },

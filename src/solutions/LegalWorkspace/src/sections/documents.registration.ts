@@ -56,7 +56,11 @@ export const documentsRegistration: SectionRegistration = {
       id: "documents",
       type: "content",
       title: "My Documents",
-      style: { overflow: "hidden" },
+      // Height-chain fix (2026-07-01): `defaultHeight` is applied as `min-height`
+      // by buildDynamicWorkspaceConfig — floor without ceiling → section grows to
+      // fit content → DataGrid scroll surface never overflows. `maxHeight` here
+      // clamps the section so the DataGrid scrolls internally + lazy-load works.
+      style: { overflow: "hidden", maxHeight: "480px", display: "flex" },
       renderContent: () =>
         React.createElement(DataverseEntityViewWidget, {
           data: { configId: DOCUMENTS_CONFIG_ID },
