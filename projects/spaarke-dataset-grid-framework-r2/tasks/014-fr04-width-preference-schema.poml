@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="014" project="spaarke-dataset-grid-framework-r2">
+  <metadata>
+    <title>FR-04: Add `widthPreference` to SectionMetadata + set 'full' on 6 widgets</title>
+    <phase>2: Wizard UI + Per-Instance Overrides</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>006</dependencies>
+    <blocks>015,016</blocks>
+    <tags>frontend, typescript, shared-library, framework, schema, metadata</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies `.ts` schema type + metadata catalog entries</rigor-reason>
+    <parallel-group>Wave 4</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Add optional `widthPreference?: 'full' | 'half' | 'any'` field to `SectionMetadata`, default `'any'`. Set `widthPreference: 'full'` on the 6 entity-list widgets in `sectionMetadataCatalog.ts` (Communications, Documents, Invoices, Matters, Projects, Work Assignments) per owner clarification 2026-07-02.
+  </prompt>
+
+  <role>
+    SPAARKE frontend framework developer. Extends `SectionMetadata` and updates catalog entries.
+  </role>
+
+  <goal>
+    `SectionMetadata.widthPreference` field exists; 6 metadata entries set `'full'`; type test verifies field acceptance.
+  </goal>
+
+  <context>
+    <background>
+      Communications, Invoices, Work Assignments have many columns (email subjects, invoice descriptions) and need full row width to display without truncation. Owner clarified 2026-07-02: all 6 entity-list widgets default to `'full'` (dense grids read best full-width; operator can override per-placement). Runtime dev-guard + wizard warnings come in task 015.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/types/</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/sectionMetadataCatalog.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">Framework schema stays in `@spaarke/ui-components`.</constraint>
+    <constraint source="ADR-022">Shared-lib React-16-safe.</constraint>
+    <constraint source="project">Owner clarification 2026-07-02: all 6 widgets default to `'full'`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-dataset-grid-framework-r2/CLAUDE.md</file>
+      <file>projects/spaarke-dataset-grid-framework-r2/spec.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read spec.md § FR-04. Locate `SectionMetadata` type.</step>
+    <step order="2">Add `readonly widthPreference?: 'full' | 'half' | 'any';` field with JSDoc: `Optional. Signals to the WorkspaceLayoutWizard whether this section renders best at 'full' row width, 'half' width, or is flexible ('any'). 'any' (default) — no wizard warnings. 'full' — wizard warns/blocks placement in multi-slot rows. 'half' — wizard warns on single-slot placement (too much whitespace).`</step>
+    <step order="3">Update `sectionMetadataCatalog.ts`: add `widthPreference: 'full'` to 6 entries: `communications`, `documents`, `invoices`, `matters`, `projects`, `workAssignments`.</step>
+    <step order="4">Type test: confirm `SectionMetadata` accepts the union type; existing catalog entries without the field still type-check (backward-compat).</step>
+    <step order="5">`npm test` + `npm run build` — clean.</step>
+    <step order="6">Update TASK-INDEX.md: → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/types/{SectionMetadata-location}.ts (modified)</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/sectionMetadataCatalog.ts (modified — 6 entries)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`SectionMetadata` accepts the `widthPreference?: 'full' | 'half' | 'any'` field.</criterion>
+    <criterion testable="true">6 entity-list metadata entries have `widthPreference: 'full'`.</criterion>
+    <criterion testable="true">Catalog entries without the field type-check (backward-compat).</criterion>
+    <criterion testable="true">Build + tests clean.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    - This is the schema half of FR-04. Task 015 adds the wizard placement checks + runtime dev-guard.
+    - Owner clarification made 2026-07-02 during `/design-to-spec` — recorded in spec.md § Owner Clarifications and applied here.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge. FULL rigor. Step 9.5 quality gates.</protocol>
+  </execution>
+</task>

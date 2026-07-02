@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="spaarke-dataset-grid-framework-r2">
+  <metadata>
+    <title>FR-02: Add `rowHeight` to LayoutJsonRow schema + parser + test</title>
+    <phase>2: Wizard UI + Per-Instance Overrides</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>006</dependencies>
+    <blocks>011,016</blocks>
+    <tags>frontend, typescript, shared-library, workspace-shell, framework, schema</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies `.ts` schema type; blocks 2 tasks</rigor-reason>
+    <parallel-group>Wave 4</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Add optional `rowHeight?: string` field to `LayoutJsonRow` schema (Dataverse `sprk_workspacelayout.sprk_sectionsjson`). Wire the framework so a row with `rowHeight` set is clamped to that height and sections inside respect the ceiling regardless of `contentSizing`. Ship unit tests covering set + omitted cases + interaction with `contentSizing`.
+  </prompt>
+
+  <role>
+    SPAARKE frontend framework developer. Extends the workspace layout schema.
+  </role>
+
+  <goal>
+    `LayoutJsonRow.rowHeight?: string` field exists; framework applies it as a height ceiling on the row wrapper; interaction with section-level `contentSizing` documented + tested; back-compat verified.
+  </goal>
+
+  <context>
+    <background>
+      A widget that needs 480px in a multi-section dashboard needs 800px+ in a single-section full-page layout. Today, one hardcoded `defaultHeight` baked into section metadata — no per-layout variation. FR-02 adds `rowHeight` at the layout level as the per-instance override.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/types/</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/buildDynamicWorkspaceConfig.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">Framework changes stay in `@spaarke/ui-components`.</constraint>
+    <constraint source="ADR-022">Shared-lib code React-16-safe.</constraint>
+    <constraint source="project">Additive; omitted `rowHeight` = current behavior (sections apply own contentSizing).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-dataset-grid-framework-r2/CLAUDE.md</file>
+      <file>projects/spaarke-dataset-grid-framework-r2/spec.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/patterns/ui/embedded-widget-sizing.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read spec.md § FR-02. Locate `LayoutJsonRow` type definition.</step>
+    <step order="2">Add `readonly rowHeight?: string;` field with JSDoc: `Optional. When set, this row is clamped to the height (accepts any CSS length: '480px', '80vh', '100vh'). Sections respect this ceiling regardless of their contentSizing.`</step>
+    <step order="3">Update `buildDynamicWorkspaceConfig.ts` (or the row-building step) to apply `rowHeight` as `maxHeight` on the row wrapper `style`, along with `overflow: hidden` (to guarantee section overflow behavior).</step>
+    <step order="4">Document interaction: when both `rowHeight` set on row AND `contentSizing: 'clamped'` set on section, the row's ceiling wins; section's `defaultHeight` no longer applies (row already provides the constraint).</step>
+    <step order="5">Unit test: (a) row without `rowHeight` renders as today, (b) row with `rowHeight: '80vh'` gets `maxHeight: '80vh'` on wrapper, (c) row with `rowHeight` set + section with `contentSizing: 'clamped'` — verify section's `defaultHeight` doesn't over-constrain (row wins).</step>
+    <step order="6">`npm test` + `npm run build` — clean.</step>
+    <step order="7">Update TASK-INDEX.md: → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/types/{LayoutJsonRow-location}.ts (modified)</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/buildDynamicWorkspaceConfig.ts (modified)</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/__tests__/buildDynamicWorkspaceConfig.test.ts (extended)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a row with `rowHeight: '80vh'`, when the workspace renders, then the row wrapper `style.maxHeight === '80vh'`.</criterion>
+    <criterion testable="true">Given a row without `rowHeight`, when the workspace renders, then no `maxHeight` is applied by the row (sections apply own contentSizing per FR-01).</criterion>
+    <criterion testable="true">Given a row with `rowHeight` + a section with `contentSizing: 'clamped'`, when the workspace renders, then the row's `maxHeight` is authoritative; section's `defaultHeight` is not applied as an additional constraint.</criterion>
+    <criterion testable="true">Unit tests + build clean.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    - This is the schema half of FR-02. The wizard UI (task 011) exposes the field to makers.
+    - Framework only enforces height at the row level; overflow behavior lives on the DataGrid's inner scroll surface per existing height-chain contract.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge. FULL rigor. Step 9.5 quality gates.</protocol>
+  </execution>
+</task>

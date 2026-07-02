@@ -1,0 +1,102 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="004" project="spaarke-dataset-grid-framework-r2">
+  <metadata>
+    <title>FR-06: Create 3 DataGrid config templates + guide reference</title>
+    <phase>1: Framework Schema + Consumer Unwind</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>006</blocks>
+    <tags>docs, config, templates, maker-experience</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Creates new files (3 templates); has explicit constraints (must be valid against current type); no code implementation</rigor-reason>
+    <parallel-group>Wave 1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Create three DataGrid config template JSON files under `scripts/config-templates/` (directory does not exist yet). Update `docs/guides/DATAGRID-FRAMEWORK-CONFIGURATION-GUIDE.md` § Step 2 to reference them as the recommended starting point for makers.
+  </prompt>
+
+  <role>
+    SPAARKE maker-experience contributor. Understands the DataGrid framework configuration schema thoroughly. Reads `DataGridConfiguration.ts` to ensure templates parse against the current type.
+  </role>
+
+  <goal>
+    3 JSON files exist under `scripts/config-templates/`. Each is a valid `sprk_configjson` payload against the current TypeScript type. Guide references them.
+  </goal>
+
+  <context>
+    <background>
+      DataGrid config has ~9 top-level keys with 30+ nested fields. Makers today either copy from an existing record, read the 400+ line TS type, or read the comprehensive guide. FR-06 provides three template starting points sized to common shapes: minimum viable, drill-through, and full-featured.
+    </background>
+    <relevant-files>
+      <file>scripts/config-templates/entity-list-basic.json (NEW)</file>
+      <file>scripts/config-templates/entity-list-drill-through.json (NEW)</file>
+      <file>scripts/config-templates/entity-list-full.json (NEW)</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/types/DataGridConfiguration.ts (reference — schema type)</file>
+      <file>docs/guides/DATAGRID-FRAMEWORK-CONFIGURATION-GUIDE.md (modified — § Step 2)</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Each JSON must parse against the current `DataGridConfiguration` TypeScript type (verified via `tsc --noEmit` or a quick script).</constraint>
+    <constraint source="project">Templates use placeholder IDs (e.g., `"<entity-name>"`, `"<savedquery-id>"`) that makers replace.</constraint>
+    <constraint source="project">`_version: "1.0"` in all three (no version bump).</constraint>
+  </constraints>
+
+  <justification>
+    <existing>`scripts/config-templates/` does not exist. No overlap.</existing>
+    <extension>N/A — brand new directory + files.</extension>
+    <cost-of-doing-nothing>New maker onboarding takes 2+ hours to author a config from scratch (read 400-line TS type + reverse-engineer working record); templates cut this to ~15 min. Concrete failure = onboarding friction + inconsistent record shapes across makers.</cost-of-doing-nothing>
+  </justification>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-dataset-grid-framework-r2/CLAUDE.md</file>
+      <file>projects/spaarke-dataset-grid-framework-r2/spec.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/types/DataGridConfiguration.ts</file>
+      <file>docs/guides/DATAGRID-FRAMEWORK-CONFIGURATION-GUIDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read spec.md § FR-06 + review `DataGridConfiguration.ts` to catalog required + optional fields.</step>
+    <step order="2">Create `scripts/config-templates/entity-list-basic.json`: minimum viable — `_version`, `source` (savedquery), `display` (title, columns), `rowOpen` (default modal), `behavior.pageSize`. Use `<entity-name>` + `<savedquery-id>` placeholders. Add a top-level `$comment` explaining purpose + replacement instructions.</step>
+    <step order="3">Create `scripts/config-templates/entity-list-drill-through.json`: adds parent-context filter (`source.parentContext`), explicit column overrides (`columns[]`), and `secondaryActions[]`. Same placeholder convention.</step>
+    <step order="4">Create `scripts/config-templates/entity-list-full.json`: every field with sensible defaults. Add per-field `$comment` describing purpose. Include new R2 fields (`availableViews`, `contentSizing` on section metadata — but note the section-metadata field is on the section registration, not the config; keep template scoped to `sprk_configjson`).</step>
+    <step order="5">Verify all three JSONs parse against the type: write a tiny Node script (or use `ts-node`) that imports the type + JSON.parse's each file + assigns to the type. Or use `tsc` with `--allowJs` + JSDoc type-checking. Fastest: add a Vitest to `Spaarke.UI.Components` that parses + type-asserts each template.</step>
+    <step order="6">Update `docs/guides/DATAGRID-FRAMEWORK-CONFIGURATION-GUIDE.md` § Step 2 (Author a new config record): add a subsection referencing the three templates with 1-line each on when to use.</step>
+    <step order="7">Update TASK-INDEX.md: status → ✅ completed.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Type-check / test JSON parses against schema</tool>
+    <tool name="terminal">Create files</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">scripts/config-templates/entity-list-basic.json (new)</output>
+    <output type="config">scripts/config-templates/entity-list-drill-through.json (new)</output>
+    <output type="config">scripts/config-templates/entity-list-full.json (new)</output>
+    <output type="docs">docs/guides/DATAGRID-FRAMEWORK-CONFIGURATION-GUIDE.md (modified — § Step 2)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">3 JSON files exist under `scripts/config-templates/`.</criterion>
+    <criterion testable="true">Each JSON parses against `DataGridConfiguration` TypeScript type without errors (verified via type-check script or Vitest).</criterion>
+    <criterion testable="true">Each JSON contains `"_version": "1.0"` and placeholder markers (`<entity-name>`, `<savedquery-id>`) for maker substitution.</criterion>
+    <criterion testable="true">Configuration guide § Step 2 references the templates with a 1-line description each.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    - Directory `scripts/config-templates/` doesn't exist yet — create it.
+    - Templates target makers, not developers — keep JSON readable + comments generous.
+    - JSON doesn't support comments; use `$comment` string keys (jq-friendly pattern) — the schema tolerates extra keys since `sprk_configjson` runtime ignores unknown keys.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge. STANDARD rigor. Step 9.5 quality gates SKIPPED per rigor level.</protocol>
+  </execution>
+</task>

@@ -46,6 +46,7 @@ Status legend:
 
 | Project | Branch | Worktree Path | BFF | SpaarkeAi | CI Workflows | Skill Directives | Last Commit | Status |
 |---|---|---|---|---|---|---|---|---|
+| `spaarke-dataset-grid-framework-r2` | `work/spaarke-dataset-grid-framework-r2` | `C:/code_files/spaarke-wt-spaarke-dataset-grid-framework-r2` | N | Y | N | Y | 2026-07-02 | Active (initialized 2026-07-02 by `/project-pipeline`) |
 | `ai-spaarke-ai-workspace-UI-r2` | `work/ai-spaarke-ai-workspace-UI-r2` | `C:/code_files/spaarke-wt-ai-spaarke-ai-workspace-UI-r2` | N | Y | N | N | 2026-07-01 | **Complete pending PR #530 merge (2026-07-01)** |
 | `spaarkeai-compose-r1` | `work/spaarkeai-compose-r1` | `C:/code_files/spaarke-wt-spaarkeai-compose-r1` | Y | Y | N | N | 2026-06-30 | Active |
 | `spaarke-ai-platform-unification-r7` | `work/spaarke-ai-platform-unification-r7` | `C:/code_files/spaarke-wt-spaarke-ai-platform-unification-r7` | Y | N | N | Y | 2026-06-28 | Active |
@@ -68,7 +69,7 @@ Status legend:
 | `email-communication-solution-r3` | `work/email-communication-solution-r3` | `C:/code_files/spaarke-wt-email-communication-solution-r3` | Y | N | N | N | 2026-06-05 | Recent |
 | `ai-spaarke-action-engine-r1` | `work/ai-spaarke-action-engine-r1` | `C:/code_files/spaarke-wt-ai-spaarke-action-engine-r1` | Y | Y | N | N | 2026-05-30 | Recent |
 
-**Count**: 21 active worktrees (`ai-spaarke-ai-workspace-UI-r2` added 2026-07-01 by `project-pipeline`; `spaarkeai-compose-r1` added 2026-06-29 by `project-pipeline`; R7 added 2026-06-28 by `project-pipeline`; R2 added 2026-06-26 by `project-pipeline`; exceeds spec's 5-6 estimate; this reflects current portfolio reality post-2026-05-20 ramp — flagged for spec refinement in `ci-cd-unit-test-remediation-r1` Phase 1 task `010`).
+**Count**: 22 active worktrees (`spaarke-dataset-grid-framework-r2` added 2026-07-02 by `project-pipeline`; `ai-spaarke-ai-workspace-UI-r2` added 2026-07-01 by `project-pipeline`; `spaarkeai-compose-r1` added 2026-06-29 by `project-pipeline`; R7 added 2026-06-28 by `project-pipeline`; R2 added 2026-06-26 by `project-pipeline`; exceeds spec's 5-6 estimate; this reflects current portfolio reality post-2026-05-20 ramp — flagged for spec refinement in `ci-cd-unit-test-remediation-r1` Phase 1 task `010`).
 
 ---
 
@@ -103,8 +104,9 @@ This section surfaces where parallel projects collide on the same hot-path surfa
 
 ### SpaarkeAi (`src/solutions/SpaarkeAi/**`)
 
-**9 active projects touch SpaarkeAi.** Concentrated in the AI/widget portfolio:
+**10 active projects touch SpaarkeAi.** Concentrated in the AI/widget portfolio:
 
+- `spaarke-dataset-grid-framework-r2` (FR-10 shared-package extraction: removes SpaarkeAi's `@spaarke/legal-workspace` source alias in vite.config.ts; adds file: dependency on new `@spaarke/legal-workspace` shared package. Merge-order coordination with `spaarkeai-compose-r1` required — Compose adds a section-registry entry that FR-10 must accommodate.)
 - `spaarkeai-compose-r1` (Compose workspace layout: new `sprk_workspacelayout` row + `components/compose/*` React surface + section-registry entry; reuses Pattern D from Calendar)
 - `spaarke-daily-update-service-r4` (widget enhancements)
 - `spaarke-daily-update-service-r3` (widget read-state)
@@ -128,8 +130,9 @@ This section surfaces where parallel projects collide on the same hot-path surfa
 
 ### Skill Directives (`.claude/skills/**`, `.claude/constraints/**`)
 
-**4 active projects touch skill directives**:
+**5 active projects touch skill directives**:
 
+- `spaarke-dataset-grid-framework-r2` — FR-09 adds dual-deploy warning section to `.claude/skills/code-page-deploy/SKILL.md` (single skill; no `INDEX.md` touch). Sequential-only per CLAUDE.md §3 sub-agent write boundary.
 - `ci-cd-unit-test-remediation-r1` — modifies `task-execute`, `project-pipeline`, `conflict-check` SKILL.md (Phase 1 Stream C)
 - `spaarke-devops-project-tracking-r1` — 9 new `/devops-*` skills + 9 hooked existing skills (this is the project's core deliverable)
 - `customer-provisioning-orchestration-r1` — new skill + scripts for provisioning orchestration (`/master-deploy` extension)

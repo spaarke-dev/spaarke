@@ -1,0 +1,121 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="spaarke-dataset-grid-framework-r2">
+  <metadata>
+    <title>FR-02: Wizard UI for `rowHeight` with presets</title>
+    <phase>2: Wizard UI + Per-Instance Overrides</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>010</dependencies>
+    <blocks>013,016</blocks>
+    <tags>frontend, typescript, react, fluent-ui, workspace-layout-wizard, wizard-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies `.tsx` file (`App.tsx`); code implementation; multi-step UI addition</rigor-reason>
+    <parallel-group>Wave 5</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Same file (`WorkspaceLayoutWizard/src/App.tsx`) touched by 013, 015 — must serialize</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Add a `rowHeight` input to the `WorkspaceLayoutWizard` UI at the per-row settings level. Provide a dropdown with common presets (`auto`, `40vh`, `60vh`, `80vh`, `100vh`) + a "Custom" option that accepts any CSS length. Wire the input to the layout JSON output so wizard-authored rows can set the field.
+  </prompt>
+
+  <role>
+    SPAARKE frontend developer + Fluent UI v9 wizard-UX contributor. Reads `.claude/patterns/ui/fluent-v9-component-authoring.md` for Fluent v9 patterns.
+  </role>
+
+  <goal>
+    Wizard-authored layout with `rowHeight` selected in dropdown produces valid JSON. Preset dropdown + "Custom" input work. UX matches Fluent v9 conventions.
+  </goal>
+
+  <context>
+    <background>
+      FR-02's schema half (task 010) added the field. This task exposes the field to makers via the wizard. Presets cover the common cases; "Custom" is escape hatch.
+    </background>
+    <relevant-files>
+      <file>src/solutions/WorkspaceLayoutWizard/src/App.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Fluent UI v9 only; no v8 imports; use semantic tokens for dark-mode adaptability.</constraint>
+    <constraint source="project">Wizard is a Vite React 18 code page — React-18-only APIs allowed here (unlike shared lib which stays React-16-safe).</constraint>
+    <constraint source="project">Output JSON matches schema from task 010 (`rowHeight?: string` on `LayoutJsonRow`).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-dataset-grid-framework-r2/CLAUDE.md</file>
+      <file>projects/spaarke-dataset-grid-framework-r2/spec.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/ui/fluent-v9-theming.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read spec.md § FR-02. Read `WorkspaceLayoutWizard/src/App.tsx` to find where row-level settings render.</step>
+    <step order="2">Add a Fluent v9 `Dropdown` for `rowHeight` with preset options: "Auto (default)", "40vh (small)", "60vh (medium)", "80vh (large)", "100vh (full-viewport)", "Custom…". Selecting "Custom…" reveals a Fluent v9 `Input` for arbitrary CSS length values (with placeholder text `e.g., 640px` or `70vh`).</step>
+    <step order="3">Wire the selected value into the `LayoutJsonRow.rowHeight` field of the wizard's JSON model. "Auto (default)" omits the field entirely.</step>
+    <step order="4">Add a small tooltip / help text: "Sets the row's max-height. Sections inside respect this ceiling regardless of their own contentSizing. Leave as Auto to let sections decide their own height."</step>
+    <step order="5">Ensure UI adapts to dark mode (use Fluent v9 semantic tokens; no hardcoded colors).</step>
+    <step order="6">Wizard integration test: setting `rowHeight` to `80vh` in the wizard produces a JSON section with `"rowHeight": "80vh"` in the `LayoutJsonRow`.</step>
+    <step order="7">Run `npm run build` in `WorkspaceLayoutWizard/` — clean.</step>
+    <step order="8">Update TASK-INDEX.md: → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + integration test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/WorkspaceLayoutWizard/src/App.tsx (modified — new dropdown + custom input)</output>
+    <output type="test">src/solutions/WorkspaceLayoutWizard/src/__tests__/rowHeight.test.tsx (new)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Wizard dropdown for `rowHeight` shows 5 preset options + Custom.</criterion>
+    <criterion testable="true">Selecting `80vh` produces JSON with `"rowHeight": "80vh"` in the row.</criterion>
+    <criterion testable="true">Selecting `Auto (default)` omits `rowHeight` from the JSON entirely.</criterion>
+    <criterion testable="true">Custom input accepts arbitrary CSS length; wizard produces JSON with the exact value.</criterion>
+    <criterion testable="true">Dark mode preserves readability (no white on white or black on black).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    - This is the wizard UI half of FR-02. Task 010 already added the field to the schema.
+    - Serial with tasks 013, 015 (all touch `WorkspaceLayoutWizard/src/App.tsx`).
+    - If existing wizard structure has separate components per row/section, add the dropdown in the row-settings component.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge. FULL rigor. Step 9.5 quality gates. UI test defs at Step 9.7 (see ui-tests below).</protocol>
+  </execution>
+
+  <ui-tests>
+    <test name="rowHeight dropdown renders">
+      <steps>
+        <step>Open WorkspaceLayoutWizard in a browser</step>
+        <step>Add a new row</step>
+        <step>Verify rowHeight dropdown is visible with 5 presets + Custom</step>
+        <step>Check console for JavaScript errors</step>
+      </steps>
+      <expected>Dropdown renders; no console errors</expected>
+    </test>
+    <test name="Dark mode compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode in browser or D365 settings</step>
+        <step>Verify dropdown + input background/text colors adapt</step>
+      </steps>
+      <expected>All colors use Fluent v9 semantic tokens per ADR-021</expected>
+    </test>
+    <test name="Custom input accepts CSS length">
+      <steps>
+        <step>Select "Custom…" from dropdown</step>
+        <step>Enter `640px` in input</step>
+        <step>Save layout</step>
+        <step>Inspect resulting JSON</step>
+      </steps>
+      <expected>JSON contains `"rowHeight": "640px"`</expected>
+    </test>
+  </ui-tests>
+</task>

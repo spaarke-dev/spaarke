@@ -1,0 +1,99 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="spaarke-dataset-grid-framework-r2">
+  <metadata>
+    <title>FR-10: Migrate LegalWorkspace section registry into new shared package</title>
+    <phase>3: Shared Package Extraction + Documentation</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>020</dependencies>
+    <blocks>022,023</blocks>
+    <tags>frontend, typescript, shared-library, legal-workspace, section-registry, migration</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Multi-file migration across shared lib + solution; refactor of core LegalWorkspace surface</rigor-reason>
+    <parallel-group>Wave 10</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Move (or re-export) `LegalWorkspace/src/sectionRegistry.ts`, the 6 entity-list section registrations (`sections/*.registration.ts`), and any related metadata/types into the new `@spaarke/legal-workspace` shared package. Decision at start of task: either (a) MOVE files (fully migrate — cleaner) or (b) RE-EXPORT from shared package (files stay in `src/solutions/LegalWorkspace/` but shared package re-exports them). Document the choice + reasoning in notes/.
+  </prompt>
+
+  <role>
+    SPAARKE frontend framework developer. Coordinates a multi-file refactor with backward-compat verification.
+  </role>
+
+  <goal>
+    Section registry + 6 entity-list registrations accessible via `@spaarke/legal-workspace` package export. Existing LegalWorkspace-internal imports continue to work (either via direct import in place or via re-export). Package builds independently.
+  </goal>
+
+  <context>
+    <background>
+      FR-10's foundation. Determines whether SpaarkeAi's vite.config.ts can drop the source alias in favor of a normal package dependency.
+    </background>
+    <relevant-files>
+      <file>src/solutions/LegalWorkspace/src/sectionRegistry.ts</file>
+      <file>src/solutions/LegalWorkspace/src/sections/*.registration.ts (all)</file>
+      <file>src/solutions/LegalWorkspace/src/workspaceConfig.tsx</file>
+      <file>src/client/shared/Spaarke.LegalWorkspace/src/index.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">Content lives in one canonical place; no duplication.</constraint>
+    <constraint source="ADR-022">Package stays React-16-safe.</constraint>
+    <constraint source="project">MUST preserve existing exports so LegalWorkspace continues to build.</constraint>
+    <constraint source="project">Decision (move vs re-export) documented in notes/ for future reviewers.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-dataset-grid-framework-r2/CLAUDE.md</file>
+      <file>projects/spaarke-dataset-grid-framework-r2/spec.md</file>
+      <file>projects/spaarke-dataset-grid-framework-r2/plan.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/index.ts</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `sectionRegistry.ts` + all 6 `sections/*.registration.ts` + `workspaceConfig.tsx`. Map the export surface: what's exported, what imports it (grep for `sectionRegistry` + `sections/` imports).</step>
+    <step order="2">Decide MIGRATION STRATEGY: (a) MOVE files into `src/client/shared/Spaarke.LegalWorkspace/src/` (cleaner but wider blast radius) OR (b) KEEP files in `src/solutions/LegalWorkspace/src/` + create `src/client/shared/Spaarke.LegalWorkspace/src/index.ts` that RE-EXPORTS them (smaller change; easier rollback). Recommend (b) for R2 — reduces blast radius; can be tightened to (a) in a future project. Document choice in `projects/spaarke-dataset-grid-framework-r2/notes/fr10-migration-strategy.md`.</step>
+    <step order="3">If (b): populate `src/client/shared/Spaarke.LegalWorkspace/src/index.ts` with re-exports: `export * from '../../../solutions/LegalWorkspace/src/sectionRegistry'; export * from '../../../solutions/LegalWorkspace/src/sections/communications.registration'; ...` (repeat for 6 sections). This is a shim; SpaarkeAi consumes via the shared package, and content stays in LegalWorkspace's tree.</step>
+    <step order="4">If (a): Move all files into shared package; update LegalWorkspace's internal imports to point at the shared package. Bigger refactor; only choose if reviewer prefers.</step>
+    <step order="5">Update the new shared package's `package.json` `exports` map to expose the section registry + section registrations.</step>
+    <step order="6">Build the shared package: `npm run build` in `src/client/shared/Spaarke.LegalWorkspace/` — types emit; exports resolvable.</step>
+    <step order="7">Build LegalWorkspace: still compiles (either via direct imports if (b) or via new shared-package imports if (a)).</step>
+    <step order="8">Update TASK-INDEX.md: 021 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build</tool>
+    <tool name="terminal">Move / edit files; grep imports</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.LegalWorkspace/src/index.ts (populated — either moves or re-exports)</output>
+    <output type="code">src/client/shared/Spaarke.LegalWorkspace/package.json (modified — exports map)</output>
+    <output type="docs">projects/spaarke-dataset-grid-framework-r2/notes/fr10-migration-strategy.md (new — decision record)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Migration strategy decision documented in notes/.</criterion>
+    <criterion testable="true">Shared package's `index.ts` exposes sectionRegistry + 6 entity-list registrations (either directly or via re-export).</criterion>
+    <criterion testable="true">`npm run build` in shared package succeeds; types emit.</criterion>
+    <criterion testable="true">LegalWorkspace continues to build (imports still resolve).</criterion>
+    <criterion testable="true">External consumer (SpaarkeAi in task 022) can import `@spaarke/legal-workspace` and get the section registry.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    - Choose (b) re-export approach for R2 unless reviewer prefers (a). Re-export is a smaller, more reversible change; matches "additive schema evolution" spirit.
+    - If (b): note that content still lives in LegalWorkspace's source tree — future project can complete the physical move once the pattern is proven.
+    - If (a): coordinate with LegalWorkspace maintainers; larger PR footprint; requires updating all LegalWorkspace-internal imports simultaneously.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge. FULL rigor. Step 9.5 quality gates.</protocol>
+  </execution>
+</task>

@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="023" project="spaarke-dataset-grid-framework-r2">
+  <metadata>
+    <title>FR-10: Update LegalWorkspace + WorkspaceLayoutWizard consumers to use shared package</title>
+    <phase>3: Shared Package Extraction + Documentation</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>021</dependencies>
+    <blocks>025,026</blocks>
+    <tags>frontend, typescript, legal-workspace, workspace-layout-wizard, migration</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies 2 Vite apps' build configs / imports; regression surface for FR-10</rigor-reason>
+    <parallel-group>Wave 11</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Update LegalWorkspace (self-consumer) and WorkspaceLayoutWizard (if it consumes the section registry) to import from the new `@spaarke/legal-workspace` package. If task 021 chose re-export strategy (b), the existing LegalWorkspace-internal imports may keep working — verify. If task 021 chose move strategy (a), update all LegalWorkspace-internal imports to point at the new package.
+  </prompt>
+
+  <role>
+    SPAARKE frontend build-engineer.
+  </role>
+
+  <goal>
+    Both LegalWorkspace and WorkspaceLayoutWizard build correctly and consume the new shared package. Existing behavior preserved.
+  </goal>
+
+  <context>
+    <background>
+      Complements task 022. After 022 + 023, all three consumers (SpaarkeAi, LegalWorkspace, WorkspaceLayoutWizard) build off the same shared package.
+    </background>
+    <relevant-files>
+      <file>src/solutions/LegalWorkspace/package.json</file>
+      <file>src/solutions/LegalWorkspace/vite.config.ts (if any alias)</file>
+      <file>src/solutions/WorkspaceLayoutWizard/package.json</file>
+      <file>src/solutions/WorkspaceLayoutWizard/vite.config.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">Shared library SSOT.</constraint>
+    <constraint source="project">Task 021's migration strategy dictates whether LegalWorkspace-internal imports change (a: yes, b: no).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-dataset-grid-framework-r2/CLAUDE.md</file>
+      <file>projects/spaarke-dataset-grid-framework-r2/spec.md</file>
+      <file>projects/spaarke-dataset-grid-framework-r2/notes/fr10-migration-strategy.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read task 021's migration strategy decision from notes/fr10-migration-strategy.md.</step>
+    <step order="2">If strategy (a) MOVE: update LegalWorkspace's internal imports (`src/sections/`, `sectionRegistry.ts`) to import from `@spaarke/legal-workspace` instead of relative paths.</step>
+    <step order="3">If strategy (b) RE-EXPORT: verify LegalWorkspace's existing imports still work (they should — files stayed in place). Add file: dependency to `LegalWorkspace/package.json` so LegalWorkspace can also import from `@spaarke/legal-workspace` if desired (optional for LegalWorkspace-internal code but required if any LegalWorkspace file wants to use the canonical name).</step>
+    <step order="4">Check WorkspaceLayoutWizard: does it consume section registry? Grep `sectionRegistry` in `WorkspaceLayoutWizard/`. If yes, add the new shared-package dependency to `WorkspaceLayoutWizard/package.json` + update imports.</step>
+    <step order="5">Run `npm install` + `npm run build` in LegalWorkspace + WorkspaceLayoutWizard. Both succeed.</step>
+    <step order="6">Update TASK-INDEX.md: 023 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Install + build</tool>
+    <tool name="terminal">Edit + grep</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/LegalWorkspace/package.json (modified — optional dependency addition)</output>
+    <output type="code">src/solutions/WorkspaceLayoutWizard/package.json (modified — if consumer)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">LegalWorkspace builds without changes to functionality.</criterion>
+    <criterion testable="true">WorkspaceLayoutWizard builds without changes to functionality.</criterion>
+    <criterion testable="true">Both consumers can import from `@spaarke/legal-workspace` if they choose to.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    - Under strategy (b), this task is mostly a no-op for LegalWorkspace (files stayed put). Confirm WorkspaceLayoutWizard's consumer relationship separately.
+    - If WorkspaceLayoutWizard doesn't consume the section registry, this task simplifies to LegalWorkspace-only.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge. FULL rigor. Step 9.5 quality gates.</protocol>
+  </execution>
+</task>

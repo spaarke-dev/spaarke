@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="003" project="spaarke-dataset-grid-framework-r2">
+  <metadata>
+    <title>FR-07: Change framework `pageSize` default 100 → 25 + doc alignment</title>
+    <phase>1: Framework Schema + Consumer Unwind</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>006</blocks>
+    <tags>frontend, typescript, shared-library, datagrid, framework, behavior-defaults</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies `.ts` file; global behavior change (default affects all consumers)</rigor-reason>
+    <parallel-group>Wave 1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Change the framework `pageSize` fallback in `DataGrid.tsx` from `?? 100` to `?? 25` (owner clarification 2026-07-02). Update the doc comment on `DataGridConfiguration.ts:329` to say `Default 25`. Ship a unit test on the fallback. Identify drill-through / full-page consumers that may rely on the old default via grep + note in PR description.
+  </prompt>
+
+  <role>
+    SPAARKE frontend framework developer. Aware that this is a global behavior change requiring identification of at-risk consumers.
+  </role>
+
+  <goal>
+    Framework default `pageSize = 25`. Consumers that want 100 must set it explicitly. Doc/code aligned. Unit test verifies fallback. At-risk consumers identified for PR reviewer awareness.
+  </goal>
+
+  <context>
+    <background>
+      Design Issue 8 flagged doc drift: comment says `Default 50 per design.md` but runtime code uses `?? 100`. During `/design-to-spec` interview 2026-07-02, owner clarified: change default to 25 (workspace embedding is dominant use case; drill-through consumers explicitly override). Merges Issue 8 (doc drift fix) and Issue 11 (default decision) into a single code+doc change.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DataGrid/DataGrid.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/types/DataGridConfiguration.ts</file>
+      <file>docs/guides/DATAGRID-FRAMEWORK-CONFIGURATION-GUIDE.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">Framework changes stay in `@spaarke/ui-components`.</constraint>
+    <constraint source="ADR-038">Unit test framework-contract; MAINTAIN-class.</constraint>
+    <constraint source="project">Additive-safe: existing config records with explicit `pageSize` set are unaffected; only records that omit `pageSize` see the new default.</constraint>
+    <constraint source="project">The 6 workspace-widget config records currently set `pageSize: 25` explicitly — no functional change for them.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-dataset-grid-framework-r2/CLAUDE.md</file>
+      <file>projects/spaarke-dataset-grid-framework-r2/spec.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/guides/DATAGRID-FRAMEWORK-CONFIGURATION-GUIDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read spec.md § FR-07 + owner clarifications table. Confirm target: `?? 100` → `?? 25`.</step>
+    <step order="2">Locate `DataGrid.tsx` line ~847 (`?? 100`). Change to `?? 25`.</step>
+    <step order="3">Update `DataGridConfiguration.ts:329` JSDoc comment for `behavior.pageSize` field: `Default 25 (workspace-widget majority use case). Drill-through / full-page consumers should override explicitly to 50 or 100.`</step>
+    <step order="4">Add unit test on `DataGrid` component (or extract the fallback into a helper for testability): assert that when `config.behavior.pageSize` is undefined, the effective pageSize passed to fetch is 25.</step>
+    <step order="5">Grep for `sprk_gridconfiguration` records in the codebase (test fixtures, documentation examples) with omitted `pageSize`. List them in the PR description for reviewer awareness — none should exist as production records, but document the search.</step>
+    <step order="6">Update `docs/guides/DATAGRID-FRAMEWORK-CONFIGURATION-GUIDE.md` where it references the pageSize default (search for "pageSize" in that guide). Align text with the new default.</step>
+    <step order="7">Run `npm test` — all pass; new test passes.</step>
+    <step order="8">Run `npm run build` — build succeeds.</step>
+    <step order="9">Update TASK-INDEX.md: status → ✅ completed.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build and test</tool>
+    <tool name="terminal">Grep for at-risk consumers</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/DataGrid/DataGrid.tsx (modified)</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/types/DataGridConfiguration.ts (modified comment)</output>
+    <output type="docs">docs/guides/DATAGRID-FRAMEWORK-CONFIGURATION-GUIDE.md (modified)</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/DataGrid/__tests__/DataGrid.pageSize.test.ts (new or extended)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a config record with `behavior.pageSize` undefined, when the DataGrid renders, then the effective pageSize is 25 (not 100).</criterion>
+    <criterion testable="true">Given a config record with `behavior.pageSize: 50` (or any explicit value), when the DataGrid renders, then the explicit value is used (not overridden by the new default).</criterion>
+    <criterion testable="true">Doc comment on `DataGridConfiguration.ts` says `Default 25`. Configuration guide reflects the same.</criterion>
+    <criterion testable="true">`npm test` and `npm run build` clean.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    - The 6 existing entity-list widgets ship with explicit `pageSize: 25` in their config records — this change is invisible to them.
+    - Post-change, those explicit settings could be removed (rely on new default), but that's optional cleanup — leave them for now to keep PR 1 focused.
+    - Reviewer note in PR description: this is a global default change. Grep in step 5 should confirm no production record relies on the old default of 100. If any is found, either explicitly set `pageSize: 100` on that record OR flag for reviewer discussion.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge. FULL rigor. Step 9.5 quality gates.</protocol>
+  </execution>
+</task>

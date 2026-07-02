@@ -1,0 +1,107 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="spaarke-dataset-grid-framework-r2">
+  <metadata>
+    <title>FR-01: Add `contentSizing` field to SectionMetadata + wire buildDynamicWorkspaceConfig</title>
+    <phase>1: Framework Schema + Consumer Unwind</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>005,006</blocks>
+    <tags>frontend, typescript, fluent-ui, shared-library, datagrid, workspace-shell, framework</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Load-bearing framework code change to `.ts` files; blocks 2+ tasks; 6+ steps</rigor-reason>
+    <parallel-group>Wave 1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Extend `SectionMetadata` with an optional `contentSizing: 'grow' | 'clamped'` field (default `'grow'` for back-compat) and update `buildDynamicWorkspaceConfig.ts` to apply `defaultHeight` as `max-height` + `overflow: hidden` + `display: flex` when `'clamped'`, or as `min-height` when `'grow'`. Ship unit tests covering both branches.
+  </prompt>
+
+  <role>
+    SPAARKE frontend framework developer. Expert in TypeScript + Fluent UI v9 + React. Follows ADR-012 (shared component library) and ADR-022 (React 16-safe shared lib). Reads `docs/architecture/SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE.md` for context and `.claude/patterns/ui/embedded-widget-sizing.md` for the height-chain contract this task fixes.
+  </role>
+
+  <goal>
+    `SectionMetadata.contentSizing` field exists; `buildDynamicWorkspaceConfig.ts` applies the correct sizing key based on the field's value; unit tests cover both `'grow'` and `'clamped'` branches; existing sections (no `contentSizing` set) render identically to today (back-compat verified).
+  </goal>
+
+  <context>
+    <background>
+      Production use of `ai-spaarke-ai-workspace-UI-r2` surfaced a broken height chain: `buildDynamicWorkspaceConfig.ts:167-171` applies `SectionMetadata.defaultHeight` as `min-height` (a floor without ceiling). Sections grow unbounded to fit content instead of scrolling. The tactical fix (added `maxHeight: '480px'` to 6 registration files) forces 480px everywhere and wastes vertical space on full-page layouts. FR-01 is the framework-level fix: sections declare intent (`'grow'` vs `'clamped'`) and framework applies correct sizing key.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/buildDynamicWorkspaceConfig.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/sectionMetadataCatalog.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/types/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">Framework changes stay in `@spaarke/ui-components`; no PCF-specific dependencies.</constraint>
+    <constraint source="ADR-022">Shared-lib code stays React-16-safe (no React 18/19-only hooks or APIs).</constraint>
+    <constraint source="ADR-038">Unit tests are MAINTAIN-class framework-contract tests. No `Mock<HttpMessageHandler>`. No DI-registration tests.</constraint>
+    <constraint source="project">Additive schema — `contentSizing` is optional; omitted = `'grow'` behavior (identical to today).</constraint>
+    <constraint source="project">No `sprk_configjson._version` bump. Change is in shared-lib TypeScript types + wiring; Dataverse JSON not touched.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-dataset-grid-framework-r2/CLAUDE.md</file>
+      <file>projects/spaarke-dataset-grid-framework-r2/spec.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/architecture/SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE.md</file>
+      <file>.claude/patterns/ui/embedded-widget-sizing.md</file>
+      <file>docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md</file>
+    </files>
+    <patterns>
+      <pattern name="Height-chain contract" location=".claude/patterns/ui/embedded-widget-sizing.md">
+        Framework decides sizing; sections declare intent via metadata; overflow lives on the DataGrid's inner scroll surface.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read spec.md § FR-01 + the referenced files above (especially `embedded-widget-sizing.md` for the height-chain rationale).</step>
+    <step order="2">Locate the `SectionMetadata` type definition (grep for `SectionMetadata` in `src/client/shared/Spaarke.UI.Components/src/types/` or wherever it lives). Add `readonly contentSizing?: 'grow' | 'clamped';` field with JSDoc comment explaining semantics.</step>
+    <step order="3">Update `buildDynamicWorkspaceConfig.ts:167-171` — replace the current `minHeight`-only logic with the conditional: when `registration.contentSizing === 'clamped'`, apply `maxHeight` + `overflow: 'hidden'` + `display: 'flex'`; otherwise apply `minHeight` (existing behavior). Guard against overriding operator-set `style.minHeight` OR `style.maxHeight`.</step>
+    <step order="4">Add unit tests for `buildDynamicWorkspaceConfig` covering: (a) section with `contentSizing: 'grow'` gets `min-height`, (b) section with `contentSizing: 'clamped'` gets `max-height` + `overflow: hidden` + `display: flex`, (c) section with `contentSizing` omitted gets `min-height` (default), (d) operator-set `style.minHeight` is not overwritten, (e) operator-set `style.maxHeight` is not overwritten. Test file location: adjacent `__tests__/` per Spaarke.UI.Components convention.</step>
+    <step order="5">Run `npm test` in `src/client/shared/Spaarke.UI.Components/` — all tests pass, including the 5 new tests.</step>
+    <step order="6">Run `npm run build` in `src/client/shared/Spaarke.UI.Components/` — build succeeds; types emit.</step>
+    <step order="7">Update TASK-INDEX.md: change 001 status to ✅ completed.</step>
+    <step order="8">If deviations from plan, document in `projects/spaarke-dataset-grid-framework-r2/notes/`.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build and test TypeScript projects</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/types/{SectionMetadata-location}.ts (modified — new field)</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/buildDynamicWorkspaceConfig.ts (modified — conditional sizing)</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/__tests__/buildDynamicWorkspaceConfig.test.ts (new or extended)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a section registration with `contentSizing: 'clamped'` and `defaultHeight: '480px'`, when `buildDynamicWorkspaceConfig` produces the section config, then the resulting `style` object contains `maxHeight: '480px'`, `overflow: 'hidden'`, `display: 'flex'` and does NOT contain `minHeight`.</criterion>
+    <criterion testable="true">Given a section registration with `contentSizing: 'grow'` (or omitted) and `defaultHeight: '480px'`, when `buildDynamicWorkspaceConfig` produces the section config, then `style.minHeight === '480px'` and no `maxHeight`/`overflow`/`display: flex` are set by the framework.</criterion>
+    <criterion testable="true">Given a section registration where operator has set `style.minHeight` or `style.maxHeight` manually, when `buildDynamicWorkspaceConfig` runs, then framework does NOT overwrite operator's explicit style.</criterion>
+    <criterion testable="true">All unit tests pass. `npm test` clean.</criterion>
+    <criterion testable="true">`npm run build` succeeds; TypeScript types emit including new field.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    - This is the load-bearing framework fix. Task 005 depends on this landing to unwind the tactical `maxHeight` hack.
+    - The 6 metadata catalog entries (Communications, Documents, Invoices, Matters, Projects, Work Assignments) get `contentSizing: 'clamped'` in task 005, not here.
+    - Height-chain contract is documented in `.claude/patterns/ui/embedded-widget-sizing.md` — required reading.
+    - No PCF consumer touch — this is Vite/React 18 in code-page consumption context. But shared-lib code must still be React-16-safe per ADR-022 (no React 18-only hooks).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files in `<knowledge><files>`. Follow task-execute Step 0.5 rigor gate — FULL applies. Quality gates at Step 9.5: `code-review` + `adr-check`.</protocol>
+  </execution>
+</task>

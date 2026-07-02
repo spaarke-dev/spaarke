@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="006" project="spaarke-dataset-grid-framework-r2">
+  <metadata>
+    <title>Phase 1 close: build + deploy + regression + PR 1</title>
+    <phase>1: Framework Schema + Consumer Unwind</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>001,002,003,004,005</dependencies>
+    <blocks>010,011,012,013,014,015</blocks>
+    <tags>deploy, code-page-deploy, legal-workspace, spaarkeai, workspace-layout-wizard, regression, pr</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Deployment task — new outputs (PR, deployment artifacts); explicit constraints; but no source-code implementation (integration + regression)</rigor-reason>
+    <parallel-group>Wave 3</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Build shared lib + LegalWorkspace + SpaarkeAi + WorkspaceLayoutWizard. Deploy to spaarkedev1 via `code-page-deploy` skill or `Deploy-AllDataGridConsumers.ps1`. Regression-test on Dashboard II (6 entity-list widgets) + 5 single-section full-page system layouts. Commit + push + open PR 1 with the 5 FRs (FR-01, FR-05, FR-06, FR-07, FR-08).
+  </prompt>
+
+  <role>
+    SPAARKE deployment operator + regression tester. Invokes `code-page-deploy` skill for the deploy step. Verifies Dashboard II + 5 full-page layouts render correctly.
+  </role>
+
+  <goal>
+    PR 1 open with all 5 FRs from Phase 1. All 4 code pages deployed to spaarkedev1. Regression clean on all 11 tested surfaces (6 Dashboard II widgets + 5 full-page layouts). CI green on the PR.
+  </goal>
+
+  <context>
+    <background>
+      Phase 1 accumulates 5 FRs into a single PR: FR-01 (framework contentSizing), FR-05 (availableViews), FR-06 (config templates), FR-07 (pageSize default 25), FR-08 (unwind maxHeight). All must ship together to keep Phase 2 (wizard work) unblocked.
+    </background>
+    <relevant-files>
+      <file>scripts/Build-AllClientComponents.ps1</file>
+      <file>scripts/Build-ViteSolutionsDirect.ps1</file>
+      <file>scripts/Deploy-AllDataGridConsumers.ps1</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">MUST verify SpaarkeAi rebuild picks up the changes (per the dual-deploy trap that FR-09 documents and FR-10 eliminates). Until FR-10 lands (PR 3), SpaarkeAi and LegalWorkspace must BOTH be rebuilt for changes to reach every consumer.</constraint>
+    <constraint source="project">Regression surface: 6 Dashboard II widgets (Communications, Documents, Invoices, Matters, Projects, Work Assignments) + 5 single-section full-page layouts (Documents, Communications, Projects, Invoices, Work Assignments).</constraint>
+    <constraint source="project">Do NOT include the wizard changes from Phase 2 in this PR. PR 1 is framework-only.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-dataset-grid-framework-r2/CLAUDE.md</file>
+      <file>projects/spaarke-dataset-grid-framework-r2/spec.md</file>
+      <file>projects/spaarke-dataset-grid-framework-r2/plan.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>.claude/skills/spaarke-conventions/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Confirm tasks 001-005 all ✅. Run `git status` to confirm expected files staged/modified.</step>
+    <step order="2">Run `powershell scripts/Build-AllClientComponents.ps1` — builds `@spaarke/ui-components` + all consumers.</step>
+    <step order="3">Run `powershell scripts/Build-ViteSolutionsDirect.ps1` (or equivalent) to build LegalWorkspace + SpaarkeAi + WorkspaceLayoutWizard Vite bundles. All succeed.</step>
+    <step order="4">Invoke `/code-page-deploy` skill for LegalWorkspace + SpaarkeAi + WorkspaceLayoutWizard (three consumers) — deploy to spaarkedev1 environment.</step>
+    <step order="5">Regression on Dashboard II — open `sprk_corporateworkspace` in spaarkedev1, navigate to Dashboard II (or the equivalent layout containing Communications section). Verify: (a) Communications section shows visible Fluent scrollbar, (b) scrolling triggers page-2 fetch (25 rows per page), (c) 5 other entity-list widgets render correctly (Documents, Invoices, Matters, Projects, Work Assignments). No console errors.</step>
+    <step order="6">Regression on 5 single-section full-page layouts — Documents system layout, Communications system layout, Projects system layout, Invoices system layout, Work Assignments system layout. Each renders correctly; height uses more than the old 480px cap (though `rowHeight` override lands in FR-02, so full-tab fill happens in Phase 2). No console errors.</step>
+    <step order="7">Regression on SpaarkeAi — open the SpaarkeAi surface, confirm the same Dashboard II + full-page layouts render identically to LegalWorkspace (proves both consumers received the change).</step>
+    <step order="8">Invoke `/push-to-github` skill (or equivalent) with commit message: `feat(datagrid-framework): PR 1 — framework schema additions + consumer unwind (FR-01, FR-05, FR-06, FR-07, FR-08)`. Push to `origin/work/spaarke-dataset-grid-framework-r2`.</step>
+    <step order="9">Open PR 1 with body citing FRs 01/05/06/07/08 + acceptance evidence (build passing + regression screenshots or narrative + no console errors).</step>
+    <step order="10">Wait for CI to complete on PR 1. Address any CI failures.</step>
+    <step order="11">Update TASK-INDEX.md: task 006 → ✅ completed.</step>
+  </steps>
+
+  <tools>
+    <tool name="powershell">Build scripts</tool>
+    <tool name="Skill">code-page-deploy, spaarke-conventions, push-to-github</tool>
+    <tool name="gh">Open PR</tool>
+    <tool name="terminal">Regression testing via browser</tool>
+  </tools>
+
+  <outputs>
+    <output type="deploy">3 code pages deployed to spaarkedev1</output>
+    <output type="pr">GitHub PR (PR 1) opened with the 5 FRs</output>
+    <output type="report">notes/phase1-regression-report.md (regression narrative)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All 4 builds succeed (shared lib + LegalWorkspace + SpaarkeAi + WorkspaceLayoutWizard).</criterion>
+    <criterion testable="true">All 3 code pages deploy to spaarkedev1 without errors.</criterion>
+    <criterion testable="true">Dashboard II Communications shows visible scrollbar + page-2 fetch on scroll.</criterion>
+    <criterion testable="true">5 single-section full-page layouts render with no console errors.</criterion>
+    <criterion testable="true">SpaarkeAi renders identical to LegalWorkspace (proves both consumers received the change).</criterion>
+    <criterion testable="true">PR 1 opened; CI green.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    - This is the first of 3 deployment tasks (matches the 3 phased PRs from spec.md).
+    - Do NOT bundle Phase 2 wizard work here. Keep PR 1 focused on framework + unwind.
+    - If SpaarkeAi renders differently from LegalWorkspace, the SpaarkeAi build likely didn't pick up the change — this is the dual-deploy trap FR-09 warns about and FR-10 eliminates. Rebuild SpaarkeAi explicitly.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge. STANDARD rigor. Delegates to `code-page-deploy` + `push-to-github` skills.</protocol>
+  </execution>
+</task>
