@@ -246,11 +246,36 @@ To add a CUSTOM command, register a handler from the host shell (see Step 6) and
 
 ### Row open (what happens on row click)
 
+**Post-R2 (2026-07-01)**: the framework's `defaultRecordOpen` always opens Layout 1 (`Xrm.Navigation.navigateTo` at **85% × 85%** centered, target 2, position 1) regardless of `rowOpen.type`. This is the R2 FR-20 binding — "one modal size for every entity, do not vary per-entity". See [`docs/standards/MODAL-DECISION-CRITERIA.md`](../standards/MODAL-DECISION-CRITERIA.md) for the two-layout standard.
+
+Because the framework unifies the behavior, `rowOpen` is only needed when you want to:
+- Explicitly document intent (recommended)
+- Open a **specific form variant** via `formId`
+- Use a **non-default** open path (sidePane / webResource / custom)
+
+Minimum recommended shape for entity-list widgets:
+
 ```json
-"rowOpen": { "type": "navigateToForm" }
+"rowOpen": { "type": "formDialog" }
 ```
 
-For the EventsPage record-link-not-opening bug fix, use:
+To open a specific form variant (e.g. a "Workspace" simplified form authored by a maker), add `formId`:
+
+```json
+"rowOpen": {
+  "type": "formDialog",
+  "formId": "11111111-2222-3333-4444-555555555555"
+}
+```
+
+When absent, the framework opens the user's default main form for the entity.
+
+**Retired R2** (still deserializes for backward compat but IGNORED at runtime):
+
+- `formDialogWidthPercent` / `formDialogHeightPercent` — R2 FR-20 unified to 85%×85% for every Layout 1 open.
+- Legacy `window.open('_blank')` fallback (was: `type` != `formDialog` → new tab) — removed; every row-click now routes through `Xrm.Navigation.navigateTo`.
+
+**Non-default alternates** (require host-side registration — see Step 6):
 
 ```json
 "rowOpen": {
@@ -260,7 +285,77 @@ For the EventsPage record-link-not-opening bug fix, use:
 }
 ```
 
-The `webResource` type uses `Xrm.Navigation.navigateTo({pageType:'webresource', …})` so the opened surface clears the dialog correctly.
+The `webResource` type uses `Xrm.Navigation.navigateTo({pageType:'webresource', …})` — the bug-fix path for the EventsPage record-link-not-opening issue.
+
+### Secondary actions (per-row + bulk)
+
+Add AI/Playbook/wizard/navigate/custom actions that appear on row hover or in bulk-select mode:
+
+```json
+"secondaryActions": [
+  {
+    "id": "ask-sprkchat-invoice",
+    "label": "Ask Sprkchat",
+    "icon": "Chat20Regular",
+    "kind": "ai-assistant",
+    "requiresSelection": "single",
+    "aiAssistantId": "default",
+    "visible": "row-hover"
+  },
+  {
+    "id": "review-playbook",
+    "label": "Review",
+    "icon": "DocumentSearch20Regular",
+    "kind": "playbook",
+    "requiresSelection": "single",
+    "privilege": "Read",
+    "playbookId": "invoice-review-default"
+  }
+]
+```
+
+Kinds: `ai-assistant` (launches SprkChat with the row context), `playbook` (fires a Spaarke playbook), `wizard` (opens a registered wizard component), `navigate` (opens a related record by lookup field), `custom` (calls a host-registered handler).
+
+Visibility modes: `always` (permanent button), `row-hover` (appears on hover — default for row actions), `bulk-only` (only when 2+ rows selected).
+
+### Behavior — pagination + selection + parent-context filter
+
+```json
+"behavior": {
+  "selectionMode": "multi",
+  "pageSize": 25,
+  "enableSorting": true,
+  "enableColumnResize": true,
+  "enableKeyboardNavigation": true
+}
+```
+
+**Field-by-field**:
+
+| Field | Type | Default | Purpose |
+|---|---|---|---|
+| `selectionMode` | `'none' \| 'single' \| 'multi'` | `'multi'` | Row selection model. `'none'` hides the checkbox column entirely. |
+| `pageSize` | number | **100** at runtime (schema note says 50 — doc drift; the runtime default is `?? 100`) | **Records per FetchXML page — controls lazy-load chunk size**. Lower = more scrolling; higher = fewer round trips. Recommended `25` for embedded widgets in workspace layouts, `50–100` for full-page grids. |
+| `enableSorting` | boolean | `true` | Column-header click sorts. Set `false` to lock the savedquery's sort order. |
+| `enableColumnResize` | boolean | `true` | Drag column edges to resize. |
+| `enableKeyboardNavigation` | boolean | `true` | Arrow keys move the row focus; Enter opens the row. |
+
+**Parent-context filter** — see Step 4 above. When set, the framework injects a `<condition>` into the savedquery's FetchXML at render time:
+
+```json
+"behavior": {
+  "parentContextFilter": {
+    "attribute": "sprk_matter",
+    "parentContextKey": "matterId",
+    "operator": "eq"
+  }
+}
+```
+
+**pageSize tuning tips**:
+- If the widget lives inside a workspace section with clamped height (~480px), pick `pageSize` so the first page fills the visible area with a small overflow (e.g. `25` for standard row density; `40` for compact density with narrow rows).
+- If the widget is a full-page grid (drill-through code page like `sprk_invoicespage`), use `50–100` — fewer network trips outweigh scroll depth concerns.
+- The framework always uses `useLazyLoad` — subsequent pages fetch via IntersectionObserver on a sentinel `<div>` at the bottom of the grid body. You never need to opt in to lazy loading; you only tune the chunk size.
 
 ### Per-column overrides
 
@@ -286,6 +381,150 @@ Default = `auto` (every chip-eligible column gets a chip). To restrict or overri
 ```
 
 `allowlist` is the inverse; `explicit` lets you author the full list with per-chip overrides (custom label, value source override).
+
+---
+
+## Step 5.5 — Full annotated template (copy-paste starter)
+
+Every override in one place, with defaults and comments. Copy this as your starting point, then **delete every key you're not overriding** so your config record stays minimal and picks up framework default changes going forward.
+
+**Why not populate every field on every record?** Records that explicitly set defaults DIVERGE from the framework when defaults evolve (e.g., if we later change the default `pageSize` from 100 to 50, records with an explicit `"pageSize": 100` get "stuck" on the old value). Keeping the record minimal preserves the framework's ability to change defaults centrally.
+
+```jsonc
+{
+  "_version": "1.0",                       // REQUIRED. Must be "1.0" — runtime guard rejects anything else.
+
+  // ─── SOURCE (REQUIRED — pick ONE variant) ─────────────────────────────────
+  "source": {
+    "type": "savedquery",                  // "savedquery" | "savedquery-set" | "inline"
+    "savedQueryId": "<guid>"               // for type="savedquery" — a specific savedquery
+    // "entityLogicalName": "sprk_...",    // for type="savedquery-set" — auto-discover all active savedqueries
+    // "fetchXml": "<fetch>...</fetch>",   // for type="inline" — provide fetchXml + layoutXml directly
+    // "layoutXml": "<grid>...</grid>"
+  },
+
+  // ─── DISPLAY (optional) ────────────────────────────────────────────────────
+  "display": {
+    "title": "Custom Header Title",        // Override savedquery name in header. Default: savedquery name.
+    "icon": "Calendar20Regular",           // Fluent v9 icon in header. Default: no icon.
+    "densityDefault": "comfortable",       // "comfortable" | "compact". Default: "comfortable".
+    "emptyStateMessage": "No records."     // Custom "no results" message. Default: framework localized fallback.
+  },
+
+  // ─── FILTER CHIPS (optional — default is auto-derive) ──────────────────────
+  "filterChips": {
+    "mode": "auto",                        // "auto" | "allowlist" | "denylist" | "explicit". Default: "auto".
+    "allowlist": ["sprk_status"],          // Attribute logical names — only these become chips (mode="allowlist").
+    "denylist":  ["createdby"],            // Attribute logical names — these are EXCLUDED (mode="denylist").
+    "explicit": [                          // Full manual authoring (mode="explicit").
+      {
+        "field": "sprk_regarding",
+        "kind": "lookup-multi",            // "optionset-multi" | "lookup-multi" | "date-range" | "text" | "bool"
+        "label": "Regarding",              // Optional label override
+        "valueSource": { "type": "systemusers" },  // Optional value source override
+        "valueColors": { "100000000": "filled" }   // Optional per-option badge appearance
+      }
+    ],
+    "showClearAll": true                   // Show "Clear all" chip. Default: true.
+  },
+
+  // ─── COMMAND BAR (optional) ────────────────────────────────────────────────
+  "commandBar": {
+    "showDefaultCommands": {               // Toggle framework defaults. Omitted = framework default (typically true).
+      "newRecord":    true,
+      "refresh":      true,
+      "exportExcel":  true,
+      "delete":       false,
+      "editColumns":  false,
+      "editFilters":  false
+    },
+    "primary": [                           // Left-aligned custom buttons (always visible).
+      {
+        "id": "mark-paid",
+        "label": "Mark paid",
+        "icon": "Money20Regular",
+        "action": "custom",                // "create-form" | "delete-selected" | "refresh" | "export-excel" | "edit-columns" | "edit-filters" | "custom"
+        "customHandlerId": "mark-invoice-paid",  // Required when action="custom"
+        "requiresSelection": "multi",      // "single" | "multi" | false. Default: false.
+        "privilege": "Write",              // "Read" | "Write" | "Create" | "Delete". Optional security gate.
+        "appearance": "primary",           // "subtle" | "primary" | "secondary". Default: "subtle".
+        "divider": false                   // Render a vertical divider BEFORE this item. Default: false.
+      }
+    ],
+    "secondary": []                        // Right-aligned / overflow-menu buttons. Same shape as primary.
+  },
+
+  // ─── ROW OPEN (optional — R2 default is Layout 1 at 85%×85%) ──────────────
+  "rowOpen": {
+    "type": "formDialog",                  // Documented value. Framework unifies to Layout 1 regardless (R2 FR-20).
+    "formId": "<form-guid>",               // R2 FR-01: open a specific form variant. Optional.
+    // For type="webResource":
+    // "webResource": "sprk_edit.html",
+    // "dataParams": ["fieldName", "matterId"],
+    // For type="sidePane":
+    // "paneId": "my-pane", "paneTitle": "Details", "webResourceName": "sprk_pane.html", "width": 480,
+    // For type="wizard": "wizardName": "MyWizard",
+    // For type="dialog": "dialogComponent": "MyDialog",
+    // For type="custom": "customHandlerId": "my-handler",
+    "passContext": ["matterId"]            // Keys from parentContext to forward to the opened surface. Optional.
+    // DEPRECATED (retained for backward-compat; ignored at runtime per R2 FR-20):
+    // "formDialogWidthPercent": 80,
+    // "formDialogHeightPercent": 80
+  },
+
+  // ─── SECONDARY ACTIONS (optional — per-row + bulk) ────────────────────────
+  "secondaryActions": [
+    {
+      "id": "ask-sprkchat",
+      "label": "Ask Sprkchat",
+      "icon": "Chat20Regular",
+      "kind": "ai-assistant",              // "ai-assistant" | "playbook" | "wizard" | "navigate" | "custom"
+      "requiresSelection": "single",       // "single" | "multi" | false
+      "privilege": "Read",                 // Optional security gate
+      "visible": "row-hover",              // "always" | "row-hover" | "bulk-only". Default: "row-hover".
+      "aiAssistantId": "default"           // Kind-specific config field
+      // "playbookId":       "invoice-review-default",     // for kind="playbook"
+      // "wizardName":       "InvoiceReviewWizard",         // for kind="wizard"
+      // "navigateTarget":   { "entity": "sprk_matter", "idField": "sprk_regardingmatter" },  // for kind="navigate"
+      // "customHandlerId":  "my-handler"                   // for kind="custom"
+    }
+  ],
+
+  // ─── COLUMNS (optional — per-column overrides keyed by logical name) ──────
+  "columns": {
+    "sprk_totalamount":    { "renderer": "currency",   "align": "right", "width": 120 },
+    "sprk_completionrate": { "renderer": "percentage", "align": "right" },
+    "createdon":           { "renderer": "date",       "width": 120 },
+    "modifiedby":          { "hidden": true },
+    "sprk_status":         { "renderer": "badge", "label": "Status", "tooltip": "Record lifecycle status" }
+    // Renderers: "default" | "currency" | "percentage" | "badge" | "link" | "date" | "datetime" | "avatar" | "icon" | "<custom-renderer-id>"
+    // Overridable fields per column: label, width, renderer, align ("left"|"center"|"right"), tooltip, hidden
+  },
+
+  // ─── BEHAVIOR (optional — interaction knobs) ──────────────────────────────
+  "behavior": {
+    "selectionMode": "multi",              // "none" | "single" | "multi". Default: "multi".
+    "pageSize": 25,                        // Records per FetchXML page. Framework runtime default: 100. Recommended: 25 for workspace-embedded widgets, 50-100 for full-page grids.
+    "enableSorting": true,                 // Column-header click sorts. Default: true.
+    "enableColumnResize": true,            // Drag column edges. Default: true.
+    "enableKeyboardNavigation": true,      // Arrow keys move focus. Default: true.
+    "parentContextFilter": {               // Drill-through parent filter. See Step 4.
+      "attribute": "sprk_matter",
+      "parentContextKey": "matterId",
+      "operator": "eq"                     // "eq" | "neq" | "in" | "eq-userid" | "eq-userteams". Default: "eq".
+    }
+  }
+}
+```
+
+**Live reference records** — real records you can inspect via Dataverse:
+
+| Config record | Pattern | GUID (spaarkedev1) |
+|---|---|---|
+| Documents workspace widget | Minimal — source + display + behavior.pageSize | `1cdd19d2-3964-f111-ab0c-7ced8ddc4cc6` |
+| Matters / Projects / Work Assignments workspace | Minimal — same shape as Documents | see [`projects/ai-spaarke-ai-workspace-UI-r2/notes/config-record-audit.md`](../../projects/ai-spaarke-ai-workspace-UI-r2/notes/config-record-audit.md) |
+| Communications workspace widget | Minimal + rowOpen.formDialog + pageSize=25 | `e1826c4c-9575-f111-ab0e-7ced8ddc4a05` |
+| Invoice Matter Budget Performance (rich) | Full — filterChips + commandBar overrides + secondaryActions + behavior.parentContextFilter | `d021827b-9b5e-f111-ab0c-7c1e521545d7` |
 
 ---
 
