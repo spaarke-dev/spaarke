@@ -203,10 +203,7 @@ export const LinearRunProgressList: React.FC<ILinearRunProgressListProps> = ({
       ) : (
         displayEvents.map((event, idx) => (
           <div key={idx} className={styles.row}>
-            <Text
-              size={200}
-              className={event.kind === 'error' ? styles.contentMuted : styles.content}
-            >
+            <Text size={200} className={event.kind === 'error' ? styles.contentMuted : styles.content}>
               {event.content ?? ''}
             </Text>
             <Text size={100} className={styles.timestamp}>

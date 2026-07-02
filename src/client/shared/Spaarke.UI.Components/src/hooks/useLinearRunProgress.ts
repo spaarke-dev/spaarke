@@ -160,7 +160,15 @@ function parseSseLine(line: string): AnalysisStreamChunkWire | null | 'DONE' {
  */
 function toLinearRunEvent(chunk: AnalysisStreamChunkWire): LinearRunEvent | null {
   const kind = chunk.type as LinearRunEventKind | undefined;
-  if (!kind || (kind !== 'metadata' && kind !== 'progress' && kind !== 'chunk' && kind !== 'result' && kind !== 'error' && kind !== 'done')) {
+  if (
+    !kind ||
+    (kind !== 'metadata' &&
+      kind !== 'progress' &&
+      kind !== 'chunk' &&
+      kind !== 'result' &&
+      kind !== 'error' &&
+      kind !== 'done')
+  ) {
     return null;
   }
 
@@ -291,9 +299,7 @@ export function useLinearRunProgress(options: UseLinearRunProgressOptions): UseL
                 if (parsed === 'DONE') {
                   // Terminator — treat as clean end. If the server did not emit a
                   // `done` chunk, synthesize completion here.
-                  setState(prev =>
-                    prev.status === 'running' ? { ...prev, status: 'complete' } : prev
-                  );
+                  setState(prev => (prev.status === 'running' ? { ...prev, status: 'complete' } : prev));
                   return;
                 }
 
