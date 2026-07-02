@@ -2,12 +2,12 @@
 <task id="SRFR-061" project="set-regarding-and-field-mapping-resolver-r1">
   <metadata>
     <title>New sprk_fieldmapping_push.js webresource (v1.0.0) — visibility check + push action</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>6h</estimated-effort>
-    <actual-effort></actual-effort>
+    <actual-effort>~1h</actual-effort>
     <assigned>AI Agent</assigned>
-    <started></started>
-    <completed></completed>
+    <started>2026-07-02</started>
+    <completed>2026-07-02</completed>
     <rigor>FULL</rigor>
     <parallel-safe>true</parallel-safe>
     <parallel-group>D</parallel-group>

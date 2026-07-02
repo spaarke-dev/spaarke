@@ -63,9 +63,9 @@
 
 | # | Task | Status | Rigor | Effort | Parallel-safe |
 |---|---|---|---|---|---|
-| 060 | [Native MDA form for `sprk_fieldmappingprofile` with rules subgrid](./060-fieldmappingprofile-mda-form.poml) | 🔲 | STANDARD | 4h | group D |
-| 061 | [New `sprk_fieldmapping_push.js` webresource (hasSourceProfile + pushUpdates)](./061-fieldmapping-push-webresource.poml) | 🔲 | FULL | 6h | group D |
-| 062 | [Ribbon `CustomAction` on Matter form + others via `/ribbon-edit`](./062-fieldmapping-push-ribbon.poml) | 🔲 | STANDARD | 3h | after 061 |
+| 060 | [Native MDA form for `sprk_fieldmappingprofile` with rules subgrid](./060-fieldmappingprofile-mda-form.poml) | ✅ | STANDARD | 4h est / **~1h actual** | group D |
+| 061 | [New `sprk_fieldmapping_push.js` webresource (hasSourceProfile + pushUpdates)](./061-fieldmapping-push-webresource.poml) | ✅ | FULL | 6h est / **~1h actual** | group D |
+| 062 | [Ribbon `CustomAction` on Matter form + others via `/ribbon-edit`](./062-fieldmapping-push-ribbon.poml) | ✅ | STANDARD | 3h est / **~50min actual** | after 061 |
 
 ### Wave 7 — Docs + audit
 

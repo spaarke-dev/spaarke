@@ -1,6 +1,33 @@
 ﻿<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Matter Ribbons
+
+  CustomActions:
+  - sprk.ThemeMenu.Matter.FlyoutAnchor.CustomAction — Theme flyout on homepage grid
+  - sprk.matter.fieldmapping.push.CustomAction — "Push Updates" button on Matter form
+      (FR-B3-01 / SRFR-062, mirrors Communication Send canonical pattern)
+
+  Web resources referenced:
+  - $webresource:sprk_ThemeMenu.js
+  - $webresource:sprk_fieldmapping_push (v1.0.0, from SRFR-061)
+-->
 <RibbonDiffXml xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
   <CustomActions>
+    <!-- Push Updates to Related Records (SRFR-062 / FR-B3-01) -->
+    <CustomAction Id="sprk.matter.fieldmapping.push.CustomAction"
+                  Location="Mscrm.Form.sprk_matter.MainTab.Actions.Controls._children"
+                  Sequence="20">
+      <CommandUIDefinition>
+        <Button Id="sprk.matter.fieldmapping.push.Button"
+                Command="sprk.matter.fieldmapping.push.Command"
+                LabelText="$LocLabels:sprk.matter.fieldmapping.push.LabelText"
+                Alt="$LocLabels:sprk.matter.fieldmapping.push.Alt"
+                ToolTipTitle="$LocLabels:sprk.matter.fieldmapping.push.ToolTipTitle"
+                ToolTipDescription="$LocLabels:sprk.matter.fieldmapping.push.ToolTipDescription"
+                TemplateAlias="o1"
+                ModernImage="Sync" />
+      </CommandUIDefinition>
+    </CustomAction>
     <CustomAction Id="sprk.ThemeMenu.Matter.FlyoutAnchor.CustomAction" Location="Mscrm.HomepageGrid.sprk_matter.MainTab.Actions.Controls._children" Sequence="900">
       <CommandUIDefinition>
         <FlyoutAnchor Id="sprk.ThemeMenu.Matter.FlyoutAnchor" Command="sprk.ThemeMenu.Matter.FlyoutCommand" LabelText="Dark Mode" ToolTipTitle="Dark Mode" ToolTipDescription="Choose your preferred color theme" Image16by16="$webresource:sprk_ThemeMenu16.svg" Image32by32="$webresource:sprk_ThemeMenu32.svg" PopulateDynamically="false" TemplateAlias="o1">
@@ -21,6 +48,19 @@
     <RibbonTemplates Id="Mscrm.Templates"></RibbonTemplates>
   </Templates>
   <CommandDefinitions>
+    <!-- Push Updates command (SRFR-062 / FR-B3-01) -->
+    <CommandDefinition Id="sprk.matter.fieldmapping.push.Command">
+      <EnableRules>
+        <EnableRule Id="sprk.matter.fieldmapping.push.hasSourceProfile.EnableRule" />
+      </EnableRules>
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_fieldmapping_push"
+                            FunctionName="Spaarke.FieldMapping.Push.pushUpdates">
+          <CrmParameter Value="PrimaryControl" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
     <CommandDefinition Id="sprk.ThemeMenu.Matter.FlyoutCommand">
       <EnableRules>
         <EnableRule Id="sprk.ThemeMenu.Matter.EnableRule" />
@@ -63,7 +103,36 @@
       <EnableRule Id="sprk.ThemeMenu.Matter.EnableRule">
         <CustomRule FunctionName="Spaarke.Theme.isEnabled" Library="$webresource:sprk_ThemeMenu.js" Default="true" />
       </EnableRule>
+      <!-- Push Updates: enabled only if the current Matter is source of at least one active field-mapping profile (SRFR-062 / FR-B3-01) -->
+      <EnableRule Id="sprk.matter.fieldmapping.push.hasSourceProfile.EnableRule">
+        <CustomRule Library="$webresource:sprk_fieldmapping_push"
+                    FunctionName="Spaarke.FieldMapping.Push.hasSourceProfile"
+                    Default="false">
+          <CrmParameter Value="PrimaryControl" />
+        </CustomRule>
+      </EnableRule>
     </EnableRules>
   </RuleDefinitions>
-  <LocLabels />
+  <LocLabels>
+    <LocLabel Id="sprk.matter.fieldmapping.push.LabelText">
+      <Titles>
+        <Title description="Push Updates" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.matter.fieldmapping.push.Alt">
+      <Titles>
+        <Title description="Push Updates to Related Records" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.matter.fieldmapping.push.ToolTipTitle">
+      <Titles>
+        <Title description="Push Updates to Related Records" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.matter.fieldmapping.push.ToolTipDescription">
+      <Titles>
+        <Title description="Cascade field updates from this Matter to related records defined by active field-mapping profiles." languagecode="1033" />
+      </Titles>
+    </LocLabel>
+  </LocLabels>
 </RibbonDiffXml>
