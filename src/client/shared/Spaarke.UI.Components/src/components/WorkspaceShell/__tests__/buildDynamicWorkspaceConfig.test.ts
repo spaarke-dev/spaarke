@@ -26,10 +26,7 @@
  */
 
 import type * as React from 'react';
-import {
-  buildDynamicWorkspaceConfig,
-  type LayoutJson,
-} from '../buildDynamicWorkspaceConfig';
+import { buildDynamicWorkspaceConfig, type LayoutJson } from '../buildDynamicWorkspaceConfig';
 import type { SectionFactoryContext, SectionRegistration } from '../types';
 
 // ---------------------------------------------------------------------------
@@ -58,7 +55,7 @@ function makeContext(): SectionFactoryContext {
 function makeRegistration(
   id: string,
   overrides: Partial<Pick<SectionRegistration, 'defaultHeight' | 'contentSizing'>>,
-  initialStyle?: React.CSSProperties,
+  initialStyle?: React.CSSProperties
 ): SectionRegistration {
   return {
     id,
@@ -126,11 +123,7 @@ describe('buildDynamicWorkspaceConfig — contentSizing (FR-01)', () => {
       }),
     ];
 
-    const config = buildDynamicWorkspaceConfig(
-      makeLayoutJson('clamped-section'),
-      registry,
-      ctx,
-    );
+    const config = buildDynamicWorkspaceConfig(makeLayoutJson('clamped-section'), registry, ctx);
     const section = config.sections[0];
 
     expect(section.style?.maxHeight).toBe('480px');
@@ -140,15 +133,9 @@ describe('buildDynamicWorkspaceConfig — contentSizing (FR-01)', () => {
   });
 
   it('(c) contentSizing omitted defaults to "grow" behavior (back-compat)', () => {
-    const registry = [
-      makeRegistration('default-section', { defaultHeight: '325px' }),
-    ];
+    const registry = [makeRegistration('default-section', { defaultHeight: '325px' })];
 
-    const config = buildDynamicWorkspaceConfig(
-      makeLayoutJson('default-section'),
-      registry,
-      ctx,
-    );
+    const config = buildDynamicWorkspaceConfig(makeLayoutJson('default-section'), registry, ctx);
     const section = config.sections[0];
 
     expect(section.style?.minHeight).toBe('325px');
@@ -162,15 +149,11 @@ describe('buildDynamicWorkspaceConfig — contentSizing (FR-01)', () => {
       makeRegistration(
         'grow-with-override',
         { defaultHeight: '480px', contentSizing: 'grow' },
-        { minHeight: '600px' }, // factory already set an override
+        { minHeight: '600px' } // factory already set an override
       ),
     ];
 
-    const config = buildDynamicWorkspaceConfig(
-      makeLayoutJson('grow-with-override'),
-      registry,
-      ctx,
-    );
+    const config = buildDynamicWorkspaceConfig(makeLayoutJson('grow-with-override'), registry, ctx);
     const section = config.sections[0];
 
     expect(section.style?.minHeight).toBe('600px'); // override preserved
@@ -181,15 +164,11 @@ describe('buildDynamicWorkspaceConfig — contentSizing (FR-01)', () => {
       makeRegistration(
         'clamped-with-override',
         { defaultHeight: '480px', contentSizing: 'clamped' },
-        { maxHeight: '720px' }, // factory already set an override
+        { maxHeight: '720px' } // factory already set an override
       ),
     ];
 
-    const config = buildDynamicWorkspaceConfig(
-      makeLayoutJson('clamped-with-override'),
-      registry,
-      ctx,
-    );
+    const config = buildDynamicWorkspaceConfig(makeLayoutJson('clamped-with-override'), registry, ctx);
     const section = config.sections[0];
 
     expect(section.style?.maxHeight).toBe('720px'); // override preserved
@@ -201,23 +180,11 @@ describe('buildDynamicWorkspaceConfig — contentSizing (FR-01)', () => {
   });
 
   it('registration without defaultHeight does not add any sizing keys, regardless of contentSizing', () => {
-    const registryGrow = [
-      makeRegistration('no-height-grow', { contentSizing: 'grow' }),
-    ];
-    const registryClamped = [
-      makeRegistration('no-height-clamped', { contentSizing: 'clamped' }),
-    ];
+    const registryGrow = [makeRegistration('no-height-grow', { contentSizing: 'grow' })];
+    const registryClamped = [makeRegistration('no-height-clamped', { contentSizing: 'clamped' })];
 
-    const grow = buildDynamicWorkspaceConfig(
-      makeLayoutJson('no-height-grow'),
-      registryGrow,
-      ctx,
-    );
-    const clamped = buildDynamicWorkspaceConfig(
-      makeLayoutJson('no-height-clamped'),
-      registryClamped,
-      ctx,
-    );
+    const grow = buildDynamicWorkspaceConfig(makeLayoutJson('no-height-grow'), registryGrow, ctx);
+    const clamped = buildDynamicWorkspaceConfig(makeLayoutJson('no-height-clamped'), registryClamped, ctx);
 
     expect(grow.sections[0].style?.minHeight).toBeUndefined();
     expect(grow.sections[0].style?.maxHeight).toBeUndefined();

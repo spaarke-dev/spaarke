@@ -432,7 +432,11 @@ export function filterAvailableViews(
   if (!allowlist || allowlist.length === 0) {
     return views;
   }
-  const normalize = (g: string): string => g.trim().toLowerCase().replace(/^\{|\}$/g, '');
+  const normalize = (g: string): string =>
+    g
+      .trim()
+      .toLowerCase()
+      .replace(/^\{|\}$/g, '');
   const allowed = new Set<string>(allowlist.map(normalize));
   return views.filter(v => allowed.has(normalize(v.id)));
 }
