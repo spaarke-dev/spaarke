@@ -18,7 +18,7 @@
 | # | Task | Status | Rigor | Effort | Parallel-safe |
 |---|---|---|---|---|---|
 | 001 | [Wave-0 discovery audit](./001-wave-0-discovery-audit.poml) | ✅ | STANDARD | 3h | — |
-| 002 | [Wave 0 data-fix (D-2 mappingtype + D-4 typo recreates + D-5 all 13 + D-6 contact fix)](./002-populate-recordtype-metadata.poml) | 🔲 | STANDARD | **5h** (revised) | after 001 |
+| 002 | [Wave 0 data-fix (D-2 mappingtype + D-4 typo recreates + D-5 all 13 + D-6 contact fix)](./002-populate-recordtype-metadata.poml) | ✅ | STANDARD | 5h est / **1.5h actual** | after 001 |
 
 ### Wave 1 — Dataverse Schema
 

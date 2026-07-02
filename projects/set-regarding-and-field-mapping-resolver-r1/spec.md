@@ -428,7 +428,7 @@ One row per field-level mapping. N:1 to `sprk_fieldmappingprofile` via `sprk_fie
 | `sprk_targetfield` | Text (NVARCHAR 100) | Target field logical name on target entity |
 | `sprk_sourcefieldtype` | Choice: `Text (0)` \| `Lookup (1)` \| `Option Set (2)` \| `Number (3)` \| `Date Time (4)` \| `Boolean (5)` \| `Memo (6)` | Schematic type of the source field — used for value coercion + validation |
 | `sprk_targetfieldtype` | Choice (same options as sourcefieldtype) | Schematic type of the target field |
-| `sprk_mappingtype` | **Choice: `Copy (0)` \| `Default (1)` \| `Concat (2)` \| `Template (3)`** | **How to combine source→target values** (added to Dataverse by SRFR-002 per D-2) |
+| `sprk_mapping_type` | **Choice: `Copy (0)` \| `Default (1)` \| `Concat (2)` \| `Template (3)`** | **How to combine source→target values** (added to Dataverse by SRFR-002 per D-2) |
 | `sprk_defaultvalue` | Text (NVARCHAR 100) | Used when `sprk_mappingtype = Default` — value written when source is empty |
 | `sprk_executionorder` | Whole Number | Determines apply order; ties broken by insertion order |
 | `sprk_mappingdirection` | Choice: `Parent to Child (0)` \| `Child to Parent (1)` \| `Bidirectional (2)` | Direction of value propagation |
@@ -475,7 +475,7 @@ for rule in profile.rules(where iscascadingsource=true and syncmode=ManualRefres
 
 ## A.3a Mapping-type semantics (per rule)
 
-`sprk_mappingtype` (added to Dataverse by SRFR-002 per D-2) drives how source→target values are combined:
+`sprk_mapping_type` (added to Dataverse by SRFR-002 per D-2) drives how source→target values are combined:
 
 | Type | Behavior | Requires `sprk_defaultvalue`? |
 |---|---|---|
