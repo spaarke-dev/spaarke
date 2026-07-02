@@ -925,8 +925,7 @@ export const DataGrid: React.FC<DataGridProps> = props => {
   // `resolveEffectivePageSize`. Note: `resolveEffectivePageSize` returns the
   // framework default (25) internally, so the `?? 25` guard is redundant here —
   // preserved as belt-and-suspenders against the pre-resolution render path.
-  const pageSize =
-    resolveEffectivePageSize(pageSizeOverride, resolved?.behavior.pageSize) ?? 25;
+  const pageSize = resolveEffectivePageSize(pageSizeOverride, resolved?.behavior.pageSize) ?? 25;
 
   const {
     records,
