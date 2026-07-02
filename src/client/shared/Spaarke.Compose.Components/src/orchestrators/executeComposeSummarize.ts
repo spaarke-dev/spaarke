@@ -218,6 +218,21 @@ export async function executeComposeSummarize(inputs: ExecuteComposeSummarizeInp
     return;
   }
 
+  // 2026-07-02 SSE trace instrumentation (task 098 smoke debug).
+  // Every trace log is prefixed with `[compose-summarize-sse]` for trivial
+  // filtering in the browser console. `debug`-level so a normal user session
+  // is unaffected unless the console filter includes verbose messages. The
+  // `sseStartMs` timestamp anchors all timing measurements below.
+  const sseStartMs = performance.now();
+  const traceLog = (msg: string, extra?: Record<string, unknown>): void => {
+    // eslint-disable-next-line no-console
+    console.debug(
+      `[compose-summarize-sse] t+${Math.round(performance.now() - sseStartMs)}ms ${msg}`,
+      extra ?? '',
+    );
+  };
+  traceLog('start', { url, hasDocumentSpeId: !!documentSpeId, hasDriveId: !!driveId, hasTenantId: !!tenantId, hasSessionId: !!sessionId });
+
   let response: Response;
   try {
     response = await fetch(url, {
@@ -230,12 +245,20 @@ export async function executeComposeSummarize(inputs: ExecuteComposeSummarizeInp
       body: JSON.stringify(body),
       signal,
     });
+    traceLog('fetch returned', {
+      status: response.status,
+      ok: response.ok,
+      contentType: response.headers.get('content-type'),
+      hasBody: !!response.body,
+    });
   } catch (err) {
     if (signal?.aborted) {
+      traceLog('aborted before fetch completed');
       fireDone();
       return;
     }
     const message = err instanceof Error ? err.message : String(err);
+    traceLog('fetch threw (pre-body)', { error: message, name: err instanceof Error ? err.name : 'unknown' });
     onError?.(`Compose summarize: network error — ${message}`);
     fireDone();
     return;
@@ -266,6 +289,11 @@ export async function executeComposeSummarize(inputs: ExecuteComposeSummarizeInp
   let sawResult = false;
   let sawDone = false;
   let sawError = false;
+  // SSE trace counters — help distinguish "read completed but no bytes" from
+  // "read errored mid-way" from "read errored before any bytes".
+  let totalBytes = 0;
+  let readCount = 0;
+  let frameCount = 0;
 
   try {
     // SSE frame loop. Each event is separated by "\n\n"; each event has one
@@ -273,7 +301,20 @@ export async function executeComposeSummarize(inputs: ExecuteComposeSummarizeInp
     // the literal terminal sentinel `[DONE]`.
     while (true) {
       const { done, value } = await reader.read();
-      if (done) break;
+      readCount += 1;
+      if (done) {
+        traceLog('reader.read() done=true (stream closed cleanly by server)', {
+          readCount,
+          totalBytes,
+          frameCount,
+          sawResult,
+          sawDone,
+          sawError,
+        });
+        break;
+      }
+      totalBytes += value?.byteLength ?? 0;
+      traceLog('reader.read() returned chunk', { readCount, bytes: value?.byteLength ?? 0, totalBytes });
 
       buffer += decoder.decode(value, { stream: true });
 
@@ -281,6 +322,13 @@ export async function executeComposeSummarize(inputs: ExecuteComposeSummarizeInp
       buffer = parts.pop() ?? '';
 
       for (const part of parts) {
+        frameCount += 1;
+        // Raw frame dump (truncated so a large `result` payload doesn't spam
+        // the console). Enables inspecting what the server actually sent
+        // versus what we parsed — key for diagnosing "stream read failed —
+        // network error" reports where the client sees the frame but the
+        // reader errors.
+        traceLog(`frame ${frameCount} raw`, { text: part.length > 400 ? part.slice(0, 400) + '…' : part });
         const dataLines: string[] = [];
         for (const line of part.split('\n')) {
           if (line.startsWith('data:')) {
@@ -361,15 +409,47 @@ export async function executeComposeSummarize(inputs: ExecuteComposeSummarizeInp
     // If the stream ended without a terminal chunk, treat it as success only
     // if a result was seen; otherwise surface an error.
     if (!sawDone && !sawResult && !sawError) {
+      traceLog('stream ended without terminal', {
+        readCount,
+        totalBytes,
+        frameCount,
+        bufferLen: buffer.length,
+      });
       onError?.('Compose summarize: stream ended without a terminal event.');
     }
+    traceLog('loop exit clean', {
+      readCount,
+      totalBytes,
+      frameCount,
+      sawResult,
+      sawDone,
+      sawError,
+    });
   } catch (err) {
     if (signal?.aborted) {
       // Caller-initiated abort — no error surfacing.
+      traceLog('abort observed inside loop', { readCount, totalBytes, frameCount });
       fireDone();
       return;
     }
     const message = err instanceof Error ? err.message : String(err);
+    const errorName = err instanceof Error ? err.name : 'unknown';
+    // Rich trace: read-count + byte-count + frame-count reveal WHERE in the
+    // stream the error occurred. `network error` at readCount=1, totalBytes=0
+    // means the connection died immediately post-headers. `network error` at
+    // readCount>2 with progress frames received means the server started
+    // streaming then died — likely a downstream exception or middleware
+    // timeout.
+    traceLog('stream read threw', {
+      error: message,
+      name: errorName,
+      readCount,
+      totalBytes,
+      frameCount,
+      sawResult,
+      sawDone,
+      sawError,
+    });
     onError?.(`Compose summarize: stream read failed — ${message}`);
   } finally {
     try {

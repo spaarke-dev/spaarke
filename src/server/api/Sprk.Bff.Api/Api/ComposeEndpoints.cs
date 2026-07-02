@@ -647,12 +647,24 @@ public static class ComposeEndpoints
             "Compose dispatch SSE: consumerType={ConsumerType} tenant={TenantId} item={DocumentSpeId} record={DocumentRecordId} session={SessionId} TraceId={TraceId}",
             consumerType, body.TenantId, body.DocumentSpeId, body.DocumentRecordId, body.SessionId, httpContext.TraceIdentifier);
 
+        // 2026-07-02 SSE trace instrumentation (task 098 smoke debug):
+        // A wall-clock stopwatch measures per-stage timing so we can correlate
+        // client-side "stream read failed — network error" reports with the
+        // actual server-side state at the moment of failure. Emitted at INFO
+        // level so the logs are trivially greppable by TraceId without
+        // requiring log-level changes.
+        var pipelineSw = System.Diagnostics.Stopwatch.StartNew();
+
         // Set SSE headers — from here on, ALL failures emit error chunks + [DONE].
         response.ContentType = "text/event-stream";
         response.Headers.CacheControl = "no-cache";
         response.Headers.Connection = "keep-alive";
         response.Headers["X-Accel-Buffering"] = "no";
         httpContext.Features.Get<IHttpResponseBodyFeature>()?.DisableBuffering();
+
+        logger.LogInformation(
+            "Compose dispatch SSE trace [T+{ElapsedMs}ms] SSE headers committed. clientAborted={ClientAborted} TraceId={TraceId}",
+            pipelineSw.ElapsedMilliseconds, httpContext.RequestAborted.IsCancellationRequested, httpContext.TraceIdentifier);
 
         try
         {
@@ -687,6 +699,10 @@ public static class ComposeEndpoints
                 return;
             }
 
+            logger.LogInformation(
+                "Compose dispatch SSE trace [T+{ElapsedMs}ms] playbook resolved. playbookId={PlaybookId} clientAborted={ClientAborted} TraceId={TraceId}",
+                pipelineSw.ElapsedMilliseconds, playbookId, httpContext.RequestAborted.IsCancellationRequested, httpContext.TraceIdentifier);
+
             // Stage 2: load DOCX bytes from SPE via IComposeDocumentService (existing
             // OBO plumbing, no change to loader semantics).
             await WriteSSEAsync(
@@ -694,10 +710,20 @@ public static class ComposeEndpoints
                 AnalysisStreamChunk.Progress("document_loaded", "Loading document from SharePoint Embedded..."),
                 ct);
 
+            var loadStartMs = pipelineSw.ElapsedMilliseconds;
             var loadResultRaw = await documentService
                 .LoadDocxAsync(httpContext, body.DriveId, body.DocumentSpeId, ct)
                 .ConfigureAwait(false);
             using var loadResult = new LoadResultLease(loadResultRaw);
+
+            logger.LogInformation(
+                "Compose dispatch SSE trace [T+{ElapsedMs}ms] LoadDocxAsync returned. loadMs={LoadMs} found={Found} bytes={ByteCount} clientAborted={ClientAborted} TraceId={TraceId}",
+                pipelineSw.ElapsedMilliseconds,
+                pipelineSw.ElapsedMilliseconds - loadStartMs,
+                loadResult.Value.Found,
+                loadResult.Value.Content?.Length ?? 0,
+                httpContext.RequestAborted.IsCancellationRequested,
+                httpContext.TraceIdentifier);
 
             if (!loadResult.Value.Found || loadResult.Value.Content is null)
             {
@@ -722,6 +748,7 @@ public static class ComposeEndpoints
                 AnalysisStreamChunk.Progress("extracting_text", "Extracting document text..."),
                 ct);
 
+            var extractStartMs = pipelineSw.ElapsedMilliseconds;
             string extractedText;
             try
             {
@@ -762,14 +789,20 @@ public static class ComposeEndpoints
             }
 
             logger.LogInformation(
-                "Compose dispatch SSE: text extraction complete. chars={CharCount} TraceId={TraceId}",
-                extractedText.Length, httpContext.TraceIdentifier);
+                "Compose dispatch SSE trace [T+{ElapsedMs}ms] text extraction complete. extractMs={ExtractMs} chars={CharCount} clientAborted={ClientAborted} TraceId={TraceId}",
+                pipelineSw.ElapsedMilliseconds,
+                pipelineSw.ElapsedMilliseconds - extractStartMs,
+                extractedText.Length,
+                httpContext.RequestAborted.IsCancellationRequested,
+                httpContext.TraceIdentifier);
 
             // Stage 4: invoke the playbook via the widened facade (task 095/096).
             await WriteSSEAsync(
                 response,
                 AnalysisStreamChunk.Progress("invoking_playbook", "Invoking playbook..."),
                 ct);
+
+            var invokeStartMs = pipelineSw.ElapsedMilliseconds;
 
             // Build parameters dict from the compose-document scope payload (spike #4 §4.2).
             // ADR-015 binding: all values are deterministic identifiers / display values.
@@ -801,6 +834,16 @@ public static class ComposeEndpoints
                     userContext: extractedText,
                     document: documentContext)
                 .ConfigureAwait(false);
+
+            logger.LogInformation(
+                "Compose dispatch SSE trace [T+{ElapsedMs}ms] InvokePlaybookAsync returned. invokeMs={InvokeMs} success={Success} textContentLen={TextLen} errorCode={ErrorCode} clientAborted={ClientAborted} TraceId={TraceId}",
+                pipelineSw.ElapsedMilliseconds,
+                pipelineSw.ElapsedMilliseconds - invokeStartMs,
+                result.Success,
+                result.TextContent?.Length ?? 0,
+                result.ErrorCode ?? "(none)",
+                httpContext.RequestAborted.IsCancellationRequested,
+                httpContext.TraceIdentifier);
 
             // Stage 5: project the final result onto SSE events.
             if (result.Success)
@@ -835,6 +878,10 @@ public static class ComposeEndpoints
 
             await response.WriteAsync("data: [DONE]\n\n", ct);
             await response.Body.FlushAsync(ct);
+
+            logger.LogInformation(
+                "Compose dispatch SSE trace [T+{ElapsedMs}ms] pipeline complete. clientAborted={ClientAborted} TraceId={TraceId}",
+                pipelineSw.ElapsedMilliseconds, httpContext.RequestAborted.IsCancellationRequested, httpContext.TraceIdentifier);
         }
         catch (Sprk.Bff.Api.Configuration.FeatureDisabledException ex)
         {
@@ -852,19 +899,28 @@ public static class ComposeEndpoints
         catch (OperationCanceledException) when (!ct.IsCancellationRequested)
         {
             logger.LogWarning(
-                "Compose dispatch SSE: timed out. TraceId={TraceId}",
-                httpContext.TraceIdentifier);
+                "Compose dispatch SSE trace [T+{ElapsedMs}ms] internal timeout. clientAborted={ClientAborted} TraceId={TraceId}",
+                pipelineSw.ElapsedMilliseconds, httpContext.RequestAborted.IsCancellationRequested, httpContext.TraceIdentifier);
             await WriteSSEAsync(
                 response,
                 AnalysisStreamChunk.FromError("Playbook invocation timed out. Please try again."),
                 CancellationToken.None);
             await response.WriteAsync("data: [DONE]\n\n", CancellationToken.None);
         }
+        catch (OperationCanceledException) when (ct.IsCancellationRequested)
+        {
+            // Client disconnected mid-stream (e.g., closed the modal, network drop,
+            // or upstream proxy timeout). Do NOT try to write more SSE frames —
+            // the response is dead.
+            logger.LogWarning(
+                "Compose dispatch SSE trace [T+{ElapsedMs}ms] CLIENT DISCONNECTED mid-stream. This is the most likely cause of client-side 'stream read failed — network error'. clientAborted={ClientAborted} TraceId={TraceId}",
+                pipelineSw.ElapsedMilliseconds, httpContext.RequestAborted.IsCancellationRequested, httpContext.TraceIdentifier);
+        }
         catch (Exception ex) when (!ct.IsCancellationRequested)
         {
             logger.LogError(ex,
-                "Compose dispatch SSE: unexpected failure. consumerType={ConsumerType} TraceId={TraceId}",
-                consumerType, httpContext.TraceIdentifier);
+                "Compose dispatch SSE trace [T+{ElapsedMs}ms] unexpected failure. consumerType={ConsumerType} clientAborted={ClientAborted} TraceId={TraceId}",
+                pipelineSw.ElapsedMilliseconds, consumerType, httpContext.RequestAborted.IsCancellationRequested, httpContext.TraceIdentifier);
             await WriteSSEAsync(
                 response,
                 AnalysisStreamChunk.FromError(
