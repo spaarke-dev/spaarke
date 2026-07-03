@@ -33,9 +33,7 @@ const IconStub: React.FC<{ label: string }> = ({ label }) => (
   </span>
 );
 
-const makeSlot = (
-  overrides: Partial<IHeaderToolbarSlot> & { key: string; tooltip: string },
-): IHeaderToolbarSlot => ({
+const makeSlot = (overrides: Partial<IHeaderToolbarSlot> & { key: string; tooltip: string }): IHeaderToolbarSlot => ({
   icon: <IconStub label={overrides.key} />,
   onClick: jest.fn(),
   ...overrides,
@@ -70,7 +68,7 @@ describe('RecordHeaderShell', () => {
       renderWithProviders(
         <RecordHeaderShell toolbar={makeToolbar('Matter Summary')}>
           <div data-testid="body-child">Body content</div>
-        </RecordHeaderShell>,
+        </RecordHeaderShell>
       );
 
       // Card + toolbar + body present
@@ -96,7 +94,7 @@ describe('RecordHeaderShell', () => {
       renderWithProviders(
         <RecordHeaderShell toolbar={makeToolbar()} loading={false}>
           <div data-testid="body-child">Body content</div>
-        </RecordHeaderShell>,
+        </RecordHeaderShell>
       );
 
       expect(screen.getByTestId('header-toolbar')).toBeInTheDocument();
@@ -114,7 +112,7 @@ describe('RecordHeaderShell', () => {
       renderWithProviders(
         <RecordHeaderShell toolbar={makeToolbar('Matter Summary')} loading={true}>
           <div data-testid="body-child">Body content</div>
-        </RecordHeaderShell>,
+        </RecordHeaderShell>
       );
 
       // Card + toolbar STILL rendered (chrome stays stable during load)
@@ -127,9 +125,7 @@ describe('RecordHeaderShell', () => {
       expect(skeleton).toBeInTheDocument();
       expect(skeleton).toHaveAttribute('aria-label', 'Loading record header');
       for (let i = 0; i < 6; i++) {
-        expect(
-          screen.getByTestId(`record-header-shell-skeleton-cell-${i}`),
-        ).toBeInTheDocument();
+        expect(screen.getByTestId(`record-header-shell-skeleton-cell-${i}`)).toBeInTheDocument();
       }
 
       // Children NOT rendered while loading
@@ -141,7 +137,7 @@ describe('RecordHeaderShell', () => {
       renderWithProviders(
         <RecordHeaderShell toolbar={makeToolbar()} loading={true}>
           <div>hidden</div>
-        </RecordHeaderShell>,
+        </RecordHeaderShell>
       );
 
       const skeleton = screen.getByTestId('record-header-shell-skeleton');
@@ -165,7 +161,7 @@ describe('RecordHeaderShell', () => {
       renderWithProviders(
         <RecordHeaderShell toolbar={makeToolbar()}>
           <div>x</div>
-        </RecordHeaderShell>,
+        </RecordHeaderShell>
       );
 
       const card = screen.getByTestId('record-header-shell');
@@ -201,7 +197,7 @@ describe('RecordHeaderShell', () => {
       renderWithProviders(
         <RecordHeaderShell toolbar={makeToolbar()}>
           <div>x</div>
-        </RecordHeaderShell>,
+        </RecordHeaderShell>
       );
 
       const card = screen.getByTestId('record-header-shell');
@@ -226,7 +222,7 @@ describe('RecordHeaderShell', () => {
       renderWithProviders(
         <RecordHeaderShell toolbar={{ iconSlots: [] }}>
           <div data-testid="body-child">Body</div>
-        </RecordHeaderShell>,
+        </RecordHeaderShell>
       );
 
       // Toolbar rendered but title node absent — shell passes props through
@@ -244,7 +240,7 @@ describe('RecordHeaderShell', () => {
       renderWithProviders(
         <RecordHeaderShell toolbar={toolbar}>
           <div>body</div>
-        </RecordHeaderShell>,
+        </RecordHeaderShell>
       );
 
       const badge = screen.getByTestId('header-toolbar-badge-todos');

@@ -73,9 +73,7 @@ describe('useRelatedCount', () => {
 
     renderHook(() => useRelatedCount('sprk_memo', MEMO_FILTER_FOR_MATTER));
 
-    await waitFor(() =>
-      expect(mockRetrieveMultipleRecords).toHaveBeenCalledTimes(1)
-    );
+    await waitFor(() => expect(mockRetrieveMultipleRecords).toHaveBeenCalledTimes(1));
 
     expect(mockRetrieveMultipleRecords).toHaveBeenCalledWith(
       'sprk_memo',
@@ -92,14 +90,9 @@ describe('useRelatedCount', () => {
 
     renderHook(() => useRelatedCount('sprk_todo', TODO_FILTER));
 
-    await waitFor(() =>
-      expect(mockRetrieveMultipleRecords).toHaveBeenCalledTimes(1)
-    );
+    await waitFor(() => expect(mockRetrieveMultipleRecords).toHaveBeenCalledTimes(1));
 
-    expect(mockRetrieveMultipleRecords).toHaveBeenCalledWith(
-      'sprk_todo',
-      `?$filter=${TODO_FILTER}&$count=true&$top=0`
-    );
+    expect(mockRetrieveMultipleRecords).toHaveBeenCalledWith('sprk_todo', `?$filter=${TODO_FILTER}&$count=true&$top=0`);
   });
 
   it('populates count from the @odata.count annotation on success', async () => {
@@ -109,9 +102,7 @@ describe('useRelatedCount', () => {
       entities: [],
     });
 
-    const { result } = renderHook(() =>
-      useRelatedCount('sprk_memo', MEMO_FILTER_FOR_MATTER)
-    );
+    const { result } = renderHook(() => useRelatedCount('sprk_memo', MEMO_FILTER_FOR_MATTER));
 
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.count).toBe(42);
@@ -124,9 +115,7 @@ describe('useRelatedCount', () => {
     // $count=true, but we defend against unusual host behavior.
     mockRetrieveMultipleRecords.mockResolvedValue({ entities: [] });
 
-    const { result } = renderHook(() =>
-      useRelatedCount('sprk_todo', TODO_FILTER)
-    );
+    const { result } = renderHook(() => useRelatedCount('sprk_todo', TODO_FILTER));
 
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.count).toBe(0);
@@ -163,18 +152,14 @@ describe('useRelatedCount', () => {
     renderHook(() => useRelatedCount('sprk_memo', MEMO_FILTER_FOR_MATTER));
 
     // Initial mount fetch.
-    await waitFor(() =>
-      expect(mockRetrieveMultipleRecords).toHaveBeenCalledTimes(1)
-    );
+    await waitFor(() => expect(mockRetrieveMultipleRecords).toHaveBeenCalledTimes(1));
 
     // Simulate the user returning to the browser tab.
     act(() => {
       window.dispatchEvent(new Event('focus'));
     });
 
-    await waitFor(() =>
-      expect(mockRetrieveMultipleRecords).toHaveBeenCalledTimes(2)
-    );
+    await waitFor(() => expect(mockRetrieveMultipleRecords).toHaveBeenCalledTimes(2));
     // Same URL — focus refresh replays the current query.
     expect(mockRetrieveMultipleRecords).toHaveBeenLastCalledWith(
       'sprk_memo',
@@ -187,9 +172,7 @@ describe('useRelatedCount', () => {
     const failure = new Error('Dataverse count query failed');
     mockRetrieveMultipleRecords.mockRejectedValue(failure);
 
-    const { result } = renderHook(() =>
-      useRelatedCount('sprk_memo', MEMO_FILTER_FOR_MATTER)
-    );
+    const { result } = renderHook(() => useRelatedCount('sprk_memo', MEMO_FILTER_FOR_MATTER));
 
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.error).toBe(failure);
@@ -200,9 +183,7 @@ describe('useRelatedCount', () => {
     // Do NOT install Xrm — simulates unit-test / non-MDA host.
     uninstallXrm();
 
-    const { result } = renderHook(() =>
-      useRelatedCount('sprk_memo', MEMO_FILTER_FOR_MATTER)
-    );
+    const { result } = renderHook(() => useRelatedCount('sprk_memo', MEMO_FILTER_FOR_MATTER));
 
     await waitFor(() => expect(result.current.error).not.toBeNull());
     expect(result.current.error).toBeInstanceOf(Error);
@@ -221,14 +202,11 @@ describe('useRelatedCount', () => {
     const OTHER_MATTER_GUID = '22222222-2222-2222-2222-222222222222';
     const OTHER_FILTER = `_sprk_regardingmatter_value eq ${OTHER_MATTER_GUID}`;
 
-    const { rerender } = renderHook(
-      ({ filter }: { filter: string }) => useRelatedCount('sprk_memo', filter),
-      { initialProps: { filter: MEMO_FILTER_FOR_MATTER } }
-    );
+    const { rerender } = renderHook(({ filter }: { filter: string }) => useRelatedCount('sprk_memo', filter), {
+      initialProps: { filter: MEMO_FILTER_FOR_MATTER },
+    });
 
-    await waitFor(() =>
-      expect(mockRetrieveMultipleRecords).toHaveBeenCalledTimes(1)
-    );
+    await waitFor(() => expect(mockRetrieveMultipleRecords).toHaveBeenCalledTimes(1));
     expect(mockRetrieveMultipleRecords).toHaveBeenLastCalledWith(
       'sprk_memo',
       `?$filter=${MEMO_FILTER_FOR_MATTER}&$count=true&$top=0`
@@ -236,9 +214,7 @@ describe('useRelatedCount', () => {
 
     rerender({ filter: OTHER_FILTER });
 
-    await waitFor(() =>
-      expect(mockRetrieveMultipleRecords).toHaveBeenCalledTimes(2)
-    );
+    await waitFor(() => expect(mockRetrieveMultipleRecords).toHaveBeenCalledTimes(2));
     expect(mockRetrieveMultipleRecords).toHaveBeenLastCalledWith(
       'sprk_memo',
       `?$filter=${OTHER_FILTER}&$count=true&$top=0`
@@ -253,8 +229,7 @@ describe('useRelatedCount', () => {
     });
 
     const { result, rerender } = renderHook(
-      ({ filter }: { filter: string | null }) =>
-        useRelatedCount('sprk_memo', filter),
+      ({ filter }: { filter: string | null }) => useRelatedCount('sprk_memo', filter),
       { initialProps: { filter: MEMO_FILTER_FOR_MATTER as string | null } }
     );
 
@@ -284,25 +259,19 @@ describe('useRelatedCount', () => {
     const addSpy = jest.spyOn(window, 'addEventListener');
     const removeSpy = jest.spyOn(window, 'removeEventListener');
 
-    const { unmount } = renderHook(() =>
-      useRelatedCount('sprk_memo', MEMO_FILTER_FOR_MATTER)
-    );
+    const { unmount } = renderHook(() => useRelatedCount('sprk_memo', MEMO_FILTER_FOR_MATTER));
 
-    await waitFor(() =>
-      expect(mockRetrieveMultipleRecords).toHaveBeenCalledTimes(1)
-    );
+    await waitFor(() => expect(mockRetrieveMultipleRecords).toHaveBeenCalledTimes(1));
 
     // Exactly one focus listener was registered.
-    const focusAddCalls = addSpy.mock.calls.filter((c) => c[0] === 'focus');
+    const focusAddCalls = addSpy.mock.calls.filter(c => c[0] === 'focus');
     expect(focusAddCalls.length).toBe(1);
     const registeredHandler = focusAddCalls[0][1];
 
     unmount();
 
     // Verify the same handler was removed.
-    const focusRemoveCalls = removeSpy.mock.calls.filter(
-      (c) => c[0] === 'focus'
-    );
+    const focusRemoveCalls = removeSpy.mock.calls.filter(c => c[0] === 'focus');
     expect(focusRemoveCalls.length).toBe(1);
     expect(focusRemoveCalls[0][1]).toBe(registeredHandler);
 

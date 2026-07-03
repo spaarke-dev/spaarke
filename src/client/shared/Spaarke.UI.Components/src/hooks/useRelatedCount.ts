@@ -122,10 +122,7 @@ interface CountResponse {
  * );
  * ```
  */
-export function useRelatedCount(
-  relatedEntity: string,
-  filter: string | null
-): UseRelatedCountResult {
+export function useRelatedCount(relatedEntity: string, filter: string | null): UseRelatedCountResult {
   const [count, setCount] = React.useState<number>(0);
   const [loading, setLoading] = React.useState<boolean>(false);
   const [error, setError] = React.useState<Error | null>(null);
@@ -188,11 +185,7 @@ export function useRelatedCount(
       (err: unknown) => {
         if (!mountedRef.current || thisRun !== runIdRef.current) return;
         const wrapped =
-          err instanceof Error
-            ? err
-            : new Error(
-                typeof err === 'string' ? err : 'retrieveMultipleRecords failed'
-              );
+          err instanceof Error ? err : new Error(typeof err === 'string' ? err : 'retrieveMultipleRecords failed');
         setCount(0);
         setError(wrapped);
         setLoading(false);

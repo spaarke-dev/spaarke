@@ -163,13 +163,7 @@ const useStyles = makeStyles({
  *
  * See file-level JSDoc for full contract, empty-state, and grid-span behavior.
  */
-export const TextareaField: React.FC<ITextareaFieldProps> = ({
-  label,
-  value,
-  span,
-  maxLines = 3,
-  className,
-}) => {
+export const TextareaField: React.FC<ITextareaFieldProps> = ({ label, value, span, maxLines = 3, className }) => {
   const styles = useStyles();
 
   // Ref to the clamped element so we can measure overflow.
@@ -230,12 +224,7 @@ export const TextareaField: React.FC<ITextareaFieldProps> = ({
         </Text>
       ) : (
         <>
-          <div
-            ref={clampedRef}
-            className={styles.clamped}
-            data-testid="sprk-textarea-clamped"
-            title={displayValue}
-          >
+          <div ref={clampedRef} className={styles.clamped} data-testid="sprk-textarea-clamped" title={displayValue}>
             {displayValue}
           </div>
           {hasOverflow && (

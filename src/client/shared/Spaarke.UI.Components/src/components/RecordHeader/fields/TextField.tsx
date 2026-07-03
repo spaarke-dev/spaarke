@@ -149,11 +149,7 @@ export const TextField: React.FC<ITextFieldProps> = ({ label, value, span, requi
           </span>
         ) : null}
       </div>
-      <div
-        className={styles.value}
-        title={displayValue}
-        data-testid="record-header-text-field-value"
-      >
+      <div className={styles.value} title={displayValue} data-testid="record-header-text-field-value">
         {displayValue}
       </div>
     </div>

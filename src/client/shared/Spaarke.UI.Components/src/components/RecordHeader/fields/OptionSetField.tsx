@@ -105,15 +105,9 @@ const useOptionSetFieldStyles = makeStyles({
  * Record-header option-set field renderer. See file-level JSDoc for the
  * full contract, FormattedValue resolution boundary, and example.
  */
-export const OptionSetField: React.FC<IOptionSetFieldProps> = ({
-  label,
-  value,
-  span,
-  className,
-}) => {
+export const OptionSetField: React.FC<IOptionSetFieldProps> = ({ label, value, span, className }) => {
   const styles = useOptionSetFieldStyles();
-  const displayValue =
-    value === null || value === undefined || value === '' ? EMPTY_VALUE_GLYPH : value;
+  const displayValue = value === null || value === undefined || value === '' ? EMPTY_VALUE_GLYPH : value;
 
   return (
     <div

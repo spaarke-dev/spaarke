@@ -47,9 +47,7 @@ describe('OptionSetField', () => {
   });
 
   it('applies gridColumn: span N inline style per span prop', () => {
-    const { rerender } = renderWithProviders(
-      <OptionSetField span={1} label="Status" value="Open" />,
-    );
+    const { rerender } = renderWithProviders(<OptionSetField span={1} label="Status" value="Open" />);
     const cell1 = screen.getByText('Open').parentElement!;
     expect(cell1.style.gridColumn).toBe('span 1');
 
@@ -184,9 +182,7 @@ describe('LookupField', () => {
   // ────────────────────────────────────────────────────────────────────────
 
   it('applies gridColumn: span N inline for FieldGrid integration', () => {
-    const { container } = renderWithProviders(
-      <LookupField label="Matter Type" value={sampleValue} span={2} />,
-    );
+    const { container } = renderWithProviders(<LookupField label="Matter Type" value={sampleValue} span={2} />);
     // Locate the LookupField root by its data-field-type marker (container is
     // the FluentProvider wrapper — reach through it to the actual field cell).
     const cell = container.querySelector('[data-field-type="lookup"]') as HTMLElement;
@@ -233,7 +229,7 @@ describe('TextField', () => {
         span={1}
         label="Description"
         value="A very long value that should be clipped with ellipsis on overflow inside a narrow container"
-      />,
+      />
     );
     const valueEl = screen.getByTestId('record-header-text-field-value');
     const cs = window.getComputedStyle(valueEl);
@@ -243,9 +239,7 @@ describe('TextField', () => {
   });
 
   it('renders the required marker when required=true', () => {
-    renderWithProviders(
-      <TextField span={1} label="Matter Number" value="M-001" required />,
-    );
+    renderWithProviders(<TextField span={1} label="Matter Number" value="M-001" required />);
     const marker = screen.getByTestId('record-header-text-field-required-marker');
     expect(marker).toBeInTheDocument();
     expect(marker).toHaveTextContent('*');
@@ -253,24 +247,16 @@ describe('TextField', () => {
 
   it('does NOT render the required marker when required is omitted', () => {
     renderWithProviders(<TextField span={1} label="Matter Name" value="Acme" />);
-    expect(
-      screen.queryByTestId('record-header-text-field-required-marker'),
-    ).not.toBeInTheDocument();
+    expect(screen.queryByTestId('record-header-text-field-required-marker')).not.toBeInTheDocument();
   });
 
   it('does NOT render the required marker when required=false', () => {
-    renderWithProviders(
-      <TextField span={1} label="Matter Name" value="Acme" required={false} />,
-    );
-    expect(
-      screen.queryByTestId('record-header-text-field-required-marker'),
-    ).not.toBeInTheDocument();
+    renderWithProviders(<TextField span={1} label="Matter Name" value="Acme" required={false} />);
+    expect(screen.queryByTestId('record-header-text-field-required-marker')).not.toBeInTheDocument();
   });
 
   it('applies gridColumn: span N inline style per span prop', () => {
-    const { rerender } = renderWithProviders(
-      <TextField span={1} label="X" value="a" />,
-    );
+    const { rerender } = renderWithProviders(<TextField span={1} label="X" value="a" />);
     const cell1 = screen.getByTestId('record-header-text-field');
     expect(cell1.style.gridColumn).toBe('span 1');
     expect(cell1.getAttribute('data-span')).toBe('1');
@@ -299,10 +285,7 @@ describe('TextField', () => {
  * (no layout engine), so we stub them at the prototype level for a test and
  * restore them afterwards.
  */
-const stubOverflow = (opts: {
-  scrollHeight: number;
-  clientHeight: number;
-}): (() => void) => {
+const stubOverflow = (opts: { scrollHeight: number; clientHeight: number }): (() => void) => {
   const origScroll = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'scrollHeight');
   const origClient = Object.getOwnPropertyDescriptor(HTMLElement.prototype, 'clientHeight');
   Object.defineProperty(HTMLElement.prototype, 'scrollHeight', {
@@ -330,9 +313,7 @@ describe('TextareaField', () => {
     // scrollHeight <= clientHeight → no overflow
     const restore = stubOverflow({ scrollHeight: 40, clientHeight: 60 });
     try {
-      renderWithProviders(
-        <TextareaField span={3} label="Description" value="A short single-line note." />,
-      );
+      renderWithProviders(<TextareaField span={3} label="Description" value="A short single-line note." />);
       expect(screen.getByText('Description')).toBeInTheDocument();
       expect(screen.getByText('A short single-line note.')).toBeInTheDocument();
       expect(screen.queryByTestId('sprk-textarea-show-more')).not.toBeInTheDocument();
@@ -402,57 +383,39 @@ describe('TextareaField', () => {
   });
 
   it('applies gridColumn: span N inline style per span prop', () => {
-    const { rerender } = renderWithProviders(
-      <TextareaField span={1} label="Description" value="short" />,
-    );
-    const cell1 = screen
-      .getByText('short')
-      .closest('[data-field-type="textarea"]') as HTMLElement;
+    const { rerender } = renderWithProviders(<TextareaField span={1} label="Description" value="short" />);
+    const cell1 = screen.getByText('short').closest('[data-field-type="textarea"]') as HTMLElement;
     expect(cell1.style.gridColumn).toBe('span 1');
 
     rerender(<TextareaField span={2} label="Description" value="short" />);
-    const cell2 = screen
-      .getByText('short')
-      .closest('[data-field-type="textarea"]') as HTMLElement;
+    const cell2 = screen.getByText('short').closest('[data-field-type="textarea"]') as HTMLElement;
     expect(cell2.style.gridColumn).toBe('span 2');
 
     rerender(<TextareaField span={3} label="Description" value="short" />);
-    const cell3 = screen
-      .getByText('short')
-      .closest('[data-field-type="textarea"]') as HTMLElement;
+    const cell3 = screen.getByText('short').closest('[data-field-type="textarea"]') as HTMLElement;
     expect(cell3.style.gridColumn).toBe('span 3');
   });
 
   it('respects the maxLines prop via the CSS custom property', () => {
     // Default maxLines = 3
-    const { rerender } = renderWithProviders(
-      <TextareaField span={3} label="Description" value="one" />,
-    );
-    const wrapperDefault = screen
-      .getByText('one')
-      .closest('[data-field-type="textarea"]') as HTMLElement;
+    const { rerender } = renderWithProviders(<TextareaField span={3} label="Description" value="one" />);
+    const wrapperDefault = screen.getByText('one').closest('[data-field-type="textarea"]') as HTMLElement;
     expect(wrapperDefault.style.getPropertyValue('--sprk-textarea-max-lines')).toBe('3');
 
     // Override maxLines = 5
     rerender(<TextareaField span={3} label="Description" value="one" maxLines={5} />);
-    const wrapper5 = screen
-      .getByText('one')
-      .closest('[data-field-type="textarea"]') as HTMLElement;
+    const wrapper5 = screen.getByText('one').closest('[data-field-type="textarea"]') as HTMLElement;
     expect(wrapper5.style.getPropertyValue('--sprk-textarea-max-lines')).toBe('5');
 
     // Override maxLines = 1
     rerender(<TextareaField span={3} label="Description" value="one" maxLines={1} />);
-    const wrapper1 = screen
-      .getByText('one')
-      .closest('[data-field-type="textarea"]') as HTMLElement;
+    const wrapper1 = screen.getByText('one').closest('[data-field-type="textarea"]') as HTMLElement;
     expect(wrapper1.style.getPropertyValue('--sprk-textarea-max-lines')).toBe('1');
   });
 
   it('carries data-field-type="textarea" and data-span attributes on the cell root', () => {
     renderWithProviders(<TextareaField span={2} label="Description" value="body" />);
-    const cell = screen
-      .getByText('body')
-      .closest('[data-field-type="textarea"]') as HTMLElement;
+    const cell = screen.getByText('body').closest('[data-field-type="textarea"]') as HTMLElement;
     expect(cell).not.toBeNull();
     expect(cell.getAttribute('data-field-type')).toBe('textarea');
     expect(cell.getAttribute('data-span')).toBe('2');
