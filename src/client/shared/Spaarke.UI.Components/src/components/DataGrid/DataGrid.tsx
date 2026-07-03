@@ -1309,11 +1309,20 @@ export const DataGrid: React.FC<DataGridProps> = props => {
         : [];
   const currentViewId =
     activeSavedQueryId ??
-    (loadState.savedQuery
-      ? // Match the active savedQuery against availableViews by name; the savedQuery
-        // result doesn't carry its own id field.
-        (loadState.availableViews.find(v => v.name === loadState.savedQuery?.name)?.id ?? '__active__')
-      : '');
+    // R2 UAT §5.1 (2026-07-03): when availableViews is restricted to a single
+    // view (via SectionInstance.overrides.availableViews or config-level
+    // allowlist), force currentViewId to that view's id. Otherwise the
+    // name-match against the initially-loaded default savedQuery may fail
+    // (default may not be in the allowlist) → currentViewId falls back to
+    // '__active__' → ViewSelector's `views.find(id === '__active__')` returns
+    // undefined → activeLabel is '' → blank view picker in the toolbar.
+    (loadState.availableViews.length === 1
+      ? loadState.availableViews[0].id
+      : loadState.savedQuery
+        ? // Match the active savedQuery against availableViews by name; the savedQuery
+          // result doesn't carry its own id field.
+          (loadState.availableViews.find(v => v.name === loadState.savedQuery?.name)?.id ?? '__active__')
+        : '');
 
   return (
     <DataGridContextProvider value={contextValue}>

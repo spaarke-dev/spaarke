@@ -90,6 +90,23 @@ interface AppProps {
    * so callers get compile-time safety.
    */
   templateFilter?: readonly LayoutTemplateId[];
+  /**
+   * Optional step id to open the wizard at (parsed from `startAtStep` URL
+   * param by `main.tsx`). Accepts one of the STEP_ constants defined below.
+   *
+   * When absent:
+   *   - `mode === "edit"` OR `mode === "saveAs"` → auto-jump to Arrange Sections
+   *     (§3.1 UX: prior steps are pre-populated so the operator should land on
+   *     the working step).
+   *   - `mode === "create"` → open at Choose Layout (first step).
+   *
+   * When present, overrides the mode-based default. Used by the SpaarkeAi
+   * gear-icon flow (§4.1) which opens the edit wizard at Choose Layout instead
+   * of Arrange Sections so the operator can swap templates.
+   *
+   * @since R2 UAT §3.1 + §4.1 (2026-07-03)
+   */
+  startAtStep?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -119,15 +136,14 @@ const SECTION_CATALOG: SectionCatalogItem[] = SECTION_METADATA_CATALOG.map(
 );
 
 /**
- * Default section IDs — all registered sections selected by default.
- *
- * NOTE: pre-R4 this set was hardcoded to 5 IDs and was used as the initial
- * `selectedSectionIds` state for the create flow. With 7 sections now in the
- * catalog, the wizard's small-template flows may select MORE than the
- * available slots; the existing `selectedCount > slotCount` warning in
- * `SectionStep` already covers that UX. No additional change needed.
+ * Default section IDs — R2 UAT §5.2 (2026-07-03): create flow starts with
+ * NOTHING selected. Operator explicitly picks the sections they want (or clicks
+ * Select All in SectionStep for the pre-R2 behavior). Prevents accidentally
+ * shipping a workspace with more sections than intended when the operator
+ * only wanted 2-3 widgets. saveAs/edit flows still preserve their prior
+ * selection via parseSectionsJson.
  */
-const DEFAULT_SECTION_IDS = new Set(SECTION_CATALOG.map((s) => s.id));
+const DEFAULT_SECTION_IDS = new Set<string>();
 
 // ---------------------------------------------------------------------------
 // Step IDs (stable string keys for WizardShell)
@@ -430,7 +446,7 @@ export function buildSectionsJson(
 // App Component
 // ---------------------------------------------------------------------------
 
-export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sectionsJson, sourceName, authenticatedFetch, templateFilter }) => {
+export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sectionsJson, sourceName, authenticatedFetch, templateFilter, startAtStep }) => {
   // ---------------------------------------------------------------------------
   // SaveAs pre-population: parse source layout data once at mount time
   // ---------------------------------------------------------------------------
@@ -492,28 +508,78 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
 
   const wizardRef = React.useRef<IWizardShellHandle>(null);
 
+  // R2 UAT §3.1 fix follow-up (2026-07-03): fetch the layout on mount when
+  // `mode === "edit"` and populate wizard state from it. Prior wizard code
+  // was designed for the SaveAs flow (state pre-populated via URL params) and
+  // for Create (start empty); the Edit flow was never wired to LOAD the
+  // existing layout — mode=edit only sent layoutId + templateFilter, then the
+  // wizard opened empty. Root cause of "screen is blank" report.
+  //
+  // Populates: workspaceName, selectedTemplateId, selectedSectionIds,
+  // sectionAssignments, rowHeights, sectionInstances, isDefault.
+  const [isLoadingLayout, setIsLoadingLayout] = React.useState<boolean>(
+    mode === "edit" && !!layoutId,
+  );
+  const [loadLayoutError, setLoadLayoutError] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (mode !== "edit" || !layoutId) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await authenticatedFetch(
+          `/api/workspace/layouts/${encodeURIComponent(layoutId)}`,
+        );
+        if (cancelled) return;
+        if (!res.ok) {
+          throw new Error(`Failed to load workspace layout (HTTP ${res.status})`);
+        }
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const layout = (await res.json()) as any;
+        if (cancelled) return;
+        // Field-name flexibility: BFF may camelCase or PascalCase.
+        const layoutName = layout?.name ?? layout?.Name ?? "";
+        const templateId = (layout?.layoutTemplateId ?? layout?.LayoutTemplateId ?? null) as LayoutTemplateId | null;
+        const sectionsJsonStr = layout?.sectionsJson ?? layout?.SectionsJson ?? null;
+        const layoutIsDefault = Boolean(layout?.isDefault ?? layout?.IsDefault ?? false);
+        setWorkspaceName(layoutName);
+        setIsDefault(layoutIsDefault);
+        if (templateId) setSelectedTemplateId(templateId);
+        if (sectionsJsonStr && typeof sectionsJsonStr === "string") {
+          const parsed = parseSectionsJson(sectionsJsonStr);
+          setSelectedSectionIds(parsed.sectionIds);
+          setSectionAssignments(parsed.assignments);
+          setRowHeights(parsed.rowHeights);
+          setSectionInstances(parsed.sectionInstances);
+        }
+        setIsLoadingLayout(false);
+      } catch (err: unknown) {
+        if (cancelled) return;
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error("[WorkspaceLayoutWizard] Failed to load layout for edit:", msg);
+        setLoadLayoutError(msg);
+        setIsLoadingLayout(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [mode, layoutId, authenticatedFetch]);
+
   // 2026-07-03 (R2-followup-1 §3.1): edit mode should skip Choose Layout +
   // Select Components and land on Arrange Sections directly, since the user is
   // MODIFYING an existing layout, not building fresh. selectedTemplateId +
   // selectedSectionIds are pre-populated from parseSectionsJson so canAdvance()
   // returns true for both intermediate steps.
-  const jumpedOnMountRef = React.useRef(false);
-  React.useEffect(() => {
-    if (mode !== "edit") return;
-    if (jumpedOnMountRef.current) return;
-    if (!wizardRef.current) return;
-    if (!selectedTemplateId) return;
-    if (selectedSectionIds.size === 0) return;
-    // Advance twice: Choose Layout → Select Components → Arrange Sections.
-    // Delayed one animation frame so WizardShell's initial mount + first
-    // canAdvance() eval settles before we programmatically advance.
-    const raf = requestAnimationFrame(() => {
-      wizardRef.current?.nextStep();
-      wizardRef.current?.nextStep();
-      jumpedOnMountRef.current = true;
-    });
-    return () => cancelAnimationFrame(raf);
-  }, [mode, selectedTemplateId, selectedSectionIds.size]);
+  //
+  // R2 UAT §3.1 (2026-07-03): the prior implementation attempted to jump twice
+  // via `wizardRef.current?.nextStep()` inside a `requestAnimationFrame`. That
+  // relied on `canAdvance()` returning true after the async fetch settled — a
+  // race we could never reliably win on first mount. Replaced with the
+  // `WizardShell.initialStepId` prop which sets the target step atomically in
+  // the reducer's lazy-init callback (single source of truth, no timing
+  // dependency).
+  //
+  // Gear icon variant (§4.1) opens at Choose Layout via URL param, which is
+  // handled by `resolvedInitialStepId` below.
 
   /** Derive slot count from the selected template. */
   const slotCount = React.useMemo(() => {
@@ -549,18 +615,20 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
 
   /**
    * Auto-initialize slot assignments when entering the Review & Save step.
-   * Watches the wizard shell state to detect when we arrive at step index 2
-   * with an empty assignments map, then populates default assignments.
+   *
+   * R2 UAT §5.4 (2026-07-03): DISABLED for create/saveAs flows. Operators
+   * explicitly drag sections into slots — the wizard no longer pre-populates
+   * assignments on step entry. Edit flows preserve prior assignments via
+   * parseSectionsJson (`sectionAssignments` starts already populated), so this
+   * effect never fired for edit anyway.
+   *
+   * Kept as a no-op effect for the historical prevStepRef tracking pattern in
+   * case future logic needs step-transition detection.
    */
   const prevStepRef = React.useRef<number>(-1);
   React.useEffect(() => {
     const currentIndex = wizardRef.current?.state.currentStepIndex ?? -1;
-    const wasOnDifferentStep = prevStepRef.current !== currentIndex;
     prevStepRef.current = currentIndex;
-
-    if (wasOnDifferentStep && currentIndex === 2 && selectedTemplateId && sectionAssignments.size === 0) {
-      setSectionAssignments(buildInitialAssignments(selectedTemplateId, selectedSections));
-    }
   });
 
   // ---------------------------------------------------------------------------
@@ -676,7 +744,19 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
 
       // Set dialog result for parent to read
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      // R2 UAT §3.3 fix follow-up (2026-07-03): also write to sessionStorage
+      // because the wizard opens as a popup (navigateTo target:2) whose
+      // `window` is separate from the SpaarkeAi host — cross-window
+      // `window.__dialogResult` doesn't survive. sessionStorage IS shared
+      // per-origin per-tab-set, so the host can read the same value.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (window as any).__dialogResult = { confirmed: true, layoutId: savedId, pinToStart };
+      try {
+        window.sessionStorage?.setItem(
+          "spaarke:workspace-wizard:last-result",
+          JSON.stringify({ confirmed: true, layoutId: savedId, pinToStart, at: Date.now() }),
+        );
+      } catch { /* storage may be disabled */ }
 
       // Return success config — WizardShell displays the success screen
       return {
@@ -760,6 +840,7 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
             selectedIds={selectedSectionIds}
             slotCount={slotCount}
             onToggle={handleSectionToggle}
+            onSelectAll={setSelectedSectionIds}
             scope={scope}
             onScopeChange={setScope}
           />
@@ -809,8 +890,54 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
   );
 
   // ---------------------------------------------------------------------------
+  // Resolved initial step id — passed to WizardShell.initialStepId. Captured
+  // ONCE on mount (WizardShell's reducer lazy-init only runs on first render).
+  // Order of precedence:
+  //   1. Explicit `startAtStep` URL param (used by SpaarkeAi gear-icon flow to
+  //      force Choose Layout for edit).
+  //   2. `mode === "edit"` OR `mode === "saveAs"` → Arrange Sections directly.
+  //   3. Default (create) → Choose Layout (first step; equivalent to leaving
+  //      `initialStepId` undefined).
+  // ---------------------------------------------------------------------------
+  const initialStepIdRef = React.useRef<string | undefined>(
+    (() => {
+      if (startAtStep === STEP_CHOOSE_LAYOUT || startAtStep === STEP_CONFIGURE_SECTIONS || startAtStep === STEP_REVIEW_SAVE) {
+        return startAtStep;
+      }
+      if (mode === "edit" || mode === "saveAs") {
+        return STEP_REVIEW_SAVE;
+      }
+      return undefined;
+    })(),
+  );
+
+  // ---------------------------------------------------------------------------
   // Render
   // ---------------------------------------------------------------------------
+
+  // R2 UAT §3.1 follow-up (2026-07-03): show a loading indicator while the
+  // edit-mode layout fetch is in flight. Prevents the wizard from opening
+  // at Arrange Sections with empty state (which rendered as a blank screen
+  // because ArrangeStep returns null when the template isn't set yet).
+  if (isLoadingLayout) {
+    return (
+      <FluentProvider theme={theme} style={{ height: "100%" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%" }}>
+          <span>Loading workspace…</span>
+        </div>
+      </FluentProvider>
+    );
+  }
+
+  if (loadLayoutError) {
+    return (
+      <FluentProvider theme={theme} style={{ height: "100%" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", flexDirection: "column", gap: "8px" }}>
+          <span style={{ color: tokens.colorPaletteRedForeground1 }}>Could not load workspace: {loadLayoutError}</span>
+        </div>
+      </FluentProvider>
+    );
+  }
 
   return (
     <FluentProvider theme={theme} style={{ height: "100%" }}>
@@ -821,6 +948,7 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
         hideTitle={true}
         ariaLabel={wizardTitle}
         steps={steps}
+        initialStepId={initialStepIdRef.current}
         onClose={() => {
           (window as any).__dialogResult = { confirmed: false };
           // Close the navigateTo dialog by clicking the platform's close button
