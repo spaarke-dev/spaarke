@@ -7,10 +7,11 @@
 
 ## Project Status
 
-- **Phase**: Planning → Wave 1 ready to start
-- **Last Updated**: 2026-06-28
-- **Current Task**: Not started (Wave 1 task 001 queued)
-- **Next Action**: Run `task-execute` for task `001-audit-aianalysis-aicompletion-patterns.poml`
+- **Phase**: R7 close — Wave 12.3+ chat-summarize + Playbook-manifest composition model
+- **Last Updated**: 2026-07-03
+- **Current Task**: Phase 12.3a next (client migration + Doc Upload PlaybookId retire)
+- **Next Action**: Follow [`notes/r7-close-plan-2026-07-03.md`](notes/r7-close-plan-2026-07-03.md) §4 Phase 12.3a
+- **CANONICAL SESSION DOC** (read first every session): [`notes/r7-close-plan-2026-07-03.md`](notes/r7-close-plan-2026-07-03.md) — design decisions D-01 through D-15 locked 2026-07-03; phased scope; vocabulary
 
 ---
 
