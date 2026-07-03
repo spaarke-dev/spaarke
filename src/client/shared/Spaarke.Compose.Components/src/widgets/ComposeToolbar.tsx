@@ -85,15 +85,7 @@ const useStyles = makeStyles({
 
 export function ComposeToolbar(props: ComposeToolbarProps): React.JSX.Element {
   const styles = useStyles();
-  const {
-    documentId,
-    bffBaseUrl,
-    disabled,
-    className,
-    onSaveRequested,
-    isDirty = false,
-    isSaving = false,
-  } = props;
+  const { documentId, bffBaseUrl, disabled, className, onSaveRequested, isDirty = false, isSaving = false } = props;
 
   const { openInWeb, openInDesktop, isActing } = useDocumentActions({
     bffBaseUrl,

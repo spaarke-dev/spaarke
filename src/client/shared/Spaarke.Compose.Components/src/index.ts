@@ -92,4 +92,3 @@ export type {
 // consumers should use ComposeEditor (which orchestrates these internally).
 export { docxToTipTapHtml, tipTapToDocxBytes } from './utils/docxBridge';
 export type { MammothConversionResult } from './utils/docxBridge';
-
