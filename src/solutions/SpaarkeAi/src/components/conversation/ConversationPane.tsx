@@ -145,6 +145,12 @@ import {
   executeSummarizeIntent,
   type HeldFile,
 } from "./executeSummarizeIntent";
+// R7 Wave 12.3 Phase 12.3a (2026-07-03) — companion for the linear_dispatch
+// SSE event pathway (deterministic explicit-intent keyword auto-dispatch).
+// Server emits `linear_dispatch` when NL like "summarize this document" matches
+// a keyword; the handler POSTs to the pre-composed dispatchUrl and streams the
+// response into the Summary tab (same workspace flow as `/summarize` slash).
+import { executeLinearDispatch } from "./executeLinearDispatch";
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -1687,6 +1693,76 @@ export function ConversationPane(): React.JSX.Element {
   );
 
   /**
+   * R7 Wave 12.3 Phase 12.3a (2026-07-03) — handle `linear_dispatch` SSE events.
+   *
+   * Fires when the BFF has deterministically matched an explicit-intent keyword
+   * (e.g. "summarize" whole-word case-insensitive) AND attachments are present.
+   * Semantic OPPOSITE of `playbook_options` (which requires a click per FR-48):
+   * this handler POSTs to `payload.dispatchUrl` with `payload.requestBody`
+   * immediately, no user confirmation, and routes the SSE response into the
+   * same workspace tab-loading flow as the `/summarize` slash command.
+   *
+   * Files are ALREADY promoted server-side (the SSE payload carries
+   * `sessionAttachmentIds` referring to existing session-file rows), so we skip
+   * the /documents promotion step of `executeSummarizeIntent` and go directly
+   * to widget_load + streaming POST.
+   *
+   * ADR-015: payload is tier-1 safe by BFF construction (consumer-type key,
+   * URL from route table, opaque IDs, controlled-vocabulary reason). Log
+   * STRUCTURAL signals only — never the payload contents.
+   */
+  const handleLinearDispatch = React.useCallback(
+    (payload: {
+      consumerType: string;
+      dispatchUrl: string;
+      requestBody: string;
+      reason: string;
+      sessionAttachmentIds: string[];
+    }): void => {
+      // ADR-015: log ONLY the discriminants + counts, never the URL or body.
+      console.log(
+        '[ConversationPane] linear_dispatch received — consumerType:%s reason:%s attachments:%d',
+        payload.consumerType,
+        payload.reason,
+        payload.sessionAttachmentIds.length,
+      );
+
+      // Interstitial chat message so the user sees intent recognition happened
+      // before the Summary tab loads.
+      const interstitial =
+        payload.consumerType === 'chat-summarize'
+          ? payload.sessionAttachmentIds.length === 1
+            ? "I'll summarize that file for you."
+            : `I'll summarize those ${payload.sessionAttachmentIds.length} files for you.`
+          : "I'll run that for you.";
+      setPendingInjection(makeLocalAssistantMessage(interstitial));
+
+      // Fire-and-forget; the workspace tab reflects streaming progress.
+      void (async () => {
+        try {
+          await executeLinearDispatch({
+            consumerType: payload.consumerType,
+            dispatchUrl: payload.dispatchUrl,
+            requestBody: payload.requestBody,
+            sessionAttachmentIds: payload.sessionAttachmentIds,
+            bffBaseUrl,
+            getAccessToken,
+            publishPaneEvent: dispatch,
+          });
+        } catch (err) {
+          // ADR-019: surface stable errorCode when present; never raw exception text.
+          const message =
+            err instanceof Error
+              ? `I couldn't complete that — ${err.message}`
+              : "I couldn't complete that. Please try again.";
+          setPendingInjection(makeLocalAssistantMessage(message));
+        }
+      })();
+    },
+    [bffBaseUrl, getAccessToken, dispatch]
+  );
+
+  /**
    * onSelectPlaybook — user clicked a candidate playbook link button (FR-50).
    *
    * POSTs to `/api/ai/playbook-dispatch/execute` with `{ playbookId,
@@ -2450,6 +2526,11 @@ export function ConversationPane(): React.JSX.Element {
               onPlaybookOptions={handlePlaybookOptions}
               onSelectPlaybook={handleSelectPlaybook}
               onOpenLibraryModal={handleOpenLibraryModal}
+              // R7 Wave 12.3 Phase 12.3a (2026-07-03) — explicit-intent
+              // deterministic auto-dispatch. Server emits `linear_dispatch`
+              // when NL keyword matches (e.g. "summarize"); client POSTs to the
+              // pre-composed dispatchUrl and streams into the Summary tab.
+              onLinearDispatch={handleLinearDispatch}
               // R6 Pillar 6c / task 095 — trace bridge. Forward each
               // context_event SSE payload to the `context` PaneEventBus channel
               // so ExecutionTraceWidget renders in real time. ADR-015: payload

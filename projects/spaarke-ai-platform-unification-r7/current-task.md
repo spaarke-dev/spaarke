@@ -1,6 +1,6 @@
 # Current Task State — spaarke-ai-platform-unification-r7
 
-> **Last Updated**: 2026-07-03 (post-conversation on composition model; ready to start Phase 12.3a client work)
+> **Last Updated**: 2026-07-03 (Phase 12.3a client-side wiring for `linear_dispatch` complete; ready to build + deploy + UAT)
 > **Recovery**: Read "Quick Recovery" section first
 
 ---
@@ -10,11 +10,12 @@
 | Field | Value |
 |-------|-------|
 | **Session** | R7 close — Wave 12.3+ chat-summarize + Playbook-manifest composition model |
-| **Status** | **Server-side keyword-match auto-dispatch complete (uncommitted).** Client audit complete. Client-side wiring is next: SprkChat + useSseStream + ConversationPane need to handle new `linear_dispatch` SSE event. |
+| **Status** | **Phase 12.3a client-side wiring COMPLETE (uncommitted).** All four subtasks done + tsc-surface-gate confirms 0 surface-owned TS errors. Next: build + deploy client + UAT smoke Assistant pane summarize. |
 | **Branch** | `work/spaarke-ai-platform-unification-r7` |
-| **Latest commits** | Server side of Wave 12.3 merged via PR #546 (`5f8543457`); D-13 revision pushed as `b1e4a4b11` |
-| **Uncommitted** | `LinearDispatchSseEvent.cs` (new), `ChatSseEventFactory.cs` (new factory method), `ChatEndpoints.cs` (keyword bypass + `TryDetectExplicitConsumerType`). Build clean. |
-| **Next Action** | **Continue Phase 12.3a client-side wiring** — see "Phase 12.3a Progress" section below. First subtask: add `linear_dispatch` handling in `src/client/shared/Spaarke.UI.Components/src/hooks/useSseStream.ts` after line 292. |
+| **Latest commits** | Server side of Wave 12.3 merged via PR #546 (`5f8543457`); D-13 revision pushed as `b1e4a4b11`; server keyword-match bypass = `139014adc` |
+| **Uncommitted (server, from prior turn)** | `LinearDispatchSseEvent.cs`, `ChatSseEventFactory.cs`, `ChatEndpoints.cs` (keyword bypass + `TryDetectExplicitConsumerType`). |
+| **Uncommitted (client, this turn)** | `types.ts` (new `ILinearDispatchPayload` + `IChatSseEventData` fields + `ChatSseEventType` extension + prop + hook API), `useSseStream.ts` (parse `linear_dispatch` case + ref + setter), `SprkChat.tsx` (prop + useEffect wiring), `ConversationPane.tsx` (`handleLinearDispatch` + prop wire), `executeLinearDispatch.ts` (NEW companion helper for the pre-promoted case). |
+| **Next Action** | **Build + deploy SpaarkeAi code page + UAT smoke.** Note: local Vite build blocked on missing `@spaarke/legal-workspace` workspace dep in node_modules (unrelated to this task); `tsc --noEmit` on shared lib passes 0 errors. Recommend `npm install` at solutions root before deploying, or use CI. |
 
 ---
 
@@ -65,34 +66,45 @@ Committed on `a34631f03`, merged to master via PR #546:
 2. `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SseEventTypes/ChatSseEventFactory.cs` — added `CreateLinearDispatchEvent` factory method
 3. `src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs` — insert keyword-match bypass before `RunPhaseBVectorMatchAsync` (line ~633); new helper method `TryDetectExplicitConsumerType(message)` + compiled `SummarizeKeywordRegex`
 
-### Client changes (NOT YET DONE — next steps in exact order)
+### Client changes (COMPLETE — uncommitted)
 
-1. **`src/client/shared/Spaarke.UI.Components/src/hooks/useSseStream.ts`**:
-   - Add `ILinearDispatchPayload` interface next to `IPlaybookOptionsPayload` (line ~53 imports)
-   - Add `onLinearDispatch` to handlers signature (line ~204)
-   - Add `else if (event.type === 'linear_dispatch')` branch after playbook_options case (line ~292)
-   - Add `onLinearDispatchRef` + `setOnLinearDispatch` following the `onPlaybookOptionsRef` pattern
-   - Export `setOnLinearDispatch` from the hook (line ~640 area)
-   - Handler shape: `{ consumerType, dispatchUrl, requestBody (JSON string), reason, sessionAttachmentIds }`
+**All four subtasks landed 2026-07-03. tsc --noEmit on shared lib = 0 errors.
+tsc-surface-gate on SpaarkeAi = 0 surface-owned errors.**
 
-2. **`src/client/shared/Spaarke.UI.Components/src/components/SprkChat/types.ts`**:
-   - Add `setOnLinearDispatch` to the exposed hook API type (line ~1550 near `setOnPlaybookOptions`)
-   - Add `onLinearDispatch?: (payload: ILinearDispatchPayload) => void` to SprkChatProps
+1. **`src/client/shared/Spaarke.UI.Components/src/components/SprkChat/types.ts`** ✅
+   - Added `ILinearDispatchPayload` interface (mirrors BFF `LinearDispatchSseEventData`)
+   - Added `linear_dispatch` variant to `ChatSseEventType` union
+   - Added `consumerType`, `dispatchUrl`, `requestBody`, `reason` fields to `IChatSseEventData` (sessionAttachmentIds reused from playbook_options)
+   - Added `onLinearDispatch?` prop to `ISprkChatProps`
+   - Added `setOnLinearDispatch` to `IUseSseStreamResult`
 
-3. **`src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx`**:
-   - Import `setOnLinearDispatch` from hook (line ~439)
-   - Add prop `onLinearDispatchProp`
-   - Add `useEffect` that wires `onLinearDispatchProp` → `setOnLinearDispatch` following the `playbook_options` pattern (line ~981)
+2. **`src/client/shared/Spaarke.UI.Components/src/hooks/useSseStream.ts`** ✅
+   - Import `ILinearDispatchPayload`
+   - Added `onLinearDispatch` to `SseEventHandlers` interface
+   - Added `else if (event.type === 'linear_dispatch')` branch in `processEvent`
+   - Added `onLinearDispatchRef` + `setOnLinearDispatch` (synchronous callback-ref pattern, mirrors `setOnPlaybookOptions`)
+   - Exposed `setOnLinearDispatch` from the returned hook API
 
-4. **`src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx`**:
-   - Add `handleLinearDispatch` handler: on receipt of `linear_dispatch` payload → POST to `payload.dispatchUrl` with `payload.requestBody` → the response is the same SSE stream `executeSummarizeIntent.ts` currently reads for `/summarize` slash command → route into the same tab-loading flow that `/summarize` uses (workspace.widget_load → StructuredOutputStreamWidget)
-   - Wire `onLinearDispatch={handleLinearDispatch}` prop on `<SprkChat>` (line ~2450)
+3. **`src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx`** ✅
+   - Destructured `setOnLinearDispatch` from `sseStream`
+   - Added `onLinearDispatch: onLinearDispatchProp` to destructured props
+   - Added `useEffect` that wires prop → setter (mirrors playbook_options `useEffect`)
 
-5. **Build client** — `npm run build` in `src/client/shared/Spaarke.UI.Components/` and `src/solutions/SpaarkeAi/`
+4. **`src/solutions/SpaarkeAi/src/components/conversation/executeLinearDispatch.ts`** ✅ (NEW file)
+   - Companion helper to `executeSummarizeIntent.ts` for the pre-promoted case
+   - Steps: (1) emit `workspace.widget_load` for Summary tab; (2) POST to `dispatchUrl` with `requestBody`; (3) consume SSE stream, bridge via `createSseToPaneEventBridge` to `workspace.streaming_*` events
+   - `resolveWidgetConfig(consumerType)` currently handles `chat-summarize`; extend as future consumers migrate
 
-6. **Deploy client** via appropriate deploy script (SpaarkeAi is a code page)
+5. **`src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx`** ✅
+   - Imported `executeLinearDispatch`
+   - Added `handleLinearDispatch` React.useCallback with structural-only logging + interstitial chat message + fire-and-forget helper invocation + ADR-019 error surfacing
+   - Wired `onLinearDispatch={handleLinearDispatch}` prop on `<SprkChat>`
 
-7. **UAT smoke** — user uploads file, types "summarize this document" → workspace Summary tab loads + structured JSON renders
+### Next steps
+
+- **Commit + push client changes** (batch with any additional Phase 12.3a work below)
+- **Deploy client** (SpaarkeAi is a code page; use appropriate deploy script — note local Vite build blocked on missing `@spaarke/legal-workspace` node_module; may need `npm install` at solutions root first)
+- **UAT smoke** — user uploads file, types "summarize this document" (NL, no slash) → workspace Summary tab installs + structured JSON renders (validates server keyword match + client `linear_dispatch` handling end-to-end)
 
 ### Deferred to future 12.3a sub-work (after keyword auto-dispatch smoke passes)
 

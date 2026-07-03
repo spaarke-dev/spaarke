@@ -347,6 +347,9 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   onPlaybookOptions: onPlaybookOptionsProp,
   onSelectPlaybook,
   onOpenLibraryModal,
+  // R7 Wave 12.3 Phase 12.3a (2026-07-03) — linear_dispatch forwarding for
+  // explicit-intent auto-dispatch (host POSTs to payload.dispatchUrl). Optional.
+  onLinearDispatch: onLinearDispatchProp,
   // R6 Pillar 6c / task 095 — trace bridge: context_event SSE forwarding to host.
   onContextEvent: onContextEventProp,
 }) => {
@@ -437,6 +440,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
     setOnDocumentStreamEvent,
     setOnPaneEvent,
     setOnPlaybookOptions,
+    setOnLinearDispatch,
     setOnContextEvent,
   } = sseStream;
 
@@ -1007,6 +1011,36 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
       setOnPlaybookOptions(null);
     };
   }, [onPlaybookOptionsProp, setOnPlaybookOptions]);
+
+  // ── R7 Wave 12.3 Phase 12.3a (2026-07-03): register linear_dispatch callback ──
+  //
+  // Forwards the SSE `linear_dispatch` payload verbatim to the host (typically
+  // ConversationPane). The host POSTs to `payload.dispatchUrl` with
+  // `payload.requestBody` immediately (no user confirmation). This is the
+  // OPPOSITE contract of `playbook_options` (which requires a click per FR-48).
+  // Synchronous callback-ref pattern — mirrors the setOnPlaybookOptions useEffect
+  // above.
+  //
+  // ADR-015: SprkChat MUST NOT log the payload here. The wrapper only forwards.
+  React.useEffect(() => {
+    if (!onLinearDispatchProp) {
+      setOnLinearDispatch(null);
+      return;
+    }
+
+    setOnLinearDispatch(payload => {
+      try {
+        onLinearDispatchProp(payload);
+      } catch (err) {
+        // Per ADR-015: do NOT include the payload in the log line — only the error.
+        console.error('[SprkChat] Failed to forward linear_dispatch SSE event:', err);
+      }
+    });
+
+    return () => {
+      setOnLinearDispatch(null);
+    };
+  }, [onLinearDispatchProp, setOnLinearDispatch]);
 
   // R6 Pillar 6c / task 095 — wire `onContextEvent` prop into the SSE pipeline.
   // Synchronous callback-ref pattern — mirrors the setOnPlaybookOptions useEffect

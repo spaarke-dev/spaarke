@@ -215,7 +215,12 @@ export type ChatSseEventType =
   | 'context_event'
   // chat-routing-redesign-r1 task 117a/117b — file-aware playbook routing
   // surfaces top-N candidates + an Open Library CTA inline in the chat.
-  | 'playbook_options';
+  | 'playbook_options'
+  // R7 Wave 12.3 Phase 12.3a (2026-07-03) — explicit-intent deterministic
+  // auto-dispatch. Locked payload shape: LinearDispatchSseEventData. Semantic
+  // OPPOSITE of `playbook_options` — caller POSTs to `data.dispatchUrl`
+  // immediately (no user confirmation).
+  | 'linear_dispatch';
 
 /** A parsed SSE event from the stream, matching ChatSseEvent from the server. */
 export interface IChatSseEvent {
@@ -379,6 +384,19 @@ export interface IChatSseEventData {
 
   /** Capability name (decision_made). */
   contextCapabilityName?: string;
+
+  // ── linear_dispatch fields (R7 Wave 12.3 Phase 12.3a, 2026-07-03) ────────────
+  // Explicit-intent auto-dispatch envelope. Locked shape mirrors
+  // `LinearDispatchSseEventData` on the BFF. All fields tier-1 safe by construction.
+  /** Consumer-type key (e.g. `"chat-summarize"`). Present only in `linear_dispatch` events. */
+  consumerType?: string;
+  /** Server-relative URL the client POSTs to. Present only in `linear_dispatch` events. */
+  dispatchUrl?: string;
+  /** Pre-composed JSON request body string. Present only in `linear_dispatch` events. */
+  requestBody?: string;
+  /** Controlled-vocabulary reason tag. Present only in `linear_dispatch` events. */
+  reason?: string;
+  // sessionAttachmentIds is reused from playbook_options fields above for linear_dispatch events.
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -441,6 +459,49 @@ export interface IPlaybookOptionsPayload {
    * `rerankInvoked` is `false`.
    */
   rerankReason?: string | null;
+}
+
+/**
+ * Payload for the `linear_dispatch` SSE event emitted by the BFF chat pipeline
+ * when an explicit-intent keyword match deterministically identifies a Linear
+ * AI Consumer (R7 Wave 12.3 Phase 12.3a, 2026-07-03).
+ *
+ * Semantic contrast with {@link IPlaybookOptionsPayload}: `playbook_options`
+ * carries the FR-48 "NEVER auto-execute — user MUST click" invariant.
+ * `linear_dispatch` carries the OPPOSITE contract — auto-execute is the intent.
+ * The client POSTs to `dispatchUrl` with `requestBody` immediately, no user
+ * confirmation.
+ *
+ * @see `Sprk.Bff.Api.Services.Ai.Chat.SseEventTypes.LinearDispatchSseEventData`
+ */
+export interface ILinearDispatchPayload {
+  /**
+   * Consumer-type key (e.g. `"chat-summarize"`) matching a
+   * `ConsumerTypes.*` constant on the BFF. Deterministic identifier.
+   */
+  consumerType: string;
+  /**
+   * Server-relative URL the client should POST to. Populated by the BFF from
+   * its known Linear endpoint registry — the client does NOT interpret this
+   * to build arbitrary URLs. Contains the session id substituted in the path
+   * template.
+   */
+  dispatchUrl: string;
+  /**
+   * JSON string carrying the pre-composed request body for the dispatch POST.
+   * Client sends it verbatim as `application/json`.
+   */
+  requestBody: string;
+  /**
+   * Short controlled-vocabulary tag explaining why this dispatch fired
+   * (e.g. `"explicit-keyword-match:summarize"`). Free-form NL forbidden.
+   */
+  reason: string;
+  /**
+   * Session file IDs correlated to the request (for client-side telemetry +
+   * candidate correlation). Opaque identifiers (ADR-015 tier-1).
+   */
+  sessionAttachmentIds: string[];
 }
 
 /**
@@ -718,6 +779,26 @@ export interface ISprkChatProps {
    * the link renders disabled.
    */
   onOpenLibraryModal?: (sessionAttachmentIds: string[]) => void;
+
+  /**
+   * Callback fired for `linear_dispatch` SSE events (R7 Wave 12.3 Phase 12.3a,
+   * 2026-07-03).
+   *
+   * When provided, SprkChat forwards the BFF-emitted dispatch descriptor
+   * (consumer type, dispatch URL, request body, session attachment IDs) verbatim.
+   * The host (typically ConversationPane) POSTs to `dispatchUrl` with
+   * `requestBody` immediately — no user confirmation. This is the
+   * explicit-intent counterpart to {@link onPlaybookOptions}, which requires a
+   * click.
+   *
+   * Uses the synchronous callback-ref pattern (same as onPlaybookOptions) —
+   * delivered from the fetch loop without React state batching.
+   *
+   * ADR-015 (binding): the callback MUST NOT be logged verbatim by the host.
+   * The payload is tier-1 safe by construction but accumulating it in
+   * telemetry defeats the point.
+   */
+  onLinearDispatch?: ((payload: ILinearDispatchPayload) => void) | null;
 
   /**
    * Callback fired when a chat attachment finishes client-side extraction and
@@ -1548,6 +1629,22 @@ export interface IUseSseStreamResult {
    * payload verbatim into Application Insights / browser telemetry.
    */
   setOnPlaybookOptions: (handler: ((payload: IPlaybookOptionsPayload) => void) | null) => void;
+
+  /**
+   * R7 Wave 12.3 Phase 12.3a (2026-07-03) — register/unregister a synchronous
+   * callback for `linear_dispatch` SSE events (explicit-intent auto-dispatch to
+   * a Linear AI Consumer endpoint).
+   *
+   * Same callback-ref pattern as {@link setOnPlaybookOptions} — payload delivered
+   * verbatim from the fetch loop without React state batching. Host (typically
+   * ConversationPane) POSTs to `payload.dispatchUrl` with `payload.requestBody`
+   * immediately, without user confirmation. Pass `null` to unregister.
+   *
+   * ADR-015: the callback receives ONLY tier-1 safe data — consumer-type key,
+   * server-relative URL from a code-defined route table, opaque session file
+   * IDs, controlled-vocabulary reason tag. No user message text.
+   */
+  setOnLinearDispatch: (handler: ((payload: ILinearDispatchPayload) => void) | null) => void;
 
   /**
    * R6 Pillar 6c / task 095 — register/unregister a synchronous callback for
