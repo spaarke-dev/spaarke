@@ -13,10 +13,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 021 → completed 2026-07-02 |
+| **Task** | 022 → completed 2026-07-02 |
 | **Step** | — (task complete) |
-| **Status** | Ready for task 022 (MatterHeaderView composition) |
-| **Next Action** | Run task-execute against task 022 (`022-matter-header-view-composition.poml`). Task 021 delivered manifest + class + version.ts + placeholder view + package.json at `src/client/pcf/MatterHeader/`. |
+| **Status** | Ready for task 023 (Matter solution folder + pack.ps1) |
+| **Next Action** | Run task-execute against task 023 (`023-matter-solution-folder-and-pack.poml`). Task 022 delivered `MatterHeaderView.tsx` (FR-12 composition), 7-test unit-test suite (all passing), jest config + setup + tsconfig.test.json + fileMock at `src/client/pcf/MatterHeader/`. Net LOC: class 20 + view 30 (pure composition) = 50 (well under NFR-02 ≤100). |
 
 ### Files Modified This Session
 
