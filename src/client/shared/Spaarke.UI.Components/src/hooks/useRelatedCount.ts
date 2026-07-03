@@ -172,7 +172,10 @@ export function useRelatedCount(relatedEntity: string, filter: string | null): U
     setLoading(true);
     setError(null);
 
-    const query = `?$filter=${currentFilter}&$count=true&$top=0`;
+    // Dataverse Web API rejects $top=0 explicitly ("Invalid value for $top query option").
+    // Use $top=1 — smallest positive value; response payload is 1 record + @odata.count.
+    // We ignore .entities and read only @odata.count. Discovered 2026-07-03 during live QA.
+    const query = `?$filter=${currentFilter}&$count=true&$top=1`;
 
     xrm.WebApi.retrieveMultipleRecords(currentEntity, query).then(
       (result: CountResponse) => {

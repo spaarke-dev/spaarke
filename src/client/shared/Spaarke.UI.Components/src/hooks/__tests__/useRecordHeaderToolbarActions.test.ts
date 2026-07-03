@@ -375,6 +375,81 @@ describe('useRecordHeaderToolbarActions', () => {
     expect(checkmark?.badge).toBe(7);
   });
 
+  // ── v1.0.2 regression guards: sprk_todo uses ADR-024 dual-field ──────────
+
+  it('checkmark badge query uses the entity-specific sprk_todo lookup (NOT the polymorphic regardingobjectid)', async () => {
+    // v1.0.0 bug: hook built `_regardingobjectid_value eq {guid}` filter for
+    // sprk_todo, but sprk_todo does not have a polymorphic regarding column
+    // (verified via Dataverse MCP describe 2026-07-03). Dataverse returned
+    // 400 "Could not find a property named '_regardingobjectid_value'".
+    installXrm({ todoCount: 3 });
+    renderHook(() =>
+      useRecordHeaderToolbarActions({
+        entity: MATTER_ENTITY,
+        recordId: MATTER_GUID,
+      })
+    );
+
+    await flushPromises();
+    await flushPromises();
+
+    const todoCallLog = mockRetrieveMultipleRecords.mock.calls.filter(c => c[0] === 'sprk_todo');
+    expect(todoCallLog.length).toBeGreaterThan(0);
+    // Positive assertion: entity-specific ADR-024 lookup is used.
+    expect(todoCallLog[0][1]).toContain('_sprk_regardingmatter_value eq');
+    // Negative assertion: legacy polymorphic filter is NOT used.
+    expect(todoCallLog[0][1]).not.toContain('_regardingobjectid_value');
+  });
+
+  it('checkmark badge = 0 for an UNSUPPORTED parent (playbook is not in SUPPORTED_TODO_PARENTS)', async () => {
+    installXrm({ todoCount: 999 });
+    const { result } = renderHook(() =>
+      useRecordHeaderToolbarActions({
+        entity: 'sprk_playbook',
+        recordId: MATTER_GUID,
+      })
+    );
+
+    await flushPromises();
+    await flushPromises();
+
+    const checkmark = result.current.toolbarProps.iconSlots.find(s => s.key === 'checkmark');
+    expect(checkmark?.badge).toBe(0);
+
+    // No sprk_todo query issued when the parent is unsupported.
+    const todoCallLog = mockRetrieveMultipleRecords.mock.calls.filter(c => c[0] === 'sprk_todo');
+    expect(todoCallLog).toHaveLength(0);
+  });
+
+  // ── v1.0.2 title prop propagates to toolbarProps ─────────────────────────
+
+  it('forwards the optional title prop through to toolbarProps.title', async () => {
+    installXrm();
+    const { result } = renderHook(() =>
+      useRecordHeaderToolbarActions({
+        entity: MATTER_ENTITY,
+        recordId: MATTER_GUID,
+        title: 'Matter #A-2026-42',
+      })
+    );
+
+    await flushPromises();
+    expect(result.current.toolbarProps.title).toBe('Matter #A-2026-42');
+  });
+
+  it('leaves toolbarProps.title undefined when the option is omitted', async () => {
+    installXrm();
+    const { result } = renderHook(() =>
+      useRecordHeaderToolbarActions({
+        entity: MATTER_ENTITY,
+        recordId: MATTER_GUID,
+      })
+    );
+
+    await flushPromises();
+    expect(result.current.toolbarProps.title).toBeUndefined();
+  });
+
   it('annotation badge reflects the mocked sprk_memo count for a SUPPORTED parent (sprk_matter)', async () => {
     installXrm({ memoCount: 4 });
     const { result } = renderHook(() =>

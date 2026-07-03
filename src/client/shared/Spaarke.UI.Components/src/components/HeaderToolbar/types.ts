@@ -11,6 +11,7 @@
  */
 
 import type * as React from 'react';
+import type { ISummaryData } from '../AiSummaryPopover/AiSummaryPopover';
 
 /**
  * A single right-aligned icon slot in the HeaderToolbar.
@@ -37,6 +38,15 @@ export interface IHeaderToolbarSlot {
   tooltip: string;
   badge?: number;
   disabled?: boolean;
+  /**
+   * Optional forwarded ref for the button element. Consumers that need to
+   * anchor a Popover, Menu, or Dialog against a specific icon (e.g. the
+   * sparkle → AI summary popover) attach a ref via this field and read
+   * `.current` at open time. Added v1.0.2 fix: the sparkle popover in
+   * `useRecordHeaderToolbarActions` was previously unanchored because the
+   * hook could not reach the trigger button through the toolbar layer.
+   */
+  buttonRef?: React.Ref<HTMLButtonElement>;
 }
 
 /**
@@ -51,4 +61,21 @@ export interface IHeaderToolbarSlot {
 export interface IHeaderToolbarProps {
   title?: string;
   iconSlots: IHeaderToolbarSlot[];
+  /**
+   * Optional AI-summary popover, rendered as the FIRST element in the icon
+   * strip via the shared `<AiSummaryPopover>` component (same one used by
+   * VisualHost, SemanticSearchControl, DocumentCard, etc.). When provided,
+   * `HeaderToolbar` builds the sparkle trigger internally so callers don't
+   * have to direct-import `@fluentui/react-icons` from a virtual PCF (that
+   * import path breaks webpack's griffel/src resolution — see the v1.0.4
+   * and v1.0.10 build regressions).
+   *
+   * The `onFetchSummary` callback is invoked lazily on first open — return
+   * `{ summary, tldr }` (either may be `null`). Retained on this shared
+   * contract because AI summary is a first-class record-header surface
+   * across every entity's header PCF (spec FR-08).
+   */
+  aiSummary?: {
+    onFetchSummary: () => Promise<ISummaryData>;
+  };
 }

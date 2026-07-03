@@ -483,6 +483,28 @@ export function useSprkMemoRepository(
   const updateBody = React.useCallback(
     (body: string, options?: { immediate?: boolean }): void => {
       pendingBodyRef.current = body;
+
+      // v1.0.9 CRITICAL fix — update local `memos` state IMMEDIATELY on every
+      // keystroke. The textarea in `MemoEditor` is CONTROLLED, so its `value`
+      // prop must reflect what the user is typing on every render. Previously
+      // we only touched a ref during typing and deferred all state work to
+      // the debounced `writeBodyNow` (1000 ms later). Any parent re-render
+      // between keystrokes then reverted the controlled input to the STALE
+      // `memos` body — producing the "extremely laggy, unusable" typing feel
+      // the user reported.
+      //
+      // Two concerns, one function:
+      //   1) Local state update on every keystroke  → controlled input stays
+      //      in sync (this addition).
+      //   2) Network write debounced by 1000 ms     → still deferred to
+      //      `writeBodyNow` so we don't spam Xrm.WebApi (existing behavior).
+      const memoId = currentMemoIdRef.current;
+      if (memoId) {
+        setMemos(prev =>
+          prev.map(m => (m.sprk_memoid === memoId ? { ...m, sprk_memobody: body } : m))
+        );
+      }
+
       if (options?.immediate) {
         // Cancel any pending timer, then write NOW with the fresh value.
         if (debounceTimerRef.current !== null) {

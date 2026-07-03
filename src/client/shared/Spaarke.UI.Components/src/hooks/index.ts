@@ -55,5 +55,7 @@ export {
   SMARTTODO_WEBRESOURCE_NAME,
   RECORDSUMMARY_FIELD,
   SUPPORTED_MEMO_PARENTS,
+  SUPPORTED_TODO_PARENTS,
   buildMemoFilterForParent,
+  buildTodoFilterForParent,
 } from './toolbarLaunchDefaults';

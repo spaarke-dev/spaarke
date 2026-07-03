@@ -54,8 +54,7 @@
  */
 
 import * as React from 'react';
-import { Button, Text, Tooltip, makeStyles, tokens } from '@fluentui/react-components';
-import { ArrowClockwise20Regular, Note24Regular, Sparkle24Regular, Checkmark24Regular } from '@fluentui/react-icons';
+import { Note24Regular, Checkmark24Regular } from '@fluentui/react-icons';
 
 import type { IHeaderToolbarProps, IHeaderToolbarSlot } from '../components/HeaderToolbar/types';
 import { getXrm } from '../utils/xrmContext';
@@ -66,23 +65,13 @@ import {
   NOTEPAD_WEBRESOURCE_NAME,
   SMARTTODO_WEBRESOURCE_NAME,
   buildMemoFilterForParent,
+  buildTodoFilterForParent,
 } from './toolbarLaunchDefaults';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Constants
 // ─────────────────────────────────────────────────────────────────────────────
 
-/**
- * Deferral tooltip copy for the unwired refresh icon (FR-08a; U-04 default).
- * If reviewer wants different copy, change this in one place.
- */
-const REFRESH_DEFERRAL_TOOLTIP = 'Refresh available in a follow-on release';
-
-/**
- * Empty-state copy for the sparkle popover when `recordSummary` is null / empty
- * (FR-08 REVISED; U-03 default).
- */
-const SPARKLE_EMPTY_STATE = 'No summary yet';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -90,13 +79,18 @@ const SPARKLE_EMPTY_STATE = 'No summary yet';
 
 /**
  * Which toolbar slots to emit. Every flag defaults to `true`. Setting a flag
- * to `false` REMOVES that slot from `toolbarProps.iconSlots` entirely — it is
- * not merely hidden. Per-entity PCFs use this to opt out of surfaces that
- * do not apply to their entity (e.g., a lightweight lookup entity that has
- * no summary field can disable sparkle).
+ * to `false` REMOVES that slot from `toolbarProps.iconSlots` entirely.
+ *
+ * v1.0.10: the `sparkle` slot was RETIRED from this hook — the sparkle
+ * popover is now the shared `<AiSummaryPopover>` component (see
+ * `SHARED-UI-COMPONENTS-GUIDE.md` §AiSummaryPopover). Consumers render it
+ * DIRECTLY alongside the toolbar (see `CardChrome.tsx` in VisualHost for the
+ * canonical pattern). The `sparkle?` flag on this interface is retained as a
+ * no-op for backward compat but ignored — passing `false` no longer
+ * suppresses anything (there is nothing to suppress).
  */
 export interface IUseRecordHeaderToolbarActionsEnabled {
-  /** Emit the sparkle (AI summary popover) slot. Default `true`. */
+  /** Retained for backward compat; ignored. See v1.0.10 note above. */
   sparkle?: boolean;
   /** Emit the checkmark (SmartTodo launcher) slot. Default `true`. */
   checkmark?: boolean;
@@ -122,6 +116,12 @@ export interface IUseRecordHeaderToolbarActionsOptions {
   recordSummary?: string | null;
   /** Which slots to emit. Every flag defaults to `true`. */
   enabled?: IUseRecordHeaderToolbarActionsEnabled;
+  /**
+   * Optional title rendered on the left of the toolbar (in the same row as icons).
+   * When omitted, the toolbar renders icons only. Added in v1.0.2 per user
+   * feedback ("title should be on the form and inline with the icons").
+   */
+  title?: string;
 }
 
 /**
@@ -144,115 +144,25 @@ export interface IUseRecordHeaderToolbarActionsOptions {
  * consumer renders the Popover shell as a sibling. This preserves anchor
  * positioning and keeps the shared `HeaderToolbar` contract unchanged.
  */
+/**
+ * Hook result — v1.0.10 minimal surface.
+ *
+ * Before v1.0.10 this returned `sparklePopoverOpen`, `setSparklePopoverOpen`,
+ * `sparklePopoverContent`, and `sparkleButtonRef` so the consumer could
+ * assemble a hand-rolled sparkle `<Popover>`. Rounds 6–9 of live QA taught us
+ * that re-implementing the AI Summary popover is a mistake — the shared
+ * `<AiSummaryPopover>` component (`SHARED-UI-COMPONENTS-GUIDE.md` §180) has
+ * already been battle-tested by VisualHost, SemanticSearchControl,
+ * DocumentCard, RichFilePreview, InsightSummaryCard, and DocumentLibrary.
+ * Consumers of this hook render `<AiSummaryPopover>` DIRECTLY next to the
+ * `<HeaderToolbar>` (see MatterHeaderView for the pattern) and this hook
+ * only supplies the launcher slots (checkmark → SmartTodo, annotation →
+ * Notepad) it uniquely owns.
+ */
 export interface IUseRecordHeaderToolbarActionsResult {
   /** Drop-in for `<HeaderToolbar {...toolbarProps} />`. */
   toolbarProps: IHeaderToolbarProps;
-  /** Controlled `open` state for the consumer's sparkle popover. */
-  sparklePopoverOpen: boolean;
-  /** Setter for `sparklePopoverOpen`. Idempotent. */
-  setSparklePopoverOpen: (open: boolean) => void;
-  /**
-   * Ready-to-render popover body (summary text OR empty state + unwired
-   * refresh icon). Consumer places this inside its `<PopoverSurface>`.
-   * `null` when the sparkle slot is disabled (nothing to render).
-   */
-  sparklePopoverContent: React.ReactNode | null;
 }
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Styles for the popover body (semantic tokens only per ADR-021 / NFR-03)
-// ─────────────────────────────────────────────────────────────────────────────
-
-const useSparkleContentStyles = makeStyles({
-  surface: {
-    minWidth: '320px',
-    maxWidth: '480px',
-    maxHeight: '480px',
-    overflowY: 'auto',
-    display: 'flex',
-    flexDirection: 'column',
-    gap: tokens.spacingVerticalS,
-  },
-  headerRow: {
-    display: 'flex',
-    alignItems: 'center',
-    justifyContent: 'space-between',
-    gap: tokens.spacingHorizontalS,
-    paddingBottom: tokens.spacingVerticalXS,
-    borderBottomWidth: '1px',
-    borderBottomStyle: 'solid',
-    borderBottomColor: tokens.colorNeutralStroke2,
-  },
-  headerLabel: {
-    fontWeight: tokens.fontWeightSemibold,
-    fontSize: tokens.fontSizeBase400,
-    color: tokens.colorNeutralForeground1,
-  },
-  bodyText: {
-    whiteSpace: 'pre-wrap',
-    color: tokens.colorNeutralForeground1,
-    fontSize: tokens.fontSizeBase300,
-  },
-  emptyText: {
-    color: tokens.colorNeutralForeground3,
-    fontSize: tokens.fontSizeBase300,
-    fontStyle: 'italic',
-  },
-});
-
-// ─────────────────────────────────────────────────────────────────────────────
-// Popover body component (memoized; kept internal — not exported from index.ts)
-// ─────────────────────────────────────────────────────────────────────────────
-
-/**
- * Rendered inside the consumer's `<PopoverSurface>`. Renders the summary body
- * OR the empty-state message. Header shows the unwired refresh icon whose
- * click is a NO-OP in R1 (FR-08a). Refresh icon tooltip states the deferral.
- */
-const SparklePopoverBody: React.FC<{ recordSummary: string | null | undefined }> = React.memo(({ recordSummary }) => {
-  const styles = useSparkleContentStyles();
-
-  // No-op click handler is deliberate. Do NOT wire this to anything — the
-  // refresh call requires a new BFF endpoint that is explicitly deferred to
-  // a follow-on project (FR-08a + NFR-07). Any wiring here would violate the
-  // R1 NFR-07 "zero new BFF endpoints" rule.
-  const handleRefreshNoOp = React.useCallback((): void => {
-    /* intentional no-op per FR-08a */
-  }, []);
-
-  const hasSummary = typeof recordSummary === 'string' && recordSummary.length > 0;
-
-  const refreshButton = React.createElement(Button, {
-    appearance: 'subtle',
-    size: 'small',
-    icon: React.createElement(ArrowClockwise20Regular),
-    'aria-label': REFRESH_DEFERRAL_TOOLTIP,
-    onClick: handleRefreshNoOp,
-  });
-
-  return React.createElement(
-    'div',
-    { className: styles.surface, 'data-testid': 'sparkle-popover-body' },
-    React.createElement(
-      'div',
-      { className: styles.headerRow },
-      React.createElement(Text, { className: styles.headerLabel }, 'AI Summary'),
-      React.createElement(Tooltip, { content: REFRESH_DEFERRAL_TOOLTIP, relationship: 'label' }, refreshButton)
-    ),
-    hasSummary
-      ? React.createElement(
-          'div',
-          { 'data-testid': 'sparkle-popover-summary' },
-          React.createElement(Text, { className: styles.bodyText }, recordSummary as string)
-        )
-      : React.createElement(
-          'div',
-          { 'data-testid': 'sparkle-popover-empty' },
-          React.createElement(Text, { className: styles.emptyText }, SPARKLE_EMPTY_STATE)
-        )
-  );
-});
-SparklePopoverBody.displayName = 'SparklePopoverBody';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Xrm.Navigation.navigateTo two-arg signature.
@@ -305,65 +215,109 @@ type XrmNavigateToTwoArg = (
 export function useRecordHeaderToolbarActions(
   options: IUseRecordHeaderToolbarActionsOptions
 ): IUseRecordHeaderToolbarActionsResult {
-  const { entity, recordId, recordSummary, enabled } = options;
+  const { entity, recordId, enabled, title } = options;
+  // `recordSummary` retained on the options type for backward compat; the
+  // sparkle popover is now the shared `<AiSummaryPopover>` (v1.0.10) which
+  // consumers render themselves. This hook no longer reads the summary.
 
-  // Enabled defaults — every flag `true`. A flag set to explicit `false`
-  // OMITS its slot from `iconSlots` (spec FR-07 acceptance criterion).
-  const sparkleEnabled = enabled?.sparkle !== false;
   const checkmarkEnabled = enabled?.checkmark !== false;
   const annotationEnabled = enabled?.annotation !== false;
 
   // ── Badge counts (FR-11: mount + focus refresh; no polling) ────────────────
-  // Todo count uses the standard polymorphic regarding lookup.
-  // Memo count uses the ADR-024 entity-specific lookup; `buildMemoFilterForParent`
-  // returns `null` for unsupported entities (→ useRelatedCount idles at count=0).
-  const todoFilter = `_regardingobjectid_value eq ${recordId}`;
+  // Both sprk_todo AND sprk_memo use ADR-024 dual-field pattern with entity-specific
+  // lookups (verified via Dataverse MCP describe queries — see notes/sprk-memo-schema.md
+  // + v1.0.2 fix note for sprk_todo). The initial assumption that sprk_todo used the
+  // standard polymorphic `_regardingobjectid_value` was WRONG — sprk_todo has 11
+  // entity-specific `sprk_regarding{entity}` lookups (a superset of sprk_memo's 6).
+  //
+  // Both helpers return `null` for unsupported entities (→ useRelatedCount idles
+  // at count=0). Discovered 2026-07-03 during live QA.
+  const todoFilter = buildTodoFilterForParent(entity, recordId);
   const memoFilter = buildMemoFilterForParent(entity, recordId);
 
   const { count: todoCount } = useRelatedCount('sprk_todo', todoFilter);
   const { count: memoCount } = useRelatedCount('sprk_memo', memoFilter);
 
-  // ── Sparkle popover controlled state ───────────────────────────────────────
-  const [sparklePopoverOpen, setSparklePopoverOpen] = React.useState<boolean>(false);
-
   // ── Handlers ───────────────────────────────────────────────────────────────
 
-  const handleSparkleClick = React.useCallback((): void => {
-    // Pure UI toggle — no Xrm.Navigation call (FR-08 REVISED). The consumer
-    // wires the Popover to `sparklePopoverOpen` / `setSparklePopoverOpen`.
-    setSparklePopoverOpen(prev => !prev);
-  }, []);
+  // Xrm.Navigation.navigateTo pageInput for `pageType: "webresource"` requires
+  // TWO things that v1.0.2 got wrong (fixed 2026-07-03 in v1.0.4):
+  //   1. Property name is `webresourceName` (NOT `name`)
+  //   2. `data` must be a URL-encoded query STRING (NOT an object)
+  // Passing the wrong shape produces a silent no-op — no console error, no
+  // modal, nothing. Verified by cross-referencing every working
+  // `pageType: "webresource"` call in this repo (LegalWorkspace WorkspaceGrid,
+  // SpaarkeAi launch-resolver, xrmNavigationServiceAdapter).
+  const buildWebresourceData = React.useCallback((): string => {
+    return `regardingEntity=${encodeURIComponent(entity)}&regardingId=${encodeURIComponent(recordId)}`;
+  }, [entity, recordId]);
 
   const handleCheckmarkClick = React.useCallback((): void => {
+    // v1.0.5 diagnostic instrumentation. `[RecordHeader]` log lines pinpoint
+    // which stage broke: click reached → navigate call → resolve / reject.
+    // eslint-disable-next-line no-console
+    console.info('[RecordHeader] checkmark click', { webresourceName: SMARTTODO_WEBRESOURCE_NAME, entity, recordId });
     const xrm = getXrm();
-    // If Xrm is unavailable (unit tests / non-MDA hosts), silently no-op.
-    // The count hook surfaces the "Xrm not available" error path separately;
-    // there is no useful UX to render at click-time.
-    if (!xrm?.Navigation?.navigateTo) return;
-    const navigate = xrm.Navigation.navigateTo as unknown as XrmNavigateToTwoArg;
-    void navigate(
-      {
-        pageType: 'webresource',
-        name: SMARTTODO_WEBRESOURCE_NAME,
-        data: { regardingEntity: entity, regardingId: recordId },
-      },
-      LAYOUT_1_MODAL as unknown as Record<string, unknown>
-    );
-  }, [entity, recordId]);
+    if (!xrm?.Navigation?.navigateTo) {
+      // eslint-disable-next-line no-console
+      console.warn('[RecordHeader] Xrm.Navigation.navigateTo unavailable');
+      return;
+    }
+    // v1.0.6 CRITICAL: call `xrm.Navigation.navigateTo(...)` DIRECTLY. Every
+    // v1.0.2..v1.0.5 aliased it as `const navigate = xrm.Navigation.navigateTo`
+    // and then called `navigate(...)`, which strips the `this` binding and
+    // makes the underlying Xrm method a silent no-op — no error, no modal.
+    // Every working call site in this repo (SpaarkeAi launch-resolver,
+    // LegalWorkspace WorkspaceGrid) calls the method directly on
+    // `Xrm.Navigation`. Do not "extract" this into a local alias.
+    (xrm.Navigation.navigateTo as unknown as XrmNavigateToTwoArg)
+      .call(
+        xrm.Navigation,
+        {
+          pageType: 'webresource',
+          webresourceName: SMARTTODO_WEBRESOURCE_NAME,
+          data: buildWebresourceData(),
+        },
+        LAYOUT_1_MODAL as unknown as Record<string, unknown>
+      )
+      .then(() => {
+        // eslint-disable-next-line no-console
+        console.info('[RecordHeader] SmartTodo navigateTo resolved');
+      })
+      .catch(err => {
+        // eslint-disable-next-line no-console
+        console.error('[RecordHeader] SmartTodo navigateTo failed', err);
+      });
+  }, [buildWebresourceData, entity, recordId]);
 
   const handleAnnotationClick = React.useCallback((): void => {
+    // eslint-disable-next-line no-console
+    console.info('[RecordHeader] annotation click', { webresourceName: NOTEPAD_WEBRESOURCE_NAME, entity, recordId });
     const xrm = getXrm();
-    if (!xrm?.Navigation?.navigateTo) return;
-    const navigate = xrm.Navigation.navigateTo as unknown as XrmNavigateToTwoArg;
-    void navigate(
-      {
-        pageType: 'webresource',
-        name: NOTEPAD_WEBRESOURCE_NAME,
-        data: { regardingEntity: entity, regardingId: recordId },
-      },
-      NOTEPAD_MODAL as unknown as Record<string, unknown>
-    );
-  }, [entity, recordId]);
+    if (!xrm?.Navigation?.navigateTo) {
+      // eslint-disable-next-line no-console
+      console.warn('[RecordHeader] Xrm.Navigation.navigateTo unavailable');
+      return;
+    }
+    (xrm.Navigation.navigateTo as unknown as XrmNavigateToTwoArg)
+      .call(
+        xrm.Navigation,
+        {
+          pageType: 'webresource',
+          webresourceName: NOTEPAD_WEBRESOURCE_NAME,
+          data: buildWebresourceData(),
+        },
+        NOTEPAD_MODAL as unknown as Record<string, unknown>
+      )
+      .then(() => {
+        // eslint-disable-next-line no-console
+        console.info('[RecordHeader] Notepad navigateTo resolved');
+      })
+      .catch(err => {
+        // eslint-disable-next-line no-console
+        console.error('[RecordHeader] Notepad navigateTo failed', err);
+      });
+  }, [buildWebresourceData, entity, recordId]);
 
   // ── Slot definitions ───────────────────────────────────────────────────────
   //
@@ -373,16 +327,6 @@ export function useRecordHeaderToolbarActions(
 
   const iconSlots = React.useMemo<IHeaderToolbarSlot[]>(() => {
     const slots: IHeaderToolbarSlot[] = [];
-
-    if (sparkleEnabled) {
-      slots.push({
-        key: 'sparkle',
-        icon: React.createElement(Sparkle24Regular),
-        onClick: handleSparkleClick,
-        tooltip: 'AI Summary',
-        // FR-08: sparkle has NO badge.
-      });
-    }
 
     if (checkmarkEnabled) {
       slots.push({
@@ -406,41 +350,30 @@ export function useRecordHeaderToolbarActions(
 
     return slots;
   }, [
-    sparkleEnabled,
     checkmarkEnabled,
     annotationEnabled,
-    handleSparkleClick,
     handleCheckmarkClick,
     handleAnnotationClick,
     todoCount,
     memoCount,
   ]);
 
-  const toolbarProps = React.useMemo<IHeaderToolbarProps>(() => ({ iconSlots }), [iconSlots]);
-
-  // ── Popover content ────────────────────────────────────────────────────────
-  // Rendered inside the consumer's <PopoverSurface>. `null` when sparkle is
-  // disabled — there is no popover to render.
-  const sparklePopoverContent = React.useMemo<React.ReactNode | null>(() => {
-    if (!sparkleEnabled) return null;
-    return React.createElement(SparklePopoverBody, { recordSummary: recordSummary ?? null });
-  }, [sparkleEnabled, recordSummary]);
+  const toolbarProps = React.useMemo<IHeaderToolbarProps>(
+    () => ({ iconSlots, title }),
+    [iconSlots, title]
+  );
 
   return {
     toolbarProps,
-    sparklePopoverOpen,
-    setSparklePopoverOpen,
-    sparklePopoverContent,
   };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Test-only exports (symbol reuse across the hook test suite).
-// Not part of the runtime consumer surface — do NOT re-export from index.ts.
+// v1.0.10: sparkle popover constants + component were removed from this hook
+// (consumers now render the shared `<AiSummaryPopover>` directly). Empty
+// object kept for import stability in existing tests that reference
+// `__testables` without accessing any specific field.
 // ─────────────────────────────────────────────────────────────────────────────
 
-export const __testables = {
-  REFRESH_DEFERRAL_TOOLTIP,
-  SPARKLE_EMPTY_STATE,
-  SparklePopoverBody,
-};
+export const __testables = {};

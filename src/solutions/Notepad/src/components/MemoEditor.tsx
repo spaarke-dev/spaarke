@@ -76,9 +76,15 @@ const useStyles = makeStyles({
 /**
  * Fluent v9 Textarea for the current memo body with FR-17 save keybindings.
  *
+ * v1.0.8: wrapped in `React.memo` so the Textarea does not re-render on every
+ * NotepadShell state bump. Live QA reported typing lag; the root cause was
+ * un-memoized child re-renders every ~1s when the repository's debounce
+ * commit updated the memo timestamp on the shell. Fluent v9 Textarea + Menu
+ * both have non-trivial re-render costs on IME-active keystroke streams.
+ *
  * @see IMemoEditorProps
  */
-export const MemoEditor = React.forwardRef<HTMLTextAreaElement, IMemoEditorProps>(
+export const MemoEditor = React.memo(React.forwardRef<HTMLTextAreaElement, IMemoEditorProps>(
   ({ value, onChange, disabled, placeholder, className }, ref) => {
     const styles = useStyles();
     // IME composition state — Ctrl+Enter during composition is a no-op.
@@ -146,6 +152,6 @@ export const MemoEditor = React.forwardRef<HTMLTextAreaElement, IMemoEditorProps
       />
     );
   }
-);
+));
 
 MemoEditor.displayName = 'MemoEditor';

@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <manifest>
-  <control namespace="Spaarke.Records" constructor="MatterHeader" version="1.0.1"
+  <control namespace="Spaarke.Records" constructor="MatterHeader" version="1.0.11"
            display-name-key="Matter Header"
-           description-key="Compact 5-field summary card + 3-action toolbar for Matter records. Part of the record-header-and-notepad-r1 shared primitive set. (v1.0.1)"
+           description-key="Compact 5-field summary card + 3-action toolbar for Matter records. Part of the record-header-and-notepad-r1 shared primitive set. (v1.0.11)"
            control-type="virtual">
 
     <!-- Bound field: any SingleLine.Text field on the host entity (Matter). The PCF replaces
@@ -13,6 +13,19 @@
     <property name="boundField" display-name-key="Bound field"
               description-key="Any SingleLine.Text field on the host entity. PCF replaces this fields rendering with the record header card. Bind to sprk_matternumber on Matter for standard placement."
               of-type="SingleLine.Text" usage="bound" required="true" />
+
+    <!-- v1.0.2: Header title rendered inline with the toolbar icons (matches VisualHost
+         CardChrome pattern). Configurable per placement so makers can override the
+         default "Matter" label. -->
+    <property name="title" display-name-key="Header title"
+              description-key="Title text shown inline with the toolbar icons. Defaults to the entity display name if left blank."
+              of-type="SingleLine.Text" usage="input" required="false" />
+
+    <!-- v1.0.2: Show/hide the version footer. Defaults to true (visible) to preserve the
+         current diagnostic value; makers can hide the footer in polished production forms. -->
+    <property name="showVersion" display-name-key="Show version footer"
+              description-key="When enabled, renders the vX.Y.Z build stamp at the bottom of the header. Disable for a cleaner production look."
+              of-type="TwoOptions" usage="input" required="false" default-value="true" />
 
     <resources>
       <code path="index.ts" order="1"/>

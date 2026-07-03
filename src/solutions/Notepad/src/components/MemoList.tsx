@@ -92,12 +92,18 @@ function formatCreatedOn(iso: string): string {
   }
 }
 
-export const MemoList: React.FC<IMemoListProps> = ({
+// v1.0.8 fix — wrap in React.memo so the list doesn't re-render on every
+// parent state change (typing in the editor bumps NotepadShell state ~1x/sec
+// on debounce commit; without memoization the MenuItem map re-runs each time
+// and Fluent v9 Menu has non-trivial re-render cost, producing visible input
+// lag). Props are shallow-comparable — `memos` array identity is stable when
+// the repository hook returns the same list; `onSelect` is a stable callback.
+export const MemoList: React.FC<IMemoListProps> = React.memo(function MemoList({
   memos,
   currentMemoId,
   onSelect,
   disabled = false,
-}) => {
+}) {
   const styles = useStyles();
 
   return (
@@ -148,4 +154,26 @@ export const MemoList: React.FC<IMemoListProps> = ({
       </MenuPopover>
     </Menu>
   );
-};
+},
+// v1.0.9 custom comparator — MemoList only DISPLAYS title + createdon per
+// memo, NOT bodies. But the parent hook now updates the `memos` array on
+// every keystroke (to keep the controlled Textarea's value in sync). Default
+// React.memo shallow-compare picks up the array reference change and forces
+// a re-render every keystroke — which was the residual lag after v1.0.8.
+// This comparator ignores body-only diffs so MemoList only re-renders on
+// list membership + name + date changes.
+(prev, next) => {
+  if (prev.currentMemoId !== next.currentMemoId) return false;
+  if (prev.disabled !== next.disabled) return false;
+  if (prev.onSelect !== next.onSelect) return false;
+  if (prev.memos.length !== next.memos.length) return false;
+  for (let i = 0; i < prev.memos.length; i++) {
+    const a = prev.memos[i];
+    const b = next.memos[i];
+    if (a.sprk_memoid !== b.sprk_memoid) return false;
+    if (a.sprk_name !== b.sprk_name) return false;
+    if (a.createdon !== b.createdon) return false;
+  }
+  return true;
+});
+MemoList.displayName = "MemoList";

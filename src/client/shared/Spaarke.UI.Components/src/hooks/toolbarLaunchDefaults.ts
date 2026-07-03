@@ -30,23 +30,32 @@ export const LAYOUT_1_MODAL = {
 };
 
 /**
- * Notepad specialized-editor modal — 70% x 80%.
+ * Notepad specialized-editor modal — 25% x 35% (v1.0.7).
  *
- * Notepad is a lightweight memo editor; a smaller modal keeps the surface
- * proportional to a text-editing task. Distinct from Layout 1 per FR-10.
+ * Original R1 spec was 70% x 80% (per FR-10). Live QA on v1.0.6 confirmed the
+ * modal was oversized for a memo-editing task — Notepad is a tight scratchpad,
+ * not a full document editor. Compact proportional sizing keeps the memo pane
+ * close to the launcher and matches the "quick note" mental model.
  */
 export const NOTEPAD_MODAL = {
   target: 2 as const,
   position: 1 as const,
-  width: { value: 70, unit: '%' as const },
-  height: { value: 80, unit: '%' as const },
+  width: { value: 25, unit: '%' as const },
+  height: { value: 35, unit: '%' as const },
 };
 
 /**
  * Webresource / Code Page name for the Notepad Vite SPA.
- * Deployed as a full-page Code Page in Dataverse per task 039.
+ *
+ * Verified via Dataverse MCP query 2026-07-03 (v1.0.5 fix — after v1.0.2..v1.0.4
+ * silently failed to open the modal). The deployed webresource in the dev
+ * environment is `sprk_notepad` (webresourceid 7523b1db-e576-f111-ab0e-000d3a13a445,
+ * displayname "Notepad HTML", type Webpage/HTML). The R1-spec-assumed name
+ * `sprk_notepad_page` does NOT exist — sending it to `Xrm.Navigation.navigateTo`
+ * produces a silent no-op (no console error, no modal). Matches the same
+ * discovery pattern that established `sprk_smarttodo` (not `sprk_smarttodo_page`).
  */
-export const NOTEPAD_WEBRESOURCE_NAME = 'sprk_notepad_page';
+export const NOTEPAD_WEBRESOURCE_NAME = 'sprk_notepad';
 
 /**
  * Webresource / Code Page name for the SmartTodo Code Page.
@@ -113,6 +122,54 @@ export const SUPPORTED_MEMO_PARENTS: Record<string, string> = {
  */
 export function buildMemoFilterForParent(regardingEntity: string, regardingId: string): string | null {
   const lookupField = SUPPORTED_MEMO_PARENTS[regardingEntity];
+  if (!lookupField) return null;
+  return `_${lookupField}_value eq ${regardingId}`;
+}
+
+/**
+ * ADR-024 dual-field pattern — `sprk_todo`'s entity-specific regarding lookups.
+ *
+ * `sprk_todo` does NOT have a polymorphic `regardingobjectid` lookup — verified via
+ * Dataverse MCP `describe('tables/sprk_todo')` on 2026-07-03 after live QA surfaced a
+ * "Could not find a property named '_regardingobjectid_value'" 400 error.
+ *
+ * `sprk_todo` supports **11 parent entity lookups** (a superset of `sprk_memo`'s six):
+ * Matter, Project, Event, Invoice, Budget, WorkAssignment, Analysis, Communication,
+ * Contact, Document, Organization.
+ *
+ * Key   = parent entity logical name.
+ * Value = lookup field name on `sprk_todo` that points at that parent.
+ */
+export const SUPPORTED_TODO_PARENTS: Record<string, string> = {
+  sprk_matter: 'sprk_regardingmatter',
+  sprk_project: 'sprk_regardingproject',
+  sprk_event: 'sprk_regardingevent',
+  sprk_invoice: 'sprk_regardinginvoice',
+  sprk_budget: 'sprk_regardingbudget',
+  sprk_workassignment: 'sprk_regardingworkassignment',
+  sprk_analysis: 'sprk_regardinganalysis',
+  sprk_communication: 'sprk_regardingcommunication',
+  contact: 'sprk_regardingcontact',
+  sprk_document: 'sprk_regardingdocument',
+  sprk_organization: 'sprk_regardingorganization',
+};
+
+/**
+ * Build the OData `$filter` clause for todo-count queries per FR-09.
+ *
+ * Mirrors {@link buildMemoFilterForParent} but uses `SUPPORTED_TODO_PARENTS`.
+ * Returns `null` when the parent entity is not supported by the `sprk_todo` schema.
+ *
+ * @param regardingEntity - Parent entity logical name (e.g. "sprk_matter").
+ * @param regardingId     - Parent record GUID (no braces).
+ * @returns OData filter string, or `null` if the entity is not supported.
+ *
+ * @example
+ * buildTodoFilterForParent("sprk_matter", "00000000-0000-0000-0000-000000000001")
+ * // → "_sprk_regardingmatter_value eq 00000000-0000-0000-0000-000000000001"
+ */
+export function buildTodoFilterForParent(regardingEntity: string, regardingId: string): string | null {
+  const lookupField = SUPPORTED_TODO_PARENTS[regardingEntity];
   if (!lookupField) return null;
   return `_${lookupField}_value eq ${regardingId}`;
 }

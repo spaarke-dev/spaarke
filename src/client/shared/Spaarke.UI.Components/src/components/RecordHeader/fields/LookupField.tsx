@@ -104,12 +104,14 @@ const useStyles = makeStyles({
   },
 
   label: {
-    // Match sibling TextField typography for a consistent label across the
-    // FieldGrid — small caption, semibold, secondary neutral color (ADR-021).
-    color: tokens.colorNeutralForeground2,
-    fontSize: tokens.fontSizeBase200,
-    fontWeight: tokens.fontWeightSemibold,
-    lineHeight: tokens.lineHeightBase200,
+    // v1.0.4: match OOB Dataverse form-field label typography — 14px / #242424
+    // regular weight / 4px bottom padding. Consistent with sibling TextField
+    // and TextareaField after the same treatment.
+    color: tokens.colorNeutralForeground1,
+    fontSize: tokens.fontSizeBase300,
+    fontWeight: tokens.fontWeightRegular,
+    lineHeight: tokens.lineHeightBase300,
+    paddingBottom: tokens.spacingVerticalXS,
     // Truncate long labels instead of pushing the value row down.
     overflow: 'hidden',
     textOverflow: 'ellipsis',
@@ -121,6 +123,16 @@ const useStyles = makeStyles({
     alignItems: 'center',
     minWidth: 0,
     columnGap: tokens.spacingHorizontalXS,
+    // v1.0.3: OOB Dataverse-style input surface so lookup cells match the
+    // TextField / TextareaField visual footprint. Light neutral background,
+    // rounded corners, single-line height.
+    backgroundColor: tokens.colorNeutralBackground3,
+    borderRadius: tokens.borderRadiusMedium,
+    paddingTop: tokens.spacingVerticalXS,
+    paddingBottom: tokens.spacingVerticalXS,
+    paddingLeft: tokens.spacingHorizontalS,
+    paddingRight: tokens.spacingHorizontalS,
+    minHeight: '2em',
   },
 
   icon: {
@@ -155,6 +167,17 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground3,
     fontSize: tokens.fontSizeBase300,
     lineHeight: tokens.lineHeightBase300,
+    // Reserve the same footprint as the populated valueRow so the FieldGrid
+    // stays aligned between empty and populated states.
+    backgroundColor: tokens.colorNeutralBackground3,
+    borderRadius: tokens.borderRadiusMedium,
+    paddingTop: tokens.spacingVerticalXS,
+    paddingBottom: tokens.spacingVerticalXS,
+    paddingLeft: tokens.spacingHorizontalS,
+    paddingRight: tokens.spacingHorizontalS,
+    minHeight: '2em',
+    display: 'flex',
+    alignItems: 'center',
   },
 });
 

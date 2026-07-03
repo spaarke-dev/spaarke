@@ -64,7 +64,7 @@ describe('useRelatedCount', () => {
     jest.clearAllMocks();
   });
 
-  it('builds correct $count=true&$top=0 URL for sprk_memo with entity-specific lookup filter', async () => {
+  it('builds correct $count=true&$top=1 URL for sprk_memo with entity-specific lookup filter', async () => {
     installXrm();
     mockRetrieveMultipleRecords.mockResolvedValue({
       '@odata.count': 3,
@@ -77,11 +77,11 @@ describe('useRelatedCount', () => {
 
     expect(mockRetrieveMultipleRecords).toHaveBeenCalledWith(
       'sprk_memo',
-      `?$filter=${MEMO_FILTER_FOR_MATTER}&$count=true&$top=0`
+      `?$filter=${MEMO_FILTER_FOR_MATTER}&$count=true&$top=1`
     );
   });
 
-  it('builds correct $count=true&$top=0 URL for sprk_todo with standard regarding filter', async () => {
+  it('builds correct $count=true&$top=1 URL for sprk_todo with standard regarding filter', async () => {
     installXrm();
     mockRetrieveMultipleRecords.mockResolvedValue({
       '@odata.count': 7,
@@ -92,7 +92,7 @@ describe('useRelatedCount', () => {
 
     await waitFor(() => expect(mockRetrieveMultipleRecords).toHaveBeenCalledTimes(1));
 
-    expect(mockRetrieveMultipleRecords).toHaveBeenCalledWith('sprk_todo', `?$filter=${TODO_FILTER}&$count=true&$top=0`);
+    expect(mockRetrieveMultipleRecords).toHaveBeenCalledWith('sprk_todo', `?$filter=${TODO_FILTER}&$count=true&$top=1`);
   });
 
   it('populates count from the @odata.count annotation on success', async () => {
@@ -163,7 +163,7 @@ describe('useRelatedCount', () => {
     // Same URL — focus refresh replays the current query.
     expect(mockRetrieveMultipleRecords).toHaveBeenLastCalledWith(
       'sprk_memo',
-      `?$filter=${MEMO_FILTER_FOR_MATTER}&$count=true&$top=0`
+      `?$filter=${MEMO_FILTER_FOR_MATTER}&$count=true&$top=1`
     );
   });
 
@@ -209,7 +209,7 @@ describe('useRelatedCount', () => {
     await waitFor(() => expect(mockRetrieveMultipleRecords).toHaveBeenCalledTimes(1));
     expect(mockRetrieveMultipleRecords).toHaveBeenLastCalledWith(
       'sprk_memo',
-      `?$filter=${MEMO_FILTER_FOR_MATTER}&$count=true&$top=0`
+      `?$filter=${MEMO_FILTER_FOR_MATTER}&$count=true&$top=1`
     );
 
     rerender({ filter: OTHER_FILTER });
@@ -217,7 +217,7 @@ describe('useRelatedCount', () => {
     await waitFor(() => expect(mockRetrieveMultipleRecords).toHaveBeenCalledTimes(2));
     expect(mockRetrieveMultipleRecords).toHaveBeenLastCalledWith(
       'sprk_memo',
-      `?$filter=${OTHER_FILTER}&$count=true&$top=0`
+      `?$filter=${OTHER_FILTER}&$count=true&$top=1`
     );
   });
 

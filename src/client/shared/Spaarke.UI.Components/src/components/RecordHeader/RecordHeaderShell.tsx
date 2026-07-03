@@ -57,6 +57,22 @@ const useStyles = makeStyles({
   },
 
   /**
+   * Borderless variant (v1.0.2): bare vertical stack — no border, no
+   * background fill, no border-radius, no padding. Consumers embedding
+   * the header inside a form section that provides its own chrome
+   * use `borderless={true}`. Toolbar row + body still stack vertically
+   * with the same gap so the shell still "looks like a group" without
+   * looking like a card.
+   */
+  cardBorderless: {
+    display: 'flex',
+    flexDirection: 'column',
+    boxSizing: 'border-box',
+    color: tokens.colorNeutralForeground1,
+    ...shorthands.gap(tokens.spacingVerticalS),
+  },
+
+  /**
    * Body region wraps `children` OR the loading skeleton. A dedicated
    * region gives the shell a stable box for the loading↔loaded swap
    * (the toolbar stays put; only the body swaps).
@@ -139,12 +155,22 @@ const LoadingSkeleton: React.FC<{ className: string; cellClassName: string }> = 
  * );
  * ```
  */
-export const RecordHeaderShell: React.FC<IRecordHeaderShellProps> = ({ toolbar, loading, children }) => {
+export const RecordHeaderShell: React.FC<IRecordHeaderShellProps> = ({
+  toolbar,
+  loading,
+  children,
+  borderless,
+}) => {
   const styles = useStyles();
   const isLoading = loading === true;
+  const containerClass = borderless === true ? styles.cardBorderless : styles.card;
 
   return (
-    <div className={styles.card} data-testid="record-header-shell">
+    <div
+      className={containerClass}
+      data-testid="record-header-shell"
+      data-borderless={borderless === true ? 'true' : 'false'}
+    >
       <HeaderToolbar {...toolbar} />
       <div className={styles.body} data-testid="record-header-shell-body">
         {isLoading ? <LoadingSkeleton className={styles.skeleton} cellClassName={styles.skeletonCell} /> : children}

@@ -199,6 +199,34 @@ export const NotepadShell: React.FC = () => {
     [updateBody]
   );
 
+  // v1.0.8 fix — auto-create a blank memo when the record has no existing
+  // memos, so the user can start typing immediately. Previously the editor
+  // rendered with `disabled={!currentMemo}` which forced users to click the
+  // "+" button before their first keystroke — friction the user flagged as a
+  // blocker. Only fires when the launch context is valid, the repo has
+  // finished loading, the list is empty, and no memo is currently selected.
+  // Uses a ref guard so we don't loop (createMemo triggers a repo refetch
+  // that will re-run the effect).
+  const autoCreatedRef = React.useRef(false);
+  React.useEffect(() => {
+    if (!valid) return;
+    if (loading) return;
+    if (memos.length > 0) return;
+    if (currentMemo) return;
+    if (autoCreatedRef.current) return;
+    autoCreatedRef.current = true;
+    // Fire and forget — createMemo is idempotent-safe within the hook.
+    void createMemo();
+  }, [valid, loading, memos.length, currentMemo, createMemo]);
+
+  // v1.0.8 — memoize the derived title so it doesn't recompute on every
+  // parent re-render (a small win, but relevant when the user is typing and
+  // updateBody rerenders the shell 1x per second on debounce commit).
+  const derivedTitle = React.useMemo(
+    () => (currentMemo ? deriveTitle(currentMemo) : "No memo"),
+    [currentMemo]
+  );
+
   // ─── Render: error states (task 038 — FR-13 MessageBar) ────────────────
 
   // FR-13 read-side: invalid launch context (missing/malformed URL params).
@@ -227,8 +255,6 @@ export const NotepadShell: React.FC = () => {
   }
 
   // ─── Render: normal state ───────────────────────────────────────────────
-
-  const derivedTitle = currentMemo ? deriveTitle(currentMemo) : "No memo";
 
   return (
     <div className={styles.root} data-testid="notepad-shell">

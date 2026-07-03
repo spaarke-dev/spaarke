@@ -12,7 +12,9 @@ import {
   SMARTTODO_WEBRESOURCE_NAME,
   RECORDSUMMARY_FIELD,
   SUPPORTED_MEMO_PARENTS,
+  SUPPORTED_TODO_PARENTS,
   buildMemoFilterForParent,
+  buildTodoFilterForParent,
 } from '../toolbarLaunchDefaults';
 
 describe('toolbarLaunchDefaults', () => {
@@ -101,6 +103,68 @@ describe('toolbarLaunchDefaults', () => {
 
     it('is case-sensitive on entity name (Dataverse logical names are lowercase)', () => {
       expect(buildMemoFilterForParent('SPRK_MATTER', 'guid1')).toBeNull();
+    });
+  });
+
+  describe('SUPPORTED_TODO_PARENTS (v1.0.2 fix — sprk_todo has 11 parent lookups, not polymorphic)', () => {
+    it('covers exactly the eleven parent entities supported by sprk_todo schema', () => {
+      expect(Object.keys(SUPPORTED_TODO_PARENTS).sort()).toEqual(
+        [
+          'contact',
+          'sprk_analysis',
+          'sprk_budget',
+          'sprk_communication',
+          'sprk_document',
+          'sprk_event',
+          'sprk_invoice',
+          'sprk_matter',
+          'sprk_organization',
+          'sprk_project',
+          'sprk_workassignment',
+        ].sort()
+      );
+    });
+
+    it('maps sprk_todo parents to entity-specific regarding lookups (ADR-024 dual-field)', () => {
+      // Verified via Dataverse MCP describe (2026-07-03) after live QA reported
+      // "Could not find a property named '_regardingobjectid_value'" from the
+      // v1.0.0 build. sprk_todo does NOT have a polymorphic regarding column.
+      expect(SUPPORTED_TODO_PARENTS.sprk_matter).toBe('sprk_regardingmatter');
+      expect(SUPPORTED_TODO_PARENTS.sprk_project).toBe('sprk_regardingproject');
+      expect(SUPPORTED_TODO_PARENTS.sprk_event).toBe('sprk_regardingevent');
+      expect(SUPPORTED_TODO_PARENTS.sprk_invoice).toBe('sprk_regardinginvoice');
+      expect(SUPPORTED_TODO_PARENTS.sprk_budget).toBe('sprk_regardingbudget');
+      expect(SUPPORTED_TODO_PARENTS.sprk_workassignment).toBe('sprk_regardingworkassignment');
+      expect(SUPPORTED_TODO_PARENTS.sprk_analysis).toBe('sprk_regardinganalysis');
+      expect(SUPPORTED_TODO_PARENTS.sprk_communication).toBe('sprk_regardingcommunication');
+      expect(SUPPORTED_TODO_PARENTS.contact).toBe('sprk_regardingcontact');
+      expect(SUPPORTED_TODO_PARENTS.sprk_document).toBe('sprk_regardingdocument');
+      expect(SUPPORTED_TODO_PARENTS.sprk_organization).toBe('sprk_regardingorganization');
+    });
+
+    it('is a strict superset of SUPPORTED_MEMO_PARENTS', () => {
+      // sprk_todo supports every parent sprk_memo supports, plus five more.
+      for (const parent of Object.keys(SUPPORTED_MEMO_PARENTS)) {
+        expect(SUPPORTED_TODO_PARENTS[parent]).toBeDefined();
+      }
+    });
+  });
+
+  describe('buildTodoFilterForParent', () => {
+    it('builds OData filter using entity-specific lookup for a supported parent', () => {
+      const filter = buildTodoFilterForParent('sprk_matter', '00000000-0000-0000-0000-000000000001');
+      expect(filter).toBe('_sprk_regardingmatter_value eq 00000000-0000-0000-0000-000000000001');
+    });
+
+    it('returns null for an unsupported parent (e.g. sprk_playbook — not in sprk_todo schema)', () => {
+      expect(buildTodoFilterForParent('sprk_playbook', 'guid1')).toBeNull();
+    });
+
+    it('does NOT emit the legacy polymorphic filter that produced the v1.0.0 bug', () => {
+      const filter = buildTodoFilterForParent('sprk_matter', 'guid1');
+      // Regression guard — v1.0.0 emitted `_regardingobjectid_value eq guid1`
+      // which Dataverse rejected with 400.
+      expect(filter).not.toMatch(/_regardingobjectid_value/);
     });
   });
 });

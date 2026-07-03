@@ -29,4 +29,12 @@ export interface IRecordHeaderShellProps {
   toolbar: IHeaderToolbarProps;
   loading?: boolean;
   children: React.ReactNode;
+  /**
+   * When `true`, the shell renders WITHOUT a card border, background, or
+   * padding — a bare vertical stack of the toolbar row + body slot. Useful
+   * when the PCF is embedded directly in a form section that already provides
+   * its own section chrome (matches the user's v1.0.2 feedback: "remove border").
+   * Defaults to `false` (backward-compatible with the R1 card look).
+   */
+  borderless?: boolean;
 }

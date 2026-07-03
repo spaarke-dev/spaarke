@@ -11,7 +11,7 @@
     <Descriptions>
       <Description description="Compact 5-field summary card + 3-action toolbar for Matter records. Part of the record-header-and-notepad-r1 shared primitive set." languagecode="1033" />
     </Descriptions>
-    <Version>1.0.1.0</Version>
+    <Version>1.0.11.0</Version>
     <Managed>0</Managed>
     <Publisher>
       <UniqueName>Spaarke</UniqueName>

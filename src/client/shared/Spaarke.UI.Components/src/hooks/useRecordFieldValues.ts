@@ -53,6 +53,18 @@ export interface UseRecordFieldValuesResult {
    * Platform host (unit tests, Storybook, etc.). `null` otherwise.
    */
   error: Error | null;
+  /**
+   * Force a re-fetch with the current entity / recordId / fields.
+   *
+   * v1.0.2: added so inline-edit consumers can pull the persisted row after
+   * a successful `Xrm.WebApi.updateRecord`.
+   *
+   * v1.0.6: accepts `{ silent: true }` to skip the loading state — the
+   * refetch runs in the background and `values` swaps in place when the new
+   * row arrives. This prevents the "whole PCF refreshes" flash that users
+   * see when a lookup save triggers a full skeleton re-render.
+   */
+  refresh: (options?: { silent?: boolean }) => Promise<void>;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -101,6 +113,9 @@ export function useRecordFieldValues(
   const [values, setValues] = React.useState<Record<string, unknown> | null>(null);
   const [loading, setLoading] = React.useState<boolean>(false);
   const [error, setError] = React.useState<Error | null>(null);
+  // Manual refresh nonce — bumping this state variable triggers the effect
+  // below without the caller having to re-set entity / recordId / fields.
+  const [refreshNonce, setRefreshNonce] = React.useState<number>(0);
 
   // Stable dep key: same-contents / new-reference → same key → no refetch loop.
   // Callers may pass a fresh array literal on every render; that is fine.
@@ -169,8 +184,41 @@ export function useRecordFieldValues(
     };
     // buildQuery is memoized on fieldsKey, so listing it here is safe; we also
     // include the raw fieldsKey to make the dep dependency explicit to reviewers.
+    // `refreshNonce` is listed so `refresh()` triggers a re-run.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entity, recordId, fieldsKey]);
+  }, [entity, recordId, fieldsKey, refreshNonce]);
 
-  return { values, loading, error };
+  // Refresh helper.
+  //
+  // Default: bumps the nonce so the effect re-runs — sets loading=true
+  // transitionally which is fine for user-triggered manual refreshes.
+  //
+  // `{ silent: true }` mode: refetches in the background WITHOUT touching
+  // loading/error state, then swaps `values` in place on success. Prevents
+  // the "whole PCF flash" that consumers observe when the RecordHeaderShell
+  // renders its skeleton in response to a transient loading=true. This is
+  // the correct mode after an inline field save.
+  const refresh = React.useCallback(
+    async (options?: { silent?: boolean }): Promise<void> => {
+      if (!options?.silent) {
+        setRefreshNonce(prev => prev + 1);
+        return;
+      }
+      // Silent path: replicate the effect body without setLoading / setError.
+      if (recordId === null || recordId === undefined || recordId.trim() === '') return;
+      const xrm = getXrm();
+      if (!xrm || !xrm.WebApi) return;
+      try {
+        const record = await xrm.WebApi.retrieveRecord(entity, recordId, buildQuery());
+        setValues(record);
+      } catch {
+        // Swallow — silent refresh should not disturb the visible error
+        // state on save. If the row genuinely became inaccessible, a
+        // subsequent user-triggered refresh will surface the error.
+      }
+    },
+    [entity, recordId, buildQuery]
+  );
+
+  return { values, loading, error, refresh };
 }

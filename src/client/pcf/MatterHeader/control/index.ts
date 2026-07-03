@@ -1,6 +1,6 @@
 import { IInputs, IOutputs } from './generated/ManifestTypes';
 import * as React from 'react';
-import { MatterHeaderView } from './MatterHeaderView';
+import { MatterHeaderHost } from './MatterHeaderHost';
 
 /**
  * MatterHeader PCF Control
@@ -34,9 +34,21 @@ export class MatterHeader implements ComponentFramework.ReactControl<IInputs, IO
     // SearchIndexResolver (task-024 build repair per task-023 gap).
     const contextInfo = (context.mode as unknown as { contextInfo?: { entityId?: string } }).contextInfo;
     const recordId = contextInfo?.entityId || '';
-    // Platform-library Fluent v9 auto-applies host theme (control-type="virtual").
-    // No manual FluentProvider wrap needed per fluent-v9-modern-theming pattern (approach 1).
-    return React.createElement(MatterHeaderView, { recordId });
+
+    // v1.0.2 manifest inputs. `title` overrides the default "Matter" label; when blank we
+    // let the view fall back. `showVersion` is a TwoOptions field: PCF surfaces it as
+    // boolean | undefined so we default to true (footer visible) to preserve diagnostic
+    // value unless the maker explicitly toggles it off.
+    const title = context.parameters.title?.raw ?? undefined;
+    const showVersion = context.parameters.showVersion?.raw !== false;
+
+    // v1.0.11 — wrap in `MatterHeaderHost` which mounts a `<FluentProvider>` so
+    // Fluent v9 CSS variables reach the portal-rendered `AiSummaryPopover`
+    // surface. Platform-library's auto-theming is applied on the PCF root
+    // only; portals mount to `document.body` outside that scope. Mirrors
+    // `VisualHostHost.tsx`. Root cause of the v1.0.4..v1.0.10 popover-styling
+    // regression per QA rounds 6..10.
+    return React.createElement(MatterHeaderHost, { recordId, title, showVersion });
   }
 
   public getOutputs(): IOutputs {

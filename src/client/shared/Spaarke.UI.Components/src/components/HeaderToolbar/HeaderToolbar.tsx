@@ -22,9 +22,11 @@
  */
 
 import * as React from 'react';
-import { Button, CounterBadge, Text, Tooltip, makeStyles, shorthands, tokens } from '@fluentui/react-components';
+import { Button, CounterBadge, Tooltip, makeStyles, shorthands, tokens } from '@fluentui/react-components';
+import { Sparkle20Regular } from '@fluentui/react-icons';
 
 import type { IHeaderToolbarProps, IHeaderToolbarSlot } from './types';
+import { AiSummaryPopover } from '../AiSummaryPopover/AiSummaryPopover';
 
 // ---------------------------------------------------------------------------
 // Styles — module scope per fluent-v9-component-authoring.md
@@ -47,12 +49,21 @@ const useStyles = makeStyles({
   },
 
   title: {
-    // Truncate long titles instead of pushing icons off-screen.
+    // v1.0.4: match OOB Dataverse form section header typography verified via
+    // Elements inspector (2026-07-03): 14px Segoe UI, #242424 foreground,
+    // semibold, 4px vertical padding, contrast 15.52. Rendering via <h2>
+    // additionally exposes correct role="heading" for screen readers.
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
     color: tokens.colorNeutralForeground1,
+    fontSize: tokens.fontSizeBase300,
+    lineHeight: tokens.lineHeightBase300,
     fontWeight: tokens.fontWeightSemibold,
+    paddingTop: tokens.spacingVerticalXS,
+    paddingBottom: tokens.spacingVerticalXS,
+    marginTop: 0,
+    marginBottom: 0,
     flexGrow: 1,
     minWidth: 0,
   },
@@ -116,22 +127,42 @@ function shouldRenderBadge(value: number | undefined): value is number {
  * rules. The component is a plain functional component to preserve React
  * 16/17 compatibility per ADR-022 (no React 18-exclusive APIs).
  */
-export const HeaderToolbar: React.FC<IHeaderToolbarProps> = ({ title, iconSlots }) => {
+export const HeaderToolbar: React.FC<IHeaderToolbarProps> = ({ title, iconSlots, aiSummary }) => {
   const styles = useStyles();
   const hasTitle = typeof title === 'string' && title.trim().length > 0;
 
   return (
     <div className={styles.root} data-testid="header-toolbar">
       {hasTitle ? (
-        <Text size={300} className={styles.title} title={title} aria-label={title} data-testid="header-toolbar-title">
+        // v1.0.4: render as <h2> so screen readers announce it with role="heading"
+        // (matches OOB form section header semantics). Fluent v9 <Text> renders
+        // a <span> with role="generic" which is functionally correct but doesn't
+        // match the OOB accessibility contract the user cited.
+        <h2 className={styles.title} title={title} aria-label={title} data-testid="header-toolbar-title">
           {title}
-        </Text>
+        </h2>
       ) : (
         // Spacer keeps icons right-aligned when no title is provided.
         <span aria-hidden={true} className={styles.titleSpacer} />
       )}
 
       <div className={styles.iconSlots} data-testid="header-toolbar-icons">
+        {aiSummary ? (
+          <AiSummaryPopover
+            trigger={
+              <Tooltip content="AI Summary" relationship="label">
+                <Button
+                  appearance="subtle"
+                  size="small"
+                  icon={<Sparkle20Regular />}
+                  aria-label="View AI summary"
+                />
+              </Tooltip>
+            }
+            onFetchSummary={aiSummary.onFetchSummary}
+            positioning="below"
+          />
+        ) : null}
         {iconSlots.map((slot: IHeaderToolbarSlot) => {
           const showBadge = shouldRenderBadge(slot.badge);
 
@@ -155,6 +186,7 @@ export const HeaderToolbar: React.FC<IHeaderToolbarProps> = ({ title, iconSlots 
                   disabled={slot.disabled === true}
                   aria-label={slot.tooltip}
                   data-testid={`header-toolbar-button-${slot.key}`}
+                  ref={slot.buttonRef}
                 />
                 {showBadge ? (
                   <CounterBadge
