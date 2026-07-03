@@ -53,8 +53,10 @@ namespace Sprk.Bff.Api.Services.Ai.PublicContracts;
 public sealed class ConsumerRoutingService : IConsumerRoutingService
 {
     private const string EntityLogicalName = "sprk_playbookconsumer";
-    private const string LookupColumn = "sprk_playbook";
+    private const string PlaybookLookupColumn = "sprk_playbook";
+    private const string ActionLookupColumn = "sprk_action";
     private const string CacheKeyPrefix = "consumer-routing:";
+    private const string ActionCacheKeyPrefix = "consumer-routing-action:";
     private static readonly TimeSpan CacheDuration = TimeSpan.FromMinutes(5);
 
     private static readonly string[] Columns =
@@ -66,7 +68,8 @@ public sealed class ConsumerRoutingService : IConsumerRoutingService
         "sprk_priority",
         "sprk_matchconditions",
         "sprk_enabled",
-        LookupColumn,
+        PlaybookLookupColumn,
+        ActionLookupColumn,
     };
 
     private static readonly JsonSerializerOptions MatchConditionsJsonOptions = new()
@@ -92,12 +95,41 @@ public sealed class ConsumerRoutingService : IConsumerRoutingService
     }
 
     /// <inheritdoc />
-    public async Task<Guid?> ResolveAsync(
+    public Task<Guid?> ResolveAsync(
         string consumerType,
         string? consumerCode = "default",
         IRoutingContext? context = null,
         string? environment = null,
         CancellationToken cancellationToken = default)
+        => ResolveLookupAsync(
+            consumerType, consumerCode, context, environment,
+            targetKind: LookupTarget.Playbook,
+            cancellationToken);
+
+    /// <inheritdoc />
+    public Task<Guid?> ResolveActionAsync(
+        string consumerType,
+        string? consumerCode = "default",
+        IRoutingContext? context = null,
+        string? environment = null,
+        CancellationToken cancellationToken = default)
+        => ResolveLookupAsync(
+            consumerType, consumerCode, context, environment,
+            targetKind: LookupTarget.Action,
+            cancellationToken);
+
+    /// <summary>
+    /// Shared implementation for <see cref="ResolveAsync"/> +
+    /// <see cref="ResolveActionAsync"/>. Same query + selection algorithm; only
+    /// the extracted lookup value + cache key namespace differ.
+    /// </summary>
+    private async Task<Guid?> ResolveLookupAsync(
+        string consumerType,
+        string? consumerCode,
+        IRoutingContext? context,
+        string? environment,
+        LookupTarget targetKind,
+        CancellationToken cancellationToken)
     {
         if (string.IsNullOrWhiteSpace(consumerType))
         {
@@ -109,12 +141,13 @@ public sealed class ConsumerRoutingService : IConsumerRoutingService
             ? _hostEnvironment.EnvironmentName?.ToLowerInvariant() ?? "*"
             : environment.ToLowerInvariant();
 
-        var cacheKey = BuildCacheKey(consumerType, normalizedCode, normalizedEnv, context);
+        var cacheKey = BuildCacheKey(consumerType, normalizedCode, normalizedEnv, context, targetKind);
 
         if (_cache.TryGetValue<Guid?>(cacheKey, out var cached))
         {
             _logger.LogDebug(
-                "ConsumerRoutingService cache hit (consumerType={ConsumerType}, consumerCode={ConsumerCode}, env={Env}, resolvedPlaybookId={ResolvedPlaybookId}).",
+                "ConsumerRoutingService cache hit (target={Target}, consumerType={ConsumerType}, consumerCode={ConsumerCode}, env={Env}, resolvedId={ResolvedId}).",
+                targetKind,
                 consumerType,
                 normalizedCode,
                 normalizedEnv,
@@ -128,7 +161,7 @@ public sealed class ConsumerRoutingService : IConsumerRoutingService
         try
         {
             var candidates = await QueryCandidatesAsync(consumerType, cancellationToken).ConfigureAwait(false);
-            resolved = SelectBestMatch(candidates, normalizedCode, normalizedEnv, context);
+            resolved = SelectBestMatch(candidates, normalizedCode, normalizedEnv, context, targetKind);
         }
         catch (OperationCanceledException)
         {
@@ -142,7 +175,8 @@ public sealed class ConsumerRoutingService : IConsumerRoutingService
             // ADR-015: log identifiers + outcome only.
             _logger.LogError(
                 ex,
-                "ConsumerRoutingService failed to resolve (consumerType={ConsumerType}, consumerCode={ConsumerCode}, env={Env}). Returning null.",
+                "ConsumerRoutingService failed to resolve (target={Target}, consumerType={ConsumerType}, consumerCode={ConsumerCode}, env={Env}). Returning null.",
+                targetKind,
                 consumerType,
                 normalizedCode,
                 normalizedEnv);
@@ -161,7 +195,8 @@ public sealed class ConsumerRoutingService : IConsumerRoutingService
         });
 
         _logger.LogInformation(
-            "ConsumerRoutingService resolved (consumerType={ConsumerType}, consumerCode={ConsumerCode}, env={Env}, resolvedPlaybookId={ResolvedPlaybookId}, cacheHit=false, durationMs={DurationMs}).",
+            "ConsumerRoutingService resolved (target={Target}, consumerType={ConsumerType}, consumerCode={ConsumerCode}, env={Env}, resolvedId={ResolvedId}, cacheHit=false, durationMs={DurationMs}).",
+            targetKind,
             consumerType,
             normalizedCode,
             normalizedEnv,
@@ -204,10 +239,14 @@ public sealed class ConsumerRoutingService : IConsumerRoutingService
         var candidates = new List<Candidate>(result.Entities.Count);
         foreach (var entity in result.Entities)
         {
-            var lookup = entity.GetAttributeValue<EntityReference>(LookupColumn);
-            if (lookup is null || lookup.Id == Guid.Empty)
+            var playbookLookup = entity.GetAttributeValue<EntityReference>(PlaybookLookupColumn);
+            var actionLookup = entity.GetAttributeValue<EntityReference>(ActionLookupColumn);
+
+            // Rows with neither target populated are admin errors — skip. Callers
+            // land on "no match" and can graceful-degrade or surface an error.
+            if ((playbookLookup is null || playbookLookup.Id == Guid.Empty)
+                && (actionLookup is null || actionLookup.Id == Guid.Empty))
             {
-                // Configured row with no playbook target — skip; admin error.
                 continue;
             }
 
@@ -217,7 +256,8 @@ public sealed class ConsumerRoutingService : IConsumerRoutingService
                 Environment = entity.GetAttributeValue<string>("sprk_environment"),
                 Priority = entity.GetAttributeValue<int?>("sprk_priority") ?? 500,
                 MatchConditionsJson = entity.GetAttributeValue<string>("sprk_matchconditions"),
-                PlaybookId = lookup.Id,
+                PlaybookId = playbookLookup?.Id ?? Guid.Empty,
+                ActionId = actionLookup?.Id ?? Guid.Empty,
             });
         }
 
@@ -234,12 +274,22 @@ public sealed class ConsumerRoutingService : IConsumerRoutingService
         IReadOnlyList<Candidate> candidates,
         string consumerCode,
         string environment,
-        IRoutingContext? context)
+        IRoutingContext? context,
+        LookupTarget targetKind)
     {
         Candidate? best = null;
 
         foreach (var c in candidates)
         {
+            // Skip candidates whose target lookup for this call kind is empty.
+            // e.g., a row with only sprk_playbook populated is invisible to
+            // ResolveActionAsync (LookupTarget.Action) callers.
+            var candidateId = targetKind == LookupTarget.Action ? c.ActionId : c.PlaybookId;
+            if (candidateId == Guid.Empty)
+            {
+                continue;
+            }
+
             if (!MatchesConsumerCode(c.ConsumerCode, consumerCode))
             {
                 continue;
@@ -261,7 +311,15 @@ public sealed class ConsumerRoutingService : IConsumerRoutingService
             }
         }
 
-        return best?.PlaybookId;
+        if (best is null) return null;
+        return targetKind == LookupTarget.Action ? best.ActionId : best.PlaybookId;
+    }
+
+    /// <summary>Discriminates <see cref="ResolveAsync"/> vs <see cref="ResolveActionAsync"/> semantics.</summary>
+    private enum LookupTarget
+    {
+        Playbook,
+        Action,
     }
 
     private static bool MatchesConsumerCode(string? rowCode, string requested)
@@ -421,11 +479,13 @@ public sealed class ConsumerRoutingService : IConsumerRoutingService
         string consumerType,
         string consumerCode,
         string environment,
-        IRoutingContext? context)
+        IRoutingContext? context,
+        LookupTarget targetKind)
     {
         var mime = context?.MimeType ?? string.Empty;
         var docType = context?.DocumentType ?? string.Empty;
-        return $"{CacheKeyPrefix}{consumerType}:{consumerCode}:{environment}:{mime}:{docType}";
+        var prefix = targetKind == LookupTarget.Action ? ActionCacheKeyPrefix : CacheKeyPrefix;
+        return $"{prefix}{consumerType}:{consumerCode}:{environment}:{mime}:{docType}";
     }
 
     private sealed record Candidate
@@ -435,5 +495,6 @@ public sealed class ConsumerRoutingService : IConsumerRoutingService
         public int Priority { get; init; }
         public string? MatchConditionsJson { get; init; }
         public Guid PlaybookId { get; init; }
+        public Guid ActionId { get; init; }
     }
 }

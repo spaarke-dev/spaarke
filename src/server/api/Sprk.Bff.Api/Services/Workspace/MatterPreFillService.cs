@@ -42,15 +42,14 @@ public sealed class MatterPreFillService
     private readonly SharePointEmbeddedOptions _speOptions;
     private readonly ILogger<MatterPreFillService> _logger;
 
-    // R7 Wave 12 Phase D (2026-07-02): Linear AI Consumer dependencies. When
-    // LinearConsumersOptions.ActionIds has an entry for ConsumerTypes.MatterPreFill,
-    // GetPreFillAsync routes through the Linear path (IActionResolver + IActionRunner
-    // + existing ParseAiResponse) instead of the Playbook Engine. Nullable to keep
-    // existing constructors (unit-test) compiling; DI-registered instances always
-    // supply non-null values.
+    // R7 Wave 12 Phase D + Wave 12.3 (2026-07-02): Linear AI Consumer dependencies.
+    // When the sprk_playbookconsumer routing row for ConsumerTypes.MatterPreFill has
+    // sprk_action populated, GetPreFillAsync routes through the Linear path
+    // (IActionResolver + IActionRunner + existing ParseAiResponse) instead of the
+    // Playbook Engine. Nullable to keep existing constructors (unit-test) compiling;
+    // DI-registered instances always supply non-null values.
     private readonly IActionResolver? _linearActionResolver;
     private readonly IActionRunner? _linearActionRunner;
-    private readonly LinearConsumersOptions? _linearOptions;
 
     // FR-1R-05 routing-table resolution (chat-routing-redesign-r1 task 028c / Pattern A):
     // Phase 1R replaces the prior WorkspaceOptions.MatterPreFillPlaybookId env-var
@@ -102,8 +101,7 @@ public sealed class MatterPreFillService
         ILogger<MatterPreFillService> logger,
         IWorkspacePrefillAi? prefillAi = null,
         IActionResolver? linearActionResolver = null,
-        IActionRunner? linearActionRunner = null,
-        IOptions<LinearConsumersOptions>? linearOptions = null)
+        IActionRunner? linearActionRunner = null)
     {
         _speFileStore = speFileStore ?? throw new ArgumentNullException(nameof(speFileStore));
         _textExtractor = textExtractor ?? throw new ArgumentNullException(nameof(textExtractor));
@@ -114,7 +112,6 @@ public sealed class MatterPreFillService
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _linearActionResolver = linearActionResolver;
         _linearActionRunner = linearActionRunner;
-        _linearOptions = linearOptions?.Value;
         _prefillAi = prefillAi; // Nullable: AI feature flags may be disabled. RequireAi() throws at use site.
     }
 
@@ -211,14 +208,17 @@ public sealed class MatterPreFillService
             combinedText.Length, requestId);
 
         // --- Step 2: Invoke AI for structured extraction ---
-        // R7 Wave 12 Phase D (2026-07-02): Linear AI Consumer dispatch. When LinearConsumers
-        // is configured for ConsumerTypes.MatterPreFill, route through the code-defined path
-        // (IActionResolver + IActionRunner) rather than the Playbook Engine. Preserves the
-        // existing PreFillResponse contract + all ParseAiResponse fallbacks. Fall-through to
-        // ExtractFieldsViaPlaybookAsync preserves engine dispatch when unconfigured.
-        if (_linearActionResolver != null && _linearActionRunner != null
-            && _linearOptions != null
-            && _linearOptions.TryGetActionId(ConsumerTypes.MatterPreFill, out _))
+        // R7 Wave 12 Phase D + Wave 12.3 (2026-07-02): Linear AI Consumer dispatch. When the
+        // sprk_playbookconsumer routing row for ConsumerTypes.MatterPreFill has sprk_action
+        // populated, route through the code-defined path (IActionResolver + IActionRunner)
+        // rather than the Playbook Engine. Preserves the existing PreFillResponse contract +
+        // all ParseAiResponse fallbacks. Fall-through to ExtractFieldsViaPlaybookAsync
+        // preserves engine dispatch when the sprk_action lookup is empty.
+        var linearActionId = (_linearActionResolver != null && _linearActionRunner != null)
+            ? await _consumerRouting.ResolveActionAsync(ConsumerTypes.MatterPreFill, cancellationToken: cancellationToken)
+                .ConfigureAwait(false)
+            : null;
+        if (linearActionId.HasValue && linearActionId.Value != Guid.Empty)
         {
             return await ExtractFieldsViaLinearAsync(combinedText, requestId, httpContext, cancellationToken);
         }

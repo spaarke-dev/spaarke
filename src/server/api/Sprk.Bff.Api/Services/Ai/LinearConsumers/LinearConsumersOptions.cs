@@ -6,25 +6,37 @@ namespace Sprk.Bff.Api.Services.Ai.LinearConsumers;
 /// </summary>
 /// <remarks>
 /// <para>
-/// R7 Wave 12 (2026-07-02). Config-driven Action + Playbook id maps let us
-/// keep the dispatch simple for tonight's Doc Upload migration without
-/// forcing per-tenant routing table changes. Later consumers (File Summarize,
-/// Prefills) will add entries here; if we later need environment-aware or
-/// per-tenant routing, we can promote this to
-/// <see cref="Sprk.Bff.Api.Services.Ai.PublicContracts.IConsumerRoutingService"/>
-/// -driven resolution without churning consumer service code — they'll still
-/// call <see cref="IActionResolver.ResolveAsync"/>.
+/// R7 Wave 12 (2026-07-02) + Wave 12.3 (2026-07-02).
 /// </para>
+/// <para>
+/// <b>ActionId lookup was retired in Wave 12.3</b> in favor of the
+/// <c>sprk_playbookconsumer.sprk_action</c> routing-table column
+/// (see <see cref="IActionResolver"/> +
+/// <see cref="Sprk.Bff.Api.Services.Ai.PublicContracts.IConsumerRoutingService.ResolveActionAsync"/>).
+/// The remaining maps here (<see cref="PlaybookIds"/>,
+/// <see cref="ModelDeployments"/>, <see cref="MaxOutputTokens"/>) serve narrow
+/// purposes that don't fit the routing-table primitive:
+/// </para>
+/// <list type="bullet">
+///   <item><see cref="PlaybookIds"/>: reverse-lookup for
+///         <c>AnalysisEndpoints.ExecuteAnalysis</c> — clients still submit the
+///         legacy playbookId, and the endpoint needs to know which consumer
+///         owns it BEFORE it can resolve an Action.</item>
+///   <item><see cref="ModelDeployments"/>: per-consumer LLM deployment
+///         override; environment-scoped concern, config-appropriate.</item>
+///   <item><see cref="MaxOutputTokens"/>: per-consumer output cap; production
+///         tuning concern, config-appropriate.</item>
+/// </list>
 /// <para>
 /// Config example (see <c>appsettings.json</c>):
 /// <code>
 /// {
 ///   "LinearConsumers": {
-///     "ActionIds": {
-///       "document-profile": "bb356968-ebe9-f011-8406-7ced8d1dc988"
-///     },
 ///     "PlaybookIds": {
 ///       "document-profile": "18cf3cc8-02ec-f011-8406-7c1e520aa4df"
+///     },
+///     "MaxOutputTokens": {
+///       "summarize-file": 4000
 ///     }
 ///   }
 /// }
@@ -34,13 +46,6 @@ namespace Sprk.Bff.Api.Services.Ai.LinearConsumers;
 public sealed class LinearConsumersOptions
 {
     public const string SectionName = "LinearConsumers";
-
-    /// <summary>
-    /// Map of consumer-type key → <c>sprk_analysisaction</c> row id. Used by
-    /// <see cref="IActionResolver"/> to look up the {SystemPrompt +
-    /// OutputSchemaJson + Temperature} triple that drives the LLM call.
-    /// </summary>
-    public Dictionary<string, Guid> ActionIds { get; set; } = new(StringComparer.OrdinalIgnoreCase);
 
     /// <summary>
     /// Map of consumer-type key → <c>sprk_analysisplaybook</c> row id. Used by
@@ -94,30 +99,8 @@ public sealed class LinearConsumersOptions
     }
 
     /// <summary>
-    /// Look up an ActionId by consumer-type key, accepting both hyphen and
-    /// underscore forms of the key (see remarks on
-    /// <see cref="GetConsumerTypeForPlaybookId"/>).
-    /// </summary>
-    public bool TryGetActionId(string consumerType, out Guid actionId)
-    {
-        if (ActionIds.TryGetValue(consumerType, out actionId) && actionId != Guid.Empty)
-            return true;
-
-        var underscoreForm = consumerType.Replace('-', '_');
-        if (ActionIds.TryGetValue(underscoreForm, out actionId) && actionId != Guid.Empty)
-            return true;
-
-        var hyphenForm = consumerType.Replace('_', '-');
-        if (ActionIds.TryGetValue(hyphenForm, out actionId) && actionId != Guid.Empty)
-            return true;
-
-        actionId = Guid.Empty;
-        return false;
-    }
-
-    /// <summary>
     /// Look up an optional model-deployment override with the same hyphen/
-    /// underscore normalization semantics as <see cref="TryGetActionId"/>.
+    /// underscore normalization semantics as <see cref="GetConsumerTypeForPlaybookId"/>.
     /// </summary>
     public bool TryGetModelDeployment(string consumerType, out string? deployment)
     {
@@ -139,7 +122,7 @@ public sealed class LinearConsumersOptions
 
     /// <summary>
     /// Look up an optional max-output-tokens override with the same hyphen/
-    /// underscore normalization semantics as <see cref="TryGetActionId"/>.
+    /// underscore normalization semantics as <see cref="GetConsumerTypeForPlaybookId"/>.
     /// </summary>
     public bool TryGetMaxOutputTokens(string consumerType, out int maxTokens)
     {
