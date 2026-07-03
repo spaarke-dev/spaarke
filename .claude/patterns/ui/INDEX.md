@@ -14,7 +14,8 @@
 | [fluent-v9-portal-gotcha.md](fluent-v9-portal-gotcha.md) | Using Popover / Tooltip / Toast / Dialog / Menu / Combobox dropdown | 2026-05-26 | Current |
 | [fluent-v9-react-version-boundaries.md](fluent-v9-react-version-boundaries.md) | Authoring in Spaarke.UI.Components OR bumping React versions | 2026-05-26 | Current |
 | [fluent-v9-host-visual-fit.md](fluent-v9-host-visual-fit.md) | Surface-by-surface theme-source matrix; "make it look native" inside MDA / Canvas / Code Pages / Office Add-ins | 2026-05-28 | Current |
-| [embedded-widget-sizing.md](embedded-widget-sizing.md) | Building/maintaining ANY workspace widget — WIDTH chain (box-sizing + min-width:0 + ResizeObserver pixel cap) AND HEIGHT chain (WorkspaceLayoutWidget.root height:100% + WorkspaceShell.row flex + widget body display:flex) | 2026-06-22 | Current |
+| [embedded-widget-sizing.md](embedded-widget-sizing.md) | Building/maintaining ANY workspace widget — WIDTH chain (box-sizing + min-width:0 + ResizeObserver pixel cap) AND HEIGHT chain (WorkspaceLayoutWidget.root height:100% + WorkspaceShell.row flex + widget body display:flex + row-height override addendum) | 2026-07-03 | Current |
+| [navigateto-popup-result-bridge.md](navigateto-popup-result-bridge.md) | Any wizard opened via `Xrm.Navigation.navigateTo({ target: 2 })` that must signal a result (savedId, confirmed flag) back to its opener when it closes | 2026-07-03 | Current |
 
 ## Critical Constraint (ADR-021 + ADR-022)
 
