@@ -1,7 +1,7 @@
 # Current Task State
 
 > **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-07-02
+> **Last Updated**: 2026-07-03
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
@@ -13,10 +13,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 033 → completed 2026-07-02 |
-| **Step** | — (task complete) |
-| **Status** | Ready for tasks 034/035/036 (MemoList / MemoEditor / CreatedByPopover) |
-| **Next Action** | Task 033 delivered `useSprkMemoRepository.ts` (~470 LOC), `discoverMemoNavProps.ts` (~90 LOC), and `useSprkMemoRepository.test.ts` (17 tests, all passing). Uses `PolymorphicResolverService.applyResolverFields` from `@spaarke/ui-components/services`; nav-prop discovery follows workAssignmentService.ts pattern (fetch to EntityDefinitions/ManyToOneRelationships). Debounce 1s via ref-held timer; unmount cancels pending write. All 48 Notepad tests still green. Zero TS errors on new files. |
+| **Task** | 024 → completed 2026-07-03 (parallel: 034 still in progress on its own thread) |
+| **Step** | — (024 complete) |
+| **Status** | Task 025 (deploy + QA) BLOCKED on NFR-04 waiver or fast-follow tree-shake fix. |
+| **Next Action** | Task 024 delivered `notes/bundle-size.md` with: (1) NFR-04 FAIL — 1607 KB un-gzipped / 421 KB gzipped (ceiling 250 KB); root cause = shared-lib barrel pulls mammoth ecosystem via EntityCreationService→sdap-client chain. (2) NFR-02 PASS — 90 LOC total (20 index.ts + 69 view + 1 version). (3) Five task-023 gaps patched during build: added `tsconfig.json`, built SdapClient, moved `ControlManifest.Input.xml` into `control/`, forced ajv@^8 to top level, added contextInfo type-cast (3 lines) in `index.ts`. Escalate to owner: pursue tree-shake option (1) in `bundle-size.md` (deep-import per symbol) before or during task 025, or explicit NFR-04 waiver. |
 
 ### Files Modified This Session
 

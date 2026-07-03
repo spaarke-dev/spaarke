@@ -3,7 +3,7 @@
   <metadata>
     <title>Build MemoList component (FR-16)</title>
     <phase>3: Notepad</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>033</dependencies>
     <blocks>037</blocks>
@@ -72,7 +72,18 @@
     </test>
   </ui-tests>
 
-  <notes>Do NOT sort inside this component — the memos prop is already sorted by 033.</notes>
+  <notes>Do NOT sort inside this component — the memos prop is already sorted by 033.
+
+Completion notes (2026-07-03):
+- Delivered MemoList.tsx (~150 lines total; ~110 non-comment LOC) using Fluent v9 Menu + MenuTrigger disableButtonEnhancement + TextBulletList24Regular icon
+- Delivered MemoList.test.tsx with 10 tests, all passing (no @testing-library/react — used ReactDOM + act harness per useSprkMemoRepository.test.ts pattern)
+- Full Notepad test suite: 81 passing (up from 71 pre-034 — includes 10 new MemoList tests, all prior tests still green)
+- Zero hex/rgb; zero @spaarke/auth or BFF imports; zero touches to App.tsx/NotepadShell/package.json
+- deriveTitle precedence verified in tests: sprk_name wins when non-empty and not "Untitled"; falls through to first non-empty body line otherwise
+- Current memo highlight via tokens.colorNeutralBackground3 through mergeClasses conditional
+- Empty-state MenuItem uses disabled prop so Fluent v9 blocks onClick natively
+- Icon chosen: TextBulletList24Regular (spec called for "List24Regular" — Fluent v9 exports it as TextBulletList24Regular; List24Regular does not exist in the installed @fluentui/react-icons v2)
+- LOC slightly above hint (~110 vs ≤80) — kept data-memoid/data-current attrs for testability without RTL + inlined formatCreatedOn helper</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

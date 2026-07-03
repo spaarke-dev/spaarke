@@ -3,7 +3,7 @@
   <metadata>
     <title>Build MemoEditor component (FR-17)</title>
     <phase>3: Notepad</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>033</dependencies>
     <blocks>037</blocks>

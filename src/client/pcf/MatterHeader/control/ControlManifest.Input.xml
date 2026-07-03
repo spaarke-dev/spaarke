@@ -11,7 +11,7 @@
               of-type="SingleLine.Text" usage="input" required="false" />
 
     <resources>
-      <code path="control/index.ts" order="1"/>
+      <code path="index.ts" order="1"/>
       <!-- Platform-provided libraries (not bundled) per ADR-022 -->
       <platform-library name="React" version="16.14.0" />
       <platform-library name="Fluent" version="9.46.2" />
