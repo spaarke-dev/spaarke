@@ -316,6 +316,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   authenticatedFetch,
   getAccessToken,
   onSessionCreated,
+  onSessionStale,
   onPlaybookChange,
   className,
   documents = [],
@@ -402,6 +403,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
     isLoading: isSessionLoading,
     error: sessionError,
     createSession,
+    resumeSession,
     loadHistory,
     switchContext,
     addMessage,
@@ -764,17 +766,27 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
     setPendingAction(null);
   }, []);
 
-  // Initialize session on mount
+  // Initialize session on mount.
+  //
+  // R7 Wave 12.3 Phase 12.3a UAT fix (2026-07-03) — this effect PREVIOUSLY called
+  // `createSession()` in BOTH branches, so a host-provided `initialSessionId` was
+  // ignored and every mount created a fresh server session. That caused a
+  // desynchronization with sibling widgets (uploads, playbook picker) that read the
+  // host's persisted `chatSessionId`: files uploaded to session A were invisible to
+  // the message send that hit newly-created session B.
+  //
+  // New behavior:
+  //   1. If `initialSessionId` is provided, RESUME it (seed local state, no POST).
+  //      Then `loadHistory()` — if the server returns 404, the session is stale
+  //      (Redis TTL expired, cleaned up, etc.), so we call `onSessionStale` so the
+  //      host can clear its persisted id, and then create fresh.
+  //   2. If `initialSessionId` is null/undefined, create a new session (same as before).
   React.useEffect(() => {
     const initSession = async () => {
       if (initialSessionId) {
-        // Resume existing session
-        const newSession = await createSession(documentId, playbookId, hostContext);
-        if (newSession) {
-          // loadHistory needs the session to be set first - handled by useChatSession
-        }
+        resumeSession(initialSessionId);
+        // Note: history load runs from the effect below once `session` is set.
       } else {
-        // Create new session
         const newSession = await createSession(documentId, playbookId, hostContext);
         if (newSession && onSessionCreated) {
           onSessionCreated(newSession);
@@ -786,11 +798,33 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Load history when session is available
+  // Load history + stale-session fallback for the resumed-session path.
+  //
+  // Fires once `session` becomes non-null AND `initialSessionId` was provided (i.e.,
+  // we resumed rather than created). If the server returns 404 for the history endpoint,
+  // the resumed session id is stale — notify the host (`onSessionStale`) so it can clear
+  // its persisted id, then create a fresh session and emit `onSessionCreated` so parallel
+  // widgets pick up the new id.
   React.useEffect(() => {
-    if (session && initialSessionId) {
-      loadHistory();
-    }
+    if (!session || !initialSessionId) return;
+    if (session.sessionId !== initialSessionId) return; // avoid firing again after a fresh create replaced the resumed session
+
+    let cancelled = false;
+    (async () => {
+      const result = await loadHistory();
+      if (cancelled) return;
+      if (result.staleSession) {
+        console.warn('[SprkChat] resumed session', initialSessionId, 'is stale on server — creating fresh');
+        if (onSessionStale) onSessionStale(initialSessionId);
+        const fresh = await createSession(documentId, playbookId, hostContext);
+        if (!cancelled && fresh && onSessionCreated) {
+          onSessionCreated(fresh);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.sessionId]);
 

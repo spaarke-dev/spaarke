@@ -112,12 +112,41 @@ export function useChatSession(options: UseChatSessionOptions): IUseChatSessionR
   );
 
   /**
+   * Resume an EXISTING server-side session by seeding local state with its ID.
+   *
+   * R7 Wave 12.3 Phase 12.3a UAT fix (2026-07-03) — prior to this hook exposing
+   * `resumeSession`, the SprkChat mount `useEffect` only had `createSession` at
+   * its disposal, which POSTs `/api/ai/chat/sessions` and creates a NEW server
+   * session even when the host passed `initialSessionId`. That guaranteed a
+   * mismatch between the persisted `chatSessionId` (used by parallel widgets
+   * for uploads etc.) and SprkChat's own session — every uploaded file
+   * landed in a session the message send never read.
+   *
+   * `resumeSession` does NOT contact the server. It sets the internal session
+   * state to `{ sessionId, createdAt: null-ish }`. Callers SHOULD invoke
+   * `loadHistory()` afterwards to hydrate messages; if the server-side session
+   * no longer exists, `loadHistory` returns `staleSession: true` so the host
+   * can fall back to `createSession()` and clear its persisted ID.
+   */
+  const resumeSession = useCallback((sessionId: string): void => {
+    setSession({ sessionId, createdAt: new Date().toISOString() });
+    setMessages(initialMessages ?? []);
+    setError(null);
+  }, [initialMessages]);
+
+  /**
    * Load message history for the current session.
    * GET /api/ai/chat/sessions/{sessionId}/history
+   *
+   * Returns `{ ok: true }` when history loaded (may be empty).
+   * Returns `{ ok: false, staleSession: true }` when the server responds 404
+   * — the current session ID no longer exists on the server (Redis TTL expired,
+   * session cleaned up, etc.). Hosts SHOULD react by clearing their persisted
+   * session state and creating a fresh session.
    */
-  const loadHistory = useCallback(async (): Promise<void> => {
+  const loadHistory = useCallback(async (): Promise<{ ok: boolean; staleSession?: boolean }> => {
     if (!session) {
-      return;
+      return { ok: false };
     }
 
     setIsLoading(true);
@@ -125,6 +154,11 @@ export function useChatSession(options: UseChatSessionOptions): IUseChatSessionR
 
     try {
       const response = await authenticatedFetch(`${baseUrl}/api/ai/chat/sessions/${session.sessionId}/history`);
+
+      if (response.status === 404) {
+        // Stale-session signal — server no longer has this session id.
+        return { ok: false, staleSession: true };
+      }
 
       if (!response.ok) {
         const errorText = await response.text();
@@ -141,9 +175,11 @@ export function useChatSession(options: UseChatSessionOptions): IUseChatSessionR
       );
 
       setMessages(historyMessages);
+      return { ok: true };
     } catch (err: unknown) {
       const errorObj = err instanceof Error ? err : new Error('Failed to load history');
       setError(errorObj);
+      return { ok: false };
     } finally {
       setIsLoading(false);
     }
@@ -323,6 +359,7 @@ export function useChatSession(options: UseChatSessionOptions): IUseChatSessionR
     isLoading,
     error,
     createSession,
+    resumeSession,
     loadHistory,
     switchContext,
     deleteSession,

@@ -132,6 +132,16 @@ export interface AiSessionContextValue {
   chatSessionId: string | null;
   /** Set the chat session ID — called when SprkChat creates a new session */
   setChatSessionId: (sessionId: string) => void;
+  /**
+   * Clear the chat session id from React state AND persisted storage. Called by
+   * SprkChat's `onSessionStale` when the server reports the persisted id no
+   * longer exists (Redis TTL expired, server cleanup, environment rebuild).
+   * Fresh session creation is then driven by SprkChat's own createSession path
+   * and lands back in state via `setChatSessionId` from `onSessionCreated`.
+   *
+   * R7 Wave 12.3 Phase 12.3a UAT fix (2026-07-03).
+   */
+  clearChatSession: () => void;
 
   // ── Playbook State (persisted to localStorage — R4 task 031) ─────────────
   /** Active playbook ID governing session behaviour */
@@ -253,6 +263,26 @@ function writeSession(key: string, value: string): void {
     localStorage.setItem(key, value);
   } catch {
     /* localStorage may be unavailable in some Dataverse webresource contexts */
+  }
+}
+
+/**
+ * Remove a session key from BOTH localStorage AND sessionStorage. Used by
+ * `clearChatSession` when SprkChat reports a stale session (R7 Wave 12.3 Phase 12.3a
+ * UAT fix 2026-07-03). Deletes from both stores to close the pre-R4 sessionStorage
+ * migration path — if we only removed from localStorage, a stale value could remain
+ * in sessionStorage and be picked up by another migration on next mount.
+ */
+function removeSession(key: string): void {
+  try {
+    localStorage.removeItem(key);
+  } catch {
+    /* localStorage may be unavailable in some Dataverse webresource contexts */
+  }
+  try {
+    sessionStorage.removeItem(key);
+  } catch {
+    /* sessionStorage may be unavailable in some Dataverse webresource contexts */
   }
 }
 
@@ -386,6 +416,11 @@ export function AiSessionProvider({
   const setChatSessionId = useCallback((sessionId: string): void => {
     setChatSessionIdState(sessionId);
     writeSession(AI_SESSION_CHAT_SESSION_KEY, sessionId);
+  }, []);
+
+  const clearChatSession = useCallback((): void => {
+    setChatSessionIdState(null);
+    removeSession(AI_SESSION_CHAT_SESSION_KEY);
   }, []);
 
   // ── Playbook State (persisted to localStorage — R4 task 031) ───────────
@@ -550,6 +585,7 @@ export function AiSessionProvider({
       // Session
       chatSessionId,
       setChatSessionId,
+      clearChatSession,
 
       // Playbook
       playbookId,
@@ -580,6 +616,7 @@ export function AiSessionProvider({
       bffBaseUrl,
       chatSessionId,
       setChatSessionId,
+      clearChatSession,
       playbookId,
       setPlaybookId,
       entityContext,

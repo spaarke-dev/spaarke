@@ -722,6 +722,7 @@ export function ConversationPane(): React.JSX.Element {
     bffBaseUrl,
     chatSessionId,
     setChatSessionId,
+    clearChatSession,
     playbookId,
     setPlaybookId,
     entityContext,
@@ -746,6 +747,27 @@ export function ConversationPane(): React.JSX.Element {
 
   // ── Session restore context (AIPU2-106) ─────────────────────────────────
   const restoreCtx = useRestoreContext();
+
+  /**
+   * R7 Wave 12.3 Phase 12.3a UAT fix (2026-07-03) — normalize SessionRestoreMessage[]
+   * to IChatMessage[] for the `initialMessages` prop on SprkChat.
+   *
+   * SessionRestoreMessage.role is a bare `string` because the server returns the raw
+   * enum name. IChatMessage.role is a strict `'User' | 'Assistant' | 'System'` union.
+   * Unrecognized roles fall back to `'User'` (defensive — the server can't emit values
+   * outside the enum today, but we don't want a future backend addition to break the UI).
+   */
+  const restoredInitialMessages = React.useMemo<IChatMessage[] | undefined>(() => {
+    if (!restoreCtx?.recentMessages || restoreCtx.recentMessages.length === 0) return undefined;
+    return restoreCtx.recentMessages.map(m => ({
+      role:
+        m.role === 'User' || m.role === 'Assistant' || m.role === 'System'
+          ? m.role
+          : 'User',
+      content: m.content,
+      timestamp: m.timestamp,
+    }));
+  }, [restoreCtx?.recentMessages]);
   const [summaryExpanded, setSummaryExpanded] = React.useState(false);
 
   // ── PaneEventBus dispatch — conversation channel ────────────────────────
@@ -1955,6 +1977,26 @@ export function ConversationPane(): React.JSX.Element {
    * Persists the session ID to AiSessionProvider (and sessionStorage).
    * Clears pendingMessage since the welcome flow is now complete.
    */
+  /**
+   * onSessionStale — SprkChat reports the resumed `initialSessionId` is no
+   * longer valid on the server (Redis TTL expired, environment rebuild, etc.).
+   *
+   * R7 Wave 12.3 Phase 12.3a UAT fix (2026-07-03). Clears persisted localStorage
+   * BEFORE SprkChat creates a fresh session so parallel widgets don't briefly
+   * read the stale id. `handleSessionCreated` below then re-populates it with
+   * the newly-created id from SprkChat's `onSessionCreated` callback.
+   *
+   * ADR-015: structural log only (id count, no id content — the id is opaque
+   * but by convention we don't log identifiers verbatim in production paths).
+   */
+  const handleSessionStale = React.useCallback(
+    (_staleSessionId: string): void => {
+      console.warn('[ConversationPane] chat session stale — clearing persisted id, awaiting fresh session');
+      clearChatSession();
+    },
+    [clearChatSession]
+  );
+
   const handleSessionCreated = React.useCallback(
     (session: IChatSession) => {
       if (session?.sessionId) {
@@ -2473,8 +2515,19 @@ export function ConversationPane(): React.JSX.Element {
               authenticatedFetch={authenticatedFetch}
               getAccessToken={getAccessToken}
               sessionId={chatSessionId ?? undefined}
+              // R7 Wave 12.3 Phase 12.3a UAT fix (2026-07-03) — pair with the new
+              // resume-not-recreate session flow. When SessionRestoreManager has
+              // populated the restore context with prior conversation messages
+              // (AIPU2-106), forward them so the chat thread shows recovered
+              // history immediately without waiting for a server round-trip.
+              // Empty array is the safe default — SprkChat treats undefined
+              // the same as an empty history.
+              initialMessages={restoredInitialMessages}
               playbookId={playbookId}
               onSessionCreated={handleSessionCreated}
+              // R7 Wave 12.3 Phase 12.3a UAT fix (2026-07-03) — clear the
+              // persisted chatSessionId when SprkChat resumed a stale id.
+              onSessionStale={handleSessionStale}
               onPlaybookChange={handlePlaybookChange}
               predefinedPrompts={predefinedPrompts}
               hostContext={hostContext}

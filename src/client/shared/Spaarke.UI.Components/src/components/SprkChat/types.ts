@@ -672,6 +672,21 @@ export interface ISprkChatProps {
   /** Callback fired when a new session is created */
   onSessionCreated?: (session: IChatSession) => void;
   /**
+   * Callback fired when the host-provided `sessionId` (via `initialSessionId`)
+   * is no longer valid on the server (Redis TTL expired, session cleaned up).
+   *
+   * The host SHOULD clear its persisted session state (e.g., localStorage /
+   * sessionStorage) when this fires. SprkChat will automatically create a
+   * fresh session and call `onSessionCreated` with the new session id
+   * immediately after, so downstream widgets (uploads, playbook picker, etc.)
+   * pick up the new id via the normal `onSessionCreated` flow.
+   *
+   * R7 Wave 12.3 Phase 12.3a UAT fix (2026-07-03) — prevents mismatched
+   * session IDs between chat and parallel widgets (uploads etc.) when a
+   * previously-persisted session has been cleaned up server-side.
+   */
+  onSessionStale?: (staleSessionId: string) => void;
+  /**
    * Callback fired when the user switches playbooks via the context selector
    * or playbook chips. Allows the host to update its own state and persist
    * the choice (e.g., to sessionStorage).
@@ -1822,8 +1837,24 @@ export interface IUseChatSessionResult {
   error: Error | null;
   /** Create a new session */
   createSession: (documentId?: string, playbookId?: string, hostContext?: IHostContext) => Promise<IChatSession | null>;
-  /** Load message history for the current session */
-  loadHistory: () => Promise<void>;
+  /**
+   * Resume an EXISTING server-side session by seeding local state with its ID.
+   * Does NOT contact the server — callers should invoke `loadHistory()` afterwards.
+   * When the server-side session is stale (Redis TTL expired), `loadHistory` reports
+   * `staleSession: true` so the host can clear its persisted ID + create fresh.
+   *
+   * R7 Wave 12.3 Phase 12.3a UAT fix (2026-07-03) — pairs with SprkChat's
+   * `initialSessionId` prop to avoid the double-session bug where uploads and messages
+   * used mismatched session IDs.
+   */
+  resumeSession: (sessionId: string) => void;
+  /**
+   * Load message history for the current session.
+   * Returns `{ ok: true }` on success (may be empty history).
+   * Returns `{ ok: false, staleSession: true }` when server responds 404 — host should
+   * clear its persisted session ID and call `createSession()`.
+   */
+  loadHistory: () => Promise<{ ok: boolean; staleSession?: boolean }>;
   /** Switch document/playbook context (optionally with additional document IDs) */
   switchContext: (
     documentId?: string,
