@@ -32,15 +32,25 @@
 
 import * as React from 'react';
 import { Popover, PopoverSurface, makeStyles, tokens } from '@fluentui/react-components';
+// Deep-path imports to bypass the top-level barrel `@spaarke/ui-components`
+// which drags `EntityCreationService` → `mammoth`/`xmldom`/`bluebird` (~550 KiB
+// of docx-processing deps this PCF never uses; webpack can't tree-shake through
+// the CommonJS barrel). The sub-barrels re-export the same identities.
 import {
   FieldGrid,
-  RecordHeaderLookupField,
   RecordHeaderShell,
   TextField,
   TextareaField,
+} from '@spaarke/ui-components/dist/components/RecordHeader';
+// LookupField (natively named inside RecordHeader/fields; aliased to
+// RecordHeaderLookupField at the top-level barrel due to name collision with
+// the pre-existing top-level LookupField component). Import from fields/
+// sub-path to get the un-aliased name.
+import { LookupField as RecordHeaderLookupField } from '@spaarke/ui-components/dist/components/RecordHeader/fields';
+import {
   useRecordFieldValues,
   useRecordHeaderToolbarActions,
-} from '@spaarke/ui-components';
+} from '@spaarke/ui-components/dist/hooks';
 import { CONTROL_VERSION } from './version';
 
 const ENTITY = 'sprk_matter';

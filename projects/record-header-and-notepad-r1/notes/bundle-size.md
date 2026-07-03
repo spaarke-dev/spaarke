@@ -1,28 +1,80 @@
 # MatterHeaderPcf bundle size + LOC verification (Task 024)
 
-**Date**: 2026-07-03
+**Date**: 2026-07-03 (revised after `/pcf-deploy` skill compliance)
 **Build command**: `npm run build:prod`
 **Task**: 024
 **Rigor level**: STANDARD
 
 ---
 
-## Bundle metrics
+## Final measurements (POST-REMEDIATION) — NFR-04 ✅ PASS
 
-- **Output path**: `C:\code_files\spaarke-wt-record-header-and-notepad-r1\src\client\pcf\MatterHeader\out\controls\control\bundle.js`
-- **Un-gzipped size**: **1,646,274 bytes** = **1,607 KB** = **1.57 MiB**
-- **Gzipped size**: **431,660 bytes** = **421 KB**
-- **Modules bundled**: ~1,057 orphan modules + built modules across ~15.5 MiB pre-minified
-- **Build time**: ~28 seconds (webpack compile-and-bundle phase)
+- **Output path**: `src/client/pcf/MatterHeader/out/controls/control/bundle.js`
+- **Un-gzipped**: **39,162 bytes** = **38 KB** — 6.5× under 250 KB ceiling
+- **Gzipped**: **10,219 bytes** = **10 KB** — 25× under 250 KB ceiling
+- **Build time**: ~31 seconds
 - **Webpack**: 5.108.3, buildMode=production, minimizer active
-- **Output layout**: `out/controls/control/` (folder name = manifest folder name `control/`)
 
-### NFR-04 status: **FAIL**
+### NFR-04 status: **PASS** ✅
 
-- Target: ≤ 250 KB minified
-- Measured un-gzipped: 1,607 KB (6.4× over ceiling)
-- Measured gzipped: 421 KB (1.7× over ceiling by gzipped measurement)
-- Fails on both un-gzipped and gzipped interpretations of "minified 250 KB"
+Bundle went from 1.57 MiB to 38 KB (43× reduction) after applying the three-part fix documented below. This matches the pcf-deploy skill's expected 400-600 KB reference range for field-based PCFs (we're well under it because MatterHeader is a compact card, not a full-app).
+
+## Three-part remediation (per /pcf-deploy skill + PCF-DEPLOYMENT-GUIDE.md)
+
+Root cause of the original 1.6 MiB bundle: three standard PCF bundle-optimization mechanisms were missing.
+
+### Fix 1: `featureconfig.json` — enable platform libraries + custom webpack
+
+Created `src/client/pcf/MatterHeader/featureconfig.json`:
+```json
+{
+  "pcfReactPlatformLibraries": "on",
+  "pcfAllowCustomWebpack": "on"
+}
+```
+
+Without this, `<platform-library>` entries in ControlManifest.Input.xml are declared but not enforced — React + Fluent still get bundled. Matches SemanticSearchControl / DocumentRelationshipViewer reference configs.
+
+### Fix 2: `webpack.config.js` — Fluent icon tree-shaking
+
+Created `src/client/pcf/MatterHeader/webpack.config.js`:
+```javascript
+module.exports = {
+  optimization: { usedExports: true, sideEffects: true, innerGraph: true, providedExports: true },
+  module: {
+    rules: [{
+      test: /[\\/]node_modules[\\/]@fluentui[\\/]react-icons[\\/]/,
+      sideEffects: false,
+    }],
+  },
+};
+```
+
+Marks `@fluentui/react-icons` as side-effect-free so webpack can drop unused icon chunks (~6.8 MB of icons otherwise).
+
+### Fix 3: `MatterHeaderView.tsx` — deep-path imports
+
+Changed from top-level barrel:
+```typescript
+// BEFORE — pulls EntityCreationService → mammoth → xmldom → bluebird (~550 KiB)
+import { RecordHeaderShell, FieldGrid, TextField, ... } from '@spaarke/ui-components';
+```
+to sub-path imports:
+```typescript
+// AFTER — targets specific sub-barrels; no EntityCreationService drag-in
+import { FieldGrid, RecordHeaderShell, TextField, TextareaField } from '@spaarke/ui-components/dist/components/RecordHeader';
+import { LookupField as RecordHeaderLookupField } from '@spaarke/ui-components/dist/components/RecordHeader/fields';
+import { useRecordFieldValues, useRecordHeaderToolbarActions } from '@spaarke/ui-components/dist/hooks';
+```
+
+The shared lib's top-level barrel (`dist/index.js`) uses `export * from './services'` which re-exports EntityCreationService which imports `@spaarke/sdap-client` which pulls in the mammoth docx-processing chain. Sub-path imports bypass this. **This is the convention for any PCF consuming `@spaarke/ui-components`** — should be captured in the Phase 4 authoring guide.
+
+## Original measurement (PRE-REMEDIATION) — kept for reference
+
+Before applying the three fixes above, the bundle was:
+
+- **Un-gzipped**: 1,646,274 bytes = 1,607 KB = 1.57 MiB (6.4× over 250 KB ceiling)
+- **Gzipped**: 431,660 bytes = 421 KB (1.7× over ceiling)
 
 ### Top bundle contributors (from webpack stats)
 
