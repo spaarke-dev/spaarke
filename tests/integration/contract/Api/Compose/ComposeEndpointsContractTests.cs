@@ -65,8 +65,6 @@ using Moq;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api;
 using Sprk.Bff.Api.Infrastructure.Graph;
-using Sprk.Bff.Api.Services.Ai;
-using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Compose;
 using Sprk.Bff.Api.Tests.Mocks;
 using Xunit;
@@ -98,20 +96,6 @@ namespace Sprk.Bff.Api.Tests.Api.Compose;
 [Trait("status", "repaired")]
 public sealed class ComposeEndpointsContractTests : IClassFixture<ComposeContractFixture>
 {
-    /// <summary>
-    /// spaarkeai-compose-r1 task 097 (Phase 8 SSE backend, per FR-S3): the three
-    /// tests marked with this Skip attribute assert JSON-response fields on
-    /// <c>ComposeActionResponse</c> which the DispatchAction endpoint no longer
-    /// returns. The endpoint contract they exercise (200 happy path + spike #4
-    /// §6 response shape + 503 no-routing) has moved to SSE events. Re-authoring
-    /// them to parse SSE frames is tracked as FU-97a in
-    /// <c>notes/defer-issues.md</c>; the immediate SSE contract is guarded by the
-    /// new <see cref="PostDispatchAction_ReturnsTextEventStreamPerTask097"/> test.
-    /// </summary>
-    private const string SkipReason_SseConversion_097 =
-        "Task 097 converted DispatchAction to SSE; JSON-response assertions no longer applicable. " +
-        "SSE-shape re-test coverage tracked as FU-97a (notes/defer-issues.md).";
-
     private readonly ComposeContractFixture _fixture;
 
     public ComposeEndpointsContractTests(ComposeContractFixture fixture)
@@ -134,7 +118,6 @@ public sealed class ComposeEndpointsContractTests : IClassFixture<ComposeContrac
     [InlineData("POST", "/api/compose/documents/spe-item-abc/promote")]
     [InlineData("POST", "/api/compose/documents/00000000-0000-0000-0000-000000000001/checkout")]
     [InlineData("POST", "/api/compose/documents/00000000-0000-0000-0000-000000000001/checkin")]
-    [InlineData("POST", "/api/compose/action/compose-summarize")]
     public async Task ComposeEndpoint_WhenUnauthenticated_Returns401(string verb, string path)
     {
         using var client = _fixture.CreateUnauthenticatedClient();
@@ -315,403 +298,6 @@ public sealed class ComposeEndpointsContractTests : IClassFixture<ComposeContrac
             "Compose check-in is a Phase 5 stub in R1 (ComposeEndpoints.Checkin)");
     }
 
-    [Fact(Skip = SkipReason_SseConversion_097)]
-    public async Task PostDispatchAction_Authenticated_WithRoutedPlaybook_Returns200_ViaPublicContractsFacadeOnly()
-    {
-        // Refined ADR-013 (2026-05-20): the dispatch path goes through
-        // IConsumerRoutingService.ResolveAsync + IInvokePlaybookAi.InvokePlaybookAsync —
-        // both lives in Services/Ai/PublicContracts/. NO AI-internal type is reached.
-        // This test asserts the WIRING end-to-end by verifying both facade calls fire.
-        const string consumerType = ConsumerTypes.ComposeSummarize;
-        const string tenantId = "tenant-aad-004";
-        const string speId = "spe-item-dispatch-001";
-        var sessionId = Guid.NewGuid().ToString();
-        var playbookId = Guid.NewGuid();
-        var runId = Guid.NewGuid();
-
-        _fixture.RoutingMock.Reset();
-        _fixture.InvokePlaybookMock.Reset();
-
-        _fixture.RoutingMock
-            .Setup(r => r.ResolveAsync(
-                consumerType,
-                It.IsAny<string?>(),
-                It.IsAny<IRoutingContext?>(),
-                It.IsAny<string?>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(playbookId);
-
-        _fixture.InvokePlaybookMock
-            .Setup(i => i.InvokePlaybookAsync(
-                playbookId,
-                It.IsAny<IReadOnlyDictionary<string, string>?>(),
-                It.IsAny<PlaybookInvocationContext>(),
-                It.IsAny<CancellationToken>(),
-                It.IsAny<string?>(),
-                It.IsAny<Sprk.Bff.Api.Services.Ai.DocumentContext?>()))
-            .ReturnsAsync(new PlaybookInvocationResult
-            {
-                RunId = runId,
-                Success = true,
-                TextContent = "Summary text from playbook.",
-                Confidence = 0.92,
-                Duration = TimeSpan.FromMilliseconds(842),
-                Citations = Array.Empty<ToolResultCitation>(),
-            });
-
-        using var client = _fixture.CreateAuthenticatedClient();
-
-        var body = new
-        {
-            documentSpeId = speId,
-            tenantId,
-            sessionId,
-            driveId = "drive-004",
-        };
-
-        var response = await client.PostAsJsonAsync($"/api/compose/action/{consumerType}", body);
-
-        response.StatusCode.Should().Be(HttpStatusCode.OK);
-        var result = await response.Content.ReadFromJsonAsync<ComposeActionResponse>();
-        result.Should().NotBeNull();
-        result!.RunId.Should().Be(runId);
-        result.Success.Should().BeTrue();
-        result.TextContent.Should().Be("Summary text from playbook.");
-
-        // The load-bearing ADR-013 assertion: both PublicContracts facade methods were
-        // exercised exactly once. Neither IOpenAiClient nor IPlaybookOrchestrationService
-        // is reachable from this handler — the static-contract test in
-        // ComposeEndpointsTests.Dispatch_action_handler_only_injects_PublicContracts_facade_types_per_refined_ADR_013
-        // (W3-024) anchors that at the reflection level; this test anchors it at the live
-        // HTTP boundary.
-        _fixture.RoutingMock.Verify(r => r.ResolveAsync(
-            consumerType,
-            It.IsAny<string?>(),
-            It.IsAny<IRoutingContext?>(),
-            It.IsAny<string?>(),
-            It.IsAny<CancellationToken>()), Times.Once);
-        _fixture.InvokePlaybookMock.Verify(i => i.InvokePlaybookAsync(
-            playbookId,
-            It.IsAny<IReadOnlyDictionary<string, string>?>(),
-            It.IsAny<PlaybookInvocationContext>(),
-            It.IsAny<CancellationToken>(),
-            It.IsAny<string?>(),
-            It.IsAny<Sprk.Bff.Api.Services.Ai.DocumentContext?>()), Times.Once);
-    }
-
-    // ================================================================================
-    // ===== Round-trip response-shape contract (task W8-061) =========================
-    // ================================================================================
-    //
-    // Task W8-061 §goal: "exercises the compose-summarize round-trip end-to-end at the
-    // BFF endpoint level: POST /api/compose/action/compose-summarize -> IConsumerRoutingService
-    // resolves Document Summary playbook id -> IInvokePlaybookAi invoked -> response shape
-    // verified."
-    //
-    // The sibling happy-path test (PostDispatchAction_Authenticated_WithRoutedPlaybook_*)
-    // verifies routing + invocation reach the facade. This test closes the response-shape
-    // gap: it pins ALL ten fields of the locked ComposeActionResponse contract per Spike
-    // #4 §6 against a fully-populated PlaybookInvocationResult, including the fields the
-    // sibling test does not assert (StructuredData, DurationMs, CitationCount, ErrorMessage,
-    // ErrorCode, CorrelationId).
-    //
-    // Path-A vs Path-C (CLAUDE.md §6.5) decision recorded for the reviewer:
-    //   - POML 061 §goal is materially satisfied by W3-027's sibling happy-path test.
-    //   - Adding a duplicate full-roundtrip test would be a B6 mirror-test antipattern.
-    //   - Path C (pivot to comply) — this single response-shape test adds non-redundant
-    //     coverage of the locked Spike #4 §6 contract WITHOUT scaffolding duplication.
-    //
-    // KEEP path: endpoint-contract (same file, same fixture, same boundary mocks).
-    // Banned-pattern compliance: behavior-shaped (B6 N/A — distinct scenario from sibling);
-    //   no Mock<HttpMessageHandler> (B1); no DI-registration assertions (B3); no ctor null
-    //   checks (B4); ratio of setup:assertion is balanced (B15 N/A).
-
-    [Fact(Skip = SkipReason_SseConversion_097)]
-    public async Task PostDispatchAction_WithComposeSummarizeRoundTrip_ReturnsLockedResponseShape_PerSpike4Section6()
-    {
-        // Arrange — full round-trip context: tenant + drive + sessionId + selection-free
-        // whole-document compose-summarize per FR-09 + spike #4 §4.2 (compose-document scope).
-        const string consumerType = ConsumerTypes.ComposeSummarize;
-        const string tenantId = "tenant-aad-roundtrip-001";
-        const string speId = "spe-item-roundtrip-doc";
-        const string driveId = "drive-roundtrip-001";
-        var sessionId = Guid.NewGuid().ToString();
-        var matterId = Guid.NewGuid();
-        var documentRecordId = Guid.NewGuid();
-        var playbookId = Guid.NewGuid();
-        var runId = Guid.NewGuid();
-        var duration = TimeSpan.FromMilliseconds(1247);
-
-        // Fully-populated PlaybookInvocationResult exercises every non-trivial field of the
-        // locked ComposeActionResponse contract (Spike #4 §6). Citations carries 3 entries
-        // so CitationCount is non-trivial (distinguishes from accidental 0).
-        var citationOne = new ToolResultCitation(
-            ChunkId: Guid.NewGuid().ToString(),
-            SourceName: "Citation A — Summary source",
-            PageNumber: 1,
-            Excerpt: "Excerpt text A");
-        var citationTwo = new ToolResultCitation(
-            ChunkId: Guid.NewGuid().ToString(),
-            SourceName: "Citation B — Summary source",
-            PageNumber: 2,
-            Excerpt: "Excerpt text B");
-        var citationThree = new ToolResultCitation(
-            ChunkId: Guid.NewGuid().ToString(),
-            SourceName: "Citation C — Summary source",
-            PageNumber: 3,
-            Excerpt: "Excerpt text C");
-
-        // StructuredData is the optional JSON envelope per Spike #4 §6 (R2-ready; nullable
-        // in R1 happy-path). We pin it as non-null here to verify the field flows through
-        // the contract end-to-end (regression guard for the optional projection).
-        using var structuredDoc = JsonDocument.Parse(@"{""summary"":""Document Summary playbook result"",""sectionCount"":5}");
-        var structuredData = structuredDoc.RootElement.Clone();
-
-        _fixture.RoutingMock.Reset();
-        _fixture.InvokePlaybookMock.Reset();
-
-        _fixture.RoutingMock
-            .Setup(r => r.ResolveAsync(
-                consumerType,
-                It.IsAny<string?>(),
-                It.IsAny<IRoutingContext?>(),
-                It.IsAny<string?>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(playbookId);
-
-        _fixture.InvokePlaybookMock
-            .Setup(i => i.InvokePlaybookAsync(
-                playbookId,
-                It.IsAny<IReadOnlyDictionary<string, string>?>(),
-                It.IsAny<PlaybookInvocationContext>(),
-                It.IsAny<CancellationToken>(),
-                It.IsAny<string?>(),
-                It.IsAny<Sprk.Bff.Api.Services.Ai.DocumentContext?>()))
-            .ReturnsAsync(new PlaybookInvocationResult
-            {
-                RunId = runId,
-                Success = true,
-                TextContent = "Document Summary: this is the round-trip summary from the playbook.",
-                StructuredData = structuredData,
-                Citations = new[] { citationOne, citationTwo, citationThree },
-                Confidence = 0.88,
-                Duration = duration,
-                ErrorMessage = null,
-                ErrorCode = null,
-            });
-
-        using var client = _fixture.CreateAuthenticatedClient();
-
-        var body = new
-        {
-            documentSpeId = speId,
-            tenantId,
-            sessionId,
-            driveId,
-            documentRecordId,
-            matterId,
-            documentName = "Round-trip Draft.docx",
-            documentMimeType = "application/vnd.openxmlformats-officedocument.wordprocessingml.document",
-            documentVersionEtag = "\"v3-etag\"",
-        };
-
-        // Act — the round-trip exercises the routing facade + invoke facade + response
-        // projection in the same call that production code makes.
-        var response = await client.PostAsJsonAsync($"/api/compose/action/{consumerType}", body);
-
-        // Assert — HTTP 200 + locked field contract per Spike #4 §6.
-        response.StatusCode.Should().Be(HttpStatusCode.OK,
-            "compose-summarize round-trip with valid routing + successful invocation returns 200 per FR-09");
-
-        var result = await response.Content.ReadFromJsonAsync<ComposeActionResponse>();
-        result.Should().NotBeNull("response body must deserialize into the locked ComposeActionResponse shape");
-
-        // Field-by-field assertions on the locked contract (Spike #4 §6). Each assertion
-        // protects a specific consumer contract — if a future refactor drops or renames a
-        // field, this test fails with a precise message naming the field + the requirement.
-        result!.RunId.Should().Be(runId,
-            "RunId field of ComposeActionResponse must propagate the playbook run id end-to-end (Spike #4 §6)");
-        result.Success.Should().BeTrue(
-            "Success field reflects the terminal playbook outcome (Spike #4 §6 row 1)");
-        result.TextContent.Should().Be("Document Summary: this is the round-trip summary from the playbook.",
-            "TextContent carries the terminal node text per IInvokePlaybookAi.InvokePlaybookAsync result projection");
-        result.StructuredData.Should().NotBeNull(
-            "StructuredData field MUST flow through when the playbook produces a structured projection (Spike #4 §6 row 4)");
-        result.Confidence.Should().Be(0.88,
-            "Confidence field flows from PlaybookInvocationResult.Confidence (Spike #4 §6 row 5)");
-        result.DurationMs.Should().Be((long)duration.TotalMilliseconds,
-            "DurationMs is the milliseconds projection of PlaybookInvocationResult.Duration (Spike #4 §6 row 6)");
-        result.CitationCount.Should().Be(3,
-            "CitationCount is the .Citations list length — 3 citations were emitted (Spike #4 §6 row 7)");
-        result.ErrorMessage.Should().BeNull(
-            "ErrorMessage MUST be null on Success=true round-trip (Spike #4 §6 row 8)");
-        result.ErrorCode.Should().BeNull(
-            "ErrorCode MUST be null on Success=true round-trip (Spike #4 §6 row 9)");
-        result.CorrelationId.Should().NotBeNullOrEmpty(
-            "CorrelationId carries the HttpContext.TraceIdentifier and MUST be present for the client to trace the run (Spike #4 §6 row 10)");
-
-        // Facade boundary verification — both facades were invoked exactly once per the
-        // refined ADR-013 round-trip contract. Belt-and-suspenders with the sibling test
-        // and the W3-024 static-contract reflection test on the handler parameter shape.
-        _fixture.RoutingMock.Verify(r => r.ResolveAsync(
-            consumerType,
-            It.IsAny<string?>(),
-            It.IsAny<IRoutingContext?>(),
-            It.IsAny<string?>(),
-            It.IsAny<CancellationToken>()), Times.Once,
-            "ResolveAsync must be called exactly once for the consumerType — round-trip contract per FR-09");
-
-        _fixture.InvokePlaybookMock.Verify(i => i.InvokePlaybookAsync(
-            playbookId,
-            It.IsAny<IReadOnlyDictionary<string, string>?>(),
-            It.IsAny<PlaybookInvocationContext>(),
-            It.IsAny<CancellationToken>(),
-            It.IsAny<string?>(),
-            It.IsAny<Sprk.Bff.Api.Services.Ai.DocumentContext?>()), Times.Once,
-            "InvokePlaybookAsync must be called exactly once with the resolved playbookId — round-trip contract per FR-09");
-    }
-
-    // ================================================================================
-    // ===== Routing-failure + unknown-consumer paths (503 / 404) =====================
-    // ================================================================================
-
-    [Fact(Skip = SkipReason_SseConversion_097)]
-    public async Task PostDispatchAction_WhenNoRoutingConfigured_Returns503()
-    {
-        // Spike #4 §8 row: no sprk_playbookconsumer row → null playbookId → 503.
-        const string consumerType = ConsumerTypes.ComposeSummarize;
-
-        _fixture.RoutingMock.Reset();
-        _fixture.InvokePlaybookMock.Reset();
-        _fixture.RoutingMock
-            .Setup(r => r.ResolveAsync(
-                consumerType,
-                It.IsAny<string?>(),
-                It.IsAny<IRoutingContext?>(),
-                It.IsAny<string?>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Guid?)null);
-
-        using var client = _fixture.CreateAuthenticatedClient();
-
-        var body = new
-        {
-            documentSpeId = "spe-item-noroute",
-            tenantId = "tenant-aad-005",
-        };
-
-        var response = await client.PostAsJsonAsync($"/api/compose/action/{consumerType}", body);
-
-        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable,
-            "no routing configured -> 503 per ComposeEndpoints.DispatchAction error model");
-
-        // The dispatch must NOT have invoked the playbook facade — short-circuit before invoke.
-        _fixture.InvokePlaybookMock.Verify(i => i.InvokePlaybookAsync(
-            It.IsAny<Guid>(),
-            It.IsAny<IReadOnlyDictionary<string, string>?>(),
-            It.IsAny<PlaybookInvocationContext>(),
-            It.IsAny<CancellationToken>(),
-            It.IsAny<string?>(),
-            It.IsAny<Sprk.Bff.Api.Services.Ai.DocumentContext?>()), Times.Never);
-    }
-
-    /// <summary>
-    /// spaarkeai-compose-r1 task 097 SSE contract guard.
-    ///
-    /// The DispatchAction endpoint MUST emit <c>Content-Type: text/event-stream</c>
-    /// with a body that terminates in the <c>data: [DONE]\n\n</c> sentinel — for BOTH
-    /// success and downstream-failure paths (once SSE headers are committed,
-    /// failures use error chunks, not 5xx codes). This test asserts the SSE contract
-    /// shape without depending on a functioning `IComposeDocumentService` or a
-    /// specific playbook outcome (the deeper Hop-by-Hop assertions live in the Skip'd
-    /// smoke tests; SSE-parsing re-tests are follow-up FU-97a).
-    /// </summary>
-    [Fact]
-    public async Task PostDispatchAction_ReturnsTextEventStreamPerTask097()
-    {
-        const string consumerType = ConsumerTypes.ComposeSummarize;
-
-        _fixture.RoutingMock.Reset();
-        _fixture.InvokePlaybookMock.Reset();
-
-        // Wire routing to succeed so we get past the pre-SSE 503 branch and
-        // commit to text/event-stream headers.
-        _fixture.RoutingMock
-            .Setup(r => r.ResolveAsync(
-                consumerType,
-                It.IsAny<string?>(),
-                It.IsAny<IRoutingContext?>(),
-                It.IsAny<string?>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Guid.NewGuid());
-
-        using var client = _fixture.CreateAuthenticatedClient();
-
-        var body = new
-        {
-            documentSpeId = "spe-item-sse-097",
-            tenantId = "tenant-aad-097",
-            driveId = "drive-sse-097",
-            documentRecordId = Guid.NewGuid(),
-            documentName = "sse-contract-test.docx",
-        };
-
-        var response = await client.PostAsJsonAsync($"/api/compose/action/{consumerType}", body);
-
-        // The endpoint commits to SSE once validation + routing pass. Downstream
-        // failures (IComposeDocumentService load, IDocxTextExtractor parse, playbook
-        // execution) surface as `data: {"type":"error", ...}` events INSIDE the SSE
-        // stream — the HTTP status stays 200 and the Content-Type stays
-        // text/event-stream. This test does not care which specific event fires
-        // because the fixture's real IComposeDocumentService will most likely fail
-        // to load a bogus drive-item — we only assert the SSE contract shape.
-        response.StatusCode.Should().Be(HttpStatusCode.OK,
-            "task 097 SSE conversion: HTTP status stays 200 after SSE headers commit; " +
-            "errors emit SSE error chunks instead of 5xx status codes");
-        response.Content.Headers.ContentType?.MediaType.Should().Be(
-            "text/event-stream",
-            "task 097: response content type MUST be text/event-stream per SSE contract");
-
-        var responseBody = await response.Content.ReadAsStringAsync();
-        responseBody.Should().Contain("data: ",
-            "SSE responses use `data:` prefixed frames per the EventSource protocol");
-        responseBody.Should().EndWith("data: [DONE]\n\n",
-            "task 097 SSE contract: every response terminates in the `data: [DONE]` sentinel " +
-            "so clients know when to close the stream");
-    }
-
-    [Fact]
-    public async Task PostDispatchAction_WithUnknownConsumerType_Returns404()
-    {
-        // ComposeEndpoints.DispatchAction performs a defense-in-depth check against
-        // ConsumerTypes.All before touching the routing layer. Unknown type → 404.
-        const string unknownConsumerType = "compose-not-a-real-consumer";
-
-        _fixture.RoutingMock.Reset();
-        _fixture.InvokePlaybookMock.Reset();
-
-        using var client = _fixture.CreateAuthenticatedClient();
-
-        var body = new
-        {
-            documentSpeId = "spe-item-unknown",
-            tenantId = "tenant-aad-006",
-        };
-
-        var response = await client.PostAsJsonAsync($"/api/compose/action/{unknownConsumerType}", body);
-
-        response.StatusCode.Should().Be(HttpStatusCode.NotFound);
-
-        // Routing layer MUST NOT be reached on unknown consumer type — the handler
-        // short-circuits before resolving so an unknown type cannot exercise any
-        // downstream code path (defense in depth).
-        _fixture.RoutingMock.Verify(r => r.ResolveAsync(
-            It.IsAny<string>(),
-            It.IsAny<string?>(),
-            It.IsAny<IRoutingContext?>(),
-            It.IsAny<string?>(),
-            It.IsAny<CancellationToken>()), Times.Never);
-    }
 
     // ================================================================================
     // ===== Validation (400 BadRequest) ==============================================
@@ -765,19 +351,6 @@ public sealed class ComposeEndpointsContractTests : IClassFixture<ComposeContrac
             "Promote handler requires sessionId for the ephemeral->promoted rebind (FR-07)");
     }
 
-    [Fact]
-    public async Task PostDispatchAction_WhenMissingTenantId_Returns400()
-    {
-        using var client = _fixture.CreateAuthenticatedClient();
-
-        var body = new { documentSpeId = "spe-item-notenant" };  // no tenantId
-
-        var response = await client.PostAsJsonAsync(
-            $"/api/compose/action/{ConsumerTypes.ComposeSummarize}", body);
-
-        response.StatusCode.Should().Be(HttpStatusCode.BadRequest,
-            "DispatchAction handler requires tenantId for multi-tenant isolation (ADR-015)");
-    }
 }
 
 // ================================================================================
@@ -788,15 +361,12 @@ public sealed class ComposeEndpointsContractTests : IClassFixture<ComposeContrac
 /// In-process BFF fixture for the Compose endpoint integration tests. Mirrors the
 /// canonical config-key set from <see cref="Sprk.Bff.Api.Tests.CustomWebAppFactory"/>
 /// (per <c>.claude/constraints/bff-extensions.md §F.2</c> Fixture-Config-FIRST), swaps
-/// in a fake auth scheme, and replaces <see cref="IComposeService"/> +
-/// <see cref="IConsumerRoutingService"/> + <see cref="IInvokePlaybookAi"/> with
-/// strict Moqs so tests configure boundary behavior per scenario.
+/// in a fake auth scheme, and replaces <see cref="IComposeService"/> with a Moq so
+/// tests configure boundary behavior per scenario.
 /// </summary>
 public sealed class ComposeContractFixture : WebApplicationFactory<Program>
 {
     public Mock<IComposeService> ComposeServiceMock { get; } = new(MockBehavior.Loose);
-    public Mock<IConsumerRoutingService> RoutingMock { get; } = new(MockBehavior.Loose);
-    public Mock<IInvokePlaybookAi> InvokePlaybookMock { get; } = new(MockBehavior.Loose);
 
     protected override IHost CreateHost(IHostBuilder builder)
     {
@@ -911,18 +481,9 @@ public sealed class ComposeContractFixture : WebApplicationFactory<Program>
             services.RemoveAll<IDataverseService>();
             services.AddSingleton(dataverseMock.Object);
 
-            // === Compose boundaries — module-boundary mocks per ADR-038 §4 ===
-            // ComposeServicesModule (task 025) registered these as Scoped UNCONDITIONAL.
-            // We swap them for test doubles so handler scenarios can control return shape.
+            // Compose boundary — module-boundary mock per ADR-038 §4.
             services.RemoveAll<IComposeService>();
             services.AddSingleton(ComposeServiceMock.Object);
-
-            // PublicContracts facade — refined ADR-013 boundary. Test doubles here verify
-            // the dispatch endpoint reaches ONLY these types end-to-end.
-            services.RemoveAll<IConsumerRoutingService>();
-            services.AddSingleton(RoutingMock.Object);
-            services.RemoveAll<IInvokePlaybookAi>();
-            services.AddSingleton(InvokePlaybookMock.Object);
         });
     }
 
