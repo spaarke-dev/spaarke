@@ -31,6 +31,7 @@ Each polymorphic entity (e.g., `sprk_event`, `sprk_memo`, `sprk_document`) has:
 - `sprk_regardingrecordid` (Single Line Text, 50 chars) - GUID of the parent record
 - `sprk_regardingrecordname` (Single Line Text, 200 chars) - Display name of parent
 - `sprk_regardingrecordurl` (URL) - Clickable link to parent record
+- `sprk_regardingrecordnumber` (Single Line Text) - Denormalized copy of the target record's business-key number, resolved via `sprk_recordtype_ref.sprk_regardingrecordnumberfield` metadata
 
 ### Visual Representation
 
@@ -48,7 +49,8 @@ Each polymorphic entity (e.g., `sprk_event`, `sprk_memo`, `sprk_document`) has:
 │ ├─ sprk_regardingrecordtype    │ ← Lookup to sprk_recordtype_ref
 │ ├─ sprk_regardingrecordid      │ ← "abc-123-def..."
 │ ├─ sprk_regardingrecordname    │ ← "Smith v. Jones"
-│ └─ sprk_regardingrecordurl     │ ← "/main.aspx?..."
+│ ├─ sprk_regardingrecordurl     │ ← "/main.aspx?..."
+│ └─ sprk_regardingrecordnumber  │ ← "MAT-2026-0042"
 └────────────────────────────────┘
 ```
 
@@ -75,7 +77,7 @@ The Record Type entity serves as the lookup target for resolver fields:
 
 - **MUST** include both entity-specific lookups AND resolver fields for polymorphic entities
 - **MUST** populate only ONE entity-specific lookup at a time (mutually exclusive)
-- **MUST** populate ALL 4 resolver fields when an association is made
+- **MUST** populate ALL 5 resolver fields when an association is made (extended from 4 → 5 per SRFR-071)
 - **MUST** clear the previous lookup when changing parent entity type
 - **MUST** use the shared `PolymorphicResolverService` for all client-side programmatic record creation
 - **MUST** use `IncomingAssociationResolver` (or equivalent) for server-side resolver field population
@@ -210,3 +212,9 @@ The resolver pattern integrates with the Field Mapping Framework. When a parent 
 ---
 
 **Lines**: ~200
+
+---
+
+## Revision Log
+
+- **2026-07-02 (SRFR-071)**: Extended field write from 4 → 5 (added `sprk_regardingrecordnumber`); no MUST/MUST NOT rule changes.

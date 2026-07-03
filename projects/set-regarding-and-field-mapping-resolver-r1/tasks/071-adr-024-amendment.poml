@@ -2,7 +2,7 @@
 <task id="SRFR-071" project="set-regarding-and-field-mapping-resolver-r1">
   <metadata>
     <title>ADR-024 amendment: extend Fields written section 4 → 5 (add sprk_regardingrecordnumber)</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>1h</estimated-effort>
     <actual-effort></actual-effort>
     <assigned>AI Agent</assigned>

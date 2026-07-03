@@ -2,12 +2,12 @@
 <task id="SRFR-072" project="set-regarding-and-field-mapping-resolver-r1">
   <metadata>
     <title>Update stale FieldMappingHandler.ts:10 inline reference to point at Appendix A</title>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-effort>1h</estimated-effort>
-    <actual-effort></actual-effort>
+    <actual-effort>~10min (idempotent — SRFR-022 already applied the change)</actual-effort>
     <assigned>AI Agent</assigned>
-    <started></started>
-    <completed></completed>
+    <started>2026-07-02</started>
+    <completed>2026-07-02</completed>
     <rigor>MINIMAL</rigor>
     <parallel-safe>true</parallel-safe>
     <parallel-group>E</parallel-group>

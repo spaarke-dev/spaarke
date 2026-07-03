@@ -71,9 +71,9 @@
 
 | # | Task | Status | Rigor | Effort | Parallel-safe |
 |---|---|---|---|---|---|
-| 070 | [OOB Dataverse mapping audit script + report](./070-oob-mapping-audit.poml) | 🔲 | STANDARD | 4h | group E |
-| 071 | [ADR-024 amendment — "Fields written" 4 → 5 (Path B)](./071-adr-024-amendment.poml) | 🔲 | MINIMAL | 1h | group E |
-| 072 | [Update `FieldMappingHandler.ts:10` inline reference + Appendix A cross-links](./072-fieldmapping-inline-reference.poml) | 🔲 | MINIMAL | 1h | group E |
+| 070 | [OOB Dataverse mapping audit script + report](./070-oob-mapping-audit.poml) | ✅ | STANDARD | 4h est / **~1h actual (2 profiles reviewed, 4 OOB mappings found, 0 collisions)** | group E |
+| 071 | [ADR-024 amendment — "Fields written" 4 → 5 (Path B)](./071-adr-024-amendment.poml) | ✅ | MINIMAL | 1h est / **~5min actual (main-session edit; §3 boundary hit)** | group E |
+| 072 | [Update `FieldMappingHandler.ts:10` inline reference + Appendix A cross-links](./072-fieldmapping-inline-reference.poml) | ✅ | MINIMAL | 1h est / **~10min actual (idempotent — SRFR-022 already applied)** | group E |
 
 ### Wave 8 — Deploy + UAT
 
