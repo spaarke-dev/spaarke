@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="record-header-and-notepad-r1">
+  <metadata>
+    <title>Author MatterHeaderPcf manifest + PCF class + version.ts</title>
+    <phase>2: MatterHeaderPcf</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>013</dependencies>
+    <blocks>022, 023, 024, 025</blocks>
+    <tags>pcf, react, typescript, fluent-ui, frontend</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>New PCF control (code implementation + manifest)</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>Author the MatterHeaderPcf manifest (ControlManifest.Input.xml) with a recordId input override property, the PCF class (control/index.ts) implementing ADR-006/022 lifecycle (init/updateView/render/destroy), and control/version.ts. Do NOT include entity or fieldSchema properties.</prompt>
+
+  <role>Spaarke platform developer. Expert in PCF framework, ControlManifest.Input.xml, ComponentFramework.StandardControl lifecycle.</role>
+
+  <goal>Manifest + PCF class + version.ts present at src/client/pcf/MatterHeader/{ControlManifest.Input.xml, control/index.ts, control/version.ts}; class boilerplate ≤ 30 LOC excluding imports.</goal>
+
+  <context>
+    <background>Design §3.5 — MatterHeaderPcf is the v1 per-entity thin PCF. Manifest has ONE input property: recordId (SingleLine.Text, optional override). No entity or schema property — entity is compile-time-fixed as "sprk_matter".</background>
+    <relevant-files>
+      <file>src/client/pcf/MatterHeader/ControlManifest.Input.xml</file>
+      <file>src/client/pcf/MatterHeader/control/index.ts</file>
+      <file>src/client/pcf/MatterHeader/control/version.ts</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-006">PCF over webresources.</constraint>
+    <constraint source="ADR-022">React 16/17 (platform lib); no React 18 APIs.</constraint>
+    <constraint source="spec">FR-12: reads recordId from context.mode.contextInfo.entityId (with manifest override).</constraint>
+    <constraint source="spec">NFR-02: PCF LOC ≤ 100 excluding shared primitives.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/record-header-and-notepad-r1/spec.md</file>
+      <file>projects/record-header-and-notepad-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-006-prefer-pcf-over-webresources.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/patterns/pcf/control-initialization.md</file>
+      <file>.claude/patterns/pcf/fluent-v9-modern-theming.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>src/client/pcf/SemanticSearchControl/</file>
+    </files>
+    <patterns>
+      <pattern name="pcf-initialization" location=".claude/patterns/pcf/control-initialization.md">Standard PCF lifecycle: init, updateView, destroy.</pattern>
+    </patterns>
+  </knowledge>
+
+  <justification>
+    <existing>None. No PCF substitutes the OOB form header on Matter.</existing>
+    <extension>N/A.</extension>
+    <cost-of-doing-nothing>Shared primitives can't render on a model-driven form without a PCF; primitives become shelf-ware.</cost-of-doing-nothing>
+  </justification>
+
+  <steps>
+    <step order="1">Create folder src/client/pcf/MatterHeader/ if not present.</step>
+    <step order="2">Author ControlManifest.Input.xml with control namespace "Spaarke.Records" name "MatterHeader" and ONE input property recordId (SingleLine.Text, optional).</step>
+    <step order="3">Author control/index.ts: export class MatterHeader implements ComponentFramework.StandardControl&lt;IInputs, IOutputs&gt; with init/updateView/render/destroy methods per design §3.5.</step>
+    <step order="4">In render(), read recordId from context.parameters.recordId?.raw || context.mode.contextInfo.entityId; wrap in FluentProvider theme=webLightTheme (matching PCF convention); mount MatterHeaderView (built in task 022).</step>
+    <step order="5">Author version.ts exporting current semver (start at "1.0.0") per src/client/pcf/CLAUDE.md convention.</step>
+    <step order="6">Do NOT include entity/fieldSchema properties in manifest — the entity is hard-coded in MatterHeaderView.</step>
+    <step order="7">Update TASK-INDEX.md: mark 021 ✅.</step>
+    <step order="8">Document deviations in notes/.</step>
+  </steps>
+
+  <tools><tool name="npm">Build</tool></tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/MatterHeader/ControlManifest.Input.xml</output>
+    <output type="code">src/client/pcf/MatterHeader/control/index.ts</output>
+    <output type="code">src/client/pcf/MatterHeader/control/version.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Manifest lists exactly one input property (recordId, SingleLine.Text).</criterion>
+    <criterion testable="true">PCF class has all four lifecycle methods (init, updateView, destroy, and optional getOutputs).</criterion>
+    <criterion testable="true">PCF class LOC ≤ 30 excluding imports.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="PCF Manifest Validity">
+      <steps>
+        <step>Run `pac pcf init` validator or manual XSD check against manifest</step>
+      </steps>
+      <expected>Manifest is well-formed and accepted</expected>
+    </test>
+  </ui-tests>
+
+  <notes>Version footer: per src/client/pcf/CLAUDE.md, PCF renders a subtle version footer bottom-right. Per spec Assumptions, this project renders it in dev/harness mode only.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files first. Follow task-execute skill.</protocol>
+  </execution>
+</task>

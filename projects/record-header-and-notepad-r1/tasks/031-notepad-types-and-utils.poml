@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="record-header-and-notepad-r1">
+  <metadata>
+    <title>Notepad types + deriveTitle utility</title>
+    <phase>3: Notepad</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>033, 034, 037</blocks>
+    <tags>typescript</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>New TypeScript types + pure-function utility</rigor-reason>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>Author src/solutions/Notepad/src/types/memo.ts (TypeScript types for Memo, derived from sprk_memo schema verified in 001) and src/solutions/Notepad/src/utils/deriveTitle.ts (pure function returning first non-empty line of body, truncated to ~60 chars).</prompt>
+
+  <role>Spaarke platform developer.</role>
+
+  <goal>types/memo.ts + utils/deriveTitle.ts present; unit tests for deriveTitle cover edge cases (empty, whitespace-only, long text, multiline).</goal>
+
+  <context>
+    <background>Small foundation task. Types mirror sprk_memo fields verified in 001. deriveTitle is used by MemoList (dropdown display) per FR-16.</background>
+    <relevant-files>
+      <file>src/solutions/Notepad/src/types/memo.ts</file>
+      <file>src/solutions/Notepad/src/utils/deriveTitle.ts</file>
+      <file>src/solutions/Notepad/src/utils/__tests__/deriveTitle.test.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-024">sprk_memo uses text field sprk_regardingrecordid.</constraint>
+    <constraint source="spec">FR-16: derived-title preview for memo list.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/record-header-and-notepad-r1/spec.md</file>
+      <file>projects/record-header-and-notepad-r1/notes/sprk-memo-schema.md</file>
+      <file>projects/record-header-and-notepad-r1/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Author types/memo.ts: interface Memo { sprk_memoid: string; sprk_body: string; sprk_regardingrecordid: string; createdby: { id: string; name: string; }; createdon: string; modifiedon: string; }</step>
+    <step order="2">Author utils/deriveTitle.ts: export function deriveTitle(body: string | null | undefined, maxLen: number = 60): string — first non-empty line, trimmed, truncated to maxLen with "…"; return "Untitled" if empty.</step>
+    <step order="3">Add unit tests: empty → "Untitled"; whitespace-only → "Untitled"; single line ≤ maxLen → line itself; single line &gt; maxLen → truncated + "…"; multiline → first non-empty line.</step>
+    <step order="4">Run tests.</step>
+    <step order="5">Update TASK-INDEX.md: mark 031 ✅.</step>
+    <step order="6">Document deviations in notes/.</step>
+  </steps>
+
+  <tools><tool name="npm">Build + test</tool></tools>
+
+  <outputs>
+    <output type="code">src/solutions/Notepad/src/types/memo.ts</output>
+    <output type="code">src/solutions/Notepad/src/utils/deriveTitle.ts</output>
+    <output type="test">src/solutions/Notepad/src/utils/__tests__/deriveTitle.test.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">deriveTitle("") === "Untitled".</criterion>
+    <criterion testable="true">deriveTitle("First line\nSecond line") === "First line".</criterion>
+    <criterion testable="true">deriveTitle(long string) truncates and appends "…".</criterion>
+  </acceptance-criteria>
+
+  <notes>Types must match schema verified in 001. If 001 reveals field-name differences (e.g. spk_body vs sprk_body), update types accordingly.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files first. Follow task-execute skill.</protocol>
+  </execution>
+</task>

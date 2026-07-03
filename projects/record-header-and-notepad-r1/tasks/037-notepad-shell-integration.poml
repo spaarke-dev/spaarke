@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="037" project="record-header-and-notepad-r1">
+  <metadata>
+    <title>Build NotepadShell integration (FR-14/15/16/18)</title>
+    <phase>3: Notepad</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>034, 035, 036, 032</dependencies>
+    <blocks>038, 039</blocks>
+    <tags>react, typescript, fluent-ui, frontend</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Integration component wiring all Notepad pieces + unit tests</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>Build src/solutions/Notepad/src/components/NotepadShell.tsx integrating useLaunchContext + useSprkMemoRepository + MemoList + MemoEditor + CreatedByPopover. Renders top bar with title (derived from current memo), `+` new-memo button, list icon, `i` info icon; body has MemoEditor. Implements FR-14 (load most-recent by default) + FR-15 (`+` creates new empty memo).</prompt>
+
+  <role>Spaarke platform developer. React composition expert.</role>
+
+  <goal>NotepadShell.tsx + tests present; integrates all Notepad pieces; App.tsx updated to render NotepadShell.</goal>
+
+  <context>
+    <background>Design §3.6 — top bar + body layout. This is the main container component. Replaces the placeholder App from task 030.</background>
+    <relevant-files>
+      <file>src/solutions/Notepad/src/components/NotepadShell.tsx</file>
+      <file>src/solutions/Notepad/src/components/__tests__/NotepadShell.test.tsx</file>
+      <file>src/solutions/Notepad/src/App.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Fluent v9 semantic tokens; zero hex/rgb.</constraint>
+    <constraint source="spec">FR-14: load most-recent memo by default.</constraint>
+    <constraint source="spec">FR-15: `+` creates new empty memo.</constraint>
+    <constraint source="spec">FR-16: list icon opens MemoList.</constraint>
+    <constraint source="spec">FR-18: `i` icon opens CreatedByPopover.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/record-header-and-notepad-r1/spec.md</file>
+      <file>projects/record-header-and-notepad-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-021-fluent-ui-design-system.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read useLaunchContext for regardingEntity + regardingId (if invalid, render MessageBar in task 038 instead — early return here).</step>
+    <step order="2">Use useSprkMemoRepository(regardingEntity, regardingId).</step>
+    <step order="3">On mount, if memos.length &gt; 0, setCurrentMemo(memos[0].sprk_memoid) (most-recent default per FR-14).</step>
+    <step order="4">Layout: top bar (title = deriveTitle(currentMemo.sprk_body) or "Untitled", `+`, list, `i` icons); body = MemoEditor bound to currentMemo.sprk_body.</step>
+    <step order="5">`+` handler: repository.createMemo(); switches to new memo.</step>
+    <step order="6">List icon: opens MemoList with memos + currentMemoId; onSelect calls setCurrentMemo.</step>
+    <step order="7">`i` icon: opens CreatedByPopover with currentMemo.createdby + createdon.</step>
+    <step order="8">MemoEditor onChange: repository.updateBody(newValue, options).</step>
+    <step order="9">Update App.tsx to render NotepadShell instead of placeholder.</step>
+    <step order="10">Add unit test: initial memo loads; `+` creates and switches; list switch works.</step>
+    <step order="11">Run tests.</step>
+    <step order="12">Update TASK-INDEX.md: mark 037 ✅.</step>
+    <step order="13">Document deviations in notes/.</step>
+  </steps>
+
+  <tools><tool name="npm">Build + test</tool></tools>
+
+  <outputs>
+    <output type="code">src/solutions/Notepad/src/components/NotepadShell.tsx</output>
+    <output type="code">src/solutions/Notepad/src/App.tsx</output>
+    <output type="test">src/solutions/Notepad/src/components/__tests__/NotepadShell.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given memos exist, on mount the most-recent is loaded into the editor.</criterion>
+    <criterion testable="true">Given `+` click, a new empty memo is created and becomes the current memo.</criterion>
+    <criterion testable="true">Given list item click, the editor switches to that memo without saving the previous one twice.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps><step>Render NotepadShell in webLightTheme then webDarkTheme with 3 memos</step></steps>
+      <expected>All colors adapt via semantic tokens</expected>
+    </test>
+  </ui-tests>
+
+  <notes>Do NOT switch memos while a debounced write is pending — flush the debounced write first (immediate:true), then switch. This prevents lost keystrokes.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files first. Follow task-execute skill.</protocol>
+  </execution>
+</task>

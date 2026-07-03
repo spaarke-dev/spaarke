@@ -1,0 +1,80 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="032" project="record-header-and-notepad-r1">
+  <metadata>
+    <title>Build useLaunchContext hook (URL param parsing, FR-13)</title>
+    <phase>3: Notepad</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>030</dependencies>
+    <blocks>033, 037</blocks>
+    <tags>react, typescript</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>New hook adapted from SmartTodo pattern + unit tests</rigor-reason>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>Build useLaunchContext hook at src/solutions/Notepad/src/hooks/useLaunchContext.ts, adapted from SmartTodo's useLaunchContext.ts. Parses regardingEntity + regardingId from URL search params or the `data` webresource parameter. If either is missing, returns { valid: false, error }. Used by NotepadShell for FR-13 error handling.</prompt>
+
+  <role>Spaarke platform developer. React hooks + URL/query-string parsing.</role>
+
+  <goal>useLaunchContext.ts + tests; correctly parses regardingEntity + regardingId; surfaces valid/invalid state; unit tests cover happy path + missing params.</goal>
+
+  <context>
+    <background>Spec §3.6 launch contract: URL parameters regardingEntity + regardingId. Webresource `data=key1=val1&amp;key2=val2` needs parsing. SmartTodo has an existing useLaunchContext pattern to adapt.</background>
+    <relevant-files>
+      <file>src/solutions/Notepad/src/hooks/useLaunchContext.ts</file>
+      <file>src/solutions/Notepad/src/hooks/__tests__/useLaunchContext.test.ts</file>
+      <file>src/solutions/SmartTodo/src/hooks/useLaunchContext.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-13: if regardingEntity or regardingId missing, render MessageBar error and offer to close.</constraint>
+    <constraint source="spec">NFR-09: URL parameter names regardingEntity + regardingId are external API — do not rename.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/record-header-and-notepad-r1/spec.md</file>
+      <file>projects/record-header-and-notepad-r1/CLAUDE.md</file>
+      <file>src/solutions/SmartTodo/src/hooks/useLaunchContext.ts</file>
+    </files>
+  </knowledge>
+
+  <justification>
+    <existing>src/solutions/SmartTodo/src/hooks/useLaunchContext.ts — same URL-parse pattern.</existing>
+    <extension>Adapt for Notepad's specific param shape (regardingEntity, regardingId). Cannot import SmartTodo's hook directly (different solution boundary).</extension>
+    <cost-of-doing-nothing>Without launch-context parsing, Notepad cannot receive the record it should attach memos to.</cost-of-doing-nothing>
+  </justification>
+
+  <steps>
+    <step order="1">Read SmartTodo's useLaunchContext.ts for URL/webresource-data parsing pattern.</step>
+    <step order="2">Author useLaunchContext.ts: return { regardingEntity: string | null; regardingId: string | null; valid: boolean; error?: string; }. Parse from window.location.search first; fall back to Xrm.Utility.getGlobalContext or similar if available; handle both direct URL params AND webresource `data=` payload (URL-encoded k=v&amp;k=v).</step>
+    <step order="3">If either regardingEntity or regardingId is missing, set valid=false and error="Missing regarding context: {which fields are missing}".</step>
+    <step order="4">Add unit tests: valid URL → valid=true; missing regardingId → valid=false; webresource-data payload correctly parsed.</step>
+    <step order="5">Run tests.</step>
+    <step order="6">Update TASK-INDEX.md: mark 032 ✅.</step>
+    <step order="7">Document deviations in notes/.</step>
+  </steps>
+
+  <tools><tool name="npm">Build + test</tool></tools>
+
+  <outputs>
+    <output type="code">src/solutions/Notepad/src/hooks/useLaunchContext.ts</output>
+    <output type="test">src/solutions/Notepad/src/hooks/__tests__/useLaunchContext.test.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given URL "?regardingEntity=sprk_matter&amp;regardingId=guid123", hook returns valid=true with correct values.</criterion>
+    <criterion testable="true">Given URL "?regardingEntity=sprk_matter" (missing regardingId), hook returns valid=false with error.</criterion>
+    <criterion testable="true">Given webresource `data=regardingEntity=sprk_matter&amp;regardingId=guid123` payload, hook parses correctly.</criterion>
+  </acceptance-criteria>
+
+  <notes>Do NOT hardcode the entity to sprk_matter — Notepad is entity-agnostic per FR-19. Return whatever entity value is in the URL.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files first. Follow task-execute skill.</protocol>
+  </execution>
+</task>

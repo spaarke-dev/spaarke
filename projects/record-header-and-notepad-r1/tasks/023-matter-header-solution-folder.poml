@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="023" project="record-header-and-notepad-r1">
+  <metadata>
+    <title>Create MatterHeader Solution folder + pack.ps1</title>
+    <phase>2: MatterHeaderPcf</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>022</dependencies>
+    <blocks>024, 025</blocks>
+    <tags>pcf, dataverse, deploy</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Config + PowerShell packaging script; no runtime code</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>Create the Solution folder scaffold at src/client/pcf/MatterHeader/Solution/ with solution.xml, Controls/sprk_Spaarke.Records.MatterHeader/ControlManifest.xml, and pack.ps1 following the pattern established by other Spaarke PCFs (e.g., DocumentRelationshipViewer, SemanticSearchControl).</prompt>
+
+  <role>Spaarke platform developer. Familiar with PCF solution packaging conventions.</role>
+
+  <goal>Solution folder scaffold present; pack.ps1 runs cleanly and produces an importable ZIP.</goal>
+
+  <context>
+    <background>Solution packaging is standard PCF pattern; adapt from an existing PCF's Solution/ folder.</background>
+    <relevant-files>
+      <file>src/client/pcf/MatterHeader/Solution/solution.xml</file>
+      <file>src/client/pcf/MatterHeader/Solution/Controls/sprk_Spaarke.Records.MatterHeader/ControlManifest.xml</file>
+      <file>src/client/pcf/MatterHeader/Solution/pack.ps1</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Follow pattern of an existing PCF (e.g., SemanticSearchControl) for Solution scaffold.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/record-header-and-notepad-r1/spec.md</file>
+      <file>projects/record-header-and-notepad-r1/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>.claude/skills/pcf-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Copy Solution/ template from an existing PCF (e.g., SemanticSearchControl or DocumentRelationshipViewer).</step>
+    <step order="2">Update solution.xml with UniqueName="MatterHeaderPcf", Version="1.0.0.0", Publisher references.</step>
+    <step order="3">Update Controls/sprk_Spaarke.Records.MatterHeader/ControlManifest.xml to match the input manifest's control name and version.</step>
+    <step order="4">Author pack.ps1 that runs npm run build:prod, copies output to Solution/, and runs pac solution pack.</step>
+    <step order="5">Test pack.ps1 dry run (does not deploy).</step>
+    <step order="6">Update TASK-INDEX.md: mark 023 ✅.</step>
+    <step order="7">Document deviations in notes/.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build</tool>
+    <tool name="terminal">Shell + PAC CLI</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">src/client/pcf/MatterHeader/Solution/solution.xml</output>
+    <output type="config">src/client/pcf/MatterHeader/Solution/Controls/sprk_Spaarke.Records.MatterHeader/ControlManifest.xml</output>
+    <output type="config">src/client/pcf/MatterHeader/Solution/pack.ps1</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">pack.ps1 runs without error and produces a Solution ZIP in the expected location.</criterion>
+    <criterion testable="true">solution.xml UniqueName is MatterHeaderPcf and version is 1.0.0.0.</criterion>
+  </acceptance-criteria>
+
+  <notes>Do NOT deploy in this task — task 025 handles deploy + QA. This task only builds the ZIP.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files first. Follow task-execute skill.</protocol>
+  </execution>
+</task>

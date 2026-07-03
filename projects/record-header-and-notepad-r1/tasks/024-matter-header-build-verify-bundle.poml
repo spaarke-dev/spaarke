@@ -1,0 +1,78 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="024" project="record-header-and-notepad-r1">
+  <metadata>
+    <title>Build MatterHeaderPcf + verify bundle size + PCF LOC</title>
+    <phase>2: MatterHeaderPcf</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>023</dependencies>
+    <blocks>025</blocks>
+    <tags>pcf, deploy, testing</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Verification against NFR-02, NFR-04</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>Run npm run build:prod for MatterHeaderPcf; verify bundle ≤ 250 KB minified (NFR-04); verify PCF LOC ≤ 100 excluding shared primitives (NFR-02). Document measurements in notes/bundle-size.md.</prompt>
+
+  <role>Spaarke platform developer. Familiar with PCF bundle size analysis.</role>
+
+  <goal>Bundle verification report at notes/bundle-size.md with measured KB + LOC counts + pass/fail vs NFRs.</goal>
+
+  <context>
+    <background>Bundle-size NFR-04 (≤ 250 KB) and LOC NFR-02 (≤ 100 excluding shared primitives) are graduation-criteria checkpoints. If either fails, escalate before Phase 3.</background>
+    <relevant-files>
+      <file>projects/record-header-and-notepad-r1/notes/bundle-size.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">NFR-02: LOC ≤ 100.</constraint>
+    <constraint source="spec">NFR-04: bundle ≤ 250 KB minified.</constraint>
+    <constraint source="project">Use npm run build:prod (NOT npm run build) per repo AP-1 lesson.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/record-header-and-notepad-r1/spec.md</file>
+      <file>projects/record-header-and-notepad-r1/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/FAILURE-MODES.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Change to src/client/pcf/MatterHeader/; run npm install if needed.</step>
+    <step order="2">Run npm run build:prod (production mode; MUST NOT use npm run build per AP-1).</step>
+    <step order="3">Measure output bundle size (kB, gzipped and un-gzipped) — check dist/ or bundle.js.</step>
+    <step order="4">Count PCF LOC (control/index.ts + MatterHeaderView.tsx + version.ts, excluding imports and __tests__/) via `wc -l` or equivalent.</step>
+    <step order="5">Document in notes/bundle-size.md: measured KB, measured LOC, NFR pass/fail, any recommendations.</step>
+    <step order="6">If NFR-04 fails: analyze bundle content; identify tree-shaking or import optimization opportunities; escalate.</step>
+    <step order="7">If NFR-02 fails: refactor view to reduce boilerplate; extract inline styles to makeStyles.</step>
+    <step order="8">Update TASK-INDEX.md: mark 024 ✅.</step>
+    <step order="9">Document deviations in notes/.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">build:prod</tool>
+    <tool name="terminal">Shell + measurement</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/record-header-and-notepad-r1/notes/bundle-size.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">notes/bundle-size.md exists with measured KB + LOC.</criterion>
+    <criterion testable="true">Bundle ≤ 250 KB minified (or a filed exception with justification).</criterion>
+    <criterion testable="true">PCF LOC ≤ 100 excluding shared primitives.</criterion>
+  </acceptance-criteria>
+
+  <notes>Bundle inspection tool: rollup-plugin-analyzer or webpack-bundle-analyzer, depending on the PCF build toolchain.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files first. Follow task-execute skill.</protocol>
+  </execution>
+</task>

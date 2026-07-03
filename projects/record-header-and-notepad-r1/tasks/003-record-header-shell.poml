@@ -1,0 +1,103 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="003" project="record-header-and-notepad-r1">
+  <metadata>
+    <title>Build RecordHeaderShell (FR-02)</title>
+    <phase>1: Shared Library</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>002</dependencies>
+    <blocks>012, 013, 022</blocks>
+    <tags>react, typescript, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>New shared component + unit tests</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Depends on 002 (HeaderToolbar) being complete</parallel-reason>
+  </metadata>
+
+  <prompt>Build RecordHeaderShell per FR-02 at src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/RecordHeaderShell.tsx. Card container with HeaderToolbar slot at top, body slot for children, loading state showing Fluent Skeleton placeholders. Fluent v9 semantic tokens only.</prompt>
+
+  <role>Spaarke platform developer. Expert in Fluent UI v9 component composition and React 16/17-compatible patterns.</role>
+
+  <goal>RecordHeaderShell.tsx + tests present at src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/; passes FR-02 acceptance; zero hex/rgb.</goal>
+
+  <context>
+    <background>Design §3.3 — outer card chrome + toolbar slot + body slot. Loading state shows Fluent Skeleton. Per-entity PCFs will wrap it around a FieldGrid.</background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/RecordHeaderShell.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/types.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/__tests__/RecordHeaderShell.test.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/HeaderToolbar/index.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">Lives in @spaarke/ui-components; exported from src/index.ts.</constraint>
+    <constraint source="ADR-021">Fluent v9 semantic tokens; zero hex/rgb.</constraint>
+    <constraint source="ADR-022">React 16/17 compatible.</constraint>
+    <constraint source="spec">FR-02: card container, toolbar at top, children slot below, Skeleton on loading.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/record-header-and-notepad-r1/spec.md</file>
+      <file>projects/record-header-and-notepad-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-012-shared-component-library.md</file>
+      <file>.claude/adr/ADR-021-fluent-ui-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+    </files>
+  </knowledge>
+
+  <justification>
+    <existing>None. No current component surfaces "form-header replacement with configurable fields."</existing>
+    <extension>N/A — nothing to extend.</extension>
+    <cost-of-doing-nothing>Without shared card chrome, per-entity PCFs (Matter, Project, Invoice, …) each reimplement card + skeleton logic — the §11 anti-pattern.</cost-of-doing-nothing>
+  </justification>
+
+  <steps>
+    <step order="1">Create the folder RecordHeader/ if not already present.</step>
+    <step order="2">Declare IRecordHeaderShellProps { toolbar: IHeaderToolbarProps; loading?: boolean; children: React.ReactNode; } in types.ts.</step>
+    <step order="3">Implement RecordHeaderShell.tsx: Fluent v9 card container (colorNeutralBackground1 + colorNeutralStroke1 border + borderRadiusMedium), HeaderToolbar rendered at top, body slot below.</step>
+    <step order="4">On loading===true, render a small Fluent Skeleton grid (3 columns, 2 rows) instead of children.</step>
+    <step order="5">Write __tests__/RecordHeaderShell.test.tsx covering: toolbar renders in header; children render in body when not loading; Skeleton renders when loading.</step>
+    <step order="6">Run npm test in shared lib.</step>
+    <step order="7">Update tasks/TASK-INDEX.md: mark 003 ✅.</step>
+    <step order="8">If deviations, document in notes/.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + test</tool>
+    <tool name="terminal">Shell</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/RecordHeaderShell.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/types.ts</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/__tests__/RecordHeaderShell.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given loading=false, when rendered with toolbar + children, then card contains HeaderToolbar and children (body).</criterion>
+    <criterion testable="true">Given loading=true, when rendered, then Skeleton visible and children NOT rendered.</criterion>
+    <criterion testable="true">All unit tests pass; no hex/rgb; React 16-compatible.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Render RecordHeaderShell with a mock toolbar and body</step>
+        <step>Toggle theme from webLightTheme to webDarkTheme</step>
+        <step>Verify card background, border, and skeleton colors adapt</step>
+      </steps>
+      <expected>All colors adapt via semantic tokens; zero hardcoded values</expected>
+    </test>
+  </ui-tests>
+
+  <notes>Card padding: spacingHorizontalM + spacingVerticalS per Fluent v9 defaults. Consumer supplies IHeaderToolbarProps directly; do NOT re-transform the props.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files first. Follow task-execute skill.</protocol>
+  </execution>
+</task>

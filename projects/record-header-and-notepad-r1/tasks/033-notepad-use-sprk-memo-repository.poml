@@ -1,0 +1,91 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="033" project="record-header-and-notepad-r1">
+  <metadata>
+    <title>Build useSprkMemoRepository hook (CRUD via Xrm.WebApi)</title>
+    <phase>3: Notepad</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>001, 031, 032</dependencies>
+    <blocks>034, 035, 036, 037</blocks>
+    <tags>react, typescript, dataverse</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Core CRUD hook with Xrm.WebApi integration + unit tests</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>Build useSprkMemoRepository hook at src/solutions/Notepad/src/hooks/useSprkMemoRepository.ts. Provides list, get, create, update against sprk_memo via Xrm.WebApi. Filter: sprk_regardingrecordid eq '{regardingId}' (per O1). Sort createdon desc. Include debounced update for FR-17 save behavior.</prompt>
+
+  <role>Spaarke platform developer. Xrm.WebApi CRUD + React hooks + debounce patterns.</role>
+
+  <goal>useSprkMemoRepository.ts + tests; supports list/create/update; 1s debounce on update; immediate save on Ctrl+Enter / blur triggers.</goal>
+
+  <context>
+    <background>Design §3.6 — hook centralizing sprk_memo CRUD. Initially lives inside Notepad (extraction to shared lib deferred until second consumer per §3.6). Adapt CRUD calls from MemoSection.tsx.</background>
+    <relevant-files>
+      <file>src/solutions/Notepad/src/hooks/useSprkMemoRepository.ts</file>
+      <file>src/solutions/Notepad/src/hooks/__tests__/useSprkMemoRepository.test.ts</file>
+      <file>src/solutions/EventDetailSidePane/src/components/MemoSection.tsx</file>
+      <file>projects/record-header-and-notepad-r1/notes/sprk-memo-schema.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-028">Xrm.WebApi only; no BFF; no @spaarke/auth.</constraint>
+    <constraint source="ADR-024">sprk_memo uses text field sprk_regardingrecordid (Path A exception).</constraint>
+    <constraint source="spec">FR-14: list order createdon desc.</constraint>
+    <constraint source="spec">FR-15: create with sprk_regardingrecordid=regardingId, empty body.</constraint>
+    <constraint source="spec">FR-17: save on Ctrl+Enter (immediate), on blur (immediate), on 1s idle typing (debounced).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/record-header-and-notepad-r1/spec.md</file>
+      <file>projects/record-header-and-notepad-r1/CLAUDE.md</file>
+      <file>projects/record-header-and-notepad-r1/notes/sprk-memo-schema.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+      <file>src/solutions/EventDetailSidePane/src/components/MemoSection.tsx</file>
+    </files>
+  </knowledge>
+
+  <justification>
+    <existing>src/solutions/EventDetailSidePane/src/components/MemoSection.tsx — same sprk_memo CRUD but embedded in EventDetailSidePane layout, single-memo model.</existing>
+    <extension>MemoSection isn't shaped as a reusable code-page (no list, no `+`, no dropdown, no popover, embedded not launched). Extracting CRUD to a hook is a clean improvement.</extension>
+    <cost-of-doing-nothing>Notepad would either fork MemoSection (anti-pattern) OR not ship. §11 catches forking.</cost-of-doing-nothing>
+  </justification>
+
+  <steps>
+    <step order="1">Design API: interface UseSprkMemoRepository { memos: Memo[]; loading; error; currentMemo: Memo | null; setCurrentMemo(id); createMemo(): Promise&lt;Memo&gt;; updateBody(body: string, options?: { immediate?: boolean }): void; }</step>
+    <step order="2">Implement list: Xrm.WebApi.retrieveMultipleRecords("sprk_memo", `?$filter=sprk_regardingrecordid eq '${regardingId}'&amp;$orderby=createdon desc`).</step>
+    <step order="3">Implement create: Xrm.WebApi.createRecord("sprk_memo", { sprk_regardingrecordid: regardingId, sprk_body: "" }); refetch list; setCurrentMemo(new id).</step>
+    <step order="4">Implement updateBody with debounce (1000ms) via a ref-held timer; options.immediate cancels timer + writes now.</step>
+    <step order="5">Handle Xrm undefined (test env) gracefully.</step>
+    <step order="6">Write tests: list order; create returns new id; debounced update coalesces rapid keystrokes; immediate=true triggers immediate write.</step>
+    <step order="7">Run tests.</step>
+    <step order="8">Update TASK-INDEX.md: mark 033 ✅.</step>
+    <step order="9">Document deviations in notes/.</step>
+  </steps>
+
+  <tools><tool name="npm">Build + test</tool></tools>
+
+  <outputs>
+    <output type="code">src/solutions/Notepad/src/hooks/useSprkMemoRepository.ts</output>
+    <output type="test">src/solutions/Notepad/src/hooks/__tests__/useSprkMemoRepository.test.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">list retrieveMultipleRecords URL contains sprk_regardingrecordid eq 'guid' filter and $orderby=createdon desc.</criterion>
+    <criterion testable="true">create issues a single createRecord call with sprk_regardingrecordid set and empty sprk_body.</criterion>
+    <criterion testable="true">Given rapid keystrokes, updateBody debounces to a single write after 1s idle.</criterion>
+    <criterion testable="true">Given options={immediate:true}, updateBody writes immediately regardless of debounce timer.</criterion>
+  </acceptance-criteria>
+
+  <notes>Debounce ref MUST be cleared on unmount to avoid stale writes. Field name sprk_body assumed per spec Assumptions; if 001 reveals a different name, update accordingly.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files first. Follow task-execute skill.</protocol>
+  </execution>
+</task>

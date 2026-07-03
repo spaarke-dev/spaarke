@@ -1,0 +1,90 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="008" project="record-header-and-notepad-r1">
+  <metadata>
+    <title>Build TextareaField renderer with show-more popover (FR-04)</title>
+    <phase>1: Shared Library</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>004</dependencies>
+    <blocks>013, 022</blocks>
+    <tags>react, typescript, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>New shared component with popover interaction + unit tests</rigor-reason>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>Build TextareaField per FR-04 at src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/fields/TextareaField.tsx. Multiline value with max-height clamp and "show more" affordance opening a Fluent v9 popover with the full text.</prompt>
+
+  <role>Spaarke platform developer. Fluent UI v9 expert.</role>
+
+  <goal>TextareaField.tsx + tests present; multiline display with clamp; popover opens on show-more click.</goal>
+
+  <context>
+    <background>Design §3.3 — matches Matter description field which is long-form. Clamp height to ~3 lines; if overflow, show "Show more" link that opens Popover with full text.</background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/fields/TextareaField.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/__tests__/fields.test.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Fluent v9 semantic tokens; zero hex/rgb.</constraint>
+    <constraint source="ADR-022">React 16/17 compat.</constraint>
+    <constraint source="spec">FR-04: TextareaField multiline w/ show-more affordance opening popover.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/record-header-and-notepad-r1/spec.md</file>
+      <file>projects/record-header-and-notepad-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-021-fluent-ui-design-system.md</file>
+    </files>
+  </knowledge>
+
+  <justification>
+    <existing>None specific.</existing>
+    <extension>N/A.</extension>
+    <cost-of-doing-nothing>Without TextareaField, long-form fields overflow the compact card without any user affordance.</cost-of-doing-nothing>
+  </justification>
+
+  <steps>
+    <step order="1">Declare ITextareaFieldProps { label: string; value: string | null | undefined; span: 1 | 2 | 3; maxLines?: number; } with default maxLines=3.</step>
+    <step order="2">Implement clamp via -webkit-line-clamp + display:-webkit-box (semantic-token-safe; no hex).</step>
+    <step order="3">Compute if content overflows (via ref + scrollHeight vs clientHeight) — if yes, render a "Show more" Link.</step>
+    <step order="4">On "Show more" click, open Fluent v9 Popover with full value in scrollable content area (maxHeight: 480px, minWidth: 320px).</step>
+    <step order="5">Handle null/undefined with hyphen.</step>
+    <step order="6">Export from fields/index.ts.</step>
+    <step order="7">Add tests: renders clamped value; show-more only when overflow; popover opens on click; hyphen on null.</step>
+    <step order="8">Run tests.</step>
+    <step order="9">Update TASK-INDEX.md: mark 008 ✅.</step>
+    <step order="10">Document deviations in notes/.</step>
+  </steps>
+
+  <tools><tool name="npm">Build + test</tool></tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/fields/TextareaField.tsx</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/__tests__/fields.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given value shorter than maxLines*avgLineLength, when rendered, then no "Show more" affordance.</criterion>
+    <criterion testable="true">Given long value, when rendered, then "Show more" is visible and clicking opens a popover with full text.</criterion>
+    <criterion testable="true">Given value=null, when rendered, then hyphen "—".</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps><step>Render TextareaField with long text in webLightTheme then webDarkTheme; open popover in each</step></steps>
+      <expected>Clamp, link, and popover colors adapt via semantic tokens</expected>
+    </test>
+  </ui-tests>
+
+  <notes>Overflow detection is dimension-dependent; tests should mock offsetHeight/scrollHeight or use a helper. See U-03 unresolved question for popover width tuning.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files first. Follow task-execute skill.</protocol>
+  </execution>
+</task>

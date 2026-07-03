@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="025" project="record-header-and-notepad-r1">
+  <metadata>
+    <title>Deploy MatterHeaderPcf + manual QA</title>
+    <phase>2: MatterHeaderPcf</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>024, 020</dependencies>
+    <blocks>050</blocks>
+    <tags>deploy, dataverse, pcf, e2e-test</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Deploy + manual QA verification against real environment</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>Deploy MatterHeaderPcf solution ZIP to dev Dataverse environment via `/pcf-deploy` skill. Manually QA: sparkle popover behavior (with and without existing sprk_recordsummary), checkmark modal (85%x85%), annotation modal (70%x80%), badge counts, dark mode. Document findings in notes/matter-header-qa.md.</prompt>
+
+  <role>Spaarke platform developer. PCF deploy + QA experienced.</role>
+
+  <goal>MatterHeaderPcf deployed to dev; QA report at notes/matter-header-qa.md with pass/fail per FR-08/08a/09/10/11 + dark mode compliance.</goal>
+
+  <context>
+    <background>End of Phase 2. Validates the shared primitives work in a real PCF host against real Xrm.WebApi. If any FR fails, blocks Phase 4 documentation until fixed.</background>
+    <relevant-files>
+      <file>projects/record-header-and-notepad-r1/notes/matter-header-qa.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">All Phase 2 FRs (08/08a/09/10/11/12) must be verified.</constraint>
+    <constraint source="spec">Dark mode compliance per ADR-021.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/record-header-and-notepad-r1/spec.md</file>
+      <file>projects/record-header-and-notepad-r1/CLAUDE.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/skills/pcf-deploy/SKILL.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Invoke /pcf-deploy for src/client/pcf/MatterHeader/ against the dev Dataverse environment.</step>
+    <step order="2">Add MatterHeaderPcf temporarily to a test Matter form (harness) — this is a QA-only binding; production form binding is deferred (OS-01).</step>
+    <step order="3">Open a Matter record WITH an existing sprk_recordsummary: verify sparkle popover renders body inline + refresh icon visible + unwired.</step>
+    <step order="4">Open a Matter record WITHOUT an existing sprk_recordsummary: verify sparkle popover shows empty-state + refresh icon.</step>
+    <step order="5">Click checkmark: verify SmartTodo webresource opens at 85%x85%; badge shows correct sprk_todo count.</step>
+    <step order="6">Click annotation: verify Notepad webresource opens at 70%x80% (may fail until Phase 3 deploys sprk_notepad_page; note as blocked-by-Phase-3 if so); badge shows correct sprk_memo count.</step>
+    <step order="7">Toggle dark mode; verify all colors adapt via semantic tokens.</step>
+    <step order="8">Check browser console: zero errors, zero warnings.</step>
+    <step order="9">Document findings in notes/matter-header-qa.md with pass/fail per criterion.</step>
+    <step order="10">Update TASK-INDEX.md: mark 025 ✅.</step>
+    <step order="11">Document deviations in notes/.</step>
+  </steps>
+
+  <tools>
+    <tool name="terminal">Shell + PAC CLI</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/record-header-and-notepad-r1/notes/matter-header-qa.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">PCF deployed successfully; visible in a Matter form.</criterion>
+    <criterion testable="true">Sparkle popover behavior verified in BOTH summary-present and summary-absent scenarios.</criterion>
+    <criterion testable="true">Checkmark opens SmartTodo at 85%x85% with correct badge count.</criterion>
+    <criterion testable="true">Dark mode compliance passes (no hex leaks).</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="MatterHeaderPcf End-to-End">
+      <steps>
+        <step>Deploy PCF; add to a Matter form header temporarily</step>
+        <step>Open a Matter record with existing recordsummary; verify sparkle popover</step>
+        <step>Click checkmark; verify SmartTodo opens at 85%x85%</step>
+        <step>Click annotation; verify Notepad opens at 70%x80% (or note as blocked)</step>
+        <step>Toggle dark mode; verify no hex leaks</step>
+      </steps>
+      <expected>All interactions succeed; zero console errors</expected>
+    </test>
+  </ui-tests>
+
+  <notes>Annotation modal may be blocked until Phase 3 deploys Notepad. If so, verify launch URL is correct and mark as blocked-by-039.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files first. Follow task-execute skill.</protocol>
+  </execution>
+</task>

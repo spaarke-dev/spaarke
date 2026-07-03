@@ -1,0 +1,84 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="009" project="record-header-and-notepad-r1">
+  <metadata>
+    <title>Build useRecordFieldValues hook (FR-05)</title>
+    <phase>1: Shared Library</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>012, 013, 022</blocks>
+    <tags>react, typescript, dataverse</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>New shared hook with Xrm.WebApi integration + unit tests</rigor-reason>
+    <parallel-group>C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>Build useRecordFieldValues hook per FR-05 at src/client/shared/Spaarke.UI.Components/src/hooks/useRecordFieldValues.ts. Returns { values, loading, error }; calls Xrm.WebApi.retrieveRecord with $select built from fields; refetches on recordId/fields change.</prompt>
+
+  <role>Spaarke platform developer. Expert in React hooks + Xrm.WebApi patterns.</role>
+
+  <goal>useRecordFieldValues.ts + unit tests present; correctly builds $select; error handling; React 16/17 compat.</goal>
+
+  <context>
+    <background>Design §3.3 — the primitive read hook consumed by RecordHeader PCFs to fetch the 5-field payload. Wraps a single Xrm.WebApi.retrieveRecord call. Types: Record&lt;string, unknown&gt;.</background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/hooks/useRecordFieldValues.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/hooks/__tests__/useRecordFieldValues.test.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-028">Uses Xrm.WebApi only; never BFF, never @spaarke/auth.</constraint>
+    <constraint source="ADR-022">React 16/17 compat.</constraint>
+    <constraint source="spec">FR-05: hook returns { values, loading, error }; internally calls Xrm.WebApi.retrieveRecord.</constraint>
+    <constraint source="spec">NFR-05: no @spaarke/auth import.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/record-header-and-notepad-r1/spec.md</file>
+      <file>projects/record-header-and-notepad-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/patterns/pcf/dataverse-queries.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+    </files>
+  </knowledge>
+
+  <justification>
+    <existing>Ad-hoc Xrm.WebApi.retrieveRecord calls scattered across widget components. No single hook.</existing>
+    <extension>Ad-hoc calls could stay ad-hoc, but they would stay ad-hoc — this project centralizes.</extension>
+    <cost-of-doing-nothing>Every future record-read consumer writes its own useEffect + retrieveRecord + error/loading state. Notepad + each RecordHeader PCF all need the same shape; three copies today.</cost-of-doing-nothing>
+  </justification>
+
+  <steps>
+    <step order="1">Implement useRecordFieldValues(entity, recordId, fields): builds $select=field1,field2,...; calls Xrm.WebApi.retrieveRecord(entity, recordId, "?$select=..."); returns { values, loading, error }.</step>
+    <step order="2">Use useEffect with deps [entity, recordId, JSON.stringify(fields)] for refetch on change.</step>
+    <step order="3">Handle Xrm.WebApi rejection: set error state, keep values null.</step>
+    <step order="4">If Xrm undefined (test env): loading=false, values=null, error=Error("Xrm not available").</step>
+    <step order="5">Write __tests__/useRecordFieldValues.test.ts mocking global.Xrm: single call per mount; correct $select; error path; refetch on recordId change.</step>
+    <step order="6">Run tests.</step>
+    <step order="7">Update TASK-INDEX.md: mark 009 ✅.</step>
+    <step order="8">Document deviations in notes/.</step>
+  </steps>
+
+  <tools><tool name="npm">Build + test</tool></tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/hooks/useRecordFieldValues.ts</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/hooks/__tests__/useRecordFieldValues.test.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given fields=["a","b","c"], when hook runs, then Xrm.WebApi.retrieveRecord called with "?$select=a,b,c".</criterion>
+    <criterion testable="true">Given Xrm.WebApi rejects, when hook runs, then error state set; loading=false.</criterion>
+    <criterion testable="true">Given recordId change, when re-rendered, then a new retrieveRecord call is issued.</criterion>
+  </acceptance-criteria>
+
+  <notes>Do NOT retry on failure — surface the error to caller. Use a stable dep key (JSON.stringify(fields)) to avoid infinite re-fetch loops from array identity churn.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files first. Follow task-execute skill.</protocol>
+  </execution>
+</task>

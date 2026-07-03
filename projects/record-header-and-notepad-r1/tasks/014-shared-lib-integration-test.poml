@@ -1,0 +1,75 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="014" project="record-header-and-notepad-r1">
+  <metadata>
+    <title>Shared lib integration test (full composition)</title>
+    <phase>1: Shared Library</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>013</dependencies>
+    <blocks>none</blocks>
+    <tags>testing, integration-test, react</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Integration test verifies Phase 1 as a whole (per CLAUDE.md testing rigor rule for test-modifying tasks)</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Depends on 013 (all Phase 1 exports available)</parallel-reason>
+  </metadata>
+
+  <prompt>Write an integration test that composes HeaderToolbar + RecordHeaderShell + FieldGrid + all four field renderers + all three hooks against a mocked Xrm.WebApi, mirroring the MatterHeaderView.tsx shape from spec FR-12. Verifies Phase 1 primitives work together end-to-end.</prompt>
+
+  <role>Spaarke platform developer. Test engineering + React Testing Library expert.</role>
+
+  <goal>Integration test file present at src/client/shared/Spaarke.UI.Components/src/__integration__/recordHeader.integration.test.tsx; passes; composes all Phase 1 exports.</goal>
+
+  <context>
+    <background>Per ADR-038, integration-heavy pyramid: this test asserts Phase 1 outputs work together as intended by spec FR-12 without a real PCF class shell. It's a design smoke test before Phase 2 begins.</background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/__integration__/recordHeader.integration.test.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-038">Integration test — KEEP category (verifies component composition).</constraint>
+    <constraint source="spec">Composition mirrors FR-12 (5 fields with span 1/2/1/1/3 in columns=3).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/record-header-and-notepad-r1/spec.md</file>
+      <file>projects/record-header-and-notepad-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Mock global.Xrm: WebApi.retrieveRecord returns {sprk_matternumber:"M-1", sprk_name:"Test", sprk_mattertype:{...}, sprk_practicearea:{...}, sprk_description:"..."} for the sprk_matter entity.</step>
+    <step order="2">Mock retrieveMultipleRecords for sprk_memo (@odata.count=3), sprk_todo (@odata.count=7), sprk_recordsummary (value=[{sprk_body:"Summary"}]).</step>
+    <step order="3">Render a TestRecordHeader FC that composes: useRecordHeaderToolbarActions({entity, recordId}) + useRecordFieldValues + RecordHeaderShell + FieldGrid + 5 field children matching FR-12.</step>
+    <step order="4">Assert: three toolbar slots rendered; badges show 3 and 7; five fields visible with correct span layout.</step>
+    <step order="5">Simulate window focus event; verify badges refetch.</step>
+    <step order="6">Simulate sparkle click; verify Popover opens with summary body; refresh icon click is a no-op.</step>
+    <step order="7">Run tests.</step>
+    <step order="8">Update TASK-INDEX.md: mark 014 ✅.</step>
+    <step order="9">Document deviations in notes/.</step>
+  </steps>
+
+  <tools><tool name="npm">Test</tool></tools>
+
+  <outputs>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/__integration__/recordHeader.integration.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Test file exists and all assertions pass.</criterion>
+    <criterion testable="true">Badge counts 3 and 7 render on toolbar per mocked WebApi.</criterion>
+    <criterion testable="true">Sparkle click opens Popover; refresh no-op.</criterion>
+  </acceptance-criteria>
+
+  <notes>This test asserts Phase 1's cohesion. If it passes, MatterHeaderPcf implementation is straightforward.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files first. Follow task-execute skill.</protocol>
+  </execution>
+</task>
