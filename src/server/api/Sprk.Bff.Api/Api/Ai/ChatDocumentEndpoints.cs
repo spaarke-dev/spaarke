@@ -521,13 +521,22 @@ public static class ChatDocumentEndpoints
                 };
 
                 // Build the ChatSessionFile manifest entry (six fields per ChatSession.cs §134).
+                //
+                // R7 Wave 12.3 Phase 12.3a UAT fix (2026-07-03): also persist ExtractedText
+                // (the same text just fed into the RAG indexing pipeline). This closes the
+                // Azure AI Search index-catchup race that caused "session files contained no
+                // text to summarize" errors when users typed "summarize this document" within
+                // seconds of upload. SessionFileTextSource reads this directly — no RAG hop.
                 var newFile = new ChatSessionFile(
                     FileId: documentId,
                     FileName: filename,
                     ContentType: sessionFileContentType,
                     SizeBytes: file.Length,
                     SearchDocumentIdsCsv: searchDocumentIdsCsv,
-                    UploadedAt: DateTimeOffset.UtcNow);
+                    UploadedAt: DateTimeOffset.UtcNow)
+                {
+                    ExtractedText = extractionResult.Text,
+                };
 
                 // Append to UploadedFiles (immutable record — use `with` expression).
                 var updatedFiles = (session.UploadedFiles ?? Array.Empty<ChatSessionFile>())

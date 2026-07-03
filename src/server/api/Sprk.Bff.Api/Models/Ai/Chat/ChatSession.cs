@@ -149,6 +149,28 @@ public record ChatSessionFile(
     DateTimeOffset UploadedAt)
 {
     /// <summary>
+    /// Full extracted text of the uploaded file (added R7 Wave 12.3 Phase 12.3a UAT fix
+    /// 2026-07-03). At upload time <c>ChatDocumentEndpoints</c> parses the file via
+    /// <c>IDocumentTextExtractor</c> to feed the RAG indexing pipeline; that same text is
+    /// now persisted here so <c>SessionFileTextSource</c> can read it directly for the
+    /// chat-summarize Linear consumer without paying the Azure AI Search index-catchup
+    /// race.
+    /// <para>
+    /// Pattern mirrors the workspace-file summarize path
+    /// (<c>WorkspaceFileEndpoints.ExecuteFileSummarizeAsync</c>) which has read text
+    /// directly since inception. Prior chat-summarize paths (playbook engine + my initial
+    /// Linear implementation) went through RAG and hit the race whenever a user typed
+    /// "summarize this document" within a few seconds of upload.
+    /// </para>
+    /// <para>
+    /// Null on pre-persistence session files (older Redis / Cosmos payloads deserialize
+    /// cleanly). <c>SessionFileTextSource</c> falls back to RAG when null so existing
+    /// sessions do not break mid-flight.
+    /// </para>
+    /// </summary>
+    public string? ExtractedText { get; init; }
+
+    /// <summary>
     /// Precomputed 1-paragraph summary produced by <c>FileSummarizationService</c>
     /// (gpt-4o-mini, chat-routing-redesign-r1 task 068). Marked "NOT authoritative"
     /// by <c>TrustFrameInstructionInjector</c> in the static-prefix trust frame —

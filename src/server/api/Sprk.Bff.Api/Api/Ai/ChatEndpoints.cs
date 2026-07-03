@@ -668,7 +668,15 @@ public static class ChatEndpoints
                         _ => null,
                     };
 
-                    if (dispatchUrl is not null)
+                    // R7 Wave 12.3 Phase 12.3a UAT hardening (2026-07-03): guard
+                    // against firing linear_dispatch with an empty file list. This
+                    // can happen transiently when a /messages call arrives before
+                    // session.UploadedFiles is hydrated for the session. Emitting
+                    // linear_dispatch with fileIds=[] would cause the client to
+                    // POST /summarize with empty fileIds → empty text → stream
+                    // errors, visible in chat as "I couldn't complete that...".
+                    // Fall through to Phase B (playbook_options) instead.
+                    if (dispatchUrl is not null && sessionAttachmentIdsForDispatch.Count > 0)
                     {
                         var requestBodyJson = JsonSerializer.Serialize(
                             new

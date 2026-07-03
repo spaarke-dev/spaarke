@@ -99,6 +99,39 @@ public sealed class SessionFileTextSource : ISessionFileTextSource
             return new SessionFileText { DisplayName = "session-files-empty" };
         }
 
+        // R7 Wave 12.3 Phase 12.3a UAT fix (2026-07-03): PREFER inline ExtractedText.
+        // At upload time ChatDocumentEndpoints now persists the extracted text on each
+        // ChatSessionFile record (same text fed into the RAG indexing pipeline). Reading
+        // it here bypasses the Azure AI Search index-catchup race that caused summarize
+        // to fail when users typed "summarize this document" within seconds of upload.
+        // Pattern mirrors WorkspaceFileEndpoints which has read text directly all along.
+        var allHaveInlineText = files.All(f => !string.IsNullOrWhiteSpace(f.ExtractedText));
+        if (allHaveInlineText)
+        {
+            var inlineText = files.Count == 1
+                ? files[0].ExtractedText!
+                : BuildMultiFileInlineText(files);
+            var inlineDisplayName = files.Count == 1
+                ? files[0].FileName
+                : "session-files-combined";
+            _logger.LogInformation(
+                "SessionFileTextSource: read {FileCount} file(s) inline ({TextChars} chars, no RAG hop). SessionId={SessionId}",
+                files.Count, inlineText.Length, sessionId);
+            return new SessionFileText
+            {
+                ExtractedText = inlineText,
+                DisplayName = inlineDisplayName,
+                ChunkCount = 0,
+            };
+        }
+
+        // Fallback: at least one file lacks inline text (pre-persistence sessions from
+        // before this fix deployed). Use the legacy RAG-based path so existing sessions
+        // don't break mid-flight.
+        _logger.LogInformation(
+            "SessionFileTextSource: {InlineCount}/{TotalCount} file(s) have inline text — falling back to RAG for the rest. SessionId={SessionId}",
+            files.Count(f => !string.IsNullOrWhiteSpace(f.ExtractedText)), files.Count, sessionId);
+
         // Build allowed-chunk-id set from every target file's SearchDocumentIdsCsv.
         var allowedChunkIds = new HashSet<string>(StringComparer.Ordinal);
         foreach (var file in files)
@@ -187,6 +220,24 @@ public sealed class SessionFileTextSource : ISessionFileTextSource
             DisplayName = displayName,
             ChunkCount = chunks.Count,
         };
+    }
+
+    /// <summary>
+    /// Concatenate inline <see cref="ChatSessionFile.ExtractedText"/> across multiple
+    /// files with per-file headers matching the RAG-based <see cref="BuildMultiFileText"/>
+    /// output shape. This keeps the SUM-CHAT@v1 prompt's file-boundary references stable
+    /// regardless of whether text came inline or from RAG.
+    /// </summary>
+    private static string BuildMultiFileInlineText(IReadOnlyList<ChatSessionFile> files)
+    {
+        var sb = new System.Text.StringBuilder();
+        for (var i = 0; i < files.Count; i++)
+        {
+            if (i > 0) sb.AppendLine();
+            sb.AppendLine($"=== File: {files[i].FileName} ===");
+            sb.AppendLine(files[i].ExtractedText ?? string.Empty);
+        }
+        return sb.ToString().TrimEnd();
     }
 
     /// <summary>

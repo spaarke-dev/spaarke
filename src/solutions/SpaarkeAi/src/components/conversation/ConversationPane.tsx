@@ -1685,6 +1685,18 @@ export function ConversationPane(): React.JSX.Element {
         payload.sessionAttachmentIds.length,
       );
 
+      // R7 Wave 12.3 Phase 12.3a UAT hardening (2026-07-03): defensive skip
+      // for empty sessionAttachmentIds. Server-side guard now blocks this at
+      // source, but a redundant client-side check keeps stale bundles safe
+      // and future consumer types will benefit as they onboard.
+      if (payload.sessionAttachmentIds.length === 0) {
+        console.warn(
+          '[ConversationPane] linear_dispatch dropped (no sessionAttachmentIds) — consumerType:%s',
+          payload.consumerType,
+        );
+        return;
+      }
+
       // Interstitial chat message so the user sees intent recognition happened
       // before the Summary tab loads.
       const interstitial =
