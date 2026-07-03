@@ -79,10 +79,10 @@
 
 | # | Task | Status | Rigor | Effort | Parallel-safe |
 |---|---|---|---|---|---|
-| 080 | [Build + deploy RegardingResolver v1.3.0 to UAT](./080-deploy-regarding-resolver.poml) | 🔲 | STANDARD | 2h | group F |
-| 081 | [Build + deploy AssociationResolver v1.2.0 to UAT](./081-deploy-association-resolver.poml) | 🔲 | STANDARD | 2h | group F |
-| 082 | [Deploy webresources (presave v1.2.0 + fieldmapping_push v1.0.0) + ribbon](./082-deploy-webresources-and-ribbon.poml) | 🔲 | STANDARD | 2h | group F |
-| 083 | [Deploy `sprk_fieldmappingprofile` MDA form solution](./083-deploy-mda-form.poml) | 🔲 | STANDARD | 1h | after 082 |
+| 080 | [Build + deploy RegardingResolver v1.3.0 to UAT](./080-deploy-regarding-resolver.poml) | ✅ | STANDARD | 2h est / **~15min actual** | group F |
+| 081 | [Build + deploy AssociationResolver v1.2.0 to UAT](./081-deploy-association-resolver.poml) | ✅ | STANDARD | 2h est / **~15min actual** | group F |
+| 082 | [Deploy webresources (presave v1.2.0 + fieldmapping_push v1.0.0) + ribbon](./082-deploy-webresources-and-ribbon.poml) | ✅ | STANDARD | 2h est / **~30min actual** | group F |
+| 083 | [Deploy `sprk_fieldmappingprofile` MDA form solution](./083-deploy-mda-form.poml) | ✅ | STANDARD | 1h est / **~2min (idempotent — Wave 6 SRFR-060 already deployed FieldMappingAdminSolution v1.0.5)** | after 082 |
 | 084 | [UAT: Matter → Event profile end-to-end](./084-uat-matter-event-end-to-end.poml) | 🔲 | STANDARD | 3h | after 080–083 |
 
 ### Wave 9 — Wrap-up

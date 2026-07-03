@@ -16,6 +16,6 @@
       <uses-feature name="WebAPI" required="true"/>
       <uses-feature name="Utility" required="true"/>
     </feature-usage>
-    <built-by name="pac" version="1.49.3"/>
+    <built-by name="pac" version="1.51.1"/>
   </control>
 </manifest>
