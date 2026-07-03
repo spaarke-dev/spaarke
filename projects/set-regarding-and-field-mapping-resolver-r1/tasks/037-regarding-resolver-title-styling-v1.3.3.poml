@@ -1,0 +1,258 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="SRFR-037" project="set-regarding-and-field-mapping-resolver-r1">
+  <metadata>
+    <title>RegardingResolver title styling v1.3.2 → v1.3.3 (font-weight 400 → 600 per actual OOB DevTools inspection + reduce top padding to match OOB section-header alignment)</title>
+    <status>completed</status>
+    <estimated-effort>1h</estimated-effort>
+    <actual-effort>~35min</actual-effort>
+    <assigned>AI Agent</assigned>
+    <started>2026-07-03</started>
+    <completed>2026-07-03</completed>
+    <rigor>FULL</rigor>
+    <parallel-safe>true</parallel-safe>
+    <parallel-group>—</parallel-group>
+    <tags>pcf,regarding-resolver,fluent-ui,react,styling,version-bump,wave-3-followon,deploy</tags>
+    <depends-on>SRFR-035</depends-on>
+    <wave>3</wave>
+  </metadata>
+
+  <prompt><![CDATA[
+Out-of-plan follow-on to SRFR-035 (v1.3.2 deploy). Owner post-UAT DevTools
+inspection of the OOB "TRACKING" section header revealed actual CSS classes:
+
+  .pa-nn { padding: 4px 0px; }
+  .pa-nl { font-size: 14px; }
+  .pa-hw { font-weight: 600; }         /* ← 600, NOT 400 as SRFR-034 briefing stated */
+  .pa-de { font-family: "Segoe UI", "Segoe UI Web (West European)",
+           -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", sans-serif; }
+  .pa-s  { color: rgb(36, 36, 36); }   /* = #242424 */
+
+Font-family, font-size, color, and padding are already correct in v1.3.2.
+Font-weight is wrong (currently 400) — must be 600 for OOB parity.
+
+Second issue: owner reports "the Related Record title needs less top padding".
+The PCF's root container currently uses `padding: tokens.spacingHorizontalS`
+(which is 8px on all sides via Fluent v9 tokens). Compared to OOB section
+headers that only carry `.pa-nn { padding: 4px 0px }`, the PCF has ~8px of
+extra top padding. Reduce the root container's top padding so the "RELATED
+RECORD" title sits at approximately the same visual top offset as the OOB
+"TRACKING" section header.
+
+Scope (all in `src/client/pcf/RegardingResolver/`):
+
+1. `RegardingResolverApp.tsx`:
+   - `title` Griffel style block: change `fontWeight: 400` → `fontWeight: 600`.
+   - Verify font-family, font-size (14px), color (#242424), padding (4px 0px)
+     are already correct — leave unchanged.
+   - `container` Griffel style block: replace uniform `padding: tokens.spacingHorizontalS`
+     with directional padding to reduce top spacing. Set `paddingTop: 0` and
+     keep `paddingRight`/`paddingBottom`/`paddingLeft` at
+     `tokens.spacingHorizontalS` (8px) for existing spacing on the other sides.
+   - Docstring header: bump v1.3.2 references to v1.3.3, add a "v1.3.3
+     (SRFR-037 title-styling fix)" section describing the two changes.
+
+2. Version bump v1.3.2 → v1.3.3 across all 7 anchors per SRFR-033's checklist:
+   - ControlManifest.Input.xml (control root version attr)
+   - index.ts CONTROL_VERSION
+   - RegardingResolverApp.tsx BUILD_DATE (leave as 2026-07-03 if same day)
+   - Solution/solution.xml <Version>
+   - Solution Control Manifest version attr
+   - package.json version
+   - Solution/pack.ps1 $version
+
+3. Tests:
+   - Bulk grep + replace `1.3.2` → `1.3.3` in test file.
+   - Add 1 new test asserting the title element's computed `fontWeight` style
+     is `600` (or asserting the makeStyles-emitted CSS resolves to 600).
+     Griffel emits atomic class names; the test can grep the title element's
+     className or use `window.getComputedStyle(el).fontWeight === '600'`.
+   - Optional: assert root container's `paddingTop` is 0 (may be brittle in
+     jsdom because Griffel atomic classes require the stylesheet to be
+     mounted — skip if the assertion is fragile).
+
+4. Step 9.5 quality gates: `/code-review` + `/adr-check` + `npm run build:prod`.
+
+5. Deploy: pack solution, `pac solution import --force-overwrite`, verify via
+   `pac solution list`.
+
+Coordination: SRFR-038 (sprk_todo FormXml fix) running in parallel — different
+files, no collision.
+
+Constraints:
+  - ADR-022 virtual pattern preserved.
+  - SRFR-034/035 features preserved (refresh button, auto-refresh,
+    showVersionFooter, PolymorphicPicker consumption unchanged).
+  - Path A exception on ADR-021 for OOB parity styling — DOCUMENTED
+    exception remains; this task tightens compliance with the ACTUAL OOB
+    styles (font-weight 600), not loosens it.
+  - Backward compat: no breaking manifest property changes.
+  ]]></prompt>
+
+  <role>PCF developer familiar with Spaarke PCF version discipline (`src/client/pcf/CLAUDE.md`), Fluent v9 Griffel + tokens (`ADR-021`), virtual PCF platform-library pattern (`ADR-022`), shared PolymorphicPicker (`ADR-012`), and Dataverse OOB section-header styling conventions.</role>
+
+  <goal><![CDATA[
+RegardingResolver v1.3.3 deployed to spaarkedev1, verified via
+`pac solution list`. Row-1 title "RELATED RECORD" renders with actual OOB
+section-header styling: font-weight 600 (semi-bold), font-family Segoe UI
+stack, font-size 14px, color #242424, padding 4px 0px. Root container top
+padding reduced so the title's visual top offset matches OOB section
+headers on the same form. Manual refresh button (SRFR-034), auto-refresh
+(SRFR-035), showVersionFooter, PolymorphicPicker consumption all preserved.
+All 7 version anchors bumped 1.3.2 → 1.3.3. Tests updated with 1 new
+font-weight assertion. `npm run build:prod` passes. ADR-021/022/012
+preserved. Backward compat: existing v1.3.2 form bindings continue to
+function.
+  ]]></goal>
+
+  <inputs>
+    <file purpose="spec">projects/set-regarding-and-field-mapping-resolver-r1/spec.md</file>
+    <file purpose="project-claude">projects/set-regarding-and-field-mapping-resolver-r1/CLAUDE.md</file>
+    <file purpose="checklist">src/client/pcf/CLAUDE.md</file>
+    <file purpose="prior-task">projects/set-regarding-and-field-mapping-resolver-r1/tasks/035-regarding-resolver-auto-refresh-v1.3.2.poml</file>
+    <file purpose="prior-task">projects/set-regarding-and-field-mapping-resolver-r1/tasks/034-regarding-resolver-ui-polish-v1.3.1.poml</file>
+    <file purpose="source">src/client/pcf/RegardingResolver/RegardingResolver/ControlManifest.Input.xml</file>
+    <file purpose="source">src/client/pcf/RegardingResolver/RegardingResolver/index.ts</file>
+    <file purpose="source">src/client/pcf/RegardingResolver/RegardingResolver/RegardingResolverApp.tsx</file>
+    <file purpose="source">src/client/pcf/RegardingResolver/package.json</file>
+    <file purpose="source">src/client/pcf/RegardingResolver/Solution/solution.xml</file>
+    <file purpose="source">src/client/pcf/RegardingResolver/Solution/Controls/sprk_Spaarke.Controls.RegardingResolver/ControlManifest.xml</file>
+    <file purpose="source">src/client/pcf/RegardingResolver/Solution/pack.ps1</file>
+    <file purpose="test">src/client/pcf/RegardingResolver/__tests__/RegardingResolverApp.test.tsx</file>
+    <file purpose="adr">.claude/adr/ADR-021-fluent-v9-tokens.md</file>
+    <file purpose="adr">.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+    <file purpose="adr">.claude/adr/ADR-012-shared-component-library.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-022">Virtual PCF pattern preserved. React 16 + Fluent 9 platform-libraries. No bundling regression.</constraint>
+    <constraint source="ADR-012">Shared PolymorphicPicker consumption preserved. Do NOT modify the shared component.</constraint>
+    <constraint source="ADR-021 Path A exception">The `title` Griffel block DELIBERATELY uses hardcoded values (Segoe UI stack, 14px, #242424, padding 4px 0px, weight 600) to match Dataverse OOB section-header EXACTLY. This is the documented owner-approved Path A exception (SRFR-034 §4, extended by SRFR-037). All other styles remain on Fluent v9 semantic tokens per ADR-021.</constraint>
+    <constraint source="project">Feature preservation: manual refresh button (SRFR-034), auto-refresh (SRFR-035), showVersionFooter (SRFR-034), PolymorphicPicker consumption (SRFR-030/034), CREATE-mode presave bridge (SRFR-032) — ALL preserved.</constraint>
+    <constraint source="project">Backward compat: no manifest property additions/removals; existing v1.3.2 form bindings continue to function.</constraint>
+    <constraint source="src/client/pcf/CLAUDE.md — Version Update Checklist">ALL 7 anchors bumped together (manifest, index.ts, footer BUILD_DATE, solution.xml, Solution ControlManifest, package.json, pack.ps1).</constraint>
+    <constraint source="project">TypeScript strict mode.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>pcf/version-discipline + Fluent v9 Griffel styling + OOB Dataverse section-header parity</topic>
+    <files>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>src/client/pcf/RegardingResolver/RegardingResolver/RegardingResolverApp.tsx</file>
+    </files>
+    <patterns>
+      <pattern name="OOB section-header parity" location="RegardingResolverApp.tsx `title` Griffel block">
+        Owner DevTools inspection of the OOB "TRACKING" section header revealed:
+        .pa-nn (padding 4px 0px), .pa-nl (font-size 14px), .pa-hw (font-weight
+        600 semi-bold), .pa-de (Segoe UI stack), .pa-s (color rgb(36,36,36) =
+        #242424). SRFR-034 briefing stated weight=400, which was incorrect.
+        SRFR-037 corrects to weight=600.
+      </pattern>
+      <pattern name="Griffel directional padding to reduce top spacing" location="RegardingResolverApp.tsx `container` Griffel block">
+        Replace uniform `padding: tokens.spacingHorizontalS` (8px all sides)
+        with directional properties: paddingTop: 0, paddingRight/Bottom/Left
+        at tokens.spacingHorizontalS. Reduces top spacing so the PCF title
+        aligns with OOB section headers on the same form.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      SRFR-035 deployed v1.3.2 with auto-refresh. Owner post-UAT DevTools
+      inspection revealed two issues: (1) title font-weight is 400
+      (incorrect per SRFR-034 briefing) but OOB actually uses 600
+      (semi-bold); (2) the PCF's title has too much top padding compared to
+      OOB section headers on the same form. This task lands as v1.3.3 to
+      preserve v1.3.2 as the shipped baseline and fixes both issues.
+    </background>
+    <dependencies>
+      <dependency task="SRFR-035" status="completed">v1.3.2 shipped with auto-refresh + manual refresh button + showVersionFooter.</dependency>
+    </dependencies>
+    <related-work>
+      <item>SRFR-038 (parallel) — sprk_todo FormXml fix (name field visibility, field labels). Different files.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check">Verify context &lt; 60%. Read current `RegardingResolverApp.tsx` `title` + `container` Griffel blocks. Confirm 7-anchor version state at 1.3.2.</step>
+    <step order="1" name="Fix title font-weight">In `RegardingResolverApp.tsx` `useStyles.title`, change `fontWeight: 400` → `fontWeight: 600`. Leave font-family, font-size (14px), color (#242424), padding (4px 0px), letterSpacing, textTransform unchanged.</step>
+    <step order="2" name="Reduce root top padding">In `RegardingResolverApp.tsx` `useStyles.container`, replace the single `padding: tokens.spacingHorizontalS` line with directional: `paddingTop: 0`, `paddingRight: tokens.spacingHorizontalS`, `paddingBottom: tokens.spacingHorizontalS`, `paddingLeft: tokens.spacingHorizontalS`. This reduces the ~8px extra top gap so the title aligns with OOB section-header row.</step>
+    <step order="3" name="Update docstring">Bump v1.3.2 references to v1.3.3 in the file docstring header. Add a "# v1.3.3 (SRFR-037 title-styling fix)" section noting (a) font-weight 400 → 600 per actual OOB DevTools inspection and (b) root container top-padding reduced to 0 for OOB section-header top alignment.</step>
+    <step order="4" name="Version bump — Location 1 (ControlManifest.Input.xml)">Update `version="1.3.3"` on the control root element.</step>
+    <step order="5" name="Version bump — Location 2 (index.ts CONTROL_VERSION)">Update `CONTROL_VERSION = '1.3.3'`.</step>
+    <step order="6" name="Version bump — Location 3 (BUILD_DATE)">Confirm `BUILD_DATE = '2026-07-03'` (same day as v1.3.2; leave unchanged).</step>
+    <step order="7" name="Version bump — Location 4 (Solution manifest)">Update `Solution/solution.xml` `&lt;Version&gt;` element to `1.3.3`.</step>
+    <step order="8" name="Version bump — Location 5 (Solution Control Manifest)">Update `Solution/Controls/sprk_Spaarke.Controls.RegardingResolver/ControlManifest.xml` version attribute to `1.3.3`.</step>
+    <step order="9" name="Version bump — Location 6 (package.json)">Update `package.json` `"version": "1.3.3"`.</step>
+    <step order="10" name="Version bump — Location 7 (pack.ps1)">Update `$version = "1.3.3"`.</step>
+    <step order="11" name="Tests — bulk version + new coverage">
+      In `__tests__/RegardingResolverApp.test.tsx`:
+      (a) Bulk replace 1.3.2 → 1.3.3 (version prop and version regex).
+      (b) Add test: title element's className carries the Griffel atomic class
+          for font-weight 600 (assertion approach: query the title element
+          and use `window.getComputedStyle(el).fontWeight` to verify 600 via
+          Griffel's injected stylesheet).
+    </step>
+    <step order="12" name="Grep verification">Grep for `1.3.2` under `src/client/pcf/RegardingResolver/` (exclude node_modules + out + Solution/bin). Assert zero non-history hits.</step>
+    <step order="9.5" name="Quality Gate">Invoke `/code-review` and `/adr-check` on modified files: ControlManifest.Input.xml, index.ts, RegardingResolverApp.tsx, solution.xml, extracted ControlManifest.xml, package.json, pack.ps1, RegardingResolverApp.test.tsx. Address findings or escalate per CLAUDE.md §6.5.</step>
+    <step order="13" name="Build">Run `npm run build:prod` in `src/client/pcf/RegardingResolver/`. Confirm build passes.</step>
+    <step order="14" name="Test run">Run `npm test`. Confirm all tests pass (54 SRFR-035 + 1 new SRFR-037 = 55 expected).</step>
+    <step order="15" name="Copy bundle + pack solution">Copy `out/controls/RegardingResolver/bundle.js` to `Solution/Controls/sprk_Spaarke.Controls.RegardingResolver/bundle.js`. Run `Solution/pack.ps1` to produce `Solution/bin/RegardingResolverSolution_v1.3.3.zip`.</step>
+    <step order="16" name="Deploy">Run `pac solution import --path Solution/bin/RegardingResolverSolution_v1.3.3.zip --force-overwrite --publish-changes` against spaarkedev1. Verify via `pac solution list | Select-String RegardingResolver` shows Version 1.3.3.</step>
+    <step order="17" name="Update Task Status">Update SRFR-037 status → completed, notes summary. Update TASK-INDEX.md — add row for SRFR-037 under Wave 3 as another follow-on. Reset current-task.md.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Load current source, prior tasks, ADRs</tool>
+    <tool name="Edit">Manifest + code + tests + solution manifests</tool>
+    <tool name="Grep">Verify no straggling `1.3.2` references</tool>
+    <tool name="Bash">`npm run build:prod`, `npm test`, `pack.ps1`, `pac solution import`, `pac solution list`</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/RegardingResolver/RegardingResolver/ControlManifest.Input.xml</output>
+    <output type="code">src/client/pcf/RegardingResolver/RegardingResolver/index.ts</output>
+    <output type="code">src/client/pcf/RegardingResolver/RegardingResolver/RegardingResolverApp.tsx</output>
+    <output type="code">src/client/pcf/RegardingResolver/package.json</output>
+    <output type="code">src/client/pcf/RegardingResolver/Solution/solution.xml</output>
+    <output type="code">src/client/pcf/RegardingResolver/Solution/Controls/sprk_Spaarke.Controls.RegardingResolver/ControlManifest.xml</output>
+    <output type="code">src/client/pcf/RegardingResolver/Solution/pack.ps1</output>
+    <output type="test">src/client/pcf/RegardingResolver/__tests__/RegardingResolverApp.test.tsx</output>
+    <output type="artifact">src/client/pcf/RegardingResolver/Solution/bin/RegardingResolverSolution_v1.3.3.zip</output>
+    <output type="notes">projects/set-regarding-and-field-mapping-resolver-r1/notes/task-037-regarding-resolver-title-styling.log</output>
+    <output type="docs">projects/set-regarding-and-field-mapping-resolver-r1/tasks/TASK-INDEX.md (add SRFR-037 row)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`grep -c 'version="1.3.3"' src/client/pcf/RegardingResolver/RegardingResolver/ControlManifest.Input.xml` returns 1.</criterion>
+    <criterion testable="true">`grep -R "1.3.2" src/client/pcf/RegardingResolver/ --exclude-dir=node_modules --exclude-dir=out --exclude-dir=bin` returns zero non-history hits.</criterion>
+    <criterion testable="true">RegardingResolverApp.tsx `useStyles.title` block declares `fontWeight: 600` (was 400).</criterion>
+    <criterion testable="true">RegardingResolverApp.tsx `useStyles.container` block declares `paddingTop: 0` (previously uniform padding).</criterion>
+    <criterion testable="true">Manual refresh button (SRFR-034) still present in Row-1 toolbar (regression check).</criterion>
+    <criterion testable="true">Auto-refresh helper (SRFR-035) still wired into `handlePickerSelect` (regression check).</criterion>
+    <criterion testable="true">1 new test covers font-weight 600 assertion on title element.</criterion>
+    <criterion testable="true">`npm run build:prod` succeeds with zero errors.</criterion>
+    <criterion testable="true">`npm test` all tests pass (existing + new).</criterion>
+    <criterion testable="true">Platform-library declarations for React 16 and Fluent 9 preserved in ControlManifest.Input.xml.</criterion>
+    <criterion testable="true">`/code-review` and `/adr-check` pass at Step 9.5 (or findings addressed / escalated per CLAUDE.md §6.5).</criterion>
+    <criterion testable="true">`pac solution list` shows RegardingResolverSolution v1.3.3 after deploy.</criterion>
+  </acceptance-criteria>
+
+  <notes><![CDATA[
+Completed 2026-07-03. Title font-weight corrected 400 → 600 per actual OOB
+DevTools inspection (SRFR-034 briefing incorrectly said 400). Root
+container top padding reduced to 0 (directional: paddingTop 0, other three
+sides preserved at spacingHorizontalS) so the RELATED RECORD title aligns
+with OOB section-header row on the same form. 7-anchor version bump to
+1.3.3. Tests: 55 passing (54 existing + 1 new SRFR-037 font-weight assertion
+via window.getComputedStyle). Build (`npm run build:prod`) succeeded with
+1.57 MiB bundle parity vs v1.3.2. Deploy succeeded: `pac solution list`
+shows RegardingResolverSolution v1.3.3. Quality gates: code-review PASS
+(targeted styling delta only); adr-check PASS (ADR-021 Path A exception
+preserved and TIGHTENED with actual OOB values; ADR-022 platform-libs
+preserved; ADR-012 shared PolymorphicPicker untouched; ADR-024 resolver
+unchanged). SRFR-034/035 features (refresh button, auto-refresh,
+showVersionFooter, CREATE-mode presave bridge, PolymorphicPicker
+consumption) all preserved. See notes/task-037-regarding-resolver-title-styling.log.
+  ]]></notes>
+</task>

@@ -2,7 +2,7 @@
 
 > **Project**: set-regarding-and-field-mapping-resolver-r1
 > **Plan**: [`../plan.md`](../plan.md)
-> **Total tasks**: 31 (28 original + 3 out-of-plan polish follow-ons SRFR-034, SRFR-035, SRFR-036)
+> **Total tasks**: 33 (28 original + 5 out-of-plan polish follow-ons SRFR-034, SRFR-035, SRFR-036, SRFR-037, SRFR-038)
 > **Wave count**: 10 (0–9)
 
 ## Legend
@@ -46,6 +46,8 @@
 | 034 | [UI polish v1.3.0 → v1.3.1 (7 owner-requested changes: OOB section-header styling, refresh button, icon flip, row-2 simplify, showVersionFooter, title uppercase)](./034-regarding-resolver-ui-polish-v1.3.1.poml) | ✅ | FULL | 3h est / **~2h30min actual** | post-Wave 8 follow-on (after SRFR-080 UAT feedback) |
 | 035 | [Auto-refresh form after picker selection v1.3.1 → v1.3.2 (owner post-UAT feedback: eliminate manual Save/Refresh click after selection; CREATE-mode presave path preserved)](./035-regarding-resolver-auto-refresh-v1.3.2.poml) | ✅ | FULL | 1h30min est / **~50min actual** | post-SRFR-034 follow-on (parallel with SRFR-036 form config) |
 | 036 | [sprk_todo form config — companion webresource `sprk_regardingrecordnumber_hyperlink` v1.0.0 + REGARDING section row layout below RegardingResolver PCF (1/3 record-number-hyperlink + 2/3 record-name; sprk_regardingrecordurl hidden; formxml `<events>` + `<formLibraries>` registration)](./036-sprk-todo-form-config.poml) | ✅ | STANDARD | 2h est / **~1h15min actual** | post-SRFR-034 follow-on (parallel with SRFR-035 PCF auto-refresh) |
+| 037 | [Title styling fix v1.3.2 → v1.3.3 (font-weight 400 → 600 per actual OOB DevTools inspection; root container top-padding reduced to 0 for OOB section-header alignment)](./037-regarding-resolver-title-styling-v1.3.3.poml) | ✅ | FULL | 1h est / **~35min actual** | post-SRFR-035 follow-on (parallel with SRFR-038 form labels fix) |
+| 038 | [sprk_todo form fix — Name field visibility + top-aligned labels (SRFR-036 regression: cell substitution inherited `visible="false"` from old shells, so record-number + record-name cells rendered inside a visible section but were themselves hidden; flip both cells to `visible="true"`; labels inherit `celllabelposition="Top"` from section)](./038-sprk-todo-form-labels-fix.poml) | ✅ | STANDARD | 45min est / **~25min actual** | post-SRFR-036 fix (parallel with SRFR-037 PCF v1.3.3 polish) |
 
 ### Wave 4 — Presave webresource (independent, parallel with Wave 3)
 

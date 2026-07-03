@@ -158,7 +158,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
         readOnly={false}
         onRecordTypeChanged={() => undefined}
-        version="1.3.2"
+        version="1.3.3"
       />
     );
 
@@ -174,7 +174,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
         readOnly={false}
         onRecordTypeChanged={() => undefined}
-        version="1.3.2"
+        version="1.3.3"
       />
     );
 
@@ -194,7 +194,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
         readOnly={false}
         onRecordTypeChanged={() => undefined}
-        version="1.3.2"
+        version="1.3.3"
       />
     );
 
@@ -210,7 +210,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
         readOnly={false}
         onRecordTypeChanged={() => undefined}
-        version="1.3.2"
+        version="1.3.3"
       />
     );
 
@@ -227,7 +227,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
         readOnly={false}
         onRecordTypeChanged={() => undefined}
-        version="1.3.2"
+        version="1.3.3"
       />
     );
 
@@ -241,7 +241,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
         readOnly={false}
         onRecordTypeChanged={() => undefined}
-        version="1.3.2"
+        version="1.3.3"
       />
     );
 
@@ -262,7 +262,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
         readOnly={false}
         onRecordTypeChanged={() => undefined}
-        version="1.3.2"
+        version="1.3.3"
       />
     );
 
@@ -282,7 +282,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
         readOnly={false}
         onRecordTypeChanged={() => undefined}
-        version="1.3.2"
+        version="1.3.3"
       />
     );
 
@@ -302,7 +302,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
         readOnly={false}
         onRecordTypeChanged={() => undefined}
-        version="1.3.2"
+        version="1.3.3"
       />
     );
 
@@ -320,7 +320,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
         readOnly={false}
         onRecordTypeChanged={() => undefined}
-        version="1.3.2"
+        version="1.3.3"
       />
     );
 
@@ -339,7 +339,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
         readOnly={false}
         onRecordTypeChanged={onRecordTypeChanged}
-        version="1.3.2"
+        version="1.3.3"
       />
     );
 
@@ -368,7 +368,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={true}
           onRecordTypeChanged={() => undefined}
-          version="1.3.2"
+          version="1.3.3"
         />
       );
 
@@ -390,7 +390,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={true}
           onRecordTypeChanged={() => undefined}
-          version="1.3.2"
+          version="1.3.3"
         />
       );
 
@@ -427,7 +427,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={true}
           onRecordTypeChanged={() => undefined}
-          version="1.3.2"
+          version="1.3.3"
         />
       );
 
@@ -454,7 +454,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={true}
           onRecordTypeChanged={() => undefined}
-          version="1.3.2"
+          version="1.3.3"
         />
       );
 
@@ -498,7 +498,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
             context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
             readOnly={false}
             onRecordTypeChanged={() => undefined}
-            version="1.3.2"
+            version="1.3.3"
           />
         );
 
@@ -538,14 +538,14 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
         readOnly={false}
         onRecordTypeChanged={() => undefined}
-        version="1.3.2"
+        version="1.3.3"
       />
     );
 
     // SRFR-033 — footer format is `v{version} • Built YYYY-MM-DD` per
     // src/client/pcf/CLAUDE.md "Version Footer Requirement (MANDATORY)".
     const footer = screen.getByTestId('regarding-resolver-version');
-    expect(footer).toHaveTextContent(/v1\.3\.2/);
+    expect(footer).toHaveTextContent(/v1\.3\.3/);
     expect(footer).toHaveTextContent(/Built \d{4}-\d{2}-\d{2}/);
   });
 
@@ -561,7 +561,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
         readOnly={false}
         onRecordTypeChanged={() => undefined}
-        version="1.3.2"
+        version="1.3.3"
       />
     );
     expect(spy).not.toHaveBeenCalled();
@@ -579,7 +579,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
         readOnly={false}
         onRecordTypeChanged={() => undefined}
-        version="1.3.2"
+        version="1.3.3"
       />
     );
     expect(screen.getByTestId('regarding-resolver-root')).toBeInTheDocument();
@@ -592,7 +592,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
         readOnly={false}
         onRecordTypeChanged={() => undefined}
-        version="1.3.2"
+        version="1.3.3"
       />
     );
     expect(screen.getByTestId('regarding-resolver-root')).toBeInTheDocument();
@@ -614,7 +614,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={false}
           onRecordTypeChanged={() => undefined}
-          version="1.3.2"
+          version="1.3.3"
         />
       );
 
@@ -653,7 +653,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={false}
           onRecordTypeChanged={() => undefined}
-          version="1.3.2"
+          version="1.3.3"
         />
       );
 
@@ -686,7 +686,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={false}
           onRecordTypeChanged={() => undefined}
-          version="1.3.2"
+          version="1.3.3"
         />
       );
 
@@ -720,7 +720,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={false}
           onRecordTypeChanged={() => undefined}
-          version="1.3.2"
+          version="1.3.3"
         />
       );
 
@@ -787,7 +787,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
             context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
             readOnly={false}
             onRecordTypeChanged={() => undefined}
-            version="1.3.2"
+            version="1.3.3"
           />
         );
 
@@ -834,7 +834,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
             context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
             readOnly={false}
             onRecordTypeChanged={() => undefined}
-            version="1.3.2"
+            version="1.3.3"
           />
         );
 
@@ -873,7 +873,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
             context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
             readOnly={false}
             onRecordTypeChanged={() => undefined}
-            version="1.3.2"
+            version="1.3.3"
           />
         );
 
@@ -912,7 +912,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
             context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
             readOnly={false}
             onRecordTypeChanged={() => undefined}
-            version="1.3.2"
+            version="1.3.3"
           />
         );
 
@@ -962,12 +962,12 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={false}
           onRecordTypeChanged={() => undefined}
-          version="1.3.2"
+          version="1.3.3"
         />
       );
 
       expect(screen.getByTestId('regarding-resolver-footer')).toBeInTheDocument();
-      expect(screen.getByTestId('regarding-resolver-version')).toHaveTextContent(/v1\.3\.2/);
+      expect(screen.getByTestId('regarding-resolver-version')).toHaveTextContent(/v1\.3\.3/);
     });
 
     test('showVersionFooter=true → footer visible', () => {
@@ -977,7 +977,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={false}
           onRecordTypeChanged={() => undefined}
-          version="1.3.2"
+          version="1.3.3"
         />
       );
 
@@ -991,7 +991,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={false}
           onRecordTypeChanged={() => undefined}
-          version="1.3.2"
+          version="1.3.3"
         />
       );
 
@@ -1012,7 +1012,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={false}
           onRecordTypeChanged={() => undefined}
-          version="1.3.2"
+          version="1.3.3"
         />
       );
 
@@ -1028,7 +1028,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={true}
           onRecordTypeChanged={() => undefined}
-          version="1.3.2"
+          version="1.3.3"
         />
       );
 
@@ -1054,7 +1054,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={false}
           onRecordTypeChanged={() => undefined}
-          version="1.3.2"
+          version="1.3.3"
         />
       );
 
@@ -1085,7 +1085,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
             context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
             readOnly={false}
             onRecordTypeChanged={() => undefined}
-            version="1.3.2"
+            version="1.3.3"
           />
         );
 
@@ -1122,7 +1122,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={false}
           onRecordTypeChanged={() => undefined}
-          version="1.3.2"
+          version="1.3.3"
         />
       );
 
@@ -1178,7 +1178,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={false}
           onRecordTypeChanged={() => undefined}
-          version="1.3.2"
+          version="1.3.3"
         />
       );
 
@@ -1221,7 +1221,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={false}
           onRecordTypeChanged={() => undefined}
-          version="1.3.2"
+          version="1.3.3"
         />
       );
 
@@ -1260,7 +1260,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={false}
           onRecordTypeChanged={() => undefined}
-          version="1.3.2"
+          version="1.3.3"
         />
       );
 
@@ -1282,6 +1282,39 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
       });
 
       warnSpy.mockRestore();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // SRFR-037 — Title styling (font-weight 600 per actual OOB DevTools inspection)
+  // ---------------------------------------------------------------------------
+
+  describe('SRFR-037 — title font-weight matches OOB section-header (600 semi-bold)', () => {
+    /**
+     * Owner DevTools inspection of the OOB "TRACKING" section header revealed:
+     *   .pa-hw { font-weight: 600 }
+     * SRFR-034 briefing incorrectly stated font-weight=400; SRFR-037 corrects
+     * to 600. This test asserts the title element renders with the correct
+     * semi-bold weight via Griffel's atomic-class stylesheet injection.
+     */
+
+    test('title element renders with computed font-weight 600 (semi-bold)', () => {
+      const { context } = buildContext();
+      renderWithProvider(
+        <RegardingResolverApp
+          context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
+          readOnly={false}
+          onRecordTypeChanged={() => undefined}
+          version="1.3.3"
+        />
+      );
+
+      const title = screen.getByTestId('regarding-resolver-title');
+      // Griffel emits atomic classes into <style> tags injected into the head;
+      // jsdom's getComputedStyle resolves them via cascade. Assert the computed
+      // fontWeight is exactly '600' (semi-bold per OOB `.pa-hw`).
+      const computed = window.getComputedStyle(title);
+      expect(computed.fontWeight).toBe('600');
     });
   });
 });

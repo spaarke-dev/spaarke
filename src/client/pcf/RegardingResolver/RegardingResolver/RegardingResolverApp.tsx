@@ -1,5 +1,22 @@
 /**
- * RegardingResolverApp — v1.3.2 streamlined 2-row UI for the polymorphic regarding picker.
+ * RegardingResolverApp — v1.3.3 streamlined 2-row UI for the polymorphic regarding picker.
+ *
+ * # v1.3.3 (SRFR-037 title-styling fix)
+ *
+ * Two OOB-parity corrections after owner DevTools inspection of the OOB
+ * "TRACKING" section header on the sprk_todo form:
+ *   1. Title font-weight was 400 (per SRFR-034 briefing) but OOB actually uses
+ *      600 (semi-bold) — `.pa-hw { font-weight: 600 }`. Corrected to 600.
+ *      All other title style values (Segoe UI stack, 14px, #242424,
+ *      padding 4px 0px) already matched OOB and remain unchanged.
+ *   2. Root container top padding reduced to 0 (was ~8px via
+ *      `tokens.spacingHorizontalS`). The extra top gap made the RELATED
+ *      RECORD title sit visibly below other OOB section headers on the same
+ *      form. Right/bottom/left padding preserved at `spacingHorizontalS`.
+ *
+ * Refresh button (SRFR-034), auto-refresh after picker selection (SRFR-035),
+ * `showVersionFooter` (SRFR-034), and PolymorphicPicker consumption
+ * (SRFR-030/034) all preserved.
  *
  * # v1.3.2 (SRFR-035 owner post-UAT polish)
  *
@@ -20,9 +37,9 @@
  *   │  MTR-2025-0142                                                          │  ← Row 2: record-number link ONLY (name cell removed)
  *   └────────────────────────────────────────────────────────────────────────┘
  *
- * Row 1: OOB-styled uppercase title (Segoe UI 14px / #242424 / weight 400 /
- *        padding 4px 0px per SRFR-034 §4 — documented Path A exception to
- *        ADR-021 for OOB parity). Title text is derived from the `title`
+ * Row 1: OOB-styled uppercase title (Segoe UI 14px / #242424 / weight 600 /
+ *        padding 4px 0px per SRFR-037 correction of SRFR-034 §4 — documented
+ *        Path A exception to ADR-021 for OOB parity). Title text is derived from the `title`
  *        manifest input (default "RELATED RECORD") and rendered UPPERCASED
  *        regardless of maker input case (SRFR-034 §1). Right side of Row 1
  *        contains the refresh ToolbarButton (SRFR-034 §5 — save + refresh
@@ -47,7 +64,7 @@
  *        entity without code change (FR-A1-02). Clicking the link opens the
  *        related record in a modal via `Xrm.Navigation.navigateTo` (SRFR-031).
  *
- * Footer: Version footer (v1.3.1 • Built {YYYY-MM-DD}) — conditionally rendered
+ * Footer: Version footer (v1.3.3 • Built {YYYY-MM-DD}) — conditionally rendered
  *         based on the new `showVersionFooter` input property (SRFR-034 §2,
  *         default true).
  *
@@ -136,11 +153,23 @@ const BUILD_DATE = '2026-07-03';
 // ---------------------------------------------------------------------------
 // Styles
 //
-// Note (v1.3.1): The `title` style intentionally uses hardcoded values
-// (#242424, Segoe UI, 14px, weight 400, padding 4px 0px) to match the
-// Dataverse OOB section-header exactly. This is a documented exception to
-// ADR-021 (semantic tokens preferred): OOB parity is the visual target, not
-// Fluent v9 theming. Owner-approved (SRFR-034 spec §4).
+// Note (v1.3.3): The `title` style intentionally uses hardcoded values
+// (Segoe UI stack, 14px, weight 600 (semi-bold), #242424, padding 4px 0px)
+// to match the Dataverse OOB section-header EXACTLY, as observed via owner
+// DevTools inspection of the OOB "TRACKING" section header:
+//   .pa-nn { padding: 4px 0px; }
+//   .pa-nl { font-size: 14px; }
+//   .pa-hw { font-weight: 600; }   ← corrected from 400 in SRFR-037
+//   .pa-de { font-family: "Segoe UI", "Segoe UI Web (West European)", ... }
+//   .pa-s  { color: rgb(36, 36, 36); }
+// This is a documented Path A exception to ADR-021 (semantic tokens
+// preferred): OOB parity is the visual target, not Fluent v9 theming.
+// Owner-approved (SRFR-034 spec §4, corrected by SRFR-037).
+//
+// The `container` block uses directional padding (top: 0) rather than
+// uniform `padding: tokens.spacingHorizontalS`; this removes the ~8px extra
+// gap above the title so the RELATED RECORD title aligns with OOB section
+// headers on the same form (SRFR-037).
 //
 // All other styles remain on Fluent v9 semantic tokens per ADR-021.
 // ---------------------------------------------------------------------------
@@ -150,7 +179,15 @@ const useStyles = makeStyles({
     display: 'flex',
     flexDirection: 'column',
     gap: tokens.spacingVerticalXS,
-    padding: tokens.spacingHorizontalS,
+    // SRFR-037: reduce top padding to 0 so the OOB-styled title aligns with
+    // other section headers on the host form (OOB `.pa-nn` uses `padding: 4px 0px`
+    // — the title Griffel block already carries that vertical padding, so the
+    // root container needs zero additional top gap). Right/bottom/left padding
+    // preserved at `tokens.spacingHorizontalS` (8px) for the surrounding layout.
+    paddingTop: 0,
+    paddingRight: tokens.spacingHorizontalS,
+    paddingBottom: tokens.spacingHorizontalS,
+    paddingLeft: tokens.spacingHorizontalS,
     height: '100%',
     boxSizing: 'border-box',
   },
@@ -160,12 +197,13 @@ const useStyles = makeStyles({
     justifyContent: 'space-between',
     minHeight: '32px',
   },
-  // Row-1 title — Dataverse OOB section-header parity (SRFR-034 §4).
+  // Row-1 title — Dataverse OOB section-header parity (SRFR-034 §4, corrected
+  // by SRFR-037 to font-weight 600 per actual OOB DevTools inspection).
   title: {
     fontFamily:
       '"Segoe UI", "Segoe UI Web (West European)", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", sans-serif',
     fontSize: '14px',
-    fontWeight: 400,
+    fontWeight: 600,
     color: '#242424',
     padding: '4px 0px',
     letterSpacing: 0,
