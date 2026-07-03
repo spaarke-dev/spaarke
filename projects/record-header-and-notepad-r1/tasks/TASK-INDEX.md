@@ -45,7 +45,7 @@
 | 038 | URL-param error handling verification (FR-13) | 3 | ✅ | 037 | — | STANDARD |
 | 039 | Vite build + deploy as sprk_notepad_page | 3 | 🔲 | 038 | — | STANDARD |
 | 040 | Entity-agnostic launch test (FR-19) | 3 | 🔲 | 039 | F | STANDARD |
-| 041 | Notepad integration test (round trip) | 3 | 🔲 | 039 | F | STANDARD |
+| 041 | Notepad integration test (round trip) | 3 | ✅ | 039 | F | STANDARD |
 | 050 | Authoring guide skeleton | 4 | 🔲 | 025 | — | MINIMAL |
 | 051 | Authoring guide full content | 4 | 🔲 | 050 | — | MINIMAL |
 | 052 | Pattern pointer (touches .claude/) | 4 | 🔲 | 051 | — | MINIMAL |

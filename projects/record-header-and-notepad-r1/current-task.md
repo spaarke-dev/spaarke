@@ -13,10 +13,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 038 → completed 2026-07-03 |
-| **Step** | — (038 complete) |
-| **Status** | not-started (next: task 039 Vite build + deploy) |
-| **Next Action** | Task 038 delivered NotepadErrorBanner (Fluent v9 MessageBar + Close button; window.close + postMessage fallback), added 5 net new tests (102/102 pass), fixed pre-existing jest.config.cjs typo (setupFilesAfterEach → setupFilesAfterEnv), documented U-01 resolution in notes/close-mechanism.md. Next task 039: Vite build + deploy as sprk_notepad_page. |
+| **Task** | 041 → completed 2026-07-03 |
+| **Step** | — (041 complete) |
+| **Status** | not-started (next: task 025 PCF deploy+QA, 039 Vite deploy, 040 launch test, 050-052 docs, 090 wrap-up) |
+| **Next Action** | Task 041 delivered `src/solutions/Notepad/src/__tests__/notepad.integration.test.tsx` — 10 test cases for FR-14/15/16/17/18/19 via mocked Xrm.WebApi. All 10 pass; Notepad suite 112/112 total (0 regressions from 102 baseline). Zero @spaarke/auth, zero BFF calls, TypeScript clean. Test uses direct-`.value` set (not input event) for immediate-save paths, focusout (not blur) for React 18 delegation, and boundary-mock strategy (parseDataParams override via globalThis) instead of fighting jsdom's non-configurable location. |
 
 ### Files Modified This Session
 
