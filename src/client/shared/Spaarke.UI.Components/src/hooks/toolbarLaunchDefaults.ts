@@ -25,8 +25,8 @@
 export const LAYOUT_1_MODAL = {
   target: 2 as const,
   position: 1 as const,
-  width: { value: 85, unit: "%" as const },
-  height: { value: 85, unit: "%" as const },
+  width: { value: 85, unit: '%' as const },
+  height: { value: 85, unit: '%' as const },
 };
 
 /**
@@ -38,21 +38,21 @@ export const LAYOUT_1_MODAL = {
 export const NOTEPAD_MODAL = {
   target: 2 as const,
   position: 1 as const,
-  width: { value: 70, unit: "%" as const },
-  height: { value: 80, unit: "%" as const },
+  width: { value: 70, unit: '%' as const },
+  height: { value: 80, unit: '%' as const },
 };
 
 /**
  * Webresource / Code Page name for the Notepad Vite SPA.
  * Deployed as a full-page Code Page in Dataverse per task 039.
  */
-export const NOTEPAD_WEBRESOURCE_NAME = "sprk_notepad_page";
+export const NOTEPAD_WEBRESOURCE_NAME = 'sprk_notepad_page';
 
 /**
  * Webresource / Code Page name for the SmartTodo Code Page.
  * Verify against target environment during task 020 — may need adjustment.
  */
-export const SMARTTODO_WEBRESOURCE_NAME = "sprk_smarttodo_page";
+export const SMARTTODO_WEBRESOURCE_NAME = 'sprk_smarttodo_page';
 
 /**
  * `sprk_recordsummary` is a MULTILINE TEXT **field** on parent entities
@@ -64,7 +64,7 @@ export const SMARTTODO_WEBRESOURCE_NAME = "sprk_smarttodo_page";
  * (Original design assumed an entity named `sprk_recordsummary`. Corrected by
  * task 001 schema verification. See notes/design-alignment-corrections.md §1.)
  */
-export const RECORDSUMMARY_FIELD = "sprk_recordsummary";
+export const RECORDSUMMARY_FIELD = 'sprk_recordsummary';
 
 /**
  * ADR-024 dual-field pattern — `sprk_memo`'s entity-specific regarding lookups.
@@ -80,12 +80,12 @@ export const RECORDSUMMARY_FIELD = "sprk_recordsummary";
  * See notes/sprk-memo-schema.md.
  */
 export const SUPPORTED_MEMO_PARENTS: Record<string, string> = {
-  sprk_matter: "sprk_regardingmatter",
-  sprk_project: "sprk_regardingproject",
-  sprk_event: "sprk_regardingevent",
-  sprk_invoice: "sprk_regardinginvoice",
-  sprk_budget: "sprk_regardingbudget",
-  sprk_workassignment: "sprk_regardingworkassignment",
+  sprk_matter: 'sprk_regardingmatter',
+  sprk_project: 'sprk_regardingproject',
+  sprk_event: 'sprk_regardingevent',
+  sprk_invoice: 'sprk_regardinginvoice',
+  sprk_budget: 'sprk_regardingbudget',
+  sprk_workassignment: 'sprk_regardingworkassignment',
 };
 
 /**
@@ -104,10 +104,7 @@ export const SUPPORTED_MEMO_PARENTS: Record<string, string> = {
  * buildMemoFilterForParent("sprk_matter", "00000000-0000-0000-0000-000000000001")
  * // → "_sprk_regardingmatter_value eq 00000000-0000-0000-0000-000000000001"
  */
-export function buildMemoFilterForParent(
-  regardingEntity: string,
-  regardingId: string
-): string | null {
+export function buildMemoFilterForParent(regardingEntity: string, regardingId: string): string | null {
   const lookupField = SUPPORTED_MEMO_PARENTS[regardingEntity];
   if (!lookupField) return null;
   return `_${lookupField}_value eq ${regardingId}`;

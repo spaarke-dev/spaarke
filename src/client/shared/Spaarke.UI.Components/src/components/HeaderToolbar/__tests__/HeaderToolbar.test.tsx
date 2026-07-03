@@ -150,9 +150,7 @@ describe('HeaderToolbar', () => {
   describe('Disabled behavior', () => {
     it('click_DisabledSlot_DoesNotFireHandler', () => {
       const onClick = jest.fn();
-      const slots = [
-        makeSlot({ key: 'ai', tooltip: 'View AI summary', onClick, disabled: true }),
-      ];
+      const slots = [makeSlot({ key: 'ai', tooltip: 'View AI summary', onClick, disabled: true })];
 
       renderWithProviders(<HeaderToolbar iconSlots={slots} />);
 
@@ -204,7 +202,7 @@ describe('HeaderToolbar', () => {
         <HeaderToolbar
           title="A very long matter title that should overflow the toolbar and truncate with ellipsis"
           iconSlots={[]}
-        />,
+        />
       );
 
       const title = screen.getByTestId('header-toolbar-title');

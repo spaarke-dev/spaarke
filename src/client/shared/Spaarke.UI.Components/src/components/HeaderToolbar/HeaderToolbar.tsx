@@ -22,15 +22,7 @@
  */
 
 import * as React from 'react';
-import {
-  Button,
-  CounterBadge,
-  Text,
-  Tooltip,
-  makeStyles,
-  shorthands,
-  tokens,
-} from '@fluentui/react-components';
+import { Button, CounterBadge, Text, Tooltip, makeStyles, shorthands, tokens } from '@fluentui/react-components';
 
 import type { IHeaderToolbarProps, IHeaderToolbarSlot } from './types';
 
@@ -131,13 +123,7 @@ export const HeaderToolbar: React.FC<IHeaderToolbarProps> = ({ title, iconSlots 
   return (
     <div className={styles.root} data-testid="header-toolbar">
       {hasTitle ? (
-        <Text
-          size={300}
-          className={styles.title}
-          title={title}
-          aria-label={title}
-          data-testid="header-toolbar-title"
-        >
+        <Text size={300} className={styles.title} title={title} aria-label={title} data-testid="header-toolbar-title">
           {title}
         </Text>
       ) : (

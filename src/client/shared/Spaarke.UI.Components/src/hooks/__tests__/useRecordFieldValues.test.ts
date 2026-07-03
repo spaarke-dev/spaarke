@@ -84,14 +84,12 @@ describe('useRecordFieldValues', () => {
     };
     mockRetrieveRecord.mockImplementation(
       () =>
-        new Promise<Record<string, unknown>>((resolve) => {
+        new Promise<Record<string, unknown>>(resolve => {
           resolveFetch = resolve;
         })
     );
 
-    const { result } = renderHook(() =>
-      useRecordFieldValues('sprk_matter', 'record-guid-1', ['sprk_matternumber'])
-    );
+    const { result } = renderHook(() => useRecordFieldValues('sprk_matter', 'record-guid-1', ['sprk_matternumber']));
 
     // Loading true after mount; values still null.
     await waitFor(() => expect(result.current.loading).toBe(true));
@@ -113,9 +111,7 @@ describe('useRecordFieldValues', () => {
     const failure = new Error('Dataverse retrieve failed');
     mockRetrieveRecord.mockRejectedValue(failure);
 
-    const { result } = renderHook(() =>
-      useRecordFieldValues('sprk_matter', 'record-guid-1', ['sprk_matternumber'])
-    );
+    const { result } = renderHook(() => useRecordFieldValues('sprk_matter', 'record-guid-1', ['sprk_matternumber']));
 
     await waitFor(() => expect(result.current.loading).toBe(false));
     expect(result.current.values).toBeNull();
@@ -127,26 +123,17 @@ describe('useRecordFieldValues', () => {
     mockRetrieveRecord.mockResolvedValue(MATTER_RECORD);
 
     const { rerender } = renderHook(
-      ({ recordId }: { recordId: string }) =>
-        useRecordFieldValues('sprk_matter', recordId, ['sprk_matternumber']),
+      ({ recordId }: { recordId: string }) => useRecordFieldValues('sprk_matter', recordId, ['sprk_matternumber']),
       { initialProps: { recordId: 'record-guid-1' } }
     );
 
     await waitFor(() => expect(mockRetrieveRecord).toHaveBeenCalledTimes(1));
-    expect(mockRetrieveRecord).toHaveBeenLastCalledWith(
-      'sprk_matter',
-      'record-guid-1',
-      '?$select=sprk_matternumber'
-    );
+    expect(mockRetrieveRecord).toHaveBeenLastCalledWith('sprk_matter', 'record-guid-1', '?$select=sprk_matternumber');
 
     rerender({ recordId: 'record-guid-2' });
 
     await waitFor(() => expect(mockRetrieveRecord).toHaveBeenCalledTimes(2));
-    expect(mockRetrieveRecord).toHaveBeenLastCalledWith(
-      'sprk_matter',
-      'record-guid-2',
-      '?$select=sprk_matternumber'
-    );
+    expect(mockRetrieveRecord).toHaveBeenLastCalledWith('sprk_matter', 'record-guid-2', '?$select=sprk_matternumber');
   });
 
   it('does NOT refetch when fields array reference changes but contents are identical', async () => {
@@ -154,8 +141,7 @@ describe('useRecordFieldValues', () => {
     mockRetrieveRecord.mockResolvedValue(MATTER_RECORD);
 
     const { rerender } = renderHook(
-      ({ fields }: { fields: string[] }) =>
-        useRecordFieldValues('sprk_matter', 'record-guid-1', fields),
+      ({ fields }: { fields: string[] }) => useRecordFieldValues('sprk_matter', 'record-guid-1', fields),
       { initialProps: { fields: ['sprk_matternumber', 'sprk_mattername'] } }
     );
 
@@ -177,8 +163,7 @@ describe('useRecordFieldValues', () => {
     mockRetrieveRecord.mockResolvedValue(MATTER_RECORD);
 
     const { rerender } = renderHook(
-      ({ fields }: { fields: string[] }) =>
-        useRecordFieldValues('sprk_matter', 'record-guid-1', fields),
+      ({ fields }: { fields: string[] }) => useRecordFieldValues('sprk_matter', 'record-guid-1', fields),
       { initialProps: { fields: ['sprk_matternumber'] } }
     );
 
@@ -199,9 +184,7 @@ describe('useRecordFieldValues', () => {
     // Do NOT install Xrm — simulate the unit-test / non-MDA host case.
     uninstallXrm();
 
-    const { result } = renderHook(() =>
-      useRecordFieldValues('sprk_matter', 'record-guid-1', ['sprk_matternumber'])
-    );
+    const { result } = renderHook(() => useRecordFieldValues('sprk_matter', 'record-guid-1', ['sprk_matternumber']));
 
     await waitFor(() => expect(result.current.error).not.toBeNull());
     expect(result.current.error).toBeInstanceOf(Error);
@@ -214,9 +197,7 @@ describe('useRecordFieldValues', () => {
     installXrm();
     mockRetrieveRecord.mockResolvedValue(MATTER_RECORD);
 
-    const { result } = renderHook(() =>
-      useRecordFieldValues('sprk_matter', null, ['sprk_matternumber'])
-    );
+    const { result } = renderHook(() => useRecordFieldValues('sprk_matter', null, ['sprk_matternumber']));
 
     // Give effects a tick.
     await act(async () => {
@@ -233,9 +214,7 @@ describe('useRecordFieldValues', () => {
     installXrm();
     mockRetrieveRecord.mockResolvedValue(MATTER_RECORD);
 
-    const { result } = renderHook(() =>
-      useRecordFieldValues('sprk_matter', '', ['sprk_matternumber'])
-    );
+    const { result } = renderHook(() => useRecordFieldValues('sprk_matter', '', ['sprk_matternumber']));
 
     await act(async () => {
       await Promise.resolve();
