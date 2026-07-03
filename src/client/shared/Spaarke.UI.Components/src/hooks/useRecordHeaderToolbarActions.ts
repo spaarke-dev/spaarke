@@ -54,19 +54,8 @@
  */
 
 import * as React from 'react';
-import {
-  Button,
-  Text,
-  Tooltip,
-  makeStyles,
-  tokens,
-} from '@fluentui/react-components';
-import {
-  ArrowClockwise20Regular,
-  Note24Regular,
-  Sparkle24Regular,
-  Checkmark24Regular,
-} from '@fluentui/react-icons';
+import { Button, Text, Tooltip, makeStyles, tokens } from '@fluentui/react-components';
+import { ArrowClockwise20Regular, Note24Regular, Sparkle24Regular, Checkmark24Regular } from '@fluentui/react-icons';
 
 import type { IHeaderToolbarProps, IHeaderToolbarSlot } from '../components/HeaderToolbar/types';
 import { getXrm } from '../utils/xrmContext';
@@ -87,8 +76,7 @@ import {
  * Deferral tooltip copy for the unwired refresh icon (FR-08a; U-04 default).
  * If reviewer wants different copy, change this in one place.
  */
-const REFRESH_DEFERRAL_TOOLTIP =
-  'Refresh available in a follow-on release';
+const REFRESH_DEFERRAL_TOOLTIP = 'Refresh available in a follow-on release';
 
 /**
  * Empty-state copy for the sparkle popover when `recordSummary` is null / empty
@@ -221,55 +209,49 @@ const useSparkleContentStyles = makeStyles({
  * OR the empty-state message. Header shows the unwired refresh icon whose
  * click is a NO-OP in R1 (FR-08a). Refresh icon tooltip states the deferral.
  */
-const SparklePopoverBody: React.FC<{ recordSummary: string | null | undefined }> = React.memo(
-  ({ recordSummary }) => {
-    const styles = useSparkleContentStyles();
+const SparklePopoverBody: React.FC<{ recordSummary: string | null | undefined }> = React.memo(({ recordSummary }) => {
+  const styles = useSparkleContentStyles();
 
-    // No-op click handler is deliberate. Do NOT wire this to anything — the
-    // refresh call requires a new BFF endpoint that is explicitly deferred to
-    // a follow-on project (FR-08a + NFR-07). Any wiring here would violate the
-    // R1 NFR-07 "zero new BFF endpoints" rule.
-    const handleRefreshNoOp = React.useCallback((): void => {
-      /* intentional no-op per FR-08a */
-    }, []);
+  // No-op click handler is deliberate. Do NOT wire this to anything — the
+  // refresh call requires a new BFF endpoint that is explicitly deferred to
+  // a follow-on project (FR-08a + NFR-07). Any wiring here would violate the
+  // R1 NFR-07 "zero new BFF endpoints" rule.
+  const handleRefreshNoOp = React.useCallback((): void => {
+    /* intentional no-op per FR-08a */
+  }, []);
 
-    const hasSummary = typeof recordSummary === 'string' && recordSummary.length > 0;
+  const hasSummary = typeof recordSummary === 'string' && recordSummary.length > 0;
 
-    const refreshButton = React.createElement(Button, {
-      appearance: 'subtle',
-      size: 'small',
-      icon: React.createElement(ArrowClockwise20Regular),
-      'aria-label': REFRESH_DEFERRAL_TOOLTIP,
-      onClick: handleRefreshNoOp,
-    });
+  const refreshButton = React.createElement(Button, {
+    appearance: 'subtle',
+    size: 'small',
+    icon: React.createElement(ArrowClockwise20Regular),
+    'aria-label': REFRESH_DEFERRAL_TOOLTIP,
+    onClick: handleRefreshNoOp,
+  });
 
-    return React.createElement(
+  return React.createElement(
+    'div',
+    { className: styles.surface, 'data-testid': 'sparkle-popover-body' },
+    React.createElement(
       'div',
-      { className: styles.surface, 'data-testid': 'sparkle-popover-body' },
-      React.createElement(
-        'div',
-        { className: styles.headerRow },
-        React.createElement(Text, { className: styles.headerLabel }, 'AI Summary'),
-        React.createElement(
-          Tooltip,
-          { content: REFRESH_DEFERRAL_TOOLTIP, relationship: 'label' },
-          refreshButton
+      { className: styles.headerRow },
+      React.createElement(Text, { className: styles.headerLabel }, 'AI Summary'),
+      React.createElement(Tooltip, { content: REFRESH_DEFERRAL_TOOLTIP, relationship: 'label' }, refreshButton)
+    ),
+    hasSummary
+      ? React.createElement(
+          'div',
+          { 'data-testid': 'sparkle-popover-summary' },
+          React.createElement(Text, { className: styles.bodyText }, recordSummary as string)
         )
-      ),
-      hasSummary
-        ? React.createElement(
-            'div',
-            { 'data-testid': 'sparkle-popover-summary' },
-            React.createElement(Text, { className: styles.bodyText }, recordSummary as string)
-          )
-        : React.createElement(
-            'div',
-            { 'data-testid': 'sparkle-popover-empty' },
-            React.createElement(Text, { className: styles.emptyText }, SPARKLE_EMPTY_STATE)
-          )
-    );
-  }
-);
+      : React.createElement(
+          'div',
+          { 'data-testid': 'sparkle-popover-empty' },
+          React.createElement(Text, { className: styles.emptyText }, SPARKLE_EMPTY_STATE)
+        )
+  );
+});
 SparklePopoverBody.displayName = 'SparklePopoverBody';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -434,10 +416,7 @@ export function useRecordHeaderToolbarActions(
     memoCount,
   ]);
 
-  const toolbarProps = React.useMemo<IHeaderToolbarProps>(
-    () => ({ iconSlots }),
-    [iconSlots]
-  );
+  const toolbarProps = React.useMemo<IHeaderToolbarProps>(() => ({ iconSlots }), [iconSlots]);
 
   // ── Popover content ────────────────────────────────────────────────────────
   // Rendered inside the consumer's <PopoverSurface>. `null` when sparkle is

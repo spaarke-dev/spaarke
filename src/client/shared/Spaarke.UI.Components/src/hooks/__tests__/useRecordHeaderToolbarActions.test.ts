@@ -20,10 +20,7 @@
 import * as React from 'react';
 import { act, render, renderHook, screen, fireEvent } from '@testing-library/react';
 
-import {
-  useRecordHeaderToolbarActions,
-  __testables,
-} from '../useRecordHeaderToolbarActions';
+import { useRecordHeaderToolbarActions, __testables } from '../useRecordHeaderToolbarActions';
 import {
   LAYOUT_1_MODAL,
   NOTEPAD_MODAL,
@@ -252,9 +249,7 @@ describe('useRecordHeaderToolbarActions', () => {
       await flushPromises();
 
       const { unmount } = render(result.current.sparklePopoverContent as React.ReactElement);
-      expect(screen.getByTestId('sparkle-popover-empty')).toHaveTextContent(
-        __testables.SPARKLE_EMPTY_STATE
-      );
+      expect(screen.getByTestId('sparkle-popover-empty')).toHaveTextContent(__testables.SPARKLE_EMPTY_STATE);
       expect(screen.queryByTestId('sparkle-popover-summary')).toBeNull();
       unmount();
     }
@@ -396,9 +391,7 @@ describe('useRecordHeaderToolbarActions', () => {
     expect(annotation?.badge).toBe(4);
 
     // Verify the memo count query actually issued (supported parent path).
-    const memoCallLog = mockRetrieveMultipleRecords.mock.calls.filter(
-      c => c[0] === 'sprk_memo'
-    );
+    const memoCallLog = mockRetrieveMultipleRecords.mock.calls.filter(c => c[0] === 'sprk_memo');
     expect(memoCallLog.length).toBeGreaterThan(0);
     // The query MUST use the entity-specific ADR-024 lookup — verify by
     // substring match on the query URL.
@@ -424,9 +417,7 @@ describe('useRecordHeaderToolbarActions', () => {
 
     // Verify NO sprk_memo query was issued — the hook must idle when the
     // parent entity is not in SUPPORTED_MEMO_PARENTS (memo filter = null).
-    const memoCallLog = mockRetrieveMultipleRecords.mock.calls.filter(
-      c => c[0] === 'sprk_memo'
-    );
+    const memoCallLog = mockRetrieveMultipleRecords.mock.calls.filter(c => c[0] === 'sprk_memo');
     expect(memoCallLog).toHaveLength(0);
   });
 
