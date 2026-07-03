@@ -10,7 +10,8 @@
     "build": "node ../../../scripts/check-html-css-reset.mjs && vite build && node --input-type=module -e \"import{renameSync}from'fs';renameSync('dist/index.html','dist/sprk_workspacelayoutwizard.html');\"",
     "preview": "vite preview",
     "lint": "eslint src --ext .ts,.tsx",
-    "lint:fix": "eslint src --ext .ts,.tsx --fix"
+    "lint:fix": "eslint src --ext .ts,.tsx --fix",
+    "test": "jest"
   },
   "dependencies": {
     "@fluentui/react-components": "^9.46.2",
@@ -21,11 +22,21 @@
     "@spaarke/ui-components": "file:../../client/shared/Spaarke.UI.Components"
   },
   "devDependencies": {
+    "@testing-library/dom": "^10.4.1",
+    "@testing-library/jest-dom": "^6.9.1",
+    "@testing-library/react": "^16.0.0",
+    "@testing-library/user-event": "^14.6.1",
+    "@types/jest": "^30.0.0",
     "@types/react": "^19.0.0",
     "@types/react-dom": "^19.0.0",
     "@vitejs/plugin-react": "^4.2.1",
+    "identity-obj-proxy": "^3.0.0",
+    "jest": "^30.2.0",
+    "jest-environment-jsdom": "^30.2.0",
     "react": "^19.0.0",
     "react-dom": "^19.0.0",
+    "ts-jest": "^29.4.4",
+    "ts-node": "^10.9.2",
     "typescript": "^5.0.0",
     "vite": "^5.0.0",
     "vite-plugin-singlefile": "^2.3.0"

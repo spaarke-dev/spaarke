@@ -51,7 +51,13 @@ export type { SidePaneFilterMessage, SidePaneFilterTranslator, SidePaneSpec } fr
 export { useLazyLoad } from './useLazyLoad';
 export type { UseLazyLoadOptions, UseLazyLoadResult } from './useLazyLoad';
 
-export { resolveConfig, parseLayoutColumns } from './configResolution';
+export {
+  resolveConfig,
+  parseLayoutColumns,
+  filterAvailableViews,
+  resolveEffectiveAvailableViews,
+  resolveEffectivePageSize,
+} from './configResolution';
 export type { DataGridOverrides, ResolvedConfig, ResolvedColumn } from './configResolution';
 
 // ─── Parent-context FetchXML overlay (task 020 D-020-02 follow-up) ───

@@ -16,11 +16,8 @@
  * The whole stack renders only when at least one row would surface; the parent
  * decides whether to mount it at all. This keeps the DOM minimal.
  *
- * Summary banners REMOVED in task 098 (Phase 9). The compose-summarize flow
- * is now streamed into the ConversationPane's chat surface via
- * `executeComposeSummarize` — Compose does not render summary text or errors
- * as workspace banners anymore. See ConversationPane's compose_summarize_request
- * subscription for the canonical rendering path.
+ * AI actions (Summarize etc.) render in the Assistant pane via chat
+ * messages — this stack owns only CRUD/lifecycle status.
  *
  * Constraints:
  *   - ADR-021: Fluent v9 only; semantic tokens; no hex colors.

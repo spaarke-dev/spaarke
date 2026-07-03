@@ -1,0 +1,113 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="spaarke-dataset-grid-framework-r2">
+  <metadata>
+    <title>FR-03: Widen LayoutJsonRow.sections + add SectionInstance type + parser back-compat</title>
+    <phase>2: Wizard UI + Per-Instance Overrides</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>006</dependencies>
+    <blocks>013,016</blocks>
+    <tags>frontend, typescript, shared-library, framework, schema</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies `.ts` schema type + parser + wiring; blocks 2 tasks; interacts with FR-05 precedence</rigor-reason>
+    <parallel-group>Wave 4</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Widen `LayoutJsonRow.sections` from `string[]` to `Array&lt;string | SectionInstance&gt;` (union). Add the `SectionInstance` type with `id: string`, `configIdOverride?: string`, `label?: string`, `overrides?: { pageSize?: number; availableViews?: string[] }`. Bare-string entries must continue to work (treated as `{ id: X }`). Wire `buildDynamicWorkspaceConfig` (and any consumer) to honor the override values. Ship unit tests covering all four override fields + back-compat.
+  </prompt>
+
+  <role>
+    SPAARKE frontend framework developer. Extends the workspace layout schema.
+  </role>
+
+  <goal>
+    `LayoutJsonRow.sections` accepts both `string` and `SectionInstance`. Framework routes `configIdOverride` to `configResolution`, `label` to section header, `overrides.pageSize` to the DataGrid's fallback, `overrides.availableViews` to the `<ViewSelector>` filter (takes precedence over config-level FR-05 allowlist). Back-compat verified against existing bare-string layouts.
+  </goal>
+
+  <context>
+    <background>
+      Communications config record has one global `pageSize: 25` — no way to vary per-layout. Similarly no way to rename ("Email" in one dashboard, "Communications" in another) or restrict view picker per-instance. FR-03 adds a per-instance override shape that folds Issue 6 (rename).
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/types/</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/buildDynamicWorkspaceConfig.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DataGrid/configResolution.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">Framework changes stay in `@spaarke/ui-components`.</constraint>
+    <constraint source="ADR-022">Shared-lib React-16-safe.</constraint>
+    <constraint source="project">Bare-string entries in existing `sprk_workspacelayout` records MUST continue to work (backward-compat).</constraint>
+    <constraint source="project">Per-instance `overrides.availableViews` takes precedence over config-level `SourceSavedQuery.availableViews` (FR-05).</constraint>
+    <constraint source="project">Additive; no `_version` bump.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-dataset-grid-framework-r2/CLAUDE.md</file>
+      <file>projects/spaarke-dataset-grid-framework-r2/spec.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>docs/architecture/SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read spec.md § FR-03. Locate `LayoutJsonRow` type. Design the `SectionInstance` interface.</step>
+    <step order="2">Add `SectionInstance` type: `{ id: string; configIdOverride?: string; label?: string; overrides?: { pageSize?: number; availableViews?: string[] } }` with JSDoc on each field.</step>
+    <step order="3">Widen `LayoutJsonRow.sections` to `Array&lt;string | SectionInstance&gt;`.</step>
+    <step order="4">Add a normalizer: `normalizeSection(entry: string | SectionInstance): SectionInstance` — bare string → `{ id: entry }`. Use this at the read boundary in `buildDynamicWorkspaceConfig`.</step>
+    <step order="5">Wire `configIdOverride` — when set, use it as the `configId` for the section instead of the metadata's baked-in default. Requires router/loader change in `buildDynamicWorkspaceConfig` or `configResolution`.</step>
+    <step order="6">Wire `label` — when set, override the section header title (metadata's label unchanged; only the render-time header uses the override).</step>
+    <step order="7">Wire `overrides.pageSize` — apply as effective `pageSize` for that section instance's DataGrid (highest precedence over config record's `behavior.pageSize` and framework default from FR-07).</step>
+    <step order="8">Wire `overrides.availableViews` — takes precedence over config-level `SourceSavedQuery.availableViews` (FR-05) in `configResolution`.</step>
+    <step order="9">Unit tests: (a) bare-string entry → normalized SectionInstance with just id, (b) SectionInstance with `configIdOverride` → alt configId used, (c) SectionInstance with `label` → header uses override, (d) SectionInstance with `overrides.pageSize` → effective pageSize matches, (e) SectionInstance with `overrides.availableViews` → view filter overrides config-level allowlist, (f) back-compat: 8+ published bare-string layouts still parse/render correctly.</step>
+    <step order="10">`npm test` + `npm run build` — clean.</step>
+    <step order="11">Update TASK-INDEX.md: → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/types/{LayoutJsonRow-location}.ts (modified — SectionInstance type + widened sections)</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/buildDynamicWorkspaceConfig.ts (modified — normalize + apply overrides)</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/DataGrid/configResolution.ts (modified — availableViews precedence)</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/__tests__/sectionInstance.test.ts (new)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given a bare-string `sections` entry (`"communications"`), when workspace renders, then behavior matches pre-R2 (default configId + label + pageSize).</criterion>
+    <criterion testable="true">Given a `SectionInstance` with `configIdOverride: '{alt-id}'`, when workspace renders, then the alt configId is loaded (not the section metadata's default).</criterion>
+    <criterion testable="true">Given a `SectionInstance` with `label: 'Email'`, when workspace renders, then the section header shows "Email"; underlying metadata label unchanged.</criterion>
+    <criterion testable="true">Given a `SectionInstance` with `overrides.pageSize: 100`, when the DataGrid loads, then effective pageSize is 100 (overrides both config record + framework default).</criterion>
+    <criterion testable="true">Given a `SectionInstance` with `overrides.availableViews: ['id-1']` AND config record has `SourceSavedQuery.availableViews: ['id-2']`, when `configResolution` runs, then instance-level allowlist wins (`id-1` only).</criterion>
+    <criterion testable="true">All 8+ existing published layouts continue to render (regression).</criterion>
+    <criterion testable="true">Unit tests + build clean.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    - This is the schema half of FR-03. Task 013 adds the wizard "Advanced" panel.
+    - Folds Issue 6 (per-instance rename) via `label` field — no separate task.
+    - Precedence order for `availableViews`: (highest) `SectionInstance.overrides.availableViews` > (middle) `SourceSavedQuery.availableViews` from FR-05 > (lowest) all views from `retrieveSavedQueriesForEntity`.
+    - Precedence order for `pageSize`: (highest) `SectionInstance.overrides.pageSize` > (middle) config record's `behavior.pageSize` > (lowest) framework default (25 per FR-07).
+
+    **Completion notes (2026-07-02):**
+    - `SectionInstance` type + `normalizeSection` helper co-located in `buildDynamicWorkspaceConfig.ts` alongside `LayoutJsonRow` (per task 010's placement precedent — types not under `src/types/`).
+    - Per-instance overrides surfaced to section factories via `SectionFactoryContext.sectionInstance?` field. Factories that embed `<DataGrid />` read `configIdOverride`, `overrides.pageSize`, `overrides.availableViews` from context to forward to the grid; factories that ignore it (action-cards, metric-cards) are unaffected.
+    - `label` override applied POST-factory by `buildDynamicWorkspaceConfig` (overwrites `SectionConfig.title`); empty-string labels are treated as "no override" per wizard save contract.
+    - New helpers `resolveEffectiveAvailableViews` + `resolveEffectivePageSize` added to `configResolution.ts` (exported from DataGrid barrel). Consumed by section factories at DataGrid-render time. Precedence for `availableViews` uses REPLACE semantics — see `sectionInstance.test.ts` for rationale.
+    - Barrel exports updated: `WorkspaceShell/index.ts` exports `SectionInstance` type + `normalizeSection`; `DataGrid/index.ts` exports the two new resolve helpers + `filterAvailableViews`.
+    - Tests: 23 new tests in `sectionInstance.test.ts` covering all 6 required branches + normalizer + empty-slot + mixed-shape + precedence-widening + zero/negative pageSize edge cases. All pass. Full suite regression check: 5 pre-existing failures in untouched files (RichFilePreview, XrmDataverseClient, EntityCreationService.cascade) + one in `sectionMetadataCatalog.test.ts` (predates my changes — expects 7 sections but 12 registered). Stash-and-restore verified failures are baseline, not new.
+    - Build: `npm run build` clean.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge. FULL rigor. Step 9.5 quality gates.</protocol>
+  </execution>
+</task>

@@ -1,0 +1,94 @@
+{
+  "$comment": "Full-featured DataGrid configuration template. Every top-level key populated with sensible defaults and per-field $comment annotations. INTENDED AS A REFERENCE, NOT A STARTING POINT — prefer entity-list-basic.json or entity-list-drill-through.json and add overrides only as needed (lean configs are good configs). REPLACE every placeholder marked with angle brackets. Type reference: src/client/shared/Spaarke.UI.Components/src/types/DataGridConfiguration.ts.",
+  "_version": "1.0",
+  "source": {
+    "$comment": "Discriminator 'type' picks one of three shapes: 'savedquery' (specific view by GUID — most common), 'savedquery-set' (auto-discover active savedqueries for the entity), or 'inline' (author FetchXML + layoutXml inline).",
+    "$comment_availableViews": "R2 FR-05 — availableViews is an optional allowlist of sibling savedquery GUIDs shown in the ViewSelector dropdown. Empty array or omitted = no filter (all active sibling savedqueries visible). Precedence: per-instance overrides.availableViews from SectionInstance (FR-03) beats this config-level value.",
+    "type": "savedquery",
+    "savedQueryId": "<savedquery-id>",
+    "availableViews": [
+      "<sibling-savedquery-id-1>",
+      "<sibling-savedquery-id-2>"
+    ]
+  },
+  "display": {
+    "$comment": "Visual chrome overrides. All fields optional; each falls back to a framework or Power Apps OOB default.",
+    "title": "<friendly-grid-title>",
+    "icon": "Grid20Regular",
+    "densityDefault": "comfortable",
+    "emptyStateMessage": "No records match the current filters."
+  },
+  "filterChips": {
+    "$comment": "How the filter chip strip above the grid is derived. mode='auto' (default) uses every chip-eligible layoutXml column. Use 'allowlist' / 'denylist' / 'explicit' to narrow.",
+    "mode": "auto",
+    "showClearAll": true
+  },
+  "commandBar": {
+    "$comment": "Command bar overrides. Omit any of the three keys to accept framework defaults. showDefaultCommands toggles the built-in buttons per slot.",
+    "primary": [
+      {
+        "$comment": "Custom primary command example. action='custom' requires customHandlerId which must be registered via registerCommandHandler in the host shell.",
+        "id": "custom-action-1",
+        "label": "Custom Action",
+        "icon": "Lightbulb20Regular",
+        "action": "custom",
+        "customHandlerId": "<custom-handler-id>",
+        "requiresSelection": false,
+        "privilege": "Read",
+        "appearance": "primary"
+      }
+    ],
+    "secondary": [],
+    "showDefaultCommands": {
+      "newRecord": true,
+      "delete": true,
+      "refresh": true,
+      "exportExcel": true,
+      "editColumns": true,
+      "editFilters": true
+    }
+  },
+  "rowOpen": {
+    "$comment": "What happens when the user clicks the primary-name link on a row. type='formDialog' opens the Dataverse-native centered modal (85% x 85%, Layout 1 — per R2 FR-20). Other types: sidePane, wizard, navigateToForm, dialog, webResource, custom.",
+    "type": "formDialog",
+    "passContext": []
+  },
+  "secondaryActions": [
+    {
+      "$comment": "Per-row / bulk affordance. kind can be 'ai-assistant', 'playbook', 'wizard', 'navigate', or 'custom'. visible='row-hover' (default 'always') surfaces the button only on row hover.",
+      "id": "run-playbook",
+      "label": "Run Playbook",
+      "icon": "PlayCircle20Regular",
+      "kind": "playbook",
+      "requiresSelection": "single",
+      "privilege": "Read",
+      "visible": "row-hover",
+      "playbookId": "<playbook-record-id>"
+    }
+  ],
+  "columns": {
+    "$comment": "Per-column overrides keyed by logical name. Every field optional; omit any column to accept the framework's metadata-derived defaults.",
+    "<column-logical-name>": {
+      "label": "<Override Column Label>",
+      "width": 200,
+      "renderer": "default",
+      "align": "left",
+      "tooltip": "<Optional tooltip>",
+      "hidden": false
+    }
+  },
+  "behavior": {
+    "$comment": "Grid-level interaction knobs. pageSize default 25 (workspace-widget majority use case per FR-07 owner clarification 2026-07-02). Drill-through / full-page consumers should override to 50 or 100.",
+    "selectionMode": "multi",
+    "pageSize": 25,
+    "enableSorting": true,
+    "enableColumnResize": true,
+    "enableKeyboardNavigation": true,
+    "parentContextFilter": {
+      "$comment": "Optional parent-context filter overlay. Injects a top-level FetchXML condition at render time when parentContext[<parent-context-key>] is set on the host. attribute = CHILD entity's lookup back to parent. Delete this whole block for non-drill-through grids.",
+      "attribute": "<parent-attribute>",
+      "parentContextKey": "<parent-context-key>",
+      "operator": "eq"
+    }
+  }
+}

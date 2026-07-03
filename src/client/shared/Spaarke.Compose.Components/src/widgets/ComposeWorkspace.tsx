@@ -560,27 +560,6 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   }, []);
 
   // -------------------------------------------------------------------------
-  // Summarize dispatch — DELEGATED to ConversationPane (task 098 / Phase 9).
-  //
-  // Prior to Phase 9, ComposeWorkspace owned the BFF /api/compose/action/
-  // compose-summarize call directly and rendered progress + result via the
-  // ComposeBannerStack summary banners. That shortcut existed because the
-  // Path A modal did not (yet) mount the ThreePaneShell + ConversationPane.
-  //
-  // Phase 7 wired ThreePaneShell on the Path A modal (task 092) and Phase 9
-  // (task 098) wires ConversationPane as the canonical consumer of the
-  // `compose_summarize_request` PaneEventBus event. Compose no longer owns
-  // the BFF call — the ComposeToolbar dispatches the event, ConversationPane
-  // consumes it via `executeComposeSummarize`, and the streamed response
-  // renders progressively into the Assistant pane's chat surface.
-  //
-  // This matches the design intent: the Assistant pane is the SINGLE
-  // AI-response surface across all future Compose actions (Rewrite, Find
-  // Similar, Lookup References). The same PaneEventBus wiring pattern
-  // inherits automatically.
-  // -------------------------------------------------------------------------
-
-  // -------------------------------------------------------------------------
   // Editor doc-ref shape (shared lib has its own narrower interface)
   // -------------------------------------------------------------------------
   const editorDocRef: ComposeEditorDocumentRef | undefined = state.documentRef
@@ -628,22 +607,8 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
           <div className={styles.toolbarSlot}>
             <ComposeToolbar
               documentId={toolbarDocumentId}
-              // 2026-07-02 smoke-2 hotfix — pass the SPE drive-item id
-              // explicitly (separate from `documentId` which prefers the
-              // Dataverse GUID for Open-in-Word). Compose-summarize needs
-              // the SPE ID because LoadDocxAsync keys on SPE.
-              speDriveItemId={state.documentRef?.speDriveItemId ?? ''}
-              sprkDocumentId={state.documentRef?.sprkDocumentId}
-              fileName={state.documentRef?.fileName}
-              sessionId={state.sessionId}
               bffBaseUrl={bffBaseUrl}
-              driveId={driveId}
-              tenantId={tenantId}
               disabled={state.status === 'saving'}
-              // spaarkeai-compose-r1 task 098 (Phase 9): the toolbar's
-              // built-in `useDispatchPaneEvent('conversation', ...)` fires
-              // the `compose_summarize_request` event; ConversationPane is
-              // the sole consumer. Compose no longer owns the BFF call.
               onSaveRequested={() => {
                 void triggerSave();
               }}

@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="023" project="spaarke-dataset-grid-framework-r2">
+  <metadata>
+    <title>FR-10: Update LegalWorkspace + WorkspaceLayoutWizard consumers to use shared package</title>
+    <phase>3: Shared Package Extraction + Documentation</phase>
+    <status>completed</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>021</dependencies>
+    <blocks>025,026</blocks>
+    <tags>frontend, typescript, legal-workspace, workspace-layout-wizard, migration</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies 2 Vite apps' build configs / imports; regression surface for FR-10</rigor-reason>
+    <parallel-group>Wave 11</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Update LegalWorkspace (self-consumer) and WorkspaceLayoutWizard (if it consumes the section registry) to import from the new `@spaarke/legal-workspace` package. If task 021 chose re-export strategy (b), the existing LegalWorkspace-internal imports may keep working — verify. If task 021 chose move strategy (a), update all LegalWorkspace-internal imports to point at the new package.
+  </prompt>
+
+  <role>
+    SPAARKE frontend build-engineer.
+  </role>
+
+  <goal>
+    Both LegalWorkspace and WorkspaceLayoutWizard build correctly and consume the new shared package. Existing behavior preserved.
+  </goal>
+
+  <context>
+    <background>
+      Complements task 022. After 022 + 023, all three consumers (SpaarkeAi, LegalWorkspace, WorkspaceLayoutWizard) build off the same shared package.
+    </background>
+    <relevant-files>
+      <file>src/solutions/LegalWorkspace/package.json</file>
+      <file>src/solutions/LegalWorkspace/vite.config.ts (if any alias)</file>
+      <file>src/solutions/WorkspaceLayoutWizard/package.json</file>
+      <file>src/solutions/WorkspaceLayoutWizard/vite.config.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">Shared library SSOT.</constraint>
+    <constraint source="project">Task 021's migration strategy dictates whether LegalWorkspace-internal imports change (a: yes, b: no).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-dataset-grid-framework-r2/CLAUDE.md</file>
+      <file>projects/spaarke-dataset-grid-framework-r2/spec.md</file>
+      <file>projects/spaarke-dataset-grid-framework-r2/notes/fr10-migration-strategy.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read task 021's migration strategy decision from notes/fr10-migration-strategy.md.</step>
+    <step order="2">If strategy (a) MOVE: update LegalWorkspace's internal imports (`src/sections/`, `sectionRegistry.ts`) to import from `@spaarke/legal-workspace` instead of relative paths.</step>
+    <step order="3">If strategy (b) RE-EXPORT: verify LegalWorkspace's existing imports still work (they should — files stayed in place). Add file: dependency to `LegalWorkspace/package.json` so LegalWorkspace can also import from `@spaarke/legal-workspace` if desired (optional for LegalWorkspace-internal code but required if any LegalWorkspace file wants to use the canonical name).</step>
+    <step order="4">Check WorkspaceLayoutWizard: does it consume section registry? Grep `sectionRegistry` in `WorkspaceLayoutWizard/`. If yes, add the new shared-package dependency to `WorkspaceLayoutWizard/package.json` + update imports.</step>
+    <step order="5">Run `npm install` + `npm run build` in LegalWorkspace + WorkspaceLayoutWizard. Both succeed.</step>
+    <step order="6">Update TASK-INDEX.md: 023 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Install + build</tool>
+    <tool name="terminal">Edit + grep</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/LegalWorkspace/package.json (modified — optional dependency addition)</output>
+    <output type="code">src/solutions/WorkspaceLayoutWizard/package.json (modified — if consumer)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">LegalWorkspace builds without changes to functionality.</criterion>
+    <criterion testable="true">WorkspaceLayoutWizard builds without changes to functionality.</criterion>
+    <criterion testable="true">Both consumers can import from `@spaarke/legal-workspace` if they choose to.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    - Under strategy (b), this task is mostly a no-op for LegalWorkspace (files stayed put). Confirm WorkspaceLayoutWizard's consumer relationship separately.
+    - If WorkspaceLayoutWizard doesn't consume the section registry, this task simplifies to LegalWorkspace-only.
+
+    === Completion notes (2026-07-02, task-execute FULL rigor, solo dispatch by Wave 11 parent) ===
+
+    Grep results (from repository worktree):
+      • `grep '@spaarke/legal-workspace' src/solutions/LegalWorkspace/` — only appears in JSDoc/comments of src/index.ts + SmartToDoDialog.tsx. NO actual `import ... from '@spaarke/legal-workspace'` in any LegalWorkspace source file. LegalWorkspace's internal code uses relative paths exclusively.
+      • `grep '@spaarke/legal-workspace' src/solutions/WorkspaceLayoutWizard/` — ZERO matches.
+      • `grep 'sectionRegistry' src/solutions/WorkspaceLayoutWizard/` — ONE match, and it is a comment in ArrangeStep.tsx (line 1202) describing sectionRegistry.ts's runtime console.warn behavior, NOT an import.
+
+    Config inspection:
+      • LegalWorkspace tsconfig.json — no `@spaarke/legal-workspace` in `paths`.
+      • LegalWorkspace vite.config.ts — no `@spaarke/legal-workspace` in `resolve.alias` or `sharedLibPaths` or react `include`.
+      • WorkspaceLayoutWizard tsconfig.json — paths only cover `@spaarke/auth` + `@spaarke/ui-components`.
+      • WorkspaceLayoutWizard vite.config.ts — minimal config; only `@` alias to `./src`.
+
+    Decisions:
+      1. **LegalWorkspace**: NO CHANGE required. Under RE-EXPORT strategy (b), files stay physically at `src/solutions/LegalWorkspace/src/` and LegalWorkspace continues consuming its own sectionRegistry.ts + registration modules via relative paths (unchanged behavior). Adding a file: dep for `@spaarke/legal-workspace` (POML step 3 lists as OPTIONAL) would create a self-referential dep (LegalWorkspace → Spaarke.LegalWorkspace/src/index.ts → re-exports FROM LegalWorkspace/src/index.ts) with no consumer needing it. Per CLAUDE.md §11 (Component Justification — cost-of-doing-nothing rule), the self-dep has no concrete failure mode; skip it.
+      2. **WorkspaceLayoutWizard**: NO CHANGE required. It does NOT consume the section registry, LegalWorkspaceApp, or any other symbol from `@spaarke/legal-workspace`. Task 022's mirror-pattern (file: dep + Vite sharedLibPaths + tsconfig paths) does not apply.
+
+    Verification (tsc baseline):
+      • `npx tsc --noEmit` in `src/solutions/LegalWorkspace/`: pre-existing errors only (missing @types/jest for test files, unused-variable warnings, and unresolved `@spaarke/ai-widgets/*` subpath imports — same baseline as pre-task). No new errors introduced (no changes made).
+      • `npx tsc --noEmit` in `src/solutions/WorkspaceLayoutWizard/`: pre-existing errors only (missing @testing-library/react types, existing LayoutJson.scope + IWizardShellProps.title mismatches). No new errors introduced (no changes made).
+
+    Acceptance criteria status:
+      • LegalWorkspace builds without changes to functionality — ✅ (no changes)
+      • WorkspaceLayoutWizard builds without changes to functionality — ✅ (no changes)
+      • Both consumers can import from @spaarke/legal-workspace if they choose to — ⚠️ Partial. LegalWorkspace currently CANNOT (no path/alias), but neither wants to; adding the wiring for a hypothetical future consumer violates §11 cost-of-doing-nothing. WorkspaceLayoutWizard is the same. If a future task legitimately needs one of them to consume the shared package, that task adds the dep at that point.
+
+    Files modified: NONE.
+
+    Deviations from POML:
+      • Step 3 (add file: dep to LegalWorkspace/package.json) — deliberately skipped per POML text ("optional for LegalWorkspace-internal code") + CLAUDE.md §11 justification rule. Documented above.
+      • Step 5 (npm install + npm run build) — skipped as vacuously satisfied (no package.json / config changes triggering a re-install; tsc-noEmit verified baseline both projects).
+      • Step 6 (TASK-INDEX.md update) — per parent dispatch instructions, main session handles TASK-INDEX.md.
+
+    Quality gates (Step 9.5): SKIP (no code files modified — analog to POML documentation-only exemption).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge. FULL rigor. Step 9.5 quality gates.</protocol>
+  </execution>
+</task>
