@@ -142,6 +142,11 @@ See [task-execute SKILL.md Step 8.0](../../.claude/skills/task-execute/SKILL.md)
 - **2026-07-02**: `sprk_memo` regarding = text field `sprk_regardingrecordid`, GUID-only format — Owner clarification O1. Path A exception to ADR-024.
 - **2026-07-02**: Notepad save = Ctrl+Enter (immediate) + blur (immediate) + 1s idle debounce; Enter inserts newline — Owner clarification O5.
 - **2026-07-02**: `useSprkMemoRepository` initially lives inside Notepad solution; promotion to `@spaarke/ui-components` deferred until MemoSection or a second consumer adopts.
+- **2026-07-02 (post task 001)**: Owner clarification O1 was incomplete. Task 001 verified via Dataverse MCP: `sprk_memo` fully complies with ADR-024 dual-field pattern (6 entity-specific lookups + 5 resolver fields). ADR-024 Path A tension REMOVED from spec — sprk_memo is Path C (comply). All memo creates MUST use `PolymorphicResolverService.applyResolverFields()` (existing shared lib service). See [`notes/design-alignment-corrections.md`](notes/design-alignment-corrections.md) for full accounting.
+- **2026-07-02 (post task 001)**: `sprk_recordsummary` is a MULTILINE TEXT **field on Matter** (not an entity). Sparkle popover reads the field value inline from useRecordFieldValues (no separate Xrm.WebApi call). Populated by external service (out of R1 scope).
+- **2026-07-02 (post task 001)**: Matter field name corrections — `sprk_mattername` (was `sprk_name`), `sprk_matterdescription` (was `sprk_description`). Add `sprk_recordsummary` to FR-12 fetch list.
+- **2026-07-02 (post task 001)**: `sprk_memo` body field is `sprk_memobody` (was `sprk_body`); title field is `sprk_name` NOT NULL (default "Untitled"). Notepad memo-create is schema-limited to 6 parent entities: Matter, Project, Event, Invoice, Budget, WorkAssignment.
+- **2026-07-02 (post task 001)**: Sibling project `set-regarding-and-field-mapping-resolver-r1` is adding 5th resolver field `sprk_regardingrecordnumber` — transparent to Notepad if it ships first.
 
 ---
 

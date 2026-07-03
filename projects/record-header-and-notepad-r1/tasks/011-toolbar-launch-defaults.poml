@@ -51,7 +51,8 @@
 
   <steps>
     <step order="1">Author toolbarLaunchDefaults.ts exporting: LAYOUT_1_MODAL = { target: 2, position: 1, width: {value: 85, unit: "%"}, height: {value: 85, unit: "%"} }; NOTEPAD_MODAL = { target: 2, position: 1, width: {value: 70, unit: "%"}, height: {value: 80, unit: "%"} }.</step>
-    <step order="2">Also export NOTEPAD_WEBRESOURCE_NAME = "sprk_notepad_page"; SMARTTODO_WEBRESOURCE_NAME = "sprk_smarttodo_page"; RECORDSUMMARY_ENTITY = "sprk_recordsummary".</step>
+    <step order="2">Also export NOTEPAD_WEBRESOURCE_NAME = "sprk_notepad_page"; SMARTTODO_WEBRESOURCE_NAME = "sprk_smarttodo_page"; RECORDSUMMARY_FIELD = "sprk_recordsummary" (per task 001 correction — this is a MULTILINE TEXT field on the record, NOT an entity name).</step>
+    <step order="2.1">Also export SUPPORTED_MEMO_PARENTS = { sprk_matter: "sprk_regardingmatter", sprk_project: "sprk_regardingproject", sprk_event: "sprk_regardingevent", sprk_invoice: "sprk_regardinginvoice", sprk_budget: "sprk_regardingbudget", sprk_workassignment: "sprk_regardingworkassignment" } — the 6 entity-specific-lookup mappings from ADR-024 dual-field pattern.</step>
     <step order="3">Add TypeScript types for the constants (or import from Xrm typings if available in the shared lib).</step>
     <step order="4">Update TASK-INDEX.md: mark 011 ✅.</step>
     <step order="5">Document deviations in notes/.</step>
@@ -64,7 +65,7 @@
   </outputs>
 
   <acceptance-criteria>
-    <criterion testable="true">File exists with named exports LAYOUT_1_MODAL, NOTEPAD_MODAL, NOTEPAD_WEBRESOURCE_NAME, SMARTTODO_WEBRESOURCE_NAME, RECORDSUMMARY_ENTITY.</criterion>
+    <criterion testable="true">File exists with named exports LAYOUT_1_MODAL, NOTEPAD_MODAL, NOTEPAD_WEBRESOURCE_NAME, SMARTTODO_WEBRESOURCE_NAME, RECORDSUMMARY_FIELD, SUPPORTED_MEMO_PARENTS.</criterion>
     <criterion testable="true">Values match spec dimensions exactly.</criterion>
   </acceptance-criteria>
 

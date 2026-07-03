@@ -15,7 +15,7 @@
     <parallel-reason>Depends on 001 (schema verification for sprk_regardingrecordid filter shape)</parallel-reason>
   </metadata>
 
-  <prompt>Build useRelatedCount hook per FR-06 at src/client/shared/Spaarke.UI.Components/src/hooks/useRelatedCount.ts. Returns { count, loading, error }; calls Xrm.WebApi.retrieveMultipleRecords with $count=true&amp;$top=0. Filter for sprk_memo uses sprk_regardingrecordid eq '{guid}' (per owner clarification O1); filter for sprk_todo uses standard regardingobjectid.</prompt>
+  <prompt>Build useRelatedCount hook per FR-06 (REVISED post task 001) at src/client/shared/Spaarke.UI.Components/src/hooks/useRelatedCount.ts. Signature: useRelatedCount(relatedEntity: string, filter: string). Returns { count, loading, error }. Calls Xrm.WebApi.retrieveMultipleRecords with `?$filter=${filter}&amp;$count=true&amp;$top=0`. Filter is caller-provided (hook is filter-agnostic). For sprk_memo: caller builds entity-specific-lookup filter per ADR-024 dual-field pattern (e.g. `_sprk_regardingmatter_value eq {guid}` for Matter); for sprk_todo: standard `_regardingobjectid_value eq {guid}`. **See notes/design-alignment-corrections.md for the schema truth uncovered by task 001.**</prompt>
 
   <role>Spaarke platform developer. Expert in Xrm.WebApi OData patterns.</role>
 
@@ -42,6 +42,7 @@
       <file>projects/record-header-and-notepad-r1/spec.md</file>
       <file>projects/record-header-and-notepad-r1/CLAUDE.md</file>
       <file>projects/record-header-and-notepad-r1/notes/sprk-memo-schema.md</file>
+      <file>projects/record-header-and-notepad-r1/notes/design-alignment-corrections.md</file>
       <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
       <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
       <file>.claude/patterns/pcf/dataverse-queries.md</file>

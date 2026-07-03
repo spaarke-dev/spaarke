@@ -14,7 +14,7 @@
     <parallel-safe>false</parallel-safe>
   </metadata>
 
-  <prompt>Author src/client/pcf/MatterHeader/control/MatterHeaderView.tsx implementing spec FR-12 exactly — thin composition of shared primitives with 5 Matter fields (sprk_matternumber, sprk_name, sprk_mattertype, sprk_practicearea, sprk_description) in a FieldGrid with span 1/2/1/1/3.</prompt>
+  <prompt>Author src/client/pcf/MatterHeader/control/MatterHeaderView.tsx implementing spec FR-12 (REVISED per task 001) — thin composition of shared primitives with 5 Matter fields (**`sprk_matternumber, sprk_mattername, sprk_mattertype, sprk_practicearea, sprk_matterdescription`** — corrected field names per Dataverse MCP verification) in a FieldGrid with span 1/2/1/1/3. **Also fetch `sprk_recordsummary`** (MULTILINE TEXT field on Matter) and pass to useRecordHeaderToolbarActions as options.recordSummary for the sparkle popover per FR-08. **See notes/design-alignment-corrections.md.**</prompt>
 
   <role>Spaarke platform developer. Fluent UI v9 composition expert.</role>
 

@@ -15,7 +15,7 @@
     <parallel-reason>Depends on 009, 010, 011 outputs</parallel-reason>
   </metadata>
 
-  <prompt>Build useRecordHeaderToolbarActions hook at src/client/shared/Spaarke.UI.Components/src/hooks/useRecordHeaderToolbarActions.ts per FR-07/08/08a/09/10/11. Returns fully-formed IHeaderToolbarProps with 3 wired slots. Sparkle opens Fluent v9 popover (not modal) showing sprk_recordsummary body inline + refresh icon rendered UNWIRED in R1 (tooltip: "Refresh available in a follow-on release"). Checkmark opens SmartTodo Layout 1 (85%x85%). Annotation opens Notepad (70%x80%). Badges from useRelatedCount.</prompt>
+  <prompt>Build useRecordHeaderToolbarActions hook at src/client/shared/Spaarke.UI.Components/src/hooks/useRecordHeaderToolbarActions.ts per FR-07/08/08a/09/10/11 (REVISED post task 001). Signature: useRecordHeaderToolbarActions({ entity, recordId, recordSummary }) — accepts recordSummary as an OPTIONAL string prop passed by the consumer (from useRecordFieldValues). Returns fully-formed IHeaderToolbarProps with 3 wired slots. **Sparkle** opens Fluent v9 popover showing the recordSummary string inline (or empty state if null/empty) + refresh icon rendered UNWIRED in R1 (tooltip: "Refresh available in a follow-on release"). NO separate Xrm.WebApi call for the summary — sprk_recordsummary is a MULTILINE TEXT field already fetched by the consumer per FR-12. **Checkmark** opens SmartTodo Layout 1 (85%x85%); badge from useRelatedCount('sprk_todo', `_regardingobjectid_value eq ${recordId}`). **Annotation** opens Notepad (70%x80%); badge from useRelatedCount('sprk_memo', entity-specific-lookup filter for the current entity per SUPPORTED_MEMO_PARENTS map from toolbarLaunchDefaults). If entity is NOT in SUPPORTED_MEMO_PARENTS, memo badge is 0 (Notepad will show an error on click). **See notes/design-alignment-corrections.md.**</prompt>
 
   <role>Spaarke platform developer. React hooks + Fluent v9 Popover expert; Xrm.Navigation.navigateTo experienced.</role>
 
@@ -62,10 +62,10 @@
   </justification>
 
   <steps>
-    <step order="1">Declare IUseRecordHeaderToolbarActionsOptions and return type IHeaderToolbarProps.</step>
-    <step order="2">Fetch memo count via useRelatedCount("sprk_memo", `sprk_regardingrecordid eq '${recordId}'`); fetch todo count via useRelatedCount("sprk_todo", `_regardingobjectid_value eq ${recordId}`).</step>
-    <step order="3">Fetch sprk_recordsummary body via Xrm.WebApi.retrieveMultipleRecords filtered by regarding = recordId. If found, cache the body + reference; if none, cache null.</step>
-    <step order="4">Build sparkle slot: onClick opens a Fluent v9 Popover anchored to the sparkle button (use useState for open/closed). Popover content: summary body OR empty-state message; refresh icon in popover header with tooltip="Refresh available in a follow-on release" and onClick=no-op.</step>
+    <step order="1">Declare IUseRecordHeaderToolbarActionsOptions { entity: string; recordId: string; recordSummary?: string | null; enabled?: {...}; } and return type IHeaderToolbarProps.</step>
+    <step order="2">Fetch memo count via useRelatedCount("sprk_memo", buildMemoFilter(entity, recordId)) where buildMemoFilter uses SUPPORTED_MEMO_PARENTS[entity] to construct `_${lookup-field}_value eq ${recordId}` (returns null if entity unsupported → memo badge 0). Fetch todo count via useRelatedCount("sprk_todo", `_regardingobjectid_value eq ${recordId}`).</step>
+    <step order="3">**Removed** per task 001 correction — sprk_recordsummary is NOT a separate entity; the consumer passes the value in via recordSummary prop from useRecordFieldValues.</step>
+    <step order="4">Build sparkle slot: onClick opens a Fluent v9 Popover anchored to the sparkle button (use useState for open/closed). Popover content: options.recordSummary body if non-empty; else empty-state "No summary yet"; refresh icon in popover header with tooltip="Refresh available in a follow-on release" and onClick=no-op.</step>
     <step order="5">Build checkmark slot: onClick calls Xrm.Navigation.navigateTo({ pageType: "webresource", webresourceName: SMARTTODO_WEBRESOURCE_NAME, data: `regardingEntity=${entity}&amp;regardingId=${recordId}` }, LAYOUT_1_MODAL). Badge = todo count.</step>
     <step order="6">Build annotation slot: onClick calls Xrm.Navigation.navigateTo({ pageType: "webresource", webresourceName: NOTEPAD_WEBRESOURCE_NAME, data: `regardingEntity=${entity}&amp;regardingId=${recordId}` }, NOTEPAD_MODAL). Badge = memo count.</step>
     <step order="7">Return IHeaderToolbarProps with only enabled slots (respect enabled: {sparkle?, checkmark?, annotation?} — defaults all true).</step>

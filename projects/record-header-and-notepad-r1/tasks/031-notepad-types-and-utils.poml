@@ -43,8 +43,8 @@
   </knowledge>
 
   <steps>
-    <step order="1">Author types/memo.ts: interface Memo { sprk_memoid: string; sprk_body: string; sprk_regardingrecordid: string; createdby: { id: string; name: string; }; createdon: string; modifiedon: string; }</step>
-    <step order="2">Author utils/deriveTitle.ts: export function deriveTitle(body: string | null | undefined, maxLen: number = 60): string — first non-empty line, trimmed, truncated to maxLen with "…"; return "Untitled" if empty.</step>
+    <step order="1">Author types/memo.ts (REVISED per task 001): interface Memo { sprk_memoid: string; sprk_name: string; sprk_memobody: string | null; sprk_regardingrecordid: string; sprk_regardingrecordname: string; sprk_regardingrecordtype?: { id: string; name: string; }; _sprk_regardingmatter_value?: string; _sprk_regardingproject_value?: string; _sprk_regardingevent_value?: string; _sprk_regardinginvoice_value?: string; _sprk_regardingbudget_value?: string; _sprk_regardingworkassignment_value?: string; createdby: { id: string; name: string; }; createdon: string; modifiedon: string; } — all fields per Dataverse MCP verification; body is sprk_memobody (NOT sprk_body); title is sprk_name (required at create).</step>
+    <step order="2">Author utils/deriveTitle.ts: export function deriveTitle(memo: { sprk_name?: string; sprk_memobody?: string | null }, maxLen: number = 60): string — prefers memo.sprk_name if non-empty and non-default; falls back to first non-empty line of memo.sprk_memobody trimmed + truncated to maxLen with "…"; returns "Untitled" if both empty.</step>
     <step order="3">Add unit tests: empty → "Untitled"; whitespace-only → "Untitled"; single line ≤ maxLen → line itself; single line &gt; maxLen → truncated + "…"; multiline → first non-empty line.</step>
     <step order="4">Run tests.</step>
     <step order="5">Update TASK-INDEX.md: mark 031 ✅.</step>

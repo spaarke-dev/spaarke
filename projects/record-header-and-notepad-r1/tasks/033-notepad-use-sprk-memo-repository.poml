@@ -14,7 +14,7 @@
     <parallel-safe>false</parallel-safe>
   </metadata>
 
-  <prompt>Build useSprkMemoRepository hook at src/solutions/Notepad/src/hooks/useSprkMemoRepository.ts. Provides list, get, create, update against sprk_memo via Xrm.WebApi. Filter: sprk_regardingrecordid eq '{regardingId}' (per O1). Sort createdon desc. Include debounced update for FR-17 save behavior.</prompt>
+  <prompt>Build useSprkMemoRepository hook at src/solutions/Notepad/src/hooks/useSprkMemoRepository.ts per FR-14/15/17 (REVISED post task 001). Provides list + create + update against sprk_memo via Xrm.WebApi. **List**: filter by entity-specific lookup for regardingEntity per SUPPORTED_MEMO_PARENTS map (e.g. `_sprk_regardingmatter_value eq {guid}` for Matter); $select includes sprk_memoid, sprk_name, sprk_memobody, sprk_regardingrecordid, createdby, createdon, modifiedon; $orderby createdon desc. **Create**: MUST use `PolymorphicResolverService.applyResolverFields()` from @spaarke/ui-components (populates entity-specific lookup + all 4 resolver fields in one call); MUST include sprk_name = "Untitled" (NOT NULL); nav-props discovered via ManyToOneRelationships metadata. **Update**: sprk_memobody (body) + optionally sprk_name (title). Debounced update per FR-17. If regardingEntity is NOT in SUPPORTED_MEMO_PARENTS, return { unsupported: true, ...defaults } so UI can show error. **See notes/design-alignment-corrections.md.**</prompt>
 
   <role>Spaarke platform developer. Xrm.WebApi CRUD + React hooks + debounce patterns.</role>
 
@@ -43,6 +43,8 @@
       <file>projects/record-header-and-notepad-r1/spec.md</file>
       <file>projects/record-header-and-notepad-r1/CLAUDE.md</file>
       <file>projects/record-header-and-notepad-r1/notes/sprk-memo-schema.md</file>
+      <file>projects/record-header-and-notepad-r1/notes/design-alignment-corrections.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/services/PolymorphicResolverService.ts</file>
       <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
       <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
       <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
@@ -57,10 +59,12 @@
   </justification>
 
   <steps>
-    <step order="1">Design API: interface UseSprkMemoRepository { memos: Memo[]; loading; error; currentMemo: Memo | null; setCurrentMemo(id); createMemo(): Promise&lt;Memo&gt;; updateBody(body: string, options?: { immediate?: boolean }): void; }</step>
-    <step order="2">Implement list: Xrm.WebApi.retrieveMultipleRecords("sprk_memo", `?$filter=sprk_regardingrecordid eq '${regardingId}'&amp;$orderby=createdon desc`).</step>
-    <step order="3">Implement create: Xrm.WebApi.createRecord("sprk_memo", { sprk_regardingrecordid: regardingId, sprk_body: "" }); refetch list; setCurrentMemo(new id).</step>
-    <step order="4">Implement updateBody with debounce (1000ms) via a ref-held timer; options.immediate cancels timer + writes now.</step>
+    <step order="1">Design API (REVISED per task 001): interface UseSprkMemoRepository { memos: Memo[]; loading; error; unsupported: boolean; currentMemo: Memo | null; setCurrentMemo(id); createMemo(): Promise&lt;Memo | null&gt;; updateBody(body: string, options?: { immediate?: boolean }): void; updateName(name: string): void; }</step>
+    <step order="2">Look up entity-specific lookup field name from SUPPORTED_MEMO_PARENTS (from toolbarLaunchDefaults). If regardingEntity not in map, set unsupported=true and skip queries.</step>
+    <step order="3">Implement list: Xrm.WebApi.retrieveMultipleRecords("sprk_memo", `?$filter=_${lookupField}_value eq ${regardingId}&amp;$select=sprk_memoid,sprk_name,sprk_memobody,sprk_regardingrecordid,createdby,createdon,modifiedon&amp;$orderby=createdon desc`).</step>
+    <step order="4">Implement create: import { applyResolverFields } from "@spaarke/ui-components"; discover nav-props for sprk_memo (via ManyToOneRelationships metadata query — cache); resolve parent record name via Xrm.WebApi.retrieveRecord($select=primary-name-field for the parent entity); call applyResolverFields(webApi, entity, navProps, regardingEntity, entitySetName(regardingEntity), regardingId, parentName); add sprk_name = "Untitled"; add sprk_memobody = ""; call Xrm.WebApi.createRecord("sprk_memo", entity); refetch list; setCurrentMemo(new id).</step>
+    <step order="5">Implement updateBody with debounce (1000ms) via a ref-held timer; options.immediate cancels timer + writes now via Xrm.WebApi.updateRecord("sprk_memo", currentMemo.sprk_memoid, { sprk_memobody: body }).</step>
+    <step order="6">Implement updateName: immediate write of sprk_name via Xrm.WebApi.updateRecord.</step>
     <step order="5">Handle Xrm undefined (test env) gracefully.</step>
     <step order="6">Write tests: list order; create returns new id; debounced update coalesces rapid keystrokes; immediate=true triggers immediate write.</step>
     <step order="7">Run tests.</step>
