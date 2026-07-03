@@ -25,13 +25,7 @@
  */
 
 import * as React from 'react';
-import {
-  Skeleton,
-  SkeletonItem,
-  makeStyles,
-  shorthands,
-  tokens,
-} from '@fluentui/react-components';
+import { Skeleton, SkeletonItem, makeStyles, shorthands, tokens } from '@fluentui/react-components';
 
 import { HeaderToolbar } from '../HeaderToolbar';
 import type { IRecordHeaderShellProps } from './types';
@@ -107,15 +101,8 @@ const useStyles = makeStyles({
  * the ~5-field header footprint of `MatterHeaderPcf` (5 fields with one
  * spanning 3 columns still visually parks in ~6 grid cells).
  */
-const LoadingSkeleton: React.FC<{ className: string; cellClassName: string }> = ({
-  className,
-  cellClassName,
-}) => (
-  <Skeleton
-    className={className}
-    aria-label="Loading record header"
-    data-testid="record-header-shell-skeleton"
-  >
+const LoadingSkeleton: React.FC<{ className: string; cellClassName: string }> = ({ className, cellClassName }) => (
+  <Skeleton className={className} aria-label="Loading record header" data-testid="record-header-shell-skeleton">
     {/* Six cells = 3 columns × 2 rows. Keys are stable strings so React
         reconciliation stays predictable across re-renders. */}
     <SkeletonItem className={cellClassName} data-testid="record-header-shell-skeleton-cell-0" />
@@ -152,11 +139,7 @@ const LoadingSkeleton: React.FC<{ className: string; cellClassName: string }> = 
  * );
  * ```
  */
-export const RecordHeaderShell: React.FC<IRecordHeaderShellProps> = ({
-  toolbar,
-  loading,
-  children,
-}) => {
+export const RecordHeaderShell: React.FC<IRecordHeaderShellProps> = ({ toolbar, loading, children }) => {
   const styles = useStyles();
   const isLoading = loading === true;
 
@@ -164,14 +147,7 @@ export const RecordHeaderShell: React.FC<IRecordHeaderShellProps> = ({
     <div className={styles.card} data-testid="record-header-shell">
       <HeaderToolbar {...toolbar} />
       <div className={styles.body} data-testid="record-header-shell-body">
-        {isLoading ? (
-          <LoadingSkeleton
-            className={styles.skeleton}
-            cellClassName={styles.skeletonCell}
-          />
-        ) : (
-          children
-        )}
+        {isLoading ? <LoadingSkeleton className={styles.skeleton} cellClassName={styles.skeletonCell} /> : children}
       </div>
     </div>
   );

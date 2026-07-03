@@ -52,13 +52,7 @@
  */
 
 import * as React from 'react';
-import {
-  Link,
-  Text,
-  makeStyles,
-  mergeClasses,
-  tokens,
-} from '@fluentui/react-components';
+import { Link, Text, makeStyles, mergeClasses, tokens } from '@fluentui/react-components';
 import { Link24Regular } from '@fluentui/react-icons';
 
 import { getXrm } from '../../../utils/xrmContext';
@@ -229,7 +223,7 @@ export const LookupField: React.FC<ILookupFieldProps> = ({ label, value, span })
         // getXrm / navigateTo threw synchronously — treat as no-op.
       }
     },
-    [empty, value],
+    [empty, value]
   );
 
   return (
