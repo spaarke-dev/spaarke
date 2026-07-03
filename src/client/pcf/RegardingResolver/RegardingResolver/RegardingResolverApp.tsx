@@ -1,30 +1,44 @@
 /**
- * RegardingResolverApp — v1.3 streamlined 2-row UI for the polymorphic regarding picker.
+ * RegardingResolverApp — v1.3.1 streamlined 2-row UI for the polymorphic regarding picker.
  *
- * Layout (2-row form-line):
+ * # v1.3.1 layout (SRFR-034 owner polish pass)
  *
  *   ┌────────────────────────────────────────────────────────────────────────┐
- *   │  Related Record                                                    [🔍] │  ← Row 1: title + toolbar icon
+ *   │  RELATED RECORD                                          [⟳] [🔎]      │  ← Row 1: OOB-styled title + refresh + lookup
  *   ├────────────────────────────────────────────────────────────────────────┤
- *   │  MTR-2025-0142     Smith v. Jones                                       │  ← Row 2: record-number link + record-name
+ *   │  MTR-2025-0142                                                          │  ← Row 2: record-number link ONLY (name cell removed)
  *   └────────────────────────────────────────────────────────────────────────┘
  *
- * Row 1: Title text (from `title` manifest input, default "Related Record") +
- *        right-aligned toolbar icon. The icon is provided by the shared
- *        `PolymorphicPicker` (Wave 2 task 021 / FR-C2-01); clicking it reveals a
- *        Menu of entity types from the catalog. Selecting an entity opens
- *        `Xrm.Utility.lookupObjects` scoped to that entity type. The picked
- *        record flows through `onSelect(entityType, recordId, recordName)` back
- *        into this component's `applyRegardingSelection` handler which delegates
- *        to `PolymorphicResolverService.applyResolverFields` per FR-A4-01.
+ * Row 1: OOB-styled uppercase title (Segoe UI 14px / #242424 / weight 400 /
+ *        padding 4px 0px per SRFR-034 §4 — documented Path A exception to
+ *        ADR-021 for OOB parity). Title text is derived from the `title`
+ *        manifest input (default "RELATED RECORD") and rendered UPPERCASED
+ *        regardless of maker input case (SRFR-034 §1). Right side of Row 1
+ *        contains the refresh ToolbarButton (SRFR-034 §5 — save + refresh
+ *        handler) LEFT of the shared `PolymorphicPicker` lookup icon. The
+ *        picker's search icon is CSS-flipped horizontally (`scaleX(-1)`) to
+ *        match OOB Dataverse lookup direction (SRFR-034 §3, consumer-side
+ *        transform — shared lib unchanged per ADR-012). Clicking the lookup
+ *        opens `Xrm.Utility.lookupObjects`; the picked record flows through
+ *        `onSelect(entityType, recordId, recordName)` back into this
+ *        component's `applyRegardingSelection` handler which delegates to
+ *        `PolymorphicResolverService.applyResolverFields` per FR-A4-01.
  *
- * Row 2: `sprk_regardingrecordnumber` hyperlink placeholder (SRFR-031 will wire
- *        the click to `Xrm.Navigation.navigateTo` modal open) + plain
- *        `sprk_regardingrecordname` text. Field names are resolved from the
- *        `regardingRecordNumberField` and `regardingRecordNameField` bound
- *        manifest properties (defaults `sprk_regardingrecordnumber` and
- *        `sprk_regardingrecordname`) so makers can rebind either field on a new
- *        host entity without code change (FR-A1-02).
+ * Row 2: `sprk_regardingrecordnumber` hyperlink ONLY (single-column layout —
+ *        SRFR-034 §6 removed the record-name cell and the em-dash empty-state
+ *        placeholder). Owner uses the OOB record-name field placed elsewhere
+ *        on the form. The record-name bound property
+ *        (`regardingRecordNameField`) is preserved in the manifest for
+ *        backward-compat with v1.3.0 form bindings but is NOT rendered.
+ *        Field name for the record-number Link is resolved from the
+ *        `regardingRecordNumberField` bound manifest property (default
+ *        `sprk_regardingrecordnumber`) so makers can rebind on a new host
+ *        entity without code change (FR-A1-02). Clicking the link opens the
+ *        related record in a modal via `Xrm.Navigation.navigateTo` (SRFR-031).
+ *
+ * Footer: Version footer (v1.3.1 • Built {YYYY-MM-DD}) — conditionally rendered
+ *         based on the new `showVersionFooter` input property (SRFR-034 §2,
+ *         default true).
  *
  * # HOST-only usage (binding contract — R4-112 clarification 2026-06-24)
  *
@@ -34,17 +48,18 @@
  * entity-specific lookups). Currently host entities: `sprk_todo`,
  * `sprk_communication` (FR-22).
  *
- * # Read-only mode (FR-A5-01 / NFR-04) — preserved by SRFR-033
+ * # Read-only mode (FR-A5-01 / NFR-04) — preserved by SRFR-033 + SRFR-034
  *
  * When read-only (either `context.parameters.readOnly.raw === true` OR
  * `context.mode.isControlDisabled === true`, resolved by RegardingResolverHost),
- * Row 1 hides the toolbar icon (PolymorphicPicker gates the trigger on
- * `!readOnly` internally); Row 2 continues to render the record-number
- * hyperlink + record-name pair. The hyperlink click handler stays active
- * because opening the related record in a modal is a VIEW action — safe
- * under read-only per FR-A5-01. handlePickerSelect has a defensive
- * write-gate (line ~282) that refuses to write if a race reaches it while
- * readOnly is true.
+ * Row 1 hides BOTH the refresh ToolbarButton (SRFR-034 §5) AND the
+ * PolymorphicPicker lookup trigger (gated on `!readOnly` internally); the
+ * OOB-styled title text still renders. Row 2 continues to render the
+ * record-number hyperlink (name cell was removed in v1.3.1 per SRFR-034
+ * §6). The hyperlink click handler stays active because opening the related
+ * record in a modal is a VIEW action — safe under read-only per FR-A5-01.
+ * handlePickerSelect has a defensive write-gate that refuses to write if a
+ * race reaches it while readOnly is true.
  *
  * # CREATE-mode presave bridge (FR-A5-02)
  *
@@ -62,9 +77,13 @@ import {
   MessageBar,
   MessageBarBody,
   Text,
+  Toolbar,
+  ToolbarButton,
+  Tooltip,
   makeStyles,
   tokens,
 } from '@fluentui/react-components';
+import { ArrowClockwiseRegular } from '@fluentui/react-icons';
 import {
   PolymorphicPicker as PolymorphicPickerRaw,
   buildRecordUrl,
@@ -101,10 +120,18 @@ import {
 // in index.ts and the manifest attributes on every release (SRFR-033).
 // ---------------------------------------------------------------------------
 
-const BUILD_DATE = '2026-07-02';
+const BUILD_DATE = '2026-07-03';
 
 // ---------------------------------------------------------------------------
-// Styles (Fluent v9 semantic tokens only — ADR-021)
+// Styles
+//
+// Note (v1.3.1): The `title` style intentionally uses hardcoded values
+// (#242424, Segoe UI, 14px, weight 400, padding 4px 0px) to match the
+// Dataverse OOB section-header exactly. This is a documented exception to
+// ADR-021 (semantic tokens preferred): OOB parity is the visual target, not
+// Fluent v9 theming. Owner-approved (SRFR-034 spec §4).
+//
+// All other styles remain on Fluent v9 semantic tokens per ADR-021.
 // ---------------------------------------------------------------------------
 
 const useStyles = makeStyles({
@@ -122,26 +149,56 @@ const useStyles = makeStyles({
     justifyContent: 'space-between',
     minHeight: '32px',
   },
+  // Row-1 title — Dataverse OOB section-header parity (SRFR-034 §4).
+  title: {
+    fontFamily:
+      '"Segoe UI", "Segoe UI Web (West European)", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", sans-serif',
+    fontSize: '14px',
+    fontWeight: 400,
+    color: '#242424',
+    padding: '4px 0px',
+    letterSpacing: 0,
+    textTransform: 'uppercase',
+  },
+  // Row-1 actions area — refresh (left) + PolymorphicPicker (right).
+  row1Actions: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalXXS,
+  },
+  refreshToolbar: {
+    paddingLeft: 0,
+    paddingRight: 0,
+    minHeight: 'auto',
+  },
+  // Flip the shared PolymorphicPicker's trigger icon horizontally so the
+  // magnifier handle points toward the top-left, matching the OOB Dataverse
+  // lookup icon direction (SRFR-034 §3). Consumer-side CSS transform —
+  // shared component is unchanged (ADR-012).
+  //
+  // Also visually suppress the picker's internal title span: our own OOB-styled
+  // title (rendered above) is the visible label; the picker's title is kept
+  // in the DOM for accessibility (aria-label + tooltip content wiring) but
+  // hidden with `display: none` on its span. The picker's title text is still
+  // used for the tooltip / aria-label wiring inside the shared component.
+  pickerContainer: {
+    '& [data-testid="polymorphic-picker-title"]': {
+      display: 'none',
+    },
+    '& [data-testid="polymorphic-picker-trigger"] svg': {
+      transform: 'scaleX(-1)',
+    },
+  },
+  // Row-2 — single-column (record-number Link only). SRFR-034 §6 removed
+  // the record-name cell + em-dash placeholder.
   row2: {
-    display: 'grid',
-    gridTemplateColumns: 'auto 1fr',
-    columnGap: tokens.spacingHorizontalM,
+    display: 'flex',
     alignItems: 'baseline',
     padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalXS}`,
     minHeight: '24px',
   },
   recordNumber: {
     fontWeight: tokens.fontWeightSemibold,
-  },
-  recordName: {
-    color: tokens.colorNeutralForeground1,
-    overflow: 'hidden',
-    textOverflow: 'ellipsis',
-    whiteSpace: 'nowrap',
-  },
-  emptyRow2: {
-    color: tokens.colorNeutralForeground3,
-    fontStyle: 'italic',
   },
   footer: {
     marginTop: 'auto',
@@ -185,6 +242,52 @@ function getXrm():
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const w = window as any;
   return w.Xrm ?? w.parent?.Xrm ?? w.top?.Xrm;
+}
+
+/**
+ * v1.3.1 — Refresh handler wired to a new toolbar button (SRFR-034 §5).
+ *
+ * Behavior:
+ *   1. Saves the current form (`Xrm.Page.data.entity.save()`) so any dirty
+ *      buffered attributes commit before refreshing.
+ *   2. Refreshes the form (`Xrm.Page.data.refresh(true)`) — the `true` arg
+ *      re-fetches from the server (parity with the OOB "Refresh" ribbon
+ *      command).
+ *   3. If Xrm is unavailable (test harness / canvas app), falls back to
+ *      `window.location.reload()` so the user still gets a refresh.
+ *   4. Any failure is caught and warned — the form host must NEVER crash
+ *      because a save error propagated (parity with the existing modal-open
+ *      handler's defensive posture).
+ */
+async function handleRefreshInternal(): Promise<void> {
+  const xrm = getXrm();
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const data = (xrm?.Page as any)?.data;
+    const save = data?.entity?.save;
+    if (typeof save === 'function') {
+      // save() returns a promise in modern MDA; older forms return void.
+      const saveResult = save.call(data.entity);
+      if (saveResult && typeof (saveResult as Promise<unknown>).then === 'function') {
+        await saveResult;
+      }
+    }
+    const refresh = data?.refresh;
+    if (typeof refresh === 'function') {
+      const refreshResult = refresh.call(data, true);
+      if (refreshResult && typeof (refreshResult as Promise<unknown>).then === 'function') {
+        await refreshResult;
+      }
+      return;
+    }
+    // Fallback — no MDA refresh API available.
+    if (typeof window !== 'undefined' && typeof window.location?.reload === 'function') {
+      window.location.reload();
+    }
+  } catch (err) {
+    // Defensive: never crash the host form.
+    console.warn('[RegardingResolver] Refresh failed:', err);
+  }
 }
 
 /** Try to resolve the host record's GUID from `Xrm.Page`. */
@@ -248,17 +351,31 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
   const hostEntity = (context.parameters.entity?.raw ?? '').trim();
 
   // Row-1 title from manifest input property (FR-A1-01). Falls back to the
-  // default "Related Record" if the maker omits the property or clears it.
+  // default "RELATED RECORD" if the maker omits the property or clears it.
+  // v1.3.1 (SRFR-034 §1 + §4): Uppercase unconditionally in the app to match
+  // Dataverse OOB section-header convention, regardless of maker input
+  // case. Belt-and-suspenders with the manifest default "RELATED RECORD".
   const titleRaw = context.parameters.title?.raw ?? null;
-  const title = titleRaw && titleRaw.trim().length > 0 ? titleRaw.trim() : 'Related Record';
+  const titleInput =
+    titleRaw && titleRaw.trim().length > 0 ? titleRaw.trim() : 'RELATED RECORD';
+  const title = titleInput.toUpperCase();
 
-  // Row-2 record-number and record-name — read from bound manifest properties
-  // (FR-A1-02). Values come straight from the host record's column values as
-  // the framework passes them. When the maker binds to a different column
-  // (default `sprk_regardingrecordnumber` / `sprk_regardingrecordname`), the
-  // raw already reflects that column's value; we render as-is.
+  // v1.3.1 (SRFR-034 §2): version-footer visibility toggle. Defaults to true
+  // when the maker omits the property or sets it to null; only an explicit
+  // `false` hides the footer.
+  const showVersionFooterRaw = context.parameters.showVersionFooter?.raw;
+  const showVersionFooter = showVersionFooterRaw !== false;
+
+  // Row-2 record-number — read from bound manifest property (FR-A1-02).
+  // Value comes straight from the host record's column value as the framework
+  // passes them. When the maker binds to a different column (default
+  // `sprk_regardingrecordnumber`), the raw already reflects that column's
+  // value; we render as-is.
+  //
+  // v1.3.1 (SRFR-034 §6): the record-name cell was removed. The
+  // `regardingRecordNameField` bound property remains in the manifest for
+  // backward-compat with v1.3.0 form bindings; its value is not rendered.
   const boundRecordNumber = context.parameters.regardingRecordNumberField?.raw ?? null;
-  const boundRecordName = context.parameters.regardingRecordNameField?.raw ?? null;
 
   // Allowed regarding targets (subset of TODO_REGARDING_CATALOG).
   const catalog = React.useMemo<readonly ITodoRegardingTargetCatalogEntry[]>(
@@ -450,9 +567,22 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
   );
 
   const hasRecordNumber = typeof boundRecordNumber === 'string' && boundRecordNumber.trim().length > 0;
-  const hasRecordName = typeof boundRecordName === 'string' && boundRecordName.trim().length > 0;
+
+  // v1.3.1 (SRFR-034 §5) — refresh handler wraps the module-level internal
+  // helper as a stable useCallback so the onClick reference is stable across
+  // re-renders.
+  const handleRefreshClick = React.useCallback(() => {
+    void handleRefreshInternal();
+  }, []);
 
   // ---------------- Render ----------------
+  //
+  // v1.3.1 layout changes (SRFR-034):
+  //   - Row 1 title uppercased + styled to match OOB section-header (§1 + §4).
+  //   - Row 1 "actions" area holds refresh (LEFT) + PolymorphicPicker (RIGHT) (§5).
+  //   - PolymorphicPicker trigger icon flipped horizontally via CSS transform (§3).
+  //   - Row 2 = single record-number Link cell (no name, no em-dash placeholder) (§6).
+  //   - Version footer gated on `showVersionFooter` (§2).
 
   return (
     <div className={styles.container} data-testid="regarding-resolver-root">
@@ -462,22 +592,45 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
         </MessageBar>
       )}
 
-      {/* Row 1 — title + right-aligned toolbar icon (from PolymorphicPicker) */}
+      {/* Row 1 — OOB-styled title (left) + refresh + PolymorphicPicker (right) */}
       <div className={styles.row1} data-testid="regarding-resolver-row-1">
-        <PolymorphicPicker
-          catalog={pickerCatalog}
-          webApi={context.webAPI as unknown as IPolymorphicPickerWebApi}
-          title={title}
-          onSelect={handlePickerSelect}
-          readOnly={readOnly}
-          disabled={isWriting}
-          onError={setError}
-        />
+        <Text className={styles.title} data-testid="regarding-resolver-title">
+          {title}
+        </Text>
+        <div className={styles.row1Actions}>
+          {!readOnly && (
+            <Toolbar className={styles.refreshToolbar} size="small" aria-label="Refresh actions">
+              <Tooltip content="Refresh form" relationship="label" withArrow>
+                <ToolbarButton
+                  icon={<ArrowClockwiseRegular />}
+                  aria-label="Refresh form"
+                  data-testid="regarding-resolver-refresh"
+                  onClick={handleRefreshClick}
+                />
+              </Tooltip>
+            </Toolbar>
+          )}
+          <div className={styles.pickerContainer}>
+            <PolymorphicPicker
+              catalog={pickerCatalog}
+              webApi={context.webAPI as unknown as IPolymorphicPickerWebApi}
+              // Pass the resolved title so the picker's aria/tooltip surface
+              // remain accessible ("Select related record"). The visible
+              // duplicate is suppressed via the pickerContainer style below
+              // (which also targets the picker's own title span).
+              title={title}
+              onSelect={handlePickerSelect}
+              readOnly={readOnly}
+              disabled={isWriting}
+              onError={setError}
+            />
+          </div>
+        </div>
       </div>
 
-      {/* Row 2 — record-number hyperlink + record-name text */}
+      {/* Row 2 — record-number hyperlink only (v1.3.1 SRFR-034 §6) */}
       <div className={styles.row2} data-testid="regarding-resolver-row-2">
-        {hasRecordNumber ? (
+        {hasRecordNumber && (
           <Link
             className={styles.recordNumber}
             role="link"
@@ -486,27 +639,16 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
           >
             {boundRecordNumber}
           </Link>
-        ) : (
-          <Text className={styles.emptyRow2} data-testid="regarding-resolver-record-number-empty">
-            —
-          </Text>
-        )}
-        {hasRecordName ? (
-          <Text className={styles.recordName} data-testid="regarding-resolver-record-name">
-            {boundRecordName}
-          </Text>
-        ) : (
-          <Text className={styles.emptyRow2} data-testid="regarding-resolver-record-name-empty">
-            {selectedTarget?.recordName ?? ''}
-          </Text>
         )}
       </div>
 
-      <div className={styles.footer}>
-        <Text className={styles.versionText} data-testid="regarding-resolver-version">
-          v{version} • Built {BUILD_DATE}
-        </Text>
-      </div>
+      {showVersionFooter && (
+        <div className={styles.footer} data-testid="regarding-resolver-footer">
+          <Text className={styles.versionText} data-testid="regarding-resolver-version">
+            v{version} • Built {BUILD_DATE}
+          </Text>
+        </div>
+      )}
     </div>
   );
 };

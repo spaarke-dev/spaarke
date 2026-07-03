@@ -2,7 +2,7 @@
 
 > **Project**: set-regarding-and-field-mapping-resolver-r1
 > **Plan**: [`../plan.md`](../plan.md)
-> **Total tasks**: 28
+> **Total tasks**: 29 (28 original + 1 out-of-plan polish follow-on SRFR-034)
 > **Wave count**: 10 (0–9)
 
 ## Legend
@@ -43,6 +43,7 @@
 | 031 | [RegardingResolver modal-open on record-number click](./031-regarding-resolver-modal-open.poml) | ✅ | FULL | 2h est / **~40min actual** | group B |
 | 032 | [RegardingResolver populates `pending.recordNumber` for presave bridge](./032-regarding-resolver-presave-record-number.poml) | ✅ | FULL | 2h est / **~1h actual** | group B |
 | 033 | [Preserve read-only mode + URL field; version bump v1.2.0 → v1.3.0](./033-regarding-resolver-preserve-and-version.poml) | ✅ | FULL | 2h est / **~1h actual** | after 030–032 |
+| 034 | [UI polish v1.3.0 → v1.3.1 (7 owner-requested changes: OOB section-header styling, refresh button, icon flip, row-2 simplify, showVersionFooter, title uppercase)](./034-regarding-resolver-ui-polish-v1.3.1.poml) | ✅ | FULL | 3h est / **~2h30min actual** | post-Wave 8 follow-on (after SRFR-080 UAT feedback) |
 
 ### Wave 4 — Presave webresource (independent, parallel with Wave 3)
 
