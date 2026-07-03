@@ -95,11 +95,7 @@ export const FieldGrid: React.FC<IFieldGridProps> = ({ columns = 3, children, cl
   const columnClass = columns === 2 ? styles.twoColumns : styles.threeColumns;
 
   return (
-    <div
-      role="group"
-      className={mergeClasses(styles.grid, columnClass, className)}
-      data-columns={columns}
-    >
+    <div role="group" className={mergeClasses(styles.grid, columnClass, className)} data-columns={columns}>
       {children}
     </div>
   );

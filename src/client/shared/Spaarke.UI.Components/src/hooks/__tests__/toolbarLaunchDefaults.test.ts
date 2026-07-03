@@ -57,14 +57,7 @@ describe('toolbarLaunchDefaults', () => {
   describe('SUPPORTED_MEMO_PARENTS', () => {
     it('covers exactly the six parent entities supported by sprk_memo schema', () => {
       expect(Object.keys(SUPPORTED_MEMO_PARENTS).sort()).toEqual(
-        [
-          'sprk_budget',
-          'sprk_event',
-          'sprk_invoice',
-          'sprk_matter',
-          'sprk_project',
-          'sprk_workassignment',
-        ].sort()
+        ['sprk_budget', 'sprk_event', 'sprk_invoice', 'sprk_matter', 'sprk_project', 'sprk_workassignment'].sort()
       );
     });
 
@@ -74,47 +67,29 @@ describe('toolbarLaunchDefaults', () => {
       expect(SUPPORTED_MEMO_PARENTS.sprk_event).toBe('sprk_regardingevent');
       expect(SUPPORTED_MEMO_PARENTS.sprk_invoice).toBe('sprk_regardinginvoice');
       expect(SUPPORTED_MEMO_PARENTS.sprk_budget).toBe('sprk_regardingbudget');
-      expect(SUPPORTED_MEMO_PARENTS.sprk_workassignment).toBe(
-        'sprk_regardingworkassignment'
-      );
+      expect(SUPPORTED_MEMO_PARENTS.sprk_workassignment).toBe('sprk_regardingworkassignment');
     });
   });
 
   describe('buildMemoFilterForParent', () => {
     it('builds OData filter using entity-specific lookup for a supported parent', () => {
-      const filter = buildMemoFilterForParent(
-        'sprk_matter',
-        '00000000-0000-0000-0000-000000000001'
-      );
-      expect(filter).toBe(
-        '_sprk_regardingmatter_value eq 00000000-0000-0000-0000-000000000001'
-      );
+      const filter = buildMemoFilterForParent('sprk_matter', '00000000-0000-0000-0000-000000000001');
+      expect(filter).toBe('_sprk_regardingmatter_value eq 00000000-0000-0000-0000-000000000001');
     });
 
     it('builds filter for each of the six supported parents', () => {
       const guid = '11111111-1111-1111-1111-111111111111';
-      expect(buildMemoFilterForParent('sprk_project', guid)).toBe(
-        `_sprk_regardingproject_value eq ${guid}`
-      );
-      expect(buildMemoFilterForParent('sprk_event', guid)).toBe(
-        `_sprk_regardingevent_value eq ${guid}`
-      );
-      expect(buildMemoFilterForParent('sprk_invoice', guid)).toBe(
-        `_sprk_regardinginvoice_value eq ${guid}`
-      );
-      expect(buildMemoFilterForParent('sprk_budget', guid)).toBe(
-        `_sprk_regardingbudget_value eq ${guid}`
-      );
+      expect(buildMemoFilterForParent('sprk_project', guid)).toBe(`_sprk_regardingproject_value eq ${guid}`);
+      expect(buildMemoFilterForParent('sprk_event', guid)).toBe(`_sprk_regardingevent_value eq ${guid}`);
+      expect(buildMemoFilterForParent('sprk_invoice', guid)).toBe(`_sprk_regardinginvoice_value eq ${guid}`);
+      expect(buildMemoFilterForParent('sprk_budget', guid)).toBe(`_sprk_regardingbudget_value eq ${guid}`);
       expect(buildMemoFilterForParent('sprk_workassignment', guid)).toBe(
         `_sprk_regardingworkassignment_value eq ${guid}`
       );
     });
 
     it('returns null for an unsupported parent entity (e.g. sprk_document)', () => {
-      const filter = buildMemoFilterForParent(
-        'sprk_document',
-        '00000000-0000-0000-0000-000000000001'
-      );
+      const filter = buildMemoFilterForParent('sprk_document', '00000000-0000-0000-0000-000000000001');
       expect(filter).toBeNull();
     });
 
@@ -123,9 +98,7 @@ describe('toolbarLaunchDefaults', () => {
     });
 
     it('is case-sensitive on entity name (Dataverse logical names are lowercase)', () => {
-      expect(
-        buildMemoFilterForParent('SPRK_MATTER', 'guid1')
-      ).toBeNull();
+      expect(buildMemoFilterForParent('SPRK_MATTER', 'guid1')).toBeNull();
     });
   });
 });

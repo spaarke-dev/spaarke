@@ -27,7 +27,7 @@ describe('FieldGrid', () => {
     renderWithProviders(
       <FieldGrid>
         <div data-testid="child-1">1</div>
-      </FieldGrid>,
+      </FieldGrid>
     );
     const grid = getGrid();
     expect(grid).toBeInTheDocument();
@@ -44,7 +44,7 @@ describe('FieldGrid', () => {
     renderWithProviders(
       <FieldGrid columns={2}>
         <div>a</div>
-      </FieldGrid>,
+      </FieldGrid>
     );
     const grid = getGrid();
     expect(grid.getAttribute('data-columns')).toBe('2');
@@ -60,7 +60,7 @@ describe('FieldGrid', () => {
     renderWithProviders(
       <FieldGrid columns={3}>
         <div>a</div>
-      </FieldGrid>,
+      </FieldGrid>
     );
     const grid = getGrid();
     expect(grid.getAttribute('data-columns')).toBe('3');
@@ -80,7 +80,7 @@ describe('FieldGrid', () => {
         <div data-testid="field-3">three</div>
         <div data-testid="field-4">four</div>
         <div data-testid="field-5">five</div>
-      </FieldGrid>,
+      </FieldGrid>
     );
 
     const grid = getGrid();
@@ -101,7 +101,7 @@ describe('FieldGrid', () => {
     renderWithProviders(
       <FieldGrid>
         <div>x</div>
-      </FieldGrid>,
+      </FieldGrid>
     );
     const grid = getGrid();
     const cs = window.getComputedStyle(grid);
@@ -112,7 +112,7 @@ describe('FieldGrid', () => {
     renderWithProviders(
       <FieldGrid>
         <div>x</div>
-      </FieldGrid>,
+      </FieldGrid>
     );
     const grid = getGrid();
     const cs = window.getComputedStyle(grid);
@@ -131,7 +131,7 @@ describe('FieldGrid', () => {
       <FieldGrid columns={3}>
         <div data-testid="child-a">a</div>
         <div data-testid="child-b">b</div>
-      </FieldGrid>,
+      </FieldGrid>
     );
     const childA = screen.getByTestId('child-a');
     const childB = screen.getByTestId('child-b');
@@ -148,7 +148,7 @@ describe('FieldGrid', () => {
     renderWithProviders(
       <FieldGrid className="caller-class">
         <div>x</div>
-      </FieldGrid>,
+      </FieldGrid>
     );
     const grid = getGrid();
     expect(grid.className).toMatch(/caller-class/);

@@ -157,10 +157,7 @@ export function useRecordFieldValues(
       (err: unknown) => {
         if (cancelled) return;
         // Preserve the original error object where possible; otherwise wrap.
-        const wrapped =
-          err instanceof Error
-            ? err
-            : new Error(typeof err === 'string' ? err : 'retrieveRecord failed');
+        const wrapped = err instanceof Error ? err : new Error(typeof err === 'string' ? err : 'retrieveRecord failed');
         setValues(null);
         setError(wrapped);
         setLoading(false);
