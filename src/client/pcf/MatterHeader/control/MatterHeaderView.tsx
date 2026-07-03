@@ -45,8 +45,12 @@ import { CONTROL_VERSION } from './version';
 
 const ENTITY = 'sprk_matter';
 const FIELDS = [
-  'sprk_matternumber', 'sprk_mattername', 'sprk_mattertype',
-  'sprk_practicearea', 'sprk_matterdescription', 'sprk_recordsummary',
+  'sprk_matternumber',
+  'sprk_mattername',
+  'sprk_mattertype',
+  'sprk_practicearea',
+  'sprk_matterdescription',
+  'sprk_recordsummary',
 ];
 
 const useStyles = makeStyles({
@@ -84,8 +88,16 @@ export const MatterHeaderView: React.FC<IMatterHeaderViewProps> = ({ recordId })
           <TextField span={1} label="Matter Number" value={values?.sprk_matternumber as string | undefined} required />
           <TextField span={2} label="Matter Name" value={values?.sprk_mattername as string | undefined} />
           <RecordHeaderLookupField span={1} label="Matter Type" value={values?.sprk_mattertype as unknown as never} />
-          <RecordHeaderLookupField span={1} label="Practice Area" value={values?.sprk_practicearea as unknown as never} />
-          <TextareaField span={3} label="Matter Description" value={values?.sprk_matterdescription as string | undefined} />
+          <RecordHeaderLookupField
+            span={1}
+            label="Practice Area"
+            value={values?.sprk_practicearea as unknown as never}
+          />
+          <TextareaField
+            span={3}
+            label="Matter Description"
+            value={values?.sprk_matterdescription as string | undefined}
+          />
         </FieldGrid>
       </RecordHeaderShell>
       <Popover open={sparklePopoverOpen} onOpenChange={(_, d) => setSparklePopoverOpen(d.open)}>

@@ -74,11 +74,7 @@ jest.mock('@spaarke/ui-components', () => {
 
     // FieldGrid — pass-through container.
     FieldGrid: ({ children, columns }: { children: React.ReactNode; columns?: number }) =>
-      React.createElement(
-        'div',
-        { 'data-testid': 'stub-field-grid', 'data-columns': columns ?? 3 },
-        children
-      ),
+      React.createElement('div', { 'data-testid': 'stub-field-grid', 'data-columns': columns ?? 3 }, children),
 
     // RecordHeaderShell — pass-through with toolbar + loading indicator.
     RecordHeaderShell: ({
@@ -96,7 +92,7 @@ jest.mock('@spaarke/ui-components', () => {
         React.createElement(
           'div',
           { 'data-testid': 'stub-toolbar' },
-          toolbar.iconSlots.map((slot) =>
+          toolbar.iconSlots.map(slot =>
             React.createElement(
               'button',
               {
@@ -160,9 +156,11 @@ function makeToolbarActionsMock(recordSummary: string | null) {
       sparklePopoverOpen: state.open,
       setSparklePopoverOpen: setOpen,
       sparklePopoverContent:
-        recordSummary && recordSummary.length > 0
-          ? <div data-testid="stub-popover-summary">{recordSummary}</div>
-          : <div data-testid="stub-popover-empty">No summary yet</div>,
+        recordSummary && recordSummary.length > 0 ? (
+          <div data-testid="stub-popover-summary">{recordSummary}</div>
+        ) : (
+          <div data-testid="stub-popover-empty">No summary yet</div>
+        ),
     }),
     setOpen,
   };
@@ -298,9 +296,7 @@ describe('MatterHeaderView', () => {
 
     renderView();
 
-    expect(mockUseRecordHeaderToolbarActions).toHaveBeenCalledWith(
-      expect.objectContaining({ recordSummary: null })
-    );
+    expect(mockUseRecordHeaderToolbarActions).toHaveBeenCalledWith(expect.objectContaining({ recordSummary: null }));
     expect(screen.getByTestId('stub-popover-empty')).toHaveTextContent('No summary yet');
     expect(screen.queryByTestId('stub-popover-summary')).toBeNull();
   });
