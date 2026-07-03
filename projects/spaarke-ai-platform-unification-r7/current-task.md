@@ -10,12 +10,11 @@
 | Field | Value |
 |-------|-------|
 | **Session** | R7 close — Wave 12.3+ chat-summarize + Playbook-manifest composition model |
-| **Status** | **Server side of Wave 12.3 complete + merged to master** (PR #546, commit `5f8543457`). **Client migration NOT started.** **Manifest overhaul phases 12.4–12.7 NOT started.** |
-| **Branch** | `work/spaarke-ai-platform-unification-r7` — synced with master (commit `12c62b711` merges origin/master into work branch) |
-| **Worktree** | `c:/code_files/spaarke-wt-spaarke-ai-platform-unification-r7/` |
-| **BFF live at commit `a34631f03`** on `spaarke-bff-dev` (deployed 2026-07-03 pre-merge; content-identical to `5f8543457`) — hash-verify ✓, `/healthz` 200, `/summarize` 401 |
-| **Master local repo** | `c:/code_files/spaarke` synced to `5f8543457` |
-| **Next Action** | Start Phase 12.3a client audit — see [`notes/r7-close-plan-2026-07-03.md`](notes/r7-close-plan-2026-07-03.md) §4 Phase 12.3a for tasks. First subtask: locate `SprkChatMessageRenderer` slash-command handling + `PlaybookCandidateSelector` invocation. |
+| **Status** | **Server-side keyword-match auto-dispatch complete (uncommitted).** Client audit complete. Client-side wiring is next: SprkChat + useSseStream + ConversationPane need to handle new `linear_dispatch` SSE event. |
+| **Branch** | `work/spaarke-ai-platform-unification-r7` |
+| **Latest commits** | Server side of Wave 12.3 merged via PR #546 (`5f8543457`); D-13 revision pushed as `b1e4a4b11` |
+| **Uncommitted** | `LinearDispatchSseEvent.cs` (new), `ChatSseEventFactory.cs` (new factory method), `ChatEndpoints.cs` (keyword bypass + `TryDetectExplicitConsumerType`). Build clean. |
+| **Next Action** | **Continue Phase 12.3a client-side wiring** — see "Phase 12.3a Progress" section below. First subtask: add `linear_dispatch` handling in `src/client/shared/Spaarke.UI.Components/src/hooks/useSseStream.ts` after line 292. |
 
 ---
 
@@ -44,6 +43,67 @@ Committed on `a34631f03`, merged to master via PR #546:
   - Retired `LinearConsumersOptions.ActionIds` + `TryGetActionId`
   - Deleted 4 `LinearConsumers__ActionIds__*` App Settings on `spaarke-bff-dev`
 - **Deploy verified**: 46.84 MB package, hash-verify 4/4 ✓, `/healthz` 200, `POST /api/ai/chat/sessions/.../summarize` returns 401 (route registered, needs auth)
+
+---
+
+## Phase 12.3a Progress (in-flight)
+
+**Operator direction (2026-07-03)**: for NL messages the intent-match confidence must be
+100% (deterministic keyword match) to auto-dispatch; anything less → show top-3 candidates
++ library option. Slash commands = direct route (auto-dispatch).
+
+### Design pattern implemented (server side)
+
+- NEW SSE event type `linear_dispatch` (distinct from `playbook_options` per FR-48 invariant).
+- Server detects explicit summarize keywords ("summarize", "summary", "summarise") whole-word case-insensitive.
+- On match + attachments present → emit `linear_dispatch` event carrying the target endpoint URL, consumer type, request body, session file IDs; skip PhaseB entirely.
+- On no keyword match → existing PhaseB flow (playbook_options with candidates).
+
+### Server changes (uncommitted, build clean)
+
+1. `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SseEventTypes/LinearDispatchSseEvent.cs` — NEW file
+2. `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SseEventTypes/ChatSseEventFactory.cs` — added `CreateLinearDispatchEvent` factory method
+3. `src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs` — insert keyword-match bypass before `RunPhaseBVectorMatchAsync` (line ~633); new helper method `TryDetectExplicitConsumerType(message)` + compiled `SummarizeKeywordRegex`
+
+### Client changes (NOT YET DONE — next steps in exact order)
+
+1. **`src/client/shared/Spaarke.UI.Components/src/hooks/useSseStream.ts`**:
+   - Add `ILinearDispatchPayload` interface next to `IPlaybookOptionsPayload` (line ~53 imports)
+   - Add `onLinearDispatch` to handlers signature (line ~204)
+   - Add `else if (event.type === 'linear_dispatch')` branch after playbook_options case (line ~292)
+   - Add `onLinearDispatchRef` + `setOnLinearDispatch` following the `onPlaybookOptionsRef` pattern
+   - Export `setOnLinearDispatch` from the hook (line ~640 area)
+   - Handler shape: `{ consumerType, dispatchUrl, requestBody (JSON string), reason, sessionAttachmentIds }`
+
+2. **`src/client/shared/Spaarke.UI.Components/src/components/SprkChat/types.ts`**:
+   - Add `setOnLinearDispatch` to the exposed hook API type (line ~1550 near `setOnPlaybookOptions`)
+   - Add `onLinearDispatch?: (payload: ILinearDispatchPayload) => void` to SprkChatProps
+
+3. **`src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx`**:
+   - Import `setOnLinearDispatch` from hook (line ~439)
+   - Add prop `onLinearDispatchProp`
+   - Add `useEffect` that wires `onLinearDispatchProp` → `setOnLinearDispatch` following the `playbook_options` pattern (line ~981)
+
+4. **`src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx`**:
+   - Add `handleLinearDispatch` handler: on receipt of `linear_dispatch` payload → POST to `payload.dispatchUrl` with `payload.requestBody` → the response is the same SSE stream `executeSummarizeIntent.ts` currently reads for `/summarize` slash command → route into the same tab-loading flow that `/summarize` uses (workspace.widget_load → StructuredOutputStreamWidget)
+   - Wire `onLinearDispatch={handleLinearDispatch}` prop on `<SprkChat>` (line ~2450)
+
+5. **Build client** — `npm run build` in `src/client/shared/Spaarke.UI.Components/` and `src/solutions/SpaarkeAi/`
+
+6. **Deploy client** via appropriate deploy script (SpaarkeAi is a code page)
+
+7. **UAT smoke** — user uploads file, types "summarize this document" → workspace Summary tab loads + structured JSON renders
+
+### Deferred to future 12.3a sub-work (after keyword auto-dispatch smoke passes)
+
+- **Server**: retire `PlaybookCandidateSelector` confidence threshold (0.85 → 0.0) so candidates always return top 3 even at low confidence
+- **Server**: new endpoint `GET /api/ai/playbooks/library?type=linear` returning enabled Linear playbooks with slashkey/displayname/description (needs Phase 12.4 schema — chicken-and-egg; either defer this to Phase 12.4 or use a hardcoded list temporarily)
+- **Server**: implement `/api/ai/playbook-dispatch/execute` endpoint (currently 404 per UAT feedback — this is why "library modal items aren't selectable")
+- **Client**: fix `handleSelectPlaybook` in ConversationPane to route through the new dispatch endpoint (or bypass into a Linear direct dispatch)
+- **Server**: new consumer-typed endpoint `POST /api/ai/documents/{docId}/profile` + retire `LinearConsumersOptions.PlaybookIds` + last App Settings
+- **Client**: `useAiSummary.ts` change POST target to new consumer-typed endpoint
+
+Phase 12.3a estimate revision: **7-11 hrs total** (was 4-5). ~2 hrs already done (audit + server keyword bypass).
 
 ---
 
