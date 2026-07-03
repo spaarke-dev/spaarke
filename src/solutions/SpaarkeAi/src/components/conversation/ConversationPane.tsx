@@ -105,7 +105,11 @@ import { HistoryMenu } from "./HistoryOverlay";
 // promotion. The matcher is a pure module; the executor handles atomic
 // /documents promotion + /summarize SSE streaming + PaneEventBus bridging.
 // See notes/task-036-design-2026-06-05.md for design rationale.
-import { matchIntent } from "./intentMatcher";
+// R7 Wave 12.3 Phase 12.3a (2026-07-03): `matchIntent` is retired from
+// summarize dispatch (server-side keyword-match handles NL + slash + button
+// uniformly via `linear_dispatch`). Import kept as a comment reference in case
+// future intent categories reintroduce a client-side matcher.
+// import { matchIntent } from "./intentMatcher";
 // R6 closeout (Pillar 8 / task 097): /new-session needs to POST /api/ai/chat/sessions
 // and return the new session id so HardSlashExecutor.execNewSession can complete.
 import { buildBffApiUrl } from "@spaarke/auth";
@@ -141,12 +145,12 @@ import ReferenceResolver, {
   createFileLookupFromSessionMap,
   type ResolverContext,
 } from "./ReferenceResolver";
-import {
-  executeSummarizeIntent,
-  type HeldFile,
-} from "./executeSummarizeIntent";
-// R7 Wave 12.3 Phase 12.3a (2026-07-03) — companion for the linear_dispatch
-// SSE event pathway (deterministic explicit-intent keyword auto-dispatch).
+// R7 Wave 12.3 Phase 12.3a (2026-07-03) — `executeSummarizeIntent` retired for
+// NL/button paths; server-side keyword-match auto-dispatch now handles them via
+// `linear_dispatch` SSE. The helper module itself is retained for reference /
+// possible future direct-invoke callers, but the import is unused here.
+//
+// `executeLinearDispatch` is the companion for the linear_dispatch pathway.
 // Server emits `linear_dispatch` when NL like "summarize this document" matches
 // a keyword; the handler POSTs to the pre-composed dispatchUrl and streams the
 // response into the Summary tab (same workspace flow as `/summarize` slash).
@@ -1204,7 +1208,12 @@ export function ConversationPane(): React.JSX.Element {
       void parsedIntent;
 
       const readyChips = attachmentChips.filter(c => c.status === "ready");
-      const intent = matchIntent(messageText, readyChips.length > 0, undefined);
+      // R7 Wave 12.3 Phase 12.3a (2026-07-03) — `matchIntent(...)` retired for
+      // summarize dispatch (see retired NL branch below). Preserved reference:
+      // shape is `{ id, via }` with `via ∈ {"slash", "nl", "button-id"}`. Kept
+      // as a comment because future intents (e.g. custom prompt intents beyond
+      // summarize) may re-introduce a lightweight client-side dispatcher.
+      void readyChips;
       // R6 Hotfix Wave B-G9c3 (B9) — slash-to-NL rewire (2026-06-10):
       //
       // When the intent matched via the `/summarize` SLASH command (as opposed
@@ -1233,83 +1242,32 @@ export function ConversationPane(): React.JSX.Element {
       // The Document Profile context's SummarizeFilesWizard
       // (`/api/workspace/files/summarize` via summarizeService.ts) is a
       // SEPARATE endpoint and is UNAFFECTED by this change.
-      if (
-        intent &&
-        intent.id === "summarize-session" &&
-        intent.via !== "slash" &&
-        chatSessionId !== null
-      ) {
-        // Build the HeldFile list from the ready chips. The File-equivalents
-        // were captured in handleAttachmentReady (keyed by filename). Chips
-        // without a captured File fall through — the orchestrator will throw
-        // with a descriptive error the user can act on.
-        const heldFiles: HeldFile[] = [];
-        for (const chip of readyChips) {
-          const file = heldFilesRef.current.get(chip.filename);
-          if (file) {
-            heldFiles.push({ id: chip.id, file });
-          }
-        }
-
-        if (heldFiles.length > 0) {
-          // Visual acknowledgement BEFORE the user's send lands (per task spec:
-          // "fall back to clearing the textarea + injecting a local assistant
-          // chip 'I'll summarize that for you' so the user sees the outbound
-          // message land"). The default SprkChat send still proceeds —
-          // suppression requires a cross-package change to SprkChat (flagged).
-          setPendingInjection(
-            makeLocalAssistantMessage(
-              `I'll summarize ${heldFiles.length === 1 ? "that file" : `those ${heldFiles.length} files`} for you.`
-            )
-          );
-
-          // Fire-and-await-internally — promote then stream. On success, mark
-          // the chips Indexed (badge flip). On failure, surface an inline
-          // error message. We don't await here because handleBeforeSendMessage
-          // is synchronous; the orchestrator runs in parallel with the chat
-          // send funnel.
-          void (async () => {
-            try {
-              const result = await executeSummarizeIntent({
-                bffBaseUrl,
-                sessionId: chatSessionId,
-                heldFiles,
-                authenticatedFetch,
-                getAccessToken,
-                publishPaneEvent: dispatch,
-                // R6 Hotfix Wave B-G9c2 (B8): each summarize invocation gets
-                // its own unique streamId so the workspace.widget_load +
-                // workspace.streaming_* events flow into a NEW Summary tab
-                // (FR-06 restoration; tab title includes the source filename).
-                // R5 task 038's reuse of `chatSessionId` as the streamId
-                // caused all subsequent runs to overwrite the original
-                // Summary tab — that behavior is reverted here. Defaulting
-                // to `undefined` lets executeSummarizeIntent generate a
-                // unique id via generateStreamId().
-                streamId: undefined,
-              });
-              // Flip Held → Indexed badges on the promoted chip ids.
-              setPromotedChipIds(prev => {
-                const next = new Set(prev);
-                for (const chip of readyChips) {
-                  if (result.documentIds.length > 0) {
-                    next.add(chip.id);
-                  }
-                }
-                return next;
-              });
-            } catch (err) {
-              const message =
-                err instanceof Error
-                  ? `I couldn't summarize that — ${err.message}`
-                  : "I couldn't summarize that. Please try again.";
-              setPendingInjection(makeLocalAssistantMessage(message));
-            }
-          })();
-        }
-        // Fall through to the multi-file interjection block below (it's
-        // additive — if both apply we get the chip + the interjection).
-      }
+      // ── R7 Wave 12.3 Phase 12.3a (2026-07-03) — RETIRED NL branch ─────────
+      // Previously this branch fired `executeSummarizeIntent` locally for
+      // natural-language summarize intents (`intent.via !== "slash"`). That
+      // path is now replaced by the server-side deterministic keyword-match
+      // auto-dispatch: BFF `ChatEndpoints.TryDetectExplicitConsumerType`
+      // matches "summarize"/"summary"/"summarise" whole-word case-insensitive
+      // (including "/summarize" slash-command text) → emits `linear_dispatch`
+      // SSE event → client `handleLinearDispatch` → `executeLinearDispatch`
+      // POSTs to /api/ai/chat/sessions/{id}/summarize and streams into the
+      // workspace Summary tab.
+      //
+      // Firing BOTH paths caused a double-dispatch race (Wave 12.3 UAT
+      // 2026-07-03): two parallel /summarize streams competed for the Summary
+      // tab; one succeeded with empty content, one errored. Removing the
+      // client-side NL branch consolidates dispatch on the server-side path
+      // per operator direction D-13 ("slash + NL converge on same dispatch").
+      //
+      // Held-file promotion is now the server's job — SessionFileTextSource
+      // reads session-file rows (populated at upload time via the shared
+      // paperclip upload flow, NOT by executeSummarizeIntent), so no client
+      // /documents call is needed here.
+      //
+      // Slash `/summarize` was already excluded from this branch (`intent.via
+      // !== "slash"`) and now flows via the same server-side keyword-match
+      // path. That satisfies the "same behavior as NL" contract naturally.
+      // ── End retired NL branch ─────────────────────────────────────────────
 
       // ── Existing task 020 multi-file interjection (untouched) ───────────
       //
