@@ -3,7 +3,7 @@
   <metadata>
     <title>Build NotepadShell integration (FR-14/15/16/18)</title>
     <phase>3: Notepad</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>034, 035, 036, 032</dependencies>
     <blocks>038, 039</blocks>

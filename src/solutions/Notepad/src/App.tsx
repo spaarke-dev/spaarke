@@ -5,9 +5,11 @@
  * 3-level cascade (localStorage > URL flags > navbar DOM), and listens
  * for theme changes to stay in sync with the Spaarke theme system.
  *
- * v1 (task 030): Renders a placeholder. Task 037 replaces this with
- * NotepadShell (useLaunchContext + useSprkMemoRepository + MemoList +
- * MemoEditor + CreatedByPopover).
+ * The theme-cascade wrappers (task 030) are preserved above `NotepadShell`
+ * so dark-mode compliance per ADR-021 works out of the box.
+ *
+ * Task 037: Replaced the placeholder with `<NotepadShell />`, which owns
+ * the launch-context + repository + memo-list + editor + popover wiring.
  */
 
 import * as React from "react";
@@ -16,6 +18,7 @@ import {
   resolveCodePageTheme,
   setupCodePageThemeListener,
 } from "@spaarke/ui-components/utils";
+import { NotepadShell } from "./components/NotepadShell";
 
 export function App() {
   const [theme, setTheme] = React.useState(resolveCodePageTheme);
@@ -27,10 +30,7 @@ export function App() {
 
   return (
     <FluentProvider theme={theme} style={{ height: "100%" }}>
-      <div>
-        <h1>Notepad</h1>
-        <p>Placeholder — task 037 will land NotepadShell.</p>
-      </div>
+      <NotepadShell />
     </FluentProvider>
   );
 }

@@ -41,7 +41,7 @@
 | 034 | MemoList component (FR-16) | 3 | ✅ | 033 | E | FULL |
 | 035 | MemoEditor component (FR-17) | 3 | ✅ | 033 | E | FULL |
 | 036 | CreatedByPopover component (FR-18) | 3 | ✅ | 033 | E | FULL |
-| 037 | NotepadShell integration (FR-14/15/16/18) | 3 | 🔲 | 034, 035, 036 | — | FULL |
+| 037 | NotepadShell integration (FR-14/15/16/18) | 3 | ✅ | 034, 035, 036 | — | FULL |
 | 038 | URL-param error handling verification (FR-13) | 3 | 🔲 | 037 | — | STANDARD |
 | 039 | Vite build + deploy as sprk_notepad_page | 3 | 🔲 | 038 | — | STANDARD |
 | 040 | Entity-agnostic launch test (FR-19) | 3 | 🔲 | 039 | F | STANDARD |
