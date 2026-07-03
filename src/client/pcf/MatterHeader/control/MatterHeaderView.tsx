@@ -21,9 +21,7 @@ export const MatterHeaderView: React.FC<IMatterHeaderViewProps> = ({ recordId })
     <div>
       <div>Matter Header (placeholder — task 022)</div>
       <div>recordId: {recordId || '(none)'}</div>
-      <div style={{ fontSize: 10, opacity: 0.6, marginTop: 8 }}>
-        v{CONTROL_VERSION}
-      </div>
+      <div style={{ fontSize: 10, opacity: 0.6, marginTop: 8 }}>v{CONTROL_VERSION}</div>
     </div>
   );
 };
