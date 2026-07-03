@@ -1,5 +1,16 @@
 /**
- * RegardingResolverApp — v1.3.1 streamlined 2-row UI for the polymorphic regarding picker.
+ * RegardingResolverApp — v1.3.2 streamlined 2-row UI for the polymorphic regarding picker.
+ *
+ * # v1.3.2 (SRFR-035 owner post-UAT polish)
+ *
+ * After a successful picker selection in UPDATE mode, the form auto-refreshes
+ * so any bound fields (e.g. `sprk_regardingrecordnumber`,
+ * `sprk_regardingrecordname` displayed elsewhere on the form) update
+ * immediately without the user clicking Save or Refresh. CREATE mode
+ * (formType === 1) is DELIBERATELY skipped — the SRFR-032 presave bridge
+ * (`__sprk_regarding_pending__` window seam) owns that path, and auto-refresh
+ * would clobber the buffered attributes. The manual refresh button added in
+ * SRFR-034 remains as an escape hatch. See `autoRefreshForm` helper below.
  *
  * # v1.3.1 layout (SRFR-034 owner polish pass)
  *
@@ -245,6 +256,90 @@ function getXrm():
 }
 
 /**
+ * v1.3.2 — Auto-refresh helper (SRFR-035).
+ *
+ * Called after a successful picker selection so the form updates
+ * transparently for the user. `applyResolverFields` already committed the
+ * writes via `webApi.updateRecord`, so this helper's job is to (a) flush any
+ * pending form-side bound-property writes with `data.entity.save()` and then
+ * (b) pull server-side updated values with `data.refresh(true)`.
+ *
+ * CREATE mode gate (formType === 1): CREATE mode is DELIBERATELY skipped
+ * because the SRFR-032 presave bridge (`__sprk_regarding_pending__` window
+ * seam) owns that path. On CREATE the host record does not yet exist —
+ * calling save() would fire the OnSave chain (including the presave webresource
+ * that stages the resolver payload into the form buffer for INSERT), which we
+ * do NOT want as a side effect of picker selection; refresh(true) would then
+ * clobber the buffered attributes and break the INSERT transaction.
+ *
+ * Xrm-unavailable path: silent-continue with a warn. Test harness and canvas
+ * app both lack Xrm; rejecting here would surface as unhandled promise
+ * rejection breaking test infra.
+ *
+ * Any exception thrown by save/refresh is caught and warned — the manual
+ * refresh button added in SRFR-034 remains as an escape hatch for the user.
+ */
+async function autoRefreshForm(formType: number): Promise<void> {
+  // Skip auto-refresh on CREATE (formType === 1) — presave bridge handles that path.
+  if (formType === 1) return;
+
+  const xrm = getXrm();
+  if (!xrm) {
+    console.warn(
+      '[RegardingResolver] Auto-refresh skipped: Xrm unavailable (test harness or canvas app).'
+    );
+    return;
+  }
+
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const data = (xrm.Page as any)?.data;
+    if (!data) return;
+
+    // Flush any pending form-side bound-property writes before refresh.
+    const save = data.entity?.save;
+    if (typeof save === 'function') {
+      const saveResult = save.call(data.entity);
+      if (saveResult && typeof (saveResult as Promise<unknown>).then === 'function') {
+        await saveResult;
+      }
+    }
+
+    // Refresh to pull updated field values from the server.
+    const refresh = data.refresh;
+    if (typeof refresh === 'function') {
+      const refreshResult = refresh.call(data, true);
+      if (refreshResult && typeof (refreshResult as Promise<unknown>).then === 'function') {
+        await refreshResult;
+      }
+    }
+  } catch (err) {
+    // Silent — user still has the manual refresh button (SRFR-034) as escape hatch.
+    console.warn('[RegardingResolver] Auto-refresh after selection failed:', err);
+  }
+}
+
+/**
+ * Resolve the current form type via `Xrm.Page.ui.getFormType()`.
+ * Return values: 1 = CREATE, 2 = UPDATE, 3 = READONLY, 4 = DISABLED, 6 = BULKEDIT.
+ * Defaults to UPDATE (2) when Xrm.Page.ui or getFormType is unavailable
+ * (test harness), so the auto-refresh gate opens rather than closes — the
+ * inner Xrm-unavailable check in autoRefreshForm covers the actual no-op.
+ */
+function getFormType(): number {
+  const xrm = getXrm();
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const ui = (xrm?.Page as any)?.ui;
+    const ft = ui?.getFormType?.();
+    if (typeof ft === 'number') return ft;
+  } catch {
+    /* ignore */
+  }
+  return 2; // Default UPDATE
+}
+
+/**
  * v1.3.1 — Refresh handler wired to a new toolbar button (SRFR-034 §5).
  *
  * Behavior:
@@ -486,6 +581,15 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
           console.warn('[RegardingResolver] resolveRecordType for output notify failed:', rtErr);
           onRecordTypeChanged(null);
         }
+
+        // v1.3.2 (SRFR-035) — After successful selection, auto-refresh the
+        // form so bound fields (record-number etc.) display fresh values
+        // without the user clicking Save/Refresh. CREATE mode (formType === 1)
+        // is deliberately skipped inside autoRefreshForm (presave bridge owns
+        // that path). Manual refresh button from SRFR-034 remains as escape
+        // hatch. Errors are swallowed inside autoRefreshForm (warn only).
+        const formType = getFormType();
+        void autoRefreshForm(formType);
       } catch (err) {
         console.error('[RegardingResolver] handlePickerSelect error:', err);
         setError(err instanceof Error ? err.message : 'Selection failed.');

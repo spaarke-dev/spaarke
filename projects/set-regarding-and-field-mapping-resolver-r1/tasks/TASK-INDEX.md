@@ -2,7 +2,7 @@
 
 > **Project**: set-regarding-and-field-mapping-resolver-r1
 > **Plan**: [`../plan.md`](../plan.md)
-> **Total tasks**: 29 (28 original + 1 out-of-plan polish follow-on SRFR-034)
+> **Total tasks**: 31 (28 original + 3 out-of-plan polish follow-ons SRFR-034, SRFR-035, SRFR-036)
 > **Wave count**: 10 (0–9)
 
 ## Legend
@@ -44,6 +44,8 @@
 | 032 | [RegardingResolver populates `pending.recordNumber` for presave bridge](./032-regarding-resolver-presave-record-number.poml) | ✅ | FULL | 2h est / **~1h actual** | group B |
 | 033 | [Preserve read-only mode + URL field; version bump v1.2.0 → v1.3.0](./033-regarding-resolver-preserve-and-version.poml) | ✅ | FULL | 2h est / **~1h actual** | after 030–032 |
 | 034 | [UI polish v1.3.0 → v1.3.1 (7 owner-requested changes: OOB section-header styling, refresh button, icon flip, row-2 simplify, showVersionFooter, title uppercase)](./034-regarding-resolver-ui-polish-v1.3.1.poml) | ✅ | FULL | 3h est / **~2h30min actual** | post-Wave 8 follow-on (after SRFR-080 UAT feedback) |
+| 035 | [Auto-refresh form after picker selection v1.3.1 → v1.3.2 (owner post-UAT feedback: eliminate manual Save/Refresh click after selection; CREATE-mode presave path preserved)](./035-regarding-resolver-auto-refresh-v1.3.2.poml) | ✅ | FULL | 1h30min est / **~50min actual** | post-SRFR-034 follow-on (parallel with SRFR-036 form config) |
+| 036 | [sprk_todo form config — companion webresource `sprk_regardingrecordnumber_hyperlink` v1.0.0 + REGARDING section row layout below RegardingResolver PCF (1/3 record-number-hyperlink + 2/3 record-name; sprk_regardingrecordurl hidden; formxml `<events>` + `<formLibraries>` registration)](./036-sprk-todo-form-config.poml) | ✅ | STANDARD | 2h est / **~1h15min actual** | post-SRFR-034 follow-on (parallel with SRFR-035 PCF auto-refresh) |
 
 ### Wave 4 — Presave webresource (independent, parallel with Wave 3)
 

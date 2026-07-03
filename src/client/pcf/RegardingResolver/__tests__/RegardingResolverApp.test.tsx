@@ -158,7 +158,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
         readOnly={false}
         onRecordTypeChanged={() => undefined}
-        version="1.3.1"
+        version="1.3.2"
       />
     );
 
@@ -174,7 +174,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
         readOnly={false}
         onRecordTypeChanged={() => undefined}
-        version="1.3.1"
+        version="1.3.2"
       />
     );
 
@@ -194,7 +194,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
         readOnly={false}
         onRecordTypeChanged={() => undefined}
-        version="1.3.1"
+        version="1.3.2"
       />
     );
 
@@ -210,7 +210,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
         readOnly={false}
         onRecordTypeChanged={() => undefined}
-        version="1.3.1"
+        version="1.3.2"
       />
     );
 
@@ -227,7 +227,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
         readOnly={false}
         onRecordTypeChanged={() => undefined}
-        version="1.3.1"
+        version="1.3.2"
       />
     );
 
@@ -241,7 +241,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
         readOnly={false}
         onRecordTypeChanged={() => undefined}
-        version="1.3.1"
+        version="1.3.2"
       />
     );
 
@@ -262,7 +262,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
         readOnly={false}
         onRecordTypeChanged={() => undefined}
-        version="1.3.1"
+        version="1.3.2"
       />
     );
 
@@ -282,7 +282,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
         readOnly={false}
         onRecordTypeChanged={() => undefined}
-        version="1.3.1"
+        version="1.3.2"
       />
     );
 
@@ -302,7 +302,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
         readOnly={false}
         onRecordTypeChanged={() => undefined}
-        version="1.3.1"
+        version="1.3.2"
       />
     );
 
@@ -320,7 +320,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
         readOnly={false}
         onRecordTypeChanged={() => undefined}
-        version="1.3.1"
+        version="1.3.2"
       />
     );
 
@@ -339,7 +339,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
         readOnly={false}
         onRecordTypeChanged={onRecordTypeChanged}
-        version="1.3.1"
+        version="1.3.2"
       />
     );
 
@@ -368,7 +368,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={true}
           onRecordTypeChanged={() => undefined}
-          version="1.3.1"
+          version="1.3.2"
         />
       );
 
@@ -390,7 +390,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={true}
           onRecordTypeChanged={() => undefined}
-          version="1.3.1"
+          version="1.3.2"
         />
       );
 
@@ -427,7 +427,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={true}
           onRecordTypeChanged={() => undefined}
-          version="1.3.1"
+          version="1.3.2"
         />
       );
 
@@ -454,7 +454,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={true}
           onRecordTypeChanged={() => undefined}
-          version="1.3.1"
+          version="1.3.2"
         />
       );
 
@@ -498,7 +498,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
             context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
             readOnly={false}
             onRecordTypeChanged={() => undefined}
-            version="1.3.1"
+            version="1.3.2"
           />
         );
 
@@ -538,14 +538,14 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
         readOnly={false}
         onRecordTypeChanged={() => undefined}
-        version="1.3.1"
+        version="1.3.2"
       />
     );
 
     // SRFR-033 — footer format is `v{version} • Built YYYY-MM-DD` per
     // src/client/pcf/CLAUDE.md "Version Footer Requirement (MANDATORY)".
     const footer = screen.getByTestId('regarding-resolver-version');
-    expect(footer).toHaveTextContent(/v1\.3\.1/);
+    expect(footer).toHaveTextContent(/v1\.3\.2/);
     expect(footer).toHaveTextContent(/Built \d{4}-\d{2}-\d{2}/);
   });
 
@@ -561,7 +561,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
         readOnly={false}
         onRecordTypeChanged={() => undefined}
-        version="1.3.1"
+        version="1.3.2"
       />
     );
     expect(spy).not.toHaveBeenCalled();
@@ -579,7 +579,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
         readOnly={false}
         onRecordTypeChanged={() => undefined}
-        version="1.3.1"
+        version="1.3.2"
       />
     );
     expect(screen.getByTestId('regarding-resolver-root')).toBeInTheDocument();
@@ -592,7 +592,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
         readOnly={false}
         onRecordTypeChanged={() => undefined}
-        version="1.3.1"
+        version="1.3.2"
       />
     );
     expect(screen.getByTestId('regarding-resolver-root')).toBeInTheDocument();
@@ -614,7 +614,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={false}
           onRecordTypeChanged={() => undefined}
-          version="1.3.1"
+          version="1.3.2"
         />
       );
 
@@ -653,7 +653,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={false}
           onRecordTypeChanged={() => undefined}
-          version="1.3.1"
+          version="1.3.2"
         />
       );
 
@@ -686,7 +686,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={false}
           onRecordTypeChanged={() => undefined}
-          version="1.3.1"
+          version="1.3.2"
         />
       );
 
@@ -720,7 +720,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={false}
           onRecordTypeChanged={() => undefined}
-          version="1.3.1"
+          version="1.3.2"
         />
       );
 
@@ -787,7 +787,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
             context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
             readOnly={false}
             onRecordTypeChanged={() => undefined}
-            version="1.3.1"
+            version="1.3.2"
           />
         );
 
@@ -834,7 +834,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
             context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
             readOnly={false}
             onRecordTypeChanged={() => undefined}
-            version="1.3.1"
+            version="1.3.2"
           />
         );
 
@@ -873,7 +873,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
             context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
             readOnly={false}
             onRecordTypeChanged={() => undefined}
-            version="1.3.1"
+            version="1.3.2"
           />
         );
 
@@ -912,7 +912,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
             context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
             readOnly={false}
             onRecordTypeChanged={() => undefined}
-            version="1.3.1"
+            version="1.3.2"
           />
         );
 
@@ -962,12 +962,12 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={false}
           onRecordTypeChanged={() => undefined}
-          version="1.3.1"
+          version="1.3.2"
         />
       );
 
       expect(screen.getByTestId('regarding-resolver-footer')).toBeInTheDocument();
-      expect(screen.getByTestId('regarding-resolver-version')).toHaveTextContent(/v1\.3\.1/);
+      expect(screen.getByTestId('regarding-resolver-version')).toHaveTextContent(/v1\.3\.2/);
     });
 
     test('showVersionFooter=true → footer visible', () => {
@@ -977,7 +977,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={false}
           onRecordTypeChanged={() => undefined}
-          version="1.3.1"
+          version="1.3.2"
         />
       );
 
@@ -991,7 +991,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={false}
           onRecordTypeChanged={() => undefined}
-          version="1.3.1"
+          version="1.3.2"
         />
       );
 
@@ -1012,7 +1012,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={false}
           onRecordTypeChanged={() => undefined}
-          version="1.3.1"
+          version="1.3.2"
         />
       );
 
@@ -1028,7 +1028,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={true}
           onRecordTypeChanged={() => undefined}
-          version="1.3.1"
+          version="1.3.2"
         />
       );
 
@@ -1054,7 +1054,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={false}
           onRecordTypeChanged={() => undefined}
-          version="1.3.1"
+          version="1.3.2"
         />
       );
 
@@ -1085,7 +1085,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
             context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
             readOnly={false}
             onRecordTypeChanged={() => undefined}
-            version="1.3.1"
+            version="1.3.2"
           />
         );
 
@@ -1122,7 +1122,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={false}
           onRecordTypeChanged={() => undefined}
-          version="1.3.1"
+          version="1.3.2"
         />
       );
 
@@ -1136,6 +1136,151 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           expect.any(Error)
         );
       });
+      warnSpy.mockRestore();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // SRFR-035 — Auto-refresh form after picker selection (v1.3.2)
+  // ---------------------------------------------------------------------------
+
+  describe('SRFR-035 — auto-refresh form after picker selection', () => {
+    /**
+     * These tests exercise the v1.3.2 autoRefreshForm helper wired into
+     * handlePickerSelect after applyRegardingSelection. The helper:
+     *   - Skips CREATE mode (formType === 1) — presave bridge owns that path
+     *   - Otherwise saves the form then refreshes with server-side pull
+     *   - Silent-continues on any error (Xrm unavailable, save reject, etc.)
+     *
+     * The existing SRFR-034 manual refresh button remains as an escape hatch.
+     */
+
+    test('UPDATE mode (formType 2) — auto-refresh invoked (save + refresh(true) called)', async () => {
+      const saveMock = jest.fn().mockResolvedValue(undefined);
+      const refreshMock = jest.fn().mockResolvedValue(undefined);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (window as any).Xrm = {
+        Page: {
+          ui: { getFormType: () => 2 },
+          data: {
+            entity: {
+              save: saveMock,
+              getId: () => '{11111111-1111-1111-1111-111111111111}',
+            },
+            refresh: refreshMock,
+          },
+        },
+      };
+
+      const { context } = buildContext();
+      renderWithProvider(
+        <RegardingResolverApp
+          context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
+          readOnly={false}
+          onRecordTypeChanged={() => undefined}
+          version="1.3.2"
+        />
+      );
+
+      // Trigger picker selection.
+      fireEvent.click(screen.getByTestId('polymorphic-picker-trigger'));
+
+      // First wait for the shared write path to be invoked so we know the
+      // handler has progressed to the auto-refresh call.
+      await waitFor(() => {
+        expect(mockApplyResolverFields).toHaveBeenCalledTimes(1);
+      });
+
+      // Now assert save() then refresh(true) were called by autoRefreshForm.
+      await waitFor(() => {
+        expect(saveMock).toHaveBeenCalledTimes(1);
+      });
+      await waitFor(() => {
+        expect(refreshMock).toHaveBeenCalledWith(true);
+      });
+    });
+
+    test('CREATE mode (formType 1) — auto-refresh SKIPPED (presave bridge owns that path)', async () => {
+      const saveMock = jest.fn().mockResolvedValue(undefined);
+      const refreshMock = jest.fn().mockResolvedValue(undefined);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (window as any).Xrm = {
+        Page: {
+          ui: { getFormType: () => 1 },
+          data: {
+            // CREATE-mode: empty host record id (getHostRecordId returns undefined).
+            entity: { save: saveMock, getId: () => '' },
+            refresh: refreshMock,
+          },
+        },
+      };
+
+      const { context } = buildContext();
+      renderWithProvider(
+        <RegardingResolverApp
+          context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
+          readOnly={false}
+          onRecordTypeChanged={() => undefined}
+          version="1.3.2"
+        />
+      );
+
+      fireEvent.click(screen.getByTestId('polymorphic-picker-trigger'));
+
+      await waitFor(() => {
+        expect(mockApplyResolverFields).toHaveBeenCalledTimes(1);
+      });
+
+      // Also wait for the CREATE-mode seam so we know the handler's
+      // post-select block has fully executed.
+      await waitFor(() => {
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        expect((window as any).__sprk_regarding_pending__).toBeDefined();
+      });
+
+      // Give any queued microtasks a chance to run so a mistakenly-invoked
+      // autoRefreshForm would show up here.
+      await new Promise(resolve => setTimeout(resolve, 0));
+
+      // CREATE mode: save + refresh MUST NOT be called by autoRefreshForm.
+      // (Presave webresource will call save() as part of the INSERT chain
+      // separately; that is not this handler's responsibility.)
+      expect(saveMock).not.toHaveBeenCalled();
+      expect(refreshMock).not.toHaveBeenCalled();
+    });
+
+    test('Xrm unavailable — auto-refresh silent-continues (no throw, warn only)', async () => {
+      // No Xrm on window (beforeEach cleared it). The handler must not throw
+      // and must not crash the picker-select flow.
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+      const { context } = buildContext();
+      renderWithProvider(
+        <RegardingResolverApp
+          context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
+          readOnly={false}
+          onRecordTypeChanged={() => undefined}
+          version="1.3.2"
+        />
+      );
+
+      // Trigger picker selection; the underlying handler must not throw.
+      expect(() =>
+        fireEvent.click(screen.getByTestId('polymorphic-picker-trigger'))
+      ).not.toThrow();
+
+      // Wait for the shared write path (proves the handler ran end-to-end).
+      await waitFor(() => {
+        expect(mockApplyResolverFields).toHaveBeenCalledTimes(1);
+      });
+
+      // The auto-refresh helper should have logged its Xrm-unavailable warn.
+      await waitFor(() => {
+        expect(warnSpy).toHaveBeenCalledWith(
+          expect.stringContaining('Auto-refresh skipped: Xrm unavailable')
+        );
+      });
+
       warnSpy.mockRestore();
     });
   });

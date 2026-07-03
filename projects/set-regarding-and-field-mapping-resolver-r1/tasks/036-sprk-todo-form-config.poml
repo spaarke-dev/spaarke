@@ -1,0 +1,253 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="SRFR-036" project="set-regarding-and-field-mapping-resolver-r1">
+  <metadata>
+    <title>sprk_todo main form config — companion webresource for record-number hyperlink + form fields below RegardingResolver PCF</title>
+    <status>completed</status>
+    <estimated-effort>2h</estimated-effort>
+    <actual-effort>~1h15min</actual-effort>
+    <assigned>AI Agent</assigned>
+    <started>2026-07-03</started>
+    <completed>2026-07-03</completed>
+    <rigor>STANDARD</rigor>
+    <parallel-safe>false</parallel-safe>
+    <parallel-group>—</parallel-group>
+    <tags>webresource,form-config,formxml,sprk-todo,dataverse-deploy,wave-3-followon,post-v1.3.1</tags>
+    <depends-on>SRFR-034</depends-on>
+    <wave>3</wave>
+  </metadata>
+
+  <prompt><![CDATA[
+Post-v1.3.1 owner feedback follow-on. Owner wants two OOB-style form
+fields BELOW the RegardingResolver PCF on the `sprk_todo` main form
+(formid eca59df4-1364-f111-ab0c-7ced8ddc4cc6):
+
+  - "Regarding Record Number" (`sprk_regardingrecordnumber`) — 1/3 row
+    width, RENDERED AS A HYPERLINK that opens the target record.
+  - "Regarding Record Name" (`sprk_regardingrecordname`) — 2/3 row width,
+    plain text.
+
+Both fields are read-only display (the RegardingResolver PCF is the
+writer via PolymorphicResolverService.applyResolverFields — SRFR-020/032).
+
+Deliverables:
+  1. New companion webresource `sprk_regardingrecordnumber_hyperlink.js`
+     v1.0.0 that on form OnLoad transforms the record-number field cell
+     into an anchor pointing at the target record via
+     Xrm.Navigation.navigateTo({ pageType: "entityrecord", entityName,
+     entityId }). Defensive: silent-fail if selector/attributes missing.
+     Mirrors sprk_todo_regarding_presave.js IIFE + namespace pattern
+     (Spaarke.SmartTodo.RegardingRecordNumberHyperlink, ns.VERSION = "1.0.0").
+  2. sprk_todo main form modification (via solution round-trip through
+     the existing SetRegardingWebResources solution or a new form-scoped
+     solution): add a section under the RegardingResolver PCF binding
+     that contains sprk_regardingrecordnumber (col 1 of 3) + sprk_regarding
+     recordname (col 2-3 of 3), both `readonlyoutsidewriteoptimized="true"`.
+     Register the new webresource on the form OnLoad event.
+  3. Deploy webresource + form to spaarkedev1. Verify via MCP that
+     webresource exists (type=3) and via `pac solution list` that the
+     form-carrying solution imports cleanly.
+
+Constraints:
+  - ADR-006 host-scripting Path A exception per SRFR-061 canonical pattern.
+  - DO NOT remove existing form fields or events. This is additive.
+  - Backward-compat: older sprk_todo records without populated
+    sprk_regardingrecordnumber render blank (webresource silent-fails on
+    missing values).
+  - Companion webresource is DEFENSIVE — never throws, logs warn on any
+    lookup miss, does not block form load.
+  - DOM-manipulation fragility acknowledged: if selector [data-lp-id]
+    fails, the webresource falls back to querySelector on common
+    field-cell shapes. Test empirically after import.
+  - No PCF change. No shared-lib change. STANDARD rigor (form config +
+    webresource only).
+
+Step 9.5 quality gates: SKIPPED per STANDARD rigor + user directive
+(form config, not code).
+
+Deploy targets: spaarkedev1. Use existing SetRegardingWebResources
+solution (already at v1.0.0) for the webresource. For form: preferred
+approach is targeted solution containing the sprk_todo main form only
+(create SetRegardingFormPatch or add to SetRegardingWebResources by
+adding the systemform component).
+  ]]></prompt>
+
+  <role>Dataverse form-scripting + FormXml developer familiar with
+  MDA main-form section layout, systemform export/import roundtrip via
+  PAC CLI + solution unpack, defensive JavaScript webresource patterns
+  (see `src/client/webresources/js/sprk_todo_regarding_presave.js` and
+  `sprk_fieldmapping_push.js`), and the Xrm.Navigation.navigateTo API
+  for opening a target polymorphic record.</role>
+
+  <goal><![CDATA[
+Owner-visible outcome: on the sprk_todo main form, BELOW the
+RegardingResolver PCF (bound to sprk_regardingrecordtype), a new
+section renders two OOB-styled read-only fields:
+  - "Regarding Record Number" (1/3 width) as a CLICKABLE HYPERLINK that
+    opens the target record identified by sprk_regardingrecordtype +
+    sprk_regardingrecordid (in a modal via Xrm.Navigation.navigateTo).
+  - "Regarding Record Name" (2/3 width) as plain read-only text.
+
+Both webresource + form deployed to spaarkedev1. On sprk_todo record
+open, DevTools console shows the webresource init log
+("[SmartTodo.RegardingRecordNumberHyperlink v1.0.0] ..."), and clicking
+the record-number opens the correct target record. Backward-compat: v1.3.1
+RegardingResolver PCF continues to function unchanged.
+  ]]></goal>
+
+  <inputs>
+    <file purpose="spec">projects/set-regarding-and-field-mapping-resolver-r1/spec.md</file>
+    <file purpose="project-claude">projects/set-regarding-and-field-mapping-resolver-r1/CLAUDE.md</file>
+    <file purpose="canonical-webresource-ref">src/client/webresources/js/sprk_todo_regarding_presave.js</file>
+    <file purpose="canonical-webresource-ref">src/client/webresources/js/sprk_fieldmapping_push.js</file>
+    <file purpose="pcf-writer-service">src/client/shared/Spaarke.UI.Components/src/services/PolymorphicResolverService.ts</file>
+    <file purpose="adr">.claude/adr/ADR-006-ui-surface-architecture.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-006">Host-scripting webresource Path A pattern (per SRFR-061 canonical). Additive form event registration only; do not replace/remove existing OnLoad handlers.</constraint>
+    <constraint source="project">Companion webresource is defensive: silent-fail (console.warn, no throw) on missing DOM selector, missing form attributes, or missing target-record type mapping.</constraint>
+    <constraint source="project">Field additions preserve existing form behavior. RegardingResolver PCF binding on sprk_regardingrecordtype is UNCHANGED. `sprk_todo_regarding_presave.js` OnLoad handler is UNCHANGED.</constraint>
+    <constraint source="project">Both new fields are `readonlyoutsidewriteoptimized="true"` — the PCF is the writer; the form displays what the PCF/presave persisted.</constraint>
+    <constraint source="project">Webresource references `sprk_regardingrecordtype` (lookup to sprk_recordtype_ref) + `sprk_regardingrecordid` (text GUID) to compose the navigateTo target. Reads the linked entity name via the lookup entity metadata from the recordtype-ref lookup value (SDK-provided entityType, no extra query).</constraint>
+    <constraint source="project">STANDARD rigor: Step 9.5 quality gates SKIPPED per user directive (form config + host-scripting webresource, not TypeScript/C# implementation).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Model-Driven App form config + host-scripting webresource patterns + Xrm.Navigation.navigateTo</topic>
+    <files>
+      <file>src/client/webresources/js/sprk_todo_regarding_presave.js</file>
+      <file>src/client/webresources/js/sprk_fieldmapping_push.js</file>
+    </files>
+    <patterns>
+      <pattern name="Defensive IIFE + namespace webresource" location="src/client/webresources/js/sprk_todo_regarding_presave.js">
+        Namespace `Spaarke.SmartTodo.{Feature}` seeded from window; IIFE
+        exposes `ns.VERSION` + `ns.onLoad(executionContext)`. Never throws:
+        wraps body in try/catch + console.error prefix with version tag.
+      </pattern>
+      <pattern name="Xrm.Navigation.navigateTo for target-record open" location="src/client/webresources/js/sprk_fieldmapping_push.js">
+        `Xrm.Navigation.navigateTo({ pageType: 'entityrecord', entityName,
+        entityId }, { target: 2, width: { value: 80, unit: '%' }, height:
+        { value: 80, unit: '%' } })`. `target: 2` = dialog modal;
+        `target: 1` = inline (default). Catch and warn on failure.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Owner reviewed v1.3.1 RegardingResolver post-deploy (SRFR-034) and
+      requested OOB-style form fields BELOW the PCF for the two most
+      commonly needed values (record number + record name). Rationale:
+      makers who prefer OOB form-field display over the PCF's Row-2
+      inline hyperlink can now surface those values as normal form
+      fields, with the record-number field additionally rendered as a
+      clickable hyperlink to the target record (mirrors PCF Row-2 SRFR-034
+      behavior for consistency).
+
+      Form ID confirmed via MCP: `eca59df4-1364-f111-ab0c-7ced8ddc4cc6`
+      ("To Do main form"). Solution ownership: SpaarkeMaster + Cr2b7d5.
+      Existing webresource solution: `SetRegardingWebResources` v1.0.0
+      (natural home for the new webresource).
+    </background>
+    <dependencies>
+      <dependency task="SRFR-034" status="completed">RegardingResolver v1.3.1 deployed. The form config here does NOT depend on the PCF version but is authored assuming v1.3.1 is the live PCF.</dependency>
+    </dependencies>
+    <related-work>
+      <item>No downstream tasks blocked. SRFR-084 UAT continues after this lands.</item>
+      <item>Parallel: SRFR-035 (if concurrent) bumps PCF to v1.3.2 with auto-refresh. Different surface (PCF vs form XML + new webresource) — no collision.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check">Confirm context &lt; 60%. Confirm SetRegardingWebResources solution exists at v1.0.0 and sprk_todo form ID via MCP.</step>
+    <step order="1" name="Author companion webresource">Create `src/client/webresources/js/sprk_regardingrecordnumber_hyperlink.js` v1.0.0. IIFE + namespace `Spaarke.SmartTodo.RegardingRecordNumberHyperlink`. Public entry: `ns.onLoad(executionContext)`. Uses a bounded polling loop (max 20 attempts × 200ms = 4s) to wait for the field DOM to render, then transforms the field's display element into an anchor pointing at target via `Xrm.Navigation.navigateTo({pageType:'entityrecord', entityName, entityId}, {target:2, width:{value:80,unit:'%'}, height:{value:80,unit:'%'}})`. Reads entityName from `formContext.getAttribute('sprk_regardingrecordtype').getValue()[0].name`. Silent-fail on any miss.</step>
+    <step order="2" name="Export existing webresource solution">Use PAC CLI to export the current SetRegardingWebResources solution as unmanaged to a temp directory (or use existing project scripts if available). This gives us the baseline to add the new webresource to.</step>
+    <step order="3" name="Deploy webresource via MCP or Web API">Since form-only solution round-trip via SetRegardingWebResources adds risk to already-published fields, use direct webresource create/publish via MCP: create a new webresource record with name `sprk_regardingrecordnumber_hyperlink`, displayname, webresourcetype=3 (JScript), content base64-encoded. Add to SetRegardingWebResources solution component list. Publish. This is the minimal-blast-radius approach.</step>
+    <step order="4" name="Export sprk_todo form for modification">Export the smallest possible solution containing the sprk_todo main form (formid eca59df4-1364-f111-ab0c-7ced8ddc4cc6). Approach: create a temporary form-scoped solution `SetRegardingTodoForm` via `pac solution init` in a temp dir; add the form component; export unmanaged; unpack; modify FormXml.</step>
+    <step order="5" name="Modify FormXml">In the unpacked FormXml (`Entities/sprk_todo/FormXml.xml` or similar):
+      (a) Locate the tab/section carrying the RegardingResolver PCF binding on `sprk_regardingrecordtype`.
+      (b) Add a new section below it (or extend existing) with a 3-column-friendly layout carrying two cells: sprk_regardingrecordnumber (colspan=1) + sprk_regardingrecordname (colspan=2). Both cells `disableViewsForForm="1"` if needed; both fields `readonly` at the control level.
+      (c) In `<formLibraries>`, add `<Library name="sprk_regardingrecordnumber_hyperlink" libraryUniqueId="{new guid}" />`.
+      (d) In `<events>` element (create if absent), add an `<event name="onload">` handler pointing at `Spaarke.SmartTodo.RegardingRecordNumberHyperlink.onLoad` with `passExecutionContext="true"` and `enabled="true"`. Do NOT replace any existing OnLoad handlers.</step>
+    <step order="6" name="Repack + import">Repack the modified solution and import via `pac solution import --path ... --publish-changes`. Verify import log for errors.</step>
+    <step order="7" name="Verify">
+      (a) Via MCP `read_query`: confirm `sprk_regardingrecordnumber_hyperlink` webresource exists with `webresourcetype = 3`.
+      (b) Via MCP: confirm sprk_todo systemform has both fields present in FormXml (query systemform.formxml LIKE '%sprk_regardingrecordnumber%').
+      (c) Owner-side smoke test: open a sprk_todo record in spaarkedev1, verify DevTools console log from webresource + hyperlink render + click-navigates to target. (This is deferred to owner UAT; the task itself completes when webresource + form are imported cleanly.)
+    </step>
+    <step order="8" name="Log + TASK-INDEX update">Write session log to `projects/set-regarding-and-field-mapping-resolver-r1/notes/task-036-sprk-todo-form-config.log`. Add SRFR-036 row to TASK-INDEX.md under Wave 3 post-v1.3.1 follow-on.</step>
+    <step order="9" name="Update task status">Mark SRFR-036 completed. Reset current-task.md.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Load existing webresource canonical + presave for patterns</tool>
+    <tool name="Write">Author new webresource file</tool>
+    <tool name="Edit">TASK-INDEX.md, current-task.md, POML notes</tool>
+    <tool name="Bash">PAC CLI export/unpack/pack/import, base64 encoding for webresource content</tool>
+    <tool name="mcp__dataverse__read_query">Verify webresource + form state</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/webresources/js/sprk_regardingrecordnumber_hyperlink.js</output>
+    <output type="artifact">Deployed webresource sprk_regardingrecordnumber_hyperlink (type=3) in spaarkedev1</output>
+    <output type="artifact">Modified sprk_todo main form (formid eca59df4-1364-f111-ab0c-7ced8ddc4cc6) with new fields + OnLoad handler</output>
+    <output type="notes">projects/set-regarding-and-field-mapping-resolver-r1/notes/task-036-sprk-todo-form-config.log</output>
+    <output type="docs">projects/set-regarding-and-field-mapping-resolver-r1/tasks/TASK-INDEX.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`src/client/webresources/js/sprk_regardingrecordnumber_hyperlink.js` exists with `ns.VERSION = "1.0.0"` and defensive try/catch.</criterion>
+    <criterion testable="true">Webresource `sprk_regardingrecordnumber_hyperlink` exists in Dataverse with `webresourcetype = 3` (JScript).</criterion>
+    <criterion testable="true">sprk_todo systemform FormXml contains `sprk_regardingrecordnumber` and `sprk_regardingrecordname` as controls (verifiable via `SELECT formxml FROM systemform WHERE formid = 'eca59df4-1364-f111-ab0c-7ced8ddc4cc6'` containing both attribute names).</criterion>
+    <criterion testable="true">sprk_todo form OnLoad event registers `Spaarke.SmartTodo.RegardingRecordNumberHyperlink.onLoad` via `sprk_regardingrecordnumber_hyperlink` library.</criterion>
+    <criterion testable="true">Existing sprk_todo_regarding_presave.js OnLoad handler is UNCHANGED in FormXml (grep for `Spaarke.SmartTodo.RegardingPreSave.onLoad` still present after import).</criterion>
+    <criterion testable="true">Solution import log shows no errors.</criterion>
+    <criterion testable="true">`notes/task-036-sprk-todo-form-config.log` written with deploy outcomes.</criterion>
+    <criterion testable="true">TASK-INDEX.md contains SRFR-036 row under Wave 3.</criterion>
+  </acceptance-criteria>
+
+  <notes><![CDATA[
+Completed 2026-07-03. Deployed to spaarkedev1:
+  - Webresource sprk_regardingrecordnumber_hyperlink v1.0.0 created + published
+    (webresourceid d09bc028-2477-f111-ab0e-70a8a590c51c, type=3 JScript,
+    unmanaged).
+  - sprk_todo main form (formid eca59df4-1364-f111-ab0c-7ced8ddc4cc6) PATCHed:
+      * FormXml: REGARDING section row 2/3 reconfigured to single row
+        [sprk_regardingrecordnumber colspan=1 disabled=true |
+         sprk_regardingrecordname colspan=2 disabled=true]; sprk_regardingrecordurl
+        relocated to hidden cell (persistence preserved).
+      * FormXml: <events> + <formLibraries> added. OnLoad handler wires
+        Spaarke.SmartTodo.RegardingRecordNumberHyperlink.onLoad with
+        passExecutionContext=true.
+  - sprk_todo entity published.
+
+Verification (via verify-form-events.ps1 against spaarkedev1):
+  - formxml size 18862 chars (was 18356)
+  - formjson regenerated to 71671 chars
+  - All 8 markers pass: webresource + handler in formxml; events block present;
+    formLibraries present; both field disabled=true markers present;
+    formjson regenerated contains both webresource + handler references.
+
+Two implementation discoveries:
+  1. formjson is READ-ONLY — Dataverse regenerates it from formxml on
+     publish. Initial approach that PATCH'd formjson directly was ignored
+     (no error, but no persistence). Fix: modify formxml <events> block
+     instead; formjson regenerates automatically.
+  2. FormXml XSD schema rejects unrecognized attributes on <row> etc.
+     Idempotency markers must be intrinsic (e.g. disabled="true" on the
+     new-shape field) rather than custom xmlns:sprk-style attributes.
+
+Files:
+  - CREATED: src/client/webresources/js/sprk_regardingrecordnumber_hyperlink.js
+  - CREATED: projects/set-regarding-and-field-mapping-resolver-r1/tasks/036-sprk-todo-form-config.poml
+  - CREATED: projects/set-regarding-and-field-mapping-resolver-r1/notes/task-036-sprk-todo-form-config.log
+  - UPDATED: projects/set-regarding-and-field-mapping-resolver-r1/tasks/TASK-INDEX.md
+  - CREATED (temporary, in c:/tmp): deploy-sprktodo-form-036.ps1,
+    verify-form-events.ps1 (kept for reference)
+
+STANDARD rigor: Step 9.5 (code-review + adr-check) explicitly skipped per
+user directive — form config + host-scripting webresource, not TypeScript/C#
+implementation. Owner-side smoke verification (open sprk_todo record and
+confirm hyperlink click-through) is deferred to next spaarkedev1 UAT session.
+  ]]></notes>
+</task>

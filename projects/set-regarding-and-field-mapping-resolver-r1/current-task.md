@@ -11,38 +11,37 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | — (SRFR-034 complete, v1.3.1 deployed) |
+| **Task** | — (SRFR-035 complete, v1.3.2 deployed) |
 | **Step** | — |
 | **Status** | idle |
-| **Next Action** | Wave 8 remaining: **SRFR-084 (UAT Matter→Event end-to-end STANDARD)**. Or Wave 9 SRFR-090 (project wrap-up). |
+| **Next Action** | Wave 8 remaining: **SRFR-084 (UAT Matter→Event end-to-end STANDARD)**. Or Wave 9 SRFR-090 (project wrap-up). Or SRFR-036 (sprk_todo form config) if still running in parallel. |
 
-## Session Notes / Key Learnings (SRFR-034)
+## Session Notes / Key Learnings (SRFR-035)
 
-- **Dataverse PCF XSD `noAposStringType`** — the extracted `Solution/Controls/.../ControlManifest.xml` `description-key` attribute cannot contain apostrophes (single-quote character). Import fails with "The 'description-key' attribute is invalid — noAposStringType Pattern constraint failed". Fix: replace `entity's` → `entity`, `'RELATED RECORD'` → `RELATED RECORD` in `description-key` values. The source `ControlManifest.Input.xml` used in pcf-scripts build is not shipped (only the extracted Solution manifest is), but syncing both keeps them consistent.
-- **Extracted Solution ControlManifest.xml lags source manifest** — the `Solution/Controls/.../ControlManifest.xml` had NOT been re-synced when v1.3 added `regardingRecordNumberField`, `regardingRecordNameField`, `title`. This shipped in v1.3.0 without those properties in the manifest surface (worked because the runtime bundle handles them regardless, but maker property panels didn't see them). SRFR-034 sync'd all v1.3 properties into the extracted manifest alongside the version bump.
-- **Path A ADR-021 exception for OOB parity** — Fluent v9 semantic tokens do NOT map to Dataverse OOB section-header conventions. When owner-requested visual target is OOB parity, hardcoded values (font family + size + color + weight + padding) are correct. Document inline + in POML constraints + acknowledge in PR description.
-- **Icon flip via consumer CSS** — `[data-testid="polymorphic-picker-trigger"] svg { transform: scaleX(-1); }` targets the shared PolymorphicPicker's SVG child without modifying the shared lib. ADR-012 preserved. Coupling to testid selector is a documented trade-off; alternative is a semantic class name on the shared component.
-- **7-anchor version discipline (SRFR-033 legacy) works** — 1.3.0 → 1.3.1 across manifest × 2, index.ts, package.json, solution.xml, pack.ps1, UI footer BUILD_DATE. Zero straggling references confirmed by grep.
+- **CREATE-mode gate is load-bearing** — the SRFR-032 presave bridge (`__sprk_regarding_pending__`) stages the resolver payload into the form's pending-attribute buffer for the INSERT transaction. `formType === 1` early-return in `autoRefreshForm` prevents `data.refresh(true)` from clobbering the form buffer during CREATE.
+- **Manual refresh button (SRFR-034) preserved** — auto-refresh is ADDITIVE, not a replacement. If auto-refresh silently fails (Xrm-unavailable or save reject), the user still has the manual button as escape hatch.
+- **Fire-and-forget pattern** — `void autoRefreshForm(getFormType())` after successful `applyRegardingSelection` completes the handler promptly for good UX; auto-refresh runs asynchronously without blocking the picker-select finally block.
+- **7-anchor version discipline preserved** — same list as SRFR-033/034, all bumped to 1.3.2.
 
 ## Applicable ADRs (session-level)
 
-- **ADR-021** — Semantic tokens (documented Path A exception for OOB title parity, owner-approved).
-- **ADR-022** — PCF platform libraries (preserved; virtual pattern intact; bundle 1.57 MiB parity).
-- **ADR-012** — Shared component library (preserved; PolymorphicPicker consumed unchanged; icon flip is consumer-side CSS transform).
+- **ADR-022** — PCF platform libraries (virtual pattern preserved; bundle 1.57 MiB parity).
+- **ADR-012** — Shared component library (PolymorphicPicker consumed unchanged).
+- **ADR-024** — Polymorphic resolver pattern (applyResolverFields is still the write path; auto-refresh is display-side).
 
 ## Files Modified This Session
 
-- MODIFIED: `src/client/pcf/RegardingResolver/RegardingResolver/ControlManifest.Input.xml` (title default + showVersionFooter + version + apostrophe fix)
+- MODIFIED: `src/client/pcf/RegardingResolver/RegardingResolver/RegardingResolverApp.tsx` (autoRefreshForm + getFormType helpers + wire-up in handlePickerSelect + docstring header)
+- MODIFIED: `src/client/pcf/RegardingResolver/RegardingResolver/ControlManifest.Input.xml` (version)
 - MODIFIED: `src/client/pcf/RegardingResolver/RegardingResolver/index.ts` (CONTROL_VERSION)
-- MODIFIED: `src/client/pcf/RegardingResolver/RegardingResolver/RegardingResolverApp.tsx` (main refactor: refresh button, styles, uppercased title, row-2 simplify, footer gate, docstring update)
 - MODIFIED: `src/client/pcf/RegardingResolver/package.json` (version)
 - MODIFIED: `src/client/pcf/RegardingResolver/Solution/solution.xml` (Version)
-- MODIFIED: `src/client/pcf/RegardingResolver/Solution/Controls/sprk_Spaarke.Controls.RegardingResolver/ControlManifest.xml` (version + sync missing v1.3 props + apostrophe fix)
+- MODIFIED: `src/client/pcf/RegardingResolver/Solution/Controls/sprk_Spaarke.Controls.RegardingResolver/ControlManifest.xml` (version)
 - MODIFIED: `src/client/pcf/RegardingResolver/Solution/pack.ps1` ($version)
-- MODIFIED: `src/client/pcf/RegardingResolver/__tests__/RegardingResolverApp.test.tsx` (bulk 1.3.0→1.3.1 + 9 new tests)
+- MODIFIED: `src/client/pcf/RegardingResolver/__tests__/RegardingResolverApp.test.tsx` (bulk 1.3.1→1.3.2 + 3 new tests)
 - BUILT: `src/client/pcf/RegardingResolver/out/controls/RegardingResolver/bundle.js` (1.57 MiB)
-- BUILT: `src/client/pcf/RegardingResolver/Solution/bin/RegardingResolverSolution_v1.3.1.zip`
-- DEPLOYED: RegardingResolverSolution v1.3.1 to spaarkedev1
-- CREATED: `projects/set-regarding-and-field-mapping-resolver-r1/tasks/034-regarding-resolver-ui-polish-v1.3.1.poml` (status: completed)
-- CREATED: `projects/set-regarding-and-field-mapping-resolver-r1/notes/task-034-regarding-resolver-ui-polish.log`
-- UPDATED: `projects/set-regarding-and-field-mapping-resolver-r1/tasks/TASK-INDEX.md` (SRFR-034 added, total 28 → 29)
+- BUILT: `src/client/pcf/RegardingResolver/Solution/bin/RegardingResolverSolution_v1.3.2.zip`
+- DEPLOYED: RegardingResolverSolution v1.3.2 to spaarkedev1
+- CREATED: `projects/set-regarding-and-field-mapping-resolver-r1/tasks/035-regarding-resolver-auto-refresh-v1.3.2.poml` (status: completed)
+- CREATED: `projects/set-regarding-and-field-mapping-resolver-r1/notes/task-035-regarding-resolver-auto-refresh.log`
+- UPDATED: `projects/set-regarding-and-field-mapping-resolver-r1/tasks/TASK-INDEX.md` (SRFR-035 added, total 29 → 30)
