@@ -31,6 +31,27 @@
 export interface SourceSavedQuery {
   type: 'savedquery';
   savedQueryId: string;
+  /**
+   * Optional allowlist of savedquery GUIDs. When set as a non-empty array, the
+   * `<ViewSelector>` dropdown is restricted to only these sibling views (in
+   * addition to any user-switched view). When omitted (or set as an empty array),
+   * all active sibling savedqueries for the entity are shown — the current
+   * back-compat behavior.
+   *
+   * Empty-array semantics: an empty array is treated as "no filter" (identical
+   * to `undefined`). This is a safer default that avoids the accidental
+   * empty-picker footgun (spec FR-05 owner note 2026-07-02).
+   *
+   * FR-05 (Issue 5, `spaarke-dataset-grid-framework-r2`): implements a
+   * maker-controlled allowlist so a specific config record can restrict the
+   * picker without deleting savedqueries Dataverse-wide.
+   *
+   * Precedence note: the per-instance `availableViews` from
+   * `SectionInstance.overrides` (FR-03) takes precedence over this
+   * config-level allowlist when both are set. That precedence lives in FR-03
+   * wiring (task 012); this field is the config-level fallback.
+   */
+  readonly availableViews?: string[];
 }
 
 /**
@@ -326,7 +347,14 @@ export interface ParentContextFilter {
 export interface BehaviorConfig {
   /** Default `'multi'`. */
   selectionMode?: 'none' | 'single' | 'multi';
-  /** Default `50` per design.md (callers may override; framework also accepts 100 default for lazy-load contexts). */
+  /**
+   * Default `25` (workspace-widget majority use case). Drill-through /
+   * full-page consumers should override explicitly to `50` or `100`.
+   *
+   * FR-07 (spaarke-dataset-grid-framework-r2, owner clarification 2026-07-02):
+   * changed from `?? 100` to `?? 25`. Existing config records with an explicit
+   * `pageSize` are unaffected; only records that omit `pageSize` see the new default.
+   */
   pageSize?: number;
   /** Default `true`. */
   enableSorting?: boolean;

@@ -64,6 +64,10 @@ import { authenticatedFetch } from "../services/authInit";
 import { getBffBaseUrl } from "../config/runtimeConfig";
 import type { LayoutJson } from "../workspace/buildDynamicWorkspaceConfig";
 import { SYSTEM_DEFAULT_LAYOUT_JSON } from "../workspace/buildDynamicWorkspaceConfig";
+// R2 FR-04 / DEF-004 (2026-07-02): dev-mode widthPreference violation detector.
+// Fires console.warn when a section with widthPreference:'full' is placed in a
+// multi-column row. Silent in production. See sectionRegistry.ts for details.
+import { warnOnWidthPreferenceViolations } from "../sectionRegistry";
 
 // Re-export type aliases so existing LegalWorkspace imports continue to resolve
 // from this path.
@@ -100,7 +104,10 @@ function parseLayoutJson(raw: unknown): LayoutJson {
       typeof candidate.schemaVersion === "number" &&
       Array.isArray(candidate.rows)
     ) {
-      return candidate as LayoutJson;
+      const parsed = candidate as LayoutJson;
+      // R2 FR-04 / DEF-004: dev-mode widthPreference guard. Silent in production.
+      warnOnWidthPreferenceViolations(parsed);
+      return parsed;
     }
   }
   return SYSTEM_DEFAULT_LAYOUT_JSON;

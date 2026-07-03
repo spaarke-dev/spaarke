@@ -35,15 +35,30 @@ import type {
 } from "@spaarke/ui-components";
 import { resolveTheme, setupThemeListener } from "./providers/ThemeProvider";
 import { TemplateStep, SectionStep, ArrangeStep, buildInitialAssignments } from "./steps";
-import type { SectionCatalogItem, SlotAssignments } from "./steps";
+import type { SectionCatalogItem, SlotAssignments, SectionInstance } from "./steps";
 import type { WizardMode } from "./main";
 
-/** Parsed LayoutJson row — mirrors the BFF LayoutJsonRow shape for sectionsJson parsing. */
+/**
+ * Parsed LayoutJson row — mirrors the BFF LayoutJsonRow shape for sectionsJson parsing.
+ *
+ * FR-03 (task 013): `sections` widened to `Array<string | SectionInstance>` so
+ * the wizard can round-trip either bare-string entries (back-compat with every
+ * pre-R2 published `sprk_workspacelayout` record) or `SectionInstance` objects
+ * carrying per-placement overrides. The "empty → bare string" invariant is
+ * enforced in `buildSectionsJson` — a slot with no advanced overrides always
+ * serializes as a bare string.
+ */
 interface LayoutJsonRow {
   id: string;
   columns: string;
   columnsSmall?: string;
-  sections: string[];
+  sections: Array<string | SectionInstance>;
+  /**
+   * Optional row-level height ceiling (any CSS length, e.g. `'80vh'`, `'640px'`).
+   * Added by FR-02 (task 010 schema half + task 011 wizard-UI half). When
+   * omitted, framework preserves current behavior (row grows to fit sections).
+   */
+  rowHeight?: string;
 }
 
 /** Parsed LayoutJson — mirrors the BFF LayoutJson shape for sectionsJson parsing. */
@@ -130,27 +145,87 @@ const STEP_REVIEW_SAVE = "review-save";
  * Parse sectionsJson from the source layout into:
  * - a Set of selected section IDs
  * - a SlotAssignments Map (slot key -> section ID)
+ * - a rowHeights Map (row.id -> CSS length; FR-02 / task 011)
+ * - a sectionInstances Map (slot key -> SectionInstance; FR-03 / task 013)
+ *
+ * FR-03 (task 013): section entries may be bare strings OR SectionInstance
+ * objects. Bare-string entries widen to `{ id }` in `sectionInstances`;
+ * SectionInstance entries with ANY override field set (configIdOverride,
+ * label, overrides.pageSize, overrides.availableViews) are stored verbatim
+ * so the wizard can pre-populate the Advanced panel during edit/saveAs.
+ * Entries with NO override fields are NOT stored — save-time will re-emit
+ * them as bare strings (back-compat).
  */
 function parseSectionsJson(
   json: string,
-): { sectionIds: Set<string>; assignments: SlotAssignments } {
+): {
+  sectionIds: Set<string>;
+  assignments: SlotAssignments;
+  rowHeights: Map<string, string>;
+  sectionInstances: Map<string, SectionInstance>;
+} {
   const sectionIds = new Set<string>();
   const assignments: SlotAssignments = new Map();
+  // FR-02 (task 011): pre-populate row-height overrides when editing an
+  // existing layout so the wizard round-trips the saved value. Keyed by
+  // row.id, matching the template row IDs from `LAYOUT_TEMPLATES`.
+  const rowHeights = new Map<string, string>();
+  // FR-03 (task 013): pre-populate per-slot SectionInstance overrides. Keyed
+  // by the same slotKey (`${row.id}:${col}`) used for `assignments`. Only
+  // slots whose serialized entry had a non-empty override survive the "empty
+  // → bare string" invariant — those are the ones we surface in the wizard
+  // Advanced panel.
+  const sectionInstances = new Map<string, SectionInstance>();
   try {
     const parsed = JSON.parse(json) as LayoutJson;
     for (const row of parsed.rows) {
+      if (typeof row.rowHeight === "string" && row.rowHeight.length > 0) {
+        rowHeights.set(row.id, row.rowHeight);
+      }
       for (let col = 0; col < row.sections.length; col++) {
-        const sectionId = row.sections[col];
-        if (sectionId) {
-          sectionIds.add(sectionId);
-          assignments.set(`${row.id}:${col}`, sectionId);
+        const rawEntry = row.sections[col];
+        if (!rawEntry) continue;
+
+        // Normalize bare-string entries to { id } at the parse boundary.
+        const instance: SectionInstance =
+          typeof rawEntry === "string" ? { id: rawEntry } : rawEntry;
+        const sectionId = instance.id;
+        if (!sectionId) continue;
+
+        sectionIds.add(sectionId);
+        const slotKey = `${row.id}:${col}`;
+        assignments.set(slotKey, sectionId);
+
+        // Only record the instance if it has AT LEAST ONE meaningful override.
+        // Otherwise the "empty → bare string" invariant covers it at emit time.
+        if (hasAnyOverride(instance)) {
+          sectionInstances.set(slotKey, instance);
         }
       }
     }
   } catch (err) {
     console.warn("[WorkspaceLayoutWizard] Failed to parse sectionsJson:", err);
   }
-  return { sectionIds, assignments };
+  return { sectionIds, assignments, rowHeights, sectionInstances };
+}
+
+/**
+ * True when a SectionInstance has any field set that would prevent it from
+ * being emitted as a bare string. Mirrors the emit-time logic in
+ * `buildSectionsJson` (FR-03 / task 013).
+ *
+ * Empty-string label + undefined arrays + undefined pageSize all → "no
+ * override" (safe to emit as bare string).
+ */
+function hasAnyOverride(instance: SectionInstance): boolean {
+  if (instance.configIdOverride && instance.configIdOverride.length > 0) return true;
+  if (instance.label && instance.label.length > 0) return true;
+  const o = instance.overrides;
+  if (o) {
+    if (typeof o.pageSize === "number" && Number.isFinite(o.pageSize)) return true;
+    if (Array.isArray(o.availableViews) && o.availableViews.length > 0) return true;
+  }
+  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -260,27 +335,92 @@ function writePinToStartForLayout(
  * Build the sectionsJson string from current wizard state.
  * Transforms slot assignments (Map<slotKey, sectionId>) into the LayoutJson
  * format expected by the BFF API: { schemaVersion: 1, rows: [{ id, sections }] }
+ *
+ * FR-03 (task 013): section entries now emit as EITHER a bare string
+ * ("empty → bare string" back-compat invariant) OR a `SectionInstance` object
+ * carrying per-placement overrides. The emit rule is:
+ *
+ *   - No entry in `sectionInstances` for the slot → bare string (or "" for empty slot)
+ *   - Entry present but `hasAnyOverride(instance)` false → bare string
+ *   - Entry present AND has at least one override field → SectionInstance object
+ *     (with only the set fields; empty fields are omitted, not written as
+ *     empty string / undefined, so the JSON stays clean)
+ *
+ * This preserves back-compat with every pre-R2 published `sprk_workspacelayout`
+ * record: existing rows continue to serialize identically, only newly-set
+ * override slots switch to the object shape.
  */
-function buildSectionsJson(
+export function buildSectionsJson(
   templateId: LayoutTemplateId,
   assignments: SlotAssignments,
   scope: "my" | "all" = "my",
+  rowHeights: Map<string, string> = new Map(),
+  sectionInstances: Map<string, SectionInstance> = new Map(),
 ): string {
   const template = getLayoutTemplate(templateId);
   if (!template) return JSON.stringify({ schemaVersion: 1, rows: [], scope });
 
   const rows: LayoutJsonRow[] = template.rows.map((row) => {
-    const sections: string[] = [];
+    const sections: Array<string | SectionInstance> = [];
     for (let col = 0; col < row.slotCount; col++) {
-      const sectionId = assignments.get(`${row.id}:${col}`);
-      sections.push(sectionId ?? "");
+      const slotKey = `${row.id}:${col}`;
+      const sectionId = assignments.get(slotKey);
+
+      if (!sectionId) {
+        // Empty slot — emit "" per task 091 tolerance behavior.
+        sections.push("");
+        continue;
+      }
+
+      // FR-03 (task 013): emit SectionInstance object when advanced overrides
+      // are set; otherwise bare string (back-compat invariant).
+      const instance = sectionInstances.get(slotKey);
+      if (instance && hasAnyOverride(instance)) {
+        // Rebuild a minimal instance with only the SET fields, so the JSON
+        // doesn't contain undefined/empty leftovers. `id` always mirrors the
+        // slot assignment (defensive — the map should already agree, but the
+        // assignment is the source of truth).
+        const emit: SectionInstance = { id: sectionId };
+        if (instance.configIdOverride && instance.configIdOverride.length > 0) {
+          emit.configIdOverride = instance.configIdOverride;
+        }
+        if (instance.label && instance.label.length > 0) {
+          emit.label = instance.label;
+        }
+        const o = instance.overrides;
+        if (o) {
+          const overrides: SectionInstance["overrides"] = {};
+          let hasAny = false;
+          if (typeof o.pageSize === "number" && Number.isFinite(o.pageSize)) {
+            overrides.pageSize = o.pageSize;
+            hasAny = true;
+          }
+          if (Array.isArray(o.availableViews) && o.availableViews.length > 0) {
+            overrides.availableViews = [...o.availableViews];
+            hasAny = true;
+          }
+          if (hasAny) emit.overrides = overrides;
+        }
+        sections.push(emit);
+      } else {
+        sections.push(sectionId);
+      }
     }
-    return {
+    // FR-02 (task 011): emit `rowHeight` only when the operator picked a
+    // non-default value. The "Auto (default)" preset intentionally OMITS the
+    // field so back-compat consumers (framework, LegalWorkspace) see the same
+    // shape they did pre-R2.
+    const rowHeight = rowHeights.get(row.id);
+    const rowJson: LayoutJsonRow = {
       id: row.id,
       columns: row.gridTemplateColumns,
       columnsSmall: row.gridTemplateColumnsSmall,
       sections,
     };
+    if (rowHeight && rowHeight.trim().length > 0) {
+      rowJson.rowHeight = rowHeight.trim();
+    }
+    return rowJson;
   });
 
   return JSON.stringify({ schemaVersion: 1, rows, scope } satisfies LayoutJson);
@@ -296,11 +436,13 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
   // ---------------------------------------------------------------------------
   const saveAsData = React.useMemo(() => {
     if (mode !== "saveAs" || !sectionsJson) return null;
-    const { sectionIds, assignments } = parseSectionsJson(sectionsJson);
+    const { sectionIds, assignments, rowHeights, sectionInstances } = parseSectionsJson(sectionsJson);
     return {
       templateId: (layoutTemplateId ?? null) as LayoutTemplateId | null,
       sectionIds,
       assignments,
+      rowHeights,
+      sectionInstances,
       name: sourceName ? `${sourceName} (copy)` : "",
     };
   }, [mode, layoutTemplateId, sectionsJson, sourceName]);
@@ -327,6 +469,26 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
   scopeRef.current = scope;
   const [sectionAssignments, setSectionAssignments] =
     React.useState<SlotAssignments>(saveAsData?.assignments ?? new Map());
+  // FR-02 (task 011): per-row height overrides keyed by row.id (matching
+  // template row IDs from `LAYOUT_TEMPLATES`). Empty map means every row uses
+  // the framework default (grow to fit sections). Set via the row-settings
+  // dropdown in `ArrangeStep`. Emitted into `LayoutJsonRow.rowHeight` by
+  // `buildSectionsJson` only when non-empty; the "Auto (default)" preset does
+  // NOT populate the map, preserving back-compat JSON output.
+  const [rowHeights, setRowHeights] = React.useState<Map<string, string>>(
+    () => saveAsData?.rowHeights ?? new Map(),
+  );
+  // FR-03 (task 013): per-slot SectionInstance overrides keyed by
+  // `${row.id}:${col}` (matching `sectionAssignments`). Populated by the
+  // "Advanced" accordion in ArrangeStep — each of the 4 fields (configId,
+  // label, pageSize, availableViews) writes into the entry for its slot.
+  // Empty map means every placed section serializes as a bare string
+  // (back-compat with every pre-R2 published `sprk_workspacelayout` record).
+  // Slots whose entry has no override fields set are omitted from serialization
+  // by `buildSectionsJson` via the `hasAnyOverride` check.
+  const [sectionInstances, setSectionInstances] = React.useState<Map<string, SectionInstance>>(
+    () => saveAsData?.sectionInstances ?? new Map(),
+  );
 
   const wizardRef = React.useRef<IWizardShellHandle>(null);
 
@@ -425,7 +587,13 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
     const body = {
       name: workspaceName.trim(),
       layoutTemplateId: selectedTemplateId,
-      sectionsJson: buildSectionsJson(selectedTemplateId, sectionAssignments, scopeRef.current),
+      sectionsJson: buildSectionsJson(
+        selectedTemplateId,
+        sectionAssignments,
+        scopeRef.current,
+        rowHeights,
+        sectionInstances,
+      ),
       isDefault,
     };
 
@@ -532,7 +700,7 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
         throw new Error(apiErr.message ?? "Failed to save workspace layout. Please try again.");
       }
     }
-  }, [mode, layoutId, selectedTemplateId, sectionAssignments, workspaceName, isDefault, pinToStart, authenticatedFetch]);
+  }, [mode, layoutId, selectedTemplateId, sectionAssignments, workspaceName, isDefault, pinToStart, rowHeights, sectionInstances, authenticatedFetch]);
 
   // ---------------------------------------------------------------------------
   // WizardShell step configurations
@@ -587,10 +755,15 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
               workspaceName={workspaceName}
               isDefault={isDefault}
               pinToStart={pinToStart}
+              rowHeights={rowHeights}
+              sectionInstances={sectionInstances}
               onAssignmentsChange={setSectionAssignments}
               onNameChange={setWorkspaceName}
               onDefaultChange={setIsDefault}
               onPinToStartChange={setPinToStart}
+              onRowHeightsChange={setRowHeights}
+              onSectionInstancesChange={setSectionInstances}
+              authenticatedFetch={authenticatedFetch}
             />
           ) : null,
       },
@@ -605,6 +778,8 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
       workspaceName,
       isDefault,
       pinToStart,
+      rowHeights,
+      sectionInstances,
       scope,
       templateFilter,
     ],

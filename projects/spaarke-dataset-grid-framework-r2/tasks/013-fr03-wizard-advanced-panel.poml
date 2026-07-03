@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="013" project="spaarke-dataset-grid-framework-r2">
+  <metadata>
+    <title>FR-03: Wizard "Advanced" panel — per-instance overrides</title>
+    <phase>2: Wizard UI + Per-Instance Overrides</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>011,012</dependencies>
+    <blocks>015,016</blocks>
+    <tags>frontend, typescript, react, fluent-ui, workspace-layout-wizard, wizard-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies `.tsx` file; multi-step UI with configId picker (queries Dataverse); interacts with FR-05 precedence</rigor-reason>
+    <parallel-group>Wave 6</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Same file (`WorkspaceLayoutWizard/src/App.tsx`) touched by 011, 015 — must serialize</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Add a per-section "Advanced" panel to the `WorkspaceLayoutWizard` UI (expandable per placed section). Panel contains: configId picker (dropdown of `sprk_gridconfiguration` records matching the section's entity), label override input, pageSize override input, availableViews multi-select. Panel writes to the `SectionInstance.overrides` structure introduced by FR-03 (task 012).
+  </prompt>
+
+  <role>
+    SPAARKE frontend wizard-UX contributor. Reads Dataverse via existing wizard patterns (Xrm.WebApi or wizard's data access layer).
+  </role>
+
+  <goal>
+    Wizard exposes per-section Advanced panel. Selecting a `configIdOverride` in the dropdown produces JSON with `SectionInstance.configIdOverride`. Same for label, pageSize, availableViews. Bare-string sections (no advanced settings) continue to write as bare strings.
+  </goal>
+
+  <context>
+    <background>
+      FR-03's schema half (task 012) added the SectionInstance union. This task exposes the four override fields to makers via the wizard.
+    </background>
+    <relevant-files>
+      <file>src/solutions/WorkspaceLayoutWizard/src/App.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Fluent UI v9 only; dark mode compliant.</constraint>
+    <constraint source="ADR-028">Data access uses existing wizard patterns (Xrm.WebApi via `XrmDataverseClient` or equivalent); no new auth surface.</constraint>
+    <constraint source="project">If no Advanced panel fields are set, wizard writes the section as a bare string (backward-compat).</constraint>
+    <constraint source="project">configId picker filters `sprk_gridconfiguration` records to those whose entity matches the section's metadata entity.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-dataset-grid-framework-r2/CLAUDE.md</file>
+      <file>projects/spaarke-dataset-grid-framework-r2/spec.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read spec.md § FR-03 + task 012's schema definition.</step>
+    <step order="2">Add an expandable Fluent v9 `Accordion` (or `Disclosure`) titled "Advanced" per placed section.</step>
+    <step order="3">Inside Advanced: (a) `Dropdown` for configId — query `sprk_gridconfiguration` records where the entity matches the section's metadata entity (may need to add a data fetch on section-entity change), (b) `Input` for label override, (c) `SpinButton` (or `Input` with number type) for pageSize override with placeholder "e.g., 100", (d) `TagPicker` (or `Combobox multiselect`) for availableViews — populates with the section's active savedqueries.</step>
+    <step order="4">Wire each control's onChange to update the wizard's `SectionInstance` for that placement. If ALL four fields are empty/default, write the section as a bare string. If ANY field is set, write as `SectionInstance` object.</step>
+    <step order="5">Add help text: "Overrides apply only to this layout instance. Set configId to point to a different sprk_gridconfiguration record. Set label to rename this section only in this layout."</step>
+    <step order="6">Ensure UI renders correctly in dark mode.</step>
+    <step order="7">Wizard integration test: setting `configIdOverride` produces valid `SectionInstance` JSON; setting nothing produces bare-string entry.</step>
+    <step order="8">Run `npm run build` in `WorkspaceLayoutWizard/` — clean.</step>
+    <step order="9">Update TASK-INDEX.md: → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + integration test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/WorkspaceLayoutWizard/src/App.tsx (modified — Advanced panel)</output>
+    <output type="test">src/solutions/WorkspaceLayoutWizard/src/__tests__/sectionInstanceAdvanced.test.tsx (new)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Per-section Advanced panel is expandable in wizard UI.</criterion>
+    <criterion testable="true">configId dropdown shows only records matching the section entity.</criterion>
+    <criterion testable="true">Setting `configIdOverride` + label produces JSON with `SectionInstance` object having those fields.</criterion>
+    <criterion testable="true">Leaving all fields empty produces a bare-string section entry.</criterion>
+    <criterion testable="true">Dark mode renders correctly (no hardcoded colors).</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    - Data-access pattern: use whatever the existing wizard uses to query Dataverse (likely `Xrm.WebApi` via a wrapper). Don't introduce new BFF calls.
+    - configId dropdown may need a "None (use default)" option to explicitly clear the override.
+    - availableViews multi-select can start empty (meaning "use config-level allowlist" per FR-03 precedence).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge. FULL rigor. Step 9.5 quality gates. UI test defs below.</protocol>
+  </execution>
+
+  <ui-tests>
+    <test name="Advanced panel expands">
+      <steps>
+        <step>Open WorkspaceLayoutWizard</step>
+        <step>Place a Communications section in a row</step>
+        <step>Click "Advanced" accordion on that section</step>
+        <step>Verify 4 controls visible (configId, label, pageSize, availableViews)</step>
+      </steps>
+      <expected>Panel expands; all controls render; no console errors</expected>
+    </test>
+    <test name="configId dropdown filters by entity">
+      <steps>
+        <step>Open Advanced panel on Communications section</step>
+        <step>Open configId dropdown</step>
+        <step>Verify only records with entity = communication are listed</step>
+      </steps>
+      <expected>Dropdown shows entity-filtered results</expected>
+    </test>
+    <test name="Dark mode compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode</step>
+        <step>Open Advanced panel</step>
+        <step>Verify all controls adapt (background, text, borders)</step>
+      </steps>
+      <expected>Fluent v9 semantic tokens used throughout</expected>
+    </test>
+  </ui-tests>
+</task>

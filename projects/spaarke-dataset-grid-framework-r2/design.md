@@ -558,6 +558,51 @@ Numbered acceptance conditions:
 
 ---
 
+## Placement Justification — DEF-002 BFF Endpoint (added 2026-07-02)
+
+**Applies to**: `GET /api/dataverse/gridconfigurations/{entityLogicalName}` (new) + reuse of pre-existing `GET /api/dataverse/savedqueries/{entityLogicalName}` for DEF-003. **Flips BFF hot-path from N → Y post-wrap-up.** Per CLAUDE.md §10 BFF Hygiene + `.claude/constraints/bff-extensions.md` §A pre-merge checklist:
+
+### 1. Why in BFF (not elsewhere)?
+
+Per [`docs/standards/DATA-ACCESS-DECISION-CRITERIA.md`](../../docs/standards/DATA-ACCESS-DECISION-CRITERIA.md) decision tree:
+
+- **Not a "single-record read from host context"** — the wizard has no host `Xrm.WebApi` (it's a standalone Vite app that receives only `authenticatedFetch` per ADR-028)
+- **Not AI, streaming, cross-system, or bulk** — a single-entity read against Dataverse
+- **The row above that fires is "OBO-protected downstream resource"** — the wizard needs to query Dataverse but cannot from the client without a host `Xrm.WebApi`. The BFF's OBO exchange under `AddDataverseAuthorizationFilter` is the only way to reach Dataverse with the operator's identity while enforcing per-entity Read privilege
+
+Alternative considered — **extend `SectionMetadata` with entity name + reach `Xrm.WebApi` through the host webresource dialog**: rejected because the wizard is intentionally decoupled from the host per FR-25/NFR-10 (standalone Vite build). Bridging `Xrm.WebApi` through window messaging would add ~150 LOC of shim + a new failure mode class (message-serialization) for a single dropdown hydration.
+
+### 2. ADRs bound
+
+- **ADR-001** (Minimal API + Workers) — new endpoint follows `MapGet` extension-method pattern, wired via `MapGridConfigurationEndpoints()` in Program.cs after existing Dataverse endpoint mappings
+- **ADR-008** (Endpoint filters) — reuses the existing `DataverseAuthorizationFilter` with `EntitySource.FromRouteValue` — identical pattern to the SavedQuery list endpoint
+- **ADR-010** (DI minimalism) — `AddDataverseGridConfigurationServices()` extension follows the `AddDataverse{Feature}Services()` convention (siblings: SavedQuery, Metadata, Fetch, Record)
+- **ADR-019** (ProblemDetails) — 401/403/500 return RFC 7807 payloads with `errorCode` extension
+- **ADR-038** (Testing strategy) — 4 integration tests added under `tests/integration/Sprk.Bff.Api.IntegrationTests/Api/Dataverse/`, MAINTAIN-class (endpoint contract). No `Mock<HttpMessageHandler>`. No DI-registration tests. Follows canonical `DataverseIntegrationTestFixture` fixture-config pattern per §F.2
+
+### 3. Publish-size impact estimate
+
+- One new endpoint class (`GridConfigurationEndpoints.cs`, ~90 lines)
+- One new service (`GridConfigurationService.cs`, ~220 lines) reusing existing `IDistributedCache` + `IDataverseService`
+- One new DTO (`GridConfigurationSummaryDto.cs`, ~20 lines)
+- One new DI extension (`GridConfigurationServiceExtensions.cs`, ~25 lines)
+- **No new NuGet packages** — reuses existing Microsoft.PowerPlatform.Dataverse.Client + Microsoft.Extensions.Caching.Distributed + Spaarke.Dataverse
+- **Estimated compressed publish-size delta**: <0.1 MB (~4 KB of new C# → ~2 KB of new IL). Baseline ~45.65 MB → estimated ~45.66 MB. Well under the 60 MB ceiling.
+
+### 4. Boundary preservation
+
+- **No new direct CRUD→AI dependency** — `GridConfigurationService` is a Dataverse-projection service consumed by a CRUD (Advanced-panel picker) endpoint. Zero AI code touched. No `Services/Ai/PublicContracts/` facade required.
+- **No new HIGH-severity CVE** — no new packages added.
+- **Follows §F.1 (Asymmetric-Registration)** — endpoint mapping AND service registration BOTH unconditional (no feature flag). No ADR-032 Null-Object required.
+- **Follows §F.2 (Fixture-Config-FIRST)** — reuses `DataverseIntegrationTestFixture` — no new fixture. Same config keys as SavedQuery tests.
+- **Follows §G (Action/Node/Playbook config boundary)** — N/A (not a playbook or AI-config field; this is a simple Dataverse projection endpoint).
+
+### 5. Reference to constraint file
+
+Load `.claude/constraints/bff-extensions.md` before modifying `Api/Dataverse/GridConfigurationEndpoints.cs`, `Services/Dataverse/GridConfigurationService.cs`, or their tests. This is the binding constraint per CLAUDE.md §10.
+
+---
+
 ## ADR touchpoints
 
 - **ADR-012 (shared component library)** — framework changes stay in `@spaarke/ui-components`; no PCF-specific dependencies; consumers (LegalWorkspace, SpaarkeAi, wizards) redeploy independently

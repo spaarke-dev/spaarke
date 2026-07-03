@@ -5,8 +5,9 @@
 .DESCRIPTION
     Orchestrates the build of all Spaarke client components in the required order:
     1. Shared libraries (8 packages in src/client/shared/ — Auth, SdapClient, AI.Context, AI.Outputs, Events.Components, SmartTodo.Components, UI.Components, AI.Widgets)
-       NOTE: Spaarke.DailyBriefing.Components is intentionally excluded — it's a source-only lib
-       (tsc --noEmit) with @spaarke peerDependencies; type-check happens via the consumer's tsc pass.
+       NOTE: Spaarke.DailyBriefing.Components and Spaarke.LegalWorkspace are intentionally excluded —
+       they're source-only libs (tsc --noEmit) with @spaarke peerDependencies; type-check happens via
+       the consumer's tsc pass.
     2. Vite solutions (19 projects in src/solutions/)
     3. Webpack code pages (4 projects in src/client/code-pages/)
     4. PCF controls (src/client/pcf/)
@@ -67,6 +68,13 @@ $RepoRoot = (Resolve-Path "$PSScriptRoot\..").Path
 # so it cannot type-check standalone — the type-check is performed by each consumer's tsc pass
 # (SpaarkeAi, DailyBriefing). Tried adding it 2026-06-28 → orchestrator failed on TS2307
 # "Cannot find module '@spaarke/ui-components'" etc. Excluded by design.
+#
+# Spaarke.LegalWorkspace is intentionally EXCLUDED on the same basis (added 2026-07-02 by
+# spaarke-dataset-grid-framework-r2 task 024 / FR-10). Task 020 scaffolded the package; task 021
+# populated src/index.ts as a RE-EXPORT barrel of files that stay under src/solutions/LegalWorkspace/src/.
+# Its `@spaarke/*` deps are peerDependencies and `npm run build` is `tsc --noEmit`; standalone
+# type-check fails with TS2307 "Cannot find module '@spaarke/*'" — verified in task 020. Type-check
+# is performed by each consumer's tsc pass (SpaarkeAi, LegalWorkspace, WorkspaceLayoutWizard).
 $SharedLibs = @(
     @{ Name = "Spaarke.Auth";                 Path = "$RepoRoot\src\client\shared\Spaarke.Auth" }
     @{ Name = "Spaarke.SdapClient";           Path = "$RepoRoot\src\client\shared\Spaarke.SdapClient" }

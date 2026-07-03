@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="016" project="spaarke-dataset-grid-framework-r2">
+  <metadata>
+    <title>Phase 2 close: build + deploy + regression + PR 2</title>
+    <phase>2: Wizard UI + Per-Instance Overrides</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>011,013,015</dependencies>
+    <blocks>020,021,022,023,024,025,026</blocks>
+    <tags>deploy, code-page-deploy, workspace-layout-wizard, legal-workspace, spaarkeai, regression, pr</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Deployment task; integration + regression; no source implementation</rigor-reason>
+    <parallel-group>Wave 8</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Build shared lib + WorkspaceLayoutWizard + LegalWorkspace + SpaarkeAi. Deploy to spaarkedev1. Regression-test wizard authoring flow (rowHeight, SectionInstance, widthPreference) + back-compat on 8+ existing published layouts. Commit + push + open PR 2 with 3 FRs (FR-02, FR-03, FR-04).
+  </prompt>
+
+  <role>
+    SPAARKE deployment operator + wizard regression tester.
+  </role>
+
+  <goal>
+    PR 2 open with 3 FRs from Phase 2. All 4 code pages deployed. Regression clean: wizard produces valid JSON for all new fields; 8+ existing bare-string layouts continue to render.
+  </goal>
+
+  <context>
+    <background>
+      Phase 2 delivers wizard UI enhancements + per-instance overrides. Ships in a single PR (PR 2) after Phase 1's framework foundations are merged.
+    </background>
+    <relevant-files>
+      <file>scripts/Build-AllClientComponents.ps1</file>
+      <file>scripts/Deploy-AllDataGridConsumers.ps1</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">MUST verify both LegalWorkspace + SpaarkeAi rebuilds (dual-deploy trap still exists until FR-10 in PR 3).</constraint>
+    <constraint source="project">Regression on wizard: (a) rowHeight dropdown works, (b) SectionInstance Advanced panel produces valid JSON, (c) widthPreference placement modal fires on multi-slot drop of full-width widget.</constraint>
+    <constraint source="project">Regression on runtime: 8+ existing bare-string published layouts continue to render identically to pre-R2.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-dataset-grid-framework-r2/CLAUDE.md</file>
+      <file>projects/spaarke-dataset-grid-framework-r2/spec.md</file>
+      <file>projects/spaarke-dataset-grid-framework-r2/plan.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Confirm tasks 010-015 all ✅. `git status` clean expected changes.</step>
+    <step order="2">Build via `scripts/Build-AllClientComponents.ps1` + `scripts/Build-ViteSolutionsDirect.ps1`.</step>
+    <step order="3">Deploy via `/code-page-deploy` — WorkspaceLayoutWizard + LegalWorkspace + SpaarkeAi (shared lib rebuild reaches both consumers).</step>
+    <step order="4">Regression wizard flow — author a test layout in WorkspaceLayoutWizard: set `rowHeight: '80vh'` on a row, place Documents section with `configIdOverride` + `label: 'Documents (alt)'` in Advanced, save. Inspect resulting JSON: contains `rowHeight` on row and `SectionInstance` object with overrides.</step>
+    <step order="5">Regression widthPreference — attempt to place Communications (full-width) in a `1fr 1fr` row → modal appears. Click "Cancel" to keep row → wizard warns via icon. Force placement anyway (via JSON edit or "keep row" path) → publish layout → open in LegalWorkspace → DevTools console shows `console.warn` about widthPreference violation (dev mode).</step>
+    <step order="6">Regression back-compat — open 3-5 existing published `sprk_workspacelayout` records with bare-string sections. Verify they still render identically. No console errors.</step>
+    <step order="7">Regression on SpaarkeAi — confirm SpaarkeAi renders identically to LegalWorkspace for the same layouts.</step>
+    <step order="8">Invoke `/push-to-github`. Commit: `feat(datagrid-framework): PR 2 — wizard UI + per-instance overrides (FR-02, FR-03, FR-04)`. Push to `origin/work/spaarke-dataset-grid-framework-r2`.</step>
+    <step order="9">Open PR 2 with body citing FRs 02/03/04 + acceptance evidence.</step>
+    <step order="10">Wait for CI. Fix any failures.</step>
+    <step order="11">Update TASK-INDEX.md: 016 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="powershell">Build scripts</tool>
+    <tool name="Skill">code-page-deploy, push-to-github</tool>
+    <tool name="gh">Open PR</tool>
+  </tools>
+
+  <outputs>
+    <output type="deploy">3 code pages deployed to spaarkedev1</output>
+    <output type="pr">GitHub PR (PR 2) opened</output>
+    <output type="report">notes/phase2-regression-report.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All builds succeed.</criterion>
+    <criterion testable="true">Wizard authoring flow produces valid JSON for all new fields.</criterion>
+    <criterion testable="true">Full-width placement modal fires on multi-slot drop.</criterion>
+    <criterion testable="true">Runtime dev-guard fires in dev mode.</criterion>
+    <criterion testable="true">8+ existing bare-string layouts continue to render.</criterion>
+    <criterion testable="true">SpaarkeAi renders identically to LegalWorkspace.</criterion>
+    <criterion testable="true">PR 2 open, CI green.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    - Phase 2 is a larger PR than Phase 1 (more code in wizard). May want to add screenshots/video to PR description for visual UX changes.
+    - PR 3 (FR-10 extraction + FR-09 docs) is the last piece. After PR 2 merges, coordinate merge order with `spaarkeai-compose-r1` before starting Phase 3.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge. STANDARD rigor. Skill delegation for deploy + push.</protocol>
+  </execution>
+</task>

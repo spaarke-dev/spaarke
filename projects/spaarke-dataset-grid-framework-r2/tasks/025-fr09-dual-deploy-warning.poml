@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="025" project="spaarke-dataset-grid-framework-r2">
+  <metadata>
+    <title>FR-09: Add dual-deploy warning to code-page-deploy skill + widget-authoring guide</title>
+    <phase>3: Shared Package Extraction + Documentation</phase>
+    <status>completed</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>022,023</dependencies>
+    <blocks>026</blocks>
+    <tags>docs, skill-directives, code-page-deploy, dual-deploy, hot-path</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Doc + skill edits; no source code; but touches `.claude/` (main-session-only per CLAUDE.md §3)</rigor-reason>
+    <parallel-group>Wave 12 (sequential)</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Touches `.claude/skills/code-page-deploy/SKILL.md` — main-session-only per CLAUDE.md §3 sub-agent write boundary</parallel-reason>
+  </metadata>
+
+  <prompt>
+    Add a dual-deploy warning section to `.claude/skills/code-page-deploy/SKILL.md` explaining the pattern (code-page A's vite.config.ts aliasing another code-page B's source tree causes dual-deploy trap). Add a companion note to `docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md`. Cite the LegalWorkspace ← SpaarkeAi pair as historical example (now resolved by FR-10 as of task 022).
+  </prompt>
+
+  <role>
+    SPAARKE docs contributor + skill-directives maintainer.
+  </role>
+
+  <goal>
+    `code-page-deploy` SKILL.md has a new "Dual-deploy warning" section. Widget-authoring guide has a companion note. Future contributors are alerted to the pattern.
+  </goal>
+
+  <context>
+    <background>
+      The dual-deploy trap: code page A's vite.config.ts aliases code page B's source (e.g., `@spaarke/legal-workspace/src` → `../LegalWorkspace/src`). Deploying B alone does NOT propagate changes to A (A keeps its bundled snapshot from A's last build). This trapped ~30 min of debug time during 2026-07-01 UAT. FR-10 (task 022) resolved the specific SpaarkeAi ← LegalWorkspace case; FR-09 documents the pattern for future contributors so they don't rediscover it the hard way.
+    </background>
+    <relevant-files>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md-§3">Touches `.claude/` — MUST be sequential (main-session-only). Sub-agent write boundary applies.</constraint>
+    <constraint source="project">Keep warning concise: paragraph + short recipe (grep target's vite.config for resolve.alias to sibling src trees).</constraint>
+    <constraint source="project">Note the historical LegalWorkspace ← SpaarkeAi case as resolved (post-FR-10) so future readers know it was closed.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-dataset-grid-framework-r2/CLAUDE.md</file>
+      <file>projects/spaarke-dataset-grid-framework-r2/spec.md</file>
+      <file>projects/spaarke-dataset-grid-framework-r2/design.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read spec.md § FR-09. Read `code-page-deploy` SKILL.md to identify a good insertion point (recommend near the "Deploy" step or a new "Known traps" section).</step>
+    <step order="2">Add a section to SKILL.md titled "Dual-deploy warning (aliased-source pairs)": paragraph explains the pattern; recipe: `grep -r "resolve.alias" src/solutions/*/vite.config.ts` to enumerate pairs; check the target's aliases + rebuild any aliased sibling. Cite historical LegalWorkspace ← SpaarkeAi case as RESOLVED by R2's FR-10.</step>
+    <step order="3">Add companion note to `docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md` (find a fitting section — recommend § 12 or new § "Deployment considerations"). One paragraph pointing to the skill's warning section.</step>
+    <step order="4">Verify no other consumers of the doc/skill break. Grep for `code-page-deploy` in other skills — if any depends on section ordering, don't break.</step>
+    <step order="5">Update TASK-INDEX.md: 025 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="terminal">Edit files; grep</tool>
+  </tools>
+
+  <outputs>
+    <output type="skill">.claude/skills/code-page-deploy/SKILL.md (modified — new warning section)</output>
+    <output type="docs">docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md (modified — companion note)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Grep on SKILL.md finds new "Dual-deploy" section.</criterion>
+    <criterion testable="true">Grep on widget-authoring guide finds companion note.</criterion>
+    <criterion testable="true">Warning is concise (paragraph + recipe, not a mini-treatise).</criterion>
+    <criterion testable="true">Historical case cited as resolved.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    - MAIN SESSION ONLY per CLAUDE.md §3 (touches `.claude/`). Do NOT delegate to sub-agent — Edit would be denied.
+    - Even though FR-10 resolves the LegalWorkspace case, the warning stays useful because the ALIAS PATTERN is likely to recur in future workspace-hosting code pages (e.g., Compose, future domain workspaces).
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge. STANDARD rigor. Main-session-only.</protocol>
+  </execution>
+</task>

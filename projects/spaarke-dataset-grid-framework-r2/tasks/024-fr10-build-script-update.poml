@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="024" project="spaarke-dataset-grid-framework-r2">
+  <metadata>
+    <title>FR-10: Update Build-AllClientComponents.ps1 to include new shared package</title>
+    <phase>3: Shared Package Extraction + Documentation</phase>
+    <status>completed</status>
+    <estimated-hours>0.5</estimated-hours>
+    <dependencies>020</dependencies>
+    <blocks>026</blocks>
+    <tags>build-script, powershell, scripts</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Modifies build script (new file behavior); no source-code impl</rigor-reason>
+    <parallel-group>Wave 10</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Add the new `@spaarke/legal-workspace` package to the client-lib build order in `scripts/Build-AllClientComponents.ps1`. Place it after `Spaarke.UI.Components` (which it may depend on) and before any consumer that depends on it (LegalWorkspace, SpaarkeAi, WorkspaceLayoutWizard).
+  </prompt>
+
+  <role>
+    SPAARKE build-script maintainer.
+  </role>
+
+  <goal>
+    Build script includes new package; ordering respects dependency chain; script runs successfully end-to-end.
+  </goal>
+
+  <context>
+    <background>
+      `Build-AllClientComponents.ps1` is the canonical client-lib build orchestrator. Adding a new shared package requires updating its build-order list.
+    </background>
+    <relevant-files>
+      <file>scripts/Build-AllClientComponents.ps1</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Ordering: `@spaarke/legal-workspace` must build AFTER `@spaarke/ui-components` (if it depends on it) and BEFORE any consumer.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-dataset-grid-framework-r2/CLAUDE.md</file>
+      <file>projects/spaarke-dataset-grid-framework-r2/spec.md</file>
+      <file>scripts/Build-AllClientComponents.ps1</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `scripts/Build-AllClientComponents.ps1` — identify the package build-order list.</step>
+    <step order="2">Determine correct insertion point: after `Spaarke.UI.Components`, before consumer solutions.</step>
+    <step order="3">Add `Spaarke.LegalWorkspace` (or final chosen name) to the list at the correct position.</step>
+    <step order="4">Test the script: `powershell scripts/Build-AllClientComponents.ps1` — completes without error; new package builds in the correct order.</step>
+    <step order="5">Update TASK-INDEX.md: 024 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="powershell">Run build script</tool>
+    <tool name="terminal">Edit script</tool>
+  </tools>
+
+  <outputs>
+    <output type="script">scripts/Build-AllClientComponents.ps1 (modified — new package added)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Grep `Spaarke.LegalWorkspace` in script → matches expected new entry.</criterion>
+    <criterion testable="true">`powershell scripts/Build-AllClientComponents.ps1` runs to completion; all packages including new one build.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    - Trivial task but easy to skip; without this, other engineers running the master build script won't build the new package.
+    - Match style/pattern of existing entries in the script.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge. STANDARD rigor.</protocol>
+  </execution>
+</task>
