@@ -2065,6 +2065,83 @@ export function ConversationPane(): React.JSX.Element {
    * Per ADR-028: no auth context flows through this callback — text was
    * extracted client-side before this point. NO BFF call is made here.
    */
+  /**
+   * R7 Wave 12.3 Phase 12.3a UAT fix (2026-07-03) — auto-promote ready chips.
+   *
+   * Pre-2026-07-03, the ONLY code that POSTed to `/api/ai/chat/sessions/{id}/documents`
+   * (which populates server-side `session.UploadedFiles`) was `executeSummarizeIntent`'s
+   * step-1 file-promotion phase — invoked from `handleBeforeSendMessage`'s NL summarize
+   * branch. When I retired that branch (Wave 12.3 D-13 convergence), file promotion
+   * was lost with it: chips would show 'ready' after client-side extraction, but the
+   * BFF never saw them.
+   *
+   * This effect closes the gap by promoting each ready chip once, as soon as both
+   * (a) a chat session id exists and (b) we have a File-ref stored in `heldFilesRef`.
+   * `promotedChipIds` guards against re-promotion; `pendingPromotionIdsRef` guards
+   * against concurrent effect runs racing on the same chip while an upload is in
+   * flight.
+   *
+   * ADR-015: log ONLY chip id + filename + status code — never the extracted text or
+   * arbitrary error message (server ProblemDetails carries errorCode which is safe).
+   * ADR-028: uses `authenticatedFetch` — no bare fetch + Authorization header.
+   */
+  const pendingPromotionIdsRef = React.useRef<Set<string>>(new Set());
+
+  React.useEffect(() => {
+    if (chatSessionId === null) return;
+
+    const toPromote = attachmentChips.filter(
+      c =>
+        c.status === "ready" &&
+        !promotedChipIds.has(c.id) &&
+        !pendingPromotionIdsRef.current.has(c.id) &&
+        heldFilesRef.current.has(c.filename)
+    );
+    if (toPromote.length === 0) return;
+
+    const documentsUrl = `${bffBaseUrl.replace(/\/$/, "")}/api/ai/chat/sessions/${encodeURIComponent(chatSessionId)}/documents`;
+
+    for (const chip of toPromote) {
+      const heldFile = heldFilesRef.current.get(chip.filename);
+      if (!heldFile) continue;
+      pendingPromotionIdsRef.current.add(chip.id);
+
+      void (async () => {
+        try {
+          const form = new FormData();
+          form.append("file", heldFile, heldFile.name);
+          const response = await authenticatedFetch(documentsUrl, {
+            method: "POST",
+            body: form,
+          });
+          if (!response.ok) {
+            console.error(
+              "[ConversationPane] /documents promote failed — status:%d filename:%s",
+              response.status,
+              chip.filename
+            );
+            return;
+          }
+          // Success — mark chip promoted so subsequent effect runs skip it.
+          setPromotedChipIds(prev => {
+            if (prev.has(chip.id)) return prev;
+            const next = new Set(prev);
+            next.add(chip.id);
+            return next;
+          });
+        } catch (err) {
+          // ADR-015: log error name only, never the message (may contain URLs / headers).
+          console.error(
+            "[ConversationPane] /documents promote threw:",
+            err instanceof Error ? err.name : "unknown"
+          );
+        } finally {
+          pendingPromotionIdsRef.current.delete(chip.id);
+        }
+      })();
+    }
+  }, [chatSessionId, attachmentChips, promotedChipIds, authenticatedFetch, bffBaseUrl]);
+
   const handleAttachmentReady = React.useCallback(
     (attachment: ChatAttachment) => {
       // R5 SC-18 cycle-6 (2026-06-05): the DocumentViewerWidget shows
