@@ -25,11 +25,15 @@
  *   would fire AFTER we switched memos and write body text into the wrong
  *   record, or lose it because currentMemoIdRef flipped mid-flight.
  *
- * Error-state hooks for task 038 (FR-13 MessageBar):
- *   When `!valid` OR `unsupported`, we render a small placeholder div with
- *   `data-error-state` set for task 038 to swap in a MessageBar. This task
- *   intentionally does not implement the MessageBar UI — 038 owns FR-13's
- *   full user-facing error surface.
+ * Error-state surface (task 038 · FR-13):
+ *   When `!valid`, `unsupported`, OR `repoError` is set, we render the
+ *   `NotepadErrorBanner` (Fluent v9 MessageBar with a Close button). The
+ *   banner replaces the entire shell (top bar hidden) — matches FR-13's
+ *   "MessageBar error and offer to close" phrasing. The `data-error-state`
+ *   attribute is preserved on the outer div so integration tests continue to
+ *   assert on the same hooks that task 037 established. Close-button
+ *   mechanism (window.close + postMessage fallback) documented in
+ *   `notes/close-mechanism.md` (U-01 resolution).
  *
  * ADR-021: Fluent v9 semantic tokens only; zero hex/rgb literals.
  * React 18 (Notepad SPA); zero @spaarke/auth (NFR-05); zero BFF calls (NFR-07).
@@ -41,12 +45,15 @@
 import * as React from "react";
 import {
   makeStyles,
-  mergeClasses,
   tokens,
   Button,
-  Text,
+  MessageBar,
+  MessageBarActions,
+  MessageBarBody,
+  MessageBarTitle,
+  type MessageBarProps,
 } from "@fluentui/react-components";
-import { AddRegular } from "@fluentui/react-icons";
+import { AddRegular, DismissRegular } from "@fluentui/react-icons";
 
 import { useLaunchContext } from "../hooks/useLaunchContext";
 import { useSprkMemoRepository } from "../hooks/useSprkMemoRepository";
@@ -98,11 +105,20 @@ const useStyles = makeStyles({
     minHeight: 0,
     padding: tokens.spacingHorizontalM,
   },
-  // Placeholder styling for the error-state div (task 038 replaces with
-  // MessageBar; we want it visible + non-jarring in the meantime).
-  errorState: {
-    padding: `${tokens.spacingVerticalM} ${tokens.spacingHorizontalL}`,
-    color: tokens.colorNeutralForeground2,
+  // Error-state container: centered MessageBar with breathing room. Replaces
+  // the top-bar-and-editor shell entirely when an error is present (per FR-13
+  // "MessageBar error and offer to close" — top bar is hidden in error state).
+  errorRoot: {
+    display: "flex",
+    flexDirection: "column",
+    alignItems: "center",
+    justifyContent: "center",
+    padding: `${tokens.spacingVerticalXXL} ${tokens.spacingHorizontalXXL}`,
+    rowGap: tokens.spacingVerticalM,
+  },
+  errorBarWrapper: {
+    width: "100%",
+    maxWidth: "640px",
   },
 });
 
@@ -183,50 +199,31 @@ export const NotepadShell: React.FC = () => {
     [updateBody]
   );
 
-  // ─── Render: error states (task 038 will wrap with MessageBar) ──────────
+  // ─── Render: error states (task 038 — FR-13 MessageBar) ────────────────
 
   // FR-13 read-side: invalid launch context (missing/malformed URL params).
   if (!valid) {
     return (
-      <div
-        className={mergeClasses(styles.root, styles.errorState)}
-        data-testid="notepad-shell-invalid-launch"
-        data-error-state="invalid-launch"
-      >
-        <Text>
-          Notepad cannot open: {launchError ?? "missing regarding context"}
-        </Text>
-      </div>
+      <NotepadErrorBanner
+        kind="invalid-launch"
+        contextError={launchError ?? null}
+      />
     );
   }
 
   // FR-19: unsupported parent entity (not one of the 6 memo parents).
   if (unsupported) {
     return (
-      <div
-        className={mergeClasses(styles.root, styles.errorState)}
-        data-testid="notepad-shell-unsupported"
-        data-error-state="unsupported"
-      >
-        <Text>
-          Notepad cannot open: entity type &quot;{regardingEntity}&quot; is not
-          supported.
-        </Text>
-      </div>
+      <NotepadErrorBanner
+        kind="unsupported"
+        regardingEntity={regardingEntity}
+      />
     );
   }
 
   // Repository-level failure (Xrm.WebApi unavailable, CRUD error).
   if (repoError) {
-    return (
-      <div
-        className={mergeClasses(styles.root, styles.errorState)}
-        data-testid="notepad-shell-repo-error"
-        data-error-state="repo-error"
-      >
-        <Text>Failed to load memos: {repoError.message}</Text>
-      </div>
-    );
+    return <NotepadErrorBanner kind="repo-error" repoError={repoError} />;
   }
 
   // ─── Render: normal state ───────────────────────────────────────────────
@@ -284,3 +281,152 @@ export const NotepadShell: React.FC = () => {
 };
 
 NotepadShell.displayName = "NotepadShell";
+
+// ---------------------------------------------------------------------------
+// NotepadErrorBanner — FR-13 error surface
+// ---------------------------------------------------------------------------
+
+/**
+ * Kinds of unrecoverable error the Notepad shell surfaces to the user.
+ *
+ * - `invalid-launch` — `useLaunchContext` returned `valid: false` (missing or
+ *   malformed `regardingEntity` / `regardingId`). FR-13 read-side.
+ * - `unsupported`   — Launch context was valid but `regardingEntity` isn't one
+ *   of the 6 memo-parent types. FR-19.
+ * - `repo-error`    — `useSprkMemoRepository` reported a runtime error
+ *   (Xrm.WebApi missing, CRUD failure, etc.).
+ */
+export type NotepadErrorKind = "invalid-launch" | "unsupported" | "repo-error";
+
+interface INotepadErrorBannerProps {
+  kind: NotepadErrorKind;
+  regardingEntity?: string | null;
+  contextError?: string | null;
+  repoError?: Error | null;
+}
+
+/**
+ * Modal close handler.
+ *
+ * Two-strategy sequence per U-01 resolution (see
+ * `notes/close-mechanism.md`):
+ *   1. `window.close()` — works when Notepad was launched via
+ *      `Xrm.Navigation.navigateTo({pageType: "webresource"}, {target: 2})`
+ *      (modal target=2).
+ *   2. `postMessage({type: "notepad-close"})` to `window.parent` — fallback
+ *      for hosts that intercept close via postMessage.
+ *
+ * Both attempts are wrapped in defensive try/catch so a broken host never
+ * throws unhandled from a Close-button click. Neither path is guaranteed to
+ * close every possible Xrm host; documented as an expected limitation in
+ * `notes/close-mechanism.md`. Users can also close via browser ESC or the
+ * ambient modal chrome.
+ */
+function handleNotepadClose(): void {
+  try {
+    // Primary: modal target=2 responds to window.close.
+    window.close();
+  } catch {
+    /* ignore */
+  }
+  try {
+    // Fallback: some Xrm hosts intercept close via postMessage.
+    window.parent?.postMessage({ type: "notepad-close" }, "*");
+  } catch {
+    /* ignore */
+  }
+}
+
+/**
+ * Compose title + body + intent for a given error kind. Pure function so the
+ * banner can render as a stateless React.FC.
+ */
+function composeErrorMessage(props: INotepadErrorBannerProps): {
+  intent: MessageBarProps["intent"];
+  title: string;
+  body: string;
+} {
+  switch (props.kind) {
+    case "invalid-launch":
+      return {
+        intent: "error",
+        title: "Cannot open Notepad",
+        body:
+          props.contextError ??
+          "Notepad cannot open: missing regarding context.",
+      };
+    case "unsupported":
+      return {
+        intent: "warning",
+        title: "Unsupported entity type",
+        body: `Notepad does not support memos for entity type "${
+          props.regardingEntity ?? "(unknown)"
+        }". Contact your admin.`,
+      };
+    case "repo-error":
+      return {
+        intent: "error",
+        title: "Failed to load memos",
+        body:
+          props.repoError?.message ??
+          "An unexpected error occurred while loading memos.",
+      };
+  }
+}
+
+/**
+ * Renders a Fluent v9 MessageBar with a Close button for one of three FR-13
+ * error states. Semantic tokens only per ADR-021.
+ *
+ * data-testid values are preserved from the previous placeholder divs
+ * (`notepad-shell-invalid-launch` / `-unsupported` / `-repo-error`) so tests
+ * from task 037 continue to pass.
+ */
+const NotepadErrorBanner: React.FC<INotepadErrorBannerProps> = (props) => {
+  const styles = useStyles();
+  const { intent, title, body } = composeErrorMessage(props);
+
+  const testId =
+    props.kind === "invalid-launch"
+      ? "notepad-shell-invalid-launch"
+      : props.kind === "unsupported"
+        ? "notepad-shell-unsupported"
+        : "notepad-shell-repo-error";
+
+  return (
+    <div
+      className={styles.errorRoot}
+      data-testid={testId}
+      data-error-state={props.kind}
+    >
+      <div className={styles.errorBarWrapper}>
+        <MessageBar intent={intent}>
+          <MessageBarBody>
+            <MessageBarTitle>{title}</MessageBarTitle>
+            {body}
+          </MessageBarBody>
+          <MessageBarActions
+            containerAction={
+              <Button
+                appearance="transparent"
+                icon={<DismissRegular />}
+                onClick={handleNotepadClose}
+                aria-label="Close"
+                data-testid="notepad-error-close-icon"
+              />
+            }
+          >
+            <Button
+              onClick={handleNotepadClose}
+              data-testid="notepad-error-close-button"
+            >
+              Close
+            </Button>
+          </MessageBarActions>
+        </MessageBar>
+      </div>
+    </div>
+  );
+};
+
+NotepadErrorBanner.displayName = "NotepadErrorBanner";

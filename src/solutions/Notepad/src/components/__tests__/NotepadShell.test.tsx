@@ -177,10 +177,14 @@ describe("NotepadShell — FR-14/15/16/18 integration", () => {
   });
 
   // ────────────────────────────────────────────────────────────────────────
-  // Error surfaces (task 038 wraps with MessageBar)
+  // Error surfaces (task 038 · FR-13 MessageBar)
+  //
+  // These wrap the outer div with a Fluent v9 MessageBar (intent="error" or
+  // "warning") + Close button. data-testid values are preserved from task 037
+  // ("notepad-shell-invalid-launch" / "-unsupported" / "-repo-error").
   // ────────────────────────────────────────────────────────────────────────
 
-  it("renders invalid-launch placeholder when useLaunchContext.valid is false", async () => {
+  it("renders invalid-launch MessageBar when useLaunchContext.valid is false", async () => {
     mockedUseLaunchContext.mockReturnValue({
       regardingEntity: null,
       regardingId: null,
@@ -196,15 +200,29 @@ describe("NotepadShell — FR-14/15/16/18 integration", () => {
     );
     expect(errorEl).not.toBeNull();
     expect(errorEl!.getAttribute("data-error-state")).toBe("invalid-launch");
-    expect(errorEl!.textContent).toContain("Notepad cannot open");
+    // MessageBar title
+    expect(errorEl!.textContent).toContain("Cannot open Notepad");
+    // Body from useLaunchContext.error
     expect(errorEl!.textContent).toContain(
       "Missing regarding context: regardingEntity"
     );
+    // Fluent v9 MessageBar renders as role="group" with an aria-labelledby
+    // pointing to the title. Presence of role="group" confirms the MessageBar
+    // shell mounted (vs. a bare div).
+    const messageBar = errorEl!.querySelector('[role="group"]');
+    expect(messageBar).not.toBeNull();
+    // Top-bar surface NOT rendered in error state
+    expect(
+      h.container.querySelector('[data-testid="notepad-shell"]')
+    ).toBeNull();
+    expect(
+      h.container.querySelector('[data-testid="notepad-shell-new"]')
+    ).toBeNull();
 
     h.unmount();
   });
 
-  it("renders unsupported-entity placeholder when repository.unsupported is true", async () => {
+  it("renders unsupported-entity MessageBar when repository.unsupported is true", async () => {
     mockedUseLaunchContext.mockReturnValue({
       regardingEntity: "sprk_document",
       regardingId: "22222222-2222-2222-2222-222222222222",
@@ -221,12 +239,20 @@ describe("NotepadShell — FR-14/15/16/18 integration", () => {
     );
     expect(errorEl).not.toBeNull();
     expect(errorEl!.getAttribute("data-error-state")).toBe("unsupported");
+    expect(errorEl!.textContent).toContain("Unsupported entity type");
     expect(errorEl!.textContent).toContain("sprk_document");
+    // Fluent v9 MessageBar renders as role="group"
+    const messageBar = errorEl!.querySelector('[role="group"]');
+    expect(messageBar).not.toBeNull();
+    // Top bar NOT rendered
+    expect(
+      h.container.querySelector('[data-testid="notepad-shell-new"]')
+    ).toBeNull();
 
     h.unmount();
   });
 
-  it("renders repo-error placeholder when repository.error is set", async () => {
+  it("renders repo-error MessageBar when repository.error is set", async () => {
     mockedUseLaunchContext.mockReturnValue(VALID_LAUNCH);
     mockedUseSprkMemoRepository.mockReturnValue(
       buildRepo({ error: new Error("Boom from Xrm") })
@@ -238,9 +264,194 @@ describe("NotepadShell — FR-14/15/16/18 integration", () => {
       '[data-testid="notepad-shell-repo-error"]'
     );
     expect(errorEl).not.toBeNull();
+    expect(errorEl!.textContent).toContain("Failed to load memos");
     expect(errorEl!.textContent).toContain("Boom from Xrm");
+    // Top bar NOT rendered
+    expect(
+      h.container.querySelector('[data-testid="notepad-shell-new"]')
+    ).toBeNull();
 
     h.unmount();
+  });
+
+  it("repo-error state takes precedence when launch context is valid but repo failed", async () => {
+    mockedUseLaunchContext.mockReturnValue(VALID_LAUNCH);
+    mockedUseSprkMemoRepository.mockReturnValue(
+      buildRepo({
+        memos: [MEMO_1],
+        currentMemo: MEMO_1,
+        error: new Error("Downstream Xrm failure"),
+      })
+    );
+
+    const h = await mount();
+
+    // Repo-error banner takes precedence over normal shell rendering.
+    const errorEl = h.container.querySelector<HTMLElement>(
+      '[data-testid="notepad-shell-repo-error"]'
+    );
+    expect(errorEl).not.toBeNull();
+    expect(errorEl!.textContent).toContain("Downstream Xrm failure");
+
+    h.unmount();
+  });
+
+  // ────────────────────────────────────────────────────────────────────────
+  // FR-13 Close-button behavior (U-01 resolution)
+  //
+  // The Close button attempts (1) window.close, then (2) postMessage to the
+  // parent. Both are wrapped in defensive try/catch so a broken host never
+  // throws unhandled.
+  // ────────────────────────────────────────────────────────────────────────
+
+  it("invalid-launch Close button invokes window.close and postMessage", async () => {
+    const originalClose = window.close;
+    const originalPostMessage = window.parent.postMessage;
+    const closeSpy = jest.fn();
+    const postSpy = jest.fn();
+    // Replace window.close AND window.parent.postMessage in-place so the
+    // handler picks them up.
+    (window as any).close = closeSpy;
+    (window.parent as any).postMessage = postSpy;
+
+    try {
+      mockedUseLaunchContext.mockReturnValue({
+        regardingEntity: null,
+        regardingId: null,
+        valid: false,
+        error: "Missing regardingId",
+      });
+      mockedUseSprkMemoRepository.mockReturnValue(buildRepo());
+
+      const h = await mount();
+
+      // Click the primary Close button (labeled "Close")
+      const closeBtn = h.container.querySelector<HTMLButtonElement>(
+        '[data-testid="notepad-error-close-button"]'
+      );
+      expect(closeBtn).not.toBeNull();
+      await click(closeBtn!);
+
+      expect(closeSpy).toHaveBeenCalledTimes(1);
+      expect(postSpy).toHaveBeenCalledTimes(1);
+      expect(postSpy).toHaveBeenCalledWith(
+        { type: "notepad-close" },
+        "*"
+      );
+
+      h.unmount();
+    } finally {
+      (window as any).close = originalClose;
+      (window.parent as any).postMessage = originalPostMessage;
+    }
+  });
+
+  it("Close icon (containerAction) also invokes window.close and postMessage", async () => {
+    const originalClose = window.close;
+    const originalPostMessage = window.parent.postMessage;
+    const closeSpy = jest.fn();
+    const postSpy = jest.fn();
+    (window as any).close = closeSpy;
+    (window.parent as any).postMessage = postSpy;
+
+    try {
+      mockedUseLaunchContext.mockReturnValue(VALID_LAUNCH);
+      mockedUseSprkMemoRepository.mockReturnValue(
+        buildRepo({ error: new Error("Repo down") })
+      );
+
+      const h = await mount();
+
+      const closeIcon = h.container.querySelector<HTMLButtonElement>(
+        '[data-testid="notepad-error-close-icon"]'
+      );
+      expect(closeIcon).not.toBeNull();
+      await click(closeIcon!);
+
+      expect(closeSpy).toHaveBeenCalledTimes(1);
+      expect(postSpy).toHaveBeenCalledTimes(1);
+
+      h.unmount();
+    } finally {
+      (window as any).close = originalClose;
+      (window.parent as any).postMessage = originalPostMessage;
+    }
+  });
+
+  it("Close button still calls postMessage when window.close throws", async () => {
+    const originalClose = window.close;
+    const originalPostMessage = window.parent.postMessage;
+    const closeSpy = jest.fn(() => {
+      throw new Error("window.close not allowed in this host");
+    });
+    const postSpy = jest.fn();
+    (window as any).close = closeSpy;
+    (window.parent as any).postMessage = postSpy;
+
+    try {
+      mockedUseLaunchContext.mockReturnValue({
+        regardingEntity: null,
+        regardingId: null,
+        valid: false,
+        error: "Missing regardingEntity",
+      });
+      mockedUseSprkMemoRepository.mockReturnValue(buildRepo());
+
+      const h = await mount();
+
+      const closeBtn = h.container.querySelector<HTMLButtonElement>(
+        '[data-testid="notepad-error-close-button"]'
+      );
+
+      // Should NOT throw even though window.close threw
+      await expect(click(closeBtn!)).resolves.not.toThrow();
+
+      expect(closeSpy).toHaveBeenCalledTimes(1);
+      // postMessage fallback still runs
+      expect(postSpy).toHaveBeenCalledTimes(1);
+
+      h.unmount();
+    } finally {
+      (window as any).close = originalClose;
+      (window.parent as any).postMessage = originalPostMessage;
+    }
+  });
+
+  it("Close button does not throw when BOTH window.close and postMessage throw", async () => {
+    const originalClose = window.close;
+    const originalPostMessage = window.parent.postMessage;
+    const closeSpy = jest.fn(() => {
+      throw new Error("close blocked");
+    });
+    const postSpy = jest.fn(() => {
+      throw new Error("postMessage blocked");
+    });
+    (window as any).close = closeSpy;
+    (window.parent as any).postMessage = postSpy;
+
+    try {
+      mockedUseLaunchContext.mockReturnValue({
+        regardingEntity: null,
+        regardingId: null,
+        valid: false,
+        error: "Missing regardingEntity",
+      });
+      mockedUseSprkMemoRepository.mockReturnValue(buildRepo());
+
+      const h = await mount();
+      const closeBtn = h.container.querySelector<HTMLButtonElement>(
+        '[data-testid="notepad-error-close-button"]'
+      );
+
+      await expect(click(closeBtn!)).resolves.not.toThrow();
+      expect(closeSpy).toHaveBeenCalled();
+      expect(postSpy).toHaveBeenCalled();
+
+      h.unmount();
+    } finally {
+      (window as any).close = originalClose;
+      (window.parent as any).postMessage = originalPostMessage;
+    }
   });
 
   // ────────────────────────────────────────────────────────────────────────

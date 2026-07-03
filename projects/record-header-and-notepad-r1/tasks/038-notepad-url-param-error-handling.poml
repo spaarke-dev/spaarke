@@ -3,7 +3,7 @@
   <metadata>
     <title>Verify URL-param error handling (FR-13)</title>
     <phase>3: Notepad</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>1</estimated-hours>
     <dependencies>037</dependencies>
     <blocks>039</blocks>
@@ -61,7 +61,24 @@
     <criterion testable="true">Close button attempts window.close; on failure, attempts postMessage; never throws.</criterion>
   </acceptance-criteria>
 
-  <notes>Xrm.Navigation.navigateTo-opened webresources typically respond to window.close(); test in dev environment during task 039 QA.</notes>
+  <notes>Xrm.Navigation.navigateTo-opened webresources typically respond to window.close(); test in dev environment during task 039 QA.
+
+  ---
+  ## Completion notes (2026-07-03)
+
+  Implemented:
+  - `NotepadErrorBanner` component in NotepadShell.tsx (Fluent v9 MessageBar + Close button; icon-in-containerAction slot + labeled button); intent="error" for invalid-launch/repo-error, intent="warning" for unsupported entity.
+  - `handleNotepadClose()` with two-strategy sequence: window.close() → postMessage({type:"notepad-close"}, "*"). Both wrapped in try/catch (defensive).
+  - Three error-state early-returns in NotepadShell now render NotepadErrorBanner instead of placeholder divs. data-testid + data-error-state hooks preserved.
+  - Fixed pre-existing jest.config.cjs typo: `setupFilesAfterEach` → `setupFilesAfterEnv` (correct Jest config key; the wrong key silently no-op'd the jest.setup.cjs, which was loading matchMedia + ResizeObserver polyfills). All 102 tests still pass after fix.
+  - Notes: `projects/record-header-and-notepad-r1/notes/close-mechanism.md` documenting U-01 resolution.
+
+  Tests: 21 NotepadShell tests (was 16; +5 net new for MessageBar rendering + Close-button behavior). Full Notepad suite: 102/102 (was 97).
+
+  Findings:
+  - Fluent v9 MessageBar renders as `role="group"` (not `role="alert"`); tests assert on role="group" to confirm shell mount.
+  - `role="alert"` mapping requires MessageBar.politeness="assertive" prop (default is polite → group). Kept default for our error banners since they are already visually prominent and non-transient.
+  - MessageBarActions.containerAction slot correctly rendered dismiss icon; click behavior verified separately from the labeled Close button.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>

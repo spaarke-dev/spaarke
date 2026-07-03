@@ -13,10 +13,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 024 → completed 2026-07-03 (parallel: 034 still in progress on its own thread) |
-| **Step** | — (024 complete) |
-| **Status** | Task 025 (deploy + QA) BLOCKED on NFR-04 waiver or fast-follow tree-shake fix. |
-| **Next Action** | Task 024 delivered `notes/bundle-size.md` with: (1) NFR-04 FAIL — 1607 KB un-gzipped / 421 KB gzipped (ceiling 250 KB); root cause = shared-lib barrel pulls mammoth ecosystem via EntityCreationService→sdap-client chain. (2) NFR-02 PASS — 90 LOC total (20 index.ts + 69 view + 1 version). (3) Five task-023 gaps patched during build: added `tsconfig.json`, built SdapClient, moved `ControlManifest.Input.xml` into `control/`, forced ajv@^8 to top level, added contextInfo type-cast (3 lines) in `index.ts`. Escalate to owner: pursue tree-shake option (1) in `bundle-size.md` (deep-import per symbol) before or during task 025, or explicit NFR-04 waiver. |
+| **Task** | 038 → completed 2026-07-03 |
+| **Step** | — (038 complete) |
+| **Status** | not-started (next: task 039 Vite build + deploy) |
+| **Next Action** | Task 038 delivered NotepadErrorBanner (Fluent v9 MessageBar + Close button; window.close + postMessage fallback), added 5 net new tests (102/102 pass), fixed pre-existing jest.config.cjs typo (setupFilesAfterEach → setupFilesAfterEnv), documented U-01 resolution in notes/close-mechanism.md. Next task 039: Vite build + deploy as sprk_notepad_page. |
 
 ### Files Modified This Session
 
