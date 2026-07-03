@@ -15,16 +15,16 @@
 | ID | Title | Phase | Status | Dependencies | Parallel Group | Rigor |
 |----|-------|-------|--------|--------------|----------------|-------|
 | 001 | Verify sprk_memo schema | 1 | 🔲 | none | — | STANDARD |
-| 002 | HeaderToolbar component (FR-01) | 1 | 🔲 | none | A | FULL |
+| 002 | HeaderToolbar component (FR-01) | 1 | ✅ | none | A | FULL |
 | 003 | RecordHeaderShell component (FR-02) | 1 | 🔲 | 002 | — | FULL |
-| 004 | FieldGrid component (FR-03) | 1 | 🔲 | none | A | FULL |
+| 004 | FieldGrid component (FR-03) | 1 | ✅ | none | A | FULL |
 | 005 | TextField renderer (FR-04) | 1 | 🔲 | 004 | B | FULL |
 | 006 | LookupField renderer (FR-04) | 1 | 🔲 | 004 | B | FULL |
 | 007 | OptionSetField renderer (FR-04) | 1 | 🔲 | 004 | B | FULL |
 | 008 | TextareaField renderer (FR-04) | 1 | 🔲 | 004 | B | FULL |
-| 009 | useRecordFieldValues hook (FR-05) | 1 | 🔲 | none | C | FULL |
+| 009 | useRecordFieldValues hook (FR-05) | 1 | ✅ | none | C | FULL |
 | 010 | useRelatedCount hook (FR-06) | 1 | 🔲 | 001 | — | FULL |
-| 011 | toolbarLaunchDefaults constants | 1 | 🔲 | none | C | STANDARD |
+| 011 | toolbarLaunchDefaults constants | 1 | ✅ | none | C | STANDARD |
 | 012 | useRecordHeaderToolbarActions hook (FR-07/08/08a/09/10/11) | 1 | 🔲 | 009, 010, 011 | — | FULL |
 | 013 | Update shared lib exports (index.ts) | 1 | 🔲 | 002-012 | — | STANDARD |
 | 014 | Shared lib integration test | 1 | 🔲 | 013 | — | STANDARD |
