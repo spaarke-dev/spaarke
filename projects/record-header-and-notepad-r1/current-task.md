@@ -13,10 +13,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none — project just initialized |
-| **Step** | — |
-| **Status** | not-started |
-| **Next Action** | Run task-execute against task 001 (Phase 1 schema verification). Check `tasks/TASK-INDEX.md` for exact task-001 path. |
+| **Task** | 021 → completed 2026-07-02 |
+| **Step** | — (task complete) |
+| **Status** | Ready for task 022 (MatterHeaderView composition) |
+| **Next Action** | Run task-execute against task 022 (`022-matter-header-view-composition.poml`). Task 021 delivered manifest + class + version.ts + placeholder view + package.json at `src/client/pcf/MatterHeader/`. |
 
 ### Files Modified This Session
 

@@ -50,9 +50,16 @@ export const NOTEPAD_WEBRESOURCE_NAME = 'sprk_notepad_page';
 
 /**
  * Webresource / Code Page name for the SmartTodo Code Page.
- * Verify against target environment during task 020 — may need adjustment.
+ *
+ * Verified via Dataverse MCP query in task 020 (2026-07-02): actual deployed
+ * webresource is `sprk_smarttodo` (webresourceid f85a1884-962b-f111-88b5-7ced8d1dc988,
+ * displayname "Smart To Do", type Webpage/HTML). The R4 spec-assumed name
+ * `sprk_smarttodo_page` does NOT exist in the dev environment. Deployment
+ * source: `scripts/Deploy-SmartTodo.ps1` + `src/solutions/SmartTodo/README.md`.
+ *
+ * See projects/record-header-and-notepad-r1/notes/smarttodo-webresource.md.
  */
-export const SMARTTODO_WEBRESOURCE_NAME = 'sprk_smarttodo_page';
+export const SMARTTODO_WEBRESOURCE_NAME = 'sprk_smarttodo';
 
 /**
  * `sprk_recordsummary` is a MULTILINE TEXT **field** on parent entities

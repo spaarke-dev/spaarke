@@ -44,7 +44,9 @@ describe('toolbarLaunchDefaults', () => {
     });
 
     it('exposes the SmartTodo code page name', () => {
-      expect(SMARTTODO_WEBRESOURCE_NAME).toBe('sprk_smarttodo_page');
+      // Verified via Dataverse MCP task 020 (2026-07-02): actual name is `sprk_smarttodo`
+      // (no `_page` suffix — that was assumed by design.md but never applied at SmartTodo R3 ship).
+      expect(SMARTTODO_WEBRESOURCE_NAME).toBe('sprk_smarttodo');
     });
   });
 
