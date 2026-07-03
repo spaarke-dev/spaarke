@@ -3,7 +3,7 @@
   <metadata>
     <title>Create MatterHeader Solution folder + pack.ps1</title>
     <phase>2: MatterHeaderPcf</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>2</estimated-hours>
     <dependencies>022</dependencies>
     <blocks>024, 025</blocks>

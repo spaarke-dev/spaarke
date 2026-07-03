@@ -13,10 +13,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 022 → completed 2026-07-02 |
+| **Task** | 033 → completed 2026-07-02 |
 | **Step** | — (task complete) |
-| **Status** | Ready for task 023 (Matter solution folder + pack.ps1) |
-| **Next Action** | Run task-execute against task 023 (`023-matter-solution-folder-and-pack.poml`). Task 022 delivered `MatterHeaderView.tsx` (FR-12 composition), 7-test unit-test suite (all passing), jest config + setup + tsconfig.test.json + fileMock at `src/client/pcf/MatterHeader/`. Net LOC: class 20 + view 30 (pure composition) = 50 (well under NFR-02 ≤100). |
+| **Status** | Ready for tasks 034/035/036 (MemoList / MemoEditor / CreatedByPopover) |
+| **Next Action** | Task 033 delivered `useSprkMemoRepository.ts` (~470 LOC), `discoverMemoNavProps.ts` (~90 LOC), and `useSprkMemoRepository.test.ts` (17 tests, all passing). Uses `PolymorphicResolverService.applyResolverFields` from `@spaarke/ui-components/services`; nav-prop discovery follows workAssignmentService.ts pattern (fetch to EntityDefinitions/ManyToOneRelationships). Debounce 1s via ref-held timer; unmount cancels pending write. All 48 Notepad tests still green. Zero TS errors on new files. |
 
 ### Files Modified This Session
 

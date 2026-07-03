@@ -31,13 +31,13 @@
 | 020 | Verify SmartTodo webresource name | 2 | ✅ | none | — | STANDARD |
 | 021 | MatterHeader PCF manifest + class (FR-12) | 2 | ✅ | 013 | — | FULL |
 | 022 | MatterHeaderView composition | 2 | ✅ | 021 | — | FULL |
-| 023 | Matter solution folder + pack.ps1 | 2 | 🔲 | 022 | — | STANDARD |
+| 023 | Matter solution folder + pack.ps1 | 2 | ✅ | 022 | — | STANDARD |
 | 024 | Build + verify bundle (NFR-02, NFR-04) | 2 | 🔲 | 023 | — | STANDARD |
 | 025 | Deploy PCF + manual QA | 2 | 🔲 | 024, 020 | — | STANDARD |
 | 030 | Notepad Vite scaffold | 3 | ✅ | 011 | — | FULL |
 | 031 | Notepad types + deriveTitle utility | 3 | ✅ | 001 | D | STANDARD |
 | 032 | useLaunchContext hook (FR-13) | 3 | ✅ | 030 | D | STANDARD |
-| 033 | useSprkMemoRepository hook | 3 | 🔲 | 001, 031, 032 | — | FULL |
+| 033 | useSprkMemoRepository hook | 3 | ✅ | 001, 031, 032 | — | FULL |
 | 034 | MemoList component (FR-16) | 3 | 🔲 | 033 | E | FULL |
 | 035 | MemoEditor component (FR-17) | 3 | 🔲 | 033 | E | FULL |
 | 036 | CreatedByPopover component (FR-18) | 3 | 🔲 | 033 | E | FULL |

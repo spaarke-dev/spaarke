@@ -1,0 +1,16 @@
+<?xml version="1.0" encoding="UTF-8" standalone="yes"?>
+<manifest>
+  <control namespace="Spaarke.Records" constructor="MatterHeader" version="1.0.0" display-name-key="Matter Header" description-key="Compact 5-field summary card + 3-action toolbar for Matter records. Part of the record-header-and-notepad-r1 shared primitive set." control-type="virtual">
+    <property name="recordId" display-name-key="Record ID (override)" description-key="Optional override for the record GUID; defaults to context.mode.contextInfo.entityId if empty." of-type="SingleLine.Text" usage="input" required="false"/>
+    <resources>
+      <code path="bundle.js" order="1"/>
+      <platform-library name="React" version="16.14.0"/>
+      <platform-library name="Fluent" version="9.46.2"/>
+    </resources>
+    <feature-usage>
+      <uses-feature name="WebAPI" required="true"/>
+      <uses-feature name="Utility" required="true"/>
+      <uses-feature name="Navigation" required="true"/>
+    </feature-usage>
+  </control>
+</manifest>

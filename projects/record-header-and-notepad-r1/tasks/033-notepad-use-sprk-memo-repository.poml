@@ -3,7 +3,7 @@
   <metadata>
     <title>Build useSprkMemoRepository hook (CRUD via Xrm.WebApi)</title>
     <phase>3: Notepad</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>4</estimated-hours>
     <dependencies>001, 031, 032</dependencies>
     <blocks>034, 035, 036, 037</blocks>
