@@ -492,6 +492,29 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
 
   const wizardRef = React.useRef<IWizardShellHandle>(null);
 
+  // 2026-07-03 (R2-followup-1 §3.1): edit mode should skip Choose Layout +
+  // Select Components and land on Arrange Sections directly, since the user is
+  // MODIFYING an existing layout, not building fresh. selectedTemplateId +
+  // selectedSectionIds are pre-populated from parseSectionsJson so canAdvance()
+  // returns true for both intermediate steps.
+  const jumpedOnMountRef = React.useRef(false);
+  React.useEffect(() => {
+    if (mode !== "edit") return;
+    if (jumpedOnMountRef.current) return;
+    if (!wizardRef.current) return;
+    if (!selectedTemplateId) return;
+    if (selectedSectionIds.size === 0) return;
+    // Advance twice: Choose Layout → Select Components → Arrange Sections.
+    // Delayed one animation frame so WizardShell's initial mount + first
+    // canAdvance() eval settles before we programmatically advance.
+    const raf = requestAnimationFrame(() => {
+      wizardRef.current?.nextStep();
+      wizardRef.current?.nextStep();
+      jumpedOnMountRef.current = true;
+    });
+    return () => cancelAnimationFrame(raf);
+  }, [mode, selectedTemplateId, selectedSectionIds.size]);
+
   /** Derive slot count from the selected template. */
   const slotCount = React.useMemo(() => {
     if (!selectedTemplateId) return 0;

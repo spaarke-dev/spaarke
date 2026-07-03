@@ -320,6 +320,8 @@ const useStyles = makeStyles({
     gap: "6px",
   },
   // FR-02 (task 011) — per-row settings header (row-height dropdown + tooltip).
+  // 2026-07-03 (R2-followup-1 §2.1): added light-grey background + padding for
+  // visual separation between rows during authoring per UAT feedback.
   rowSettingsHeader: {
     display: "flex",
     alignItems: "center",
@@ -327,6 +329,9 @@ const useStyles = makeStyles({
     flexWrap: "wrap",
     // Semantic token — adapts to light/dark automatically per ADR-021.
     color: tokens.colorNeutralForeground2,
+    backgroundColor: tokens.colorNeutralBackground2,
+    borderRadius: tokens.borderRadiusMedium,
+    padding: "6px 10px",
   },
   rowSettingsLabel: {
     // Semantic token for row label — adapts to dark mode.
@@ -1192,19 +1197,10 @@ const AdvancedSectionControl: React.FC<{
     [instance, sectionInstances, onSectionInstancesChange, slotKey],
   );
 
-  const handleConfigIdSelect = React.useCallback(
-    (_ev: unknown, data: { optionValue?: string }) => {
-      const key = data.optionValue;
-      updateInstance((d) => {
-        if (!key || key === CONFIG_ID_NONE_KEY) {
-          d.configIdOverride = undefined;
-        } else {
-          d.configIdOverride = key;
-        }
-      });
-    },
-    [updateInstance],
-  );
+  // configId picker (Grid Configuration) removed 2026-07-03 per UAT feedback R2-followup-1 §2.4
+  // — maker use-case for swapping between multiple sprk_gridconfiguration records per
+  // section is not real; simplification removes user-facing confusion. Fetch still runs
+  // (see React.useEffect above) for a possible future reintroduction; harmless.
 
   const handleLabelChange = React.useCallback(
     (_ev: unknown, data: { value: string }) => {
@@ -1252,15 +1248,8 @@ const AdvancedSectionControl: React.FC<{
   );
 
   // Resolve controlled-value strings.
-  const currentConfigIdKey = instance.configIdOverride ?? CONFIG_ID_NONE_KEY;
-  // Build the effective configId option list: real data if ready, else fall
-  // back to "None" only (matches graceful-degradation contract).
-  const configOptions: readonly ConfigIdOption[] =
-    configState.status === "ready" ? configState.data : [CONFIG_ID_NONE_OPTION];
-  const currentConfigIdOption =
-    configOptions.find((o) => o.key === currentConfigIdKey) ??
-    configOptions[0] ??
-    CONFIG_ID_NONE_OPTION;
+  // configId picker removed 2026-07-03 (R2-followup-1 §2.4); currentConfigIdKey /
+  // currentConfigIdOption / configOptions computations retired with it.
   const currentLabelValue = instance.label ?? "";
   const currentPageSize = instance.overrides?.pageSize;
   const currentAvailableViewIds = instance.overrides?.availableViews ?? [];
@@ -1290,64 +1279,7 @@ const AdvancedSectionControl: React.FC<{
           </Text>
         </AccordionHeader>
         <AccordionPanel className={classes.advancedPanel}>
-          {/* (a) configId picker — DEF-002 real Dataverse query */}
-          <div className={classes.advancedField}>
-            <Label
-              htmlFor={`advanced-configid-${slotKey}`}
-              size="small"
-              className={classes.advancedFieldLabel}
-            >
-              Grid configuration
-              {configState.status === "loading" && (
-                <Spinner
-                  size="tiny"
-                  aria-label="Loading grid configurations"
-                  data-testid={`advanced-configid-spinner-${slotKey}`}
-                  style={{ marginLeft: "6px", display: "inline-block" }}
-                />
-              )}
-            </Label>
-            <Dropdown
-              id={`advanced-configid-${slotKey}`}
-              size="small"
-              value={currentConfigIdOption.label}
-              selectedOptions={[currentConfigIdOption.key]}
-              onOptionSelect={handleConfigIdSelect}
-              aria-label={`Grid configuration override for ${sectionLabel}`}
-              data-testid={`advanced-configid-dropdown-${slotKey}`}
-              disabled={!entityName}
-            >
-              {configOptions.map((o) => (
-                <Option key={o.key || "none"} value={o.key}>
-                  {o.label}
-                </Option>
-              ))}
-            </Dropdown>
-            {configState.status === "error" && (
-              <Text
-                className={classes.advancedFieldHelp}
-                style={{ color: tokens.colorPaletteRedForeground1 }}
-                data-testid={`advanced-configid-error-${slotKey}`}
-              >
-                Could not load configurations: {configState.message}. Only
-                &quot;None (use default)&quot; is available.
-              </Text>
-            )}
-            {!entityName && (
-              <Text className={classes.advancedFieldHelp}>
-                This section has no Dataverse entity — configId override is not
-                applicable.
-              </Text>
-            )}
-            {entityName && configState.status !== "error" && (
-              <Text className={classes.advancedFieldHelp}>
-                Point this section at a different sprk_gridconfiguration record.
-                Leave as &quot;None&quot; to use the registration&#39;s default.
-              </Text>
-            )}
-          </div>
-
-          {/* (b) label override */}
+          {/* (a) label override */}
           <div className={classes.advancedField}>
             <Label
               htmlFor={`advanced-label-${slotKey}`}
@@ -1366,12 +1298,9 @@ const AdvancedSectionControl: React.FC<{
               aria-label={`Label override for ${sectionLabel}`}
               data-testid={`advanced-label-input-${slotKey}`}
             />
-            <Text className={classes.advancedFieldHelp}>
-              Rename this section in this layout only. Empty = use default label.
-            </Text>
           </div>
 
-          {/* (c) pageSize override */}
+          {/* (b) pageSize override */}
           <div className={classes.advancedField}>
             <Label
               htmlFor={`advanced-pagesize-${slotKey}`}
@@ -1394,13 +1323,9 @@ const AdvancedSectionControl: React.FC<{
               aria-label={`Page size override for ${sectionLabel}`}
               data-testid={`advanced-pagesize-spinbutton-${slotKey}`}
             />
-            <Text className={classes.advancedFieldHelp}>
-              Rows per page. Empty = use config record&#39;s default (framework
-              default is 25).
-            </Text>
           </div>
 
-          {/* (d) availableViews override — DEF-003 real savedquery multi-select */}
+          {/* (c) availableViews override — DEF-003 real savedquery multi-select */}
           <div className={classes.advancedField}>
             <Label
               htmlFor={`advanced-views-${slotKey}`}
@@ -1451,18 +1376,6 @@ const AdvancedSectionControl: React.FC<{
                 data-testid={`advanced-views-error-${slotKey}`}
               >
                 Could not load saved queries: {savedQueriesState.message}.
-              </Text>
-            )}
-            {!entityName && (
-              <Text className={classes.advancedFieldHelp}>
-                This section has no Dataverse entity — availableViews override
-                is not applicable.
-              </Text>
-            )}
-            {entityName && savedQueriesState.status !== "error" && (
-              <Text className={classes.advancedFieldHelp}>
-                Select one or more saved views this section should offer. Leave
-                empty to use the config-level allowlist.
               </Text>
             )}
           </div>
