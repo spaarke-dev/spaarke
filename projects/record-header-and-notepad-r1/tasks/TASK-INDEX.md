@@ -26,8 +26,8 @@
 | 010 | useRelatedCount hook (FR-06) | 1 | ✅ | 001 | — | FULL |
 | 011 | toolbarLaunchDefaults constants | 1 | ✅ | none | C | STANDARD |
 | 012 | useRecordHeaderToolbarActions hook (FR-07/08/08a/09/10/11) | 1 | ✅ | 009, 010, 011 | — | FULL |
-| 013 | Update shared lib exports (index.ts) | 1 | 🔲 | 002-012 | — | STANDARD |
-| 014 | Shared lib integration test | 1 | 🔲 | 013 | — | STANDARD |
+| 013 | Update shared lib exports (index.ts) | 1 | ✅ | 002-012 | — | STANDARD |
+| 014 | Shared lib integration test | 1 | ✅ | 013 | — | STANDARD |
 | 020 | Verify SmartTodo webresource name | 2 | 🔲 | none | — | STANDARD |
 | 021 | MatterHeader PCF manifest + class (FR-12) | 2 | 🔲 | 013 | — | FULL |
 | 022 | MatterHeaderView composition | 2 | 🔲 | 021 | — | FULL |

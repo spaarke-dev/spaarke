@@ -52,7 +52,7 @@
   </justification>
 
   <steps>
-    <step order="1">Import HeaderToolbar-based primitives from @spaarke/ui-components: RecordHeaderShell, FieldGrid, TextField, LookupField, TextareaField, useRecordFieldValues, useRecordHeaderToolbarActions.</step>
+    <step order="1">Import HeaderToolbar-based primitives from @spaarke/ui-components: RecordHeaderShell, FieldGrid, TextField, **RecordHeaderLookupField** (aliased due to name collision with top-level src/components/LookupField/ — see task 013 report; use `import { RecordHeaderLookupField as LookupField } from "@spaarke/ui-components"` OR import directly from the sub-path `@spaarke/ui-components/components/RecordHeader/fields` to get the un-aliased name), TextareaField, useRecordFieldValues, useRecordHeaderToolbarActions.</step>
     <step order="2">Define IMatterHeaderViewProps { recordId: string; }.</step>
     <step order="3">Compose MatterHeaderView per FR-12 code sample — entity="sprk_matter" hard-coded; useRecordFieldValues with 5 fields; render RecordHeaderShell{toolbar, loading} wrapping FieldGrid{columns:3} with 5 field children (spans 1/2/1/1/3).</step>
     <step order="4">Verify LOC ≤ 40 (excluding imports).</step>
