@@ -26,10 +26,7 @@ export class MatterHeader implements ComponentFramework.ReactControl<IInputs, IO
   }
 
   public updateView(context: ComponentFramework.Context<IInputs>): React.ReactElement {
-    const recordId =
-      context.parameters.recordId?.raw ||
-      context.mode.contextInfo.entityId ||
-      '';
+    const recordId = context.parameters.recordId?.raw || context.mode.contextInfo.entityId || '';
     // Platform-library Fluent v9 auto-applies host theme (control-type="virtual").
     // No manual FluentProvider wrap needed per fluent-v9-modern-theming pattern (approach 1).
     return React.createElement(MatterHeaderView, { recordId });
