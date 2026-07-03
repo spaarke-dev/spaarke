@@ -31,7 +31,7 @@ Reference conversation ended 2026-07-03. All decisions confirmed by operator:
 | D-10 | **Composition binding = build-time (hardcoded FKs in consumer service code)** | Level A. Composition is dev activity per operator |
 | D-11 | **Content resolution = runtime (Dataverse row fetch by FK)** | Level B. Content is maker activity — prompt text, persona voice, skill instructions, knowledge |
 | D-12 | Playbook Builder UI = deferred | No users on it; will retrofit after everything functional |
-| D-13 | Slash commands (`/summarize`) removed entirely | Operator's Wave 12.3 Decision 1 |
+| D-13 (revised 2026-07-03) | Slash commands **retained as UX affordance**. Both `/summarize` and NL "summarize this document" arrive at the SAME client-side dispatch function → POST `/api/ai/chat/sessions/{id}/summarize` → Linear consumer → Workspace tab rendering. Slash = explicit intent shortcut + discovery menu; NL = implicit path through intent classifier; ambiguous intent surfaces a picker (D-15). All three converge on ONE consumer service call. **No dual code paths, no divergent rendering.** | Original position ("remove entirely") was reactive to the OLD implementation's dual-dispatch bug, not to slash commands as a UX pattern. Operator preference is Claude-Code-style slash menus as shortcuts to the same execution NL reaches. Revised 2026-07-03. |
 | D-14 | Doc Upload's PlaybookId in client contract = retire NOW (not R8) | No external clients; scope creep argument invalid |
 | D-15 | Two-step ambiguous-intent flow (LLM picks candidate Actions → user picks → executes) retained as future design (NOT R7) | Real-estate vs NDA example — future consumer set |
 
@@ -59,8 +59,8 @@ Reference conversation ended 2026-07-03. All decisions confirmed by operator:
 **Goal**: Assistant pane summarize works end-to-end. Doc Upload client uses consumer-typed endpoint.
 
 Tasks:
-1. Remove `/summarize` slash command handler from `SprkChat` (Decision 1)
-2. Rewire `SprkChatMessageRenderer` intent detection: explicit summarize intent → POST `/api/ai/chat/sessions/{id}/summarize` (skip `PlaybookCandidateSelector`)
+1. **Consolidate `/summarize` + NL summarize intent onto ONE dispatch path** (D-13 revised). Both should call the same client-side function that POSTs `/api/ai/chat/sessions/{id}/summarize`. Retain `SlashCommandMenu` + `useDynamicSlashCommands` — rewire, don't delete. Slash handler translates `/summarize` → same dispatch payload NL intent produces. Result: single code path, single rendering path (Workspace tab).
+2. Rewire `SprkChatMessageRenderer` NL intent detection: explicit summarize intent → same shared dispatch function (skip `PlaybookCandidateSelector`)
 3. Build schema-driven Workspace Summary tab — reads Action's `sprk_outputschemajson` top-level properties → renders skeleton sections → populates from SSE `result` chunk JSON
 4. Consume SSE via shared `useLinearRunProgress` hook OR retain existing chat consumer if simpler
 5. **Retire Doc Upload's PlaybookId**: client sends consumer-typed URL (`POST /api/ai/documents/{docId}/profile`), server dispatches by URL path (not by `LinearConsumers__PlaybookIds__*` reverse-lookup). Delete `LinearConsumersOptions.PlaybookIds` + last App Settings. Delete `GetConsumerTypeForPlaybookId`.
@@ -90,11 +90,11 @@ Done criteria:
 
 Estimate: **1-2 hrs**
 
-### Phase 12.4 — Persona introduction
+### Phase 12.4 — Persona + Playbook slash-menu schema
 
-**Goal**: Persona is a first-class composition primitive on Action.
+**Goal**: Persona is a first-class composition primitive on Action. Playbook gains maker-visible slash-command metadata for the client's discovery menu.
 
-Tasks:
+Persona tasks:
 1. Verify `sprk_aipersona` entity exists; if not, create it (`sprk_name`, `sprk_prompttext`)
 2. Add `sprk_personaid` LOOKUP column to `sprk_analysisaction` → `sprk_aipersona`
 3. Build `IPersonaLibrary` service — `GetAsync(personaId)` → returns persona row + 5-min cache
@@ -102,13 +102,26 @@ Tasks:
 5. Seed a small library of personas: "Compliance Reviewer", "Matter Analyst", "General Counsel Assistant", "Drafter (Partner-level)"
 6. Populate Persona FK on the 6 Linear Actions where appropriate
 
+Playbook slash-menu schema tasks (per D-13 revised):
+7. Add columns to `sprk_analysisplaybook`:
+   - `sprk_slashkey` NVARCHAR(50) — shortcut key (e.g., "summarize", "review-nda")
+   - `sprk_displayname` NVARCHAR(200) — human-facing menu label (e.g., "Summarize this document")
+   - `sprk_description` NVARCHAR(500) — menu subtitle
+   - `sprk_intenttriggers` NVARCHAR(MAX) — optional JSON array of NL phrases for the client-side intent classifier fast path
+   - `sprk_slashenabled` BIT — whether this playbook surfaces in the slash menu at all
+8. Populate on the 6 Linear Playbooks (chat-summarize gets slashkey="summarize", etc.)
+9. Add BFF endpoint `GET /api/ai/playbooks/slash-menu` — returns list of enabled Playbooks with slashkey + displayname + description (5-min server cache; small payload)
+10. Client `useDynamicSlashCommands` fetches from that endpoint (replacing whatever hardcoded list exists) — slash menu content is now data-driven
+
 Done criteria:
 - New Persona rows exist + populated
 - ActionResolver returns Action with Persona
 - Prompt renders with persona voice prepended
 - Existing consumer output quality maintained or improved
+- Client slash menu displays 6 Linear consumers dynamically (from the endpoint)
+- Adding a new Playbook row automatically adds a new slash command in the menu (no client redeploy)
 
-Estimate: **4-6 hrs**
+Estimate: **6-8 hrs** (Persona ~4-6 + slash-schema ~2)
 
 ### Phase 12.5 — Skills formalization on Node
 
@@ -208,13 +221,13 @@ Estimate: **6-8 hrs**
 |---|---|
 | 12.3a | 4-5 hrs |
 | 12.3b | 1-2 hrs |
-| 12.4 | 4-6 hrs |
+| 12.4 | 6-8 hrs (Persona + slash-menu schema) |
 | 12.5 | 4-6 hrs |
 | 12.6 | 6-8 hrs |
 | 12.7 | 8-10 hrs |
 | Phase E | 0.5 hr |
 | Phase G | 6-8 hrs |
-| **Total** | **~34-46 hrs** |
+| **Total** | **~36-48 hrs** |
 
 Roughly one week of concentrated work.
 
