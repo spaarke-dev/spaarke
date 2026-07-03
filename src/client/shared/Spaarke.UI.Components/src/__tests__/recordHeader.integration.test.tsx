@@ -44,12 +44,7 @@
 
 import * as React from 'react';
 import { act, fireEvent, render, screen, waitFor } from '@testing-library/react';
-import {
-  FluentProvider,
-  Popover,
-  PopoverSurface,
-  webLightTheme,
-} from '@fluentui/react-components';
+import { FluentProvider, Popover, PopoverSurface, webLightTheme } from '@fluentui/react-components';
 
 // Imports go through the sub-barrels rather than the top-level `../index`
 // barrel because the top-level barrel re-exports `services/` which pulls in
@@ -215,27 +210,18 @@ interface TestRecordHeaderProps {
 function TestRecordHeader({ entity, recordId, columns = 3 }: TestRecordHeaderProps): React.ReactElement {
   const { values, loading } = useRecordFieldValues(entity, recordId, MATTER_FIELD_LIST);
 
-  const {
-    toolbarProps,
-    sparklePopoverOpen,
-    setSparklePopoverOpen,
-    sparklePopoverContent,
-  } = useRecordHeaderToolbarActions({
-    entity,
-    recordId,
-    recordSummary: (values?.sprk_recordsummary ?? null) as string | null,
-  });
+  const { toolbarProps, sparklePopoverOpen, setSparklePopoverOpen, sparklePopoverContent } =
+    useRecordHeaderToolbarActions({
+      entity,
+      recordId,
+      recordSummary: (values?.sprk_recordsummary ?? null) as string | null,
+    });
 
   return (
     <FluentProvider theme={webLightTheme}>
       <RecordHeaderShell toolbar={toolbarProps} loading={loading}>
         <FieldGrid columns={columns}>
-          <TextField
-            span={1}
-            label="Matter Number"
-            value={values?.sprk_matternumber as string | undefined}
-            required
-          />
+          <TextField span={1} label="Matter Number" value={values?.sprk_matternumber as string | undefined} required />
           <TextField span={2} label="Matter Name" value={values?.sprk_mattername as string | undefined} />
           <RecordHeaderLookupField
             span={1}
@@ -264,10 +250,7 @@ function TestRecordHeader({ entity, recordId, columns = 3 }: TestRecordHeaderPro
        * mount the Popover as a sibling and let its default anchor logic resolve
        * against document coordinates. This matches the task-012 hook contract.
        */}
-      <Popover
-        open={sparklePopoverOpen}
-        onOpenChange={(_, data) => setSparklePopoverOpen(data.open)}
-      >
+      <Popover open={sparklePopoverOpen} onOpenChange={(_, data) => setSparklePopoverOpen(data.open)}>
         <PopoverSurface>{sparklePopoverContent}</PopoverSurface>
       </Popover>
     </FluentProvider>
@@ -364,7 +347,10 @@ describe('RecordHeader composition — integration (Phase 1 as a whole)', () => 
   it('while retrieveRecord is in-flight, RecordHeaderShell shows Skeleton and children are NOT rendered', async () => {
     // Never-resolving promise → loading stays true.
     installXrm({
-      record: () => new Promise<Record<string, unknown>>(() => { /* never resolves */ }),
+      record: () =>
+        new Promise<Record<string, unknown>>(() => {
+          /* never resolves */
+        }),
       todoCount: 0,
       memoCount: 0,
     });
@@ -409,9 +395,7 @@ describe('RecordHeader composition — integration (Phase 1 as a whole)', () => 
     await waitFor(() => {
       expect(screen.getByTestId('sparkle-popover-summary')).toBeInTheDocument();
     });
-    expect(screen.getByTestId('sparkle-popover-summary')).toHaveTextContent(
-      MATTER_RECORD.sprk_recordsummary
-    );
+    expect(screen.getByTestId('sparkle-popover-summary')).toHaveTextContent(MATTER_RECORD.sprk_recordsummary);
     expect(screen.queryByTestId('sparkle-popover-empty')).toBeNull();
   });
 

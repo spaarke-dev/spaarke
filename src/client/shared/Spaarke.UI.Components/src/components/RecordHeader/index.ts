@@ -42,7 +42,4 @@ export { TextareaField } from './fields';
 export type { ITextareaFieldProps } from './fields';
 
 export { LookupField as RecordHeaderLookupField } from './fields';
-export type {
-  ILookupFieldProps as IRecordHeaderLookupFieldProps,
-  ILookupFieldValue,
-} from './fields';
+export type { ILookupFieldProps as IRecordHeaderLookupFieldProps, ILookupFieldValue } from './fields';
