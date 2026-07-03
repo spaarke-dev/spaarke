@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="spaarke-dataset-grid-framework-r2">
+  <metadata>
+    <title>FR-10: Update SpaarkeAi vite.config.ts + package.json dependency</title>
+    <phase>3: Shared Package Extraction + Documentation</phase>
+    <status>completed</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>021</dependencies>
+    <blocks>025,026</blocks>
+    <tags>frontend, typescript, spaarkeai, vite, build-config, high-risk</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies SpaarkeAi build chain — HIGH RISK task; core acceptance for FR-10; blocks Phase 3 close</rigor-reason>
+    <parallel-group>Wave 11</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Remove the source-alias entries for `@spaarke/legal-workspace` and `@spaarke/legal-workspace/src` from `src/solutions/SpaarkeAi/vite.config.ts`. Add a normal file dependency in `src/solutions/SpaarkeAi/package.json` pointing at the new shared package. Verify SpaarkeAi builds correctly and Dashboard II renders identically to LegalWorkspace.
+  </prompt>
+
+  <role>
+    SPAARKE frontend build-engineer. HIGH-RISK task — this is where the dual-deploy trap is closed.
+  </role>
+
+  <goal>
+    SpaarkeAi's `vite.config.ts` has no `@spaarke/legal-workspace` source aliases. `package.json` has a file: dependency on the new package. SpaarkeAi builds. Dashboard II renders identically pre/post.
+  </goal>
+
+  <context>
+    <background>
+      This task realizes FR-10's operational goal: eliminate the SpaarkeAi ← LegalWorkspace source-alias trap. After this, editing a section registration in the shared package updates SpaarkeAi via a normal shared-lib rebuild — no LegalWorkspace-specific rebuild coordination needed.
+    </background>
+    <relevant-files>
+      <file>src/solutions/SpaarkeAi/vite.config.ts</file>
+      <file>src/solutions/SpaarkeAi/package.json</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">HIGH RISK — touches SpaarkeAi build chain. Regression is Dashboard II identical rendering.</constraint>
+    <constraint source="project">The file: dependency path depends on npm workspaces setup — check root package.json for the pattern.</constraint>
+    <constraint source="project">If regression fails, ROLL BACK this task's changes and investigate. Do NOT compound with other changes.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-dataset-grid-framework-r2/CLAUDE.md</file>
+      <file>projects/spaarke-dataset-grid-framework-r2/spec.md</file>
+      <file>projects/spaarke-dataset-grid-framework-r2/plan.md</file>
+      <file>src/solutions/SpaarkeAi/vite.config.ts</file>
+      <file>src/solutions/SpaarkeAi/package.json</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `src/solutions/SpaarkeAi/vite.config.ts` — identify the `resolve.alias` entries for `@spaarke/legal-workspace` and `@spaarke/legal-workspace/src`.</step>
+    <step order="2">Read `src/solutions/SpaarkeAi/package.json` — identify the pattern used for other `@spaarke/*` shared-lib dependencies (e.g., `@spaarke/ui-components`, `@spaarke/daily-briefing-components`).</step>
+    <step order="3">In `vite.config.ts`: remove the two alias entries. Leave other aliases untouched.</step>
+    <step order="4">In `package.json`: add `"@spaarke/legal-workspace": "file:../../../client/shared/Spaarke.LegalWorkspace"` (or equivalent per Spaarke's file-dependency convention). Match the existing shared-lib dependency style.</step>
+    <step order="5">Run `npm install` (or `pnpm install`) in `src/solutions/SpaarkeAi/` to link the new package.</step>
+    <step order="6">Run `npm run build` in `src/solutions/SpaarkeAi/`. Build MUST succeed.</step>
+    <step order="7">If build fails: investigate module resolution. Common issues: (a) new package's types field points wrong, (b) exports map incomplete, (c) tsconfig paths conflict. Fix or roll back.</step>
+    <step order="8">Local smoke test: build SpaarkeAi + LegalWorkspace + deploy to spaarkedev1 (dev environment) OR use local dev server. Open both surfaces + navigate to Dashboard II. Verify identical rendering.</step>
+    <step order="9">Update TASK-INDEX.md: 022 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Install + build</tool>
+    <tool name="terminal">Edit config files</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/vite.config.ts (modified — 2 aliases removed)</output>
+    <output type="code">src/solutions/SpaarkeAi/package.json (modified — 1 dependency added)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`grep '@spaarke/legal-workspace' src/solutions/SpaarkeAi/vite.config.ts` returns zero matches.</criterion>
+    <criterion testable="true">`grep '@spaarke/legal-workspace' src/solutions/SpaarkeAi/package.json` returns exactly one match (the file: dependency).</criterion>
+    <criterion testable="true">`npm run build` in SpaarkeAi succeeds.</criterion>
+    <criterion testable="true">Dashboard II in SpaarkeAi renders identically to LegalWorkspace (both consumers now on the same package).</criterion>
+    <criterion testable="true">No console errors in browser.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    - THIS IS THE HIGHEST-RISK TASK IN R2. Rollback plan: revert both file changes; SpaarkeAi returns to source-alias mode.
+    - If parallel `spaarkeai-compose-r1` merges before this and adds new SpaarkeAi files that reference the old aliases, coordinate with that worktree — the alias removal must happen atomically.
+    - Consider: after this task, the dual-deploy trap is closed. FR-09 (task 025) still adds a doc warning covering any future aliased-source pairs.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge. FULL rigor. Step 9.5 quality gates. Local smoke test before marking complete.</protocol>
+  </execution>
+</task>

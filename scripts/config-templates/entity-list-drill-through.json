@@ -1,0 +1,51 @@
+{
+  "$comment": "Drill-through DataGrid configuration template. Use for grids embedded in a Custom Page or workspace surface that is scoped to a parent record (e.g. Matter Health -> KPI Assessments). The host shell must mount <DataGrid configId=... parentContext={{ <parent-context-key>: '<parent-record-id>' }} />. REPLACE <entity-name>, <savedquery-id>, <parent-attribute>, <parent-context-key>, and column keys. See docs/guides/DATAGRID-FRAMEWORK-CONFIGURATION-GUIDE.md.",
+  "_version": "1.0",
+  "source": {
+    "type": "savedquery",
+    "savedQueryId": "<savedquery-id>"
+  },
+  "display": {
+    "title": "<friendly-grid-title>",
+    "densityDefault": "compact"
+  },
+  "rowOpen": {
+    "type": "formDialog",
+    "passContext": ["<parent-context-key>"]
+  },
+  "secondaryActions": [
+    {
+      "$comment": "Row-hover navigate action example. Kind 'navigate' opens the target record. Delete or edit this block if not applicable.",
+      "id": "open-parent",
+      "label": "Open parent record",
+      "icon": "Open20Regular",
+      "kind": "navigate",
+      "requiresSelection": "single",
+      "visible": "row-hover",
+      "navigateTarget": {
+        "entity": "<entity-name>",
+        "idField": "<parent-attribute>"
+      }
+    }
+  ],
+  "columns": {
+    "<column-logical-name-1>": {
+      "label": "<Column Display Label>",
+      "width": 220
+    },
+    "<column-logical-name-2>": {
+      "renderer": "badge",
+      "align": "center",
+      "width": 120
+    }
+  },
+  "behavior": {
+    "pageSize": 25,
+    "parentContextFilter": {
+      "$comment": "Injects a top-level FetchXML condition at render time when parentContext[<parent-context-key>] is set on the host. Attribute is the CHILD entity's lookup back to the parent (e.g. sprk_matter). Default operator is 'eq'.",
+      "attribute": "<parent-attribute>",
+      "parentContextKey": "<parent-context-key>",
+      "operator": "eq"
+    }
+  }
+}

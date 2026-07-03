@@ -950,3 +950,13 @@ Three hypothetical widgets, each walked through §1 to confirm the tree reaches 
 - [`../../CLAUDE.md`](../../CLAUDE.md) §10 — BFF Hygiene; binding before any BFF additions.
 - [`../../.claude/constraints/bff-extensions.md`](../../.claude/constraints/bff-extensions.md) — BFF additions pre-merge checklist.
 - ADR-012 (shared component libraries), ADR-021 (Fluent v9 tokens), ADR-022 (React 19 Code Pages), ADR-025 (PaneEventBus — NEW in R4), ADR-026 (stage lifecycle — NEW in R4), ADR-028 (Spaarke Auth v2).
+
+---
+
+## 12. Deployment considerations — dual-deploy trap (added 2026-07-02 by `spaarke-dataset-grid-framework-r2` FR-09)
+
+When authoring a workspace widget in one code page's source tree that another code page consumes via `resolve.alias` in its `vite.config.ts`, both code pages must be rebuilt + redeployed for a source edit to reach every runtime. The alias resolves at BUILD time — the consumer bundles the source it saw at its last build, not what's on disk today.
+
+**Full recipe + historical case** (SpaarkeAi ← LegalWorkspace, RESOLVED 2026-07-02 by R2 FR-10): see [`.claude/skills/code-page-deploy/SKILL.md` — Dual-Deploy Warning section](../../.claude/skills/code-page-deploy/SKILL.md#dual-deploy-warning--aliased-source-pairs-added-2026-07-02-by-spaarke-dataset-grid-framework-r2-fr-09).
+
+**Preferred pattern going forward**: instead of aliasing one code page's `src/` from another's `vite.config.ts`, extract the shared surface into a proper shared package under `src/client/shared/{PackageName}/` and consume via a normal `file:` dependency. See `src/client/shared/Spaarke.LegalWorkspace/` as the reference RE-EXPORT-strategy implementation.

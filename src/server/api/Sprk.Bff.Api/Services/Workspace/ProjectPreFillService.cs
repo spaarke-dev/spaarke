@@ -7,6 +7,7 @@ using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.LinearConsumers;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 
 namespace Sprk.Bff.Api.Services.Workspace;
@@ -34,6 +35,12 @@ public sealed class ProjectPreFillService
     private readonly WorkspaceOptions _workspaceOptions;
     private readonly SharePointEmbeddedOptions _speOptions;
     private readonly ILogger<ProjectPreFillService> _logger;
+
+    // R7 Wave 12 Phase D — Linear AI Consumer dependencies. See MatterPreFillService
+    // for the parallel implementation. Nullable to keep existing constructor callers.
+    private readonly IActionResolver? _linearActionResolver;
+    private readonly IActionRunner? _linearActionRunner;
+    private readonly LinearConsumersOptions? _linearOptions;
 
     // FR-1R-05 routing-table resolution (chat-routing-redesign-r1 task 028c / Pattern A):
     // Phase 1R replaces the prior WorkspaceOptions.ProjectPreFillPlaybookId env-var
@@ -83,7 +90,10 @@ public sealed class ProjectPreFillService
         IOptions<WorkspaceOptions> workspaceOptions,
         IOptions<SharePointEmbeddedOptions> speOptions,
         ILogger<ProjectPreFillService> logger,
-        IWorkspacePrefillAi? prefillAi = null)
+        IWorkspacePrefillAi? prefillAi = null,
+        IActionResolver? linearActionResolver = null,
+        IActionRunner? linearActionRunner = null,
+        IOptions<LinearConsumersOptions>? linearOptions = null)
     {
         _speFileStore = speFileStore ?? throw new ArgumentNullException(nameof(speFileStore));
         _textExtractor = textExtractor ?? throw new ArgumentNullException(nameof(textExtractor));
@@ -93,6 +103,9 @@ public sealed class ProjectPreFillService
         _speOptions = (speOptions ?? throw new ArgumentNullException(nameof(speOptions))).Value;
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _prefillAi = prefillAi; // Nullable: AI feature flags may be disabled. RequireAi() throws at use site.
+        _linearActionResolver = linearActionResolver;
+        _linearActionRunner = linearActionRunner;
+        _linearOptions = linearOptions?.Value;
     }
 
     /// <summary>
@@ -180,7 +193,93 @@ public sealed class ProjectPreFillService
             "Text extraction complete. TotalChars={TotalChars}. RequestId={RequestId}",
             combinedText.Length, requestId);
 
+        // R7 Wave 12 Phase D: Linear AI Consumer dispatch (see MatterPreFillService).
+        if (_linearActionResolver != null && _linearActionRunner != null
+            && _linearOptions != null
+            && _linearOptions.TryGetActionId(ConsumerTypes.ProjectPreFill, out _))
+        {
+            return await ExtractFieldsViaLinearAsync(combinedText, requestId, httpContext, cancellationToken);
+        }
+
         return await ExtractFieldsViaPlaybookAsync(combinedText, requestId, httpContext, cancellationToken);
+    }
+
+    /// <summary>
+    /// R7 Wave 12 Phase D — Linear AI Consumer path for Project Prefill. Mirrors
+    /// MatterPreFillService.ExtractFieldsViaLinearAsync. Feeds the raw structured
+    /// output through the existing ParseAiResponse so wizard fallback logic is preserved.
+    /// </summary>
+    private async Task<ProjectPreFillResponse> ExtractFieldsViaLinearAsync(
+        string documentText,
+        Guid requestId,
+        HttpContext httpContext,
+        CancellationToken cancellationToken)
+    {
+        const int maxTextChars = 80_000;
+        if (documentText.Length > maxTextChars)
+        {
+            _logger.LogDebug(
+                "Truncating combined text from {Original} to {Truncated} chars. RequestId={RequestId}",
+                documentText.Length, maxTextChars, requestId);
+            documentText = documentText[..maxTextChars] + "\n\n[... content truncated ...]";
+        }
+
+        try
+        {
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeoutCts.CancelAfter(TimeSpan.FromSeconds(45));
+
+            var action = await _linearActionResolver!.ResolveAsync(ConsumerTypes.ProjectPreFill, timeoutCts.Token);
+
+            var tenantId = httpContext.User?.FindFirst("tid")?.Value
+                ?? httpContext.User?.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value;
+
+            var docText = new DocumentText
+            {
+                DocumentId = null,
+                FileName = "project-prefill-input",
+                ExtractedText = documentText,
+            };
+            var runContext = new LinearRunContext
+            {
+                ConsumerType = ConsumerTypes.ProjectPreFill,
+                CorrelationId = httpContext.TraceIdentifier,
+                TenantId = tenantId,
+            };
+
+            _logger.LogInformation(
+                "Invoking Linear Project Prefill action. ActionId={ActionId}, TextLength={TextLength}, RequestId={RequestId}",
+                action.Id, documentText.Length, requestId);
+
+            var jsonElement = await _linearActionRunner!.RunAsync(action, docText, runContext, timeoutCts.Token);
+            var preFillJson = jsonElement.GetRawText();
+
+            var confidence = 0.0;
+            if (jsonElement.ValueKind == JsonValueKind.Object
+                && jsonElement.TryGetProperty("confidence", out var confElement)
+                && confElement.ValueKind == JsonValueKind.Number)
+            {
+                confidence = confElement.GetDouble();
+            }
+
+            _logger.LogInformation(
+                "Linear Project Prefill extraction complete. ResponseLength={Length}, Confidence={Confidence}. RequestId={RequestId}",
+                preFillJson.Length, confidence, requestId);
+
+            return ParseAiResponse(preFillJson, confidence, requestId);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogWarning(
+                "Linear Project Prefill request timed out after 45s. RequestId={RequestId}", requestId);
+            return ProjectPreFillResponse.Empty();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "Linear Project Prefill call failed. RequestId={RequestId}", requestId);
+            return ProjectPreFillResponse.Empty();
+        }
     }
 
     private async Task<string> ExtractTextFromFilesAsync(

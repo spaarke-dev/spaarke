@@ -164,6 +164,8 @@ public static class WorkspaceFileEndpoints
         IPlaybookLookupService playbookLookup,
         IConsumerRoutingService consumerRouting,
         IOptions<WorkspaceOptions> workspaceOptions,
+        IOptions<Sprk.Bff.Api.Services.Ai.LinearConsumers.LinearConsumersOptions> linearOptions,
+        Sprk.Bff.Api.Services.Ai.LinearConsumers.FileSummarizeService fileSummarizeService,
         HttpContext httpContext,
         ILogger<Program> logger,
         CancellationToken ct)
@@ -222,15 +224,32 @@ public static class WorkspaceFileEndpoints
             await WriteSSEAsync(response, AnalysisStreamChunk.Progress("context_ready", "Preparing analysis..."), ct);
             await WriteSSEAsync(response, AnalysisStreamChunk.Progress("analyzing", "Analyzing..."), ct);
 
-            // FR-1R-04 — pass the first uploaded file's MIME type into the routing context so
-            // sprk_matchconditions JSON predicates can specialize (e.g., PDF vs DOCX). When the
-            // upload is empty or content type is null/whitespace, MimeType stays null and the
-            // default routing record matches.
-            var mimeType = files.FirstOrDefault(f => !string.IsNullOrWhiteSpace(f.ContentType))?.ContentType;
+            // R7 Wave 12 Phase C (2026-07-02): Linear AI Consumer dispatch. When the
+            // File Summary consumer is configured under LinearConsumers:ActionIds, route
+            // through FileSummarizeService (code-defined, no interpreter tax) rather than
+            // the Playbook Engine. Same SSE contract preserved — client sees the same
+            // result chunk shape. Fall-through preserves engine behavior when unset.
+            if (linearOptions.Value.TryGetActionId(ConsumerTypes.SummarizeFile, out _))
+            {
+                var displayName = files.FirstOrDefault()?.FileName ?? "combined-input";
+                await foreach (var chunk in fileSummarizeService.ExecuteAsync(
+                    extractedText, displayName, httpContext, ct))
+                {
+                    await WriteSSEAsync(response, chunk, ct);
+                }
+            }
+            else
+            {
+                // FR-1R-04 — pass the first uploaded file's MIME type into the routing context so
+                // sprk_matchconditions JSON predicates can specialize (e.g., PDF vs DOCX). When the
+                // upload is empty or content type is null/whitespace, MimeType stays null and the
+                // default routing record matches.
+                var mimeType = files.FirstOrDefault(f => !string.IsNullOrWhiteSpace(f.ContentType))?.ContentType;
 
-            await RunSummarizePlaybookAsSSEAsync(
-                extractedText, playbookService, playbookLookup, consumerRouting, workspaceOptions,
-                mimeType, response, httpContext, logger, ct);
+                await RunSummarizePlaybookAsSSEAsync(
+                    extractedText, playbookService, playbookLookup, consumerRouting, workspaceOptions,
+                    mimeType, response, httpContext, logger, ct);
+            }
 
             await WriteSSEAsync(response, AnalysisStreamChunk.Progress("delivering", "Delivering results..."), ct);
             await response.WriteAsync("data: [DONE]\n\n", ct);

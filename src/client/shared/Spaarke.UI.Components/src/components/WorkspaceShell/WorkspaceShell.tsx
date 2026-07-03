@@ -225,6 +225,13 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = ({ config, classNam
             className={shellStyles.row}
             style={{
               gridTemplateColumns: columns,
+              // FR-02 (spaarke-dataset-grid-framework-r2): apply optional row-level
+              // height ceiling. Populated by buildDynamicWorkspaceConfig from
+              // LayoutJsonRow.rowHeight. When set, the row wrapper is clamped and
+              // overflow is hidden — sections inside respect the ceiling regardless
+              // of their contentSizing.
+              ...(row.maxHeight !== undefined ? { maxHeight: row.maxHeight } : {}),
+              ...(row.overflow !== undefined ? { overflow: row.overflow } : {}),
               // Inline media-query equivalent via CSS custom properties is not
               // available in inline styles. Consumers who need per-row responsive
               // overrides should pass a className instead. The shell CSS handles

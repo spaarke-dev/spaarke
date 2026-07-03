@@ -54,6 +54,30 @@ export interface DataverseEntityViewWidgetData {
   configId: string;
   /** Optional debug label — not currently rendered (DataGrid owns its header). */
   title?: string;
+  /**
+   * spaarke-dataset-grid-framework-r2 FR-03 (DEF-005b, 2026-07-02):
+   * Per-instance `pageSize` override. Forwarded to the `<DataGrid />` `pageSize`
+   * prop which participates in the 3-tier precedence chain
+   * (SectionInstance.overrides.pageSize > `sprk_configjson.behavior.pageSize` >
+   * framework default 25) via `configResolution.resolveEffectivePageSize`.
+   *
+   * Populated by LegalWorkspace section factories from
+   * `context.sectionInstance?.overrides.pageSize`. Absent = fall through to
+   * config record / framework default.
+   */
+  pageSize?: number;
+  /**
+   * spaarke-dataset-grid-framework-r2 FR-03 (DEF-005b, 2026-07-02):
+   * Per-instance savedquery allowlist override. Forwarded to the `<DataGrid />`
+   * `availableViewsAllowlist` prop and REPLACES (not intersects) the
+   * config-level `SourceSavedQuery.availableViews` (FR-05) when both are set,
+   * per `configResolution.resolveEffectiveAvailableViews`.
+   *
+   * Populated by LegalWorkspace section factories from
+   * `context.sectionInstance?.overrides.availableViews`. Absent = fall through
+   * to config-level allowlist / all sibling views.
+   */
+  availableViews?: string[];
 }
 
 // ---------------------------------------------------------------------------
@@ -202,7 +226,12 @@ export const DataverseEntityViewWidget: React.FC<WorkspaceWidgetProps<DataverseE
           overflow: 'hidden',
         }}
       >
-        <DataGrid configId={data.configId} dataverseClient={dataverseClient} />
+        <DataGrid
+          configId={data.configId}
+          dataverseClient={dataverseClient}
+          pageSize={data.pageSize}
+          availableViewsAllowlist={data.availableViews}
+        />
       </div>
     </div>
   );

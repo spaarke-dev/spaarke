@@ -87,6 +87,18 @@ That's enough to render a working grid. The framework will:
 
 Iterate from there — add only the overrides you need.
 
+### Starter templates (recommended)
+
+Three copy-paste templates live under [`scripts/config-templates/`](../../scripts/config-templates/). Pick the one closest to your shape, replace the `<placeholder>` markers (angle-bracketed values like `<savedquery-id>`, `<entity-name>`, `<parent-context-key>`), then paste into the `sprk_configjson` field on your new record.
+
+| Template | When to use |
+|---|---|
+| [`entity-list-basic.json`](../../scripts/config-templates/entity-list-basic.json) | Standalone grid of a single entity's records. Minimum viable — `_version`, `source`, `display.title`, `rowOpen`, `behavior.pageSize`. Best starting point for most new configs. |
+| [`entity-list-drill-through.json`](../../scripts/config-templates/entity-list-drill-through.json) | Grid scoped to a parent record (e.g. Matter → KPI Assessments). Adds `behavior.parentContextFilter`, column overrides, and a `secondaryActions[]` entry. |
+| [`entity-list-full.json`](../../scripts/config-templates/entity-list-full.json) | Reference only — every top-level key populated with `$comment` annotations. Use as a lookup, **not** as a starting point (lean configs are good configs).|
+
+The templates use `$comment` keys for inline documentation. The framework tolerates unknown keys at parse time, so `$comment` is safe to leave in the record — remove it if you prefer stricter payloads.
+
 ---
 
 ## Step 3 — Pick a `source`
@@ -335,7 +347,7 @@ Visibility modes: `always` (permanent button), `row-hover` (appears on hover —
 | Field | Type | Default | Purpose |
 |---|---|---|---|
 | `selectionMode` | `'none' \| 'single' \| 'multi'` | `'multi'` | Row selection model. `'none'` hides the checkbox column entirely. |
-| `pageSize` | number | **100** at runtime (schema note says 50 — doc drift; the runtime default is `?? 100`) | **Records per FetchXML page — controls lazy-load chunk size**. Lower = more scrolling; higher = fewer round trips. Recommended `25` for embedded widgets in workspace layouts, `50–100` for full-page grids. |
+| `pageSize` | number | **`25`** (FR-07, spaarke-dataset-grid-framework-r2) | **Records per FetchXML page — controls lazy-load chunk size**. Lower = more scrolling; higher = fewer round trips. `25` matches the workspace-widget majority use case; drill-through / full-page grids should override explicitly to `50–100`. |
 | `enableSorting` | boolean | `true` | Column-header click sorts. Set `false` to lock the savedquery's sort order. |
 | `enableColumnResize` | boolean | `true` | Drag column edges to resize. |
 | `enableKeyboardNavigation` | boolean | `true` | Arrow keys move the row focus; Enter opens the row. |
@@ -388,7 +400,7 @@ Default = `auto` (every chip-eligible column gets a chip). To restrict or overri
 
 Every override in one place, with defaults and comments. Copy this as your starting point, then **delete every key you're not overriding** so your config record stays minimal and picks up framework default changes going forward.
 
-**Why not populate every field on every record?** Records that explicitly set defaults DIVERGE from the framework when defaults evolve (e.g., if we later change the default `pageSize` from 100 to 50, records with an explicit `"pageSize": 100` get "stuck" on the old value). Keeping the record minimal preserves the framework's ability to change defaults centrally.
+**Why not populate every field on every record?** Records that explicitly set defaults DIVERGE from the framework when defaults evolve (e.g., FR-07 changed the default `pageSize` from `100` to `25`; records with an explicit `"pageSize": 100` are "stuck" on the old value until the record is re-authored). Keeping the record minimal preserves the framework's ability to change defaults centrally.
 
 ```jsonc
 {
@@ -504,7 +516,7 @@ Every override in one place, with defaults and comments. Copy this as your start
   // ─── BEHAVIOR (optional — interaction knobs) ──────────────────────────────
   "behavior": {
     "selectionMode": "multi",              // "none" | "single" | "multi". Default: "multi".
-    "pageSize": 25,                        // Records per FetchXML page. Framework runtime default: 100. Recommended: 25 for workspace-embedded widgets, 50-100 for full-page grids.
+    "pageSize": 25,                        // Records per FetchXML page. Framework runtime default: 25 (FR-07). Override to 50-100 for drill-through / full-page grids.
     "enableSorting": true,                 // Column-header click sorts. Default: true.
     "enableColumnResize": true,            // Drag column edges. Default: true.
     "enableKeyboardNavigation": true,      // Arrow keys move focus. Default: true.

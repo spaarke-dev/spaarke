@@ -1,0 +1,93 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="spaarke-dataset-grid-framework-r2">
+  <metadata>
+    <title>FR-05: Add `availableViews` allowlist to SourceSavedQuery + configResolution filter</title>
+    <phase>1: Framework Schema + Consumer Unwind</phase>
+    <status>completed</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>006</blocks>
+    <tags>frontend, typescript, shared-library, datagrid, framework, view-selector</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies `.ts` files; framework schema addition; tags include `framework`</rigor-reason>
+    <parallel-group>Wave 1</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Add an optional `availableViews?: string[]` field to `SourceSavedQuery` type. Filter `configResolution.ts` savedquery retrieval by the allowlist when set. When absent, preserve current behavior (all siblings show). Ship unit tests covering both present and absent branches.
+  </prompt>
+
+  <role>
+    SPAARKE frontend framework developer. Expert in TypeScript + Fluent UI v9. Follows ADR-012 for shared-lib SSOT.
+  </role>
+
+  <goal>
+    `SourceSavedQuery.availableViews?: string[]` field exists in types; `configResolution.ts` applies allowlist intersection when field is populated; back-compat verified for records without the field.
+  </goal>
+
+  <context>
+    <background>
+      `<ViewSelector>` dropdown shows every active savedquery for the entity today. Operator screenshot showed Communications with irrelevant views. FR-05 adds a maker-controlled allowlist so a specific config can restrict the picker without deleting savedqueries Dataverse-wide.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/types/DataGridConfiguration.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/DataGrid/configResolution.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">Framework changes stay in `@spaarke/ui-components`.</constraint>
+    <constraint source="ADR-022">Shared-lib code React-16-safe.</constraint>
+    <constraint source="ADR-038">Unit tests MAINTAIN-class; test the allowlist filter directly, not via a mock HTTP layer.</constraint>
+    <constraint source="project">Additive: `availableViews` optional; absent = current behavior (all views).</constraint>
+    <constraint source="project">Per-instance override from FR-03 (`SectionInstance.overrides.availableViews`) takes precedence over this global config-level allowlist. FR-03 wires that precedence — this task just implements the config-level filter.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-dataset-grid-framework-r2/CLAUDE.md</file>
+      <file>projects/spaarke-dataset-grid-framework-r2/spec.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/guides/DATAGRID-FRAMEWORK-CONFIGURATION-GUIDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read spec.md § FR-05. Locate `SourceSavedQuery` in `DataGridConfiguration.ts`.</step>
+    <step order="2">Add `readonly availableViews?: string[];` to `SourceSavedQuery` with JSDoc noting: optional allowlist of savedquery IDs; when set, filters the `<ViewSelector>` dropdown to only these IDs; when omitted, all sibling views show (back-compat).</step>
+    <step order="3">Locate `configResolution.ts` where savedqueries are retrieved. Add allowlist intersection: after `retrieveSavedQueriesForEntity(entity)` returns, if `source.availableViews` is a non-empty array, filter the result to entries whose `savedqueryid` is in the array.</step>
+    <step order="4">Add unit tests: (a) `availableViews` unset → all savedqueries returned, (b) `availableViews` set with 2 IDs from 5 returned by mock → only those 2 returned, (c) `availableViews` set with 0 matching IDs → empty array returned, (d) `availableViews` is an empty array (edge case) → decide semantics + document (proposed: treat as "no filter" = current behavior).</step>
+    <step order="5">Run `npm test` in `Spaarke.UI.Components` — all tests pass.</step>
+    <step order="6">Run `npm run build` — build succeeds.</step>
+    <step order="7">Update TASK-INDEX.md: status → ✅ completed.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build and test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/types/DataGridConfiguration.ts (modified)</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/DataGrid/configResolution.ts (modified)</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/DataGrid/__tests__/configResolution.test.ts (new or extended)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given `source.availableViews` is unset, when `configResolution` runs, then the returned savedquery list matches `retrieveSavedQueriesForEntity` output verbatim.</criterion>
+    <criterion testable="true">Given `source.availableViews = ['id-1', 'id-3']` and `retrieveSavedQueriesForEntity` returns 5 entries with IDs 1-5, when `configResolution` runs, then the returned list contains only entries with IDs 1 and 3.</criterion>
+    <criterion testable="true">All unit tests pass; `npm run build` succeeds.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    - Empty-array edge case: recommend documenting as "no filter" to reduce accidental empty-picker footguns. If reviewer disagrees, treat as intentional "hide all" — document behavior explicitly either way.
+    - Per-instance override (FR-03) reads `SectionInstance.overrides.availableViews` first; falls back to this config-level allowlist if absent. That precedence lives in FR-03 wiring; not this task.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files. FULL rigor. Quality gates at Step 9.5.</protocol>
+  </execution>
+</task>

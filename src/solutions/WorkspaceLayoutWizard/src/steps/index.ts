@@ -9,4 +9,4 @@ export { SectionStep } from "./SectionStep";
 export type { SectionStepProps, SectionCatalogItem } from "./SectionStep";
 
 export { ArrangeStep, buildInitialAssignments } from "./ArrangeStep";
-export type { ArrangeStepProps, SlotAssignments } from "./ArrangeStep";
+export type { ArrangeStepProps, SlotAssignments, SectionInstance } from "./ArrangeStep";

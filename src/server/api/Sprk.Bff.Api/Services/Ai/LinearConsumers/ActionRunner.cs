@@ -71,17 +71,21 @@ public sealed class ActionRunner : IActionRunner
         var temperature = (float?)action.Temperature;
 
         _options.Value.TryGetModelDeployment(context.ConsumerType, out var modelDeployment);
+        var hasMaxTokens = _options.Value.TryGetMaxOutputTokens(context.ConsumerType, out var maxTokens);
+        int? maxOutputTokens = hasMaxTokens ? maxTokens : null;
 
         _logger.LogInformation(
-            "Linear run: consumer={ConsumerType} action={ActionName} promptLen={PromptLen} model={Model} temp={Temperature}",
-            context.ConsumerType, action.Name, prompt.Length, modelDeployment ?? "(default)", temperature);
+            "Linear run: consumer={ConsumerType} action={ActionName} promptLen={PromptLen} model={Model} temp={Temperature} maxTokens={MaxTokens}",
+            context.ConsumerType, action.Name, prompt.Length,
+            modelDeployment ?? "(default)", temperature,
+            maxOutputTokens?.ToString() ?? "(default)");
 
         var rawJson = await _openAi.GetStructuredCompletionRawAsync(
             prompt,
             jsonSchema,
             schemaName,
             model: modelDeployment,
-            maxOutputTokens: null,
+            maxOutputTokens: maxOutputTokens,
             temperature: temperature,
             cancellationToken: cancellationToken);
 
