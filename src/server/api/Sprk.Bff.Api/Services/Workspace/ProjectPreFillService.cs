@@ -36,11 +36,11 @@ public sealed class ProjectPreFillService
     private readonly SharePointEmbeddedOptions _speOptions;
     private readonly ILogger<ProjectPreFillService> _logger;
 
-    // R7 Wave 12 Phase D — Linear AI Consumer dependencies. See MatterPreFillService
-    // for the parallel implementation. Nullable to keep existing constructor callers.
+    // R7 Wave 12 Phase D + Wave 12.3 — Linear AI Consumer dependencies. See
+    // MatterPreFillService for the parallel implementation. Nullable to keep existing
+    // constructor callers compiling.
     private readonly IActionResolver? _linearActionResolver;
     private readonly IActionRunner? _linearActionRunner;
-    private readonly LinearConsumersOptions? _linearOptions;
 
     // FR-1R-05 routing-table resolution (chat-routing-redesign-r1 task 028c / Pattern A):
     // Phase 1R replaces the prior WorkspaceOptions.ProjectPreFillPlaybookId env-var
@@ -92,8 +92,7 @@ public sealed class ProjectPreFillService
         ILogger<ProjectPreFillService> logger,
         IWorkspacePrefillAi? prefillAi = null,
         IActionResolver? linearActionResolver = null,
-        IActionRunner? linearActionRunner = null,
-        IOptions<LinearConsumersOptions>? linearOptions = null)
+        IActionRunner? linearActionRunner = null)
     {
         _speFileStore = speFileStore ?? throw new ArgumentNullException(nameof(speFileStore));
         _textExtractor = textExtractor ?? throw new ArgumentNullException(nameof(textExtractor));
@@ -105,7 +104,6 @@ public sealed class ProjectPreFillService
         _prefillAi = prefillAi; // Nullable: AI feature flags may be disabled. RequireAi() throws at use site.
         _linearActionResolver = linearActionResolver;
         _linearActionRunner = linearActionRunner;
-        _linearOptions = linearOptions?.Value;
     }
 
     /// <summary>
@@ -194,9 +192,11 @@ public sealed class ProjectPreFillService
             combinedText.Length, requestId);
 
         // R7 Wave 12 Phase D: Linear AI Consumer dispatch (see MatterPreFillService).
-        if (_linearActionResolver != null && _linearActionRunner != null
-            && _linearOptions != null
-            && _linearOptions.TryGetActionId(ConsumerTypes.ProjectPreFill, out _))
+        var linearActionId = (_linearActionResolver != null && _linearActionRunner != null)
+            ? await _consumerRouting.ResolveActionAsync(ConsumerTypes.ProjectPreFill, cancellationToken: cancellationToken)
+                .ConfigureAwait(false)
+            : null;
+        if (linearActionId.HasValue && linearActionId.Value != Guid.Empty)
         {
             return await ExtractFieldsViaLinearAsync(combinedText, requestId, httpContext, cancellationToken);
         }

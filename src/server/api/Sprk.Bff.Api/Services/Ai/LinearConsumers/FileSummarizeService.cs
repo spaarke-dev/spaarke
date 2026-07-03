@@ -7,18 +7,31 @@ using Sprk.Bff.Api.Services.Ai.PublicContracts;
 namespace Sprk.Bff.Api.Services.Ai.LinearConsumers;
 
 /// <summary>
-/// Linear AI Consumer for the Workspace File Summarize flow.
-/// Replaces the Playbook Engine dispatch of the "File Summary" playbook
-/// (see <c>projects/spaarke-ai-platform-unification-r7/notes/wave12-linear-consumer-migration.md</c>).
+/// Consumer-agnostic Linear AI Consumer for text → structured-summary flows.
+/// Composes <see cref="IActionResolver"/> + <see cref="IActionRunner"/> and
+/// emits an <see cref="AnalysisStreamChunk"/> SSE sequence. The
+/// <c>consumerType</c> parameter selects which <c>sprk_analysisaction</c> row
+/// is resolved (each consumer supplies its own prompt + output schema via
+/// <see cref="LinearConsumersOptions.ActionIds"/>).
 /// </summary>
 /// <remarks>
-/// R7 Wave 12 Phase C (2026-07-02). Composes <see cref="IActionResolver"/> +
-/// <see cref="IActionRunner"/>. No Dataverse writes, no downstream jobs — the
-/// LLM output is emitted straight back to the client via a single SSE
-/// <c>result</c> chunk (matching the engine path's client contract).
-/// Endpoint already extracted text from the uploaded files before invoking us,
-/// so we consume the pre-extracted text directly rather than owning extraction
-/// (which is a per-file concern the endpoint handles today).
+/// <para>
+/// R7 Wave 12 Phase C (File Summary) + Phase 12.3 (Chat Summarize) — same
+/// service serves two consumers by parameterizing consumer-type at call time.
+/// See <c>docs/architecture/SPAARKE-LINEAR-AI-CONSUMER-ARCHITECTURE.md</c>.
+/// </para>
+/// <para>
+/// The service consumes PRE-EXTRACTED text; each caller owns extraction
+/// (Workspace endpoint uses <c>ITextExtractor</c> over uploaded files;
+/// chat orchestrator uses <c>SessionFileTextSource</c> over the
+/// <c>spaarke-session-files</c> RAG index). This keeps the service usable
+/// as a step within a larger non-linear pipeline as well.
+/// </para>
+/// <para>
+/// Name retained: "FileSummarizeService" — the service is a generic
+/// text-to-summary primitive. The name reflects its origin; the interface
+/// is intentionally consumer-agnostic.
+/// </para>
 /// </remarks>
 public sealed class FileSummarizeService
 {
@@ -37,16 +50,18 @@ public sealed class FileSummarizeService
     }
 
     /// <summary>
-    /// Execute the File Summary linear pipeline. Emits progress + result chunks
-    /// the caller (WorkspaceFileEndpoints) can write to the SSE response.
+    /// Execute the summarize linear pipeline for the specified consumer.
+    /// Emits progress + result chunks the caller can write to the SSE response.
     /// </summary>
-    /// <param name="extractedText">Pre-extracted, pre-concatenated text from the uploaded files.</param>
-    /// <param name="fileName">Display filename for logging (typically first file or "combined").</param>
+    /// <param name="extractedText">Pre-extracted, pre-concatenated source text.</param>
+    /// <param name="fileName">Display label for logging (e.g., first file name or "session-files-combined").</param>
+    /// <param name="consumerType">Consumer-type key (e.g., <see cref="ConsumerTypes.SummarizeFile"/> or <see cref="ConsumerTypes.ChatSummarize"/>) — resolves the target Action row via <see cref="LinearConsumersOptions.ActionIds"/>.</param>
     /// <param name="httpContext">HTTP context (for tenant claims + correlation id).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
     public async IAsyncEnumerable<AnalysisStreamChunk> ExecuteAsync(
         string extractedText,
         string fileName,
+        string consumerType,
         HttpContext httpContext,
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
@@ -55,13 +70,13 @@ public sealed class FileSummarizeService
 
         var runContext = new LinearRunContext
         {
-            ConsumerType = ConsumerTypes.SummarizeFile,
+            ConsumerType = consumerType,
             CorrelationId = httpContext.TraceIdentifier,
             TenantId = tenantId,
         };
 
         yield return AnalysisStreamChunk.Progress("resolving_action", "Resolving action configuration…");
-        var (action, actionError) = await TryResolveActionAsync(cancellationToken);
+        var (action, actionError) = await TryResolveActionAsync(consumerType, cancellationToken);
         if (actionError != null)
         {
             yield return AnalysisStreamChunk.FromError(actionError);
@@ -88,16 +103,17 @@ public sealed class FileSummarizeService
         yield return AnalysisStreamChunk.Result(aiOutput.GetRawText());
     }
 
-    private async Task<(AnalysisAction? action, string? error)> TryResolveActionAsync(CancellationToken ct)
+    private async Task<(AnalysisAction? action, string? error)> TryResolveActionAsync(
+        string consumerType, CancellationToken ct)
     {
         try
         {
-            var action = await _actionResolver.ResolveAsync(ConsumerTypes.SummarizeFile, ct);
+            var action = await _actionResolver.ResolveAsync(consumerType, ct);
             return (action, null);
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "Failed to resolve File Summary action");
+            _logger.LogError(ex, "Failed to resolve action for consumerType={ConsumerType}", consumerType);
             return (null, $"Failed to resolve action: {ex.Message}");
         }
     }
@@ -112,7 +128,7 @@ public sealed class FileSummarizeService
         }
         catch (Exception ex)
         {
-            _logger.LogError(ex, "LLM call failed for File Summary");
+            _logger.LogError(ex, "LLM call failed for consumerType={ConsumerType}", ctx.ConsumerType);
             return (default, $"AI analysis failed: {ex.Message}");
         }
     }

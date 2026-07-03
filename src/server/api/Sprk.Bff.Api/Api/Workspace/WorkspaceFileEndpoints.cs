@@ -164,7 +164,6 @@ public static class WorkspaceFileEndpoints
         IPlaybookLookupService playbookLookup,
         IConsumerRoutingService consumerRouting,
         IOptions<WorkspaceOptions> workspaceOptions,
-        IOptions<Sprk.Bff.Api.Services.Ai.LinearConsumers.LinearConsumersOptions> linearOptions,
         Sprk.Bff.Api.Services.Ai.LinearConsumers.FileSummarizeService fileSummarizeService,
         HttpContext httpContext,
         ILogger<Program> logger,
@@ -224,16 +223,20 @@ public static class WorkspaceFileEndpoints
             await WriteSSEAsync(response, AnalysisStreamChunk.Progress("context_ready", "Preparing analysis..."), ct);
             await WriteSSEAsync(response, AnalysisStreamChunk.Progress("analyzing", "Analyzing..."), ct);
 
-            // R7 Wave 12 Phase C (2026-07-02): Linear AI Consumer dispatch. When the
-            // File Summary consumer is configured under LinearConsumers:ActionIds, route
-            // through FileSummarizeService (code-defined, no interpreter tax) rather than
-            // the Playbook Engine. Same SSE contract preserved — client sees the same
-            // result chunk shape. Fall-through preserves engine behavior when unset.
-            if (linearOptions.Value.TryGetActionId(ConsumerTypes.SummarizeFile, out _))
+            // R7 Wave 12 Phase C (2026-07-02) + Wave 12.3 (2026-07-02): Linear AI Consumer
+            // dispatch. When the File Summary consumer has sprk_action populated on its
+            // sprk_playbookconsumer routing row, route through FileSummarizeService
+            // (code-defined, no interpreter tax) rather than the Playbook Engine. Same SSE
+            // contract preserved — client sees the same result chunk shape. Fall-through
+            // preserves engine behavior when sprk_action is empty (per-consumer rollback).
+            var linearFileSummaryActionId = await consumerRouting
+                .ResolveActionAsync(ConsumerTypes.SummarizeFile, cancellationToken: ct)
+                .ConfigureAwait(false);
+            if (linearFileSummaryActionId.HasValue && linearFileSummaryActionId.Value != Guid.Empty)
             {
                 var displayName = files.FirstOrDefault()?.FileName ?? "combined-input";
                 await foreach (var chunk in fileSummarizeService.ExecuteAsync(
-                    extractedText, displayName, httpContext, ct))
+                    extractedText, displayName, ConsumerTypes.SummarizeFile, httpContext, ct))
                 {
                     await WriteSSEAsync(response, chunk, ct);
                 }

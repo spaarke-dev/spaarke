@@ -28,6 +28,7 @@ public static class LinearConsumersModule
         // → IHttpContextAccessor).
         services.AddSingleton<IActionResolver, ActionResolver>();
         services.AddScoped<IDocumentTextSource, DocumentTextSource>();
+        services.AddScoped<ISessionFileTextSource, SessionFileTextSource>();
         services.AddSingleton<IActionRunner, ActionRunner>();
 
         // Consumer services.

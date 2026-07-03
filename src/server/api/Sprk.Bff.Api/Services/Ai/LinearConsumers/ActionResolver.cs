@@ -1,29 +1,41 @@
-using Microsoft.Extensions.Options;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 
 namespace Sprk.Bff.Api.Services.Ai.LinearConsumers;
 
 /// <summary>
-/// Config-driven <see cref="IActionResolver"/>: reads the ActionId map from
-/// <see cref="LinearConsumersOptions"/> and delegates to
-/// <see cref="IScopeResolverService.GetActionAsync"/> to load the row.
+/// Routing-table-driven <see cref="IActionResolver"/>: resolves consumer-type
+/// to an Action GUID via <see cref="IConsumerRoutingService.ResolveActionAsync"/>
+/// (reads <c>sprk_playbookconsumer.sprk_action</c> lookup), then loads the row
+/// via <see cref="IScopeResolverService.GetActionAsync"/>.
 /// </summary>
 /// <remarks>
-/// Registered as Singleton per <see cref="Sprk.Bff.Api.Services.Ai.IScopeResolverService"/>
-/// lifecycle; safe because it holds no mutable per-request state and
-/// <see cref="IOptions{TOptions}"/> is itself Singleton.
+/// <para>
+/// R7 Wave 12.3 (2026-07-02) — replaces the earlier
+/// <see cref="LinearConsumersOptions.ActionIds"/> config-map lookup. The routing
+/// table is the single canonical routing surface for every consumer (Linear +
+/// legacy playbook); config-based routing is retired to eliminate per-env drift,
+/// silent fallback on missing App Settings, and dual routing surfaces.
+/// </para>
+/// <para>
+/// <b>Adding a new Linear consumer</b>: seed one <c>sprk_playbookconsumer</c>
+/// row with <c>sprk_consumertype = &lt;yourType&gt;</c>, <c>sprk_action</c>
+/// pointing at the target Action row, and <c>sprk_enabled = true</c>. No code
+/// change or App Settings change is required — routing takes effect within the
+/// 5-minute cache TTL.
+/// </para>
 /// </remarks>
 public sealed class ActionResolver : IActionResolver
 {
-    private readonly IOptions<LinearConsumersOptions> _options;
+    private readonly IConsumerRoutingService _consumerRouting;
     private readonly IScopeResolverService _scopeResolver;
     private readonly ILogger<ActionResolver> _logger;
 
     public ActionResolver(
-        IOptions<LinearConsumersOptions> options,
+        IConsumerRoutingService consumerRouting,
         IScopeResolverService scopeResolver,
         ILogger<ActionResolver> logger)
     {
-        _options = options;
+        _consumerRouting = consumerRouting;
         _scopeResolver = scopeResolver;
         _logger = logger;
     }
@@ -35,20 +47,24 @@ public sealed class ActionResolver : IActionResolver
             throw new ArgumentException("consumerType is required", nameof(consumerType));
         }
 
-        if (!_options.Value.TryGetActionId(consumerType, out var actionId))
+        var actionId = await _consumerRouting
+            .ResolveActionAsync(consumerType, cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
+
+        if (actionId is null || actionId.Value == Guid.Empty)
         {
             throw new InvalidOperationException(
-                $"Linear consumer '{consumerType}' has no ActionId configured. " +
-                $"Add a LinearConsumers:ActionIds:{consumerType} entry to appsettings " +
-                $"(or LinearConsumers__ActionIds__{consumerType.Replace('-', '_')} in App Service settings).");
+                $"Linear consumer '{consumerType}' has no Action routed. " +
+                $"Populate sprk_action on the sprk_playbookconsumer row where " +
+                $"sprk_consumertype='{consumerType}' AND sprk_enabled=true.");
         }
 
-        var action = await _scopeResolver.GetActionAsync(actionId, cancellationToken)
+        var action = await _scopeResolver.GetActionAsync(actionId.Value, cancellationToken)
             ?? throw new InvalidOperationException(
-                $"Linear consumer '{consumerType}' ActionId {actionId} not found in Dataverse.");
+                $"Linear consumer '{consumerType}' Action {actionId.Value} not found in Dataverse.");
 
         _logger.LogDebug(
-            "Resolved linear consumer {ConsumerType} → Action {ActionId} ({ActionName})",
+            "Resolved linear consumer {ConsumerType} → Action {ActionId} ({ActionName}) via routing table",
             consumerType, action.Id, action.Name);
 
         return action;
