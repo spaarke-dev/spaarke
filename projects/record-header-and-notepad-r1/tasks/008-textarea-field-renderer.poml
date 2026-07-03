@@ -3,7 +3,7 @@
   <metadata>
     <title>Build TextareaField renderer with show-more popover (FR-04)</title>
     <phase>1: Shared Library</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>004</dependencies>
     <blocks>013, 022</blocks>

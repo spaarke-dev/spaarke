@@ -3,7 +3,7 @@
   <metadata>
     <title>Build useRelatedCount hook (FR-06)</title>
     <phase>1: Shared Library</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>001</dependencies>
     <blocks>012, 013, 022</blocks>

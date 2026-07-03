@@ -3,7 +3,7 @@
   <metadata>
     <title>Build RecordHeaderShell (FR-02)</title>
     <phase>1: Shared Library</phase>
-    <status>not-started</status>
+    <status>completed</status>
     <estimated-hours>3</estimated-hours>
     <dependencies>002</dependencies>
     <blocks>012, 013, 022</blocks>
@@ -94,7 +94,15 @@
     </test>
   </ui-tests>
 
-  <notes>Card padding: spacingHorizontalM + spacingVerticalS per Fluent v9 defaults. Consumer supplies IHeaderToolbarProps directly; do NOT re-transform the props.</notes>
+  <notes>Card padding: spacingHorizontalM + spacingVerticalS per Fluent v9 defaults. Consumer supplies IHeaderToolbarProps directly; do NOT re-transform the props.
+
+Completion (2026-07-02):
+- Files created: RecordHeaderShell.tsx, types.ts, index.ts, __tests__/RecordHeaderShell.test.tsx.
+- index.ts did NOT exist prior to this task; created with both RecordHeaderShell (task 003) and FieldGrid (task 004) exports as instructed by the caller.
+- Tests: 8/8 pass (npx jest RecordHeaderShell). Covers FR-02 acceptance (loading absent, loading=false, loading=true), toolbar passthrough, hex/rgb literal absence via computed style + regex, structural grid + flex + border styles.
+- Zero hex/rgb/hsl literals in source (grep-verified; only match is regex string inside a JSDoc comment in the test file).
+- TypeScript compiles clean for new files (only pre-existing unrelated error in EntityCreationService.ts about @spaarke/sdap-client module).
+- No deviations from POML spec. Skeleton uses 3-col × 2-row (6 cells) matching FieldGrid default; gaps use spacingHorizontalM / spacingVerticalS so load→loaded swap looks continuous.</notes>
 
   <execution>
     <skill>.claude/skills/task-execute/SKILL.md</skill>
