@@ -25,7 +25,7 @@
 | 009 | useRecordFieldValues hook (FR-05) | 1 | ✅ | none | C | FULL |
 | 010 | useRelatedCount hook (FR-06) | 1 | ✅ | 001 | — | FULL |
 | 011 | toolbarLaunchDefaults constants | 1 | ✅ | none | C | STANDARD |
-| 012 | useRecordHeaderToolbarActions hook (FR-07/08/08a/09/10/11) | 1 | 🔲 | 009, 010, 011 | — | FULL |
+| 012 | useRecordHeaderToolbarActions hook (FR-07/08/08a/09/10/11) | 1 | ✅ | 009, 010, 011 | — | FULL |
 | 013 | Update shared lib exports (index.ts) | 1 | 🔲 | 002-012 | — | STANDARD |
 | 014 | Shared lib integration test | 1 | 🔲 | 013 | — | STANDARD |
 | 020 | Verify SmartTodo webresource name | 2 | 🔲 | none | — | STANDARD |
