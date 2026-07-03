@@ -26,10 +26,14 @@ export class MatterHeader implements ComponentFramework.ReactControl<IInputs, IO
   }
 
   public updateView(context: ComponentFramework.Context<IInputs>): React.ReactElement {
-    // `context.mode.contextInfo` exists at runtime but is not in the current @types/powerapps-component-framework.
-    // Type-cast pattern mirrors ScopeConfigEditor + SearchIndexResolver (task-024 build repair per task-023 gap).
+    // Read recordId from context.mode.contextInfo.entityId (the current form's record).
+    // The bound field (boundField) is manifest-required so Dataverse shows the PCF in the
+    // form designers "Add component" gallery, but the field value itself is not used.
+    // `context.mode.contextInfo` exists at runtime but is not in the current
+    // @types/powerapps-component-framework. Type-cast pattern mirrors ScopeConfigEditor +
+    // SearchIndexResolver (task-024 build repair per task-023 gap).
     const contextInfo = (context.mode as unknown as { contextInfo?: { entityId?: string } }).contextInfo;
-    const recordId = context.parameters.recordId?.raw || contextInfo?.entityId || '';
+    const recordId = contextInfo?.entityId || '';
     // Platform-library Fluent v9 auto-applies host theme (control-type="virtual").
     // No manual FluentProvider wrap needed per fluent-v9-modern-theming pattern (approach 1).
     return React.createElement(MatterHeaderView, { recordId });

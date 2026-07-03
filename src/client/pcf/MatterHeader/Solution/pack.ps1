@@ -6,7 +6,7 @@
 #   2. Copy out/controls/*/{bundle.js,ControlManifest.xml,styles.css}
 #      to Solution/Controls/sprk_Spaarke.Records.MatterHeader/
 #   3. Zip solution.xml + customizations.xml + [Content_Types].xml + Controls/*
-#      to Solution/bin/MatterHeaderPcf_v1.0.0.0.zip
+#      to Solution/bin/MatterHeaderPcf_v1.0.1.0.zip
 #
 # Requires: Node/npm on PATH. Does NOT require pac CLI (uses System.IO.Compression).
 
@@ -19,7 +19,7 @@ $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 
 Set-Location $PSScriptRoot
-$version = "1.0.0.0"
+$version = "1.0.1.0"
 $solutionName = "MatterHeaderPcf"
 $controlSchemaName = "sprk_Spaarke.Records.MatterHeader"
 $zipPath = "bin\${solutionName}_v$version.zip"

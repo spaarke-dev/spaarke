@@ -1,14 +1,18 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <manifest>
-  <control namespace="Spaarke.Records" constructor="MatterHeader" version="1.0.0"
+  <control namespace="Spaarke.Records" constructor="MatterHeader" version="1.0.1"
            display-name-key="Matter Header"
-           description-key="Compact 5-field summary card + 3-action toolbar for Matter records. Part of the record-header-and-notepad-r1 shared primitive set."
+           description-key="Compact 5-field summary card + 3-action toolbar for Matter records. Part of the record-header-and-notepad-r1 shared primitive set. (v1.0.1)"
            control-type="virtual">
 
-    <!-- Input: recordId override (defaults to context.mode.contextInfo.entityId when empty) -->
-    <property name="recordId" display-name-key="Record ID (override)"
-              description-key="Optional override for the record GUID; defaults to context.mode.contextInfo.entityId if empty."
-              of-type="SingleLine.Text" usage="input" required="false" />
+    <!-- Bound field: any SingleLine.Text field on the host entity (Matter). The PCF replaces
+         this fields rendering with the custom header card. The bound value itself is not
+         semantically important - the PCF reads recordId from context.mode.contextInfo.entityId.
+         Common binding: sprk_matternumber. usage=bound + required=true is what makes the PCF
+         appear in Dataverses form designer Add component to field gallery. -->
+    <property name="boundField" display-name-key="Bound field"
+              description-key="Any SingleLine.Text field on the host entity. PCF replaces this fields rendering with the record header card. Bind to sprk_matternumber on Matter for standard placement."
+              of-type="SingleLine.Text" usage="bound" required="true" />
 
     <resources>
       <code path="index.ts" order="1"/>
