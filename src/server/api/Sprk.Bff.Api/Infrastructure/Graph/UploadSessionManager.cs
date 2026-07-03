@@ -309,6 +309,74 @@ public class UploadSessionManager
     }
 
     /// <summary>
+    /// Replace the content of an existing drive-item by itemId (OBO flow).
+    /// PUTs the stream to the drive-item's <c>/content</c> endpoint, committing a new
+    /// SPE version. Used by document editors (Compose R1) that saved content back
+    /// to an item they had already opened.
+    /// </summary>
+    public async Task<FileHandleDto?> ReplaceFileContentAsUserAsync(
+        HttpContext ctx,
+        string driveId,
+        string itemId,
+        Stream content,
+        CancellationToken ct = default)
+    {
+        if (string.IsNullOrWhiteSpace(driveId)) throw new ArgumentException("driveId is required", nameof(driveId));
+        if (string.IsNullOrWhiteSpace(itemId)) throw new ArgumentException("itemId is required", nameof(itemId));
+
+        try
+        {
+            var graphClient = await _factory.ForUserAsync(ctx, ct);
+
+            var saved = await graphClient.Drives[driveId].Items[itemId].Content
+                .PutAsync(content, cancellationToken: ct);
+
+            if (saved == null)
+            {
+                _logger.LogWarning("SPE replace-content returned null for drive={DriveId} item={ItemId}", driveId, itemId);
+                return null;
+            }
+
+            _logger.LogInformation(
+                "SPE replace-content succeeded for drive={DriveId} item={ItemId} etag={ETag} size={Size}",
+                driveId, itemId, saved.ETag, saved.Size);
+
+            return new FileHandleDto(
+                saved.Id!,
+                saved.Name!,
+                saved.ParentReference?.Id,
+                saved.Size,
+                saved.CreatedDateTime ?? DateTimeOffset.UtcNow,
+                saved.LastModifiedDateTime ?? DateTimeOffset.UtcNow,
+                saved.ETag,
+                saved.Folder != null,
+                saved.WebUrl,
+                saved.ParentReference?.DriveId ?? driveId);
+        }
+        catch (ServiceException ex) when (ex.ResponseStatusCode == 404)
+        {
+            _logger.LogWarning("SPE replace-content: drive-item not found drive={DriveId} item={ItemId}", driveId, itemId);
+            return null;
+        }
+        catch (ServiceException ex) when (ex.ResponseStatusCode == 403)
+        {
+            _logger.LogError(ex, "SPE replace-content: access denied drive={DriveId} item={ItemId}", driveId, itemId);
+            throw new UnauthorizedAccessException($"Access denied to drive-item {itemId} on drive {driveId}", ex);
+        }
+        catch (ServiceException ex) when (ex.ResponseStatusCode == 429)
+        {
+            _logger.LogWarning(ex, "SPE replace-content: Graph throttling drive={DriveId} item={ItemId}", driveId, itemId);
+            throw new InvalidOperationException("Service temporarily unavailable due to Graph rate limiting", ex);
+        }
+        catch (ServiceException ex)
+        {
+            _logger.LogError(ex, "SPE replace-content Graph error drive={DriveId} item={ItemId}: {Message}",
+                driveId, itemId, ex.Message);
+            throw new InvalidOperationException($"Failed to replace drive-item content: {ex.Message}", ex);
+        }
+    }
+
+    /// <summary>
     /// Creates an upload session for large files as the user (OBO flow).
     /// </summary>
     public async Task<UploadSessionResponse?> CreateUploadSessionAsUserAsync(

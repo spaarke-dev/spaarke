@@ -84,6 +84,46 @@ public interface IConsumerRoutingService
         IRoutingContext? context = null,
         string? environment = null,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// R7 Wave 12.3 (2026-07-02) — Linear AI Consumer routing. Same resolution
+    /// algorithm as <see cref="ResolveAsync"/> (consumer-code + environment +
+    /// match-conditions + priority tiebreak), but returns the row's
+    /// <c>sprk_action</c> lookup value (a <c>sprk_analysisaction</c> row id)
+    /// instead of the <c>sprk_playbook</c> value. Callers on the Linear path
+    /// (<see cref="Sprk.Bff.Api.Services.Ai.LinearConsumers.IActionResolver"/>)
+    /// use this to dispatch directly to an Action row without going through the
+    /// Playbook Engine.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Dispatch precedence</b>: consumers that support both paths (Linear
+    /// primary, engine fallback during migration) invoke
+    /// <c>ResolveActionAsync</c> FIRST; if it returns non-null the Linear
+    /// dispatch fires; else they fall through to <see cref="ResolveAsync"/> for
+    /// the playbook-engine dispatch.
+    /// </para>
+    /// <para>
+    /// <b>Data model</b>: <c>sprk_playbookconsumer</c> rows may populate:
+    /// <list type="bullet">
+    ///   <item><c>sprk_action</c> only — pure Linear (post-migration state).</item>
+    ///   <item><c>sprk_playbook</c> only — pure engine (legacy, non-migrated).</item>
+    ///   <item>Both — transitional (Linear-primary + engine-fallback in-place).</item>
+    /// </list>
+    /// A row with NEITHER populated is an admin error; both resolve methods return null.
+    /// </para>
+    /// </remarks>
+    /// <returns>
+    /// The <c>sprk_analysisaction</c> row GUID of the highest-priority matching
+    /// record, or <c>null</c> when no record matches or the matched row has an
+    /// empty <c>sprk_action</c> lookup value.
+    /// </returns>
+    Task<Guid?> ResolveActionAsync(
+        string consumerType,
+        string? consumerCode = "default",
+        IRoutingContext? context = null,
+        string? environment = null,
+        CancellationToken cancellationToken = default);
 }
 
 /// <summary>

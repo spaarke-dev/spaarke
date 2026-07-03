@@ -2,9 +2,11 @@ using System.Runtime.CompilerServices;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http;
 using Microsoft.Extensions.Options;
+using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
+using Sprk.Bff.Api.Services.Ai.LinearConsumers;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 
 namespace Sprk.Bff.Api.Services.Ai.Chat;
@@ -106,6 +108,8 @@ public class SessionSummarizeOrchestrator
     private readonly IPlaybookLookupService _playbookLookup;
     private readonly IConsumerRoutingService _consumerRouting;
     private readonly IOptions<WorkspaceOptions> _workspaceOptions;
+    private readonly ISessionFileTextSource _sessionFileTextSource;
+    private readonly FileSummarizeService _fileSummarizeService;
     private readonly ILogger<SessionSummarizeOrchestrator> _logger;
 
     public SessionSummarizeOrchestrator(
@@ -115,6 +119,8 @@ public class SessionSummarizeOrchestrator
         IPlaybookLookupService playbookLookup,
         IConsumerRoutingService consumerRouting,
         IOptions<WorkspaceOptions> workspaceOptions,
+        ISessionFileTextSource sessionFileTextSource,
+        FileSummarizeService fileSummarizeService,
         ILogger<SessionSummarizeOrchestrator> logger)
     {
         _sessionManager = sessionManager ?? throw new ArgumentNullException(nameof(sessionManager));
@@ -123,6 +129,8 @@ public class SessionSummarizeOrchestrator
         _playbookLookup = playbookLookup ?? throw new ArgumentNullException(nameof(playbookLookup));
         _consumerRouting = consumerRouting ?? throw new ArgumentNullException(nameof(consumerRouting));
         _workspaceOptions = workspaceOptions ?? throw new ArgumentNullException(nameof(workspaceOptions));
+        _sessionFileTextSource = sessionFileTextSource ?? throw new ArgumentNullException(nameof(sessionFileTextSource));
+        _fileSummarizeService = fileSummarizeService ?? throw new ArgumentNullException(nameof(fileSummarizeService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -143,6 +151,8 @@ public class SessionSummarizeOrchestrator
         _playbookLookup = null!;
         _consumerRouting = null!;
         _workspaceOptions = null!;
+        _sessionFileTextSource = null!;
+        _fileSummarizeService = null!;
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -193,6 +203,30 @@ public class SessionSummarizeOrchestrator
 
         var uploadedFiles = session.UploadedFiles ?? Array.Empty<ChatSessionFile>();
         var resolvedFileIds = ResolveEffectiveFileIds(request.FileIds, uploadedFiles);
+
+        // R7 Wave 12.3 (2026-07-02): Linear AI Consumer dispatch. When the chat-summarize
+        // consumer has a sprk_action row on the sprk_playbookconsumer routing table, route
+        // through the code-defined FileSummarizeService (consumer-agnostic Linear primitive)
+        // rather than the Playbook Engine. Same AnalysisChunk wire contract preserved for
+        // pre-existing clients (translator maps AnalysisStreamChunk → AnalysisChunk).
+        // Fall-through preserves engine behavior when sprk_action is empty (deploy-time
+        // rollback path — clear the column in Power Apps to disable Linear per-consumer).
+        var linearActionId = await _consumerRouting
+            .ResolveActionAsync(ConsumerTypes.ChatSummarize, cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
+        if (linearActionId.HasValue && linearActionId.Value != Guid.Empty)
+        {
+            _logger.LogDebug(
+                "R7 Wave 12.3: SessionSummarizeOrchestrator dispatching via Linear path (tenant={TenantId} session={SessionId} fileCount={FileCount} actionId={ActionId})",
+                request.TenantId, request.SessionId, resolvedFileIds.Count, linearActionId.Value);
+
+            await foreach (var chunk in ExecuteLinearAsync(request, uploadedFiles, resolvedFileIds, cancellationToken)
+                .ConfigureAwait(false))
+            {
+                yield return chunk;
+            }
+            yield break;
+        }
 
         // FR-1R-05 routing-table resolution (chat-routing-redesign-r1 task 028d): prefer
         // IConsumerRoutingService.ResolveAsync(ConsumerTypes.ChatSummarize) which reads the
@@ -393,6 +427,151 @@ public class SessionSummarizeOrchestrator
                 // UnrenderedTemplateDetected (server-side observability only).
                 return null;
         }
+    }
+
+    /// <summary>
+    /// R7 Wave 12.3 Linear execution path — replaces the Playbook Engine dispatch when the
+    /// chat-summarize consumer is configured under <c>LinearConsumers:ActionIds</c>.
+    /// Fetches session-file text via <see cref="ISessionFileTextSource"/>, invokes
+    /// <see cref="FileSummarizeService"/> with <see cref="ConsumerTypes.ChatSummarize"/>,
+    /// and translates its <see cref="AnalysisStreamChunk"/> emissions into the chat wire
+    /// <see cref="AnalysisChunk"/> envelope.
+    /// </summary>
+    private async IAsyncEnumerable<AnalysisChunk> ExecuteLinearAsync(
+        SummarizeSessionFilesRequest request,
+        IReadOnlyList<ChatSessionFile> uploadedFiles,
+        IReadOnlyList<string> resolvedFileIds,
+        [EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        var httpContext = _httpContextAccessor.HttpContext
+            ?? throw new InvalidOperationException(
+                "SessionSummarizeOrchestrator Linear path requires an active HttpContext.");
+
+        var targetFiles = uploadedFiles
+            .Where(f => resolvedFileIds.Contains(f.FileId, StringComparer.Ordinal))
+            .ToList();
+
+        if (targetFiles.Count == 0)
+        {
+            yield return AnalysisChunk.FromError(
+                "No session files were available to summarize. Upload a file first, or pass a valid fileId subset.");
+            yield break;
+        }
+
+        // FR-04 multi-file combined-summary interjection — emitted BEFORE the Linear
+        // consumer starts so the chat client can render an early "combining files…" hint.
+        if (targetFiles.Count >= 2)
+        {
+            yield return AnalysisChunk.FromContent(CombinedSummaryInterjection);
+        }
+
+        // Session-scoped RAG fetch — surface transport failures as a stream error, not
+        // an unhandled throw (the endpoint handles those but the chat client would just
+        // see a bare EOF; a FromError chunk is the intended UX).
+        SessionFileText textResult;
+        string? fetchError = null;
+        try
+        {
+            textResult = await _sessionFileTextSource
+                .FetchAsync(request.TenantId, request.SessionId, targetFiles, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "SessionSummarizeOrchestrator (Linear): session-file text retrieval failed. TenantId={TenantId} SessionId={SessionId}",
+                request.TenantId, request.SessionId);
+            textResult = default!;
+            fetchError = "Failed to retrieve session file content. Please try again.";
+        }
+
+        if (fetchError != null)
+        {
+            yield return AnalysisChunk.FromError(fetchError);
+            yield break;
+        }
+
+        if (string.IsNullOrWhiteSpace(textResult.ExtractedText))
+        {
+            yield return AnalysisChunk.FromError(
+                "Session files contained no text to summarize. The RAG index may still be catching up — try again in a few seconds.");
+            yield break;
+        }
+
+        // Delegate to the shared Linear primitive. Consumer-type is ChatSummarize; the
+        // Action row (config-mapped GUID) supplies the SystemPrompt + strict-mode
+        // OutputSchema (SUM-CHAT@v1 — tldr / summary / keywords / entities).
+        await foreach (var streamChunk in _fileSummarizeService
+            .ExecuteAsync(
+                textResult.ExtractedText,
+                textResult.DisplayName,
+                ConsumerTypes.ChatSummarize,
+                httpContext,
+                cancellationToken)
+            .ConfigureAwait(false))
+        {
+            var translated = TranslateStreamChunkToChunk(streamChunk);
+            if (translated is not null)
+            {
+                yield return translated;
+            }
+        }
+    }
+
+    /// <summary>
+    /// Translate <see cref="AnalysisStreamChunk"/> (canonical Linear consumer envelope) to
+    /// <see cref="AnalysisChunk"/> (chat-endpoint wire contract). Preserves byte-shape
+    /// compatibility for the pre-Linear chat client during the migration window.
+    /// </summary>
+    /// <remarks>
+    /// Mapping:
+    /// <list type="bullet">
+    ///   <item><c>progress</c> → skipped (no client-visible chat event; if we want a hint,
+    ///         the FR-04 multi-file interjection already emitted one).</item>
+    ///   <item><c>result</c> → deserialize <c>Content</c> as <see cref="DocumentAnalysisResult"/>;
+    ///         fall back to text-completed when deserialization fails (graceful degrade).</item>
+    ///   <item><c>error</c> → <see cref="AnalysisChunk.FromError"/> with the error string.</item>
+    ///   <item>Others (<c>metadata</c>, <c>done</c>, <c>chunk</c>) → skipped —
+    ///         <c>FileSummarizeService</c> emits only <c>progress</c>/<c>result</c>/<c>error</c>
+    ///         today, so those branches are defensive.</item>
+    /// </list>
+    /// </remarks>
+    private static AnalysisChunk? TranslateStreamChunkToChunk(AnalysisStreamChunk chunk)
+    {
+        return chunk.Type switch
+        {
+            "result" when !string.IsNullOrEmpty(chunk.Content) =>
+                DeserializeResultChunk(chunk.Content!),
+            "error" => AnalysisChunk.FromError(chunk.Error ?? "Chat summarize failed."),
+            _ => null,
+        };
+    }
+
+    /// <summary>
+    /// Deserialize the LLM's structured JSON output into <see cref="DocumentAnalysisResult"/>.
+    /// Falls back to text-only <see cref="AnalysisChunk.Completed(string)"/> on parse error
+    /// so the client always sees a terminal complete chunk (never a silent EOF).
+    /// </summary>
+    private static AnalysisChunk DeserializeResultChunk(string jsonContent)
+    {
+        try
+        {
+            var doc = JsonSerializer.Deserialize<DocumentAnalysisResult>(jsonContent);
+            if (doc is not null)
+            {
+                doc.ParsedSuccessfully = true;
+                return AnalysisChunk.Completed(doc);
+            }
+        }
+        catch (JsonException)
+        {
+            // Graceful degrade — see remarks.
+        }
+        return AnalysisChunk.Completed(jsonContent);
     }
 
     /// <summary>
