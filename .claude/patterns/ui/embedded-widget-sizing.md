@@ -1,6 +1,6 @@
 # Embedded Workspace-Widget Sizing — Boundary, Chain, and Box-Sizing
 
-> **Last Reviewed**: 2026-06-23 (R4-110 chain audit — shell chain now forgiving; per-section `style.height` no longer needed)
+> **Last Reviewed**: 2026-07-03 (spaarke-dataset-grid-framework-r2 UAT §5.6 — added row-height override addendum; per-section `style.height` re-enters when operator sets row-height via wizard)
 > **Status**: Current
 > **Severity**: High — width problems cause ~120-150px column overshoot + horizontal scrollbars; height problems cause widgets to render at content height with large empty section areas below
 
@@ -122,3 +122,91 @@ For HEIGHT: paste from [`BUILD-A-NEW-WORKSPACE-WIDGET.md` §7.2.4](../../../docs
 - [`fluent-v9-component-authoring.md`](./fluent-v9-component-authoring.md) — Fluent v9 component-level rules
 - iter-2 rounds 6-11 commit chain in `feature/ai-spaarke-ai-workspace-UI-r1` — 11-round saga that surfaced the WIDTH knowledge
 - smart-todo-r4 UAT rounds 4-12 commit chain (June 2026) on `work/smart-todo-r4-uat4-fixes` — 9-round saga that surfaced the HEIGHT knowledge; PR #406
+
+---
+
+## R2 addendum — Row-height override wins over section defaultHeight
+
+> **Added**: 2026-07-03 (spaarke-dataset-grid-framework-r2 UAT §5.6)
+> **Scope**: adds one new HEIGHT rule that applies when an operator sets a per-row `rowHeight` via the WorkspaceLayoutWizard (or equivalent authoring surface). Does NOT change any prior rule.
+
+### The scenario
+
+The R2 wizard added a "Row height" dropdown (`40vh` / `60vh` / `80vh` / `100vh` / Custom / Auto) in the row settings header. When the operator picks a non-Auto value, the intent is: "**this row is exactly this tall — sections inside must fill it, not use their own `defaultHeight`.**"
+
+Without the override, each section applies its registration `defaultHeight` (e.g., `Matters: 480px`) even when the row is `100vh`. Result: row wrapper is 100vh tall but the DataGrid inside stays at ~600px with empty space below.
+
+### The rule
+
+**When `LayoutJsonRow.rowHeight` is set, the row's height wins over every section's registration `defaultHeight`.**
+
+Implementation in [`buildDynamicWorkspaceConfig.ts`](../../../src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/buildDynamicWorkspaceConfig.ts):
+
+```typescript
+if (jsonRow.rowHeight) {
+  // ROW-HEIGHT WINS — sections fill the row's height instead of using their
+  // registration defaultHeight. Preserve factory-supplied maxHeight/height.
+  if (!sectionConfig.style?.maxHeight && !sectionConfig.style?.height) {
+    sectionConfig.style = {
+      ...sectionConfig.style,
+      height: jsonRow.rowHeight,      // ← LITERAL value, NOT '100%'
+      maxHeight: jsonRow.rowHeight,
+      minHeight: jsonRow.rowHeight,
+      overflow: 'hidden',
+      display: 'flex',
+      flexDirection: 'column',
+    };
+  }
+} else if (registration.defaultHeight) {
+  // Existing FR-01 clamped/grow logic (unchanged)
+  ...
+}
+```
+
+**And** on the row wrapper in [`WorkspaceShell.tsx`](../../../src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/WorkspaceShell.tsx):
+
+```typescript
+const heightEnforcement = row.maxHeight !== undefined
+  ? { height: row.maxHeight, maxHeight: row.maxHeight, flex: '0 0 auto' as const }
+  : undefined;
+
+<div className={shellStyles.row} style={{ gridTemplateColumns, ...(heightEnforcement ?? {}) }}>
+```
+
+The row's `flex: '0 0 auto'` (overriding the default `flex: '1 1 0'`) prevents the row from being sized by the flex-distribution parent — it takes exactly its configured height.
+
+### Why not `height: 100%` on the section?
+
+**We tried this first. It doesn't reliably work in nested grid/flex layouts.**
+
+Chain from row → section → DataverseEntityViewWidget → DataGrid inner card:
+1. Row (grid, `height: rowHeight`) — determinate
+2. Section card (grid item, `alignItems: stretch`) — stretches to fill track
+3. Section card content div (`flex: 1 1 auto`) — grows to fill card minus title
+4. Widget root (`flex: 1, minHeight: 0`) — grows to fill content div
+5. DataGrid root (`height: 100%, width: 100%`) — 100% of widget root
+6. DataGrid innerCard (`flex: 1, minHeight: 0`) — grows
+
+Layer 5's `height: 100%` requires layer 4 to have a determinate height. Layer 4's height comes from flex distribution (layer 3 is flex-column with `flex: 1 1 auto`, layer 4 is `flex: 1`). Flex distribution is "determinate enough" in Chromium but was empirically unreliable in the R2 UAT environment — DataGrid stayed at its registration `defaultHeight` (500-600px) even when the row was 100vh tall.
+
+Setting the section's `height` to the LITERAL `rowHeight` value bypasses all chain propagation. The section is exactly `100vh` tall by inline style; layers 3-6 inherit determinacy from that. No dependency on grid-track-height-derived-from-alignItems-stretch. No dependency on flex distribution making a widget root `flex:1` determinate.
+
+### Symptom-to-cause table (row-height addendum)
+
+| Symptom | Cause | Fix |
+|---|---|---|
+| Row 1 = 60vh, Row 2 = 40vh, Row 3 = 80vh in wizard — but the runtime workspace shows all three rows at ~33vh each (equal shares) | `WorkspaceShell.row` still uses default `flex: 1 1 0` (equal-distribution). `maxHeight` alone is just a ceiling — doesn't enforce a specific height. | Apply `heightEnforcement` (`height: rowHeight, maxHeight: rowHeight, flex: '0 0 auto'`) when `row.maxHeight` is defined. |
+| Row wrapper resizes correctly to 100vh — but the DataGrid inside stays at ~600px | Section applies its registration `defaultHeight` regardless of row-height; grid stretch fills the card, but the card's inner DataGrid stays at its clamped defaultHeight | In `buildDynamicWorkspaceConfig`, when `jsonRow.rowHeight` is set, set section `style.height = jsonRow.rowHeight` (LITERAL, not `100%`). |
+| Setting Row 1 to `100` (no unit) resizes nothing | `100` is invalid CSS — browser ignores it. | Wizard should only emit valid CSS length values (via presets). Custom input should validate unit is one of `px`, `vh`, `vw`, `%`, `em`, `rem`, `fr`. |
+
+### Prevention checklist for future row-level layout features
+
+- If you add an operator-set per-row property that affects sizing, apply it to BOTH the row wrapper AND the sections inside. Row-wrapper alone won't reliably propagate through the flex chain.
+- Prefer literal values over `100%` in nested grid/flex layouts. `100%` is deterministic only when every ancestor has a determinate height.
+- When adding a per-row property to `LayoutJsonRow`, thread it through `buildDynamicWorkspaceConfig` (data → runtime config) AND `WorkspaceShell` (runtime config → DOM). Do not skip either.
+
+### Live example
+
+- Row wrapper: [`WorkspaceShell.tsx:210-245`](../../../src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/WorkspaceShell.tsx) — `heightEnforcement`
+- Section height: [`buildDynamicWorkspaceConfig.ts:327-357`](../../../src/client/shared/Spaarke.UI.Components/src/components/WorkspaceShell/buildDynamicWorkspaceConfig.ts) — `jsonRow.rowHeight` branch (LITERAL value)
+- Wizard authoring surface: [`ArrangeStep.tsx:864-946`](../../../src/solutions/WorkspaceLayoutWizard/src/steps/ArrangeStep.tsx) — `RowHeightPopoverField` (moved into per-section Advanced popover in round 4)

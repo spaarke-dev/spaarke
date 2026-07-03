@@ -17,22 +17,34 @@ import type { IWizardShellState, IWizardShellStep, IWizardStepConfig, WizardShel
 /**
  * Build the initial WizardShell state from an ordered array of step configs.
  *
- * The first step is marked 'active'; all subsequent steps are 'pending'.
- * Only `id`, `label`, and `status` are extracted — rendering callbacks and
- * predicates remain in the config array managed by the consumer.
+ * The first step (or the step matching `initialStepId` if provided) is marked
+ * 'active'; steps before it are 'completed'; steps after are 'pending'.
  *
  * @param steps - Ordered step configurations provided by the consumer.
- * @returns A fresh IWizardShellState with currentStepIndex = 0.
+ * @param initialStepId - Optional step id to open at. When provided and it
+ *   matches one of the step configs, the wizard opens at that step with prior
+ *   steps marked 'completed'. Useful for edit flows where prior steps
+ *   (template selection, section selection) are pre-populated from the
+ *   existing record and the operator should land on the working step directly.
+ *   R2 UAT §3.1 (2026-07-03).
+ * @returns A fresh IWizardShellState.
  */
-export function buildInitialShellState(steps: ReadonlyArray<IWizardStepConfig>): IWizardShellState {
+export function buildInitialShellState(
+  steps: ReadonlyArray<IWizardStepConfig>,
+  initialStepId?: string
+): IWizardShellState {
+  // Resolve initial step index. Fall back to 0 if id is missing / not found.
+  const requestedIndex = initialStepId ? steps.findIndex(s => s.id === initialStepId) : -1;
+  const activeIndex = requestedIndex >= 0 ? requestedIndex : 0;
+
   const shellSteps: IWizardShellStep[] = steps.map((config, index) => ({
     id: config.id,
     label: config.label,
-    status: index === 0 ? 'active' : 'pending',
+    status: index < activeIndex ? 'completed' : index === activeIndex ? 'active' : 'pending',
   }));
 
   return {
-    currentStepIndex: 0,
+    currentStepIndex: activeIndex,
     steps: shellSteps,
   };
 }

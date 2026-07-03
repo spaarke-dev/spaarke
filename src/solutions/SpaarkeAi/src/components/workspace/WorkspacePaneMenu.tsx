@@ -366,6 +366,48 @@ async function launchWizard(args: {
 }
 
 // ---------------------------------------------------------------------------
+// Wizard save signaling (R2 UAT §3.3) — sessionStorage bridge
+// ---------------------------------------------------------------------------
+//
+// The wizard runs in a popup (navigateTo target:2) whose `window` is separate
+// from the SpaarkeAi shell. `window.__dialogResult` cannot cross that
+// boundary. Wizard writes to sessionStorage on save; consumers read + consume
+// after the wizard closes. Stored value carries a timestamp so stale values
+// (rare — sessionStorage is per-tab-set) don't get mistaken for fresh saves.
+// ---------------------------------------------------------------------------
+
+const WIZARD_RESULT_STORAGE_KEY = "spaarke:workspace-wizard:last-result";
+/** Max age (ms) a wizard result is considered fresh. Anything older is ignored. */
+const WIZARD_RESULT_MAX_AGE_MS = 60_000;
+
+interface WizardDialogResult {
+  confirmed: boolean;
+  layoutId?: string;
+  pinToStart?: boolean;
+  at?: number;
+}
+
+function readWizardDialogResult(): WizardDialogResult | null {
+  try {
+    const raw = window.sessionStorage?.getItem(WIZARD_RESULT_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as WizardDialogResult;
+    if (typeof parsed.at === "number" && Date.now() - parsed.at > WIZARD_RESULT_MAX_AGE_MS) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function consumeWizardDialogResult(): void {
+  try {
+    window.sessionStorage?.removeItem(WIZARD_RESULT_STORAGE_KEY);
+  } catch { /* storage may be disabled */ }
+}
+
+// ---------------------------------------------------------------------------
 // Active-layout signaling — sessionStorage + window CustomEvent
 // ---------------------------------------------------------------------------
 
@@ -566,8 +608,25 @@ export const WorkspacePaneMenu: React.FC<WorkspacePaneMenuProps> = ({
       bffBaseUrl,
       templateFilter: SPAARKEAI_TEMPLATE_FILTER,
     });
+    // R2 UAT §3.3 (2026-07-03, revised): after the wizard closes, if the
+    // wizard reported a successful save (via sessionStorage — the wizard is a
+    // popup so its `window.__dialogResult` doesn't cross the window boundary
+    // to us), refresh the layouts list AND auto-open the newly-created
+    // workspace as a tab. Prior behavior only refetched — operator had to
+    // manually pick the new workspace from the dropdown.
     refetch();
-  }, [bffBaseUrl, refetch]);
+    const dialogResult = readWizardDialogResult();
+    if (dialogResult?.confirmed && dialogResult.layoutId) {
+      const newLayoutId = dialogResult.layoutId;
+      dispatch("workspace", {
+        type: "widget_load",
+        widgetType: "workspace",
+        widgetData: { layoutId: newLayoutId, layoutName: "Workspace" },
+        displayName: "Workspace",
+      });
+      consumeWizardDialogResult();
+    }
+  }, [bffBaseUrl, refetch, dispatch]);
 
   /**
    * Task 093 (2026-05-22) — "Manage workspaces" opens the

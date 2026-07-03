@@ -307,4 +307,22 @@ export interface IWizardShellProps {
    * @since v1.1.63
    */
   height?: string;
+  /**
+   * Optional step id to open the wizard at. When the id matches one of the
+   * step configs, that step becomes 'active' and all earlier steps are marked
+   * 'completed'. When absent (default) OR the id doesn't match, the wizard
+   * opens at the first step.
+   *
+   * Use for edit flows where prior steps (template selection, section list)
+   * are pre-populated from the existing record and the operator should land
+   * on the working step directly.
+   *
+   * NOTE: `initialStepId` is captured on mount by `useReducer` — changing it
+   * after mount has no effect. Consumers that need to jump between steps
+   * post-mount should use the imperative `nextStep`/`prevStep` handle
+   * methods.
+   *
+   * @since R2 UAT §3.1 (2026-07-03)
+   */
+  initialStepId?: string;
 }

@@ -174,3 +174,62 @@ Per skill body §Behavior contracts (binding):
 ---
 
 *Report generated 2026-07-02 during R2 project-close. Formal `/test-diet` invocation closes CLAUDE.md §7 binding gate per FR-B09.*
+
+---
+
+## UAT round 1 + 2 addendum (2026-07-03)
+
+**Second `/test-diet` invocation** at UAT close, covering commits pushed under branch `fix/r2-uat-followup-1` (PR #547) — includes both round-1 (`708f18bb7`) and round-2 (`803c77ace`) UAT fixes.
+
+**Scope**: commits between `5f8543457` (branch base = origin/master head at branch creation) and `803c77ace` (current HEAD).
+
+### Enumeration
+
+```bash
+git diff --name-only --diff-filter=AM 5f8543457 803c77ace -- \
+  '**/*.test.ts' '**/*.test.tsx' 'tests/**/*.cs' '**/__tests__/**'
+```
+
+Output: **empty** — zero test files added or modified across both UAT rounds.
+
+### Reconciliation
+
+| Class | Count | Action |
+|---|---|---|
+| MAINTAIN (KEEP at canonical path) | 0 | — |
+| SCAFFOLDING (DELETE candidate) | 0 | — |
+| AMBIGUOUS (reviewer judgment) | 0 | — |
+| PATH-VIOLATION (wrong KEEP path) | 0 | — |
+| **Total test files touched** | **0** | — |
+
+### Verdict
+
+**No reconciliation needed.** All 14 UAT items (round 1 §1.1 / §2.1 / §2.3 / §2.4 / §2.5 / §3.2 / §5.1 / §5.2 / §5.3 / §5.4 / §5.6 / §5.7 / §3.3 / §3.1 initialStepId / §4.1 gear icon / §2.6 full-width visual / §2.2 gear+popover) were production-code fixes with no test changes.
+
+### Why no new tests
+
+The UAT fixes fall into three categories, and each is exercised by the shared R2 test surface without needing new test files:
+
+1. **Runtime rendering / CSS behavior** (§5.6 row-height enforcement, §5.5 drag hit-test, §5.7 scroll region split, §2.6 derived columns, §5.1 view-name blank) — these are visual + layout behaviors validated in browser DevTools during UAT. Unit tests in JSDOM cannot reproduce the specific browser CSS/DnD behaviors that caused the bugs (per DEF-001 followup — 9 wizard tests already fail in JSDOM due to Fluent v9 event model incompatibility). These are integration-regression territory, blocked on the Vitest + happy-dom migration.
+
+2. **Async data-loading paths** (§2.5 configs/savedqueries fetch split; §3.1 edit-mode layout fetch) — validated against real BFF endpoints, not mocks. Adding `Mock<HttpMessageHandler>` tests would violate ADR-038 §7 B1 (banned mock shape). These behaviors are covered by the integration tests already at `tests/integration/contract/Api/DataGrid/`.
+
+3. **UI wiring changes** (§5.2 Select All / Clear, §5.3 2-column layout, §5.4 no auto-place, §2.2 gear popover, §4.1 gear icon in shell, §3.3 sessionStorage bridge) — these are UI orchestration + state flow that would require a snapshot test to cover, which ADR-038 §7 B12 explicitly bans. Covered by manual + UAT verification.
+
+The R2 project's 10 existing MAINTAIN-class tests remain load-bearing:
+- 6 framework-contract tests (`DataGrid/*.test.ts`, `configResolution.availableViews.test.ts`) still pass — R2 framework semantics unchanged
+- 4 wizard/regression tests (`sectionInstanceAdvanced.test.tsx`, `rowHeight.test.tsx`, `widthPreferencePlacement.test.tsx`, `sectionMetadataCatalog.widthPreference.test.ts`) still pass — none of the UAT fixes changed the data contracts they assert against.
+
+### Commands emitted
+
+```
+(none — no reconciliation required)
+```
+
+### FR-B09 gate
+
+`/test-diet` invocation at UAT close: **PASS** — clean run, no build-vs-maintain reconciliation deltas. Combined with the R2 project-close `/test-diet` above (2026-07-02, 10 MAINTAIN / 0 SCAFFOLDING), the R2 project's total lifecycle test surface is entirely MAINTAIN-class per ADR-038 §7.
+
+---
+
+*UAT addendum generated 2026-07-03. Closes second `/test-diet` binding gate at UAT close.*

@@ -164,7 +164,7 @@ export const SECTION_METADATA_CATALOG: readonly SectionMetadata[] = [
   },
   {
     id: 'documents',
-    label: 'My Documents',
+    label: 'Documents',
     description: 'Your documents',
     category: 'data',
     icon: DocumentRegular,
