@@ -205,6 +205,48 @@ export function createSseToPaneEventBridge(streamId: string): SseToPaneEventBrid
       }
 
       case 'complete': {
+        // R7 Wave 12.3 Phase 12.3a UAT fix (2026-07-03) — the Linear consumer path
+        // (FileSummarizeService → SessionSummarizeOrchestrator) uses a non-streaming
+        // OpenAI structured-output call and emits ONE terminal chunk with the entire
+        // DocumentAnalysisResult in `chunk.result` (see AnalysisChunk.Completed).
+        // Previously the bridge dropped that payload and only surfaced the lifecycle
+        // event, leaving the widget's tldr/summary/keywords/entities fields empty.
+        //
+        // Fix: synthesize `field_delta` events for each top-level result property
+        // BEFORE the terminal `streaming_complete` event. Widget subscribers append
+        // deltas per fieldPath; a single delta carrying the entire value is
+        // semantically equivalent to a stream of deltas concatenated. To preserve
+        // the lifecycle contract (started → deltas → complete/declined), we emit
+        // streaming_started here explicitly BEFORE the deltas — matching the
+        // ordering that the post-switch `!started` guard would have produced.
+        //
+        // ADR-030: additive within the existing `workspace.field_delta` +
+        // `workspace.streaming_complete` events — no new event type introduced.
+        // ADR-015: content is derived from the LLM output payload which is user-
+        // content-derived. Kept per the widget contract; not logged verbatim.
+        if (chunk.result && typeof chunk.result === 'object') {
+          if (!started) {
+            started = true;
+            events.push({ type: 'streaming_started', streamId });
+          }
+          const result = chunk.result as Record<string, unknown>;
+          let seq = 0;
+          for (const [key, value] of Object.entries(result)) {
+            // Skip null/undefined + widget-internal metadata fields.
+            if (value === null || value === undefined) continue;
+            if (key === 'parsedSuccessfully' || key === 'rawResponse') continue;
+            const content =
+              typeof value === 'string' ? value : JSON.stringify(value);
+            if (content === '') continue;
+            events.push({
+              type: 'field_delta',
+              streamId,
+              fieldPath: key,
+              fieldContent: content,
+              sequence: seq++,
+            });
+          }
+        }
         mapped = {
           type: 'streaming_complete',
           streamId,

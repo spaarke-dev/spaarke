@@ -646,6 +646,23 @@ public static class ChatEndpoints
                 // /summarize slash does today). NO PlaybookCandidateSelector, NO confidence
                 // threshold, NO risk of running the wrong playbook.
                 var explicitConsumerType = TryDetectExplicitConsumerType(request.Message);
+                // R7 Wave 12.3 Phase 12.3a UAT hotfix (2026-07-03): unconditional
+                // diagnostic log to reveal why linear_dispatch never fires in production.
+                // ADR-015 tier-1 safe: logs msgLen (int) + first char class (letter/digit/other)
+                // + explicit consumer type (from a closed vocabulary or null). NEVER the raw
+                // message text. Remove after root cause identified.
+                logger.LogInformation(
+                    "Wave 12.3 keyword-check: msgLen={MsgLen} msgFirstCharClass={FirstCharClass} regexMatch={RegexMatch} explicitConsumerType={ExplicitConsumerType} sessionUploadedFileCount={SessionFileCount}",
+                    request.Message?.Length ?? 0,
+                    request.Message is { Length: > 0 }
+                        ? char.IsLetter(request.Message[0]) ? "letter"
+                          : char.IsDigit(request.Message[0]) ? "digit"
+                          : char.IsWhiteSpace(request.Message[0]) ? "whitespace"
+                          : "other"
+                        : "empty",
+                    explicitConsumerType is not null,
+                    explicitConsumerType ?? "null",
+                    session.UploadedFiles?.Count ?? 0);
                 if (explicitConsumerType is not null)
                 {
                     var sessionAttachmentIdsForDispatch = new List<string>();
