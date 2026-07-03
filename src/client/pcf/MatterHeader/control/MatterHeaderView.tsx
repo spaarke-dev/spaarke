@@ -47,10 +47,7 @@ import {
 // the pre-existing top-level LookupField component). Import from fields/
 // sub-path to get the un-aliased name.
 import { LookupField as RecordHeaderLookupField } from '@spaarke/ui-components/dist/components/RecordHeader/fields';
-import {
-  useRecordFieldValues,
-  useRecordHeaderToolbarActions,
-} from '@spaarke/ui-components/dist/hooks';
+import { useRecordFieldValues, useRecordHeaderToolbarActions } from '@spaarke/ui-components/dist/hooks';
 import { CONTROL_VERSION } from './version';
 
 const ENTITY = 'sprk_matter';
