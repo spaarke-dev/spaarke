@@ -33,10 +33,7 @@
 
 import * as React from 'react';
 import { FluentProvider, teamsHighContrastTheme, type Theme } from '@fluentui/react-components';
-import {
-  resolveThemeWithUserPreference,
-  setupThemeListener,
-} from '@spaarke/ui-components/dist/utils/themeStorage';
+import { resolveThemeWithUserPreference, setupThemeListener } from '@spaarke/ui-components/dist/utils/themeStorage';
 import { MatterHeaderView } from './MatterHeaderView';
 
 export interface IMatterHeaderHostProps {
