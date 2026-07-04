@@ -13,10 +13,6 @@
 
 import * as React from "react";
 import {
-  Accordion,
-  AccordionHeader,
-  AccordionItem,
-  AccordionPanel,
   Button,
   Checkbox,
   Combobox,
@@ -31,6 +27,9 @@ import {
   Input,
   Label,
   Option,
+  Popover,
+  PopoverSurface,
+  PopoverTrigger,
   SpinButton,
   Spinner,
   Text,
@@ -289,13 +288,49 @@ export function buildInitialAssignments(
 // ---------------------------------------------------------------------------
 
 const useStyles = makeStyles({
+  // R2 UAT §5.7 (2026-07-03): the ArrangeStep now uses a dedicated 3-region
+  // vertical layout so the unassigned-sections palette can dock at the
+  // bottom during drag operations. Root fills the parent (wizard body)
+  // height; the topScroll region scrolls independently while the
+  // paletteFooter stays put.
   root: {
     display: "flex",
     flexDirection: "column",
-    gap: "20px",
     width: "100%",
     maxWidth: "780px",
     alignSelf: "center",
+    // Fill the wizard body's height so the flex children can share it.
+    height: "100%",
+    minHeight: 0,
+  },
+  // Top scrollable region — everything above the palette footer.
+  topScroll: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "20px",
+    flex: "1 1 auto",
+    minHeight: 0,
+    overflowY: "auto",
+    // Small right-padding so scrollbar doesn't hug the content.
+    paddingRight: "4px",
+  },
+  // Palette docks at the bottom. Content still wraps + can scroll horizontally
+  // if the operator selects many sections.
+  paletteFooter: {
+    flexShrink: 0,
+    display: "flex",
+    flexDirection: "column",
+    gap: "8px",
+    paddingTop: tokens.spacingVerticalM,
+    paddingBottom: tokens.spacingVerticalS,
+    borderTopWidth: "1px",
+    borderTopStyle: "solid",
+    borderTopColor: tokens.colorNeutralStroke2,
+    backgroundColor: tokens.colorNeutralBackground1,
+    // Cap palette height so if the operator selects lots of sections it
+    // scrolls internally instead of stealing the row area.
+    maxHeight: "40%",
+    overflowY: "auto",
   },
   formRow: {
     display: "flex",
@@ -320,6 +355,8 @@ const useStyles = makeStyles({
     gap: "6px",
   },
   // FR-02 (task 011) — per-row settings header (row-height dropdown + tooltip).
+  // 2026-07-03 (R2-followup-1 §2.1): added light-grey background + padding for
+  // visual separation between rows during authoring per UAT feedback.
   rowSettingsHeader: {
     display: "flex",
     alignItems: "center",
@@ -327,11 +364,20 @@ const useStyles = makeStyles({
     flexWrap: "wrap",
     // Semantic token — adapts to light/dark automatically per ADR-021.
     color: tokens.colorNeutralForeground2,
+    backgroundColor: tokens.colorNeutralBackground2,
+    borderRadius: tokens.borderRadiusMedium,
+    padding: "6px 10px",
   },
   rowSettingsLabel: {
     // Semantic token for row label — adapts to dark mode.
     color: tokens.colorNeutralForeground3,
     fontWeight: tokens.fontWeightSemibold,
+  },
+  // R2 UAT §2.2 round 4 (2026-07-03) — flexible spacer that pushes the
+  // right-aligned per-section Advanced gears to the far right of the row
+  // settings header.
+  rowSettingsSpacer: {
+    flexGrow: 1,
   },
   rowHeightDropdown: {
     minWidth: "200px",
@@ -523,6 +569,19 @@ const useStyles = makeStyles({
     fontSize: tokens.fontSizeBase200,
     paddingTop: "4px",
   },
+  // R2 UAT §2.2 (2026-07-03 round 3) — Fluent v9 Popover surface for the
+  // per-section Advanced controls. Sized to comfortably fit the 3 fields
+  // (label / page size / available views) without being wider than the
+  // combobox needs; capped at 360px so it doesn't span the whole wizard.
+  advancedPopoverSurface: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "12px",
+    minWidth: "280px",
+    maxWidth: "360px",
+    // Popover default padding is minimal; add breathing room.
+    ...shorthands.padding("12px"),
+  },
   // FR-04 (task 015) — Warning icon overlay on a section chip when the
   // section's widthPreference conflicts with its row slot count. The icon
   // sits absolutely-positioned in the slot's top-left so it doesn't compete
@@ -601,14 +660,27 @@ const GridSlot: React.FC<{
   const [isDragOver, setIsDragOver] = React.useState(false);
   const [isHovered, setIsHovered] = React.useState(false);
 
-  const handleDragOver = React.useCallback(
-    (e: React.DragEvent) => {
-      e.preventDefault();
-      e.dataTransfer.dropEffect = "move";
-      if (!isDragOver) setIsDragOver(true);
-    },
-    [isDragOver],
-  );
+  // R2 UAT §5.5 (2026-07-03, revised): verify the pointer is ACTUALLY inside
+  // this slot's bounding rect on every dragOver. Previous attempts
+  // (counter-based, dragEnter/dragLeave) mis-fired: rows far from the pointer
+  // lit up as drop targets while the drag preview was still nowhere near
+  // them. Root cause was that HTML5 DnD events can fire on ancestors and
+  // stale positions, and `dragEnter` doesn't always match cursor position
+  // when the drag preview extends beyond the pointer. Solution:
+  // hit-test `clientX/clientY` against `getBoundingClientRect()` on the
+  // slot's own DOM node. If the pointer isn't literally inside our box, we
+  // are NOT a drop target for this event.
+  const handleDragOver = React.useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const inside =
+      e.clientX >= rect.left &&
+      e.clientX <= rect.right &&
+      e.clientY >= rect.top &&
+      e.clientY <= rect.bottom;
+    setIsDragOver((prev) => (prev === inside ? prev : inside));
+  }, []);
 
   const handleDragLeave = React.useCallback(() => {
     setIsDragOver(false);
@@ -618,6 +690,15 @@ const GridSlot: React.FC<{
     (e: React.DragEvent) => {
       e.preventDefault();
       setIsDragOver(false);
+      // Hit-test one more time to reject drops that fire from ancestor
+      // dispatch when the pointer isn't actually over this slot.
+      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+      const inside =
+        e.clientX >= rect.left &&
+        e.clientX <= rect.right &&
+        e.clientY >= rect.top &&
+        e.clientY <= rect.bottom;
+      if (!inside) return;
       const sectionId = e.dataTransfer.getData("text/plain");
       if (sectionId) {
         onDrop(slotId, sectionId);
@@ -751,26 +832,25 @@ const UnassignedSectionCard: React.FC<{
 // colors use semantic tokens (ADR-021) for dark-mode compliance.
 // ---------------------------------------------------------------------------
 
-const RowHeightControl: React.FC<{
-  rowIndex: number;
+/**
+ * Compact inline row-height dropdown for embedding inside each section's
+ * Advanced popover (R2 UAT §2.2 round 4, 2026-07-03). Extracted from the
+ * former `RowHeightControl` header component so the same row-height widget
+ * can be reused within the per-section popover — one row-height value per
+ * row but editable from any of the row's section popovers (all bound to
+ * the same rowHeights map entry).
+ */
+const RowHeightPopoverField: React.FC<{
   rowId: string;
   currentValue: string | undefined;
   onChange: (rowId: string, newValue: string | undefined) => void;
-}> = ({ rowIndex, rowId, currentValue, onChange }) => {
+}> = ({ rowId, currentValue, onChange }) => {
   const classes = useStyles();
   const preset = resolveRowHeightPreset(currentValue);
-
-  // The custom-input reveal is derived from the resolved preset. When the
-  // stored value is a preset value, `isCustom` is false and the input hides.
-  // When the operator selects "Custom…" explicitly, we transition by setting
-  // the map value to "" (blank string sentinel), which resolves to Custom but
-  // still emits nothing (blank rowHeight is filtered out in buildSectionsJson).
   const [showCustomInput, setShowCustomInput] = React.useState<boolean>(
     preset.isCustom,
   );
 
-  // Keep local reveal state in sync when the parent updates the stored value
-  // (e.g., saveAs prefill of a custom-height row).
   React.useEffect(() => {
     if (preset.isCustom) setShowCustomInput(true);
   }, [preset.isCustom]);
@@ -780,21 +860,15 @@ const RowHeightControl: React.FC<{
       const key = data.optionValue;
       if (!key) return;
       if (key === ROW_HEIGHT_AUTO_KEY) {
-        // Clear the entry — buildSectionsJson will omit the field entirely.
         onChange(rowId, undefined);
         setShowCustomInput(false);
         return;
       }
       if (key === ROW_HEIGHT_CUSTOM_KEY) {
-        // Reveal the custom input but do NOT yet commit a value; the user
-        // will type one. Until they type, map stays at previous non-preset
-        // custom value (if any) OR blank.
         setShowCustomInput(true);
-        // Preserve any existing custom value; otherwise reset to blank.
         if (!preset.isCustom) onChange(rowId, "");
         return;
       }
-      // Preset selection: commit the CSS value.
       const chosen = ROW_HEIGHT_PRESETS.find((p) => p.key === key);
       if (chosen?.value) {
         onChange(rowId, chosen.value);
@@ -806,29 +880,25 @@ const RowHeightControl: React.FC<{
 
   const handleCustomInputChange = React.useCallback(
     (_ev: unknown, data: { value: string }) => {
-      // Empty string stays in the map as "" — buildSectionsJson trims + skips.
       onChange(rowId, data.value);
     },
     [rowId, onChange],
   );
 
   return (
-    <div className={classes.rowSettingsHeader}>
-      <Text size={200} className={classes.rowSettingsLabel}>
-        Row {rowIndex + 1}
-      </Text>
-      <Label htmlFor={`row-height-${rowId}`} size="small">
+    <div className={classes.advancedField}>
+      <Label htmlFor={`row-height-popover-${rowId}`} size="small" className={classes.advancedFieldLabel}>
         Row height
       </Label>
       <Dropdown
-        id={`row-height-${rowId}`}
-        className={classes.rowHeightDropdown}
+        id={`row-height-popover-${rowId}`}
         size="small"
+        appearance="outline"
         value={preset.label}
         selectedOptions={[preset.key]}
         onOptionSelect={handleDropdownChange}
-        aria-label={`Row ${rowIndex + 1} height`}
-        data-testid={`row-height-dropdown-${rowId}`}
+        aria-label="Row height"
+        data-testid={`row-height-dropdown-popover-${rowId}`}
       >
         {ROW_HEIGHT_PRESETS.map((p) => (
           <Option key={p.key} value={p.key}>
@@ -838,33 +908,40 @@ const RowHeightControl: React.FC<{
       </Dropdown>
       {showCustomInput && (
         <Input
-          className={classes.rowHeightCustomInput}
           size="small"
           appearance="outline"
           value={preset.isCustom ? currentValue ?? "" : ""}
           onChange={handleCustomInputChange}
           placeholder="e.g., 640px or 70vh"
-          aria-label={`Row ${rowIndex + 1} custom height`}
-          data-testid={`row-height-custom-input-${rowId}`}
+          aria-label="Row custom height"
+          data-testid={`row-height-custom-input-popover-${rowId}`}
         />
       )}
-      <Tooltip
-        content="Sets the row's max-height. Sections inside respect this ceiling regardless of their own contentSizing. Leave as Auto to let sections decide their own height."
-        relationship="description"
-        withArrow
-      >
-        <span
-          className={classes.helpIcon}
-          role="img"
-          aria-label="Row height help"
-          data-testid={`row-height-help-${rowId}`}
-        >
-          <QuestionCircle16Regular />
-        </span>
-      </Tooltip>
     </div>
   );
 };
+
+/**
+ * Row header — just displays "Row N" and reserves right-aligned space for
+ * per-section Advanced gears (rendered via `rightSlot`). Row height controls
+ * live inside each gear's popover per R2 UAT §2.2 round 4 (2026-07-03).
+ */
+const RowSettingsHeader: React.FC<{
+  rowIndex: number;
+  rightSlot?: React.ReactNode;
+}> = ({ rowIndex, rightSlot }) => {
+  const classes = useStyles();
+  return (
+    <div className={classes.rowSettingsHeader}>
+      <Text size={200} className={classes.rowSettingsLabel}>
+        Row {rowIndex + 1}
+      </Text>
+      <div className={classes.rowSettingsSpacer} />
+      {rightSlot}
+    </div>
+  );
+};
+
 
 // ---------------------------------------------------------------------------
 // FR-03 (task 013) — Advanced accordion per placed section
@@ -1055,18 +1132,36 @@ const AdvancedSectionControl: React.FC<{
   sectionLabel: string;
   sectionInstances: Map<string, SectionInstance>;
   onSectionInstancesChange: (next: Map<string, SectionInstance>) => void;
+  /**
+   * R2 UAT §2.2 round 4 (2026-07-03): row-level height controls hoisted
+   * into the per-section Advanced popover (`Row height` field at the top).
+   * All section popovers within the same row share the same rowHeights map
+   * entry — editing from any gear updates the row for everyone.
+   */
+  rowId: string;
+  rowHeightValue: string | undefined;
+  onRowHeightChange: (rowId: string, newValue: string | undefined) => void;
   /** DEF-002 / DEF-003 — pickers hydrate against BFF via this fetch. */
   authenticatedFetch: (url: string, init?: RequestInit) => Promise<Response>;
   /** DEF-002 / DEF-003 — shared entity-picker cache across all accordions. */
   pickerCache: EntityPickerCache;
-  /** Notify parent when a fetch completes so state re-renders + shared cache updates. */
-  onPickerCacheChange: (cache: EntityPickerCache) => void;
+  /**
+   * Notify parent when a fetch completes so state re-renders + shared cache updates.
+   * Typed as `React.Dispatch<React.SetStateAction<...>>` so callers here can pass
+   * a FUNCTIONAL updater — required to avoid state-races when the configs +
+   * savedqueries effects both dispatch "loading" transitions in the same tick
+   * (R2 UAT §2.5 fix, 2026-07-03).
+   */
+  onPickerCacheChange: React.Dispatch<React.SetStateAction<EntityPickerCache>>;
 }> = ({
   slotKey,
   sectionId,
   sectionLabel,
   sectionInstances,
   onSectionInstancesChange,
+  rowId,
+  rowHeightValue,
+  onRowHeightChange,
   authenticatedFetch,
   pickerCache,
   onPickerCacheChange,
@@ -1087,86 +1182,127 @@ const AdvancedSectionControl: React.FC<{
     ? pickerCache.savedQueries.get(entityName) ?? { status: "idle" as const }
     : ({ status: "idle" as const });
 
+  // R2 UAT §2.5 fix (2026-07-03): two structural changes to make picker
+  // fetches actually complete on mount:
+  //   (1) Split configs + savedqueries into SEPARATE useEffects with SEPARATE
+  //       AbortControllers so one completing does not cancel the other.
+  //   (2) Depend ONLY on `entityName` + `authenticatedFetch` — NOT on status
+  //       fields. Status is read from closure by the idle-guard; that guard
+  //       decides whether to START a fetch, but status transitions must NOT
+  //       trigger cleanup (which would abort the fetch we just started).
+  //
+  // Original bug (pre-fix): the single effect depended on both status fields.
+  // Sequence: effect fires → dispatches idle→loading for both → next render →
+  // deps changed (status flipped) → cleanup fires → controller.abort() →
+  // BOTH in-flight fetches cancelled → re-run guard skips (status is now
+  // "loading" not "idle") → nothing ever resolves. Network tab: status blank,
+  // "Failed to load response data".
+  //
+  // Post-fix: status changes do not retrigger effects. Cleanup only fires on
+  // unmount or entityName change (i.e., user swapped to a different entity),
+  // which is the correct time to abort a stale fetch.
+
+  // Effect A: fetch grid configurations for entityName if idle.
   React.useEffect(() => {
     if (!entityName) return;
+    if (configState.status !== "idle") return;
     const controller = new AbortController();
 
-    // Fetch grid configurations if not yet started.
-    if (configState.status === "idle") {
-      // Mark loading in the cache immediately to prevent duplicate parallel fetches.
+    // Mark loading via functional update — safe against concurrent writes from
+    // the sibling savedqueries effect that runs in the same render pass.
+    onPickerCacheChange((prev) => {
       const next: EntityPickerCache = {
-        configs: new Map(pickerCache.configs),
-        savedQueries: new Map(pickerCache.savedQueries),
+        configs: new Map(prev.configs),
+        savedQueries: new Map(prev.savedQueries),
       };
       next.configs.set(entityName, { status: "loading" });
-      onPickerCacheChange(next);
+      return next;
+    });
 
-      void (async () => {
-        try {
-          const options = await fetchGridConfigurations(entityName, authenticatedFetch, controller.signal);
-          if (controller.signal.aborted) return;
+    void (async () => {
+      try {
+        const options = await fetchGridConfigurations(entityName, authenticatedFetch, controller.signal);
+        if (controller.signal.aborted) return;
+        onPickerCacheChange((prev) => {
           const updated: EntityPickerCache = {
-            configs: new Map(next.configs),
-            savedQueries: new Map(next.savedQueries),
+            configs: new Map(prev.configs),
+            savedQueries: new Map(prev.savedQueries),
           };
           updated.configs.set(entityName, { status: "ready", data: options });
-          onPickerCacheChange(updated);
-        } catch (err) {
-          if (controller.signal.aborted) return;
+          return updated;
+        });
+      } catch (err) {
+        if (controller.signal.aborted) return;
+        onPickerCacheChange((prev) => {
           const updated: EntityPickerCache = {
-            configs: new Map(next.configs),
-            savedQueries: new Map(next.savedQueries),
+            configs: new Map(prev.configs),
+            savedQueries: new Map(prev.savedQueries),
           };
           updated.configs.set(entityName, {
             status: "error",
             message: err instanceof Error ? err.message : String(err),
           });
-          onPickerCacheChange(updated);
-        }
-      })();
-    }
+          return updated;
+        });
+      }
+    })();
 
-    // Fetch savedqueries if not yet started.
-    if (savedQueriesState.status === "idle") {
+    return () => controller.abort();
+    // Deps: entityName + authenticatedFetch ONLY. Status is read via closure by
+    // the idle-guard above; it decides whether to START a fetch. If we added
+    // status to deps, the idle→loading dispatch would trigger cleanup + abort
+    // the fetch we just started. See rationale block above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entityName, authenticatedFetch]);
+
+  // Effect B: fetch savedqueries for entityName if idle. Independent controller
+  // — completion of the configs fetch (Effect A) does NOT abort this one.
+  React.useEffect(() => {
+    if (!entityName) return;
+    if (savedQueriesState.status !== "idle") return;
+    const controller = new AbortController();
+
+    onPickerCacheChange((prev) => {
       const next: EntityPickerCache = {
-        configs: new Map(pickerCache.configs),
-        savedQueries: new Map(pickerCache.savedQueries),
+        configs: new Map(prev.configs),
+        savedQueries: new Map(prev.savedQueries),
       };
       next.savedQueries.set(entityName, { status: "loading" });
-      onPickerCacheChange(next);
+      return next;
+    });
 
-      void (async () => {
-        try {
-          const options = await fetchSavedQueries(entityName, authenticatedFetch, controller.signal);
-          if (controller.signal.aborted) return;
+    void (async () => {
+      try {
+        const options = await fetchSavedQueries(entityName, authenticatedFetch, controller.signal);
+        if (controller.signal.aborted) return;
+        onPickerCacheChange((prev) => {
           const updated: EntityPickerCache = {
-            configs: new Map(next.configs),
-            savedQueries: new Map(next.savedQueries),
+            configs: new Map(prev.configs),
+            savedQueries: new Map(prev.savedQueries),
           };
           updated.savedQueries.set(entityName, { status: "ready", data: options });
-          onPickerCacheChange(updated);
-        } catch (err) {
-          if (controller.signal.aborted) return;
+          return updated;
+        });
+      } catch (err) {
+        if (controller.signal.aborted) return;
+        onPickerCacheChange((prev) => {
           const updated: EntityPickerCache = {
-            configs: new Map(next.configs),
-            savedQueries: new Map(next.savedQueries),
+            configs: new Map(prev.configs),
+            savedQueries: new Map(prev.savedQueries),
           };
           updated.savedQueries.set(entityName, {
             status: "error",
             message: err instanceof Error ? err.message : String(err),
           });
-          onPickerCacheChange(updated);
-        }
-      })();
-    }
+          return updated;
+        });
+      }
+    })();
 
     return () => controller.abort();
-    // NOTE: intentionally NOT depending on `pickerCache` here — the effect
-    // reads it via closure and enqueues a state update. Depending on it would
-    // re-fire on every cache update and produce a loop. `entityName` +
-    // status fields are the load-bearing triggers.
+    // Deps: entityName + authenticatedFetch ONLY. See Effect A rationale.
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [entityName, configState.status, savedQueriesState.status, authenticatedFetch]);
+  }, [entityName, authenticatedFetch]);
 
   // Central update helper — applies a mutation to the current instance,
   // then normalizes: if the resulting instance has NO override set, DELETE it
@@ -1192,19 +1328,10 @@ const AdvancedSectionControl: React.FC<{
     [instance, sectionInstances, onSectionInstancesChange, slotKey],
   );
 
-  const handleConfigIdSelect = React.useCallback(
-    (_ev: unknown, data: { optionValue?: string }) => {
-      const key = data.optionValue;
-      updateInstance((d) => {
-        if (!key || key === CONFIG_ID_NONE_KEY) {
-          d.configIdOverride = undefined;
-        } else {
-          d.configIdOverride = key;
-        }
-      });
-    },
-    [updateInstance],
-  );
+  // configId picker (Grid Configuration) removed 2026-07-03 per UAT feedback R2-followup-1 §2.4
+  // — maker use-case for swapping between multiple sprk_gridconfiguration records per
+  // section is not real; simplification removes user-facing confusion. Fetch still runs
+  // (see React.useEffect above) for a possible future reintroduction; harmless.
 
   const handleLabelChange = React.useCallback(
     (_ev: unknown, data: { value: string }) => {
@@ -1252,15 +1379,8 @@ const AdvancedSectionControl: React.FC<{
   );
 
   // Resolve controlled-value strings.
-  const currentConfigIdKey = instance.configIdOverride ?? CONFIG_ID_NONE_KEY;
-  // Build the effective configId option list: real data if ready, else fall
-  // back to "None" only (matches graceful-degradation contract).
-  const configOptions: readonly ConfigIdOption[] =
-    configState.status === "ready" ? configState.data : [CONFIG_ID_NONE_OPTION];
-  const currentConfigIdOption =
-    configOptions.find((o) => o.key === currentConfigIdKey) ??
-    configOptions[0] ??
-    CONFIG_ID_NONE_OPTION;
+  // configId picker removed 2026-07-03 (R2-followup-1 §2.4); currentConfigIdKey /
+  // currentConfigIdOption / configOptions computations retired with it.
   const currentLabelValue = instance.label ?? "";
   const currentPageSize = instance.overrides?.pageSize;
   const currentAvailableViewIds = instance.overrides?.availableViews ?? [];
@@ -1272,210 +1392,143 @@ const AdvancedSectionControl: React.FC<{
     .map((id) => savedQueryOptions.find((sq) => sq.id === id)?.name ?? id)
     .join(", ");
 
+  // R2 UAT §2.2 (2026-07-03 round 3): the Accordion under each slot is replaced
+  // with a compact gear icon in the row header (rendered by the parent) that
+  // opens a Fluent v9 Popover containing the same three controls. Operator
+  // benefit: (1) less vertical clutter under each row; (2) advanced state is
+  // ephemeral (popover dismisses on outside click); (3) one gear per section
+  // in the row keeps the per-slot semantics without a full accordion strip.
   return (
-    <Accordion
-      collapsible
-      multiple
-      className={classes.advancedAccordion}
-      data-testid={`advanced-accordion-${slotKey}`}
-    >
-      <AccordionItem value={`${slotKey}-advanced`}>
-        <AccordionHeader
-          className={classes.advancedHeader}
-          expandIconPosition="end"
-          icon={<Settings16Regular />}
+    <Popover positioning={{ position: "below", align: "start" }}>
+      <PopoverTrigger disableButtonEnhancement>
+        <Tooltip
+          content={`Advanced — ${sectionLabel}`}
+          relationship="label"
+          withArrow
         >
-          <Text size={200} weight="semibold">
-            Advanced
-          </Text>
-        </AccordionHeader>
-        <AccordionPanel className={classes.advancedPanel}>
-          {/* (a) configId picker — DEF-002 real Dataverse query */}
-          <div className={classes.advancedField}>
-            <Label
-              htmlFor={`advanced-configid-${slotKey}`}
-              size="small"
-              className={classes.advancedFieldLabel}
-            >
-              Grid configuration
-              {configState.status === "loading" && (
-                <Spinner
-                  size="tiny"
-                  aria-label="Loading grid configurations"
-                  data-testid={`advanced-configid-spinner-${slotKey}`}
-                  style={{ marginLeft: "6px", display: "inline-block" }}
-                />
-              )}
-            </Label>
-            <Dropdown
-              id={`advanced-configid-${slotKey}`}
-              size="small"
-              value={currentConfigIdOption.label}
-              selectedOptions={[currentConfigIdOption.key]}
-              onOptionSelect={handleConfigIdSelect}
-              aria-label={`Grid configuration override for ${sectionLabel}`}
-              data-testid={`advanced-configid-dropdown-${slotKey}`}
-              disabled={!entityName}
-            >
-              {configOptions.map((o) => (
-                <Option key={o.key || "none"} value={o.key}>
-                  {o.label}
-                </Option>
-              ))}
-            </Dropdown>
-            {configState.status === "error" && (
-              <Text
-                className={classes.advancedFieldHelp}
-                style={{ color: tokens.colorPaletteRedForeground1 }}
-                data-testid={`advanced-configid-error-${slotKey}`}
-              >
-                Could not load configurations: {configState.message}. Only
-                &quot;None (use default)&quot; is available.
-              </Text>
-            )}
-            {!entityName && (
-              <Text className={classes.advancedFieldHelp}>
-                This section has no Dataverse entity — configId override is not
-                applicable.
-              </Text>
-            )}
-            {entityName && configState.status !== "error" && (
-              <Text className={classes.advancedFieldHelp}>
-                Point this section at a different sprk_gridconfiguration record.
-                Leave as &quot;None&quot; to use the registration&#39;s default.
-              </Text>
-            )}
-          </div>
+          <Button
+            appearance="subtle"
+            size="small"
+            icon={<Settings16Regular />}
+            aria-label={`Advanced settings for ${sectionLabel}`}
+            data-testid={`advanced-trigger-${slotKey}`}
+          />
+        </Tooltip>
+      </PopoverTrigger>
+      <PopoverSurface className={classes.advancedPopoverSurface}>
+        <Text size={300} weight="semibold" style={{ marginBottom: tokens.spacingVerticalXS }}>
+          Advanced — {sectionLabel}
+        </Text>
 
-          {/* (b) label override */}
-          <div className={classes.advancedField}>
-            <Label
-              htmlFor={`advanced-label-${slotKey}`}
-              size="small"
-              className={classes.advancedFieldLabel}
+        {/* Row height (applies to the whole row — R2 UAT §2.2 round 4) */}
+        <RowHeightPopoverField
+          rowId={rowId}
+          currentValue={rowHeightValue}
+          onChange={onRowHeightChange}
+        />
+
+        {/* (a) label override */}
+        <div className={classes.advancedField}>
+          <Label
+            htmlFor={`advanced-label-${slotKey}`}
+            size="small"
+            className={classes.advancedFieldLabel}
+          >
+            Label override
+          </Label>
+          <Input
+            id={`advanced-label-${slotKey}`}
+            size="small"
+            appearance="outline"
+            value={currentLabelValue}
+            onChange={handleLabelChange}
+            placeholder={sectionLabel}
+            aria-label={`Label override for ${sectionLabel}`}
+            data-testid={`advanced-label-input-${slotKey}`}
+          />
+        </div>
+
+        {/* (b) pageSize override */}
+        <div className={classes.advancedField}>
+          <Label
+            htmlFor={`advanced-pagesize-${slotKey}`}
+            size="small"
+            className={classes.advancedFieldLabel}
+          >
+            Page size
+          </Label>
+          <SpinButton
+            id={`advanced-pagesize-${slotKey}`}
+            size="small"
+            appearance="outline"
+            min={1}
+            max={500}
+            step={25}
+            value={currentPageSize ?? null}
+            displayValue={currentPageSize === undefined ? "" : String(currentPageSize)}
+            onChange={handlePageSizeChange}
+            placeholder="e.g., 100"
+            aria-label={`Page size override for ${sectionLabel}`}
+            data-testid={`advanced-pagesize-spinbutton-${slotKey}`}
+          />
+        </div>
+
+        {/* (c) availableViews override — DEF-003 real savedquery multi-select */}
+        <div className={classes.advancedField}>
+          <Label
+            htmlFor={`advanced-views-${slotKey}`}
+            size="small"
+            className={classes.advancedFieldLabel}
+          >
+            Available views
+            {savedQueriesState.status === "loading" && (
+              <Spinner
+                size="tiny"
+                aria-label="Loading saved queries"
+                data-testid={`advanced-views-spinner-${slotKey}`}
+                style={{ marginLeft: "6px", display: "inline-block" }}
+              />
+            )}
+          </Label>
+          <Combobox
+            id={`advanced-views-${slotKey}`}
+            size="small"
+            appearance="outline"
+            multiselect
+            value={currentAvailableViewsDisplay}
+            selectedOptions={currentAvailableViewIds}
+            onOptionSelect={handleAvailableViewsSelect}
+            placeholder={
+              savedQueryOptions.length === 0
+                ? entityName
+                  ? savedQueriesState.status === "loading"
+                    ? "Loading views…"
+                    : "No saved queries available"
+                  : "N/A — no Dataverse entity"
+                : "Select one or more views…"
+            }
+            aria-label={`Available views override for ${sectionLabel}`}
+            data-testid={`advanced-views-combobox-${slotKey}`}
+            disabled={!entityName || savedQueryOptions.length === 0}
+          >
+            {savedQueryOptions.map((sq) => (
+              <Option key={sq.id} value={sq.id}>
+                {sq.isDefault ? `${sq.name} (default)` : sq.name}
+              </Option>
+            ))}
+          </Combobox>
+          {savedQueriesState.status === "error" && (
+            <Text
+              className={classes.advancedFieldHelp}
+              style={{ color: tokens.colorPaletteRedForeground1 }}
+              data-testid={`advanced-views-error-${slotKey}`}
             >
-              Label override
-            </Label>
-            <Input
-              id={`advanced-label-${slotKey}`}
-              size="small"
-              appearance="outline"
-              value={currentLabelValue}
-              onChange={handleLabelChange}
-              placeholder={sectionLabel}
-              aria-label={`Label override for ${sectionLabel}`}
-              data-testid={`advanced-label-input-${slotKey}`}
-            />
-            <Text className={classes.advancedFieldHelp}>
-              Rename this section in this layout only. Empty = use default label.
+              Could not load saved queries: {savedQueriesState.message}.
             </Text>
-          </div>
-
-          {/* (c) pageSize override */}
-          <div className={classes.advancedField}>
-            <Label
-              htmlFor={`advanced-pagesize-${slotKey}`}
-              size="small"
-              className={classes.advancedFieldLabel}
-            >
-              Page size
-            </Label>
-            <SpinButton
-              id={`advanced-pagesize-${slotKey}`}
-              size="small"
-              appearance="outline"
-              min={1}
-              max={500}
-              step={25}
-              value={currentPageSize ?? null}
-              displayValue={currentPageSize === undefined ? "" : String(currentPageSize)}
-              onChange={handlePageSizeChange}
-              placeholder="e.g., 100"
-              aria-label={`Page size override for ${sectionLabel}`}
-              data-testid={`advanced-pagesize-spinbutton-${slotKey}`}
-            />
-            <Text className={classes.advancedFieldHelp}>
-              Rows per page. Empty = use config record&#39;s default (framework
-              default is 25).
-            </Text>
-          </div>
-
-          {/* (d) availableViews override — DEF-003 real savedquery multi-select */}
-          <div className={classes.advancedField}>
-            <Label
-              htmlFor={`advanced-views-${slotKey}`}
-              size="small"
-              className={classes.advancedFieldLabel}
-            >
-              Available views
-              {savedQueriesState.status === "loading" && (
-                <Spinner
-                  size="tiny"
-                  aria-label="Loading saved queries"
-                  data-testid={`advanced-views-spinner-${slotKey}`}
-                  style={{ marginLeft: "6px", display: "inline-block" }}
-                />
-              )}
-            </Label>
-            <Combobox
-              id={`advanced-views-${slotKey}`}
-              size="small"
-              appearance="outline"
-              multiselect
-              value={currentAvailableViewsDisplay}
-              selectedOptions={currentAvailableViewIds}
-              onOptionSelect={handleAvailableViewsSelect}
-              placeholder={
-                savedQueryOptions.length === 0
-                  ? entityName
-                    ? savedQueriesState.status === "loading"
-                      ? "Loading views…"
-                      : "No saved queries available"
-                    : "N/A — no Dataverse entity"
-                  : "Select one or more views…"
-              }
-              aria-label={`Available views override for ${sectionLabel}`}
-              data-testid={`advanced-views-combobox-${slotKey}`}
-              disabled={!entityName || savedQueryOptions.length === 0}
-            >
-              {savedQueryOptions.map((sq) => (
-                <Option key={sq.id} value={sq.id}>
-                  {sq.isDefault ? `${sq.name} (default)` : sq.name}
-                </Option>
-              ))}
-            </Combobox>
-            {savedQueriesState.status === "error" && (
-              <Text
-                className={classes.advancedFieldHelp}
-                style={{ color: tokens.colorPaletteRedForeground1 }}
-                data-testid={`advanced-views-error-${slotKey}`}
-              >
-                Could not load saved queries: {savedQueriesState.message}.
-              </Text>
-            )}
-            {!entityName && (
-              <Text className={classes.advancedFieldHelp}>
-                This section has no Dataverse entity — availableViews override
-                is not applicable.
-              </Text>
-            )}
-            {entityName && savedQueriesState.status !== "error" && (
-              <Text className={classes.advancedFieldHelp}>
-                Select one or more saved views this section should offer. Leave
-                empty to use the config-level allowlist.
-              </Text>
-            )}
-          </div>
-
-          {/* Help block covering all four fields */}
-          <Text className={classes.advancedHelpBlock}>
-            Overrides apply only to this layout instance. Set configId to point
-            to a different sprk_gridconfiguration record. Set label to rename
-            this section only in this layout.
-          </Text>
-        </AccordionPanel>
-      </AccordionItem>
-    </Accordion>
+          )}
+        </div>
+      </PopoverSurface>
+    </Popover>
   );
 };
 
@@ -1769,6 +1822,8 @@ export const ArrangeStep: React.FC<ArrangeStepProps> = ({
 
   return (
     <div className={classes.root}>
+      {/* R2 UAT §5.7 — top region scrolls; palette footer stays docked. */}
+      <div className={classes.topScroll}>
       {/* Workspace name + Set default + Pin to Start (inline row) */}
       <div style={{ display: "flex", flexDirection: "row", alignItems: "flex-end", gap: tokens.spacingHorizontalL, flexWrap: "wrap" }}>
         <div style={{ flex: "1 1 0", minWidth: 0, maxWidth: "480px" }}>
@@ -1820,7 +1875,34 @@ export const ArrangeStep: React.FC<ArrangeStepProps> = ({
 
       {/* Template grid */}
       <div className={classes.gridContainer}>
-        {template.rows.map((row: LayoutTemplateRow, rowIdx: number) => (
+        {template.rows.map((row: LayoutTemplateRow, rowIdx: number) => {
+          // R2 UAT §2.6 (2026-07-03): if this row has exactly ONE filled slot
+          // AND that slot's section is `widthPreference: 'full'`, override
+          // the row's grid template to `1fr` so the row VISUALLY appears
+          // full-width. Matches the operator's mental model after the FR-04
+          // "Yes, convert" dialog dismisses (which clears the other slots) —
+          // otherwise the row keeps its 1fr 1fr / 1fr 1fr 1fr template with
+          // empty visual space where the cleared slots used to be.
+          //
+          // Derived from state (no schema addition): purely a rendering hint.
+          // Save flow still emits `row.gridTemplateColumns` as-is; the runtime
+          // framework's `buildDynamicWorkspaceConfig` already handles the
+          // 1-section-in-multi-slot-row case identically.
+          const filledSlots: string[] = [];
+          for (let c = 0; c < row.slotCount; c++) {
+            const key = slotKey(row.id, c);
+            const id = sectionAssignments.get(key);
+            if (id) filledSlots.push(id);
+          }
+          const isSingleFullWidthOccupant =
+            row.slotCount > 1 &&
+            filledSlots.length === 1 &&
+            lookupWidthPreference(filledSlots[0]) === "full";
+          const effectiveColumns = isSingleFullWidthOccupant
+            ? "1fr"
+            : row.gridTemplateColumns;
+
+          return (
           <div key={row.id} className={classes.rowGroup}>
             {/*
               FR-02 (task 011) — Per-row settings header. Fluent v9 Dropdown
@@ -1828,66 +1910,86 @@ export const ArrangeStep: React.FC<ArrangeStepProps> = ({
               Selected value wires through to `LayoutJsonRow.rowHeight` in the
               wizard's JSON output via App.tsx.
             */}
-            <RowHeightControl
+            <RowSettingsHeader
               rowIndex={rowIdx}
-              rowId={row.id}
-              currentValue={rowHeights.get(row.id)}
-              onChange={handleRowHeightChange}
+              // R2 UAT §2.2 round 4 (2026-07-03): row header shows only "Row N"
+              // on the left + right-aligned Advanced gears (one per filled
+              // section). The row-height dropdown and the help tooltip are
+              // moved INTO the Advanced popover so operators find every row +
+              // section setting in one compact surface.
+              rightSlot={
+                <>
+                  {Array.from({ length: row.slotCount }, (_, colIdx) => {
+                    const key = slotKey(row.id, colIdx);
+                    const sectionId = sectionAssignments.get(key);
+                    const section = sectionId ? sectionMap.get(sectionId) : undefined;
+                    if (!section) return null;
+                    return (
+                      <AdvancedSectionControl
+                        key={key}
+                        slotKey={key}
+                        sectionId={section.id}
+                        sectionLabel={section.label}
+                        sectionInstances={sectionInstances}
+                        onSectionInstancesChange={onSectionInstancesChange}
+                        rowId={row.id}
+                        rowHeightValue={rowHeights.get(row.id)}
+                        onRowHeightChange={handleRowHeightChange}
+                        authenticatedFetch={authenticatedFetch}
+                        pickerCache={pickerCache}
+                        onPickerCacheChange={setPickerCache}
+                      />
+                    );
+                  })}
+                </>
+              }
             />
             <div
               className={classes.gridRow}
-              style={{ gridTemplateColumns: row.gridTemplateColumns }}
+              style={{ gridTemplateColumns: effectiveColumns }}
             >
               {Array.from({ length: row.slotCount }, (_, colIdx) => {
                 const key = slotKey(row.id, colIdx);
                 const sectionId = sectionAssignments.get(key);
                 const section = sectionId ? sectionMap.get(sectionId) : undefined;
 
-                // FR-03 (task 013): render slot + Advanced accordion stacked in
-                // a per-column wrapper. Accordion only appears for FILLED slots
-                // (empty slot has no SectionInstance to render overrides for).
-                //
-                // Placement hook for FR-04 (task 015): task 015 will add a
-                // `widthPreference` warning banner between the slot and the
-                // accordion when a `widthPreference: 'full'` section is placed
-                // in a multi-slot row. Leaving the vertical stack layout as-is
-                // makes that insertion point trivial to add.
+                // Slot renders WITHOUT the per-slot Accordion — Advanced
+                // controls moved up to the row header via `rightSlot` above.
                 return (
-                  <div
+                  <GridSlot
                     key={key}
-                    style={{ display: "flex", flexDirection: "column" }}
-                  >
-                    <GridSlot
-                      slotId={key}
-                      section={section}
-                      onDrop={handleSlotDrop}
-                      onDragStart={handleSlotDragStart}
-                      onRemove={handleSlotRemove}
-                      widthWarning={slotWidthWarnings.get(key)}
-                    />
-                    {section && (
-                      <AdvancedSectionControl
-                        slotKey={key}
-                        sectionId={section.id}
-                        sectionLabel={section.label}
-                        sectionInstances={sectionInstances}
-                        onSectionInstancesChange={onSectionInstancesChange}
-                        authenticatedFetch={authenticatedFetch}
-                        pickerCache={pickerCache}
-                        onPickerCacheChange={setPickerCache}
-                      />
-                    )}
-                  </div>
+                    slotId={key}
+                    section={section}
+                    onDrop={handleSlotDrop}
+                    onDragStart={handleSlotDragStart}
+                    onRemove={handleSlotRemove}
+                    widthWarning={slotWidthWarnings.get(key)}
+                  />
                 );
               })}
             </div>
           </div>
-        ))}
+          );
+        })}
       </div>
 
-      {/* Unassigned sections area */}
+      {/* Overflow note when more sections than slots — stays in scroll region */}
+      {hasOverflow && (
+        <div className={classes.overflowNote}>
+          <Info16Regular />
+          <Text size={200}>
+            You have more sections than layout slots. Extra unassigned sections will be
+            added as full-width rows below the grid.
+          </Text>
+        </div>
+      )}
+
+      {/* R2 UAT §5.7 — close topScroll region here; palette becomes the footer. */}
+      </div>
+
+      {/* Unassigned sections palette — docked footer (R2 UAT §5.7). */}
       {(unassignedSections.length > 0 || true) && (
-        <>
+        <div className={classes.paletteFooter}>
           <Text size={300} weight="semibold" style={{ color: tokens.colorNeutralForeground2 }}>
             Unassigned sections
           </Text>
@@ -1915,17 +2017,6 @@ export const ArrangeStep: React.FC<ArrangeStepProps> = ({
               </Text>
             )}
           </div>
-        </>
-      )}
-
-      {/* Overflow note when more sections than slots */}
-      {hasOverflow && (
-        <div className={classes.overflowNote}>
-          <Info16Regular />
-          <Text size={200}>
-            You have more sections than layout slots. Extra unassigned sections will be
-            added as full-width rows below the grid.
-          </Text>
         </div>
       )}
 

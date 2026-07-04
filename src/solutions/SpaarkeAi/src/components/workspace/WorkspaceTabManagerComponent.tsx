@@ -34,12 +34,16 @@ import {
   ChevronLeft20Regular,
   ChevronRight20Regular,
   Dismiss12Regular,
+  Settings16Regular,
   WarningRegular,
 } from "@fluentui/react-icons";
 import { WidgetErrorBoundary } from "@spaarke/ui-components";
 import type { WorkspaceTab } from "./WorkspaceTabManager";
 import type { WorkspaceWidgetProps } from "@spaarke/ai-widgets";
+import { useDispatchPaneEvent } from "@spaarke/ai-widgets";
 import { AddToAssistantToggle } from "./AddToAssistantToggle";
+import { SPAARKEAI_TEMPLATE_FILTER } from "../../constants/workspaceTemplateFilter";
+import { resolveRuntimeConfig } from "@spaarke/auth";
 
 // NOTE (task 098 — 2026-05-22): the per-tab pin button was removed from
 // every tab row. Pin state is still owned by `services/pinnedWorkspaces.ts`
@@ -209,6 +213,9 @@ const useStyles = makeStyles({
     display: "flex",
     alignItems: "center",
     justifyContent: "flex-end",
+    // R2 UAT §4.1 (2026-07-03) — small horizontal gap so the new gear icon
+    // sits comfortably to the left of the AddToAssistantToggle.
+    columnGap: tokens.spacingHorizontalS,
     paddingLeft: tokens.spacingHorizontalM,
     paddingRight: tokens.spacingHorizontalM,
     paddingTop: tokens.spacingVerticalXS,
@@ -313,6 +320,112 @@ export interface WorkspaceTabManagerComponentProps {
 }
 
 // ---------------------------------------------------------------------------
+// Wizard launch helper — R2 UAT §4.1 (2026-07-03). Gear icon in the visibility
+// bar opens the WorkspaceLayoutWizard at the Choose Layout step for the
+// active workspace tab. Reuses the existing `sprk_workspacelayoutwizard`
+// webresource + navigateTo pattern from ManageWorkspacesPane, plus the R2
+// `startAtStep` URL param wired into wizard main.tsx.
+// ---------------------------------------------------------------------------
+
+function getXrmForWizard(): unknown {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const w = window as any;
+  return w?.Xrm ?? w?.parent?.Xrm ?? w?.top?.Xrm ?? null;
+}
+
+const WIZARD_RESULT_STORAGE_KEY = "spaarke:workspace-wizard:last-result";
+const WIZARD_RESULT_MAX_AGE_MS = 60_000;
+
+interface WizardDialogResult {
+  confirmed: boolean;
+  layoutId?: string;
+  at?: number;
+}
+
+function readWizardDialogResult(): WizardDialogResult | null {
+  try {
+    const raw = window.sessionStorage?.getItem(WIZARD_RESULT_STORAGE_KEY);
+    if (!raw) return null;
+    const parsed = JSON.parse(raw) as WizardDialogResult;
+    if (typeof parsed.at === "number" && Date.now() - parsed.at > WIZARD_RESULT_MAX_AGE_MS) {
+      return null;
+    }
+    return parsed;
+  } catch {
+    return null;
+  }
+}
+
+function consumeWizardDialogResult(): void {
+  try {
+    window.sessionStorage?.removeItem(WIZARD_RESULT_STORAGE_KEY);
+  } catch { /* storage may be disabled */ }
+}
+
+/**
+ * Launch the edit wizard for an existing workspace layout. Opens at the
+ * wizard's default step for edit mode (Arrange Sections, per §3.1). After the
+ * wizard closes, if it reports a successful save via sessionStorage, invoke
+ * `onSaved` so the caller can refresh the affected tab (§3.3).
+ *
+ * Renamed from `launchEditWizardForTab` after operator feedback
+ * (2026-07-03 round 2): user wanted the gear icon to open at Arrange rather
+ * than Choose Layout.
+ */
+async function launchEditWizardForTab(
+  layoutId: string,
+  onSaved?: (savedLayoutId: string) => void,
+): Promise<void> {
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const xrm = getXrmForWizard() as any;
+  if (!xrm?.Navigation?.navigateTo) {
+    console.warn(
+      "[WorkspaceTabManagerComponent] Xrm.Navigation.navigateTo not available — running outside Dataverse host. Gear-icon launch is a no-op.",
+    );
+    return;
+  }
+
+  const bffBaseUrl = (await resolveRuntimeConfig()).bffBaseUrl ?? "";
+  const parts: string[] = [
+    "mode=edit",
+    `bffBaseUrl=${encodeURIComponent(bffBaseUrl)}`,
+    `layoutId=${encodeURIComponent(layoutId)}`,
+    `templateFilter=${encodeURIComponent(SPAARKEAI_TEMPLATE_FILTER.join(","))}`,
+    // Default edit behavior: land on Arrange Sections. No `startAtStep`
+    // override needed (App.tsx sets it internally from `mode === "edit"`).
+  ];
+  const data = parts.join("&");
+
+  try {
+    await xrm.Navigation.navigateTo(
+      {
+        pageType: "webresource",
+        webresourceName: "sprk_workspacelayoutwizard",
+        data,
+      },
+      {
+        target: 2,
+        width: { value: 60, unit: "%" },
+        height: { value: 70, unit: "%" },
+        title: "Edit Workspace",
+      },
+    );
+  } catch (err: unknown) {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const code = (err as any)?.errorCode;
+    if (code !== 2) {
+      console.warn("[WorkspaceTabManagerComponent] Wizard launch error:", err);
+    }
+  }
+
+  const dialogResult = readWizardDialogResult();
+  if (dialogResult?.confirmed && onSaved) {
+    onSaved(dialogResult.layoutId ?? layoutId);
+    consumeWizardDialogResult();
+  }
+}
+
+// ---------------------------------------------------------------------------
 // ActiveWidgetContent — renders the active tab's resolved widget
 // ---------------------------------------------------------------------------
 
@@ -376,9 +489,31 @@ export function WorkspaceTabManagerComponent({
   hideTabBar = false,
 }: WorkspaceTabManagerComponentProps): React.JSX.Element {
   const styles = useStyles();
+  const dispatch = useDispatchPaneEvent();
 
   // Resolve the active tab record.
   const activeTab = tabs.find((t) => t.id === activeTabId) ?? null;
+
+  // R2 UAT §3.3 (2026-07-03): after gear-icon edit wizard closes with a save,
+  // close the affected tab and dispatch a fresh widget_load so the tab
+  // remounts with the new layout. Force-remount is simpler than plumbing a
+  // per-widget "refresh" method through the registry.
+  const handleGearIconClick = React.useCallback(
+    (tabId: string, layoutId: string, layoutName: string) => {
+      void launchEditWizardForTab(layoutId, (savedLayoutId) => {
+        // Close the old tab; re-dispatch widget_load with the saved id so a
+        // fresh tab renders the updated layout.
+        onTabClose(tabId);
+        dispatch("workspace", {
+          type: "widget_load",
+          widgetType: "workspace",
+          widgetData: { layoutId: savedLayoutId, layoutName },
+          displayName: layoutName,
+        });
+      });
+    },
+    [onTabClose, dispatch],
+  );
 
   // ---------------------------------------------------------------------------
   // Tab overflow arrows — task 107 (2026-05-22)
@@ -616,6 +751,31 @@ export function WorkspaceTabManagerComponent({
               - the host wired onToggleVisibility (otherwise it's read-only). */}
         {activeTab !== null && chatSessionId && onToggleVisibility ? (
           <div className={styles.visibilityBar}>
+            {/* R2 UAT §4.1 (2026-07-03) — gear icon opens the edit wizard for
+                the active workspace layout at the Choose Layout step. Only
+                shown for workspace-layout tabs (widgetType === "workspace")
+                with a resolvable layoutId in widgetData. */}
+            {activeTab.widgetType === "workspace" &&
+             (activeTab.widgetData as { layoutId?: string } | null)?.layoutId ? (
+              <Tooltip content="Edit workspace layout" relationship="label" withArrow>
+                <Button
+                  appearance="subtle"
+                  size="small"
+                  icon={<Settings16Regular />}
+                  aria-label="Edit workspace layout"
+                  onClick={() =>
+                    handleGearIconClick(
+                      activeTab.id,
+                      (activeTab.widgetData as { layoutId: string }).layoutId,
+                      (activeTab.widgetData as { layoutName?: string }).layoutName
+                        ?? activeTab.displayName
+                        ?? "Workspace",
+                    )
+                  }
+                  data-testid="workspace-edit-gear"
+                />
+              </Tooltip>
+            ) : null}
             <AddToAssistantToggle
               tabId={activeTab.id}
               sessionId={chatSessionId}

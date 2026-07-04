@@ -24,6 +24,15 @@ export const useWorkspaceShellStyles = makeStyles({
     flex: '1 1 auto',
     minHeight: 0,
     overflow: 'auto',
+    // R2-followup-1 §1.1 (2026-07-03): hide the OUTER scrollbar CHROME to
+    // eliminate the double-scrollbar visual conflict with per-section
+    // scrollbars (each entity-list section has its own scrollbar per FR-01
+    // contentSizing:'clamped'). Scroll CAPABILITY is retained: mouse wheel
+    // + touch + keyboard (arrow keys, PageUp/Down) all still work; only
+    // the visible chrome is hidden. Content > viewport remains reachable.
+    scrollbarWidth: 'none',
+    msOverflowStyle: 'none',
+    '::-webkit-scrollbar': { display: 'none' },
   },
 
   /**
