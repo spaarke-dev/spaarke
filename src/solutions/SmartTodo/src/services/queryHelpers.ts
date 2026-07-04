@@ -491,6 +491,13 @@ export const TODO_SELECT_FIELDS: string[] = [
   '_ownerid_value',
   'createdon',
   'modifiedon',
+  // DEF-11 Part 3 (2026-07-04, record-header-and-notepad-r1) — regarding-record
+  // resolver text fields (ADR-024) so the Kanban Filter can match against parent
+  // display name (e.g., "Smith v Jones") AND record number (e.g., "MAT-2026-01234")
+  // in the substring filter. Both fields are populated on sprk_todo by the
+  // PolymorphicResolverService when the todo is created regarding a parent.
+  'sprk_regardingrecordname',
+  'sprk_regardingrecordnumber',
 ];
 
 /**

@@ -562,15 +562,29 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
     return sortTodoItems([...dedupedActive, ...addedItems]);
   }, [activeItems, addedItems]);
 
-  // Code-review hotfix 2026-06-27 — apply Header SearchBox filter (when set).
+  // Code-review hotfix 2026-06-27 — apply Header Filter input (when set).
   // Mirrors `SmartTodoWidget.tsx:552-560` substring-match-on-name+description.
+  //
+  // DEF-11 Part 3 (2026-07-04, record-header-and-notepad-r1) — extended to
+  // also match the regarding-record display name (`sprk_regardingrecordname`)
+  // and record number (`sprk_regardingrecordnumber`) resolver text fields.
+  // Users can now type e.g. "Smith v Jones" or "MAT-2026-01234" and see just
+  // the todos related to that matter — without needing to drill from the
+  // Matter form's checkmark.
   const displayItems = React.useMemo(() => {
     const q = (searchQuery ?? "").trim().toLowerCase();
     if (!q) return mergedItems;
     return mergedItems.filter((item) => {
       const name = (item.sprk_name ?? "").toLowerCase();
       const desc = (item.sprk_description ?? "").toLowerCase();
-      return name.includes(q) || desc.includes(q);
+      const regardingName = (item.sprk_regardingrecordname ?? "").toLowerCase();
+      const regardingNumber = (item.sprk_regardingrecordnumber ?? "").toLowerCase();
+      return (
+        name.includes(q) ||
+        desc.includes(q) ||
+        regardingName.includes(q) ||
+        regardingNumber.includes(q)
+      );
     });
   }, [mergedItems, searchQuery]);
 
