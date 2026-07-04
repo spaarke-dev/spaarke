@@ -92,16 +92,18 @@ const useStyles = makeStyles({
 
   badge: {
     position: 'absolute',
-    top: 0,
-    // rtl-safe: inset-inline-end keeps the badge on the visual trailing
-    // edge under both LTR and RTL layouts.
-    insetInlineEnd: 0,
-    // Nudge the badge outward by ~half its diameter so it visually sits on
-    // the corner rather than inside the button.
-    transform: 'translate(35%, -35%)',
-    // Ensure the badge sits above the button surface.
+    // v1.0.14 UAT (2026-07-04): the previous placement used
+    // `top: 0; insetInlineEnd: 0; transform: translate(35%, -35%)` which
+    // shifted the badge OUTSIDE the button by ~35% of its width. That was
+    // borderline-visible with size="small" (v1.0.11) and got fully clipped by
+    // the Power Apps form-header container's overflow when we bumped size to
+    // "medium" (v1.0.13). Fix: anchor the badge INSIDE the button's top-right
+    // corner with a small negative offset — visible, guaranteed non-clipped,
+    // and still corner-attached. `pointer-events: none` keeps clicks passing
+    // through to the button behind.
+    top: '-2px',
+    insetInlineEnd: '-2px',
     zIndex: 1,
-    // Non-interactive — clicks pass through to the button behind it.
     pointerEvents: 'none',
   },
 });

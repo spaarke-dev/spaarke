@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <manifest>
-  <control namespace="Spaarke.Records" constructor="MatterHeader" version="1.0.13"
+  <control namespace="Spaarke.Records" constructor="MatterHeader" version="1.0.14"
            display-name-key="Matter Header"
-           description-key="Compact 5-field summary card + 3-action toolbar for Matter records. Part of the record-header-and-notepad-r1 shared primitive set. (v1.0.13 — UAT: toolbar CounterBadge bumped to medium size for legibility)"
+           description-key="Compact 5-field summary card + 3-action toolbar for Matter records. Part of the record-header-and-notepad-r1 shared primitive set. (v1.0.14 — UAT: fix CounterBadge clipping by anchoring inside button corner instead of shifting outward)"
            control-type="virtual">
 
     <!-- Bound field: any SingleLine.Text field on the host entity (Matter). The PCF replaces
