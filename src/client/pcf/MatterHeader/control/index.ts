@@ -43,12 +43,12 @@ export class MatterHeader implements ComponentFramework.ReactControl<IInputs, IO
     const showVersion = context.parameters.showVersion?.raw !== false;
 
     // v1.0.11 — wrap in `MatterHeaderHost` which mounts a `<FluentProvider>` so
-    // Fluent v9 CSS variables reach the portal-rendered `AiSummaryPopover`
-    // surface. Platform-library's auto-theming is applied on the PCF root
-    // only; portals mount to `document.body` outside that scope. Mirrors
-    // `VisualHostHost.tsx`. Root cause of the v1.0.4..v1.0.10 popover-styling
-    // regression per QA rounds 6..10.
-    return React.createElement(MatterHeaderHost, { recordId, title, showVersion });
+    // Fluent v9 CSS variables reach the portal-rendered `AiSummaryPopover`.
+    // v1.0.12 (DEF-09) — pass `context` so the host's theme resolver can read
+    // `context.fluentDesignLanguage.isDarkTheme` (Power Apps native dark-mode
+    // signal). Adds live-listening for `spaarke-theme-change` events + the
+    // `(forced-colors: active)` media query — dynamic light/dark/HC support.
+    return React.createElement(MatterHeaderHost, { recordId, title, showVersion, context });
   }
 
   public getOutputs(): IOutputs {

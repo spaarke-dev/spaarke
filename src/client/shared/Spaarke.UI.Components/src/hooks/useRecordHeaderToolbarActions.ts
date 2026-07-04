@@ -247,8 +247,21 @@ export function useRecordHeaderToolbarActions(
   // modal, nothing. Verified by cross-referencing every working
   // `pageType: "webresource"` call in this repo (LegalWorkspace WorkspaceGrid,
   // SpaarkeAi launch-resolver, xrmNavigationServiceAdapter).
-  const buildWebresourceData = React.useCallback((): string => {
+  // Notepad launch payload: `regardingEntity=<entity>&regardingId=<id>` per
+  // spec NFR-09 external API contract. Data MUST be a string — see gotcha
+  // notes above about `pageType: 'webresource'` payload shape.
+  const buildNotepadLaunchData = React.useCallback((): string => {
     return `regardingEntity=${encodeURIComponent(entity)}&regardingId=${encodeURIComponent(recordId)}`;
+  }, [entity, recordId]);
+
+  // DEF-11 (2026-07-04): SmartTodo openTodos launch payload — reuses the R4
+  // FR-34 contract shipped in `src/solutions/SmartTodo/src/hooks/useLaunchContext.ts`
+  // to pre-filter the Kanban to the current record's related to-dos.
+  // Explicit `action=openTodos` form; SmartTodo's `useLaunchContext` recognizes
+  // this and applies the regarding filter automatically.
+  // Data MUST be a string (same gotcha as Notepad payload).
+  const buildSmartTodoLaunchData = React.useCallback((): string => {
+    return `action=openTodos&regardingType=${encodeURIComponent(entity)}&regardingId=${encodeURIComponent(recordId)}`;
   }, [entity, recordId]);
 
   const handleCheckmarkClick = React.useCallback((): void => {
@@ -275,7 +288,7 @@ export function useRecordHeaderToolbarActions(
         {
           pageType: 'webresource',
           webresourceName: SMARTTODO_WEBRESOURCE_NAME,
-          data: buildWebresourceData(),
+          data: buildSmartTodoLaunchData(),
         },
         LAYOUT_1_MODAL as unknown as Record<string, unknown>
       )
@@ -287,7 +300,7 @@ export function useRecordHeaderToolbarActions(
         // eslint-disable-next-line no-console
         console.error('[RecordHeader] SmartTodo navigateTo failed', err);
       });
-  }, [buildWebresourceData, entity, recordId]);
+  }, [buildSmartTodoLaunchData, entity, recordId]);
 
   const handleAnnotationClick = React.useCallback((): void => {
     // eslint-disable-next-line no-console
@@ -304,7 +317,7 @@ export function useRecordHeaderToolbarActions(
         {
           pageType: 'webresource',
           webresourceName: NOTEPAD_WEBRESOURCE_NAME,
-          data: buildWebresourceData(),
+          data: buildNotepadLaunchData(),
         },
         NOTEPAD_MODAL as unknown as Record<string, unknown>
       )
@@ -316,7 +329,7 @@ export function useRecordHeaderToolbarActions(
         // eslint-disable-next-line no-console
         console.error('[RecordHeader] Notepad navigateTo failed', err);
       });
-  }, [buildWebresourceData, entity, recordId]);
+  }, [buildNotepadLaunchData, entity, recordId]);
 
   // ── Slot definitions ───────────────────────────────────────────────────────
   //

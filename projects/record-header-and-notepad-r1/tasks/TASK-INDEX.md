@@ -1,7 +1,8 @@
 # Task Index — Record Header + Notepad R1
 
 > **Generated**: 2026-07-02 by `/project-pipeline` → `task-create`
-> **Total Tasks**: 36 (14 Phase 1 + 6 Phase 2 + 12 Phase 3 + 3 Phase 4 + 1 wrap-up)
+> **Last Updated**: 2026-07-04 — Phase 6 extension added per user "reasonable-scope" ask (rounds 10 live QA + DEF absorption)
+> **Total Tasks**: 42 (14 Phase 1 + 6 Phase 2 + 12 Phase 3 + 3 Phase 4 + 6 Phase 6 extension + 1 wrap-up)
 > **Spec**: [../spec.md](../spec.md) · **Plan**: [../plan.md](../plan.md) · **CLAUDE.md**: [../CLAUDE.md](../CLAUDE.md)
 
 ---
@@ -33,7 +34,7 @@
 | 022 | MatterHeaderView composition | 2 | ✅ | 021 | — | FULL |
 | 023 | Matter solution folder + pack.ps1 | 2 | ✅ | 022 | — | STANDARD |
 | 024 | Build + verify bundle (NFR-02, NFR-04) | 2 | ✅ | 023 | — | STANDARD |
-| 025 | Deploy PCF + manual QA | 2 | 🔲 | 024, 020 | — | STANDARD |
+| 025 | Deploy PCF + manual QA | 2 | ✅ | 024, 020 | — | STANDARD |
 | 030 | Notepad Vite scaffold | 3 | ✅ | 011 | — | FULL |
 | 031 | Notepad types + deriveTitle utility | 3 | ✅ | 001 | D | STANDARD |
 | 032 | useLaunchContext hook (FR-13) | 3 | ✅ | 030 | D | STANDARD |
@@ -43,12 +44,18 @@
 | 036 | CreatedByPopover component (FR-18) | 3 | ✅ | 033 | E | FULL |
 | 037 | NotepadShell integration (FR-14/15/16/18) | 3 | ✅ | 034, 035, 036 | — | FULL |
 | 038 | URL-param error handling verification (FR-13) | 3 | ✅ | 037 | — | STANDARD |
-| 039 | Vite build + deploy as sprk_notepad_page | 3 | 🔲 | 038 | — | STANDARD |
-| 040 | Entity-agnostic launch test (FR-19) | 3 | 🔲 | 039 | F | STANDARD |
+| 039 | Vite build + deploy as sprk_notepad webresource | 3 | ✅ | 038 | — | STANDARD |
+| 040 | Entity-agnostic launch test (FR-19) | 3 | ✅ | 039 | F | STANDARD |
 | 041 | Notepad integration test (round trip) | 3 | ✅ | 039 | F | STANDARD |
 | 050 | Authoring guide skeleton | 4 | ✅ | 025 | — | MINIMAL |
 | 051 | Authoring guide full content | 4 | ✅ | 050 | — | MINIMAL |
 | 052 | Pattern pointer (touches .claude/) | 4 | ✅ | 051 | — | MINIMAL |
+| 060 | DEF-07 — PCF build-scaffold pattern doc | 6 | 🔲 | 052 | — | MINIMAL |
+| 061 | DEF-02 — Matter form binding maker instructions | 6 | 🔲 | 025 | — | MINIMAL |
+| 062 | DEF-09 — Port ThemeProvider from VisualHost for dark mode | 6 | 🔲 | 025 | — | STANDARD |
+| 063 | DEF-06 — Add exports field to @spaarke/ui-components + migrate R1 imports | 6 | ⏸️ | 013 | — | STANDARD |
+| 064 | DEF-10 — Notepad SPA bundle-size perf (chunk-split, drop deps) | 6 | 🔲 | 039 | — | STANDARD |
+| 065 | DEF-11 — Checkmark → sprk_todospage DataGrid Code Page | 6 | 🔲 | 025 | — | FULL |
 | 090 | Project wrap-up (MANDATORY) | 5 | 🔲 | all | — | FULL |
 
 ---

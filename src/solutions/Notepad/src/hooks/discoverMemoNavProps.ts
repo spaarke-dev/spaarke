@@ -39,7 +39,9 @@
  * @see src/client/shared/Spaarke.UI.Components/src/services/PolymorphicResolverService.ts
  */
 
-import type { INavPropEntry } from '@spaarke/ui-components/services';
+// DEF-10 (2026-07-04) — deep-path import to skip the services barrel (which
+// re-exports `EntityCreationService` → `mammoth` docx parser, ~300 KB).
+import type { INavPropEntry } from '@spaarke/ui-components/services/PolymorphicResolverService';
 
 // ---------------------------------------------------------------------------
 // Module-local cache

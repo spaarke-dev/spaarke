@@ -42,6 +42,16 @@
 
 import * as React from 'react';
 import { makeStyles, tokens } from '@fluentui/react-components';
+// v1.0.12 (DEF-06 partial) — the shared lib's `package.json` now defines an
+// `exports` map at `@spaarke/ui-components` so consumers on modern TypeScript
+// (`moduleResolution: "bundler"` or `"node16"`) can use clean subpaths like
+// `@spaarke/ui-components/RecordHeader`. THIS PCF's tsconfig extends
+// `pcf-scripts/tsconfig_base.json` which uses legacy `moduleResolution: "node"`
+// — it does NOT read the exports field. Migrating requires bumping the
+// pcf-scripts baseline, out of R1 scope. R1's own imports stay on
+// `dist/*` (the exports field includes a `./dist/*` fallback entry so this
+// path resolves cleanly through the exports gate). Downstream Code Page
+// consumers (Vite/Rollup) on bundler resolution get the clean-subpath UX now.
 import {
   FieldGrid,
   RecordHeaderShell,

@@ -49,7 +49,8 @@
  */
 
 import * as React from 'react';
-import { parseDataParams } from '@spaarke/ui-components/utils';
+// DEF-10 (2026-07-04) — deep-path import to skip the utils barrel.
+import { parseDataParams } from '@spaarke/ui-components/utils/parseDataParams';
 
 // ---------------------------------------------------------------------------
 // Constants — external API surface per NFR-09

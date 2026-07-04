@@ -49,9 +49,14 @@
 
 import * as React from 'react';
 
-import { applyResolverFields } from '@spaarke/ui-components/services';
-import type { IPolymorphicWebApi } from '@spaarke/ui-components/services';
-import { SUPPORTED_MEMO_PARENTS } from '@spaarke/ui-components';
+// DEF-10 (2026-07-04) — deep-path imports to skip barrels.
+// `services/index.ts` re-exports `EntityCreationService` → `mammoth` (~300 KB
+// docx parser) which Notepad has no use for. The top-level `@spaarke/ui-components`
+// barrel re-exports every component (Lexical rich-text editor, PDF.js, App
+// Insights, etc.). Direct-file imports let Vite tree-shake all of that away.
+import { applyResolverFields } from '@spaarke/ui-components/services/PolymorphicResolverService';
+import type { IPolymorphicWebApi } from '@spaarke/ui-components/services/PolymorphicResolverService';
+import { SUPPORTED_MEMO_PARENTS } from '@spaarke/ui-components/hooks/toolbarLaunchDefaults';
 
 import type { Memo, MemoRaw } from '../types/memo';
 import { discoverMemoNavProps } from './discoverMemoNavProps';

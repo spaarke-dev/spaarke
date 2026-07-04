@@ -50,8 +50,10 @@ const mockApplyResolverFields = jest.fn(
   }
 );
 
+// DEF-10 (2026-07-04) — mock targets updated to the deep-path modules used by
+// the source (see useSprkMemoRepository.ts imports).
 jest.mock(
-  '@spaarke/ui-components/services',
+  '@spaarke/ui-components/services/PolymorphicResolverService',
   () => ({
     applyResolverFields: (...args: any[]) =>
       (mockApplyResolverFields as any)(...args),
@@ -59,9 +61,9 @@ jest.mock(
   { virtual: true }
 );
 
-// Mock the top-level barrel that provides SUPPORTED_MEMO_PARENTS.
+// Mock the toolbarLaunchDefaults module that provides SUPPORTED_MEMO_PARENTS.
 jest.mock(
-  '@spaarke/ui-components',
+  '@spaarke/ui-components/hooks/toolbarLaunchDefaults',
   () => ({
     SUPPORTED_MEMO_PARENTS: {
       sprk_matter: 'sprk_regardingmatter',

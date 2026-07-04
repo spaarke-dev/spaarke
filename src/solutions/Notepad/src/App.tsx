@@ -17,7 +17,7 @@ import { FluentProvider } from "@fluentui/react-components";
 import {
   resolveCodePageTheme,
   setupCodePageThemeListener,
-} from "@spaarke/ui-components/utils";
+} from "@spaarke/ui-components/utils/themeStorage";
 import { NotepadShell } from "./components/NotepadShell";
 
 export function App() {

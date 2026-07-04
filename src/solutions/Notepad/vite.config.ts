@@ -68,9 +68,19 @@ export default defineConfig({
     alias: {
       "@": path.resolve(__dirname, "./src"),
       "@spaarke/ui-components/PanelSplitter": path.resolve(sharedLibRoot, "components/PanelSplitter/index.ts"),
-      "@spaarke/ui-components/hooks": path.resolve(sharedLibRoot, "hooks/useTwoPanelLayout.ts"),
-      "@spaarke/ui-components/services": path.resolve(sharedLibRoot, "services/index.ts"),
-      "@spaarke/ui-components/utils": path.resolve(sharedLibRoot, "utils/index.ts"),
+      // DEF-10 (2026-07-04): alias the subpath prefixes to DIRECTORIES rather
+      // than to barrel `index.ts` files. This lets deep-path imports such as
+      // `@spaarke/ui-components/services/PolymorphicResolverService` resolve
+      // through Vite's default file lookup, skipping the barrel and its
+      // transitive re-exports (services barrel pulls in EntityCreationService →
+      // `mammoth` docx parser, ~300 KB; utils barrel pulls in top-level barrel;
+      // top-level barrel pulls in Lexical + PDF.js + App Insights).
+      // Barrel behavior is preserved because Vite still resolves the bare
+      // subpath (e.g. `@spaarke/ui-components/utils`) to `utils/index.ts` by
+      // default file-lookup, matching the previous alias exactly.
+      "@spaarke/ui-components/hooks": path.resolve(sharedLibRoot, "hooks"),
+      "@spaarke/ui-components/services": path.resolve(sharedLibRoot, "services"),
+      "@spaarke/ui-components/utils": path.resolve(sharedLibRoot, "utils"),
       "@spaarke/ui-components": path.resolve(sharedLibRoot, "index.ts"),
     },
     // Ensure shared lib imports resolve from Notepad's node_modules

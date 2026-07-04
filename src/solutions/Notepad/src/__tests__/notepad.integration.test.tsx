@@ -83,8 +83,10 @@ const mockApplyResolverFields = jest.fn(
   }
 );
 
+// DEF-10 (2026-07-04) — mock targets updated to deep-path modules to match
+// source imports in useSprkMemoRepository.ts + useLaunchContext.ts.
 jest.mock(
-  "@spaarke/ui-components/services",
+  "@spaarke/ui-components/services/PolymorphicResolverService",
   () => ({
     applyResolverFields: (...args: any[]) =>
       (mockApplyResolverFields as any)(...args),
@@ -92,10 +94,10 @@ jest.mock(
   { virtual: true }
 );
 
-// SUPPORTED_MEMO_PARENTS — top-level barrel. Values match the schema map in
-// `useSprkMemoRepository.test.ts`.
+// SUPPORTED_MEMO_PARENTS — direct module (deep path). Values match the schema
+// map in `useSprkMemoRepository.test.ts`.
 jest.mock(
-  "@spaarke/ui-components",
+  "@spaarke/ui-components/hooks/toolbarLaunchDefaults",
   () => ({
     SUPPORTED_MEMO_PARENTS: {
       sprk_matter: "sprk_regardingmatter",
@@ -117,7 +119,7 @@ jest.mock(
 // Note: `let` inside a `jest.mock` factory won't work (factory is hoisted). We
 // stash the injected value on `globalThis` and read it inside the mock.
 jest.mock(
-  "@spaarke/ui-components/utils",
+  "@spaarke/ui-components/utils/parseDataParams",
   () => ({
     parseDataParams: (_search: string): Record<string, string> => {
       // Prefer the per-test injected search (set via setLaunchSearch); fall back

@@ -314,12 +314,16 @@ describe('useRecordHeaderToolbarActions', () => {
     expect(mockNavigateTo).toHaveBeenCalledTimes(1);
     const [pageInput, navOptions] = mockNavigateTo.mock.calls[0];
     expect(pageInput.pageType).toBe('webresource');
-    expect(pageInput.name).toBe(SMARTTODO_WEBRESOURCE_NAME);
-    // Launch-contract URL params — external API surface per NFR-09.
-    expect(pageInput.data).toEqual({
-      regardingEntity: MATTER_ENTITY,
-      regardingId: MATTER_GUID,
-    });
+    // Fix (2026-07-04): source uses `webresourceName` (per PCF pageType gotcha
+    // documented above buildNotepadLaunchData); test previously asserted `.name`
+    // which was pre-existing broken. Aligned with source contract.
+    expect(pageInput.webresourceName).toBe(SMARTTODO_WEBRESOURCE_NAME);
+    // DEF-11 (2026-07-04): checkmark now emits SmartTodo's `openTodos` contract
+    // so the Kanban pre-filters to the current record's related to-dos. Data is
+    // a URL-encoded query STRING, not an object (see PCF gotcha above).
+    expect(pageInput.data).toBe(
+      `action=openTodos&regardingType=${encodeURIComponent(MATTER_ENTITY)}&regardingId=${encodeURIComponent(MATTER_GUID)}`
+    );
     // Layout 1: 85% × 85% modal (target=2, position=1).
     expect(navOptions).toEqual(LAYOUT_1_MODAL);
   });
@@ -347,11 +351,14 @@ describe('useRecordHeaderToolbarActions', () => {
     expect(mockNavigateTo).toHaveBeenCalledTimes(1);
     const [pageInput, navOptions] = mockNavigateTo.mock.calls[0];
     expect(pageInput.pageType).toBe('webresource');
-    expect(pageInput.name).toBe(NOTEPAD_WEBRESOURCE_NAME);
-    expect(pageInput.data).toEqual({
-      regardingEntity: MATTER_ENTITY,
-      regardingId: MATTER_GUID,
-    });
+    // Fix (2026-07-04): source uses `webresourceName` (per PCF pageType gotcha);
+    // test previously asserted `.name` which was pre-existing broken.
+    expect(pageInput.webresourceName).toBe(NOTEPAD_WEBRESOURCE_NAME);
+    // Notepad's data is the plain `regardingEntity=<entity>&regardingId=<id>`
+    // form per spec NFR-09 launch contract (string, not object).
+    expect(pageInput.data).toBe(
+      `regardingEntity=${encodeURIComponent(MATTER_ENTITY)}&regardingId=${encodeURIComponent(MATTER_GUID)}`
+    );
     // Notepad modal is 70% × 80% (distinct from Layout 1).
     expect(navOptions).toEqual(NOTEPAD_MODAL);
   });
