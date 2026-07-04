@@ -1,6 +1,6 @@
 # Current Task State — spaarke-ai-platform-unification-r7
 
-> **Last Updated**: 2026-07-03 (Phase 12.3a client-side wiring for `linear_dispatch` complete; ready to build + deploy + UAT)
+> **Last Updated**: 2026-07-04 (context-handoff, pre-compact)
 > **Recovery**: Read "Quick Recovery" section first
 
 ---
@@ -9,182 +9,124 @@
 
 | Field | Value |
 |-------|-------|
-| **Session** | R7 close — Wave 12.3+ chat-summarize + Playbook-manifest composition model |
-| **Status** | **Phase 12.3a client-side wiring COMPLETE (uncommitted).** All four subtasks done + tsc-surface-gate confirms 0 surface-owned TS errors. Next: build + deploy client + UAT smoke Assistant pane summarize. |
+| **Session** | R7 Wave 12.3 Phase 12.3a closed + strategic pivot to canonical Spaarke AI architecture design |
+| **Status** | **Wave 12.3 summarize flow WORKING end-to-end** (curl + browser UAT). **Now paused for strategic architecture design.** Operator to review §3 of new canonical doc before we draft §4-8. |
 | **Branch** | `work/spaarke-ai-platform-unification-r7` |
-| **Latest commits** | Server side of Wave 12.3 merged via PR #546 (`5f8543457`); D-13 revision pushed as `b1e4a4b11`; server keyword-match bypass = `139014adc` |
-| **Uncommitted (server, from prior turn)** | `LinearDispatchSseEvent.cs`, `ChatSseEventFactory.cs`, `ChatEndpoints.cs` (keyword bypass + `TryDetectExplicitConsumerType`). |
-| **Uncommitted (client, this turn)** | `types.ts` (new `ILinearDispatchPayload` + `IChatSseEventData` fields + `ChatSseEventType` extension + prop + hook API), `useSseStream.ts` (parse `linear_dispatch` case + ref + setter), `SprkChat.tsx` (prop + useEffect wiring), `ConversationPane.tsx` (`handleLinearDispatch` + prop wire), `executeLinearDispatch.ts` (NEW companion helper for the pre-promoted case). |
-| **Next Action** | **Build + deploy SpaarkeAi code page + UAT smoke.** Note: local Vite build blocked on missing `@spaarke/legal-workspace` workspace dep in node_modules (unrelated to this task); `tsc --noEmit` on shared lib passes 0 errors. Recommend `npm install` at solutions root before deploying, or use CI. |
+| **Latest commit** | `5f77a1d9c docs(architecture): canonical Spaarke AI Architecture and Component Design v0.1` (pushed to origin 2026-07-04) |
+| **Uncommitted** | none — clean tree |
+| **Next Action** | **Wait for operator review of §3 (use cases) in [`docs/architecture/SPAARKE-AI-ARCHITECTURE-AND-COMPONENT-DESIGN.md`](../../docs/architecture/SPAARKE-AI-ARCHITECTURE-AND-COMPONENT-DESIGN.md).** After approval → draft §4 architecture overview, §5 component model, §6 capability manifest, §7 intent+dispatch (resolves the 4-mechanism drift), §8 roadmap. |
+
+### Critical context (30-second read)
+
+Today's work had two phases. **Phase 1 (morning-afternoon)**: chased and closed the Wave 12.3 Phase 12.3a summarize failures — shipped 7 commits (session-id fix, ExtractedText persistence, auto-promote, field_delta synthesis, retry-with-backoff diagnostics, plus a broadened summarize regex to handle typos). Verified end-to-end via `curl` on session `9d466fd406b54e5d8777642849cd90f3` AND browser UAT. Summary tab renders TL;DR, Summary, Keywords, Entities correctly.
+
+**Phase 2 (evening) — strategic pivot triggered by operator**: the operator recognized we've been shipping one-off tactical patches without a coherent target architecture for the general N-capability case. Spaarke AI is a **portfolio of AI capabilities for legal operations**, not a "summarize a document" tool. Certain Wave 12.3 artifacts (server-side regex in `TryDetectExplicitConsumerType`, `linear_dispatch` SSE event, `executeLinearDispatch.ts` client helper) are architecturally out of place — they create a fourth intent-detection mechanism in a system that already had three (CapabilityRouter, LLM agent tool loop, SoftSlashRouter). Operator directed a strategic pause to define the canonical architecture.
+
+**Deliverable this session**: [`docs/architecture/SPAARKE-AI-ARCHITECTURE-AND-COMPONENT-DESIGN.md`](../../docs/architecture/SPAARKE-AI-ARCHITECTURE-AND-COMPONENT-DESIGN.md) v0.1 — canonical Spaarke AI architecture doc with §0-3 drafted (intro, product context, competitive landscape, 28 use cases in 7 categories with stable UC-* IDs). §4-8 explicitly deferred to next iteration pending operator review.
 
 ---
 
-## Companion docs (READ IN THIS ORDER)
+## Files modified this session
 
-1. **Canonical R7 close plan** — [`notes/r7-close-plan-2026-07-03.md`](notes/r7-close-plan-2026-07-03.md) — **NEW — READ THIS FIRST**. Design decisions locked; phased execution scope; vocabulary.
-2. Wave 12.3 canonical plan (chat-summarize) — [`notes/wave12-3-assistant-summarize-canonical-plan.md`](notes/wave12-3-assistant-summarize-canonical-plan.md)
-3. Wave 12 tech debt inventory — [`notes/wave12-linear-migration-tech-debt.md`](notes/wave12-linear-migration-tech-debt.md)
-4. R7 delivery + UAT — [`notes/wave12-uat-checklist-2026-07-02.md`](notes/wave12-uat-checklist-2026-07-02.md)
+### Committed today (all pushed to origin)
 
----
+**Server (BFF) — Wave 12.3 UAT fixes**:
+- `src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs` — server keyword-match `linear_dispatch` bypass; `TryDetectExplicitConsumerType` with regex; diagnostic log (`Wave 12.3 keyword-check`); broadened regex for typos (`sumarize`, `summerize` etc.). **Architecturally at risk in §7 dispatch redesign.**
+- `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SseEventTypes/LinearDispatchSseEvent.cs` — new SSE event type. **Architecturally at risk.**
+- `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SseEventTypes/ChatSseEventFactory.cs` — factory method for the event.
+- `src/server/api/Sprk.Bff.Api/Models/Ai/Chat/ChatSession.cs` — added `ChatSessionFile.ExtractedText` nullable init-only property.
+- `src/server/api/Sprk.Bff.Api/Api/Ai/ChatDocumentEndpoints.cs` — persist `ExtractedText` at upload time.
+- `src/server/api/Sprk.Bff.Api/Services/Ai/LinearConsumers/SessionFileTextSource.cs` — read inline `ExtractedText` first; RAG fallback.
 
-## What is DONE (Wave 12.3 server side)
+**Client (shared libs + SpaarkeAi) — Wave 12.3 UAT fixes**:
+- `src/client/shared/Spaarke.UI.Components/src/components/SprkChat/types.ts` — `ILinearDispatchPayload` interface, `linear_dispatch` variant on `ChatSseEventType`, `onLinearDispatch` prop, `onSessionStale` prop, `resumeSession` API.
+- `src/client/shared/Spaarke.UI.Components/src/hooks/useSseStream.ts` — parser branch for `linear_dispatch`, `setOnLinearDispatch` callback ref.
+- `src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx` — `initialSessionId` now honored via `resumeSession()`; `onSessionStale` wiring; prop destructure for `onLinearDispatch`.
+- `src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useChatSession.ts` — new `resumeSession(id)`; `loadHistory()` returns `{ok, staleSession?}`.
+- `src/client/shared/Spaarke.AI.Widgets/src/providers/AiSessionProvider.tsx` — new `clearChatSession()`; `removeSession()` helper.
+- `src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx` — auto-promote `useEffect` (POSTs ready chips to `/documents`); `handleLinearDispatch`; `handleSessionStale`; retired NL `executeSummarizeIntent` branch. Latest edit adds explicit diagnostics + retry-with-backoff to auto-promote.
+- `src/solutions/SpaarkeAi/src/components/conversation/executeLinearDispatch.ts` — new companion helper (widget_load + POST /summarize + SSE bridge). **Architecturally at risk in §7 dispatch redesign.**
+- `src/solutions/SpaarkeAi/src/components/conversation/sseToPaneEventBridge.ts` — synthesize `field_delta` events from `complete` chunk's `result` payload per top-level property.
 
-Committed on `a34631f03`, merged to master via PR #546:
+**Docs**:
+- `projects/spaarke-ai-platform-unification-r7/notes/current-architecture-map-2026-07-03.md` — architecture map + KQL queries + regression analysis (diagnostic artifact, not authoritative).
+- `projects/spaarke-ai-platform-unification-r7/notes/summarize-flow-2026-07-03.md` — end-to-end trace of the successful summarize flow (preserves the working-state knowledge).
+- `docs/architecture/SPAARKE-AI-ARCHITECTURE-AND-COMPONENT-DESIGN.md` — **CANONICAL v0.1** — Spaarke AI architecture doc. §0-3 drafted (intro, product context, competitive landscape, 28 use cases with UC-* IDs). §4-8 deferred pending operator review of §3.
 
-- **Chat Summarize Linear dispatch**: `SessionSummarizeOrchestrator` checks `IConsumerRoutingService.ResolveActionAsync("chat-summarize")` first → if populated (it is — routing row `sprk_action = eeb05bfd-1260-f111-ab0b-70a8a59455f4`), dispatches to `FileSummarizeService.ExecuteAsync(text, filename, ConsumerTypes.ChatSummarize, ctx, ct)`. Fall-through preserves engine path.
-- **`FileSummarizeService.ExecuteAsync` parameterized** — accepts `consumerType` arg (was hardcoded). Same class serves both Workspace File Summary AND Chat Summarize.
-- **`ISessionFileTextSource` + `SessionFileTextSource`** — session-scoped RAG (`SessionId`, keyword-only, no vector/semantic ranking) concatenates all chunks for target files with per-file headers for multi-file input.
-- **Option 3 routing table refactor**:
-  - Added `sprk_action` LOOKUP column to `sprk_playbookconsumer` (→ `sprk_analysisaction`)
-  - Extended `IConsumerRoutingService` with `ResolveActionAsync(consumerType)` — same query + selection algorithm as `ResolveAsync`; returns `sprk_action` GUID
-  - `ActionResolver` refactored to use `ResolveActionAsync` (retired `LinearConsumersOptions.ActionIds` map)
-  - Populated `sprk_action` on 4 existing rows (chat-summarize, summarize-file, matter-pre-fill, project-pre-fill)
-  - Created new routing row for `document-profile` (Doc Upload wizard's IActionResolver lookup)
-  - Retired `LinearConsumersOptions.ActionIds` + `TryGetActionId`
-  - Deleted 4 `LinearConsumers__ActionIds__*` App Settings on `spaarke-bff-dev`
-- **Deploy verified**: 46.84 MB package, hash-verify 4/4 ✓, `/healthz` 200, `POST /api/ai/chat/sessions/.../summarize` returns 401 (route registered, needs auth)
+### Commits this session (chronological)
 
----
+| Commit | Purpose |
+|---|---|
+| `139014adc` | server-side `linear_dispatch` SSE event + keyword-match bypass |
+| `7f0e42b30` | client SSE wiring + first `executeLinearDispatch.ts` |
+| `a9bdd2f88` | retire client NL `executeSummarizeIntent` branch (avoid double dispatch) |
+| `5ab21578b` | persist `ExtractedText` on `ChatSessionFile`; SessionFileTextSource inline-first |
+| `ab8ab68a8` | resume, don't recreate, persisted chat sessions (single session id) |
+| `68e8b96f1` | auto-promote ready chips to `/documents` (regression from executeSummarizeIntent retire) |
+| `2d4e0c8d8` | bridge synthesizes `field_delta` from `complete` chunk result payload |
+| `1e366dc5b` | docs: successful summarize flow synopsis + component model |
+| `5f77a1d9c` | **docs: canonical Spaarke AI Architecture and Component Design v0.1** ← current tip |
 
-## Phase 12.3a Progress (in-flight)
+### App Insights connection (for next session's KQL queries)
 
-**Operator direction (2026-07-03)**: for NL messages the intent-match confidence must be
-100% (deterministic keyword match) to auto-dispatch; anything less → show top-3 candidates
-+ library option. Slash commands = direct route (auto-dispatch).
+- App ID: `6a76b012-46d9-412f-b4ab-4905658a9559`
+- Endpoint: `westus2-2.in.applicationinsights.azure.com`
+- Successful curl reproduction session id: `9d466fd406b54e5d8777642849cd90f3` (~22:31 UTC 2026-07-03)
 
-### Design pattern implemented (server side)
+### Curl-driven repro (bypasses browser cache)
 
-- NEW SSE event type `linear_dispatch` (distinct from `playbook_options` per FR-48 invariant).
-- Server detects explicit summarize keywords ("summarize", "summary", "summarise") whole-word case-insensitive.
-- On match + attachments present → emit `linear_dispatch` event carrying the target endpoint URL, consumer type, request body, session file IDs; skip PhaseB entirely.
-- On no keyword match → existing PhaseB flow (playbook_options with candidates).
+See §6 of `notes/summarize-flow-2026-07-03.md`. Full working bash script:
 
-### Server changes (uncommitted, build clean)
+```bash
+TOKEN=$(az account get-access-token --resource "api://1e40baad-e065-4aea-a8d4-4b7ab273458c" --query "accessToken" -o tsv)
+TID=a221a95e-6abc-4434-aecc-e48338a1b2f2
+# ... create session, upload doc, POST /messages, POST /summarize
+```
 
-1. `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SseEventTypes/LinearDispatchSseEvent.cs` — NEW file
-2. `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SseEventTypes/ChatSseEventFactory.cs` — added `CreateLinearDispatchEvent` factory method
-3. `src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs` — insert keyword-match bypass before `RunPhaseBVectorMatchAsync` (line ~633); new helper method `TryDetectExplicitConsumerType(message)` + compiled `SummarizeKeywordRegex`
-
-### Client changes (COMPLETE — uncommitted)
-
-**All four subtasks landed 2026-07-03. tsc --noEmit on shared lib = 0 errors.
-tsc-surface-gate on SpaarkeAi = 0 surface-owned errors.**
-
-1. **`src/client/shared/Spaarke.UI.Components/src/components/SprkChat/types.ts`** ✅
-   - Added `ILinearDispatchPayload` interface (mirrors BFF `LinearDispatchSseEventData`)
-   - Added `linear_dispatch` variant to `ChatSseEventType` union
-   - Added `consumerType`, `dispatchUrl`, `requestBody`, `reason` fields to `IChatSseEventData` (sessionAttachmentIds reused from playbook_options)
-   - Added `onLinearDispatch?` prop to `ISprkChatProps`
-   - Added `setOnLinearDispatch` to `IUseSseStreamResult`
-
-2. **`src/client/shared/Spaarke.UI.Components/src/hooks/useSseStream.ts`** ✅
-   - Import `ILinearDispatchPayload`
-   - Added `onLinearDispatch` to `SseEventHandlers` interface
-   - Added `else if (event.type === 'linear_dispatch')` branch in `processEvent`
-   - Added `onLinearDispatchRef` + `setOnLinearDispatch` (synchronous callback-ref pattern, mirrors `setOnPlaybookOptions`)
-   - Exposed `setOnLinearDispatch` from the returned hook API
-
-3. **`src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChat.tsx`** ✅
-   - Destructured `setOnLinearDispatch` from `sseStream`
-   - Added `onLinearDispatch: onLinearDispatchProp` to destructured props
-   - Added `useEffect` that wires prop → setter (mirrors playbook_options `useEffect`)
-
-4. **`src/solutions/SpaarkeAi/src/components/conversation/executeLinearDispatch.ts`** ✅ (NEW file)
-   - Companion helper to `executeSummarizeIntent.ts` for the pre-promoted case
-   - Steps: (1) emit `workspace.widget_load` for Summary tab; (2) POST to `dispatchUrl` with `requestBody`; (3) consume SSE stream, bridge via `createSseToPaneEventBridge` to `workspace.streaming_*` events
-   - `resolveWidgetConfig(consumerType)` currently handles `chat-summarize`; extend as future consumers migrate
-
-5. **`src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx`** ✅
-   - Imported `executeLinearDispatch`
-   - Added `handleLinearDispatch` React.useCallback with structural-only logging + interstitial chat message + fire-and-forget helper invocation + ADR-019 error surfacing
-   - Wired `onLinearDispatch={handleLinearDispatch}` prop on `<SprkChat>`
-
-### Next steps
-
-- **Commit + push client changes** (batch with any additional Phase 12.3a work below)
-- **Deploy client** (SpaarkeAi is a code page; use appropriate deploy script — note local Vite build blocked on missing `@spaarke/legal-workspace` node_module; may need `npm install` at solutions root first)
-- **UAT smoke** — user uploads file, types "summarize this document" (NL, no slash) → workspace Summary tab installs + structured JSON renders (validates server keyword match + client `linear_dispatch` handling end-to-end)
-
-### Deferred to future 12.3a sub-work (after keyword auto-dispatch smoke passes)
-
-- **Server**: retire `PlaybookCandidateSelector` confidence threshold (0.85 → 0.0) so candidates always return top 3 even at low confidence
-- **Server**: new endpoint `GET /api/ai/playbooks/library?type=linear` returning enabled Linear playbooks with slashkey/displayname/description (needs Phase 12.4 schema — chicken-and-egg; either defer this to Phase 12.4 or use a hardcoded list temporarily)
-- **Server**: implement `/api/ai/playbook-dispatch/execute` endpoint (currently 404 per UAT feedback — this is why "library modal items aren't selectable")
-- **Client**: fix `handleSelectPlaybook` in ConversationPane to route through the new dispatch endpoint (or bypass into a Linear direct dispatch)
-- **Server**: new consumer-typed endpoint `POST /api/ai/documents/{docId}/profile` + retire `LinearConsumersOptions.PlaybookIds` + last App Settings
-- **Client**: `useAiSummary.ts` change POST target to new consumer-typed endpoint
-
-Phase 12.3a estimate revision: **7-11 hrs total** (was 4-5). ~2 hrs already done (audit + server keyword bypass).
+Test file at `c:/tmp/testdoc.txt`.
 
 ---
 
-## What is NOT DONE — the R7 close path
+## Decisions locked this session
 
-Follow [`notes/r7-close-plan-2026-07-03.md`](notes/r7-close-plan-2026-07-03.md) §4 Phase order. Summary:
-
-| Phase | Purpose | Estimate |
-|---|---|---|
-| **12.3a** (NEXT) | Chat client rewire + Doc Upload PlaybookId retire | 4-5 hrs |
-| 12.3b | Output schema single-source cleanup (strip from JPS, render from schema) | 1-2 hrs |
-| 12.4 | Persona (`sprk_aipersona` FK on Action) | 4-6 hrs |
-| 12.5 | Skills formalized on Node (already 1:N per operator) | 4-6 hrs |
-| 12.6 | Knowledge references on Node | 6-8 hrs |
-| 12.7 | Retrofit 5 Linear consumers to Playbook-manifest model + CI drift check | 8-10 hrs |
-| Phase E | Deactivate 6 migrated playbook rows | 0.5 hr |
-| Phase G | Docs (BUILD-A-NEW-LINEAR-AI-CONSUMER + BUILD-A-MULTI-STEP + SPAARKE-AI-COMPOSITION-MODEL) | 6-8 hrs |
-
-**Total remaining: ~34-46 hrs.**
+- **Wave 12.3 tactical closure**: 7 commits ship a working summarize flow. Fixes to session-id, ExtractedText persistence, auto-promote, and field_delta synthesis are architecturally sound and stay regardless of §7 redesign.
+- **Strategic pivot**: Wave 12.3's `linear_dispatch` SSE event + server-side regex + `executeLinearDispatch.ts` client helper are architecturally out of place — they create a fourth intent-detection mechanism. Retirement path to be defined in §7.
+- **Canonical use-case catalog established**: 28 use cases (UC-A-1 through UC-G-2) across 7 categories. Stable IDs. All future capability work references these.
+- **Broadened regex ships as tactical band-aid**: to unblock further testing while §7 redesign is in progress. Explicitly flagged for retirement.
+- **Compound-intent plan_preview UX** (`SYS-Recall_Session_File` triple-fire for read-only recall tools) is a pre-R7 feature not caused by Wave 12.3. Refinement (whitelist read-only tools) noted as follow-up, not urgent.
 
 ---
 
-## Design decisions locked (2026-07-03)
+## What "next session" should do first
 
-Full list in `r7-close-plan-2026-07-03.md` §2. Key ones the coding agent MUST honor:
-
-- Playbook is a MANIFEST (documents composition), not a runtime graph interpreter
-- Composition binding = **compile-time FKs in consumer service code**
-- Content resolution = **runtime Dataverse row fetch** by FK
-- Skills on Node (1:N). Persona on Action. Output schema ONLY in `sprk_outputschemajson` (never in JPS output.fields).
-- Multi-step = **explicit code sequence in consumer service** (`if` statements, sequential awaits) — NOT runtime graph walking
-- Slash commands (`/summarize`) removed entirely
-- Doc Upload's PlaybookId in client contract = **retire in Phase 12.3a** (not R8)
-- CI drift check in Phase 12.7 is **mandatory**
-
----
-
-## Key files for Phase 12.3a (the next work)
-
-Client (rewire target):
-- `src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatMessageRenderer.tsx`
-- `src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useActionHandlers.ts`
-- `src/client/shared/Spaarke.UI.Components/src/components/SprkChat/hooks/useDynamicSlashCommands.ts` — REMOVE if not needed elsewhere
-- `src/client/shared/Spaarke.UI.Components/src/components/SprkChat/SprkChatInput.tsx`
-- `src/client/shared/Spaarke.UI.Components/src/components/SlashCommandMenu/` — REMOVE entire directory if `/summarize` was its only use
-- Existing shared hook: `src/client/shared/Spaarke.UI.Components/src/hooks/useLinearRunProgress.ts`
-
-Doc Upload retire target (client):
-- `src/solutions/LegalWorkspace/**` — find Doc Upload wizard client code that posts to `/api/ai/documentintelligence/analyze` with `PlaybookId = 18cf3cc8-…`
-- Change to `POST /api/ai/documents/{docId}/profile` (or similar consumer-typed URL)
-
-Server (needs a new endpoint for Doc Upload consumer-typed URL):
-- `src/server/api/Sprk.Bff.Api/Api/Ai/AnalysisEndpoints.cs` — add new consumer-typed endpoint route; retire `PlaybookIds` reverse-lookup dispatch code
-- `src/server/api/Sprk.Bff.Api/Services/Ai/LinearConsumers/LinearConsumersOptions.cs` — delete `PlaybookIds` map + `GetConsumerTypeForPlaybookId` method
-- `spaarke-bff-dev` App Settings — delete remaining `LinearConsumers__PlaybookIds__*` and `LinearConsumers__MaxOutputTokens__*` keys (verify none used elsewhere first)
-
-Test rendering:
-- `src/client/shared/Spaarke.UI.Components/src/components/SprkChat/__tests__/SprkChatMessageRenderer.playbook-options.test.tsx` — likely needs rewrite or delete
+1. **Read** `docs/architecture/SPAARKE-AI-ARCHITECTURE-AND-COMPONENT-DESIGN.md` §0-3 in full.
+2. **Ask the operator** for review notes on §3 (use case catalog): category taxonomy, use case completeness, status honesty, boundary with SprkChatAgent tool loop, ordering.
+3. **After approval**, draft §4-8 in the canonical doc. Suggested sequence:
+   - §4 architecture overview (5 layers: intent, capability manifest, input resolution, execution engine, output routing)
+   - §5 component model (Dataverse tables, BFF services, shared client libs, widgets — with contracts)
+   - §6 capability manifest schema (Actions + Consumers + Personas + Skills + Triggers + Output bindings — the maker-configurable model)
+   - §7 intent + dispatch (single mechanism to replace the current four: regex + CapabilityRouter + agent tool loop + SoftSlashRouter; propose LLM classification OR embedding similarity against trigger phrases)
+   - §8 roadmap (phased migration from today's state → target; identify what retires, what generalizes, what's genuinely new)
+4. **Do not** ship more tactical patches without a §7 decision — every new capability we add today deepens the architectural drift.
 
 ---
 
-## Rollback for Wave 12.3 server-side (if needed)
+## Environment state at handoff
 
-Revert PR #546 (single merge commit). Restores App Settings needed for old code:
-- Would need to also restore 4 `LinearConsumers__ActionIds__*` on `spaarke-bff-dev`
-- Doc Upload / File Summary / Prefills would go back to config-map lookup
-
-Not planned. Server side deployed clean.
+- **BFF deploy**: `spaarke-bff-dev` — up, healthy, running commit that includes diagnostic log + broadened regex.
+- **Client deploy**: `sprk_spaarkeai` code page (resource `5206a442-3451-f111-bec7-7ced8d1dc988`) — running the bundle from commit `2d4e0c8d8` (bridge fix). The `5f77a1d9c` regex + retry improvements are on disk locally but NOT yet deployed (docs-only commit). If testing continues before §4-8 land, rebuild + deploy.
+- **Redis + AI Search**: healthy, no known issues.
+- **App Insights**: capturing traces. `Wave 12.3 keyword-check` diagnostic log fires when regex is evaluated — useful for validating dispatch decisions.
 
 ---
 
-*End of current-task.md. Recovery point: server merged to master; Wave 12.3 client work is the next material task per [`r7-close-plan-2026-07-03.md`](notes/r7-close-plan-2026-07-03.md) Phase 12.3a.*
+## Not-yet-addressed items surfaced today
+
+- Widget rendering for `entities` field currently receives a JSON string (via `JSON.stringify` in the bridge). Widget parses fine for organizations; nested arrays like `persons` render empty (not yet verified whether widget schema supports the nested object shape). Follow-up.
+- `sumarize` typo case now handled by broadened regex, but the typo issue is a symptom of the wrong dispatch pattern. §7 should address the general issue.
+- Schedule 13A.pdf silent-upload-failure from the last UAT: user cited "Failed to fetch" banner. My auto-promote effect now has explicit diagnostics + retry-with-backoff — if the failure recurs, the console log will explain why. Not yet reproduced via curl.
+- Compound-intent `plan_preview` UX for read-only recall tools is arguably overkill. Whitelist `SYS-Recall_*` in `CompoundIntentDetector.IsCompoundIntent`. Follow-up, not urgent.
+
+---
+
+*End of current-task.md. Recovery point: strategic architecture doc drafted; operator review pending; §4-8 to be drafted after approval.*
