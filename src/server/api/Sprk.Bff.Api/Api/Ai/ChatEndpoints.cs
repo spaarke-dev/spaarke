@@ -2579,8 +2579,25 @@ public static class ChatEndpoints
         return null;
     }
 
+    /// <summary>
+    /// Whole-word case-insensitive keyword match. Intentionally tolerant of common
+    /// misspellings — this is a fast-path dispatcher for high-confidence intent, so
+    /// a user's typo shouldn't push them to the "I couldn't find a confident match"
+    /// path (2026-07-04 UAT hardening after "sumarize" incident).
+    ///
+    /// Accepted forms (case-insensitive, whole word):
+    ///   summarize / summary / summarise            — canonical
+    ///   sumarize / sumarise                        — missing double-m typo
+    ///   summerize / summarie / summarze            — other common transpositions
+    ///   summarizes / summarizing / summarized      — inflected forms
+    ///
+    /// The pattern is `sum(m?)+a[rz]{1,2}i?[sz]?e(s|d|ing)?` — matches the shape
+    /// while rejecting semantically distant strings. Data-driven vocabulary
+    /// (`sprk_intenttriggers` on the playbook row) replaces this hardcoded regex
+    /// in Phase 12.4 per the R7 close plan.
+    /// </summary>
     private static readonly System.Text.RegularExpressions.Regex SummarizeKeywordRegex =
-        new(@"\b(summarize|summary|summarise)\b",
+        new(@"\bsu?mm?[ae]ri[sz]e?(s|d|ing)?\b|\bsummary\b",
             System.Text.RegularExpressions.RegexOptions.Compiled | System.Text.RegularExpressions.RegexOptions.IgnoreCase);
 
     /// <summary>

@@ -2086,28 +2086,60 @@ export function ConversationPane(): React.JSX.Element {
    * ADR-028: uses `authenticatedFetch` — no bare fetch + Authorization header.
    */
   const pendingPromotionIdsRef = React.useRef<Set<string>>(new Set());
+  // R7 Wave 12.3 Phase 12.3a UAT hardening (2026-07-04 — following Schedule 13A.pdf
+  // silent-failure incident). Attempt counter for retry-on-fail (max 2 attempts).
+  const promotionAttemptCountRef = React.useRef<Map<string, number>>(new Map());
 
   React.useEffect(() => {
     if (chatSessionId === null) return;
 
-    const toPromote = attachmentChips.filter(
-      c =>
-        c.status === "ready" &&
-        !promotedChipIds.has(c.id) &&
-        !pendingPromotionIdsRef.current.has(c.id) &&
-        heldFilesRef.current.has(c.filename)
-    );
-    if (toPromote.length === 0) return;
+    // 2026-07-04 UAT hardening: log every effect run so we can see WHY a chip is
+    // skipped (not-ready / already-promoted / pending / missing heldFile). ADR-015
+    // tier-1 safe — filenames + status codes + session-id-len only.
+    const skipReasons = attachmentChips.map(c => {
+      if (c.status !== "ready") return { id: c.id, name: c.filename, skip: `status=${c.status}` };
+      if (promotedChipIds.has(c.id)) return { id: c.id, name: c.filename, skip: "already-promoted" };
+      if (pendingPromotionIdsRef.current.has(c.id)) return { id: c.id, name: c.filename, skip: "pending" };
+      if (!heldFilesRef.current.has(c.filename)) return { id: c.id, name: c.filename, skip: "no-heldFile" };
+      return { id: c.id, name: c.filename, skip: null as string | null };
+    });
+    const eligible = skipReasons.filter(r => r.skip === null);
+    if (attachmentChips.length > 0) {
+      // Only log when there are chips — reduces noise on empty effect runs.
+      console.log(
+        "[ConversationPane] auto-promote scan: chips=%d eligible=%d skipped=%o",
+        attachmentChips.length,
+        eligible.length,
+        skipReasons.filter(r => r.skip !== null).map(r => ({ file: r.name, why: r.skip }))
+      );
+    }
+    if (eligible.length === 0) return;
 
     const documentsUrl = `${bffBaseUrl.replace(/\/$/, "")}/api/ai/chat/sessions/${encodeURIComponent(chatSessionId)}/documents`;
+    // Retry policy: max 2 total attempts (1 initial + 1 retry) with 1s backoff.
+    // Transient failures we want to survive: token race, brief network hiccup.
+    // Permanent failures (413 payload too large, 422 wrong MIME) still fail after
+    // retry, but at least both attempts are visible in the console + App Insights.
+    const MAX_ATTEMPTS = 2;
+    const RETRY_DELAY_MS = 1000;
 
-    for (const chip of toPromote) {
-      const heldFile = heldFilesRef.current.get(chip.filename);
-      if (!heldFile) continue;
-      pendingPromotionIdsRef.current.add(chip.id);
+    for (const { id: chipId, name: chipFilename } of eligible) {
+      const heldFile = heldFilesRef.current.get(chipFilename);
+      if (!heldFile) continue; // defensive — filter already checked but ref may have raced
+      pendingPromotionIdsRef.current.add(chipId);
+      const attemptNumber = (promotionAttemptCountRef.current.get(chipId) ?? 0) + 1;
+      promotionAttemptCountRef.current.set(chipId, attemptNumber);
 
       void (async () => {
         try {
+          console.log(
+            "[ConversationPane] /documents promote attempt %d/%d — filename:%s heldFileSize:%d heldFileType:%s",
+            attemptNumber,
+            MAX_ATTEMPTS,
+            chipFilename,
+            heldFile.size,
+            heldFile.type
+          );
           const form = new FormData();
           form.append("file", heldFile, heldFile.name);
           const response = await authenticatedFetch(documentsUrl, {
@@ -2116,27 +2148,57 @@ export function ConversationPane(): React.JSX.Element {
           });
           if (!response.ok) {
             console.error(
-              "[ConversationPane] /documents promote failed — status:%d filename:%s",
+              "[ConversationPane] /documents promote failed — attempt:%d status:%d filename:%s",
+              attemptNumber,
               response.status,
-              chip.filename
+              chipFilename
             );
+            // Retry on 5xx or 0 (network) — do NOT retry on 4xx (client-side failure
+            // like 413 payload too large won't succeed on retry).
+            const shouldRetry = attemptNumber < MAX_ATTEMPTS && (response.status >= 500 || response.status === 0);
+            if (shouldRetry) {
+              await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
+              // Clear pending flag so the next effect run picks it up; keep the
+              // attempt count so we don't loop indefinitely.
+              pendingPromotionIdsRef.current.delete(chipId);
+              return;
+            }
             return;
           }
           // Success — mark chip promoted so subsequent effect runs skip it.
+          console.log(
+            "[ConversationPane] /documents promote OK — attempt:%d filename:%s",
+            attemptNumber,
+            chipFilename
+          );
+          promotionAttemptCountRef.current.delete(chipId);
           setPromotedChipIds(prev => {
-            if (prev.has(chip.id)) return prev;
+            if (prev.has(chipId)) return prev;
             const next = new Set(prev);
-            next.add(chip.id);
+            next.add(chipId);
             return next;
           });
         } catch (err) {
-          // ADR-015: log error name only, never the message (may contain URLs / headers).
+          // ADR-015: log error name + basic classification only, never the message
+          // (may contain URLs / headers). "Failed to fetch" is a TypeError from the
+          // browser fetch API; use it to distinguish transport failure from server rejection.
+          const errName = err instanceof Error ? err.name : "unknown";
+          const errKind = err instanceof TypeError ? "network-or-cors" : errName;
           console.error(
-            "[ConversationPane] /documents promote threw:",
-            err instanceof Error ? err.name : "unknown"
+            "[ConversationPane] /documents promote threw — attempt:%d filename:%s errName:%s errKind:%s",
+            attemptNumber,
+            chipFilename,
+            errName,
+            errKind
           );
+          const shouldRetry = attemptNumber < MAX_ATTEMPTS && errKind === "network-or-cors";
+          if (shouldRetry) {
+            await new Promise(resolve => setTimeout(resolve, RETRY_DELAY_MS));
+            pendingPromotionIdsRef.current.delete(chipId);
+            return;
+          }
         } finally {
-          pendingPromotionIdsRef.current.delete(chip.id);
+          pendingPromotionIdsRef.current.delete(chipId);
         }
       })();
     }
