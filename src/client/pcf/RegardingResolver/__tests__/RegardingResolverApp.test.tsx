@@ -3,17 +3,16 @@
  *
  * Covers FR-A1-01 / FR-A1-02 / FR-A1-03 / FR-A4-01 / FR-A5-01 / NFR-04:
  *   - 2-row DOM structure (row 1 title + PolymorphicPicker trigger; row 2
- *     record-number Link + record-name Text)
- *   - Toolbar-icon menu populated from catalog (12 entries after Wave 0 task 002
- *     populates the catalog — spec §Executive Summary revised count is 11 core
- *     entities; the test snapshot mocks the runtime catalog so we assert on
- *     the count returned by the mock, not a hardcoded expectation)
+ *     1/3:2/3 grid with number Link + name Text, per SRFR-039 v1.3.4)
+ *   - Toolbar-icon menu populated from catalog (11 entries)
  *   - PolymorphicPicker.onSelect flow invokes applyResolverFields via the
  *     ResolverWriteHandler wrapper (FR-A4-01)
  *   - Manifest defaults render when maker omits `title` / bound field bindings
  *   - Read-only mode hides the trigger (FR-A5-01)
  *   - Version footer renders (PCF CLAUDE.md mandatory rule)
  *   - No console errors on init
+ *   - SRFR-039 (v1.3.4): Row 2 both cells present with top-aligned labels
+ *     ("Regarding Number" / "Regarding Name"); name cell is plain Text not Link
  */
 
 import * as React from 'react';
@@ -158,7 +157,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
         readOnly={false}
         onRecordTypeChanged={() => undefined}
-        version="1.3.3"
+        version="1.3.4"
       />
     );
 
@@ -174,7 +173,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
         readOnly={false}
         onRecordTypeChanged={() => undefined}
-        version="1.3.3"
+        version="1.3.4"
       />
     );
 
@@ -194,7 +193,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
         readOnly={false}
         onRecordTypeChanged={() => undefined}
-        version="1.3.3"
+        version="1.3.4"
       />
     );
 
@@ -210,7 +209,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
         readOnly={false}
         onRecordTypeChanged={() => undefined}
-        version="1.3.3"
+        version="1.3.4"
       />
     );
 
@@ -227,7 +226,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
         readOnly={false}
         onRecordTypeChanged={() => undefined}
-        version="1.3.3"
+        version="1.3.4"
       />
     );
 
@@ -241,7 +240,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
         readOnly={false}
         onRecordTypeChanged={() => undefined}
-        version="1.3.3"
+        version="1.3.4"
       />
     );
 
@@ -250,9 +249,9 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
     expect(link).toHaveAttribute('role', 'link');
   });
 
-  test('SRFR-034 §6 — Row 2 does NOT contain a record-name cell (removed in v1.3.1)', () => {
-    // Owner uses the OOB name field placed elsewhere on the form. The
-    // record-name Text component was removed from Row 2 in v1.3.1.
+  test('SRFR-039 — Row 2 renders BOTH number and name cells inline (v1.3.4 restored)', () => {
+    // v1.3.4 restores the Name cell (SRFR-034 §6 removed it over-eagerly per
+    // owner correction). Row 2 now renders 1/3 : 2/3 grid with both cells.
     const { context } = buildContext({
       regardingRecordNumberField: 'MTR-2025-0142',
       regardingRecordNameField: 'Smith v. Jones',
@@ -262,33 +261,51 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
         readOnly={false}
         onRecordTypeChanged={() => undefined}
-        version="1.3.3"
+        version="1.3.4"
       />
     );
 
-    expect(screen.queryByTestId('regarding-resolver-record-name')).not.toBeInTheDocument();
-    expect(screen.queryByTestId('regarding-resolver-record-name-empty')).not.toBeInTheDocument();
-    // Record-number Link is still there.
+    // Both cells present, each with its own testid.
+    expect(screen.getByTestId('regarding-resolver-number-cell')).toBeInTheDocument();
+    expect(screen.getByTestId('regarding-resolver-name-cell')).toBeInTheDocument();
+    // Record-number renders as Link.
     expect(screen.getByTestId('regarding-resolver-record-number')).toHaveTextContent('MTR-2025-0142');
+    // Record-name renders as plain Text — but the value is present.
+    expect(screen.getByTestId('regarding-resolver-record-name')).toHaveTextContent('Smith v. Jones');
   });
 
-  test('SRFR-034 §6 — empty record-number does NOT render em-dash placeholder (removed in v1.3.1)', () => {
-    // Prior v1.3.0 rendered an em-dash placeholder ("—") when the bound
-    // record-number was empty. v1.3.1 removes the placeholder — Row 2 is
-    // empty until the picker selects or a record-number lands.
+  test('SRFR-039 — empty record-number hides the number cell entirely (no em-dash placeholder)', () => {
+    // Empty cells hide entirely rather than render a placeholder character.
     const { context } = buildContext();
     renderWithProvider(
       <RegardingResolverApp
         context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
         readOnly={false}
         onRecordTypeChanged={() => undefined}
-        version="1.3.3"
+        version="1.3.4"
       />
     );
 
+    expect(screen.queryByTestId('regarding-resolver-number-cell')).not.toBeInTheDocument();
     expect(screen.queryByTestId('regarding-resolver-record-number-empty')).not.toBeInTheDocument();
     // The Row-2 container is still in the DOM (structural anchor), just empty.
     expect(screen.getByTestId('regarding-resolver-row-2')).toBeInTheDocument();
+  });
+
+  test('SRFR-039 — empty record-name hides the name cell entirely (no em-dash placeholder)', () => {
+    // Name-only-empty case: number renders, name hides.
+    const { context } = buildContext({ regardingRecordNumberField: 'MTR-2025-0142' });
+    renderWithProvider(
+      <RegardingResolverApp
+        context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
+        readOnly={false}
+        onRecordTypeChanged={() => undefined}
+        version="1.3.4"
+      />
+    );
+
+    expect(screen.getByTestId('regarding-resolver-number-cell')).toBeInTheDocument();
+    expect(screen.queryByTestId('regarding-resolver-name-cell')).not.toBeInTheDocument();
   });
 
   // ---------------------------------------------------------------------------
@@ -302,7 +319,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
         readOnly={false}
         onRecordTypeChanged={() => undefined}
-        version="1.3.3"
+        version="1.3.4"
       />
     );
 
@@ -320,7 +337,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
         readOnly={false}
         onRecordTypeChanged={() => undefined}
-        version="1.3.3"
+        version="1.3.4"
       />
     );
 
@@ -339,7 +356,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
         readOnly={false}
         onRecordTypeChanged={onRecordTypeChanged}
-        version="1.3.3"
+        version="1.3.4"
       />
     );
 
@@ -368,7 +385,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={true}
           onRecordTypeChanged={() => undefined}
-          version="1.3.3"
+          version="1.3.4"
         />
       );
 
@@ -379,7 +396,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
       expect(screen.getByTestId('polymorphic-picker-mock-title')).toBeInTheDocument();
     });
 
-    test('FR-A5-01 — read-only mode preserves Row 2 record-number display (name cell removed in v1.3.1 per SRFR-034 §6)', () => {
+    test('FR-A5-01 — read-only mode preserves Row 2 display of BOTH cells (v1.3.4 SRFR-039)', () => {
       const { context } = buildContext({
         readOnly: true,
         regardingRecordNumberField: 'MTR-2025-0142',
@@ -390,18 +407,18 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={true}
           onRecordTypeChanged={() => undefined}
-          version="1.3.3"
+          version="1.3.4"
         />
       );
 
-      // Row 2 renders with content, hyperlink still rendered (view action is
-      // safe under read-only — clicking opens the record modal for viewing).
+      // Row 2 renders both cells; hyperlink still active (view action is safe
+      // under read-only — clicking opens the record modal for viewing).
       expect(screen.getByTestId('regarding-resolver-row-2')).toBeInTheDocument();
       const link = screen.getByTestId('regarding-resolver-record-number');
       expect(link).toHaveTextContent('MTR-2025-0142');
       expect(link).toHaveAttribute('role', 'link');
-      // v1.3.1: record-name cell removed — owner uses OOB name field elsewhere.
-      expect(screen.queryByTestId('regarding-resolver-record-name')).not.toBeInTheDocument();
+      // v1.3.4 SRFR-039: name cell restored as plain-text display.
+      expect(screen.getByTestId('regarding-resolver-record-name')).toHaveTextContent('Smith v. Jones');
     });
 
     test('FR-A5-01 — read-only mode: Row 2 hyperlink click still opens modal (view action is safe)', () => {
@@ -427,7 +444,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={true}
           onRecordTypeChanged={() => undefined}
-          version="1.3.3"
+          version="1.3.4"
         />
       );
 
@@ -454,7 +471,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={true}
           onRecordTypeChanged={() => undefined}
-          version="1.3.3"
+          version="1.3.4"
         />
       );
 
@@ -498,7 +515,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
             context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
             readOnly={false}
             onRecordTypeChanged={() => undefined}
-            version="1.3.3"
+            version="1.3.4"
           />
         );
 
@@ -538,14 +555,14 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
         readOnly={false}
         onRecordTypeChanged={() => undefined}
-        version="1.3.3"
+        version="1.3.4"
       />
     );
 
     // SRFR-033 — footer format is `v{version} • Built YYYY-MM-DD` per
     // src/client/pcf/CLAUDE.md "Version Footer Requirement (MANDATORY)".
     const footer = screen.getByTestId('regarding-resolver-version');
-    expect(footer).toHaveTextContent(/v1\.3\.3/);
+    expect(footer).toHaveTextContent(/v1\.3\.4/);
     expect(footer).toHaveTextContent(/Built \d{4}-\d{2}-\d{2}/);
   });
 
@@ -561,7 +578,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
         readOnly={false}
         onRecordTypeChanged={() => undefined}
-        version="1.3.3"
+        version="1.3.4"
       />
     );
     expect(spy).not.toHaveBeenCalled();
@@ -579,7 +596,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
         readOnly={false}
         onRecordTypeChanged={() => undefined}
-        version="1.3.3"
+        version="1.3.4"
       />
     );
     expect(screen.getByTestId('regarding-resolver-root')).toBeInTheDocument();
@@ -592,7 +609,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
         readOnly={false}
         onRecordTypeChanged={() => undefined}
-        version="1.3.3"
+        version="1.3.4"
       />
     );
     expect(screen.getByTestId('regarding-resolver-root')).toBeInTheDocument();
@@ -614,7 +631,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={false}
           onRecordTypeChanged={() => undefined}
-          version="1.3.3"
+          version="1.3.4"
         />
       );
 
@@ -653,7 +670,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={false}
           onRecordTypeChanged={() => undefined}
-          version="1.3.3"
+          version="1.3.4"
         />
       );
 
@@ -686,7 +703,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={false}
           onRecordTypeChanged={() => undefined}
-          version="1.3.3"
+          version="1.3.4"
         />
       );
 
@@ -720,7 +737,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={false}
           onRecordTypeChanged={() => undefined}
-          version="1.3.3"
+          version="1.3.4"
         />
       );
 
@@ -787,7 +804,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
             context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
             readOnly={false}
             onRecordTypeChanged={() => undefined}
-            version="1.3.3"
+            version="1.3.4"
           />
         );
 
@@ -834,7 +851,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
             context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
             readOnly={false}
             onRecordTypeChanged={() => undefined}
-            version="1.3.3"
+            version="1.3.4"
           />
         );
 
@@ -873,7 +890,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
             context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
             readOnly={false}
             onRecordTypeChanged={() => undefined}
-            version="1.3.3"
+            version="1.3.4"
           />
         );
 
@@ -912,7 +929,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
             context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
             readOnly={false}
             onRecordTypeChanged={() => undefined}
-            version="1.3.3"
+            version="1.3.4"
           />
         );
 
@@ -962,12 +979,12 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={false}
           onRecordTypeChanged={() => undefined}
-          version="1.3.3"
+          version="1.3.4"
         />
       );
 
       expect(screen.getByTestId('regarding-resolver-footer')).toBeInTheDocument();
-      expect(screen.getByTestId('regarding-resolver-version')).toHaveTextContent(/v1\.3\.3/);
+      expect(screen.getByTestId('regarding-resolver-version')).toHaveTextContent(/v1\.3\.4/);
     });
 
     test('showVersionFooter=true → footer visible', () => {
@@ -977,7 +994,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={false}
           onRecordTypeChanged={() => undefined}
-          version="1.3.3"
+          version="1.3.4"
         />
       );
 
@@ -991,7 +1008,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={false}
           onRecordTypeChanged={() => undefined}
-          version="1.3.3"
+          version="1.3.4"
         />
       );
 
@@ -1012,7 +1029,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={false}
           onRecordTypeChanged={() => undefined}
-          version="1.3.3"
+          version="1.3.4"
         />
       );
 
@@ -1028,7 +1045,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={true}
           onRecordTypeChanged={() => undefined}
-          version="1.3.3"
+          version="1.3.4"
         />
       );
 
@@ -1054,7 +1071,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={false}
           onRecordTypeChanged={() => undefined}
-          version="1.3.3"
+          version="1.3.4"
         />
       );
 
@@ -1085,7 +1102,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
             context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
             readOnly={false}
             onRecordTypeChanged={() => undefined}
-            version="1.3.3"
+            version="1.3.4"
           />
         );
 
@@ -1122,7 +1139,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={false}
           onRecordTypeChanged={() => undefined}
-          version="1.3.3"
+          version="1.3.4"
         />
       );
 
@@ -1178,7 +1195,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={false}
           onRecordTypeChanged={() => undefined}
-          version="1.3.3"
+          version="1.3.4"
         />
       );
 
@@ -1221,7 +1238,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={false}
           onRecordTypeChanged={() => undefined}
-          version="1.3.3"
+          version="1.3.4"
         />
       );
 
@@ -1260,7 +1277,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={false}
           onRecordTypeChanged={() => undefined}
-          version="1.3.3"
+          version="1.3.4"
         />
       );
 
@@ -1305,7 +1322,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={false}
           onRecordTypeChanged={() => undefined}
-          version="1.3.3"
+          version="1.3.4"
         />
       );
 
@@ -1315,6 +1332,136 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
       // fontWeight is exactly '600' (semi-bold per OOB `.pa-hw`).
       const computed = window.getComputedStyle(title);
       expect(computed.fontWeight).toBe('600');
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // SRFR-039 — Row 2 restore Name cell inline (v1.3.4) — 1/3:2/3 grid + labels
+  // ---------------------------------------------------------------------------
+
+  describe('SRFR-039 — Row 2 v1.3.4: 1/3 : 2/3 grid with top-aligned OOB-parity labels', () => {
+    test('Row 2 has TWO cells with correct data-testids (number + name)', () => {
+      const { context } = buildContext({
+        regardingRecordNumberField: 'MTR-2025-0142',
+        regardingRecordNameField: 'Smith v. Jones',
+      });
+      renderWithProvider(
+        <RegardingResolverApp
+          context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
+          readOnly={false}
+          onRecordTypeChanged={() => undefined}
+          version="1.3.4"
+        />
+      );
+
+      const row2 = screen.getByTestId('regarding-resolver-row-2');
+      expect(row2).toContainElement(screen.getByTestId('regarding-resolver-number-cell'));
+      expect(row2).toContainElement(screen.getByTestId('regarding-resolver-name-cell'));
+    });
+
+    test('Row 2 uses CSS grid with 1fr 2fr columns (1/3 : 2/3 proportion)', () => {
+      const { context } = buildContext({
+        regardingRecordNumberField: 'MTR-2025-0142',
+        regardingRecordNameField: 'Smith v. Jones',
+      });
+      renderWithProvider(
+        <RegardingResolverApp
+          context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
+          readOnly={false}
+          onRecordTypeChanged={() => undefined}
+          version="1.3.4"
+        />
+      );
+
+      const row2 = screen.getByTestId('regarding-resolver-row-2');
+      const computed = window.getComputedStyle(row2);
+      // Griffel emits `display: grid` and `grid-template-columns: 1fr 2fr` —
+      // jsdom's cascade resolves the atomic class rules.
+      expect(computed.display).toBe('grid');
+      expect(computed.gridTemplateColumns).toBe('1fr 2fr');
+    });
+
+    test('Name cell renders as plain <Text> (NOT a Link) — no href, no role=link', () => {
+      const { context } = buildContext({
+        regardingRecordNumberField: 'MTR-2025-0142',
+        regardingRecordNameField: 'Smith v. Jones',
+      });
+      renderWithProvider(
+        <RegardingResolverApp
+          context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
+          readOnly={false}
+          onRecordTypeChanged={() => undefined}
+          version="1.3.4"
+        />
+      );
+
+      const nameEl = screen.getByTestId('regarding-resolver-record-name');
+      // Plain-text Text component renders as <span>. It is NOT a <Link>.
+      expect(nameEl.tagName.toLowerCase()).not.toBe('a');
+      expect(nameEl).not.toHaveAttribute('role', 'link');
+      expect(nameEl).not.toHaveAttribute('href');
+      // But the value is present.
+      expect(nameEl).toHaveTextContent('Smith v. Jones');
+    });
+
+    test('Number cell still renders as Link (hyperlink preserved from SRFR-031)', () => {
+      const { context } = buildContext({
+        regardingRecordNumberField: 'MTR-2025-0142',
+        regardingRecordNameField: 'Smith v. Jones',
+      });
+      renderWithProvider(
+        <RegardingResolverApp
+          context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
+          readOnly={false}
+          onRecordTypeChanged={() => undefined}
+          version="1.3.4"
+        />
+      );
+
+      const numEl = screen.getByTestId('regarding-resolver-record-number');
+      expect(numEl).toHaveAttribute('role', 'link');
+    });
+
+    test('Both top-aligned labels "Regarding Number" and "Regarding Name" render', () => {
+      const { context } = buildContext({
+        regardingRecordNumberField: 'MTR-2025-0142',
+        regardingRecordNameField: 'Smith v. Jones',
+      });
+      renderWithProvider(
+        <RegardingResolverApp
+          context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
+          readOnly={false}
+          onRecordTypeChanged={() => undefined}
+          version="1.3.4"
+        />
+      );
+
+      const numberLabel = screen.getByTestId('regarding-resolver-number-label');
+      const nameLabel = screen.getByTestId('regarding-resolver-name-label');
+      expect(numberLabel).toHaveTextContent('Regarding Number');
+      expect(nameLabel).toHaveTextContent('Regarding Name');
+    });
+
+    test('Labels use OOB-parity styling (12px, weight 400, color #616161)', () => {
+      const { context } = buildContext({
+        regardingRecordNumberField: 'MTR-2025-0142',
+        regardingRecordNameField: 'Smith v. Jones',
+      });
+      renderWithProvider(
+        <RegardingResolverApp
+          context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
+          readOnly={false}
+          onRecordTypeChanged={() => undefined}
+          version="1.3.4"
+        />
+      );
+
+      const numberLabel = screen.getByTestId('regarding-resolver-number-label');
+      const computed = window.getComputedStyle(numberLabel);
+      expect(computed.fontSize).toBe('12px');
+      expect(computed.fontWeight).toBe('400');
+      // color may serialize as rgb(97, 97, 97) in jsdom.
+      expect(['#616161', 'rgb(97, 97, 97)']).toContain(computed.color);
     });
   });
 });

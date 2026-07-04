@@ -2,7 +2,7 @@
 
 > **Project**: set-regarding-and-field-mapping-resolver-r1
 > **Plan**: [`../plan.md`](../plan.md)
-> **Total tasks**: 33 (28 original + 5 out-of-plan polish follow-ons SRFR-034, SRFR-035, SRFR-036, SRFR-037, SRFR-038)
+> **Total tasks**: 35 (28 original + 7 out-of-plan polish follow-ons SRFR-034, SRFR-035, SRFR-036, SRFR-037, SRFR-038, SRFR-039, SRFR-041)
 > **Wave count**: 10 (0–9)
 
 ## Legend
@@ -48,6 +48,8 @@
 | 036 | [sprk_todo form config — companion webresource `sprk_regardingrecordnumber_hyperlink` v1.0.0 + REGARDING section row layout below RegardingResolver PCF (1/3 record-number-hyperlink + 2/3 record-name; sprk_regardingrecordurl hidden; formxml `<events>` + `<formLibraries>` registration)](./036-sprk-todo-form-config.poml) | ✅ | STANDARD | 2h est / **~1h15min actual** | post-SRFR-034 follow-on (parallel with SRFR-035 PCF auto-refresh) |
 | 037 | [Title styling fix v1.3.2 → v1.3.3 (font-weight 400 → 600 per actual OOB DevTools inspection; root container top-padding reduced to 0 for OOB section-header alignment)](./037-regarding-resolver-title-styling-v1.3.3.poml) | ✅ | FULL | 1h est / **~35min actual** | post-SRFR-035 follow-on (parallel with SRFR-038 form labels fix) |
 | 038 | [sprk_todo form fix — Name field visibility + top-aligned labels (SRFR-036 regression: cell substitution inherited `visible="false"` from old shells, so record-number + record-name cells rendered inside a visible section but were themselves hidden; flip both cells to `visible="true"`; labels inherit `celllabelposition="Top"` from section)](./038-sprk-todo-form-labels-fix.poml) | ✅ | STANDARD | 45min est / **~25min actual** | post-SRFR-036 fix (parallel with SRFR-037 PCF v1.3.3 polish) |
+| 039 | [RegardingResolver v1.3.3 → v1.3.4 — restore Row 2 Name cell inline (1/3 : 2/3 grid) with top-aligned OOB-parity labels "Regarding Number" / "Regarding Name" (owner correction to SRFR-034 §6; Path A exception extended to Row 2 labels 12px/400/#616161)](./039-regarding-resolver-restore-name-cell-v1.3.4.poml) | ✅ | FULL | 1h30min est / **~55min actual** | post-SRFR-037 follow-on (parallel with SRFR-041 form revert) |
+| 041 | [sprk_todo FormXml revert — hide OOB fields again (undo SRFR-038 visibility flip; preserve OnLoad handler wiring; owner clarified OOB fields were intentionally hidden)](./041-sprk-todo-form-revert-hide-oob-fields.poml) | ✅ | STANDARD | 30min est / **~15min actual** | post-SRFR-038 revert (parallel with SRFR-039 PCF v1.3.4) |
 
 ### Wave 4 — Presave webresource (independent, parallel with Wave 3)
 

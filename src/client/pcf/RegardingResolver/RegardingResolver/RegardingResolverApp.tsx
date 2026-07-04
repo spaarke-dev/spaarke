@@ -1,5 +1,24 @@
 /**
- * RegardingResolverApp — v1.3.3 streamlined 2-row UI for the polymorphic regarding picker.
+ * RegardingResolverApp — v1.3.4 streamlined 2-row UI for the polymorphic regarding picker.
+ *
+ * # v1.3.4 (SRFR-039 restore Name cell + top-aligned OOB-parity labels)
+ *
+ * Owner clarification post-v1.3.3: SRFR-034 §6 over-eagerly removed the Row 2
+ * record-name cell. Owner wants the Name displayed INSIDE the PCF, next to
+ * the record-number, in a proportional 1/3 : 2/3 grid layout (Number 1/3
+ * left, Name 2/3 right). Additionally, both cells now carry OOB-parity
+ * top-aligned labels: "Regarding Number" and "Regarding Name" (small font
+ * 12px, weight 400, color #616161 — matches Dataverse OOB field-label
+ * styling). Empty cells hide entirely (no em-dash placeholder).
+ *
+ * The `regardingRecordNameField` bound manifest property (preserved for
+ * backward-compat since v1.3.1 SRFR-034 §6) is now RE-CONSUMED in Row 2's
+ * right cell as plain-text (Fluent v9 `<Text>` — NOT a Link; hyperlink is
+ * only on the number).
+ *
+ * All other SRFR-034/035/037 features preserved: refresh button,
+ * auto-refresh, showVersionFooter, PolymorphicPicker consumption, title
+ * font-weight 600 + reduced top padding.
  *
  * # v1.3.3 (SRFR-037 title-styling fix)
  *
@@ -33,9 +52,10 @@
  *
  *   ┌────────────────────────────────────────────────────────────────────────┐
  *   │  RELATED RECORD                                          [⟳] [🔎]      │  ← Row 1: OOB-styled title + refresh + lookup
- *   ├────────────────────────────────────────────────────────────────────────┤
- *   │  MTR-2025-0142                                                          │  ← Row 2: record-number link ONLY (name cell removed)
- *   └────────────────────────────────────────────────────────────────────────┘
+ *   ├────────────────────┬───────────────────────────────────────────────────┤
+ *   │  Regarding Number  │  Regarding Name                                    │  ← v1.3.4: top-aligned labels
+ *   │  MTR-2025-0142     │  Smith v. Jones                                    │  ← Row 2: number link (1/3) + name text (2/3)
+ *   └────────────────────┴───────────────────────────────────────────────────┘
  *
  * Row 1: OOB-styled uppercase title (Segoe UI 14px / #242424 / weight 600 /
  *        padding 4px 0px per SRFR-037 correction of SRFR-034 §4 — documented
@@ -52,19 +72,19 @@
  *        component's `applyRegardingSelection` handler which delegates to
  *        `PolymorphicResolverService.applyResolverFields` per FR-A4-01.
  *
- * Row 2: `sprk_regardingrecordnumber` hyperlink ONLY (single-column layout —
- *        SRFR-034 §6 removed the record-name cell and the em-dash empty-state
- *        placeholder). Owner uses the OOB record-name field placed elsewhere
- *        on the form. The record-name bound property
- *        (`regardingRecordNameField`) is preserved in the manifest for
- *        backward-compat with v1.3.0 form bindings but is NOT rendered.
- *        Field name for the record-number Link is resolved from the
- *        `regardingRecordNumberField` bound manifest property (default
- *        `sprk_regardingrecordnumber`) so makers can rebind on a new host
- *        entity without code change (FR-A1-02). Clicking the link opens the
- *        related record in a modal via `Xrm.Navigation.navigateTo` (SRFR-031).
+ * Row 2: v1.3.4 (SRFR-039) — 2-column CSS grid (`1fr 2fr`) with top-aligned
+ *        OOB-parity labels above each value. LEFT (1/3 width): "Regarding
+ *        Number" label + record-number Link (SRFR-031 modal-open handler
+ *        preserved). RIGHT (2/3 width): "Regarding Name" label + record-name
+ *        plain-text (Fluent v9 `<Text>` — NOT a Link; hyperlink is only on
+ *        the number). Empty cells hide entirely (no em-dash placeholder).
+ *        Field names for both cells are resolved from bound manifest
+ *        properties (`regardingRecordNumberField` default
+ *        `sprk_regardingrecordnumber`; `regardingRecordNameField` default
+ *        `sprk_regardingrecordname`) so makers can rebind on a new host
+ *        entity without code change (FR-A1-02).
  *
- * Footer: Version footer (v1.3.3 • Built {YYYY-MM-DD}) — conditionally rendered
+ * Footer: Version footer (v1.3.4 • Built {YYYY-MM-DD}) — conditionally rendered
  *         based on the new `showVersionFooter` input property (SRFR-034 §2,
  *         default true).
  *
@@ -82,12 +102,12 @@
  * `context.mode.isControlDisabled === true`, resolved by RegardingResolverHost),
  * Row 1 hides BOTH the refresh ToolbarButton (SRFR-034 §5) AND the
  * PolymorphicPicker lookup trigger (gated on `!readOnly` internally); the
- * OOB-styled title text still renders. Row 2 continues to render the
- * record-number hyperlink (name cell was removed in v1.3.1 per SRFR-034
- * §6). The hyperlink click handler stays active because opening the related
- * record in a modal is a VIEW action — safe under read-only per FR-A5-01.
- * handlePickerSelect has a defensive write-gate that refuses to write if a
- * race reaches it while readOnly is true.
+ * OOB-styled title text still renders. Row 2 continues to render BOTH the
+ * number Link and the plain-text Name (v1.3.4 SRFR-039 restored the Name
+ * cell). The number-hyperlink click handler stays active because opening the
+ * related record in a modal is a VIEW action — safe under read-only per
+ * FR-A5-01. handlePickerSelect has a defensive write-gate that refuses to
+ * write if a race reaches it while readOnly is true.
  *
  * # CREATE-mode presave bridge (FR-A5-02)
  *
@@ -164,7 +184,13 @@ const BUILD_DATE = '2026-07-03';
 //   .pa-s  { color: rgb(36, 36, 36); }
 // This is a documented Path A exception to ADR-021 (semantic tokens
 // preferred): OOB parity is the visual target, not Fluent v9 theming.
-// Owner-approved (SRFR-034 spec §4, corrected by SRFR-037).
+// Owner-approved (SRFR-034 spec §4, corrected by SRFR-037, extended by
+// SRFR-039 for Row 2 field labels).
+//
+// Note (v1.3.4 SRFR-039): The `fieldLabel` style uses hardcoded OOB field-
+// label values (12px, weight 400, color #616161, Segoe UI stack). This is
+// the Path A extension covering Row 2 top-aligned labels. `row2Grid` uses
+// CSS grid `1fr 2fr` for the 1/3 : 2/3 Number/Name proportional layout.
 //
 // The `container` block uses directional padding (top: 0) rather than
 // uniform `padding: tokens.spacingHorizontalS`; this removes the ~8px extra
@@ -238,16 +264,56 @@ const useStyles = makeStyles({
       transform: 'scaleX(-1)',
     },
   },
-  // Row-2 — single-column (record-number Link only). SRFR-034 §6 removed
-  // the record-name cell + em-dash placeholder.
+  // Row-2 — v1.3.4 (SRFR-039): two-column grid. Number cell = 1/3 width
+  // (left), Name cell = 2/3 width (right). Empty cells hide entirely.
   row2: {
-    display: 'flex',
-    alignItems: 'baseline',
+    display: 'grid',
+    gridTemplateColumns: '1fr 2fr',
+    gap: tokens.spacingHorizontalS,
     padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalXS}`,
     minHeight: '24px',
+    alignItems: 'start',
+  },
+  // Per-cell wrapper: label above, value below (flex column).
+  numberCell: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalXXS,
+    minWidth: 0,
+  },
+  nameCell: {
+    display: 'flex',
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalXXS,
+    minWidth: 0,
+  },
+  // Row-2 field label — OOB-parity styling (SRFR-039 Path A extension).
+  // Small font (12px), regular weight (400), gray color (#616161), Segoe UI
+  // stack. Left-aligned inherently via flex column. Documented exception
+  // to ADR-021 semantic tokens for OOB parity.
+  fieldLabel: {
+    fontFamily:
+      '"Segoe UI", "Segoe UI Web (West European)", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", sans-serif',
+    fontSize: '12px',
+    fontWeight: 400,
+    color: '#616161',
+    lineHeight: '16px',
   },
   recordNumber: {
     fontWeight: tokens.fontWeightSemibold,
+  },
+  // Row-2 record-name value — plain text (NOT a Link). Segoe UI 14px, weight
+  // 400, color #242424 — matches OOB body-text on the same form. Truncate
+  // with ellipsis on overflow so long names don't blow out the cell.
+  recordName: {
+    fontFamily:
+      '"Segoe UI", "Segoe UI Web (West European)", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", sans-serif',
+    fontSize: '14px',
+    fontWeight: 400,
+    color: '#242424',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
   },
   footer: {
     marginTop: 'auto',
@@ -505,10 +571,12 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
   // `sprk_regardingrecordnumber`), the raw already reflects that column's
   // value; we render as-is.
   //
-  // v1.3.1 (SRFR-034 §6): the record-name cell was removed. The
-  // `regardingRecordNameField` bound property remains in the manifest for
-  // backward-compat with v1.3.0 form bindings; its value is not rendered.
+  // v1.3.4 (SRFR-039): The `regardingRecordNameField` bound property is now
+  // RE-CONSUMED in Row 2's right cell as plain-text (Fluent v9 `<Text>` —
+  // NOT a Link; hyperlink is only on the number). This restores the Name
+  // display SRFR-034 §6 removed, per owner clarification.
   const boundRecordNumber = context.parameters.regardingRecordNumberField?.raw ?? null;
+  const boundRecordName = context.parameters.regardingRecordNameField?.raw ?? null;
 
   // Allowed regarding targets (subset of TODO_REGARDING_CATALOG).
   const catalog = React.useMemo<readonly ITodoRegardingTargetCatalogEntry[]>(
@@ -709,6 +777,7 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
   );
 
   const hasRecordNumber = typeof boundRecordNumber === 'string' && boundRecordNumber.trim().length > 0;
+  const hasRecordName = typeof boundRecordName === 'string' && boundRecordName.trim().length > 0;
 
   // v1.3.1 (SRFR-034 §5) — refresh handler wraps the module-level internal
   // helper as a stable useCallback so the onClick reference is stable across
@@ -719,12 +788,14 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
 
   // ---------------- Render ----------------
   //
-  // v1.3.1 layout changes (SRFR-034):
-  //   - Row 1 title uppercased + styled to match OOB section-header (§1 + §4).
-  //   - Row 1 "actions" area holds refresh (LEFT) + PolymorphicPicker (RIGHT) (§5).
-  //   - PolymorphicPicker trigger icon flipped horizontally via CSS transform (§3).
-  //   - Row 2 = single record-number Link cell (no name, no em-dash placeholder) (§6).
-  //   - Version footer gated on `showVersionFooter` (§2).
+  // v1.3.4 layout (SRFR-039):
+  //   - Row 1 title uppercased + styled to match OOB section-header (SRFR-034 §1 + §4, weight 600 per SRFR-037).
+  //   - Row 1 "actions" area holds refresh (LEFT) + PolymorphicPicker (RIGHT) (SRFR-034 §5).
+  //   - PolymorphicPicker trigger icon flipped horizontally via CSS transform (SRFR-034 §3).
+  //   - Row 2 = 1/3:2/3 CSS grid: LEFT record-number Link (SRFR-031 modal-open), RIGHT record-name plain-text Text.
+  //   - Row 2 top-aligned OOB-parity labels above each cell ("Regarding Number" / "Regarding Name").
+  //   - Empty cells hide entirely (no em-dash placeholder).
+  //   - Version footer gated on `showVersionFooter` (SRFR-034 §2).
 
   return (
     <div className={styles.container} data-testid="regarding-resolver-root">
@@ -770,17 +841,44 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
         </div>
       </div>
 
-      {/* Row 2 — record-number hyperlink only (v1.3.1 SRFR-034 §6) */}
+      {/* Row 2 — v1.3.4 (SRFR-039): 1/3 : 2/3 grid layout with top-aligned
+          OOB-parity labels. Left cell = number hyperlink (SRFR-031 modal-open
+          preserved). Right cell = plain-text name (NOT a Link). Empty cells
+          hide entirely. */}
       <div className={styles.row2} data-testid="regarding-resolver-row-2">
         {hasRecordNumber && (
-          <Link
-            className={styles.recordNumber}
-            role="link"
-            data-testid="regarding-resolver-record-number"
-            onClick={handleRecordNumberClick}
-          >
-            {boundRecordNumber}
-          </Link>
+          <div className={styles.numberCell} data-testid="regarding-resolver-number-cell">
+            <Text
+              className={styles.fieldLabel}
+              data-testid="regarding-resolver-number-label"
+            >
+              Regarding Number
+            </Text>
+            <Link
+              className={styles.recordNumber}
+              role="link"
+              data-testid="regarding-resolver-record-number"
+              onClick={handleRecordNumberClick}
+            >
+              {boundRecordNumber}
+            </Link>
+          </div>
+        )}
+        {hasRecordName && (
+          <div className={styles.nameCell} data-testid="regarding-resolver-name-cell">
+            <Text
+              className={styles.fieldLabel}
+              data-testid="regarding-resolver-name-label"
+            >
+              Regarding Name
+            </Text>
+            <Text
+              className={styles.recordName}
+              data-testid="regarding-resolver-record-name"
+            >
+              {boundRecordName}
+            </Text>
+          </div>
         )}
       </div>
 
