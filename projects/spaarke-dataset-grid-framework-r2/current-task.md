@@ -1,7 +1,7 @@
 # Current Task State — spaarke-dataset-grid-framework-r2
 
-> **Auto-updated by task-execute and context-handoff skills**
-> **Last Updated**: 2026-07-02 (by task 090 wrap-up)
+> **PROJECT ARCHIVED 2026-07-03** — see [`.archived`](.archived) marker
+> **Last Updated**: 2026-07-03 (by /devops-project-archive)
 > **Protocol**: [Context Recovery](../../docs/procedures/context-recovery.md)
 
 ---
@@ -10,10 +10,14 @@
 
 | Field | Value |
 |---|---|
-| **Task** | none — project code complete |
-| **Step** | Wrap-up complete; PR merge + deploy + regression pending |
-| **Status** | none |
-| **Next Action** | User merges PR [#537](https://github.com/spaarke-dev/spaarke/pull/537), deploys to spaarkedev1, runs browser regression per PR test plan. Then optionally `/repo-cleanup` + `/merge-to-master`. |
+| **Task** | none — project archived |
+| **Status** | **Completed** (Portfolio Issue [#548](https://github.com/spaarke-dev/spaarke/issues/548) closed 2026-07-03) |
+| **Original ship PR** | [#537](https://github.com/spaarke-dev/spaarke/pull/537) merged 2026-07-02 (10 FRs + 5 DEFs, 21 tasks) |
+| **UAT rounds 1 + 2 PR** | [#547](https://github.com/spaarke-dev/spaarke/pull/547) merged 2026-07-03 as commit `411251a99` (14 UAT fixes) |
+| **Portfolio Issue** | [#548](https://github.com/spaarke-dev/spaarke/issues/548) (backfill-registered + closed) — Parent Epic [#430](https://github.com/spaarke-dev/spaarke/issues/430) |
+| **Docs memorialized** | 6 files — see [`notes/lessons-learned.md`](notes/lessons-learned.md) UAT addendum |
+| **Worktree** | `c:/code_files/spaarke-wt-spaarke-dataset-grid-framework-r2` — **preserved** per operator workflow |
+| **Next Action** | None. Project closed. Clean up worktree separately if desired via `git worktree remove`. |
 
 ### Critical Context
 
