@@ -151,12 +151,7 @@ export const HeaderToolbar: React.FC<IHeaderToolbarProps> = ({ title, iconSlots,
           <AiSummaryPopover
             trigger={
               <Tooltip content="AI Summary" relationship="label">
-                <Button
-                  appearance="subtle"
-                  size="small"
-                  icon={<Sparkle20Regular />}
-                  aria-label="View AI summary"
-                />
+                <Button appearance="subtle" size="small" icon={<Sparkle20Regular />} aria-label="View AI summary" />
               </Tooltip>
             }
             onFetchSummary={aiSummary.onFetchSummary}

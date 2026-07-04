@@ -155,12 +155,7 @@ const LoadingSkeleton: React.FC<{ className: string; cellClassName: string }> = 
  * );
  * ```
  */
-export const RecordHeaderShell: React.FC<IRecordHeaderShellProps> = ({
-  toolbar,
-  loading,
-  children,
-  borderless,
-}) => {
+export const RecordHeaderShell: React.FC<IRecordHeaderShellProps> = ({ toolbar, loading, children, borderless }) => {
   const styles = useStyles();
   const isLoading = loading === true;
   const containerClass = borderless === true ? styles.cardBorderless : styles.card;

@@ -189,9 +189,7 @@ export const MatterHeaderView: React.FC<IMatterHeaderViewProps> = ({ recordId, t
         ? `&$filter=contains(${meta.refNameField},'${encodeURIComponent(trimmed.replace(/'/g, "''"))}')`
         : '';
     const odata =
-      `?$select=${meta.refIdField},${meta.refNameField}` +
-      filterClause +
-      `&$orderby=${meta.refNameField} asc&$top=10`;
+      `?$select=${meta.refIdField},${meta.refNameField}` + filterClause + `&$orderby=${meta.refNameField} asc&$top=10`;
     const result = await xrm.WebApi.retrieveMultipleRecords(meta.refEntity, odata);
     return (result.entities as Array<Record<string, unknown>>).map(e => ({
       id: e[meta.refIdField] as string,
@@ -224,9 +222,10 @@ export const MatterHeaderView: React.FC<IMatterHeaderViewProps> = ({ recordId, t
 
   const searchMatterType = React.useCallback((q: string) => searchLookup('sprk_mattertype', q), [searchLookup]);
   const searchPracticeArea = React.useCallback((q: string) => searchLookup('sprk_practicearea', q), [searchLookup]);
-  const saveMatterTypeLookup = React.useCallback((item: ILookupItem | null) => saveLookup('sprk_mattertype', item), [
-    saveLookup,
-  ]);
+  const saveMatterTypeLookup = React.useCallback(
+    (item: ILookupItem | null) => saveLookup('sprk_mattertype', item),
+    [saveLookup]
+  );
   const savePracticeAreaLookup = React.useCallback(
     (item: ILookupItem | null) => saveLookup('sprk_practicearea', item),
     [saveLookup]
@@ -240,9 +239,7 @@ export const MatterHeaderView: React.FC<IMatterHeaderViewProps> = ({ recordId, t
   const displayMatterType =
     'sprk_mattertype' in pendingLookup ? pendingLookup.sprk_mattertype : projectLookup(values, 'sprk_mattertype');
   const displayPracticeArea =
-    'sprk_practicearea' in pendingLookup
-      ? pendingLookup.sprk_practicearea
-      : projectLookup(values, 'sprk_practicearea');
+    'sprk_practicearea' in pendingLookup ? pendingLookup.sprk_practicearea : projectLookup(values, 'sprk_practicearea');
 
   const { toolbarProps } = useRecordHeaderToolbarActions({
     entity: ENTITY,
@@ -274,13 +271,7 @@ export const MatterHeaderView: React.FC<IMatterHeaderViewProps> = ({ recordId, t
     <div className={styles.root}>
       <RecordHeaderShell toolbar={toolbarPropsWithSparkle} loading={loading} borderless>
         <FieldGrid columns={3}>
-          <TextField
-            span={1}
-            label="Matter Number"
-            value={displayMatterNumber}
-            required
-            onSave={saveMatterNumber}
-          />
+          <TextField span={1} label="Matter Number" value={displayMatterNumber} required onSave={saveMatterNumber} />
           <TextField span={2} label="Matter Name" value={displayMatterName} onSave={saveMatterName} />
           <div className={styles.lookupCell} style={{ gridColumn: 'span 1' }}>
             <LookupField

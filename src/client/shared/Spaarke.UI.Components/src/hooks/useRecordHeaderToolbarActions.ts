@@ -72,7 +72,6 @@ import {
 // Constants
 // ─────────────────────────────────────────────────────────────────────────────
 
-
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
 // ─────────────────────────────────────────────────────────────────────────────
@@ -349,19 +348,9 @@ export function useRecordHeaderToolbarActions(
     }
 
     return slots;
-  }, [
-    checkmarkEnabled,
-    annotationEnabled,
-    handleCheckmarkClick,
-    handleAnnotationClick,
-    todoCount,
-    memoCount,
-  ]);
+  }, [checkmarkEnabled, annotationEnabled, handleCheckmarkClick, handleAnnotationClick, todoCount, memoCount]);
 
-  const toolbarProps = React.useMemo<IHeaderToolbarProps>(
-    () => ({ iconSlots, title }),
-    [iconSlots, title]
-  );
+  const toolbarProps = React.useMemo<IHeaderToolbarProps>(() => ({ iconSlots, title }), [iconSlots, title]);
 
   return {
     toolbarProps,
