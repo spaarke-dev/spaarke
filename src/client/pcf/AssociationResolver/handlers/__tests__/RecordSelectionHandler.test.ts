@@ -38,11 +38,7 @@ jest.mock('@spaarke/ui-components', () => ({
   resolveRecordNumberFieldName: jest.fn(),
 }));
 
-import {
-  buildRecordUrl,
-  resolveRecordType,
-  resolveRecordNumberFieldName,
-} from '@spaarke/ui-components';
+import { buildRecordUrl, resolveRecordType, resolveRecordNumberFieldName } from '@spaarke/ui-components';
 import {
   handleRecordSelection,
   completeAutoDetectedAssociation,
@@ -54,8 +50,9 @@ import {
 
 const mockedBuildRecordUrl = buildRecordUrl as jest.MockedFunction<typeof buildRecordUrl>;
 const mockedResolveRecordType = resolveRecordType as jest.MockedFunction<typeof resolveRecordType>;
-const mockedResolveRecordNumberFieldName =
-  resolveRecordNumberFieldName as jest.MockedFunction<typeof resolveRecordNumberFieldName>;
+const mockedResolveRecordNumberFieldName = resolveRecordNumberFieldName as jest.MockedFunction<
+  typeof resolveRecordNumberFieldName
+>;
 
 // ---------------------------------------------------------------------------
 // Helpers: Xrm.Page attribute mock + webApi shim
@@ -121,11 +118,7 @@ const DENORMALIZED_FIELD_NAMES = [
   'sprk_regardingrecordnumber',
 ];
 
-const ENTITY_SPECIFIC_LOOKUP_NAMES = [
-  'sprk_regardingmatter',
-  'sprk_regardingproject',
-  'sprk_regardingcontact',
-];
+const ENTITY_SPECIFIC_LOOKUP_NAMES = ['sprk_regardingmatter', 'sprk_regardingproject', 'sprk_regardingcontact'];
 
 // ---------------------------------------------------------------------------
 // webApi shim — dispatches queries by first arg
@@ -155,15 +148,13 @@ function makeWebApi(opts: {
         if (entity === 'sprk_matter') {
           const val = opts.matterNumber === undefined ? 'M-1001' : opts.matterNumber;
           return {
-            entities:
-              val === null ? [{ sprk_matternumber: null }] : [{ sprk_matternumber: val }],
+            entities: val === null ? [{ sprk_matternumber: null }] : [{ sprk_matternumber: val }],
           };
         }
         if (entity === 'sprk_project') {
           const val = opts.projectNumber === undefined ? 'P-2002' : opts.projectNumber;
           return {
-            entities:
-              val === null ? [{ sprk_projectnumber: null }] : [{ sprk_projectnumber: val }],
+            entities: val === null ? [{ sprk_projectnumber: null }] : [{ sprk_projectnumber: val }],
           };
         }
         return { entities: [] };
@@ -204,10 +195,7 @@ describe('RecordSelectionHandler (SRFR-051 thin adapter)', () => {
       const { webApi } = makeWebApi({ matterNumber: 'M-1001' });
       await loadEntityConfigs(webApi);
 
-      installXrmPageWithFields([
-        ...DENORMALIZED_FIELD_NAMES,
-        ...ENTITY_SPECIFIC_LOOKUP_NAMES,
-      ]);
+      installXrmPageWithFields([...DENORMALIZED_FIELD_NAMES, ...ENTITY_SPECIFIC_LOOKUP_NAMES]);
 
       const selection: IRecordSelection = {
         entityType: 'sprk_matter',
@@ -231,10 +219,7 @@ describe('RecordSelectionHandler (SRFR-051 thin adapter)', () => {
       const { webApi } = makeWebApi({ matterNumber: 'M-1001' });
       await loadEntityConfigs(webApi);
 
-      const attrs = installXrmPageWithFields([
-        ...DENORMALIZED_FIELD_NAMES,
-        ...ENTITY_SPECIFIC_LOOKUP_NAMES,
-      ]);
+      const attrs = installXrmPageWithFields([...DENORMALIZED_FIELD_NAMES, ...ENTITY_SPECIFIC_LOOKUP_NAMES]);
 
       const selection: IRecordSelection = {
         entityType: 'sprk_matter',
@@ -262,10 +247,7 @@ describe('RecordSelectionHandler (SRFR-051 thin adapter)', () => {
       const { webApi } = makeWebApi({ matterNumber: 'M-1001' });
       await loadEntityConfigs(webApi);
 
-      const attrs = installXrmPageWithFields([
-        ...DENORMALIZED_FIELD_NAMES,
-        ...ENTITY_SPECIFIC_LOOKUP_NAMES,
-      ]);
+      const attrs = installXrmPageWithFields([...DENORMALIZED_FIELD_NAMES, ...ENTITY_SPECIFIC_LOOKUP_NAMES]);
 
       const selection: IRecordSelection = {
         entityType: 'sprk_matter',
@@ -297,10 +279,7 @@ describe('RecordSelectionHandler (SRFR-051 thin adapter)', () => {
       const { webApi } = makeWebApi({ matterNumber: null });
       await loadEntityConfigs(webApi);
 
-      const attrs = installXrmPageWithFields([
-        ...DENORMALIZED_FIELD_NAMES,
-        ...ENTITY_SPECIFIC_LOOKUP_NAMES,
-      ]);
+      const attrs = installXrmPageWithFields([...DENORMALIZED_FIELD_NAMES, ...ENTITY_SPECIFIC_LOOKUP_NAMES]);
 
       const selection: IRecordSelection = {
         entityType: 'sprk_matter',
@@ -327,10 +306,7 @@ describe('RecordSelectionHandler (SRFR-051 thin adapter)', () => {
       const { webApi } = makeWebApi({});
       await loadEntityConfigs(webApi);
 
-      const attrs = installXrmPageWithFields([
-        ...DENORMALIZED_FIELD_NAMES,
-        ...ENTITY_SPECIFIC_LOOKUP_NAMES,
-      ]);
+      const attrs = installXrmPageWithFields([...DENORMALIZED_FIELD_NAMES, ...ENTITY_SPECIFIC_LOOKUP_NAMES]);
 
       // Contact config carries NO regardingRecordNumberField; shared resolver
       // will be consulted and returns null (per default mock setup) → graceful-blank.
@@ -378,10 +354,7 @@ describe('RecordSelectionHandler (SRFR-051 thin adapter)', () => {
       const { webApi } = makeWebApi({ matterNumber: 'M-1001' });
       await loadEntityConfigs(webApi);
 
-      const attrs = installXrmPageWithFields([
-        ...DENORMALIZED_FIELD_NAMES,
-        ...ENTITY_SPECIFIC_LOOKUP_NAMES,
-      ]);
+      const attrs = installXrmPageWithFields([...DENORMALIZED_FIELD_NAMES, ...ENTITY_SPECIFIC_LOOKUP_NAMES]);
 
       const detected: IDetectedParentContext = {
         entityType: 'sprk_matter',
@@ -420,10 +393,7 @@ describe('RecordSelectionHandler (SRFR-051 thin adapter)', () => {
       const { webApi } = makeWebApi({});
       await loadEntityConfigs(webApi);
 
-      const attrs = installXrmPageWithFields([
-        ...DENORMALIZED_FIELD_NAMES,
-        ...ENTITY_SPECIFIC_LOOKUP_NAMES,
-      ]);
+      const attrs = installXrmPageWithFields([...DENORMALIZED_FIELD_NAMES, ...ENTITY_SPECIFIC_LOOKUP_NAMES]);
 
       clearAllRegardingFields();
 

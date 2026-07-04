@@ -104,11 +104,7 @@ export interface RecordTypeCatalogEntry {
  */
 export interface IPolymorphicPickerWebApi {
   retrieveRecord?(entityLogicalName: string, id: string, options?: string): Promise<unknown>;
-  retrieveMultipleRecords?(
-    entityLogicalName: string,
-    options?: string,
-    maxPageSize?: number
-  ): Promise<unknown>;
+  retrieveMultipleRecords?(entityLogicalName: string, options?: string, maxPageSize?: number): Promise<unknown>;
 }
 
 /**

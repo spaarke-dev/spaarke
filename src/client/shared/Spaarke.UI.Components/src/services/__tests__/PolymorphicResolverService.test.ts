@@ -33,10 +33,7 @@ import {
   resolveRecordNumberFieldName,
   _resetRecordNumberFieldCacheForTests,
 } from '../PolymorphicResolverService';
-import type {
-  INavPropEntry,
-  IPolymorphicWebApi,
-} from '../PolymorphicResolverService';
+import type { INavPropEntry, IPolymorphicWebApi } from '../PolymorphicResolverService';
 
 // ---------------------------------------------------------------------------
 // Fixtures
@@ -47,10 +44,7 @@ import type {
  * Value `null` = intentional graceful-blank (Contact/Person + host-only rows
  * that don't have a natural business-key text field).
  */
-const CATALOG: Record<
-  string,
-  { recordTypeId: string; recordDisplayName: string; recordNumberField: string | null }
-> = {
+const CATALOG: Record<string, { recordTypeId: string; recordDisplayName: string; recordNumberField: string | null }> = {
   sprk_matter: { recordTypeId: 'rt-matter', recordDisplayName: 'Matter', recordNumberField: 'sprk_matternumber' },
   sprk_project: { recordTypeId: 'rt-project', recordDisplayName: 'Project', recordNumberField: 'sprk_projectnumber' },
   sprk_event: { recordTypeId: 'rt-event', recordDisplayName: 'Event', recordNumberField: 'sprk_eventnumber' },
@@ -61,7 +55,11 @@ const CATALOG: Record<
   },
   sprk_invoice: { recordTypeId: 'rt-invoice', recordDisplayName: 'Invoice', recordNumberField: 'sprk_invoicenumber' },
   sprk_budget: { recordTypeId: 'rt-budget', recordDisplayName: 'Budget', recordNumberField: 'sprk_budgetnumber' },
-  sprk_analysis: { recordTypeId: 'rt-analysis', recordDisplayName: 'Analysis', recordNumberField: 'sprk_analysisnumber' },
+  sprk_analysis: {
+    recordTypeId: 'rt-analysis',
+    recordDisplayName: 'Analysis',
+    recordNumberField: 'sprk_analysisnumber',
+  },
   sprk_organization: {
     recordTypeId: 'rt-org',
     recordDisplayName: 'Organization',
@@ -125,46 +123,44 @@ function buildHostNavProps(): INavPropEntry[] {
  */
 function buildMockWebApi(targetRecordValues: Record<string, string | null>): IPolymorphicWebApi {
   return {
-    retrieveMultipleRecords: jest.fn(
-      async (entityLogicalName: string, query: string, _maxPageSize?: number) => {
-        if (entityLogicalName === 'sprk_recordtype_ref') {
-          const filterMatch = query.match(/sprk_recordlogicalname eq '([^']+)'/);
-          const logicalName = filterMatch ? filterMatch[1] : null;
-          if (logicalName && CATALOG[logicalName]) {
-            const row = CATALOG[logicalName];
-            return {
-              entities: [
-                {
-                  sprk_recordtype_refid: row.recordTypeId,
-                  sprk_recorddisplayname: row.recordDisplayName,
-                  sprk_regardingrecordnumberfield: row.recordNumberField,
-                },
-              ],
-            };
-          }
-          return { entities: [] };
-        }
-
-        // Target-record lookup (any entity except sprk_recordtype_ref).
-        // Fixture layer: return whatever `targetRecordValues[entity]` says
-        // for the source-field key. We infer the source-field name from
-        // the `$select=...` fragment.
-        const selectMatch = query.match(/\$select=([^&]+)/);
-        const selectedField = selectMatch ? selectMatch[1] : null;
-        if (selectedField && targetRecordValues[entityLogicalName] !== undefined) {
-          const value = targetRecordValues[entityLogicalName];
+    retrieveMultipleRecords: jest.fn(async (entityLogicalName: string, query: string, _maxPageSize?: number) => {
+      if (entityLogicalName === 'sprk_recordtype_ref') {
+        const filterMatch = query.match(/sprk_recordlogicalname eq '([^']+)'/);
+        const logicalName = filterMatch ? filterMatch[1] : null;
+        if (logicalName && CATALOG[logicalName]) {
+          const row = CATALOG[logicalName];
           return {
             entities: [
               {
-                [selectedField]: value,
+                sprk_recordtype_refid: row.recordTypeId,
+                sprk_recorddisplayname: row.recordDisplayName,
+                sprk_regardingrecordnumberfield: row.recordNumberField,
               },
             ],
           };
         }
-
         return { entities: [] };
       }
-    ),
+
+      // Target-record lookup (any entity except sprk_recordtype_ref).
+      // Fixture layer: return whatever `targetRecordValues[entity]` says
+      // for the source-field key. We infer the source-field name from
+      // the `$select=...` fragment.
+      const selectMatch = query.match(/\$select=([^&]+)/);
+      const selectedField = selectMatch ? selectMatch[1] : null;
+      if (selectedField && targetRecordValues[entityLogicalName] !== undefined) {
+        const value = targetRecordValues[entityLogicalName];
+        return {
+          entities: [
+            {
+              [selectedField]: value,
+            },
+          ],
+        };
+      }
+
+      return { entities: [] };
+    }),
   };
 }
 
@@ -253,16 +249,86 @@ describe('applyResolverFields — 5-field write (happy path)', () => {
     expectedNumberValue: string;
     navPropName: string;
   }> = [
-    { entity: 'sprk_matter', entitySet: 'sprk_matters', hint: 'matter', expectedSourceField: 'sprk_matternumber', expectedNumberValue: 'M-00042', navPropName: 'sprk_RegardingMatter' },
-    { entity: 'sprk_project', entitySet: 'sprk_projects', hint: 'project', expectedSourceField: 'sprk_projectnumber', expectedNumberValue: 'P-00007', navPropName: 'sprk_RegardingProject' },
-    { entity: 'sprk_event', entitySet: 'sprk_events', hint: 'event', expectedSourceField: 'sprk_eventnumber', expectedNumberValue: 'E-2026-01', navPropName: 'sprk_RegardingEvent' },
-    { entity: 'sprk_workassignment', entitySet: 'sprk_workassignments', hint: 'workassignment', expectedSourceField: 'sprk_workassignmentnumber', expectedNumberValue: 'WA-201', navPropName: 'sprk_RegardingWorkAssignment' },
-    { entity: 'sprk_invoice', entitySet: 'sprk_invoices', hint: 'invoice', expectedSourceField: 'sprk_invoicenumber', expectedNumberValue: 'INV-9001', navPropName: 'sprk_RegardingInvoice' },
-    { entity: 'sprk_budget', entitySet: 'sprk_budgets', hint: 'budget', expectedSourceField: 'sprk_budgetnumber', expectedNumberValue: 'B-101', navPropName: 'sprk_RegardingBudget' },
-    { entity: 'sprk_analysis', entitySet: 'sprk_analyses', hint: 'analysis', expectedSourceField: 'sprk_analysisnumber', expectedNumberValue: 'A-33', navPropName: 'sprk_RegardingAnalysis' },
-    { entity: 'sprk_organization', entitySet: 'sprk_organizations', hint: 'organization', expectedSourceField: 'sprk_organizationnumber', expectedNumberValue: 'ORG-77', navPropName: 'sprk_RegardingOrganization' },
-    { entity: 'sprk_document', entitySet: 'sprk_documents', hint: 'document', expectedSourceField: 'sprk_documentnumber', expectedNumberValue: 'DOC-9', navPropName: 'sprk_RegardingDocument' },
-    { entity: 'account', entitySet: 'accounts', hint: 'account', expectedSourceField: 'accountnumber', expectedNumberValue: 'ACCT-001', navPropName: 'sprk_RegardingAccount' },
+    {
+      entity: 'sprk_matter',
+      entitySet: 'sprk_matters',
+      hint: 'matter',
+      expectedSourceField: 'sprk_matternumber',
+      expectedNumberValue: 'M-00042',
+      navPropName: 'sprk_RegardingMatter',
+    },
+    {
+      entity: 'sprk_project',
+      entitySet: 'sprk_projects',
+      hint: 'project',
+      expectedSourceField: 'sprk_projectnumber',
+      expectedNumberValue: 'P-00007',
+      navPropName: 'sprk_RegardingProject',
+    },
+    {
+      entity: 'sprk_event',
+      entitySet: 'sprk_events',
+      hint: 'event',
+      expectedSourceField: 'sprk_eventnumber',
+      expectedNumberValue: 'E-2026-01',
+      navPropName: 'sprk_RegardingEvent',
+    },
+    {
+      entity: 'sprk_workassignment',
+      entitySet: 'sprk_workassignments',
+      hint: 'workassignment',
+      expectedSourceField: 'sprk_workassignmentnumber',
+      expectedNumberValue: 'WA-201',
+      navPropName: 'sprk_RegardingWorkAssignment',
+    },
+    {
+      entity: 'sprk_invoice',
+      entitySet: 'sprk_invoices',
+      hint: 'invoice',
+      expectedSourceField: 'sprk_invoicenumber',
+      expectedNumberValue: 'INV-9001',
+      navPropName: 'sprk_RegardingInvoice',
+    },
+    {
+      entity: 'sprk_budget',
+      entitySet: 'sprk_budgets',
+      hint: 'budget',
+      expectedSourceField: 'sprk_budgetnumber',
+      expectedNumberValue: 'B-101',
+      navPropName: 'sprk_RegardingBudget',
+    },
+    {
+      entity: 'sprk_analysis',
+      entitySet: 'sprk_analyses',
+      hint: 'analysis',
+      expectedSourceField: 'sprk_analysisnumber',
+      expectedNumberValue: 'A-33',
+      navPropName: 'sprk_RegardingAnalysis',
+    },
+    {
+      entity: 'sprk_organization',
+      entitySet: 'sprk_organizations',
+      hint: 'organization',
+      expectedSourceField: 'sprk_organizationnumber',
+      expectedNumberValue: 'ORG-77',
+      navPropName: 'sprk_RegardingOrganization',
+    },
+    {
+      entity: 'sprk_document',
+      entitySet: 'sprk_documents',
+      hint: 'document',
+      expectedSourceField: 'sprk_documentnumber',
+      expectedNumberValue: 'DOC-9',
+      navPropName: 'sprk_RegardingDocument',
+    },
+    {
+      entity: 'account',
+      entitySet: 'accounts',
+      hint: 'account',
+      expectedSourceField: 'accountnumber',
+      expectedNumberValue: 'ACCT-001',
+      navPropName: 'sprk_RegardingAccount',
+    },
   ];
 
   it.each(HAPPY_PATH_ENTITIES)(
@@ -314,9 +380,7 @@ describe('applyResolverFields — 5-field write (happy path)', () => {
     );
 
     // The @odata.bind value uses the cleaned GUID (no braces, lowercase).
-    expect(payload['sprk_RegardingMatter@odata.bind']).toBe(
-      '/sprk_matters(aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee)'
-    );
+    expect(payload['sprk_RegardingMatter@odata.bind']).toBe('/sprk_matters(aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee)');
     expect(payload['sprk_regardingrecordid']).toBe('aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee');
 
     // The target-record query used the cleaned GUID too (verify via the mock call).
@@ -383,32 +447,28 @@ describe('applyResolverFields — NFR-06 graceful-blank', () => {
     );
 
     expect(payload['sprk_regardingrecordnumber']).toBeUndefined();
-    expect(consoleWarnSpy).toHaveBeenCalledWith(
-      expect.stringContaining('has null/empty "sprk_matternumber"')
-    );
+    expect(consoleWarnSpy).toHaveBeenCalledWith(expect.stringContaining('has null/empty "sprk_matternumber"'));
     expect(result.recordNumber).toBeNull();
     expect(result.recordNumberSourceField).toBe('sprk_matternumber');
   });
 
   it('warns and skips when target-record query fails (does NOT throw)', async () => {
     const webApi: IPolymorphicWebApi = {
-      retrieveMultipleRecords: jest.fn(
-        async (entityLogicalName: string, query: string) => {
-          if (entityLogicalName === 'sprk_recordtype_ref') {
-            return {
-              entities: [
-                {
-                  sprk_recordtype_refid: 'rt-matter',
-                  sprk_recorddisplayname: 'Matter',
-                  sprk_regardingrecordnumberfield: 'sprk_matternumber',
-                },
-              ],
-            };
-          }
-          // Target-record query fails.
-          throw new Error('target read failed');
+      retrieveMultipleRecords: jest.fn(async (entityLogicalName: string, query: string) => {
+        if (entityLogicalName === 'sprk_recordtype_ref') {
+          return {
+            entities: [
+              {
+                sprk_recordtype_refid: 'rt-matter',
+                sprk_recorddisplayname: 'Matter',
+                sprk_regardingrecordnumberfield: 'sprk_matternumber',
+              },
+            ],
+          };
         }
-      ),
+        // Target-record query fails.
+        throw new Error('target read failed');
+      }),
     };
     const payload: Record<string, unknown> = {};
 
@@ -462,22 +522,20 @@ describe('applyResolverFields — backward compat + explicit override', () => {
     // Simulate a fresh environment where sprk_recordtype_ref rows have not yet
     // been populated (Wave 0 pre-fix state). The 5th field silently skips.
     const webApi: IPolymorphicWebApi = {
-      retrieveMultipleRecords: jest.fn(
-        async (entityLogicalName: string, _query: string) => {
-          if (entityLogicalName === 'sprk_recordtype_ref') {
-            return {
-              entities: [
-                {
-                  sprk_recordtype_refid: 'rt-matter',
-                  sprk_recorddisplayname: 'Matter',
-                  sprk_regardingrecordnumberfield: null,
-                },
-              ],
-            };
-          }
-          return { entities: [] };
+      retrieveMultipleRecords: jest.fn(async (entityLogicalName: string, _query: string) => {
+        if (entityLogicalName === 'sprk_recordtype_ref') {
+          return {
+            entities: [
+              {
+                sprk_recordtype_refid: 'rt-matter',
+                sprk_recorddisplayname: 'Matter',
+                sprk_regardingrecordnumberfield: null,
+              },
+            ],
+          };
         }
-      ),
+        return { entities: [] };
+      }),
     };
     const payload: Record<string, unknown> = {};
 

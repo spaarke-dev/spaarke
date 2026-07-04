@@ -37,12 +37,7 @@
  * @version 1.1.0 → 1.2.0 (SRFR-051 refactor; version bumped in SRFR-053)
  */
 
-import {
-  createLogger,
-  buildRecordUrl,
-  resolveRecordType,
-  resolveRecordNumberFieldName,
-} from '@spaarke/ui-components';
+import { createLogger, buildRecordUrl, resolveRecordType, resolveRecordNumberFieldName } from '@spaarke/ui-components';
 
 const logger = createLogger('AssociationResolver');
 
@@ -138,8 +133,7 @@ export async function loadEntityConfigs(webApi: ComponentFramework.WebApi): Prom
             regardingField: e.sprk_regardingfield as string,
             // Optional — undefined when the catalog row leaves it blank
             // (e.g., OOB account/contact per Owner Clarification Q-06).
-            regardingRecordNumberField:
-              (e.sprk_regardingrecordnumberfield as string | undefined) || undefined,
+            regardingRecordNumberField: (e.sprk_regardingrecordnumberfield as string | undefined) || undefined,
           }));
 
         logger.logInfo(
@@ -330,10 +324,7 @@ async function resolveResolverFields(
   // 2. Record Type lookup — delegated to shared `resolveRecordType`
   const recordTypeLookup = await resolveRecordType(webApi, parentEntityLogicalName);
   if (!recordTypeLookup) {
-    logger.logWarn(
-      'RecordSelection',
-      `Record Type not found for entity: ${parentEntityLogicalName}`
-    );
+    logger.logWarn('RecordSelection', `Record Type not found for entity: ${parentEntityLogicalName}`);
   }
 
   // 3. Record Number — delegated to shared `resolveRecordNumberFieldName`
@@ -345,8 +336,7 @@ async function resolveResolverFields(
       : null;
 
   const recordNumberSourceField =
-    explicitOverride ??
-    (await resolveRecordNumberFieldName(webApi, parentEntityLogicalName));
+    explicitOverride ?? (await resolveRecordNumberFieldName(webApi, parentEntityLogicalName));
 
   let recordNumber: string | null = null;
   if (recordNumberSourceField) {

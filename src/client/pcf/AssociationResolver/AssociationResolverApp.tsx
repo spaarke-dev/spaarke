@@ -73,8 +73,7 @@ import {
  * Runtime is unaffected — the compiled JS module is the same regardless of
  * which type version emitted the `.d.ts`.
  */
-const PolymorphicPicker =
-  PolymorphicPickerRaw as unknown as React.ComponentType<PolymorphicPickerProps>;
+const PolymorphicPicker = PolymorphicPickerRaw as unknown as React.ComponentType<PolymorphicPickerProps>;
 
 const logger = createLogger('AssociationResolver');
 
@@ -455,11 +454,7 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
    * mapping side effects. Replaces the pre-SRFR-052 `handleLookupClick` /
    * `handleEntityTypeChange` handler pair.
    */
-  const handlePickerSelect = async (
-    entityType: string,
-    recordId: string,
-    recordName: string
-  ): Promise<void> => {
+  const handlePickerSelect = async (entityType: string, recordId: string, recordName: string): Promise<void> => {
     setSelectedEntityType(entityType);
     setError(null);
     setMappingStatus(null);
@@ -727,7 +722,9 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
         </Dialog>
 
         <div className={styles.footer}>
-          <Text className={styles.versionText}>v{version} • Built {BUILD_DATE} • Auto</Text>
+          <Text className={styles.versionText}>
+            v{version} • Built {BUILD_DATE} • Auto
+          </Text>
         </div>
       </div>
     );
@@ -844,7 +841,9 @@ export const AssociationResolverApp: React.FC<AssociationResolverAppProps> = ({
       </Dialog>
 
       <div className={styles.footer}>
-        <Text className={styles.versionText}>v{version} • Built {BUILD_DATE}</Text>
+        <Text className={styles.versionText}>
+          v{version} • Built {BUILD_DATE}
+        </Text>
       </div>
     </div>
   );

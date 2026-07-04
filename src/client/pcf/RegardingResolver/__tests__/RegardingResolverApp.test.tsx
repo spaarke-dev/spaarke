@@ -30,24 +30,73 @@ const mockPolymorphicPicker = jest.fn();
 
 jest.mock('@spaarke/ui-components', () => {
   const TODO_REGARDING_CATALOG = [
-    { entityType: 'sprk_matter', entitySet: 'sprk_matters', lookupAttribute: 'sprk_regardingmatter', navPropHint: 'matter' },
-    { entityType: 'sprk_project', entitySet: 'sprk_projects', lookupAttribute: 'sprk_regardingproject', navPropHint: 'project' },
-    { entityType: 'sprk_event', entitySet: 'sprk_events', lookupAttribute: 'sprk_regardingevent', navPropHint: 'event' },
-    { entityType: 'sprk_communication', entitySet: 'sprk_communications', lookupAttribute: 'sprk_regardingcommunication', navPropHint: 'communication' },
-    { entityType: 'sprk_workassignment', entitySet: 'sprk_workassignments', lookupAttribute: 'sprk_regardingworkassignment', navPropHint: 'workassignment' },
-    { entityType: 'sprk_invoice', entitySet: 'sprk_invoices', lookupAttribute: 'sprk_regardinginvoice', navPropHint: 'invoice' },
-    { entityType: 'sprk_budget', entitySet: 'sprk_budgets', lookupAttribute: 'sprk_regardingbudget', navPropHint: 'budget' },
-    { entityType: 'sprk_analysis', entitySet: 'sprk_analyses', lookupAttribute: 'sprk_regardinganalysis', navPropHint: 'analysis' },
-    { entityType: 'sprk_organization', entitySet: 'sprk_organizations', lookupAttribute: 'sprk_regardingorganization', navPropHint: 'organization' },
+    {
+      entityType: 'sprk_matter',
+      entitySet: 'sprk_matters',
+      lookupAttribute: 'sprk_regardingmatter',
+      navPropHint: 'matter',
+    },
+    {
+      entityType: 'sprk_project',
+      entitySet: 'sprk_projects',
+      lookupAttribute: 'sprk_regardingproject',
+      navPropHint: 'project',
+    },
+    {
+      entityType: 'sprk_event',
+      entitySet: 'sprk_events',
+      lookupAttribute: 'sprk_regardingevent',
+      navPropHint: 'event',
+    },
+    {
+      entityType: 'sprk_communication',
+      entitySet: 'sprk_communications',
+      lookupAttribute: 'sprk_regardingcommunication',
+      navPropHint: 'communication',
+    },
+    {
+      entityType: 'sprk_workassignment',
+      entitySet: 'sprk_workassignments',
+      lookupAttribute: 'sprk_regardingworkassignment',
+      navPropHint: 'workassignment',
+    },
+    {
+      entityType: 'sprk_invoice',
+      entitySet: 'sprk_invoices',
+      lookupAttribute: 'sprk_regardinginvoice',
+      navPropHint: 'invoice',
+    },
+    {
+      entityType: 'sprk_budget',
+      entitySet: 'sprk_budgets',
+      lookupAttribute: 'sprk_regardingbudget',
+      navPropHint: 'budget',
+    },
+    {
+      entityType: 'sprk_analysis',
+      entitySet: 'sprk_analyses',
+      lookupAttribute: 'sprk_regardinganalysis',
+      navPropHint: 'analysis',
+    },
+    {
+      entityType: 'sprk_organization',
+      entitySet: 'sprk_organizations',
+      lookupAttribute: 'sprk_regardingorganization',
+      navPropHint: 'organization',
+    },
     { entityType: 'contact', entitySet: 'contacts', lookupAttribute: 'sprk_regardingcontact', navPropHint: 'contact' },
-    { entityType: 'sprk_document', entitySet: 'sprk_documents', lookupAttribute: 'sprk_regardingdocument', navPropHint: 'document' },
+    {
+      entityType: 'sprk_document',
+      entitySet: 'sprk_documents',
+      lookupAttribute: 'sprk_regardingdocument',
+      navPropHint: 'document',
+    },
   ];
   return {
     TODO_REGARDING_CATALOG,
     applyResolverFields: mockApplyResolverFields,
     resolveRecordType: mockResolveRecordType,
-    buildRecordUrl: (entityType: string, id: string) =>
-      `https://test/main.aspx?etn=${entityType}&id=${id}`,
+    buildRecordUrl: (entityType: string, id: string) => `https://test/main.aspx?etn=${entityType}&id=${id}`,
     // PolymorphicPicker mock — records catalog + onSelect + title so tests
     // can trigger onSelect programmatically and inspect the props received.
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -56,9 +105,7 @@ jest.mock('@spaarke/ui-components', () => {
       return (
         <div data-testid="polymorphic-picker-mock">
           <span data-testid="polymorphic-picker-mock-title">{props.title}</span>
-          <span data-testid="polymorphic-picker-mock-catalog-count">
-            {props.catalog?.length ?? 0}
-          </span>
+          <span data-testid="polymorphic-picker-mock-catalog-count">{props.catalog?.length ?? 0}</span>
           {!props.readOnly && (
             <button
               data-testid="polymorphic-picker-trigger"
@@ -100,20 +147,13 @@ function buildContext(overrides?: {
       regardingRecordType: overrides?.boundLookup ? { raw: [overrides.boundLookup] } : { raw: null },
       title: { raw: overrides?.title === undefined ? null : overrides.title },
       regardingRecordNumberField: {
-        raw:
-          overrides?.regardingRecordNumberField === undefined
-            ? null
-            : overrides.regardingRecordNumberField,
+        raw: overrides?.regardingRecordNumberField === undefined ? null : overrides.regardingRecordNumberField,
       },
       regardingRecordNameField: {
-        raw:
-          overrides?.regardingRecordNameField === undefined
-            ? null
-            : overrides.regardingRecordNameField,
+        raw: overrides?.regardingRecordNameField === undefined ? null : overrides.regardingRecordNameField,
       },
       showVersionFooter: {
-        raw:
-          overrides?.showVersionFooter === undefined ? null : overrides.showVersionFooter,
+        raw: overrides?.showVersionFooter === undefined ? null : overrides.showVersionFooter,
       },
     },
     mode: { isControlDisabled: false },
@@ -530,9 +570,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           // URL must reference the picked entity type and record id, matching
           // buildRecordUrl output shape (etn + id query params).
           expect(seam.recordUrl).toEqual(expect.stringContaining('sprk_matter'));
-          expect(seam.recordUrl).toEqual(
-            expect.stringContaining('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa')
-          );
+          expect(seam.recordUrl).toEqual(expect.stringContaining('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'));
         });
       } finally {
         if (originalXrm === undefined) {
@@ -686,14 +724,10 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
 
       // Now click. Must NOT throw. v1.3.6: click handler is async, so we
       // waitFor the warn to appear on the microtask queue.
-      expect(() =>
-        fireEvent.click(screen.getByTestId('regarding-resolver-record-number'))
-      ).not.toThrow();
+      expect(() => fireEvent.click(screen.getByTestId('regarding-resolver-record-number'))).not.toThrow();
 
       await waitFor(() => {
-        expect(warnSpy).toHaveBeenCalledWith(
-          expect.stringContaining('Xrm.Navigation.navigateTo unavailable')
-        );
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Xrm.Navigation.navigateTo unavailable'));
       });
       warnSpy.mockRestore();
     });
@@ -719,9 +753,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         expect(mockApplyResolverFields).toHaveBeenCalledTimes(1);
       });
 
-      expect(() =>
-        fireEvent.click(screen.getByTestId('regarding-resolver-record-number'))
-      ).not.toThrow();
+      expect(() => fireEvent.click(screen.getByTestId('regarding-resolver-record-number'))).not.toThrow();
 
       // Wait for the microtask queue so the .catch handler fires.
       await waitFor(() => {
@@ -789,9 +821,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
       const navigateToMock = jest.fn().mockResolvedValue(undefined);
       const preLoadedUrl =
         'https://spaarkedev1.crm.dynamics.com/main.aspx?etn=sprk_matter&id=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
-      const retrieveRecordMock = jest
-        .fn()
-        .mockResolvedValue({ sprk_regardingrecordurl: preLoadedUrl });
+      const retrieveRecordMock = jest.fn().mockResolvedValue({ sprk_regardingrecordurl: preLoadedUrl });
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (window as any).Xrm = {
@@ -851,9 +881,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
       const navigateToMock = jest.fn().mockResolvedValue(undefined);
       const staleUrl =
         'https://spaarkedev1.crm.dynamics.com/main.aspx?etn=sprk_project&id=bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
-      const retrieveRecordMock = jest
-        .fn()
-        .mockResolvedValue({ sprk_regardingrecordurl: staleUrl });
+      const retrieveRecordMock = jest.fn().mockResolvedValue({ sprk_regardingrecordurl: staleUrl });
 
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (window as any).Xrm = {
@@ -932,9 +960,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         />
       );
 
-      expect(() =>
-        fireEvent.click(screen.getByTestId('regarding-resolver-record-number'))
-      ).not.toThrow();
+      expect(() => fireEvent.click(screen.getByTestId('regarding-resolver-record-number'))).not.toThrow();
 
       // Micro-task queue must drain before we assert the .then() branch ran.
       await Promise.resolve();
@@ -942,9 +968,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
 
       expect(retrieveRecordMock).not.toHaveBeenCalled();
       expect(navigateToMock).not.toHaveBeenCalled();
-      expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining('Cannot open modal')
-      );
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Cannot open modal'));
       warnSpy.mockRestore();
     });
 
@@ -976,29 +1000,21 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         />
       );
 
-      expect(() =>
-        fireEvent.click(screen.getByTestId('regarding-resolver-record-number'))
-      ).not.toThrow();
+      expect(() => fireEvent.click(screen.getByTestId('regarding-resolver-record-number'))).not.toThrow();
 
       // Wait for the rejected promise + the fallback warn to fire.
       await waitFor(() => {
         expect(retrieveRecordMock).toHaveBeenCalledTimes(1);
       });
       await waitFor(() => {
-        expect(warnSpy).toHaveBeenCalledWith(
-          expect.stringContaining('Cannot open modal'),
-          ...([] as unknown[])
-        );
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Cannot open modal'), ...([] as unknown[]));
       });
 
       expect(navigateToMock).not.toHaveBeenCalled();
       // Both warnings should appear: (a) the retrieveRecord-rejected warn from
       // inside resolveClickTarget, (b) the "Cannot open modal" warn from the
       // click handler's null-target fallback.
-      expect(warnSpy).toHaveBeenCalledWith(
-        expect.stringContaining('webApi.retrieveRecord'),
-        expect.anything()
-      );
+      expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('webApi.retrieveRecord'), expect.anything());
       warnSpy.mockRestore();
     });
   });
@@ -1398,15 +1414,10 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         />
       );
 
-      expect(() =>
-        fireEvent.click(screen.getByTestId('regarding-resolver-refresh'))
-      ).not.toThrow();
+      expect(() => fireEvent.click(screen.getByTestId('regarding-resolver-refresh'))).not.toThrow();
 
       await waitFor(() => {
-        expect(warnSpy).toHaveBeenCalledWith(
-          expect.stringContaining('Refresh failed'),
-          expect.any(Error)
-        );
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Refresh failed'), expect.any(Error));
       });
       warnSpy.mockRestore();
     });
@@ -1537,9 +1548,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
       );
 
       // Trigger picker selection; the underlying handler must not throw.
-      expect(() =>
-        fireEvent.click(screen.getByTestId('polymorphic-picker-trigger'))
-      ).not.toThrow();
+      expect(() => fireEvent.click(screen.getByTestId('polymorphic-picker-trigger'))).not.toThrow();
 
       // Wait for the shared write path (proves the handler ran end-to-end).
       await waitFor(() => {
@@ -1548,9 +1557,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
 
       // The auto-refresh helper should have logged its Xrm-unavailable warn.
       await waitFor(() => {
-        expect(warnSpy).toHaveBeenCalledWith(
-          expect.stringContaining('Auto-refresh skipped: Xrm unavailable')
-        );
+        expect(warnSpy).toHaveBeenCalledWith(expect.stringContaining('Auto-refresh skipped: Xrm unavailable'));
       });
 
       warnSpy.mockRestore();

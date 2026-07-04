@@ -185,8 +185,7 @@ import {
  * against the local React 16 types. Runtime is unaffected — the compiled JS
  * module is the same regardless of which type version emitted the `.d.ts`.
  */
-const PolymorphicPicker =
-  PolymorphicPickerRaw as unknown as React.ComponentType<PolymorphicPickerProps>;
+const PolymorphicPicker = PolymorphicPickerRaw as unknown as React.ComponentType<PolymorphicPickerProps>;
 import { IInputs } from './generated/ManifestTypes';
 import {
   applyRegardingSelection,
@@ -422,9 +421,7 @@ async function autoRefreshForm(formType: number): Promise<void> {
 
   const xrm = getXrm();
   if (!xrm) {
-    console.warn(
-      '[RegardingResolver] Auto-refresh skipped: Xrm unavailable (test harness or canvas app).'
-    );
+    console.warn('[RegardingResolver] Auto-refresh skipped: Xrm unavailable (test harness or canvas app).');
     return;
   }
 
@@ -570,11 +567,7 @@ async function resolveClickTarget(
   if (!webApi || typeof webApi.retrieveRecord !== 'function') return null;
 
   try {
-    const result = await webApi.retrieveRecord(
-      hostEntity,
-      hostRecordId,
-      '?$select=sprk_regardingrecordurl'
-    );
+    const result = await webApi.retrieveRecord(hostEntity, hostRecordId, '?$select=sprk_regardingrecordurl');
     const urlValue = result?.sprk_regardingrecordurl;
     if (typeof urlValue === 'string' && urlValue.length > 0) {
       try {
@@ -598,10 +591,7 @@ async function resolveClickTarget(
   } catch (err) {
     // Record deleted, no privilege, or network error. Warn (developer-visible)
     // but do not throw — the host form must never crash from a click.
-    console.warn(
-      '[RegardingResolver] webApi.retrieveRecord(sprk_regardingrecordurl) rejected:',
-      err
-    );
+    console.warn('[RegardingResolver] webApi.retrieveRecord(sprk_regardingrecordurl) rejected:', err);
   }
 
   return null;
@@ -631,9 +621,7 @@ function getHostRecordId(): string | undefined {
  * (a stable string) since the picker doesn't touch the actual
  * `sprk_recordtype_ref` GUID.
  */
-function adaptCatalogForPicker(
-  catalog: ReadonlyArray<ITodoRegardingTargetCatalogEntry>
-): RecordTypeCatalogEntry[] {
+function adaptCatalogForPicker(catalog: ReadonlyArray<ITodoRegardingTargetCatalogEntry>): RecordTypeCatalogEntry[] {
   return catalog.map(entry => ({
     recordTypeRefId: entry.entityType,
     displayName: entry.entityType,
@@ -673,8 +661,7 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
   // Dataverse OOB section-header convention, regardless of maker input
   // case. Belt-and-suspenders with the manifest default "RELATED RECORD".
   const titleRaw = context.parameters.title?.raw ?? null;
-  const titleInput =
-    titleRaw && titleRaw.trim().length > 0 ? titleRaw.trim() : 'RELATED RECORD';
+  const titleInput = titleRaw && titleRaw.trim().length > 0 ? titleRaw.trim() : 'RELATED RECORD';
   const title = titleInput.toUpperCase();
 
   // v1.3.1 (SRFR-034 §2): version-footer visibility toggle. Defaults to true
@@ -702,10 +689,7 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
     [context.parameters.regardingTargets?.raw]
   );
 
-  const pickerCatalog = React.useMemo<RecordTypeCatalogEntry[]>(
-    () => adaptCatalogForPicker(catalog),
-    [catalog]
-  );
+  const pickerCatalog = React.useMemo<RecordTypeCatalogEntry[]>(() => adaptCatalogForPicker(catalog), [catalog]);
 
   // Local transient state — errors + write-in-flight indicator.
   const [error, setError] = React.useState<string | null>(null);
@@ -856,12 +840,7 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
       // v1.3.6 SRFR-043 — click-time target resolution is now async because
       // pre-loaded records go through webApi.retrieveRecord. Fire-and-forget
       // via .then; errors are logged inside resolveClickTarget.
-      void resolveClickTarget(
-        selectedTarget,
-        context.webAPI,
-        hostEntity,
-        getHostRecordId()
-      ).then(clickTarget => {
+      void resolveClickTarget(selectedTarget, context.webAPI, hostEntity, getHostRecordId()).then(clickTarget => {
         const entityName = clickTarget?.entityName;
         const entityId = clickTarget?.entityId;
 
@@ -991,10 +970,7 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
       <div className={styles.row2} data-testid="regarding-resolver-row-2">
         {hasRecordNumber && (
           <div className={styles.numberCell} data-testid="regarding-resolver-number-cell">
-            <Text
-              className={styles.fieldLabel}
-              data-testid="regarding-resolver-number-label"
-            >
+            <Text className={styles.fieldLabel} data-testid="regarding-resolver-number-label">
               Regarding Number
             </Text>
             <Link
@@ -1009,16 +985,10 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
         )}
         {hasRecordName && (
           <div className={styles.nameCell} data-testid="regarding-resolver-name-cell">
-            <Text
-              className={styles.fieldLabel}
-              data-testid="regarding-resolver-name-label"
-            >
+            <Text className={styles.fieldLabel} data-testid="regarding-resolver-name-label">
               Regarding Name
             </Text>
-            <Text
-              className={styles.recordName}
-              data-testid="regarding-resolver-record-name"
-            >
+            <Text className={styles.recordName} data-testid="regarding-resolver-record-name">
               {boundRecordName}
             </Text>
           </div>

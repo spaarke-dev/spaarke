@@ -212,10 +212,7 @@ export async function resolveRecordNumberFieldName(
     _recordNumberFieldCache.set(entityLogicalName, null);
     return null;
   } catch (err) {
-    console.warn(
-      `[PolymorphicResolver] resolveRecordNumberFieldName(${entityLogicalName}) error:`,
-      err
-    );
+    console.warn(`[PolymorphicResolver] resolveRecordNumberFieldName(${entityLogicalName}) error:`, err);
     // Do not cache on error — allow retry on next call.
     return null;
   }
@@ -397,13 +394,11 @@ export async function applyResolverFields(
   // Never throw from a missing optional mapping — the user experience is a
   // blank cell, not a broken form.
   const explicitOverride =
-    typeof options?.sourceRecordNumberField === 'string' &&
-    options.sourceRecordNumberField.trim().length > 0
+    typeof options?.sourceRecordNumberField === 'string' && options.sourceRecordNumberField.trim().length > 0
       ? options.sourceRecordNumberField.trim()
       : null;
 
-  const sourceField =
-    explicitOverride ?? (await resolveRecordNumberFieldName(webApi, parentEntityLogicalName));
+  const sourceField = explicitOverride ?? (await resolveRecordNumberFieldName(webApi, parentEntityLogicalName));
 
   if (!sourceField) {
     // Metadata null → graceful-blank per NFR-06.
@@ -420,8 +415,7 @@ export async function applyResolverFields(
     // attribute so we exercise the same webApi surface as the rest of this
     // service (no new capability required from IPolymorphicWebApi).
     const primaryIdAttr = `${parentEntityLogicalName}id`;
-    const query =
-      `?$filter=${primaryIdAttr} eq ${cleanRecordId}&$select=${sourceField}&$top=1`;
+    const query = `?$filter=${primaryIdAttr} eq ${cleanRecordId}&$select=${sourceField}&$top=1`;
     const result = await webApi.retrieveMultipleRecords(parentEntityLogicalName, query, 1);
 
     if (result.entities && result.entities.length > 0) {
