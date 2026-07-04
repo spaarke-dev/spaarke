@@ -1,53 +1,100 @@
-# Current Task
+# Current Task State — set-regarding-and-field-mapping-resolver-r1
 
-**Project**: set-regarding-and-field-mapping-resolver-r1
-**Wave**: Wave 8 remaining (SRFR-084 UAT); Wave 9 wrap-up (SRFR-090)
-**Task**: none active
-**Status**: idle
-**Started**: —
-**Rigor**: —
+> **Last Updated**: 2026-07-03 (by context-handoff)
+> **Recovery**: Read "Quick Recovery" section first
 
-## Quick Recovery
+---
+
+## Quick Recovery (READ THIS FIRST)
 
 | Field | Value |
-|-------|-------|
-| **Task** | — (SRFR-039 + SRFR-041 complete; v1.3.4 deployed; OOB fields hidden) |
-| **Step** | — |
-| **Status** | idle |
-| **Next Action** | Wave 8 remaining: **SRFR-084 (UAT Matter→Event end-to-end STANDARD)**. Or Wave 9 SRFR-090 (project wrap-up). Or await owner UAT feedback on v1.3.4. |
+|---|---|
+| **Project** | set-regarding-and-field-mapping-resolver-r1 |
+| **Branch** | `work/set-regarding-and-field-mapping-resolver-r1` (worktree) |
+| **Portfolio** | [Project #536](https://github.com/spaarke-dev/spaarke/issues/536) · Epic [#535 ENTITY FUNCTIONALITY](https://github.com/spaarke-dev/spaarke/issues/535) |
+| **Tasks Completed** | 33 of ~36 (28 original + 8 out-of-plan iterations 034/035/036/037/038/039/041) |
+| **Active Task** | **SRFR-042 v1.3.5 hyperlink onLoad fix — running as background sub-agent** (agentId `a152406bc76c0c25c`) |
+| **Status** | in-progress (waiting for SRFR-042 notification) |
+| **Next Action after SRFR-042 lands** | Commit + push; owner hard-refreshes to verify link works on pre-loaded records; then dispatch **SRFR-084 UAT** (3 scenarios) + **SRFR-090 wrap-up** |
 
-## Session Notes / Key Learnings (SRFR-039 + SRFR-041)
+### Critical Context (1-3 sentences)
 
-- **Owner corrections are common on visible UI polish** — SRFR-034 §6 removed the Name cell based on a briefing; owner post-v1.3.3 clarified they wanted it inline. Similarly SRFR-038 misinterpreted the hidden OOB fields as a regression; owner clarified they were intentionally hidden. Lesson: for visible-UI changes, prefer to verify via screenshot/DevTools BEFORE making permanent structural decisions.
-- **Path A exceptions can be extended** — SRFR-034 §4 (title OOB parity) was extended by SRFR-037 (weight 400 → 600) and now SRFR-039 (Row 2 field labels 12px/400/#616161 + name text 14px/400/#242424). All extensions stay bounded to OOB-parity within the same file. This is a legitimate pattern per CLAUDE.md §6.5.
-- **Preserving companion wiring on revert** — SRFR-041 revert keeps the OnLoad handler + `<events>` block intact so owner can re-enable OOB fields via maker portal without re-registering the webresource. Reverts should preserve wiring, not tear everything down.
-- **7-anchor version discipline preserved** — same list as SRFR-033/034/035/037, all bumped to 1.3.4.
+RegardingResolver PCF v1.3.4 is deployed to spaarkedev1 with the correct visual layout (2-cell Row 2 with labels "Regarding Number" 1/3 + "Regarding Name" 2/3; OOB form fields hidden per SRFR-041). Owner reported the record-number hyperlink doesn't work when the record was pre-loaded (only works right after user picks via search) — SRFR-042 is fixing this by deriving entity+id from BOUND fields (Xrm.Page attributes) with URL-parse fallback from `sprk_regardingrecordurl`, not just from React `selectedTarget` state.
 
-## Applicable ADRs (session-level)
+### Files Modified This Session (post-Wave-8 iteration cycle)
 
-- **ADR-021** — Fluent v9 tokens preferred. Path A exception (SRFR-034 §4) extended by SRFR-037 (title weight) and SRFR-039 (Row 2 labels + name text). All hardcoded values match observed OOB DevTools output.
-- **ADR-022** — PCF platform libraries (virtual pattern preserved; bundle 1.58 MiB parity).
-- **ADR-012** — Shared component library (PolymorphicPicker consumed unchanged).
-- **ADR-024** — Polymorphic resolver pattern (unchanged).
-- **ADR-006** — Form config only for W2 (SRFR-041).
+**PCF version bumps** (all committed + deployed to spaarkedev1 via `pac solution import`):
+- v1.3.0 → v1.3.1 (SRFR-034 — UI polish: title uppercase, showVersionFooter, icon flip, refresh button, OOB styling, Row 2 name-cell removed, version bump)
+- v1.3.1 → v1.3.2 (SRFR-035 — auto-refresh after selection, CREATE-mode gate protects presave bridge)
+- v1.3.2 → v1.3.3 (SRFR-037 — title font-weight 400 → 600 to match OOB `.pa-hw`; root paddingTop 0 for reduced top spacing)
+- v1.3.3 → v1.3.4 (SRFR-039 — Row 2 restored as 1fr 2fr grid; "Regarding Number" + "Regarding Name" labels 12px gray top-aligned; name cell as `<Text>` not `<Link>`)
+- v1.3.4 → v1.3.5 (SRFR-042 — **IN-FLIGHT** — hyperlink onLoad fix via bound-field derivation + URL parse fallback)
 
-## Files Modified This Session (SRFR-039 + SRFR-041)
+**Form config iterations**:
+- SRFR-036 — sprk_todo FormXml: fields + companion webresource `sprk_regardingrecordnumber_hyperlink.js` v1.0.0
+- SRFR-038 — flipped both cells to visible=true (WRONG — owner had them hidden by intent)
+- SRFR-041 — reverted SRFR-038 (both cells back to visible=false, wire preserved for future maker enable)
 
-- CREATED: `projects/set-regarding-and-field-mapping-resolver-r1/tasks/039-regarding-resolver-restore-name-cell-v1.3.4.poml` (status: completed)
-- CREATED: `projects/set-regarding-and-field-mapping-resolver-r1/tasks/041-sprk-todo-form-revert-hide-oob-fields.poml` (status: completed)
-- MODIFIED: `src/client/pcf/RegardingResolver/RegardingResolver/RegardingResolverApp.tsx` (Row 2 grid + labels + Griffel styles; +81 net lines)
-- MODIFIED: `src/client/pcf/RegardingResolver/RegardingResolver/ControlManifest.Input.xml` (v1.3.4)
-- MODIFIED: `src/client/pcf/RegardingResolver/RegardingResolver/index.ts` (CONTROL_VERSION v1.3.4)
-- MODIFIED: `src/client/pcf/RegardingResolver/package.json` (v1.3.4)
-- MODIFIED: `src/client/pcf/RegardingResolver/Solution/solution.xml` (v1.3.4)
-- MODIFIED: `src/client/pcf/RegardingResolver/Solution/Controls/sprk_Spaarke.Controls.RegardingResolver/ControlManifest.xml` (v1.3.4)
-- MODIFIED: `src/client/pcf/RegardingResolver/Solution/pack.ps1` (v1.3.4)
-- MODIFIED: `src/client/pcf/RegardingResolver/__tests__/RegardingResolverApp.test.tsx` (bulk v1.3.4 + 3 replaced + 6 new SRFR-039 tests; +164 net lines)
-- BUILT: `src/client/pcf/RegardingResolver/out/controls/RegardingResolver/bundle.js` (1.58 MiB)
-- BUILT: `src/client/pcf/RegardingResolver/Solution/bin/RegardingResolverSolution_v1.3.4.zip` (442,670 bytes)
-- DEPLOYED: RegardingResolverSolution v1.3.4 to spaarkedev1 (verified via `pac solution list`)
-- CREATED: `c:/tmp/deploy-sprktodo-form-041-revert.ps1`
-- PATCHED: sprk_todo main form (formid eca59df4-...); both OOB cells reverted to `visible="false"`; PublishXml executed
-- CREATED: `projects/set-regarding-and-field-mapping-resolver-r1/notes/task-039-restore-name-cell.log`
-- CREATED: `projects/set-regarding-and-field-mapping-resolver-r1/notes/task-041-sprk-todo-form-revert.log`
-- UPDATED: `projects/set-regarding-and-field-mapping-resolver-r1/tasks/TASK-INDEX.md` (SRFR-039 + SRFR-041 rows; totals 33 → 35)
+**Companion webresource** (deployed, still active but unused):
+- `sprk_regardingrecordnumber_hyperlink.js` v1.0.0 — DOM-transforms OOB field to hyperlink
+
+## Full State (Detailed)
+
+### Wave-level completion status
+
+| Wave | Status |
+|---|---|
+| 0 Discovery + data-fix | ✅ SRFR-001, 002 (surfaced D-1..D-11) |
+| 1 Schema (10 targets + Matter) | ✅ SRFR-010 (surfaced D-12..D-15 including MCP underscore convention) |
+| 2 Shared lib (Poly + FMH + interface) | ✅ SRFR-020, 021, 022, 023 (91 tests pass) |
+| 3 RegardingResolver PCF | ✅ SRFR-030, 031, 032, 033 + iterative polish 034/035/037/039/**042** |
+| 4 Presave webresource | ✅ SRFR-040 (v1.2.0 shipped) |
+| 5 AssociationResolver PCF | ✅ SRFR-050, 051 (Path A exception), 052, 053 |
+| 6 Field Mapping subsystem | ✅ SRFR-060 (MDA form), 061 (push webresource ADR-006 Path A), 062 (ribbons) |
+| 7 Docs + audit | ✅ SRFR-070 (audit), 071 (ADR-024 amend main-session), 072 (idempotent) |
+| 8 Deploy + UAT | ✅ 080/081/082/083 deployed; ⏳ 084 UAT pending owner verify |
+| 9 Wrap-up | ⏳ 090 pending after UAT |
+
+### In-flight background agent
+
+- **agentId**: `a152406bc76c0c25c` (SRFR-042)
+- **Task**: RegardingResolver v1.3.4 → v1.3.5; hyperlink onLoad fix via bound-field derivation
+- **Approach given to agent**: priority-ordered (1) selectedTarget state (fresh selection wins) → (2) Xrm.Page attribute read for `sprk_regardingrecordtype` + `sprk_regardingrecordid` + catalog lookup for entity name → (3) URL parse fallback from `sprk_regardingrecordurl` `?etn=X&id=Y` querystring
+- **Deploy**: agent will pack + import; verify via `pac solution list`
+- **On notification**: main session commits, pushes, prompts owner to hard-refresh + test click on pre-loaded record
+
+### Cumulative divergences resolved during project (15 D-series findings)
+
+D-1 profile schema uses lookups (spec Appendix A rewritten) · D-2 sprk_mapping_type added · D-3 per-rule syncmode · D-4 3 catalog typos fixed · D-5 all catalog rows populated · D-6 Contact catalog → OOB `contact` · D-7 13 record types (later 12 after D-9 removed Billing Analysis) · D-8 3 sprk_ entities missing number fields → added · D-9 sprk_billinganalysis doesn't exist → catalog row deleted · D-10 sprk_communication uses sprk_regardingperson (deferred) · D-11 MCP underscore naming · D-12 Matter didn't have sprk_regardingrecordnumber → added · D-13 OOB entities (contact/account) get entity-prefix not sprk_ → convention-derived in resolver · D-14 MaxLength MAX not 100 (accepted) · D-15 IsSearchable not set (accepted)
+
+### Known deferred issues
+
+- **@spaarke/sdap-client missing module** — pre-existing; blocks full shared-lib `npm run build` but PCF `build:prod` unaffected (uses pre-compiled dist). Fix as separate project.
+- **React 19 vs React 16 types mismatch** in `@spaarke/ui-components` — cast at seam in both RegardingResolver + AssociationResolver. Follow-on idea: `@spaarke/ui-components-react-types-alignment`.
+- **Admin batch-cascade service** — deferred to `admin-cascade-batch-job-r1` (open follow-on Idea Issue during SRFR-090 wrap-up).
+
+### Recovery commands
+
+```bash
+# Resume: check running agent status
+# If SRFR-042 completed: read its output-file + commit
+# If still running: wait for notification
+
+# See current TASK-INDEX
+cat projects/set-regarding-and-field-mapping-resolver-r1/tasks/TASK-INDEX.md
+
+# See most recent commit
+git log -1
+
+# Portfolio state
+gh issue view 536
+
+# Deploy verification
+pac solution list | grep RegardingResolver
+```
+
+### Latest committed state
+
+- **Last commit**: `c3dba3339` — SRFR-039 v1.3.4 restore Name cell + SRFR-041 form revert
+- **Portfolio**: Project #536 → Task Count 35, Tasks Completed 33 (will be 34 after SRFR-042 commits)
+- **Owner-visible on spaarkedev1**: RegardingResolver v1.3.4 renders correctly per screenshot; hyperlink click on pre-loaded record is the only remaining bug (fix in-flight)
