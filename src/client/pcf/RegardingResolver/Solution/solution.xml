@@ -8,7 +8,7 @@
     <Descriptions>
       <Description description="Virtual PCF: 11-entity polymorphic regarding picker bound to sprk_regardingrecordtype; HOST-only (sprk_todo, sprk_communication per FR-22)" languagecode="1033" />
     </Descriptions>
-    <Version>1.3.6</Version>
+    <Version>1.3.7</Version>
     <Managed>0</Managed>
     <Publisher>
       <UniqueName>Spaarke</UniqueName>

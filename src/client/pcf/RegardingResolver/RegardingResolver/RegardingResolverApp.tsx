@@ -877,8 +877,7 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
         }
 
         const xrm = getXrm();
-        const navigateTo = xrm?.Navigation?.navigateTo;
-        if (typeof navigateTo !== 'function') {
+        if (typeof xrm?.Navigation?.navigateTo !== 'function') {
           // Xrm unavailable — test harness, canvas app, or missing SDK. Warn
           // (developer-visible), do not throw (host-safe).
           console.warn(
@@ -890,8 +889,15 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
         // Promise handling: navigateTo returns a Promise per MS docs. Rejection
         // (record deleted, no privilege, user cancelled) must NOT surface as an
         // unhandled rejection or crash the host form.
+        //
+        // v1.3.7 (SRFR-044): call as `xrm.Navigation.navigateTo(...)` — NOT
+        // via an extracted `const navigateTo = xrm.Navigation.navigateTo`
+        // reference. The extracted reference loses `this`; the platform impl
+        // accesses `this.Navigation._clientApiExecutor` internally and throws
+        // `TypeError: Cannot read properties of undefined (reading '_clientApiExecutor')`
+        // when unbound. Method-call form preserves `this`.
         try {
-          const result = navigateTo(
+          const result = xrm.Navigation.navigateTo(
             { pageType: 'entityrecord', entityName, entityId },
             {
               target: 2,
