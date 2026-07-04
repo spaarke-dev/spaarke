@@ -494,12 +494,50 @@ export const TODO_SELECT_FIELDS: string[] = [
 ];
 
 /**
+ * Optional parent-record filter for the R4 FR-34 openTodos launch flow.
+ * `entityType` is the parent's Dataverse logical name (e.g., `sprk_matter`);
+ * `recordId` is the parent GUID. When present, `buildTodoItemsQuery` scopes
+ * results to `sprk_todo` rows whose corresponding entity-specific regarding
+ * lookup equals the given GUID (e.g., `_sprk_regardingmatter_value eq <guid>`).
+ *
+ * Set by `SmartToDo.tsx` from `useLaunchContext()` when action=openTodos.
+ * Added 2026-07-04 (record-header-and-notepad-r1 DEF-11 Part 2 — finishes the
+ * R4 FR-34 consumer side that `useLaunchContext.ts` parses but nothing wired).
+ */
+export interface ITodoRegardingFilter {
+  entityType: string;
+  recordId: string;
+}
+
+/**
+ * Map parent entity logical name → sprk_todo's entity-specific regarding
+ * lookup attribute (ADR-024 dual-field pattern). Mirrors the same map in
+ * `@spaarke/ui-components/hooks/toolbarLaunchDefaults.ts SUPPORTED_TODO_PARENTS`
+ * — the two lists MUST stay in sync (both derived from the sprk_todo schema).
+ */
+const TODO_REGARDING_LOOKUP_BY_ENTITY: Record<string, string> = {
+  sprk_matter: 'sprk_regardingmatter',
+  sprk_project: 'sprk_regardingproject',
+  sprk_event: 'sprk_regardingevent',
+  sprk_invoice: 'sprk_regardinginvoice',
+  sprk_budget: 'sprk_regardingbudget',
+  sprk_workassignment: 'sprk_regardingworkassignment',
+};
+
+/**
  * Build the OData query for active to-do items (Kanban-visible).
  *
  * Returns `sprk_todo` records where:
  *   - statecode = 0 (Active)
  *   - statuscode in (Open, In Progress) — excludes Completed + Dismissed
  *   - assignee = current user's CONTACT ("Assigned to Me" — R4 task 031 / FR-07 / OD-2)
+ *   - IF regardingFilter is provided (R4 FR-34 openTodos launch — record-header-
+ *     and-notepad-r1 DEF-11 Part 2): AND `_sprk_regarding<X>_value eq <guid>`.
+ *     Kanban ownership scope is preserved — this scopes "MY todos" to a specific
+ *     parent record (e.g., "MY todos for THIS matter"), which matches the drill-
+ *     through UX intent. If entityType isn't in the supported map, the filter is
+ *     silently ignored (safe fallback — matches unsupported handling in the
+ *     memo repository).
  *
  * Sort: priorityscore desc, then duedate asc (most urgent first).
  *
@@ -512,15 +550,29 @@ export const TODO_SELECT_FIELDS: string[] = [
  * Per OS-1: no `sprk_todoflag` filter — that field no longer exists on `sprk_event`.
  *
  * @param contactId - GUID of the current user's sprk_contact record
+ * @param regardingFilter - Optional parent-record filter (openTodos launch)
  */
-export function buildTodoItemsQuery(contactId: string): string {
+export function buildTodoItemsQuery(
+  contactId: string,
+  regardingFilter?: ITodoRegardingFilter,
+): string {
   const activeClause =
     `statecode eq 0 and (statuscode eq 1 or statuscode eq 659490001)`;
 
   // UAT 2026-06-19 — Contact-lookup ownership clause.
   const ownershipClause = `_sprk_assignedto_value eq ${contactId}`;
 
-  const filter = `${ownershipClause} and ${activeClause}`;
+  const clauses: string[] = [ownershipClause, activeClause];
+
+  if (regardingFilter) {
+    const lookup = TODO_REGARDING_LOOKUP_BY_ENTITY[regardingFilter.entityType];
+    if (lookup) {
+      clauses.push(`_${lookup}_value eq ${regardingFilter.recordId}`);
+    }
+    // else: unsupported entityType — silently skip the filter (safe fallback).
+  }
+
+  const filter = clauses.join(' and ');
 
   return buildQuery({
     select: TODO_SELECT_FIELDS,

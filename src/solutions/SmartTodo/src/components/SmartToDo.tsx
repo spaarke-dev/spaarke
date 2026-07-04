@@ -62,6 +62,18 @@ import type { QuickAddTodoEventDetail } from "./Header";
 import { ThresholdSettingsPopover } from "./ThresholdSettings";
 import { DismissedSection } from "./DismissedSection";
 import { useTodoItems } from "../hooks/useTodoItems";
+// DEF-11 Part 2 (2026-07-04, record-header-and-notepad-r1) — read the openTodos
+// launch context here and thread the regardingFilter to `useTodoItems`. This is
+// the CONSUMER side of the R4 FR-34 contract that `useLaunchContext.ts` parses
+// but was never wired (see the stale "task 030" comment in SmartTodoApp.tsx).
+// Safe to call alongside `SmartTodoApp.tsx`'s existing `useLaunchContext` call:
+// both memoise `window.location.search` synchronously on first render BEFORE
+// any useEffect clears the URL params.
+import {
+  useLaunchContext,
+  LAUNCH_ACTION_OPEN_TODOS,
+} from "../hooks/useLaunchContext";
+import type { ITodoRegardingFilter } from "../services/queryHelpers";
 // R4 task 101 (W-3, 2026-06-18) — `useKanbanColumns` was hoisted into the
 // `@spaarke/smart-todo-components` peer package so the workspace widget can
 // reuse the same Today/Tomorrow/Future bucketing. The Code Page now imports
@@ -393,10 +405,24 @@ export const SmartToDo: React.FC<ISmartToDoProps> = ({
   // comment on useTodoItems options).
   const { contactId } = useCurrentContactId({ webApi, userId });
 
+  // DEF-11 Part 2 — extract the openTodos regardingFilter from the launch URL.
+  // Returns `undefined` for all other launch modes (createTodo, openTodo, no
+  // launch action), which means the Kanban falls back to the standard
+  // "Assigned to Me" scope — no regression for existing flows.
+  const launchContext = useLaunchContext();
+  const regardingFilter = React.useMemo<ITodoRegardingFilter | undefined>(() => {
+    if (launchContext?.action !== LAUNCH_ACTION_OPEN_TODOS) return undefined;
+    return {
+      entityType: launchContext.regardingFilter.entityType,
+      recordId: launchContext.regardingFilter.recordId,
+    };
+  }, [launchContext]);
+
   const { items, isLoading, error, refetch } = useTodoItems({
     webApi,
     userId: contactId ?? '00000000-0000-0000-0000-000000000000',
     mockItems,
+    regardingFilter,
   });
 
   // R4 task 031 / FR-07 / OD-2 — "Assigned to Me" is the sole filter mode for
