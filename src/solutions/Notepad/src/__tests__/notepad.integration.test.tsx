@@ -700,40 +700,15 @@ describe("Notepad — full round-trip integration (FR-14/15/16/17/18)", () => {
 
   // ────────────────────────────────────────────────────────────────────────
   // 7. Info popover — createdby + createdon (FR-18)
+  //
+  // DELETED 2026-07-04 per UAT feedback: the "i" info popover was removed from
+  // NotepadShell because the createdby + createdon metadata is already visible
+  // on the memo card in MemoList. See src/components/NotepadShell.tsx around
+  // the "// CreatedByPopover intentionally NOT imported" comment. The
+  // CreatedByPopover component + its own unit tests remain on disk under
+  // src/components/CreatedByPopover.tsx + __tests__/CreatedByPopover.test.tsx
+  // so a future consumer can re-render it if the metadata surface reappears.
   // ────────────────────────────────────────────────────────────────────────
-
-  it("info popover: renders 'Created by {name}' and a formatted createdon date", async () => {
-    installXrmStub([
-      makeMemoRaw({
-        id: "memo-1",
-        name: "Memo",
-        body: "body",
-        createdon: "2026-05-03T12:25:00Z",
-        createdbyName: "Alice Author",
-      }),
-    ]);
-
-    const h = await mount();
-
-    const infoBtn = h.container.querySelector<HTMLButtonElement>(
-      '[data-testid="created-by-trigger"]'
-    );
-    expect(infoBtn).not.toBeNull();
-
-    await click(infoBtn!);
-
-    // Popover surface is portal-mounted under document.body.
-    const surface = document.body.querySelector<HTMLElement>(
-      '[data-testid="created-by-surface"]'
-    );
-    expect(surface).not.toBeNull();
-    expect(surface!.textContent).toContain("Created by Alice Author");
-    // Formatted date — via Intl.DateTimeFormat. Locale-sensitive, so assert
-    // presence of "2026" (year survives every locale + timeZone).
-    expect(surface!.textContent).toContain("2026");
-
-    h.unmount();
-  });
 
   // ────────────────────────────────────────────────────────────────────────
   // 8. Invalid launch context — NotepadErrorBanner (FR-13)

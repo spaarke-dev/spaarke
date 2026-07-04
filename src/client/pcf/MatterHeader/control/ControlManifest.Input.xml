@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <manifest>
-  <control namespace="Spaarke.Records" constructor="MatterHeader" version="1.0.12"
+  <control namespace="Spaarke.Records" constructor="MatterHeader" version="1.0.13"
            display-name-key="Matter Header"
-           description-key="Compact 5-field summary card + 3-action toolbar for Matter records. Part of the record-header-and-notepad-r1 shared primitive set. (v1.0.12 — DEF-09 dark mode + DEF-11 checkmark→SmartTodo openTodos filter)"
+           description-key="Compact 5-field summary card + 3-action toolbar for Matter records. Part of the record-header-and-notepad-r1 shared primitive set. (v1.0.13 — UAT: toolbar CounterBadge bumped to medium size for legibility)"
            control-type="virtual">
 
     <!-- Bound field: any SingleLine.Text field on the host entity (Matter). The PCF replaces

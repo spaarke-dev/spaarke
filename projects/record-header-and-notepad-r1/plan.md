@@ -1,9 +1,9 @@
 # Project Plan: Record Header + Notepad — R1
 
-> **Last Updated**: 2026-07-02
-> **Status**: Ready for Tasks
-> **Spec**: [spec.md](spec.md)
-> **Design**: [design.md](design.md)
+> **Last Updated**: 2026-07-04
+> **Status**: ✅ Complete (all 5 phases + Phase 6 DEF absorption shipped + user acceptance 2026-07-04)
+> **Spec**: [spec.md](spec.md) · **Design**: [design.md](design.md) · **Plan extension**: [plan-extension.md](plan-extension.md)
+> **Actual timeline**: 2 days end-to-end (2026-07-02 → 2026-07-04), well ahead of the 3-week projection — most of the time was live-QA iteration + Phase 6 DEF absorption.
 
 ---
 

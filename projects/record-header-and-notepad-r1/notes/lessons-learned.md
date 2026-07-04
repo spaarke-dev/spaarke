@@ -81,4 +81,64 @@ Estimated time for a follow-on entity: **4-6 hours** if the entity is already in
 
 ---
 
-*Written by Claude Code sub-agent + main session at project wrap-up 2026-07-03.*
+## Phase 6 additional lessons (added 2026-07-04)
+
+Phase 6 (DEF absorption — user's "reasonable scope in R1" ask) shipped 5 of 6 DEFs in ~1 dev-day. Six additional lessons that didn't surface in Phases 1–5:
+
+### 1. Sparkle popover odyssey → shared-component-first is a rule, not a suggestion
+
+Rounds 6–9 of live QA (v1.0.5 → v1.0.11) chased sparkle popover styling divergence — no background, wrong border-radius, no shadow, wrong font. Each round we tuned CSS on our re-implementation. Odyssey ended when the user asked: **"why isn't this just the shared `<AiSummaryPopover>` we already have?"** Answer: because we didn't check. Once we swapped to the shared component + wrapped `MatterHeaderHost` in `<FluentProvider>` (VisualHost's proven pattern for portal-vars to reach Popover), it worked in one build.
+
+**Rule (CLAUDE.md §11 restated)**: Before implementing ANY new UI surface, `Grep` for existing shared components matching the intent. `@spaarke/ui-components/components/` catalog is small enough to skim. 5 minutes of grep beats 5 rounds of styling divergence.
+
+### 2. Half-shipped contracts are a real risk (DEF-11 Part 2 saga)
+
+DEF-11's original launch (Part 1) emitted `data: "action=openTodos&regardingType=<entity>&regardingId=<id>"` to SmartTodo. QA revealed the Kanban rendered unfiltered — because SmartTodo's `useLaunchContext.ts` **parses** the openTodos contract completely (with tests) but **nothing consumed** `regardingFilter` in the Kanban query. The stale comment in `SmartTodoApp.tsx:512` referring to "R4 task 030" led us to believe the consumer was wired; investigation showed R4 task 030 was actually a "4-row layout" task. R4 shipped the parser and never wired the consumer. Nobody noticed for months because no upstream caller emitted the payload until DEF-11 Part 1.
+
+**Rule for reviewers**: When reviewing PRs that add a "parse-side" of a launch contract, insist on the consumer side landing in the SAME PR (or an immediately-adjacent one) with a QA scenario that exercises the round trip. Otherwise the contract is dead code that fails silently when a real consumer arrives.
+
+**Rule for authors**: If you MUST land a parser without a consumer, add a `// TODO: consumer wire-up — TASK-NNN` comment plus a runtime `console.warn`. Otherwise stale pointer comments (like R4 task 030) mislead future contributors.
+
+### 3. Trust user test feedback over the original design (DEF-11 pivot)
+
+The DEF-11 pivot ("reuse SmartTodo with matter filter" vs "build a new sprk_todospage DataGrid Code Page") saved ~6 hours AND gave users a better UX (full interactive Kanban vs read-only grid). The pivot came from one line of user QA feedback: *"could we instead open the Smart To Do (as it is now) but filtered by the matter?"* Six hours of research went into the original design that a QA insight replaced in 30 seconds.
+
+**Rule**: When user QA feedback conflicts with the original design, treat the feedback as authoritative unless a hard constraint blocks it. The original design was hypothesis; feedback is data. This paired with the "extend existing over introduce new" rule (CLAUDE.md §11) to make the pivot obviously correct once considered.
+
+### 4. Pre-existing test-assertion drift is normal — investigate before assuming regression
+
+The `useRecordHeaderToolbarActions` test asserted `pageInput.name === SMARTTODO_WEBRESOURCE_NAME` but source has been sending `webresourceName` (the correct Power Apps property) for a while. Similarly Notepad has 2 tests failing since v1.0.9 (memo-state-on-keystroke fix) and 9 sparkle tests failing since v1.0.10 (sparkle slot retired from the hook). When Phase 6 changes caused test failures, first move was `git stash` + rerun on baseline — confirmed these were pre-existing, not Phase 6 regressions.
+
+**Rule**: When tests fail on new code, ALWAYS test the baseline first with `git stash` before assuming your change broke them. Silent test drift accumulates over time; new work often just surfaces it.
+
+### 5. `exports` field ≠ single-project change (DEF-06 revert)
+
+DEF-06 looked like a 4-8 hour clean-imports migration on `@spaarke/ui-components/package.json`. Turned into ecosystem-wide `pcf-scripts/tsconfig_base.json` `moduleResolution: "bundler"` bump because Webpack v5 (which reads `exports`) demands directory-index resolution that Node's legacy `moduleResolution: "node"` doesn't support. Every PCF in the repo would ripple.
+
+**Rule**: Anything touching `package.json` `exports` requires the ENTIRE build ecosystem (webpack, ts-jest, pcf-scripts, vite, rollup, ts-loader) to be on `moduleResolution: "bundler"` or `"node16"` FIRST. Filed as R2B project with explicit ecosystem-migration scope. Reversing quickly (same-day, before commit) prevented a broken checkpoint.
+
+### 6. current-task.md as pre-compact insurance is invaluable
+
+Before running `/compact` mid-Phase 6, we wrote a comprehensive `current-task.md` with full DEF-10 + DEF-11 research embedded (76 + 95 lines of specifics: root causes, file-by-file migration tables, exact commands). Post-compact work continued with zero re-investigation. Without it, we'd have re-discovered SmartTodo's openTodos contract 3 times.
+
+**Rule**: When approaching context limits mid-investigation, embed the research findings + concrete file paths + expected outcomes in `current-task.md` BEFORE compact — not just "resume here." The Quick Recovery section handles the "where was I" question; the full-body research section handles the "what was I learning" question. Both matter.
+
+### Phase 6 numbers
+
+| Metric | Value |
+|---|---|
+| Original R1 estimate (Phases 1–5) | 88–116 h |
+| Phase 6 add-on estimate (6 DEFs) | 40–64 h |
+| **Actual Phase 6 elapsed** | ~1 dev-day (mostly Ralph's QA + one context-handoff cycle) |
+| DEF-11 estimate → actual | 2–3 days DataGrid page → ~30 min pivot + 2 h consumer wire + 30 min filter enhancement |
+| DEF-10 bundle reduction | 1,176,060 → 478,612 bytes = **59% reduction** |
+| MatterHeader PCF version | 1.0.11 → 1.0.12 (DEF-09 + DEF-11 Part 1) |
+| Deployables shipped this phase | MatterHeaderPcf_v1.0.12.0.zip (18 KB); Notepad `smarttodo.html` twice (Part 2 + Part 3); Notepad `notepad.html` (478 KB) |
+| Files modified in Phase 6 | 25 initial + 4 DEF-11 Part 2 + 4 DEF-11 Part 3 = 33 |
+| Tests baseline vs Phase 6 | No Phase-6-introduced failures. Pre-existing drift documented, not fixed (scope) |
+| BFF endpoints added | 0 (NFR-07 preserved) |
+
+---
+
+*Original body written by Claude Code sub-agent + main session at project wrap-up 2026-07-03.*
+*Phase 6 addendum written by Claude Code 2026-07-04 (Opus 4.7) after user acceptance.*

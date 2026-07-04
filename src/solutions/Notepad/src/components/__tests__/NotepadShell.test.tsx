@@ -508,41 +508,15 @@ describe("NotepadShell — FR-14/15/16/18 integration", () => {
   });
 
   // ────────────────────────────────────────────────────────────────────────
-  // FR-18 CreatedByPopover conditional rendering
+  // FR-18 CreatedByPopover — DELETED 2026-07-04 per UAT feedback.
+  // The "i" info popover was removed from NotepadShell because the createdby
+  // + createdon metadata is already visible on the memo card in MemoList.
+  // The CreatedByPopover component + its own unit-test file remain on disk
+  // (src/components/CreatedByPopover.tsx + __tests__/CreatedByPopover.test.tsx)
+  // so a future consumer can render it if the metadata surface reappears.
+  // Prior tests here asserted trigger presence/absence in NotepadShell; both
+  // are now vacuous (trigger is never rendered from the shell).
   // ────────────────────────────────────────────────────────────────────────
-
-  it("renders CreatedByPopover trigger only when currentMemo is non-null", async () => {
-    mockedUseLaunchContext.mockReturnValue(VALID_LAUNCH);
-    mockedUseSprkMemoRepository.mockReturnValue(
-      buildRepo({ memos: [MEMO_1], currentMemo: MEMO_1 })
-    );
-
-    const h = await mount();
-
-    // The CreatedByPopover trigger has data-testid="created-by-trigger"
-    const trigger = h.container.querySelector<HTMLButtonElement>(
-      '[data-testid="created-by-trigger"]'
-    );
-    expect(trigger).not.toBeNull();
-
-    h.unmount();
-  });
-
-  it("does NOT render CreatedByPopover trigger when currentMemo is null", async () => {
-    mockedUseLaunchContext.mockReturnValue(VALID_LAUNCH);
-    mockedUseSprkMemoRepository.mockReturnValue(
-      buildRepo({ memos: [], currentMemo: null })
-    );
-
-    const h = await mount();
-
-    const trigger = h.container.querySelector<HTMLButtonElement>(
-      '[data-testid="created-by-trigger"]'
-    );
-    expect(trigger).toBeNull();
-
-    h.unmount();
-  });
 
   // ────────────────────────────────────────────────────────────────────────
   // FR-15 `+` new memo

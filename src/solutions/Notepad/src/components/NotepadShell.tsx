@@ -59,7 +59,11 @@ import { useLaunchContext } from "../hooks/useLaunchContext";
 import { useSprkMemoRepository } from "../hooks/useSprkMemoRepository";
 import { MemoList } from "./MemoList";
 import { MemoEditor } from "./MemoEditor";
-import { CreatedByPopover } from "./CreatedByPopover";
+// CreatedByPopover intentionally NOT imported — 2026-07-04 UAT feedback: the
+// "i" info popover was redundant with the memo card's inline metadata. The
+// component + its tests are retained on disk (see ./CreatedByPopover.tsx +
+// __tests__/CreatedByPopover.test.tsx) so a future consumer can render it if
+// the metadata surface reappears. Removed from the shell only.
 import { deriveTitle } from "../utils/deriveTitle";
 
 // ---------------------------------------------------------------------------
@@ -281,12 +285,12 @@ export const NotepadShell: React.FC = () => {
             onSelect={handleSelect}
             disabled={loading}
           />
-          {currentMemo && (
-            <CreatedByPopover
-              createdBy={currentMemo.createdby}
-              createdOn={currentMemo.createdon}
-            />
-          )}
+          {/*
+            CreatedByPopover ("i" info icon) removed 2026-07-04 per UAT feedback
+            — the metadata was redundant with the MemoList card's inline
+            createdby/createdon display. Component preserved on disk for a
+            future consumer.
+          */}
         </div>
       </div>
 

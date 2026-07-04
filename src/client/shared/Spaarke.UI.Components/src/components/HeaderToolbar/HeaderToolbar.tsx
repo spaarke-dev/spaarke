@@ -188,7 +188,10 @@ export const HeaderToolbar: React.FC<IHeaderToolbarProps> = ({ title, iconSlots,
                     className={styles.badge}
                     count={slot.badge as number}
                     color="brand"
-                    size="small"
+                    // 2026-07-04 UAT feedback: bumped size from "small" → "medium"
+                    // so the count is legible without needing to hover — small
+                    // was easy to miss on a dense toolbar.
+                    size="medium"
                     appearance="filled"
                     data-testid={`header-toolbar-badge-${slot.key}`}
                   />

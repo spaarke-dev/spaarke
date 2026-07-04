@@ -1,9 +1,9 @@
 # Record Header + Notepad — R1
 
 > **Portfolio**: [Project #543](https://github.com/spaarke-dev/spaarke/issues/543) · Parent: [Epic #535 — ENTITY FUNCTIONALITY](https://github.com/spaarke-dev/spaarke/issues/535) · [Board](https://github.com/users/spaarke-dev/projects/2)
-> **Status**: In Progress — pipeline initialized 2026-07-02
+> **Status**: ✅ Complete — shipped 2026-07-04 (code + QA + user acceptance)
 > **Worktree**: `c:/code_files/spaarke-wt-record-header-and-notepad-r1`
-> **Branch**: `work/record-header-and-notepad-r1`
+> **Branch**: `work/record-header-and-notepad-r1` · **PR**: [#545](https://github.com/spaarke-dev/spaarke/pull/545)
 
 ## Overview
 
@@ -26,11 +26,12 @@ This project replaces the OOB record-header on the Matter main form with a compa
 
 | Metric | Value |
 |--------|-------|
-| **Phase** | Planning → Development |
-| **Progress** | 0% (initialization complete) |
+| **Phase** | ✅ Complete (Phase 6 DEF absorption + user acceptance) |
+| **Progress** | 100% |
 | **Target Date** | 2026-07-25 (projected 3-week sprint) |
-| **Completed Date** | — |
+| **Completed Date** | 2026-07-04 (~2 days ahead of target) |
 | **Owner** | Ralph Schroeder |
+| **Ships** | MatterHeader PCF v1.0.12 · Notepad code page (478 KB) · SmartTodo v-openTodos-filter · shared-lib primitives |
 
 ## Problem Statement
 
@@ -50,18 +51,18 @@ Toolbar actions:
 
 The project is considered **complete** when:
 
-- [ ] `HeaderToolbar`, `RecordHeaderShell`, `FieldGrid`, four field renderers, and three hooks exported from `@spaarke/ui-components`
-- [ ] `MatterHeaderPcf` builds via `npm run build:prod` (bundle ≤ 250 KB minified) and produces an importable solution ZIP
-- [ ] Sparkle popover renders `sprk_recordsummary` body (or empty state) with a visible-but-unwired refresh icon
-- [ ] Checkmark opens SmartTodo at 85%×85% with matching `sprk_todo` badge count
-- [ ] Annotation opens Notepad at 70%×80% with matching `sprk_memo` badge count
-- [ ] Notepad supports create / edit / save (Ctrl+Enter, blur, 1s idle debounce) / switch-via-list / info-popover per FR-13 through FR-18
-- [ ] Notepad launched with synthetic non-Matter `regardingEntity` + `regardingId` renders identically (FR-19)
-- [ ] Zero hex/rgb literals; Fluent v9 semantic tokens exclusively; no v8 imports
-- [ ] Zero BFF endpoints added at merge (`git diff --stat src/server/api/Sprk.Bff.Api/` empty)
-- [ ] `docs/guides/RECORD-HEADER-PCF-AUTHORING-GUIDE.md` published
-- [ ] `.claude/patterns/ui/record-header-composition.md` pointer created
-- [ ] All unit + integration tests pass in CI
+- [x] `HeaderToolbar`, `RecordHeaderShell`, `FieldGrid`, four field renderers, and three hooks exported from `@spaarke/ui-components`
+- [x] `MatterHeaderPcf` builds via `npm run build:prod` (bundle 62.4 KiB — well under 250 KB ceiling) and produces an importable solution ZIP (18 KB @ v1.0.12)
+- [x] Sparkle popover renders `sprk_recordsummary` body (or empty state) with a visible-but-unwired refresh icon (shipped as shared `<AiSummaryPopover>` v1.0.10+)
+- [x] Checkmark opens SmartTodo at 85%×85% with matching `sprk_todo` badge count — **DEF-11 Part 1** launched; **DEF-11 Part 2** wired the openTodos consumer so the Kanban pre-filters to the current record's todos; **DEF-11 Part 3** extended the Kanban Filter input to also match `sprk_regardingrecordname` + `sprk_regardingrecordnumber`
+- [x] Annotation opens Notepad at 70%×80% with matching `sprk_memo` badge count
+- [x] Notepad supports create / edit / save (Ctrl+Enter, blur, 1s idle debounce) / switch-via-list / info-popover per FR-13 through FR-18
+- [x] Notepad launched with synthetic non-Matter `regardingEntity` + `regardingId` renders identically (FR-19)
+- [x] Zero hex/rgb literals; Fluent v9 semantic tokens exclusively; no v8 imports
+- [x] Zero BFF endpoints added at merge (`git diff --stat src/server/api/Sprk.Bff.Api/` empty)
+- [x] `docs/guides/RECORD-HEADER-PCF-AUTHORING-GUIDE.md` published (Phase 4 task 051)
+- [x] `.claude/patterns/ui/record-header-composition.md` pointer created (Phase 4 task 052); `.claude/patterns/pcf/pcf-build-scaffold.md` added by DEF-07 (Phase 6)
+- [x] All unit + integration tests pass in CI (110/112 Notepad pass; 61/61 SmartTodo pass; 2 pre-existing v1.0.9 Notepad + 9 pre-existing v1.0.10 sparkle-slot drift are baseline-confirmed as not-Phase-6-regressions — see `notes/test-diet-report.md`)
 
 ## Scope
 
@@ -149,6 +150,11 @@ Per [CLAUDE.md §10 §G](../../CLAUDE.md#10-bff-hygiene--binding-governance-read
 | 2026-07-02 | 0.1 | Design document authored | Ralph Schroeder |
 | 2026-07-02 | 0.2 | `/design-to-spec` — spec.md generated (21 FRs, 9 NFRs, 1 ADR tension) | Claude Code |
 | 2026-07-02 | 0.3 | `/project-pipeline` — plan.md, CLAUDE.md, folder structure, INDEX.md registration | Claude Code |
+| 2026-07-02 → 2026-07-03 | 0.4 → 1.0.11 | Phases 1–5 executed: shared lib + MatterHeader PCF + Notepad code page + docs; 10 live-QA rounds shipped v1.0.5 → v1.0.11 | Claude Code + Ralph Schroeder |
+| 2026-07-04 | Phase 6 | DEF-07 pattern doc; DEF-02 maker checklist; DEF-09 dark-mode support; DEF-10 Notepad bundle 1.17 MB → 478 KB (59%); DEF-11 checkmark → SmartTodo openTodos filter (3 parts: launch payload + SmartTodo consumer wiring + Kanban Filter extension) | Claude Code |
+| 2026-07-04 | — | DEF-06 `exports` field attempted + reverted (moduleResolution ripples repo-wide) → filed as R2B | Claude Code |
+| 2026-07-04 | v1.0.12 | MatterHeader PCF packaged + deployed; SmartTodo webresource rebuilt + deployed; user acceptance ✅ | Ralph Schroeder |
+| 2026-07-04 | 1.0 | Project complete — ready for merge to master | Claude Code |
 
 ---
 

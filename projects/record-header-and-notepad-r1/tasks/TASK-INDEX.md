@@ -50,13 +50,13 @@
 | 050 | Authoring guide skeleton | 4 | ✅ | 025 | — | MINIMAL |
 | 051 | Authoring guide full content | 4 | ✅ | 050 | — | MINIMAL |
 | 052 | Pattern pointer (touches .claude/) | 4 | ✅ | 051 | — | MINIMAL |
-| 060 | DEF-07 — PCF build-scaffold pattern doc | 6 | 🔲 | 052 | — | MINIMAL |
-| 061 | DEF-02 — Matter form binding maker instructions | 6 | 🔲 | 025 | — | MINIMAL |
-| 062 | DEF-09 — Port ThemeProvider from VisualHost for dark mode | 6 | 🔲 | 025 | — | STANDARD |
+| 060 | DEF-07 — PCF build-scaffold pattern doc | 6 | ✅ | 052 | — | MINIMAL |
+| 061 | DEF-02 — Matter form binding maker instructions | 6 | ✅ | 025 | — | MINIMAL |
+| 062 | DEF-09 — Port ThemeProvider from VisualHost for dark mode | 6 | ✅ | 025 | — | STANDARD |
 | 063 | DEF-06 — Add exports field to @spaarke/ui-components + migrate R1 imports | 6 | ⏸️ | 013 | — | STANDARD |
-| 064 | DEF-10 — Notepad SPA bundle-size perf (chunk-split, drop deps) | 6 | 🔲 | 039 | — | STANDARD |
-| 065 | DEF-11 — Checkmark → sprk_todospage DataGrid Code Page | 6 | 🔲 | 025 | — | FULL |
-| 090 | Project wrap-up (MANDATORY) | 5 | 🔲 | all | — | FULL |
+| 064 | DEF-10 — Notepad SPA bundle-size perf (1.17 MB → 478 KB, 59%) | 6 | ✅ | 039 | — | STANDARD |
+| 065 | DEF-11 — Checkmark → SmartTodo openTodos filter (3 parts, pivoted from DataGrid) | 6 | ✅ | 025 | — | FULL |
+| 090 | Project wrap-up (MANDATORY) | 5 | ✅ | all | — | FULL |
 
 ---
 
