@@ -1,0 +1,195 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="SRFR-042" project="set-regarding-and-field-mapping-resolver-r1">
+  <metadata>
+    <title>RegardingResolver v1.3.4 → v1.3.5 — Row 2 hyperlink onLoad fix (pre-loaded records: derive click target from bound form fields, not just picker-selected state)</title>
+    <status>completed</status>
+    <estimated-effort>1h30min</estimated-effort>
+    <actual-effort>~50min</actual-effort>
+    <assigned>AI Agent</assigned>
+    <started>2026-07-03</started>
+    <completed>2026-07-03</completed>
+    <rigor>FULL</rigor>
+    <parallel-safe>true</parallel-safe>
+    <parallel-group>—</parallel-group>
+    <tags>pcf,regarding-resolver,bug-fix,hyperlink,onload,version-bump,wave-3-followon,deploy</tags>
+    <depends-on>SRFR-039</depends-on>
+    <wave>3</wave>
+  </metadata>
+
+  <prompt><![CDATA[
+Out-of-plan bug fix reported by owner post-v1.3.4 deploy.
+
+Bug: Row 2 "Regarding Number" hyperlink does NOT open the target record on click
+when the record was pre-loaded (existed before the user opened the form). Works
+only immediately after user picks a new record via the search icon.
+
+Root cause: `selectedTarget` React state is populated ONLY in the `onSelect`
+callback. On form-load with a pre-existing regarding value, bound fields
+display correctly BUT `selectedTarget` is null → click handler has no
+entityName/entityId → no-op.
+
+Fix (v1.3.5) — SIMPLE approach: derive click target on demand at click time
+from Xrm.Page attributes when `selectedTarget` is null. Priority order:
+  1. `selectedTarget` (fresh picker selection wins)
+  2. Parse `etn` + `id` from `sprk_regardingrecordurl` attribute value
+     (most robust — URL is stored on host records, contains both parts
+     inline in query params `?etn=<entityLogicalName>&id=<guid>`)
+  3. Fallback: `sprk_regardingrecordid` + resolve entityName from the bound
+     `sprk_regardingrecordtype` lookup's entityType hint if present in
+     the `(rtRef as any).entityType` extension. (Best-effort fallback if
+     no URL is stored.)
+
+The URL-parse path is the primary derivation because `sprk_regardingrecordurl`
+already contains both etn and id in a well-known shape — the shared lib's
+`buildRecordUrl` helper produces exactly this shape (SRFR-032 CREATE-mode
+seam + shared `applyResolverFields` UPDATE-mode write).
+
+Scope (all in `src/client/pcf/RegardingResolver/`):
+
+1. `RegardingResolverApp.tsx`:
+   - Add helper `resolveClickTarget(selectedTarget)`: reads Xrm.Page
+     attributes if selectedTarget is null; returns `{ entityName, entityId }`
+     or `null` if unresolvable.
+   - URL parse: `new URL(recordUrl)`, extract `etn` + `id` query params.
+   - Update `handleRecordNumberClick` to call the helper first, then use its
+     resolved `entityName` + `entityId` for `navigateTo`.
+   - Preserve all existing behavior: Xrm-unavailable → warn + no-throw;
+     navigateTo rejection → catch + warn; empty-state → warn + no-op.
+
+2. Version bump v1.3.4 → v1.3.5 across all 7 anchors:
+   - `ControlManifest.Input.xml` (control root version attr)
+   - `index.ts` CONTROL_VERSION
+   - `RegardingResolverApp.tsx` BUILD_DATE (leave as 2026-07-03 if same day)
+   - `Solution/solution.xml` <Version>
+   - `Solution/Controls/sprk_Spaarke.Controls.RegardingResolver/ControlManifest.xml`
+     version attr
+   - `package.json` version
+   - `Solution/pack.ps1` $version
+
+3. Tests (`__tests__/RegardingResolverApp.test.tsx`):
+   - Bulk grep + replace 1.3.4 → 1.3.5 (version prop + assertion regex).
+   - Add 3 new tests:
+     (a) Click with pre-loaded record (no selectedTarget, but Xrm.Page has
+         sprk_regardingrecordurl attribute) → navigateTo called with parsed
+         etn + id.
+     (b) Click with fresh picker selection (selectedTarget populated) →
+         navigateTo called with selection's entityType + recordId (regression
+         guard — selectedTarget still wins).
+     (c) Click with no selectedTarget AND no Xrm.Page attributes → warn +
+         no-op (unchanged empty-state behavior).
+
+4. Step 9.5 quality gates: `/code-review` + `/adr-check` + `npm run build:prod`.
+
+5. Deploy: pack solution, `pac solution import --force-overwrite
+   --publish-changes`, verify `pac solution list | Select-String
+   RegardingResolver` shows Version 1.3.5.
+
+Constraints:
+  - ADR-022 virtual pattern preserved.
+  - SRFR-034/035/037/039 features preserved: refresh button, auto-refresh,
+    showVersionFooter, PolymorphicPicker consumption, Row 2 grid with labels,
+    Name cell restored, title semi-bold + low top padding.
+  - Backward compat: no manifest property changes; new plumbing is
+    additive (reads Xrm.Page at click time, no new context bindings).
+  - Xrm-unavailable path: warn + silent-continue.
+  ]]></prompt>
+
+  <role>PCF developer familiar with Spaarke PCF version discipline
+  (`src/client/pcf/CLAUDE.md`), Fluent v9 Griffel + tokens (`ADR-021`),
+  virtual PCF platform-library pattern (`ADR-022`), Xrm.Page/attribute
+  read patterns, and defensive host-safe error handling.</role>
+
+  <goal><![CDATA[
+RegardingResolver v1.3.5 deployed to spaarkedev1, verified via
+`pac solution list`. Row 2 record-number hyperlink correctly opens the
+target record modal for BOTH pre-loaded records (form-load path) AND
+fresh picker selections. Fix is additive — no manifest property changes,
+no shared-library changes. All prior SRFR-034/035/037/039 features
+preserved. All 7 version anchors bumped 1.3.4 → 1.3.5. `npm run build:prod`
+passes. New tests validate the pre-loaded-record path.
+  ]]></goal>
+
+  <inputs>
+    <file purpose="spec">projects/set-regarding-and-field-mapping-resolver-r1/spec.md</file>
+    <file purpose="project-claude">projects/set-regarding-and-field-mapping-resolver-r1/CLAUDE.md</file>
+    <file purpose="checklist">src/client/pcf/CLAUDE.md</file>
+    <file purpose="prior-task">projects/set-regarding-and-field-mapping-resolver-r1/tasks/039-regarding-resolver-restore-name-cell-v1.3.4.poml</file>
+    <file purpose="source">src/client/pcf/RegardingResolver/RegardingResolver/ControlManifest.Input.xml</file>
+    <file purpose="source">src/client/pcf/RegardingResolver/RegardingResolver/index.ts</file>
+    <file purpose="source">src/client/pcf/RegardingResolver/RegardingResolver/RegardingResolverApp.tsx</file>
+    <file purpose="source">src/client/pcf/RegardingResolver/package.json</file>
+    <file purpose="source">src/client/pcf/RegardingResolver/Solution/solution.xml</file>
+    <file purpose="source">src/client/pcf/RegardingResolver/Solution/Controls/sprk_Spaarke.Controls.RegardingResolver/ControlManifest.xml</file>
+    <file purpose="source">src/client/pcf/RegardingResolver/Solution/pack.ps1</file>
+    <file purpose="test">src/client/pcf/RegardingResolver/__tests__/RegardingResolverApp.test.tsx</file>
+    <file purpose="adr">.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+    <file purpose="adr">.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-022">Virtual PCF pattern preserved. React 16 + Fluent 9 platform-libraries. No bundling regression.</constraint>
+    <constraint source="ADR-024">No reimplementation of resolver write logic — this fix is READ-ONLY (click-time derivation for navigation).</constraint>
+    <constraint source="project">Feature preservation: manual refresh button (SRFR-034), auto-refresh (SRFR-035), showVersionFooter (SRFR-034), PolymorphicPicker consumption (SRFR-030/034), CREATE-mode presave bridge (SRFR-032), title semi-bold + low top padding (SRFR-037), Row 2 grid + labels + Name cell (SRFR-039) — ALL preserved.</constraint>
+    <constraint source="project">Backward compat: no manifest property additions/removals. All new logic is additive click-time reads.</constraint>
+    <constraint source="src/client/pcf/CLAUDE.md — Version Update Checklist">ALL 7 anchors bumped together (manifest, index.ts, footer BUILD_DATE, solution.xml, Solution ControlManifest, package.json, pack.ps1).</constraint>
+    <constraint source="project">TypeScript strict mode. Host-safe error handling (never throw to host form).</constraint>
+  </constraints>
+
+  <steps>
+    <step order="0" name="Context Check">Verify context &lt; 60%. Read current `RegardingResolverApp.tsx` handleRecordNumberClick block. Confirm 7-anchor version state at 1.3.4.</step>
+    <step order="1" name="Add resolveClickTarget helper">Add module-level function `resolveClickTarget(selectedTarget)` that returns `{ entityName, entityId } | null`. Priority: (1) selectedTarget when populated; (2) parse etn+id from `sprk_regardingrecordurl` Xrm.Page attribute; (3) fallback to `sprk_regardingrecordid` + entityType hint. All paths defensive — try/catch, no throw.</step>
+    <step order="2" name="Update handleRecordNumberClick">Replace direct `selectedTarget?.entityType / recordId` reads with `resolveClickTarget(selectedTarget)`. If null → warn + no-op (existing empty-state behavior). Otherwise call navigateTo with resolved values.</step>
+    <step order="3" name="Update docstring">Bump v1.3.4 references to v1.3.5 in the file docstring header. Add a "# v1.3.5 (SRFR-042 hyperlink onLoad fix)" section describing the bug + fix.</step>
+    <step order="4" name="Version bump — Location 1 (ControlManifest.Input.xml)">Update `version="1.3.5"` on the control root element.</step>
+    <step order="5" name="Version bump — Location 2 (index.ts CONTROL_VERSION)">Update `CONTROL_VERSION = '1.3.5'`.</step>
+    <step order="6" name="Version bump — Location 3 (BUILD_DATE)">Confirm `BUILD_DATE = '2026-07-03'`.</step>
+    <step order="7" name="Version bump — Location 4 (Solution manifest)">Update `Solution/solution.xml` `&lt;Version&gt;` to `1.3.5`.</step>
+    <step order="8" name="Version bump — Location 5 (Solution Control Manifest)">Update extracted `ControlManifest.xml` version to `1.3.5`.</step>
+    <step order="9" name="Version bump — Location 6 (package.json)">Update `package.json` `"version": "1.3.5"`.</step>
+    <step order="10" name="Version bump — Location 7 (pack.ps1)">Update `$version = "1.3.5"`.</step>
+    <step order="11" name="Tests update">Bulk replace 1.3.4 → 1.3.5. Add 3 new tests for the pre-loaded-record path.</step>
+    <step order="12" name="Grep verification">Grep for `1.3.4` under `src/client/pcf/RegardingResolver/` (exclude node_modules + out + Solution/bin + docstring version-history section). Assert zero non-history hits.</step>
+    <step order="9.5" name="Quality Gate">Invoke `/code-review` and `/adr-check` on modified files. Address findings or escalate per CLAUDE.md §6.5.</step>
+    <step order="13" name="Build">Run `npm run build:prod`. Confirm build passes.</step>
+    <step order="14" name="Test run">Run `npm test`. Confirm all tests pass.</step>
+    <step order="15" name="Copy bundle + pack solution">Copy `out/controls/RegardingResolver/bundle.js` to solution controls folder. Run `pack.ps1` to produce `Solution/bin/RegardingResolverSolution_v1.3.5.zip`.</step>
+    <step order="16" name="Deploy">Run `pac solution import --path Solution/bin/RegardingResolverSolution_v1.3.5.zip --force-overwrite --publish-changes` against spaarkedev1. Verify via `pac solution list | Select-String RegardingResolver` shows Version 1.3.5.</step>
+    <step order="17" name="Update Task Status">Update SRFR-042 status → completed. Update TASK-INDEX.md — add SRFR-042 row. Reset current-task.md.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/pcf/RegardingResolver/RegardingResolver/ControlManifest.Input.xml</output>
+    <output type="code">src/client/pcf/RegardingResolver/RegardingResolver/index.ts</output>
+    <output type="code">src/client/pcf/RegardingResolver/RegardingResolver/RegardingResolverApp.tsx</output>
+    <output type="code">src/client/pcf/RegardingResolver/package.json</output>
+    <output type="code">src/client/pcf/RegardingResolver/Solution/solution.xml</output>
+    <output type="code">src/client/pcf/RegardingResolver/Solution/Controls/sprk_Spaarke.Controls.RegardingResolver/ControlManifest.xml</output>
+    <output type="code">src/client/pcf/RegardingResolver/Solution/pack.ps1</output>
+    <output type="test">src/client/pcf/RegardingResolver/__tests__/RegardingResolverApp.test.tsx</output>
+    <output type="artifact">src/client/pcf/RegardingResolver/Solution/bin/RegardingResolverSolution_v1.3.5.zip</output>
+    <output type="notes">projects/set-regarding-and-field-mapping-resolver-r1/notes/task-042-hyperlink-onload-fix.log</output>
+    <output type="docs">projects/set-regarding-and-field-mapping-resolver-r1/tasks/TASK-INDEX.md (add SRFR-042 row)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`grep -c 'version="1.3.5"' src/client/pcf/RegardingResolver/RegardingResolver/ControlManifest.Input.xml` returns 1.</criterion>
+    <criterion testable="true">`grep -R "1.3.4" src/client/pcf/RegardingResolver/ --exclude-dir=node_modules --exclude-dir=out --exclude-dir=bin` returns only version-history docstring hits.</criterion>
+    <criterion testable="true">Hyperlink click on pre-loaded record correctly resolves entityName + entityId via URL-parse fallback and invokes navigateTo.</criterion>
+    <criterion testable="true">Hyperlink click on freshly-selected record still uses `selectedTarget` (regression guard).</criterion>
+    <criterion testable="true">Hyperlink click with no state and no bound URL → warn + no-op (no throw).</criterion>
+    <criterion testable="true">All prior features preserved (manual refresh, auto-refresh, showVersionFooter, Row 2 layout, Name cell, title styling).</criterion>
+    <criterion testable="true">`npm run build:prod` succeeds with zero errors.</criterion>
+    <criterion testable="true">`npm test` all tests pass.</criterion>
+    <criterion testable="true">`/code-review` and `/adr-check` pass at Step 9.5 (or findings addressed / escalated per CLAUDE.md §6.5).</criterion>
+    <criterion testable="true">`pac solution list` shows RegardingResolverSolution v1.3.5 after deploy.</criterion>
+  </acceptance-criteria>
+
+  <notes><![CDATA[
+Owner bug report post-v1.3.4 deploy. Row 2 hyperlink no-op on pre-loaded
+records because `selectedTarget` React state is only populated by picker
+onSelect. Fix derives entityName + entityId from Xrm.Page attributes
+(primary path: parse etn+id from sprk_regardingrecordurl) when
+selectedTarget is null. Additive, no manifest changes, no shared-lib
+changes.
+  ]]></notes>
+</task>

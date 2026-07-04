@@ -12,14 +12,14 @@
 | **Project** | set-regarding-and-field-mapping-resolver-r1 |
 | **Branch** | `work/set-regarding-and-field-mapping-resolver-r1` (worktree) |
 | **Portfolio** | [Project #536](https://github.com/spaarke-dev/spaarke/issues/536) · Epic [#535 ENTITY FUNCTIONALITY](https://github.com/spaarke-dev/spaarke/issues/535) |
-| **Tasks Completed** | 33 of ~36 (28 original + 8 out-of-plan iterations 034/035/036/037/038/039/041) |
-| **Active Task** | **SRFR-042 v1.3.5 hyperlink onLoad fix — running as background sub-agent** (agentId `a152406bc76c0c25c`) |
-| **Status** | in-progress (waiting for SRFR-042 notification) |
-| **Next Action after SRFR-042 lands** | Commit + push; owner hard-refreshes to verify link works on pre-loaded records; then dispatch **SRFR-084 UAT** (3 scenarios) + **SRFR-090 wrap-up** |
+| **Tasks Completed** | 34 of ~36 (28 original + 8 out-of-plan iterations 034/035/036/037/038/039/041/042) |
+| **Active Task** | none (SRFR-042 v1.3.5 deployed successfully) |
+| **Status** | idle |
+| **Next Action** | Owner hard-refreshes to verify link works on pre-loaded records; then dispatch **SRFR-084 UAT** (3 scenarios) + **SRFR-090 wrap-up** |
 
 ### Critical Context (1-3 sentences)
 
-RegardingResolver PCF v1.3.4 is deployed to spaarkedev1 with the correct visual layout (2-cell Row 2 with labels "Regarding Number" 1/3 + "Regarding Name" 2/3; OOB form fields hidden per SRFR-041). Owner reported the record-number hyperlink doesn't work when the record was pre-loaded (only works right after user picks via search) — SRFR-042 is fixing this by deriving entity+id from BOUND fields (Xrm.Page attributes) with URL-parse fallback from `sprk_regardingrecordurl`, not just from React `selectedTarget` state.
+RegardingResolver PCF v1.3.5 is deployed to spaarkedev1. SRFR-042 fixed the pre-loaded-record hyperlink no-op: added `resolveClickTarget()` helper that derives `entityName` + `entityId` at click time via three-tier priority (selectedTarget → parse etn+id from `sprk_regardingrecordurl` Xrm.Page attr → fallback id + entityType hint). Additive fix — no manifest changes, no shared-lib changes. Build + test + deploy all green; 65 tests pass (47 pre-existing + 3 new SRFR-042 tests).
 
 ### Files Modified This Session (post-Wave-8 iteration cycle)
 

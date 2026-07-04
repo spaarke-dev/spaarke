@@ -1,5 +1,37 @@
 /**
- * RegardingResolverApp — v1.3.4 streamlined 2-row UI for the polymorphic regarding picker.
+ * RegardingResolverApp — v1.3.5 streamlined 2-row UI for the polymorphic regarding picker.
+ *
+ * # v1.3.5 (SRFR-042 Row 2 hyperlink onLoad fix)
+ *
+ * Bug fix (owner post-v1.3.4 deploy): Row 2 "Regarding Number" hyperlink did
+ * NOT open the target record on click when the record was pre-loaded (existed
+ * before the user opened the form). Only worked immediately after a user
+ * picked a new record via the search icon.
+ *
+ * Root cause: `selectedTarget` React state is populated ONLY in the picker's
+ * `onSelect` callback. On form-load with a pre-existing regarding value, the
+ * bound Row 2 fields display correctly (via `context.parameters.regardingRecordNumberField.raw`)
+ * BUT `selectedTarget` is `null` — so `handleRecordNumberClick` had no
+ * entityName/entityId and was a silent no-op.
+ *
+ * Fix (additive, no manifest changes): new `resolveClickTarget()` helper
+ * derives the click target at click time with fallbacks. Priority:
+ *   1. `selectedTarget` — fresh picker selection wins.
+ *   2. Parse `etn` + `id` query params from the `sprk_regardingrecordurl`
+ *      Xrm.Page attribute — most robust because the URL is stored on host
+ *      records and contains BOTH parts inline (produced by shared
+ *      `buildRecordUrl` helper on write, per SRFR-032 + `applyResolverFields`).
+ *   3. Fallback: `sprk_regardingrecordid` GUID + entityType hint from the
+ *      `sprk_regardingrecordtype` lookup's `(value as any).entityType` shape.
+ *      Best-effort — used only if no URL is stored.
+ *
+ * All defensive: try/catch, warn on failure, never throw to host form. The
+ * shared library and manifest properties are UNCHANGED — this is a
+ * consumer-side click-time read.
+ *
+ * All prior SRFR-034/035/037/039 features preserved: refresh button,
+ * auto-refresh, showVersionFooter, PolymorphicPicker consumption, Row 2 grid
+ * with labels, Name cell, title semi-bold + reduced top padding.
  *
  * # v1.3.4 (SRFR-039 restore Name cell + top-aligned OOB-parity labels)
  *
@@ -489,6 +521,103 @@ async function handleRefreshInternal(): Promise<void> {
   }
 }
 
+/**
+ * v1.3.5 (SRFR-042) — Click-time click-target resolution helper.
+ *
+ * Returns the `entityName` + `entityId` the Row 2 record-number hyperlink should
+ * open. Fixes the pre-loaded-record no-op bug: on form load with a pre-existing
+ * regarding value, `selectedTarget` React state is null (only populated on
+ * fresh picker selection), so the click handler had no navigation target.
+ *
+ * Priority (fresh selection wins over pre-loaded state):
+ *   1. `selectedTarget` — populated by the PolymorphicPicker onSelect callback.
+ *   2. Parse `etn` + `id` query params from the `sprk_regardingrecordurl`
+ *      Xrm.Page attribute — most robust because the URL is stored on host
+ *      records by the shared `buildRecordUrl` helper on write.
+ *   3. Fallback: read `sprk_regardingrecordid` GUID + `sprk_regardingrecordtype`
+ *      lookup's `.entityType` extension. Best-effort — used only if no URL
+ *      is stored (rare — legacy records or admin edits that cleared URL).
+ *
+ * Returns `null` when the target cannot be resolved. Defensive throughout:
+ * try/catch on every DOM/Xrm read; never throws to the host form.
+ */
+function resolveClickTarget(
+  selectedTarget: IRegardingSelection | null
+): { entityName: string; entityId: string } | null {
+  // Priority 1 — fresh picker selection wins.
+  if (selectedTarget?.entityType && selectedTarget?.recordId) {
+    const cleanId = String(selectedTarget.recordId).replace(/[{}]/g, '');
+    if (cleanId.length > 0) {
+      return { entityName: selectedTarget.entityType, entityId: cleanId };
+    }
+  }
+
+  const xrm = getXrm();
+  if (!xrm?.Page?.getAttribute) return null;
+
+  // Priority 2 — parse etn + id from sprk_regardingrecordurl.
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const urlAttr = (xrm.Page as any).getAttribute?.('sprk_regardingrecordurl');
+    const urlValue = urlAttr?.getValue?.();
+    if (typeof urlValue === 'string' && urlValue.length > 0) {
+      try {
+        // URL constructor handles absolute URLs; the stored value is
+        // `https://<orgurl>/main.aspx?etn=<entity>&id=<guid>` per buildRecordUrl.
+        const parsed = new URL(urlValue);
+        const etn = parsed.searchParams.get('etn');
+        const id = parsed.searchParams.get('id');
+        if (etn && id) {
+          const cleanId = id.replace(/[{}]/g, '');
+          if (cleanId.length > 0) {
+            return { entityName: etn, entityId: cleanId };
+          }
+        }
+      } catch {
+        // Malformed URL — fall through to Priority 3.
+      }
+    }
+  } catch {
+    /* ignore attribute-read failures */
+  }
+
+  // Priority 3 — fallback: sprk_regardingrecordid + entityType hint on the
+  // sprk_regardingrecordtype lookup. Best-effort.
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const idAttr = (xrm.Page as any).getAttribute?.('sprk_regardingrecordid');
+    const idValue = idAttr?.getValue?.();
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const rtAttr = (xrm.Page as any).getAttribute?.('sprk_regardingrecordtype');
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const rtValue = rtAttr?.getValue?.();
+    const rtRef = Array.isArray(rtValue) ? rtValue[0] : rtValue;
+    // Xrm.LookupValue's optional `.entityType` is the referenced entity's
+    // logicalName ('sprk_recordtype_ref' here — NOT the target entity). This
+    // fallback is intentionally weak; the URL-parse path above is preferred.
+    // We surface the hint only if a maker/admin has extended the lookup value
+    // with a target-entity-type marker.
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const hint = (rtRef as any)?.entityType;
+    if (
+      typeof idValue === 'string' &&
+      idValue.length > 0 &&
+      typeof hint === 'string' &&
+      hint.length > 0 &&
+      hint !== 'sprk_recordtype_ref'
+    ) {
+      const cleanId = idValue.replace(/[{}]/g, '');
+      if (cleanId.length > 0) {
+        return { entityName: hint, entityId: cleanId };
+      }
+    }
+  } catch {
+    /* ignore */
+  }
+
+  return null;
+}
+
 /** Try to resolve the host record's GUID from `Xrm.Page`. */
 function getHostRecordId(): string | undefined {
   const xrm = getXrm();
@@ -719,24 +848,33 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
   // and MS Learn PageInput type). `target: 1` would REPLACE main content —
   // do NOT confuse the two.
   //
-  // Entity name + id come from live control state (`selectedTarget`) —
-  // populated by the PolymorphicPicker onSelect handler. On initial mount
-  // before any picker selection, the state is null and this handler is a
-  // silent no-op (there is no target to open). Xrm-unavailable path
-  // (test harness / missing SDK) logs warn and no-ops without throwing so
-  // the host form is never broken by a click on an inert link.
+  // v1.3.5 (SRFR-042): entity name + id come from `resolveClickTarget()`, which
+  // handles BOTH fresh picker selections (via `selectedTarget`) AND pre-loaded
+  // records (by parsing etn+id from the bound `sprk_regardingrecordurl` Xrm.Page
+  // attribute). Previously this handler only read `selectedTarget`, causing a
+  // silent no-op on form load with a pre-existing regarding value.
+  //
+  // Xrm-unavailable path (test harness / missing SDK) logs warn and no-ops
+  // without throwing so the host form is never broken by a click on an inert
+  // link.
   const handleRecordNumberClick = React.useCallback(
     (e: React.MouseEvent) => {
       e.preventDefault();
 
-      const entityName = selectedTarget?.entityType;
-      const entityId = selectedTarget?.recordId;
+      // v1.3.5 SRFR-042 — click-time target resolution supports pre-loaded
+      // records as well as fresh picker selections.
+      const clickTarget = resolveClickTarget(selectedTarget);
+      const entityName = clickTarget?.entityName;
+      const entityId = clickTarget?.entityId;
 
-      // Empty-state guard — no picker selection yet, or selection cleared.
-      // Silent no-op is intentional (link may be rendered from a bound field
-      // that reflects the persisted record but no in-memory target exists
-      // until the picker fires; SRFR-033 will polish read-only navigation).
+      // Empty-state guard — no picker selection AND no bound URL/id to derive
+      // a target from. Silent no-op is intentional to keep the host form
+      // safe under partially-populated states (e.g., mid-load, cleared, or
+      // brand-new blank form).
       if (!entityName || !entityId) {
+        console.warn(
+          '[RegardingResolver] Cannot open modal — entityName or entityId not resolved from selection or bound fields.'
+        );
         return;
       }
 

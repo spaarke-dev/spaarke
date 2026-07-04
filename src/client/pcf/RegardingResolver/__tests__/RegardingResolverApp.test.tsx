@@ -157,7 +157,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
         readOnly={false}
         onRecordTypeChanged={() => undefined}
-        version="1.3.4"
+        version="1.3.5"
       />
     );
 
@@ -173,7 +173,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
         readOnly={false}
         onRecordTypeChanged={() => undefined}
-        version="1.3.4"
+        version="1.3.5"
       />
     );
 
@@ -193,7 +193,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
         readOnly={false}
         onRecordTypeChanged={() => undefined}
-        version="1.3.4"
+        version="1.3.5"
       />
     );
 
@@ -209,7 +209,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
         readOnly={false}
         onRecordTypeChanged={() => undefined}
-        version="1.3.4"
+        version="1.3.5"
       />
     );
 
@@ -226,7 +226,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
         readOnly={false}
         onRecordTypeChanged={() => undefined}
-        version="1.3.4"
+        version="1.3.5"
       />
     );
 
@@ -240,7 +240,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
         readOnly={false}
         onRecordTypeChanged={() => undefined}
-        version="1.3.4"
+        version="1.3.5"
       />
     );
 
@@ -261,7 +261,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
         readOnly={false}
         onRecordTypeChanged={() => undefined}
-        version="1.3.4"
+        version="1.3.5"
       />
     );
 
@@ -282,7 +282,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
         readOnly={false}
         onRecordTypeChanged={() => undefined}
-        version="1.3.4"
+        version="1.3.5"
       />
     );
 
@@ -300,7 +300,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
         readOnly={false}
         onRecordTypeChanged={() => undefined}
-        version="1.3.4"
+        version="1.3.5"
       />
     );
 
@@ -319,7 +319,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
         readOnly={false}
         onRecordTypeChanged={() => undefined}
-        version="1.3.4"
+        version="1.3.5"
       />
     );
 
@@ -337,7 +337,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
         readOnly={false}
         onRecordTypeChanged={() => undefined}
-        version="1.3.4"
+        version="1.3.5"
       />
     );
 
@@ -356,7 +356,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
         readOnly={false}
         onRecordTypeChanged={onRecordTypeChanged}
-        version="1.3.4"
+        version="1.3.5"
       />
     );
 
@@ -385,7 +385,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={true}
           onRecordTypeChanged={() => undefined}
-          version="1.3.4"
+          version="1.3.5"
         />
       );
 
@@ -407,7 +407,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={true}
           onRecordTypeChanged={() => undefined}
-          version="1.3.4"
+          version="1.3.5"
         />
       );
 
@@ -444,7 +444,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={true}
           onRecordTypeChanged={() => undefined}
-          version="1.3.4"
+          version="1.3.5"
         />
       );
 
@@ -471,7 +471,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={true}
           onRecordTypeChanged={() => undefined}
-          version="1.3.4"
+          version="1.3.5"
         />
       );
 
@@ -515,7 +515,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
             context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
             readOnly={false}
             onRecordTypeChanged={() => undefined}
-            version="1.3.4"
+            version="1.3.5"
           />
         );
 
@@ -555,14 +555,14 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
         readOnly={false}
         onRecordTypeChanged={() => undefined}
-        version="1.3.4"
+        version="1.3.5"
       />
     );
 
     // SRFR-033 — footer format is `v{version} • Built YYYY-MM-DD` per
     // src/client/pcf/CLAUDE.md "Version Footer Requirement (MANDATORY)".
     const footer = screen.getByTestId('regarding-resolver-version');
-    expect(footer).toHaveTextContent(/v1\.3\.4/);
+    expect(footer).toHaveTextContent(/v1\.3\.5/);
     expect(footer).toHaveTextContent(/Built \d{4}-\d{2}-\d{2}/);
   });
 
@@ -578,7 +578,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
         readOnly={false}
         onRecordTypeChanged={() => undefined}
-        version="1.3.4"
+        version="1.3.5"
       />
     );
     expect(spy).not.toHaveBeenCalled();
@@ -596,7 +596,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
         readOnly={false}
         onRecordTypeChanged={() => undefined}
-        version="1.3.4"
+        version="1.3.5"
       />
     );
     expect(screen.getByTestId('regarding-resolver-root')).toBeInTheDocument();
@@ -609,7 +609,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
         readOnly={false}
         onRecordTypeChanged={() => undefined}
-        version="1.3.4"
+        version="1.3.5"
       />
     );
     expect(screen.getByTestId('regarding-resolver-root')).toBeInTheDocument();
@@ -631,7 +631,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={false}
           onRecordTypeChanged={() => undefined}
-          version="1.3.4"
+          version="1.3.5"
         />
       );
 
@@ -670,7 +670,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={false}
           onRecordTypeChanged={() => undefined}
-          version="1.3.4"
+          version="1.3.5"
         />
       );
 
@@ -703,7 +703,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={false}
           onRecordTypeChanged={() => undefined}
-          version="1.3.4"
+          version="1.3.5"
         />
       );
 
@@ -728,6 +728,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
 
     test('empty entityName/entityId (no picker selection yet) → navigateTo NOT called', () => {
       const navigateToMock = jest.fn();
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (window as any).Xrm = { Navigation: { navigateTo: navigateToMock } };
 
@@ -737,14 +738,168 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={false}
           onRecordTypeChanged={() => undefined}
-          version="1.3.4"
+          version="1.3.5"
         />
       );
 
-      // Click without firing the picker first — selectedTarget is null.
+      // Click without firing the picker first — selectedTarget is null AND
+      // no Xrm.Page attributes present → resolveClickTarget returns null →
+      // warn + no-op (SRFR-042 empty-state gate).
       fireEvent.click(screen.getByTestId('regarding-resolver-record-number'));
 
       expect(navigateToMock).not.toHaveBeenCalled();
+      warnSpy.mockRestore();
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // SRFR-042 — Row 2 hyperlink onLoad fix (v1.3.5)
+  //
+  // Pre-loaded record: form-load path where `selectedTarget` is null but the
+  // bound Row 2 field values (record-number) render from context.parameters.
+  // The fix derives entityName + entityId from Xrm.Page attributes at click
+  // time — primary via URL parse (sprk_regardingrecordurl), fallback via
+  // sprk_regardingrecordid + entityType hint.
+  // ---------------------------------------------------------------------------
+
+  describe('SRFR-042 — Row 2 hyperlink onLoad fix (pre-loaded records)', () => {
+    test('pre-loaded record (no selectedTarget) — URL-parse fallback resolves target and navigateTo IS called', async () => {
+      // Simulate a pre-loaded record: bound record-number renders from context
+      // parameters, but the user never touched the picker, so selectedTarget
+      // is null. Xrm.Page has the sprk_regardingrecordurl attribute populated
+      // with the shape produced by buildRecordUrl on prior write.
+      const navigateToMock = jest.fn().mockResolvedValue(undefined);
+      const preLoadedUrl =
+        'https://spaarkedev1.crm.dynamics.com/main.aspx?etn=sprk_matter&id=aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa';
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (window as any).Xrm = {
+        Navigation: { navigateTo: navigateToMock },
+        Page: {
+          data: { entity: { getId: () => '{22222222-2222-2222-2222-222222222222}' } },
+          getAttribute: (name: string) => {
+            if (name === 'sprk_regardingrecordurl') {
+              return { getValue: () => preLoadedUrl };
+            }
+            return null;
+          },
+        },
+      };
+
+      const { context } = buildContext({ regardingRecordNumberField: 'MTR-2025-0142' });
+      renderWithProvider(
+        <RegardingResolverApp
+          context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
+          readOnly={false}
+          onRecordTypeChanged={() => undefined}
+          version="1.3.5"
+        />
+      );
+
+      // Click WITHOUT firing the picker — selectedTarget is null. The
+      // resolveClickTarget helper must derive the target from the URL attr.
+      fireEvent.click(screen.getByTestId('regarding-resolver-record-number'));
+
+      expect(navigateToMock).toHaveBeenCalledTimes(1);
+      expect(navigateToMock).toHaveBeenCalledWith(
+        {
+          pageType: 'entityrecord',
+          entityName: 'sprk_matter',
+          entityId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+        },
+        {
+          target: 2,
+          width: { value: 80, unit: '%' },
+          height: { value: 80, unit: '%' },
+        }
+      );
+    });
+
+    test('fresh picker selection wins over Xrm.Page-derived target (regression guard)', async () => {
+      // Belt-and-suspenders: even when Xrm.Page has a URL that would parse
+      // to a DIFFERENT record, a fresh picker selection takes priority (the
+      // user's intent is the newer selection). This guards the priority-1 path.
+      const navigateToMock = jest.fn().mockResolvedValue(undefined);
+      const staleUrl =
+        'https://spaarkedev1.crm.dynamics.com/main.aspx?etn=sprk_project&id=bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb';
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (window as any).Xrm = {
+        Navigation: { navigateTo: navigateToMock },
+        Page: {
+          data: { entity: { getId: () => '{22222222-2222-2222-2222-222222222222}' } },
+          getAttribute: (name: string) => {
+            if (name === 'sprk_regardingrecordurl') {
+              return { getValue: () => staleUrl };
+            }
+            return null;
+          },
+          ui: { getFormType: () => 2 },
+        },
+      };
+
+      const { context } = buildContext({ regardingRecordNumberField: 'MTR-2025-0142' });
+      renderWithProvider(
+        <RegardingResolverApp
+          context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
+          readOnly={false}
+          onRecordTypeChanged={() => undefined}
+          version="1.3.5"
+        />
+      );
+
+      // Fire picker onSelect first — this populates selectedTarget with the
+      // FRESH selection (sprk_matter / aaa GUID), not the stale URL.
+      fireEvent.click(screen.getByTestId('polymorphic-picker-trigger'));
+      await waitFor(() => {
+        expect(mockApplyResolverFields).toHaveBeenCalledTimes(1);
+      });
+
+      // Now click. Selection wins over URL parse — navigateTo receives
+      // sprk_matter + aaa GUID, NOT sprk_project + bbb GUID.
+      fireEvent.click(screen.getByTestId('regarding-resolver-record-number'));
+
+      expect(navigateToMock).toHaveBeenCalledTimes(1);
+      expect(navigateToMock).toHaveBeenCalledWith(
+        expect.objectContaining({
+          entityName: 'sprk_matter',
+          entityId: 'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa',
+        }),
+        expect.anything()
+      );
+    });
+
+    test('no selectedTarget AND no Xrm.Page attributes → warn + no-op (unchanged empty-state)', () => {
+      // No selection, no URL attribute, no id attribute. resolveClickTarget
+      // must return null; handler must warn and no-op. navigateTo must not
+      // be called; handler must not throw.
+      const navigateToMock = jest.fn();
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      (window as any).Xrm = {
+        Navigation: { navigateTo: navigateToMock },
+        Page: {
+          getAttribute: () => null,
+        },
+      };
+
+      const { context } = buildContext({ regardingRecordNumberField: 'MTR-2025-0142' });
+      renderWithProvider(
+        <RegardingResolverApp
+          context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
+          readOnly={false}
+          onRecordTypeChanged={() => undefined}
+          version="1.3.5"
+        />
+      );
+
+      expect(() =>
+        fireEvent.click(screen.getByTestId('regarding-resolver-record-number'))
+      ).not.toThrow();
+
+      expect(navigateToMock).not.toHaveBeenCalled();
+      expect(warnSpy).toHaveBeenCalledWith(
+        expect.stringContaining('Cannot open modal')
+      );
+      warnSpy.mockRestore();
     });
   });
 
@@ -804,7 +959,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
             context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
             readOnly={false}
             onRecordTypeChanged={() => undefined}
-            version="1.3.4"
+            version="1.3.5"
           />
         );
 
@@ -851,7 +1006,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
             context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
             readOnly={false}
             onRecordTypeChanged={() => undefined}
-            version="1.3.4"
+            version="1.3.5"
           />
         );
 
@@ -890,7 +1045,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
             context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
             readOnly={false}
             onRecordTypeChanged={() => undefined}
-            version="1.3.4"
+            version="1.3.5"
           />
         );
 
@@ -929,7 +1084,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
             context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
             readOnly={false}
             onRecordTypeChanged={() => undefined}
-            version="1.3.4"
+            version="1.3.5"
           />
         );
 
@@ -979,12 +1134,12 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={false}
           onRecordTypeChanged={() => undefined}
-          version="1.3.4"
+          version="1.3.5"
         />
       );
 
       expect(screen.getByTestId('regarding-resolver-footer')).toBeInTheDocument();
-      expect(screen.getByTestId('regarding-resolver-version')).toHaveTextContent(/v1\.3\.4/);
+      expect(screen.getByTestId('regarding-resolver-version')).toHaveTextContent(/v1\.3\.5/);
     });
 
     test('showVersionFooter=true → footer visible', () => {
@@ -994,7 +1149,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={false}
           onRecordTypeChanged={() => undefined}
-          version="1.3.4"
+          version="1.3.5"
         />
       );
 
@@ -1008,7 +1163,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={false}
           onRecordTypeChanged={() => undefined}
-          version="1.3.4"
+          version="1.3.5"
         />
       );
 
@@ -1029,7 +1184,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={false}
           onRecordTypeChanged={() => undefined}
-          version="1.3.4"
+          version="1.3.5"
         />
       );
 
@@ -1045,7 +1200,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={true}
           onRecordTypeChanged={() => undefined}
-          version="1.3.4"
+          version="1.3.5"
         />
       );
 
@@ -1071,7 +1226,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={false}
           onRecordTypeChanged={() => undefined}
-          version="1.3.4"
+          version="1.3.5"
         />
       );
 
@@ -1102,7 +1257,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
             context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
             readOnly={false}
             onRecordTypeChanged={() => undefined}
-            version="1.3.4"
+            version="1.3.5"
           />
         );
 
@@ -1139,7 +1294,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={false}
           onRecordTypeChanged={() => undefined}
-          version="1.3.4"
+          version="1.3.5"
         />
       );
 
@@ -1195,7 +1350,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={false}
           onRecordTypeChanged={() => undefined}
-          version="1.3.4"
+          version="1.3.5"
         />
       );
 
@@ -1238,7 +1393,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={false}
           onRecordTypeChanged={() => undefined}
-          version="1.3.4"
+          version="1.3.5"
         />
       );
 
@@ -1277,7 +1432,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={false}
           onRecordTypeChanged={() => undefined}
-          version="1.3.4"
+          version="1.3.5"
         />
       );
 
@@ -1322,7 +1477,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={false}
           onRecordTypeChanged={() => undefined}
-          version="1.3.4"
+          version="1.3.5"
         />
       );
 
@@ -1350,7 +1505,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={false}
           onRecordTypeChanged={() => undefined}
-          version="1.3.4"
+          version="1.3.5"
         />
       );
 
@@ -1369,7 +1524,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={false}
           onRecordTypeChanged={() => undefined}
-          version="1.3.4"
+          version="1.3.5"
         />
       );
 
@@ -1391,7 +1546,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={false}
           onRecordTypeChanged={() => undefined}
-          version="1.3.4"
+          version="1.3.5"
         />
       );
 
@@ -1414,7 +1569,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={false}
           onRecordTypeChanged={() => undefined}
-          version="1.3.4"
+          version="1.3.5"
         />
       );
 
@@ -1432,7 +1587,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={false}
           onRecordTypeChanged={() => undefined}
-          version="1.3.4"
+          version="1.3.5"
         />
       );
 
@@ -1452,7 +1607,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
           context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
           readOnly={false}
           onRecordTypeChanged={() => undefined}
-          version="1.3.4"
+          version="1.3.5"
         />
       );
 
