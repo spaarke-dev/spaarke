@@ -79,7 +79,12 @@ const useStyles = makeStyles({
     display: 'flex',
     alignItems: 'center',
     flexShrink: 0,
-    ...shorthands.gap(tokens.spacingHorizontalXS),
+    // v1.0.18 UAT: `gap: spacingHorizontalS` (4px) between icons — bumped from
+    // XS (2px) which was uncomfortably tight now that count badges are visible.
+    // `paddingInlineEnd: spacingHorizontalM` (8px) insets the whole icon strip
+    // from the trailing edge so the badges don't kiss the container edge.
+    ...shorthands.gap(tokens.spacingHorizontalS),
+    paddingInlineEnd: tokens.spacingHorizontalM,
   },
 
   // Positioned wrapper so CounterBadge can overlay the top-right corner
