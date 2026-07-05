@@ -9,4 +9,4 @@
  *
  * See docs/guides/PCF-DEPLOYMENT-GUIDE.md for the update workflow.
  */
-export const CONTROL_VERSION = '1.0.14';
+export const CONTROL_VERSION = '1.0.15';
