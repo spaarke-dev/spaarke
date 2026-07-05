@@ -1,6 +1,6 @@
 # Current Task State — record-header-and-notepad-r1
 
-> **Last Updated**: 2026-07-04 12:15 (post Phase 6 code-complete)
+> **Last Updated**: 2026-07-04 22:05 (post v1.0.18 UAT sign-off, entering wrap-up)
 > **Recovery**: Read "Quick Recovery" section first.
 
 ---
@@ -9,78 +9,118 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 090 — R1 Wrap-Up (MANDATORY per CLAUDE.md §7) |
-| **Phase** | 5 — Wrap-up (after Phase 6 code-complete) |
-| **Progress** | Phase 6 CODE-COMPLETE (6 DEFs; 1 reverted). Ready for wrap-up + `/merge-to-master`. |
-| **Status** | pending (task 090 not started) |
-| **Next Action** | `/task-execute` on task 090 wrap-up scope: `/code-review` → `/adr-check` → `/test-diet` → `/repo-cleanup` → update README/plan → `notes/lessons-learned.md` → file DEF-01/03/04/05/06-reforward/08 as GH Issues → update `projects/INDEX.md` → mark all TASK-INDEX rows ✅. Then `/merge-to-master`. |
+| **Task** | 090 — R1 Wrap-Up (in progress) |
+| **Phase** | 5 — Wrap-up |
+| **Progress** | Docs updated ✅ · pattern doc shipped ✅ · UAT rounds 11–18 sign-off ✅. Remaining: `/code-review` → `/test-diet` → `/merge-to-master`. |
+| **Status** | in-progress |
+| **Next Action** | Invoke `/code-review` on the Phase 6 scope. Then `/test-diet` (BINDING per CLAUDE.md §7). Then `/merge-to-master`. |
 
-### Phase 6 delivered (this session)
+### Live-QA versions shipped and accepted
 
-| DEF | Result |
-|---|---|
-| DEF-07 | ✅ `.claude/patterns/pcf/pcf-build-scaffold.md` — 10 build gotchas captured while fresh |
-| DEF-02 | ✅ `notes/matter-form-binding-instructions.md` — maker checklist for post-merge form binding |
-| DEF-09 | ✅ Dark-mode support in `MatterHeaderHost.tsx` via shared `themeStorage` + HC listener + Power Apps context signal |
-| DEF-06 | ⏸️ Attempted `exports` field on `@spaarke/ui-components/package.json`; reverted — webpack directory-index resolution + pcf-scripts `moduleResolution: "node"` block. Filed as R2B scope. |
-| DEF-10 | ✅ Notepad bundle **1,176,060 → 478,612 bytes (59% reduction)**. Root cause: services barrel pulled in `mammoth` docx parser, top-level barrel pulled in Lexical + PDF.js + App Insights. Fix: 6 deep-path imports + 3 Vite alias values changed from `.../index.ts` files to `.../` directories (tsconfig `paths` synced). |
-| DEF-11 | ✅ Pivoted from "build sprk_todospage DataGrid Code Page" to "reuse SmartTodo openTodos filter". `handleCheckmarkClick` now emits `action=openTodos&regardingType=<entity>&regardingId=<id>` to launch SmartTodo Code Page pre-filtered to the current record's related to-dos. Reuses shipped R4 FR-34 contract (`src/solutions/SmartTodo/src/hooks/useLaunchContext.ts` `openTodos` branch). |
-
-### MatterHeader PCF: v1.0.11 → v1.0.12
-
-Ship: `src/client/pcf/MatterHeader/Solution/bin/MatterHeaderPcf_v1.0.12.0.zip` (18,126 bytes / 62.4 KiB bundle).
-
-Version bumped in 5 locations: `control/version.ts`, `control/ControlManifest.Input.xml`, `Solution/solution.xml`, `Solution/pack.ps1`, `Solution/Controls/…/ControlManifest.xml`. Description-key captures "(v1.0.12 — DEF-09 dark mode + DEF-11 checkmark→SmartTodo openTodos filter)".
-
-### Notepad ship: 478 KB webresource
-
-`src/solutions/Notepad/dist/notepad.html` — 478,612 bytes (gzipped 144 KB). Upload to `sprk_notepad` webresource + publish.
-
-### Test status (baseline-confirmed, not DEF-10/11 regressions)
-
-- Notepad: **110/112 pass**. 2 failures are pre-existing v1.0.9 memo-state drift; confirmed on baseline via `git stash`.
-- Shared lib toolbar: DEF-11 checkmark + annotation tests **pass** with updated assertions (fixed `pageInput.name` → `pageInput.webresourceName` pre-existing broken assertion). 9 sparkle-related failures are pre-existing v1.0.10-era drift (sparkle slot was intentionally moved to shared `<AiSummaryPopover>` component; tests still assert the old hook-emitted-slot API).
-
-### Deferrals to file at wrap-up
-
-| DEF | Reason | Follow-on target |
+| Version | Change | User acceptance |
 |---|---|---|
-| DEF-01 | Sparkle refresh needs BFF endpoint (R1 NFR-07 forbids BFF) | `ai-record-summary-regeneration-r1` |
-| DEF-03 | VisualHost CardChrome migration blocked by R1 CLAUDE.md "MUST NOT modify VisualHost/**" | R2B `record-header-shared-consolidation-r2` |
-| DEF-04 | EventDetailSidePane MemoSection adoption blocked by R1 CLAUDE.md "MUST NOT modify EventDetailSidePane/**" | R2B `record-header-shared-consolidation-r2` |
-| DEF-05 | Per-entity PCFs (Project/Invoice/Event) each own separate ~80 LOC project per R1 §Scope OS-02 | Three follow-ons: `project-header-r1`, `invoice-header-r1`, `event-header-r1` |
-| DEF-06 reforward | `exports` field blocked by pcf-scripts `moduleResolution: "node"` — proper fix ripples repo-wide | R2B `pcf-tsconfig-moduleresolution-bump-r2` |
+| v1.0.11 | Phase 5 close-out (10 QA rounds) | ✅ 2026-07-03 |
+| v1.0.12 | Phase 6 shipping build (DEF-09 dark mode + DEF-11 Part 1 checkmark→SmartTodo openTodos) | ✅ 2026-07-04 |
+| v1.0.13 | UAT round 11 attempt: bump CounterBadge size=medium + remove Notepad "i" popover | 🟡 popover fix accepted; badge fix ineffective (see v1.0.16) |
+| v1.0.14 | UAT round 11b: reanchor badge inside button corner to prevent clipping | 🟡 accepted for structure; still no visible badges (root cause below) |
+| v1.0.15 | Diagnostic build: console.info logs the badge count state on every render | ✅ produced the diagnostic that surfaced the root cause |
+| **v1.0.16** | **ROOT CAUSE fix**: `Xrm.WebApi` does NOT expose `@odata.count` — was reading a missing property. Rewrote `useRelatedCount` to count `entities.length` client-side with `$top=100` cap. Test mocks fixed (were fabricating `@odata.count`). | ✅ counts started rendering |
+| v1.0.17 | Badge back to size="small" at upper-right corner (v1.0.13's "medium" swallowed the icon) | ✅ badges look right at counter dimensions |
+| **v1.0.18** | Toolbar `iconSlots`: `gap: XS→S` (4px between icons) + `paddingInlineEnd: M` (8px inset from trailing edge) | ✅ 2026-07-04 final sign-off |
+
+### Deployables (all in place)
+
+- **MatterHeader PCF**: `src/client/pcf/MatterHeader/Solution/bin/MatterHeaderPcf_v1.0.18.0.zip` (v1.0.18)
+- **Notepad**: `src/solutions/Notepad/dist/notepad.html` (442 KB, ships DEF-10 + Notepad "i" popover removal from v1.0.13)
+- **SmartTodo**: `src/solutions/SmartTodo/dist/smarttodo.html` (1.76 MB, ships DEF-11 Part 2 openTodos consumer + Part 3 Filter enhancement)
+
+### Phase 6 delivery (all shipped)
+
+- ✅ DEF-07 pattern doc (`.claude/patterns/pcf/pcf-build-scaffold.md`)
+- ✅ DEF-02 maker checklist (`notes/matter-form-binding-instructions.md`)
+- ✅ DEF-09 dark-mode support (MatterHeaderHost via shared `themeStorage`)
+- ⏸️ DEF-06 exports field — attempted, reverted, filed as R2B (pcf-scripts moduleResolution ripples)
+- ✅ DEF-10 Notepad bundle 1.17 MB → 442 KB (62% reduction; 478 KB → 442 KB after CreatedByPopover removed)
+- ✅ DEF-11 checkmark → SmartTodo openTodos filter — **3 parts total**:
+  - Part 1: launch payload rewire (`useRecordHeaderToolbarActions` emits `action=openTodos&regardingType=X&regardingId=Y`)
+  - Part 2: SmartTodo consumer wiring — R4 FR-34 shipped the parser but never the consumer; wired `launchContext.regardingFilter` through `TodoProvider` → `useTodoItems` → `DataverseService.getActiveTodos` → `buildTodoItemsQuery` OData clause
+  - Part 3: Kanban Filter enhancement — search now matches `sprk_regardingrecordname` + `sprk_regardingrecordnumber` in addition to name/description; placeholder renamed `Search…` → `Filter…`
+
+### UAT extension delivered (also shipped)
+
+- ✅ Notepad "i" info popover removed from `NotepadShell.tsx` (metadata was redundant with MemoList card display)
+- ✅ Toolbar CounterBadge rendering fixed (v1.0.16 real root cause — see live-QA table above)
+- ✅ Badge sizing + placement + gap refinements (v1.0.17 + v1.0.18)
+- ✅ **NEW pattern doc**: `.claude/patterns/pcf/xrm-webapi-related-count.md` — captures the `@odata.count` gotcha + badge sizing rules so future PCFs don't rediscover the trap. Cross-referenced from INDEX, `dataverse-queries.md`, and `HeaderToolbar/README.md`.
+
+### Files touched during Phase 6 + wrap-up
+
+Aggregated modification list (Phases 1–5 are in prior commits `1fd4eebbd` and earlier):
+
+- `.claude/patterns/pcf/pcf-build-scaffold.md` (NEW, DEF-07)
+- `.claude/patterns/pcf/xrm-webapi-related-count.md` (NEW, wrap-up)
+- `.claude/patterns/pcf/INDEX.md` (2× new rows)
+- `.claude/patterns/pcf/dataverse-queries.md` (+ `@odata.count` warning)
+- `projects/record-header-and-notepad-r1/README.md` (status → Complete + graduation checklist)
+- `projects/record-header-and-notepad-r1/plan.md` (status → Complete)
+- `projects/record-header-and-notepad-r1/plan-extension.md` (Phase 6 row updates)
+- `projects/record-header-and-notepad-r1/tasks/TASK-INDEX.md` (all Phase 6 rows ✅ except DEF-06 ⏸️)
+- `projects/record-header-and-notepad-r1/notes/lessons-learned.md` (+ Phase 6 addendum, 6 new lessons)
+- `projects/record-header-and-notepad-r1/notes/matter-form-binding-instructions.md` (NEW, DEF-02)
+- `src/client/pcf/MatterHeader/control/*` — dark mode wiring (DEF-09) + all 5 version-bump locations
+- `src/client/pcf/MatterHeader/Solution/*` — 5 version-bump locations + packed bundle
+- `src/client/shared/Spaarke.UI.Components/src/hooks/useRelatedCount.ts` — v1.0.16 root-cause fix
+- `src/client/shared/Spaarke.UI.Components/src/hooks/useRelatedCount.test.ts` — mock shape corrected
+- `src/client/shared/Spaarke.UI.Components/src/hooks/useRecordHeaderToolbarActions.ts` — DEF-11 Part 1 + v1.0.15 diagnostic revert
+- `src/client/shared/Spaarke.UI.Components/src/components/HeaderToolbar/HeaderToolbar.tsx` — badge sizing/positioning + gap/padding
+- `src/client/shared/Spaarke.UI.Components/src/components/HeaderToolbar/README.md` — badge-counts section
+- `src/solutions/Notepad/**` — DEF-10 (6 deep-path imports + Vite aliases + tsconfig paths) + CreatedByPopover removal
+- `src/solutions/SmartTodo/src/services/queryHelpers.ts` — DEF-11 Part 2 + Part 3 (regarding filter + 2 SELECT fields)
+- `src/solutions/SmartTodo/src/services/DataverseService.ts` — DEF-11 Part 2 param
+- `src/solutions/SmartTodo/src/hooks/useTodoItems.ts` — DEF-11 Part 2 option
+- `src/solutions/SmartTodo/src/components/SmartToDo.tsx` — DEF-11 Part 2 wiring + Part 3 filter extend
+- `src/solutions/SmartTodo/src/components/Header/Header.tsx` — DEF-11 Part 3 placeholder rename
+- `src/solutions/SmartTodo/src/types/entities.ts` — DEF-11 Part 3 field
+
+### Test status heading into `/code-review` + `/test-diet`
+
+- **useRelatedCount**: 11/11 pass (mocks corrected in v1.0.16)
+- **useRecordHeaderToolbarActions**: DEF-11 checkmark + annotation assertions updated (pass). 9 pre-existing v1.0.10-era sparkle-slot drift baseline-confirmed as not-Phase-6.
+- **HeaderToolbar**: all pass (no changes to test contract in v1.0.13→v1.0.18 styling tweaks)
+- **Notepad**: 107/109 pass. 2 failures = pre-existing v1.0.9 memo-state drift, baseline-confirmed. 3 CreatedByPopover-shell tests DELETED (component removed from shell; unit tests retained on disk).
+- **SmartTodo**: 61/61 pass (across queryHelpers, useTodoItems, SmartToDo, useLaunchContext).
+
+### Deferrals to file at `/code-review` step or during merge-to-master
+
+| DEF | Rationale (blocked by R1 CLAUDE.md constraint) | Follow-on |
+|---|---|---|
+| DEF-01 | Sparkle refresh needs BFF endpoint (NFR-07 forbids) | `ai-record-summary-regeneration-r1` |
+| DEF-03 | R1 CLAUDE.md "MUST NOT modify VisualHost/**" | R2B `record-header-shared-consolidation-r2` |
+| DEF-04 | R1 CLAUDE.md "MUST NOT modify EventDetailSidePane/**" | R2B `record-header-shared-consolidation-r2` |
+| DEF-05 | Per-entity PCFs each own separate ~80 LOC project per §Scope OS-02 | Three follow-ons: `project-header-r1`, `invoice-header-r1`, `event-header-r1` |
+| DEF-06 reforward | pcf-scripts `moduleResolution: "node"` blocks; proper fix ripples repo-wide | R2B `pcf-tsconfig-moduleresolution-bump-r2` |
 | DEF-08 | Promote `useSprkMemoRepository` to shared lib blocked by DEF-04 (adopter out of R1) | R2B (after DEF-04) |
 
 ---
 
 ## After wrap-up: `/merge-to-master`
 
-Full sync (worktree → origin/master → main-repo local master pull) via the merge-to-master skill.
+Full sync (worktree branch → origin/master → main-repo local master pull) via the merge-to-master skill.
 
 ---
 
 ## Full State (Detailed)
 
-### Session timeline (2026-07-03 → 2026-07-04)
-
-- 2026-07-03: v1.0.5 → v1.0.11 live QA rounds (10 rounds)
-- 2026-07-04 09:00–11:15: Phase 6 execution start — DEF-07, DEF-02, DEF-09 shipped; DEF-06 attempted and reverted
-- 2026-07-04 11:15: context-handoff + `/compact`
-- 2026-07-04 post-compact: DEF-11 pivot decision — user preferred reusing SmartTodo with matter filter over building a new DataGrid page. Cost collapsed from 6-8 hours to ~30 min.
-- 2026-07-04 11:30–12:15: DEF-10 executed (6 imports + 3 Vite aliases + 2 tsconfig paths + 2 Jest mock paths); DEF-11 executed (~10-line handler rewire + 2 test-assertion updates); MatterHeader v1.0.12 packed
-- Next: Phase 6 code commit → merge master → task 090 wrap-up → `/merge-to-master`
-
 ### Applicable ADRs (from R1 spec)
 
 - ADR-006 PCF over webresources
-- ADR-011 Dataset PCF over subgrids
+- ADR-011 Dataset PCF over subgrids (principle only)
 - ADR-012 Shared component library
 - ADR-021 Fluent v9 semantic tokens
 - ADR-022 PCF platform libraries (React 16/17 boundary)
-- ADR-024 Polymorphic resolver pattern (Path C — sprk_memo complies)
+- ADR-024 Polymorphic resolver pattern (sprk_memo complies — Path C)
 - ADR-028 Spaarke Auth v2 (N/A — R1 is host-context only)
-- ADR-038 Testing strategy (for test-diet gate at wrap-up)
+- ADR-038 Testing strategy (drives the `/test-diet` step)
 
 ### Constraints in effect (R1 CLAUDE.md)
 
@@ -93,19 +133,26 @@ MUST:
 MUST NOT:
 - Add ANY endpoint to `Sprk.Bff.Api/**` (NFR-07)
 - Import `@spaarke/auth` (NFR-05)
-- Modify `src/client/pcf/VisualHost/**` (DEF-03 is R2B)
-- Modify `src/solutions/EventDetailSidePane/**` (DEF-04 is R2B)
+- Modify `src/client/pcf/VisualHost/**`
+- Modify `src/solutions/EventDetailSidePane/**`
 - Use React 18-exclusive APIs in shared library
 
 ### Environment state
 
 - Working directory: `c:\code_files\spaarke-wt-record-header-and-notepad-r1`
 - Git branch: `work/record-header-and-notepad-r1`
-- Latest commit before Phase 6: `4ae56fc04` (merge master into branch, resolved INDEX conflict)
-- PR: #545 (draft state)
-- Phase 6 to be committed as ONE consolidated commit
-- After Phase 6 commit: fetch + merge `origin/master` (incoming: `a91ad1fcf` — unrelated project archive; zero file overlap)
+- Latest commit: `a9bda2674` (v1.0.18 spacing tweak)
+- PR: [#545](https://github.com/spaarke-dev/spaarke/pull/545) — draft. Ready for review sign-off after `/code-review` + `/test-diet`.
+
+### Recovery commands (verify state after any interruption)
+
+```bash
+git -C c:/code_files/spaarke-wt-record-header-and-notepad-r1 log --oneline -5
+git -C c:/code_files/spaarke-wt-record-header-and-notepad-r1 status --short
+cat src/client/pcf/MatterHeader/control/version.ts    # → CONTROL_VERSION = '1.0.18'
+cat projects/record-header-and-notepad-r1/README.md | head -20  # status Complete
+```
 
 ---
 
-*Last edited 2026-07-04 12:15 to reflect Phase 6 code-complete state.*
+*Last edited 2026-07-04 22:05 to reflect UAT round 18 sign-off + close-out entering `/code-review` step.*

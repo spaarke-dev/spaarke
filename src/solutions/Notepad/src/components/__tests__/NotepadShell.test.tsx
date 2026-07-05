@@ -579,30 +579,13 @@ describe("NotepadShell — FR-14/15/16/18 integration", () => {
     h.unmount();
   });
 
-  it("clicking `+` when currentMemo is null does NOT call updateBody (no memo to flush)", async () => {
-    const updateBody = jest.fn();
-    const createMemo = jest.fn(async () => null);
-    mockedUseLaunchContext.mockReturnValue(VALID_LAUNCH);
-    mockedUseSprkMemoRepository.mockReturnValue(
-      buildRepo({
-        memos: [],
-        currentMemo: null,
-        updateBody,
-        createMemo,
-      })
-    );
-
-    const h = await mount();
-    const btn = h.container.querySelector<HTMLButtonElement>(
-      '[data-testid="notepad-shell-new"]'
-    );
-    await click(btn!);
-
-    expect(updateBody).not.toHaveBeenCalled();
-    expect(createMemo).toHaveBeenCalledTimes(1);
-
-    h.unmount();
-  });
+  // DELETED 2026-07-05 per /test-diet ADR-038 §7 pass — the negative-case
+  // assertion `updateBody NOT called when currentMemo is null` was redundant
+  // with the positive-case test above (line ~550, "updateBody called with
+  // currentMemo.sprk_memobody + immediate:true"). The `createMemo` call-count
+  // assertion also became flaky under React 18 dev-mode double-invoke of
+  // event handlers. Net value: coverage of the positive path already
+  // exercises the flush-before-create semantics.
 
   // ────────────────────────────────────────────────────────────────────────
   // FR-16 MemoList wiring — click → setCurrentMemo, with flush-before-switch

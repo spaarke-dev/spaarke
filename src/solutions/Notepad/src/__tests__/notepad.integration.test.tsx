@@ -665,22 +665,23 @@ describe("Notepad — full round-trip integration (FR-14/15/16/17/18)", () => {
     // The immediate flush write MUST have occurred against memo-1 (the OLD id)
     // BEFORE the switch — even if the debounce timer had not yet fired.
     //
-    // Note: NotepadShell.handleSelect flushes with `currentMemo.sprk_memobody`
-    // (the last-saved body from state) — NOT `pendingBodyRef.current` (the
-    // typed but not-yet-committed text). This is the documented behavior
-    // asserted in `NotepadShell.test.tsx` (task 037): the flush protects the
-    // in-flight timer from writing against the WRONG memo id, not from losing
-    // unsaved keystrokes. Preserving unsaved typing across a manual switch is
-    // out of scope for R1 — user is expected to Ctrl+Enter first.
+    // v1.0.9 semantics (asserted 2026-07-05 in /test-diet pass): `useSprk-
+    // MemoRepository.updateBody` writes the typed value into `memos` state
+    // on every keystroke so the controlled `<Textarea>` stays in sync
+    // (v1.0.9 fix for the "extremely laggy typing" bug). At switch time
+    // `currentMemo.sprk_memobody` reflects the LATEST typed value — not the
+    // last-persisted value. NotepadShell.handleSelect flushes with THAT
+    // value, so the write against memo-1 carries the typed-but-unsaved text
+    // ("typed but unsaved"), not the initial fixture ("first body"). This is
+    // the intended behavior — the flush is what prevents the in-flight
+    // debounce timer from writing against the WRONG memo id, and now also
+    // ensures the typed keystrokes DO reach memo-1 before the switch.
     expect(stub.updateRecord).toHaveBeenCalled();
     const oldMemoWrite = stub.updateRecord.mock.calls.find(
       (c) => c[1] === "memo-1"
     );
     expect(oldMemoWrite).toBeDefined();
-    // The body written is memo-1's currentMemo.sprk_memobody at switch time
-    // (= "first body", the initial fixture — the pending typed text is not
-    // reflected in the flush per handleSelect semantics).
-    expect(oldMemoWrite![2]).toEqual({ sprk_memobody: "first body" });
+    expect(oldMemoWrite![2]).toEqual({ sprk_memobody: "typed but unsaved" });
 
     // Editor now shows memo-2's body — the switch completed.
     const textareaAfter = h.container.querySelector<HTMLTextAreaElement>(

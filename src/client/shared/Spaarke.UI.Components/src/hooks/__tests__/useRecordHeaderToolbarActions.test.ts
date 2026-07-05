@@ -54,14 +54,21 @@ let mockNavigateTo: jest.Mock;
  */
 function installXrm(counts: { todoCount?: number; memoCount?: number } = {}): void {
   const { todoCount = 0, memoCount = 0 } = counts;
+  // Mock the ACTUAL Xrm.WebApi shape: `{ entities: Array<...>, nextLink? }`.
+  // Previously this mock fabricated `@odata.count` which is what let the
+  // v1.0.11 → v1.0.15 badge silent-zero bug ship — real Xrm strips that
+  // annotation. See `.claude/patterns/pcf/xrm-webapi-related-count.md` and
+  // the parallel fixture in `useRelatedCount.test.ts` (makeEntities helper).
+  const makeEntities = (n: number): Array<Record<string, string>> =>
+    Array.from({ length: n }, (_, i) => ({ createdon: `2026-01-0${(i % 9) + 1}T00:00:00Z` }));
   mockRetrieveMultipleRecords = jest.fn((entity: string) => {
     if (entity === 'sprk_todo') {
-      return Promise.resolve({ '@odata.count': todoCount, entities: [] });
+      return Promise.resolve({ entities: makeEntities(todoCount) });
     }
     if (entity === 'sprk_memo') {
-      return Promise.resolve({ '@odata.count': memoCount, entities: [] });
+      return Promise.resolve({ entities: makeEntities(memoCount) });
     }
-    return Promise.resolve({ '@odata.count': 0, entities: [] });
+    return Promise.resolve({ entities: [] });
   });
   mockNavigateTo = jest.fn().mockResolvedValue(undefined);
 
@@ -108,31 +115,23 @@ describe('useRecordHeaderToolbarActions', () => {
   });
 
   // ── FR-07 Slot enumeration + enabled-flag filtering ───────────────────────
+  //
+  // v1.0.10 note: the `sparkle` slot was RETIRED from this hook — the AI
+  // summary popover is now the shared `<AiSummaryPopover>` component
+  // rendered by consumers alongside the toolbar (see SHARED-UI-COMPONENTS
+  // -GUIDE.md §AiSummaryPopover). The hook emits ONLY `checkmark` +
+  // `annotation`. Old sparkle-slot tests (7 of them, including sparkle
+  // popover content + refresh icon) were deleted in the /test-diet pass
+  // on 2026-07-05 per ADR-038 §7 (they asserted removed behavior — B10
+  // coverage-filler + B6 mirror to removed function).
 
-  it('emits all three slots (sparkle / checkmark / annotation) by default', async () => {
+  it('emits checkmark + annotation slots by default (sparkle is now a sibling AiSummaryPopover, not a hook slot)', async () => {
     installXrm();
     const { result } = renderHook(() =>
       useRecordHeaderToolbarActions({
         entity: MATTER_ENTITY,
         recordId: MATTER_GUID,
         recordSummary: null,
-      })
-    );
-
-    await flushPromises();
-
-    const keys = result.current.toolbarProps.iconSlots.map(s => s.key);
-    expect(keys).toEqual(['sparkle', 'checkmark', 'annotation']);
-  });
-
-  it('omits the sparkle slot when enabled.sparkle=false (not just hides it)', async () => {
-    installXrm();
-    const { result } = renderHook(() =>
-      useRecordHeaderToolbarActions({
-        entity: MATTER_ENTITY,
-        recordId: MATTER_GUID,
-        recordSummary: null,
-        enabled: { sparkle: false },
       })
     );
 
@@ -141,8 +140,6 @@ describe('useRecordHeaderToolbarActions', () => {
     const keys = result.current.toolbarProps.iconSlots.map(s => s.key);
     expect(keys).toEqual(['checkmark', 'annotation']);
     expect(result.current.toolbarProps.iconSlots).toHaveLength(2);
-    // Sparkle popover content is also null when sparkle is disabled.
-    expect(result.current.sparklePopoverContent).toBeNull();
   });
 
   it('omits the checkmark slot when enabled.checkmark=false', async () => {
@@ -158,7 +155,7 @@ describe('useRecordHeaderToolbarActions', () => {
     await flushPromises();
 
     const keys = result.current.toolbarProps.iconSlots.map(s => s.key);
-    expect(keys).toEqual(['sparkle', 'annotation']);
+    expect(keys).toEqual(['annotation']);
   });
 
   it('omits the annotation slot when enabled.annotation=false', async () => {
@@ -174,121 +171,7 @@ describe('useRecordHeaderToolbarActions', () => {
     await flushPromises();
 
     const keys = result.current.toolbarProps.iconSlots.map(s => s.key);
-    expect(keys).toEqual(['sparkle', 'checkmark']);
-  });
-
-  // ── FR-08 REVISED Sparkle popover toggle (no Xrm.Navigation call) ─────────
-
-  it('sparkle onClick toggles sparklePopoverOpen and does NOT call Xrm.Navigation.navigateTo', async () => {
-    installXrm();
-    const { result } = renderHook(() =>
-      useRecordHeaderToolbarActions({
-        entity: MATTER_ENTITY,
-        recordId: MATTER_GUID,
-        recordSummary: 'A summary',
-      })
-    );
-
-    await flushPromises();
-
-    expect(result.current.sparklePopoverOpen).toBe(false);
-
-    const sparkleSlot = result.current.toolbarProps.iconSlots.find(s => s.key === 'sparkle');
-    expect(sparkleSlot).toBeDefined();
-
-    // First click → open.
-    act(() => {
-      void sparkleSlot!.onClick();
-    });
-    expect(result.current.sparklePopoverOpen).toBe(true);
-
-    // Second click → close (toggle semantics).
-    act(() => {
-      void sparkleSlot!.onClick();
-    });
-    expect(result.current.sparklePopoverOpen).toBe(false);
-
-    // NO navigateTo call for sparkle — critical FR-08 REVISED invariant.
-    expect(mockNavigateTo).not.toHaveBeenCalled();
-  });
-
-  // ── FR-08 Popover content — summary vs empty state ────────────────────────
-
-  it('sparkle popover renders the recordSummary body when non-empty', async () => {
-    installXrm();
-    const summary = 'This is the AI-generated summary for the record.';
-    const { result } = renderHook(() =>
-      useRecordHeaderToolbarActions({
-        entity: MATTER_ENTITY,
-        recordId: MATTER_GUID,
-        recordSummary: summary,
-      })
-    );
-
-    await flushPromises();
-
-    const content = result.current.sparklePopoverContent;
-    expect(content).not.toBeNull();
-
-    render(content as React.ReactElement);
-    expect(screen.getByTestId('sparkle-popover-summary')).toHaveTextContent(summary);
-    expect(screen.queryByTestId('sparkle-popover-empty')).toBeNull();
-  });
-
-  it('sparkle popover renders empty-state message when recordSummary is null / undefined / empty', async () => {
-    installXrm();
-    for (const value of [null, undefined, ''] as (string | null | undefined)[]) {
-      const { result } = renderHook(() =>
-        useRecordHeaderToolbarActions({
-          entity: MATTER_ENTITY,
-          recordId: MATTER_GUID,
-          recordSummary: value,
-        })
-      );
-
-      await flushPromises();
-
-      const { unmount } = render(result.current.sparklePopoverContent as React.ReactElement);
-      expect(screen.getByTestId('sparkle-popover-empty')).toHaveTextContent(__testables.SPARKLE_EMPTY_STATE);
-      expect(screen.queryByTestId('sparkle-popover-summary')).toBeNull();
-      unmount();
-    }
-  });
-
-  // ── FR-08a Refresh icon is UNWIRED (no-op click; deferral tooltip) ────────
-
-  it('refresh icon click inside the sparkle popover is a no-op (no navigateTo, no WebApi write)', async () => {
-    installXrm();
-    const { result } = renderHook(() =>
-      useRecordHeaderToolbarActions({
-        entity: MATTER_ENTITY,
-        recordId: MATTER_GUID,
-        recordSummary: 'summary body',
-      })
-    );
-
-    await flushPromises();
-
-    render(result.current.sparklePopoverContent as React.ReactElement);
-
-    // The refresh button is icon-only; aria-label matches the deferral tooltip.
-    const refreshBtn = screen.getByRole('button', {
-      name: __testables.REFRESH_DEFERRAL_TOOLTIP,
-    });
-    expect(refreshBtn).toBeInTheDocument();
-
-    // Reset navigate/webapi call trackers so we assert on THIS click only.
-    mockNavigateTo.mockClear();
-    // Baseline write-side calls we would care about are createRecord /
-    // updateRecord — none of those exist on our mock. retrieveMultipleRecords
-    // is a READ (badge counts). We assert the click adds ZERO calls of any
-    // navigation and ZERO NEW retrieveMultipleRecords calls.
-    const priorReadCount = mockRetrieveMultipleRecords.mock.calls.length;
-
-    fireEvent.click(refreshBtn);
-
-    expect(mockNavigateTo).not.toHaveBeenCalled();
-    expect(mockRetrieveMultipleRecords.mock.calls.length).toBe(priorReadCount);
+    expect(keys).toEqual(['checkmark']);
   });
 
   // ── FR-09 Checkmark → SmartTodo webresource + LAYOUT_1_MODAL ──────────────
@@ -503,9 +386,14 @@ describe('useRecordHeaderToolbarActions', () => {
     expect(memoCallLog).toHaveLength(0);
   });
 
-  // ── Xrm unavailable resilience — sparkle still toggles; nav is no-op ─────
+  // ── Xrm unavailable resilience — checkmark + annotation clicks silently no-op ───
+  //
+  // v1.0.10 note: sparkle was retired from the hook, so its "still toggles"
+  // clause from the pre-v1.0.10 version of this test was dropped in the
+  // 2026-07-05 /test-diet pass. What remains is the invariant that matters
+  // for a broken host: nav-related clicks must NOT throw.
 
-  it('when Xrm is undefined, sparkle popover still toggles; checkmark + annotation clicks are no-op (no throw)', async () => {
+  it('when Xrm is undefined, checkmark + annotation clicks silently no-op (no throw)', async () => {
     // Explicitly NO installXrm() — simulate unit-test / non-MDA host.
     uninstallXrm();
 
@@ -513,21 +401,13 @@ describe('useRecordHeaderToolbarActions', () => {
       useRecordHeaderToolbarActions({
         entity: MATTER_ENTITY,
         recordId: MATTER_GUID,
-        recordSummary: 'body',
       })
     );
 
     await flushPromises();
 
-    const sparkle = result.current.toolbarProps.iconSlots.find(s => s.key === 'sparkle');
     const checkmark = result.current.toolbarProps.iconSlots.find(s => s.key === 'checkmark');
     const annotation = result.current.toolbarProps.iconSlots.find(s => s.key === 'annotation');
-
-    // Sparkle still toggles (pure client state).
-    act(() => {
-      void sparkle!.onClick();
-    });
-    expect(result.current.sparklePopoverOpen).toBe(true);
 
     // Nav-related clicks must NOT throw; they silently no-op.
     expect(() => {

@@ -269,16 +269,8 @@ export function useRecordHeaderToolbarActions(
   }, [entity, recordId]);
 
   const handleCheckmarkClick = React.useCallback((): void => {
-    // v1.0.5 diagnostic instrumentation. `[RecordHeader]` log lines pinpoint
-    // which stage broke: click reached → navigate call → resolve / reject.
-    // eslint-disable-next-line no-console
-    console.info('[RecordHeader] checkmark click', { webresourceName: SMARTTODO_WEBRESOURCE_NAME, entity, recordId });
     const xrm = getXrm();
-    if (!xrm?.Navigation?.navigateTo) {
-      // eslint-disable-next-line no-console
-      console.warn('[RecordHeader] Xrm.Navigation.navigateTo unavailable');
-      return;
-    }
+    if (!xrm?.Navigation?.navigateTo) return;
     // v1.0.6 CRITICAL: call `xrm.Navigation.navigateTo(...)` DIRECTLY. Every
     // v1.0.2..v1.0.5 aliased it as `const navigate = xrm.Navigation.navigateTo`
     // and then called `navigate(...)`, which strips the `this` binding and
@@ -286,54 +278,30 @@ export function useRecordHeaderToolbarActions(
     // Every working call site in this repo (SpaarkeAi launch-resolver,
     // LegalWorkspace WorkspaceGrid) calls the method directly on
     // `Xrm.Navigation`. Do not "extract" this into a local alias.
-    (xrm.Navigation.navigateTo as unknown as XrmNavigateToTwoArg)
-      .call(
-        xrm.Navigation,
-        {
-          pageType: 'webresource',
-          webresourceName: SMARTTODO_WEBRESOURCE_NAME,
-          data: buildSmartTodoLaunchData(),
-        },
-        LAYOUT_1_MODAL as unknown as Record<string, unknown>
-      )
-      .then(() => {
-        // eslint-disable-next-line no-console
-        console.info('[RecordHeader] SmartTodo navigateTo resolved');
-      })
-      .catch(err => {
-        // eslint-disable-next-line no-console
-        console.error('[RecordHeader] SmartTodo navigateTo failed', err);
-      });
-  }, [buildSmartTodoLaunchData, entity, recordId]);
+    void (xrm.Navigation.navigateTo as unknown as XrmNavigateToTwoArg).call(
+      xrm.Navigation,
+      {
+        pageType: 'webresource',
+        webresourceName: SMARTTODO_WEBRESOURCE_NAME,
+        data: buildSmartTodoLaunchData(),
+      },
+      LAYOUT_1_MODAL as unknown as Record<string, unknown>
+    );
+  }, [buildSmartTodoLaunchData]);
 
   const handleAnnotationClick = React.useCallback((): void => {
-    // eslint-disable-next-line no-console
-    console.info('[RecordHeader] annotation click', { webresourceName: NOTEPAD_WEBRESOURCE_NAME, entity, recordId });
     const xrm = getXrm();
-    if (!xrm?.Navigation?.navigateTo) {
-      // eslint-disable-next-line no-console
-      console.warn('[RecordHeader] Xrm.Navigation.navigateTo unavailable');
-      return;
-    }
-    (xrm.Navigation.navigateTo as unknown as XrmNavigateToTwoArg)
-      .call(
-        xrm.Navigation,
-        {
-          pageType: 'webresource',
-          webresourceName: NOTEPAD_WEBRESOURCE_NAME,
-          data: buildNotepadLaunchData(),
-        },
-        NOTEPAD_MODAL as unknown as Record<string, unknown>
-      )
-      .then(() => {
-        // eslint-disable-next-line no-console
-        console.info('[RecordHeader] Notepad navigateTo resolved');
-      })
-      .catch(err => {
-        // eslint-disable-next-line no-console
-        console.error('[RecordHeader] Notepad navigateTo failed', err);
-      });
-  }, [buildNotepadLaunchData, entity, recordId]);
+    if (!xrm?.Navigation?.navigateTo) return;
+    void (xrm.Navigation.navigateTo as unknown as XrmNavigateToTwoArg).call(
+      xrm.Navigation,
+      {
+        pageType: 'webresource',
+        webresourceName: NOTEPAD_WEBRESOURCE_NAME,
+        data: buildNotepadLaunchData(),
+      },
+      NOTEPAD_MODAL as unknown as Record<string, unknown>
+    );
+  }, [buildNotepadLaunchData]);
 
   // ── Slot definitions ───────────────────────────────────────────────────────
   //
