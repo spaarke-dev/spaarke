@@ -29,7 +29,9 @@ the deadwood."*
 | **1** | Inventory ALL AI-touching code across all worktrees against the 5 target categories (Session / Consumer / Tool / Dispatcher / Manifest) + functional capabilities | [`SPAARKE-AI-CODE-INVENTORY.md`](SPAARKE-AI-CODE-INVENTORY.md) | ✅ v1.0 (2026-07-05) — operator review pending |
 | **2** | Draft §4-7 of the canonical design doc, informed by Step 1 | `docs/architecture/SPAARKE-AI-ARCHITECTURE-AND-COMPONENT-DESIGN.md` v0.3 | ✅ v0.3 (2026-07-05) — D7-D12 pending operator ratification (incl. flagged deviation D10) |
 | **2.5** | Greenfield conceptual design + convergence overlay (operator-added 2026-07-05) | [`GREENFIELD-CONCEPTUAL-DESIGN.md`](GREENFIELD-CONCEPTUAL-DESIGN.md) v0.2 + [`OVERLAY-MATRIX.md`](OVERLAY-MATRIX.md) v1.0 | ✅ drafted — overlay matrix under operator review (5 exceptions E-1..E-5; OQ-1/OQ-3 resolutions proposed) |
-| **3** | Migration map: Track A (target alignment per overlay matrix) + Track B (deadwood sweep) + sequencing | [`SPAARKE-AI-MIGRATION-MAP.md`](SPAARKE-AI-MIGRATION-MAP.md) | 🔲 after overlay review |
+| **2.6** | ADR review vs greenfield (operator-added) | [`ADR-REVIEW-VS-GREENFIELD.md`](ADR-REVIEW-VS-GREENFIELD.md) | ✅ approved 2026-07-05 — ADR-037 + ADR-013 amendments APPLIED; ADR-039/040 authored (Proposed) |
+| **2.7** | Convergence bundle: canonical doc **v0.4** (converged target; three entry paths; 14 components with Fulfilled-by) | `docs/architecture/SPAARKE-AI-ARCHITECTURE-AND-COMPONENT-DESIGN.md` | ✅ 2026-07-05 (`e863cada9`) |
+| **3** | Migration map: Track A + Track B + hard-cutover sequencing (P0-P4) | [`SPAARKE-AI-MIGRATION-MAP.md`](SPAARKE-AI-MIGRATION-MAP.md) | ✅ v1.0 (2026-07-05) — seeds `/design-to-spec` for the implementation project |
 
 ## Scope
 
