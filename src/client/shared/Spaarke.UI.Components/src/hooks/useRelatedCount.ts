@@ -205,8 +205,7 @@ export function useRelatedCount(relatedEntity: string, filter: string | null): U
     // `$select=<any_single_column>` minimises payload — we don't care about
     // the row data, only the row COUNT. `createdon` is present on every
     // Dataverse entity so it's a safe choice.
-    const query =
-      `?$select=createdon&$filter=${currentFilter}&$top=${RELATED_COUNT_CAP}`;
+    const query = `?$select=createdon&$filter=${currentFilter}&$top=${RELATED_COUNT_CAP}`;
 
     xrm.WebApi.retrieveMultipleRecords(currentEntity, query).then(
       (result: RetrieveMultipleResponse) => {
