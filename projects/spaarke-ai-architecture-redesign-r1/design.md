@@ -44,12 +44,22 @@ flowing into the next in one conversation.
 Every phase gates on a **user-verifiable UAT script**, not artifact
 completion. A phase that ships its components but fails its script is not done.
 
+**The browser rule (binding — added at operator review)**: every G-gate UAT
+script is executed by a **user in the Spaarke UI**, end-to-end, with the
+result *rendered on screen* — a passing curl, a green test, or a log line does
+NOT satisfy a gate. "We didn't build an output for that" is a gate failure by
+definition: if the user can't see it and act on it, it doesn't exist. The only
+exception is **P0**, which is deliberately dark (foundations) and gates on
+engineering evidence — it is the single phase with no user-visible gate, and
+it says so.
+
 | Gate | The user can now… (UAT script summary) |
 |---|---|
 | **G-P1** | Upload a file to the Assistant and — typing nothing — see what the document is and get a summary with working next-step chips. Any phrasing or typo of "summarize" also works. (Kills: inert uploads, the regex.) |
 | **G-P2** | Type anything and get one of exactly four outcomes: it does it; it asks a clarifying question and proceeds ("what's the due date, and assign to you?"); it answers ad-hoc questions over documents AND Dataverse records with citations ("show me all open Acme matters over $100k" — never pre-built); or it says honestly what it can't do. It remembers the session ("email that summary to John" works — the summary is addressable). Record writes always confirm before executing. |
 | **G-P3** | The flagship journey runs as ONE conversation: upload contract → auto-summary → chat about a clause → "create matter from this" → pre-filled wizard → confirm → "draft the client letter" (references the real summary + real matter) → "create a follow-up task" → done. Plus: the daily briefing email arrives each morning; the assistant behaves identically on record forms, workspace, and SPA. |
 | **G-P4** | Nothing new — everything above is *boring*: reliable, fast, telemetered, on a codebase smaller than today's. |
+| **G-M** (maker gate, at P4 — added at operator review) | **A business analyst — not an engineer — authors a brand-new small capability entirely as data** (JPS prompt + output schema + Binding with chips + eval case, via PlaybookBuilder/ScopeConfigEditor, ZERO deploys), and a user then invokes it in the UI and gets a rendered result. This gate tests the "second product" claim directly; if it fails, the platform claim fails. |
 
 **The second product**: after G-P3, adding legal capability #N+1 (NDA review,
 invoice validation, obligation extraction…) is **a catalog row a business
@@ -120,7 +130,14 @@ implements; it does not re-open design.
 - **P3 Consumer + client consolidation**: all remaining consumers as Bindings
   (document-profile, matter/project pre-fill, workspace summarize,
   email-analysis, Insights ask/search); Daily Briefing as first coded
-  composite (narrate flag deleted); the three routing-appsettings blocks
+  composite (narrate flag deleted); **plus two NEW proving capabilities the
+  G-P3 script depends on** (gap closed at operator review — the script
+  promised outputs the scope didn't build): **`draft-correspondence`**
+  (prompted Action → `email.draft` write-shape over the existing Graph draft
+  path, gated, rendered as reviewable draft — the §3.9 terminal hub, ~22
+  inbound edges) and **`create-task`** (prompted Action → `dataverse.create`
+  of `sprk_event(type=task)` under the conversational-confirm gate — the
+  walkthrough's steps 10-14); the three routing-appsettings blocks
   deleted; engine-shell deletions; ConversationPane decomposition; LegalWorkspace
   + Compose summarize onto the shared helper; FieldDelta path deleted at cutover.
 - **P4 Sweep + hardening + graduation**: Track-B completion (grep-verified),
@@ -128,7 +145,17 @@ implements; it does not re-open design.
   canvas de-scope → BA scope/prompt/binding editor, publish-size verification,
   `/test-diet`, Action Engine R1 re-based spec filed.
 - **Track B deadwood sweep runs continuously from P0** (the ~30
-  dependency-free deletes start immediately).
+  dependency-free deletes start immediately). **Scope restated per operator
+  direction**: the sweep covers ALL dead technical debt in the inventory's §9
+  register — including code with NO relationship to the target design
+  ("not in the way" is not a reason to keep dead code); every entry ends
+  grep-verified-deleted or carries a written keep-with-reason.
+- **P0 also carries portfolio reconciliation** (gap closed at operator
+  review): formally re-scope/close `spaarke-ai-platform-unification-r7`
+  (this project absorbs its remaining waves), re-point the R4
+  daily-update-service graduation gate and the Action Engine R1 /
+  insights-engine-r3 resumption triggers from "R7 ships" to this project's
+  phases, and file the Action Engine re-based spec stub.
 
 ### 4.2 Explicit non-goals
 
@@ -206,12 +233,32 @@ should land in this project's generated CLAUDE.md.
 ## 7. What /design-to-spec should produce
 
 - FRs grouped by phase P0-P4, each phase carrying its **G-gate UAT script as
-  acceptance criteria** (§2) — user-verifiable, not component-complete.
-- NFRs: publish-size ceiling (ADR-029), eval-suite green as merge gate from
-  P1, telemetry (`dispatch_refused`, tool budgets), ADR-015 tier compliance
-  for ledger entries, hard-cutover verification (grep-zero for retired
-  mechanisms/config keys per phase).
+  acceptance criteria** (§2, incl. the browser rule and the G-M maker gate) —
+  user-verifiable, not component-complete.
+- NFRs: publish-size ceiling (ADR-029); eval-suite green as merge gate from
+  P1; telemetry (`dispatch_refused`, tool budgets); ADR-015 tier compliance
+  for ledger entries; hard-cutover verification (grep-zero for retired
+  mechanisms/config keys per phase); **plus the four added at operator review**:
+  - **Prompt-injection threat model (security NFR)**: uploaded-document text
+    and tool results are UNTRUSTED input to the text-path loop; verify
+    `AgentContentSafetyMiddleware` coverage on the loop path; injection
+    attack cases (hostile document instructing exfiltration/side effects) in
+    the eval suite; the confirmation gate is the last line, not the only one.
+  - **Latency targets per gate**: upload→first-summary-token and
+    text-turn TTFB budgets (capability-tool schemas in context → prompt
+    caching required as an implementation note).
+  - **Per-tenant AI usage metering**: ADR-016 budgets surfaced as a
+    billing-grade per-tenant meter (product/pricing requirement in this
+    market) — at minimum the counter lands; the admin/pricing surface may be
+    a named follow-on.
+  - **Output-quality checks in the eval suite** beyond dispatch: per-capability
+    schema-conformance + citation-integrity assertions, so a prompt edit that
+    degrades output fails CI, not UAT.
 - Wave structure = P0-P4 + continuous Track-B stream; dependencies per the
   migration map's spine.
 - The Track-B delete register as enumerated cleanup tasks (grep-verified
   acceptance).
+- **Named deferrals (explicit, not silent)**: admin observability dashboards
+  (audit-trail UI over ledger/Tier-2, cost dashboards, refusal-backlog view)
+  → follow-on project, filed via `/defer` at P4; deep legal capabilities
+  beyond the proving set per §4.2.
