@@ -6,7 +6,7 @@
 
 ---
 
-## Phase P0 — Foundations (dark; gate G-P0 = engineering evidence)
+## Phase P0 — Foundations (dark; gate G-P0 = engineering evidence) — ✅ **PHASE COMPLETE 2026-07-05** (G-P0 passed; ADR-040 Accepted; evidence: notes/g-p0-evidence.md)
 
 ### Wave W-P0-A (parallel ×6)
 
@@ -49,7 +49,7 @@
 
 | # | Task | FR | Rigor | Deps | Status |
 |---|---|---|---|---|---|
-| 014 | P0 deploy + G-P0 evidence + **ADR-040 → Accepted** | G-P0 | STANDARD | 001–012 | 🔲 |
+| 014 | P0 deploy + G-P0 evidence + **ADR-040 → Accepted** (deployed spaarke-bff-dev 46.87 MB; /healthz 200 + /healthz/catalog Degraded-by-design; evidence at notes/g-p0-evidence.md; F-1 ruled accept-until-cutover) | G-P0 | STANDARD | 001–012 | ✅ |
 
 ## Phase P1 — First capability end-to-end (gate G-P1, BROWSER)
 

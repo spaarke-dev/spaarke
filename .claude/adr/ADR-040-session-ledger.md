@@ -1,7 +1,8 @@
 # ADR-040: Session Ledger (Concise)
 
-> **Status**: Proposed (2026-07-05) — accepted-in-principle by operator with the
-> v0.4 converged target; moves to Accepted when migration P0 ships.
+> **Status**: **Accepted** (2026-07-05 at gate G-P0 of
+> `spaarke-ai-architecture-redesign-r1` — P0 shipped; evidence:
+> `projects/spaarke-ai-architecture-redesign-r1/notes/g-p0-evidence.md`).
 > **Domain**: AI platform — session state, composition, audit
 > **Source**: `spaarke-ai-code-audit-r1` (ADR review A-5); encodes ratified
 > decisions D2/D8 (canonical AI architecture doc v0.4 §4.3/§5.2).

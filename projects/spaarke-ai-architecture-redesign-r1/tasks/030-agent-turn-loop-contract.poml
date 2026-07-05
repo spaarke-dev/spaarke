@@ -130,6 +130,7 @@
     <criterion testable="true">Capability-tool projection is prompt-cache-stable (deterministic serialization verified; NFR-04 evidence in notes).</criterion>
     <criterion testable="true">Budget telemetry emitted per ADR-016 (NFR-09); ToolChain entries contain identifiers/filters/counts only (NFR-07).</criterion>
     <criterion testable="true">dotnet build + full test suite green; publish-size delta reported per ADR-029.</criterion>
+    <criterion testable="true">Orphan-handler reconciliation ESCALATED: with the catalog now the ONLY tool projection, RoutingConsumerTypeHealthCheck's orphan-handler dimension flips from Degraded to Unhealthy (gate-014 deferral, 2026-07-05 — see HasOrphanHandlers doc comment). Every handler this task leaves registered either has a sprk_analysistool row or is deleted; /healthz/catalog Healthy on spaarkedev1 (shown).</criterion>
   </acceptance-criteria>
 
   <execution>

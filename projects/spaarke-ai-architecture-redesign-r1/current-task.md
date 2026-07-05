@@ -5,14 +5,22 @@
 
 ## Active Task
 
-- **Task**: Wave W-P0-C (parallel)
-- **Status**: in-progress (dispatched 2026-07-05)
-- **Rigor Level**: per-task (010 MINIMAL spike · 011 TEST-MODIFYING · 012 STANDARD · 072 STANDARD)
-- **Wave**: W-P0-C = 010, 011, 012, 072
+- **Task**: none — **PHASE P0 COMPLETE (G-P0 PASSED 2026-07-05)**
+- **Status**: awaiting W-P1-A dispatch
+- **Rigor Level**: —
+- **Wave**: next = W-P1-A (020 chat-summarize Action+Binding, 025 r7 branch close, 073 Track-B batch 4)
 
 ## Next Action
 
-Collect W-P0-C results → verify → commit → gate task 014 (serial: bff-deploy, G-P0 evidence, ADR-040 → Accepted, seed catalog to /healthz/catalog green).
+Dispatch W-P1-A → W-P1-B (021) → W-P1-C (022, 023, 024) → W-P1-D (026, ADR-039 → Accepted) → gate 027 (**BROWSER UAT — operator on spaarkedev1**).
+
+## Phase P0 close-out summary
+
+- 17/51 tasks ✅ (001–014, 070–072); deployed spaarke-bff-dev (46.87 MB, SHA-verified)
+- ADR-040 → Accepted (both copies); evidence: notes/g-p0-evidence.md
+- F-1 audit ruling: accept-until-cutover; task 044 extended to delete surviving legs
+- Gate-014 semantic corrections: /healthz vs /healthz/catalog split; duplicate detection keys on sprk_toolid; orphan handlers = Degraded until task 030 escalation; ComposeSummarize constant added
+- Known pre-existing test failures (8) + 2 load-flakes documented in evidence §7
 
 ## Steps Completed This Task
 

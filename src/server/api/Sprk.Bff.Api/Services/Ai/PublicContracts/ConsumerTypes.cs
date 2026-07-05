@@ -97,6 +97,16 @@ public static class ConsumerTypes
     public const string DocumentProfile = "document-profile";
 
     /// <summary>
+    /// <c>ComposeSummarize</c> — Compose drafting-workspace summarize flow
+    /// (spaarkeai-compose-r1; `ConsumerTypes.ComposeSummarize` in that
+    /// project's branch). Constant added here 2026-07-05 by
+    /// spaarke-ai-architecture-redesign-r1 gate 014: the Binding row exists on
+    /// spaarkedev1 and the FR-P0-04 boot reconciliation requires constants ↔
+    /// rows parity. Identical declaration expected from the compose-r1 merge.
+    /// </summary>
+    public const string ComposeSummarize = "compose-summarize";
+
+    /// <summary>
     /// Read-only list of all consumer-type constants. Intended for startup
     /// health-log diffing against Dataverse (chat-routing-redesign-r1 task
     /// 028e exit gate).
@@ -111,5 +121,6 @@ public static class ConsumerTypes
         EmailAnalysis,
         DailyBriefingNarrate,
         DocumentProfile,
+        ComposeSummarize,
     };
 }

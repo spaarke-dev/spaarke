@@ -1,6 +1,6 @@
 # ADR-040: Session Ledger
 
-- **Status**: Proposed (2026-07-05); accepted-in-principle by operator with the v0.4 converged target. Moves to Accepted when migration phase P0 ships.
+- **Status**: **Accepted** (2026-07-05, at gate G-P0 of `spaarke-ai-architecture-redesign-r1`, per this ADR's own promotion condition — "moves to Accepted when migration phase P0 ships"). Evidence: typed ledger model + Redis/Cosmos persistence deployed to `spaarke-bff-dev`; ledger round-trip incl. file references test-proven; boot reconciliation live. Full package: `projects/spaarke-ai-architecture-redesign-r1/notes/g-p0-evidence.md`. (Originally Proposed 2026-07-05, accepted-in-principle by operator with the v0.4 converged target.)
 - **Deciders**: Operator + `spaarke-ai-code-audit-r1` convergence review (2026-07-05)
 - **Concise version**: [`.claude/adr/ADR-040-session-ledger.md`](../../.claude/adr/ADR-040-session-ledger.md) (the operational MUST/MUST-NOT surface — binding)
 

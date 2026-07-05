@@ -91,7 +91,7 @@
       Re-point FileSummarizeService/DocumentProfileService call sites onto the executor path (Binding resolution from task 040); delete the wrapper classes + their DI registrations (+ Null-Object peers if any, per ADR-032).
     </step>
     <step order="3" name="Delete the shells">
-      Delete PlaybookExecutionEngine, the AnalysisOrchestrationService legacy path (R7 FR-11), and SessionSummarizeOrchestrator remnants, including DI registrations and shell-only tests.
+      Delete PlaybookExecutionEngine, the AnalysisOrchestrationService legacy path (R7 FR-11), and SessionSummarizeOrchestrator remnants, including DI registrations and shell-only tests. ALSO delete the three app-only legacy tool-handler legs recorded in audit finding F-1 (notes/user-obo-audit.md; G-P0 ruling 2026-07-05 = accept-until-cutover): InvokePlaybookHandler, AnalysisQueryHandler, WorkingDocumentHandler(+Tools) — they reach app-only Dataverse writes from LLM-initiated calls and MUST NOT survive this phase. Delete (or OBO-migrate ONLY if a live P3 capability still needs one — escalate before choosing migration).
     </step>
     <step order="4" name="Prove the boundary + grep-zero">
       Run and SHOW: (a) grep-zero for each deleted symbol across src/** and tests/** (outside git history); (b) `git diff --stat` proving no frozen-engine file (PlaybookOrchestrationService + nodes) changed.
@@ -119,6 +119,7 @@
 
   <acceptance-criteria>
     <criterion testable="true">Grep-zero (shown) for PlaybookExecutionEngine, the AnalysisOrchestrationService legacy path, SessionSummarizeOrchestrator, FileSummarizeService, and DocumentProfileService wrapper symbols outside git history.</criterion>
+    <criterion testable="true">Audit F-1 closure: grep-zero (shown) for InvokePlaybookHandler, AnalysisQueryHandler, WorkingDocumentHandler — no app-only Dataverse write reachable from any LLM-initiated call chain (re-run the task-012 audit trace for these three).</criterion>
     <criterion testable="true">All former callers re-pointed to the executor/Binding path; dotnet build + full test suite + eval suite green.</criterion>
     <criterion testable="true">Frozen engine (`PlaybookOrchestrationService` + nodes) untouched — diff-scope proof shown.</criterion>
     <criterion testable="true">Publish-size delta reported and negative-or-justified (ADR-029).</criterion>

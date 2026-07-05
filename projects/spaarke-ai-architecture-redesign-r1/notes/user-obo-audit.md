@@ -154,3 +154,24 @@ Every flow the **new** AI tool plane exposes — the six `dataverse.*` handlers 
 ---
 
 *Task 012 · spaarke-ai-architecture-redesign-r1 · read-only audit · no code changed.*
+
+---
+
+## §7 G-P0 Gate Ruling (2026-07-05, operator)
+
+**F-1 ruling: ACCEPT-UNTIL-CUTOVER.** Rationale: the app-only legs are pre-existing
+production behavior, not a regression introduced by this project; the P2 hard cutover
+(tasks 034/035/036) deletes most of them on schedule. The three surviving legs
+(`InvokePlaybookHandler`, `AnalysisQueryHandler`, `WorkingDocumentHandler(+Tools)`)
+are now EXPLICITLY covered: task 044 (P3 engine-shell deletions) scope + acceptance
+criteria extended 2026-07-05 to delete them with grep-zero proof and an F-1 re-trace.
+
+Structural backstops in the interim: (a) the P2 loop's tool projection comes ONLY
+from the closed `sprk_analysistool` catalog (FR-P2-01), so un-catalogued handlers are
+not loop-invocable; (b) task 005's bijection health check fails startup on any
+handler-without-row drift. Residual risk window = today's existing behavior until P2,
+then structurally closed; fully deleted at P3 task 044.
+
+F-3 (config-plane app-only reads) ruled accept-with-note: tenant-shared catalog
+config, no user data, parameters BFF-controlled. F-4 (session persistence infra)
+accepted per ADR-028 background/infra allowance.

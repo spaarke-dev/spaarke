@@ -250,33 +250,56 @@ public sealed class RoutingConsumerTypeHealthCheckTests
     }
 
     [Fact]
-    public async Task CheckHealthAsync_HandlerWithoutToolRow_ReturnsUnhealthyNamingOrphanHandler()
+    public async Task CheckHealthAsync_HandlerWithoutToolRow_ReturnsDegradedNamingOrphanHandler()
     {
+        // Orphan handlers are DEGRADED until the FR-P2-01 catalog-projection
+        // cutover (task 030): direct-wired chat handlers legitimately lack rows
+        // today, and F-1 deletion targets must not be seeded rows to appease a
+        // probe. Gate-014 semantic correction, 2026-07-05.
         SetupBindingRows(BindingRowsForAllConstants());
         SetupToolRows(ToolRow("Alpha Tool", "AlphaHandler"));
         var sut = CreateSut(handlerIds: new[] { "AlphaHandler", "OrphanHandler" });
 
         var result = await CheckAsync(sut);
 
-        result.Status.Should().Be(HealthStatus.Unhealthy);
+        result.Status.Should().Be(HealthStatus.Degraded);
         result.Description.Should().Contain("OrphanHandler");
-        result.Description.Should().Contain("orphan handlers");
+        result.Description.Should().Contain("escalates to Unhealthy at the FR-P2-01 cutover");
     }
 
     [Fact]
-    public async Task CheckHealthAsync_DuplicateToolRowsForOneHandler_ReturnsUnhealthyNamingHandler()
+    public async Task CheckHealthAsync_MultipleToolRowsPerHandler_IsHealthy()
     {
+        // Row = tool, handler = implementation: one handler serving several
+        // named tool rows is the catalog's legitimate shape (e.g.
+        // TextRefinementHandler serves Summary/KeyPoints/Refinement).
         SetupBindingRows(BindingRowsForAllConstants());
         SetupToolRows(
             ToolRow("Alpha Tool", "AlphaHandler", "dataverse.alpha"),
-            ToolRow("Alpha Tool Copy", "AlphaHandler", "dataverse.alpha_copy"));
+            ToolRow("Alpha Tool Sibling", "AlphaHandler", "dataverse.alpha_sibling"));
         var sut = CreateSut(handlerIds: new[] { "AlphaHandler" });
 
         var result = await CheckAsync(sut);
 
+        result.Status.Should().Be(HealthStatus.Healthy);
+    }
+
+    [Fact]
+    public async Task CheckHealthAsync_DuplicateToolIdAcrossRows_ReturnsUnhealthyNamingToolId()
+    {
+        // Tool identity is sprk_toolid: two active rows claiming the same id
+        // is the real duplicate-drift class (gate-014 semantic correction).
+        SetupBindingRows(BindingRowsForAllConstants());
+        SetupToolRows(
+            ToolRow("Alpha Tool", "AlphaHandler", "dataverse.alpha"),
+            ToolRow("Alpha Tool Copy", "BetaHandler", "dataverse.alpha"));
+        var sut = CreateSut(handlerIds: new[] { "AlphaHandler", "BetaHandler" });
+
+        var result = await CheckAsync(sut);
+
         result.Status.Should().Be(HealthStatus.Unhealthy);
-        result.Description.Should().Contain("AlphaHandler (2 rows)");
-        result.Description.Should().Contain("bijection violated");
+        result.Description.Should().Contain("dataverse.alpha (2 rows)");
+        result.Description.Should().Contain("tool identity violated");
     }
 
     [Fact]
@@ -304,8 +327,11 @@ public sealed class RoutingConsumerTypeHealthCheckTests
             .Append(BindingRow("typo-consumer"))
             .ToArray();
         SetupBindingRows(rows);
-        SetupToolRows(ToolRow("Ghost Tool", "GhostHandler"));
-        var sut = CreateSut(handlerIds: new[] { "OrphanHandler" });
+        SetupToolRows(
+            ToolRow("Ghost Tool", "GhostHandler"),
+            ToolRow("Dup A", "AlphaHandler", "dataverse.dup"),
+            ToolRow("Dup B", "AlphaHandler", "dataverse.dup"));
+        var sut = CreateSut(handlerIds: new[] { "AlphaHandler" });
 
         var result = await CheckAsync(sut);
 
@@ -313,7 +339,7 @@ public sealed class RoutingConsumerTypeHealthCheckTests
         result.Description.Should().Contain(ConsumerTypes.ChatSummarize);
         result.Description.Should().Contain("typo-consumer");
         result.Description.Should().Contain("GhostHandler");
-        result.Description.Should().Contain("OrphanHandler");
+        result.Description.Should().Contain("dataverse.dup (2 rows)");
     }
 
     // ── Fail-soft: transient errors are not drift ───────────────────────────
