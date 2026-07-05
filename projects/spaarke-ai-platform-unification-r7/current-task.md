@@ -1,7 +1,8 @@
 # Current Task State — spaarke-ai-platform-unification-r7
 
-> **Last Updated**: 2026-07-04 (context-handoff, pre-compact)
+> **Last Updated**: 2026-07-05 (pre-Fable-5-switch handoff)
 > **Recovery**: Read "Quick Recovery" section first
+> **Session model note**: previous session was Claude Opus 4.7. The next session should be **Claude Fable 5** (`claude-fable-5`) — activated by operator via settings-file or `/model fable`. Fable 5's 1M context + adaptive thinking suits the code-audit + §4-7 design work coming up.
 
 ---
 
@@ -9,12 +10,63 @@
 
 | Field | Value |
 |-------|-------|
-| **Session** | R7 Wave 12.3 Phase 12.3a closed + strategic pivot to canonical Spaarke AI architecture design |
-| **Status** | **Wave 12.3 summarize flow WORKING end-to-end** (curl + browser UAT). **Now paused for strategic architecture design.** Operator to review §3 of new canonical doc before we draft §4-8. |
+| **Session** | Canonical Spaarke AI Architecture doc reached v0.2.6 (§0-3 substantive draft including relationship map + orchestration walkthrough + Layer 0 auto-composite + four-layer dispatch + two-catalog Consumers-and-Tools model). **Pausing before Step 1 of the code audit** to switch to Fable 5. |
+| **Status** | Doc at **v0.2.6**. Uncommitted edits on disk (this session's v0.2.5 + v0.2.6 changes were not committed). Audit project folder NOT YET CREATED. |
 | **Branch** | `work/spaarke-ai-platform-unification-r7` |
-| **Latest commit** | `5f77a1d9c docs(architecture): canonical Spaarke AI Architecture and Component Design v0.1` (pushed to origin 2026-07-04) |
-| **Uncommitted** | none — clean tree |
-| **Next Action** | **Wait for operator review of §3 (use cases) in [`docs/architecture/SPAARKE-AI-ARCHITECTURE-AND-COMPONENT-DESIGN.md`](../../docs/architecture/SPAARKE-AI-ARCHITECTURE-AND-COMPONENT-DESIGN.md).** After approval → draft §4 architecture overview, §5 component model, §6 capability manifest, §7 intent+dispatch (resolves the 4-mechanism drift), §8 roadmap. |
+| **Latest committed doc version** | v0.2.4 (from 2026-07-04 session) — commit `5f77a1d9c` pushed to origin. **v0.2.5 + v0.2.6 changes are uncommitted on disk.** |
+| **Uncommitted** | `docs/architecture/SPAARKE-AI-ARCHITECTURE-AND-COMPONENT-DESIGN.md` — v0.2.5 (status banner + revision-log format) + v0.2.6 (three write-shapes hub reframing, on-upload auto-composite, sprk_event fix, Layer 0 dispatch). Consider committing before Fable 5 switch to avoid confusion. |
+| **Next Action for Fable 5 session** | **Step 1 of the 3-step code audit.** Todos are laid out in TodoWrite. First todo: create `projects/spaarke-ai-code-audit-r1/` project folder + README.md + spec.md. Then enumerate AI-touching code across ALL worktrees (not just r7). Operator confirmed scope = "All AI-touching code, all worktrees" and output location = "New project folder". |
+
+---
+
+## Fable 5 session — orientation on arrival
+
+**You are the Fable 5 successor to the Opus 4.7 session that produced v0.2.6.** Read this section before touching anything.
+
+### Where we are in the design conversation
+
+The operator and previous session (Opus 4.7) collaboratively built a canonical Spaarke AI architecture doc across 6 minor versions on 2026-07-04–05. Current state is **v0.2.6** at `docs/architecture/SPAARKE-AI-ARCHITECTURE-AND-COMPONENT-DESIGN.md`. The doc's Status banner + Last-updated line at the top will confirm the version.
+
+**Highlights of v0.2.6** (read the doc top-to-bottom before proceeding, but this is the shape):
+- §0 intro + product context (§1) + competitive landscape (§2) — includes Wordsmith AI + Peppermint + Fable 5 tier context.
+- §3 use case catalog — 28 UCs across 8 categories (A-H), each with Typical prior context + Typical next steps declaring session-graph edges.
+- §3.9 relationship map + overlap analysis — three write-shapes (edit file / create record / send comm) reframe of universal hubs; 10 overlap points for §5-6 consolidation.
+- §3.10 orchestration walkthrough — 14-step NDA scenario as canonical example; 7 mechanisms (M1-M7); 4 locked decisions (D1-D4); testable propositions (P1-P10).
+- §3.10.7 dispatch model — Layer 0 (on-upload auto-composite) + Layer 1 chip / Layer 2 Consumer NL match / Layer 3 LLM tool loop over Tool catalog / Layer 4 refusal. Two-catalog model (Consumers + Tools). Locked decisions D5 (grounded execution invariant) + D6 (two catalogs both closed).
+- §4-8 explicitly deferred. §9 revision log with per-version summary.
+
+**Design principles locked** (do NOT re-litigate unless operator raises):
+- Sequence framing (§3.0): UCs are connected nodes in a session graph, not isolated tools.
+- Grounded execution (D5): every output must be Cataloged Consumer output, Tool-composed answer with citations, M4 confirmation, or honest refusal. No free-form ungrounded LLM chat.
+- Two catalogs (D6): Consumers (curated) + Tools (LLM composition primitives, incl. Dataverse MCP). Both closed.
+- Storage vs rendering separation (D2): `session.outputs` universal + automatic; disposition (informational / work_product / overlay) is a Consumer rendering choice.
+- Chip labels Consumer-declared (D4); slot-fill chat by default with modal escape (D3); confidence-threshold confirmation (D1).
+- On-upload auto-composite (Layer 0) is the DEFAULT new-session flow when a doc is uploaded.
+
+### The 3-step audit plan the operator directed
+
+1. **Step 1 (this session's first task)** — Inventory ALL existing AI code across all worktrees against the 5 target categories (Session / Consumer / Tool / Dispatcher / Manifest) + functional capabilities. Deliverable: `projects/spaarke-ai-code-audit-r1/SPAARKE-AI-CODE-INVENTORY.md`.
+2. **Step 2 (after audit)** — Draft §4-7 of the canonical design doc, informed by what Step 1 revealed. Design against real constraints, not greenfield.
+3. **Step 3 (after design)** — For each inventoried component: keep-as-is / refactor-to-target / retire / new-required. Deliverable: `projects/spaarke-ai-code-audit-r1/SPAARKE-AI-MIGRATION-MAP.md`.
+
+### Immediate first moves for you (Fable 5 session)
+
+1. **Read the current doc top-to-bottom** — `docs/architecture/SPAARKE-AI-ARCHITECTURE-AND-COMPONENT-DESIGN.md` (v0.2.6, ~2200 lines; comfortably within your 1M context window). This is where the operator and prior session agreed the target model.
+2. **Confirm uncommitted state with the operator** — v0.2.5 + v0.2.6 doc edits were not committed. Ask whether to commit before starting the audit (recommended) or defer.
+3. **Create the audit project folder**: `projects/spaarke-ai-code-audit-r1/README.md` + `spec.md`. Portfolio issue should be registered via `/devops-project-register --from-folder projects/spaarke-ai-code-audit-r1 --epic 421 --project-type Cleanup` (or Data / Process — operator's call).
+4. **Begin Step 1 audit** per the pending TodoWrite list. Enumerate code surfaces across worktrees first (this is a `git worktree list` + Glob per worktree pattern).
+
+### Key context the previous session accumulated
+
+- Spaarke has ~30 accumulated AI-related projects (7 spaarke-ai-platform-unification R1-R7 + ~20+ others: document-intelligence, insight-engine, chat, daily-update, playbook, email-to-document, chat-routing-redesign, etc.). Operator's concern: technical debt from 27+ projects worth of code that may or may not fit the target model.
+- Operator explicitly asked: "what happens to all of this code — many required components have been built in one way or another. BUT if not then we need to get rid of all the deadwood."
+- Working environment: `spaarkedev1` Dataverse dev env; `spaarke-bff-dev` App Service. Fable 5 session should ONLY do audit-related work; no BFF changes without operator direction.
+
+### Todos to work through (in TodoWrite)
+
+The Fable 5 session should immediately view the TodoWrite list. The first `in_progress` marker was set to "PAUSED: switch to Fable 5" — flip that to completed and start the top pending task: "Create projects/spaarke-ai-code-audit-r1/ folder + README.md + spec.md".
+
+---
 
 ### Critical context (30-second read)
 
