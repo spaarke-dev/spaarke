@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="record-header-and-notepad-r1">
+  <metadata>
+    <title>Entity-agnostic launch test (FR-19)</title>
+    <phase>3: Notepad</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>039</dependencies>
+    <blocks>050</blocks>
+    <tags>testing, e2e-test, dataverse</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Empirical verification of external launch-contract stability</rigor-reason>
+    <parallel-group>F</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>Execute the FR-19 entity-agnostic launch test — launch Notepad with a synthetic non-Matter regardingEntity (e.g. sprk_project or a test entity) + regardingId. Verify Notepad renders and behaves identically. Document scenario in notes/entity-agnostic-launch.md.</prompt>
+
+  <role>Spaarke QA / platform developer.</role>
+
+  <goal>Notes doc confirms FR-19: URL contract stable across entities; Notepad reads regardingEntity generically and behaves identically.</goal>
+
+  <context>
+    <background>Design §3.6 + FR-19: reusability discipline verification. Contract fields must not encode Matter-specific assumptions.</background>
+    <relevant-files>
+      <file>projects/record-header-and-notepad-r1/notes/entity-agnostic-launch.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-19: verified by a test-only launcher against a synthetic non-Matter record.</constraint>
+    <constraint source="spec">NFR-09: URL contract stability.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/record-header-and-notepad-r1/spec.md</file>
+      <file>projects/record-header-and-notepad-r1/CLAUDE.md</file>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Identify a non-Matter entity available in the dev environment (e.g. sprk_project, sprk_event, or a test-only entity).</step>
+    <step order="2">Find or create a record in that entity.</step>
+    <step order="3">Manually construct the webresource URL with regardingEntity=&lt;entity&gt;&amp;regardingId=&lt;guid&gt; and open it.</step>
+    <step order="4">Verify Notepad renders identically to the Matter case: top bar, editor, list dropdown, `+` button, `i` icon all functional.</step>
+    <step order="5">Create a memo; verify sprk_memo record is created with sprk_regardingrecordid set to the non-Matter GUID.</step>
+    <step order="6">Document the scenario + results in notes/entity-agnostic-launch.md.</step>
+    <step order="7">Update TASK-INDEX.md: mark 040 ✅.</step>
+    <step order="8">Document deviations in notes/.</step>
+  </steps>
+
+  <tools>
+    <tool name="terminal">Shell + browser</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/record-header-and-notepad-r1/notes/entity-agnostic-launch.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Notepad renders and functions when regardingEntity is anything other than sprk_matter.</criterion>
+    <criterion testable="true">Created memo has sprk_regardingrecordid set to the non-Matter GUID.</criterion>
+    <criterion testable="true">Behavior is identical (no Matter-specific branches or assumptions surface).</criterion>
+  </acceptance-criteria>
+
+  <notes>If the test uncovers Matter-specific behavior, file DEF-{NNN} via /project-defer-issue-tracking and fix before wrap-up.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files first. Follow task-execute skill.</protocol>
+  </execution>
+</task>

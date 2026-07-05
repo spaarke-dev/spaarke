@@ -324,7 +324,32 @@ export function buildDynamicWorkspaceConfig(
       // In both branches, operator-set styles (`style.minHeight` or `style.maxHeight`
       // supplied by the factory) are NOT overwritten — this preserves the existing
       // "factory wins" contract.
-      if (registration.defaultHeight) {
+      //
+      // R2 UAT §5.6 fix (2026-07-03 round 2): when the ROW has an operator-set
+      // rowHeight, apply that height LITERALLY to the section card — not via
+      // `100%` which depends on the row's grid track being sized correctly by
+      // the browser. Direct value avoids the flex/grid chain propagation
+      // subtleties that were causing the DataGrid inside to stay at its
+      // registration `defaultHeight` regardless of the row's actual height.
+      //
+      // Semantics: row-height wins over section-defaultHeight (operator intent
+      // > registration hint). Overrides any registration.defaultHeight.
+      if (jsonRow.rowHeight) {
+        // Force `flex: 1` on the widget root chain to fill, but ALSO set the
+        // outer card's explicit height so the whole subtree has a determinate
+        // parent height. Factory-supplied maxHeight/height wins if present.
+        if (!sectionConfig.style?.maxHeight && !sectionConfig.style?.height) {
+          sectionConfig.style = {
+            ...sectionConfig.style,
+            height: jsonRow.rowHeight,
+            maxHeight: jsonRow.rowHeight,
+            minHeight: jsonRow.rowHeight,
+            overflow: 'hidden',
+            display: 'flex',
+            flexDirection: 'column',
+          };
+        }
+      } else if (registration.defaultHeight) {
         if (registration.contentSizing === 'clamped') {
           if (!sectionConfig.style?.maxHeight) {
             sectionConfig.style = {

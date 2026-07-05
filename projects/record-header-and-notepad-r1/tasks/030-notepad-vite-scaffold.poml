@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="record-header-and-notepad-r1">
+  <metadata>
+    <title>Scaffold Notepad Vite React 18 SPA</title>
+    <phase>3: Notepad</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>011</dependencies>
+    <blocks>032, 033</blocks>
+    <tags>react, typescript, frontend</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>New Vite SPA scaffold; foundation for Phase 3</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>Scaffold a Vite React 18 SPA at src/solutions/Notepad/ adapted from src/solutions/SmartTodo/. Include package.json, vite.config.ts, tsconfig.json, index.html, src/main.tsx, src/App.tsx. Use Fluent v9. This will be deployed as sprk_notepad_page webresource in task 039.</prompt>
+
+  <role>Spaarke platform developer. Vite + React 18 + Fluent v9 SPA experienced.</role>
+
+  <goal>Notepad Vite project scaffold builds cleanly via `npm run build`; App.tsx renders a placeholder that will be replaced by NotepadShell in task 037.</goal>
+
+  <context>
+    <background>Design §3.6 — Notepad is a standalone Vite React 18 SPA (ADR-022 SPA branch, can use React 18). Adapt from SmartTodo's structure.</background>
+    <relevant-files>
+      <file>src/solutions/Notepad/package.json</file>
+      <file>src/solutions/Notepad/vite.config.ts</file>
+      <file>src/solutions/Notepad/tsconfig.json</file>
+      <file>src/solutions/Notepad/index.html</file>
+      <file>src/solutions/Notepad/src/main.tsx</file>
+      <file>src/solutions/Notepad/src/App.tsx</file>
+      <file>src/solutions/SmartTodo/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-022">Code Page bundles React 18 — separate from PCF React 16/17 boundary.</constraint>
+    <constraint source="ADR-021">Fluent v9 semantic tokens; zero hex/rgb.</constraint>
+    <constraint source="spec">NFR-08: zero new NuGet/npm packages beyond baseline. Use only what SmartTodo already ships.</constraint>
+    <constraint source="project">Use `npm install --legacy-peer-deps --no-audit --no-fund` (root CLAUDE.md build note).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/record-header-and-notepad-r1/spec.md</file>
+      <file>projects/record-header-and-notepad-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-021-fluent-ui-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/patterns/webresource/full-page-custom-page.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <justification>
+    <existing>src/solutions/SmartTodo/ — Vite React 18 code-page reference (adapted).</existing>
+    <extension>No — Notepad is entity-agnostic; SmartTodo is domain-specific. New SPA required, but scaffolding is copied.</extension>
+    <cost-of-doing-nothing>Without Notepad SPA, spec FR-13 through FR-18 cannot be implemented.</cost-of-doing-nothing>
+  </justification>
+
+  <steps>
+    <step order="1">Copy src/solutions/SmartTodo/ package.json + vite.config.ts + tsconfig.json + index.html to src/solutions/Notepad/, updating name/description fields.</step>
+    <step order="2">Update package.json name to "sprk-notepad" (or Spaarke convention); ensure dependencies list matches SmartTodo's Fluent v9 + React 18 baseline (no extras).</step>
+    <step order="3">Create src/main.tsx wrapping App in FluentProvider theme={webLightTheme}.</step>
+    <step order="4">Create src/App.tsx as a placeholder returning &lt;div&gt;Notepad placeholder&lt;/div&gt; — will be replaced by NotepadShell in task 037.</step>
+    <step order="5">Run `npm install --legacy-peer-deps --no-audit --no-fund` in the new folder.</step>
+    <step order="6">Run `npm run build`; verify Vite produces dist/ output cleanly.</step>
+    <step order="7">Update TASK-INDEX.md: mark 030 ✅.</step>
+    <step order="8">Document deviations in notes/.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">install + build</tool>
+    <tool name="terminal">Shell</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">src/solutions/Notepad/package.json</output>
+    <output type="config">src/solutions/Notepad/vite.config.ts</output>
+    <output type="config">src/solutions/Notepad/tsconfig.json</output>
+    <output type="config">src/solutions/Notepad/index.html</output>
+    <output type="code">src/solutions/Notepad/src/main.tsx</output>
+    <output type="code">src/solutions/Notepad/src/App.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Vite build (npm run build) succeeds with 0 errors.</criterion>
+    <criterion testable="true">Rendered placeholder App.tsx displays "Notepad placeholder" via FluentProvider.</criterion>
+    <criterion testable="true">No new npm packages added beyond SmartTodo baseline.</criterion>
+  </acceptance-criteria>
+
+  <notes>Do NOT include @spaarke/auth as a dependency — spec NFR-05 forbids it. If SmartTodo's package.json includes it, remove it from Notepad's copy.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files first. Follow task-execute skill.</protocol>
+  </execution>
+</task>

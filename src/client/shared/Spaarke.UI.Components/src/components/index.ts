@@ -158,3 +158,12 @@ export * from './ViewToggle';
 
 // OrientationToggle - Horizontal ↔ vertical layout toggle icon button (R4 task 012 / F FR-28)
 export * from './OrientationToggle';
+
+// HeaderToolbar - Icon-slot toolbar for record-header composition
+// (record-header-and-notepad-r1 FR-01, task 002)
+export * from './HeaderToolbar';
+
+// RecordHeader - Card chrome (RecordHeaderShell), grid primitive (FieldGrid),
+// and four field renderers (TextField, LookupField, OptionSetField, TextareaField)
+// (record-header-and-notepad-r1 FR-02/03/04, tasks 003–008)
+export * from './RecordHeader';

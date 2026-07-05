@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="005" project="record-header-and-notepad-r1">
+  <metadata>
+    <title>Build TextField renderer (FR-04)</title>
+    <phase>1: Shared Library</phase>
+    <status>completed</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>004</dependencies>
+    <blocks>013, 022</blocks>
+    <tags>react, typescript, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>New shared component + unit tests</rigor-reason>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>Build TextField field renderer per FR-04 at src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/fields/TextField.tsx. Single-line label + value, ellipsis on overflow, optional required marker.</prompt>
+
+  <role>Spaarke platform developer. Fluent UI v9 expert.</role>
+
+  <goal>TextField.tsx + tests present in fields/; passes FR-04 TextField clause; zero hex/rgb.</goal>
+
+  <context>
+    <background>Design §3.3 — TextField is one of four field renderers colocated in fields/ for extension. Each takes label, value, span; TextField specifically shows a text value with ellipsis and optional required indicator.</background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/fields/TextField.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/fields/index.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/__tests__/fields.test.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Fluent v9 semantic tokens; zero hex/rgb.</constraint>
+    <constraint source="ADR-022">React 16/17 compat.</constraint>
+    <constraint source="spec">FR-04: label + value + span; single-line ellipsis overflow.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/record-header-and-notepad-r1/spec.md</file>
+      <file>projects/record-header-and-notepad-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-021-fluent-ui-design-system.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+    </files>
+  </knowledge>
+
+  <justification>
+    <existing>None specific. Ad-hoc `<Label>` + `<Text>` patterns in various PCFs.</existing>
+    <extension>No — no existing "label+value cell" component in the shared lib.</extension>
+    <cost-of-doing-nothing>Without TextField, every per-entity PCF re-implements the label+value+ellipsis pattern inline. §11 anti-pattern.</cost-of-doing-nothing>
+  </justification>
+
+  <steps>
+    <step order="1">Declare ITextFieldProps { label: string; value: string | number | null | undefined; span: 1 | 2 | 3; required?: boolean; } in fields/TextField.tsx.</step>
+    <step order="2">Implement TextField as an FC: label above (colorNeutralForeground2, caption1 typography) + value below (colorNeutralForeground1, body1). Apply grid-column: span {span} via style prop.</step>
+    <step order="3">If required===true, render a small "*" marker beside label using colorPaletteRedForeground1.</step>
+    <step order="4">Apply CSS overflow:hidden + text-overflow:ellipsis + white-space:nowrap to the value.</step>
+    <step order="5">Handle null/undefined value by rendering a hyphen "—".</step>
+    <step order="6">Export from fields/index.ts.</step>
+    <step order="7">Write test cases in __tests__/fields.test.tsx (append TextField section): renders label + value; ellipsis on long value; hyphen on null; required marker.</step>
+    <step order="8">Run tests.</step>
+    <step order="9">Update TASK-INDEX.md: mark 005 ✅.</step>
+    <step order="10">Document deviations in notes/.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + test</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/fields/TextField.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/fields/index.ts</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/__tests__/fields.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given value="Hello world with very long overflowing text", when rendered inside a narrow container, then text-overflow is ellipsis (verified via computed style).</criterion>
+    <criterion testable="true">Given value=null, when rendered, then a hyphen "—" is shown.</criterion>
+    <criterion testable="true">Given required=true, when rendered, then a "*" indicator is present near the label.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Render TextField in webLightTheme then webDarkTheme</step>
+      </steps>
+      <expected>Label color, value color, and required marker adapt via semantic tokens</expected>
+    </test>
+  </ui-tests>
+
+  <notes>Do NOT accept arbitrary React nodes for value — restrict to primitives. This keeps ellipsis behavior deterministic.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files first. Follow task-execute skill.</protocol>
+  </execution>
+</task>

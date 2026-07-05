@@ -1,0 +1,81 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="051" project="record-header-and-notepad-r1">
+  <metadata>
+    <title>Write full RECORD-HEADER-PCF-AUTHORING-GUIDE.md content</title>
+    <phase>4: Documentation</phase>
+    <status>completed</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>050</dependencies>
+    <blocks>052, 090</blocks>
+    <tags>documentation</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Documentation content — no code impact</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>Write the full body of docs/guides/RECORD-HEADER-PCF-AUTHORING-GUIDE.md: shared-lib primitives reference; per-entity PCF pattern (Matter → Project template); Notepad launch contract; ADR references; worked walkthrough of ProjectHeaderPcf (a hypothetical follow-on) showing how the ~80 LOC decomposes.</prompt>
+
+  <role>Spaarke docs author + platform developer.</role>
+
+  <goal>Complete authoring guide enabling a follow-on developer to ship a new per-entity PCF (e.g., ProjectHeaderPcf) in ~80 LOC without re-reading this spec.md.</goal>
+
+  <context>
+    <background>Spec §Success Criteria explicit outcome. Guide is the sustained value of this project across follow-on entity PCFs.</background>
+    <relevant-files>
+      <file>docs/guides/RECORD-HEADER-PCF-AUTHORING-GUIDE.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Guide MUST enable a developer to build ProjectHeaderPcf without re-reading spec.md.</constraint>
+    <constraint source="project">Cite ADRs: 006, 012, 021, 022, 024, 028, 038.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/record-header-and-notepad-r1/spec.md</file>
+      <file>projects/record-header-and-notepad-r1/CLAUDE.md</file>
+      <file>projects/record-header-and-notepad-r1/design.md</file>
+      <file>.claude/adr/ADR-006-prefer-pcf-over-webresources.md</file>
+      <file>.claude/adr/ADR-012-shared-component-library.md</file>
+      <file>.claude/adr/ADR-021-fluent-ui-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Fill in Purpose + Prerequisites (npm workspace, Fluent v9, PCF PAC CLI, target Dataverse environment).</step>
+    <step order="2">Shared Primitives Overview: brief description of each (HeaderToolbar, RecordHeaderShell, FieldGrid, field renderers, hooks).</step>
+    <step order="3">Per-Entity Thin PCF Pattern: manifest anatomy, PCF class shape, view composition — cite ADR-006/022.</step>
+    <step order="4">Worked Example — ProjectHeaderPcf (hypothetical): show manifest, view composition with sprk_project fields (e.g. sprk_projectnumber, sprk_projectname, sprk_manager as lookup, sprk_status, sprk_description). Highlight identical structure to MatterHeaderPcf.</step>
+    <step order="5">Notepad Launch Contract: URL param reference; example launch code; entity-agnostic invariant + FR-19 test scenario.</step>
+    <step order="6">Testing + Deploying: unit + integration test patterns; use /pcf-deploy + /code-page-deploy.</step>
+    <step order="7">Troubleshooting: common pitfalls (bundle size, hex leaks, missing exports).</step>
+    <step order="8">FAQ: 3-5 anticipated questions.</step>
+    <step order="9">Update TASK-INDEX.md: mark 051 ✅.</step>
+    <step order="10">Document deviations in notes/.</step>
+  </steps>
+
+  <tools><tool name="terminal">Shell</tool></tools>
+
+  <outputs>
+    <output type="docs">docs/guides/RECORD-HEADER-PCF-AUTHORING-GUIDE.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Guide length 800-2000 words (thorough but not encyclopedic).</criterion>
+    <criterion testable="true">ProjectHeaderPcf worked example uses the same manifest + PCF class + view pattern.</criterion>
+    <criterion testable="true">All 9 ADRs referenced at least once.</criterion>
+    <criterion testable="true">Notepad launch contract has a copy-pasteable URL example.</criterion>
+  </acceptance-criteria>
+
+  <notes>Do NOT re-derive the spec here; link back to spec.md for policy questions.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files first. Follow task-execute skill.</protocol>
+  </execution>
+</task>

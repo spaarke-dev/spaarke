@@ -11,6 +11,7 @@
 
 import * as React from "react";
 import {
+  Button,
   Checkbox,
   Text,
   Radio,
@@ -48,6 +49,11 @@ export interface SectionStepProps {
   slotCount: number;
   /** Toggle a section's selection state. */
   onToggle: (sectionId: string) => void;
+  /**
+   * R2 UAT §5.2 (2026-07-03): bulk-set the selection to the given IDs. Passed
+   * `new Set(all-ids)` for Select All, `new Set()` for Clear.
+   */
+  onSelectAll: (nextIds: Set<string>) => void;
   /** Record scope setting. */
   scope: WorkspaceScope;
   /** Called when scope changes. */
@@ -112,6 +118,23 @@ const useStyles = makeStyles({
     borderBottom: `1px solid ${tokens.colorNeutralStroke2}`,
     marginBottom: "4px",
   },
+  // R2 UAT §5.3 (2026-07-03): section items within a category render in a
+  // 2-column grid so the palette is more scannable. Categories still stack
+  // vertically (each category is its own row of the outer flex column).
+  categoryItems: {
+    display: "grid",
+    gridTemplateColumns: "1fr 1fr",
+    columnGap: tokens.spacingHorizontalM,
+    rowGap: "2px",
+  },
+  // R2 UAT §5.2 (2026-07-03): bulk-action bar above the category groups.
+  bulkActions: {
+    display: "flex",
+    flexDirection: "row",
+    justifyContent: "flex-end",
+    gap: tokens.spacingHorizontalS,
+    paddingBottom: "4px",
+  },
   sectionItem: {
     display: "flex",
     alignItems: "center",
@@ -153,26 +176,18 @@ const SectionCheckItem: React.FC<{
   onToggle: () => void;
 }> = ({ section, checked, onToggle }) => {
   const classes = useStyles();
-  const IconComponent = section.icon;
 
+  // R2 UAT §5.2 declutter (2026-07-03 round 2): removed the section icon +
+  // description. Operator feedback: "let's remove the Icons and the
+  // descriptions — clutters the UI". Just a checkbox + label per row.
   return (
     <div className={classes.sectionItem}>
       <Checkbox
         checked={checked}
         onChange={onToggle}
         aria-label={`${checked ? "Deselect" : "Select"} ${section.label}`}
+        label={section.label}
       />
-      <div className={classes.sectionIcon}>
-        <IconComponent />
-      </div>
-      <div className={classes.sectionText}>
-        <Text weight="semibold" size={300}>
-          {section.label}
-        </Text>
-        <Text size={200} style={{ color: tokens.colorNeutralForeground3 }}>
-          {section.description}
-        </Text>
-      </div>
     </div>
   );
 };
@@ -186,11 +201,20 @@ export const SectionStep: React.FC<SectionStepProps> = ({
   selectedIds,
   slotCount,
   onToggle,
+  onSelectAll,
   scope,
   onScopeChange,
 }) => {
   const classes = useStyles();
   const selectedCount = selectedIds.size;
+
+  const handleSelectAll = React.useCallback(() => {
+    onSelectAll(new Set(sections.map((s) => s.id)));
+  }, [sections, onSelectAll]);
+
+  const handleClearAll = React.useCallback(() => {
+    onSelectAll(new Set());
+  }, [onSelectAll]);
 
   // Group sections by category
   const grouped = React.useMemo(() => {
@@ -230,7 +254,17 @@ export const SectionStep: React.FC<SectionStepProps> = ({
         </RadioGroup>
       </div>
 
-      {/* Category groups */}
+      {/* Bulk actions — Select All / Clear All (R2 UAT §5.2) */}
+      <div className={classes.bulkActions}>
+        <Button size="small" appearance="secondary" onClick={handleSelectAll}>
+          Select all
+        </Button>
+        <Button size="small" appearance="secondary" onClick={handleClearAll}>
+          Clear
+        </Button>
+      </div>
+
+      {/* Category groups — 2-column grid per category (R2 UAT §5.3) */}
       {CATEGORY_ORDER.map((category) => {
         const items = grouped.get(category);
         if (!items || items.length === 0) return null;
@@ -245,14 +279,16 @@ export const SectionStep: React.FC<SectionStepProps> = ({
             >
               {CATEGORY_LABELS[category]}
             </Text>
-            {items.map((section) => (
-              <SectionCheckItem
-                key={section.id}
-                section={section}
-                checked={selectedIds.has(section.id)}
-                onToggle={() => onToggle(section.id)}
-              />
-            ))}
+            <div className={classes.categoryItems}>
+              {items.map((section) => (
+                <SectionCheckItem
+                  key={section.id}
+                  section={section}
+                  checked={selectedIds.has(section.id)}
+                  onToggle={() => onToggle(section.id)}
+                />
+              ))}
+            </div>
           </div>
         );
       })}

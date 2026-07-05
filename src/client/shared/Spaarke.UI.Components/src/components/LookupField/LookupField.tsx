@@ -45,6 +45,24 @@ export interface ILookupFieldProps {
   labelExtra?: React.ReactNode;
   /** Minimum characters before search fires. Default: 1. */
   minSearchLength?: number;
+  /**
+   * Optional chip icon rendered before the selected item's name. Matches
+   * OOB Dataverse lookup chip presentation (e.g., chain-link icon for
+   * cross-entity references). Ignored when no value is selected. Added
+   * v1.0.4 for record-header lookup parity with OOB form fields.
+   */
+  chipIcon?: React.ReactElement;
+  /**
+   * When `true`, focusing the empty input triggers a search with the current
+   * (possibly empty) term and opens the results dropdown so the user can
+   * browse values without having to guess. Consumers using this MUST have an
+   * `onSearch` implementation that returns a useful default set for an empty
+   * query (e.g., top 10 unfiltered records) and MUST pass `minSearchLength={0}`.
+   *
+   * Added v1.0.5 for record-header lookup parity with OOB Dataverse pickers,
+   * which show the option list immediately on focus (no keystroke required).
+   */
+  openOnFocus?: boolean;
 }
 
 // ---------------------------------------------------------------------------
@@ -141,6 +159,13 @@ const useStyles = makeStyles({
   selectedChipName: {
     color: tokens.colorBrandForeground2,
   },
+  chipIcon: {
+    display: 'inline-flex',
+    alignItems: 'center',
+    color: tokens.colorBrandForeground2,
+    // Ensure the icon size is fixed even when the parent flex layout shrinks.
+    flexShrink: 0,
+  },
 
   spinnerRow: {
     display: 'flex',
@@ -169,6 +194,8 @@ export const LookupField: React.FC<ILookupFieldProps> = ({
   onSearch,
   labelExtra,
   minSearchLength = 1,
+  chipIcon,
+  openOnFocus = false,
 }) => {
   const styles = useStyles();
 
@@ -275,10 +302,35 @@ export const LookupField: React.FC<ILookupFieldProps> = ({
   );
 
   const handleFocus = React.useCallback(() => {
-    if (results.length > 0 && !value) {
+    if (value) return;
+    if (results.length > 0) {
       setShowResults(true);
+      return;
     }
-  }, [results.length, value]);
+    // v1.0.5: when `openOnFocus` is enabled and no results are cached yet,
+    // trigger an immediate search with the current (possibly empty) term so
+    // the user can browse values without having to guess. Requires the
+    // consumer's `onSearch` to return a sensible default set for empty input
+    // (e.g. top N unfiltered rows). Failures are surfaced to the console —
+    // the empty-state message covers the UX so there's no thrown error.
+    if (openOnFocus) {
+      const query = searchTerm.trim();
+      setLoading(true);
+      onSearch(query)
+        .then(items => {
+          setResults(items);
+          setShowResults(items.length > 0);
+          setHighlightedIndex(-1);
+        })
+        .catch(err => {
+          // eslint-disable-next-line no-console
+          console.error('[LookupField] openOnFocus search error:', label, err);
+          setResults([]);
+          setShowResults(false);
+        })
+        .finally(() => setLoading(false));
+    }
+  }, [value, results.length, openOnFocus, searchTerm, onSearch, label]);
 
   // ── Render label ──────────────────────────────────────────────────────
   const renderLabel = (): React.ReactElement => (
@@ -300,6 +352,11 @@ export const LookupField: React.FC<ILookupFieldProps> = ({
       <Field label={renderLabel()} required={required}>
         {value ? (
           <div className={styles.selectedChip}>
+            {chipIcon ? (
+              <span className={styles.chipIcon} aria-hidden="true">
+                {chipIcon}
+              </span>
+            ) : null}
             <Text size={200} weight="semibold" className={styles.selectedChipName}>
               {value.name}
             </Text>

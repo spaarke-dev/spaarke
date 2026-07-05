@@ -251,7 +251,11 @@ export const Header: React.FC<HeaderProps> = ({
   title = 'Smart To Do',
   searchQuery: searchQueryProp,
   onSearchChange,
-  searchPlaceholder = 'Search…',
+  // DEF-11 Part 3 (2026-07-04): renamed default from "Search…" → "Filter…" —
+  // the input is a client-side substring filter across name / description /
+  // regarding-record name / regarding-record number, NOT a search index. The
+  // label now matches the behaviour so users don't expect fuzzy or ranked search.
+  searchPlaceholder = 'Filter…',
   onRefresh,
   onOpenWizard,
   onOpenSettings,

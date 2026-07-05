@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="004" project="record-header-and-notepad-r1">
+  <metadata>
+    <title>Build FieldGrid CSS-grid wrapper (FR-03)</title>
+    <phase>1: Shared Library</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>005, 006, 007, 008, 022</blocks>
+    <tags>react, typescript, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>New shared component + unit tests</rigor-reason>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>Build FieldGrid per FR-03 at src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/FieldGrid.tsx. CSS grid with columns=2|3 (default 3); accepts field renderer children with span 1..3; fields flow row-by-row; span=3 field starts a new row.</prompt>
+
+  <role>Spaarke platform developer. Expert in CSS Grid and React composition patterns.</role>
+
+  <goal>FieldGrid.tsx + tests present; passes FR-03 acceptance; zero hex/rgb; React 16/17 compatible.</goal>
+
+  <context>
+    <background>Design §3.3 — CSS-grid layout with span-aware children. Each field cell reads its own span prop via a shared style hook. Enables per-entity PCFs to compose fields declaratively.</background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/FieldGrid.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/__tests__/FieldGrid.test.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Fluent v9 semantic tokens; grid gap uses spacingHorizontal/Vertical tokens.</constraint>
+    <constraint source="ADR-022">React 16/17 compat.</constraint>
+    <constraint source="spec">FR-03: columns 2 or 3, default 3; span-aware children; span=3 starts new row.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/record-header-and-notepad-r1/spec.md</file>
+      <file>projects/record-header-and-notepad-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-021-fluent-ui-design-system.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+    </files>
+  </knowledge>
+
+  <justification>
+    <existing>None. No current shared component surfaces span-aware CSS-grid layout.</existing>
+    <extension>N/A.</extension>
+    <cost-of-doing-nothing>Without FieldGrid, each per-entity PCF hand-rolls CSS grid + inline styles for its 5-field header — three copies of layout code the first time, N over time.</cost-of-doing-nothing>
+  </justification>
+
+  <steps>
+    <step order="1">Declare IFieldGridProps { columns?: 2 | 3; children: React.ReactNode; } in FieldGrid.tsx (or reuse types.ts).</step>
+    <step order="2">Implement makeStyles with display:grid, grid-template-columns:repeat(N, 1fr), gap:spacingHorizontalM.</step>
+    <step order="3">Each field child (TextField/LookupField/OptionSetField/TextareaField) accepts span 1..3 via prop; wrap child in a div with grid-column: span {span} (via a shared useFieldStyles hook OR passed style prop).</step>
+    <step order="4">Verify a span=3 field breaks to a new row (CSS grid natural behavior; no explicit flex logic needed).</step>
+    <step order="5">Write __tests__/FieldGrid.test.tsx: default columns=3; columns=2 respected; children rendered in correct grid-column count.</step>
+    <step order="6">Run tests.</step>
+    <step order="7">Update TASK-INDEX.md: mark 004 ✅.</step>
+    <step order="8">Document any deviations in notes/.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + test</tool>
+    <tool name="terminal">Shell</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/FieldGrid.tsx</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/__tests__/FieldGrid.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given columns=3, when rendered with 5 field children of span 1/2/1/1/3, then layout has row1=[1,2], row2=[1,1,-], row3=[3].</criterion>
+    <criterion testable="true">Given columns=2, when rendered, then grid-template-columns is "repeat(2, 1fr)".</criterion>
+    <criterion testable="true">All tests pass; no hex/rgb.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Render FieldGrid with mixed field children in webLightTheme, then webDarkTheme</step>
+      </steps>
+      <expected>Gap, background, and any explicit color tokens adapt correctly</expected>
+    </test>
+  </ui-tests>
+
+  <notes>Do NOT couple FieldGrid to specific field renderer components — it accepts any React.ReactNode. Grid gap uses spacingHorizontalM (row gap) + spacingVerticalS (col gap) or equivalent.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files first. Follow task-execute skill.</protocol>
+  </execution>
+</task>

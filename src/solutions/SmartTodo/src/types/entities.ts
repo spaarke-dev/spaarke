@@ -99,6 +99,10 @@ export interface IEvent {
   sprk_effortreason?: string;
   sprk_regardingrecordid?: string;   // Text field: GUID of associated matter/project
   sprk_regardingrecordname?: string; // Text field: display name of associated matter/project
+  // DEF-11 Part 3 (2026-07-04) — resolver record-number text (populated by the
+  // sibling set-regarding-and-field-mapping-resolver-r1 project). Optional
+  // because older todos created before that project shipped won't have it.
+  sprk_regardingrecordnumber?: string;
   /** Display name from sprk_regardingrecordtype lookup (populated via formatted value mapping). */
   regardingRecordTypeName?: string;
   /** Display name from sprk_assignedto contact lookup (populated via formatted value mapping). */

@@ -1,0 +1,89 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="record-header-and-notepad-r1">
+  <metadata>
+    <title>Build useRelatedCount hook (FR-06)</title>
+    <phase>1: Shared Library</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>012, 013, 022</blocks>
+    <tags>react, typescript, dataverse</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>New shared hook with Xrm.WebApi $count integration + unit tests</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Depends on 001 (schema verification for sprk_regardingrecordid filter shape)</parallel-reason>
+  </metadata>
+
+  <prompt>Build useRelatedCount hook per FR-06 (REVISED post task 001) at src/client/shared/Spaarke.UI.Components/src/hooks/useRelatedCount.ts. Signature: useRelatedCount(relatedEntity: string, filter: string). Returns { count, loading, error }. Calls Xrm.WebApi.retrieveMultipleRecords with `?$filter=${filter}&amp;$count=true&amp;$top=0`. Filter is caller-provided (hook is filter-agnostic). For sprk_memo: caller builds entity-specific-lookup filter per ADR-024 dual-field pattern (e.g. `_sprk_regardingmatter_value eq {guid}` for Matter); for sprk_todo: standard `_regardingobjectid_value eq {guid}`. **See notes/design-alignment-corrections.md for the schema truth uncovered by task 001.**</prompt>
+
+  <role>Spaarke platform developer. Expert in Xrm.WebApi OData patterns.</role>
+
+  <goal>useRelatedCount.ts + tests present; produces correct $filter+$count query per entity; refreshes on window-focus.</goal>
+
+  <context>
+    <background>Design §3.3 — the badge-count primitive. Two consumers in v1: memo count (sprk_memo, filter sprk_regardingrecordid) and todo count (sprk_todo, filter _regardingobjectid_value). Refresh on mount + window-focus per FR-11.</background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/hooks/useRelatedCount.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/hooks/__tests__/useRelatedCount.test.ts</file>
+      <file>projects/record-header-and-notepad-r1/notes/sprk-memo-schema.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-028">Xrm.WebApi only; no BFF.</constraint>
+    <constraint source="ADR-024">sprk_memo uses text field sprk_regardingrecordid (Path A exception).</constraint>
+    <constraint source="spec">FR-06: $count=true&amp;$top=0 query per related entity.</constraint>
+    <constraint source="spec">FR-11: refresh on mount + window-focus, no polling.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/record-header-and-notepad-r1/spec.md</file>
+      <file>projects/record-header-and-notepad-r1/CLAUDE.md</file>
+      <file>projects/record-header-and-notepad-r1/notes/sprk-memo-schema.md</file>
+      <file>projects/record-header-and-notepad-r1/notes/design-alignment-corrections.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/patterns/pcf/dataverse-queries.md</file>
+    </files>
+  </knowledge>
+
+  <justification>
+    <existing>Ad-hoc retrieveMultipleRecords calls in widget components; no shared hook.</existing>
+    <extension>No — no single hook shape for count queries.</extension>
+    <cost-of-doing-nothing>Both memo-count and todo-count consumers would each write the same query + focus-listener + loading state. §11 anti-pattern.</cost-of-doing-nothing>
+  </justification>
+
+  <steps>
+    <step order="1">Design signature: useRelatedCount(relatedEntity, filter). filter is a string expression like "sprk_regardingrecordid eq 'guid'" — consumer builds the correct shape per entity.</step>
+    <step order="2">Implement using Xrm.WebApi.retrieveMultipleRecords(relatedEntity, `?$filter=${filter}&amp;$count=true&amp;$top=0`); read result.@odata.count.</step>
+    <step order="3">Register window.addEventListener("focus", refetch) with cleanup on unmount.</step>
+    <step order="4">Return { count, loading, error }.</step>
+    <step order="5">Handle Xrm undefined: count=0, loading=false, error=Error("Xrm not available").</step>
+    <step order="6">Write tests: correct URL for sprk_memo (with sprk_regardingrecordid filter); correct URL for sprk_todo (with _regardingobjectid_value filter); focus event triggers refetch; error path.</step>
+    <step order="7">Run tests.</step>
+    <step order="8">Update TASK-INDEX.md: mark 010 ✅.</step>
+    <step order="9">Document deviations in notes/.</step>
+  </steps>
+
+  <tools><tool name="npm">Build + test</tool></tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/hooks/useRelatedCount.ts</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/hooks/__tests__/useRelatedCount.test.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given relatedEntity="sprk_memo", filter="sprk_regardingrecordid eq 'guid123'", when hook runs, then URL contains that filter + $count=true + $top=0.</criterion>
+    <criterion testable="true">Given window focus event fires, when hook is mounted, then a new query is issued.</criterion>
+    <criterion testable="true">Given Xrm.WebApi rejects, when hook runs, then error state set; count=0.</criterion>
+  </acceptance-criteria>
+
+  <notes>Consumers (useRecordHeaderToolbarActions) construct the exact filter per entity. This hook is agnostic to the entity model. Do not add polling — spec FR-11 explicitly limits to mount + focus.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files first. Follow task-execute skill.</protocol>
+  </execution>
+</task>

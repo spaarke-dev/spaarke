@@ -1,0 +1,101 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="record-header-and-notepad-r1">
+  <metadata>
+    <title>Author MatterHeaderView.tsx composition (FR-12)</title>
+    <phase>2: MatterHeaderPcf</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>021</dependencies>
+    <blocks>023, 024, 025</blocks>
+    <tags>pcf, react, typescript, fluent-ui, frontend</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Entity-specific React composition + tight LOC ceiling</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>Author src/client/pcf/MatterHeader/control/MatterHeaderView.tsx implementing spec FR-12 (REVISED per task 001) — thin composition of shared primitives with 5 Matter fields (**`sprk_matternumber, sprk_mattername, sprk_mattertype, sprk_practicearea, sprk_matterdescription`** — corrected field names per Dataverse MCP verification) in a FieldGrid with span 1/2/1/1/3. **Also fetch `sprk_recordsummary`** (MULTILINE TEXT field on Matter) and pass to useRecordHeaderToolbarActions as options.recordSummary for the sparkle popover per FR-08. **See notes/design-alignment-corrections.md.**</prompt>
+
+  <role>Spaarke platform developer. Fluent UI v9 composition expert.</role>
+
+  <goal>MatterHeaderView.tsx present matching FR-12 sample code exactly; renders successfully in a harness; total file LOC ≤ 40.</goal>
+
+  <context>
+    <background>Design §3.5 exact composition code. Entity hard-coded to "sprk_matter". Consumes useRecordHeaderToolbarActions and useRecordFieldValues.</background>
+    <relevant-files>
+      <file>src/client/pcf/MatterHeader/control/MatterHeaderView.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Fluent v9 semantic tokens; zero hex/rgb.</constraint>
+    <constraint source="ADR-022">React 16/17 compat (no use, no useSyncExternalStore).</constraint>
+    <constraint source="spec">FR-12 sample composition MUST be followed.</constraint>
+    <constraint source="spec">NFR-02: PCF LOC ≤ 100 total; view ≤ 40.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/record-header-and-notepad-r1/spec.md</file>
+      <file>projects/record-header-and-notepad-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-012-shared-component-library.md</file>
+      <file>.claude/adr/ADR-021-fluent-ui-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+    </files>
+  </knowledge>
+
+  <justification>
+    <existing>None — the entity-specific composition IS the new content.</existing>
+    <extension>N/A.</extension>
+    <cost-of-doing-nothing>Without the view, MatterHeaderPcf's class shell has nothing to render.</cost-of-doing-nothing>
+  </justification>
+
+  <steps>
+    <step order="1">Import HeaderToolbar-based primitives from @spaarke/ui-components: RecordHeaderShell, FieldGrid, TextField, **RecordHeaderLookupField** (aliased due to name collision with top-level src/components/LookupField/ — see task 013 report; use `import { RecordHeaderLookupField as LookupField } from "@spaarke/ui-components"` OR import directly from the sub-path `@spaarke/ui-components/components/RecordHeader/fields` to get the un-aliased name), TextareaField, useRecordFieldValues, useRecordHeaderToolbarActions.</step>
+    <step order="2">Define IMatterHeaderViewProps { recordId: string; }.</step>
+    <step order="3">Compose MatterHeaderView per FR-12 code sample — entity="sprk_matter" hard-coded; useRecordFieldValues with 5 fields; render RecordHeaderShell{toolbar, loading} wrapping FieldGrid{columns:3} with 5 field children (spans 1/2/1/1/3).</step>
+    <step order="4">Verify LOC ≤ 40 (excluding imports).</step>
+    <step order="5">Add a minimal test at __tests__/MatterHeaderView.test.tsx mocking Xrm.WebApi and verifying 5 fields + 3 toolbar slots rendered.</step>
+    <step order="6">Run tests.</step>
+    <step order="7">Update TASK-INDEX.md: mark 022 ✅.</step>
+    <step order="8">Document deviations in notes/.</step>
+  </steps>
+
+  <tools><tool name="npm">Build + test</tool></tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/MatterHeader/control/MatterHeaderView.tsx</output>
+    <output type="test">src/client/pcf/MatterHeader/__tests__/MatterHeaderView.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">MatterHeaderView.tsx composes exactly the FR-12 field payload with 5 field renderers and 3 toolbar slots.</criterion>
+    <criterion testable="true">LOC ≤ 40 excluding imports.</criterion>
+    <criterion testable="true">Test verifies mocked Xrm.WebApi payload renders correctly.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Component Renders (Matter Form)">
+      <steps>
+        <step>Add MatterHeaderPcf to a Matter form header section in a dev environment</step>
+        <step>Open a Matter record; verify 5-field card + 3-icon toolbar render</step>
+        <step>Check browser console for errors</step>
+      </steps>
+      <expected>Card renders without console errors; toolbar shows 3 icons</expected>
+    </test>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Toggle dark mode; verify card + toolbar + fields adapt without hex leaks</step>
+      </steps>
+      <expected>All colors via semantic tokens</expected>
+    </test>
+  </ui-tests>
+
+  <notes>Do NOT duplicate toolbar wiring — must call useRecordHeaderToolbarActions. Do NOT hardcode modal sizes — the hook handles that.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files first. Follow task-execute skill.</protocol>
+  </execution>
+</task>

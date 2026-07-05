@@ -24,6 +24,9 @@ import { ITodo } from '../types/entities';
 import { useFeedTodoSync } from './useFeedTodoSync';
 import { computeTodoScore } from '../utils/todoScoreUtils';
 import type { IWebApi } from '../types/xrm';
+// DEF-11 Part 2 (2026-07-04, record-header-and-notepad-r1): openTodos launch
+// filter (R4 FR-34 consumer wiring).
+import type { ITodoRegardingFilter } from '../services/queryHelpers';
 
 // ---------------------------------------------------------------------------
 // Sort helper
@@ -72,6 +75,14 @@ export interface IUseTodoItemsOptions {
    * When provided, bypasses Xrm.WebApi.
    */
   mockItems?: ITodo[];
+  /**
+   * Optional parent-record filter (R4 FR-34 openTodos launch). When set,
+   * the fetched list is scoped to `_sprk_regarding<X>_value eq <guid>` in
+   * addition to the standard ownership + active-status clauses.
+   * Set by `SmartToDo.tsx` from `useLaunchContext()` when action=openTodos.
+   * Added 2026-07-04 (record-header-and-notepad-r1 DEF-11 Part 2).
+   */
+  regardingFilter?: ITodoRegardingFilter;
 }
 
 export interface IUseTodoItemsResult {
@@ -90,7 +101,12 @@ export interface IUseTodoItemsResult {
 // ---------------------------------------------------------------------------
 
 export function useTodoItems(options: IUseTodoItemsOptions): IUseTodoItemsResult {
-  const { webApi, userId, mockItems } = options;
+  const { webApi, userId, mockItems, regardingFilter } = options;
+
+  // Destructure regardingFilter to primitive deps so useEffect stability isn't
+  // broken by parent components passing a new object identity per render.
+  const regardingFilterEntity = regardingFilter?.entityType ?? null;
+  const regardingFilterRecordId = regardingFilter?.recordId ?? null;
 
   const [items, setItems] = useState<ITodo[]>([]);
   const [isLoading, setIsLoading] = useState<boolean>(true);
@@ -140,8 +156,15 @@ export function useTodoItems(options: IUseTodoItemsOptions): IUseTodoItemsResult
     setIsLoading(true);
     setError(null);
 
+    // DEF-11 Part 2 — rebuild the filter here from primitive deps so a new
+    // object identity from the parent doesn't destabilise this effect.
+    const filterForFetch: ITodoRegardingFilter | undefined =
+      regardingFilterEntity && regardingFilterRecordId
+        ? { entityType: regardingFilterEntity, recordId: regardingFilterRecordId }
+        : undefined;
+
     serviceRef.current
-      .getActiveTodos(userId)
+      .getActiveTodos(userId, filterForFetch)
       .then((result) => {
         if (cancelled) return;
 
@@ -168,7 +191,7 @@ export function useTodoItems(options: IUseTodoItemsOptions): IUseTodoItemsResult
     return () => {
       cancelled = true;
     };
-  }, [userId, mockItems, fetchKey]);
+  }, [userId, mockItems, fetchKey, regardingFilterEntity, regardingFilterRecordId]);
 
   // -------------------------------------------------------------------------
   // FeedTodoSyncContext subscription — react to cross-block todo lifecycle

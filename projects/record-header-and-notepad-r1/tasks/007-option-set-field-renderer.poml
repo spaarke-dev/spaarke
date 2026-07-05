@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="007" project="record-header-and-notepad-r1">
+  <metadata>
+    <title>Build OptionSetField renderer (FR-04)</title>
+    <phase>1: Shared Library</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>004</dependencies>
+    <blocks>013, 022</blocks>
+    <tags>react, typescript, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>New shared component + unit tests</rigor-reason>
+    <parallel-group>B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>Build OptionSetField per FR-04 at src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/fields/OptionSetField.tsx. Renders label of selected option; hyphen for null.</prompt>
+
+  <role>Spaarke platform developer. Fluent UI v9 expert.</role>
+
+  <goal>OptionSetField.tsx + tests present; renders selected option label; hyphen on null.</goal>
+
+  <context>
+    <background>Design §3.3. Consumer supplies label of selected option (already resolved from OData FormattedValue). Component is a pure display renderer.</background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/fields/OptionSetField.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/__tests__/fields.test.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Fluent v9 semantic tokens; zero hex/rgb.</constraint>
+    <constraint source="ADR-022">React 16/17 compat.</constraint>
+    <constraint source="spec">FR-04: OptionSetField renders label of selected option, hyphen for null.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/record-header-and-notepad-r1/spec.md</file>
+      <file>projects/record-header-and-notepad-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-021-fluent-ui-design-system.md</file>
+    </files>
+  </knowledge>
+
+  <justification>
+    <existing>None specific.</existing>
+    <extension>N/A.</extension>
+    <cost-of-doing-nothing>Consistent pattern for header option-set display across future entity PCFs.</cost-of-doing-nothing>
+  </justification>
+
+  <steps>
+    <step order="1">Declare IOptionSetFieldProps { label: string; value: string | null | undefined; span: 1 | 2 | 3; }.</step>
+    <step order="2">Implement as FC with label + value styling matching TextField (visual parity).</step>
+    <step order="3">Handle null/undefined with hyphen.</step>
+    <step order="4">Export from fields/index.ts.</step>
+    <step order="5">Add tests: renders value; hyphen on null.</step>
+    <step order="6">Run tests.</step>
+    <step order="7">Update TASK-INDEX.md: mark 007 ✅.</step>
+    <step order="8">Document deviations in notes/.</step>
+  </steps>
+
+  <tools><tool name="npm">Build + test</tool></tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/fields/OptionSetField.tsx</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/RecordHeader/__tests__/fields.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given value="Open", when rendered, then value text = "Open".</criterion>
+    <criterion testable="true">Given value=null, when rendered, then hyphen "—".</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps><step>Render OptionSetField in webLightTheme then webDarkTheme</step></steps>
+      <expected>Label + value colors adapt via semantic tokens</expected>
+    </test>
+  </ui-tests>
+
+  <notes>Consumer resolves the label via OData FormattedValue annotation (@OData.Community.Display.V1.FormattedValue). This component takes the resolved label directly.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files first. Follow task-execute skill.</protocol>
+  </execution>
+</task>

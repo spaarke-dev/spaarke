@@ -1,0 +1,82 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="record-header-and-notepad-r1">
+  <metadata>
+    <title>Verify sprk_memo schema (regarding field, body field, system fields)</title>
+    <phase>1: Shared Library</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>010, 031, 033</blocks>
+    <tags>dataverse</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Schema discovery + written notes; no code files created but has explicit constraints (ADR-024 Path A exception in effect)</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>First blocker — output shapes queries in 010, 033</parallel-reason>
+  </metadata>
+
+  <prompt>Verify the sprk_memo entity schema in the target Dataverse environment so that FR-06 (useRelatedCount memo query) and FR-14/FR-15/FR-17 (Notepad CRUD) code can be shaped correctly. Confirm sprk_regardingrecordid is a text field storing GUID-only strings (owner clarification O1), verify sprk_body is Multiple Lines of Text with at least ~1MB capacity, and confirm createdby/createdon/modifiedon system fields are present.</prompt>
+
+  <role>Spaarke platform developer. Follow ADRs strictly. Expert in Dataverse metadata and Xrm.WebApi.</role>
+
+  <goal>Written schema verification report at projects/record-header-and-notepad-r1/notes/sprk-memo-schema.md documenting: sprk_regardingrecordid type + format (GUID-only string, per owner clarification O1), sprk_body type + max length, presence of system fields, any deviations from spec assumptions (assumptions §Assumptions of spec.md).</goal>
+
+  <context>
+    <background>Spec §Dependencies + Owner Clarifications O1 identify sprk_memo as pre-existing but the schema was verified only via owner statement, not empirical metadata read. Phase 1 downstream code (useRelatedCount, useSprkMemoRepository, MemoList queries) needs authoritative field names and types before implementation. Per spec §Assumptions, sprk_body max-size was assumed ~1MB; verify.</background>
+    <relevant-files>
+      <file>src/solutions/EventDetailSidePane/src/components/MemoSection.tsx</file>
+      <file>projects/record-header-and-notepad-r1/notes/sprk-memo-schema.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-024">sprk_memo does NOT participate in the 11-entity regarding pattern; uses text field sprk_regardingrecordid (Path A exception documented in spec ADR Tensions).</constraint>
+    <constraint source="spec">FR-06 memo count query uses filter sprk_regardingrecordid eq '{guid}'.</constraint>
+    <constraint source="spec">Owner clarification O1a: sprk_regardingrecordid stores GUID-only (no entity prefix).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/record-header-and-notepad-r1/spec.md</file>
+      <file>projects/record-header-and-notepad-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+      <file>src/solutions/EventDetailSidePane/src/components/MemoSection.tsx</file>
+    </files>
+    <patterns>
+      <pattern name="dataverse-queries" location=".claude/patterns/pcf/dataverse-queries.md">Xrm.WebApi retrieve/retrieveMultiple patterns.</pattern>
+    </patterns>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read src/solutions/EventDetailSidePane/src/components/MemoSection.tsx and extract every sprk_memo field name + operation (retrieve, create, update).</step>
+    <step order="2">Enumerate expected fields from spec.md §3.6 data model: sprk_memoid (PK), sprk_body (multiline text), sprk_regardingrecordid (text, GUID-only), createdby, createdon, modifiedon.</step>
+    <step order="3">Query the dev-environment metadata for entity sprk_memo via Xrm-console or the dataverse MCP describe tool to confirm: field types, max lengths (sprk_body), required flags.</step>
+    <step order="4">Compare MemoSection.tsx usage against metadata; flag any field it uses that isn't in the metadata (or vice versa).</step>
+    <step order="5">Draft notes/sprk-memo-schema.md with sections: Fields Confirmed, Fields Missing/Different, Impact on Downstream Tasks (010, 031, 033).</step>
+    <step order="6">If any material deviation is found (e.g. sprk_body is Single Line, or sprk_regardingrecordid isn't text), file an ISS-{NNN} via /project-defer-issue-tracking and update spec.md Assumptions section.</step>
+    <step order="7">Update tasks/TASK-INDEX.md: mark this task ✅ completed.</step>
+    <step order="8">If any deviations from plan, document in projects/record-header-and-notepad-r1/notes/.</step>
+  </steps>
+
+  <tools>
+    <tool name="terminal">Run shell + MCP commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/record-header-and-notepad-r1/notes/sprk-memo-schema.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">notes/sprk-memo-schema.md exists and documents every field used by MemoSection.tsx.</criterion>
+    <criterion testable="true">The sprk_regardingrecordid field is confirmed as text (String) type storing GUID-only strings, OR a deviation is filed as an issue.</criterion>
+    <criterion testable="true">sprk_body max-length is confirmed at ≥ 100 KB, OR a deviation is filed with impact on the debounce write pattern.</criterion>
+  </acceptance-criteria>
+
+  <notes>This is the first task and blocks Phase 1 (tasks 010, 012), Phase 3 (tasks 031, 033). If verification uncovers unexpected schema shape, invoke /adr-check + escalate via CLAUDE.md §6.5 §6 (ADR Conflict Resolution Protocol) before proceeding.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in knowledge/files. Follow task-execute skill.</protocol>
+  </execution>
+</task>

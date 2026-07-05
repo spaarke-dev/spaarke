@@ -1,0 +1,100 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="record-header-and-notepad-r1">
+  <metadata>
+    <title>Build useRecordHeaderToolbarActions hook (FR-07/08/08a/09/10/11)</title>
+    <phase>1: Shared Library</phase>
+    <status>completed</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>009, 010, 011, 002, 003</dependencies>
+    <blocks>013, 022</blocks>
+    <tags>react, typescript, fluent-ui, dataverse</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Core toolbar-actions hook with sparkle popover, refresh-icon deferral (FR-08a), and dual modal wiring</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Depends on 009, 010, 011 outputs</parallel-reason>
+  </metadata>
+
+  <prompt>Build useRecordHeaderToolbarActions hook at src/client/shared/Spaarke.UI.Components/src/hooks/useRecordHeaderToolbarActions.ts per FR-07/08/08a/09/10/11 (REVISED post task 001). Signature: useRecordHeaderToolbarActions({ entity, recordId, recordSummary }) — accepts recordSummary as an OPTIONAL string prop passed by the consumer (from useRecordFieldValues). Returns fully-formed IHeaderToolbarProps with 3 wired slots. **Sparkle** opens Fluent v9 popover showing the recordSummary string inline (or empty state if null/empty) + refresh icon rendered UNWIRED in R1 (tooltip: "Refresh available in a follow-on release"). NO separate Xrm.WebApi call for the summary — sprk_recordsummary is a MULTILINE TEXT field already fetched by the consumer per FR-12. **Checkmark** opens SmartTodo Layout 1 (85%x85%); badge from useRelatedCount('sprk_todo', `_regardingobjectid_value eq ${recordId}`). **Annotation** opens Notepad (70%x80%); badge from useRelatedCount('sprk_memo', entity-specific-lookup filter for the current entity per SUPPORTED_MEMO_PARENTS map from toolbarLaunchDefaults). If entity is NOT in SUPPORTED_MEMO_PARENTS, memo badge is 0 (Notepad will show an error on click). **See notes/design-alignment-corrections.md.**</prompt>
+
+  <role>Spaarke platform developer. React hooks + Fluent v9 Popover expert; Xrm.Navigation.navigateTo experienced.</role>
+
+  <goal>useRecordHeaderToolbarActions.ts + unit tests; three slots emitted with correct handlers; sparkle uses Popover (no navigateTo); refresh icon UNWIRED; enabled flags respected.</goal>
+
+  <context>
+    <background>Design §3.4 with spec FR-08 revised: sparkle click opens a Fluent v9 popover (not modal) with sprk_recordsummary body + refresh icon (unwired in R1 per FR-08a — deferred to a follow-on BFF project). This is the LINCHPIN hook that per-entity PCFs consume without re-implementing toolbar wiring.</background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/hooks/useRecordHeaderToolbarActions.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/hooks/__tests__/useRecordHeaderToolbarActions.test.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/hooks/toolbarLaunchDefaults.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/HeaderToolbar/types.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-07: IUseRecordHeaderToolbarActionsOptions { entity; recordId; enabled?: { sparkle?; checkmark?; annotation?; } }. Enabled defaults all true.</constraint>
+    <constraint source="spec">FR-08 REVISED: sparkle opens Fluent v9 popover with summary body (no navigateTo).</constraint>
+    <constraint source="spec">FR-08a NEW: refresh icon rendered but NOT wired in R1 — click is no-op with tooltip stating deferral.</constraint>
+    <constraint source="spec">FR-09: checkmark opens SmartTodo webresource at 85%x85%.</constraint>
+    <constraint source="spec">FR-10: annotation opens Notepad webresource at 70%x80%.</constraint>
+    <constraint source="spec">FR-11: badges refresh on mount + window-focus.</constraint>
+    <constraint source="spec">NFR-07: zero new BFF endpoints; refresh icon MUST stay unwired.</constraint>
+    <constraint source="ADR-028">Xrm.WebApi only; no BFF.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/record-header-and-notepad-r1/spec.md</file>
+      <file>projects/record-header-and-notepad-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-021-fluent-ui-design-system.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+      <file>.claude/patterns/pcf/dataverse-queries.md</file>
+      <file>.claude/patterns/ui/record-modal-selection.md</file>
+    </files>
+  </knowledge>
+
+  <justification>
+    <existing>None. Per-entity toolbar wiring does not exist as a shared hook.</existing>
+    <extension>N/A — this is the extraction point.</extension>
+    <cost-of-doing-nothing>Every per-entity PCF (MatterHeaderPcf now; ProjectHeaderPcf, InvoiceHeaderPcf next) would re-implement the same three-action wiring, then diverge over time. §11 anti-pattern.</cost-of-doing-nothing>
+  </justification>
+
+  <steps>
+    <step order="1">Declare IUseRecordHeaderToolbarActionsOptions { entity: string; recordId: string; recordSummary?: string | null; enabled?: {...}; } and return type IHeaderToolbarProps.</step>
+    <step order="2">Fetch memo count via useRelatedCount("sprk_memo", buildMemoFilter(entity, recordId)) where buildMemoFilter uses SUPPORTED_MEMO_PARENTS[entity] to construct `_${lookup-field}_value eq ${recordId}` (returns null if entity unsupported → memo badge 0). Fetch todo count via useRelatedCount("sprk_todo", `_regardingobjectid_value eq ${recordId}`).</step>
+    <step order="3">**Removed** per task 001 correction — sprk_recordsummary is NOT a separate entity; the consumer passes the value in via recordSummary prop from useRecordFieldValues.</step>
+    <step order="4">Build sparkle slot: onClick opens a Fluent v9 Popover anchored to the sparkle button (use useState for open/closed). Popover content: options.recordSummary body if non-empty; else empty-state "No summary yet"; refresh icon in popover header with tooltip="Refresh available in a follow-on release" and onClick=no-op.</step>
+    <step order="5">Build checkmark slot: onClick calls Xrm.Navigation.navigateTo({ pageType: "webresource", webresourceName: SMARTTODO_WEBRESOURCE_NAME, data: `regardingEntity=${entity}&amp;regardingId=${recordId}` }, LAYOUT_1_MODAL). Badge = todo count.</step>
+    <step order="6">Build annotation slot: onClick calls Xrm.Navigation.navigateTo({ pageType: "webresource", webresourceName: NOTEPAD_WEBRESOURCE_NAME, data: `regardingEntity=${entity}&amp;regardingId=${recordId}` }, NOTEPAD_MODAL). Badge = memo count.</step>
+    <step order="7">Return IHeaderToolbarProps with only enabled slots (respect enabled: {sparkle?, checkmark?, annotation?} — defaults all true).</step>
+    <step order="8">Write tests: 3 slots emitted by default; enabled={sparkle:false} removes sparkle slot; checkmark handler invokes navigateTo with Layout 1; annotation handler invokes navigateTo with 70x80; refresh click is no-op.</step>
+    <step order="9">Run tests.</step>
+    <step order="10">Update TASK-INDEX.md: mark 012 ✅.</step>
+    <step order="11">Document deviations in notes/.</step>
+  </steps>
+
+  <tools><tool name="npm">Build + test</tool></tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/hooks/useRecordHeaderToolbarActions.ts</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/hooks/__tests__/useRecordHeaderToolbarActions.test.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given default enabled, when hook runs, then IHeaderToolbarProps.iconSlots has 3 entries (sparkle, checkmark, annotation).</criterion>
+    <criterion testable="true">Given enabled.sparkle=false, when hook runs, then iconSlots has 2 entries; sparkle is not present.</criterion>
+    <criterion testable="true">When sparkle onClick fires, then a Popover state opens; no Xrm.Navigation call is made.</criterion>
+    <criterion testable="true">When checkmark onClick fires, then Xrm.Navigation.navigateTo is called with pageType="webresource", webresourceName=SMARTTODO_WEBRESOURCE_NAME, and LAYOUT_1_MODAL options.</criterion>
+    <criterion testable="true">When annotation onClick fires, then Xrm.Navigation.navigateTo is called with NOTEPAD_MODAL options.</criterion>
+    <criterion testable="true">Refresh icon click is a no-op in R1 (no navigateTo, no API call).</criterion>
+  </acceptance-criteria>
+
+  <notes>Sparkle popover UX (width, empty-state copy) is flagged as unresolved question U-03/U-04 in spec.md — pick sensible defaults ("maxWidth: 480px", empty-state: "No summary yet") and revisit in QA.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files first. Follow task-execute skill.</protocol>
+  </execution>
+</task>

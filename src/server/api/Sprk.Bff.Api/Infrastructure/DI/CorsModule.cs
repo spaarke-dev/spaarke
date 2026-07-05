@@ -109,6 +109,8 @@ public static class CorsModule
                           "Authorization",
                           "Content-Type",
                           "Accept",
+                          "If-Match",
+                          "If-None-Match",
                           "X-Requested-With",
                           "X-Correlation-Id",
                           "X-Idempotency-Key",
@@ -118,6 +120,7 @@ public static class CorsModule
                           "traceparent",
                           "tracestate")
                       .WithExposedHeaders(
+                          "ETag",
                           "request-id",
                           "client-request-id",
                           "traceparent",
