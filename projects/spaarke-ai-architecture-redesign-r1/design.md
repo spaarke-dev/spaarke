@@ -190,6 +190,19 @@ ADR-039/040 are Proposed with promotion gates inside this project's phases.
 | Scope creep back into mechanism-building | ADR-039 MUST NOTs + adr-check at Step 9.5; the spec's FRs derive from the migration map only |
 | Frozen-engine drift | ADR-039 + amended ADR-037; code review flags any new engine-bound capability |
 
+## 6.5 Execution tooling: `/goal` (evaluated 2026-07-05 — adopt at wave level)
+
+Claude Code's `/goal` (GA v2.1.154) sets a completion condition an independent
+evaluator checks per turn until met. **Adopted for this project at the
+wave/work-batch level only** — its evaluator judges observable evidence in the
+transcript, which matches the migration map's grep-verified acceptance style.
+It is **prohibited at phase-gate level**: G-P1..G-P4 are human UAT gates by
+design. Composition rules (goal conditions include shown evidence + scope bind
++ turn cap + "Step 9.5 gates passed"; conditions authored into wave
+definitions at task-create time) are in
+[`notes/goal-feature-evaluation.md`](notes/goal-feature-evaluation.md) and
+should land in this project's generated CLAUDE.md.
+
 ## 7. What /design-to-spec should produce
 
 - FRs grouped by phase P0-P4, each phase carrying its **G-gate UAT script as
