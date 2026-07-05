@@ -233,7 +233,7 @@ internal static partial class DataverseSqlQueryTranslator
             return "UNION is not supported (per the GA read_query dialect).";
         if (Has(sql, @"\bOFFSET\b"))
             return "OFFSET is not supported (per the GA read_query dialect). Use TOP.";
-        if (Has(sql, @"^\s*WITH\b") )
+        if (Has(sql, @"^\s*WITH\b"))
             return "WITH (CTEs) is not supported (per the GA read_query dialect).";
         if (Has(sql, @"\b(CAST|CONVERT)\s*\("))
             return "CAST/CONVERT are not supported (per the GA read_query dialect).";
