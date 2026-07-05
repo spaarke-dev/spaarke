@@ -1,7 +1,10 @@
 # ADR Review vs the Greenfield Approach
 
-> **Status**: DRAFT v1.0 — 2026-07-05, operator-requested ("some ADRs have
-> constrained or misdirected our development — review relative to greenfield").
+> **Status**: v1.1 — **APPROVED by operator 2026-07-05** (recommendations
+> A-1..A-5 accepted). A-2 (ADR-037 rescind) APPLIED same day — concise + full
+> ADR amended, INDEX updated. A-1 (ADR-013 amendment) and A-4/A-5 (new
+> ADR-039/040) queued alongside canonical doc v0.4. A-3 refreshes batched to
+> Step 3 doc tasks.
 > **Method**: every AI-relevant ADR read against GREENFIELD-CONCEPTUAL-DESIGN.md
 > v0.2 + the resolved decisions (OQ-2/OQ-4, Action+Binding, D7-D12 as amended).
 > Conducted under CLAUDE.md §6.5 (ADR Conflict Resolution Protocol) — every

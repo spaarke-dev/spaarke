@@ -9,6 +9,17 @@
 > for operator approval. Components selected for no slot land in one of two
 > buckets: **TL** (transitional legacy — keeps running, named retirement
 > trigger, NOT part of the target) or **DEL** (Track B delete).
+>
+> **TL clarified (operator, 2026-07-05)**: TL is NEVER a customer-continuity
+> hedge — existing-customer continuity is explicitly not a constraint. TL
+> exists for exactly two reasons: (a) **build sequencing** — the old path runs
+> only until its replacement ships, then hard-cutover (no parallel-run
+> periods, no dual-render shims kept "just in case" — e.g. the FieldDelta
+> dual-renderer deletes at cutover per the ADR-037 amendment); (b) **rebuild
+> cost** — the frozen Insights pipelines (shipped, working, system-authored)
+> are not re-migrated for its own sake (OQ-2). Migration sequencing in Step 3
+> uses big-bang cutovers per surface, consistent with R7's own no-transition-
+> mode rule.
 > **Verdicts**: ✅ fills as-is · 🔧 fills with trim/extension · 🆕 build fresh
 > (nothing fits) · TL · DEL.
 > **This document + the inventory's §9 register = the substance of Step 3's

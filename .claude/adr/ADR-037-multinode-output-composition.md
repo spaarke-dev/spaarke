@@ -1,8 +1,27 @@
 # ADR-037: Multi-Node Output Composition (Concise)
 
-> **Status**: Accepted
-> **Domain**: BFF AI / playbook execution + FE widget rendering
-> **Last Updated**: 2026-06-25
+> **Status**: Accepted (amended 2026-07-05)
+> **Domain**: BFF AI / composite output streaming + FE widget rendering
+> **Last Updated**: 2026-07-05
+>
+> **⚠️ Amendment 2026-07-05 (Path B per CLAUDE.md §6.5 — operator-approved, `spaarke-ai-code-audit-r1` ADR review A-2)**:
+> 1. **RESCINDED**: the Migration-Path rule *"any future workspace playbook
+>    authored after Phase 5R uses `DeliverComposite` by default."* Per the OQ-2
+>    resolution (canonical AI architecture doc §4.2.1, 2026-07-05) the playbook
+>    engine is a maintained-but-frozen representation — **no new capability
+>    lands on it**. New composite capabilities are authored as `coded`
+>    workflows (Wave-11 pattern) per the target design.
+> 2. **RE-SCOPED**: this ADR's binding content is the **section-name-keyed
+>    streaming contract** (`section_started` / `section_data` /
+>    `section_completed` keyed by section NAME) + the FE widget contract —
+>    binding for ANY composite executor, coded workflow or frozen engine node.
+>    The `NodeType.DeliverComposite` machinery itself is frozen with the engine.
+> 3. Backward-compat invariants (FieldDelta preservation for unmigrated
+>    playbooks, append-only ordinals) remain in force for the frozen
+>    representation; per the operator's 2026-07-05 no-continuity-concern
+>    direction, the FieldDelta dual-render path may be DELETED at migration
+>    cutover rather than maintained indefinitely.
+> Full rationale: `projects/spaarke-ai-code-audit-r1/ADR-REVIEW-VS-GREENFIELD.md` §2.2.
 > **Source project**: `chat-routing-redesign-r1` Wave 5-C (Phase 5R FR-52 through FR-55)
 > **Cross-references**: extends [ADR-033](ADR-033-streaming-chat-tool-side-channel.md) (preserves Path 3 streaming invariant); reinforces [ADR-013](ADR-013-ai-architecture.md) (playbook execution stays in `Services/Ai/`); reinforces [ADR-015](ADR-015-ai-data-governance.md) (section names are deterministic identifiers; content NOT logged separately from SSE payload); reinforces [ADR-021](ADR-021-fluent-design-system.md) (FE widget uses Fluent v9 semantic tokens).
 
