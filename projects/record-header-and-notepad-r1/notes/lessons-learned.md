@@ -115,7 +115,7 @@ The `useRecordHeaderToolbarActions` test asserted `pageInput.name === SMARTTODO_
 
 DEF-06 looked like a 4-8 hour clean-imports migration on `@spaarke/ui-components/package.json`. Turned into ecosystem-wide `pcf-scripts/tsconfig_base.json` `moduleResolution: "bundler"` bump because Webpack v5 (which reads `exports`) demands directory-index resolution that Node's legacy `moduleResolution: "node"` doesn't support. Every PCF in the repo would ripple.
 
-**Rule**: Anything touching `package.json` `exports` requires the ENTIRE build ecosystem (webpack, ts-jest, pcf-scripts, vite, rollup, ts-loader) to be on `moduleResolution: "bundler"` or `"node16"` FIRST. Filed as R2B project with explicit ecosystem-migration scope. Reversing quickly (same-day, before commit) prevented a broken checkpoint.
+**Rule**: Anything touching `package.json` `exports` requires the ENTIRE build ecosystem (webpack, ts-jest, pcf-scripts, vite, rollup, ts-loader) to be on `moduleResolution: "bundler"` or `"node16"` FIRST. Bundled into `record-header-and-notepad-r2` §6.1 alongside four new per-entity PCFs so the migration ripple is absorbed by one coordinated rebuild pass. Reversing R1's attempt quickly (same-day, before commit) prevented a broken checkpoint.
 
 ### 6. current-task.md as pre-compact insurance is invaluable
 
@@ -142,3 +142,20 @@ Before running `/compact` mid-Phase 6, we wrote a comprehensive `current-task.md
 
 *Original body written by Claude Code sub-agent + main session at project wrap-up 2026-07-03.*
 *Phase 6 addendum written by Claude Code 2026-07-04 (Opus 4.7) after user acceptance.*
+
+---
+
+## Where to look next (deferral tracking policy — added 2026-07-05 during wrap-up)
+
+Owner decision at R1 wrap-up: **do not file the six remaining DEFs as GitHub Issues.** Rot risk is real; issues that sit for months without a driving business need or an owner become noise. Track deferrals at the trigger instead — in-code pointers, R2 design doc, and pattern-doc callouts — where the future editor will actually see them.
+
+| DEF | Tracked in |
+|---|---|
+| **DEF-01** — sparkle refresh → BFF regen endpoint | Absorbed by the future **Insights Engine / AI Summary** project. No standalone R2 filing. |
+| **DEF-03** — VisualHost `CardChrome` migration to consume `HeaderToolbar` | In-code pointer in [`.claude/patterns/ui/record-header-composition.md`](../../../.claude/patterns/ui/record-header-composition.md) "Duplication pointers" section. Trigger: someone touching `CardChrome.tsx` for another reason. |
+| **DEF-04** — EventDetailSidePane `MemoSection` adoption of `useSprkMemoRepository` | Same patterns doc + JSDoc header of [`src/solutions/Notepad/src/hooks/useSprkMemoRepository.ts`](../../../src/solutions/Notepad/src/hooks/useSprkMemoRepository.ts). Trigger: someone touching `MemoSection.tsx`. |
+| **DEF-05** — Per-entity PCFs (Project, Invoice, Work Assignment, Event) | New project **`record-header-and-notepad-r2`** — starter design at [`../../record-header-and-notepad-r2/design.md`](../../record-header-and-notepad-r2/design.md). Business ask; not speculative. |
+| **DEF-06 reforward** — `exports` field + `moduleResolution: "bundler"` migration | Bundled into `record-header-and-notepad-r2` §6.1 alongside the four new PCFs. |
+| **DEF-08** — Promote `useSprkMemoRepository` to shared lib | Bundled into `record-header-and-notepad-r2` §6.2. Confirms during `/design-to-spec` whether any R2 PCF needs inline memo rendering. |
+
+Meta-lesson: **defer-tracking policy IS a design choice**. Some teams track everything; some track nothing; the right answer for R1's context is "track where the future editor will find it, not where it becomes noise." This is documented here so future project wrap-ups have a precedent to follow (or override with reason).

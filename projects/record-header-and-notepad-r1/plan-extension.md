@@ -54,15 +54,16 @@ Recommended sequence:
 
 ## What is NOT in Phase 6 (deferred to R2 + follow-ons)
 
-The remaining DEFs are structurally forbidden by R1 CLAUDE.md — not preference-driven:
+Deferral tracking policy per owner decision 2026-07-05: **do not clutter the GitHub issues list** with items that will either never be addressed or will be scoped naturally when demand arrives. Where a deferral has a real trigger, we track it AT the trigger — in-code, in a future project's design doc, or in a pattern doc — not in an issue tracker.
 
-| DEF | Constraint | Follow-on target |
+| DEF | Constraint | Tracked in |
 |---|---|---|
-| DEF-01 Sparkle refresh → BFF regen endpoint | R1 NFR-07 forbids BFF endpoints | `ai-record-summary-regeneration-r1` (BFF + AI service work) |
-| DEF-03 VisualHost CardChrome migration | R1 CLAUDE.md "MUST NOT modify VisualHost/**" | R2B `record-header-shared-consolidation-r2` |
-| DEF-04 EventDetailSidePane MemoSection adoption | R1 CLAUDE.md "MUST NOT modify EventDetailSidePane/**" | R2B `record-header-shared-consolidation-r2` |
-| DEF-05 Per-entity PCFs (Project, Invoice, Event) | R1 §Scope OS-02 — each is own ~80 LOC project | 3 independent follow-ons: `project-header-r1`, `invoice-header-r1`, `event-header-r1` |
-| DEF-08 Promote `useSprkMemoRepository` to shared lib | Blocked by DEF-04 (the adopter is out of R1) | R2B `record-header-shared-consolidation-r2` (after DEF-04) |
+| DEF-01 Sparkle refresh → BFF regen endpoint | R1 NFR-07 forbids BFF endpoints | Absorbed by the future **Insights Engine / AI Summary** project. No separate filing. |
+| DEF-03 VisualHost CardChrome migration | R1 CLAUDE.md "MUST NOT modify VisualHost/**" | In-code pointer in [`.claude/patterns/ui/record-header-composition.md`](../../.claude/patterns/ui/record-header-composition.md) "Duplication pointers" section. Trigger: when someone next touches `CardChrome.tsx` for any reason. R2B if that never happens organically. |
+| DEF-04 EventDetailSidePane MemoSection adoption | R1 CLAUDE.md "MUST NOT modify EventDetailSidePane/**" | In-code pointer in the same patterns doc + JSDoc header of [`src/solutions/Notepad/src/hooks/useSprkMemoRepository.ts`](../../src/solutions/Notepad/src/hooks/useSprkMemoRepository.ts) "Promotion trigger" section. Trigger: when someone next touches `MemoSection.tsx`. |
+| DEF-05 Per-entity PCFs (Project, Invoice, Work Assignment, Event) | R1 §Scope OS-02 — each is own ~80 LOC project | New project **`record-header-and-notepad-r2`** — starter design doc at [`../record-header-and-notepad-r2/design.md`](../record-header-and-notepad-r2/design.md) (seeded 2026-07-05 during R1 wrap-up). |
+| DEF-06 reforward `exports` field | R1 attempted + reverted (see log above) | Bundled into **`record-header-and-notepad-r2`** §6.1. Ships alongside the four new PCFs so the migration ripple is absorbed by the same set of PCF rebuilds. |
+| DEF-08 Promote `useSprkMemoRepository` to shared lib | Blocked by DEF-04 (adopter is out of R1) | Bundled into **`record-header-and-notepad-r2`** §6.2. Confirms during `/design-to-spec` whether any R2 PCF needs inline memo rendering; if yes, promote. |
 
 ---
 

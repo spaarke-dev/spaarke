@@ -40,9 +40,30 @@
  *     - Returns `error` state populated + safe defaults. No throws — a broken
  *       host must not crash React.
  *
+ * Promotion trigger (DEF-08 → tracked in R2)
+ * ──────────────────────────────────────────
+ * Move this hook (and `discoverMemoNavProps`) into
+ * `@spaarke/ui-components/hooks/` when a SECOND consumer emerges. Known
+ * candidates:
+ *
+ *   1. Any of the record-header-and-notepad-r2 per-entity PCFs that renders
+ *      inline memo content (see `projects/record-header-and-notepad-r2/design.md`
+ *      §6.2). If R2 doesn't need inline memo rendering, this trigger doesn't
+ *      fire from that project.
+ *   2. `src/solutions/EventDetailSidePane/**/MemoSection.tsx` — currently
+ *      duplicates similar CRUD logic. If someone touches EventDetailSidePane's
+ *      memo path for any reason, migrate it to this hook as part of the same
+ *      change; that IS the second-consumer trigger. R1 was blocked from
+ *      touching EventDetailSidePane by CLAUDE.md constraint.
+ *
+ * Do NOT promote pre-emptively — CLAUDE.md §11 "extend existing when a second
+ * consumer appears" means the promotion is EARNED by a real second consumer,
+ * not anticipated.
+ *
  * @see projects/record-header-and-notepad-r1/spec.md FR-14, FR-15, FR-17
  * @see projects/record-header-and-notepad-r1/notes/sprk-memo-schema.md
  * @see projects/record-header-and-notepad-r1/notes/design-alignment-corrections.md
+ * @see projects/record-header-and-notepad-r2/design.md §6.2 (DEF-08 promotion decision)
  * @see .claude/adr/ADR-024-polymorphic-resolver-pattern.md
  * @see src/client/shared/Spaarke.UI.Components/src/services/PolymorphicResolverService.ts
  */
