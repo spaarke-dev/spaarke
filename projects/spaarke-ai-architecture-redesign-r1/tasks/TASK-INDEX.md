@@ -40,10 +40,10 @@
 
 | # | Task | FR | Rigor | Deps | Status |
 |---|---|---|---|---|---|
-| 010 | OBO spike: mcp.tools → /api/mcp | FR-P0-08 | MINIMAL | — | 🔲 |
-| 011 | Golden-utterance eval-suite scaffold (~30 utterances) | FR-P0-09 | TEST-MODIFYING | — | 🔲 |
-| 012 | User-OBO audit of AI-reachable Dataverse flows | FR-P0-10 | STANDARD | 008, 009 | 🔲 |
-| 072 | Track-B batch 3: dead PCF dirs + R1 client registries | FR-TB-01 | STANDARD | — | 🔲 |
+| 010 | OBO spike: mcp.tools → /api/mcp (FAIL-with-path: consent grant missing, mechanics proven; native handlers stay runtime path) | FR-P0-08 | MINIMAL | — | ✅ |
+| 011 | Golden-utterance eval scaffold (34 cases/14 families, BA-editable JSON; live P0 asserts + routing smoke; CI via existing glob; gate activates at 026) | FR-P0-09 | TEST-MODIFYING | — | ✅ |
+| 012 | User-OBO audit (6 new handlers PASS; F-1 CRITICAL: legacy engine → app-only writes, 2 entry points — gate-014 decision required) | FR-P0-10 | STANDARD | 008, 009 | ✅ |
+| 072 | Track-B batch 3: R1 registries/provider/widgets/cross-pane deleted (20+ symbols grep-zero; SprkChatBridge KEPT — live in SprkChat) | FR-TB-01 | STANDARD | — | ✅ |
 
 ### Gate (serial — `/goal clear` first)
 

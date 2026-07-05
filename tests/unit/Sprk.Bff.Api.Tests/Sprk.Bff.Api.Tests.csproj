@@ -60,6 +60,18 @@
     <Compile Include="..\..\integration\contract\**\*.cs" LinkBase="ContractTests" />
   </ItemGroup>
 
+  <!-- Golden-utterance eval suite seed data (spaarke-ai-architecture-redesign-r1
+       task 011 / FR-P0-09). The harness (ContractTests\Eval\GoldenUtteranceEvalSuiteTests.cs,
+       compiled via the contract glob above) resolves the case file via
+       AppContext.BaseDirectory + "ContractTests/Eval/golden-utterances.json".
+       Cases are DATA — BAs extend the suite by editing the JSON only (NFR-06 / G-M);
+       same linked-content pattern as the Insights golden dataset below. -->
+  <ItemGroup>
+    <Content Include="..\..\integration\contract\Eval\**\*.json" Link="ContractTests\Eval\%(RecursiveDir)%(Filename)%(Extension)">
+      <CopyToOutputDirectory>PreserveNewest</CopyToOutputDirectory>
+    </Content>
+  </ItemGroup>
+
   <!--
     W8-060 (2026-06-29) — Regression KEEP-path inclusion per ADR-038 §2 path #2 (every
     load-bearing R1 acceptance scenario = regression test). The compose-summarize round-trip

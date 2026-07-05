@@ -11,7 +11,7 @@
  *
  * Key R1 → R2 migration changes:
  *   - Auth and session state consumed from useAiSession() (R2 AiSessionProvider)
- *     instead of useStandaloneAi() (R1 StandaloneAiProvider).
+ *     instead of the deleted R1 standalone provider hook.
  *   - SprkChat's onPaneEvent callback bridges to AiSessionProvider's
  *     streaming.onPaneEvent, which routes SSE events to the typed PaneEventBus.
  *     Multiple panes (WorkspacePane, ContextPaneController) subscribe independently.

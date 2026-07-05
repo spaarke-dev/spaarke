@@ -5,14 +5,14 @@
 
 ## Active Task
 
-- **Task**: Wave W-P0-B (parallel, staggered)
+- **Task**: Wave W-P0-C (parallel)
 - **Status**: in-progress (dispatched 2026-07-05)
-- **Rigor Level**: per-task (002/004/005/008/009 FULL · 071 STANDARD)
-- **Wave**: W-P0-B stage 1 = 002, 004, 008, 071 · stage 2 = 005 (after 004), 009 (after 008)
+- **Rigor Level**: per-task (010 MINIMAL spike · 011 TEST-MODIFYING · 012 STANDARD · 072 STANDARD)
+- **Wave**: W-P0-C = 010, 011, 012, 072
 
 ## Next Action
 
-Collect stage-1 results → dispatch 005/009 as deps clear → build + test verification → commit → dispatch W-P0-C (010, 011, 012, 072).
+Collect W-P0-C results → verify → commit → gate task 014 (serial: bff-deploy, G-P0 evidence, ADR-040 → Accepted, seed catalog to /healthz/catalog green).
 
 ## Steps Completed This Task
 

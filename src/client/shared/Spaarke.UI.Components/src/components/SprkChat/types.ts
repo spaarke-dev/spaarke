@@ -744,7 +744,7 @@ export interface ISprkChatProps {
    * Callback fired for AI pane-routing SSE events (output_pane / source_pane / source_highlight).
    *
    * When provided, SprkChat forwards pane-routing events from the BFF stream to this callback.
-   * OutputPanel and SourcePanel subscribe (via StandaloneAiContext) to receive events and render
+   * OutputPanel and SourcePanel subscribe (via the host AI session context) to receive events and render
    * the correct widget type with the event's payload.
    *
    * Uses the same synchronous callback ref pattern as onDocumentStreamEvent — events are
@@ -1625,7 +1625,7 @@ export interface IUseSseStreamResult {
    * Invoked from the fetch loop whenever an event whose top-level `event` field
    * is "output_pane", "source_pane", or "source_highlight" is received from the BFF.
    *
-   * OutputPanel and SourcePanel subscribe via StandaloneAiContext to receive these
+   * OutputPanel and SourcePanel subscribe via the host AI session context to receive these
    * events and render the appropriate widget type with the event's payload.
    * Pass null to unregister.
    */

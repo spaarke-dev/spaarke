@@ -992,7 +992,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   //
   // Forwards output_pane / source_pane / source_highlight events from the BFF
   // stream to the onPaneEventProp callback provided by ChatPanel.tsx.
-  // ChatPanel receives it from StandaloneAiContext so OutputPanel and SourcePanel
+  // ChatPanel receives it from the host AI session context so OutputPanel and SourcePanel
   // can subscribe and render the correct widget type from the SSE payload.
   //
   // Uses the same synchronous callback ref pattern as the document stream handler
@@ -2272,7 +2272,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
     [switchContext, documentId, hostContext, onPlaybookChange]
   );
 
-  // ── FR-08 (task 025): SprkChatExportWord handlers removed ────────────────
+  // ── FR-08 (task 025): Word-export handlers removed ───────────────────────
   // The "Open in Word" affordance was removed from the input toolbar per FR-08.
   // No other code paths consumed handleExportWordError / handleExportWordSuccess.
 
@@ -2512,9 +2512,10 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
              button hidden via `hideSlashButton`; the strip-mounted button
              above triggers the slash menu via the imperative handle).
 
-        The previous "Open in Word" SprkChatExportWord button has been removed
-        entirely (FR-08). Consumer survey 2026-05-20: no external consumer of
-        SprkChatExportWord found; barrel export removed from index.ts.
+        The previous "Open in Word" export button has been removed entirely
+        (FR-08). Consumer survey 2026-05-20 found no external consumer; the
+        component file itself was deleted in Track-B batch 3
+        (ai-architecture-redesign-r1).
 
         FR-06: Input remains editable on cold load (handleSend guards `!session`).
       */}

@@ -633,7 +633,7 @@ export function ThreePaneShell(props: ThreePaneShellProps): React.JSX.Element {
 
   // Build the entity context for AiSessionProvider from URL params.
   // R2: entityContext is resolved at the shell level and passed down via
-  // AiSessionProvider rather than being resolved inside StandaloneAiProvider.
+  // AiSessionProvider rather than inside the deleted R1 standalone provider.
   const entityContext = React.useMemo<EntityContext | null>(() => {
     if (!entityLogicalName || !entityId) return null;
     return {

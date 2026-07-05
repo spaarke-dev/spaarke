@@ -1,12 +1,12 @@
 /**
  * AiSessionProvider — React context provider for multi-pane AI sessions (R2)
  *
- * Replaces R1's StandaloneAiProvider / StandaloneAiContext with a design that
+ * Replaces the R1 standalone provider (deleted in Track-B batch 3) with a design that
  * routes SSE pane events to the typed PaneEventBus instead of a single-subscriber
  * ref. Multiple panes (WorkspacePane, ContextPaneController, etc.) can subscribe
  * to their channel independently — every subscriber receives every event.
  *
- * Key differences from R1 StandaloneAiProvider:
+ * Key differences from the R1 standalone provider:
  *  - NO `subscribePaneEvents` / single-subscriber ref. Panes use usePaneEvent().
  *  - `onPaneEvent` callback routes SSE events to PaneEventBus channels:
  *      output_pane      → 'workspace' channel  (WorkspacePaneEvent widget_load/widget_update)
@@ -34,7 +34,7 @@
  *   </AiSessionProvider>
  * </PaneEventBusProvider>
  *
- * @see StandaloneAiContext.tsx in Spaarke.AI.Context — R1 provider being replaced
+ * (The replaced R1 provider in Spaarke.AI.Context was deleted in Track-B batch 3.)
  * @see PaneEventBus.ts — multi-subscriber typed bus
  * @see usePaneEvent — hook for pane components to subscribe to channels
  * @see useDispatchPaneEvent — hook used internally to route SSE events

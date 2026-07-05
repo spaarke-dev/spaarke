@@ -47,8 +47,7 @@ export type { ISprkChatUploadZoneProps, UploadedDocument } from './SprkChatUploa
 export { SprkChatDocumentStatus } from './SprkChatDocumentStatus';
 
 // Word export button removed (FR-08, task 025 — replaced by toolbar restructure).
-// `SprkChatExportWord` is no longer exported from `@spaarke/ui-components`.
-// The file remains in the tree as historical reference but is unreferenced.
+// The component file was deleted in Track-B batch 3 (ai-architecture-redesign-r1).
 
 // Hooks
 // Note: useSseStream is exported from src/hooks/useSseStream (canonical) via src/hooks/index.ts.

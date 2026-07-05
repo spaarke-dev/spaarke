@@ -339,7 +339,7 @@ async function bootstrap(): Promise<void> {
   //      a) Direct query params: ?entityType=sprk_matter&entityId=<guid>&matterId=<guid>
   //      b) Encoded data param: ?data=entityType%3Dsprk_matter%26entityId%3D<guid>
   //
-  //    useEntityResolver (inside StandaloneAiProvider) also resolves entity context
+  //    useEntityResolver (used by the deleted R1 standalone provider) also resolved entity context
   //    via Xrm frame-walk as a fallback, so URL params are supplementary hints.
   // -------------------------------------------------------------------------
   const searchParams = new URLSearchParams(window.location.search);

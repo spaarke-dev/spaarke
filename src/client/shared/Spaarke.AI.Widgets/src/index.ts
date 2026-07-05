@@ -551,12 +551,12 @@ export type {
 // Providers: AiSessionProvider (R2 session state + PaneEventBus routing)
 // ---------------------------------------------------------------------------
 
-// AiSessionProvider — replaces R1 StandaloneAiProvider; routes SSE events to PaneEventBus
+// AiSessionProvider — replaces the deleted R1 standalone provider; routes SSE events to PaneEventBus
 export { AiSessionProvider } from './providers/AiSessionProvider';
 export type { AiSessionContextValue, AiSessionProviderProps, AiContextMapping } from './providers/AiSessionProvider';
 export { AI_SESSION_CHAT_SESSION_KEY, AI_SESSION_PLAYBOOK_KEY } from './providers/AiSessionProvider';
 
-// useAiSession — consumer hook for AiSessionContext (replaces R1 useStandaloneAi)
+// useAiSession — consumer hook for AiSessionContext (replaces the deleted R1 standalone hook)
 export { useAiSession } from './providers/useAiSession';
 
 // ---------------------------------------------------------------------------

@@ -390,7 +390,7 @@ export function useSseStream(): IUseSseStreamResult {
   // Handles output_pane / source_pane / source_highlight events from the BFF stream.
   // Uses a ref (not state) for zero-serialization delivery — pane events may carry
   // large payloads (widget data) and must not trigger SprkChat re-renders.
-  // OutputPanel and SourcePanel subscribe via StandaloneAiContext to receive these.
+  // OutputPanel and SourcePanel subscribe via the host AI session context to receive these.
   const onPaneEventRef = useRef<((event: IAiPaneEvent) => void) | null>(null);
 
   // chat-routing-redesign-r1 task 117a/117b — callback ref for `playbook_options`
@@ -438,7 +438,7 @@ export function useSseStream(): IUseSseStreamResult {
   }, []);
 
   // Task 041: Register/unregister the AI pane-routing SSE event callback.
-  // ChatPanel.tsx wires this to the StandaloneAiContext onPaneEvent callback so
+  // ChatPanel.tsx wires this to the host AI session context onPaneEvent callback so
   // OutputPanel and SourcePanel can react to output_pane / source_pane / source_highlight events.
   const setOnPaneEvent = useCallback((handler: ((event: IAiPaneEvent) => void) | null) => {
     onPaneEventRef.current = handler;
