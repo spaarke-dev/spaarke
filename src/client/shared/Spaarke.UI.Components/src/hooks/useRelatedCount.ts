@@ -73,13 +73,35 @@ export interface UseRelatedCountResult {
 }
 
 /**
- * OData response shape for a `$count=true&$top=0` query. `@odata.count`
- * carries the total; `entities` is empty because `$top=0`.
+ * `Xrm.WebApi.retrieveMultipleRecords` response shape.
+ *
+ * IMPORTANT (2026-07-04 UAT root cause — v1.0.15 → v1.0.16 fix): the raw
+ * OData `@odata.count` annotation is NOT exposed by Xrm.WebApi. Every prior
+ * revision of this hook read `result['@odata.count']` on the assumption that
+ * `?$count=true` would surface it — it does at the wire level, but Xrm's
+ * client wrapper strips it and only returns `{ entities, nextLink }`. That is
+ * why v1.0.11 through v1.0.15 always showed count=0 for real records (with
+ * `todoError: null` / `memoError: null` — the request succeeded, we just
+ * read the wrong property). Tests mock a fake `@odata.count` field which
+ * silently masked the bug.
+ *
+ * Fix: count `entities.length` client-side. We cap at `$top=RELATED_COUNT_CAP`
+ * (100) so payload stays small; badges show any value 0..100 truthfully. For
+ * matter records with more than 100 related todos / memos the badge caps at
+ * 100 which is acceptable for a "at-a-glance" toolbar counter.
  */
-interface CountResponse {
-  '@odata.count'?: number;
+interface RetrieveMultipleResponse {
   entities: unknown[];
+  nextLink?: string;
 }
+
+/**
+ * Upper bound for badge counts. See {@link RetrieveMultipleResponse} — Xrm
+ * does not expose the true OData total, so we retrieve up to this many rows
+ * and count them client-side. Choose small enough to keep the payload light,
+ * large enough that the badge value is meaningful.
+ */
+const RELATED_COUNT_CAP = 100;
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Hook
@@ -172,16 +194,24 @@ export function useRelatedCount(relatedEntity: string, filter: string | null): U
     setLoading(true);
     setError(null);
 
-    // Dataverse Web API rejects $top=0 explicitly ("Invalid value for $top query option").
-    // Use $top=1 — smallest positive value; response payload is 1 record + @odata.count.
-    // We ignore .entities and read only @odata.count. Discovered 2026-07-03 during live QA.
-    const query = `?$filter=${currentFilter}&$count=true&$top=1`;
+    // v1.0.16 (2026-07-04 UAT root cause fix) — count entities client-side
+    // because Xrm.WebApi.retrieveMultipleRecords does NOT expose `@odata.count`
+    // (see RetrieveMultipleResponse comment above). We cap the query at
+    // $top=RELATED_COUNT_CAP so payload stays small for high-related-count
+    // records. Prior implementations queried `$count=true&$top=1` and read
+    // `result['@odata.count']` — always undefined → always 0. Tests masked
+    // the bug with a fake `@odata.count` field.
+    //
+    // `$select=<any_single_column>` minimises payload — we don't care about
+    // the row data, only the row COUNT. `createdon` is present on every
+    // Dataverse entity so it's a safe choice.
+    const query =
+      `?$select=createdon&$filter=${currentFilter}&$top=${RELATED_COUNT_CAP}`;
 
     xrm.WebApi.retrieveMultipleRecords(currentEntity, query).then(
-      (result: CountResponse) => {
+      (result: RetrieveMultipleResponse) => {
         if (!mountedRef.current || thisRun !== runIdRef.current) return;
-        const raw = result['@odata.count'];
-        const value = typeof raw === 'number' ? raw : 0;
+        const value = Array.isArray(result?.entities) ? result.entities.length : 0;
         setCount(value);
         setLoading(false);
       },

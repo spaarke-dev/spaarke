@@ -64,12 +64,21 @@ describe('useRelatedCount', () => {
     jest.clearAllMocks();
   });
 
-  it('builds correct $count=true&$top=1 URL for sprk_memo with entity-specific lookup filter', async () => {
+  // ─── v1.0.16 tests (2026-07-04) ──────────────────────────────────────────
+  // Previous tests mocked `@odata.count` on the response and asserted the
+  // hook read it. That was the ROOT CAUSE of the "no badges" UAT bug:
+  // Xrm.WebApi's retrieveMultipleRecords does NOT expose `@odata.count`,
+  // so the hook always saw undefined → count=0 in production. The tests
+  // silently masked the bug because their mocks fabricated the annotation.
+  // Rewritten below to mock the ACTUAL Xrm shape (`{entities: [...], nextLink?}`)
+  // and count entities.length.
+
+  const makeEntities = (n: number): Array<Record<string, string>> =>
+    Array.from({ length: n }, (_, i) => ({ createdon: `2026-01-0${(i % 9) + 1}T00:00:00Z` }));
+
+  it('builds correct $select+$filter URL with $top=100 for sprk_memo entity-specific lookup filter', async () => {
     installXrm();
-    mockRetrieveMultipleRecords.mockResolvedValue({
-      '@odata.count': 3,
-      entities: [],
-    });
+    mockRetrieveMultipleRecords.mockResolvedValue({ entities: makeEntities(3) });
 
     renderHook(() => useRelatedCount('sprk_memo', MEMO_FILTER_FOR_MATTER));
 
@@ -77,30 +86,27 @@ describe('useRelatedCount', () => {
 
     expect(mockRetrieveMultipleRecords).toHaveBeenCalledWith(
       'sprk_memo',
-      `?$filter=${MEMO_FILTER_FOR_MATTER}&$count=true&$top=1`
+      `?$select=createdon&$filter=${MEMO_FILTER_FOR_MATTER}&$top=100`
     );
   });
 
-  it('builds correct $count=true&$top=1 URL for sprk_todo with standard regarding filter', async () => {
+  it('builds correct $select+$filter URL with $top=100 for sprk_todo standard regarding filter', async () => {
     installXrm();
-    mockRetrieveMultipleRecords.mockResolvedValue({
-      '@odata.count': 7,
-      entities: [],
-    });
+    mockRetrieveMultipleRecords.mockResolvedValue({ entities: makeEntities(7) });
 
     renderHook(() => useRelatedCount('sprk_todo', TODO_FILTER));
 
     await waitFor(() => expect(mockRetrieveMultipleRecords).toHaveBeenCalledTimes(1));
 
-    expect(mockRetrieveMultipleRecords).toHaveBeenCalledWith('sprk_todo', `?$filter=${TODO_FILTER}&$count=true&$top=1`);
+    expect(mockRetrieveMultipleRecords).toHaveBeenCalledWith(
+      'sprk_todo',
+      `?$select=createdon&$filter=${TODO_FILTER}&$top=100`
+    );
   });
 
-  it('populates count from the @odata.count annotation on success', async () => {
+  it('populates count from entities.length on success (Xrm.WebApi does NOT expose @odata.count)', async () => {
     installXrm();
-    mockRetrieveMultipleRecords.mockResolvedValue({
-      '@odata.count': 42,
-      entities: [],
-    });
+    mockRetrieveMultipleRecords.mockResolvedValue({ entities: makeEntities(42) });
 
     const { result } = renderHook(() => useRelatedCount('sprk_memo', MEMO_FILTER_FOR_MATTER));
 
@@ -109,11 +115,11 @@ describe('useRelatedCount', () => {
     expect(result.current.error).toBeNull();
   });
 
-  it('coerces missing @odata.count to 0 (defensive default)', async () => {
+  it('coerces missing entities array to count=0 (defensive default)', async () => {
     installXrm();
-    // Response without @odata.count — real Xrm always sends it when
-    // $count=true, but we defend against unusual host behavior.
-    mockRetrieveMultipleRecords.mockResolvedValue({ entities: [] });
+    // Response with no entities field — real Xrm always sends `entities`,
+    // but the hook defends against unusual host behavior.
+    mockRetrieveMultipleRecords.mockResolvedValue({});
 
     const { result } = renderHook(() => useRelatedCount('sprk_todo', TODO_FILTER));
 
@@ -163,7 +169,7 @@ describe('useRelatedCount', () => {
     // Same URL — focus refresh replays the current query.
     expect(mockRetrieveMultipleRecords).toHaveBeenLastCalledWith(
       'sprk_memo',
-      `?$filter=${MEMO_FILTER_FOR_MATTER}&$count=true&$top=1`
+      `?$select=createdon&$filter=${MEMO_FILTER_FOR_MATTER}&$top=100`
     );
   });
 
@@ -194,10 +200,7 @@ describe('useRelatedCount', () => {
 
   it('refetches when the filter string changes (e.g. parent record swap)', async () => {
     installXrm();
-    mockRetrieveMultipleRecords.mockResolvedValue({
-      '@odata.count': 1,
-      entities: [],
-    });
+    mockRetrieveMultipleRecords.mockResolvedValue({ entities: makeEntities(1) });
 
     const OTHER_MATTER_GUID = '22222222-2222-2222-2222-222222222222';
     const OTHER_FILTER = `_sprk_regardingmatter_value eq ${OTHER_MATTER_GUID}`;
@@ -209,7 +212,7 @@ describe('useRelatedCount', () => {
     await waitFor(() => expect(mockRetrieveMultipleRecords).toHaveBeenCalledTimes(1));
     expect(mockRetrieveMultipleRecords).toHaveBeenLastCalledWith(
       'sprk_memo',
-      `?$filter=${MEMO_FILTER_FOR_MATTER}&$count=true&$top=1`
+      `?$select=createdon&$filter=${MEMO_FILTER_FOR_MATTER}&$top=100`
     );
 
     rerender({ filter: OTHER_FILTER });
@@ -217,16 +220,13 @@ describe('useRelatedCount', () => {
     await waitFor(() => expect(mockRetrieveMultipleRecords).toHaveBeenCalledTimes(2));
     expect(mockRetrieveMultipleRecords).toHaveBeenLastCalledWith(
       'sprk_memo',
-      `?$filter=${OTHER_FILTER}&$count=true&$top=1`
+      `?$select=createdon&$filter=${OTHER_FILTER}&$top=100`
     );
   });
 
   it('transitions filter from a value to null → skips fetch and clears state', async () => {
     installXrm();
-    mockRetrieveMultipleRecords.mockResolvedValue({
-      '@odata.count': 4,
-      entities: [],
-    });
+    mockRetrieveMultipleRecords.mockResolvedValue({ entities: makeEntities(4) });
 
     const { result, rerender } = renderHook(
       ({ filter }: { filter: string | null }) => useRelatedCount('sprk_memo', filter),

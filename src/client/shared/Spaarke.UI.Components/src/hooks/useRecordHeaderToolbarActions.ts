@@ -234,33 +234,12 @@ export function useRecordHeaderToolbarActions(
   const todoFilter = buildTodoFilterForParent(entity, recordId);
   const memoFilter = buildMemoFilterForParent(entity, recordId);
 
-  const { count: todoCount, loading: todoLoading, error: todoError } = useRelatedCount('sprk_todo', todoFilter);
-  const { count: memoCount, loading: memoLoading, error: memoError } = useRelatedCount('sprk_memo', memoFilter);
-
-  // v1.0.15 UAT diagnostic (2026-07-04) — user reports no badges visible on
-  // Matter where Dataverse ground-truth shows 3 memos + 2 todos. Log the
-  // filter shapes + count states so we can distinguish:
-  //   • unsupported entity (filter null)              — memoFilter/todoFilter null
-  //   • Xrm.WebApi unavailable                        — error set, count 0
-  //   • query returned 0 (unexpected)                 — no error, count 0
-  //   • counts loaded correctly but badge not rendering (CSS/component issue)
-  // Diagnostic is intentionally chatty on mount; removed after root cause
-  // identified.
-  React.useEffect(() => {
-    // eslint-disable-next-line no-console
-    console.info('[RecordHeader] badge counts', {
-      entity,
-      recordId,
-      todoFilter,
-      memoFilter,
-      todoCount,
-      todoLoading,
-      todoError: todoError?.message ?? null,
-      memoCount,
-      memoLoading,
-      memoError: memoError?.message ?? null,
-    });
-  }, [entity, recordId, todoFilter, memoFilter, todoCount, todoLoading, todoError, memoCount, memoLoading, memoError]);
+  const { count: todoCount } = useRelatedCount('sprk_todo', todoFilter);
+  const { count: memoCount } = useRelatedCount('sprk_memo', memoFilter);
+  // Note: v1.0.15's diagnostic console.info was removed in v1.0.16 after
+  // the diagnostic surfaced the root cause — Xrm.WebApi does NOT expose
+  // `@odata.count`, so the prior "read @odata.count" approach always yielded
+  // 0. Fix moved to useRelatedCount (entities.length client-side count).
 
   // ── Handlers ───────────────────────────────────────────────────────────────
 
