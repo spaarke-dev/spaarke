@@ -36,9 +36,14 @@ widget layer. The 33-executor vocabulary + JPS + PlaybookBuilder is a real (if f
    orchestration engines, two chat-summarize execution paths, three historical cross-pane event
    mechanisms, three independently-implemented chat-hook sets, and two client summarize implementations.
 4. **A sizable dead-code register** (§9) — headlined by the ~14-file SpaarkeAi Insights renderer
-   cluster (never wired), the `DirectOpenAiAgent`/`ISprkAgent` cluster (registered in DI, never
+   cluster, the `DirectOpenAiAgent`/`ISprkAgent` cluster (registered in DI, never
    consumed, with a test maintaining it), 5 source-less/empty PCF directories, R1 registries and
    providers superseded by R2, and a matched trio of built-but-unmounted workspace affordances.
+   **Insights-cluster verdict verified 2026-07-05** against all five Insights/Action engine project
+   plans at operator request: the cluster is R5-origin (PR #345), superseded by R6's own Pillar 5
+   renderers, claimed by NO active project (widgets-r1 explicitly renders via its own
+   `InsightSummaryCard`) — genuinely dead, not staged. Full provenance:
+   [`notes/agent-findings-engine-projects.md`](notes/agent-findings-engine-projects.md).
 5. **The manifest documentation surface is largely stale** — the live R7 vocabulary is defined by just
    three current artifacts (`executorMetadata.ts`, the R7-refreshed guides, `sprk-playbookconsumer.md`);
    the 2026-02 ERD docs are actively misleading (show a column R7 dropped), the scope/model catalog is
@@ -295,7 +300,7 @@ assignment (lines 97-98).
 `source-registry` (AI.Outputs) · 4 unregistered AI.Outputs widgets (Chart, DataTable, Timeline,
 DocumentCompare) · `cross-pane/` · `SprkChatExportWord` · `SprkChatBridge`.
 
-**SpaarkeAi page**: **Insights renderer cluster (~14 files)** — never wired ·
+**SpaarkeAi page**: **Insights renderer cluster (~14 files)** — never wired; R5-origin (PR #345), superseded by R6 Pillar 5, claimed by no active project (verified — `notes/agent-findings-engine-projects.md`) ·
 `notificationContextLoader.ts` (self-declared dead) · Pillar-6b trio (`SendToWorkspaceButton`,
 `PinToMatterButton`, `AddToAssistantToggle`) built+tested, zero importers · `ChatHistoryPanel.tsx` ·
 vestigial refs in WorkspacePane/ConversationPane.

@@ -1,0 +1,31 @@
+---
+name: dataverse-mcp-refresh-2026-07-05
+description: July 2026 refresh of Dataverse MCP + Foundry MCP auth for the R7 D10 decision (native typed dataverse.* handlers vs first-party Dataverse MCP server). Crux = end-user-context auth.
+metadata:
+  type: project
+---
+
+# Dataverse MCP / Foundry MCP auth refresh — 2026-07-05
+
+**Question**: Refresh Dataverse MCP + Microsoft AI-platform capabilities as of July 2026 to settle R7 draft decision D10 — ship `dataverse.*` as native typed handlers over the existing Dataverse Web API layer (MCP-conformant contracts, defer real MCP transport) vs. have the BFF act as an MCP client to Microsoft's first-party Dataverse MCP server. Crux: every request must run under the END USER's Dataverse security context (AI must not be an authorization side-channel), headless server-side.
+
+## Key facts (with dates)
+
+- **Dataverse built-in MCP server is GA** at `https://<org>.crm.dynamics.com/api/mcp`; preview endpoint `/api/mcp_preview`. Learn `data-platform-mcp` ms.date **2026-06-05**.
+- **Current GA tool surface (changed since the 2026-05-14 knowledge snapshot)**: `search_data`, `search` (now searches *metadata*, not data), `create_record`, `update_record`, `delete_record`, `create_table`, `update_table`, `delete_table`, `read_query` (SQL SELECT), `describe` (replaces removed `describe_table`/`list_tables`/`fetch`), `upsert_skill`, `delete_skill`, `init_file_upload`, `commit_file_upload`, `file_download`. `search_data` only appears if Dataverse search is enabled.
+- **AUTH — the crux.** FAQ (ms.date 2026-06-05): "The Dataverse MCP server respects Dataverse security roles and row-level security. Users can only access tables and records that their security role permits." → the server runs under the CALLING USER's context natively. Remote-endpoint auth (`data-platform-mcp-other-clients`, ms.date 2026-06-05): register a **custom Entra app**, grant **Dynamics CRM → `mcp.tools`** (delegated) permission, add client ID to PPAC allow-list. "The authentication flow used by the Entra app depends on the MCP client." **No app-only/service-principal flow is documented for /api/mcp** — the documented model is delegated user tokens. Local-proxy path uses first-party Dataverse CLI app `0c412cc3-0dd6-449b-987f-05b053db9457` + tenant admin consent.
+- **Metering**: from **2025-12-15**, Dataverse MCP tools are CHARGEABLE when called by agents created outside Copilot Studio, UNLESS the user has D365 Premium or M365 Copilot USL. `search_data` billed at Tenant-graph-grounding rate; other tools at Text-and-generative-AI (basic) per-10-response Copilot-credit rate. Spaarke users likely lack those licenses → real per-call cost if BFF calls /api/mcp at runtime.
+- **Foundry Agent Service MCP tool = GA & first-class** (Python/C#/JS/Java/REST; Basic+Standard setups). Learn `model-context-protocol` ms.date 2026-04-23 / updated 2026-07-03. `.NET` Foundry SDK still preview. Bounded loop = Responses API with `require_approval` (always/never/per-tool) + `allowed_tools` allow-list + `mcp_approval_request`/`mcp_approval_response` items. Long-running (background mode) is preview, gpt-5.4/5.5 only, 100s sync timeout otherwise.
+- **Foundry OAuth identity passthrough** (`mcp-authentication`, ms.date 2026-04-09 / updated 2026-07-01) **preserves each user's identity & permissions** (user context persists = Yes). Other methods (key-based, Entra agent identity, project managed identity) are SHARED identity (no user context). Passthrough uses a **per-user, per-tool interactive consent link** (`oauth_consent_request`). Guardrail: "Cannot pass Microsoft token to untrusted MCP endpoint" — a Microsoft-audience token can't be forwarded to a custom/3rd-party MCP server; use custom OAuth with your own app registration.
+- **Two distinct Dataverse-as-MCP surfaces now**: (1) org-level `/api/mcp` (GA, delegated `Dynamics CRM/mcp.tools`); (2) **"Microsoft Dataverse MCP Server (Frontier)"** via the **Agent 365 Tools** app (`ea9ffc3e-8a23-4a7d-836d-234d7c7565c1`, scope `McpServers.Dataverse.All`) — **Frontier-tenant only**, consumed through Foundry OAuth passthrough.
+- **MCP C# SDK** (`ModelContextProtocol`, Microsoft-maintained, still pre-release/preview): `McpClientTool : AIFunction`, so MCP tools drop straight into `Microsoft.Extensions.AI` `IChatClient`/`ChatOptions` function-calling and into Agent Framework — no adapter. Streamable-HTTP `McpClient.CreateAsync(new HttpClientTransport(...))`.
+- **Azure OpenAI Responses API GA** (since 2025; Foundry Agent Service uses it by default since Nov 2025); structured outputs supported on GA v1 API. Assistants API decommissions 2026-08-26.
+
+## Implication / recommendation delivered
+
+Recommended **(c) hybrid, leaning to (b) for now**: keep D10's native typed `dataverse.*` handlers over the Dataverse Web API as the RUNTIME path (uniquely satisfies closed curated catalog + no Copilot-credit metering + proven BFF OBO-to-Dataverse end-user context), but (1) shape tool names/contracts to mirror the GA Dataverse MCP surface (`describe`, `read_query`, `create_record`, `update_record`, `search_data`) for a low-friction future swap, and (2) run a spike confirming OBO exchange for the delegated `Dynamics CRM/mcp.tools` scope from a confidential client works against `/api/mcp`. Do NOT move the bounded planner into Foundry yet — technically viable (MCP GA + approval gates + Responses API) but its end-user-context model (per-user interactive OAuth consent) is a worse fit for Spaarke's headless multi-tenant SaaS flow than BFF-side OBO, and it's a large architectural shift. **Driving constraint**: the first-party Dataverse MCP server is delegated-token / user-security-role based (NOT app-only), so end-user context is satisfied by OBO on whichever surface — making metering, catalog control, and swap cost the deciding factors, all favoring native handlers now.
+
+## Open questions
+- Not empirically confirmed that OBO to the `mcp.tools` delegated scope works from a confidential (BFF) client against `/api/mcp` — docs neither confirm nor deny; needs a spike.
+- Whether `mcp.tools` is ever offered as an Application (app-only) permission — not seen in docs as of 2026-07-05.
+- Prompt columns / "run prompt" tool the operator mentioned appear to live on the preview endpoint / as Dataverse skills (`upsert_skill`); not on the GA `/api/mcp` tool list.

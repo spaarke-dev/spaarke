@@ -62,6 +62,21 @@ Two auxiliary buckets for code that supports but isn't one of the five:
 - **NFR-4** Inventory must be reconcilable: every claim carries a file path so
   Step 3 dispositions can be verified by grep.
 
+## 4.5 Step 3 scope amendment (operator feedback, 2026-07-05)
+
+The migration map (Step 3) carries TWO tracks, not one:
+- **Track A — target alignment**: keep / extend / refactor-to-target / retire per component
+  against canonical doc §4-7.
+- **Track B — deadwood sweep**: explicit delete / keep-with-reason for EVERY dead-code
+  register entry, regardless of relevance to the target design. Dead technical debt is
+  in scope even when it is "not in the way". Stays require verification against an
+  active project's written plan (e.g. Insights Engine r2/r3, Action Engine r1), not
+  assumption.
+
+Additionally, Step 2/3 must honor the objectives of the umbrella in-flight projects:
+`ai-spaarke-action-engine-r1`, `ai-spaarke-insights-engine-r1/r2/r3`,
+`ai-spaarke-insights-engine-widgets-r1` (see `notes/agent-findings-engine-projects.md`).
+
 ## 5. Out of scope
 
 - §4-7 design content (Step 2, lives in the canonical doc).

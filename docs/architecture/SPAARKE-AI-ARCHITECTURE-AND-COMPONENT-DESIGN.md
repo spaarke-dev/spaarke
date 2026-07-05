@@ -1,13 +1,17 @@
 # Spaarke AI — Architecture and Component Design (Canonical)
 
-> **Status**: DRAFT **v0.3** — §4-7 now drafted (architecture overview,
-> component model, configuration model, intent+dispatch), designed against the
-> audited current state in
-> `projects/spaarke-ai-code-audit-r1/SPAARKE-AI-CODE-INVENTORY.md` rather than
-> greenfield. Six new decisions proposed for ratification (D7-D12, §7.10),
-> including one flagged deviation (D10: native typed handlers instead of
-> runtime Dataverse MCP). §8 (roadmap) deferred pending audit Step 3
-> (migration map). §0-3 unchanged from v0.2.6.
+> **Status**: DRAFT **v0.3.1** — §4-7 drafted against the audited current state
+> (`projects/spaarke-ai-code-audit-r1/SPAARKE-AI-CODE-INVENTORY.md`), then
+> revised per operator feedback 2026-07-05: §4.2.1 opens **OQ-2** (does the
+> node-graph engine survive the data-defined→code-defined pivot?), §5.9 gains
+> the two-track cleanup rule (deadwood sweep beyond design-implicated code),
+> **§5.10** records the Insights/Action engine umbrella commitments, and
+> **D10 is revised** from July-2026 Dataverse-MCP research (GA, delegated-only
+> auth, metered — native handlers with GA-MCP-mirrored contracts + OBO spike).
+> Companion clean-sheet reference:
+> `projects/spaarke-ai-code-audit-r1/GREENFIELD-CONCEPTUAL-DESIGN.md` (OQ-1..4
+> decision surface). §8 (roadmap) deferred pending audit Step 3.
+> §0-3 unchanged from v0.2.6.
 >
 > **Last updated**: 2026-07-05 (see §9 revision log for full history).
 >
@@ -2225,6 +2229,60 @@ Consequences:
   residual duties (multi-file text assembly, SSE shaping) move into
   `ConsumerExecutionService` + `SessionFileTextSource`.
 
+#### 4.2.1 OPEN QUESTION (OQ-2): does the node-graph engine survive at all? (operator challenge, 2026-07-05)
+
+The operator flagged a real inconsistency: **R7's strategic direction moved
+Spaarke from data-defined AI execution toward code-defined execution** —
+Wave 11 validated the code-defined narrator (~10× less runtime code, fewer bug
+classes); the operator ruled that "a config-table-with-rules IS an interpreter"
+(tunable config tables deferred); and Wave 12.3 moved chat-summarize itself OFF
+the engine onto the Linear path. Yet §4.2 above retains
+`PlaybookOrchestrationService` + the 33-executor vocabulary as a first-class
+execution shape. Is that consistent?
+
+**The honest evidence from the audit**:
+- The maker-authored-graph promise is barely exercised today: chat-summarize and
+  document-profile have LEFT the engine; `/narrate` defaults to the engine only
+  because the code-narrator flag defaults false; the flagship multinode playbook
+  is blocked-undeployed on a schema gap; the Insights pipelines run on the
+  engine but as **BFF-embedded code-tree JSON** — i.e. developer-authored, not
+  maker-authored.
+- What the engine genuinely provides that Linear does not: multi-node
+  composition, conditional branching, parallel fan-out, and the write-shape /
+  delivery executors — plus the Insights Engine's evidence-gated pipeline
+  (GroundingVerify, EvidenceSufficiency, DeclineToFind nodes) is BUILT on it.
+- **Counter-evidence from the Insights Engine review (2026-07-05)**: insights-
+  engine-r2's shipped doctrine is *"Insights IS a JPS application — no parallel
+  orchestrators; all workflows are JPS playbook data on the engine"*, and r2
+  explicitly RETIRED a code orchestrator (`IngestOrchestrator.cs`) in favor of
+  the `universal-ingest@v1` playbook. So the platform's two most recent lessons
+  point in OPPOSITE directions: Waves 11-12 (Daily Briefing) moved code-ward;
+  Insights r2 moved data-ward — and both shipped successfully. This suggests the
+  real boundary is not "data vs code" globally but per-workload: evidence-gated
+  retrieval pipelines benefited from data-defined nodes (SME-editable prompts
+  per node, uniform honesty gates); narrative composition benefited from code.
+  Option (c) below would force a re-migration of Insights; weigh that cost.
+
+**Candidate resolutions** (decision deferred to the greenfield comparison —
+`projects/spaarke-ai-code-audit-r1/GREENFIELD-CONCEPTUAL-DESIGN.md` §8 OQ-2 —
+and the Insights/Action engine objectives review):
+- **(a) Keep, scoped**: engine remains for genuinely multi-step orchestrations;
+  boundary test = "does this capability need runtime branching between LLM
+  steps?"; Linear is the default; maker canvas authoring stays.
+- **(b) Keep as system-only runtime**: engine survives for developer-authored
+  pipelines (Insights, composite delivery) but the maker-authored-graph promise
+  is dropped — PlaybookBuilder canvas de-scoped to Action/prompt authoring;
+  graphs become code-reviewed JSON in the repo.
+- **(c) Retire**: compound flows become `coded` workflows (C# classes, the
+  Wave 11 narrator pattern generalized) + L3 tool composition; the 33-executor
+  vocabulary dissolves into prompted-capabilities / primitive-tools /
+  coded-workflows / output-routing. Maximum consistency with the R7 lesson;
+  highest migration cost for Insights.
+
+The three-shapes model in §4.2 is written compatibly with (a) and (b); (c)
+would reduce it to two shapes + workflows. **Do not build new capability on
+the engine until OQ-2 is called.**
+
 ### 4.3 The session-state backbone
 
 Target schema is §3.10.5. Mapping to what exists:
@@ -2445,15 +2503,24 @@ extensions:
    gates on `side_effect_class` — replacing `CompoundIntentDetector`'s hardcoded
    `WriteBackToolNames` sets (which cannot stay: a name list is exactly the kind
    of shadow-catalog this design eliminates).
-2. **`dataverse.*` family (C-12)** — `describe`, `query`, `get`, `create`,
-   `update` implemented as **native typed handlers** over the existing
-   `IDataverseService`/Web API layer, with MCP-conformant naming and schemas.
-   ⚠️ **Deviation flag for review**: §3.10.7 said "via Dataverse MCP", but the
-   audit confirmed no runtime MCP surface exists in the repo. Wrapping our own
-   Dataverse layer as typed handlers delivers the same LLM-facing contract now,
-   reuses the tenant-security plumbing we already trust, and leaves adopting a
-   real MCP client as a later swap behind the same tool ids. (Path C-shaped
-   pivot: the *capability* ships; the *transport* is an implementation detail.)
+2. **`dataverse.*` family (C-12)** — implemented as **native typed handlers**
+   over the existing BFF-OBO Dataverse Web API layer, with contracts
+   **name-and-semantics aligned to the GA Dataverse MCP tool surface**
+   (`describe`, `read_query`, `search_data`, `create_record`, `update_record`,
+   `delete_record`) so selected tools can later swap to the first-party server
+   transport-only. This position was **re-validated against July-2026 platform
+   research** (operator challenge, 2026-07-05 — full brief:
+   `projects/spaarke-ai-code-audit-r1/notes/research-dataverse-mcp-2026-07.md`):
+   the first-party server IS GA and first-class, but (a) it authenticates via
+   **delegated user tokens only** (no app-only flow) — so end-user security
+   context is equally satisfied by our proven BFF OBO path; (b) calls from
+   agents built outside Copilot Studio are **Copilot-credit metered** for users
+   without D365 Premium / M365 Copilot USL — a recurring per-tool-call cost the
+   native path avoids; (c) the official MCP C# SDK's `McpClientTool : AIFunction`
+   drops straight into the `IChatClient` loop, making the later swap a
+   registration change, not a rewrite. **De-risking spike filed**: confirm a
+   confidential BFF client can OBO-exchange for the delegated
+   `Dynamics CRM/mcp.tools` scope against `/api/mcp`.
 
 The three **write shapes** (§3.9.1) map: `dataverse.create/update` (C-12),
 `email.draft` (wraps the existing Graph draft path / `SendEmailNodeExecutor`
@@ -2528,6 +2595,21 @@ LinearConsumers registration moves under the compound gate (inventory §10).
 
 ### 5.9 Overlap + dead-code resolution (inventory §8/§9 → target)
 
+**Scope rule (operator direction, 2026-07-05)**: cleanup is NOT limited to code
+implicated in this target design. Step 3's migration map carries **two tracks**:
+
+- **Track A — target alignment**: every inventoried component gets
+  keep / extend / refactor-to-target / retire, per this section and §7.8.
+- **Track B — deadwood sweep**: every entry in the inventory's dead-code
+  register (§9 there) gets an explicit delete / keep-with-reason disposition
+  **even when the component has no relationship to the target design** —
+  orphaned PCF build artifacts, superseded R1 registries/providers, stale seed
+  scripts, self-declared-dead loaders, unwired affordances, dead tests
+  maintaining dead code. "Not in the way" is not a reason to keep dead code.
+  The only stay-of-execution is a documented claim by an active project
+  (verified against that project's plan, not assumed — see the Insights
+  renderer cluster case in the inventory).
+
 | Inventory item | Resolution |
 |---|---|
 | O-1 two engines | `PlaybookExecutionEngine` retires into C-07 |
@@ -2547,6 +2629,44 @@ LinearConsumers registration moves under the compound gate (inventory §10).
 | O-20/O-21 client summarize + SSE parsers | one dispatch helper + canonical useSseStream |
 | O-22/O-23/O-24 card catalogs, pinned-list, dup search/exec clients | consolidate to shared lib exports (mechanical) |
 | Dead-code register §9 | deletes, sequenced in Step 3 migration map |
+
+### 5.10 Umbrella project commitments (Insights Engine + Action Engine)
+
+The target design must honor the shipped commitments of the umbrella projects
+(operator direction 2026-07-05; full synthesis:
+`projects/spaarke-ai-code-audit-r1/notes/agent-findings-engine-projects.md`):
+
+**Insights Engine (r1/r2/widgets-r1 — shipped, load-bearing)**:
+- The four-artifact `InsightArtifact` envelope (Fact / Observation / Precedent /
+  Inference) with its trust/store/decline rules; `IInsightsAi` as the single
+  Zone-A facade with the Zone-B namespace firewall; mandatory Observation review.
+- The honesty primitives (GroundingVerifier, EvidenceSufficiency, DeclineToFind,
+  Sanitizer, confidence gating) — these prefigure this doc's D5 grounded-
+  execution invariant and MUST survive any engine decision under OQ-2.
+- The locked Assistant tool-call contract v1.1 (`/api/insights/assistant/query`:
+  playbook-inference / RAG-answer / decline shapes + citations[].href + SSE) —
+  in target terms, Insights ask/search are cataloged Consumers (or pre-scoped L3
+  configurations) whose output contract is already frozen.
+- The widgets-r1 topic-registry pattern (`sprk_aitopicregistry` topic → playbook
+  → display config + TTL cache; `InsightSummaryCard`; envelope persisted to the
+  host record; form-load pre-warm) — an existing, shipped instance of
+  "Consumer with `work_product`-persisted disposition + record binding" that §6
+  must be able to express rather than replace.
+- r3's parked `InsightsIntentClassifier ↔ PlaybookDispatcher` reconciliation
+  debt resolves inside the C-03 dispatcher consolidation — do not fix it
+  separately.
+
+**Action Engine (r1 — Phase 0, zero code; plan predates this design)**:
+its planned vocabulary substantially duplicates this design — `sprk_toolregistry`
+vs the extended `sprk_analysistool` (§6.2), `IGateResolver`/`sprk_gate_approval`
+vs `ConfirmationGateService` (C-04/D12), meta-tools FindResources/InvokeResource
+vs the L3 planner over the Tool catalog, `sprk_action*` lifecycle entities vs
+the extended Consumer catalog (§6.1). **Recommendation**: re-base Action Engine
+R1's spec on this design before it starts — its Phase-0 spike becomes "validate
+this design covers the Action Engine FRs". Its genuinely novel contributions to
+absorb into §5-6: the gate taxonomy (5 gate types, timeout, resolver plurality
+— enriches C-04), the template/instance/run lifecycle model, scheduled action
+dispatch, and the resource-registry search concept.
 
 ---
 
@@ -2778,7 +2898,7 @@ maker's backlog signal for new Consumers.
 | **D7** | One dispatch service implementing L0-L4; ten-mechanism disposition per §7.8 | §5.3, §7 |
 | **D8** | `session.outputs` lives in the existing 3-tier ChatSession store (no new store); universal write; size-capped payloads with pointers | §5.2 |
 | **D9** | Consumer manifest = `sprk_playbookconsumer` EXTENDED (no new table); one catalog, two execution modes (`linear` action FK / `playbook` playbook FK) | §6.1 |
-| **D10** | `dataverse.*` tools ship as native typed handlers with MCP-conformant contracts; runtime MCP transport deferred (deviation from §3.10.7 "via MCP" — flagged) | §5.5 |
+| **D10 (revised 2026-07-05)** | `dataverse.*` tools ship as native typed handlers whose contracts mirror the **GA Dataverse MCP tool surface** (swap-ready); direct `/api/mcp` consumption stays open pending the OBO-for-`mcp.tools` spike. Grounds: delegated-only auth means user-context parity either way; Copilot-credit metering on non-Copilot-Studio agents; MCP C# SDK makes later swap registration-only. Bounded planner does NOT move to Foundry Agent Service (its user-context mechanism is interactive per-user OAuth consent — wrong fit for headless multi-tenant BFF). Research: `notes/research-dataverse-mcp-2026-07.md` | §5.5 |
 | **D11** | Two engines + one planner: `PlaybookOrchestrationService` (playbook), `ActionRunner` (linear), `L3PlannerService` (composition). `PlaybookExecutionEngine` and legacy analysis retire | §4.2, §5.4 |
 | **D12** | One pending-action store for all M4 confirmations (plan-preview, HITL confirm, must-click unify) | §5.3 |
 
@@ -2811,5 +2931,6 @@ earliest enablers.*
 | v0.2.3 | 2026-07-04 21:30 (approx) | Claude (with operator direction) | Added **§3.10.7 Dispatch beyond declared chips: NL fallback and off-catalog handling**. Resolves the operator's question "will we need to define all possible routes?". Formalizes: (1) destinations (Consumers) are enumerated in the catalog and closed; transitions (chip labels) are curated by the maker, not required to be exhaustive. (2) Three-layer dispatch model — Layer 1 chip click (deterministic), Layer 2 NL utterance classified against catalog with prior UC's next-steps + session-context bias, Layer 3 honest refusal via a per-tenant no-match-handler Consumer. (3) **Closed-catalog principle** (BINDING): the LLM operates over a closed set; never invents destinations; never free-form-answers when catalog match fails; UC-C-1/C-2 grounded chat Consumers refuse when cannot ground answer. (4) Maker authoring contract per Consumer (12-field declaration; maker does NOT enumerate incoming transitions or every NL utterance). (5) **D5 locked**: off-catalog resolves to honest refusal, no free-form LLM answers — legal-ops liability implication. (6) Scale expectations from single-stage (~30 Consumers) to multi-stage (300+). Section also worked scenarios A/B/C/D for step 10 of the walkthrough showing chip/NL/novel/compound behaviors. |
 | v0.2.4 | 2026-07-04 22:15 (approx) | Claude (with operator direction) | **Revised §3.10.7** — the v0.2.3 formulation was too strict and mismatched how Claude Code, CoCounsel, and Harvey actually work. Introduces **two-catalog model**: Consumer catalog (~30-100 curated capabilities with fixed prompts, outputs, dispositions) + **Tool catalog** (~15-25 typed primitives the LLM composes, powered largely by Dataverse MCP for CRUD). Dispatch model now **four layers**: L1 chip click (deterministic), L2 NL utterance → Consumer catalog match, **L3 (NEW) LLM tool loop over Tool catalog** for the long tail (grounded, bounded, cited), L4 honest refusal (much narrower — only when no tool can serve). **D5 revised**: every platform output must be (1) Cataloged Consumer output, (2) Tool-composed answer with cited grounding, (3) M4 confirmation prompt, or (4) no-match refusal. **The anti-hallucination invariant is grounding, not cataloging.** UC-C-1/UC-C-2 grounded chat Consumers reframed as pre-packaged L3 tool loops with scoped tool subsets. New **D6 locked**: two independent maker catalogs (Consumers + Tools) both closed; LLM never invokes an unlisted tool. Added **§3.10.7.6 tool authoring contract** (8-field spec), **§3.10.7.7 Consumer-vs-Tool decision guidance**, **§3.10.7.8 worked example**: Dataverse-MCP-composed portfolio query ("show me open Acme matters where budget > 100k") — LLM composes describe → query for customer → query for filtered matters → cited table output, no Consumer needed. **§3.10.7.11 updated §5-7 implications**: tool catalog + tool executor as §5 first-class components; §6 manifest gets `tool_catalog[]`; §7 dispatch protocol gets L3 planner. |
 | v0.2.5 | 2026-07-05 09:00 | Claude (with operator direction) | **Documentation-visibility maintenance** (no content changes). Reader flagged the top-of-doc Status banner was stale (still showed v0.2) and revision-log entries had date-only stamps making sequencing across a multi-session review hard to read. Fixed: (1) top Status banner bumped to **v0.2.5** with current summary of what's drafted (§0-3 including §3.9 relationship map, §3.10 orchestration walkthrough, §3.10.7 dispatch model with two-catalog composition; §4-8 still deferred). (2) Added **"Last updated"** line at top of doc so reader knows without scrolling. (3) Revision log column renamed **Date → Date/Time** with `YYYY-MM-DD HH:MM` format. (4) v0.1 through v0.2.4 backfilled with approximate times based on session flow (marked `(approx)`); precise times used v0.2.5 onward. Format note added above the log. |
+| v0.3.1 | 2026-07-05 18:30 | Claude Fable 5 (operator feedback round on v0.3 + inventory) | Four operator points addressed. (1) **§5.9 two-track cleanup rule** — Step 3 migration map covers target-alignment AND a full deadwood sweep (all dead code, implicated or not; stays require verification against an active project's written plan). (2) **Insights renderer cluster verdict verified** — R5-origin (PR #345), superseded by R6 Pillar 5, claimed by none of the five Insights/Action projects (widgets-r1 renders via its own InsightSummaryCard); inventory updated; genuinely dead. New **§5.10** records umbrella commitments the design must honor: InsightArtifact four-artifact envelope + IInsightsAi Zone-A facade + honesty primitives + locked Assistant contract v1.1 + widgets-r1 topic-registry pattern; Action Engine R1 (Phase 0, zero code) recommended for RE-BASE onto this design (its planned tool-registry/gates/meta-tools duplicate C-03/C-04/C-11; absorb its gate taxonomy + template/instance/run lifecycle). (3) **§4.2.1 NEW — OQ-2 opened**: is retaining the 33-executor node-graph engine consistent with R7's data-defined→code-defined pivot? Evidence honestly cuts both ways (Waves 11-12 code-ward; insights-r2 data-ward "Insights IS a JPS application"). Three candidate resolutions (keep-scoped / system-only runtime / retire into coded workflows); freeze on new engine-based capability until called. (4) **D10 revised** from researcher brief (`notes/research-dataverse-mcp-2026-07.md`): Dataverse MCP is GA + first-class BUT delegated-user-token-only (user-context parity with our OBO path) and Copilot-credit metered outside Copilot Studio → native typed handlers whose contracts mirror the GA MCP tool surface; OBO-for-mcp.tools spike filed; planner stays out of Foundry Agent Service. Companion deliverable: **GREENFIELD-CONCEPTUAL-DESIGN.md v0.1** (clean-sheet design from product objectives only; five bets; ~14 components; §8 comparison surfacing OQ-1..OQ-4 as the pre-Step-3 decision set). |
 | v0.3 | 2026-07-05 16:30 | Claude Fable 5 (operator directed Step 2 of code audit) | **§4-7 drafted** — first version designed against audited reality (`spaarke-ai-code-audit-r1` inventory, same day). **§4 architecture overview**: five-layer view; THREE execution shapes (`linear` = LinearConsumers ActionRunner, `playbook` = PlaybookOrchestrationService, `l3_composition` = bounded planner); session-state backbone mapped to the existing 3-tier ChatSessionManager with two structural additions (`session.outputs` addressable store, `in_progress_dispatch`); change-vs-today table (10 dispatch mechanisms → 1, 4 routing surfaces → 1, 3 engines → 2+planner); invariants restated. **§5 component model**: 21-component map (K/E/N/R per component with today's path); session subsystem with `SessionOutput` record contract; dispatch subsystem (ConsumerDispatchService, ConfirmationGateService unifying the three gate surfaces, SlotFillEngine, SessionEventTriggerService for Layer 0, no_match_handler); execution subsystem (thin ConsumerExecutionService; L3PlannerService as contracted generalization of SprkChatAgent); tool subsystem (typed-handler framework + 8-field contract + native `dataverse.*` handlers); output subsystem (OutputRouter over disposition; PaneEventBus/registries/StructuredOutputStreamWidget keep); client model (ConversationPane decomposition to one `dispatchConsumer` helper); full O-1..O-24 + dead-code resolution table. **§6 configuration model**: no new tables — `sprk_playbookconsumer` extended to the 12-field Consumer contract (sprk_ucid, executionmode, matchhints, inputschema, disposition, chiptransitions, capturemode, confirmthreshold, oneventbindings), `sprk_analysistool` extended to the 8-field Tool contract (toolid, namespace, outputschema, sideeffectclass, permissionscope, budgetclass); single-routing-surface rule (retire LinearConsumers/Workspace.*PlaybookId/Insights.Playbooks.Map appsettings); startup health check reconciles ConsumerTypes constants ↔ rows; catalog governance fixes for audited staleness. **§7 intent+dispatch**: full L0-L4 turn protocol; L2 = existing PlaybookDispatcher vector infra retargeted to a consumer-embeddings index over match_hints + IntentRerankerService in the ambiguity band + session-context score adjustments; L3 planner contract (closed tools, budget 8, cites, M4-gated writes, chain → session.outputs); L4 refusal telemetry; M4/M5/compound semantics; **ten-mechanism disposition table** (absorb ×4, keep ×3, extend ×1, contract ×1, retire ×1); P1-P10 walkthrough replay check. **Decisions proposed D7-D12** (§7.10) incl. flagged deviation D10 (native typed handlers with MCP-conformant contracts instead of runtime Dataverse MCP — none exists in repo per audit). §8 roadmap still deferred pending audit Step 3 migration map. |
 | v0.2.6 | 2026-07-05 11:30 | Claude (with operator direction) | **Review-driven refinements to §3.9 and §3.10** based on operator review comments. (1) **§3.9.1 Universal hubs reframed** from "UC-E-3 and UC-H-1 are hubs" (an artifact of current catalog counts) to **three universal write shapes** — Edit file, Create record, Send communication — with mapping to current UCs that instantiate each shape and the Tool primitives (`document.write`, `dataverse.create`, `email.draft`) that implement them. Architectural implication: write-side of Tool catalog IS these three; curated Consumers delegate to them at the write step. (2) **§3.9.2 Primary entry points restructured** — replaces UC-per-row with entry-pattern-per-row. Adds **on-upload composite** as the DEFAULT new-session flow when a doc is uploaded (auto-classify + auto-summarize, no explicit command needed). Rationale + bounds included (per-user daily cost cap, opt-out preference, bulk-upload handling). (3) **§3.10.1 scenario rewritten** — steps 1-3 updated for auto-composite path (no "types 'summarize'"); notes low-confidence alternate where M4 confirmation gate fires between A-7 and A-1. Step 13 fixed: `sprk_task` → `sprk_event` with `sprk_eventtype = 'task'` per actual Spaarke pattern. Illustrative-fields note added at top of scenario. (4) **§3.10.2 annotated table** — rows 1-5 rewritten for Layer 0 on-upload composite path; row 13 corrected to `sprk_event` + session-state references replacing speculative `sprk_source_document` / `sprk_source_analysis` column names. (5) **§3.10.7.2 dispatch model** — Layer 0 (on-upload composite) added ahead of Layers 1-4. Layer 0 covers: auto-classify + auto-summarize on upload, M4 gate interaction, per-user cost cap, opt-out preference, bulk-upload handling, explicit-command supersede, and extensibility to other session events (matter form open, chat first-launched with context, external inbound) via §6 manifest `on_event: [{event, consumer_id}]` bindings. |
