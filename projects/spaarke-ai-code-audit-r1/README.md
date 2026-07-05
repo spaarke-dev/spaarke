@@ -28,7 +28,8 @@ the deadwood."*
 |---|---|---|---|
 | **1** | Inventory ALL AI-touching code across all worktrees against the 5 target categories (Session / Consumer / Tool / Dispatcher / Manifest) + functional capabilities | [`SPAARKE-AI-CODE-INVENTORY.md`](SPAARKE-AI-CODE-INVENTORY.md) | ✅ v1.0 (2026-07-05) — operator review pending |
 | **2** | Draft §4-7 of the canonical design doc, informed by Step 1 | `docs/architecture/SPAARKE-AI-ARCHITECTURE-AND-COMPONENT-DESIGN.md` v0.3 | ✅ v0.3 (2026-07-05) — D7-D12 pending operator ratification (incl. flagged deviation D10) |
-| **3** | Per inventoried component: keep-as-is / refactor-to-target / retire / new-required | [`SPAARKE-AI-MIGRATION-MAP.md`](SPAARKE-AI-MIGRATION-MAP.md) | 🔲 |
+| **2.5** | Greenfield conceptual design + convergence overlay (operator-added 2026-07-05) | [`GREENFIELD-CONCEPTUAL-DESIGN.md`](GREENFIELD-CONCEPTUAL-DESIGN.md) v0.2 + [`OVERLAY-MATRIX.md`](OVERLAY-MATRIX.md) v1.0 | ✅ drafted — overlay matrix under operator review (5 exceptions E-1..E-5; OQ-1/OQ-3 resolutions proposed) |
+| **3** | Migration map: Track A (target alignment per overlay matrix) + Track B (deadwood sweep) + sequencing | [`SPAARKE-AI-MIGRATION-MAP.md`](SPAARKE-AI-MIGRATION-MAP.md) | 🔲 after overlay review |
 
 ## Scope
 
