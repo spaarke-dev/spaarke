@@ -128,11 +128,14 @@ export function useChatSession(options: UseChatSessionOptions): IUseChatSessionR
    * no longer exists, `loadHistory` returns `staleSession: true` so the host
    * can fall back to `createSession()` and clear its persisted ID.
    */
-  const resumeSession = useCallback((sessionId: string): void => {
-    setSession({ sessionId, createdAt: new Date().toISOString() });
-    setMessages(initialMessages ?? []);
-    setError(null);
-  }, [initialMessages]);
+  const resumeSession = useCallback(
+    (sessionId: string): void => {
+      setSession({ sessionId, createdAt: new Date().toISOString() });
+      setMessages(initialMessages ?? []);
+      setError(null);
+    },
+    [initialMessages]
+  );
 
   /**
    * Load message history for the current session.
