@@ -234,10 +234,8 @@ export function useRecordHeaderToolbarActions(
   const todoFilter = buildTodoFilterForParent(entity, recordId);
   const memoFilter = buildMemoFilterForParent(entity, recordId);
 
-  const { count: todoCount, loading: todoLoading, error: todoError } =
-    useRelatedCount('sprk_todo', todoFilter);
-  const { count: memoCount, loading: memoLoading, error: memoError } =
-    useRelatedCount('sprk_memo', memoFilter);
+  const { count: todoCount, loading: todoLoading, error: todoError } = useRelatedCount('sprk_todo', todoFilter);
+  const { count: memoCount, loading: memoLoading, error: memoError } = useRelatedCount('sprk_memo', memoFilter);
 
   // v1.0.15 UAT diagnostic (2026-07-04) — user reports no badges visible on
   // Matter where Dataverse ground-truth shows 3 memos + 2 todos. Log the
