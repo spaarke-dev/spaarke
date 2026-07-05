@@ -27,7 +27,7 @@ the deadwood."*
 | Step | What | Deliverable | Status |
 |---|---|---|---|
 | **1** | Inventory ALL AI-touching code across all worktrees against the 5 target categories (Session / Consumer / Tool / Dispatcher / Manifest) + functional capabilities | [`SPAARKE-AI-CODE-INVENTORY.md`](SPAARKE-AI-CODE-INVENTORY.md) | ✅ v1.0 (2026-07-05) — operator review pending |
-| **2** | Draft §4-7 of the canonical design doc, informed by Step 1 | `docs/architecture/SPAARKE-AI-ARCHITECTURE-AND-COMPONENT-DESIGN.md` v0.3 | 🔲 |
+| **2** | Draft §4-7 of the canonical design doc, informed by Step 1 | `docs/architecture/SPAARKE-AI-ARCHITECTURE-AND-COMPONENT-DESIGN.md` v0.3 | ✅ v0.3 (2026-07-05) — D7-D12 pending operator ratification (incl. flagged deviation D10) |
 | **3** | Per inventoried component: keep-as-is / refactor-to-target / retire / new-required | [`SPAARKE-AI-MIGRATION-MAP.md`](SPAARKE-AI-MIGRATION-MAP.md) | 🔲 |
 
 ## Scope

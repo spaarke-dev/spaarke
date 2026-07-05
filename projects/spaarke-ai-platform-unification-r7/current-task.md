@@ -9,11 +9,11 @@
 
 | Field | Value |
 |-------|-------|
-| **Session** | Fable 5 session executed **Step 1 of the 3-step code audit** the operator directed on 2026-07-05. Created `projects/spaarke-ai-code-audit-r1/` (README + spec + notes) and produced **`SPAARKE-AI-CODE-INVENTORY.md` v1.0** via 7 parallel Explore agents + worktree pre-scan. |
+| **Session** | Fable 5 session executed **Steps 1 AND 2 of the 3-step code audit** (operator-directed 2026-07-05). Step 1: `projects/spaarke-ai-code-audit-r1/` + **`SPAARKE-AI-CODE-INVENTORY.md` v1.0** (7 parallel Explore agents). Step 2: **canonical doc §4-7 drafted → v0.3**, designed against the inventory. |
 | **Branch** | `work/spaarke-ai-platform-unification-r7` |
-| **Canonical design doc** | `docs/architecture/SPAARKE-AI-ARCHITECTURE-AND-COMPONENT-DESIGN.md` **v0.2.6** (committed, `997c3d717`). §4-8 still deferred. |
-| **Next Action** | **Operator review of the inventory**, then **Step 2**: draft §4-7 of the canonical doc informed by the inventory (esp. Appendix B scorecard + §4 dispatch census + §8 overlap register). Then **Step 3**: `SPAARKE-AI-MIGRATION-MAP.md` (keep / refactor / retire / new per component). |
-| **Pending operator calls** | (a) portfolio registration project type for `/devops-project-register --from-folder projects/spaarke-ai-code-audit-r1 --epic 421` (Cleanup / Data / Process); (b) inventory review notes. |
+| **Canonical design doc** | `docs/architecture/SPAARKE-AI-ARCHITECTURE-AND-COMPONENT-DESIGN.md` **v0.3** — §4 (five layers, 3 execution shapes), §5 (21-component map K/E/N/R + O-1..O-24 resolution), §6 (extend sprk_playbookconsumer + sprk_analysistool, no new tables, single-routing-surface rule), §7 (L0-L4 protocol, ten-mechanism disposition table, P1-P10 replay). §8 roadmap deferred to Step 3. |
+| **Next Action** | **Operator ratification of D7-D12** (§7.10) — especially **D10 flagged deviation** (native typed handlers with MCP-conformant contracts instead of runtime Dataverse MCP, which doesn't exist in repo). Then **Step 3**: `SPAARKE-AI-MIGRATION-MAP.md` (keep / refactor / retire / new per inventoried component + sequencing) → then §8 roadmap. |
+| **Pending operator calls** | (a) D7-D12 ratification + inventory review notes; (b) portfolio registration project type for `/devops-project-register --from-folder projects/spaarke-ai-code-audit-r1 --epic 421` (Cleanup / Data / Process). |
 
 ---
 

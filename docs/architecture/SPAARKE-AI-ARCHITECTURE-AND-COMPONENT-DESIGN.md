@@ -1,11 +1,13 @@
 # Spaarke AI — Architecture and Component Design (Canonical)
 
-> **Status**: DRAFT **v0.2.6** — intro + use cases (sequence-framed) +
-> orchestration walkthrough (auto-composite on upload) + dispatch model with
-> Layer 0 + four utterance/click layers + two-catalog composition (Consumers +
-> Tools). Universal hubs reframed as three write-shapes (edit file / create
-> record / send communication). §4-8 (architecture, component model, manifest,
-> intent+dispatch, roadmap) deferred to v0.3 pending review of §3.
+> **Status**: DRAFT **v0.3** — §4-7 now drafted (architecture overview,
+> component model, configuration model, intent+dispatch), designed against the
+> audited current state in
+> `projects/spaarke-ai-code-audit-r1/SPAARKE-AI-CODE-INVENTORY.md` rather than
+> greenfield. Six new decisions proposed for ratification (D7-D12, §7.10),
+> including one flagged deviation (D10: native typed handlers instead of
+> runtime Dataverse MCP). §8 (roadmap) deferred pending audit Step 3
+> (migration map). §0-3 unchanged from v0.2.6.
 >
 > **Last updated**: 2026-07-05 (see §9 revision log for full history).
 >
@@ -2152,29 +2154,644 @@ source.
 
 ## 4. Architecture overview
 
-*Deferred to v0.3. Will draw on `notes/summarize-flow-2026-07-03.md` and the
-component trace already done today; extends it to the general N-capability
-case with the sequence-framing constraint (§3.0) as the primary requirement.*
+> **Grounding**: this section is designed against the audited current state in
+> [`projects/spaarke-ai-code-audit-r1/SPAARKE-AI-CODE-INVENTORY.md`](../../projects/spaarke-ai-code-audit-r1/SPAARKE-AI-CODE-INVENTORY.md)
+> (2026-07-05), not against a greenfield. Every target component below is
+> annotated **exists** (path), **extend** (exists, contract grows), **new**, or
+> **retire/absorb** (exists, folds into another component). The inventory's
+> Appendix B scorecard is the presence baseline; its §8 overlap register and §9
+> dead-code register are resolved by §5.9 below.
+
+### 4.1 The five-layer view
+
+```
+┌─ SURFACES ──────────────────────────────────────────────────────────────┐
+│ Assistant pane · record forms/ribbons · wizards · workspace widgets     │
+│ scheduled jobs · inbound email · Office add-ins · external SPA          │
+└──────────────┬──────────────────────────────────────────────────────────┘
+               │ session events (upload, form-open, schedule, inbound)
+               │ + utterances + chip clicks
+┌─ SESSION LAYER (M1) ────────────────────────────────────────────────────┐
+│ SessionStateService: documents · outputs[uc@turn] · conversation ·      │
+│ workspace_widgets · matter_context · in_progress_dispatch               │
+└──────────────┬──────────────────────────────────────────────────────────┘
+               │ session context (read on EVERY dispatch decision)
+┌─ DISPATCH LAYER (M2–M5, Layers 0–4) ────────────────────────────────────┐
+│ ConsumerDispatchService (single): L0 event auto-composite → L1 chip →   │
+│ L2 Consumer-catalog classify → L3 bounded tool loop → L4 refusal        │
+│ + ConfirmationGateService (M4) + SlotFillEngine (M5)                    │
+└──────────────┬──────────────────────────────────────────────────────────┘
+               │ resolved Consumer (or L3 plan)
+┌─ EXECUTION LAYER ───────────────────────────────────────────────────────┐
+│ ConsumerExecutionService → one of THREE execution shapes:               │
+│   (a) Linear: ActionRunner (JPS render + one structured LLM call)       │
+│   (b) Playbook: PlaybookOrchestrationService (node graph)               │
+│   (c) L3 composition: L3PlannerService over the Tool catalog            │
+└──────────────┬──────────────────────────────────────────────────────────┘
+               │ typed output + Consumer-declared disposition
+┌─ OUTPUT LAYER (M6/M7) ──────────────────────────────────────────────────┐
+│ OutputRouter: ALWAYS store to session.outputs; render per disposition   │
+│ (informational → Assistant · work_product → Workspace tab · overlay →   │
+│ widget update · email/record → write-shape via M4 gate)                 │
+│ Client: PaneEventBus + widget registries + StructuredOutputStreamWidget │
+└─────────────────────────────────────────────────────────────────────────┘
+```
+
+The load-bearing change versus today is the **dispatch layer**: ten coexisting
+mechanisms (inventory §4.1) collapse into ONE service implementing the layered
+protocol, and it reads **session state**, which no current mechanism does.
+The execution and output layers are largely consolidation of things that
+already work; the session layer needs one structural addition (the
+addressable `outputs` store).
+
+### 4.2 The three execution shapes (and only three)
+
+Every Consumer in the catalog declares `execution_mode`, one of:
+
+| Shape | Engine | Exists today as | When to use |
+|---|---|---|---|
+| **`linear`** | `ActionRunner` + `PromptSchemaRenderer` → one structured LLM call | `Services/Ai/LinearConsumers/` (R7 Wave 12) — **exists** | Single-step capabilities: summarize, classify, extract, pre-fill proposal, reminder text. The majority of the catalog. |
+| **`playbook`** | `PlaybookOrchestrationService` node graph (33 executors) | `Services/Ai/PlaybookOrchestrationService.cs` — **exists** | Multi-node capabilities: composite delivery, conditional branches, write-back chains, briefing collect+narrate+deliver. |
+| **`l3_composition`** | `L3PlannerService` bounded tool loop | generalization of `SprkChatAgent` — **extend** | Not authored per-capability: this is the long-tail shape. UC-C-1/C-2 grounded chat are pre-scoped instances (D5). |
+
+Consequences:
+- `PlaybookExecutionEngine` (the "unified" wrapper) **retires** — its batch mode
+  already delegates to `PlaybookOrchestrationService`; its conversational and
+  summarize modes become catalog entries (inventory O-1).
+- `AnalysisOrchestrationService`'s legacy path **retires** per the already-planned
+  R7 FR-11 (inventory O-2).
+- `SessionSummarizeOrchestrator`'s internal dual-path (inventory O-3) dissolves:
+  `chat-summarize` becomes a normal `linear` Consumer row; the orchestrator's
+  residual duties (multi-file text assembly, SSE shaping) move into
+  `ConsumerExecutionService` + `SessionFileTextSource`.
+
+### 4.3 The session-state backbone
+
+Target schema is §3.10.5. Mapping to what exists:
+
+| §3.10.5 slice | Today | Change |
+|---|---|---|
+| `documents[]` | `ChatSessionFile` (incl. 8 enrichment fields + r7 `ExtractedText`) | **keep** — already richer than the target schema |
+| `conversation[]` | `ChatHistoryManager` (summarize@15/archive@50) | **keep** |
+| `workspace_widgets[]` | tab persistence (`PATCH /sessions/{id}/tabs`) + Cosmos restore | **extend** — widgets also *emit* session events (M6 leg 3) |
+| `outputs{uc@turn}` | ❌ nothing — outputs are streamed and forgotten | **new** — the P4 composition carrier; see §5.2 |
+| `matter_context` | `ChatContextMappingService` + entity context | **keep** |
+| `in_progress_dispatch` | ❌ (modal wizards only) | **new** — slot-fill state; see §5.3 |
+
+Persistence stays the existing three tiers (Redis hot / Cosmos warm / Dataverse
+cold via `ChatSessionManager`). Two fixes are mandatory: (1) `outputs` and
+`in_progress_dispatch` join the Redis+Cosmos payloads; (2) the Cosmos mapping
+that drops `UploadedFiles`/`DocumentId` (inventory §10) must stop dropping at
+least the file *references* — a restored session that has lost its file
+manifest violates P2.
+
+### 4.4 What changes versus today (summary)
+
+| Dimension | Today (audited) | Target |
+|---|---|---|
+| Dispatch mechanisms | 10 (9 in master + r7 regex) | 1 service, 5 layers (§7) |
+| Playbook-routing config surfaces | 4 (table + 3 appsettings blocks) | 1 (`sprk_playbookconsumer`, extended) |
+| Orchestration engines | 3 overlapping | 2 engines + 1 planner, selected by `execution_mode` |
+| Chat-summarize implementations | 2 server paths in 1 class + 3 client orchestrators | 1 Consumer row; 1 client dispatch helper |
+| Gate-before-write surfaces | 3 (plan/approve, actions/confirm, must-click) | 1 (`ConfirmationGateService`, M4) |
+| Output→surface decision | hardcoded per consumer | `disposition` field per Consumer output |
+| Prior-output reuse | none (re-derive or re-upload) | `session.outputs` addressable store |
+| Upload behavior | inert until user clicks/types | Layer 0 auto-composite (classify + summarize) |
+| Off-catalog utterances | fall into agent chat, ungated | L3 bounded loop → L4 honest refusal |
+
+### 4.5 Architectural invariants (restated for §4-7)
+
+1. **Grounded execution (D5)** — every output is a Consumer output, a
+   tool-composed answer with citations, an M4 confirmation, or an L4 refusal.
+2. **Two closed catalogs (D6)** — Consumers and Tools. The LLM never invokes an
+   unlisted tool; the dispatcher never dispatches to an uncataloged Consumer.
+3. **Storage/rendering separation (D2)** — `session.outputs` write is universal
+   and automatic; rendering is the Consumer's `disposition` choice.
+4. **Session context is a dispatch input (§3.0-3)** — every L0/L2/L3 decision
+   reads session state, not just the current utterance.
+5. **Tenant boundary + Dataverse security + HITL write-back** (§1.2) unchanged.
+6. **Kill-switch discipline (ADR-032)** — every new registered service ships
+   with a Null-Object peer under the compound AI gate; the inventory's placement
+   smells (FinanceModule strays, ungated LinearConsumers) are corrected, not
+   replicated.
+
+### 4.6 Walkthrough compliance (P1–P10)
+
+§7.9 carries the full replay of the 14-step NDA walkthrough against this
+design. Summary: P1/P5/P9 are satisfied by §7's chip + layer protocol; P2/P4/P10
+by §5.2's outputs store; P3/P8 by §5.6's disposition routing over the existing
+PaneEventBus; P6 by §5.3's SlotFillEngine; P7 by §5.3's ConfirmationGateService.
+
+---
 
 ## 5. Component model
 
-*Deferred to v0.3.*
+### 5.1 Component map
+
+Legend: **K** keep · **E** extend · **N** new · **R** retire/absorb.
+
+| # | Component | Layer | Disposition | Exists today as |
+|---|---|---|---|---|
+| C-01 | `SessionStateService` | Session | **E** | `Services/Ai/Chat/ChatSessionManager.cs` (3-tier) |
+| C-02 | `session.outputs` store | Session | **N** | — (model + persistence addition to C-01) |
+| C-03 | `ConsumerDispatchService` | Dispatch | **N** (absorbs 6 of 10 mechanisms) | see §7.8 disposition table |
+| C-04 | `ConfirmationGateService` (M4) | Dispatch | **E** | `PendingPlanManager` + `/actions/{id}/confirm` merged |
+| C-05 | `SlotFillEngine` (M5) | Dispatch | **N** | — |
+| C-06 | `SessionEventTriggerService` (Layer 0) | Dispatch | **N** | — |
+| C-07 | `ConsumerExecutionService` | Execution | **N** (thin) | absorbs `SessionSummarizeOrchestrator` shell + `PlaybookExecutionEngine` callers |
+| C-08 | `ActionRunner` + `PromptSchemaRenderer` + `ActionResolver` | Execution (linear) | **K** | `Services/Ai/LinearConsumers/` |
+| C-09 | `PlaybookOrchestrationService` + 33 node executors | Execution (playbook) | **K** | `Services/Ai/PlaybookOrchestrationService.cs`, `Services/Ai/Nodes/` |
+| C-10 | `L3PlannerService` | Execution (composition) | **E** | bounded generalization of `SprkChatAgent` tool loop |
+| C-11 | Tool framework (`IToolHandler` + adapter + registry) | Tool | **E** (8-field contract) | `Services/Ai/Handlers/`, `ToolHandlerToAIFunctionAdapter` |
+| C-12 | `dataverse.*` tool family | Tool | **N** | — (typed handlers over `IDataverseService`; §5.5) |
+| C-13 | `OutputRouter` (M7) | Output | **N** (thin) | absorbs `PlaybookOutputHandler` routing + per-consumer rendering decisions |
+| C-14 | SSE surface (typed events + emitters) | Output | **E** | `ChatSseEventFactory`, `R2SseEventEmitter` (r7 `linear_dispatch` retires) |
+| C-15 | PaneEventBus + widget registries + `StructuredOutputStreamWidget` | Output (client) | **K** | `Spaarke.AI.Widgets` |
+| C-16 | `ConsumerRoutingService` → Consumer-catalog reader | Manifest | **E** | `Services/Ai/PublicContracts/ConsumerRoutingService.cs` |
+| C-17 | Tool-catalog reader | Manifest | **E** | `sprk_analysistool` load path in `SprkChatAgentFactory` |
+| C-18 | Scope/Action/Playbook manifest services | Manifest | **K** | `PlaybookService`, `NodeService`, `ScopeResolverService`, etc. |
+| C-19 | SprkChat + canonical `useSseStream` | Client | **K** | `Spaarke.UI.Components` |
+| C-20 | Client dispatch adapter | Client | **E** | `ConversationPane` decomposition (§5.8) |
+| C-21 | `no_match_handler` Consumer (L4) | Dispatch | **N** | — (catalog row per tenant) |
+
+### 5.2 Session subsystem (C-01, C-02)
+
+**`SessionStateService`** is `ChatSessionManager` with a widened model — same
+3-tier persistence, same TTLs, same cleanup signals.
+
+**The outputs store (C-02)** is the single most consequential addition in this
+design. Model addition to `ChatSession`:
+
+```csharp
+// Models/Ai/Chat/ChatSession.cs (addition)
+public Dictionary<string, SessionOutput> Outputs { get; init; } = new();
+
+public sealed record SessionOutput
+{
+    public required string Key { get; init; }          // "UC-A-1@t4" | "L3@t14"
+    public required string ConsumerId { get; init; }    // catalog id, or "l3-composition"
+    public required string UcId { get; init; }          // "UC-A-1" (stable §3 vocabulary)
+    public required int Turn { get; init; }
+    public required string Disposition { get; init; }   // informational | work_product | overlay
+    public required JsonElement Payload { get; init; }  // the structured output
+    public string? WidgetId { get; init; }              // overlay target, if any
+    public IReadOnlyList<string>? SourceRefs { get; init; } // citations / tool-chain / doc ids
+    public DateTimeOffset CreatedAt { get; init; }
+}
+```
+
+Rules:
+- **Write is universal** — `ConsumerExecutionService` and `L3PlannerService`
+  write every completed output here before any rendering happens (D2).
+- **Read is by reference** — Consumer `input_schema` entries may declare session
+  resolutions like `session.outputs["UC-A-1@last"].entities.orgs` (§6.1); the
+  `SlotFillEngine` resolves them before asking the user anything.
+- **Size discipline** — payloads above a threshold (default 64 KB) store a
+  truncated payload + SPE/blob pointer; the store is a composition carrier, not
+  a document store.
+- **L3 audit chains** are outputs too: `session.outputs["L3@t{n}"]` carries
+  `tool_chain[]` + result summary (§7.5), making tool composition replayable.
+
+`in_progress_dispatch` (per §3.10.5) is a nullable slot on `ChatSession`
+holding `{consumer_id, required_slots[], resolved_slots{}, next_prompt}` —
+written by `SlotFillEngine`, cleared on execution or abandonment (TTL = session).
+
+### 5.3 Dispatch subsystem (C-03..C-06, C-21)
+
+**`ConsumerDispatchService` (C-03)** — one scoped service, one entry point:
+
+```csharp
+Task<DispatchDecision> DecideAsync(DispatchInput input, CancellationToken ct);
+// DispatchInput: session snapshot + trigger (event | chip | utterance) + attachments
+// DispatchDecision: ExecuteConsumer(consumerId, slots) | NeedsConfirmation(options)
+//                 | NeedsSlots(missing) | RunL3(goal) | Refuse(handlerId)
+```
+
+The layer protocol it implements is §7. What it absorbs and what stays is the
+disposition table in §7.8 — notably `PlaybookDispatcher`'s vector
+infrastructure and `IntentRerankerService` survive INSIDE it as the L2
+implementation; the client `CommandRouter`/`HardSlashExecutor` stay as the
+deterministic pre-layer (slash commands are retained UX per r7 close-plan D-13).
+
+**`ConfirmationGateService` (C-04)** — merges today's three gate surfaces
+(inventory O-8) into one service with ONE Redis-backed pending-action store
+(the `PendingPlanManager` store generalizes; the separate `/actions/{id}/confirm`
+store retires). Fires on: (a) classifier confidence below the Consumer's
+`confirmation_threshold` (D1); (b) any tool call whose `side_effect_class` ∈
+{write, communicate} (§5.5); (c) compound-intent plans (≥2 proposed actions).
+The FR-48 "must-click" `playbook_options` flow becomes a *presentation* of this
+gate, not a separate mechanism.
+
+**`SlotFillEngine` (C-05)** — on `ExecuteConsumer` with missing required slots:
+resolve from session (documents, matter context, prior outputs per the
+Consumer's declared resolutions) → for each still-missing slot, emit the
+Consumer's slot prompt as a chat turn → LLM-parse the reply into typed slots →
+loop until complete or `capture_mode: modal` escapes to the wizard surface (D3).
+State lives in `in_progress_dispatch`; no new Consumer dispatch occurs
+mid-fill (M5).
+
+**`SessionEventTriggerService` (C-06)** — Layer 0. Subscribes to session events
+(document uploaded, matter form opened, session first-launch with context,
+inbound email routed) and dispatches the `on_event` composite bindings from the
+manifest (§6.4) under the Layer 0 bounds (per-user daily cost cap, opt-out
+preference, bulk-upload top-1 rule, explicit-command supersede — §3.10.7.2).
+Implementation note: the upload event already has a natural emission point at
+the end of `ChatDocumentEndpoints` upload handling; no new infrastructure is
+required to observe it.
+
+**`no_match_handler` (C-21)** — a per-tenant Consumer row (linear, trivially
+cheap model) whose prompt template produces the tenant-customized refusal from
+the live Consumer+Tool catalog summaries. L4 only fires when L3 reports
+no-progress (§7.6).
+
+### 5.4 Execution subsystem (C-07..C-10)
+
+**`ConsumerExecutionService` (C-07)** — thin by design:
+
+```
+ExecuteAsync(consumerId, slots, session):
+    consumer = catalog.Get(consumerId)
+    switch consumer.execution_mode:
+        linear   → ActionRunner over consumer.action (JPS render → structured call)
+        playbook → PlaybookOrchestrationService.ExecuteAsync(consumer.playbook, bind slots)
+    → write SessionOutput (C-02) → hand to OutputRouter (C-13)
+```
+
+It replaces, as call-sites migrate: `SessionSummarizeOrchestrator` (shell),
+`PlaybookExecutionEngine` (all three modes), the `AnalysisEndpoints` document-
+profile branch, and the `Services/Workspace/*` facade-callers' bespoke playbook
+resolution. The ADR-013 `PublicContracts` facades remain the CRUD-side entry
+point but delegate here.
+
+**`L3PlannerService` (C-10)** — the bounded tool loop. Built on the existing
+agent stack (`IChatClient` + `ToolHandlerToAIFunctionAdapter` + middleware
+pipeline), differing from today's `SprkChatAgent` free chat in four contracted
+ways: (1) closed tool set from the Tool catalog filtered by the caller's
+permission scopes; (2) per-turn tool-call budget (default 8) — loop terminates,
+reports progress-or-refusal; (3) every read result carries its citation
+(`cite` field from the tool contract); (4) the full chain writes to
+`session.outputs["L3@t{n}"]`. UC-C-1/UC-C-2 become pre-scoped L3 configurations
+(`document.*`+`llm.answer` / `dataverse.*`+`llm.answer`) — grounded chat is not
+a separate mechanism (D5 consequence, §3.10.7.4).
+
+### 5.5 Tool subsystem (C-11, C-12)
+
+The R6 typed-handler framework IS the Tool catalog executor — it stays. Two
+extensions:
+
+1. **8-field contract (§3.10.7.6)** on `sprk_analysistool`: add
+   `side_effect_class` (read | write | communicate | pure), `permission_scope`,
+   `budget_class`, and namespace-conforming `tool_id`s. `ConfirmationGateService`
+   gates on `side_effect_class` — replacing `CompoundIntentDetector`'s hardcoded
+   `WriteBackToolNames` sets (which cannot stay: a name list is exactly the kind
+   of shadow-catalog this design eliminates).
+2. **`dataverse.*` family (C-12)** — `describe`, `query`, `get`, `create`,
+   `update` implemented as **native typed handlers** over the existing
+   `IDataverseService`/Web API layer, with MCP-conformant naming and schemas.
+   ⚠️ **Deviation flag for review**: §3.10.7 said "via Dataverse MCP", but the
+   audit confirmed no runtime MCP surface exists in the repo. Wrapping our own
+   Dataverse layer as typed handlers delivers the same LLM-facing contract now,
+   reuses the tenant-security plumbing we already trust, and leaves adopting a
+   real MCP client as a later swap behind the same tool ids. (Path C-shaped
+   pivot: the *capability* ships; the *transport* is an implementation detail.)
+
+The three **write shapes** (§3.9.1) map: `dataverse.create/update` (C-12),
+`email.draft` (wraps the existing Graph draft path / `SendEmailNodeExecutor`
+logic), `document.write` (SPE new-version path). Node executors and tools
+share the underlying services, not implementations of each other — a playbook
+node and an L3 tool call converge on the same write service and the same M4 gate.
+
+Legacy `Chat/Tools/*` classes (inventory §9) delete outright, with
+`AnalysisExecutionTools` and `TextRefinementTools` migrating to handlers first.
+
+### 5.6 Output subsystem (C-13..C-15)
+
+**`OutputRouter` (C-13)** — reads the Consumer's per-output `disposition`
+(§6.1) and routes:
+
+| Disposition | Server action | Client action |
+|---|---|---|
+| `informational` | SSE narrative/structured frames to Assistant + chips | SprkChat renders; chips from §7.3 |
+| `work_product` | `output_pane` event (existing) targeting a Workspace tab | WorkspacePane `widget_load` → registry-resolved widget |
+| `overlay` | targeted widget-update event carrying `WidgetId` | PaneEventBus workspace channel → widget re-renders in place (no re-mount) |
+| write-shape side effects | M4 gate → write service → confirmation turn | link-back chip (walkthrough step 14) |
+
+`PlaybookOutputHandler`'s seven output types fold into this vocabulary;
+`OutputOrchestratorService` (the Dataverse `outputMapping` writer currently
+stranded in FinanceModule) becomes the `dataverse` write-shape implementation.
+
+**SSE surface (C-14)**: keep the existing typed-event families (`output_pane`,
+`source_pane`, `source_highlight`, `playbook_options`, section-stream, R2
+events). The r7 `linear_dispatch` event retires with its mechanism. Client-side
+the canonical `useSseStream` is the ONLY parser — the hand-rolled parsers in
+`executeSummarizeIntent`, LegalWorkspace `summarizeService`, and Compose
+orchestrators migrate to it (inventory O-21).
+
+**Client widget layer (C-15)**: PaneEventBus, `WorkspaceWidgetRegistry`/
+`ContextWidgetRegistry`, `StructuredOutputStreamWidget`, tab persistence — all
+keep as-is. The M6 third leg (widgets *emitting* consumable session events) is
+additive: widget user-actions (highlight, selection, edit) dispatch onto the
+existing bus and `SessionStateService` snapshots them into `workspace_widgets`.
+
+### 5.7 Manifest components (C-16..C-18)
+
+`ConsumerRoutingService` grows from "resolve consumertype → playbook" into the
+**Consumer-catalog reader** returning the full §6.1 contract (cache pattern
+unchanged). The Tool-catalog reader similarly returns §6.2 contracts. All other
+manifest services (`PlaybookService`, `NodeService`, scope CRUD,
+`ModelSelector`, `ChatContextMappingService`, `DynamicCommandResolver`) keep.
+Registration hygiene: `PlaybookLookupService` and `OutputOrchestratorService`
+move out of FinanceModule into the AI modules with Null-Object peers;
+LinearConsumers registration moves under the compound gate (inventory §10).
+
+### 5.8 Client component model (C-19, C-20)
+
+- **SprkChat** stays the single reusable chat control. The duplicated hook
+  triples (`useChatSession`/`useChatContextMapping`/`useChatPlaybooks` in
+  SprkChat vs AI.Context — inventory O-16) consolidate to one implementation
+  (AI.Context copies become re-exports, mirroring the AIPU2-082 `useSseStream`
+  precedent).
+- **ConversationPane decomposes** (it is 2,498 lines of accreted dispatch): the
+  target shape is a thin host wiring SprkChat to (a) `CommandRouter`/
+  `HardSlashExecutor` (keep — deterministic pre-layer), (b) a single
+  **`dispatchConsumer(consumerId, slots)`** helper that POSTs to the dispatch
+  endpoint and bridges SSE → PaneEventBus. `executeSummarizeIntent`,
+  `executeLinearDispatch` (r7), and the intent-matcher registry all fold into
+  that one helper. Chips carry `target_consumer_id` (D4) so chip-click is L1,
+  zero client heuristics.
+- **Wizard/launcher widgets** (the 7 thin dispatchers in AI.Widgets) keep —
+  they become L1 dispatches with consumer ids instead of hardcoded page routes
+  where an AI capability is involved.
+- **LegalWorkspace AI features** keep their UX but their service calls migrate
+  to catalog Consumers (e.g. `summarizeService` → `summarize-file` Consumer
+  dispatch), eliminating the second/third client summarize stacks over time.
+
+### 5.9 Overlap + dead-code resolution (inventory §8/§9 → target)
+
+| Inventory item | Resolution |
+|---|---|
+| O-1 two engines | `PlaybookExecutionEngine` retires into C-07 |
+| O-2 legacy analysis | retires per R7 FR-11 |
+| O-3/O-4/O-5 summarize & profile dual paths | one `linear` Consumer row each; C-07 executes |
+| O-6 narrate dual path | decision moves to the Consumer row (`execution_mode`); flag retires |
+| O-7 duplicated vector match | single L2 implementation inside C-03 |
+| O-8 three write gates | C-04 |
+| O-9 legacy tools | delete after handler migration |
+| O-10 dead agent abstraction | delete `ISprkAgent` cluster + its test |
+| O-11 LLM-call wrapping ×4 | `ActionRunner` is the single-call wrapper; facades delegate |
+| O-12 four routing surfaces | §6.5 single-surface rule |
+| O-13/O-14 catalog taxonomy/copies | §6.6 governance |
+| O-15 BFF-embedded playbooks | migrate to Dataverse rows or mark system-playbooks explicitly in the catalog |
+| O-16 chat-hook triples | consolidate (§5.8) |
+| O-17/O-18/O-19 registries + cross-pane | R1 registries, cross-pane/, SprkChatBridge delete; dedupe register-context-widgets |
+| O-20/O-21 client summarize + SSE parsers | one dispatch helper + canonical useSseStream |
+| O-22/O-23/O-24 card catalogs, pinned-list, dup search/exec clients | consolidate to shared lib exports (mechanical) |
+| Dead-code register §9 | deletes, sequenced in Step 3 migration map |
+
+---
 
 ## 6. Configuration model (Capability manifest)
 
-*Deferred to v0.3. Must include first-class transitions between
-capabilities — a UC's Typical next steps become configurable affordances in
-the manifest.*
+**Principle (CLAUDE.md §11 applied)**: no new tables. The manifest extends the
+two catalog tables that already exist and already have reader services —
+`sprk_playbookconsumer` (Consumers) and `sprk_analysistool` (Tools). Transitions
+and event bindings are JSON columns on the Consumer row, not child tables,
+until row-count or query patterns prove otherwise.
+
+### 6.1 Consumer manifest — `sprk_playbookconsumer` extended
+
+Existing columns keep their semantics (consumertype, code, environment,
+priority, matchconditions, playbook FK). Additions (per §3.10.7.5):
+
+| Field (§3.10.7.5) | Storage | Notes |
+|---|---|---|
+| `consumer_id` | existing `sprk_consumertype` + `sprk_consumercode` | stable id; no rename |
+| `underlying_uc` | new column `sprk_ucid` (text) | "UC-A-1" — ties catalog to §3 vocabulary |
+| `execution_mode` | new choice `sprk_executionmode` (linear \| playbook) | linear rows require Action FK; playbook rows require playbook FK |
+| target | existing playbook FK + new `sprk_action` FK | `ActionResolver` already reads `sprk_playbookconsumer.sprk_action` (R7 W12.3) — formalized |
+| `description` | existing/desc column | classifier + planner context |
+| `match_hints` | new `sprk_matchhints` (JSON: keywords[], example_utterances[]) | replaces `sprk_intenttriggers` idea from r7 close plan Phase 12.4 — same intent, catalog-level |
+| `input_schema` | new `sprk_inputschema` (JSON) | slots: name, type, required, session_resolution, slot_prompt |
+| prompt + output schema | via Action row (`sprk_systemprompt` JPS + `sprk_outputschemajson`) | already exists — no duplication on the consumer row |
+| `output_disposition` | new choice/JSON `sprk_disposition` | informational \| work_product \| overlay (per-output-field override in JSON if needed) |
+| `chip_transitions` | new `sprk_chiptransitions` (JSON: [{target_consumer_id, chip_label, when?}]) | D4 — labels declared on the source transition |
+| `capture_mode` | new choice `sprk_capturemode` | slot_fill (default) \| modal |
+| `confirmation_threshold` | new decimal `sprk_confirmthreshold` | D1 |
+| `on_event` | new `sprk_oneventbindings` (JSON: [{event, order}]) | Layer 0 membership (§6.4) |
+| visibility/gates | existing environment + statecode | plus per-tenant no-match row |
+
+Maker UI: extend the `ScopeConfigEditor` PCF (which already does per-entity
+variants) with a Consumer editor variant; `PlaybookBuilder` continues to own
+playbook/node/action authoring.
+
+### 6.2 Tool manifest — `sprk_analysistool` extended
+
+Existing: `sprk_handlerclass`, `sprk_jsonschema` (input), description.
+Additions per §3.10.7.6: `sprk_toolid` (namespaced, e.g. `dataverse.query`),
+`sprk_namespace`, `sprk_outputschema`, `sprk_sideeffectclass`
+(read | write | communicate | pure), `sprk_permissionscope`, `sprk_budgetclass`.
+Handler discovery (`AddToolHandlersFromAssembly`) unchanged; a startup health
+check (extend `RoutingConsumerTypeHealthCheck`) verifies every catalog row has
+a resolvable handler and every registered handler has a row.
+
+### 6.3 What a maker can and cannot do (target)
+
+**Data-only (no deploy)**: add/modify a Consumer (prompt via Action JPS, output
+schema, disposition, chips, match hints, slots, thresholds, Layer 0 membership);
+re-route any consumer to a different playbook/action per environment; author
+playbooks/nodes over the 33-executor vocabulary; tune scopes/skills/knowledge/
+personas; edit slash-command catalog + context mappings; set the tenant
+refusal template.
+**Code-required**: new executor types, new tool handlers, new widget types,
+new surfaces. (Unchanged from today; the difference is that everything in the
+first list currently split across appsettings/code moves into the first list.)
+
+### 6.4 Layer 0 event bindings
+
+`on_event` values are a closed platform vocabulary: `document_uploaded`,
+`matter_form_opened`, `session_started_with_context`, `inbound_email_routed`.
+Multiple Consumers may bind one event with `order` (classify order=1,
+summarize order=2 — the classify output is available to later composite
+members via `session.outputs`). Bounds (cost cap, opt-out, bulk rule) are
+platform settings, not per-row.
+
+### 6.5 Single-routing-surface rule (BINDING for §8 sequencing)
+
+`sprk_playbookconsumer` becomes the ONLY answer to "which capability runs".
+Consequences: `LinearConsumers` appsettings maps retire (rows move to the
+table with `execution_mode=linear`); `Workspace.*PlaybookId` fallbacks delete
+(the table's environment column covers per-env); `Insights.Playbooks.Map`
+migrates to rows; `ConsumerTypes.cs` remains as compile-time constants only —
+the startup health check reconciles constants ↔ rows so the count-drift the
+audit found (7 vs 6-7 vs 8) becomes a build/boot failure instead of silent skew.
+
+### 6.6 Catalog governance (fixes the audit's staleness findings)
+
+- One `scope-model-index.json` (`.claude/catalogs/`); the `docs/ai-knowledge`
+  copy deletes (doc-discipline: DELETE, no redirect stubs). Refresh script runs
+  at project close via checklist.
+- The 2026-02 ERD/data-model docs DELETE and are replaced by current-schema
+  docs for `sprk_playbooknode` + `sprk_analysisaction` + extended
+  `sprk_playbookconsumer`/`sprk_analysistool` (this project's Step 3 files the
+  doc tasks); `docs/data-model/INDEX.md` reconciled.
+- `scripts/seed-data/` R4-era taxonomy and `Seed-JpsActions.ps1` broken sources
+  delete or repoint; `Seed-PlaybookConsumers.ps1` regenerates from the table.
+- The blocked multinode playbook's `sprk_nodetype` option-set gap
+  (`DeliverComposite=100000004`) is a Step 3 schema task.
+
+---
 
 ## 7. Intent and dispatch
 
-*Deferred to v0.3. Will resolve the four-intent-mechanism drift discussed in
-2026-07-04 review with the operator. Dispatch must read session context and
-prior-capability outputs, not just current utterance (§3.0 requirement 3).*
+### 7.1 The protocol (one turn, end to end)
+
+```
+trigger arrives (event | chip | utterance)
+│
+├─ session event?  → LAYER 0: SessionEventTriggerService
+│     bounds check (cost cap / opt-out / bulk / explicit-command supersede)
+│     → dispatch on_event composite in declared order
+│     → classify member below threshold? → M4 confirm between members
+│
+├─ chip click?     → LAYER 1: chip.target_consumer_id IS the decision.
+│     no LLM. → slot check → M5 if missing → execute.
+│
+├─ hard slash?     → deterministic client execution (CommandRouter/
+│     HardSlashExecutor — unchanged, pre-layer)
+│
+└─ utterance       → LAYER 2: classify against Consumer catalog
+      candidate ranking: (1) prior output's chip_transitions targets,
+      (2) session-context-scoped consumers (matter_context, files present,
+      soft-slash intentHint bias), (3) full catalog via match_hints
+      ├─ top1 ≥ threshold_high            → dispatch (slots → M5 → execute)
+      ├─ top1-top2 gap < threshold_amb    → M4 confirm with top-2 chips
+      ├─ compound intent detected         → dispatch primary; queue secondary
+      │                                     as post-completion chip (§7.7)
+      └─ all < threshold_low → LAYER 3: L3PlannerService bounded tool loop
+            reads write? → M4 gate before executing
+            progress    → cited answer, disposition informational,
+                          chain → session.outputs["L3@t{n}"]
+            no progress → LAYER 4: no_match_handler Consumer (refusal)
+```
+
+Every path ends identically: output → `session.outputs` → OutputRouter →
+next-step chips from the executed Consumer's `chip_transitions` + "…or
+something else?" NL fallback (M3).
+
+### 7.2 Layer 2 classifier design
+
+Reuse, don't reinvent: the L2 engine is the audited `PlaybookDispatcher`
+vector infrastructure retargeted from the playbook-embeddings index to a
+**consumer-embeddings index** built from each row's `match_hints`
+(keywords + example utterances + description), with `IntentRerankerService`
+(gpt-4o-mini, existing 800ms budget) applied only inside the ambiguity band.
+Session-context features enter as deterministic score adjustments *before*
+thresholding: +bias for prior-UC declared transitions, +bias for
+`intentHint`, context-scoping filters (e.g. matter-scoped consumers only rank
+when `matter_context` present, file-requiring consumers only when session has
+files). Thresholds (`threshold_high`, `threshold_ambiguous`, `threshold_low`)
+are platform settings; `confirmation_threshold` is per-Consumer (D1).
+Single-stage classification is sufficient at the expected ~30-100 rows
+(§3.10.7.10); the embedding index keeps it O(1)-ish beyond that.
+
+### 7.3 Layer 1 chip contract
+
+A chip is `{target_consumer_id, chip_label, prefill_slots?}` rendered by M3
+from the just-executed Consumer's `chip_transitions` (D4). Chip click POSTs the
+id — no NL round-trip, no classifier. `QuickActionChips`/`SprkChatSuggestions`
+carry the payload; `UC-C-4`-style LLM-suggested extras may append after the
+declared chips, and those dispatch as L2 utterances (they are hints, not ids).
+
+### 7.4 Layer 0 specifics
+
+Default binding set at launch: `document_uploaded → [classify (order 1),
+summarize (order 2)]` — the §3.9.2 on-upload composite. The classify member's
+`ClassifiedDocType`/confidence already exist on `ChatSessionFile` (the
+enrichment fields shipped in chat-routing-redesign-r1 — Layer 0 is partly
+*wiring*, not net-new capability). Explicit-command supersede: if the upload
+turn carries an utterance or slash, Layer 0 yields to L1/L2 for that turn.
+
+### 7.5 Layer 3 planner contract
+
+Inputs: goal utterance, session snapshot, tool catalog filtered by caller
+permissions. Loop: plan → call tool → observe, ≤ budget (default 8 calls).
+Guarantees: closed tool set; every read result cites (`cite` from the tool's
+output schema); every write/communicate call suspends into M4 and resumes on
+approval; chain persists to `session.outputs`. Output disposition defaults
+`informational`. UC-C-1/C-2 = pre-scoped L3 (tool subsets), so "just chatting
+about the doc" is the same audited machinery — free-form ungrounded completion
+has no code path (D5).
+
+### 7.6 Layer 4 refusal
+
+Only reachable from L3 no-progress. The `no_match_handler` Consumer renders
+the tenant's refusal template with the live capability summary. Refusals log a
+`dispatch_refused` telemetry event with the utterance (tenant-scoped) — the
+maker's backlog signal for new Consumers.
+
+### 7.7 M4 + M5 + compound intents
+
+- **M4** fires from three sources (§5.3) through ONE store; a confirmation is a
+  chat turn with confirm/correct chips; approval resumes the suspended decision
+  (same `PendingPlan` shape, generalized).
+- **M5** slot-fill turns belong to the in-flight dispatch
+  (`in_progress_dispatch`), not the classifier — a mid-fill utterance is parsed
+  as slot content unless it's an explicit cancel/new-command (hard slash or
+  high-confidence L2 hit with `restart` semantics).
+- **Compound** (scenario E, §3.10.7.3): L2 detects multi-intent (the existing
+  `CompoundIntentDetector` heuristic generalizes to Consumer candidates, minus
+  its hardcoded name lists); primary dispatches now, secondary renders as a
+  queued chip after primary completes.
+
+### 7.8 Disposition of the ten audited mechanisms
+
+| # | Mechanism (inventory §4.1) | Disposition |
+|---|---|---|
+| 1 | `CompoundIntentDetector` | **absorb** — compound detection moves into L2; write-gating replaced by `side_effect_class` (hardcoded name sets delete) |
+| 2 | `PlaybookDispatcher` 2-stage vector | **absorb** — becomes the L2 engine (single vector path; Phase-B/Stage-1 duplication collapses; `RunPhaseBManifestPresentAsync` scaffolding deletes) |
+| 3 | LLM agent tool loop | **contract** — becomes L3PlannerService (bounded, cited, audited); no unbounded free-chat path remains |
+| 4 | `SoftSlashRouter` intentHint | **keep** — client-side bias input to L2 (retained slash UX per D-13) |
+| 5 | `AgentServiceRoutingMiddleware` | **keep, orthogonal** — infrastructure routing (which model host), not intent dispatch; renamed concern in docs |
+| 6 | `IntentRerankerService` | **absorb** — L2 ambiguity-band reranker |
+| 7 | `PlaybookCandidateSelector` | **absorb** — its top-N logic feeds M4 option presentation |
+| 8 | `ConsumerRoutingService` | **extend** — the catalog reader under everything (C-16) |
+| 9 | `InvokePlaybookHandler` | **keep** — an L3 *tool* (`invoke_playbook`), correctly a tool not a dispatcher; visibility-gated as today |
+| 10 | r7 regex + `linear_dispatch` SSE + `executeLinearDispatch.ts` | **retire** — never merges as-is; its two lessons persist: the empty-attachments guard becomes an L0/L2 precondition, and the retired-NL-branch double-dispatch race is prevented structurally (single dispatch decision per turn) |
+
+### 7.9 Walkthrough replay (P1–P10 self-check)
+
+| Step(s) | Mechanism in this design | Proposition |
+|---|---|---|
+| 1-3 upload → classify+summarize, one turn | L0 binding (§7.4); M4 only if classify < threshold | P7 ✓ |
+| 2 Tiptap mounts | widget registry mount-on-`session.documents` (C-15) | P3 setup |
+| 5 summary informational + stored | OutputRouter disposition + C-02 write | P8, P10 ✓ |
+| 6, 9 chips | M3 renders `chip_transitions` labels + NL fallback | P5, P9 ✓ |
+| 7-8 flag issues + overlay | L1 dispatch → linear Consumer → `overlay` disposition targeting widget id | P3 ✓ |
+| 10-12 task with slot-fill | L1 → SlotFillEngine (due_date, owner) as chat turns | P6 ✓ |
+| 13 write w/ references | write-shape via M4-implicit (conversation IS confirmation) → record links `source_document` + `source_analysis` from session.outputs keys | P4 ✓ |
+| 1-14 single surface, doc uploaded once | session layer carries everything | P1, P2 ✓ |
+
+### 7.10 Design decisions proposed in v0.3 (for operator ratification)
+
+| # | Decision | Section |
+|---|---|---|
+| **D7** | One dispatch service implementing L0-L4; ten-mechanism disposition per §7.8 | §5.3, §7 |
+| **D8** | `session.outputs` lives in the existing 3-tier ChatSession store (no new store); universal write; size-capped payloads with pointers | §5.2 |
+| **D9** | Consumer manifest = `sprk_playbookconsumer` EXTENDED (no new table); one catalog, two execution modes (`linear` action FK / `playbook` playbook FK) | §6.1 |
+| **D10** | `dataverse.*` tools ship as native typed handlers with MCP-conformant contracts; runtime MCP transport deferred (deviation from §3.10.7 "via MCP" — flagged) | §5.5 |
+| **D11** | Two engines + one planner: `PlaybookOrchestrationService` (playbook), `ActionRunner` (linear), `L3PlannerService` (composition). `PlaybookExecutionEngine` and legacy analysis retire | §4.2, §5.4 |
+| **D12** | One pending-action store for all M4 confirmations (plan-preview, HITL confirm, must-click unify) | §5.3 |
+
+---
 
 ## 8. Roadmap
 
-*Deferred to v0.3.*
+*Deferred pending Step 3 of the audit
+(`projects/spaarke-ai-code-audit-r1/SPAARKE-AI-MIGRATION-MAP.md`), which
+assigns keep / refactor-to-target / retire / new-required per inventoried
+component and sequences the migration. §8 will then encode phase ordering,
+with §6.5's single-routing-surface rule and §5.2's outputs store as the
+earliest enablers.*
 
 ---
 
@@ -2194,4 +2811,5 @@ prior-capability outputs, not just current utterance (§3.0 requirement 3).*
 | v0.2.3 | 2026-07-04 21:30 (approx) | Claude (with operator direction) | Added **§3.10.7 Dispatch beyond declared chips: NL fallback and off-catalog handling**. Resolves the operator's question "will we need to define all possible routes?". Formalizes: (1) destinations (Consumers) are enumerated in the catalog and closed; transitions (chip labels) are curated by the maker, not required to be exhaustive. (2) Three-layer dispatch model — Layer 1 chip click (deterministic), Layer 2 NL utterance classified against catalog with prior UC's next-steps + session-context bias, Layer 3 honest refusal via a per-tenant no-match-handler Consumer. (3) **Closed-catalog principle** (BINDING): the LLM operates over a closed set; never invents destinations; never free-form-answers when catalog match fails; UC-C-1/C-2 grounded chat Consumers refuse when cannot ground answer. (4) Maker authoring contract per Consumer (12-field declaration; maker does NOT enumerate incoming transitions or every NL utterance). (5) **D5 locked**: off-catalog resolves to honest refusal, no free-form LLM answers — legal-ops liability implication. (6) Scale expectations from single-stage (~30 Consumers) to multi-stage (300+). Section also worked scenarios A/B/C/D for step 10 of the walkthrough showing chip/NL/novel/compound behaviors. |
 | v0.2.4 | 2026-07-04 22:15 (approx) | Claude (with operator direction) | **Revised §3.10.7** — the v0.2.3 formulation was too strict and mismatched how Claude Code, CoCounsel, and Harvey actually work. Introduces **two-catalog model**: Consumer catalog (~30-100 curated capabilities with fixed prompts, outputs, dispositions) + **Tool catalog** (~15-25 typed primitives the LLM composes, powered largely by Dataverse MCP for CRUD). Dispatch model now **four layers**: L1 chip click (deterministic), L2 NL utterance → Consumer catalog match, **L3 (NEW) LLM tool loop over Tool catalog** for the long tail (grounded, bounded, cited), L4 honest refusal (much narrower — only when no tool can serve). **D5 revised**: every platform output must be (1) Cataloged Consumer output, (2) Tool-composed answer with cited grounding, (3) M4 confirmation prompt, or (4) no-match refusal. **The anti-hallucination invariant is grounding, not cataloging.** UC-C-1/UC-C-2 grounded chat Consumers reframed as pre-packaged L3 tool loops with scoped tool subsets. New **D6 locked**: two independent maker catalogs (Consumers + Tools) both closed; LLM never invokes an unlisted tool. Added **§3.10.7.6 tool authoring contract** (8-field spec), **§3.10.7.7 Consumer-vs-Tool decision guidance**, **§3.10.7.8 worked example**: Dataverse-MCP-composed portfolio query ("show me open Acme matters where budget > 100k") — LLM composes describe → query for customer → query for filtered matters → cited table output, no Consumer needed. **§3.10.7.11 updated §5-7 implications**: tool catalog + tool executor as §5 first-class components; §6 manifest gets `tool_catalog[]`; §7 dispatch protocol gets L3 planner. |
 | v0.2.5 | 2026-07-05 09:00 | Claude (with operator direction) | **Documentation-visibility maintenance** (no content changes). Reader flagged the top-of-doc Status banner was stale (still showed v0.2) and revision-log entries had date-only stamps making sequencing across a multi-session review hard to read. Fixed: (1) top Status banner bumped to **v0.2.5** with current summary of what's drafted (§0-3 including §3.9 relationship map, §3.10 orchestration walkthrough, §3.10.7 dispatch model with two-catalog composition; §4-8 still deferred). (2) Added **"Last updated"** line at top of doc so reader knows without scrolling. (3) Revision log column renamed **Date → Date/Time** with `YYYY-MM-DD HH:MM` format. (4) v0.1 through v0.2.4 backfilled with approximate times based on session flow (marked `(approx)`); precise times used v0.2.5 onward. Format note added above the log. |
+| v0.3 | 2026-07-05 16:30 | Claude Fable 5 (operator directed Step 2 of code audit) | **§4-7 drafted** — first version designed against audited reality (`spaarke-ai-code-audit-r1` inventory, same day). **§4 architecture overview**: five-layer view; THREE execution shapes (`linear` = LinearConsumers ActionRunner, `playbook` = PlaybookOrchestrationService, `l3_composition` = bounded planner); session-state backbone mapped to the existing 3-tier ChatSessionManager with two structural additions (`session.outputs` addressable store, `in_progress_dispatch`); change-vs-today table (10 dispatch mechanisms → 1, 4 routing surfaces → 1, 3 engines → 2+planner); invariants restated. **§5 component model**: 21-component map (K/E/N/R per component with today's path); session subsystem with `SessionOutput` record contract; dispatch subsystem (ConsumerDispatchService, ConfirmationGateService unifying the three gate surfaces, SlotFillEngine, SessionEventTriggerService for Layer 0, no_match_handler); execution subsystem (thin ConsumerExecutionService; L3PlannerService as contracted generalization of SprkChatAgent); tool subsystem (typed-handler framework + 8-field contract + native `dataverse.*` handlers); output subsystem (OutputRouter over disposition; PaneEventBus/registries/StructuredOutputStreamWidget keep); client model (ConversationPane decomposition to one `dispatchConsumer` helper); full O-1..O-24 + dead-code resolution table. **§6 configuration model**: no new tables — `sprk_playbookconsumer` extended to the 12-field Consumer contract (sprk_ucid, executionmode, matchhints, inputschema, disposition, chiptransitions, capturemode, confirmthreshold, oneventbindings), `sprk_analysistool` extended to the 8-field Tool contract (toolid, namespace, outputschema, sideeffectclass, permissionscope, budgetclass); single-routing-surface rule (retire LinearConsumers/Workspace.*PlaybookId/Insights.Playbooks.Map appsettings); startup health check reconciles ConsumerTypes constants ↔ rows; catalog governance fixes for audited staleness. **§7 intent+dispatch**: full L0-L4 turn protocol; L2 = existing PlaybookDispatcher vector infra retargeted to a consumer-embeddings index over match_hints + IntentRerankerService in the ambiguity band + session-context score adjustments; L3 planner contract (closed tools, budget 8, cites, M4-gated writes, chain → session.outputs); L4 refusal telemetry; M4/M5/compound semantics; **ten-mechanism disposition table** (absorb ×4, keep ×3, extend ×1, contract ×1, retire ×1); P1-P10 walkthrough replay check. **Decisions proposed D7-D12** (§7.10) incl. flagged deviation D10 (native typed handlers with MCP-conformant contracts instead of runtime Dataverse MCP — none exists in repo per audit). §8 roadmap still deferred pending audit Step 3 migration map. |
 | v0.2.6 | 2026-07-05 11:30 | Claude (with operator direction) | **Review-driven refinements to §3.9 and §3.10** based on operator review comments. (1) **§3.9.1 Universal hubs reframed** from "UC-E-3 and UC-H-1 are hubs" (an artifact of current catalog counts) to **three universal write shapes** — Edit file, Create record, Send communication — with mapping to current UCs that instantiate each shape and the Tool primitives (`document.write`, `dataverse.create`, `email.draft`) that implement them. Architectural implication: write-side of Tool catalog IS these three; curated Consumers delegate to them at the write step. (2) **§3.9.2 Primary entry points restructured** — replaces UC-per-row with entry-pattern-per-row. Adds **on-upload composite** as the DEFAULT new-session flow when a doc is uploaded (auto-classify + auto-summarize, no explicit command needed). Rationale + bounds included (per-user daily cost cap, opt-out preference, bulk-upload handling). (3) **§3.10.1 scenario rewritten** — steps 1-3 updated for auto-composite path (no "types 'summarize'"); notes low-confidence alternate where M4 confirmation gate fires between A-7 and A-1. Step 13 fixed: `sprk_task` → `sprk_event` with `sprk_eventtype = 'task'` per actual Spaarke pattern. Illustrative-fields note added at top of scenario. (4) **§3.10.2 annotated table** — rows 1-5 rewritten for Layer 0 on-upload composite path; row 13 corrected to `sprk_event` + session-state references replacing speculative `sprk_source_document` / `sprk_source_analysis` column names. (5) **§3.10.7.2 dispatch model** — Layer 0 (on-upload composite) added ahead of Layers 1-4. Layer 0 covers: auto-classify + auto-summarize on upload, M4 gate interaction, per-user cost cap, opt-out preference, bulk-upload handling, explicit-command supersede, and extensibility to other session events (matter form open, chat first-launched with context, external inbound) via §6 manifest `on_event: [{event, consumer_id}]` bindings. |
