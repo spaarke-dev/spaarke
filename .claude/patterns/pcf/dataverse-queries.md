@@ -22,3 +22,4 @@ Querying Dataverse data from PCF controls via WebAPI or context.
 - Lookup fields: read via `_fieldname_value` (logical name, underscore prefix)
 - Lookup fields: write via `SchemaName@odata.bind` (CASE-SENSITIVE — see relationship-navigation pattern)
 - Environment variables: `Xrm.Utility.getGlobalContext().getCurrentAppProperties()` for app-level config
+- **🚨 `Xrm.WebApi` does NOT expose `@odata.count`** even when you pass `$count=true` — it strips the annotation. **Never** read `result['@odata.count']`. To count related records, use `entities.length` with a reasonable `$top` cap. See [`xrm-webapi-related-count.md`](xrm-webapi-related-count.md) for the canonical pattern + failure-mode notes.

@@ -17,6 +17,7 @@
 | [fluent-v9-modern-theming.md](fluent-v9-modern-theming.md) | New PCF setup, `<platform-library>` manifest, theme-source decision | 2026-05-26 | Current |
 | [fluent-v9-canvas-vs-mda-disabled.md](fluent-v9-canvas-vs-mda-disabled.md) | PCF ships to both Canvas + MDA; disabled state needs different handling | 2026-05-26 | Current |
 | [pcf-build-scaffold.md](pcf-build-scaffold.md) | Scaffolding a NEW virtual PCF OR debugging build-fails / transparent-popover / silent-navigateTo symptoms. Captures the 10 gotchas record-header-and-notepad-r1 hit across 11 versions of live QA (v1.0.0 → v1.0.11). | 2026-07-04 | Current |
+| [xrm-webapi-related-count.md](xrm-webapi-related-count.md) | Adding a related-record count badge to a PCF icon (e.g., "3 memos", "17 tasks"). Captures the `@odata.count` gotcha that silently zeroed the record-header-and-notepad-r1 v1.0.11 → v1.0.15 toolbar badges. Load whenever you're wiring a badge counter to Xrm.WebApi. | 2026-07-04 | Current |
 
 ## Critical Constraint (ADR-022)
 PCF = React 16 (platform-provided). Code Pages = React 18 (bundled). Never mix.

@@ -19,7 +19,7 @@ $ErrorActionPreference = 'Stop'
 Add-Type -AssemblyName System.IO.Compression.FileSystem
 
 Set-Location $PSScriptRoot
-$version = "1.0.16.0"
+$version = "1.0.17.0"
 $solutionName = "MatterHeaderPcf"
 $controlSchemaName = "sprk_Spaarke.Records.MatterHeader"
 $zipPath = "bin\${solutionName}_v$version.zip"

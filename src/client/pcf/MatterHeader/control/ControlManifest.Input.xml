@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <manifest>
-  <control namespace="Spaarke.Records" constructor="MatterHeader" version="1.0.16"
+  <control namespace="Spaarke.Records" constructor="MatterHeader" version="1.0.17"
            display-name-key="Matter Header"
-           description-key="Compact 5-field summary card + 3-action toolbar for Matter records. Part of the record-header-and-notepad-r1 shared primitive set. (v1.0.16 — UAT ROOT CAUSE: fix useRelatedCount to count entities.length client-side; Xrm.WebApi strips @odata.count so prior versions always showed 0)"
+           description-key="Compact 5-field summary card + 3-action toolbar for Matter records. Part of the record-header-and-notepad-r1 shared primitive set. (v1.0.17 — UAT: badge size back to small + repositioned at icon upper-right corner instead of covering the icon face)"
            control-type="virtual">
 
     <!-- Bound field: any SingleLine.Text field on the host entity (Matter). The PCF replaces

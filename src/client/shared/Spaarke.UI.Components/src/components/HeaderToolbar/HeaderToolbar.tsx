@@ -92,18 +92,15 @@ const useStyles = makeStyles({
 
   badge: {
     position: 'absolute',
-    // v1.0.14 UAT (2026-07-04): the previous placement used
-    // `top: 0; insetInlineEnd: 0; transform: translate(35%, -35%)` which
-    // shifted the badge OUTSIDE the button by ~35% of its width. That was
-    // borderline-visible with size="small" (v1.0.11) and got fully clipped by
-    // the Power Apps form-header container's overflow when we bumped size to
-    // "medium" (v1.0.13). Fix: anchor the badge INSIDE the button's top-right
-    // corner with a small negative offset — visible, guaranteed non-clipped,
-    // and still corner-attached. `pointer-events: none` keeps clicks passing
-    // through to the button behind.
-    top: '-2px',
-    insetInlineEnd: '-2px',
+    // v1.0.17 UAT: badge sits at the icon's upper-right CORNER (not over the
+    // icon body). Small negative offsets nudge it slightly outward so the
+    // circle overhangs the button edge — classic notification-badge look.
+    // Paired with `size="small"` on CounterBadge (see JSX below) so the count
+    // is legible without swallowing the underlying icon.
+    top: '-4px',
+    insetInlineEnd: '-4px',
     zIndex: 1,
+    // Non-interactive — clicks pass through to the button behind it.
     pointerEvents: 'none',
   },
 });
@@ -190,10 +187,12 @@ export const HeaderToolbar: React.FC<IHeaderToolbarProps> = ({ title, iconSlots,
                     className={styles.badge}
                     count={slot.badge as number}
                     color="brand"
-                    // 2026-07-04 UAT feedback: bumped size from "small" → "medium"
-                    // so the count is legible without needing to hover — small
-                    // was easy to miss on a dense toolbar.
-                    size="medium"
+                    // v1.0.17 UAT: keep size "small" — the earlier "medium"
+                    // bump made the badge cover the icon face. Real-Xrm count
+                    // fix (v1.0.16, useRelatedCount client-side entities.length)
+                    // is what made the badge visible in the first place; size
+                    // was never actually the reason it looked hidden.
+                    size="small"
                     appearance="filled"
                     data-testid={`header-toolbar-badge-${slot.key}`}
                   />
