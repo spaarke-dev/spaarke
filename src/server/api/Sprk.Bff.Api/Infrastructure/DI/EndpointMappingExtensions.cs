@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api;
 using Sprk.Bff.Api.Api.Admin;
@@ -41,7 +42,21 @@ public static class EndpointMappingExtensions
         // Anonymous client config endpoint — MSAL bootstrap fallback for direct URL access (AIPU-091)
         app.MapMsalConfigEndpoints();
 
-        app.MapHealthChecks("/healthz").AllowAnonymous();
+        // /healthz is the App Service LIVENESS probe — it must not fail on catalog
+        // drift (an unseeded catalog would recycle instances forever). The FR-P0-04
+        // reconciliation check (tag "catalog") is exposed on its own endpoint below;
+        // drift additionally logs at Error on startup via the hosted service.
+        app.MapHealthChecks("/healthz", new HealthCheckOptions
+        {
+            Predicate = registration => !registration.Tags.Contains("catalog")
+        }).AllowAnonymous();
+
+        // FR-P0-04 catalog-reconciliation probe: Unhealthy on constants↔rows drift or
+        // tool↔handler bijection violation. Verified green at gate task 014 after seeding.
+        app.MapHealthChecks("/healthz/catalog", new HealthCheckOptions
+        {
+            Predicate = registration => registration.Tags.Contains("catalog")
+        }).AllowAnonymous();
 
         app.MapGet("/healthz/dataverse", TestDataverseConnectionAsync);
         app.MapGet("/healthz/dataverse/crud", TestDataverseCrudOperationsAsync);

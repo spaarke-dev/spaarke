@@ -1,0 +1,62 @@
+{
+  "_comment_top": "spaarke-ai-architecture-redesign-r1 task 009 (FR-P0-07 write half) — seed row for the dataverse.update_record WRITE tool. GA-MCP-contract-frozen per ADR-039: sprk_toolid local segment equals the GA Dataverse MCP tool name 'update_record'; arguments are 'tablename' + 'recordId' + 'item' exactly as GA (research note notes/audit-inputs/research-dataverse-mcp-2026-07.md; Learn ms.date 2026-06-05; argument shapes captured from the live GA MCP tool schemas 2026-07-05).",
+  "_comment_routing": "Runtime invocation routes to DataverseUpdateRecordHandler via sprk_handlerclass. Auto-discovered (ADR-010). P2 loop projects the LLM-facing function name from sprk_toolid; sprk_name keeps the SYS- display convention required by the seed script's safety filter.",
+  "_comment_obo": "spec MUST rule (task-012 audit): the update executes through IDataverseUserClient under the calling user's OBO token. A privilege-denied update fails with the USER's own access error — never escalated via app identity. A table invisible to the user 404s at metadata resolution BEFORE any write.",
+  "_comment_side_effect": "sprk_sideeffectclass = 100000001 (Write) — SIDE-EFFECT tool. The P2 confirmation gate (FR-P2-02, task 031) suspends/resumes this tool BY THIS DECLARED CLASS (never by tool-name list); the handler itself contains NO gating logic. Lands dark at P0.",
+  "_comment_update_only": "Update-only semantics: the handler PATCHes with If-Match: * so a missing/invisible record yields the user's own 404 instead of the Web API's default upsert-create (an update must never masquerade as a create).",
+  "_comment_consumption": "Read by scripts/Seed-TypedHandlers.ps1. Idempotent — UPSERT by sprk_handlerclass + sprk_toolcode with sprk_name 'SYS-%' filter.",
+  "sprk_name": "SYS-Dataverse Update Record",
+  "sprk_toolcode": "DATAVERSE-UPDATE-RECORD",
+  "sprk_toolid": "dataverse.update_record",
+  "sprk_namespace": "dataverse",
+  "sprk_sideeffectclass": 100000001,
+  "sprk_permissionscope": "dataverse-user-context",
+  "sprk_budgetclass": "light",
+  "sprk_description": "Updates columns on one existing Dataverse record under the calling user's permissions. Call dataverse.describe first if the table's schema is unknown — do NOT guess column logical names from display names. Only the columns present in 'item' are changed. Values: strings/numbers/booleans for simple fields; numeric option values for choice columns; comma-separated numeric values for multi-select choice; lookup fields as {\"relatedTable\": \"...\", \"recordId\": \"guid\"}. Update-only: a record that does not exist or is not visible to the user fails with not-found — it is never created. WRITE tool: executes with the user's own privileges.",
+  "sprk_handlerclass": "DataverseUpdateRecordHandler",
+  "sprk_availableincontexts": 100000001,
+  "_comment_availableincontexts": "100000001 = Chat only — dataverse.* tools exist for the agent loop (P2), not playbook nodes.",
+  "sprk_jsonschema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "dataverse.update_record Request",
+    "description": "Argument shape frozen against the GA Dataverse MCP update_record(tablename, recordId, item) tool.",
+    "type": "object",
+    "required": ["tablename", "recordId", "item"],
+    "properties": {
+      "tablename": {
+        "type": "string",
+        "minLength": 1,
+        "description": "The logical (schema) name of the table to update a record in (e.g. 'account', 'sprk_event')."
+      },
+      "recordId": {
+        "type": "string",
+        "minLength": 1,
+        "description": "The GUID of the record to update."
+      },
+      "item": {
+        "type": "object",
+        "minProperties": 1,
+        "description": "Properties to update as key-value pairs. Keys are column logical names from dataverse.describe. Values: strings, numbers, or booleans for simple fields. For lookup/customer fields use an object: {\"relatedTable\": \"account\", \"name\": \"Contoso Ltd\", \"recordId\": \"guid\"} (recordId required on this transport). For choice fields use the numeric option value. For multi-select choice use comma-separated values like \"100000002,100000004\".",
+        "additionalProperties": true
+      }
+    },
+    "additionalProperties": false
+  },
+  "sprk_outputschema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "dataverse.update_record Result",
+    "type": "object",
+    "required": ["tool", "tablename", "recordId", "path"],
+    "properties": {
+      "tool": { "const": "dataverse.update_record" },
+      "tablename": { "type": "string", "description": "Table logical name of the updated record." },
+      "recordId": { "type": "string", "description": "GUID of the updated record." },
+      "path": { "type": "string", "description": "tables/{tablename}/records/{recordId} — replayable via dataverse.describe." },
+      "columnsUpdated": { "type": "array", "items": { "type": "string" }, "description": "Column logical names updated (identifiers only — never values)." },
+      "columnCount": { "type": "integer" }
+    }
+  },
+  "sprk_configuration": {
+    "_comment": "No method-discriminator dispatch — single LLM-facing function. Reserved for per-environment defaults."
+  }
+}

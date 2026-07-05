@@ -124,6 +124,47 @@ public interface IConsumerRoutingService
         IRoutingContext? context = null,
         string? environment = null,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// FR-P0-03 (spaarke-ai-architecture-redesign-r1 task 004) — resolve the
+    /// FULL <see cref="Binding"/> contract for the given consumer + context:
+    /// the matched <c>sprk_playbookconsumer</c> row (all §6.2 columns —
+    /// ucid, tool description, disposition, chip transitions, risk, capture
+    /// mode, on-event bindings, surfaces, model-tier override) joined with the
+    /// execution fields of its target <c>sprk_analysisaction</c> row (kind,
+    /// workflow class, input schema, model tier).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Same resolution algorithm as <see cref="ResolveAsync"/> /
+    /// <see cref="ResolveActionAsync"/> (consumer-code + environment +
+    /// match-conditions + priority tiebreak). A row qualifies when EITHER
+    /// target lookup (<c>sprk_playbook</c> or <c>sprk_action</c>) is
+    /// populated; rows with neither are admin errors and are skipped.
+    /// </para>
+    /// <para>
+    /// <b>Legacy tolerance</b>: rows created before the task-003 schema
+    /// extension resolve without error; null new columns map to the documented
+    /// safe defaults on <see cref="Binding"/> (Informational / None /
+    /// LoopElicitation / Prompted / empty lists / null tiers).
+    /// </para>
+    /// <para>
+    /// <b>ADR-039</b>: this contract is the ONLY routing contract — later
+    /// phases (Event Rules, Output Router, loop tool-projection, confirmation
+    /// gate, chips) consume it rather than adding routing config elsewhere.
+    /// </para>
+    /// </remarks>
+    /// <returns>
+    /// The full <see cref="Binding"/> contract of the highest-priority
+    /// matching record, or <c>null</c> when no record matches (callers
+    /// graceful-degrade exactly as for <see cref="ResolveAsync"/>).
+    /// </returns>
+    Task<Binding?> ResolveBindingAsync(
+        string consumerType,
+        string? consumerCode = "default",
+        IRoutingContext? context = null,
+        string? environment = null,
+        CancellationToken cancellationToken = default);
 }
 
 /// <summary>

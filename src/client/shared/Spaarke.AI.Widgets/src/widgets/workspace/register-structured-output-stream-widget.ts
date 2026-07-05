@@ -25,8 +25,8 @@ import { summaryWidgetVisibility } from './pillar9-visibility';
 /**
  * The widget type ID under which StructuredOutputStreamWidget is registered.
  * Exported so dispatchers (e.g. ConversationPane in SpaarkeAi, task 020 /
- * D2-11; InsightsResponseRenderer in task 026 / D2-16) can reference the
- * string symbolically instead of repeating the literal.
+ * D2-11) can reference the string symbolically instead of repeating the
+ * literal.
  */
 export const STRUCTURED_OUTPUT_STREAM_WIDGET_TYPE = 'structured-output-stream' as const;
 

@@ -27,12 +27,12 @@
 
 | # | Task | FR | Rigor | Deps | Status |
 |---|---|---|---|---|---|
-| 002 | Digest compaction generalized to outputs | FR-P0-02 | FULL | 001 | 🔲 |
-| 004 | ConsumerRoutingService returns full Binding contract | FR-P0-03 | FULL | 003 | 🔲 |
-| 005 | Boot reconciliation health checks | FR-P0-04 | FULL | 003, 004 | 🔲 |
-| 008 | `dataverse.*` READ handlers (describe/read_query/search_data) | FR-P0-07 | FULL | 003 | 🔲 |
-| 009 | `dataverse.*` WRITE handlers (create/update/delete) | FR-P0-07 | FULL | 003, 008 | 🔲 |
-| 071 | Track-B batch 2: Insights renderer cluster | FR-TB-01 | STANDARD | — | 🔲 |
+| 002 | Digest compaction generalized to outputs (keys verbatim in digest; 22 targeted + 768 namespace tests green) | FR-P0-02 | FULL | 001 | ✅ |
+| 004 | ConsumerRoutingService full Binding contract (Binding record + 5 enums; action LinkEntity; legacy-tolerant; 15 new tests) | FR-P0-03 | FULL | 003 | ✅ |
+| 005 | Boot reconciliation health checks (6 drift classes → Unhealthy; registry-abstraction bijection; 13 tests) | FR-P0-04 | FULL | 003, 004 | ✅ |
+| 008 | `dataverse.*` READ handlers (GA-frozen names; user-OBO fail-closed; SQL→OData translator; rows seeded spaarkedev1; 305 tests) | FR-P0-07 | FULL | 003 | ✅ |
+| 009 | `dataverse.*` WRITE handlers (GA-frozen; If-Match update-only; injection-hardened mapper; 6↔6 bijection live; 55 tests) | FR-P0-07 | FULL | 003, 008 | ✅ |
+| 071 | Track-B batch 2: Insights renderers (23 deleted; AddToAssistantToggle KEPT — live via R6 Pillar 9, inventory stale) | FR-TB-01 | STANDARD | — | ✅ |
 
 ### Wave W-P0-C (parallel ×4)
 

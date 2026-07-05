@@ -14,9 +14,10 @@
  * EntityCreationService.ts (and the two wizard service files using the same
  * import surface).
  *
- * Added by R6 Wave C-G3 gap-fill (task 057 — PinToMatterButton.test.tsx and
- * the other two affordance tests previously committed in 2677f9439 without
- * test verification). Mirrors the existing `marked.ts` mock pattern.
+ * Added by R6 Wave C-G3 gap-fill (task 057 — the Pillar-6b affordance tests
+ * previously committed in 2677f9439 without test verification; of those only
+ * AddToAssistantToggle.test.tsx remains after the Track-B batch-2 deadwood
+ * sweep). Mirrors the existing `marked.ts` mock pattern.
  *
  * @see jest.config.ts moduleNameMapper — wires this file to `@spaarke/sdap-client`
  */

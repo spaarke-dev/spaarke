@@ -53,7 +53,7 @@
  * @see AiSessionProvider.tsx — session + streaming + PaneEventBus routing (R2)
  * @see PlaybookGalleryWidget.tsx — dispatches playbook-selected (AIPU2-086/102)
  * @see WelcomePanel.tsx — welcome experience (unchanged from R1)
- * @see ChatHistoryPanel.tsx — rewired to a side-overlay by task 022 (FR-03 / OC-01)
+ * @see HistoryOverlay.tsx — session history side-overlay (task 022, FR-03 / OC-01)
  * @see PaneHeader.tsx (@spaarke/ui-components) — shared header primitive (FR-01, task 010)
  * @see ADR-012 — Shared component library (PaneHeader lives in @spaarke/ui-components)
  * @see ADR-021 — Fluent v9, dark mode via FluentProvider (no hardcoded colors)

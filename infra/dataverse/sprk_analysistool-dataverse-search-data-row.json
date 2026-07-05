@@ -1,0 +1,75 @@
+{
+  "_comment_top": "spaarke-ai-architecture-redesign-r1 task 008 (FR-P0-07 read half) — seed row for the dataverse.search_data read tool. GA-MCP-contract-frozen per ADR-039: sprk_toolid local segment equals the GA Dataverse MCP tool name 'search_data'; arguments are 'query' + 'scope' exactly as GA (research note notes/audit-inputs/research-dataverse-mcp-2026-07.md; Learn ms.date 2026-06-05).",
+  "_comment_routing": "Runtime invocation routes to DataverseSearchDataHandler via sprk_handlerclass. Auto-discovered (ADR-010). P2 loop projects the LLM-facing function name from sprk_toolid.",
+  "_comment_obo": "spec MUST rule (task-012 audit): the search executes through IDataverseUserClient (POST /api/search/v2.0/query) under the calling user's OBO token — Dataverse Search applies the user's security roles + row-level security to hits. NO app-only path.",
+  "_comment_side_effect": "sprk_sideeffectclass = 100000000 (Read).",
+  "_comment_scope_deviation": "DOCUMENTED DEVIATION: GA MCP requires 'scope' (an MCP scope name from describe('scopes/')). The native transport has no MCP scope registry, so 'scope' is OPTIONAL here and interpreted as a comma-separated list of table logical names to restrict the search. Property NAME is frozen; a future MCP transport swap only tightens the schema (a data edit on this row, not a code change).",
+  "_comment_grounding": "ADR-039 grounding: results are GA-MCP-style paths tables/{table}/records/{guid} + adapter-level citation metadata; the model reads full details via dataverse.describe on a returned path.",
+  "_comment_consumption": "Read by scripts/Seed-TypedHandlers.ps1. Idempotent — UPSERT by sprk_handlerclass + sprk_toolcode with sprk_name 'SYS-%' filter.",
+  "sprk_name": "SYS-Dataverse Search Data",
+  "sprk_toolcode": "DATAVERSE-SEARCH-DATA",
+  "sprk_toolid": "dataverse.search_data",
+  "sprk_namespace": "dataverse",
+  "sprk_sideeffectclass": 100000000,
+  "sprk_permissionscope": "dataverse-user-context",
+  "sprk_budgetclass": "standard",
+  "sprk_description": "Searches Dataverse records for keywords under the calling user's permissions and returns matching records as citable paths (tables/{table}/records/{guid}) with relevance scores. Use this when the user asks to find records by name, keyword, or phrase and the exact table or column is unknown. For structured filtering on known columns use dataverse.read_query instead. Use dataverse.describe on a returned path to read the full record. Results respect the current user's Dataverse security roles and row-level security.",
+  "sprk_handlerclass": "DataverseSearchDataHandler",
+  "sprk_availableincontexts": 100000001,
+  "_comment_availableincontexts": "100000001 = Chat only — dataverse.* tools exist for the agent loop (P2), not playbook nodes.",
+  "sprk_jsonschema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "dataverse.search_data Request",
+    "description": "Argument shape frozen against the GA Dataverse MCP search_data(query, scope) tool. 'scope' is optional on the native transport (documented deviation — see seed row comments).",
+    "type": "object",
+    "required": ["query"],
+    "properties": {
+      "query": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Search keywords or phrase."
+      },
+      "scope": {
+        "type": "string",
+        "description": "Optional. Native transport: comma-separated table logical names to restrict the search (e.g. 'account,contact'). Omit to search all search-enabled tables."
+      }
+    },
+    "additionalProperties": false
+  },
+  "sprk_outputschema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "dataverse.search_data Result",
+    "type": "object",
+    "required": ["tool", "results", "count"],
+    "properties": {
+      "tool": { "const": "dataverse.search_data" },
+      "results": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "path": { "type": "string", "description": "tables/{table}/records/{guid} — read full details via dataverse.describe" },
+            "entity": { "type": "string" },
+            "recordId": { "type": "string" },
+            "score": { "type": ["number", "null"] },
+            "content": { "type": ["string", "null"], "description": "Matched highlight excerpts when available." }
+          }
+        }
+      },
+      "count": { "type": "integer" },
+      "citations": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "path": { "type": "string" },
+            "entity": { "type": "string" }
+          }
+        }
+      }
+    }
+  },
+  "sprk_configuration": {
+    "_comment": "No method-discriminator dispatch — single LLM-facing function. Reserved for per-environment result caps."
+  }
+}

@@ -1,3 +1,5 @@
+using System.Text;
+using System.Text.Json;
 using Sprk.Bff.Api.Models.Ai.Chat;
 
 namespace Sprk.Bff.Api.Services.Ai.Chat;
@@ -18,6 +20,17 @@ namespace Sprk.Bff.Api.Services.Ai.Chat;
 ///   - In Phase 1 (AIPL-052), summarisation generates a placeholder summary.
 ///     The real LLM-based summarisation is implemented in AIPL-054 (ChatEndpoints).
 ///
+/// Ledger-aware digest (ADR-040 / FR-P0-02):
+///   - The compacted digest covers session-ledger <see cref="SessionOutput"/> entries in
+///     addition to conversational history. Each output contributes one digest line carrying
+///     its addressable <c>{bindingId}@t{n}</c> key (see <see cref="SessionLedger.BuildOutputKey"/>),
+///     disposition, uc id, and a size-capped content snippet — so post-compaction sessions
+///     can still resolve ledger references ("email that summary to John" at G-P2).
+///   - Both compaction events (summarise@15 and archive@50) emit the output section.
+///   - Governance (ADR-015 / NFR-07): the digest is Tier 3 session data persisted to
+///     <c>sprk_aichatsummary.sprk_summary</c>; log statements carry counts / ids ONLY —
+///     never digest or payload content.
+///
 /// Lifetime: Scoped — one instance per HTTP request (ADR-010).
 /// </summary>
 public sealed class ChatHistoryManager
@@ -37,6 +50,13 @@ public sealed class ChatHistoryManager
     /// Default maximum number of messages to return from <see cref="GetHistoryAsync"/>.
     /// </summary>
     public const int DefaultMaxMessages = 50;
+
+    /// <summary>
+    /// Maximum length of the per-output content snippet embedded in the compacted
+    /// digest (ADR-040: digests summarize outputs compactly; full payloads stay in
+    /// the ledger, addressable by key).
+    /// </summary>
+    public const int MaxOutputSnippetLength = 120;
 
     private readonly ChatSessionManager _sessionManager;
     private readonly IChatDataverseRepository _dataverseRepository;
@@ -177,9 +197,10 @@ public sealed class ChatHistoryManager
     /// <param name="ct">Cancellation token.</param>
     public async Task TriggerSummarisationAsync(ChatSession session, CancellationToken ct = default)
     {
+        // NFR-07: log counts / ids only — never message, digest, or output content.
         _logger.LogInformation(
-            "Summarisation triggered for session {SessionId} (messageCount={Count}, tenant={TenantId})",
-            session.SessionId, session.Messages.Count, session.TenantId);
+            "Summarisation triggered for session {SessionId} (messageCount={Count}, outputCount={OutputCount}, tenant={TenantId})",
+            session.SessionId, session.Messages.Count, session.Outputs?.Count ?? 0, session.TenantId);
 
         // Phase 1: Placeholder summary — real LLM summarisation added in AIPL-054.
         // The summary condenses older messages to free context for newer messages.
@@ -189,7 +210,8 @@ public sealed class ChatHistoryManager
             .ToList();
 
         var summaryText = $"[Summary of {olderMessages.Count} earlier messages — "
-                         + $"session {session.SessionId}, generated {DateTimeOffset.UtcNow:u}]";
+                         + $"session {session.SessionId}, generated {DateTimeOffset.UtcNow:u}]"
+                         + BuildOutputDigestSection(session.Outputs);
 
         await _dataverseRepository.UpdateSessionSummaryAsync(
             session.TenantId,
@@ -208,20 +230,123 @@ public sealed class ChatHistoryManager
     /// <param name="ct">Cancellation token.</param>
     public async Task ArchiveHistoryAsync(ChatSession session, CancellationToken ct = default)
     {
+        // NFR-07: log counts / ids only — never message, digest, or output content.
         _logger.LogWarning(
-            "Archive threshold reached for session {SessionId} (messageCount={Count}). "
+            "Archive threshold reached for session {SessionId} (messageCount={Count}, outputCount={OutputCount}). "
             + "Archiving history (NFR-12). Tenant={TenantId}",
-            session.SessionId, session.Messages.Count, session.TenantId);
+            session.SessionId, session.Messages.Count, session.Outputs?.Count ?? 0, session.TenantId);
 
         // Phase 1: Log and persist final summary.
         // Full archival (moving sprk_aichatmessage records to archive entity) is deferred.
         var archiveSummary = $"[ARCHIVED — session {session.SessionId} reached {session.Messages.Count} messages "
-                            + $"at {DateTimeOffset.UtcNow:u}]";
+                            + $"at {DateTimeOffset.UtcNow:u}]"
+                            + BuildOutputDigestSection(session.Outputs);
 
         await _dataverseRepository.UpdateSessionSummaryAsync(
             session.TenantId,
             session.SessionId,
             archiveSummary,
             ct);
+    }
+
+    // =========================================================================
+    // Ledger-output digest (ADR-040 / FR-P0-02)
+    // =========================================================================
+
+    /// <summary>
+    /// Builds the ledger-outputs section of the compacted session digest.
+    ///
+    /// One line per <see cref="SessionOutput"/>, carrying the addressable
+    /// <c>{bindingId}@t{n}</c> key VERBATIM (ADR-040: references must remain
+    /// resolvable post-compaction), the disposition, the uc id, and a content
+    /// snippet capped at <see cref="MaxOutputSnippetLength"/> characters.
+    ///
+    /// Returns <see cref="string.Empty"/> when the session has no ledger outputs,
+    /// leaving the pre-ledger digest shape byte-for-byte unchanged (additive
+    /// generalization — spec FR-P0-02 acceptance).
+    /// </summary>
+    private static string BuildOutputDigestSection(IReadOnlyList<SessionOutput>? outputs)
+    {
+        if (outputs is null || outputs.Count == 0)
+        {
+            return string.Empty;
+        }
+
+        var sb = new StringBuilder();
+        sb.Append('\n').Append($"[Ledger outputs ({outputs.Count}) — addressable post-compaction]");
+
+        foreach (var output in outputs)
+        {
+            sb.Append('\n')
+              .Append("- ").Append(output.Key)
+              .Append(" [").Append(output.Disposition).Append(']')
+              .Append(' ').Append(output.UcId);
+
+            var snippet = BuildPayloadSnippet(output.Payload);
+            if (snippet.Length > 0)
+            {
+                sb.Append(": ").Append(snippet);
+            }
+        }
+
+        return sb.ToString();
+    }
+
+    /// <summary>
+    /// Extracts a compact, single-line snippet from an output payload for the digest.
+    /// Prefers a summary-like string property on object payloads; falls back to the
+    /// raw JSON. Always capped at <see cref="MaxOutputSnippetLength"/> characters —
+    /// the digest summarizes, the ledger entry remains the full payload.
+    /// </summary>
+    private static string BuildPayloadSnippet(JsonElement payload)
+    {
+        var text = payload.ValueKind switch
+        {
+            JsonValueKind.Undefined => string.Empty,
+            JsonValueKind.Null => string.Empty,
+            JsonValueKind.String => payload.GetString() ?? string.Empty,
+            JsonValueKind.Object => FindSummaryLikeProperty(payload) ?? payload.GetRawText(),
+            _ => payload.GetRawText()
+        };
+
+        text = text.ReplaceLineEndings(" ").Trim();
+        if (text.Length <= MaxOutputSnippetLength)
+        {
+            return text;
+        }
+
+        // Back off one char if the cap would split a surrogate pair (e.g. an emoji),
+        // which would persist a malformed UTF-16 string to Dataverse.
+        var cut = MaxOutputSnippetLength;
+        if (char.IsHighSurrogate(text[cut - 1]))
+        {
+            cut--;
+        }
+
+        return text[..cut] + "…";
+    }
+
+    /// <summary>
+    /// Returns the first summary-like string property on an object payload
+    /// (<c>summary</c>, <c>title</c>, <c>text</c>, <c>content</c>, <c>name</c> —
+    /// case-insensitive), or null when none is present.
+    /// </summary>
+    private static string? FindSummaryLikeProperty(JsonElement payload)
+    {
+        string[] preferredNames = ["summary", "title", "text", "content", "name"];
+
+        foreach (var name in preferredNames)
+        {
+            foreach (var property in payload.EnumerateObject())
+            {
+                if (property.Value.ValueKind == JsonValueKind.String
+                    && string.Equals(property.Name, name, StringComparison.OrdinalIgnoreCase))
+                {
+                    return property.Value.GetString();
+                }
+            }
+        }
+
+        return null;
     }
 }

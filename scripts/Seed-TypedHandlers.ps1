@@ -222,6 +222,34 @@ $RowFiles = @{
     # default user affordance available in every chat session). sprk_availableincontexts =
     # Chat (100000001) — playbook nodes do not read from chat-session workspace tabs.
     "GET-WORKSPACE-TAB-CONTENT"        = "$RepoRoot/infra/dataverse/sprk_analysistool-get-workspace-tab-content-row.json"
+    # spaarke-ai-architecture-redesign-r1 / task 008 / FR-P0-07 (read half) — the three
+    # dataverse.* READ tools with GA-Dataverse-MCP-frozen contracts (ADR-039):
+    #   dataverse.describe    → DataverseDescribeHandler    (describe(path, scope?))
+    #   dataverse.read_query  → DataverseReadQueryHandler   (read_query(querytext))
+    #   dataverse.search_data → DataverseSearchDataHandler  (search_data(query, scope?))
+    # All three: sprk_namespace='dataverse', sprk_sideeffectclass=Read (100000000),
+    # sprk_permissionscope='dataverse-user-context', executed EXCLUSIVELY over the user-OBO
+    # Dataverse Web API via IDataverseUserClient (spec MUST rule; audited by task 012).
+    # Rows carry the task-003 catalog columns (sprk_toolid / sprk_namespace / sprk_outputschema /
+    # sprk_sideeffectclass / sprk_permissionscope / sprk_budgetclass). Task 009 adds the three
+    # WRITE tools (create_record / update_record / delete_record) alongside.
+    "DATAVERSE-DESCRIBE"               = "$RepoRoot/infra/dataverse/sprk_analysistool-dataverse-describe-row.json"
+    "DATAVERSE-READ-QUERY"             = "$RepoRoot/infra/dataverse/sprk_analysistool-dataverse-read-query-row.json"
+    "DATAVERSE-SEARCH-DATA"            = "$RepoRoot/infra/dataverse/sprk_analysistool-dataverse-search-data-row.json"
+    # spaarke-ai-architecture-redesign-r1 / task 009 / FR-P0-07 (write half) — the three
+    # dataverse.* WRITE tools with GA-Dataverse-MCP-frozen contracts (ADR-039):
+    #   dataverse.create_record → DataverseCreateRecordHandler (create_record(tablename, item))
+    #   dataverse.update_record → DataverseUpdateRecordHandler (update_record(tablename, recordId, item))
+    #   dataverse.delete_record → DataverseDeleteRecordHandler (delete_record(tablename, hasUserApproved, recordId))
+    # All three: sprk_namespace='dataverse', sprk_sideeffectclass=Write (100000001) — SIDE-EFFECT
+    # tools gated at P2 by the ONE confirmation gate keyed on this declared class (FR-P2-02,
+    # task 031; NEVER by tool-name list). Executed EXCLUSIVELY over the user-OBO Dataverse Web
+    # API via IDataverseUserClient (spec MUST rule; audited by task 012) — privilege-denied
+    # writes surface the USER's own access error. Land dark at P0; P3 create-task (FR-P3-03)
+    # is the first production consumer.
+    "DATAVERSE-CREATE-RECORD"          = "$RepoRoot/infra/dataverse/sprk_analysistool-dataverse-create-record-row.json"
+    "DATAVERSE-UPDATE-RECORD"          = "$RepoRoot/infra/dataverse/sprk_analysistool-dataverse-update-record-row.json"
+    "DATAVERSE-DELETE-RECORD"          = "$RepoRoot/infra/dataverse/sprk_analysistool-dataverse-delete-record-row.json"
 }
 
 # -----------------------------------------------------------------------------
@@ -313,8 +341,9 @@ function Get-PayloadFromRowJson {
     $payload = [ordered]@{}
     foreach ($prop in $obj.PSObject.Properties) {
         if ($prop.Name.StartsWith("_comment")) { continue }
-        # sprk_jsonschema + sprk_configuration are persisted as serialized strings.
-        if ($prop.Name -in @("sprk_jsonschema", "sprk_configuration")) {
+        # sprk_jsonschema + sprk_configuration + sprk_outputschema (task-003 column; carried
+        # by the dataverse.* rows per ADR-039 grounding) are persisted as serialized strings.
+        if ($prop.Name -in @("sprk_jsonschema", "sprk_configuration", "sprk_outputschema")) {
             $payload[$prop.Name] = ($prop.Value | ConvertTo-Json -Depth 50 -Compress)
         }
         else {

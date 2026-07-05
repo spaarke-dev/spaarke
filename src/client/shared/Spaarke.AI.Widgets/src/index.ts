@@ -189,8 +189,8 @@ export { SEARCH_CRITERIA_RESULT_WIDGET_TYPE } from './widgets/workspace/register
 // extensibility story (risk UR-02 mitigation).
 //
 // Two CONCRETE schemas are exported (SUMMARIZE_SCHEMA, INSIGHTS_PLAYBOOK_SCHEMA)
-// so downstream consumers (chat-pane dispatcher, InsightsResponseRenderer) do
-// not redeclare them. Per task 006 spike: schema declaration order = stream
+// so downstream consumers (e.g. the chat-pane dispatcher) do not redeclare
+// them. Per task 006 spike: schema declaration order = stream
 // arrival order = render order (TL;DR first for Summarize).
 //
 // Registered under 'structured-output-stream' via
