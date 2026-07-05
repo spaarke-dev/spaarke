@@ -1,6 +1,11 @@
 # Spaarke AI — Greenfield Conceptual Design
 
-> **Status**: DRAFT v0.1 — 2026-07-05, operator-requested before audit Step 3.
+> **Status**: DRAFT **v0.2** — 2026-07-05. v0.1 reviewed with the operator
+> (Q&A recorded in §9); revisions: §4.2 rewritten to the **Action + Binding**
+> model (single `capability` table rejected — reuse-first + one-Action-many-
+> configs), playbook fate recorded, **OQ-2 and OQ-4 resolved** in §8.
+> Remaining open before Step 3: OQ-1 (classifier vs loop), OQ-3 (slot-fill
+> engine vs loop-native).
 > **Premise**: *"As if you were a senior developer working in our platform but with
 > no preexisting AI architecture or components, what would that design.md look
 > like?"* This document designs the Spaarke AI platform from the **product
@@ -196,27 +201,60 @@ is the ONLY carrier of cross-capability context (no capability reads the screen)
 Retention: session TTL → durable archive of outputs onto the Dataverse record
 (matter timeline) where a capability declares it.
 
-### 4.2 Capability Catalog + Executor
+### 4.2 Capability Catalog + Executor (REVISED v0.2 — Action + Binding, not a new entity)
 
-One Dataverse table, `capability`:
+> **Revision note (2026-07-05, operator review)**: v0.1 sketched a single new
+> `capability` table. That was rejected on review for two reasons: (1) it
+> breaks the **one-Action-many-configs** reuse pattern the overlap analysis
+> (§3.9.8 canonical doc) depends on — the same briefing Action serves a widget
+> binding AND a scheduled-email binding; a single row would duplicate prompts;
+> (2) it violates the reuse-first rule when two fit-for-purpose tables with
+> reader services already exist. **"Capability" is hereby vocabulary, not
+> schema**: the concept of an Action × Binding pair, projected to the agent
+> loop as one tool.
+
+**The catalog is two existing tables, refined:**
+
+**`sprk_analysisaction` (Action — the execution unit)**. Already owns the JPS
+prompt + output schema + scope refs. Refinements:
 
 | Field | Meaning |
 |---|---|
-| `id`, `uc_id`, `description` | identity + tool description (the intent surface) |
-| `kind` | `prompted` \| `coded` |
-| `prompt_template`, `output_schema`, `model_tier` | for `prompted` (JPS-style template; schema enforced via structured outputs) |
-| `workflow_class` | for `coded` (registered C# class; catalog row still owns prompts/schemas the workflow uses) |
+| `kind` | `prompted` (default) \| `coded` (+ workflow class ref) — Wave-11 code-defined composites get a first-class home INSIDE the Action concept |
 | `input_schema` | typed args incl. `ledger_resolution` per arg ("latest summarize output.entities") |
+| `model_tier` (default) | overridable per binding |
+| prompt, output schema, skills/knowledge/persona refs | unchanged — already there |
+
+**`sprk_playbookconsumer` (Binding — the invocation unit)**. Already owns
+consumertype/code, environment, priority, target FK. Refinements:
+
+| Field | Meaning |
+|---|---|
+| tool description + match surface | the intent text the agent loop sees |
 | `disposition` | informational \| work_product \| overlay \| email \| record \| notification |
-| `next_steps` | `[{target_capability_id, chip_label}]` |
-| `risk` | none \| confirm-below-confidence \| always-confirm |
-| `surfaces`, `environment`, `enabled` | where it appears; per-env routing |
+| `next_steps` | `[{target_binding_id, chip_label}]` |
+| `risk` | none \| confirm-when-uncertain \| always-confirm |
+| `on_event` | Layer 0 / Event-path membership |
+| `surfaces`, `enabled`, per-binding model override | where it appears |
 
 The Executor: `prompted` = render template with resolved args + ledger refs →
-one structured-output call → validate → ledger write. `coded` = instantiate
-workflow class → it orchestrates in C# (calling the executor and tools as
-needed) → ledger write. **~30-60 catalog rows cover the §3 catalog**; the ten
-overlap consolidations (§3.9.8) become one row each with variant configs.
+one structured-output call → validate → ledger write. `coded` = instantiate the
+workflow class → orchestrates in C# (calling the executor and tools as needed;
+reading its prompts from child Action rows) → ledger write. **~30-60 bindings
+over a smaller set of Actions cover the §3 catalog**; the ten overlap
+consolidations (§3.9.8) become one Action each with N bindings — prompts stay
+single-sourced. Authoring UX presents "Action + its binding" as one flow for
+the majority 1:1 case; "add another binding" is the advanced path.
+
+**What happens to playbooks** (operator-confirmed 2026-07-05; full resolution
+in canonical doc §4.2.1): a playbook is at most a **system-defined composite
+Action** — control flow is hard-coded (C# workflow, or frozen developer-
+authored graphs for existing Insights pipelines); the business-analyst surface
+is the prompt-based scopes (Actions/Skills/Personas) and binding metadata,
+never graphs. Single-node playbook wrappers dissolve into Action + binding;
+playbook-as-dispatch-unit retires; "playbook" survives as product language.
+PlaybookBuilder's future = the BA scope/prompt/binding editor (canvas
+de-scoped).
 
 ### 4.3 Agent Turn Runtime
 
@@ -332,11 +370,11 @@ deliverables); add primitive tools; change gate policies platform-wide.
 | Dimension | Greenfield (this doc) | Constrained v0.3 (canonical §4-7) | The decision this exposes |
 |---|---|---|---|
 | Free-text intent | Agent loop over capability tools (B1/B2) | L2 classifier stack (vector index + reranker + thresholds) feeding L3 loop | **OQ-1**: is a maintained classifier stack justified vs letting the loop dispatch? v0.3 reuses audited, working components; greenfield removes a whole tunable subsystem. Cost per turn is comparable (both call a model); determinism differs (L2 is replayable; loop dispatch is model-judgment + audit trail). |
-| Compound orchestration | `coded` workflows (C# classes) + loop composition; **no interpreter** | Keeps `PlaybookOrchestrationService` (33 executors) as one of three shapes | **OQ-2**: does the node-graph engine survive? See canonical §4.2.1. Note the evidence cuts both ways: Waves 11-12 moved code-ward, but insights-engine-r2 deliberately moved DATA-ward ("Insights IS a JPS application", retired a code orchestrator) and shipped. Greenfield answer: per-node SME-editable *prompts* don't require data-defined *control flow* — a `coded` Insights workflow can still read its prompts from catalog rows. But retiring the engine forces an Insights re-migration; that cost belongs in the OQ-2 call. |
+| Compound orchestration | `coded` workflows (C# classes) + loop composition; **no interpreter** | Keeps `PlaybookOrchestrationService` (33 executors) as one of three shapes | **OQ-2 RESOLVED 2026-07-05** (canonical §4.2.1): the operator's R7 playbook definition (system-hard-coded structure; BA edits prompt-scopes only) removes the maker-graph promise from requirements. No maker graph authoring ever; new composites = coded workflows; existing Insights pipelines stay on the engine as a maintained-but-frozen representation, retired by attrition. No forced re-migration. |
 | Slot-fill | Native loop elicitation (model asks for missing schema args) | Dedicated `SlotFillEngine` + `in_progress_dispatch` state | **OQ-3**: engine vs emergent. Greenfield is less code; v0.3 is more deterministic about mid-fill turn semantics. |
 | Session context | Unified ledger (all entry types, one contract) | `session.outputs` grafted onto existing ChatSession | Same destination; ledger is the cleaner end-state model for Step 3 to aim at. |
 | Dataverse tools | MCP contracts at the boundary; per-tool transport choice (§5.3) | Native typed handlers, GA-MCP-mirrored contracts, swap-ready (D10 revised) | **OQ-4 RESOLVED 2026-07-05**: the two designs now converge — contracts = GA MCP surface; runtime transport = OBO Web API now (metering + proven auth), `/api/mcp` per-tool later pending the OBO spike. |
-| Manifest | ONE `capability` table | Extend `sprk_playbookconsumer` + `sprk_analysistool` + keep playbook/node/action tables | Greenfield collapses playbook/node/action/consumer into one row for prompted capabilities; v0.3 preserves the R7 investment. Step 3 decides how far to converge. |
+| Manifest | ~~ONE `capability` table~~ → **REVISED v0.2**: Action + Binding (two existing tables refined, §4.2) | Extend `sprk_playbookconsumer` + `sprk_analysistool` (D9) | **CONVERGED 2026-07-05**: the two designs now agree — refine `sprk_analysisaction` (execution unit) + `sprk_playbookconsumer` (invocation unit); "Capability" is vocabulary, not schema. Playbook/node tables persist only for frozen Insights composites per OQ-2 resolution. |
 | Component count | ~14 | 21 mapped (many kept legacy) | The gap IS the migration cost/benefit question. |
 
 **Reading guide for the operator**: where the two designs agree (ledger/outputs
@@ -348,5 +386,77 @@ map should not proceed past the affected components until each is called.
 
 ---
 
-*End v0.1 (complete — §1.1 and §5.3 filled from the engine-projects synthesis
-and the July-2026 MCP research brief, both in `notes/`).*
+## 9. Operator review Q&A (2026-07-05) — decisions and rationale record
+
+Condensed from the review session; kept here because these answers ARE the
+design rationale future readers will look for.
+
+**Q1 Does this deliver requirements fully?** Yes — §3 catalog, P1-P10, D1-D6,
+umbrella commitments all covered. One qualification: D1's confidence threshold
+is delivered as *behavior* (risk-classed gates + ask-when-uncertain), not as a
+calibrated per-Consumer score — the loop emits no calibrated confidence.
+
+**Q2 Then why build the constrained v0.3?** Don't — as a destination. v0.3 is
+the **migration atlas** (component dispositions, manifest schema, invariants);
+its proposed NEW machinery (L2 classifier stack, SlotFillEngine) should not be
+built if the greenfield alternative is available — spending new-build budget on
+continuity-justified architecture is how the ten-mechanism drift happened.
+
+**Q3 No classifier — hallucination protection? Matching accuracy?** Two
+different questions. Hallucination protection was never the classifier's job:
+grounding is (schema-enforced structured outputs, closed typed tool set, cited
+reads, gated writes, honest refusal) — all kept in full. Matching among 30-100
+described tools is core 2026 frontier-model competency, hardened by
+deterministic context pre-filtering (only session-valid tools offered),
+maker-editable descriptions, schema-triggered elicitation on misfires, and
+gates on side effects. Note v0.3's L2 was ALSO probabilistic (embeddings +
+LLM rerank) — the choice was whose probabilistic judgment, not whether.
+
+**Q4 What do we give up?** Greenfield gives up: the calibrated confidence dial;
+replayable dispatch decisions (replaced by golden-utterance eval suites in CI);
+the maker-graph promise (resolved moot — see OQ-2); R7 dispatch-machinery
+continuity. Constrained gives up: ~7 fewer components' simplicity; building two
+new subsystems whose only justification is mechanism continuity; a permanent
+L2↔L3 threshold seam; industry-pattern alignment.
+
+**Q5 Can we layer sophistication in later?** Yes — every v0.3 sophistication is
+a bolt-on to the loop, not vice versa: deterministic pre-filters (day 1) →
+golden-utterance CI evals → embedding retrieval as a tool-list PRE-FILTER at
+100+ catalog scale (the graceful re-entry point for L2 machinery, as an
+optimization not a decision-maker) → post-hoc verifier for high-risk classes →
+declarative support for repeating workflow *shapes* (parameters, never control
+flow).
+
+**Q6 Session persistence + chat memory?** Same three audited tiers (Redis hot /
+Cosmos durable / Dataverse cold); the ledger changes WHAT persists, not where.
+Memory = maintained session digest (rolling compaction, generalizing today's
+summarize@15) + addressable recall via tools (memory beyond the window is a
+tool call, not a bigger prompt) + durable pins (user/matter/tenant) + record-
+persisted work products (widgets-r1 pattern).
+
+**Q7 Multi-surface output (Assistant↔Workspace↔Context)?** Server: ledger write
+first, then disposition-driven typed SSE (informational → Assistant;
+work_product → workspace tab load; overlay → targeted widget update; sources →
+context channel). Client: PaneEventBus channels + widget registry + streaming
+widget — kept from today. Widgets emit user actions back as ledger events
+(cross-pane interactions = channel events referencing ledger keys). Any surface
+speaks the same invoke + SSE contract, rendering only the channels it hosts.
+
+**Q8 Capabilities vs Actions; Skills/Personas?** Resolved into the §4.2
+Action + Binding model: Capability = vocabulary for an Action × Binding pair.
+Skills = prompt-composition fragments (unchanged); Personas = capability-level
+voice AND session-level assistant identity (both `sprk_aipersona`); Knowledge =
+grounding bindings scoping retrieval. Maker vocabulary compresses from
+action+playbook+node+consumer+scopes to **Action + Binding + scopes**.
+
+**Q9 Playbooks?** Four roles, four fates: single-step wrappers dissolve into
+Action+Binding; dispatch-unit role retires with dispatch consolidation;
+multi-step role = system-defined composite Action (coded workflow, or frozen
+developer-authored graphs for existing Insights); legal-sense "firm playbook"
+is Knowledge content, untouched. Resolution per the operator's R7 definition —
+playbooks were always system-hard-coded; the BA surface is prompt-based scopes.
+PlaybookBuilder becomes the BA scope/prompt/binding editor.
+
+---
+
+*End v0.2.*

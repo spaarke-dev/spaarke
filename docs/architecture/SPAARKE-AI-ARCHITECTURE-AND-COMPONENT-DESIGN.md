@@ -2280,8 +2280,33 @@ and the Insights/Action engine objectives review):
   highest migration cost for Insights.
 
 The three-shapes model in §4.2 is written compatibly with (a) and (b); (c)
-would reduce it to two shapes + workflows. **Do not build new capability on
-the engine until OQ-2 is called.**
+would reduce it to two shapes + workflows.
+
+**RESOLVED 2026-07-05 (operator).** The deciding input was the operator's R7
+refinement of what a playbook IS: *"a business-analyst front end to read or
+update prompt-based scopes (Actions, Skills, Personas); critically the
+playbooks are essentially hard-coded into the system — not a flexible, ad-hoc
+maker surface."* That removes the maker-authored-graph promise from the
+requirements entirely — and with it, the apparent Waves-11/12 vs insights-r2
+contradiction dissolves: BOTH shipped patterns keep control flow system-owned
+(C# in one case, developer-authored JSON graphs in the other) with BA-editable
+prompts in data. The two "opposite" lessons already obey the same rule; they
+differ only in internal representation.
+
+**Resolution (option b sliding to c by attrition)**:
+1. **No maker-facing graph authoring, ever.** The PlaybookBuilder canvas
+   de-scopes; PlaybookBuilder's future is the BA front end for prompt-based
+   scopes (JPS editing, output schemas, skills/personas/knowledge, binding
+   metadata).
+2. **New composite capabilities default to `coded` workflows** (Wave-11
+   pattern). No new investment in the interpreter, its canvas renderers, or
+   the `sprk_nodetype` option-set gap.
+3. **Existing Insights pipelines stay on the engine as-is** — system-authored
+   data that works; the engine becomes a maintained-but-frozen representation,
+   retired opportunistically if/when Insights next restructures its pipelines.
+4. "Playbook" survives as product language for a curated composite Action;
+   single-node playbook wrappers dissolve into Action + binding; the
+   playbook-as-dispatch-unit role retires with the dispatch consolidation.
 
 ### 4.3 The session-state backbone
 
