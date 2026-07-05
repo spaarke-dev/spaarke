@@ -11,6 +11,7 @@ using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
+using Sprk.Bff.Api.Services.Ai.LinearConsumers;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Xunit;
 
@@ -274,6 +275,16 @@ public class SessionSummarizeOrchestratorPathA5IntegrationTest
         });
         var logger = new Mock<ILogger<SessionSummarizeOrchestrator>>();
 
+        // R7 Wave 12.3 ctor deps (pre-existing HEAD compile gap fixed by
+        // ai-architecture-redesign-r1 task 006): these scenarios exercise the engine
+        // (routing-table → Playbook Engine) path — ResolveActionAsync is unmocked and
+        // returns null by default, so the Linear deps are never invoked.
+        var sessionFileTextSource = Mock.Of<ISessionFileTextSource>();
+        var fileSummarizeService = new FileSummarizeService(
+            Mock.Of<IActionResolver>(),
+            Mock.Of<IActionRunner>(),
+            Mock.Of<ILogger<FileSummarizeService>>());
+
         var sut = new SessionSummarizeOrchestrator(
             sessionManager,
             orchestration.Object,
@@ -281,6 +292,8 @@ public class SessionSummarizeOrchestratorPathA5IntegrationTest
             lookup.Object,
             routing.Object,
             workspaceOptions,
+            sessionFileTextSource,
+            fileSummarizeService,
             logger.Object);
 
         return (sut, orchestration, routing, lookup, sessionManager);

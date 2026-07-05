@@ -3,6 +3,7 @@ using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.Insights;
 using Sprk.Bff.Api.Services.Ai.Insights.Routing;
+using Sprk.Bff.Api.Services.Ai.LinearConsumers;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Ai.RecordSearch;
 using Sprk.Bff.Api.Services.Ai.SemanticSearch;
@@ -132,6 +133,31 @@ public static class AnalysisServicesModule
         {
             AddAnalysisOrchestrationServices(services, configuration);
             AddPlaybookServices(services);
+
+            // ai-architecture-redesign-r1 task 006 (FR-P0-05, 2026-07-05) — Linear AI
+            // Consumer library (R7 Wave 12) moved from unconditional Program.cs registration
+            // to INSIDE this compound AI gate so the whole prompted-executor stack
+            // (ActionResolver + DocumentTextSource + SessionFileTextSource + ActionRunner +
+            // DocumentProfileService + FileSummarizeService) toggles as one unit. Every
+            // primitive's ctor graph is compound-ON-only anyway (IOpenAiClient,
+            // PromptSchemaRenderer, IScopeResolverService, AnalysisDocumentLoader,
+            // ITextExtractor, IRagService).
+            //
+            // §F.1 asymmetric-registration audit (static scan run 2026-07-05):
+            //  - FileSummarizeService — consumed by WorkspaceFileEndpoints.HandleSummarize
+            //    (MapWorkspaceFileEndpoints is UNCONDITIONAL) → NullFileSummarizeService peer
+            //    registered in AddNullObjectsForCompoundOff (P3 subclass).
+            //  - DocumentProfileService — consumed only by AnalysisEndpoints
+            //    (MapAnalysisEndpoints is INSIDE the same compound gate) → symmetric; no peer.
+            //  - IActionResolver / IActionRunner — consumed by Matter/ProjectPreFillService as
+            //    OPTIONAL nullable ctor params (= null default) → ADR-032 "optional-via-null-
+            //    tolerance" exemption; no peer.
+            //  - IDocumentTextSource / ISessionFileTextSource — transitively conditional
+            //    (consumed only by gated LinearConsumers services + compound-ON
+            //    SessionSummarizeOrchestrator) → no peer.
+            services.AddLinearConsumers(configuration);
+            Console.WriteLine("✓ Linear AI Consumer library enabled (gated under compound AI gate — FR-P0-05)");
+
             AddBuilderServices(services);
             AddTestingServices(services, configuration);
             AddDeliveryServices(services);
@@ -188,6 +214,14 @@ public static class AnalysisServicesModule
             AddNullObjectsForCompoundOff(services);
             Console.WriteLine("\u26a0 Analysis services disabled (Analysis:Enabled = false) \u2014 Null-Objects registered");
         }
+
+        // FR-P0-06 (ai-architecture-redesign-r1 task 007) \u2014 ICodedWorkflow assembly-scan
+        // discovery + class-ref registry (mirrors AddToolFramework's handler scan, E-1).
+        // MUST run after the gate branches above: the scan's factory bindings defer to the
+        // concrete-type registrations those branches made (real narrator/collector when the
+        // compound AI gate is ON; ADR-032 Null-Object peers when OFF), so kill-switch
+        // behavior flows through class-ref resolution unchanged.
+        services.AddCodedWorkflows();
 
         AddRecordMatchingServices(services, configuration);
 
@@ -382,6 +416,32 @@ public static class AnalysisServicesModule
 
         // L3 — IPlaybookOrchestrationService (P3 Fail-Fast). Real impl registered in AddPlaybookServices.
         services.AddScoped<IPlaybookOrchestrationService, NullPlaybookOrchestrationService>();
+
+        // ── ai-architecture-redesign-r1 task 006 (FR-P0-05, 2026-07-05) ──────────────────
+        // Null peers for the two playbook services moved out of FinanceModule into
+        // AddPlaybookServices (compound-ON), plus the LinearConsumers stack moved under the
+        // compound gate. See the §F.1 audit note beside services.AddLinearConsumers(...).
+
+        // IPlaybookLookupService (P3 Fail-Fast on GetByIdAsync; quiet no-op cache-clears).
+        // Real impl registered in AddPlaybookServices. Unconditional consumers:
+        // ChatEndpoints.ExecutePlaybookAsync, WorkspaceFileEndpoints.HandleSummarize,
+        // WorkspaceAiService + Matter/ProjectPreFillService, InvoiceExtractionJobHandler.
+        services.AddScoped<IPlaybookLookupService, NullPlaybookLookupService>();
+
+        // IOutputOrchestratorService (P3 Fail-Fast). Real impl registered in
+        // AddPlaybookServices. Keeps unconditional InvoiceExtractionJobHandler (IJobHandler
+        // enumeration) resolvable under compound-OFF; dequeue fails fast per ADR-018.
+        services.AddScoped<IOutputOrchestratorService, NullOutputOrchestratorService>();
+
+        // FileSummarizeService (P3 Fail-Fast subclass — concrete class per ADR-010, so the
+        // Null-Object is a subclass via the protected logger-only ctor, mirroring
+        // NullSessionSummarizeOrchestrator). WorkspaceFileEndpoints.HandleSummarize injects
+        // the concrete type and MapWorkspaceFileEndpoints is UNCONDITIONAL — without this
+        // peer, minimal-API parameter inference aborts host startup when the compound AI
+        // gate is OFF. The endpoint's catch (FeatureDisabledException) emits the SSE error
+        // chunk / 503 pattern.
+        services.AddScoped<FileSummarizeService>(sp =>
+            new NullFileSummarizeService(sp.GetRequiredService<ILogger<FileSummarizeService>>()));
 
         // B6 — IPlaybookService (P3 Fail-Fast). Real impl registered in AddPlaybookServices as typed HttpClient.
         services.AddSingleton<IPlaybookService, NullPlaybookService>();
@@ -749,6 +809,26 @@ public static class AnalysisServicesModule
     {
         services.AddHttpClient<IPlaybookService, PlaybookService>();
         services.AddHttpClient<INodeService, NodeService>();
+
+        // ai-architecture-redesign-r1 task 006 (FR-P0-05, 2026-07-05) — moved OUT of
+        // FinanceModule (misplaced-registration debt from earlier Finance accretion).
+        //
+        // IPlaybookLookupService: cached stable-ID alt-key (sprk_playbookid) playbook lookups
+        // for SaaS multi-environment portability (IMemoryCache, 1h TTL). Playbook-domain
+        // service — belongs beside IPlaybookService. Null peer (P3 Fail-Fast) registered in
+        // AddNullObjectsForCompoundOff because its consumers include UNCONDITIONAL surfaces:
+        // ChatEndpoints.ExecutePlaybookAsync, WorkspaceFileEndpoints.HandleSummarize,
+        // WorkspaceAiService / Matter/ProjectPreFillService (WorkspaceModule, unconditional),
+        // and InvoiceExtractionJobHandler (FinanceModule IJobHandler, unconditional).
+        services.AddScoped<IPlaybookLookupService, PlaybookLookupService>();
+
+        // IOutputOrchestratorService: applies playbook outputMapping field updates to
+        // Dataverse (delegates to IDataverseUpdateHandler, which stays unconditional in
+        // FinanceModule). Sole consumer today is InvoiceExtractionJobHandler (unconditional
+        // IJobHandler) → Null peer (P3 Fail-Fast) in AddNullObjectsForCompoundOff keeps
+        // IJobHandler enumeration resolvable under compound-OFF; on dequeue the job fails
+        // fast with FeatureDisabledException and Service Bus retry/DLQ handles it (ADR-018).
+        services.AddScoped<IOutputOrchestratorService, OutputOrchestratorService>();
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutorRegistry, Sprk.Bff.Api.Services.Ai.Nodes.NodeExecutorRegistry>();
 
         // Insights Engine r2 Wave D4 (task 033) — runtime per-(area, type) routing for

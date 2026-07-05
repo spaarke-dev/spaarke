@@ -11,6 +11,7 @@ using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
+using Sprk.Bff.Api.Services.Ai.LinearConsumers;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Xunit;
 
@@ -64,6 +65,8 @@ public class SessionSummarizeOrchestratorTests
     private readonly Mock<IPlaybookLookupService> _playbookLookupMock;
     private readonly Mock<IConsumerRoutingService> _consumerRoutingMock;
     private readonly IOptions<WorkspaceOptions> _workspaceOptions;
+    private readonly Mock<ISessionFileTextSource> _sessionFileTextSourceMock;
+    private readonly FileSummarizeService _fileSummarizeService;
     private readonly Mock<ILogger<SessionSummarizeOrchestrator>> _loggerMock;
 
     public SessionSummarizeOrchestratorTests()
@@ -73,6 +76,16 @@ public class SessionSummarizeOrchestratorTests
         _httpContextAccessorMock = new Mock<IHttpContextAccessor>();
         _httpContext = new DefaultHttpContext();
         _httpContextAccessorMock.SetupGet(a => a.HttpContext).Returns(_httpContext);
+
+        // R7 Wave 12.3 ctor deps (pre-existing HEAD compile gap fixed by
+        // ai-architecture-redesign-r1 task 006): the Linear path is only taken when
+        // IConsumerRoutingService.ResolveActionAsync returns a non-empty action id — these
+        // tests exercise the engine path, so loose mocks (default null/empty) suffice.
+        _sessionFileTextSourceMock = new Mock<ISessionFileTextSource>();
+        _fileSummarizeService = new FileSummarizeService(
+            Mock.Of<IActionResolver>(),
+            Mock.Of<IActionRunner>(),
+            Mock.Of<ILogger<FileSummarizeService>>());
         _playbookLookupMock = new Mock<IPlaybookLookupService>();
         _consumerRoutingMock = new Mock<IConsumerRoutingService>();
         _workspaceOptions = Options.Create(new WorkspaceOptions
@@ -121,6 +134,8 @@ public class SessionSummarizeOrchestratorTests
         _playbookLookupMock.Object,
         _consumerRoutingMock.Object,
         _workspaceOptions,
+        _sessionFileTextSourceMock.Object,
+        _fileSummarizeService,
         _loggerMock.Object);
 
     // ─── (a) R7 — dispatches through IPlaybookOrchestrationService with resolved playbookId ────
@@ -506,6 +521,8 @@ public class SessionSummarizeOrchestratorTests
             _playbookLookupMock.Object,
             _consumerRoutingMock.Object,
             emptyOptions,
+            _sessionFileTextSourceMock.Object,
+            _fileSummarizeService,
             _loggerMock.Object);
 
         var request = new SummarizeSessionFilesRequest(

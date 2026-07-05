@@ -51,7 +51,7 @@ Status legend:
 | `record-header-and-notepad-r1` | `work/record-header-and-notepad-r1` | `C:/code_files/spaarke-wt-record-header-and-notepad-r1` | N | N | N | N | 2026-07-03 | **Code complete (33/36 tasks, 237 tests); env-dependent tasks 025/039/040 pending owner deploy + QA** |
 | `ai-spaarke-ai-workspace-UI-r2` | `work/ai-spaarke-ai-workspace-UI-r2` | `C:/code_files/spaarke-wt-ai-spaarke-ai-workspace-UI-r2` | N | Y | N | N | 2026-07-01 | **Complete pending PR #530 merge (2026-07-01)** |
 | `spaarkeai-compose-r1` | `work/spaarkeai-compose-r1` | `C:/code_files/spaarke-wt-spaarkeai-compose-r1` | Y | Y | N | N | 2026-06-30 | Active |
-| `spaarke-ai-platform-unification-r7` | `work/spaarke-ai-platform-unification-r7` | `C:/code_files/spaarke-wt-spaarke-ai-platform-unification-r7` | Y | N | N | Y | 2026-06-28 | Active |
+| `spaarke-ai-platform-unification-r7` | `work/spaarke-ai-platform-unification-r7` | `C:/code_files/spaarke-wt-spaarke-ai-platform-unification-r7` | Y | N | N | Y | 2026-07-05 | **CLOSED / RE-SCOPED 2026-07-05** — Issue #501 closed; remaining waves absorbed by `spaarke-ai-architecture-redesign-r1` (#550) or dropped per `projects/spaarke-ai-platform-unification-r7/notes/close-out-absorbed-by-ai-architecture-redesign-r1.md`; branch disposition = redesign-r1 task 025 (FR-P1-06); archive row after task 025 |
 | `spaarke-redis-cache-remediation-r2` | `work/spaarke-redis-cache-remediation-r2` | `C:/code_files/spaarke-wt-spaarke-redis-cache-remediation-r2` | Y | N | Y | N | 2026-06-26 | Active |
 | `spaarke-redis-cache-remediation-r1` | `work/spaarke-redis-cache-remediation-r1` | `C:/code_files/spaarke-wt-spaarke-redis-cache-remediation-r1` | Y | N | N | N | 2026-06-26 | Active |
 | `spaarke-daily-update-service-r4` | `work/spaarke-daily-update-service-r4` | `C:/code_files/spaarke-wt-spaarke-daily-update-service-r4` | Y | Y | N | N | 2026-06-26 | Active |
@@ -142,9 +142,9 @@ This section surfaces where parallel projects collide on the same hot-path surfa
 - `ci-cd-unit-test-remediation-r1` — modifies `task-execute`, `project-pipeline`, `conflict-check` SKILL.md (Phase 1 Stream C)
 - `spaarke-devops-project-tracking-r1` — 9 new `/devops-*` skills + 9 hooked existing skills (this is the project's core deliverable)
 - `customer-provisioning-orchestration-r1` — new skill + scripts for provisioning orchestration (`/master-deploy` extension)
-- `spaarke-ai-platform-unification-r7` — REWRITES `jps-action-create`, `jps-playbook-design`, `jps-playbook-audit`, `jps-validate` + MINOR UPDATE `jps-scope-refresh` (Wave 7, FR-32/FR-33; node-first dispatch model)
+- ~~`spaarke-ai-platform-unification-r7` — REWRITES `jps-action-create`, `jps-playbook-design`, `jps-playbook-audit`, `jps-validate` + MINOR UPDATE `jps-scope-refresh` (Wave 7, FR-32/FR-33; node-first dispatch model)~~ **CANCELLED 2026-07-05** — R7 closed; jps-* skill work absorbed by `spaarke-ai-architecture-redesign-r1` P4 (re-based on the Action/Binding catalog model, not node-first dispatch)
 
-**Coordination action**: Four projects serialize PRs touching `.claude/skills/INDEX.md`. Recommended order: `devops-project-tracking-r1` first (owns skill registry concept), then `ci-cd-unit-test-remediation-r1` (modifies existing skills), then `customer-provisioning-orchestration-r1` (adds new skills), then `spaarke-ai-platform-unification-r7` Wave 7 (rewrites jps-* skill bodies after R7's dispatch reform lands). R7 Wave 7 is sequential within itself (Sub-Agent Write Boundary per CLAUDE.md §3).
+**Coordination action**: Four projects serialize PRs touching `.claude/skills/INDEX.md`. Recommended order: `devops-project-tracking-r1` first (owns skill registry concept), then `ci-cd-unit-test-remediation-r1` (modifies existing skills), then `customer-provisioning-orchestration-r1` (adds new skills), then `spaarke-ai-architecture-redesign-r1` P4 (jps-* skill refresh — took over the slot formerly held by R7 Wave 7, which was cancelled at R7 close 2026-07-05; main-session-only per Sub-Agent Write Boundary CLAUDE.md §3).
 
 ---
 

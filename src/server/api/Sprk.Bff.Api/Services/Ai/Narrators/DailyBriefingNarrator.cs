@@ -41,11 +41,20 @@ namespace Sprk.Bff.Api.Services.Ai.Narrators;
 /// is enabled.
 /// </summary>
 /// <remarks>
+/// <para>
 /// Unsealed (R7 Wave 12 post-T135 CI fix 2026-06-30 — PR #520) so
 /// <see cref="NullDailyBriefingNarrator"/> can subclass it for the compound-OFF kill-switch
 /// path (mirrors <see cref="Chat.NullSessionSummarizeOrchestrator"/> + ADR-032 §F.1).
+/// </para>
+/// <para>
+/// FR-P0-06 (spaarke-ai-architecture-redesign-r1 task 007): first <see cref="ICodedWorkflow"/>
+/// instance — resolvable by class reference (<c>"DailyBriefingNarrator"</c>) as a
+/// <c>coded</c>-kind Action row's <c>sprk_workflowclass</c> names it. The retrofit is
+/// interface adoption only: <see cref="ExecuteAsync"/> delegates to the pre-existing
+/// <see cref="NarrateAsync"/>; existing callers and behavior are unchanged.
+/// </para>
 /// </remarks>
-public class DailyBriefingNarrator
+public class DailyBriefingNarrator : ICodedWorkflow
 {
     private const string TldrActionCode = "BRIEF-NARRATE-TLDR";
     private const string ChannelActionCode = "BRIEF-NARRATE-CHANNEL";
@@ -93,6 +102,48 @@ public class DailyBriefingNarrator
         _llm = null!;
         _scrubber = null!;
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// FR-P0-06: stable class reference an Action row's <c>sprk_workflowclass</c> carries.
+    /// Inherited by <see cref="NullDailyBriefingNarrator"/> — the Null peer is the same
+    /// workflow identity on the compound-OFF path (ADR-032).
+    /// </remarks>
+    public string WorkflowClassRef => nameof(DailyBriefingNarrator);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// FR-P0-06 convention entry point: deserializes <see cref="CodedWorkflowContext.ArgumentsJson"/>
+    /// into the narrator's request DTO and delegates to <see cref="NarrateAsync"/> (the virtual
+    /// method — so the <see cref="NullDailyBriefingNarrator"/> kill-switch override flows
+    /// through class-ref invocation unchanged). No behavior change to the existing path.
+    /// </remarks>
+    public async Task<object?> ExecuteAsync(CodedWorkflowContext context, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+
+        DailyBriefingNarrateRequest? req;
+        try
+        {
+            req = JsonSerializer.Deserialize<DailyBriefingNarrateRequest>(
+                context.ArgumentsJson, OutputDeserializerOptions);
+        }
+        catch (JsonException ex)
+        {
+            throw new ArgumentException(
+                $"DailyBriefingNarrator: CodedWorkflowContext.ArgumentsJson is not a valid {nameof(DailyBriefingNarrateRequest)} payload: {ex.Message}",
+                nameof(context), ex);
+        }
+
+        if (req is null)
+        {
+            throw new ArgumentException(
+                $"DailyBriefingNarrator: CodedWorkflowContext.ArgumentsJson deserialized to null — a {nameof(DailyBriefingNarrateRequest)} JSON object is required.",
+                nameof(context));
+        }
+
+        return await NarrateAsync(req, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>

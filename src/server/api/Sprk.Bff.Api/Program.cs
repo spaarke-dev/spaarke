@@ -127,12 +127,11 @@ builder.Services.AddGraphModule(builder.Configuration);
 // Document Intelligence, Analysis, Playbook, Builder, RAG, and Record Matching services
 builder.Services.AddAnalysisServicesModule(builder.Configuration);
 
-// R7 Wave 12 (2026-07-02): Linear AI Consumer library. Code-defined services for
-// linear (Start → LLM → deterministic steps → return) consumers — replaces the
-// Playbook Engine for Document Profile / File Summarize / Prefills. Playbook
-// Engine remains for its rightful consumers (Chat, Insight Engine, Daily Briefing).
-// See docs/architecture/SPAARKE-LINEAR-AI-CONSUMER-ARCHITECTURE.md.
-builder.Services.AddLinearConsumers(builder.Configuration);
+// R7 Wave 12 Linear AI Consumer library: registration MOVED into AnalysisServicesModule's
+// compound AI gate (Analysis:Enabled && DocumentIntelligence:Enabled) by
+// ai-architecture-redesign-r1 task 006 (FR-P0-05, 2026-07-05) so the whole prompted-executor
+// stack toggles as one unit. NullFileSummarizeService covers the unconditional
+// WorkspaceFileEndpoints consumer on the compound-OFF path (ADR-032).
 
 // Consumer→playbook routing (Phase 1R per chat-routing-redesign-r1 spec FR-1R-02).
 // Replaces Workspace__*PlaybookId env vars with Dataverse-backed `sprk_playbookconsumer`
@@ -174,7 +173,7 @@ builder.Services.AddAiSafetyModule(builder.Configuration);
 // AI Platform R2: Cosmos DB persistence (sessions, prompts, audit, memory, feedback)
 builder.Services.AddAiPersistenceModule(builder.Configuration);
 
-// AI Platform R2: agent and chat extensions (ISprkAgent impls, orchestration)
+// AI Platform R2: chat extensions (prompt builder, latency telemetry, playbook candidate selection)
 builder.Services.AddAiChatModule(builder.Configuration);
 
 // Spaarke Insights Engine — Zone B domain services per SPEC §3.5 facade boundary.

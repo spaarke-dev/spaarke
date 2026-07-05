@@ -87,8 +87,8 @@ public static class ConsumerTypes
     /// <c>DocumentProfileService</c> — Document Upload / Profile Document
     /// linear consumer. R7 Wave 12 (2026-07-02) — migrated off the Playbook
     /// Engine per <c>docs/architecture/SPAARKE-LINEAR-AI-CONSUMER-ARCHITECTURE.md</c>.
-    /// Routes via <see cref="LinearConsumers.LinearConsumersOptions.ActionIds"/>
-    /// rather than the routing table; the corresponding entry in
+    /// Routes via the <c>sprk_playbookconsumer</c> routing table
+    /// (Wave 12.3 retired the config-map lookup); the corresponding entry in
     /// <see cref="LinearConsumers.LinearConsumersOptions.PlaybookIds"/> is
     /// used by <c>AnalysisEndpoints.ExecuteAnalysis</c> to dispatch when the
     /// incoming request's <c>PlaybookId</c> matches (preserving the client

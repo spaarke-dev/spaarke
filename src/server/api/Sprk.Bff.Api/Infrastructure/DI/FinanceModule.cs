@@ -94,25 +94,17 @@ public static class FinanceModule
         services.AddScoped<IFinanceSummaryService, FinanceSummaryService>();
 
         // ============================================================================
-        // Output Orchestrator Service (playbook-driven Dataverse updates)
+        // Playbook Lookup + Output Orchestrator — MOVED to AnalysisServicesModule
         // ============================================================================
-        // Scoped: reads outputMapping from playbooks and applies field updates to Dataverse
-        // Enables business analysts to configure field mappings via Playbook Builder without code deployment
-        // Variable resolution: ${context.invoiceId}, ${extraction.aiSummary}, etc.
-        // Type conversions: Money, EntityReference, DateTime
-        // Delegates to DataverseUpdateHandler for optimistic concurrency and retry logic
-        services.AddScoped<IOutputOrchestratorService, OutputOrchestratorService>();
-
-        // ============================================================================
-        // Playbook Lookup Service (cached alternate key lookups for SaaS portability)
-        // ============================================================================
-        // Scoped: retrieves playbooks by the stable-ID alt-key sprk_playbookid per Q&A 2026-06-22 Q1.
-        // Stable-ID alt-key value mirrors the row's sprk_analysisplaybookid PK and is immutable across
-        // environments — enables multi-environment deployments (DEV/QA/PROD) without env-specific config.
-        // Caching: IMemoryCache with 1-hour TTL to minimize Dataverse queries (critical for high-volume scenarios)
-        // Uses RetrieveByAlternateKeyAsync for indexed, fast lookups via sprk_playbookid alternate key.
-        // Example: GetByIdAsync("<row's sprk_analysisplaybookid PK GUID>") returns the same playbook across environments.
-        services.AddScoped<IPlaybookLookupService, PlaybookLookupService>();
+        // ai-architecture-redesign-r1 task 006 (FR-P0-05, 2026-07-05): IPlaybookLookupService
+        // and IOutputOrchestratorService are AI playbook services that landed here during
+        // earlier Finance accretion. Real registrations now live in
+        // AnalysisServicesModule.AddPlaybookServices (compound Analysis:Enabled &&
+        // DocumentIntelligence:Enabled gate); ADR-032 P3 Null-Object peers are registered in
+        // AnalysisServicesModule.AddNullObjectsForCompoundOff so unconditional consumers
+        // (ChatEndpoints, WorkspaceFileEndpoints, Workspace prefill services,
+        // InvoiceExtractionJobHandler) keep resolving and surface the 503 kill-switch
+        // pattern when the compound AI gate is OFF.
 
         // ============================================================================
         // Dataverse Update Handler (low-level update operations with concurrency control)

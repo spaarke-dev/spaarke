@@ -24,7 +24,7 @@
 > - r3 Wave 2 (InsightsIntentClassifier ↔ PlaybookDispatcher reconciliation — locked at ~1 week scope per audit)
 > - All Tier 2/3/4 design discussion
 >
-> **Resumption trigger** (all 3 conditions): R6 ships its surface-defining pillars (Pillar 3 + 5 + 6) AND owner directs resumption AND widgets-r1 reaches first proof-point.
+> **Resumption trigger** (all 3 conditions; condition 1 **re-pointed 2026-07-05** — the original "R6 ships Pillars 3+5+6" condition is superseded via the R6 → R7 (#501, closed) → `spaarke-ai-architecture-redesign-r1` (#550) chain): (1) `spaarke-ai-architecture-redesign-r1` passes **gate G-P3** (Phase P3 — Insights `ask`/`search` re-modeled as Binding rows per FR-P3-01; Insights engine outputs write to the session ledger from P1 per FR-P1-05) AND (2) owner directs resumption AND (3) widgets-r1 reaches first proof-point. NOTE at resumption: redesign-r1 P2 DELETES `PlaybookDispatcher` + `IntentRerankerService` + `PlaybookCandidateSelector` (FR-P2-06) — r3 Wave 2 (InsightsIntentClassifier ↔ PlaybookDispatcher reconciliation) must be re-scoped against the agent-loop model before execution.
 
 **Next action at resumption**: see [`notes/pre-design-context-2026-06-10.md`](notes/pre-design-context-2026-06-10.md) §7 (step-by-step resumption sequence).
 

@@ -223,8 +223,7 @@ public static class SummarizeSessionEndpoint
 
         // ─── Build orchestrator request (convergence contract — task 012) ─────────────
         // The endpoint passes SummarizeInvocationPath.DirectEndpoint to drive the
-        // telemetry 'path' dimension. The agent-tool path (task 015) will pass
-        // SummarizeInvocationPath.AgentTool. Output is byte-identical for the same
+        // telemetry 'path' dimension. Output is byte-identical for the same
         // (TenantId, SessionId, FileIds, StyleHint) tuple per the orchestrator contract.
         var request = new SummarizeSessionFilesRequest(
             TenantId: tenantId,

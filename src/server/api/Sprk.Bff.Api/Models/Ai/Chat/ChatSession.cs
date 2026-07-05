@@ -61,9 +61,10 @@ namespace Sprk.Bff.Api.Models.Ai.Chat;
 ///     <c>IHostedService</c> (R5 task 007) — does NOT wait for the scheduled sweep.
 ///
 /// Persistence: rides the existing triple-tier flow (Redis hot via
-/// <see cref="System.Text.Json.JsonSerializer"/>; Cosmos warm intentionally drops the
-/// manifest per the aggressive cleanup-on-session-end contract; Dataverse cold-tier
-/// audit intentionally omits the manifest for the same reason).
+/// <see cref="System.Text.Json.JsonSerializer"/>; Cosmos warm carries the manifest as
+/// <c>StoredSession.UploadedFiles</c> and it is restored on Cosmos fallback — the prior
+/// mapping that dropped file references on restore was a P2 violation fixed per ADR-040
+/// / FR-P0-01; Dataverse cold-tier audit intentionally omits the manifest).
 ///
 /// Default: <c>null</c> for backward compatibility — pre-R5 sessions, persisted records,
 /// and call sites omitting the parameter are semantically equivalent to "no files
@@ -89,6 +90,49 @@ public record ChatSession(
     /// (R5 endpoint task own the error mapping per ADR-019).
     /// </summary>
     public const int MaxUploadedFiles = 20;
+
+    // =========================================================================
+    // Session ledger (ADR-040 / FR-P0-01) — append-only typed entries.
+    //
+    // DARK LANDING (P0): these collections are persisted through the Redis +
+    // Cosmos pipeline but have ZERO production readers. Writers arrive at P1
+    // (FR-P1-02 universal ledger-write-before-render); ToolChain writers at P2;
+    // ledger-referencing capability inputs at P3. Do NOT add readers before the
+    // corresponding phase lands.
+    //
+    // All four default to null so pre-ledger Redis/Cosmos payloads (and call
+    // sites that never touch the ledger) deserialize/construct cleanly — null is
+    // semantically identical to "no ledger entries yet" (same convention as
+    // UploadedFiles / AdditionalDocumentIds).
+    //
+    // Governance: Tier 3 user-owned, GDPR-erasable with the session (ADR-015 /
+    // NFR-07). ToolChains carry identifiers/filters/counts only — never content.
+    // =========================================================================
+
+    /// <summary>
+    /// Capability outputs, addressable by <see cref="SessionOutput.Key"/>
+    /// (<c>{bindingId}@t{n}</c> — build via <see cref="SessionLedger.BuildOutputKey"/>).
+    /// Append-only; the composition carrier for cross-capability references (ADR-040).
+    /// </summary>
+    public IReadOnlyList<SessionOutput>? Outputs { get; init; }
+
+    /// <summary>
+    /// Per-turn tool-call audit chains (identifiers/filters/counts/citations only —
+    /// never verbatim content, per NFR-07). Append-only.
+    /// </summary>
+    public IReadOnlyList<SessionToolChain>? ToolChains { get; init; }
+
+    /// <summary>
+    /// Widget user-actions (selection, highlight, edit) recorded as consumable
+    /// session events. Append-only.
+    /// </summary>
+    public IReadOnlyList<SessionWidgetEvent>? WidgetEvents { get; init; }
+
+    /// <summary>
+    /// Pending-confirmation and in-flight-elicitation markers. Append-only —
+    /// resolutions are new entries correlated by <see cref="SessionGate.GateId"/>.
+    /// </summary>
+    public IReadOnlyList<SessionGate>? Gates { get; init; }
 }
 
 /// <summary>

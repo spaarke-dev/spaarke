@@ -5,27 +5,34 @@
 
 ## Active Task
 
-- **Task**: none
-- **Status**: not-started
-- **Rigor Level**: —
-- **Wave**: — (next: W-P0-A = tasks 001, 003, 006, 007, 013 + Track-B 070)
+- **Task**: Wave W-P0-A (parallel)
+- **Status**: in-progress (dispatched 2026-07-05)
+- **Rigor Level**: per-task (001/006/007 FULL · 003/070 STANDARD · 013 MINIMAL)
+- **Wave**: W-P0-A = tasks 001, 003, 006, 007, 013, 070
 
 ## Next Action
 
-Run "work on task 001" (or launch wave W-P0-A per plan.md §4 — paste its pre-authored /goal condition first).
+Collect W-P0-A agent results → flip TASK-INDEX statuses → build verification → commit → dispatch W-P0-B (002, 004, 005, 008, 009, 071).
 
 ## Steps Completed This Task
 
-(none)
+- Wave dispatched: 6 agents, one per task, each under task-execute protocol
 
 ## Files Modified This Task
 
-(none)
+(tracked per agent; consolidated at wave end)
 
 ## Decisions This Task
 
-(none)
+- File-ownership boundaries set for DI-file contention: 070 owns only the DirectOpenAiAgent registration line in AiChatModule; 006 owns FinanceModule + moved-service registrations; 007 adds its own registration extension file
 
 ## Parallel Execution
 
-(none active)
+| Task | Agent focus | Status |
+|---|---|---|
+| 001 | ChatSession ledger + persistence | 🔄 running |
+| 003 | Catalog schema (spaarkedev1) | 🔄 running |
+| 006 | Registration hygiene + Null peers | 🔄 running |
+| 007 | ICodedWorkflow convention | 🔄 running |
+| 013 | Portfolio reconciliation | 🔄 running |
+| 070 | Track-B batch 1 deletions | 🔄 running |

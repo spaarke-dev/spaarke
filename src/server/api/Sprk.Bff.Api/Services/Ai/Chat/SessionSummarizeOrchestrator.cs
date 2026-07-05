@@ -431,7 +431,7 @@ public class SessionSummarizeOrchestrator
 
     /// <summary>
     /// R7 Wave 12.3 Linear execution path — replaces the Playbook Engine dispatch when the
-    /// chat-summarize consumer is configured under <c>LinearConsumers:ActionIds</c>.
+    /// chat-summarize consumer is configured in the <c>sprk_playbookconsumer</c> routing table.
     /// Fetches session-file text via <see cref="ISessionFileTextSource"/>, invokes
     /// <see cref="FileSummarizeService"/> with <see cref="ConsumerTypes.ChatSummarize"/>,
     /// and translates its <see cref="AnalysisStreamChunk"/> emissions into the chat wire
@@ -661,8 +661,7 @@ public class SessionSummarizeOrchestrator
 /// </param>
 /// <param name="Path">
 /// Invocation-path discriminator. <see cref="SummarizeInvocationPath.DirectEndpoint"/> when
-/// dispatched from the direct endpoint; <see cref="SummarizeInvocationPath.AgentTool"/> when
-/// dispatched from the agent-tool handler. Drives the <c>path</c> dimension on
+/// dispatched from the direct endpoint. Drives the <c>path</c> dimension on
 /// <see cref="Telemetry.R5SummarizeTelemetry.RecordSummarizeInvocation"/>.
 /// </param>
 /// <param name="CorrelationId">
@@ -685,9 +684,6 @@ public enum SummarizeInvocationPath
 {
     /// <summary>Direct endpoint dispatch (<c>POST /api/ai/chat/sessions/{id}/summarize</c>).</summary>
     DirectEndpoint = 0,
-
-    /// <summary>Agent-tool dispatch (historical; reserved for future re-introduction).</summary>
-    AgentTool = 1,
 }
 
 /// <summary>Extension helpers for <see cref="SummarizeInvocationPath"/>.</summary>
@@ -695,13 +691,12 @@ internal static class SummarizeInvocationPathExtensions
 {
     /// <summary>
     /// Maps the enum to the locked <see cref="Telemetry.R5SummarizeTelemetry"/> <c>path</c>
-    /// dimension value (<c>direct_endpoint</c> or <c>agent_tool</c>). Out-of-enum input
+    /// dimension value (<c>direct_endpoint</c>). Out-of-enum input
     /// throws — by design, the telemetry cardinality guard would reject it anyway.
     /// </summary>
     public static string ToTelemetryValue(this SummarizeInvocationPath path) => path switch
     {
         SummarizeInvocationPath.DirectEndpoint => "direct_endpoint",
-        SummarizeInvocationPath.AgentTool => "agent_tool",
         _ => throw new ArgumentOutOfRangeException(nameof(path), path,
             "Unknown SummarizeInvocationPath value — orchestrator/telemetry contract drift.")
     };

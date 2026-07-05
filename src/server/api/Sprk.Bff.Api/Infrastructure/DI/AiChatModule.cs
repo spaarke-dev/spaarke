@@ -13,20 +13,19 @@ namespace Sprk.Bff.Api.Infrastructure.DI;
 /// ChatSessionManager, ChatHistoryManager, etc.) with R2-specific agent implementations.
 ///
 /// UNCONDITIONAL registrations:
-///   1. AddSingleton&lt;ISprkAgent, DirectOpenAiAgent&gt;  — AIPU2-008: R2 provider-agnostic agent boundary (FR-701/FR-702)
-///   2. AddSingleton&lt;AiLatencyTelemetry&gt;            — AIPU2-066: AI latency telemetry meter
-///   3. AddScoped&lt;AiLatencyTracker&gt;                  — AIPU2-066: per-request latency stopwatch
-///   4. AddSingleton&lt;IPlaybookCandidateSelector, PlaybookCandidateSelector&gt; — chat-routing-redesign-r1 task 113R / FR-47 + FR-48 top-N selector
-///   5. AddScoped&lt;IIntentRerankerService, IntentRerankerService&gt;             — chat-routing-redesign-r1 task 111R / FR-46 hybrid LLM intent reranker
-///   6. AddScoped&lt;PlaybookOptionsEventBuilder&gt;                              — chat-routing-redesign-r1 task 117a / FR-49 playbook_options SSE payload builder
-///   7. AddSingleton&lt;OrchestratorPromptBuilder&gt; (and as IOrchestratorPromptBuilder)
+///   1. AddSingleton&lt;AiLatencyTelemetry&gt;            — AIPU2-066: AI latency telemetry meter
+///   2. AddScoped&lt;AiLatencyTracker&gt;                  — AIPU2-066: per-request latency stopwatch
+///   3. AddSingleton&lt;IPlaybookCandidateSelector, PlaybookCandidateSelector&gt; — chat-routing-redesign-r1 task 113R / FR-47 + FR-48 top-N selector
+///   4. AddScoped&lt;IIntentRerankerService, IntentRerankerService&gt;             — chat-routing-redesign-r1 task 111R / FR-46 hybrid LLM intent reranker
+///   5. AddScoped&lt;PlaybookOptionsEventBuilder&gt;                              — chat-routing-redesign-r1 task 117a / FR-49 playbook_options SSE payload builder
+///   6. AddSingleton&lt;OrchestratorPromptBuilder&gt; (and as IOrchestratorPromptBuilder)
 ///      — chat-routing-redesign-r1 task 141 / FR-22: orchestrator-side prompt builder.
 ///
-/// Planned registrations (future tasks):
-///   - SprkChatAgentFactory          — Extended factory (replaces AiModule registration in R2)
-///   - ChatOrchestrationService      — Three-pane experience orchestration (router + event bus)
+/// (The AIPU2-008 provider-agnostic agent boundary registration was removed by
+/// spaarke-ai-architecture-redesign-r1 Track-B batch 1 — the implementation was
+/// registered but never consumed.)
 ///
-/// DI count: 7 unconditional (ADR-010 compliant, well within ≤15 limit).
+/// DI count: 6 unconditional (ADR-010 compliant, well within ≤15 limit).
 ///
 /// Prerequisites (must already be registered before calling AddAiChatModule):
 ///   - <c>IConfiguration</c>   — registered by the host
@@ -51,15 +50,6 @@ public static class AiChatModule
         this IServiceCollection services,
         IConfiguration configuration)
     {
-        // AIPU2-008 / AIPU2-060: Register the R2 provider-agnostic agent boundary (FR-701/FR-702).
-        // DirectOpenAiAgent is the Phase 2 full implementation that streams directly from Azure OpenAI.
-        // Constructor deps resolved from DI:
-        //   - IChatClient                (singleton, registered in AiModule via AddChatClient().UseFunctionInvocation())
-        //   - IOrchestratorPromptBuilder (singleton, registered below in this module)
-        //   - ILogger<DirectOpenAiAgent> (framework, always available)
-        // Phase 3 will introduce FoundryAgent and a MultiAgentOrchestrator to replace this registration.
-        services.AddSingleton<ISprkAgent, DirectOpenAiAgent>();
-
         // chat-routing-redesign-r1 task 141 / FR-22: OrchestratorPromptBuilder.
         // Singleton — holds an in-process MemoryCache for the stable prefix (keyed by active
         // playbook name). Singleton lifetime is required so the cache persists across requests

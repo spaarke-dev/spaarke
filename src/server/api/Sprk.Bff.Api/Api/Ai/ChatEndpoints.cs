@@ -2406,6 +2406,26 @@ public static class ChatEndpoints
         {
             playbook = await playbookLookup.GetByIdAsync(request.PlaybookId!, cancellationToken);
         }
+        catch (FeatureDisabledException ex)
+        {
+            // ADR-032 P3 kill-switch: NullPlaybookLookupService surfaced (compound AI gate
+            // OFF — ai-architecture-redesign-r1 task 006). MUST precede the generic catch so
+            // the caller sees the canonical 503 kill-switch pattern instead of a 404.
+            logger.LogDebug(
+                "ExecutePlaybookAsync called while AI feature disabled. ErrorCode={ErrorCode}, session={SessionId}",
+                ex.ErrorCode, request.SessionId);
+            response.StatusCode = StatusCodes.Status503ServiceUnavailable;
+            response.ContentType = "application/problem+json";
+            await response.WriteAsJsonAsync(new
+            {
+                type = FeatureDisabledResults.TypeUri,
+                title = "Feature Disabled",
+                status = 503,
+                detail = ex.Message,
+                errorCode = ex.ErrorCode,
+            }, cancellationToken);
+            return;
+        }
         catch (Exception ex)
         {
             logger.LogWarning(ex,

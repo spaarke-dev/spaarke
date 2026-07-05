@@ -14,12 +14,12 @@
 
 | # | Task | FR | Rigor | Deps | Status |
 |---|---|---|---|---|---|
-| 001 | ChatSession ledger model + persistence + Cosmos file-ref fix | FR-P0-01 | FULL | — | 🔲 |
-| 003 | Catalog schema extensions ×3 tables (spaarkedev1) | FR-P0-03 | STANDARD | — | 🔲 |
-| 006 | Registration hygiene: FinanceModule exits + Null peers | FR-P0-05 | FULL | — | 🔲 |
-| 007 | ICodedWorkflow convention + DailyBriefing retrofit | FR-P0-06 | FULL | — | 🔲 |
-| 013 | Portfolio reconciliation (close R7; re-point triggers) | FR-P0-11 | MINIMAL | — | 🔲 |
-| 070 | Track-B batch 1: DirectOpenAiAgent cluster | FR-TB-01 | STANDARD | — | 🔲 |
+| 001 | ChatSession ledger model + persistence + Cosmos file-ref fix (5 new + 815 existing tests green; publish 49.97 MB; defer filed: widget/tab-state clobber) | FR-P0-01 | FULL | — | ✅ |
+| 003 | Catalog schema extensions ×3 tables (spaarkedev1) | FR-P0-03 | STANDARD | — | ✅ |
+| 006 | Registration hygiene: FinanceModule exits + 3 Null peers + compound gate (12 gating tests; publish −0.2 MB; repaired pre-existing orchestrator test breakage) | FR-P0-05 | FULL | — | ✅ |
+| 007 | ICodedWorkflow convention + DailyBriefing retrofit (assembly-scan mirror of tool handlers; 3 convention tests; narrator tests unchanged) | FR-P0-06 | FULL | — | ✅ |
+| 013 | Portfolio reconciliation (R7 #501 closed w/ absorption map; R4/ActionEngine/insights-r3 triggers → G-P3/G-P2; re-base stub filed) | FR-P0-11 | MINIMAL | — | ✅ |
+| 070 | Track-B batch 1: DirectOpenAiAgent cluster (8 deleted, 2 keep-with-reason: SseEvent.cs live via SseOutputGuard; RunPhaseBManifestPresentAsync live until 035) | FR-TB-01 | STANDARD | — | ✅ |
 
 ### Wave W-P0-B (parallel ×6)
 

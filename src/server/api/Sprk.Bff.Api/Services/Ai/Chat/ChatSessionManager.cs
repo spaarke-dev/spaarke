@@ -331,7 +331,14 @@ public class ChatSessionManager
 
     /// <summary>
     /// Maps a <see cref="ChatSession"/> (hot Redis model) to a <see cref="StoredSession"/>
-    /// (Cosmos DB warm document). Preserves all message content and metadata.
+    /// (Cosmos DB warm document). Preserves all message content and metadata, document
+    /// references (DocumentId, AdditionalDocumentIds, UploadedFiles manifest), and the
+    /// typed session-ledger collections (Outputs, ToolChains, WidgetEvents, Gates).
+    ///
+    /// ADR-040 / FR-P0-01: prior to the ledger work this mapper dropped DocumentId, the
+    /// pinned AdditionalDocumentIds, and the UploadedFiles manifest — every write-through
+    /// clobbered the Cosmos document's file references (the audited P2 violation).
+    /// Document references now round-trip through the warm store in both directions.
     ///
     /// Content is permitted at ADR-015 Tier 3 (user-owned work history, Cosmos warm store).
     /// </summary>
@@ -361,7 +368,20 @@ public class ChatSessionManager
             Messages = messages,
             WidgetStates = [],
             CreatedAt = session.CreatedAt,
-            LastActivity = session.LastActivity
+            LastActivity = session.LastActivity,
+
+            // Document references (ADR-040 fix — file refs survive the warm store)
+            DocumentId = session.DocumentId,
+            AdditionalDocumentIds = session.AdditionalDocumentIds?.ToList() ?? [],
+            UploadedFiles = session.UploadedFiles is { Count: > 0 }
+                ? SessionPersistenceService.MapToStored(session.UploadedFiles)
+                : [],
+
+            // Session ledger (ADR-040 / FR-P0-01 — persisted DARK at P0, zero readers)
+            Outputs = SessionPersistenceService.MapOutputsToStored(session.Outputs),
+            ToolChains = SessionPersistenceService.MapToolChainsToStored(session.ToolChains),
+            WidgetEvents = SessionPersistenceService.MapWidgetEventsToStored(session.WidgetEvents),
+            Gates = SessionPersistenceService.MapGatesToStored(session.Gates)
         };
     }
 
@@ -369,9 +389,12 @@ public class ChatSessionManager
     /// Maps a <see cref="StoredSession"/> (Cosmos warm document) back to a <see cref="ChatSession"/>
     /// (hot Redis model) for Cosmos-fallback scenarios.
     ///
-    /// Message content round-trips faithfully. Fields present only on <see cref="StoredSession"/>
-    /// (widget states, entity refs, summary) have no equivalent on <see cref="ChatSession"/> and
-    /// are discarded — they remain in Cosmos and are accessible via <see cref="ISessionPersistenceService"/>.
+    /// Message content, document references (DocumentId, AdditionalDocumentIds, the
+    /// UploadedFiles manifest — ADR-040: document references MUST survive warm-store
+    /// restore), and the typed session-ledger collections all round-trip faithfully.
+    /// Fields present only on <see cref="StoredSession"/> (widget states, entity refs,
+    /// summary, tabs) have no equivalent on <see cref="ChatSession"/> and are not mapped —
+    /// they remain in Cosmos and are accessible via <see cref="ISessionPersistenceService"/>.
     /// </summary>
     private static ChatSession MapStoredSessionToChatSession(StoredSession stored)
     {
@@ -402,10 +425,27 @@ public class ChatSessionManager
         return new ChatSession(
             SessionId: stored.SessionId,
             TenantId: stored.TenantId,
-            DocumentId: null,          // Not stored in Cosmos — Dataverse is authoritative for document associations
+            // ADR-040 fix: document references now persist to (and restore from) Cosmos.
+            // Older warm documents that pre-date the fields restore as null/empty —
+            // Dataverse remains the cold-tier authority for those sessions.
+            DocumentId: stored.DocumentId,
             PlaybookId: stored.PlaybookId,
             CreatedAt: stored.CreatedAt,
             LastActivity: stored.LastActivity,
-            Messages: messages);
+            Messages: messages,
+            AdditionalDocumentIds: stored.AdditionalDocumentIds is { Count: > 0 }
+                ? stored.AdditionalDocumentIds
+                : null,
+            UploadedFiles: stored.UploadedFiles is { Count: > 0 }
+                ? SessionPersistenceService.MapFromStored(stored.UploadedFiles)
+                : null)
+        {
+            // Session ledger (ADR-040 / FR-P0-01 — restored DARK at P0, zero readers).
+            // Empty stored lists map to null ("no ledger entries yet").
+            Outputs = SessionPersistenceService.MapOutputsFromStored(stored.Outputs),
+            ToolChains = SessionPersistenceService.MapToolChainsFromStored(stored.ToolChains),
+            WidgetEvents = SessionPersistenceService.MapWidgetEventsFromStored(stored.WidgetEvents),
+            Gates = SessionPersistenceService.MapGatesFromStored(stored.Gates)
+        };
     }
 }

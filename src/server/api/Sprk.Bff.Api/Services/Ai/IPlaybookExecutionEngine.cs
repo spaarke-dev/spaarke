@@ -140,7 +140,7 @@ public interface IPlaybookExecutionEngine
 /// and as the source-of-truth for default file selection.
 /// </param>
 /// <param name="Path">
-/// Invocation-path discriminator (DirectEndpoint or AgentTool); drives the
+/// Invocation-path discriminator (DirectEndpoint); drives the
 /// <c>path</c> dimension on <see cref="Telemetry.R5SummarizeTelemetry.RecordSummarizeInvocation"/>.
 /// </param>
 /// <param name="CorrelationId">Optional correlation ID propagated to the tracing span.</param>

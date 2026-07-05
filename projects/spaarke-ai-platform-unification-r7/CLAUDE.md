@@ -7,11 +7,11 @@
 
 ## Project Status
 
-- **Phase**: R7 close — Wave 12.3+ chat-summarize + Playbook-manifest composition model
-- **Last Updated**: 2026-07-03
-- **Current Task**: Phase 12.3a next (client migration + Doc Upload PlaybookId retire)
-- **Next Action**: Follow [`notes/r7-close-plan-2026-07-03.md`](notes/r7-close-plan-2026-07-03.md) §4 Phase 12.3a
-- **CANONICAL SESSION DOC** (read first every session): [`notes/r7-close-plan-2026-07-03.md`](notes/r7-close-plan-2026-07-03.md) — design decisions D-01 through D-15 locked 2026-07-03; phased scope; vocabulary
+- **Phase**: **CLOSED / RE-SCOPED** (2026-07-05) — do NOT execute further R7 tasks or close-plan phases
+- **Last Updated**: 2026-07-05
+- **Current Task**: none — project closed; remaining scope absorbed by [`spaarke-ai-architecture-redesign-r1`](../spaarke-ai-architecture-redesign-r1/) (Issue #550)
+- **Next Action**: work continues in `spaarke-ai-architecture-redesign-r1`; r7 branch disposition is redesign-r1 task 025 (FR-P1-06)
+- **CANONICAL CLOSE-OUT DOC** (read first): [`notes/close-out-absorbed-by-ai-architecture-redesign-r1.md`](notes/close-out-absorbed-by-ai-architecture-redesign-r1.md) — per-wave absorbed/dropped disposition map. The former close plan [`notes/r7-close-plan-2026-07-03.md`](notes/r7-close-plan-2026-07-03.md) is HISTORICAL — its phases 12.3a–G are absorbed or dropped per that map.
 
 ---
 

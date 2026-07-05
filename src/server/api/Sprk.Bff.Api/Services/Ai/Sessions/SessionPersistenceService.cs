@@ -456,6 +456,174 @@ public class SessionPersistenceService : ISessionPersistenceService
     }
 
     // =========================================================================
+    // Internal helpers — ledger entry <-> Stored* bridge (ADR-040 / FR-P0-01)
+    // =========================================================================
+    //
+    // Same bridge pattern as MapToStored/MapFromStored above: the domain records
+    // (Models.Ai.Chat) are PascalCase System.Text.Json shapes; the Stored* classes
+    // are camelCase Cosmos shapes. Payloads additionally convert JsonElement <->
+    // raw-JSON string because StoredSession travels through BOTH System.Text.Json
+    // (Redis via ITenantCache) and the Cosmos SDK's Newtonsoft-based serializer —
+    // JsonElement does not survive the Newtonsoft leg.
+    //
+    // DARK at P0: called only by the ChatSessionManager persist/restore mappers;
+    // no production code reads the mapped collections yet.
+
+    internal static List<StoredSessionOutput> MapOutputsToStored(IReadOnlyList<SessionOutput>? outputs)
+        => outputs is not { Count: > 0 }
+            ? []
+            : outputs.Select(o => new StoredSessionOutput
+            {
+                Key = o.Key,
+                BindingId = o.BindingId,
+                UcId = o.UcId,
+                Turn = o.Turn,
+                Disposition = o.Disposition,
+                Payload = o.Payload.GetRawText(),
+                WidgetId = o.WidgetId,
+                SourceRefs = o.SourceRefs?.ToList(),
+                CreatedAt = o.CreatedAt
+            }).ToList();
+
+    internal static IReadOnlyList<SessionOutput>? MapOutputsFromStored(List<StoredSessionOutput>? stored)
+        => stored is not { Count: > 0 }
+            ? null
+            : stored.Select(s => new SessionOutput
+            {
+                Key = s.Key,
+                BindingId = s.BindingId,
+                UcId = s.UcId,
+                Turn = s.Turn,
+                Disposition = s.Disposition,
+                Payload = ParsePayload(s.Payload),
+                WidgetId = s.WidgetId,
+                SourceRefs = s.SourceRefs,
+                CreatedAt = s.CreatedAt
+            }).ToList();
+
+    internal static List<StoredToolChain> MapToolChainsToStored(IReadOnlyList<SessionToolChain>? chains)
+        => chains is not { Count: > 0 }
+            ? []
+            : chains.Select(c => new StoredToolChain
+            {
+                Turn = c.Turn,
+                CreatedAt = c.CreatedAt,
+                Calls = c.Calls.Select(call => new StoredToolCall
+                {
+                    ToolId = call.ToolId,
+                    ArgsSummary = call.ArgsSummary,
+                    ResultCount = call.ResultCount,
+                    Citations = call.Citations?.ToList(),
+                    DurationMs = call.DurationMs
+                }).ToList()
+            }).ToList();
+
+    internal static IReadOnlyList<SessionToolChain>? MapToolChainsFromStored(List<StoredToolChain>? stored)
+        => stored is not { Count: > 0 }
+            ? null
+            : stored.Select(s => new SessionToolChain
+            {
+                Turn = s.Turn,
+                CreatedAt = s.CreatedAt,
+                Calls = s.Calls.Select(call => new SessionToolCall
+                {
+                    ToolId = call.ToolId,
+                    ArgsSummary = call.ArgsSummary,
+                    ResultCount = call.ResultCount,
+                    Citations = call.Citations,
+                    DurationMs = call.DurationMs
+                }).ToList()
+            }).ToList();
+
+    internal static List<StoredWidgetEvent> MapWidgetEventsToStored(IReadOnlyList<SessionWidgetEvent>? events)
+        => events is not { Count: > 0 }
+            ? []
+            : events.Select(e => new StoredWidgetEvent
+            {
+                WidgetId = e.WidgetId,
+                EventType = e.EventType,
+                Turn = e.Turn,
+                EntryRefs = e.EntryRefs?.ToList(),
+                Payload = e.Payload?.GetRawText(),
+                CreatedAt = e.CreatedAt
+            }).ToList();
+
+    internal static IReadOnlyList<SessionWidgetEvent>? MapWidgetEventsFromStored(List<StoredWidgetEvent>? stored)
+        => stored is not { Count: > 0 }
+            ? null
+            : stored.Select(s => new SessionWidgetEvent
+            {
+                WidgetId = s.WidgetId,
+                EventType = s.EventType,
+                Turn = s.Turn,
+                EntryRefs = s.EntryRefs,
+                Payload = s.Payload is null ? null : ParsePayload(s.Payload),
+                CreatedAt = s.CreatedAt
+            }).ToList();
+
+    internal static List<StoredGate> MapGatesToStored(IReadOnlyList<SessionGate>? gates)
+        => gates is not { Count: > 0 }
+            ? []
+            : gates.Select(g => new StoredGate
+            {
+                GateId = g.GateId,
+                Kind = g.Kind,
+                Status = g.Status,
+                Turn = g.Turn,
+                BindingId = g.BindingId,
+                SideEffectClass = g.SideEffectClass,
+                OutputKey = g.OutputKey,
+                CreatedAt = g.CreatedAt,
+                ResolvedAt = g.ResolvedAt
+            }).ToList();
+
+    internal static IReadOnlyList<SessionGate>? MapGatesFromStored(List<StoredGate>? stored)
+        => stored is not { Count: > 0 }
+            ? null
+            : stored.Select(s => new SessionGate
+            {
+                GateId = s.GateId,
+                Kind = s.Kind,
+                Status = s.Status,
+                Turn = s.Turn,
+                BindingId = s.BindingId,
+                SideEffectClass = s.SideEffectClass,
+                OutputKey = s.OutputKey,
+                CreatedAt = s.CreatedAt,
+                ResolvedAt = s.ResolvedAt
+            }).ToList();
+
+    /// <summary>
+    /// Re-hydrates a raw-JSON payload string to a detached <see cref="System.Text.Json.JsonElement"/>.
+    /// Malformed / empty payloads (which should not occur — the write side always emits
+    /// <c>GetRawText()</c>) degrade to a JSON <c>null</c> element rather than failing the
+    /// whole session restore.
+    /// </summary>
+    private static System.Text.Json.JsonElement ParsePayload(string payload)
+    {
+        if (string.IsNullOrWhiteSpace(payload))
+        {
+            return NullJsonElement();
+        }
+
+        try
+        {
+            using var doc = System.Text.Json.JsonDocument.Parse(payload);
+            return doc.RootElement.Clone();
+        }
+        catch (System.Text.Json.JsonException)
+        {
+            return NullJsonElement();
+        }
+    }
+
+    private static System.Text.Json.JsonElement NullJsonElement()
+    {
+        using var doc = System.Text.Json.JsonDocument.Parse("null");
+        return doc.RootElement.Clone();
+    }
+
+    // =========================================================================
     // Private helpers — Redis
     // =========================================================================
 

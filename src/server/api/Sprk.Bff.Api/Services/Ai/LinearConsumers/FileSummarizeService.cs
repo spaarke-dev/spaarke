@@ -11,8 +11,8 @@ namespace Sprk.Bff.Api.Services.Ai.LinearConsumers;
 /// Composes <see cref="IActionResolver"/> + <see cref="IActionRunner"/> and
 /// emits an <see cref="AnalysisStreamChunk"/> SSE sequence. The
 /// <c>consumerType</c> parameter selects which <c>sprk_analysisaction</c> row
-/// is resolved (each consumer supplies its own prompt + output schema via
-/// <see cref="LinearConsumersOptions.ActionIds"/>).
+/// is resolved (each consumer supplies its own prompt + output schema via the
+/// <c>sprk_playbookconsumer</c> routing table — see <see cref="IActionResolver"/>).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -33,7 +33,7 @@ namespace Sprk.Bff.Api.Services.Ai.LinearConsumers;
 /// is intentionally consumer-agnostic.
 /// </para>
 /// </remarks>
-public sealed class FileSummarizeService
+public class FileSummarizeService
 {
     private readonly IActionResolver _actionResolver;
     private readonly IActionRunner _actionRunner;
@@ -50,15 +50,28 @@ public sealed class FileSummarizeService
     }
 
     /// <summary>
+    /// Protected logger-only ctor for the ADR-032 Null-Object subclass
+    /// (<see cref="NullFileSummarizeService"/>) — bypasses the AI deps so the Null peer is
+    /// registrable when the compound AI gate is OFF. Production code MUST use the public ctor.
+    /// Pattern mirrors <c>SessionSummarizeOrchestrator</c> / <c>SprkChatAgentFactory</c>.
+    /// </summary>
+    protected FileSummarizeService(ILogger<FileSummarizeService> logger)
+    {
+        _actionResolver = null!;
+        _actionRunner = null!;
+        _logger = logger;
+    }
+
+    /// <summary>
     /// Execute the summarize linear pipeline for the specified consumer.
     /// Emits progress + result chunks the caller can write to the SSE response.
     /// </summary>
     /// <param name="extractedText">Pre-extracted, pre-concatenated source text.</param>
     /// <param name="fileName">Display label for logging (e.g., first file name or "session-files-combined").</param>
-    /// <param name="consumerType">Consumer-type key (e.g., <see cref="ConsumerTypes.SummarizeFile"/> or <see cref="ConsumerTypes.ChatSummarize"/>) — resolves the target Action row via <see cref="LinearConsumersOptions.ActionIds"/>.</param>
+    /// <param name="consumerType">Consumer-type key (e.g., <see cref="ConsumerTypes.SummarizeFile"/> or <see cref="ConsumerTypes.ChatSummarize"/>) — resolves the target Action row via the <c>sprk_playbookconsumer</c> routing table (<see cref="IActionResolver"/>).</param>
     /// <param name="httpContext">HTTP context (for tenant claims + correlation id).</param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    public async IAsyncEnumerable<AnalysisStreamChunk> ExecuteAsync(
+    public virtual async IAsyncEnumerable<AnalysisStreamChunk> ExecuteAsync(
         string extractedText,
         string fileName,
         string consumerType,

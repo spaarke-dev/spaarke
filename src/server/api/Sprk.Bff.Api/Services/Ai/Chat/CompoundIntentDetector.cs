@@ -94,8 +94,7 @@ public sealed class CompoundIntentDetector
         }
 
         // Single tool call: check if it's a write-back or external action
-        var toolName = toolCalls[0].CallId is not null ? toolCalls[0].Name : string.Empty;
-        toolName = toolCalls[0].Name ?? string.Empty;
+        var toolName = toolCalls[0].Name ?? string.Empty;
 
         if (WriteBackToolNames.Contains(toolName))
         {

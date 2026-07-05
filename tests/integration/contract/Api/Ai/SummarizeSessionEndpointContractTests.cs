@@ -22,6 +22,7 @@ using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
+using Sprk.Bff.Api.Services.Ai.LinearConsumers;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Telemetry;
 using Spaarke.Dataverse;
@@ -489,6 +490,17 @@ public sealed class SummarizeSessionEndpointTestFixture : IAsyncLifetime, IDispo
         // exercises the FR-05 typed-options fallback path (preserves the prior fixture
         // intent verbatim). FR-1R-05 happy-path coverage lives in SessionSummarizeOrchestratorTests.
         builder.Services.AddSingleton(ConsumerRoutingMock.Object);
+
+        // R7 Wave 12.3 orchestrator ctor deps (pre-existing fixture gap — repaired by
+        // ai-architecture-redesign-r1 task 006 alongside the sibling unit-test ctor repairs):
+        // ISessionFileTextSource + FileSummarizeService are hard ctor deps. These scenarios
+        // exercise the engine path (ConsumerRoutingMock.ResolveActionAsync returns null by
+        // default), so constructor-satisfying stubs suffice — the Linear path is never taken.
+        builder.Services.AddSingleton(Mock.Of<ISessionFileTextSource>());
+        builder.Services.AddSingleton(new FileSummarizeService(
+            Mock.Of<IActionResolver>(),
+            Mock.Of<IActionRunner>(),
+            Mock.Of<ILogger<FileSummarizeService>>()));
 
         // Orchestrator itself — concrete (ADR-010); registered Scoped to mirror prod.
         builder.Services.AddScoped<SessionSummarizeOrchestrator>();
