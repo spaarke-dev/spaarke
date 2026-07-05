@@ -1,0 +1,167 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="038" project="spaarke-ai-architecture-redesign-r1">
+  <metadata>
+    <title>G-P2 gate — P2 deploy + operator browser UAT (four-outcome contract, session memory, confirmed writes)</title>
+    <phase>Phase P2: Text-Path Hard Cutover</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <tags>deploy, gate, uat</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <parallel-group>serial</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>030, 031, 032, 033, 034, 035, 036, 037</dependencies>
+  </metadata>
+
+  <prompt>
+    Execute the G-P2 phase gate: deploy the P2 build to spaarkedev1 (bff-deploy + code-page-deploy for touched client surfaces), then hand off to the OPERATOR who executes the G-P2 UAT script IN THE SPAARKE UI. Per NFR-11 (BINDING browser rule), this gate CANNOT be satisfied by curl, tests, or logs — a user must see rendered results in the browser. The script proves the four-outcome text contract (do / clarify-then-do / cited ad-hoc answer over docs + Dataverse / honest refusal), session memory ("email that summary to John" resolves the ledger reference from an earlier turn), and that writes confirm before executing. Latency NFR-04 is verified at this gate: text-turn TTFB no more than 3s p50 on spaarkedev1. Run /goal clear BEFORE starting this gate task (plan rule 7). Assemble the gate-evidence package (deploy record, UAT sign-off, TTFB measurements, zero-legacy-dispatch telemetry from the FR-P2-05 UAT window) in task notes.
+  </prompt>
+
+  <role>
+    Release engineer coordinating deployment + operator UAT for the Spaarke BFF and SpaarkeAi client surfaces on spaarkedev1.
+  </role>
+
+  <goal>
+    P2 build deployed to spaarkedev1; operator has executed the full G-P2 UAT script in the browser with all steps passing; TTFB p50 no more than 3s verified; gate evidence assembled; phase P3 unblocked.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-architecture-redesign-r1/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-architecture-redesign-r1/plan.md</file>
+    <file purpose="project-context">projects/spaarke-ai-architecture-redesign-r1/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md</file>
+    <file purpose="deploy-skill">.claude/skills/bff-deploy/SKILL.md</file>
+    <file purpose="deploy-skill">.claude/skills/code-page-deploy/SKILL.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="NFR-11">BINDING browser rule: this gate is executed by a user in the Spaarke UI with rendered results. Curl, automated tests, and log inspection NEVER satisfy the gate. Claude Code prepares, deploys, and assembles evidence — the OPERATOR passes the gate.</constraint>
+    <constraint source="NFR-04">Text-turn TTFB no more than 3s p50 verified on spaarkedev1 at this gate (owner-set target; prompt caching from FR-P2-01 is the mechanism).</constraint>
+    <constraint source="NFR-10">/goal clear MUST be run before this gate task; /goal never wraps a phase gate.</constraint>
+    <constraint source="ADR-039">The UAT exercises the ONE dispatch protocol; any observed second-path behavior (legacy dispatcher traffic in telemetry) fails the gate.</constraint>
+    <constraint source="ADR-040">Session-memory step depends on ledger-addressable outputs — "email that summary to John" must resolve the ledger ref, proving storage-precedes-rendering end-to-end.</constraint>
+    <constraint source="NFR-08">Gate evidence includes the FR-P2-05 telemetry proof: zero chat utterances reached any legacy dispatcher over the UAT window.</constraint>
+    <constraint source="NFR-02">Eval suite green in CI is a precondition for deploying this gate build.</constraint>
+    <constraint source="ADR-029">Deploy record includes the P2 publish size (net reduction expected after 035/036 deletions).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>deploy, uat, gate-evidence</topic>
+    <files>
+      <file>docs/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>docs/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/OVERLAY-MATRIX.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-MIGRATION-MAP.md</file>
+    </files>
+    <patterns>
+      <pattern name="Gate store" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PendingPlanManager.cs">
+        The unified gate whose confirm-before-execute behavior the operator observes in UAT step 4.
+      </pattern>
+      <pattern name="SprkChatAgent stack" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgent.cs">
+        The loop under UAT — all four outcomes originate here.
+      </pattern>
+      <pattern name="Tool handler framework" location="src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/">
+        The closed catalog behind the "do" and "cited ad-hoc answer" outcomes.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      G-P2 is the second browser gate (spec Success Criterion 3). It proves the P2 promise to a human: the assistant does what you ask, asks when it must, answers with citations, refuses honestly, remembers the session, and never writes without confirmation.
+    </background>
+    <dependencies>
+      <dependency task="030" status="pending">Loop contract.</dependency>
+      <dependency task="031" status="pending">Unified confirmation gate.</dependency>
+      <dependency task="032" status="pending">Loop-native elicitation.</dependency>
+      <dependency task="033" status="pending">Honest refusal.</dependency>
+      <dependency task="034" status="pending">Chat NL hard cutover.</dependency>
+      <dependency task="035" status="pending">Dispatcher stack deleted.</dependency>
+      <dependency task="036" status="pending">Legacy Chat/Tools deleted.</dependency>
+      <dependency task="037" status="pending">Eval suite green incl. injection cases.</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0" name="Context check + preconditions">
+      Verify context below 70%. Confirm tasks 030-037 are all complete, CI (incl. eval suite) is green, and /goal clear has been run (NFR-10).
+    </step>
+    <step order="1" name="Deploy BFF">
+      Invoke the bff-deploy skill to deploy Sprk.Bff.Api to spaarke-bff-dev; record the publish size in the deploy record (net reduction expected per ADR-029).
+    </step>
+    <step order="2" name="Deploy client surfaces">
+      Invoke code-page-deploy for the SpaarkeAi client surfaces touched in P2 (task 034 intentHint removal); verify the deployed build loads on spaarkedev1.
+    </step>
+    <step order="3" name="Smoke-check readiness (not the gate)">
+      Verify health endpoints green and a trivial chat turn streams — readiness only; this does NOT satisfy the gate (NFR-11).
+    </step>
+    <step order="4" name="Operator executes the G-P2 UAT script in the browser">
+      Hand the ui-tests script below to the operator. The operator performs every step in the Spaarke UI on spaarkedev1 and records pass/fail + screenshots per step. Claude Code waits for the operator's results — it MUST NOT self-certify any step.
+    </step>
+    <step order="5" name="Verify latency NFR-04">
+      From the operator's UAT session window, measure text-turn TTFB (App Insights or browser network evidence tied to the operator's turns): p50 no more than 3s. Record measurements.
+    </step>
+    <step order="6" name="Assemble gate evidence + close">
+      Compile the gate package in projects/spaarke-ai-architecture-redesign-r1/notes/: deploy record, operator UAT sign-off, TTFB p50 evidence, zero-legacy-dispatcher telemetry (FR-P2-05 UAT window). Update TASK-INDEX.md (038 done; P2 complete) and current-task.md to the first P3 task. If ANY UAT step fails, the gate FAILS — file the failure, revert status to in-progress, and escalate; do not proceed to P3.
+    </step>
+  </steps>
+
+  <ui-tests>
+    <description>
+      G-P2 operator UAT script — executed by the OPERATOR in the Spaarke UI on spaarkedev1 (NFR-11: curl/tests/logs never satisfy this gate). Each step requires a rendered result observed in the browser.
+    </description>
+    <test id="UAT-1" name="Outcome 1 — DO">
+      In a fresh chat session, type a plain-language request matching a live catalog capability (e.g. "summarize this document" with a file attached). EXPECT: the capability executes via the loop, a streamed summary renders with citations, and chips appear. No slash command used.
+    </test>
+    <test id="UAT-2" name="Outcome 2 — CLARIFY-THEN-DO">
+      Type a request for a capability while omitting a required input (e.g. "create a task" with no title/date). EXPECT: the assistant asks a clarifying question naming the missing field(s). Answer conversationally. EXPECT: the capability then proceeds using the answer (mid-elicitation utterance parsed as an answer, per FR-P2-03).
+    </test>
+    <test id="UAT-3" name="Outcome 3 — CITED AD-HOC ANSWER over docs + Dataverse">
+      Ask a question answerable only by combining document content and Dataverse data (e.g. "which matters reference the indemnification clause in this agreement?"). EXPECT: a rendered answer with citations to BOTH the document passage(s) and the Dataverse record(s). Uncited assertions = FAIL.
+    </test>
+    <test id="UAT-4" name="Outcome 4 — HONEST REFUSAL">
+      Ask for something off-catalog (e.g. "book me a flight to Chicago"). EXPECT: the tenant's refusal template renders — no invented capability, no hallucinated result, no silent drop.
+    </test>
+    <test id="UAT-5" name="Session memory — ledger reference resolution">
+      After UAT-1's summary exists in this session, type: "email that summary to John". EXPECT: the assistant resolves "that summary" to the earlier ledger output (references its actual content/identity) and proposes the email action — proving ledger-addressable session memory (ADR-040).
+    </test>
+    <test id="UAT-6" name="Writes confirm before executing">
+      Continue UAT-5 (or request any write, e.g. "create a follow-up task for this matter"). EXPECT: a confirmation gate renders BEFORE anything executes, showing what will happen. Confirm it. EXPECT: the write executes and the result renders. Then request another write and REJECT at the gate. EXPECT: nothing executes; the assistant acknowledges. Any write executing without the gate = GATE FAILURE.
+    </test>
+    <test id="UAT-7" name="Soft-slash deterministic invocation">
+      Use one of the four retained soft slash commands. EXPECT: the mapped capability invokes directly and deterministically (same behavior on repeat), with no NL reinterpretation.
+    </test>
+    <test id="UAT-8" name="Latency spot-check (NFR-04)">
+      Across the turns above (minimum 10 text turns), first response token feels immediate; measured TTFB p50 no more than 3s (evidence collected in step 5 against this session window).
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="dotnet">Publish for deploy</tool>
+    <tool name="npm">Client prod builds (npm run build:prod)</tool>
+    <tool name="az">App Service deploy + App Insights queries (TTFB, legacy-dispatch telemetry)</tool>
+    <tool name="pac">Dataverse web-resource deploy (code-page-deploy)</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="deploy">Sprk.Bff.Api deployed to spaarke-bff-dev; SpaarkeAi client surfaces deployed to spaarkedev1</output>
+    <output type="report">projects/spaarke-ai-architecture-redesign-r1/notes/gate-evidence-g-p2.md (deploy record, operator UAT sign-off per step, TTFB p50 evidence, zero-legacy-dispatch telemetry)</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md (status update; P2 phase closed)</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r1/current-task.md (reset to first P3 task)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">P2 build deployed to spaarkedev1 (BFF + touched client surfaces) with deploy record incl. publish size.</criterion>
+    <criterion testable="true">Operator executed ALL ui-tests steps IN THE BROWSER with every step passing — four-outcome contract (do / clarify-then-do / cited ad-hoc answer over docs + Dataverse / honest refusal) observed rendered (NFR-11; curl/tests/logs do not count).</criterion>
+    <criterion testable="true">Session memory verified: "email that summary to John" resolves the ledger reference from the earlier turn (UAT-5).</criterion>
+    <criterion testable="true">Writes confirm before executing — confirm and reject paths both observed in the UI (UAT-6).</criterion>
+    <criterion testable="true">Text-turn TTFB p50 no more than 3s measured over the operator's UAT window (NFR-04 evidence in gate package).</criterion>
+    <criterion testable="true">Zero-legacy-dispatcher telemetry over the UAT window attached to the gate package (FR-P2-05 / NFR-08).</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

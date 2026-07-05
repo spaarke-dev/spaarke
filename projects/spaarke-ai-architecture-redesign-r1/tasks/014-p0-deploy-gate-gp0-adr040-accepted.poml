@@ -1,0 +1,137 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="014" project="spaarke-ai-architecture-redesign-r1">
+  <metadata>
+    <title>G-P0 gate: P0 deploy + engineering evidence + ADR-040 → Accepted</title>
+    <phase>Phase P0: Foundations</phase>
+    <status>not-started</status>
+    <estimated-hours>5</estimated-hours>
+    <tags>deploy, gate, adr</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <parallel-group>serial</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>001, 002, 003, 004, 005, 006, 007, 008, 009, 010, 011, 012</dependencies>
+  </metadata>
+
+  <prompt>
+    Execute the G-P0 gate (spec Success Criterion 1): deploy the P0 foundations to `spaarke-bff-dev` via the `bff-deploy` skill and assemble the engineering evidence package that closes Phase P0. G-P0 is the project's SOLE engineering-gated phase (NFR-11): evidence is integration tests + startup logs, not browser UAT. Evidence must show: ledger round-trip passing INCLUDING file references (task 001), boot reconciliation health checks green on the deployed environment (task 005), catalog schema deployed to spaarkedev1 (task 003), and the user-OBO audit (task 012). With evidence assembled, flip ADR-040 (Session Ledger) from Proposed to Accepted in BOTH copies — `docs/adr/ADR-040-session-ledger.md` and `.claude/adr/ADR-040-session-ledger.md` — citing the evidence. Report publish size per ADR-029. Run `/goal clear` before starting (plan §6 rule 7: /goal never wraps a gate task).
+  </prompt>
+
+  <role>
+    Release engineer familiar with the bff-deploy skill, App Service health verification, and ADR lifecycle management.
+  </role>
+
+  <goal>
+    P0 code deployed to spaarke-bff-dev with health checks green; a G-P0 evidence package in project notes covering ledger round-trip (incl. file refs), health checks, schema deployment, and OBO audit; ADR-040 status = Accepted in both copies with citation; publish size reported per ADR-029.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-architecture-redesign-r1/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-architecture-redesign-r1/plan.md</file>
+    <file purpose="project-context">projects/spaarke-ai-architecture-redesign-r1/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md</file>
+    <file purpose="adr-full">docs/adr/ADR-040-session-ledger.md</file>
+    <file purpose="adr-concise">.claude/adr/ADR-040-session-ledger.md</file>
+    <file purpose="obo-audit">projects/spaarke-ai-architecture-redesign-r1/notes/user-obo-audit.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="NFR-10 / plan §6.7">Run `/goal clear` before this gate task — /goal NEVER wraps a gate.</constraint>
+    <constraint source="NFR-11">G-P0 is the sole engineering gate: integration tests + startup logs are the accepted evidence class here (browser UAT starts at G-P1).</constraint>
+    <constraint source="ADR-029 / NFR-01">Verify publish-size impact per ADR-029/NFR-01; expect net change reported in task notes. Ceiling ≤60 MB compressed; report absolute size + diff vs baseline.</constraint>
+    <constraint source="root-CLAUDE.md §3">`.claude/adr/ADR-040-session-ledger.md` is a `.claude/` path — the status flip MUST be applied by the MAIN session, not a sub-agent (sub-agent write boundary).</constraint>
+    <constraint source="project">All twelve P0 tasks (001-012) must be ✅ before this gate runs; a 🔄/❌ task blocks the gate.</constraint>
+    <constraint source="ADR-040">Status flip requires the acceptance evidence cited in the ADR's status/history section — not a bare status edit.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>deploy, gate-evidence, adr-lifecycle</topic>
+    <files>
+      <file>docs/adr/ADR-040-session-ledger.md</file>
+      <file>docs/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-MIGRATION-MAP.md</file>
+    </files>
+    <patterns>
+      <pattern name="bff-deploy skill" location=".claude/skills/bff-deploy/SKILL.md">
+        The deployment mechanism for Sprk.Bff.Api → spaarke-bff-dev App Service.
+      </pattern>
+      <pattern name="Health checks (evidence source)" location="src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/RoutingConsumerTypeHealthCheck.cs">
+        Task 005's boot reconciliation — its green status on the deployed environment is core gate evidence.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      G-P0 closes Phase P0 and promotes ADR-040 to Accepted — the ledger contract becomes binding for every subsequent phase. P1 (first capability end-to-end) starts only after this gate passes.
+    </background>
+    <dependencies>
+      <dependency task="001" status="not-started">Ledger round-trip incl. file refs (primary evidence)</dependency>
+      <dependency task="002" status="not-started">Digest compaction over outputs</dependency>
+      <dependency task="003" status="not-started">Catalog schema deployed to spaarkedev1 (gate evidence)</dependency>
+      <dependency task="004" status="not-started">Full Binding contract</dependency>
+      <dependency task="005" status="not-started">Boot reconciliation health checks (gate evidence)</dependency>
+      <dependency task="006" status="not-started">Registration hygiene + Null peers</dependency>
+      <dependency task="007" status="not-started">ICodedWorkflow convention</dependency>
+      <dependency task="008" status="not-started">dataverse.* read handlers</dependency>
+      <dependency task="009" status="not-started">dataverse.* write handlers</dependency>
+      <dependency task="010" status="not-started">OBO spike documented</dependency>
+      <dependency task="011" status="not-started">Eval-suite scaffold in CI</dependency>
+      <dependency task="012" status="not-started">User-OBO audit (gate evidence)</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0" name="Context check + /goal clear">
+      Run `/goal clear`. Check context usage; handoff if &gt; 70%. Verify ALL tasks 001-012 are ✅ in TASK-INDEX.md — any 🔄/❌ blocks the gate; stop and escalate.
+    </step>
+    <step order="1" name="Pre-deploy verification">
+      dotnet build + full test suite green from a clean state; run the ledger round-trip test and capture output showing file references survive; run the eval scaffold; confirm CI green.
+    </step>
+    <step order="2" name="Deploy">
+      Invoke the `bff-deploy` skill to deploy Sprk.Bff.Api to spaarke-bff-dev. Capture publish size (absolute + diff vs ~45.65 MB baseline) per ADR-029.
+    </step>
+    <step order="3" name="Post-deploy evidence">
+      Verify startup health checks green on the deployed environment (boot reconciliation included); capture startup logs; verify schema columns present on spaarkedev1 (query output).
+    </step>
+    <step order="4" name="Assemble the G-P0 evidence package">
+      Write projects/spaarke-ai-architecture-redesign-r1/notes/g-p0-evidence.md: ledger round-trip output (incl. file refs), health-check status + startup logs, schema verification output, OBO audit reference, OBO spike result, eval CI run link, publish-size report.
+    </step>
+    <step order="5" name="Flip ADR-040 to Accepted">
+      Update status Proposed → Accepted in docs/adr/ADR-040-session-ledger.md AND .claude/adr/ADR-040-session-ledger.md, citing the evidence package + date. NOTE: the .claude/ copy must be edited by the main session (sub-agent write boundary).
+    </step>
+    <step order="6" name="Verify + close phase">
+      Confirm every Success-Criterion-1 item is evidenced; update TASK-INDEX.md (task 014 ✅, Phase P0 complete); reset current-task.md toward task 020 (Phase P1). Report gate completion.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build, test, publish</tool>
+    <tool name="bff-deploy">Skill: deploy Sprk.Bff.Api to spaarke-bff-dev</tool>
+    <tool name="az">App Service log/health verification</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="deploy">spaarke-bff-dev App Service (P0 build deployed)</output>
+    <output type="report">projects/spaarke-ai-architecture-redesign-r1/notes/g-p0-evidence.md</output>
+    <output type="docs">docs/adr/ADR-040-session-ledger.md (status → Accepted, with citation)</output>
+    <output type="docs">.claude/adr/ADR-040-session-ledger.md (status → Accepted, with citation — main-session edit)</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md (status update; Phase P0 closed)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Ledger round-trip evidence includes file references (test output in evidence package).</criterion>
+    <criterion testable="true">Startup health checks green on deployed spaarke-bff-dev (logs in evidence package).</criterion>
+    <criterion testable="true">Schema verified deployed on spaarkedev1 (query output in evidence package).</criterion>
+    <criterion testable="true">ADR-040 status = Accepted in BOTH docs/adr/ and .claude/adr/ copies, with evidence citation.</criterion>
+    <criterion testable="true">Publish size reported (absolute + diff vs baseline) per ADR-029; ≤60 MB ceiling respected.</criterion>
+    <criterion testable="true">/goal cleared before gate execution; all tasks 001-012 ✅ beforehand.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

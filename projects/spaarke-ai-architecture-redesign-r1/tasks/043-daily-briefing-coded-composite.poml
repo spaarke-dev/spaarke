@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="043" project="spaarke-ai-architecture-redesign-r1">
+  <metadata>
+    <title>Daily Briefing as the first full coded composite Action — /narrate engine-default + NarrateUseCodeBasedNarrator flag deleted</title>
+    <phase>Phase P3: Consumer + Client Consolidation</phase>
+    <status>not-started</status>
+    <estimated-hours>8</estimated-hours>
+    <tags>bff-api, coded-workflow, briefing</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <parallel-group>W-P3-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>038</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement FR-P3-04: promote Daily Briefing to the FIRST full `coded` composite Action in the catalog. Task 007 already retrofitted `DailyBriefingNarrator`/`Collector` under the `ICodedWorkflow` registration convention with no behavior change; this task completes the cutover — the Action row (`kind: coded`, `sprk_workflowclass` referencing the workflow) plus its Binding row become the ONLY way the briefing dispatches. Consequently the `/narrate` engine-default fallback and the `Features:NarrateUseCodeBasedNarrator` feature flag are DELETED — the Binding decides, not a flag (per the ratified OQ-2 engine-fate decision: new composites are coded workflows, control-flow-is-code). Acceptance: the briefing renders in the UI and the briefing email arrives via the coded path, and grep for the flag returns zero with output SHOWN (NFR-08). Briefing outputs write ledger entries per ADR-040 and stream per the amended ADR-037 section-name-keyed contract.
+  </prompt>
+
+  <role>
+    Senior .NET developer familiar with the DailyBriefingNarrator Wave-11 pattern, the ICodedWorkflow convention, feature-flag retirement, and the ADR-037 section-keyed streaming contract.
+  </role>
+
+  <goal>
+    Daily Briefing dispatches exclusively as a catalog `coded` composite Action via its Binding; the `/narrate` engine-default and `Features:NarrateUseCodeBasedNarrator` flag are deleted (grep-zero shown); briefing render + email both work through the coded path with ledger writes preceding rendering.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-architecture-redesign-r1/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-architecture-redesign-r1/plan.md</file>
+    <file purpose="project-context">projects/spaarke-ai-architecture-redesign-r1/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md</file>
+    <file purpose="per-component-verdicts">projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/OVERLAY-MATRIX.md</file>
+    <file purpose="coded-workflow">src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingNarrator.cs</file>
+    <file purpose="pattern-doc">docs/architecture/SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-039">Control-flow-is-code: composites are `coded` workflows referenced from Action rows — MUST NOT land the briefing (or any new composite) on the frozen engine; dispatch decided by the Binding table only.</constraint>
+    <constraint source="ADR-040">Briefing section outputs + tool chains write to the session ledger BEFORE rendering/emailing; disposition drives render vs email routing.</constraint>
+    <constraint source="ADR-037-amended-2026-07-05">The section-name-keyed streaming contract binds this composite executor; DeliverComposite is frozen; do not introduce a new streaming shape.</constraint>
+    <constraint source="NFR-08">Hard cutover: `/narrate` engine-default and `Features:NarrateUseCodeBasedNarrator` are DELETED (no dormant flag, no compat shim); grep-zero output SHOWN in the transcript.</constraint>
+    <constraint source="FR-P0-06">Reuse the ICodedWorkflow assembly-scan registration from task 007 — resolvable by class ref from the Action row; existing narrator tests stay green.</constraint>
+    <constraint source="ADR-029 / NFR-01">BFF-touching task: publish-size + delta reported (flag/fallback deletion should trend negative).</constraint>
+    <constraint source="NFR-02">Add/update eval cases for the briefing capability; eval suite green is the merge gate.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>coded-workflows, narrators, feature-flag-retirement, section-keyed-streaming</topic>
+    <files>
+      <file>docs/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>docs/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/OVERLAY-MATRIX.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-MIGRATION-MAP.md</file>
+    </files>
+    <patterns>
+      <pattern name="Coded workflow shape" location="src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingNarrator.cs">
+        The Wave-11 narrator IS the coded workflow — this task changes its dispatch (catalog row) not its behavior.
+      </pattern>
+      <pattern name="ICodedWorkflow convention" location="src/server/api/Sprk.Bff.Api/Services/Ai/">
+        Task-007 assembly-scan discovery mirroring tool handlers; Action row `sprk_workflowclass` resolves the class.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Daily Briefing is the template for every future composite: prove that a multi-step, scheduled, email-emitting capability can live entirely as a `coded` Action + Binding with no engine involvement and no feature flag. The `Features:NarrateUseCodeBasedNarrator` flag was the R7-era parallel-run mechanism; hard-cutover doctrine says the Binding now decides and the flag dies.
+    </background>
+    <dependencies>
+      <dependency task="038" status="pending">G-P2 gate passed.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 007 — ICodedWorkflow convention + DailyBriefing retrofit (no behavior change)</item>
+      <item>Task 044 — engine-shell deletions consume this task's cutover (dep)</item>
+      <item>docs/architecture/SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md — Daily Briefing is the shipped reference</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context check + load knowledge">
+      Verify context &lt; 70%. Load spec FR-P3-04, the OVERLAY-MATRIX briefing verdict, DailyBriefingNarrator + its task-007 registration, and all `/narrate` + `NarrateUseCodeBasedNarrator` call/read sites (grep first).
+    </step>
+    <step order="1" name="Author the coded Action + Binding rows">
+      Create the `sprk_analysisaction` row (`kind: coded`, `sprk_workflowclass` = DailyBriefingNarrator workflow ref) and the `sprk_playbookconsumer` Binding row (Event-path schedule trigger + surfaces + dispositions for render and email) on spaarkedev1.
+    </step>
+    <step order="2" name="Cut dispatch onto the Binding">
+      Re-point the briefing trigger path (scheduled job / endpoint) to resolve via ConsumerRoutingService → coded executor. Verify ledger writes (SessionOutput per section + ToolChain) precede render/email, and streaming stays section-name-keyed per amended ADR-037.
+    </step>
+    <step order="3" name="Delete the flag + engine-default">
+      Remove `Features:NarrateUseCodeBasedNarrator` from appsettings + options + all read sites; delete the `/narrate` engine-default fallback branch. Run and SHOW grep-zero for `NarrateUseCodeBasedNarrator` (and the dead fallback symbol) across src/** and config.
+    </step>
+    <step order="4" name="Tests + eval cases">
+      Keep existing narrator tests green (behavior unchanged); add dispatch-via-Binding test; add/update briefing eval case in tests/integration/contract/.
+    </step>
+    <step order="5" name="Verify">
+      dotnet build + full test + eval suites green (shown). Confirm briefing email path executes in dev. Publish-size delta reported per ADR-029.
+    </step>
+    <step order="6" name="Step 9.5 quality gates">
+      Run code-review + adr-check (FULL rigor). Update TASK-INDEX.md; reset current-task.md.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build, test, publish-size verification</tool>
+    <tool name="dataverse-mcp">Author Action/Binding rows on spaarkedev1</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="data">sprk_analysisaction (daily-briefing, kind=coded) + sprk_playbookconsumer Binding rows on spaarkedev1</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/** (dispatch re-point; behavior unchanged)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/appsettings.json + options/read sites — NarrateUseCodeBasedNarrator flag + /narrate engine-default deleted</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/** (dispatch-via-Binding test; narrator tests green)</output>
+    <output type="test">tests/integration/contract/** (briefing eval case)</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Daily Briefing renders AND emails via the coded composite path dispatched from its Action (`kind: coded`) + Binding rows — no engine involvement, no flag.</criterion>
+    <criterion testable="true">`Features:NarrateUseCodeBasedNarrator` and the `/narrate` engine-default are deleted; grep-zero output SHOWN (NFR-08).</criterion>
+    <criterion testable="true">Briefing outputs write ledger entries before rendering (ADR-040) and stream section-name-keyed (amended ADR-037) — test-proven.</criterion>
+    <criterion testable="true">Existing narrator tests remain green; dotnet build + eval suite green.</criterion>
+    <criterion testable="true">Publish-size delta reported (ADR-029); Step 9.5 code-review + adr-check passed.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

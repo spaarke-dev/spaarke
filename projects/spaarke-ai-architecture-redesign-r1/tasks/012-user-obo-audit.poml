@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="spaarke-ai-architecture-redesign-r1">
+  <metadata>
+    <title>User-OBO audit of every AI-reachable Dataverse flow</title>
+    <phase>Phase P0: Foundations</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <tags>audit, auth, obo</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <parallel-group>W-P0-C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>008, 009</dependencies>
+  </metadata>
+
+  <prompt>
+    Execute FR-P0-10: verify that EVERY flow the AI tool plane exposes runs user-OBO — no app-only Dataverse path is reachable from AI code. This is an evidence-producing audit, not a code task: trace each AI-reachable Dataverse access path (the six task-008/009 dataverse.* handlers, plus any existing handler or AI service that touches Dataverse) from entry point to the client acquisition call, and record per-flow evidence (file:line of the OBO acquisition, or the violation found). Any app-only path discovered is a finding requiring escalation — it violates the project MUST rule and would let AI read/write beyond the calling user's privileges. Output is an audit note in project notes with per-flow evidence, consumed as G-P0 gate material by task 014.
+  </prompt>
+
+  <role>
+    Security-minded senior .NET reviewer familiar with OBO vs app-only auth flows in Sprk.Bff.Api and with tracing DI-resolved client acquisition through service layers.
+  </role>
+
+  <goal>
+    An audit note at projects/spaarke-ai-architecture-redesign-r1/notes/user-obo-audit.md listing every AI-reachable Dataverse flow with per-flow evidence (identity mode + file:line citations), zero unexplained app-only paths, and escalations filed for any violation.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-architecture-redesign-r1/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-architecture-redesign-r1/plan.md</file>
+    <file purpose="project-context">projects/spaarke-ai-architecture-redesign-r1/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md</file>
+    <file purpose="handlers">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/</file>
+    <file purpose="auth-reference">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/GraphClientFactory.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec-MUST">MUST run user-OBO for all Dataverse tool access; an app-only Dataverse path reachable from AI is a Critical finding — escalate per CLAUDE.md §6 (security-sensitive), do not silently fix or waive.</constraint>
+    <constraint source="project">Read-only audit: no code changes in this task; findings become escalations or follow-up items, evidence goes in the note.</constraint>
+    <constraint source="NFR-07">Evidence cites identifiers and code locations only — no captured tokens or record content in the note.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>auth/obo, audit</topic>
+    <files>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>docs/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-MIGRATION-MAP.md</file>
+    </files>
+    <patterns>
+      <pattern name="Tool plane (audit surface)" location="src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/">
+        Every handler that can reach Dataverse — the six dataverse.* handlers plus existing handlers (e.g., AnalysisQueryHandler, InvokePlaybookHandler) and AI services they call.
+      </pattern>
+      <pattern name="OBO vs app-only acquisition" location="src/server/api/Sprk.Bff.Api/Infrastructure/Graph/GraphClientFactory.cs">
+        The dual-mode factory pattern — the audit distinguishes which mode each AI flow actually resolves.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      The tool plane gives the LLM reach into Dataverse; user-OBO is the security property that keeps that reach bounded by the calling user's privileges. This audit is G-P0 gate evidence.
+    </background>
+    <dependencies>
+      <dependency task="008" status="not-started">Read handlers must exist to be audited.</dependency>
+      <dependency task="009" status="not-started">Write handlers must exist to be audited.</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0" name="Context check">
+      Check context usage; handoff if &gt; 70%. Verify tasks 008 + 009 ✅. Load ADR-028 and the handler inventory.
+    </step>
+    <step order="1" name="Enumerate AI-reachable Dataverse flows">
+      Grep/trace every path from AI code (Handlers/, Services/Ai/) to a Dataverse client: the six dataverse.* handlers, existing Dataverse-touching handlers, and AI services (routing, playbook lookup, session persistence to Dataverse if any). Produce the flow list first.
+    </step>
+    <step order="2" name="Trace identity mode per flow">
+      For each flow, follow client acquisition to its auth source; record OBO (user assertion) vs app-only (client credentials) with file:line citations.
+    </step>
+    <step order="3" name="Classify + escalate">
+      Mark each flow PASS (user-OBO) or FINDING (app-only or ambiguous). For findings: escalate per CLAUDE.md §6 with the evidence; do not fix in this task.
+    </step>
+    <step order="4" name="Write the audit note">
+      Write notes/user-obo-audit.md: flow table (flow, entry point, identity mode, evidence citation, verdict), methodology, findings + escalations, and the G-P0 statement that no app-only Dataverse path is reachable from AI (or the exceptions pending resolution).
+    </step>
+    <step order="5" name="Verify + close">
+      Confirm every enumerated flow has evidence (FR-P0-10 acceptance: audit note with per-flow evidence). Update TASK-INDEX.md.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="git">Version control (audit note)</tool>
+    <tool name="dotnet">Optional: targeted test runs to confirm identity behavior</tool>
+  </tools>
+
+  <outputs>
+    <output type="report">projects/spaarke-ai-architecture-redesign-r1/notes/user-obo-audit.md</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Audit note exists with per-flow evidence (identity mode + file:line citation) for every AI-reachable Dataverse flow.</criterion>
+    <criterion testable="true">Zero unexplained app-only Dataverse paths reachable from AI; any finding has a filed escalation.</criterion>
+    <criterion testable="true">Note is usable as G-P0 gate evidence by task 014.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

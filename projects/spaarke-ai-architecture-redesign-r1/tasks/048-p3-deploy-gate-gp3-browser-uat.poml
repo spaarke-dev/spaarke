@@ -1,0 +1,142 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="048" project="spaarke-ai-architecture-redesign-r1">
+  <metadata>
+    <title>G-P3 gate — P3 deploy + operator browser UAT: flagship one-conversation journey, briefing email, three identical surfaces</title>
+    <phase>Phase P3: Consumer + Client Consolidation</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <tags>deploy, gate, uat</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <parallel-group>serial</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>040, 041, 042, 043, 044, 045, 046, 047</dependencies>
+  </metadata>
+
+  <prompt>
+    Execute the Phase P3 gate G-P3. First run `/goal clear` (NFR-10 — /goal never wraps a gate). Deploy all P3 surfaces (BFF via bff-deploy; client code pages via code-page-deploy) to spaarkedev1/spaarke-bff-dev, then hand the UAT script to the operator. BROWSER RULE (NFR-11, BINDING): this gate is satisfied ONLY by the operator running the flagship journey as ONE conversation in the Spaarke UI with rendered results — curl, tests, and logs can NEVER satisfy it. The journey: upload a document → auto-classification + summary appear untyped → clause chat over the document → "create a matter from this" → pre-filled matter wizard → confirm → "draft the client letter" producing a Communication-service draft that references real ledger outputs → follow-up task created carrying ledger refs. Additionally: the daily briefing email arrives via the coded path, and the identical behavior is verified on all three surfaces (record form, workspace, SPA). Latency spot-checks per NFR-04 apply. Assemble the evidence (operator sign-off + observations) into the gate record before marking P3 complete.
+  </prompt>
+
+  <role>
+    Release engineer + UAT facilitator: deploys BFF and client surfaces, prepares the operator script, records gate evidence, and blocks phase progression on any failed step.
+  </role>
+
+  <goal>
+    All P3 changes deployed to spaarkedev1; the operator has executed the full G-P3 UAT script in the browser with every step passing; gate evidence recorded in project notes; TASK-INDEX marks P3 complete and unblocks Phase P4.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-architecture-redesign-r1/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-architecture-redesign-r1/plan.md</file>
+    <file purpose="project-context">projects/spaarke-ai-architecture-redesign-r1/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md</file>
+    <file purpose="deploy-skill-bff">.claude/skills/bff-deploy/SKILL.md</file>
+    <file purpose="deploy-skill-client">.claude/skills/code-page-deploy/SKILL.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="NFR-11">BINDING BROWSER RULE: the gate is executed by the operator in the Spaarke UI on spaarkedev1 with rendered results. curl/tests/logs NEVER satisfy this gate. Do not mark the gate passed on any engineering evidence.</constraint>
+    <constraint source="NFR-10">Run `/goal clear` BEFORE this gate task; /goal never wraps a G-gate.</constraint>
+    <constraint source="NFR-04">Latency targets verified at the gate: upload→first-summary-token &lt;=5s p50 / &lt;=10s p95; text-turn TTFB &lt;=3s p50.</constraint>
+    <constraint source="NFR-02">Eval suite must be green before deploy (merge gate) — a red suite blocks the gate.</constraint>
+    <constraint source="ADR-029 / NFR-01">Report publish size of the deployed BFF artifact (cumulative P3 delta; net reduction expected).</constraint>
+    <constraint source="FR-P3-02">The client-letter step must produce a DRAFT in the Communication service (send stays user-initiated) referencing real ledger outputs — an Outlook draft or an ungrounded letter FAILS the step.</constraint>
+    <constraint source="project">Any failed UAT step: record the failure, fix via the owning task's scope (re-open it), redeploy, re-run — do NOT partially pass the gate.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>deployment, uat-gates, browser-verification</topic>
+    <files>
+      <file>docs/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>docs/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/OVERLAY-MATRIX.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-MIGRATION-MAP.md</file>
+    </files>
+    <patterns>
+      <pattern name="Gate precedent" location="projects/spaarke-ai-architecture-redesign-r1/tasks/ (014, 027, 038)">
+        Prior gate tasks — same deploy + operator-UAT + evidence-record shape; G-P3 adds the multi-surface and email checks.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      G-P3 is the flagship demonstration of the whole redesign: one conversation composes analysis, record creation, drafting, and tasking over the session ledger, identically on every surface. It is the last browser gate before P4 hardening/graduation.
+    </background>
+    <dependencies>
+      <dependency task="040" status="pending">Consumers as Bindings</dependency>
+      <dependency task="041" status="pending">draft-correspondence capability</dependency>
+      <dependency task="042" status="pending">create-task capability</dependency>
+      <dependency task="043" status="pending">Daily Briefing coded composite</dependency>
+      <dependency task="044" status="pending">Engine-shell deletions</dependency>
+      <dependency task="045" status="pending">Client consolidation</dependency>
+      <dependency task="046" status="pending">Widget layer</dependency>
+      <dependency task="047" status="pending">Work-product persistence</dependency>
+    </dependencies>
+    <related-work>
+      <item>spec.md Success Criteria #4 (G-P3) — the verbatim gate definition</item>
+      <item>plan.md §4 Gate 048 row</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context check + /goal clear">
+      Verify context &lt; 70%. Run `/goal clear` (NFR-10). Confirm all eight P3 tasks are ✅ in TASK-INDEX and the eval suite is green.
+    </step>
+    <step order="1" name="Pre-deploy verification">
+      dotnet build + full test suite + eval suite green; `npm run build:prod` green for all touched client packages; publish-size measured and reported (ADR-029).
+    </step>
+    <step order="2" name="Deploy">
+      Invoke bff-deploy (spaarke-bff-dev) and code-page-deploy for the SpaarkeAi/LegalWorkspace/Compose surfaces to spaarkedev1. Smoke-check /healthz and a cold workspace load.
+    </step>
+    <step order="3" name="Hand the UAT script to the operator">
+      Present the &lt;ui-tests&gt; script below. The OPERATOR executes it in the browser. Wait for operator results — do NOT self-certify any step.
+    </step>
+    <step order="4" name="Record gate evidence">
+      Capture operator pass/fail per step + latency spot-checks + observations into projects/spaarke-ai-architecture-redesign-r1/notes/gates/g-p3-evidence.md.
+    </step>
+    <step order="5" name="Close or loop">
+      If all steps pass: mark 048 ✅ in TASK-INDEX, update project CLAUDE.md status, reset current-task.md to the first P4 task. If any step fails: record, re-open the owning task, redeploy, re-run the failed portion with the operator.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Pre-deploy build/test/publish</tool>
+    <tool name="npm">Client prod builds</tool>
+    <tool name="bff-deploy">Deploy Sprk.Bff.Api to spaarke-bff-dev</tool>
+    <tool name="code-page-deploy">Deploy client code pages to spaarkedev1</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <ui-tests>
+    <ui-test name="step-1-upload-auto-summary">Operator uploads a legal document in the Spaarke UI and types NOTHING: classification + summary + action chips render automatically (Event path).</ui-test>
+    <ui-test name="step-2-clause-chat">In the SAME conversation, operator asks clause-level questions about the document; answers stream with citations grounded in the document.</ui-test>
+    <ui-test name="step-3-create-matter">Operator types "create a matter from this": the matter wizard opens PRE-FILLED from ledger outputs (capture_mode modal); operator confirms; the matter record is created.</ui-test>
+    <ui-test name="step-4-draft-client-letter">Operator types "draft the client letter": the confirmation gate presents (side_effect_class communicate); on confirm, a Spaarke Communication-service DRAFT record renders for review, referencing the REAL summary + matter from the session ledger. Send is NOT performed by the assistant.</ui-test>
+    <ui-test name="step-5-follow-up-task">Operator asks for a follow-up task: conversational confirm presents; on confirm, a sprk_event (type=task) is created carrying ledger refs to the source document + analysis (operator verifies refs on the record).</ui-test>
+    <ui-test name="step-6-briefing-email">The daily briefing email arrives via the coded composite path (operator verifies receipt + content renders).</ui-test>
+    <ui-test name="step-7-three-surfaces">Operator repeats a representative slice (upload→summary + one chat turn) on the record form, the workspace, and the SPA: behavior is IDENTICAL on all three surfaces.</ui-test>
+    <ui-test name="step-8-latency">Spot-check NFR-04: upload→first-summary-token &lt;=5s p50; text-turn TTFB &lt;=3s p50 (operator-observed on spaarkedev1).</ui-test>
+    <ui-test name="step-9-work-product">Operator verifies the persisted work-product envelope is visible on the host record (task 047) in the UI.</ui-test>
+  </ui-tests>
+
+  <outputs>
+    <output type="deploy">Sprk.Bff.Api deployed to spaarke-bff-dev; client surfaces deployed to spaarkedev1</output>
+    <output type="report">projects/spaarke-ai-architecture-redesign-r1/notes/gates/g-p3-evidence.md (operator UAT results + latency + publish size)</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md (gate status update)</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r1/CLAUDE.md (project status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The flagship journey passes as ONE conversation in the browser: upload → auto-summary → clause chat → "create matter" → pre-filled wizard → confirm → "draft the client letter" (Communication-service draft referencing real ledger outputs) → follow-up task with ledger refs.</criterion>
+    <criterion testable="true">The daily briefing email arrives via the coded path.</criterion>
+    <criterion testable="true">Identical behavior verified on record form, workspace, and SPA.</criterion>
+    <criterion testable="true">Gate satisfied EXCLUSIVELY by operator browser execution (NFR-11) — evidence file records operator sign-off; no curl/test/log substitution.</criterion>
+    <criterion testable="true">NFR-04 latency spot-checks pass; publish size reported; eval suite green at deploy.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="030" project="spaarke-ai-architecture-redesign-r1">
+  <metadata>
+    <title>Agent-turn loop contract on the SprkChatAgent stack (budget, projection, pre-filter, citations, ToolChain persist)</title>
+    <phase>Phase P2: Text-Path Hard Cutover</phase>
+    <status>not-started</status>
+    <estimated-hours>12</estimated-hours>
+    <tags>bff-api, loop, tools, prompt-caching</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <parallel-group>W-P2-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>027</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement FR-P2-01: the agent-turn loop contract on the existing SprkChatAgent stack. The loop becomes THE text-path dispatcher (ADR-039 loop-as-dispatcher, ratified OQ-1): enforce a per-turn tool budget (default 8, tunable platform setting per NFR-09/ADR-016), project capability-tools from the closed catalog (Binding table) into the loop's tool list, apply a deterministic session-context pre-filter that narrows the tool list BEFORE the model sees it (this is filtering, not a second intent-detection mechanism), enforce citations on every read-tool result surfaced in output, and persist a ToolChain ledger entry per turn (ADR-040 — identifiers/filters/counts only, no content, per NFR-07). Per NFR-04, prompt caching is REQUIRED for the capability-tool projection so the projected tool block is cache-stable across turns. The SprkChatAgentFactory line-count is expected to SHRINK — this task tightens a contract on the existing stack; it does not add a parallel loop.
+  </prompt>
+
+  <role>
+    Senior .NET developer expert in the Sprk.Bff.Api AI chat stack (SprkChatAgent, Microsoft.Extensions.AI tool calling, agent middleware pipeline) and Azure OpenAI prompt caching.
+  </role>
+
+  <goal>
+    Loop tests prove budget/filter/cite/persist behavior; capability tools are projected from the catalog with a prompt-cache-stable block; every turn writes a ToolChain ledger entry before rendering; SprkChatAgentFactory line count is reduced.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-architecture-redesign-r1/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-architecture-redesign-r1/plan.md</file>
+    <file purpose="project-context">projects/spaarke-ai-architecture-redesign-r1/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md</file>
+    <file purpose="loop-core">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgent.cs</file>
+    <file purpose="loop-factory">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs</file>
+    <file purpose="tool-adapter">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ToolHandlerToAIFunctionAdapter.cs</file>
+    <file purpose="ledger-model">src/server/api/Sprk.Bff.Api/Models/Ai/Chat/ (ChatSession ledger from task 001)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-039">ONE dispatch protocol — the loop is THE text-path dispatcher. MUST NOT add a second intent-detection mechanism anywhere; the deterministic pre-filter narrows the tool list, it does not classify intent.</constraint>
+    <constraint source="ADR-039">MUST NOT gate by tool-name lists; gating/projection is driven by catalog columns (side_effect_class, surfaces, budget_class).</constraint>
+    <constraint source="ADR-039">Grounded outputs only — read-tool results surfaced in output MUST carry citations; ungrounded free-form output is forbidden.</constraint>
+    <constraint source="ADR-040">Ledger write BEFORE rendering — the ToolChain entry is persisted before the turn's output renders.</constraint>
+    <constraint source="NFR-09/ADR-016">Per-turn tool-call cap (default 8) enforced AND telemetered per ADR-016 budget conventions.</constraint>
+    <constraint source="NFR-04">Prompt caching REQUIRED for the capability-tool projection (cache-stable ordering/serialization of the projected tool block).</constraint>
+    <constraint source="NFR-08">Hard-cutover doctrine: no parallel-run, no compat shims; any retirement in this task is grep-zero-verified with SHOWN output.</constraint>
+    <constraint source="ADR-029">BFF-touching task: run dotnet publish, report compressed size + diff vs baseline (~45.65 MB); ceiling 60 MB; expect neutral-to-reduction.</constraint>
+    <constraint source="NFR-02">Eval suite green is a merge gate; add/update eval cases for any prompt/catalog change made here.</constraint>
+    <constraint source="NFR-07">ToolChain ledger entries contain identifiers/filters/counts only — no content in logs or ledger tool entries.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff-api, agent-loop, tool-calling, prompt-caching, session-ledger</topic>
+    <files>
+      <file>docs/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>docs/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/OVERLAY-MATRIX.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-MIGRATION-MAP.md</file>
+    </files>
+    <patterns>
+      <pattern name="SprkChatAgent stack" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgent.cs">
+        The existing agent loop + middleware pipeline (Middleware/*.cs) that this contract tightens. Extend it; do not build a parallel loop.
+      </pattern>
+      <pattern name="Tool handler framework" location="src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/">
+        Typed handlers + ToolHandlerToAIFunctionAdapter + sprk_analysistool discovery — the source for the capability-tools projection.
+      </pattern>
+      <pattern name="Gate store" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PendingPlanManager.cs">
+        The pending store task 031 generalizes in parallel; the loop suspends write tools through it — coordinate the interface, do not duplicate.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      P1 delivered the ledger, catalog contract, and Event/Click paths. P2 makes the loop the sole text-path dispatcher. This task builds the loop contract the rest of P2 depends on: 032 (elicitation), 033 (refusal), and 034 (hard cutover) all sit on this contract.
+    </background>
+    <dependencies>
+      <dependency task="027" status="pending">G-P1 browser gate passed — P1 catalog + ledger + Event/Click paths deployed and UAT-verified.</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0" name="Context check + load knowledge">
+      Verify context below 70%. Load ADR-039, ADR-040, bff-extensions.md, BFF CLAUDE.md, OVERLAY-MATRIX.md loop rows, and the SprkChatAgent stack sources.
+    </step>
+    <step order="1" name="Per-turn tool budget">
+      Enforce the per-turn tool-call cap (default 8) in the loop with a tunable platform setting; emit budget telemetry per ADR-016; budget-exceeded behavior ends the turn gracefully with a grounded message.
+    </step>
+    <step order="2" name="Capability-tools projection">
+      Project capability tools from the catalog (Binding rows via ConsumerRoutingService + sprk_analysistool rows via the handler framework) into the loop tool list; serialize the projected block deterministically so prompt caching applies (NFR-04); verify cache-hit behavior.
+    </step>
+    <step order="3" name="Deterministic session-context pre-filter">
+      Implement the deterministic pre-filter that narrows the tool list from session context (surfaces, attached records, capture state) BEFORE model invocation. Pure filtering — no scoring, no classification, no second intent-detection mechanism.
+    </step>
+    <step order="4" name="Citation enforcement on reads">
+      Enforce that read-tool results referenced in the assistant output carry citations; uncited read-derived claims fail the turn contract (test-proven).
+    </step>
+    <step order="5" name="ToolChain ledger persistence">
+      Persist a ToolChain ledger entry per turn (tool ids, arg identifiers/filters, counts, budget spent — no content) BEFORE rendering, using the FR-P0-01 ledger model.
+    </step>
+    <step order="6" name="Tests + factory shrink">
+      Add loop contract tests in tests/unit/Sprk.Bff.Api.Tests/ proving budget, filter, citation, and persist behavior; refactor SprkChatAgentFactory so its line count shrinks; run full build + tests; show output.
+    </step>
+    <step order="7" name="Publish-size verification">
+      Run dotnet publish -c Release for Sprk.Bff.Api; report compressed size + diff vs prior baseline in task notes.
+    </step>
+    <step order="8" name="Step 9.5 quality gates">
+      Run code-review + adr-check. Resolve findings per CLAUDE.md section 6.5 (path A/B/C). Update TASK-INDEX.md and current-task.md.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build, test, publish Sprk.Bff.Api</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgent.cs (loop contract)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs (shrinks)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ (pre-filter + projection components as needed)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/ (loop contract tests: budget/filter/cite/persist)</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md (status update)</output>
+    <output type="report">Task notes: publish-size delta + prompt-cache verification evidence</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Loop tests prove per-turn budget (default 8), deterministic pre-filter, citation enforcement on reads, and ToolChain ledger persistence — test output shown.</criterion>
+    <criterion testable="true">SprkChatAgentFactory line count shrinks versus pre-task baseline (counts shown).</criterion>
+    <criterion testable="true">Capability-tool projection is prompt-cache-stable (deterministic serialization verified; NFR-04 evidence in notes).</criterion>
+    <criterion testable="true">Budget telemetry emitted per ADR-016 (NFR-09); ToolChain entries contain identifiers/filters/counts only (NFR-07).</criterion>
+    <criterion testable="true">dotnet build + full test suite green; publish-size delta reported per ADR-029.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

@@ -1,0 +1,144 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="053" project="spaarke-ai-architecture-redesign-r1">
+  <metadata>
+    <title>PlaybookBuilder canvas de-scope → BA Action/Binding editor; ScopeConfigEditor Binding variant</title>
+    <phase>Phase P4: Sweep + Hardening + Graduation</phase>
+    <status>not-started</status>
+    <estimated-hours>16</estimated-hours>
+    <tags>frontend, code-pages, pcf, playbook-builder</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <parallel-group>W-P4-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>048</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement FR-P4-04: retarget the BA authoring surfaces at the second product — "a new AI capability is a catalog row a business analyst authors". De-scope the PlaybookBuilder code page's graph/canvas authoring (maker-facing graph authoring is out of scope per ratified OQ-2; the engine is frozen) and rebuild it as a BA scope/prompt/binding editor over the two closed catalogs; add a Binding-editor variant to the `ScopeConfigEditor` PCF for the `sprk_playbookconsumer` contract columns; and retarget `AiPlaybookBuilderService` from graph authoring to Action/Binding authoring support. Acceptance per spec: a business analyst can author an Action + Binding end-to-end in the UI — this is the authoring surface the G-M maker gate (task 090) will exercise.
+  </prompt>
+
+  <role>
+    Senior frontend developer (React 18, Fluent UI v9) experienced with Spaarke code pages and PCF controls, plus the BFF service surface behind them (`AiPlaybookBuilderService`) — comfortable de-scoping a complex canvas UI down to a focused form-driven editor.
+  </role>
+
+  <goal>
+    PlaybookBuilder presents a BA-grade scope/prompt/binding editor (no graph canvas); ScopeConfigEditor has a Binding-editor variant; AiPlaybookBuilderService serves Action/Binding authoring; a BA authors a complete Action + Binding end-to-end in the UI (ui-test evidence), producing valid catalog rows.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-architecture-redesign-r1/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-architecture-redesign-r1/plan.md</file>
+    <file purpose="project-context">projects/spaarke-ai-architecture-redesign-r1/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md</file>
+    <file purpose="builder-page">src/client/code-pages/PlaybookBuilder/</file>
+    <file purpose="scope-editor-pcf">src/client/pcf/ScopeConfigEditor/</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec-scope">Maker-facing graph authoring is OUT of scope (ratified OQ-2) — the canvas de-scopes; do not preserve a hidden/flag-gated canvas path (no compat shims, NFR-08).</constraint>
+    <constraint source="spec-MUST">MUST NOT land new capability on the frozen engine; MUST NOT create new manifest tables — the editor authors rows in `sprk_analysisaction` + `sprk_playbookconsumer` only, keeping both catalogs closed (ADR-039).</constraint>
+    <constraint source="ADR-021">Dark mode: all new/reworked UI uses Fluent v9 tokens — verified in both themes during ui-tests.</constraint>
+    <constraint source="ADR-013 (amended 2026-07-05)">Client/service wiring goes through the PublicContracts facade verbs — no AI-internal types injected into authoring CRUD paths.</constraint>
+    <constraint source="ADR-029 / NFR-01">BFF-touching (AiPlaybookBuilderService): verify publish-size impact; expect reduction from canvas-support code removal.</constraint>
+    <constraint source="NFR-08">Retired canvas modules + dead AiPlaybookBuilderService graph endpoints are grep-zero-verified with SHOWN output.</constraint>
+    <constraint source="ADR-038">Tests follow the integration-heavy pyramid; update tests for retargeted service methods (CLAUDE.md §10 #6).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>code-pages, pcf, fluent-v9, ba-authoring</topic>
+    <files>
+      <file>projects/spaarke-ai-architecture-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/plan.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-MIGRATION-MAP.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-CODE-INVENTORY.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/OVERLAY-MATRIX.md</file>
+      <file>docs/architecture/SPAARKE-AI-ARCHITECTURE-AND-COMPONENT-DESIGN.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Prompted Action contract" location="src/server/api/Sprk.Bff.Api/Services/Ai/LinearConsumers/">
+        ActionRunner + PromptSchemaRenderer define what a valid prompted Action row must carry (JPS prompt, input/output schemas, model tier) — the editor's validation target.
+      </pattern>
+      <pattern name="Binding contract columns" location="notes/audit-inputs/OVERLAY-MATRIX.md">
+        The full sprk_playbookconsumer contract (ucid, tooldescription, disposition, chiptransitions, risk, capturemode, oneventbindings, surfaces, model override) the Binding editor must cover.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      The "second product" of this project is the maker path: prompt + schema + Binding + chips + eval case, zero deploys. P0-P3 made the runtime read everything from the two catalogs; this task builds the UI a BA uses to write them. The G-M maker gate at task 090 has an operator observe a BA authoring a brand-new capability entirely as data through this surface.
+    </background>
+    <dependencies>
+      <dependency task="048" status="pending">G-P3 passed — Binding contract complete and proven across all consumers before the editor targets it</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 090 G-M maker gate exercises this editor end-to-end with an operator observing</item>
+      <item>Task 003 (FR-P0-03) created the columns the Binding editor edits</item>
+      <item>jps-action-create / jps-validate skills define valid JPS Action shapes — reuse their validation rules</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context check">
+      Check context usage. If &gt; 70%, create handoff summary and request new chat. Load inputs; read the OVERLAY-MATRIX PlaybookBuilder/ScopeConfigEditor verdicts and the canonical doc's BA-authoring section.
+    </step>
+    <step order="1" name="Inventory the current surfaces">
+      Map PlaybookBuilder's canvas modules vs reusable form/service plumbing; map ScopeConfigEditor's existing scope-editing structure; enumerate AiPlaybookBuilderService endpoints by graph-vs-authoring concern. Produce the de-scope cut list.
+    </step>
+    <step order="2" name="De-scope the canvas">
+      Remove the graph/canvas authoring modules + their routes/entries; delete (not hide) per hard-cutover doctrine. Grep-zero the removed module names (output shown).
+    </step>
+    <step order="3" name="Build the BA Action editor">
+      Scope/prompt editing per Action row: JPS prompt + input/output schema + `sprk_kind`/`sprk_modeltier` fields, with validation mirroring jps-validate rules. Fluent v9, both themes.
+    </step>
+    <step order="4" name="Build the Binding editor (page + PCF variant)">
+      Binding authoring covering the full sprk_playbookconsumer contract (ucid, tool description, disposition, chip transitions, risk, capture mode, on-event bindings, surfaces, model override) in PlaybookBuilder; add the ScopeConfigEditor Binding-editor variant for the record-form surface. Bump PCF version per deployment convention.
+    </step>
+    <step order="5" name="Retarget AiPlaybookBuilderService">
+      Repoint the service to Action/Binding authoring support (validation, lookups, save paths through the facade); delete dead graph endpoints; update tests in tests/unit/Sprk.Bff.Api.Tests/.
+    </step>
+    <step order="6" name="Builds + publish-size">
+      `npm run build:prod` (PlaybookBuilder + ScopeConfigEditor) and `dotnet build` green, output shown; publish-size delta reported per ADR-029.
+    </step>
+    <step order="7" name="UI tests">
+      Execute the &lt;ui-tests&gt; scenario via the ui-test skill on spaarkedev1; capture evidence (screenshots/DOM assertions) incl. dark-mode rendering.
+    </step>
+    <step order="8" name="Verify + quality gates">
+      Check all acceptance criteria. Step 9.5 quality gates: code-review + adr-check. Update TASK-INDEX.md and current-task.md.
+    </step>
+  </steps>
+
+  <ui-tests>
+    <scenario name="BA authors an Action + Binding end-to-end">
+      As a business analyst on spaarkedev1: open PlaybookBuilder → create a new Action (kind: prompted; JPS prompt; input/output schemas; model tier) → create its Binding (ucid, tool description, disposition, chips, risk, capture mode, surfaces) → save → verify both rows exist in Dataverse with valid contract fields and the capability appears in the catalog projection. Verify the editor renders correctly in light AND dark mode (ADR-021). Verify no canvas/graph authoring surface is reachable anywhere in the page.
+    </scenario>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">build:prod for PlaybookBuilder + ScopeConfigEditor</tool>
+    <tool name="dotnet">Build/test/publish-size for AiPlaybookBuilderService</tool>
+    <tool name="ui-test">Browser-based end-to-end authoring evidence</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/code-pages/PlaybookBuilder/ (canvas removed; BA Action/Binding editor)</output>
+    <output type="code">src/client/pcf/ScopeConfigEditor/ (Binding-editor variant, version bumped)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ (AiPlaybookBuilderService retargeted)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (service tests updated)</output>
+    <output type="report">ui-test evidence in projects/spaarke-ai-architecture-redesign-r1/notes/</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A BA can author an Action + Binding end-to-end in the UI, producing valid catalog rows on spaarkedev1 (ui-test evidence) (FR-P4-04).</criterion>
+    <criterion testable="true">Graph/canvas authoring is fully de-scoped — removed modules grep-zero with output shown (NFR-08); no flag-gated canvas remnant.</criterion>
+    <criterion testable="true">ScopeConfigEditor Binding-editor variant works on the record form; AiPlaybookBuilderService is retargeted with tests updated.</criterion>
+    <criterion testable="true">UI verified in light + dark mode (ADR-021); builds green; publish-size delta reported (ADR-029).</criterion>
+    <criterion testable="true">Step 9.5 quality gates (code-review + adr-check) passed.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

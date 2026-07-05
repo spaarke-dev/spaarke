@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="044" project="spaarke-ai-architecture-redesign-r1">
+  <metadata>
+    <title>Engine-shell deletions — PlaybookExecutionEngine, AnalysisOrchestrationService legacy path, orchestrator remnants, wrapper absorption (frozen engine UNTOUCHED)</title>
+    <phase>Phase P3: Consumer + Client Consolidation</phase>
+    <status>not-started</status>
+    <estimated-hours>8</estimated-hours>
+    <tags>bff-api, deletion, cleanup</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <parallel-group>W-P3-B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>040, 043</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement FR-P3-05: with all consumers on Bindings (task 040) and the briefing on the coded path (task 043), the legacy engine shells have zero callers — DELETE them. In scope: `PlaybookExecutionEngine`, the `AnalysisOrchestrationService` legacy path (R7 FR-11), and any `SessionSummarizeOrchestrator` remnants left after task 020; additionally the `FileSummarizeService` and `DocumentProfileService` wrappers are ABSORBED into the executor path (their call sites re-pointed, the wrapper classes deleted). The HARD CONSTRAINT is the frozen-engine boundary: `PlaybookOrchestrationService` and its node pipeline remain UNTOUCHED — you must show diff-scope proof (e.g., `git diff --stat` demonstrating no frozen-engine files changed). Acceptance is grep-zero for every deleted symbol outside git history with output SHOWN (NFR-08), callers re-pointed, and build + full test suite green. Delete tests that exist solely to exercise deleted shells; update tests for re-pointed callers.
+  </prompt>
+
+  <role>
+    Senior .NET developer with strong refactoring discipline: safe large-scale deletion, caller re-pointing, and surgical respect for a frozen subsystem boundary.
+  </role>
+
+  <goal>
+    `PlaybookExecutionEngine`, the AnalysisOrchestrationService legacy path, SessionSummarizeOrchestrator remnants, and the FileSummarizeService/DocumentProfileService wrappers are deleted with shown grep-zero; all callers re-point to the executor path; `PlaybookOrchestrationService` + nodes provably untouched; build, tests, and eval suite green; publish size reduced.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-architecture-redesign-r1/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-architecture-redesign-r1/plan.md</file>
+    <file purpose="project-context">projects/spaarke-ai-architecture-redesign-r1/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md</file>
+    <file purpose="delete-register">projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-CODE-INVENTORY.md</file>
+    <file purpose="migration-sequencing">projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-MIGRATION-MAP.md</file>
+    <file purpose="per-component-verdicts">projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/OVERLAY-MATRIX.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec-FR-P3-05">FROZEN-ENGINE RULE: `PlaybookOrchestrationService` + its nodes are UNTOUCHED — provide diff-scope proof (git diff --stat shown) that no frozen-engine file changed. The frozen Insights pipelines are out of scope (spec §Out of Scope).</constraint>
+    <constraint source="NFR-08">Hard cutover: every deleted symbol verified grep-zero outside git history with output SHOWN; no compat shims, no "keep just in case" dead classes.</constraint>
+    <constraint source="ADR-039">Deletion must not leave a routing side-channel: all re-pointed callers resolve via the Binding table / executor path only.</constraint>
+    <constraint source="ADR-040">Re-pointed flows retain ledger-write-before-render semantics (no regression on FR-P1-02).</constraint>
+    <constraint source="ADR-013-amended-2026-07-05">PublicContracts boundary unchanged; if a deleted shell was referenced through PublicContracts, the facade verb re-points to the executor — the facade surface itself does not widen.</constraint>
+    <constraint source="ADR-032">If deletion removes a conditionally-registered service, remove its Null-Object peer in the same commit — no orphaned registrations (bff-extensions.md §F.1 scan).</constraint>
+    <constraint source="ADR-029 / NFR-01">Publish-size + delta reported — this task is expected to show a NET REDUCTION.</constraint>
+    <constraint source="TEST-MODIFYING-override">This task deletes/modifies tests/** — code-review + adr-check run UNCONDITIONALLY at Step 9.5.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>deletion, refactoring, frozen-engine-boundary, di-hygiene</topic>
+    <files>
+      <file>docs/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>docs/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/OVERLAY-MATRIX.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-MIGRATION-MAP.md</file>
+    </files>
+    <patterns>
+      <pattern name="Prompted executor" location="src/server/api/Sprk.Bff.Api/Services/Ai/LinearConsumers/">
+        ActionRunner + PromptSchemaRenderer — the absorption target for FileSummarizeService/DocumentProfileService wrapper call sites.
+      </pattern>
+      <pattern name="Frozen engine (DO NOT TOUCH)" location="src/server/api/Sprk.Bff.Api/Services/Ai/">
+        `PlaybookOrchestrationService` + node pipeline — the boundary this task must prove it did not cross.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      These shells are the last server-side remnants of the pre-redesign dispatch estate. Tasks 040 and 043 removed their final callers; leaving them compilable would violate the hard-cutover doctrine and keep ~dead LOC in the publish output. The frozen engine stays because the Insights composite pipelines still run on it (ratified OQ-2) — deletion stops exactly at that boundary.
+    </background>
+    <dependencies>
+      <dependency task="040" status="pending">All remaining consumers resolve via Bindings — removes wrapper/engine-shell callers.</dependency>
+      <dependency task="043" status="pending">Briefing on the coded path — removes the /narrate engine-default caller.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 020 — dissolved the SessionSummarizeOrchestrator dual path (this task sweeps remnants)</item>
+      <item>Task 035/036 — P2 dispatcher-stack + Chat/Tools deletions (same doctrine, prior phase)</item>
+      <item>FR-P4-01 — Track-B completion audit will re-verify these deletions</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context check + load knowledge">
+      Verify context &lt; 70%. Load spec FR-P3-05, OVERLAY-MATRIX + migration-map entries for each delete target, and enumerate the frozen-engine file list (PlaybookOrchestrationService + nodes) as the DO-NOT-TOUCH set.
+    </step>
+    <step order="1" name="Caller census">
+      Grep every reference to `PlaybookExecutionEngine`, the AnalysisOrchestrationService legacy path, `SessionSummarizeOrchestrator`, `FileSummarizeService`, `DocumentProfileService`. Classify each hit: delete-with-target, re-point-to-executor, or frozen-engine (out of scope). Zero unexpected live callers expected after 040/043 — escalate if found.
+    </step>
+    <step order="2" name="Absorb the wrappers">
+      Re-point FileSummarizeService/DocumentProfileService call sites onto the executor path (Binding resolution from task 040); delete the wrapper classes + their DI registrations (+ Null-Object peers if any, per ADR-032).
+    </step>
+    <step order="3" name="Delete the shells">
+      Delete PlaybookExecutionEngine, the AnalysisOrchestrationService legacy path (R7 FR-11), and SessionSummarizeOrchestrator remnants, including DI registrations and shell-only tests.
+    </step>
+    <step order="4" name="Prove the boundary + grep-zero">
+      Run and SHOW: (a) grep-zero for each deleted symbol across src/** and tests/** (outside git history); (b) `git diff --stat` proving no frozen-engine file (PlaybookOrchestrationService + nodes) changed.
+    </step>
+    <step order="5" name="Verify">
+      dotnet build + FULL test suite + eval suite green (shown). Publish-size + delta reported per ADR-029 (net reduction expected — report the number).
+    </step>
+    <step order="6" name="Step 9.5 quality gates">
+      Run code-review + adr-check (FULL rigor; TEST-MODIFYING override applies). Update TASK-INDEX.md; reset current-task.md.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build, test, publish-size verification</tool>
+    <tool name="git">Deletion, diff-scope proof, version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/** — PlaybookExecutionEngine, AnalysisOrchestrationService legacy path, SessionSummarizeOrchestrator remnants, FileSummarizeService/DocumentProfileService wrappers DELETED; callers re-pointed</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/** + Program.cs (registration removals)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/** (shell-only tests deleted; re-pointed-caller tests updated)</output>
+    <output type="report">Diff-scope proof (git diff --stat) + per-symbol grep-zero output in task notes / transcript</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Grep-zero (shown) for PlaybookExecutionEngine, the AnalysisOrchestrationService legacy path, SessionSummarizeOrchestrator, FileSummarizeService, and DocumentProfileService wrapper symbols outside git history.</criterion>
+    <criterion testable="true">All former callers re-pointed to the executor/Binding path; dotnet build + full test suite + eval suite green.</criterion>
+    <criterion testable="true">Frozen engine (`PlaybookOrchestrationService` + nodes) untouched — diff-scope proof shown.</criterion>
+    <criterion testable="true">Publish-size delta reported and negative-or-justified (ADR-029).</criterion>
+    <criterion testable="true">Step 9.5 code-review + adr-check passed (TEST-MODIFYING override).</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="spaarke-ai-architecture-redesign-r1">
+  <metadata>
+    <title>ChatSession typed ledger entries + Redis/Cosmos persistence + Cosmos file-ref fix</title>
+    <phase>Phase P0: Foundations</phase>
+    <status>not-started</status>
+    <estimated-hours>8</estimated-hours>
+    <tags>bff-api, ledger, redis, cosmos</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <parallel-group>W-P0-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement FR-P0-01: extend the `ChatSession` model with typed ledger entries — `Outputs` as `SessionOutput` records keyed `{bindingId}@t{n}`, plus `ToolChains`, `WidgetEvents`, and `Gates` collections — persisted through the existing Redis + Cosmos three-tier session pipeline. Also fix the known Cosmos mapping defect that drops file references on session restore. The ledger is the composition carrier the estate never had (ADR-040: storage precedes rendering; addressable outputs); this task lands the model + persistence DARK — zero readers are introduced yet. All downstream phases (universal ledger write at P1, ToolChain persistence at P2, ledger-referencing capabilities at P3) build on this shape, so the round-trip fidelity proven here is the foundation of the whole project.
+  </prompt>
+
+  <role>
+    Senior .NET developer familiar with the Sprk.Bff.Api session stack (ChatSession model, Redis session cache, Cosmos session persistence) and with designing serialization-stable record types.
+  </role>
+
+  <goal>
+    `ChatSession` carries typed `Outputs` (SessionOutput keyed {bindingId}@t{n}), `ToolChains`, `WidgetEvents`, and `Gates`; a ledger round-trip integration test (write → Redis → Cosmos-restore) passes including file references; no production code reads the new ledger fields yet.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-architecture-redesign-r1/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-architecture-redesign-r1/plan.md</file>
+    <file purpose="project-context">projects/spaarke-ai-architecture-redesign-r1/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md</file>
+    <file purpose="model">src/server/api/Sprk.Bff.Api/Models/Ai/Chat/ChatSession.cs</file>
+    <file purpose="persistence">src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/SessionPersistenceService.cs</file>
+    <file purpose="session-manager">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatSessionManager.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-040">Storage precedes rendering; every output must be addressable by `{bindingId}@t{n}` key; disposition is the only rendering contract. This task implements the storage half only.</constraint>
+    <constraint source="ADR-015 / NFR-07">Ledger entries are Tier 3 user-owned/GDPR-erasable data; ToolChain entries carry identifiers/filters/counts ONLY — no content in logs.</constraint>
+    <constraint source="ADR-029 / NFR-01">Verify publish-size impact per ADR-029/NFR-01; expect net change reported in task notes.</constraint>
+    <constraint source="spec-MUST">MUST write every output + tool chain to the ledger before rendering (contract established here; readers arrive P1). Zero readers in this task — dark landing.</constraint>
+    <constraint source="project">Extend the existing ChatSession + Redis/Cosmos pipeline — do NOT create a new session entity or a parallel store (CLAUDE.md §11 reuse rule).</constraint>
+    <constraint source="ADR-038">New tests follow the integration-heavy pyramid; no banned patterns (Mock&lt;HttpMessageHandler&gt;, DI-registration tests, ctor null-check tests).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff-api/session-ledger, redis, cosmos</topic>
+    <files>
+      <file>docs/adr/ADR-040-session-ledger.md</file>
+      <file>docs/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/OVERLAY-MATRIX.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-MIGRATION-MAP.md</file>
+    </files>
+    <patterns>
+      <pattern name="ChatSession model + session managers" location="src/server/api/Sprk.Bff.Api/Models/Ai/Chat/ChatSession.cs">
+        The model to extend; session lifecycle flows through ChatSessionManager + SessionPersistenceService (Services/Ai/Sessions/).
+      </pattern>
+      <pattern name="Session persistence (Redis→Cosmos)" location="src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/SessionPersistenceService.cs">
+        The Cosmos mapping that drops file references lives on this path — trace serialization both directions before fixing.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      The session ledger is ADR-040's core mechanism and the composition carrier for the entire redesign; it must exist and round-trip faithfully before any executor writes to it (P1 FR-P1-02).
+    </background>
+    <dependencies>
+      <dependency task="none" status="complete">No upstream dependencies — Wave W-P0-A entry task.</dependency>
+    </dependencies>
+    <related-work>
+      <item>FR-P1-02 (task 021) adds the universal ledger-write-before-render on top of this model</item>
+      <item>Task 002 generalizes digest compaction over these Outputs</item>
+      <item>Task 014 (G-P0) presents the round-trip evidence and flips ADR-040 to Accepted</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context check">
+      Check context usage. If &gt; 70%, create handoff summary and request new chat. Load inputs + knowledge files; read ADR-040 in full.
+    </step>
+    <step order="1" name="Trace the current session shape">
+      Read ChatSession.cs, ChatSessionManager.cs, SessionPersistenceService.cs. Map the exact Redis write path and Cosmos persist/restore path; locate where file references are dropped in the Cosmos mapping.
+    </step>
+    <step order="2" name="Design the typed ledger records">
+      Define `SessionOutput` (keyed `{bindingId}@t{n}`, with disposition, envelope/refs incl. file refs), `ToolChain` (identifiers/filters/counts only per NFR-07), `WidgetEvent`, and `Gate` record types under Models/Ai/Chat/. Add `Outputs`, `ToolChains`, `WidgetEvents`, `Gates` collections to ChatSession with serialization attributes consistent with the existing model.
+    </step>
+    <step order="3" name="Wire persistence + fix the Cosmos file-ref drop">
+      Ensure the new collections survive the Redis serialize/deserialize and Cosmos persist/restore paths. Fix the Cosmos mapping so file references round-trip.
+    </step>
+    <step order="4" name="Write the round-trip test">
+      Add a ledger round-trip test (write → Redis → Cosmos-restore) in tests/unit/Sprk.Bff.Api.Tests/ asserting all four collections AND file references survive intact, keys preserved.
+    </step>
+    <step order="5" name="Build + verify zero readers">
+      `dotnet build src/server/api/Sprk.Bff.Api/` green; run the test suite; grep to confirm no production code reads the new ledger fields (dark landing).
+    </step>
+    <step order="6" name="Publish-size verification">
+      Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`, report compressed size + diff vs baseline in task notes per ADR-029.
+    </step>
+    <step order="7" name="Verify + quality gates">
+      Check all acceptance criteria. Step 9.5 quality gates: code-review + adr-check. Update TASK-INDEX.md and current-task.md.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build, test, publish-size verification</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Ai/Chat/ChatSession.cs (extended)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Ai/Chat/ (new SessionOutput/ToolChain/WidgetEvent/Gate record types)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Sessions/SessionPersistenceService.cs (Cosmos file-ref fix + new collections)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (ledger round-trip test)</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Ledger round-trip test (write → Redis → Cosmos-restore) passes including file references.</criterion>
+    <criterion testable="true">SessionOutput records are keyed {bindingId}@t{n}; ChatSession carries Outputs, ToolChains, WidgetEvents, Gates collections.</criterion>
+    <criterion testable="true">Zero readers of the new ledger fields exist in production code (grep evidence shown).</criterion>
+    <criterion testable="true">dotnet build + existing test suite green; publish-size delta reported per ADR-029.</criterion>
+    <criterion testable="true">Step 9.5 quality gates (code-review + adr-check) passed.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

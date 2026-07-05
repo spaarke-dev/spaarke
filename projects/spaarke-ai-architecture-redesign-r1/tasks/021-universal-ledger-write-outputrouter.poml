@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="021" project="spaarke-ai-architecture-redesign-r1">
+  <metadata>
+    <title>Universal ledger write before rendering + OutputRouter disposition routing (informational path)</title>
+    <phase>Phase P1: First Capability End-to-End</phase>
+    <status>not-started</status>
+    <estimated-hours>10</estimated-hours>
+    <tags>bff-api, ledger, output-router</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <parallel-group>W-P1-B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>020</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement FR-P1-02: make the session ledger the universal output store — every capability execution writes an addressable `SessionOutput` entry keyed `{bindingId}@t{n}` to the ledger BEFORE any rendering occurs, and a new `OutputRouter` routes rendering by the Binding's declared `disposition` (this task implements the informational path). This is the storage-precedes-rendering contract of ADR-040 made operational: the ledger entry is the composition carrier later phases resolve ("email that summary to John" resolves a ledger ref, not chat scrollback). Build on the P0-01 typed ledger model (`Outputs`, `ToolChains`, `WidgetEvents`, `Gates`) persisted through Redis + Cosmos. Acceptance per spec: every execution produces an addressable SessionOutput, and render-follows-store ordering is test-proven.
+  </prompt>
+
+  <role>
+    Senior .NET developer familiar with the Sprk.Bff.Api chat/session stack (ChatSession, Redis + Cosmos persistence, SSE streaming) and disposition-based rendering contracts.
+  </role>
+
+  <goal>
+    An `OutputRouter` service in Services/Ai that (1) writes a `SessionOutput` keyed `{bindingId}@t{n}` to the ledger before rendering, (2) routes the informational disposition to the SSE render path, with ordering proven by test; chat-summarize (task 020) runs through it as the first caller.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-architecture-redesign-r1/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-architecture-redesign-r1/plan.md</file>
+    <file purpose="project-context">projects/spaarke-ai-architecture-redesign-r1/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md</file>
+    <file purpose="ledger-model">src/server/api/Sprk.Bff.Api/Models/Ai/Chat/ (ChatSession + SessionOutput from task 001)</file>
+    <file purpose="executor">src/server/api/Sprk.Bff.Api/Services/Ai/LinearConsumers/ActionRunner.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-040">MUST write every output + tool chain to the ledger BEFORE rendering; outputs MUST be addressable (`{bindingId}@t{n}`); disposition is the ONLY rendering contract — no renderer-specific branching by capability name.</constraint>
+    <constraint source="ADR-039">MUST NOT introduce routing config outside the Binding table — `disposition` comes from the Binding row (`sprk_disposition`), never from appsettings or code lists; no second intent mechanism.</constraint>
+    <constraint source="NFR-07">Ledger entries are ADR-015 Tier 3 (user-owned, GDPR-erasable); ToolChain entries carry identifiers/filters/counts only; NO content in logs.</constraint>
+    <constraint source="NFR-08">Hard cutover: if any existing render-before-store path is replaced, its retirement is grep-zero-proven with SHOWN output; no compat shims.</constraint>
+    <constraint source="ADR-029">BFF-touching task: publish-size verification with size + delta reported; +2 MB or more single-task delta requires justification.</constraint>
+    <constraint source="NFR-02">Eval suite green is a merge gate from P1; keep it green.</constraint>
+    <constraint source="ADR-032">If OutputRouter registration is feature-gated, ship a Null-Object peer.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>session-ledger, output-routing, bff-api</topic>
+    <files>
+      <file>docs/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>docs/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/OVERLAY-MATRIX.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-MIGRATION-MAP.md</file>
+    </files>
+    <patterns>
+      <pattern name="Prompted executor" location="src/server/api/Sprk.Bff.Api/Services/Ai/LinearConsumers/ActionRunner.cs">First execution path to be wrapped by the universal ledger write.</pattern>
+      <pattern name="Ledger model" location="src/server/api/Sprk.Bff.Api/Models/Ai/Chat/">Typed SessionOutput / ToolChain / Gate records from task 001 — extend, do not fork.</pattern>
+      <pattern name="Session persistence" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/">Redis + Cosmos three-tier ChatSession persistence (incl. task 001 file-ref fix).</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      The estate never had a composition carrier: outputs streamed to the client and were gone. ADR-040 makes storage precede rendering so any later turn can reference an earlier output by address. OutputRouter is the single seam where every executor output passes; P2/P3 add further dispositions (work_product persistence, gates) on this same seam.
+    </background>
+    <dependencies>
+      <dependency task="020" status="pending">chat-summarize on the catalog path — the first execution this task routes through the ledger write.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 001 (FR-P0-01): typed ledger entries + Cosmos file-ref fix.</item>
+      <item>Task 002 (FR-P0-02): digest compaction over outputs.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context check + load knowledge">
+      Verify context usage below 70%. Load spec FR-P1-02, ADR-040 in full, the task-001 ledger model, and OVERLAY-MATRIX rows for the output-routing slot. Confirm task 020 complete.
+    </step>
+    <step order="1" name="Design the OutputRouter seam">
+      Define `IOutputRouter` + implementation in Services/Ai: input = execution result + resolved Binding; behavior = (a) allocate `{bindingId}@t{n}` key, (b) persist SessionOutput to the ledger (Redis write-through per existing session persistence), (c) route by `disposition`. Answer the CLAUDE.md §11 three-question justification in the task notes (this is new surface).
+    </step>
+    <step order="2" name="Implement write-before-render">
+      Implement the informational disposition path: ledger write completes (or is durably enqueued in the session store) BEFORE the first render token is emitted to the client stream. Wire ActionRunner executions through the router.
+    </step>
+    <step order="3" name="Re-point chat-summarize">
+      Route the task-020 chat-summarize execution through OutputRouter so the G-P1 capability produces an addressable ledger entry. Remove any interim direct-render path introduced in 020 (grep shown if anything is deleted).
+    </step>
+    <step order="4" name="Ordering + addressability tests">
+      Add tests proving (a) a SessionOutput keyed `{bindingId}@t{n}` exists in the ledger after execution, (b) the ledger write strictly precedes render emission (ordering test), (c) sequential executions of the same binding increment `t{n}`, (d) ledger entries survive the Redis → Cosmos round-trip.
+    </step>
+    <step order="5" name="DI registration + hygiene">
+      Register OutputRouter under the AI module gates per bff-extensions.md (Null-Object peer if gated). Verify no content-bearing log statements (NFR-07).
+    </step>
+    <step order="6" name="Build + publish-size verification">
+      dotnet build + full test suite green (shown). ADR-029 publish-size verification: report size + delta vs baseline.
+    </step>
+    <step order="7" name="Update tracking">
+      Update TASK-INDEX.md, POML status, current-task.md per completion protocol.
+    </step>
+    <step order="9.5" name="Quality gates">
+      Step 9.5 quality gates: run code-review + adr-check; resolve Critical findings per CLAUDE.md §6.5 before completion.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build, test, publish-size verification</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/OutputRouter.cs (+ IOutputRouter, disposition enum/contract)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/LinearConsumers/ActionRunner.cs (routed through OutputRouter)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/ (registration under AI gate)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/ (ledger-write ordering + addressability tests)</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Every capability execution produces an addressable SessionOutput ledger entry keyed {bindingId}@t{n} (test output shown).</criterion>
+    <criterion testable="true">Render follows store: the ledger write precedes render emission, proven by an ordering test (test output shown).</criterion>
+    <criterion testable="true">OutputRouter routes the informational disposition from the Binding row; disposition is sourced ONLY from the Binding table (no appsettings/code routing config).</criterion>
+    <criterion testable="true">Ledger entries round-trip Redis → Cosmos including file refs; ToolChain/log content complies with NFR-07 (identifiers only).</criterion>
+    <criterion testable="true">dotnet build + tests green; ADR-029 publish size reported with delta vs baseline.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

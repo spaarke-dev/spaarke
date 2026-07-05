@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="052" project="spaarke-ai-architecture-redesign-r1">
+  <metadata>
+    <title>Documentation refresh — data-model docs ×4, INDEX reconcile, capability-wiring guide, ADR A-3 refreshes</title>
+    <phase>Phase P4: Sweep + Hardening + Graduation</phase>
+    <status>not-started</status>
+    <estimated-hours>8</estimated-hours>
+    <tags>docs, data-model, adr</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <parallel-group>W-P4-B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>050, 051</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement FR-P4-03: bring the documentation surface in line with the shipped architecture. Author NEW data-model docs for the three extended tables (`sprk_analysisaction`, `sprk_playbookconsumer`, `sprk_analysistool` — with the FR-P0-03 column extensions) plus the previously-undocumented frozen `sprk_playbooknode`; reconcile `docs/data-model/INDEX.md` (it currently omits sprk-playbookconsumer.md and now links to deleted 2026-02 ERDs); refresh the consumer-wiring guide into a capability-wiring guide reflecting the Action+Binding model; and apply the A-3 minor refreshes to ADRs 033/034/010/016/018/038. Acceptance per spec: the 2026-02 ERD docs are deleted (done by Track-B batch 4) AND replaced by the new docs, and `doc-drift-audit` runs clean.
+  </prompt>
+
+  <role>
+    Technical writer-developer who reads schema from the live Dataverse environment and shipped code rather than from stale docs; fluent with the docs-data-model and doc-drift-audit skills and the Spaarke docs hierarchy (code wins, docs lag).
+  </role>
+
+  <goal>
+    Four new data-model docs published; INDEX.md reconciled; capability-wiring guide replaces the consumer-wiring guide; six ADRs carry their A-3 minor refreshes (concise `.claude/adr/` twins updated in the MAIN session); doc-drift-audit output is clean.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-architecture-redesign-r1/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-architecture-redesign-r1/plan.md</file>
+    <file purpose="project-context">projects/spaarke-ai-architecture-redesign-r1/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md</file>
+    <file purpose="adr-refresh-list">projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/ADR-REVIEW-VS-GREENFIELD.md</file>
+    <file purpose="doc-index">docs/data-model/INDEX.md</file>
+    <file purpose="wiring-guide">docs/guides/ai-guide-consumer-wiring.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="CLAUDE.md §3 Sub-Agent Write Boundary">The concise ADR twins under `.claude/adr/` MUST be written in the MAIN session — sub-agents can draft content into notes but cannot write `.claude/` paths.</constraint>
+    <constraint source="FR-P4-03">The 2026-02 ERD docs must be verifiably deleted (Track-B batch 4) and REPLACED by the new data-model docs — confirm deletion with grep/glob, then author replacements.</constraint>
+    <constraint source="CLAUDE.md §2">Code wins, docs lag: every schema statement in the new docs is read from the deployed spaarkedev1 schema / shipped code, not from prior docs or memory.</constraint>
+    <constraint source="project">A-3 refreshes are MINOR (terminology, cross-references, capability-verb alignment per amended ADR-013) — no ADR status or decision changes; ADR-039/040 status flips belong to tasks 026/014, not here.</constraint>
+    <constraint source="project">Frozen `sprk_playbooknode` doc documents the FROZEN engine as-is (Insights only) — it must state the frozen status and MUST NOT invite new capability onto the engine.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>docs/data-model, adr-maintenance, doc-drift</topic>
+    <files>
+      <file>projects/spaarke-ai-architecture-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/plan.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-MIGRATION-MAP.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-CODE-INVENTORY.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/OVERLAY-MATRIX.md</file>
+      <file>docs/architecture/SPAARKE-AI-ARCHITECTURE-AND-COMPONENT-DESIGN.md</file>
+      <file>.claude/skills/docs-data-model/SKILL.md</file>
+      <file>.claude/skills/doc-drift-audit/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="Data-model doc shape" location="docs/data-model/">
+        Follow the existing entity-doc format (schema table, relationships, JSON field contracts) via the docs-data-model skill.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Inventory §5.4 called the manifest documentation surface "largely stale": the 2026-02 ERDs showed a column R7 dropped, no `sprk_playbooknode` doc ever existed, and INDEX.md omitted sprk-playbookconsumer.md. After P0-P3 the three catalog tables carry the extended contract (FR-P0-03) and the Binding table is the single routing surface — the docs must now describe that reality. The consumer-wiring guide (R7 FR-31) predates the Action+Binding vocabulary.
+    </background>
+    <dependencies>
+      <dependency task="050" status="pending">Completion audit done — deleted-item list final, so docs reference nothing dead</dependency>
+      <dependency task="051" status="pending">Catalog governance done — single catalog + seed round-trip are documentable facts</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 073 deleted the misleading 2026-02 ERD docs this task replaces</item>
+      <item>Root CLAUDE.md §17 pointer rows for the wiring guide may need retitling — include in the drift pass</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context check">
+      Check context usage. If &gt; 70%, create handoff summary and request new chat. Load inputs; confirm the 2026-02 ERD docs are deleted (glob shown); pull the A-3 refresh list from ADR-REVIEW-VS-GREENFIELD.md.
+    </step>
+    <step order="1" name="Author the four data-model docs">
+      Using the docs-data-model skill and live spaarkedev1 schema: write docs for `sprk_analysisaction`, `sprk_playbookconsumer`, `sprk_analysistool` (each documenting the FR-P0-03 extended columns + the Binding/tool contracts) and `sprk_playbooknode` (frozen-engine status explicit).
+    </step>
+    <step order="2" name="Reconcile docs/data-model/INDEX.md">
+      Add the four new docs; remove/repair links to the deleted 2026-02 ERDs and any other dead references surfaced by the task-050 audit.
+    </step>
+    <step order="3" name="Consumer-wiring guide → capability-wiring guide">
+      Rewrite `docs/guides/ai-guide-consumer-wiring.md` as capability-wiring: authoring an Action row + Binding row, chips, disposition, eval case — aligned with the Event/Click/Text model. Update inbound pointers (root CLAUDE.md §17 row) as part of the same change.
+    </step>
+    <step order="4" name="ADR A-3 minor refreshes (main session for .claude twins)">
+      Apply the minor refreshes to ADRs 033, 034, 010, 016, 018, 038 (full versions under docs/adr/ and concise twins under .claude/adr/ — twins written in the MAIN session). Terminology + cross-reference updates only; no decision changes.
+    </step>
+    <step order="5" name="Run doc-drift-audit">
+      Invoke the doc-drift-audit skill; resolve every finding it raises against the surfaces this project touched; show the clean output.
+    </step>
+    <step order="6" name="Verify + close">
+      Check acceptance criteria against spec FR-P4-03. Update TASK-INDEX.md (052 → ✅) and .claude/CHANGELOG.md if root CLAUDE.md was touched.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dataverse-mcp">Read live schema for the data-model docs</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">docs/data-model/sprk-analysisaction.md, sprk-playbookconsumer.md, sprk-analysistool.md, sprk-playbooknode.md (new)</output>
+    <output type="docs">docs/data-model/INDEX.md (reconciled)</output>
+    <output type="docs">docs/guides/ (capability-wiring guide replacing consumer-wiring)</output>
+    <output type="docs">docs/adr/ + .claude/adr/ (A-3 minor refreshes ×6 — twins main-session)</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Four new data-model docs exist (three extended tables + frozen sprk_playbooknode) reflecting deployed schema (FR-P4-03).</criterion>
+    <criterion testable="true">2026-02 ERD docs are deleted AND replaced; docs/data-model/INDEX.md reconciled with no dead links.</criterion>
+    <criterion testable="true">Consumer-wiring guide is refreshed into capability-wiring; ADRs 033/034/010/016/018/038 carry their A-3 minor refreshes incl. .claude/adr twins (main-session writes).</criterion>
+    <criterion testable="true">doc-drift-audit runs clean (output shown).</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

@@ -1,0 +1,116 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="013" project="spaarke-ai-architecture-redesign-r1">
+  <metadata>
+    <title>Portfolio reconciliation: close/re-scope R7; re-point R4/Action-Engine/insights-r3 triggers</title>
+    <phase>Phase P0: Foundations</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <tags>portfolio, docs</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <parallel-group>W-P0-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+
+  <prompt>
+    Execute FR-P0-11: reconcile the portfolio around this project. (1) Close/re-scope `spaarke-ai-platform-unification-r7` (GitHub issue #501): document which of its waves this project absorbs, update the R7 project files + issue accordingly, and mark it closed/re-scoped on the portfolio board. (2) Re-point three resumption triggers so they name THIS project's phases instead of R7: the R4 daily-update graduation gate, the Action Engine R1 resumption trigger, and the insights-engine-r3 resumption trigger. (3) File the Action Engine re-based spec stub reflecting its new dependency on this project. Doing this at P0 unblocks branch hygiene early — task 025 (close the r7 tactical branch) depends on the R7 close-out landed here. Acceptance per spec: project files + portfolio issues updated; triggers name this project.
+  </prompt>
+
+  <role>
+    DevOps/portfolio coordinator familiar with the Spaarke GitHub portfolio board (Project #2), the /devops-* skill family, and cross-project trigger documentation in projects/*/ files.
+  </role>
+
+  <goal>
+    R7 (#501) closed/re-scoped with absorbed waves documented; the three named triggers re-pointed to spaarke-ai-architecture-redesign-r1 phases; Action Engine re-based spec stub filed; projects/INDEX.md and the portfolio board reflect all of it.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-architecture-redesign-r1/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-architecture-redesign-r1/plan.md</file>
+    <file purpose="project-context">projects/spaarke-ai-architecture-redesign-r1/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md</file>
+    <file purpose="r7-project">projects/spaarke-ai-platform-unification-r7/ (or R7 worktree project files)</file>
+    <file purpose="active-registry">projects/INDEX.md</file>
+    <file purpose="action-engine">projects/ai-spaarke-action-engine-r1/</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="project">Absorbed-waves documentation must be explicit: for each R7 wave, state absorbed-by-which-phase-here or dropped-with-reason. No silent closure.</constraint>
+    <constraint source="project">Trigger re-points must name THIS project and the specific phase/gate (e.g., "resumes after spaarke-ai-architecture-redesign-r1 G-P2") — not vague "after the redesign".</constraint>
+    <constraint source="project">Use the /devops-* skills (devops-project-sync, devops-project-archive as applicable) for board updates; keep notes/defer-issues-style traceability where items are dropped.</constraint>
+    <constraint source="project">Do NOT merge or close the r7 tactical BRANCH here — that is task 025 (FR-P1-06); this task handles project/portfolio artifacts only.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>portfolio, devops-tracking</topic>
+    <files>
+      <file>projects/INDEX.md</file>
+      <file>docs/guides/HOW-TO-INITIATE-NEW-PROJECT.md</file>
+      <file>docs/procedures/AI-CODING-PROCEDURES-GUIDE.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-MIGRATION-MAP.md</file>
+    </files>
+    <patterns>
+      <pattern name="Portfolio skills" location=".claude/skills/devops-project-sync/SKILL.md">
+        devops-project-sync / devops-project-archive are the board-update mechanisms; issue #501 (R7), #550 (this project), Epic #421.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      This project absorbs and supersedes R7's remaining scope (spec Prerequisites: "FR-P0-11 portfolio reconciliation early — R7 close-out unblocks branch hygiene"); three other projects' resumption triggers currently point at R7 or stale milestones.
+    </background>
+    <dependencies>
+      <dependency task="none" status="complete">No upstream dependencies — Wave W-P0-A; do earliest possible (unblocks task 025).</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 025 (FR-P1-06) closes the r7 tactical BRANCH — this task is its portfolio prerequisite</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context check">
+      Check context usage; handoff if &gt; 70%. Read R7 project files + issue #501; list R7's waves and their status.
+    </step>
+    <step order="1" name="Document absorbed waves">
+      Write the absorption map (R7 wave → this project's phase/task, or dropped-with-reason) into the R7 project README/close-out note and reference it from this project's notes.
+    </step>
+    <step order="2" name="Close/re-scope R7">
+      Update issue #501 + R7 project files to closed/re-scoped status citing the absorption map; update the portfolio board (devops skills) and projects/INDEX.md.
+    </step>
+    <step order="3" name="Re-point the three triggers">
+      Update the R4 daily-update graduation gate, Action Engine R1 resumption trigger, and insights-engine-r3 resumption trigger (project files + their GitHub issues) to name spaarke-ai-architecture-redesign-r1 phases/gates.
+    </step>
+    <step order="4" name="File Action Engine re-based spec stub">
+      Create the re-based spec stub in the Action Engine project folder stating its new baseline (this project's catalog/loop/ledger deliverables) and what it consumes from which phase.
+    </step>
+    <step order="5" name="Verify + close">
+      Confirm: project files + portfolio issues updated; all three triggers name this project; stub filed. Link evidence (issue URLs) in task notes. Update TASK-INDEX.md.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="gh">GitHub issue + project board updates</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-ai-platform-unification-r7/ (close-out + absorbed-waves documentation)</output>
+    <output type="docs">projects/INDEX.md (registry update)</output>
+    <output type="docs">projects/ai-spaarke-action-engine-r1/ (re-based spec stub + re-pointed trigger)</output>
+    <output type="docs">R4 + insights-engine-r3 project trigger files (re-pointed)</output>
+    <output type="issues">GitHub: #501 closed/re-scoped; trigger issues updated; board synced</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">R7 (#501) closed/re-scoped with absorbed waves documented per wave.</criterion>
+    <criterion testable="true">R4 daily-update graduation gate + Action Engine R1 + insights-engine-r3 resumption triggers each name spaarke-ai-architecture-redesign-r1 phases (files + issues updated).</criterion>
+    <criterion testable="true">Action Engine re-based spec stub filed.</criterion>
+    <criterion testable="true">projects/INDEX.md + portfolio board reflect the changes.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

@@ -1,0 +1,106 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="010" project="spaarke-ai-architecture-redesign-r1">
+  <metadata>
+    <title>OBO spike: Dynamics CRM/mcp.tools delegated scope against /api/mcp (documented pass/fail)</title>
+    <phase>Phase P0: Foundations</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <tags>spike, auth, obo, mcp</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <parallel-group>W-P0-C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+
+  <prompt>
+    Execute FR-P0-08: a time-boxed spike testing whether the confidential BFF client can perform an OBO token exchange for the delegated `Dynamics CRM/mcp.tools` scope and successfully call the Dataverse MCP endpoint at `/api/mcp` under the user's identity. The result — pass OR fail, both acceptable — decides whether runtime MCP transport remains an option for individual dataverse.* tools later; it is explicitly NOT a blocker in either outcome because task 008/009 handler contracts are GA-MCP-mirrored and swap-ready regardless. Document the attempt, exact token request/response shapes (redacted), the MCP call result, and a clear recommendation in `notes/spikes/obo-mcp-spike.md`. Throwaway code only; nothing lands in src/.
+  </prompt>
+
+  <role>
+    Identity/auth engineer familiar with Entra ID confidential-client OBO flows, delegated scopes for Dataverse, and MCP endpoint semantics.
+  </role>
+
+  <goal>
+    A documented pass/fail spike result at `projects/spaarke-ai-architecture-redesign-r1/notes/spikes/obo-mcp-spike.md` with reproduction steps, evidence (redacted token claims, HTTP traces), and a recommendation on per-tool MCP transport viability.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-architecture-redesign-r1/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-architecture-redesign-r1/plan.md</file>
+    <file purpose="project-context">projects/spaarke-ai-architecture-redesign-r1/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md</file>
+    <file purpose="mcp-research">projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/research-dataverse-mcp-2026-07.md</file>
+    <file purpose="auth-resources">docs/architecture/auth-azure-resources.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="project">Time-boxed spike; pass and fail are BOTH acceptable outcomes (spec: informative, non-blocking). Do not rabbit-hole past the box.</constraint>
+    <constraint source="project">Spike code lives in notes/spikes/ ONLY — throwaway; nothing promoted to src/; no DI registrations; no BFF code changes.</constraint>
+    <constraint source="security">NEVER commit secrets or raw tokens; redact all token material in the report; use existing dev app registrations per docs/architecture/auth-azure-resources.md.</constraint>
+    <constraint source="ADR-028">Use the Spaarke Auth v2 confidential client configuration as the OBO source — do not create new app registrations without escalation.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>auth/obo, dataverse-mcp</topic>
+    <files>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/research-dataverse-mcp-2026-07.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-MIGRATION-MAP.md</file>
+      <file>docs/architecture/auth-azure-resources.md</file>
+    </files>
+    <patterns>
+      <pattern name="OBO exchange (reference)" location="src/server/api/Sprk.Bff.Api/Infrastructure/Graph/GraphClientFactory.cs">
+        The BFF's existing OBO exchange for Graph — mirror the confidential-client flow, substituting the Dynamics CRM/mcp.tools scope.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      OQ-4/D10 ratified native handlers with swap-ready GA-MCP contracts; this spike determines whether runtime MCP transport is even possible under BFF OBO, informing (not blocking) a later per-tool transport option.
+    </background>
+    <dependencies>
+      <dependency task="none" status="complete">Independent of the handler tasks; runs in Wave W-P0-C.</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0" name="Context check">
+      Check context usage; handoff if &gt; 70%. Read the MCP research note and the auth resources doc; identify the dev confidential client + a test user.
+    </step>
+    <step order="1" name="Attempt the OBO exchange">
+      Using the BFF's confidential client credentials (dev), exchange a user assertion for a token with the delegated `Dynamics CRM/mcp.tools` scope. Record the request shape and the response (success or the exact AADSTS error).
+    </step>
+    <step order="2" name="Call /api/mcp">
+      If a token is issued, call the Dataverse `/api/mcp` endpoint (initialize + list tools at minimum) and record whether tool invocation succeeds under the user's identity.
+    </step>
+    <step order="3" name="Document pass/fail + recommendation">
+      Write `notes/spikes/obo-mcp-spike.md`: setup, exact steps, redacted evidence, pass/fail verdict, failure root cause if failed, and a recommendation on per-tool MCP transport viability.
+    </step>
+    <step order="4" name="Verify + close">
+      Confirm the report answers FR-P0-08's acceptance (documented pass/fail result in project notes); confirm no src/ changes and no secrets committed. Update TASK-INDEX.md.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="curl">Token + MCP endpoint calls</tool>
+    <tool name="az">Azure CLI for dev credentials/context where needed</tool>
+    <tool name="git">Version control (report only)</tool>
+  </tools>
+
+  <outputs>
+    <output type="report">projects/spaarke-ai-architecture-redesign-r1/notes/spikes/obo-mcp-spike.md</output>
+    <output type="notes" ephemeral="true">projects/spaarke-ai-architecture-redesign-r1/notes/spikes/ (throwaway spike scripts, if any)</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Documented pass/fail result exists at notes/spikes/obo-mcp-spike.md with reproduction steps and redacted evidence.</criterion>
+    <criterion testable="true">Report states a clear recommendation on the per-tool MCP transport option.</criterion>
+    <criterion testable="true">No src/ changes; no secrets or raw tokens committed.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

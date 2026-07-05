@@ -1,8 +1,8 @@
 # spaarke-ai-architecture-redesign-r1
 
-> **Created**: 2026-07-05 · **Parent epic**: #421 SPAARKE AI
-> **Status**: design.md v1.0 drafted — operator review → `/design-to-spec` → `/project-pipeline`
-> **Portfolio registration**: pending (`/devops-project-register` after pipeline init)
+> **Portfolio**: [Project #550](https://github.com/spaarke-dev/spaarke/issues/550) · Parent Epic [#421 SPAARKE AI](https://github.com/spaarke-dev/spaarke/issues/421) · Board [Project #2](https://github.com/users/spaarke-dev/projects/2)
+> **Created**: 2026-07-05 · **Target**: 2026-08-15
+> **Status**: Initialized via `/project-pipeline` 2026-07-05 — spec ratified, tasks generated; execution starts at task 001
 
 ## What this project delivers (the one-liner)
 
@@ -21,6 +21,10 @@ re-open design.
 
 | Input | Location |
 |---|---|
+| **spec.md** (FR/NFR contract — 42 FRs, 11 NFRs) | [`spec.md`](spec.md) |
+| **plan.md** (WBS, waves, /goal conditions) | [`plan.md`](plan.md) |
+| **Task tracker** (51 POML tasks) | [`tasks/TASK-INDEX.md`](tasks/TASK-INDEX.md) |
+| **AI context** | [`CLAUDE.md`](CLAUDE.md) |
 | **design.md** (this project's charter — review this) | [`design.md`](design.md) |
 | Target architecture (living, canonical) | [`docs/architecture/SPAARKE-AI-ARCHITECTURE-AND-COMPONENT-DESIGN.md`](../../docs/architecture/SPAARKE-AI-ARCHITECTURE-AND-COMPONENT-DESIGN.md) **v0.4** |
 | Frozen audit inputs (inventory, greenfield+Q&A, overlay matrix, ADR review, migration map, MCP research, auditor evidence) | [`notes/audit-inputs/`](notes/audit-inputs/README.md) |

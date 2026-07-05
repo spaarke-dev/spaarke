@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="005" project="spaarke-ai-architecture-redesign-r1">
+  <metadata>
+    <title>Boot reconciliation health checks (constants↔rows, tool↔handler bijection)</title>
+    <phase>Phase P0: Foundations</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <tags>bff-api, health-check</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <parallel-group>W-P0-B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>003, 004</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement FR-P0-04: extend `RoutingConsumerTypeHealthCheck` (Services/Ai/PublicContracts/) into a boot reconciliation gate that verifies (a) every `ConsumerTypes` constant has a corresponding Binding row in `sprk_playbookconsumer` and vice versa, and (b) a bijection between `sprk_analysistool` rows and registered tool handlers — every tool row resolves to exactly one handler and every discovered handler has exactly one tool row. Catalog drift (a constant without a row, a row without a handler, an orphaned handler) must FAIL the startup health check rather than surface as a runtime routing miss. This makes the closed-catalog invariant of ADR-039 mechanically enforced at boot, which is what allows later phases to trust the catalog blindly.
+  </prompt>
+
+  <role>
+    Senior .NET developer familiar with ASP.NET Core health checks, the Sprk.Bff.Api tool-handler discovery mechanism, and the ConsumerTypes/Binding routing contract.
+  </role>
+
+  <goal>
+    Startup health check fails (proven by test) when ConsumerTypes constants and Binding rows drift, or when the tool-row ↔ handler mapping is not a bijection; healthy state passes on the real spaarkedev1 catalog.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-architecture-redesign-r1/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-architecture-redesign-r1/plan.md</file>
+    <file purpose="project-context">projects/spaarke-ai-architecture-redesign-r1/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md</file>
+    <file purpose="target">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/RoutingConsumerTypeHealthCheck.cs</file>
+    <file purpose="routing">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ConsumerRoutingService.cs</file>
+    <file purpose="adapter">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ToolHandlerToAIFunctionAdapter.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-039">Closed catalogs: drift between code constants, catalog rows, and handlers is a startup failure, not a warning. The health check is the enforcement mechanism.</constraint>
+    <constraint source="ADR-029 / NFR-01">Verify publish-size impact per ADR-029/NFR-01; expect net change reported in task notes.</constraint>
+    <constraint source="project">Extend the existing RoutingConsumerTypeHealthCheck — do not add a second parallel health check class (CLAUDE.md §11 reuse rule).</constraint>
+    <constraint source="project">Health check must degrade gracefully when the AI subsystem is disabled (Analysis:Enabled=false) — coordinate with task 006 gating; a disabled subsystem is Healthy-with-description, not a failure.</constraint>
+    <constraint source="ADR-038">Tests seed drift scenarios through the service boundary; no banned mock patterns.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff-api/health-checks, tool-catalog</topic>
+    <files>
+      <file>docs/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/OVERLAY-MATRIX.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-MIGRATION-MAP.md</file>
+    </files>
+    <patterns>
+      <pattern name="Existing health check (target)" location="src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/RoutingConsumerTypeHealthCheck.cs">
+        The check to extend — already verifies consumer types; add the tool↔handler bijection dimension.
+      </pattern>
+      <pattern name="Tool framework / handler discovery" location="src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/">
+        Handler set + ToolHandlerToAIFunctionAdapter + sprk_analysistool discovery — the bijection's two sides.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      G-P0 requires "health checks green" as gate evidence; this check is what makes catalog drift impossible to ship silently from P1 onward.
+    </background>
+    <dependencies>
+      <dependency task="003" status="not-started">sprk_analysistool new columns (sprk_toolid, sprk_namespace) participate in the bijection identity.</dependency>
+      <dependency task="004" status="not-started">Full Binding contract is what the constants↔rows reconciliation reads.</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0" name="Context check">
+      Check context usage; handoff if &gt; 70%. Verify tasks 003 + 004 ✅. Load ADR-039 and the existing health check.
+    </step>
+    <step order="1" name="Map both reconciliation surfaces">
+      Enumerate ConsumerTypes constants and the handler-discovery mechanism (how handlers register and how sprk_analysistool rows name them via sprk_toolid/sprk_namespace).
+    </step>
+    <step order="2" name="Implement constants↔rows reconciliation">
+      Extend the health check to compare ConsumerTypes constants against Binding rows both directions; report each missing/orphaned entry by name in the failure description.
+    </step>
+    <step order="3" name="Implement tool↔handler bijection">
+      Verify every sprk_analysistool row maps to exactly one registered handler and every handler to exactly one row; duplicates and orphans on either side fail with named diagnostics.
+    </step>
+    <step order="4" name="Test drift failure">
+      Add tests seeding drift (extra constant, missing row, orphan handler, duplicate tool row) proving the health check reports Unhealthy for each; plus a healthy-catalog pass case and a subsystem-disabled pass case.
+    </step>
+    <step order="5" name="Build + publish-size">
+      dotnet build + tests green; publish-size delta reported per ADR-029.
+    </step>
+    <step order="6" name="Verify + quality gates">
+      Check acceptance criteria. Step 9.5 quality gates: code-review + adr-check. Update TASK-INDEX.md.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build, test, publish-size verification</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/RoutingConsumerTypeHealthCheck.cs (extended)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (drift-fails-startup tests)</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Drift between ConsumerTypes constants and Binding rows fails the startup health check (proven by test).</criterion>
+    <criterion testable="true">Tool row ↔ handler non-bijection (orphan, missing, duplicate) fails the health check with named diagnostics (proven by test).</criterion>
+    <criterion testable="true">Healthy catalog and disabled-subsystem cases pass.</criterion>
+    <criterion testable="true">dotnet build green; publish-size delta reported per ADR-029.</criterion>
+    <criterion testable="true">Step 9.5 quality gates (code-review + adr-check) passed.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

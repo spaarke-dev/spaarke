@@ -1,0 +1,148 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="023" project="spaarke-ai-architecture-redesign-r1">
+  <metadata>
+    <title>Click path: chips carry binding_id; ONE client dispatchConsumer(bindingId, args) helper; executeSummarizeIntent + intentMatcher deleted</title>
+    <phase>Phase P1: First Capability End-to-End</phase>
+    <status>not-started</status>
+    <estimated-hours>10</estimated-hours>
+    <tags>frontend, spaarkeai, click-path, sse</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <parallel-group>W-P1-C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>021</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement FR-P1-04: build the Click entry path on the client. Chips rendered in SpaarkeAi carry a `binding_id`, and ONE shared helper — `dispatchConsumer(bindingId, args)` — performs the invocation, encapsulating the SSE consumption (canonical `useSseStream`) and the SSE→PaneEventBus bridging inside itself so no call-site hand-rolls streaming again. The two legacy client dispatch modules, `executeSummarizeIntent.ts` and `intentMatcher.ts` (client-side intent detection — forbidden as a second intent mechanism under ADR-039), migrate onto the helper and are DELETED with grep-zero shown. Acceptance per spec: a chip click runs the bound capability end-to-end, and grep returns zero hits for the two deleted modules outside git history.
+  </prompt>
+
+  <role>
+    Senior React/TypeScript developer familiar with the SpaarkeAi code page (ConversationPane, PaneEventBus, sseToPaneEventBridge), the shared `@spaarke/ui-components` hooks, and Fluent UI v9 theming.
+  </role>
+
+  <goal>
+    One `dispatchConsumer(bindingId, args)` helper (SSE + PaneEventBus inside); chips carry binding_id from the Binding row's chip transitions; `executeSummarizeIntent.ts` + `intentMatcher.ts` (and their tests) deleted grep-zero; chip click works end-to-end in SpaarkeAi with no console errors.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-architecture-redesign-r1/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-architecture-redesign-r1/plan.md</file>
+    <file purpose="project-context">projects/spaarke-ai-architecture-redesign-r1/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md</file>
+    <file purpose="delete-target">src/solutions/SpaarkeAi/src/components/conversation/executeSummarizeIntent.ts</file>
+    <file purpose="delete-target">src/solutions/SpaarkeAi/src/components/conversation/intentMatcher.ts</file>
+    <file purpose="sse-bridge">src/solutions/SpaarkeAi/src/components/conversation/sseToPaneEventBridge.ts</file>
+    <file purpose="canonical-sse-hook">src/client/shared/Spaarke.UI.Components/src/hooks/useSseStream.ts</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-039">Click is one of the ONLY three entry paths. The chip's binding_id IS the routing decision — MUST NOT re-detect intent client-side (intentMatcher.ts is precisely the second intent mechanism ADR-039 forbids); MUST NOT add routing config outside the Binding table (chip transitions come from `sprk_chiptransitions` on the Binding row).</constraint>
+    <constraint source="ADR-040">Rendered chip results come from server-side executions that ledger-write before render (task 021); the client renders what the stream delivers — it does not compose outputs locally.</constraint>
+    <constraint source="NFR-08">Hard cutover: `executeSummarizeIntent.ts` and `intentMatcher.ts` (plus their __tests__) are DELETED, not shimmed; grep-zero for both symbols SHOWN in the transcript. Empty-attachments guard, if present in these modules, becomes an Event/Click precondition (coordinate with tasks 022/025) — not a retained client shim.</constraint>
+    <constraint source="project">ONE helper client-wide: dispatchConsumer is the only place SSE consumption + PaneEventBus bridging for capability dispatch lives. Place it where SpaarkeAi and later P3 consumers (LegalWorkspace, Compose) can share it per the component model.</constraint>
+    <constraint source="ADR-021">Chips MUST use Fluent v9 design tokens (no hardcoded colors) — verified in dark mode.</constraint>
+    <constraint source="project">Client build via `npm run build:prod` (NOT `npm run build`) per root CLAUDE.md §12 / FAILURE-MODES AP-1.</constraint>
+    <constraint source="NFR-02">Eval suite green is a merge gate from P1; keep it green.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>spaarkeai-client, sse, pane-event-bus, chips</topic>
+    <files>
+      <file>docs/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>docs/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/OVERLAY-MATRIX.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-MIGRATION-MAP.md</file>
+    </files>
+    <patterns>
+      <pattern name="Canonical SSE hook" location="src/client/shared/Spaarke.UI.Components/src/hooks/useSseStream.ts">The ONE SSE parse path client-wide — dispatchConsumer consumes this, never a hand-rolled parser.</pattern>
+      <pattern name="SSE to PaneEventBus bridge" location="src/solutions/SpaarkeAi/src/components/conversation/sseToPaneEventBridge.ts">Existing bridge semantics to be encapsulated inside the helper.</pattern>
+      <pattern name="Conversation host" location="src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx">Current call-sites of executeSummarizeIntent/intentMatcher to migrate.</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      The client accreted per-capability dispatch modules, each with its own SSE handling and its own intent regexes. FR-P1-04 collapses them to a single data-driven helper: the server decides what a chip does (Binding row), the client just dispatches by id. P3 (FR-P3-06) migrates LegalWorkspace + Compose onto this same helper — get the seam right now.
+    </background>
+    <dependencies>
+      <dependency task="021" status="pending">OutputRouter — the server-side render contract the helper's SSE stream consumes.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 022 emits the chips (with binding_id) this path clicks.</item>
+      <item>Task 025 deletes the sibling r7 module executeLinearDispatch.ts — coordinate grep sweeps.</item>
+      <item>FR-P3-06 extends this helper to LegalWorkspace summarizeService + Compose executeComposeSummarize.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context check + load knowledge">
+      Verify context usage below 70%. Load spec FR-P1-04, the OVERLAY-MATRIX rows for the client dispatch slot, the two delete targets, sseToPaneEventBridge.ts, and useSseStream.ts. Confirm task 021 complete.
+    </step>
+    <step order="1" name="Design dispatchConsumer">
+      Define the helper signature `dispatchConsumer(bindingId, args)` and its home (shared location consumable by SpaarkeAi now and LW/Compose in P3 per SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md). Inside: BFF invocation, useSseStream consumption, PaneEventBus publication. Answer the CLAUDE.md §11 justification (new surface; existing = executeSummarizeIntent et al., which this replaces).
+    </step>
+    <step order="2" name="Implement the helper">
+      Implement dispatchConsumer with the SSE→PaneEventBus bridge inside. No intent detection, no capability-specific branching — bindingId in, stream out.
+    </step>
+    <step order="3" name="Chips carry binding_id">
+      Update chip rendering in the conversation surface so chips are constructed from the Binding row's chip transitions and carry binding_id; chip click calls dispatchConsumer.
+    </step>
+    <step order="4" name="Migrate + delete legacy modules">
+      Migrate all executeSummarizeIntent/intentMatcher call-sites onto dispatchConsumer. DELETE executeSummarizeIntent.ts, intentMatcher.ts, and their __tests__ files. Run grep for both symbols and SHOW zero hits outside git history.
+    </step>
+    <step order="5" name="Tests">
+      Add unit tests for dispatchConsumer (invocation shape, SSE event bridging, error path) and chip click wiring; update ConversationPane tests that referenced the deleted modules.
+    </step>
+    <step order="6" name="Build verification">
+      `npm run build:prod` green for SpaarkeAi and any touched shared package (output shown).
+    </step>
+    <step order="7" name="UI verification + tracking">
+      Execute the ui-tests section below on the dev stack. Update TASK-INDEX.md, POML status, current-task.md.
+    </step>
+    <step order="9.5" name="Quality gates">
+      Step 9.5 quality gates: run code-review + adr-check; resolve Critical findings per CLAUDE.md §6.5 before completion.
+    </step>
+  </steps>
+
+  <ui-tests>
+    <test name="Chip click end-to-end in SpaarkeAi">
+      In the SpaarkeAi workspace on the dev stack: upload a document (or use a session with chips present), click a rendered chip (e.g., "summarize"), and verify the bound capability executes — streamed output renders in the conversation pane and the relevant workspace pane updates via PaneEventBus.
+    </test>
+    <test name="No console errors">
+      Browser devtools console shows zero errors during chip render + chip click + stream completion.
+    </test>
+    <test name="ADR-021 dark-mode check on chips">
+      Toggle dark mode: chips render with correct Fluent v9 token-driven colors (no hardcoded light-theme values, legible text, correct hover/focus states).
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="npm">Build (build:prod) and test TypeScript packages</tool>
+    <tool name="git">Version control</tool>
+    <tool name="ui-test">Browser-based verification of chip click path</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">Shared dispatchConsumer helper (new file; location chosen in step 1, e.g. src/client/shared/Spaarke.UI.Components/src/services/ or SpaarkeAi shared services)</output>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx + chip rendering (binding_id wiring)</output>
+    <output type="code-deleted">src/solutions/SpaarkeAi/src/components/conversation/executeSummarizeIntent.ts, intentMatcher.ts, and their __tests__ files</output>
+    <output type="test">dispatchConsumer + chip wiring unit tests</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A chip click executes the bound capability end-to-end in SpaarkeAi (browser evidence per ui-tests; final gate confirmation at 027).</criterion>
+    <criterion testable="true">Chips carry binding_id sourced from the Binding row's chip transitions; dispatchConsumer(bindingId, args) is the ONLY client dispatch entry (SSE + PaneEventBus inside).</criterion>
+    <criterion testable="true">Grep for executeSummarizeIntent and intentMatcher returns zero hits outside git history, output SHOWN in the transcript (NFR-08).</criterion>
+    <criterion testable="true">Exactly one SSE consumption path is used by the helper (canonical useSseStream — no new hand-rolled parser introduced).</criterion>
+    <criterion testable="true">npm run build:prod green; no console errors; chips pass the ADR-021 dark-mode check.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>
