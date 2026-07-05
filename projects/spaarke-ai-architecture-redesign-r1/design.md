@@ -255,7 +255,13 @@ should land in this project's generated CLAUDE.md.
     schema-conformance + citation-integrity assertions, so a prompt edit that
     degrades output fails CI, not UAT.
 - Wave structure = P0-P4 + continuous Track-B stream; dependencies per the
-  migration map's spine.
+  migration map's spine. **Every generated wave definition (plan.md wave
+  section + TASK-INDEX wave header) includes a pre-authored `/goal` condition
+  per §6.5's composition rules** (shown evidence + scope bind + turn cap +
+  "Step 9.5 gates passed") — ready to paste at wave start. This is a
+  project-scoped pilot: NO changes to the `/project-pipeline` or
+  `/task-create` skills; if the pattern proves out by P1, file a `/defer` to
+  promote it into the skills via `ai-procedure-maintenance`.
 - The Track-B delete register as enumerated cleanup tasks (grep-verified
   acceptance).
 - **Named deferrals (explicit, not silent)**: admin observability dashboards
