@@ -13,7 +13,7 @@
   </metadata>
 
   <prompt>
-    Implement FR-P3-06: consolidate the client dispatch/streaming estate. `ConversationPane` (src/solutions/SpaarkeAi) decomposes into a thin host over the shared `dispatchConsumer(bindingId, args)` helper built in task 023, ending under the agreed size budget. The LegalWorkspace `summarizeService` and Compose `executeComposeSummarize` call-sites migrate onto that same helper, and their hand-rolled SSE parsers are DELETED — after this task there is exactly ONE SSE parse path client-wide, the canonical `useSseStream` (grep for hand-rolled parsers must return zero, shown). Duplicated chat-hook triples across packages become re-exports of the single shared implementation. Wizard/launcher widgets are updated to carry `binding_id`s so every Click-path invocation is Binding-addressed. This is a client task: acceptance includes browser-verified UI behavior (chat renders + streams in SpaarkeAi; LW and Compose summarize still work; console error-free; ADR-021 dark mode).
+    Implement FR-P3-06: consolidate the client dispatch/streaming estate. `ConversationPane` (src/solutions/SpaarkeAi) decomposes into a thin host over the shared `dispatchConsumer(bindingId, args)` helper built in task 023, ending at ≤300 lines (see constraints for the escalation valve). The LegalWorkspace `summarizeService` and Compose `executeComposeSummarize` call-sites migrate onto that same helper, and their hand-rolled SSE parsers are DELETED — after this task there is exactly ONE SSE parse path client-wide, the canonical `useSseStream` (grep for hand-rolled parsers must return zero, shown). Duplicated chat-hook triples across packages become re-exports of the single shared implementation. Wizard/launcher widgets are updated to carry `binding_id`s so every Click-path invocation is Binding-addressed. This is a client task: acceptance includes browser-verified UI behavior (chat renders + streams in SpaarkeAi; LW and Compose summarize still work; console error-free; ADR-021 dark mode).
   </prompt>
 
   <role>
@@ -21,7 +21,7 @@
   </role>
 
   <goal>
-    ConversationPane is a thin host under the agreed size budget; LegalWorkspace summarizeService + Compose executeComposeSummarize dispatch through the shared helper; all hand-rolled SSE parsers deleted (grep-zero shown) leaving canonical `useSseStream` as the only parse path; chat-hook triples are re-exports; wizard/launcher widgets carry binding ids; all three surfaces verified working in the browser.
+    ConversationPane is a thin host at ≤300 lines (or an operator-approved exception); LegalWorkspace summarizeService + Compose executeComposeSummarize dispatch through the shared helper; all hand-rolled SSE parsers deleted (grep-zero shown) leaving canonical `useSseStream` as the only parse path; chat-hook triples are re-exports; wizard/launcher widgets carry binding ids; all three surfaces verified working in the browser.
   </goal>
 
   <inputs>
@@ -40,7 +40,7 @@
     <constraint source="ADR-037-amended-2026-07-05">Streaming consumption follows the section-name-keyed contract; FieldDelta handling is NOT deleted in this task (task 046 owns it at the last-playbook cutover).</constraint>
     <constraint source="NFR-08">Hard cutover: hand-rolled SSE parsers (LegalWorkspace summarizeService, Compose executeComposeSummarize, any ConversationPane-local parser) are DELETED with grep-zero output SHOWN — no dual parse paths retained.</constraint>
     <constraint source="ADR-013-amended-2026-07-05">Client talks to BFF capability-invocation endpoints only; no new client-visible contract shapes beyond the Binding dispatch helper.</constraint>
-    <constraint source="project">ConversationPane final size must be under the agreed size budget (record the budget + measured line count in task notes; source: OVERLAY-MATRIX ConversationPane verdict).</constraint>
+    <constraint source="project">ConversationPane host size budget: ≤300 lines (set at pipeline init 2026-07-05 — operator-approved best-practice ceiling for a thin host doing layout + session context + PaneEventBus wiring only). Record the measured line count in task notes. ESCALATION VALVE: if meeting functional best practices (error boundaries, accessibility wiring, embedded-mode host contract) genuinely requires exceeding 300 lines, STOP and ask the operator with the specific justification and a proposed new ceiling — do NOT silently exceed the budget, and do NOT degrade code quality (cramming logic into one-liners, or child components that are hosts in disguise) to squeeze under it.</constraint>
     <constraint source="ADR-021">Dark mode support verified — Fluent v9 tokens, no hardcoded colors introduced.</constraint>
     <constraint source="project">Client build via `npm run build:prod` (NOT `npm run build`) per root CLAUDE.md §12.</constraint>
   </constraints>
@@ -86,10 +86,10 @@
 
   <steps>
     <step order="0" name="Context check + load knowledge">
-      Verify context &lt; 70%. Load spec FR-P3-06, OVERLAY-MATRIX verdicts for ConversationPane / summarizeService / executeComposeSummarize / chat-hook triples, and the agreed ConversationPane size budget. Grep-inventory every SSE parse site client-wide.
+      Verify context &lt; 70%. Load spec FR-P3-06 and OVERLAY-MATRIX verdicts for ConversationPane / summarizeService / executeComposeSummarize / chat-hook triples. Size budget is ≤300 lines (see constraints — escalate BEFORE exceeding, never after). Grep-inventory every SSE parse site client-wide.
     </step>
     <step order="1" name="Decompose ConversationPane">
-      Extract ConversationPane's dispatch/stream/render logic onto the shared helper + `useSseStream`; leave a thin host component (layout, session context, PaneEventBus wiring). Measure and record the resulting line count vs budget.
+      Extract ConversationPane's dispatch/stream/render logic onto the shared helper + `useSseStream`; leave a thin host component (layout, session context, PaneEventBus wiring). Measure and record the resulting line count vs the ≤300 budget; if best practices force an overrun, invoke the escalation valve BEFORE proceeding.
     </step>
     <step order="2" name="Migrate LegalWorkspace summarizeService">
       Re-point the LW summarize call-site onto `dispatchConsumer` (binding id from task 040's workspace summarize-file Binding); DELETE its hand-rolled SSE parser. Respect the embedded-mode host contract.
@@ -135,7 +135,7 @@
 
   <acceptance-criteria>
     <criterion testable="true">One SSE parse path client-wide: canonical `useSseStream`; grep for hand-rolled SSE parsers returns zero (output SHOWN, NFR-08).</criterion>
-    <criterion testable="true">ConversationPane is a thin host under the agreed size budget (measured line count recorded).</criterion>
+    <criterion testable="true">ConversationPane is a thin host at ≤300 lines (measured line count recorded in task notes), OR an operator-approved exception with documented justification and revised ceiling is on record.</criterion>
     <criterion testable="true">LegalWorkspace summarizeService + Compose executeComposeSummarize dispatch via the shared `dispatchConsumer` helper; duplicated chat-hook triples are re-exports.</criterion>
     <criterion testable="true">Wizard/launcher widgets carry binding_ids on their invocations.</criterion>
     <criterion testable="true">All &lt;ui-tests&gt; pass in the browser on spaarkedev1 (chat streams; LW + Compose summarize work; console error-free; dark mode correct).</criterion>

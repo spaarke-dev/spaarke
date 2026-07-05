@@ -159,7 +159,7 @@
 
 ### Wave W-P3-C (parallel ×2)
 
-> **/goal**: `Tasks 045, 047 complete: exactly one SSE parse path client-wide (grep for hand-rolled parsers zero, shown); ConversationPane under the agreed size budget (line count shown); a work_product capability persists its envelope to the host record (test shown). npm run build:prod green per package (shown). Step 9.5 passed. Stop after 40 turns.`
+> **/goal**: `Tasks 045, 047 complete: exactly one SSE parse path client-wide (grep for hand-rolled parsers zero, shown); ConversationPane host ≤300 lines with line count shown (or an operator-approved exception on record — escalate before exceeding); a work_product capability persists its envelope to the host record (test shown). npm run build:prod green per package (shown). Step 9.5 passed. Stop after 40 turns.`
 
 | # | Task | FR | Rigor | Deps | Status |
 |---|---|---|---|---|---|
