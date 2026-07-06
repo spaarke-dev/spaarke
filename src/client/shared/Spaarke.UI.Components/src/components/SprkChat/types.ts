@@ -384,11 +384,16 @@ export interface IChatSseEventData {
   // ── consumer_chips fields (ai-architecture-redesign-r1 task 023 / FR-P1-04) ──
   //
   // Next-step chips sourced from a Binding row's `sprk_chiptransitions` (D4 /
-  // ADR-039). DECLARED wire shape for the task-022 server chip SSE contract:
-  // the server emits `context_event` with `contextEventType: 'consumer_chips'`
-  // and the chip transitions array below. Hosts parse via
-  // `parseConsumerChips` (services/dispatchConsumer.ts) and dispatch clicks
-  // through the ONE `dispatchConsumer(bindingId, args)` helper.
+  // ADR-039). RESOLVED at task 023b: the SHIPPED server chip contract is the
+  // task-022 Event stream's top-level `chips` ChatSseEvent
+  // (`data: {sourceBindingId, chips: EventChip[]}` with EventChip =
+  // `{targetBindingId, label, args?}`) — the server does NOT emit
+  // `consumer_chips` context events (single-wire-shape decision; EventChip
+  // also rides inside event_confirmation/event_notice payloads). This
+  // `contextChips` leg remains as client-side tolerance only. Hosts parse ANY
+  // chip payload via `parseConsumerChips` (services/dispatchConsumer.ts, which
+  // accepts both spellings) and dispatch clicks through the ONE
+  // `dispatchConsumer(bindingId, args)` helper.
   //
   // ADR-015: chip labels + binding ids are maker-authored configuration
   // content (Tier 1 safe) — no user content on this event.

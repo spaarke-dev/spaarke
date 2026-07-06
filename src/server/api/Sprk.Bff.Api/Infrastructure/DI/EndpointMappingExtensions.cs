@@ -173,6 +173,15 @@ public static class EndpointMappingExtensions
         // the compound-OFF branch (asymmetric-registration rule §10 F.1 satisfied).
         app.MapSummarizeSessionEndpoint();
 
+        // FR-P1-04 (ai-architecture-redesign-r1 task 023b) — the Click entry path.
+        // Maps POST /api/ai/chat/sessions/{sessionId}/dispatch and delegates to
+        // SessionDispatchOrchestrator, which resolves the chip's binding_id against the
+        // Binding table (ADR-039 — the id IS the routing decision) and executes the
+        // prompted Action with the ADR-040 ledger write before render.
+        // UNCONDITIONAL mapping — NullSessionDispatchOrchestrator mirror registered on
+        // the compound-OFF branch (asymmetric-registration rule §10 F.1 satisfied).
+        app.MapDispatchSessionEndpoint();
+
         try { app.MapChatDocumentEndpoints(); }
         catch (Exception ex)
         {

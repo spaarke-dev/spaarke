@@ -537,6 +537,19 @@ public static class AnalysisServicesModule
             new NullSessionSummarizeOrchestrator(
                 sp.GetRequiredService<ILogger<SessionSummarizeOrchestrator>>()));
 
+        // SessionDispatchOrchestrator (P3 Fail-Fast subclass) — FR-P1-04, ai-architecture-
+        // redesign-r1 task 023b. The Click dispatch endpoint (POST /api/ai/chat/sessions/
+        // {sessionId}/dispatch) is mapped UNCONDITIONALLY in EndpointMappingExtensions and
+        // injects the concrete SessionDispatchOrchestrator. Real impl registered scoped in
+        // AddAnalysisOrchestrationServices (compound-ON only — its graph needs IActionRunner
+        // + IScopeResolverService + ISessionFileTextSource + IOutputRouter). This Null peer
+        // throws FeatureDisabledException (ai.dispatch.disabled) at first MoveNextAsync();
+        // the endpoint's pre-stream probe maps it to the canonical 503 (ADR-018 + ADR-019).
+        // Canonical pattern sibling: NullSessionSummarizeOrchestrator (above).
+        services.AddScoped<Sprk.Bff.Api.Services.Ai.Chat.SessionDispatchOrchestrator>(sp =>
+            new Sprk.Bff.Api.Services.Ai.Chat.NullSessionDispatchOrchestrator(
+                sp.GetRequiredService<ILogger<Sprk.Bff.Api.Services.Ai.Chat.SessionDispatchOrchestrator>>()));
+
         // R7 Wave 12 post-T135 CI fix (2026-06-30) — DailyBriefingNarrator + DailyBriefingCollector
         // P3 Fail-Fast Null-Objects. Both /api/ai/daily-briefing/render and
         // /api/ai/daily-briefing/narrate are mapped UNCONDITIONALLY by EndpointMappingExtensions,
@@ -655,6 +668,19 @@ public static class AnalysisServicesModule
         // the parent compound gate (Analysis:Enabled && DocumentIntelligence:Enabled).
         services.AddScoped<Sprk.Bff.Api.Services.Ai.Chat.SessionSummarizeOrchestrator>();
         Console.WriteLine("✓ SessionSummarizeOrchestrator registered (FR-P1-01 catalog path; ADR-010 concrete; chat-session Summarize boundary)");
+
+        // SessionDispatchOrchestrator — chat-session boundary for the Click entry path
+        // (FR-P1-04, ai-architecture-redesign-r1 task 023b). Resolves a Binding row BY ID
+        // (chips carry binding_id — ADR-039 D4: the id IS the routing decision) via
+        // IConsumerRoutingService.GetBindingByIdAsync and executes the SAME catalog stack
+        // as the summarize boundary (prompted executor → IOutputRouter ledger-before-render).
+        // Concrete class (ADR-010); Scoped for the same lifetime reasoning as the sibling.
+        //
+        // §F.1 asymmetric-registration audit: registration is unconditional within the
+        // already-gated outer block; POST /sessions/{id}/dispatch maps unconditionally with
+        // the NullSessionDispatchOrchestrator mirror in AddNullObjectsForCompoundOff.
+        services.AddScoped<Sprk.Bff.Api.Services.Ai.Chat.SessionDispatchOrchestrator>();
+        Console.WriteLine("✓ SessionDispatchOrchestrator registered (FR-P1-04 Click path; binding-id catalog dispatch; ADR-040 ledger-before-render)");
 
         // IOutputRouter — the universal ledger write-before-render seam (ADR-040 / FR-P1-02,
         // ai-architecture-redesign-r1 task 021). Every capability execution writes an

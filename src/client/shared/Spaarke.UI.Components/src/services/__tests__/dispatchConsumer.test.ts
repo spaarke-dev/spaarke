@@ -168,6 +168,64 @@ describe('parseConsumerChips', () => {
       ])
     ).toEqual([{ bindingId: 'ok', label: 'OK', prefillSlots: undefined, requiresAttachments: false }]);
   });
+
+  // Task 023b — the SHIPPED Event-path chip wire shape (022's `EventChip`,
+  // camelCase `{targetBindingId, label, args?}`; delivered on the top-level
+  // `chips` event AND inside event_confirmation / event_notice payloads).
+  // Single-wire-shape decision: the ONE parser accepts it; `args` maps to
+  // prefillSlots and forwards verbatim to dispatchConsumer.
+  it('parses the shipped EventChip wire shape ({targetBindingId, label, args})', () => {
+    const chips = parseConsumerChips([
+      {
+        targetBindingId: '651194cd-3670-f111-ab0e-70a8a590c51c',
+        label: 'Summarize all 3 files?',
+        args: { fileIds: ['f-1', 'f-2', 'f-3'] },
+      },
+      // M4 confirm chip shape (args carries confirmedDocType too — verbatim pass-through)
+      {
+        targetBindingId: '651194cd-3670-f111-ab0e-70a8a590c51c',
+        label: "Yes, it's a nda — summarize it",
+        args: { fileIds: ['f-1'], confirmedDocType: 'nda' },
+      },
+      // args-less transition chip (e.g. "Summarize again" from sprk_chiptransitions)
+      { targetBindingId: 'b-9', label: 'Summarize again' },
+    ]);
+    expect(chips).toEqual([
+      {
+        bindingId: '651194cd-3670-f111-ab0e-70a8a590c51c',
+        label: 'Summarize all 3 files?',
+        prefillSlots: { fileIds: ['f-1', 'f-2', 'f-3'] },
+        requiresAttachments: false,
+      },
+      {
+        bindingId: '651194cd-3670-f111-ab0e-70a8a590c51c',
+        label: "Yes, it's a nda — summarize it",
+        prefillSlots: { fileIds: ['f-1'], confirmedDocType: 'nda' },
+        requiresAttachments: false,
+      },
+      { bindingId: 'b-9', label: 'Summarize again', prefillSlots: undefined, requiresAttachments: false },
+    ]);
+  });
+
+  it('prefers authored chip_label / prefill_slots over EventChip twins when both present', () => {
+    const chips = parseConsumerChips([
+      {
+        target_binding_id: 'b-1',
+        chip_label: 'Authored label',
+        label: 'EventChip label',
+        prefill_slots: { from: 'authored' },
+        args: { from: 'eventchip' },
+      },
+    ]);
+    expect(chips).toEqual([
+      {
+        bindingId: 'b-1',
+        label: 'Authored label',
+        prefillSlots: { from: 'authored' },
+        requiresAttachments: false,
+      },
+    ]);
+  });
 });
 
 // ---------------------------------------------------------------------------

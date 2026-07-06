@@ -79,8 +79,13 @@ namespace Sprk.Bff.Api.Api.Ai;
 /// </remarks>
 public static class SummarizeSessionEndpoint
 {
-    /// <summary>JSON serialization options for SSE event payloads (camelCase; matches sibling Chat endpoints).</summary>
-    private static readonly JsonSerializerOptions s_jsonOptions = new()
+    /// <summary>
+    /// JSON serialization options for SSE event payloads (camelCase; matches sibling Chat
+    /// endpoints). Internal (not private) so <see cref="DispatchSessionEndpoint"/> reuses
+    /// the SAME serializer — ONE AnalysisChunk wire shape across the summarize + dispatch
+    /// streams (task 023b integration seam).
+    /// </summary>
+    internal static readonly JsonSerializerOptions s_jsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase
     };
@@ -412,7 +417,9 @@ public static class SummarizeSessionEndpoint
     }
 
     // ─── SSE write helper — `data: {json}\n\n` per SSE format ──────────────────────
-    private static async Task WriteSseChunkAsync(
+    // Internal (not private): DispatchSessionEndpoint reuses THIS writer so the two
+    // AnalysisChunk streams share one serialization implementation (task 023b).
+    internal static async Task WriteSseChunkAsync(
         HttpResponse response,
         AnalysisChunk chunk,
         CancellationToken cancellationToken)
@@ -426,7 +433,8 @@ public static class SummarizeSessionEndpoint
     // ─── ProblemDetails writer — for pre-stream validation/auth errors ─────────────
     // Pre-stream we haven't set SSE headers; write a standard application/problem+json
     // body. ADR-019 conformance: stable errorCode + correlationId extensions; no PII.
-    private static async Task WriteProblemDetailsAsync(
+    // Internal (not private): DispatchSessionEndpoint reuses THIS writer (task 023b).
+    internal static async Task WriteProblemDetailsAsync(
         HttpResponse response,
         int statusCode,
         string title,

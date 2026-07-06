@@ -200,6 +200,41 @@ public interface IConsumerRoutingService
         string eventName,
         string? environment = null,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// FR-P1-04 (spaarke-ai-architecture-redesign-r1 task 023b) — resolve the FULL
+    /// <see cref="Binding"/> contract for a KNOWN Binding row id (the
+    /// <c>sprk_playbookconsumerid</c> primary key). This is the Click path's routing
+    /// read: chips carry <c>binding_id</c> (every chip emitter — the Event Rules
+    /// contextual chips and the <c>sprk_chiptransitions</c> column — sends the row
+    /// GUID), and <c>POST /sessions/{id}/dispatch</c> resolves it here.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>ADR-039</b>: extends THIS service (rather than introducing a second query
+    /// path) so the Binding query + row→contract mapping stay in one implementation
+    /// (CLAUDE.md §11 extension-over-new — same rationale as
+    /// <see cref="ResolveEventBindingsAsync"/>).
+    /// </para>
+    /// <para>
+    /// <b>Resolution semantics</b>: primary-key lookup, <c>sprk_enabled=true</c> only
+    /// (a disabled Binding is not dispatchable — same visibility rule as every other
+    /// resolve). No consumer-code / environment / match-conditions filtering: the id
+    /// IS the routing decision (ADR-039 D4); makers who authored the chip already
+    /// chose the row. Rows with neither target lookup populated are admin errors and
+    /// return null. Results (including null misses) cache 5 minutes.
+    /// </para>
+    /// </remarks>
+    /// <param name="bindingId">The <c>sprk_playbookconsumer</c> row id. Required (non-empty).</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>
+    /// The full <see cref="Binding"/> contract of the row, or <c>null</c> when no
+    /// enabled row with that id exists (callers reject unknown ids with a clean
+    /// error — ADR-039: no fallback).
+    /// </returns>
+    Task<Binding?> GetBindingByIdAsync(
+        Guid bindingId,
+        CancellationToken cancellationToken = default);
 }
 
 /// <summary>

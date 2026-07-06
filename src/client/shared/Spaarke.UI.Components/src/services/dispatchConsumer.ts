@@ -35,12 +35,17 @@
  * field_delta / streaming_complete / widget_load — all pre-existing
  * discriminants; ADR-030 four-channel invariant untouched).
  *
- * Server contract (DECLARED SHAPE — server surface owned by task 022+):
+ * Server contract (BUILT — task 023b `DispatchSessionEndpoint`, BFF):
  *   POST {bffBaseUrl}/api/ai/chat/sessions/{sessionId}/dispatch
  *   body: { bindingId: string, args: Record<string, unknown> }
+ *     - `bindingId` MUST be the Binding row GUID (`sprk_playbookconsumer` id)
+ *       carried by the chip — the ONLY resolution vocabulary (ADR-039; non-GUID
+ *       → 400 `dispatch.binding-id-invalid`; unknown/disabled GUID → 404
+ *       `dispatch.binding-not-found`)
  *   → 200 text/event-stream of AnalysisChunk events
  *     (`data: {"type":"delta"|"complete"|"error"|"text", ...}\n\n`,
- *     camelCase, identical to SummarizeSessionEndpoint's wire format)
+ *     camelCase, serialized by the SAME writer as SummarizeSessionEndpoint —
+ *     one wire shape)
  *   → non-OK: ProblemDetails with stable `errorCode` extension (ADR-019)
  *
  * Empty-attachments guard (Click precondition, re-homed from the deleted
@@ -65,15 +70,21 @@ import type { AccessTokenGetter } from '../components/SprkChat/types';
 // ---------------------------------------------------------------------------
 
 /**
- * Wire shape of one chip transition as authored on the Binding row's
- * `sprk_chiptransitions` JSON column and delivered by the server
- * (task 022 chip SSE contract — declared shape:
- * `{target_binding_id, chip_label, prefill_slots?, requires_attachments?}`).
+ * Wire shape of one chip as delivered by the server. THE shipped shape
+ * (task 022 Event SSE contract, resolved at task 023b) is the BFF `EventChip`
+ * record serialized camelCase: `{targetBindingId, label, args?}`. It appears
+ * on THREE stream events — the top-level `chips` event
+ * (`data: {sourceBindingId, chips: EventChip[]}`), and inside
+ * `event_confirmation.data.chips` + `event_notice.data.chips` — so it is the
+ * ONE chip wire vocabulary (single-wire-shape decision, task 023b: mapping
+ * EventChip here was strictly smaller than re-emitting the final chips as a
+ * `context_event`, which would have left the confirmation/notice chips as a
+ * second shape).
  *
- * The parser ALSO tolerates the BFF's camelCase serialization policy
- * (`targetBindingId`, `chipLabel`, …) so a task-022 DTO without explicit
- * `[JsonPropertyName]` attributes still parses — single-seam hardening while
- * the server contract finalizes.
+ * The parser ALSO tolerates the Binding column's authored snake_case JSON
+ * (`{target_binding_id, chip_label, prefill_slots?, requires_attachments?}`)
+ * and its camelCase twins — maker-authored transitions parse identically if a
+ * host ever receives them raw.
  */
 export interface ConsumerChipWire {
   target_binding_id?: string;
@@ -85,6 +96,11 @@ export interface ConsumerChipWire {
   chipLabel?: string;
   prefillSlots?: Record<string, unknown>;
   requiresAttachments?: boolean;
+  // BFF EventChip serialization (task 022 — the shipped Event-path shape):
+  // `label` is the user-facing text; `args` forwards verbatim as dispatch args
+  // (e.g. `{fileIds: [...]}` on manual-run / summarize-all / M4 confirm chips).
+  label?: string;
+  args?: Record<string, unknown>;
 }
 
 /**
@@ -120,10 +136,15 @@ export function parseConsumerChips(raw: unknown): ConsumerChip[] {
     if (entry === null || typeof entry !== 'object') continue;
     const wire = entry as ConsumerChipWire;
     const bindingId = wire.target_binding_id ?? wire.targetBindingId;
-    const label = wire.chip_label ?? wire.chipLabel;
+    // `label` last: the EventChip serialization (the shipped Event-path shape,
+    // task 022/023b) uses bare `label`; authored chip transitions use chip_label.
+    const label = wire.chip_label ?? wire.chipLabel ?? wire.label;
     if (typeof bindingId !== 'string' || bindingId.length === 0) continue;
     if (typeof label !== 'string' || label.length === 0) continue;
-    const slots = wire.prefill_slots ?? wire.prefillSlots;
+    // EventChip `args` and chip-transition `prefill_slots` are the same datum:
+    // capability args forwarded VERBATIM to dispatchConsumer (the server owns
+    // the typed parse — ADR-039; the client never interprets them).
+    const slots = wire.prefill_slots ?? wire.prefillSlots ?? wire.args;
     chips.push({
       bindingId,
       label,

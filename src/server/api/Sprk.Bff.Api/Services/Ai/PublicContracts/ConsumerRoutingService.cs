@@ -71,6 +71,7 @@ public sealed class ConsumerRoutingService : IConsumerRoutingService
     private const string CacheKeyPrefix = "consumer-routing:";
     private const string ActionCacheKeyPrefix = "consumer-routing-action:";
     private const string BindingCacheKeyPrefix = "consumer-routing-binding:";
+    private const string BindingByIdCacheKeyPrefix = "consumer-routing-binding-id:";
     private const string EventBindingsCacheKeyPrefix = "consumer-routing-event:";
     private static readonly TimeSpan CacheDuration = TimeSpan.FromMinutes(5);
 
@@ -245,6 +246,112 @@ public sealed class ConsumerRoutingService : IConsumerRoutingService
             string.Join(",", resolved.Select(b => b.BindingId)), stopwatch.ElapsedMilliseconds);
 
         return resolved;
+    }
+
+    /// <inheritdoc />
+    public async Task<Binding?> GetBindingByIdAsync(
+        Guid bindingId,
+        CancellationToken cancellationToken = default)
+    {
+        if (bindingId == Guid.Empty)
+        {
+            throw new ArgumentException("bindingId is required.", nameof(bindingId));
+        }
+
+        var cacheKey = $"{BindingByIdCacheKeyPrefix}{bindingId}";
+        if (_cache.TryGetValue<Binding?>(cacheKey, out var cached))
+        {
+            _logger.LogDebug(
+                "ConsumerRoutingService binding-by-id cache hit (bindingId={BindingId}, resolved={Resolved}).",
+                bindingId, cached is not null);
+            return cached;
+        }
+
+        var stopwatch = Stopwatch.StartNew();
+        Binding? resolved = null;
+        try
+        {
+            resolved = await QueryBindingByIdAsync(bindingId, cancellationToken).ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // Don't poison the cache on cancellation — let next call retry.
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Routing must NEVER throw to the consumer (same contract as the other
+            // resolves) — the Click path rejects the dispatch as "unknown binding"
+            // (ADR-039: clean error, no fallback). ADR-015: identifiers only.
+            _logger.LogError(ex,
+                "ConsumerRoutingService failed to resolve binding by id (bindingId={BindingId}). Returning null.",
+                bindingId);
+            return null;
+        }
+        finally
+        {
+            stopwatch.Stop();
+        }
+
+        // Cache hits AND misses (same policy as the per-consumer resolves).
+        _cache.Set(cacheKey, resolved, new MemoryCacheEntryOptions
+        {
+            AbsoluteExpirationRelativeToNow = CacheDuration,
+        });
+
+        _logger.LogInformation(
+            "ConsumerRoutingService resolved binding by id (bindingId={BindingId}, resolved={Resolved}, " +
+            "consumerType={ConsumerType}, actionId={ActionId}, cacheHit=false, durationMs={DurationMs}).",
+            bindingId, resolved is not null, resolved?.ConsumerType, resolved?.ActionId,
+            stopwatch.ElapsedMilliseconds);
+
+        return resolved;
+    }
+
+    /// <summary>
+    /// Primary-key query for one enabled <c>sprk_playbookconsumer</c> row with the
+    /// same left-outer Action link + <see cref="MapBinding"/> mapping as every other
+    /// resolve path. Disabled rows and rows with neither target lookup populated
+    /// (admin errors) return null.
+    /// </summary>
+    private async Task<Binding?> QueryBindingByIdAsync(Guid bindingId, CancellationToken cancellationToken)
+    {
+        var query = new QueryExpression(EntityLogicalName)
+        {
+            ColumnSet = new ColumnSet(Columns),
+            Criteria = new FilterExpression(LogicalOperator.And),
+            TopCount = 1,
+        };
+        query.Criteria.AddCondition("sprk_playbookconsumerid", ConditionOperator.Equal, bindingId);
+        query.Criteria.AddCondition("sprk_enabled", ConditionOperator.Equal, true);
+
+        var actionLink = query.AddLink(
+            ActionEntityLogicalName,
+            ActionLookupColumn,
+            "sprk_analysisactionid",
+            JoinOperator.LeftOuter);
+        actionLink.EntityAlias = ActionLinkAlias;
+        actionLink.Columns = new ColumnSet(ActionColumns);
+
+        var result = await _entityService
+            .RetrieveMultipleAsync(query, cancellationToken)
+            .ConfigureAwait(false);
+
+        var entity = result?.Entities is { Count: > 0 } ? result.Entities[0] : null;
+        if (entity is null)
+        {
+            return null;
+        }
+
+        var playbookLookup = entity.GetAttributeValue<EntityReference>(PlaybookLookupColumn);
+        var actionLookup = entity.GetAttributeValue<EntityReference>(ActionLookupColumn);
+        if ((playbookLookup is null || playbookLookup.Id == Guid.Empty)
+            && (actionLookup is null || actionLookup.Id == Guid.Empty))
+        {
+            return null; // admin error — same skip rule as QueryCandidatesAsync.
+        }
+
+        return MapBinding(entity, playbookLookup, actionLookup);
     }
 
     /// <summary>
