@@ -53,6 +53,7 @@ public sealed class InvokePlaybookHandlerTests : TypedToolHandlerTestFixture
 
     private readonly Mock<IInvokePlaybookAi> _invokeFacadeMock = new();
     private readonly Mock<IPlaybookService> _playbookServiceMock = new();
+    private readonly Mock<IEngineOutputLedgerAdapter> _ledgerAdapterMock = new();
     private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly IMemoryCache _memoryCache;
 
@@ -75,6 +76,7 @@ public sealed class InvokePlaybookHandlerTests : TypedToolHandlerTestFixture
             _playbookServiceMock.Object,
             _httpContextAccessor,
             _memoryCache,
+            _ledgerAdapterMock.Object,
             CreateLogger<InvokePlaybookHandler>());
     }
 
@@ -389,6 +391,129 @@ public sealed class InvokePlaybookHandlerTests : TypedToolHandlerTestFixture
     }
 
     // ═════════════════════════════════════════════════════════════════════════════
+    // E-2 engine-output→ledger adapter seam (ADR-040 / FR-P1-05, ai-architecture-
+    // redesign-r1 task 024): successful frozen-engine runs are recorded to the
+    // session ledger BEFORE the ToolResult returns (store precedes render — the
+    // LLM's assistant turn is the render); failed runs never enter the ledger; a
+    // ledger-write failure fails the tool call rather than rendering unstored output.
+    // ═════════════════════════════════════════════════════════════════════════════
+
+    [Fact]
+    public async Task ExecuteChatAsync_SuccessfulRun_RecordsEngineOutputToLedger_AndSurfacesLedgerKey()
+    {
+        var playbookId = Guid.NewGuid();
+        _playbookServiceMock
+            .Setup(p => p.GetPlaybookAsync(playbookId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(BuildVisiblePlaybook(playbookId));
+        _invokeFacadeMock
+            .Setup(f => f.InvokePlaybookAsync(
+                playbookId, It.IsAny<IReadOnlyDictionary<string, string>?>(),
+                It.IsAny<PlaybookInvocationContext>(), It.IsAny<CancellationToken>(), It.IsAny<string?>(), It.IsAny<Sprk.Bff.Api.Services.Ai.DocumentContext?>()))
+            .ReturnsAsync(BuildSuccessResult(playbookId));
+
+        var expectedKey = Sprk.Bff.Api.Models.Ai.Chat.SessionLedger.BuildOutputKey(playbookId.ToString(), 1);
+        _ledgerAdapterMock
+            .Setup(a => a.RecordAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), playbookId,
+                It.Is<PlaybookInvocationResult>(r => r.Success),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Sprk.Bff.Api.Models.Ai.Chat.SessionOutput
+            {
+                Key = expectedKey,
+                BindingId = playbookId.ToString(),
+                UcId = "engine-playbook",
+                Turn = 1,
+                Disposition = "informational",
+                Payload = JsonDocument.Parse("{}").RootElement.Clone(),
+                CreatedAt = DateTimeOffset.UtcNow,
+            });
+
+        var handler = CreateHandler();
+        var ctx = BuildChatInvocationContext(
+            toolArgumentsJson: $"{{\"playbookId\":\"{playbookId}\"}}");
+        var tool = BuildInvokeTool();
+
+        var result = await handler.ExecuteChatAsync(ctx, tool, CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        _ledgerAdapterMock.Verify(a => a.RecordAsync(
+                ctx.TenantId, ctx.ChatSessionId, playbookId,
+                It.Is<PlaybookInvocationResult>(r => r.Success),
+                It.IsAny<CancellationToken>()),
+            Times.Once,
+            "the E-2 adapter must record the engine output to the session ledger before the ToolResult returns");
+
+        result.Data.Should().NotBeNull("ToolResult.Ok serializes the InvokePlaybookPayload into Data");
+        result.Data!.Value.GetProperty("ledgerKey").GetString().Should().Be(expectedKey,
+            "the addressable ledger key is surfaced so later turns can reference the output");
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_FailedFacadeResult_DoesNotWriteLedger()
+    {
+        var playbookId = Guid.NewGuid();
+        _playbookServiceMock
+            .Setup(p => p.GetPlaybookAsync(playbookId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(BuildVisiblePlaybook(playbookId));
+        _invokeFacadeMock
+            .Setup(f => f.InvokePlaybookAsync(
+                playbookId, It.IsAny<IReadOnlyDictionary<string, string>?>(),
+                It.IsAny<PlaybookInvocationContext>(), It.IsAny<CancellationToken>(), It.IsAny<string?>(), It.IsAny<Sprk.Bff.Api.Services.Ai.DocumentContext?>()))
+            .ReturnsAsync(new PlaybookInvocationResult
+            {
+                RunId = Guid.NewGuid(),
+                Success = false,
+                ErrorMessage = "Node failed.",
+                ErrorCode = "PLAYBOOK_INVOCATION_FAILED"
+            });
+
+        var handler = CreateHandler();
+        var ctx = BuildChatInvocationContext(
+            toolArgumentsJson: $"{{\"playbookId\":\"{playbookId}\"}}");
+        var tool = BuildInvokeTool();
+
+        var result = await handler.ExecuteChatAsync(ctx, tool, CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        _ledgerAdapterMock.Verify(a => a.RecordAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>(),
+                It.IsAny<PlaybookInvocationResult>(), It.IsAny<CancellationToken>()),
+            Times.Never,
+            "failed engine runs produce no output — nothing enters the ledger (ADR-040)");
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_LedgerWriteFailure_ReturnsError_NeverRendersUnstoredOutput()
+    {
+        var playbookId = Guid.NewGuid();
+        _playbookServiceMock
+            .Setup(p => p.GetPlaybookAsync(playbookId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(BuildVisiblePlaybook(playbookId));
+        _invokeFacadeMock
+            .Setup(f => f.InvokePlaybookAsync(
+                playbookId, It.IsAny<IReadOnlyDictionary<string, string>?>(),
+                It.IsAny<PlaybookInvocationContext>(), It.IsAny<CancellationToken>(), It.IsAny<string?>(), It.IsAny<Sprk.Bff.Api.Services.Ai.DocumentContext?>()))
+            .ReturnsAsync(BuildSuccessResult(playbookId, text: "output that MUST NOT render unstored"));
+        _ledgerAdapterMock
+            .Setup(a => a.RecordAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>(),
+                It.IsAny<PlaybookInvocationResult>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("session store unavailable"));
+
+        var handler = CreateHandler();
+        var ctx = BuildChatInvocationContext(
+            toolArgumentsJson: $"{{\"playbookId\":\"{playbookId}\"}}");
+        var tool = BuildInvokeTool();
+
+        var result = await handler.ExecuteChatAsync(ctx, tool, CancellationToken.None);
+
+        result.Success.Should().BeFalse(
+            "ADR-040 store-precedes-render: when the ledger write fails, the output is NOT handed to the LLM");
+        result.ErrorCode.Should().Be(ToolErrorCodes.InternalError);
+        (result.Summary ?? string.Empty).Should().NotContain("output that MUST NOT render unstored");
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════
     // Tenant visibility / isolation
     // ═════════════════════════════════════════════════════════════════════════════
 
@@ -655,6 +780,7 @@ public sealed class InvokePlaybookHandlerTests : TypedToolHandlerTestFixture
             _playbookServiceMock.Object,
             noHttpAccessor,
             _memoryCache,
+            _ledgerAdapterMock.Object,
             CreateLogger<InvokePlaybookHandler>());
 
         var ctx = BuildChatInvocationContext(
@@ -780,6 +906,7 @@ public sealed class InvokePlaybookHandlerTests : TypedToolHandlerTestFixture
             _playbookServiceMock.Object,
             _httpContextAccessor,
             _memoryCache,
+            _ledgerAdapterMock.Object,
             CreateLogger<InvokePlaybookHandler>());
 
         var argsJson = JsonSerializer.Serialize(new

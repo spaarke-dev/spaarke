@@ -1040,7 +1040,8 @@ public class SprkChatAgentFactory
         //   ExecuteAsync) and resulting LLM outputs are genuinely different. To make the
         //   Assistant chat experience consistent, the /summarize slash command in
         //   ConversationPane.handleBeforeSendMessage is now suppressed from firing
-        //   executeSummarizeIntent (which drives the direct endpoint). Slash now flows purely
+        //   the retired R5 client summarize orchestrator (which drove the direct
+        //   endpoint; deleted by ai-architecture-redesign-r1 task 023). Slash now flows purely
         //   through SprkChatAgent → invoke_playbook → InvokePlaybookHandler →
         //   IPlaybookOrchestrationService.ExecuteAsync, matching natural-language
         //   "summarize this document" output. The direct endpoint

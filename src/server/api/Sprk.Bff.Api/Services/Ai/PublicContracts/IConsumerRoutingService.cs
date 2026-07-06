@@ -165,6 +165,41 @@ public interface IConsumerRoutingService
         IRoutingContext? context = null,
         string? environment = null,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// FR-P1-03 (spaarke-ai-architecture-redesign-r1 task 022) — resolve the
+    /// ORDERED Event-path members for a surface event: every enabled
+    /// <c>sprk_playbookconsumer</c> row (any consumer type) whose
+    /// <c>sprk_oneventbindings</c> JSON declares membership in
+    /// <paramref name="eventName"/>, environment-filtered, ordered by the
+    /// membership's <c>order</c> value (ascending; ties break on
+    /// <c>sprk_priority</c> then row id for determinism).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>ADR-039</b>: this method IS the Event path's routing read — event rules
+    /// are declarative Binding data, and this is the only place they are
+    /// interpreted. It extends THIS service (rather than introducing a second
+    /// query path) so the Binding query + row→contract mapping stay in one
+    /// implementation (CLAUDE.md §11 extension-over-new).
+    /// </para>
+    /// <para>
+    /// <b>Resolution semantics vs the per-consumer methods</b>: no consumer-code
+    /// or match-conditions filtering (an event fires platform-wide, not for one
+    /// consumer); environment filtering matches
+    /// <see cref="ResolveBindingAsync"/>. Malformed membership JSON degrades to
+    /// non-membership (routing never throws). Results cache 5 minutes per
+    /// (event, environment) — same TTL policy as the other resolves.
+    /// </para>
+    /// </remarks>
+    /// <param name="eventName">Closed platform event token (e.g. <c>document_uploaded</c>). Required.</param>
+    /// <param name="environment">Environment scope; null reads <c>IHostEnvironment.EnvironmentName</c>.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Ordered members; empty when no enabled Binding declares the event (callers graceful-degrade).</returns>
+    Task<IReadOnlyList<Binding>> ResolveEventBindingsAsync(
+        string eventName,
+        string? environment = null,
+        CancellationToken cancellationToken = default);
 }
 
 /// <summary>

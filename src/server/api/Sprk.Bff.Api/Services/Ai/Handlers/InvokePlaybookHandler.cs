@@ -74,7 +74,9 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// <c>AnalysisServicesModule</c>. ALL dependencies are already registered:
 /// <see cref="IInvokePlaybookAi"/> (AddPublicContractsFacade), <see cref="IPlaybookService"/>
 /// (AddPlaybookServices), <see cref="IMemoryCache"/> (CoreServiceCollectionExtensions),
-/// <see cref="IHttpContextAccessor"/> (AddAnalysisOrchestrationServices).</item>
+/// <see cref="IHttpContextAccessor"/> (AddAnalysisOrchestrationServices),
+/// <see cref="IEngineOutputLedgerAdapter"/> (registered in the same compound-ON block as
+/// the tool-framework scan — E-2 adapter, ai-architecture-redesign-r1 task 024).</item>
 /// <item><strong>ADR-013</strong>: facade-only injection; lives under
 /// <c>Services/Ai/Handlers/</c>; CRUD code never injects this type directly.</item>
 /// <item><strong>ADR-014</strong>: playbook visibility lookups cached per
@@ -114,6 +116,7 @@ public sealed class InvokePlaybookHandler : IToolHandler
     private readonly IPlaybookService _playbookService;
     private readonly IHttpContextAccessor _httpContextAccessor;
     private readonly IMemoryCache _memoryCache;
+    private readonly IEngineOutputLedgerAdapter _engineOutputLedger;
     private readonly ILogger<InvokePlaybookHandler> _logger;
 
     public InvokePlaybookHandler(
@@ -121,12 +124,14 @@ public sealed class InvokePlaybookHandler : IToolHandler
         IPlaybookService playbookService,
         IHttpContextAccessor httpContextAccessor,
         IMemoryCache memoryCache,
+        IEngineOutputLedgerAdapter engineOutputLedger,
         ILogger<InvokePlaybookHandler> logger)
     {
         _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
         _playbookService = playbookService ?? throw new ArgumentNullException(nameof(playbookService));
         _httpContextAccessor = httpContextAccessor ?? throw new ArgumentNullException(nameof(httpContextAccessor));
         _memoryCache = memoryCache ?? throw new ArgumentNullException(nameof(memoryCache));
+        _engineOutputLedger = engineOutputLedger ?? throw new ArgumentNullException(nameof(engineOutputLedger));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -340,7 +345,26 @@ public sealed class InvokePlaybookHandler : IToolHandler
                 "InvokePlaybookHandler ({Correlation}) dispatch complete playbookId={PlaybookId} runId={RunId} success={Success} citationCount={CitationCount} in {Duration}ms",
                 correlationLogId, playbookId, result.RunId, result.Success, result.Citations.Count, stopwatch.ElapsedMilliseconds);
 
-            return ProjectFacadeResult(result, tool, startedAt);
+            // ── E-2 engine-output→ledger adapter (ADR-040 / FR-P1-05, ai-architecture-redesign-r1
+            // task 024) ─────────────────────────────────────────────────────────────────────────
+            // At this exact point the frozen engine's aggregated composite output is in hand and
+            // NOTHING has rendered (the LLM's assistant turn IS the render, and it happens only
+            // after this ToolResult returns). The adapter writes the addressable SessionOutput
+            // ledger entry through the task-021 IOutputRouter write path FIRST — storage precedes
+            // rendering. A ledger-write failure propagates to the generic catch below and fails
+            // the tool call: unstored output is never handed to the LLM (ADR-040 D2/D8). A null
+            // entry means no chat session was resolvable (record-context runs join the ledger at
+            // P3 FR-P3-08) — the result still renders because no session ledger exists to write.
+            string? ledgerKey = null;
+            if (result.Success)
+            {
+                var ledgerEntry = await _engineOutputLedger
+                    .RecordAsync(context.TenantId, context.ChatSessionId, playbookId, result, cancellationToken)
+                    .ConfigureAwait(false);
+                ledgerKey = ledgerEntry?.Key;
+            }
+
+            return ProjectFacadeResult(result, tool, startedAt, ledgerKey);
         }
         catch (OperationCanceledException)
         {
@@ -525,7 +549,8 @@ public sealed class InvokePlaybookHandler : IToolHandler
     private ToolResult ProjectFacadeResult(
         PlaybookInvocationResult result,
         AnalysisTool tool,
-        DateTimeOffset startedAt)
+        DateTimeOffset startedAt,
+        string? ledgerKey = null)
     {
         var execMetadata = new ToolExecutionMetadata
         {
@@ -551,7 +576,8 @@ public sealed class InvokePlaybookHandler : IToolHandler
             TextContent = result.TextContent,
             StructuredData = result.StructuredData,
             CitationCount = result.Citations.Count,
-            DurationMs = (long)result.Duration.TotalMilliseconds
+            DurationMs = (long)result.Duration.TotalMilliseconds,
+            LedgerKey = ledgerKey
         };
 
         var ok = ToolResult.Ok(
@@ -624,5 +650,14 @@ public sealed class InvokePlaybookHandler : IToolHandler
         /// <summary>Total wall-clock duration of the run in milliseconds.</summary>
         [JsonPropertyName("durationMs")]
         public long DurationMs { get; set; }
+
+        /// <summary>
+        /// Addressable session-ledger key of the stored engine output
+        /// (<c>{playbookId}@t{n}</c> — E-2 adapter, ADR-040 / FR-P1-05, task 024). Later
+        /// turns reference the output by this key. Null when no chat session was resolvable
+        /// (record-context runs join the ledger at P3 FR-P3-08).
+        /// </summary>
+        [JsonPropertyName("ledgerKey")]
+        public string? LedgerKey { get; set; }
     }
 }

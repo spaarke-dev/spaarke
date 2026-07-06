@@ -336,7 +336,8 @@ export interface IChatSseEventData {
     | 'knowledge_retrieved'
     | 'playbook_node_executing'
     | 'playbook_node_completed'
-    | 'decision_made';
+    | 'decision_made'
+    | 'consumer_chips';
 
   /** ISO-8601 UTC timestamp of the trace event. Present on 'context_event'. */
   contextTimestamp?: string;
@@ -379,6 +380,31 @@ export interface IChatSseEventData {
 
   /** Capability name (decision_made). */
   contextCapabilityName?: string;
+
+  // ── consumer_chips fields (ai-architecture-redesign-r1 task 023 / FR-P1-04) ──
+  //
+  // Next-step chips sourced from a Binding row's `sprk_chiptransitions` (D4 /
+  // ADR-039). DECLARED wire shape for the task-022 server chip SSE contract:
+  // the server emits `context_event` with `contextEventType: 'consumer_chips'`
+  // and the chip transitions array below. Hosts parse via
+  // `parseConsumerChips` (services/dispatchConsumer.ts) and dispatch clicks
+  // through the ONE `dispatchConsumer(bindingId, args)` helper.
+  //
+  // ADR-015: chip labels + binding ids are maker-authored configuration
+  // content (Tier 1 safe) — no user content on this event.
+
+  /**
+   * Chip transitions from the just-completed Binding. Present when
+   * `contextEventType === 'consumer_chips'`. Entries follow the Binding
+   * column's authored JSON shape (`target_binding_id`, `chip_label`,
+   * optional `prefill_slots`, optional `requires_attachments`).
+   */
+  contextChips?: ReadonlyArray<{
+    target_binding_id?: string;
+    chip_label?: string;
+    prefill_slots?: Record<string, unknown>;
+    requires_attachments?: boolean;
+  }>;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

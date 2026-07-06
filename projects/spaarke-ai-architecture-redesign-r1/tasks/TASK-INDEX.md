@@ -77,9 +77,9 @@
 
 | # | Task | FR | Rigor | Deps | Status |
 |---|---|---|---|---|---|
-| 022 | Event Rules service + upload binding with bounds | FR-P1-03 | FULL | 021 | 🔲 |
-| 023 | Click path: `dispatchConsumer` helper; legacy modules deleted | FR-P1-04 | FULL | 021 | 🔲 |
-| 024 | Engine-output→ledger adapter (E-2) | FR-P1-05 | FULL | 021 | 🔲 |
+| 022 | Event path live (CLS-CHAT@v1 chat-classify created as catalog data; 4 bounds + precondition + M4 gate test-proven; SSE chip contract for 023; publish −1.31 MB) | FR-P1-03 | FULL | 021 | ✅ |
+| 023 | Click path client: dispatchConsumer + ConsumerChips; executeSummarizeIntent/intentMatcher grep-zero; ONE SSE loop client-wide. GAP → 023b: server /dispatch endpoint + chips envelope | FR-P1-04 | FULL | 021 | ✅ |
+| 024 | Engine-output→ledger adapter E-2 (attach: InvokePlaybookHandler; interim BindingId=playbookId → re-point at 040; frozen diff empty; NOTE: 044's F-1 deletion must relocate the adapter call) | FR-P1-05 | FULL | 021 | ✅ |
 
 ### Wave W-P1-D + Gate
 

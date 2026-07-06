@@ -107,6 +107,23 @@ public static class AnalysisServicesModule
             configuration.GetSection(Sprk.Bff.Api.Configuration.PostUploadIndexingOptions.SectionName));
         services.AddScoped<IPostUploadIndexingEnqueuer, PostUploadIndexingEnqueuer>();
 
+        // FR-P1-03 (ai-architecture-redesign-r1 task 022) — Event-path BOUNDS infrastructure,
+        // TRULY UNCONDITIONAL. These three registrations have NO AI dependencies:
+        //  - EventRulesOptions: platform-setting bounds (daily cap, M4 threshold, opt-out TTL).
+        //    Bounds are policy, NOT routing — event routing lives exclusively in
+        //    sprk_playbookconsumer.sprk_oneventbindings (ADR-039).
+        //  - IEventPathUserState: per-user budget counter + opt-out marker over ITenantCache
+        //    (unconditional via CacheModule). Consumed by the UNCONDITIONALLY-mapped
+        //    GET/PUT /api/ai/chat/event-rules/opt-out routes → must resolve on the AI-OFF
+        //    path too (§F.1 asymmetric-registration rule).
+        //  - EventRulesTelemetry: NFR-09 "enforced AND telemetered" meter (pattern:
+        //    R5SummarizeTelemetry — unconditional singleton).
+        services.Configure<Sprk.Bff.Api.Services.Ai.EventRules.EventRulesOptions>(
+            configuration.GetSection(Sprk.Bff.Api.Services.Ai.EventRules.EventRulesOptions.SectionName));
+        services.AddScoped<Sprk.Bff.Api.Services.Ai.EventRules.IEventPathUserState,
+                           Sprk.Bff.Api.Services.Ai.EventRules.EventPathUserState>();
+        services.AddSingleton<Sprk.Bff.Api.Services.Ai.EventRules.EventRulesTelemetry>();
+
         var documentIntelligenceEnabled = configuration.GetValue<bool>("DocumentIntelligence:Enabled");
         if (documentIntelligenceEnabled)
         {
@@ -544,6 +561,18 @@ public static class AnalysisServicesModule
         services.AddScoped<Sprk.Bff.Api.Services.Ai.Narrators.DailyBriefingCollector>(sp =>
             new Sprk.Bff.Api.Services.Ai.Narrators.NullDailyBriefingCollector(
                 sp.GetRequiredService<ILogger<Sprk.Bff.Api.Services.Ai.Narrators.DailyBriefingCollector>>()));
+
+        // IEventRulesService (P3 Fail-Fast) — FR-P1-03, ai-architecture-redesign-r1 task 022.
+        // The document_uploaded event route (POST /api/ai/chat/sessions/{id}/events/
+        // document-uploaded) is mapped UNCONDITIONALLY in ChatDocumentEndpoints and injects
+        // IEventRulesService. Real impl registered in AddAnalysisOrchestrationServices
+        // (compound-ON only — its graph needs IActionRunner + IScopeResolverService +
+        // ISessionFileTextSource + IOutputRouter). This Null peer throws
+        // FeatureDisabledException on first MoveNextAsync(); the endpoint's pre-stream probe
+        // maps it to the canonical 503 ProblemDetails (ADR-018 + ADR-019).
+        // Canonical pattern siblings: NullSessionSummarizeOrchestrator (above).
+        services.AddScoped<Sprk.Bff.Api.Services.Ai.EventRules.IEventRulesService,
+                           Sprk.Bff.Api.Services.Ai.EventRules.NullEventRulesService>();
     }
 
     private static void AddAnalysisOrchestrationServices(IServiceCollection services, IConfiguration configuration)
@@ -643,6 +672,40 @@ public static class AnalysisServicesModule
         services.AddScoped<Sprk.Bff.Api.Services.Ai.IOutputRouter,
                            Sprk.Bff.Api.Services.Ai.OutputRouter>();
         Console.WriteLine("✓ OutputRouter registered (FR-P1-02 universal ledger write-before-render; disposition routing per ADR-040)");
+
+        // IEngineOutputLedgerAdapter — the E-2 engine-output→ledger adapter (ADR-040 /
+        // FR-P1-05, ai-architecture-redesign-r1 task 024). Converts the FROZEN Insights
+        // engine's chat-invoked composite outputs (invoke_playbook tool path) into
+        // addressable SessionOutput ledger entries via the IOutputRouter write path.
+        // Boundary shim on OUR side of the ADR-039 freeze line — zero changes inside
+        // PlaybookOrchestrationService/nodes; attaches in InvokePlaybookHandler, which the
+        // OVERLAY-MATRIX S4 verdict keeps (survives the FR-P3-05 engine-shell deletions).
+        // Scoped: wraps ChatSessionManager (Scoped) + IOutputRouter (Scoped).
+        //
+        // §F.1 asymmetric-registration audit (task 024): consumed ONLY by the ctor of
+        // InvokePlaybookHandler, which is auto-discovered by AddToolFramework — invoked at
+        // line ~166 INSIDE this same compound-ON block. Compound-OFF constructs no tool
+        // handlers (AddToolFramework never runs), so the registration is transitively
+        // conditional exactly like IOutputRouter above; no ADR-032 Null peer needed.
+        services.AddScoped<Sprk.Bff.Api.Services.Ai.IEngineOutputLedgerAdapter,
+                           Sprk.Bff.Api.Services.Ai.EngineOutputLedgerAdapter>();
+        Console.WriteLine("✓ EngineOutputLedgerAdapter registered (FR-P1-05 E-2 frozen-engine composite outputs → session ledger)");
+
+        // IEventRulesService — the THIN Event entry path (ADR-039 path 1 of 3; FR-P1-03,
+        // ai-architecture-redesign-r1 task 022). Resolves document_uploaded to the ordered
+        // members declared in sprk_playbookconsumer.sprk_oneventbindings and executes them
+        // through IActionRunner → IOutputRouter under the FR-P1-03 bounds (daily cap,
+        // opt-out, bulk top-1, explicit-command supersede, empty-attachments precondition).
+        // Scoped: wraps ChatSessionManager + IScopeResolverService + ISessionFileTextSource
+        // + IOutputRouter (all Scoped).
+        //
+        // §F.1 asymmetric-registration audit (task 022): the document_uploaded event route
+        // is mapped UNCONDITIONALLY in ChatDocumentEndpoints and injects IEventRulesService
+        // → NullEventRulesService peer registered in AddNullObjectsForCompoundOff (throws
+        // FeatureDisabledException on first MoveNextAsync; endpoint probe maps it to 503).
+        services.AddScoped<Sprk.Bff.Api.Services.Ai.EventRules.IEventRulesService,
+                           Sprk.Bff.Api.Services.Ai.EventRules.EventRulesService>();
+        Console.WriteLine("✓ EventRulesService registered (FR-P1-03 Event path; document_uploaded → ordered Binding members with bounds)");
 
         // R6 Pillar 7 (task 064, D-C-17) — SummarizationCompressionService. Sliding-window
         // compression primitive: folds the oldest M chat turns into a single System-role

@@ -101,15 +101,20 @@ import {
   usePaneCollapseContext,
 } from "../shell/ThreePaneShell";
 import { HistoryMenu } from "./HistoryOverlay";
-// R5 task 036 / P2-CLOSEOUT-05: deterministic intent matching + Summarize
-// promotion. The matcher is a pure module; the executor handles atomic
-// /documents promotion + /summarize SSE streaming + PaneEventBus bridging.
-// See notes/task-036-design-2026-06-05.md for design rationale.
-// R7 Wave 12.3 Phase 12.3a (2026-07-03): `matchIntent` is retired from
-// summarize dispatch. The R7 server-side keyword-match replacement was itself
-// dropped by ai-architecture-redesign-r1 task 025 (FR-P1-06 / ADR-039);
-// summarize now flows via the Event/Click entry paths (tasks 022/023).
-// import { matchIntent } from "./intentMatcher";
+// ai-architecture-redesign-r1 task 023 (FR-P1-04 / ADR-039): the Click entry
+// path. Next-step chips carry a binding_id sourced from the Binding row's
+// `sprk_chiptransitions`; a chip click flows through the ONE shared
+// `dispatchConsumer(bindingId, args)` helper (canonical SSE consumption +
+// PaneEventBus bridging INSIDE it). The R5/R7 per-capability dispatch modules
+// and the client-side intent matcher were deleted here (hard cutover, NFR-08)
+// — the server resolves the Binding; the client never detects intent.
+import {
+  createConsumerDispatcher,
+  parseConsumerChips,
+  type ConsumerChip,
+  type DispatchWorkspaceEvent,
+} from "@spaarke/ui-components";
+import { ConsumerChips } from "./ConsumerChips";
 // R6 closeout (Pillar 8 / task 097): /new-session needs to POST /api/ai/chat/sessions
 // and return the new session id so HardSlashExecutor.execNewSession can complete.
 import { buildBffApiUrl } from "@spaarke/auth";
@@ -145,10 +150,6 @@ import ReferenceResolver, {
   createFileLookupFromSessionMap,
   type ResolverContext,
 } from "./ReferenceResolver";
-// R7 Wave 12.3 Phase 12.3a (2026-07-03) — `executeSummarizeIntent` retired for
-// NL/button paths. Its R7 server-side keyword auto-dispatch replacement was
-// dropped by ai-architecture-redesign-r1 task 025 (FR-P1-06 / ADR-039); the
-// behavior re-homes as an Event/Click-path precondition (tasks 022/023).
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -977,7 +978,8 @@ export function ConversationPane(): React.JSX.Element {
   //  end-to-end flow can be exercised in dev.
   const heldFilesRef = React.useRef<Map<string, File>>(new Map());
 
-  // Chip ids that have been successfully promoted via `executeSummarizeIntent`.
+  // Attachment-chip ids that have been successfully promoted to server-side
+  // session files (auto-promote flow in handleAttachmentReady, R7 12.3a).
   // The render reads this to flip the per-chip status badge "Held" → "Indexed".
   const [promotedChipIds, setPromotedChipIds] = React.useState<ReadonlySet<string>>(
     () => new Set<string>()
@@ -1223,58 +1225,14 @@ export function ConversationPane(): React.JSX.Element {
       const parsedIntent = parseCommandIntent(messageText);
       void parsedIntent;
 
-      const readyChips = attachmentChips.filter(c => c.status === "ready");
-      // R7 Wave 12.3 Phase 12.3a (2026-07-03) — `matchIntent(...)` retired for
-      // summarize dispatch (see retired NL branch below). Preserved reference:
-      // shape is `{ id, via }` with `via ∈ {"slash", "nl", "button-id"}`. Kept
-      // as a comment because future intents (e.g. custom prompt intents beyond
-      // summarize) may re-introduce a lightweight client-side dispatcher.
-      void readyChips;
-      // R6 Hotfix Wave B-G9c3 (B9) — slash-to-NL rewire (2026-06-10):
-      //
-      // When the intent matched via the `/summarize` SLASH command (as opposed
-      // to a natural-language pattern or button-id), DO NOT fire the
-      // deterministic `executeSummarizeIntent` orchestrator. Let the message
-      // flow through the SprkChat default send funnel only — the LLM agent
-      // (SprkChatAgent) sees the literal "/summarize" text and routes it
-      // through the natural-language path (CapabilityRouter → invoke_playbook
-      // tool → InvokePlaybookHandler → IPlaybookOrchestrationService.ExecuteAsync).
-      //
-      // This satisfies the user's B9 decision: "/summarize in the Assistant
-      // chat should produce the SAME output as 'summarize this document'."
-      // Both now route through the SAME NL primitives (richer
-      // PromptSchemaRenderer templates, conversational LLM-driven output)
-      // instead of the JPS-template streaming path
-      // (PlaybookExecutionEngine.ExecuteChatSummarizeAsync) used by the
-      // direct endpoint.
-      //
-      // NL pattern matches ("summarize…", "please summarize…") and button-id
-      // matches (`action:summarize`) STILL fire executeSummarizeIntent — they
-      // preserve the R5 task 036 / P2-CLOSEOUT-05 "deterministic intent
-      // dispatch" operator-UX contract. The slash command is the only path
-      // that bypasses the orchestrator entry — it's purely a typing-affordance
-      // synonym for natural language.
-      //
-      // The Document Profile context's SummarizeFilesWizard
-      // (`/api/workspace/files/summarize` via summarizeService.ts) is a
-      // SEPARATE endpoint and is UNAFFECTED by this change.
-      // ── R7 Wave 12.3 Phase 12.3a (2026-07-03) — RETIRED NL branch ─────────
-      // Previously this branch fired `executeSummarizeIntent` locally for
-      // natural-language summarize intents (`intent.via !== "slash"`). Firing
-      // it in parallel with a server-side dispatch caused a double-dispatch
-      // race (Wave 12.3 UAT 2026-07-03): two parallel /summarize streams
-      // competed for the Summary tab; one succeeded with empty content, one
-      // errored — so the client-side NL branch was removed.
-      //
-      // The R7 server-side keyword-match auto-dispatch that replaced it was
-      // itself dropped by ai-architecture-redesign-r1 task 025 (FR-P1-06 /
-      // ADR-039 — no second intent-detection mechanism). Summarize dispatch
-      // re-homes on the Event/Click entry paths (tasks 022/023).
-      //
-      // Held-file promotion is the server's job — SessionFileTextSource reads
-      // session-file rows (populated at upload time via the shared paperclip
-      // upload flow), so no client /documents call is needed here.
-      // ── End retired NL branch ─────────────────────────────────────────────
+      // ── ADR-039 (task 023 / FR-P1-04): NO client-side intent detection ────
+      // Natural language flows to the agent turn (Text path) unchanged; chips
+      // dispatch deterministically by binding_id through dispatchConsumer
+      // (Click path); upload events fire Event-path rules server-side. The
+      // former client intent matcher + per-capability orchestrator were
+      // deleted (hard cutover, NFR-08) — held-file promotion is the server's
+      // job (SessionFileTextSource reads session-file rows populated at
+      // upload time via the shared paperclip flow).
 
       // ── Existing task 020 multi-file interjection (untouched) ───────────
       //
@@ -1489,6 +1447,68 @@ export function ConversationPane(): React.JSX.Element {
   // execution and Library modal launch.
   // ─────────────────────────────────────────────────────────────────────────
 
+  // ── Click path (task 023 / FR-P1-04 / ADR-039) ───────────────────────────
+  //
+  // Next-step chips from the just-completed Binding's `sprk_chiptransitions`
+  // (delivered via the task-022 `context_event` SSE contract, discriminant
+  // `consumer_chips`). Chips CARRY binding_id; a click calls the ONE shared
+  // dispatchConsumer(bindingId, args) helper — no intent detection, no
+  // capability branching. A new chip set replaces the previous one; the set
+  // clears on click (single dispatch decision per turn — the r7 lesson) and
+  // on session change.
+  const [consumerChips, setConsumerChips] = React.useState<ReadonlyArray<ConsumerChip>>([]);
+
+  // The bound dispatcher. Stable per (bffBaseUrl, session, auth, bus) — the
+  // helper re-reads the session id per dispatch via the getter.
+  const chatSessionIdRef = React.useRef<string | null>(chatSessionId);
+  chatSessionIdRef.current = chatSessionId;
+  const dispatchConsumer = React.useMemo(
+    () =>
+      createConsumerDispatcher({
+        bffBaseUrl,
+        getSessionId: () => chatSessionIdRef.current,
+        getAccessToken,
+        publishPaneEvent: (channel, event: DispatchWorkspaceEvent) =>
+          dispatch(channel, event as WorkspacePaneEvent),
+      }),
+    [bffBaseUrl, getAccessToken, dispatch]
+  );
+
+  /**
+   * Chip click → dispatchConsumer(chip.bindingId, args). The chip's
+   * prefill_slots forward verbatim as capability args; the empty-attachments
+   * Click precondition is enforced both here (disabled chip UI in
+   * ConsumerChips) and inside the helper (throws before any network call).
+   * Failures surface as a local Assistant message (ADR-019: stable
+   * error text only — never raw server detail).
+   */
+  const handleConsumerChipClick = React.useCallback(
+    (chip: ConsumerChip): void => {
+      // Single dispatch decision per turn: consume the chip set on click.
+      setConsumerChips([]);
+
+      const readyAttachmentCount = attachmentChips.filter(
+        (c) => c.status === "ready"
+      ).length;
+
+      // ADR-015: log structural signals only — never the label/binding values.
+      console.log("[ConversationPane] consumer chip dispatched");
+
+      void dispatchConsumer(chip.bindingId, {
+        slots: chip.prefillSlots,
+        requiresAttachments: chip.requiresAttachments,
+        attachmentCount: readyAttachmentCount,
+      }).catch(() => {
+        setPendingInjection(
+          makeLocalAssistantMessage(
+            "Sorry — I couldn't run that action. Please try again."
+          )
+        );
+      });
+    },
+    [attachmentChips, dispatchConsumer]
+  );
+
   /**
    * onPlaybookOptions — fired by SprkChat for each `playbook_options` SSE event.
    * Synthesizes an Assistant chat message via the existing `injectLocalMessage`
@@ -1534,12 +1554,21 @@ export function ConversationPane(): React.JSX.Element {
       contextLayer?: string;
       contextDecision?: string;
       contextCapabilityName?: string;
+      contextChips?: ReadonlyArray<Record<string, unknown>>;
     }): void => {
       const eventType = data.contextEventType;
       if (!eventType) return;
 
       // ADR-015 telemetry: log discriminant only — never typed-field values.
       console.log("[ConversationPane] context_event received — type:%s", eventType);
+
+      // task 023 / FR-P1-04 — Click-path chips (task-022 chip SSE contract).
+      // Chips are conversation-surface UI (rendered by <ConsumerChips>), not a
+      // bus payload — handled locally; tolerant parse never throws.
+      if (eventType === "consumer_chips") {
+        setConsumerChips(parseConsumerChips(data.contextChips));
+        return;
+      }
 
       const timestamp = data.contextTimestamp ?? new Date().toISOString();
 
@@ -1923,6 +1952,9 @@ export function ConversationPane(): React.JSX.Element {
         // new session does not carry the previous session's promotion state.
         heldFilesRef.current.clear();
         setPromotedChipIds(new Set());
+        // task 023 / FR-P1-04: next-step chips are session-scoped — a fresh
+        // session must not render the prior session's Binding transitions.
+        setConsumerChips([]);
         if (readyConfirmationTimerRef.current !== null) {
           clearTimeout(readyConfirmationTimerRef.current);
           readyConfirmationTimerRef.current = null;
@@ -1972,10 +2004,11 @@ export function ConversationPane(): React.JSX.Element {
    * R7 Wave 12.3 Phase 12.3a UAT fix (2026-07-03) — auto-promote ready chips.
    *
    * Pre-2026-07-03, the ONLY code that POSTed to `/api/ai/chat/sessions/{id}/documents`
-   * (which populates server-side `session.UploadedFiles`) was `executeSummarizeIntent`'s
-   * step-1 file-promotion phase — invoked from `handleBeforeSendMessage`'s NL summarize
-   * branch. When I retired that branch (Wave 12.3 D-13 convergence), file promotion
-   * was lost with it: chips would show 'ready' after client-side extraction, but the
+   * (which populates server-side `session.UploadedFiles`) was the retired R5
+   * per-capability summarize orchestrator's step-1 file-promotion phase —
+   * invoked from `handleBeforeSendMessage`'s NL summarize branch. When that
+   * branch was retired (Wave 12.3 D-13 convergence), file promotion was lost
+   * with it: chips would show 'ready' after client-side extraction, but the
    * BFF never saw them.
    *
    * This effect closes the gap by promoting each ready chip once, as soon as both
@@ -2136,9 +2169,8 @@ export function ConversationPane(): React.JSX.Element {
       //     displayName: attachment.filename,
       //   });
 
-      // R5 task 036: capture the File so the promote-and-execute
-      // orchestrator (`executeSummarizeIntent`) can POST multipart binary
-      // to `/api/ai/chat/sessions/{id}/documents`.
+      // R5 task 036: capture the File so the auto-promote effect (R7 12.3a)
+      // can POST multipart binary to `/api/ai/chat/sessions/{id}/documents`.
       //
       // PREFERRED PATH (R5 task 036 sub-task — additive shared-lib change):
       // SprkChat now forwards the ORIGINAL `File` reference through
@@ -2530,6 +2562,21 @@ export function ConversationPane(): React.JSX.Element {
               )}
             </div>
           )}
+
+          {/* ── Click-path next-step chips (task 023 / FR-P1-04 / ADR-039) ── */}
+          {/*
+            Chips carry binding_id from the completed Binding's chip
+            transitions; a click dispatches through the ONE shared
+            dispatchConsumer helper. Attachment-requiring chips render
+            disabled when the session has zero ready attachments
+            (empty-attachments Click precondition). ADR-021: Fluent v9
+            tokens only — dark-mode verified at gate 027.
+          */}
+          <ConsumerChips
+            chips={consumerChips}
+            attachmentCount={attachmentChips.filter((c) => c.status === "ready").length}
+            onChipClick={handleConsumerChipClick}
+          />
 
           {/* ── SprkChat — fills remaining height below the chip bar ── */}
           {/*

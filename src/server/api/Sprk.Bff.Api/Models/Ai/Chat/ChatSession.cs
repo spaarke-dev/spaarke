@@ -226,16 +226,21 @@ public record ChatSessionFile(
     public string? SummaryText { get; init; }
 
     /// <summary>
-    /// Document type label produced by <c>FileClassificationService</c>
-    /// (chat-routing-redesign-r1 task 067). Examples: "NDA", "patent", "invoice",
-    /// "contract", "memo". Null until classification completes.
+    /// Document type label. Populated by the Event path's classify member
+    /// (<c>EventRulesService</c> — the <c>document_uploaded → chat-classify(1)</c>
+    /// rule, FR-P1-03 / spaarke-ai-architecture-redesign-r1 task 022; field
+    /// originally added for chat-routing-redesign-r1 task 067, whose
+    /// <c>FileClassificationService</c> never shipped). Examples: "nda", "patent",
+    /// "invoice", "contract", "memo". Null until classification completes.
     /// </summary>
     public string? ClassifiedDocType { get; init; }
 
     /// <summary>
     /// Classifier confidence in <see cref="ClassifiedDocType"/> on the closed interval [0, 1].
-    /// Null until classification completes. Downstream consumers SHOULD treat values
-    /// below ~0.6 as "unclassified" per architecture §6.1 trust-frame rules.
+    /// Null until classification completes. The Event path's M4 policy gates on this value
+    /// (below <c>EventRules:ClassifyConfidenceThreshold</c> ⇒ confirmation turn before
+    /// auto-summarize — FR-P1-03); downstream trust-frame consumers SHOULD treat values
+    /// below ~0.6 as "unclassified" per architecture §6.1 rules.
     /// </summary>
     public double? ClassifiedConfidence { get; init; }
 

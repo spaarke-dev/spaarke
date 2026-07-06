@@ -177,6 +177,130 @@ function extractTenantId(token: string): string | null {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// readSseStream — the canonical non-hook SSE streaming primitive
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Options for {@link readSseStream}.
+ */
+export interface ReadSseStreamOptions {
+  /** Fully-constructed streaming endpoint URL (never a raw template literal). */
+  url: string;
+  /** JSON request body for the POST. */
+  body: Record<string, unknown>;
+  /**
+   * Fresh access-token getter (Auth v2 / D-AUTH-7). Invoked ONCE per stream
+   * open, immediately before the fetch — never snapshot the token.
+   */
+  getAccessToken: AccessTokenGetter;
+  /** Optional AbortSignal for cancellation. AbortError propagates to the caller. */
+  signal?: AbortSignal;
+  /**
+   * Invoked once per raw SSE line (both loop parts and the trailing buffer
+   * remainder). Callers parse with {@link parseSseEvent} / {@link parsePaneEvent}
+   * — never hand-roll a parser.
+   */
+  onLine: (line: string) => void;
+  /**
+   * Optional non-OK response mapper. When provided and the response is not OK,
+   * the returned Error is thrown instead of the default message (lets callers
+   * surface ADR-019 ProblemDetails `errorCode` extensions). When omitted, the
+   * default behavior matches the useSseStream hook (429 friendly message;
+   * otherwise status + body text).
+   */
+  mapHttpError?: (response: Response) => Promise<Error>;
+}
+
+/**
+ * Canonical SSE read loop — POST fetch + ReadableStream + `data:` line delivery.
+ *
+ * ai-architecture-redesign-r1 task 023 (FR-P1-04): extracted from the
+ * useSseStream hook body so non-hook consumers (the `dispatchConsumer` helper)
+ * share the ONE SSE consumption path client-wide instead of hand-rolling
+ * fetch/reader/buffer loops (as the retired per-capability dispatch modules
+ * did). The `useSseStream` hook delegates to this function — there is exactly
+ * one parse loop in the client codebase.
+ *
+ * Token attachment + X-Tenant-Id derivation are identical to the pre-extraction
+ * hook behavior. Errors (HTTP non-OK, empty body, network) throw; AbortError
+ * propagates so hook callers can treat cancellation as a non-error.
+ */
+export async function readSseStream(options: ReadSseStreamOptions): Promise<void> {
+  const { url, body, getAccessToken, signal, onLine, mapHttpError } = options;
+
+  // Auth v2 (D-AUTH-7): re-acquire a fresh token for THIS stream open.
+  const token = await getAccessToken();
+  const tenantId = extractTenantId(token);
+
+  const response = await fetch(url, {
+    method: 'POST',
+    headers: {
+      'Content-Type': 'application/json',
+      Authorization: `Bearer ${token}`,
+      ...(tenantId ? { 'X-Tenant-Id': tenantId } : {}),
+    },
+    body: JSON.stringify(body),
+    signal,
+  });
+
+  if (!response.ok) {
+    if (mapHttpError) {
+      throw await mapHttpError(response);
+    }
+    const errorText = await response.text();
+    // ADR-016: Show user-friendly message for rate limiting (429)
+    if (response.status === 429) {
+      throw new Error('You are sending messages too quickly. Please wait a moment and try again.');
+    }
+    throw new Error(`Chat request failed (${response.status}): ${errorText}`);
+  }
+
+  if (!response.body) {
+    throw new Error('Response body is empty');
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  try {
+    // Main read loop
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+
+      buffer += decoder.decode(value, { stream: true });
+
+      // SSE events are separated by double newlines
+      const parts = buffer.split('\n\n');
+      // Keep the last incomplete part in the buffer
+      buffer = parts.pop() || '';
+
+      for (const part of parts) {
+        for (const line of part.split('\n')) {
+          onLine(line);
+        }
+      }
+    }
+
+    // Process any remaining buffer content
+    if (buffer.trim()) {
+      for (const line of buffer.split('\n')) {
+        onLine(line);
+      }
+    }
+  } finally {
+    try {
+      reader.releaseLock();
+    } catch {
+      // Cleanup-tail; mocked/polyfilled readers may not expose releaseLock.
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // SSE event processing dispatcher
 // Shared between main read loop and remainder-buffer processing.
 // Using a dispatcher eliminates the copy-paste duplication that existed in the
@@ -451,38 +575,6 @@ export function useSseStream(): IUseSseStreamResult {
 
       const fetchStream = async () => {
         try {
-          // Auth v2 (D-AUTH-7): re-acquire a fresh token for THIS stream open.
-          // Never snapshot the token; never reuse across stream opens.
-          const token = await getAccessToken();
-          const tenantId = extractTenantId(token);
-
-          const response = await fetch(url, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${token}`,
-              ...(tenantId ? { 'X-Tenant-Id': tenantId } : {}),
-            },
-            body: JSON.stringify(body),
-            signal: controller.signal,
-          });
-
-          if (!response.ok) {
-            const errorText = await response.text();
-            // ADR-016: Show user-friendly message for rate limiting (429)
-            if (response.status === 429) {
-              throw new Error('You are sending messages too quickly. Please wait a moment and try again.');
-            }
-            throw new Error(`Chat request failed (${response.status}): ${errorText}`);
-          }
-
-          if (!response.body) {
-            throw new Error('Response body is empty');
-          }
-
-          const reader = response.body.getReader();
-          const decoder = new TextDecoder();
-          let buffer = '';
           let accumulated = '';
 
           // Build event handlers that capture accumulated content via closure.
@@ -539,62 +631,32 @@ export function useSseStream(): IUseSseStreamResult {
             },
           };
 
-          // Main read loop
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) {
-              break;
-            }
-
-            buffer += decoder.decode(value, { stream: true });
-
-            // SSE events are separated by double newlines
-            const parts = buffer.split('\n\n');
-            // Keep the last incomplete part in the buffer
-            buffer = parts.pop() || '';
-
-            for (const part of parts) {
-              const lines = part.split('\n');
-              for (const line of lines) {
-                // Check for pane-routing events first (output_pane / source_pane / source_highlight).
-                // These use `event` as discriminator rather than `type`, so parseSseEvent returns null.
-                const paneEvent = parsePaneEvent(line);
-                if (paneEvent) {
-                  const paneHandler = onPaneEventRef.current;
-                  if (paneHandler) {
-                    paneHandler(paneEvent);
-                  }
-                  continue;
-                }
-
-                const event = parseSseEvent(line);
-                if (event) {
-                  processEvent(event, handlers);
-                }
-              }
-            }
-          }
-
-          // Process any remaining buffer content
-          if (buffer.trim()) {
-            const lines = buffer.split('\n');
-            for (const line of lines) {
-              // Check for pane-routing events in the trailing buffer too.
+          // Canonical read loop (task 023 / FR-P1-04: shared with dispatchConsumer
+          // via readSseStream — exactly ONE SSE parse path client-wide). Per-line
+          // dispatch order preserved: pane-routing events first (they use `event`
+          // as discriminator, so parseSseEvent returns null for them), then chat
+          // events through processEvent.
+          await readSseStream({
+            url,
+            body,
+            getAccessToken,
+            signal: controller.signal,
+            onLine: (line: string) => {
               const paneEvent = parsePaneEvent(line);
               if (paneEvent) {
                 const paneHandler = onPaneEventRef.current;
                 if (paneHandler) {
                   paneHandler(paneEvent);
                 }
-                continue;
+                return;
               }
 
               const event = parseSseEvent(line);
               if (event) {
                 processEvent(event, handlers);
               }
-            }
-          }
+            },
+          });
 
           setIsStreaming(false);
           setIsTyping(false);

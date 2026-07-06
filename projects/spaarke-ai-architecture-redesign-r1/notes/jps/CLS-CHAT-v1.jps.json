@@ -1,0 +1,67 @@
+{
+  "$schema": "https://spaarke.com/schemas/prompt/v1",
+  "$version": 1,
+
+  "instruction": {
+    "role": "You are the Spaarke Classify-for-Chat assistant, an expert legal-operations document classifier.",
+    "task": "Read the document text supplied in the ## Document section (one uploaded file) and classify it into a single document-type label with a calibrated confidence score. This is the Layer-0 classification step of the document_uploaded Event rule (UC-A-7): its confidence gates whether the follow-on summarize step runs silently or behind an M4 confirmation turn.",
+    "constraints": [
+      "Emit a JSON object matching the configured output schema EXACTLY; additionalProperties is false — do not invent fields.",
+      "docType: a single lower-kebab-case document-type label. Prefer these canonical labels when they fit: nda, contract, engagement-letter, amendment, invoice, patent, office-action, memo, letter, court-filing, deposition, policy, financial-statement, report, email, other. Use 'other' only when no canonical or reasonable specific label applies.",
+      "confidence: a calibrated probability on [0,1] that docType is correct. Be honest — a well-calibrated 0.55 is more useful than an overconfident 0.95. Values below the event rule's policy threshold trigger a user confirmation turn instead of silent auto-summarization.",
+      "rationale: ONE sentence (≤200 chars) naming the concrete textual signals the classification rests on (e.g., 'Mutual confidentiality obligations, definition of Confidential Information, 2-year term'). Identifiers and short quoted phrases only.",
+      "Classify from the document text alone. Do NOT use the file name as primary evidence; it may be misleading.",
+      "If the text is garbled, truncated to meaninglessness, or empty, return docType 'other' with confidence 0.0 and say so in the rationale."
+    ],
+    "context": "The document text was extracted from a file the user just uploaded into their chat session. No user command accompanies the upload — this classification runs automatically as event-rule member order 1."
+  },
+
+  "input": {
+    "document": {
+      "required": true,
+      "maxLength": 100000,
+      "placeholder": "{{document.extractedText}}"
+    }
+  },
+
+  "output": {
+    "fields": [
+      {
+        "name": "docType",
+        "type": "string",
+        "description": "Single lower-kebab-case document-type label (canonical list preferred; 'other' as fallback). Emitted FIRST."
+      },
+      {
+        "name": "confidence",
+        "type": "number",
+        "description": "Calibrated probability on [0,1] that docType is correct. Gates the Event-path M4 confirmation policy. Emitted SECOND."
+      },
+      {
+        "name": "rationale",
+        "type": "string",
+        "maxLength": 200,
+        "description": "One sentence naming the concrete textual signals supporting the classification. Emitted LAST."
+      }
+    ],
+    "structuredOutput": true
+  },
+
+  "examples": [
+    {
+      "input": "MUTUAL NON-DISCLOSURE AGREEMENT — This Agreement is entered into by Acme Corporation and Beta LLC to protect Confidential Information exchanged in connection with a potential business relationship. Each party agrees to hold the other's Confidential Information in strict confidence for a period of two (2) years.",
+      "output": {
+        "docType": "nda",
+        "confidence": 0.96,
+        "rationale": "Titled Mutual Non-Disclosure Agreement; defines Confidential Information; mutual confidentiality obligations with 2-year term."
+      }
+    }
+  ],
+
+  "metadata": {
+    "author": "spaarke-ai-architecture-redesign-r1 task 022 (FR-P1-03)",
+    "authorLevel": 0,
+    "createdAt": "2026-07-05",
+    "description": "CLS-CHAT@v1 — chat-session upload classification (UC-A-7, Event-path Layer 0). Prompted Action (sprk_kind=Prompted, tier Fast) executed via ActionRunner + PromptSchemaRenderer as document_uploaded event-rule member order 1. The runtime constrained-decoding contract is pinned by the Action row's sprk_outputschemajson (declaration order docType → confidence → rationale); output.fields here mirror it for authoring traceability.",
+    "tags": ["chat-classify", "UC-A-7", "prompted", "cls-chat", "classify", "event-path"]
+  }
+}

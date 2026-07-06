@@ -110,6 +110,28 @@ export { SprkChatBridge } from './SprkChatBridge';
 // '@spaarke/ui-components/services/userLookup'`).
 export { searchUsersAndContacts, extractEmailKey } from './userLookup';
 
+// THE client capability-dispatch helper (Click path, ai-architecture-redesign-r1
+// task 023 / FR-P1-04 / ADR-039). Chips carry binding_id; dispatchConsumer is the
+// ONLY client dispatch entry (SSE consumption + PaneEventBus bridging inside).
+export {
+  createConsumerDispatcher,
+  parseConsumerChips,
+  buildDispatchUrl,
+  DispatchPreconditionError,
+} from './dispatchConsumer';
+export type {
+  ConsumerChip,
+  ConsumerChipWire,
+  ConsumerDispatchDeps,
+  DispatchConsumer,
+  DispatchConsumerArgs,
+  DispatchConsumerResult,
+  DispatchPaneEventPublisher,
+  DispatchWorkspaceEvent,
+  AnalysisChunk,
+  AnalysisFieldDelta,
+} from './dispatchConsumer';
+
 // Typed wrapper around POST /api/communications/send.
 export { sendCommunication } from './communicationApi';
 export type {

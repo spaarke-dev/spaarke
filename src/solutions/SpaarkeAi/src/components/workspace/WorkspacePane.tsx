@@ -43,9 +43,9 @@ import type { WorkspacePaneEvent, ConversationPaneEvent } from "@spaarke/ai-widg
 // auto-install (R5 task 038) was removed. Each summarize invocation now
 // dispatches its own `workspace.widget_load` carrying the structured-
 // output-stream widget type + SUMMARIZE_SCHEMA + a per-run correlationId.
-// Those symbols are no longer needed at this site; consumers
-// (executeSummarizeIntent.ts + FilePreviewContextWidget.dispatchSummarizeOnly)
-// own them now.
+// Those symbols are no longer needed at this site; capability dispatchers
+// (the shared dispatchConsumer helper via its `workspaceTarget` arg +
+// FilePreviewContextWidget.dispatchSummarizeOnly) own them now.
 import { buildBffApiUrl } from "@spaarke/auth";
 import { usePaneCollapseContext, useComposeLaunch } from "../shell/ThreePaneShell";
 import { WorkspaceTabManager } from "./WorkspaceTabManager";
@@ -592,8 +592,9 @@ export function WorkspacePane(): React.JSX.Element {
   //       because all runs shared `streamId = chatSessionId`. File A's summary
   //       was lost when file B was summarized.
   //
-  // The fix shifts BOTH responsibilities to `executeSummarizeIntent` (in
-  // ConversationPane's summarize-intent dispatcher):
+  // The fix shifts BOTH responsibilities to the invoking dispatcher (today
+  // the shared `dispatchConsumer` helper's `workspaceTarget` arg; formerly
+  // the retired R5 per-capability summarize orchestrator):
   //
   //   - Each run generates a UNIQUE `streamId` (no reuse of `chatSessionId`).
   //   - The run synchronously emits `workspace.widget_load` with the structured-

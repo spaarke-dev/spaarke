@@ -71,6 +71,7 @@ public sealed class ConsumerRoutingService : IConsumerRoutingService
     private const string CacheKeyPrefix = "consumer-routing:";
     private const string ActionCacheKeyPrefix = "consumer-routing-action:";
     private const string BindingCacheKeyPrefix = "consumer-routing-binding:";
+    private const string EventBindingsCacheKeyPrefix = "consumer-routing-event:";
     private static readonly TimeSpan CacheDuration = TimeSpan.FromMinutes(5);
 
     private static readonly string[] Columns =
@@ -180,6 +181,144 @@ public sealed class ConsumerRoutingService : IConsumerRoutingService
             consumerType, consumerCode, context, environment,
             targetKind: LookupTarget.Binding,
             cancellationToken);
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<Binding>> ResolveEventBindingsAsync(
+        string eventName,
+        string? environment = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (string.IsNullOrWhiteSpace(eventName))
+        {
+            throw new ArgumentException("eventName is required.", nameof(eventName));
+        }
+
+        var normalizedEnv = string.IsNullOrWhiteSpace(environment)
+            ? _hostEnvironment.EnvironmentName?.ToLowerInvariant() ?? "*"
+            : environment.ToLowerInvariant();
+        var cacheKey = $"{EventBindingsCacheKeyPrefix}{eventName}:{normalizedEnv}";
+
+        if (_cache.TryGetValue<IReadOnlyList<Binding>>(cacheKey, out var cached) && cached is not null)
+        {
+            _logger.LogDebug(
+                "ConsumerRoutingService event-bindings cache hit (event={Event}, env={Env}, memberCount={MemberCount}).",
+                eventName, normalizedEnv, cached.Count);
+            return cached;
+        }
+
+        var stopwatch = Stopwatch.StartNew();
+        IReadOnlyList<Binding> resolved;
+        try
+        {
+            resolved = SelectEventMembers(
+                await QueryEventCandidatesAsync(cancellationToken).ConfigureAwait(false),
+                eventName,
+                normalizedEnv);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Routing must NEVER throw to the consumer (same contract as the
+            // per-consumer resolves) — the Event path graceful-degrades to "no rule".
+            _logger.LogError(ex,
+                "ConsumerRoutingService failed to resolve event bindings (event={Event}, env={Env}). Returning empty.",
+                eventName, normalizedEnv);
+            return Array.Empty<Binding>();
+        }
+        finally
+        {
+            stopwatch.Stop();
+        }
+
+        _cache.Set(cacheKey, resolved, new MemoryCacheEntryOptions
+        {
+            AbsoluteExpirationRelativeToNow = CacheDuration,
+        });
+
+        _logger.LogInformation(
+            "ConsumerRoutingService resolved event bindings (event={Event}, env={Env}, memberCount={MemberCount}, " +
+            "memberBindingIds={MemberBindingIds}, cacheHit=false, durationMs={DurationMs}).",
+            eventName, normalizedEnv, resolved.Count,
+            string.Join(",", resolved.Select(b => b.BindingId)), stopwatch.ElapsedMilliseconds);
+
+        return resolved;
+    }
+
+    /// <summary>
+    /// Query every enabled row that declares ANY event membership
+    /// (<c>sprk_oneventbindings</c> not null), across all consumer types, with the
+    /// same left-outer Action link + <see cref="MapBinding"/> mapping as the
+    /// per-consumer path. Event-membership cardinality is tiny (a handful of rows
+    /// platform-wide), so per-event filtering happens in memory.
+    /// </summary>
+    private async Task<IReadOnlyList<Binding>> QueryEventCandidatesAsync(CancellationToken cancellationToken)
+    {
+        var query = new QueryExpression(EntityLogicalName)
+        {
+            ColumnSet = new ColumnSet(Columns),
+            Criteria = new FilterExpression(LogicalOperator.And),
+        };
+        query.Criteria.AddCondition("sprk_enabled", ConditionOperator.Equal, true);
+        query.Criteria.AddCondition("sprk_oneventbindings", ConditionOperator.NotNull);
+        query.AddOrder("sprk_priority", OrderType.Ascending);
+
+        var actionLink = query.AddLink(
+            ActionEntityLogicalName,
+            ActionLookupColumn,
+            "sprk_analysisactionid",
+            JoinOperator.LeftOuter);
+        actionLink.EntityAlias = ActionLinkAlias;
+        actionLink.Columns = new ColumnSet(ActionColumns);
+
+        var result = await _entityService
+            .RetrieveMultipleAsync(query, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (result?.Entities is null || result.Entities.Count == 0)
+        {
+            return Array.Empty<Binding>();
+        }
+
+        var candidates = new List<Binding>(result.Entities.Count);
+        foreach (var entity in result.Entities)
+        {
+            var playbookLookup = entity.GetAttributeValue<EntityReference>(PlaybookLookupColumn);
+            var actionLookup = entity.GetAttributeValue<EntityReference>(ActionLookupColumn);
+            if ((playbookLookup is null || playbookLookup.Id == Guid.Empty)
+                && (actionLookup is null || actionLookup.Id == Guid.Empty))
+            {
+                continue; // admin error — same skip rule as QueryCandidatesAsync.
+            }
+            candidates.Add(MapBinding(entity, playbookLookup, actionLookup));
+        }
+        return candidates;
+    }
+
+    /// <summary>
+    /// Filter candidates to members of <paramref name="eventName"/> in the given
+    /// environment and order by the membership's declared <c>order</c> (ascending;
+    /// ties: <c>sprk_priority</c> then BindingId for determinism). Event tokens
+    /// compare ordinal-case-insensitively; rows whose JSON degraded to an empty
+    /// membership list (malformed maker JSON) simply don't match.
+    /// </summary>
+    internal static IReadOnlyList<Binding> SelectEventMembers(
+        IReadOnlyList<Binding> candidates,
+        string eventName,
+        string environment)
+    {
+        return candidates
+            .Select(binding => (binding, membership: binding.OnEventBindings.FirstOrDefault(m =>
+                string.Equals(m.Event, eventName, StringComparison.OrdinalIgnoreCase))))
+            .Where(x => x.membership is not null && MatchesEnvironment(x.binding.Environment, environment))
+            .OrderBy(x => x.membership!.Order)
+            .ThenBy(x => x.binding.Priority)
+            .ThenBy(x => x.binding.BindingId)
+            .Select(x => x.binding)
+            .ToList();
+    }
 
     /// <summary>
     /// Shared implementation for all three resolve methods. Same query +

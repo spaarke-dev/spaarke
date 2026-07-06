@@ -70,6 +70,14 @@ public static class ConsumerTypes
     public const string ChatSummarize = "chat-summarize";
 
     /// <summary>
+    /// <c>EventRulesService</c> — document_uploaded event-rule member order 1
+    /// (UC-A-7 Layer-0 classification; CLS-CHAT@v1 prompted Action). Added by
+    /// spaarke-ai-architecture-redesign-r1 task 022 (FR-P1-03); the Binding row's
+    /// <c>sprk_oneventbindings</c> carries <c>[{"event":"document_uploaded","order":1}]</c>.
+    /// </summary>
+    public const string ChatClassify = "chat-classify";
+
+    /// <summary>
     /// <c>AppOnlyAnalysisService</c> — email analysis pipeline (Email
     /// Analysis playbook, app-only execution context).
     /// </summary>
@@ -118,6 +126,7 @@ public static class ConsumerTypes
         AiSummary,
         SummarizeFile,
         ChatSummarize,
+        ChatClassify,
         EmailAnalysis,
         DailyBriefingNarrate,
         DocumentProfile,

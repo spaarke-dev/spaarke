@@ -415,6 +415,54 @@
       "expected": { "outcomeClass": "dispatch", "consumerType": "chat-summarize", "consumerCode": "default", "catalogStatus": "existing" },
       "assertions": { "schemaConformance": "SUM-CHAT@v1", "citationIntegrity": false },
       "activation": { "dispatchAssertPhase": "P1", "activatedBy": "task 026 (FR-P1-07)" }
+    },
+    {
+      "caseId": "GU-037",
+      "family": "event-document-uploaded",
+      "ucId": "UC-A-7",
+      "channel": "event",
+      "utterance": "user uploads a document into a chat session and types nothing",
+      "notes": "FR-P1-03 launch rule member order 1 (task 022) — document_uploaded resolves from sprk_oneventbindings to chat-classify(1); CLS-CHAT@v1 prompted Action emits {docType, confidence, rationale}",
+      "context": { "surface": "assistant-chat", "sessionHasDocument": true },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "chat-classify", "consumerCode": "default", "catalogStatus": "existing" },
+      "assertions": { "schemaConformance": "CLS-CHAT@v1", "citationIntegrity": false },
+      "activation": { "dispatchAssertPhase": "P1", "activatedBy": "task 026 (FR-P1-07; event-path cases added by task 022)" }
+    },
+    {
+      "caseId": "GU-038",
+      "family": "event-document-uploaded",
+      "ucId": "UC-A-1",
+      "channel": "event",
+      "utterance": "document_uploaded rule continues after high-confidence classification (member order 2)",
+      "notes": "FR-P1-03 launch rule member order 2 (task 022) — classify confidence ≥ EventRules:ClassifyConfidenceThreshold lets chat-summarize(2) run silently; both outputs ledger-written before rendering (ADR-040)",
+      "context": { "surface": "assistant-chat", "sessionHasDocument": true },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "chat-summarize", "consumerCode": "default", "catalogStatus": "existing" },
+      "assertions": { "schemaConformance": "SUM-CHAT@v1", "citationIntegrity": false },
+      "activation": { "dispatchAssertPhase": "P1", "activatedBy": "task 026 (FR-P1-07; event-path cases added by task 022)" }
+    },
+    {
+      "caseId": "GU-039",
+      "family": "event-document-uploaded",
+      "ucId": "UC-A-7",
+      "channel": "event",
+      "utterance": "user uploads a document AND types an explicit command in the same action",
+      "notes": "FR-P1-03 bound (d) explicit-command supersede (task 022) — the Text path wins; the event rule does NOT fire (event_notice reason=superseded; eventpath.bound_denial telemetry). Modeled as refuse on the EVENT channel: the auto-rule honestly declines; the typed command dispatches separately on the text channel.",
+      "context": { "surface": "assistant-chat", "sessionHasDocument": true, "typedCommandPresent": true },
+      "expected": { "outcomeClass": "refuse", "consumerType": null, "consumerCode": null, "catalogStatus": null },
+      "assertions": { "schemaConformance": null, "citationIntegrity": false },
+      "activation": { "dispatchAssertPhase": "P2", "activatedBy": "P2 loop (suite invariant: refuse-class dispatch assertions activate with the P2 loop; the supersede BEHAVIOR itself ships at P1 — unit-proven in EventRulesServiceTests since task 022)" }
+    },
+    {
+      "caseId": "GU-040",
+      "family": "event-document-uploaded",
+      "ucId": "UC-A-7",
+      "channel": "event",
+      "utterance": "uploaded document classifies below the confidence threshold",
+      "notes": "FR-P1-03 M4 classify-confidence policy (task 022) — confidence < EventRules:ClassifyConfidenceThreshold (default 0.85) suspends member order 2 into an event_confirmation turn; the confirm chip resumes summarize via the Click path (canonical §7.1/§7.4, the surviving D1 dial)",
+      "context": { "surface": "assistant-chat", "sessionHasDocument": true, "lowClassifyConfidence": true },
+      "expected": { "outcomeClass": "clarify", "consumerType": null, "consumerCode": null, "catalogStatus": null },
+      "assertions": { "schemaConformance": null, "citationIntegrity": false },
+      "activation": { "dispatchAssertPhase": "P1", "activatedBy": "task 026 (FR-P1-07; event-path cases added by task 022)" }
     }
   ]
 }

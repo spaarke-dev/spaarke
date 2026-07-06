@@ -87,8 +87,58 @@ jest.mock('@spaarke/ai-widgets', () => {
   };
 });
 
+// FULL ThreePaneShell stub (ai-architecture-redesign-r1 task 023): loading the
+// real module pulls ContextPaneController → runtimeConfig → @spaarke/auth at
+// module scope, and rendering ConversationPane outside <ThreePaneShell> throws
+// from useShellStage(). ConversationPane consumes exactly these three hooks;
+// both context hooks tolerate null (render-in-isolation contract).
+jest.mock('../../shell/ThreePaneShell', () => ({
+  useShellStage: () => ({
+    stage: 'active-chat' as const,
+    toLoading: jest.fn(),
+    toActiveChat: jest.fn(),
+    toReview: jest.fn(),
+    reset: jest.fn(),
+  }),
+  useRestoreContext: () => null,
+  usePaneCollapseContext: () => null,
+  useComposeLaunch: () => null,
+}));
+
 // Import AFTER the mocks.
 import { ConversationPane } from '../ConversationPane';
+
+// jest-environment-jsdom does not expose the WHATWG fetch classes even though
+// Node 18+ provides them. This suite constructs `new Response(...)` for the
+// authenticatedFetch mock — provide a minimal stand-in exposing exactly the
+// surface the SUT reads (ok / status / json / text). Same spirit as the
+// TextEncoder/TextDecoder bridges in sibling suites.
+// eslint-disable-next-line @typescript-eslint/no-explicit-any
+if (typeof (globalThis as any).Response === 'undefined') {
+  class TestResponse {
+    public readonly status: number;
+    public readonly ok: boolean;
+    public readonly headers: Record<string, string>;
+    private readonly _body: string;
+
+    constructor(body?: string, init?: { status?: number; headers?: Record<string, string> }) {
+      this._body = body ?? '';
+      this.status = init?.status ?? 200;
+      this.ok = this.status >= 200 && this.status < 300;
+      this.headers = init?.headers ?? {};
+    }
+
+    async json(): Promise<unknown> {
+      return JSON.parse(this._body === '' ? 'null' : this._body);
+    }
+
+    async text(): Promise<string> {
+      return this._body;
+    }
+  }
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  (globalThis as any).Response = TestResponse;
+}
 
 // ---------------------------------------------------------------------------
 // Helpers
