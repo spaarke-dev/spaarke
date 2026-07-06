@@ -550,9 +550,7 @@ describe('dispatchConsumer result + chips capture (G-P1 Defect 1)', () => {
   it('falls back to the legacy summary string when the complete chunk has no structured result', async () => {
     const { publish } = makePublishSpy();
     const dispatchConsumer = makeDispatcher(publish);
-    mockFetch.mockResolvedValueOnce(
-      sseResponse(['{"type":"complete","done":true,"summary":"Plain text summary."}'])
-    );
+    mockFetch.mockResolvedValueOnce(sseResponse(['{"type":"complete","done":true,"summary":"Plain text summary."}']));
 
     const result = await dispatchConsumer(BINDING_ID);
 
