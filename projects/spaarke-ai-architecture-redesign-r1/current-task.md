@@ -1,7 +1,7 @@
 # Current Task State — spaarke-ai-architecture-redesign-r1
 
-> **Last Updated**: 2026-07-05 ~23:55 (by context-handoff — pre-compaction checkpoint before P2)
-> **Recovery**: Read "Quick Recovery" first. Full project context: this file + tasks/TASK-INDEX.md + plan.md + notes/g-p0-evidence.md.
+> **Last Updated**: 2026-07-06 ~00:20 (by context-handoff — FINAL pre-compaction refresh; operator compacts next)
+> **Recovery**: Read "Quick Recovery" first. Full project context: this file + tasks/TASK-INDEX.md + plan.md + notes/g-p0-evidence.md + notes/g-p1-uat-round1-findings.md.
 
 ---
 
@@ -14,8 +14,8 @@
 | **Status** | blocked ONLY on operator round-2 browser UAT |
 | **Next Action** | Operator runs the round-2 UAT script (below). On PASS: mark 027 ✅ + P1 PHASE COMPLETE in TASK-INDEX, sync portfolio Tasks Completed=27, dispatch W-P2-A (tasks 030, 031 in parallel per wave protocol). On FAIL: triage findings, fix, redeploy, re-UAT. |
 
-### In-flight background agent (027-fix) — its brief, so results can be judged post-compaction
-Fixes 3 G-P1 UAT round-1 defects PLUS the operator UX ruling (sent mid-flight, acked via SendMessage):
+### 027-fix wave — COMPLETE, COMMITTED (`befcaa5da`), DEPLOYED (no agents in flight)
+What it fixed (3 G-P1 UAT round-1 defects PLUS the operator UX ruling):
 1. **Chips missing/inconsistent** — client chip state replaced/cleared between events (ConversationPane/ConsumerChips/DocumentUploadedEventStream) + catalog rows lacked chip declarations.
 2. **Bulk batching bug** — 250ms coalescing fired one event POST per file; fix = count-complete batching (fire when ALL files in the attach gesture have documentIds, ~30s fallback) → ONE event per gesture.
 3. **"Files not available yet" race** — server-side bounded readiness re-check (~5s) in EventRulesService before giving up to the notice.
@@ -67,6 +67,10 @@ CI bot pushes Prettier/whitespace commits to this branch — ALWAYS `git pull --
 
 ## Parallel Execution
 
-| Agent | Status |
-|---|---|
-| 027-fix (chips + batching + race + UX ruling) | 🔄 RUNNING — report pending |
+(none in flight — 027-fix landed in `befcaa5da`; worktree clean; branch pushed through `cfd745e83`)
+
+## 027-fix key outcomes (for post-compaction judgment)
+- Root causes: chip strip cleared on click + dispatch stream had no chips chunk; 250ms debounce fired one event POST per file; PARALLEL /documents promotions clobbered the read-modify-write session manifest (the real "files not available" cause — promotions now sequential + server readiness probe 5×1000ms).
+- Catalog after ruling (verified on spaarkedev1): chat-summarize `sprk_oneventbindings=[]`; chat-classify has [Summarize] chipTransition (requires_attachments); classify-ALL-per-gesture; bulk chip "Summarize all N files?".
+- Suite: 7,865 passed / 5 known pre-existing + 1 isolation-passing flake; eval 11/11 (GU-038 → click channel); conversation jest 316/316; publish 46.91 MB.
+- Deferred follow-ups (candidates for /defer or task 045): ConversationPane batch-state extraction; concurrency-safe manifest append; production Task.Delay → TimeProvider in the readiness probe.
