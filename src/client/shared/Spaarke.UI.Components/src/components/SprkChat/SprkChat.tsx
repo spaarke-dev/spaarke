@@ -763,7 +763,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
             role: 'Assistant',
             content:
               `Got it — "${action.actionName}" is recorded and approved, but executing ` +
-              'record changes from chat isn\'t enabled yet in this build. It arrives in ' +
+              "record changes from chat isn't enabled yet in this build. It arrives in " +
               'the next phase; nothing was created or modified.',
             timestamp: new Date().toISOString(),
           });
@@ -2452,9 +2452,10 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
             // declare an insert target (enableInsertToEditor, e.g. AnalysisWorkspace's
             // Lexical editor) get the affordance; hosts without one (SpaarkeAi
             // conversation pane) must not render a button that does nothing.
-            ...(enableInsertToEditor && msg.role === 'Assistant' && {
-              onInsert: handleInsert,
-            }),
+            ...(enableInsertToEditor &&
+              msg.role === 'Assistant' && {
+                onInsert: handleInsert,
+              }),
             ...(isPlanPreview && {
               onProceed: () => handlePlanProceed(index),
               onCancel: () => handlePlanCancel(index),

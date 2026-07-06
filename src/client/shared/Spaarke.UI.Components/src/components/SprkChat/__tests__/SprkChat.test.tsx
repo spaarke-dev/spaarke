@@ -111,10 +111,7 @@ describe('SprkChat', () => {
     it('should render transcriptFooterSlot content inside the message list', async () => {
       await act(async () => {
         renderWithProviders(
-          <SprkChat
-            {...defaultProps}
-            transcriptFooterSlot={<div data-testid="footer-slot-content">chips here</div>}
-          />
+          <SprkChat {...defaultProps} transcriptFooterSlot={<div data-testid="footer-slot-content">chips here</div>} />
         );
       });
 
@@ -148,9 +145,7 @@ describe('SprkChat', () => {
 
     it('should show the Insert button when the host opts in via enableInsertToEditor', async () => {
       await act(async () => {
-        renderWithProviders(
-          <SprkChat {...defaultProps} initialMessages={assistantHistory} enableInsertToEditor />
-        );
+        renderWithProviders(<SprkChat {...defaultProps} initialMessages={assistantHistory} enableInsertToEditor />);
       });
 
       await waitFor(() => {
