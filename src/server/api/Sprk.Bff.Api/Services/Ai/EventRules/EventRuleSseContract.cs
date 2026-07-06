@@ -78,7 +78,17 @@ public static class EventNoticeReasons
 /// <param name="TargetBindingId">The <c>sprk_playbookconsumer</c> row id to invoke.</param>
 /// <param name="Label">User-facing chip label.</param>
 /// <param name="Args">Optional invocation args forwarded verbatim (e.g. <c>{ fileIds: [...] }</c>).</param>
-public sealed record EventChip(string TargetBindingId, string Label, object? Args = null);
+/// <param name="RequiresAttachments">
+/// Whether the target capability needs session attachments — drives the client's
+/// empty-attachments Click precondition (disabled chip + tooltip). Carried through
+/// from the authored <c>sprk_chiptransitions</c> entry (G-P1 UAT fix, 2026-07-05 —
+/// previously dropped in the transition → chip mapping).
+/// </param>
+public sealed record EventChip(
+    string TargetBindingId,
+    string Label,
+    object? Args = null,
+    bool RequiresAttachments = false);
 
 /// <summary>Data payload for <see cref="EventRuleSseEvents.Notice"/>.</summary>
 /// <param name="Reason">Bounded reason token (<see cref="EventNoticeReasons"/>).</param>

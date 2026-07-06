@@ -54,4 +54,19 @@ public sealed class EventRulesOptions
     /// remarks for the durability trade-off decision).
     /// </summary>
     public int OptOutTtlDays { get; set; } = 365;
+
+    /// <summary>
+    /// G-P1 UAT round-1 Defect 3 (2026-07-05): when the document-uploaded event
+    /// arrives before every requested file id is visible in the session manifest
+    /// (upload 202 → manifest write → cache propagation can lag the client's
+    /// count-complete batch fire), the service re-reads the session up to this
+    /// many times before degrading to the <c>no-attachments</c> notice.
+    /// Semantics: wait-briefly-or-degrade — total added latency is bounded by
+    /// <c>ReadinessProbeAttempts × ReadinessProbeDelayMs</c> (default ~5s).
+    /// 0 disables the re-check (single read, previous behavior).
+    /// </summary>
+    public int ReadinessProbeAttempts { get; set; } = 5;
+
+    /// <summary>Delay between manifest readiness probes (ms). See <see cref="ReadinessProbeAttempts"/>.</summary>
+    public int ReadinessProbeDelayMs { get; set; } = 1000;
 }

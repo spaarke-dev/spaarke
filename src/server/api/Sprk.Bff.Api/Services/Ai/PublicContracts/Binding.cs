@@ -199,7 +199,12 @@ public enum AiModelTier
 
 /// <summary>
 /// One curated next-step chip parsed from <c>sprk_chiptransitions</c> JSON
-/// (D4; canonical §7.2 Click path). Shape: <c>[{target_binding_id, chip_label}]</c>.
+/// (D4; canonical §7.2 Click path). Shape:
+/// <c>[{target_binding_id, chip_label, requires_attachments?, prefill_slots?}]</c>.
+/// The two optional members were formalized by the G-P1 UAT round-1 fix
+/// (2026-07-05): authored transitions can now declare the empty-attachments
+/// Click precondition and pre-filled capability args; both were previously
+/// silently dropped by the transition → chip mapping.
 /// </summary>
 public sealed record ChipTransition
 {
@@ -210,6 +215,14 @@ public sealed record ChipTransition
     /// <summary>Chip label rendered to the user.</summary>
     [JsonPropertyName("chip_label")]
     public string? ChipLabel { get; init; }
+
+    /// <summary>Whether the target capability requires session attachments (client disables the chip at zero attachments).</summary>
+    [JsonPropertyName("requires_attachments")]
+    public bool? RequiresAttachments { get; init; }
+
+    /// <summary>Optional pre-filled capability args forwarded verbatim as the chip's <c>args</c> (the server-side dispatch boundary owns the typed parse).</summary>
+    [JsonPropertyName("prefill_slots")]
+    public System.Text.Json.JsonElement? PrefillSlots { get; init; }
 }
 
 /// <summary>

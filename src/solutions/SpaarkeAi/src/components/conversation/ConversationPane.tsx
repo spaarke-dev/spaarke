@@ -116,9 +116,10 @@ import {
 } from "@spaarke/ui-components";
 import { ConsumerChips } from "./ConsumerChips";
 // ai-architecture-redesign-r1 task 022b (FR-P1-03 / ADR-039): the Event entry
-// path client leg. When an upload batch completes (last per-file /documents
-// 202, coalesced 250 ms), the pane POSTs the document-uploaded Event endpoint
-// ONCE via the canonical SSE path and renders the rule's stream:
+// path client leg. When an attach gesture completes (EVERY chip of the gesture
+// has its /documents 202 — count-complete batching, G-P1 UAT fix 2026-07-05;
+// 30 s stuck-promotion fallback), the pane POSTs the document-uploaded Event
+// endpoint ONCE via the canonical SSE path and renders the rule's stream:
 // event_classification (classification line), event_output (the STORED ledger
 // entry — ADR-040 render-follows-store), event_confirmation / event_notice
 // (message + chips), chips (next-step Click-path chips). The server owns
@@ -1014,29 +1015,82 @@ export function ConversationPane(): React.JSX.Element {
 
   // ── task 022b / FR-P1-03: Event-path upload-batch state ───────────────────
   //
-  // The Event entry path fires ONCE per upload batch, AFTER the last per-file
-  // `POST /documents` 202 (the server contract requires session-file document
-  // ids — which only exist post-promotion). Batch coalescing mirrors the
-  // ready-confirmation pattern above: each successful promotion queues its
-  // `{chipId, documentId}` pair and (re)starts a 250 ms timer; on expiry the
-  // batch POSTs `/events/document-uploaded` via the canonical SSE path.
+  // The Event entry path fires ONCE per ATTACH GESTURE, after EVERY file queued
+  // in the gesture has received its server-issued documentId (count-complete
+  // batching — G-P1 UAT round-1 Defect 2 fix, 2026-07-05). The original 250 ms
+  // post-202 debounce fired one event POST per file when real promotions landed
+  // seconds apart, so the server saw partial batches (per-file summaries + the
+  // "files not available yet" notice). Semantics now:
+  //
+  //   - MEMBERSHIP: every attachment chip visible in the strip that is not in a
+  //     terminal error state and has not been accounted to a previously-fired
+  //     batch belongs to the current gesture batch (`eventBatchExpectedRef`).
+  //   - SETTLEMENT: a chip settles when its `/documents` promotion 202 lands
+  //     (queued into `pendingEventFilesRef`) or permanently fails
+  //     (`eventBatchFailedChipIdsRef`, from the auto-promote effect) or is
+  //     removed from the strip.
+  //   - FIRE: the instant every expected chip is settled — exactly ONE event
+  //     POST per gesture. A 30 s fallback timer (anchored at the first settled
+  //     promotion) bounds stuck promotions: on expiry the batch fires with
+  //     whatever settled.
   //
   //   - `pendingEventFilesRef` — promoted-but-not-yet-event-fired docs.
-  //   - `eventBatchTimerRef`   — the coalescing timer.
-  //   - `eventBatchOpenedAtRef`— when the batch's FIRST chip became ready
-  //     (the operator-visible upload gesture). A message sent at-or-after
-  //     this instant is the "typed command accompanying the upload" and is
-  //     passed verbatim as `typedCommand` (the SERVER decides supersede —
-  //     ADR-039: no client pre-filtering).
+  //   - `eventBatchExpectedRef`— chip ids belonging to the open gesture batch.
+  //   - `eventBatchFailedChipIdsRef` — chips whose promotion permanently failed
+  //     (or whose 202 body carried no documentId) — settled without a file.
+  //   - `eventAccountedChipIdsRef` — chips consumed by an already-fired batch
+  //     (or terminal-error chips); they never (re-)join a batch unless re-added.
+  //   - `eventBatchTimerRef`   — the 30 s stuck-promotion fallback timer.
+  //   - `eventBatchOpenedAtRef`— when the gesture batch OPENED (first chip
+  //     joined). A message sent at-or-after this instant is the "typed command
+  //     accompanying the upload" and is passed verbatim as `typedCommand`
+  //     (the SERVER decides supersede — ADR-039: no client pre-filtering).
   //   - `lastSentAtRef`        — timestamp twin of `lastSentMessageRef`.
   //   - `attachmentChipsRef`   — render-free chip mirror so the fire callback
-  //     can order fileIds by upload order (index 0 = deterministic top-1).
+  //     can order fileIds by upload order (index 0 stays deterministic).
+  //   - `fireEventBatchRef`    — indirection so callbacks declared ABOVE the
+  //     fire callback (handleAttachmentsChanged et al.) can trigger the check
+  //     without a TDZ/dependency cycle.
   const pendingEventFilesRef = React.useRef<Array<{ chipId: string; documentId: string }>>([]);
+  const eventBatchExpectedRef = React.useRef<Set<string>>(new Set());
+  const eventBatchFailedChipIdsRef = React.useRef<Set<string>>(new Set());
+  const eventAccountedChipIdsRef = React.useRef<Set<string>>(new Set());
   const eventBatchTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
   const eventBatchOpenedAtRef = React.useRef<number | null>(null);
   const lastSentAtRef = React.useRef<number | null>(null);
   const attachmentChipsRef = React.useRef<AttachmentChip[]>([]);
-  const EVENT_BATCH_DEBOUNCE_MS = 250;
+  const fireEventBatchRef = React.useRef<() => void>(() => undefined);
+  const EVENT_BATCH_FALLBACK_MS = 30_000;
+
+  /**
+   * Count-complete check: fires the Event batch the moment EVERY expected chip
+   * of the current gesture is settled (documentId received, permanently failed,
+   * or removed). Reads refs only — safe to call from any chip-lifecycle seam.
+   */
+  const maybeFireEventBatch = React.useCallback((): void => {
+    const expected = eventBatchExpectedRef.current;
+    if (expected.size === 0) return;
+    const settledIds = new Set(pendingEventFilesRef.current.map((p) => p.chipId));
+    for (const id of expected) {
+      if (!settledIds.has(id) && !eventBatchFailedChipIdsRef.current.has(id)) {
+        return; // at least one promotion still in flight — keep waiting.
+      }
+    }
+    fireEventBatchRef.current();
+  }, []);
+
+  /**
+   * Settle a chip WITHOUT a documentId (permanent promotion failure, or a 202
+   * whose body carried no documentId). The batch must not wait for it.
+   */
+  const markEventFilePromotionFailed = React.useCallback(
+    (chipId: string): void => {
+      if (!eventBatchExpectedRef.current.has(chipId)) return;
+      eventBatchFailedChipIdsRef.current.add(chipId);
+      maybeFireEventBatch();
+    },
+    [maybeFireEventBatch]
+  );
 
   // Assistant-message injection queue (task 022b). `pendingInjection` is a
   // single one-shot slot; the Event stream can deliver several renderable
@@ -1113,13 +1167,48 @@ export function ConversationPane(): React.JSX.Element {
       for (const id of Array.from(confirmedReadyIdsRef.current)) {
         if (!currentIds.has(id)) confirmedReadyIdsRef.current.delete(id);
       }
+      for (const id of Array.from(eventAccountedChipIdsRef.current)) {
+        if (!currentIds.has(id)) eventAccountedChipIdsRef.current.delete(id);
+      }
+      for (const id of Array.from(eventBatchFailedChipIdsRef.current)) {
+        if (!currentIds.has(id)) eventBatchFailedChipIdsRef.current.delete(id);
+      }
 
-      // task 022b (FR-P1-03): the first ready transition of a fresh batch
-      // OPENS the Event-path batch window. Any message the user sends at or
+      // task 022b (FR-P1-03) + G-P1 Defect-2 fix: gesture-batch MEMBERSHIP.
+      // Every chip in the strip that is not accounted to a previously-fired
+      // batch and is not terminally errored belongs to the CURRENT gesture
+      // batch — including chips still 'extracting' (they joined the same
+      // attach gesture; the batch waits for their promotion). The first chip
+      // joining OPENS the batch window: any message the user sends at or
       // after this instant counts as the command that accompanied the upload
       // (passed verbatim as `typedCommand` — the server decides supersede).
-      if (readyChipsThisTick.length > 0 && eventBatchOpenedAtRef.current === null) {
+      const expected = eventBatchExpectedRef.current;
+      let membershipChanged = false;
+      for (const chip of chips) {
+        if (eventAccountedChipIdsRef.current.has(chip.id)) continue;
+        if (chip.status === "error") {
+          // Extraction failed — the chip can never promote; settle it out.
+          if (expected.delete(chip.id)) membershipChanged = true;
+          eventAccountedChipIdsRef.current.add(chip.id);
+          continue;
+        }
+        if (!expected.has(chip.id)) {
+          expected.add(chip.id);
+          membershipChanged = true;
+        }
+      }
+      for (const id of Array.from(expected)) {
+        if (!currentIds.has(id)) {
+          expected.delete(id);
+          eventBatchFailedChipIdsRef.current.delete(id);
+          membershipChanged = true;
+        }
+      }
+      if (expected.size > 0 && eventBatchOpenedAtRef.current === null) {
         eventBatchOpenedAtRef.current = Date.now();
+      }
+      if (membershipChanged) {
+        maybeFireEventBatch();
       }
 
       // Side effect 1: inline confirmation message (debounced).
@@ -1164,7 +1253,7 @@ export function ConversationPane(): React.JSX.Element {
         dispatch("context", payload);
       }
     },
-    [dispatch]
+    [dispatch, maybeFireEventBatch]
   );
 
   /**
@@ -1205,6 +1294,15 @@ export function ConversationPane(): React.JSX.Element {
       // ready-transition + confirmation + dispatch logic.
       dispatchedReadyIdsRef.current.delete(chip.id);
       confirmedReadyIdsRef.current.delete(chip.id);
+      // G-P1 Defect-2 fix: a dismissed chip leaves the gesture batch — the
+      // count-complete check must not wait for its promotion.
+      eventBatchExpectedRef.current.delete(chip.id);
+      eventBatchFailedChipIdsRef.current.delete(chip.id);
+      eventAccountedChipIdsRef.current.delete(chip.id);
+      pendingEventFilesRef.current = pendingEventFilesRef.current.filter(
+        (p) => p.chipId !== chip.id
+      );
+      maybeFireEventBatch();
       // R5 task 036: release the captured File-ref + promoted-chip status.
       heldFilesRef.current.delete(chip.filename);
       setPromotedChipIds(prev => {
@@ -1226,7 +1324,7 @@ export function ConversationPane(): React.JSX.Element {
         );
       }
     },
-    [chatSessionId]
+    [chatSessionId, maybeFireEventBatch]
   );
 
   /**
@@ -1580,9 +1678,25 @@ export function ConversationPane(): React.JSX.Element {
   // Stream/HTTP failures render ONE stable failure line (ADR-019 — never raw
   // server detail). ADR-015: logs carry structural counts/flags only.
   const fireDocumentUploadedEvent = React.useCallback((): void => {
-    eventBatchTimerRef.current = null;
+    // Cancel the stuck-promotion fallback (count-complete fired first, or the
+    // fallback IS what invoked us — either way the timer is spent).
+    if (eventBatchTimerRef.current !== null) {
+      clearTimeout(eventBatchTimerRef.current);
+      eventBatchTimerRef.current = null;
+    }
+
     const pending = pendingEventFilesRef.current;
     pendingEventFilesRef.current = [];
+    // Account every chip of this gesture so late/duplicate promotions open a
+    // NEW batch instead of re-firing this one (count-complete bookkeeping).
+    for (const id of eventBatchExpectedRef.current) {
+      eventAccountedChipIdsRef.current.add(id);
+    }
+    for (const p of pending) {
+      eventAccountedChipIdsRef.current.add(p.chipId);
+    }
+    eventBatchExpectedRef.current = new Set();
+    eventBatchFailedChipIdsRef.current = new Set();
     const openedAt = eventBatchOpenedAtRef.current;
     eventBatchOpenedAtRef.current = null;
 
@@ -1651,7 +1765,13 @@ export function ConversationPane(): React.JSX.Element {
         onChips: (raw) => {
           // Chips are conversation-surface UI — same tolerant parse + render
           // path as the Click-path consumer_chips context_event above.
-          setConsumerChips(parseConsumerChips(raw));
+          // G-P1 Defect-1 fix: a non-empty chip set REPLACES the strip; an
+          // empty/malformed payload never clears previously-rendered chips
+          // (chips vanish only on click consumption or session change).
+          const parsed = parseConsumerChips(raw);
+          if (parsed.length > 0) {
+            setConsumerChips(parsed);
+          }
         },
         onError: (message) => {
           // Server `error` content is the safe message by contract (same
@@ -1666,30 +1786,43 @@ export function ConversationPane(): React.JSX.Element {
     });
   }, [bffBaseUrl, getAccessToken, enqueueAssistantMessage]);
 
+  // Ref indirection: chip-lifecycle callbacks declared ABOVE (membership /
+  // removal / failure seams) trigger the fire through this ref.
+  fireEventBatchRef.current = fireDocumentUploadedEvent;
+
   /**
    * queueDocumentUploadedEvent — called once per successful per-file
-   * `/documents` promotion (202) with the server-issued documentId. Queues
-   * the pair and (re)starts the 250 ms coalescing timer so a multi-file
-   * batch fires the Event endpoint exactly ONCE, after its last 202.
+   * `/documents` promotion (202) with the server-issued documentId. Settles
+   * the chip in the count-complete gesture batch (G-P1 Defect-2 fix): the
+   * Event endpoint fires exactly ONCE per attach gesture, the moment ALL
+   * expected chips have settled. A 30 s fallback (anchored at the first
+   * settled promotion) bounds stuck promotions.
    */
   const queueDocumentUploadedEvent = React.useCallback(
     (chipId: string, documentId: string): void => {
       pendingEventFilesRef.current.push({ chipId, documentId });
-      // Defensive: the batch normally opens at the ready transition in
-      // handleAttachmentsChanged; re-open here if a promotion arrives for an
-      // already-closed batch (e.g. retry succeeding after the batch fired).
+      // Defensive membership: a promotion arriving for an already-fired batch
+      // (e.g. retry succeeding late) re-opens a fresh single-file batch.
+      eventAccountedChipIdsRef.current.delete(chipId);
+      eventBatchExpectedRef.current.add(chipId);
       if (eventBatchOpenedAtRef.current === null) {
         eventBatchOpenedAtRef.current = Date.now();
       }
-      if (eventBatchTimerRef.current !== null) {
-        clearTimeout(eventBatchTimerRef.current);
+      if (eventBatchTimerRef.current === null) {
+        eventBatchTimerRef.current = setTimeout(() => {
+          eventBatchTimerRef.current = null;
+          // ADR-015: structural signal only.
+          console.warn(
+            "[ConversationPane] event batch fallback fired — settled:%d expected:%d",
+            pendingEventFilesRef.current.length,
+            eventBatchExpectedRef.current.size
+          );
+          fireEventBatchRef.current();
+        }, EVENT_BATCH_FALLBACK_MS);
       }
-      eventBatchTimerRef.current = setTimeout(
-        fireDocumentUploadedEvent,
-        EVENT_BATCH_DEBOUNCE_MS
-      );
+      maybeFireEventBatch();
     },
-    [fireDocumentUploadedEvent]
+    [maybeFireEventBatch]
   );
 
   /**
@@ -1716,15 +1849,33 @@ export function ConversationPane(): React.JSX.Element {
         slots: chip.prefillSlots,
         requiresAttachments: chip.requiresAttachments,
         attachmentCount: readyAttachmentCount,
-      }).catch(() => {
-        setPendingInjection(
-          makeLocalAssistantMessage(
-            "Sorry — I couldn't run that action. Please try again."
-          )
-        );
-      });
+      })
+        .then((dispatched) => {
+          // G-P1 Defect-1 fix (2026-07-05): render the dispatched capability's
+          // STORED output in the conversation surface (ADR-040 render-follows-
+          // store — `result` IS the ledger payload) and re-arm the chip strip
+          // from the stream's next-step chips (the dispatched Binding's
+          // sprk_chiptransitions, e.g. summarize → "Summarize again").
+          // Previously a chip click rendered nothing in the conversation and
+          // permanently emptied the strip.
+          if (dispatched.result !== undefined && dispatched.result !== null) {
+            enqueueAssistantMessage(
+              makeLocalAssistantMessage(formatEventOutputMarkdown(dispatched.result))
+            );
+          }
+          if (dispatched.chips && dispatched.chips.length > 0) {
+            setConsumerChips(dispatched.chips);
+          }
+        })
+        .catch(() => {
+          setPendingInjection(
+            makeLocalAssistantMessage(
+              "Sorry — I couldn't run that action. Please try again."
+            )
+          );
+        });
     },
-    [attachmentChips, dispatchConsumer]
+    [attachmentChips, dispatchConsumer, enqueueAssistantMessage]
   );
 
   /**
@@ -1784,7 +1935,12 @@ export function ConversationPane(): React.JSX.Element {
       // Chips are conversation-surface UI (rendered by <ConsumerChips>), not a
       // bus payload — handled locally; tolerant parse never throws.
       if (eventType === "consumer_chips") {
-        setConsumerChips(parseConsumerChips(data.contextChips));
+        // G-P1 Defect-1 fix: replace-only-when-non-empty — a chip-less carrier
+        // must never blank an already-rendered next-step strip.
+        const parsedChips = parseConsumerChips(data.contextChips);
+        if (parsedChips.length > 0) {
+          setConsumerChips(parsedChips);
+        }
         return;
       }
 
@@ -2179,11 +2335,14 @@ export function ConversationPane(): React.JSX.Element {
         }
         // task 022b / FR-P1-03: promoted document ids are session-scoped —
         // a queued Event batch must not fire against a different session.
-        // The batch-opened timestamp is KEPT: in the cold-start gesture
-        // (attach → type → first send creates the session) promotion runs
-        // AFTER this callback, and the accompanying typed command must still
-        // resolve against the pre-session batch-open instant.
+        // The batch-opened timestamp AND the expected-chip membership are
+        // KEPT: in the cold-start gesture (attach → type → first send creates
+        // the session) promotion runs AFTER this callback, the count-complete
+        // batch still needs its membership, and the accompanying typed
+        // command must still resolve against the pre-session batch-open
+        // instant.
         pendingEventFilesRef.current = [];
+        eventBatchFailedChipIdsRef.current = new Set();
         if (eventBatchTimerRef.current !== null) {
           clearTimeout(eventBatchTimerRef.current);
           eventBatchTimerRef.current = null;
@@ -2288,14 +2447,37 @@ export function ConversationPane(): React.JSX.Element {
     const MAX_ATTEMPTS = 2;
     const RETRY_DELAY_MS = 1000;
 
+    // G-P1 UAT round-1 Defect-2/3 hardening (2026-07-05): promotions run
+    // SEQUENTIALLY, not in parallel. Each /documents handler read-modify-writes
+    // the session manifest (UploadedFiles append + UpdateSessionCacheAsync);
+    // parallel POSTs from one gesture raced last-writer-wins and could drop a
+    // concurrently-added file from the manifest — the observed "No uploaded
+    // files were available yet" notice. Serializing the client's own uploads
+    // removes the primary race; the server-side manifest readiness probe
+    // (EventRulesService) covers residual propagation lag.
+    //
+    // All eligible chips are marked pending UP FRONT so an overlapping effect
+    // run (attachmentChips changing mid-sequence) cannot double-start one.
+    const queue: Array<{ chipId: string; chipFilename: string; attemptNumber: number }> = [];
     for (const { id: chipId, name: chipFilename } of eligible) {
-      const heldFile = heldFilesRef.current.get(chipFilename);
-      if (!heldFile) continue; // defensive — filter already checked but ref may have raced
+      if (!heldFilesRef.current.has(chipFilename)) continue; // defensive re-check
       pendingPromotionIdsRef.current.add(chipId);
       const attemptNumber = (promotionAttemptCountRef.current.get(chipId) ?? 0) + 1;
       promotionAttemptCountRef.current.set(chipId, attemptNumber);
+      queue.push({ chipId, chipFilename, attemptNumber });
+    }
 
-      void (async () => {
+    const promoteOne = async (
+      chipId: string,
+      chipFilename: string,
+      attemptNumber: number
+    ): Promise<void> => {
+      const heldFile = heldFilesRef.current.get(chipFilename);
+      if (!heldFile) {
+        pendingPromotionIdsRef.current.delete(chipId);
+        return;
+      }
+      {
         try {
           console.log(
             "[ConversationPane] /documents promote attempt %d/%d — filename:%s heldFileSize:%d heldFileType:%s",
@@ -2328,6 +2510,9 @@ export function ConversationPane(): React.JSX.Element {
               pendingPromotionIdsRef.current.delete(chipId);
               return;
             }
+            // Permanent failure — settle the chip out of the Event gesture
+            // batch so count-complete does not wait for it (G-P1 Defect 2).
+            markEventFilePromotionFailed(chipId);
             return;
           }
           // Success — mark chip promoted so subsequent effect runs skip it.
@@ -2357,9 +2542,14 @@ export function ConversationPane(): React.JSX.Element {
                 : null;
             if (documentId !== null) {
               queueDocumentUploadedEvent(chipId, documentId);
+            } else {
+              // No documentId — Event leg skipped; settle the chip so the
+              // count-complete batch does not wait for it.
+              markEventFilePromotionFailed(chipId);
             }
           } catch {
             // Non-JSON body — promotion stands; Event leg skipped for this file.
+            markEventFilePromotionFailed(chipId);
           }
         } catch (err) {
           // ADR-015: log error name + basic classification only, never the message
@@ -2380,12 +2570,20 @@ export function ConversationPane(): React.JSX.Element {
             pendingPromotionIdsRef.current.delete(chipId);
             return;
           }
+          // Permanent transport failure — settle the chip out of the batch.
+          markEventFilePromotionFailed(chipId);
         } finally {
           pendingPromotionIdsRef.current.delete(chipId);
         }
-      })();
-    }
-  }, [chatSessionId, attachmentChips, promotedChipIds, authenticatedFetch, bffBaseUrl, queueDocumentUploadedEvent]);
+      }
+    };
+
+    void (async () => {
+      for (const item of queue) {
+        await promoteOne(item.chipId, item.chipFilename, item.attemptNumber);
+      }
+    })();
+  }, [chatSessionId, attachmentChips, promotedChipIds, authenticatedFetch, bffBaseUrl, queueDocumentUploadedEvent, markEventFilePromotionFailed]);
 
   const handleAttachmentReady = React.useCallback(
     (attachment: ChatAttachment) => {

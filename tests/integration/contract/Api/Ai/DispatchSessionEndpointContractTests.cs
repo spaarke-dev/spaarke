@@ -172,6 +172,73 @@ public class DispatchSessionEndpointContractTests : IClassFixture<DispatchSessio
     }
 
     // ─────────────────────────────────────────────────────────────────────────
+    // NEXT-STEP CHIPS — the dispatched Binding's sprk_chiptransitions stream as
+    // a `chips` chunk AFTER the terminal complete chunk (G-P1 UAT fix 2026-07-05:
+    // previously only the Event path emitted chips, so every chip click
+    // permanently emptied the strip)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task Post_BindingWithChipTransitions_StreamsChipsChunkAfterComplete()
+    {
+        _fx.Reset();
+        _fx.Sessions.Session = BuildSession(TestSessionId, fileId: "file-001");
+        _fx.ConsumerRoutingMock
+            .Setup(c => c.GetBindingByIdAsync(TestBindingId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(_fx.BuildDefaultBinding() with
+            {
+                ChipTransitions = new[]
+                {
+                    new ChipTransition
+                    {
+                        TargetBindingId = TestBindingId.ToString(),
+                        ChipLabel = "Summarize again",
+                        RequiresAttachments = true,
+                    },
+                },
+            });
+
+        var client = _fx.CreateAuthenticatedClient();
+        var response = await client.PostAsJsonAsync(
+            $"/api/ai/chat/sessions/{TestSessionId}/dispatch",
+            new { bindingId = TestBindingId.ToString(), args = new { fileIds = new[] { "file-001" } } });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var body = await response.Content.ReadAsStringAsync();
+
+        body.Should().Contain("\"type\":\"chips\"",
+            "the dispatched Binding's chip transitions follow the stream so the client " +
+            "always sees the CURRENT next-step chips after a Click dispatch");
+        body.IndexOf("\"type\":\"chips\"", StringComparison.Ordinal).Should().BeGreaterThan(
+            body.IndexOf("\"type\":\"complete\"", StringComparison.Ordinal),
+            "chips are next-steps — they follow the terminal output chunk");
+        body.Should().Contain("\"targetBindingId\":\"" + TestBindingId + "\"",
+            "chips use the unified EventChip wire vocabulary (targetBindingId IS the routing decision, ADR-039)");
+        body.Should().Contain("Summarize again");
+        body.Should().Contain("\"requiresAttachments\":true",
+            "the authored requires_attachments flag survives the transition → chip mapping");
+        body.Should().Contain("file-001",
+            "the dispatched fileIds are pre-filled so the follow-up chip re-targets the same files");
+    }
+
+    [Fact]
+    public async Task Post_BindingWithoutChipTransitions_StreamsNoChipsChunk()
+    {
+        _fx.Reset();
+        _fx.Sessions.Session = BuildSession(TestSessionId, fileId: "file-001");
+
+        var client = _fx.CreateAuthenticatedClient();
+        var response = await client.PostAsJsonAsync(
+            $"/api/ai/chat/sessions/{TestSessionId}/dispatch",
+            new { bindingId = TestBindingId.ToString() });
+
+        response.StatusCode.Should().Be(HttpStatusCode.OK);
+        var body = await response.Content.ReadAsStringAsync();
+        body.Should().NotContain("\"type\":\"chips\"",
+            "no transitions ⇒ no chips chunk (the client keeps its previously-rendered chips)");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
     // ADR-039 — unknown binding id: clean 4xx, stable errorCode, NO fallback
     // ─────────────────────────────────────────────────────────────────────────
 

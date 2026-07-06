@@ -515,3 +515,65 @@ describe('dispatchConsumer workspaceTarget', () => {
     expect(events).toHaveLength(0);
   });
 });
+
+// ---------------------------------------------------------------------------
+// G-P1 UAT round-1 Defect-1 fix (2026-07-05): terminal result + next-step
+// chips are captured from the stream and returned to the host so a Click
+// dispatch can render its output in the conversation and re-arm the strip.
+// ---------------------------------------------------------------------------
+
+describe('dispatchConsumer result + chips capture (G-P1 Defect 1)', () => {
+  it('returns the terminal complete chunk result and the parsed chips chunk', async () => {
+    const { publish } = makePublishSpy();
+    const dispatchConsumer = makeDispatcher(publish);
+    mockFetch.mockResolvedValueOnce(
+      sseResponse([
+        '{"type":"complete","done":true,"result":{"tldr":"T.","summary":"S."}}',
+        '{"type":"chips","done":false,"chips":[{"targetBindingId":"b-again","label":"Summarize again","args":{"fileIds":["f1"]},"requiresAttachments":true}]}',
+      ])
+    );
+
+    const result = await dispatchConsumer(BINDING_ID);
+
+    expect(result.status).toBe('complete');
+    expect(result.result).toEqual({ tldr: 'T.', summary: 'S.' });
+    expect(result.chips).toEqual([
+      {
+        bindingId: 'b-again',
+        label: 'Summarize again',
+        prefillSlots: { fileIds: ['f1'] },
+        requiresAttachments: true,
+      },
+    ]);
+  });
+
+  it('falls back to the legacy summary string when the complete chunk has no structured result', async () => {
+    const { publish } = makePublishSpy();
+    const dispatchConsumer = makeDispatcher(publish);
+    mockFetch.mockResolvedValueOnce(
+      sseResponse(['{"type":"complete","done":true,"summary":"Plain text summary."}'])
+    );
+
+    const result = await dispatchConsumer(BINDING_ID);
+
+    expect(result.result).toBe('Plain text summary.');
+    expect(result.chips).toBeUndefined();
+  });
+
+  it('ignores empty/malformed chips chunks (tolerant — never a throwing parse)', async () => {
+    const { publish } = makePublishSpy();
+    const dispatchConsumer = makeDispatcher(publish);
+    mockFetch.mockResolvedValueOnce(
+      sseResponse([
+        '{"type":"chips","done":false,"chips":[]}',
+        '{"type":"chips","done":false,"chips":"not-an-array"}',
+        '{"type":"complete","done":true}',
+      ])
+    );
+
+    const result = await dispatchConsumer(BINDING_ID);
+
+    expect(result.status).toBe('complete');
+    expect(result.chips).toBeUndefined();
+  });
+});

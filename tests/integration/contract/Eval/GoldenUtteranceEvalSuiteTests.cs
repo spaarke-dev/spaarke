@@ -366,59 +366,107 @@ public class GoldenUtteranceEvalSuiteTests
     }
 
     [Fact]
-    public async Task P1LiveDispatch_DocumentUploadedEventCases_ResolveOrderedCatalogMembers()
+    public async Task P1LiveDispatch_DocumentUploadedEventAndChipClickCases_ResolveCatalogRoutes()
     {
         var suite = LoadSuite();
-        var cases = suite.Cases
+        var eventCases = suite.Cases
             .Where(c => IsPhase(c, "P1") && IsOutcome(c, "dispatch") && IsChannel(c, "event"))
             .ToList();
+        var clickCases = suite.Cases
+            .Where(c => IsPhase(c, "P1") && IsOutcome(c, "dispatch") && IsChannel(c, "click"))
+            .ToList();
 
-        cases.Should().NotBeEmpty("FR-P1-03/FR-P1-07: task 022 seeded P1 event-channel dispatch cases");
+        eventCases.Should().NotBeEmpty("FR-P1-03/FR-P1-07: task 022 seeded P1 event-channel dispatch cases");
+        clickCases.Should().NotBeEmpty(
+            "the 2026-07-05 operator ruling ('auto-classify, chip-offered summarize') moved GU-038 " +
+            "to the click channel — the chip → dispatch leg needs a live case");
 
-        // Dataverse boundary stub shaped like the seeded document_uploaded rule:
-        // chat-classify (member order 1, CLS-CHAT@v1) + chat-summarize (member
-        // order 2, SUM-CHAT@v1) declared in sprk_oneventbindings.
+        // Dataverse boundary stub shaped like the POST-RULING seeded catalog rows
+        // (G-P1 UAT round-1 fix, 2026-07-05):
+        //   chat-classify — SOLE document_uploaded member (order 1, CLS-CHAT@v1),
+        //     sprk_chiptransitions → Summarize (targets the chat-summarize row GUID).
+        //   chat-summarize — NO event membership (sprk_oneventbindings = []),
+        //     reached ONLY via the chip's binding id (Click path).
+        var summarizeRowId = Guid.NewGuid();
+        var classifyRow = BuildActionTargetRow(
+            ConsumerTypes.ChatClassify, ClsChatActionId, ucid: "UC-A-7",
+            onEventBindingsJson: """[{"event":"document_uploaded","order":1}]""",
+            chipTransitionsJson: $$"""[{"target_binding_id":"{{summarizeRowId}}","chip_label":"Summarize","requires_attachments":true}]""");
+        var summarizeRow = BuildActionTargetRow(
+            ConsumerTypes.ChatSummarize, SumChatActionId, ucid: "UC-A-1",
+            rowId: summarizeRowId);
+
         var entityService = new Mock<IGenericEntityService>();
         entityService
             .Setup(s => s.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new EntityCollection(new List<Entity>
+            .ReturnsAsync((QueryExpression query, CancellationToken _) =>
             {
-                BuildActionTargetRow(
-                    ConsumerTypes.ChatClassify, ClsChatActionId, ucid: "UC-A-7",
-                    onEventBindingsJson: """[{"event":"document_uploaded","order":1}]"""),
-                BuildActionTargetRow(
-                    ConsumerTypes.ChatSummarize, SumChatActionId, ucid: "UC-A-1",
-                    onEventBindingsJson: """[{"event":"document_uploaded","order":2}]"""),
-            }));
+                // Binding-by-id query (the Click leg) → the matching row only;
+                // event-candidates query (sprk_oneventbindings NotNull) → the classify row.
+                var byId = query.Criteria.Conditions
+                    .FirstOrDefault(c => c.AttributeName == "sprk_playbookconsumerid");
+                if (byId is not null)
+                {
+                    var requestedId = (Guid)byId.Values[0];
+                    var match = new[] { classifyRow, summarizeRow }.FirstOrDefault(e => e.Id == requestedId);
+                    return new EntityCollection(match is null ? new List<Entity>() : new List<Entity> { match });
+                }
+                return new EntityCollection(new List<Entity> { classifyRow });
+            });
 
         var routing = CreateRoutingService(entityService);
 
+        // ── Event leg (GU-037): classify is the SOLE resolved member ─────────────
         var members = await routing.ResolveEventBindingsAsync("document_uploaded");
 
-        members.Should().HaveCount(2,
-            "the FR-P1-03 launch rule declares exactly two ordered members for document_uploaded");
+        members.Should().HaveCount(1,
+            "post-ruling the FR-P1-03 launch rule declares exactly ONE member for document_uploaded " +
+            "(summarize is chip-offered, not auto-run)");
         members[0].ConsumerType.Should().Be(ConsumerTypes.ChatClassify,
-            "member order 1 is the Layer-0 classification step (CLS-CHAT@v1, GU-037)");
-        members[1].ConsumerType.Should().Be(ConsumerTypes.ChatSummarize,
-            "member order 2 is the silent summarize continuation (SUM-CHAT@v1, GU-038)");
-        members.Should().OnlyContain(m => m.ActionId != null && m.ActionKind == ActionKind.Prompted,
+            "the sole member is the Layer-0 classification step (CLS-CHAT@v1, GU-037)");
+        members[0].ActionId.Should().NotBeNull();
+        members[0].ActionKind.Should().Be(ActionKind.Prompted,
             "every event-rule member executes through the prompted executor at P1 (thinness invariant)");
+        members[0].ChipTransitions.Should().ContainSingle(t =>
+                t.TargetBindingId == summarizeRowId.ToString() && t.ChipLabel == "Summarize" && t.RequiresAttachments == true,
+            "the classify Binding's curated transition IS the summarize entry (chips carry the row GUID + " +
+            "requires_attachments — G-P1 Defect-1 fix)");
 
-        _output.WriteLine("P1 LIVE dispatch assertions — Event path (document_uploaded ordered members):");
-        foreach (var c in cases)
+        _output.WriteLine("P1 LIVE dispatch assertions — Event path (document_uploaded, classify-only rule):");
+        foreach (var c in eventCases)
         {
             members.Select(m => m.ConsumerType).Should().Contain(c.Expected.ConsumerType,
                 $"case {c.CaseId}: its expected capability must be a resolved member of the document_uploaded rule");
-
-            var expectedSchema = string.Equals(c.Expected.ConsumerType, ConsumerTypes.ChatClassify, StringComparison.OrdinalIgnoreCase)
-                ? "CLS-CHAT@v1"
-                : "SUM-CHAT@v1";
             c.Assertions.Should().NotBeNull(
                 $"case {c.CaseId}: P1 dispatch cases must carry a schema-conformance assertion (NFR-06)");
-            c.Assertions!.SchemaConformance.Should().Be(expectedSchema,
+            c.Assertions!.SchemaConformance.Should().Be("CLS-CHAT@v1",
                 $"case {c.CaseId}: NFR-06 — event-path outputs are schema-validated structured outputs");
+            _output.WriteLine($"  {c.CaseId}  \"{c.Utterance}\"  ->  {c.Expected.ConsumerType} (CLS-CHAT@v1)");
+        }
 
-            _output.WriteLine($"  {c.CaseId}  \"{c.Utterance}\"  ->  {c.Expected.ConsumerType} ({expectedSchema})");
+        // ── Click leg (GU-038): the chip's target_binding_id resolves BY ID to the
+        // summarize Binding — the exact read SessionDispatchOrchestrator performs.
+        var chipTarget = Guid.Parse(members[0].ChipTransitions[0].TargetBindingId!);
+        var clickBinding = await routing.GetBindingByIdAsync(chipTarget);
+
+        clickBinding.Should().NotBeNull(
+            "the Summarize chip's binding id must resolve through the by-id read (ADR-039: the id IS the routing decision)");
+        clickBinding!.ConsumerType.Should().Be(ConsumerTypes.ChatSummarize,
+            "GU-038: the chip-offered capability is chat-summarize");
+        clickBinding.ActionId.Should().Be(SumChatActionId,
+            "the Binding's sprk_action lookup targets the SUM-CHAT@v1 Action");
+        clickBinding.ActionKind.Should().Be(ActionKind.Prompted);
+
+        _output.WriteLine("P1 LIVE dispatch assertions — Click path (chip target_binding_id → by-id resolution):");
+        foreach (var c in clickCases)
+        {
+            c.Expected.ConsumerType.Should().Be(ConsumerTypes.ChatSummarize,
+                $"case {c.CaseId}: chat-summarize is the only chip-offered P1 click capability");
+            c.Assertions.Should().NotBeNull(
+                $"case {c.CaseId}: P1 dispatch cases must carry a schema-conformance assertion (NFR-06)");
+            c.Assertions!.SchemaConformance.Should().Be("SUM-CHAT@v1",
+                $"case {c.CaseId}: NFR-06 — the dispatched output is schema-validated (SUM-CHAT@v1)");
+            _output.WriteLine($"  {c.CaseId}  \"{c.Utterance}\"  ->  {c.Expected.ConsumerType} (SUM-CHAT@v1)");
         }
     }
 
@@ -510,6 +558,8 @@ public class GoldenUtteranceEvalSuiteTests
                 (IsOutcome(c, "dispatch") && IsChannel(c, "text")
                     && string.Equals(c.Family, "chat-summarize", StringComparison.OrdinalIgnoreCase))
                 || (IsOutcome(c, "dispatch") && IsChannel(c, "event"))
+                || (IsOutcome(c, "dispatch") && IsChannel(c, "click")
+                    && string.Equals(c.Expected.ConsumerType, ConsumerTypes.ChatSummarize, StringComparison.OrdinalIgnoreCase))
                 || (IsOutcome(c, "clarify") && IsChannel(c, "event"));
             covered.Should().BeTrue(
                 $"case {c.CaseId} declares dispatchAssertPhase=P1, but no live P1 assertion in this " +
@@ -605,9 +655,11 @@ public class GoldenUtteranceEvalSuiteTests
         string consumerType,
         Guid actionId,
         string ucid,
-        string? onEventBindingsJson = null)
+        string? onEventBindingsJson = null,
+        string? chipTransitionsJson = null,
+        Guid? rowId = null)
     {
-        var entity = new Entity("sprk_playbookconsumer", Guid.NewGuid());
+        var entity = new Entity("sprk_playbookconsumer", rowId ?? Guid.NewGuid());
         entity["sprk_playbookconsumerid"] = entity.Id;
         entity["sprk_consumertype"] = consumerType;
         entity["sprk_consumercode"] = "default";
@@ -620,6 +672,10 @@ public class GoldenUtteranceEvalSuiteTests
         if (onEventBindingsJson is not null)
         {
             entity["sprk_oneventbindings"] = onEventBindingsJson;
+        }
+        if (chipTransitionsJson is not null)
+        {
+            entity["sprk_chiptransitions"] = chipTransitionsJson;
         }
 
         return entity;

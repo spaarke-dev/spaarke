@@ -20,24 +20,30 @@ namespace Sprk.Bff.Api.Services.Ai.EventRules;
 /// zero rule config). Each member executes as a catalog capability: Action row →
 /// prompted executor (<see cref="IActionRunner"/>) → <see cref="IOutputRouter"/>
 /// (universal ledger write BEFORE any event is emitted — ADR-040). The launch
-/// binding is <c>document_uploaded → [chat-classify(1), chat-summarize(2)]</c>.
+/// binding is <c>document_uploaded → [chat-classify(1)]</c> — "auto-classify,
+/// chip-offered summarize" per the 2026-07-05 operator UX ruling (G-P1 UAT
+/// round 1); summarization is reached ONLY via the emitted chips (Click path).
 /// </para>
 /// <para>
-/// <b>Bounds (FR-P1-03, all test-proven)</b>:
+/// <b>Bounds (FR-P1-03, all test-proven; bound (c) revised by the 2026-07-05 ruling)</b>:
 /// <list type="bullet">
 ///   <item><b>(a) per-user daily cost cap</b> — <see cref="IEventPathUserState"/>
-///   counter vs <see cref="EventRulesOptions.DailyExecutionCap"/>; cap-exceeded
-///   defers with a manual-run chip + <c>eventpath.bound_denial</c> telemetry
-///   (NFR-09: graceful rendered notice, never a silent drop).</item>
+///   counter vs <see cref="EventRulesOptions.DailyExecutionCap"/>; the whole rule
+///   (members × batch files) must fit; cap-exceeded defers with a manual-run chip +
+///   <c>eventpath.bound_denial</c> telemetry (NFR-09: graceful rendered notice,
+///   never a silent drop).</item>
 ///   <item><b>(b) per-user opt-out</b> — checked before any execution; notice +
 ///   manual-run chip.</item>
-///   <item><b>(c) bulk top-1</b> — a multi-file batch auto-runs against the FIRST
-///   file of the batch only (deterministic: request order, which is upload order);
-///   a "Summarize all files?" chip carries the full batch to the Click path.</item>
+///   <item><b>(c) bulk batches</b> — every file of the gesture batch is auto-run
+///   (classify-only rule: cheap Fast-tier calls); the "…all N files?" chip plus
+///   per-file chips carry summarization to the Click path. The former top-1
+///   auto-summarize bound is retired with the ruling.</item>
 ///   <item><b>(d) explicit-command supersede</b> — a typed command with the upload
 ///   suppresses the rule entirely (the Text path wins).</item>
 ///   <item><b>precondition: empty attachments</b> — the r7 guard re-homed here
-///   (task 025): the rule never fires with a zero-file set.</item>
+///   (task 025): the rule never fires with a zero-file set. A bounded manifest
+///   readiness probe (<see cref="EventRulesOptions.ReadinessProbeAttempts"/>) runs
+///   first when requested ids are not yet visible (G-P1 Defect 3).</item>
 /// </list>
 /// </para>
 /// <para>
@@ -133,7 +139,40 @@ public sealed class EventRulesService : IEventRulesService
 
         // ── Precondition: empty attachments (task 025 r7 guard re-home). Resolve the
         // batch against the session manifest; the rule never fires on a zero-file set.
+        //
+        // G-P1 UAT round-1 Defect 3 (2026-07-05): the event can arrive before every
+        // requested file id is visible in the session manifest (upload 202 → manifest
+        // write → cache propagation lag). Wait-briefly-or-degrade: re-read the session
+        // up to ReadinessProbeAttempts × ReadinessProbeDelayMs (~5s default) until all
+        // requested ids resolve; degrade to whatever resolved (or the no-attachments
+        // notice at zero). Inline ExtractedText is written atomically WITH the manifest
+        // entry (ChatDocumentEndpoints), so a present entry never has pending text on
+        // the current write path — the probe covers manifest visibility only.
         var batchFiles = ResolveBatchFiles(request.FileIds, session.UploadedFiles);
+        if (request.FileIds is { Count: > 0 } && batchFiles.Count < request.FileIds.Count)
+        {
+            for (var attempt = 1; attempt <= _options.ReadinessProbeAttempts; attempt++)
+            {
+                await Task.Delay(Math.Max(0, _options.ReadinessProbeDelayMs), cancellationToken).ConfigureAwait(false);
+                var refreshed = await _sessionManager
+                    .GetSessionAsync(request.TenantId, request.SessionId, cancellationToken)
+                    .ConfigureAwait(false);
+                if (refreshed is null)
+                {
+                    break;
+                }
+                session = refreshed;
+                batchFiles = ResolveBatchFiles(request.FileIds, session.UploadedFiles);
+                if (batchFiles.Count >= request.FileIds.Count)
+                {
+                    break;
+                }
+            }
+
+            _logger.LogInformation(
+                "EventRules: manifest readiness probe finished — resolved {ResolvedCount}/{RequestedCount} file(s). tenant={TenantId} session={SessionId}",
+                batchFiles.Count, request.FileIds.Count, request.TenantId, request.SessionId);
+        }
         if (batchFiles.Count == 0)
         {
             _telemetry.RecordBoundDenial(request.EventName, EventNoticeReasons.NoAttachments);
@@ -183,12 +222,14 @@ public sealed class EventRulesService : IEventRulesService
         }
 
         // ── Bound (a): per-user daily Event-path budget (NFR-09 / ADR-016). The whole
-        // rule (member count) must fit in the remaining budget; a cap hit DEFERS with a
-        // chip (spec §7.1) and is telemetered — never a silent drop.
+        // rule (member count × batch file count — every member runs per file since the
+        // 2026-07-05 operator ruling) must fit in the remaining budget; a cap hit DEFERS
+        // with a chip (spec §7.1) and is telemetered — never a silent drop.
+        var requiredExecutions = members.Count * batchFiles.Count;
         var usedToday = await _userState
             .GetTodayExecutionCountAsync(request.TenantId, request.UserOid, cancellationToken)
             .ConfigureAwait(false);
-        if (usedToday + members.Count > _options.DailyExecutionCap)
+        if (usedToday + requiredExecutions > _options.DailyExecutionCap)
         {
             _telemetry.RecordBoundDenial(request.EventName, EventNoticeReasons.DailyCap);
             _logger.LogWarning(
@@ -201,103 +242,35 @@ public sealed class EventRulesService : IEventRulesService
             yield break;
         }
 
-        // ── Bound (c): bulk top-1 — auto-run the FIRST file of the batch only; the
-        // "summarize all?" chip carries the full batch to the Click path.
-        var targetFile = batchFiles[0];
+        // ── Bound (c), revised by the 2026-07-05 operator ruling (G-P1 UAT round 1):
+        // the rule auto-runs its members for EVERY file of the gesture batch (the launch
+        // rule is classify-only — cheap Fast-tier calls); summarization happens ONLY via
+        // the emitted chips (Click path). The old top-1 auto-summarize bound is retired;
+        // the bulk "Summarize all N files?" chip moves to the classify member's chips.
         var isBulk = batchFiles.Count > 1;
 
         _logger.LogInformation(
-            "EventRules: firing {Event} with {MemberCount} member(s) (top-1 file of {BatchCount}). " +
+            "EventRules: firing {Event} with {MemberCount} member(s) across {BatchCount} file(s). " +
             "tenant={TenantId} session={SessionId} user={UserOid} correlationId={CorrelationId}",
             request.EventName, members.Count, batchFiles.Count,
             request.TenantId, request.SessionId, request.UserOid, request.CorrelationId);
 
-        // Fetch the target file's text ONCE — every member of the launch rule consumes the
-        // same document. Failures surface as a standard chat error event (graceful stream UX).
-        SessionFileText text = default!;
-        string? fetchError = null;
-        try
-        {
-            text = await _sessionFileTextSource
-                .FetchAsync(request.TenantId, request.SessionId, new[] { targetFile }, cancellationToken)
-                .ConfigureAwait(false);
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogError(ex,
-                "EventRules: session-file text retrieval failed. tenant={TenantId} session={SessionId} fileId={FileId}",
-                request.TenantId, request.SessionId, targetFile.FileId);
-            fetchError = "Automatic analysis could not read the uploaded file. You can retry from the file menu.";
-        }
-        if (fetchError is null && string.IsNullOrWhiteSpace(text.ExtractedText))
-        {
-            fetchError = "The uploaded file contained no readable text, so automatic analysis did not run.";
-        }
-        if (fetchError is not null)
-        {
-            yield return ErrorEvent(fetchError);
-            yield break;
-        }
-
-        // ── Execute members in declared order. Each execution: budget++ → ActionRunner →
-        // OutputRouter (ledger write BEFORE the SSE event that renders it — ADR-040).
+        // ── Execute members in declared order, per file. Each execution: budget++ →
+        // ActionRunner → OutputRouter (ledger write BEFORE the SSE event that renders
+        // it — ADR-040). A per-file failure yields an error event for THAT file and
+        // continues with the rest of the batch (G-P1 Defect 2/3 resilience); catalog
+        // integrity failures remain batch-fatal (operator-actionable, loud).
         var currentSession = session;
         Binding? lastCompleted = null;
-        foreach (var member in members)
+        foreach (var targetFile in batchFiles)
         {
-            // Catalog integrity guards — operator-actionable, loud, stop the chain.
-            if (member.ActionId is null || member.ActionId.Value == Guid.Empty)
-            {
-                yield return ErrorEvent(
-                    $"Event rule member '{member.ConsumerType}' has no Action target — fix the sprk_playbookconsumer row's sprk_action lookup.");
-                yield break;
-            }
-            if (member.ActionKind != ActionKind.Prompted)
-            {
-                yield return ErrorEvent(
-                    $"Event rule member '{member.ConsumerType}' targets a non-prompted Action ('{member.ActionKind}'); the P1 Event path executes prompted Actions only.");
-                yield break;
-            }
-
-            var action = await _scopeResolver
-                .GetActionAsync(member.ActionId.Value, cancellationToken)
-                .ConfigureAwait(false);
-            if (action is null)
-            {
-                yield return ErrorEvent(
-                    $"Event rule member '{member.ConsumerType}' references Action {member.ActionId.Value}, which could not be loaded from Dataverse.");
-                yield break;
-            }
-
-            // Budget consumption precedes the LLM call (the spend happens regardless of outcome).
-            await _userState
-                .AddExecutionsAsync(request.TenantId, request.UserOid, 1, cancellationToken)
-                .ConfigureAwait(false);
-
-            JsonElement output = default;
-            string? memberError = null;
+            // Per-file text fetch — inline ExtractedText makes this cheap (no RAG hop).
+            SessionFileText text = default!;
+            string? fetchError = null;
             try
             {
-                output = await _actionRunner
-                    .RunAsync(
-                        action,
-                        new DocumentText
-                        {
-                            DocumentId = null,
-                            FileName = targetFile.FileName,
-                            ExtractedText = text.ExtractedText,
-                        },
-                        new LinearRunContext
-                        {
-                            ConsumerType = member.ConsumerType,
-                            CorrelationId = request.CorrelationId,
-                            TenantId = request.TenantId,
-                        },
-                        cancellationToken)
+                text = await _sessionFileTextSource
+                    .FetchAsync(request.TenantId, request.SessionId, new[] { targetFile }, cancellationToken)
                     .ConfigureAwait(false);
             }
             catch (OperationCanceledException)
@@ -307,115 +280,232 @@ public sealed class EventRulesService : IEventRulesService
             catch (Exception ex)
             {
                 _logger.LogError(ex,
-                    "EventRules: prompted executor failed for member binding {BindingId} action {ActionId}. tenant={TenantId} session={SessionId}",
-                    member.BindingId, action.Id, request.TenantId, request.SessionId);
-                memberError = "Automatic analysis failed for the uploaded file. You can retry on demand.";
+                    "EventRules: session-file text retrieval failed. tenant={TenantId} session={SessionId} fileId={FileId}",
+                    request.TenantId, request.SessionId, targetFile.FileId);
+                fetchError = $"Automatic analysis could not read \"{targetFile.FileName}\". You can retry on demand.";
             }
-            if (memberError is not null)
+            if (fetchError is null && string.IsNullOrWhiteSpace(text.ExtractedText))
             {
-                _telemetry.RecordExecution(request.EventName, member.Ucid, "failed");
-                yield return ErrorEvent(memberError);
-                yield break;
+                fetchError = $"\"{targetFile.FileName}\" contained no readable text, so automatic analysis skipped it.";
             }
-
-            // M4 classification shape detection: docType + confidence on the member output.
-            var classification = TryReadClassification(output);
-            if (classification is { } cls)
+            if (fetchError is not null)
             {
-                // Layer-0 wiring: persist onto the pre-existing ChatSessionFile confidence
-                // fields BEFORE routing, so the OutputRouter's single session write carries
-                // the manifest enrichment together with the ledger entry.
-                currentSession = WithClassifiedFile(currentSession, targetFile.FileId, cls.DocType, cls.Confidence);
+                yield return ErrorEvent(fetchError);
+                continue;
             }
 
-            // ── ADR-040 SEAM: universal ledger write BEFORE the rendering event below.
-            var routed = await _outputRouter
-                .RouteAsync(
-                    currentSession,
-                    member,
-                    output,
-                    sourceRefs: new[] { targetFile.FileId },
-                    cancellationToken: cancellationToken)
-                .ConfigureAwait(false);
-            currentSession = routed.Session;
-
-            if (classification is { } c)
+            var fileFailed = false;
+            foreach (var member in members)
             {
-                _telemetry.RecordExecution(request.EventName, member.Ucid, "success");
-                yield return new ChatSseEvent(EventRuleSseEvents.Classification, null,
-                    new EventClassificationData(
-                        FileId: targetFile.FileId,
-                        FileName: targetFile.FileName,
-                        DocType: c.DocType,
-                        Confidence: c.Confidence,
-                        BindingId: member.BindingId.ToString(),
-                        Ucid: member.Ucid,
-                        LedgerKey: routed.Entry.Key));
-
-                // M4 policy: below-threshold confidence suspends the remaining members into
-                // a confirmation turn; the confirm chip resumes via the Click path.
-                if (c.Confidence < _options.ClassifyConfidenceThreshold && member != members[^1])
+                // Catalog integrity guards — operator-actionable, loud, stop the chain.
+                if (member.ActionId is null || member.ActionId.Value == Guid.Empty)
                 {
-                    _telemetry.RecordExecution(request.EventName, members[^1].Ucid, "gated");
-                    _logger.LogInformation(
-                        "EventRules: M4 confirmation gate fired (confidence={Confidence} < threshold={Threshold}). " +
-                        "tenant={TenantId} session={SessionId} docType={DocType}",
-                        c.Confidence, _options.ClassifyConfidenceThreshold,
-                        request.TenantId, request.SessionId, c.DocType);
-                    yield return new ChatSseEvent(EventRuleSseEvents.Confirmation, null,
-                        new EventConfirmationData(
-                            FileId: targetFile.FileId,
-                            DocType: c.DocType,
-                            Confidence: c.Confidence,
-                            Threshold: _options.ClassifyConfidenceThreshold,
-                            Message: $"This looks like it might be a {c.DocType} — is that correct? Confirm to get a summary.",
-                            Chips: new[]
-                            {
-                                new EventChip(
-                                    members[^1].BindingId.ToString(),
-                                    $"Yes, it's a {c.DocType} — summarize it",
-                                    new { fileIds = new[] { targetFile.FileId }, confirmedDocType = c.DocType }),
-                            }));
-                    yield return DoneEvent();
+                    yield return ErrorEvent(
+                        $"Event rule member '{member.ConsumerType}' has no Action target — fix the sprk_playbookconsumer row's sprk_action lookup.");
                     yield break;
                 }
-            }
-            else
-            {
-                _telemetry.RecordExecution(request.EventName, member.Ucid, "success");
-                // Render-follows-store: the payload comes from the STORED ledger entry.
-                yield return new ChatSseEvent(EventRuleSseEvents.Output, null,
-                    new EventOutputData(
-                        BindingId: member.BindingId.ToString(),
-                        Ucid: member.Ucid,
-                        LedgerKey: routed.Entry.Key,
-                        Disposition: routed.Entry.Disposition,
-                        Payload: routed.Entry.Payload));
+                if (member.ActionKind != ActionKind.Prompted)
+                {
+                    yield return ErrorEvent(
+                        $"Event rule member '{member.ConsumerType}' targets a non-prompted Action ('{member.ActionKind}'); the P1 Event path executes prompted Actions only.");
+                    yield break;
+                }
+
+                var action = await _scopeResolver
+                    .GetActionAsync(member.ActionId.Value, cancellationToken)
+                    .ConfigureAwait(false);
+                if (action is null)
+                {
+                    yield return ErrorEvent(
+                        $"Event rule member '{member.ConsumerType}' references Action {member.ActionId.Value}, which could not be loaded from Dataverse.");
+                    yield break;
+                }
+
+                // Budget consumption precedes the LLM call (the spend happens regardless of outcome).
+                await _userState
+                    .AddExecutionsAsync(request.TenantId, request.UserOid, 1, cancellationToken)
+                    .ConfigureAwait(false);
+
+                JsonElement output = default;
+                string? memberError = null;
+                try
+                {
+                    output = await _actionRunner
+                        .RunAsync(
+                            action,
+                            new DocumentText
+                            {
+                                DocumentId = null,
+                                FileName = targetFile.FileName,
+                                ExtractedText = text.ExtractedText,
+                            },
+                            new LinearRunContext
+                            {
+                                ConsumerType = member.ConsumerType,
+                                CorrelationId = request.CorrelationId,
+                                TenantId = request.TenantId,
+                            },
+                            cancellationToken)
+                        .ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    throw;
+                }
+                catch (Exception ex)
+                {
+                    _logger.LogError(ex,
+                        "EventRules: prompted executor failed for member binding {BindingId} action {ActionId}. tenant={TenantId} session={SessionId}",
+                        member.BindingId, action.Id, request.TenantId, request.SessionId);
+                    memberError = $"Automatic analysis failed for \"{targetFile.FileName}\". You can retry on demand.";
+                }
+                if (memberError is not null)
+                {
+                    _telemetry.RecordExecution(request.EventName, member.Ucid, "failed");
+                    yield return ErrorEvent(memberError);
+                    fileFailed = true;
+                    break; // remaining members skip THIS file; the batch continues.
+                }
+
+                // M4 classification shape detection: docType + confidence on the member output.
+                var classification = TryReadClassification(output);
+                if (classification is { } cls)
+                {
+                    // Layer-0 wiring: persist onto the pre-existing ChatSessionFile confidence
+                    // fields BEFORE routing, so the OutputRouter's single session write carries
+                    // the manifest enrichment together with the ledger entry.
+                    currentSession = WithClassifiedFile(currentSession, targetFile.FileId, cls.DocType, cls.Confidence);
+                }
+
+                // ── ADR-040 SEAM: universal ledger write BEFORE the rendering event below.
+                var routed = await _outputRouter
+                    .RouteAsync(
+                        currentSession,
+                        member,
+                        output,
+                        sourceRefs: new[] { targetFile.FileId },
+                        cancellationToken: cancellationToken)
+                    .ConfigureAwait(false);
+                currentSession = routed.Session;
+
+                if (classification is { } c)
+                {
+                    _telemetry.RecordExecution(request.EventName, member.Ucid, "success");
+                    yield return new ChatSseEvent(EventRuleSseEvents.Classification, null,
+                        new EventClassificationData(
+                            FileId: targetFile.FileId,
+                            FileName: targetFile.FileName,
+                            DocType: c.DocType,
+                            Confidence: c.Confidence,
+                            BindingId: member.BindingId.ToString(),
+                            Ucid: member.Ucid,
+                            LedgerKey: routed.Entry.Key));
+
+                    // M4 policy: below-threshold confidence suspends the remaining members into
+                    // a confirmation turn; the confirm chip resumes via the Click path. LATENT on
+                    // the classify-only launch rule (no member follows classify since the
+                    // 2026-07-05 ruling) — kept for multi-member rules.
+                    if (c.Confidence < _options.ClassifyConfidenceThreshold && member != members[^1])
+                    {
+                        _telemetry.RecordExecution(request.EventName, members[^1].Ucid, "gated");
+                        _logger.LogInformation(
+                            "EventRules: M4 confirmation gate fired (confidence={Confidence} < threshold={Threshold}). " +
+                            "tenant={TenantId} session={SessionId} docType={DocType}",
+                            c.Confidence, _options.ClassifyConfidenceThreshold,
+                            request.TenantId, request.SessionId, c.DocType);
+                        yield return new ChatSseEvent(EventRuleSseEvents.Confirmation, null,
+                            new EventConfirmationData(
+                                FileId: targetFile.FileId,
+                                DocType: c.DocType,
+                                Confidence: c.Confidence,
+                                Threshold: _options.ClassifyConfidenceThreshold,
+                                Message: $"This looks like it might be a {c.DocType} — is that correct? Confirm to get a summary.",
+                                Chips: new[]
+                                {
+                                    new EventChip(
+                                        members[^1].BindingId.ToString(),
+                                        $"Yes, it's a {c.DocType} — summarize it",
+                                        new { fileIds = new[] { targetFile.FileId }, confirmedDocType = c.DocType }),
+                                }));
+                        yield return DoneEvent();
+                        yield break;
+                    }
+                }
+                else
+                {
+                    _telemetry.RecordExecution(request.EventName, member.Ucid, "success");
+                    // Render-follows-store: the payload comes from the STORED ledger entry.
+                    yield return new ChatSseEvent(EventRuleSseEvents.Output, null,
+                        new EventOutputData(
+                            BindingId: member.BindingId.ToString(),
+                            Ucid: member.Ucid,
+                            LedgerKey: routed.Entry.Key,
+                            Disposition: routed.Entry.Disposition,
+                            Payload: routed.Entry.Payload));
+                }
             }
 
-            lastCompleted = member;
+            if (!fileFailed)
+            {
+                lastCompleted = members[^1];
+            }
         }
 
         // ── Chips: the completed rule's next-step affordances — the last member's curated
-        // sprk_chiptransitions (D4) + the bulk "Summarize all files?" chip (bound c).
+        // sprk_chiptransitions (D4). Per the 2026-07-05 operator ruling these ARE the
+        // summarize entry ("auto-classify, chip-offered summarize"): single-file batches
+        // emit each transition with the batch's fileIds pre-filled; multi-file batches
+        // emit the bulk "…all N files?" chip (first transition target, full-batch args)
+        // plus per-file chips when the batch is small enough to keep the strip readable.
         if (lastCompleted is not null)
         {
             var chips = new List<EventChip>();
-            if (isBulk)
+            var transitions = lastCompleted.ChipTransitions
+                .Where(t => !string.IsNullOrWhiteSpace(t.TargetBindingId) && !string.IsNullOrWhiteSpace(t.ChipLabel))
+                .ToList();
+
+            if (!isBulk)
             {
-                chips.Add(new EventChip(
-                    lastCompleted.BindingId.ToString(),
-                    $"Summarize all {batchFiles.Count} files?",
-                    new { fileIds = allFileIds }));
-            }
-            foreach (var transition in lastCompleted.ChipTransitions)
-            {
-                if (!string.IsNullOrWhiteSpace(transition.TargetBindingId) &&
-                    !string.IsNullOrWhiteSpace(transition.ChipLabel))
+                foreach (var transition in transitions)
                 {
-                    chips.Add(new EventChip(transition.TargetBindingId!, transition.ChipLabel!));
+                    chips.Add(new EventChip(
+                        transition.TargetBindingId!,
+                        transition.ChipLabel!,
+                        new { fileIds = allFileIds },
+                        transition.RequiresAttachments == true));
                 }
             }
+            else if (transitions.Count > 0)
+            {
+                var primary = transitions[0];
+                chips.Add(new EventChip(
+                    primary.TargetBindingId!,
+                    $"{primary.ChipLabel} all {batchFiles.Count} files?",
+                    new { fileIds = allFileIds },
+                    primary.RequiresAttachments == true));
+
+                if (batchFiles.Count <= MaxPerFileChips)
+                {
+                    foreach (var file in batchFiles)
+                    {
+                        chips.Add(new EventChip(
+                            primary.TargetBindingId!,
+                            $"{primary.ChipLabel}: {file.FileName}",
+                            new { fileIds = new[] { file.FileId } },
+                            primary.RequiresAttachments == true));
+                    }
+                }
+
+                foreach (var transition in transitions.Skip(1))
+                {
+                    chips.Add(new EventChip(
+                        transition.TargetBindingId!,
+                        transition.ChipLabel!,
+                        new { fileIds = allFileIds },
+                        transition.RequiresAttachments == true));
+                }
+            }
+
             if (chips.Count > 0)
             {
                 yield return new ChatSseEvent(EventRuleSseEvents.Chips, null,
@@ -425,6 +515,12 @@ public sealed class EventRulesService : IEventRulesService
 
         yield return DoneEvent();
     }
+
+    /// <summary>
+    /// Per-file chip cap for multi-file batches — above this only the bulk
+    /// "…all N files?" chip renders (keeps the strip readable; the manifest cap is 20).
+    /// </summary>
+    private const int MaxPerFileChips = 3;
 
     // ─── Helpers ────────────────────────────────────────────────────────────────────────
 
@@ -493,9 +589,21 @@ public sealed class EventRulesService : IEventRulesService
         return session with { UploadedFiles = files };
     }
 
-    /// <summary>Chip that lets a bounded-out user run the rule's primary capability by explicit Click.</summary>
+    /// <summary>
+    /// Chip that lets a bounded-out (opted-out / daily-capped) user still reach the rule's
+    /// user-visible value by explicit Click. Since the 2026-07-05 operator ruling the launch
+    /// rule is classify-only, so the primary next step is the last member's FIRST curated
+    /// chip transition (e.g. classify → "Summarize"); a rule with no transitions falls back
+    /// to the member itself.
+    /// </summary>
     private static EventChip ManualRunChip(Binding deferTarget, IReadOnlyList<string> fileIds)
-        => new(deferTarget.BindingId.ToString(), "Summarize now", new { fileIds });
+    {
+        var transition = deferTarget.ChipTransitions.FirstOrDefault(t =>
+            !string.IsNullOrWhiteSpace(t.TargetBindingId) && !string.IsNullOrWhiteSpace(t.ChipLabel));
+        return transition is not null
+            ? new EventChip(transition.TargetBindingId!, transition.ChipLabel!, new { fileIds }, transition.RequiresAttachments == true)
+            : new EventChip(deferTarget.BindingId.ToString(), "Run analysis now", new { fileIds });
+    }
 
     private static ChatSseEvent NoticeEvent(string reason, string message, IReadOnlyList<EventChip>? chips = null)
         => new(EventRuleSseEvents.Notice, null, new EventNoticeData(reason, message, chips));

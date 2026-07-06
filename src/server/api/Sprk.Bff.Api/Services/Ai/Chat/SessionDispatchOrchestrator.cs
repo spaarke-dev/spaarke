@@ -324,6 +324,44 @@ public class SessionDispatchOrchestrator
             .ConfigureAwait(false);
 
         yield return DeserializeResultChunk(routed.Entry.Payload.GetRawText());
+
+        // ── Next-step chips (G-P1 UAT round-1 Defect 1 fix, 2026-07-05): the dispatched
+        // Binding's curated sprk_chiptransitions follow the terminal complete chunk so the
+        // conversation surface always shows the CURRENT next steps after a Click dispatch
+        // (e.g. summarize → "Summarize again"). Previously only the Event path emitted
+        // chips — every chip click permanently emptied the strip. The dispatched batch's
+        // fileIds are pre-filled so the follow-up chip re-targets the same files.
+        var transitionChips = BuildTransitionChips(binding, targetFiles);
+        if (transitionChips.Count > 0)
+        {
+            yield return AnalysisChunk.FromChips(transitionChips);
+        }
+    }
+
+    /// <summary>
+    /// Map the Binding's valid <c>sprk_chiptransitions</c> to the unified chip wire shape,
+    /// pre-filling the dispatched file set (authored <c>prefill_slots</c> win when present).
+    /// </summary>
+    private static IReadOnlyList<AnalysisChunkChip> BuildTransitionChips(
+        Binding binding,
+        IReadOnlyList<ChatSessionFile> targetFiles)
+    {
+        var fileIds = targetFiles.Select(f => f.FileId).ToArray();
+        var chips = new List<AnalysisChunkChip>();
+        foreach (var transition in binding.ChipTransitions)
+        {
+            if (string.IsNullOrWhiteSpace(transition.TargetBindingId) ||
+                string.IsNullOrWhiteSpace(transition.ChipLabel))
+            {
+                continue;
+            }
+            chips.Add(new AnalysisChunkChip(
+                TargetBindingId: transition.TargetBindingId!,
+                Label: transition.ChipLabel!,
+                Args: transition.PrefillSlots is { } slots ? (object)slots : new { fileIds },
+                RequiresAttachments: transition.RequiresAttachments == true));
+        }
+        return chips;
     }
 
     /// <summary>

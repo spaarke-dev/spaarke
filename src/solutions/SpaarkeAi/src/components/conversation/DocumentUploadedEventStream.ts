@@ -3,12 +3,13 @@
  *
  * ai-architecture-redesign-r1 task 022b / ADR-039 / ADR-040.
  *
- * When an upload batch completes in the ConversationPane (the last per-file
- * `POST /sessions/{id}/documents` 202 has landed, coalesced by a 250 ms
- * timer), the host calls {@link runDocumentUploadedEvent} ONCE with the
- * batch's session-file document ids (upload order — index 0 is the
- * deterministic top-1 for the bulk bound) plus any command the user typed
- * alongside the upload. The SERVER owns every routing decision — rule lookup,
+ * When an attach gesture completes in the ConversationPane (EVERY chip queued
+ * in the gesture has received its `POST /sessions/{id}/documents` 202 —
+ * count-complete batching per the G-P1 UAT round-1 fix, 2026-07-05, with a
+ * 30 s stuck-promotion fallback), the host calls
+ * {@link runDocumentUploadedEvent} ONCE with the batch's session-file
+ * document ids (upload order) plus any command the user typed alongside the
+ * upload. The SERVER owns every routing decision — rule lookup,
  * explicit-command supersede, opt-out, daily cap, M4 confidence policy
  * (ADR-039: the client never pre-filters; `typedCommand` is passed verbatim
  * and the server decides).

@@ -4,9 +4,12 @@
  * ai-architecture-redesign-r1 task 022b / FR-P1-03 / ADR-039.
  *
  * Covers the client leg of the Event entry path at the component boundary:
- *   1. Upload-batch completion (per-file /documents 202s, coalesced 250 ms)
- *      triggers EXACTLY ONE runDocumentUploadedEvent call with the batch's
- *      documentIds in upload order (index 0 = deterministic top-1).
+ *   1. Attach-gesture completion (count-complete batching — G-P1 UAT round-1
+ *      Defect-2 fix, 2026-07-05: the batch fires the moment EVERY chip of the
+ *      gesture has its /documents 202, however far apart the promotions land;
+ *      30 s stuck-promotion fallback) triggers EXACTLY ONE
+ *      runDocumentUploadedEvent call with the batch's documentIds in upload
+ *      order.
  *   2. typedCommand pass-through: a message sent alongside the upload batch
  *      is forwarded VERBATIM (server decides supersede — no client pre-filter).
  *   3. Each stream event type renders: event_classification (classification
@@ -187,15 +190,18 @@ async function uploadBatch(files: Array<{ id: string; filename: string }>): Prom
   await act(async () => {
     props?.onAttachmentsChanged?.(files.map((f) => makeReadyChip(f.id, f.filename)));
   });
-  // Flush promote-effect microtasks (fetch await → json await → queue call).
+  // Flush promote-effect microtasks. Promotions run SEQUENTIALLY since the
+  // G-P1 Defect-2 fix (manifest write-race mitigation), so a multi-file batch
+  // needs several rounds (each promoteOne awaits fetch → json → queue).
   await act(async () => {
-    await Promise.resolve();
-    await Promise.resolve();
-    await Promise.resolve();
+    for (let i = 0; i < 12; i++) {
+      await Promise.resolve();
+    }
   });
 }
 
-/** Advance past both 250 ms coalescing timers (ready-confirm + Event batch). */
+/** Advance past the 250 ms ready-confirmation timer (the Event batch itself is
+ *  count-complete — it fires on the last 202, not on a timer). */
 async function fireBatchTimers(): Promise<void> {
   await act(async () => {
     jest.advanceTimersByTime(250);
@@ -243,7 +249,7 @@ afterEach(() => {
 // Tests
 // ---------------------------------------------------------------------------
 
-describe('Event path — upload batch fires the document-uploaded event ONCE (FR-P1-03)', () => {
+describe('Event path — attach gesture fires the document-uploaded event ONCE (FR-P1-03, count-complete)', () => {
   it('a multi-file batch triggers exactly one event run with documentIds in upload order and no typedCommand', async () => {
     renderPane();
     await uploadBatch([
@@ -256,11 +262,9 @@ describe('Event path — upload batch fires the document-uploaded event ONCE (FR
       (c) => typeof c[0] === 'string' && (c[0] as string).includes('/documents')
     );
     expect(documentCalls).toHaveLength(2);
-    // …but the Event endpoint has NOT fired yet (batch coalescing).
-    expect(runEventSpy).not.toHaveBeenCalled();
 
-    await fireBatchTimers();
-
+    // …and the batch fired the instant the LAST 202 settled (count-complete —
+    // no coalescing timer), exactly once.
     const run = capturedRun();
     expect(run.sessionId).toBe(TEST_SESSION_ID);
     expect(run.bffBaseUrl).toBe('https://test-bff.example.com');
@@ -268,11 +272,97 @@ describe('Event path — upload batch fires the document-uploaded event ONCE (FR
     expect(run.typedCommand).toBeNull();
   });
 
+  it('G-P1 Defect 2 repro: promotions landing SECONDS apart still produce ONE event per gesture', async () => {
+    renderPane();
+    const props = sprkChatPropsRef.current;
+
+    const resolvers: Array<(r: unknown) => void> = [];
+    authenticatedFetchMock.mockImplementation(
+      () => new Promise((resolve) => resolvers.push(resolve))
+    );
+
+    act(() => {
+      for (const f of ['a.pdf', 'b.pdf', 'c.pdf']) {
+        props?.onAttachmentReady?.({
+          filename: f, contentType: 'application/pdf', textContent: 'x',
+          file: new File(['x'], f, { type: 'application/pdf' }),
+        });
+      }
+    });
+    await act(async () => {
+      props?.onAttachmentsChanged?.([
+        makeReadyChip('chip-a', 'a.pdf'),
+        makeReadyChip('chip-b', 'b.pdf'),
+        makeReadyChip('chip-c', 'c.pdf'),
+      ]);
+    });
+
+    const respond = (documentId: string) => ({
+      ok: true, status: 202, json: async () => ({ documentId }),
+    });
+
+    // Promotions run sequentially — resolve them 5 s apart (the real-world
+    // timing that broke the old 250 ms debounce: it fired one POST per file).
+    for (const [index, docId] of (['doc-a', 'doc-b', 'doc-c'] as const).entries()) {
+      expect(runEventSpy).not.toHaveBeenCalled();
+      await act(async () => {
+        jest.advanceTimersByTime(5_000);
+        resolvers[index](respond(docId));
+        for (let i = 0; i < 8; i++) await Promise.resolve();
+      });
+    }
+
+    // ONE event, the full gesture, upload order.
+    expect(runEventSpy).toHaveBeenCalledTimes(1);
+    expect(runEventSpy.mock.calls[0][0].fileIds).toEqual(['doc-a', 'doc-b', 'doc-c']);
+  });
+
+  it('a stuck promotion is bounded by the 30 s fallback — the batch fires with whatever settled', async () => {
+    renderPane();
+    const props = sprkChatPropsRef.current;
+
+    const resolvers: Array<(r: unknown) => void> = [];
+    authenticatedFetchMock.mockImplementation(
+      () => new Promise((resolve) => resolvers.push(resolve))
+    );
+
+    act(() => {
+      for (const f of ['a.pdf', 'b.pdf']) {
+        props?.onAttachmentReady?.({
+          filename: f, contentType: 'application/pdf', textContent: 'x',
+          file: new File(['x'], f, { type: 'application/pdf' }),
+        });
+      }
+    });
+    await act(async () => {
+      props?.onAttachmentsChanged?.([
+        makeReadyChip('chip-a', 'a.pdf'),
+        makeReadyChip('chip-b', 'b.pdf'),
+      ]);
+    });
+
+    // Only chip-a's promotion ever lands; chip-b's hangs.
+    await act(async () => {
+      resolvers[0]({ ok: true, status: 202, json: async () => ({ documentId: 'doc-a' }) });
+      for (let i = 0; i < 8; i++) await Promise.resolve();
+    });
+    expect(runEventSpy).not.toHaveBeenCalled();
+
+    await act(async () => {
+      jest.advanceTimersByTime(30_000);
+    });
+
+    expect(runEventSpy).toHaveBeenCalledTimes(1);
+    expect(runEventSpy.mock.calls[0][0].fileIds).toEqual(['doc-a']);
+  });
+
   it('orders fileIds by the chip strip (upload order) even when promotions complete out of order', async () => {
     renderPane();
     const props = sprkChatPropsRef.current;
 
-    // Manual promise control: call 1 (chip-a) resolves LAST.
+    // Manual promise control. NOTE: promotions are dispatched sequentially
+    // since the Defect-2 fix, so "out of order" is exercised at the queue
+    // seam by scripting the promote responses' documentIds.
     const resolvers: Array<(r: unknown) => void> = [];
     authenticatedFetchMock.mockImplementation(
       () => new Promise((resolve) => resolvers.push(resolve))
@@ -291,7 +381,6 @@ describe('Event path — upload batch fires the document-uploaded event ONCE (FR
     await act(async () => {
       props?.onAttachmentsChanged?.([makeReadyChip('chip-a', 'a.txt'), makeReadyChip('chip-b', 'b.txt')]);
     });
-    expect(resolvers).toHaveLength(2);
 
     const respond = (documentId: string) => ({
       ok: true,
@@ -299,28 +388,45 @@ describe('Event path — upload batch fires the document-uploaded event ONCE (FR
       json: async () => ({ documentId }),
     });
     await act(async () => {
-      resolvers[1](respond('doc-b')); // chip-b promotion lands FIRST
-      await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
       resolvers[0](respond('doc-a'));
-      await Promise.resolve(); await Promise.resolve(); await Promise.resolve();
+      for (let i = 0; i < 8; i++) await Promise.resolve();
+      resolvers[1](respond('doc-b'));
+      for (let i = 0; i < 8; i++) await Promise.resolve();
     });
 
-    await fireBatchTimers();
-
-    // Upload order wins: chip-a's document is the deterministic top-1.
+    // Upload order wins: chip-a's document stays index 0.
     expect(capturedRun().fileIds).toEqual(['doc-a', 'doc-b']);
   });
 
   it('passes a command typed alongside the upload VERBATIM as typedCommand (server decides — ADR-039)', async () => {
     renderPane();
-    await uploadBatch([{ id: 'chip-a', filename: 'a.txt' }]);
+    const props = sprkChatPropsRef.current;
 
-    // The user sends a command while the batch is open (before it fires).
+    // Hold the promotion open so the batch is still gathering when the user types.
+    const resolvers: Array<(r: unknown) => void> = [];
+    authenticatedFetchMock.mockImplementation(
+      () => new Promise((resolve) => resolvers.push(resolve))
+    );
+
+    act(() => {
+      props?.onAttachmentReady?.({
+        filename: 'a.txt', contentType: 'text/plain', textContent: 'x',
+        file: new File(['x'], 'a.txt', { type: 'text/plain' }),
+      });
+    });
+    await act(async () => {
+      props?.onAttachmentsChanged?.([makeReadyChip('chip-a', 'a.txt')]);
+    });
+
+    // The user sends a command while the batch is open (before its last 202).
     act(() => {
       sprkChatPropsRef.current?.onBeforeSendMessage?.('translate this to French');
     });
 
-    await fireBatchTimers();
+    await act(async () => {
+      resolvers[0]({ ok: true, status: 202, json: async () => ({ documentId: 'doc-1' }) });
+      for (let i = 0; i < 8; i++) await Promise.resolve();
+    });
 
     expect(capturedRun().typedCommand).toBe('translate this to French');
   });
@@ -450,6 +556,85 @@ describe('Event path — stream events render in the conversation surface', () =
     ];
     expect(bindingId).toBe('b-summarize-all');
     expect(args.slots).toEqual({ fileIds: ['doc-1', 'doc-2'] });
+  });
+});
+
+describe('Event path — chip persistence (G-P1 Defect 1)', () => {
+  async function startedRun(): Promise<RunDocumentUploadedEventOptions> {
+    renderPane();
+    await uploadBatch([{ id: 'chip-a', filename: 'a.pdf' }]);
+    return capturedRun();
+  }
+
+  it('a later chip-less event (e.g. a notice) does NOT clear previously-rendered chips', async () => {
+    const run = await startedRun();
+    await act(async () => {
+      run.handlers.onChips?.([{ targetBindingId: 'b-sum', label: 'Summarize' }]);
+    });
+    expect(screen.getByTestId('consumer-chip-b-sum')).toBeInTheDocument();
+
+    await act(async () => {
+      run.handlers.onNotice?.({ reason: 'no-attachments', message: 'Nothing ran.' });
+      run.handlers.onDone?.();
+    });
+
+    expect(screen.getByTestId('consumer-chip-b-sum')).toBeInTheDocument();
+  });
+
+  it('an empty or malformed chips payload never blanks the strip (tolerant replace-only-when-non-empty)', async () => {
+    const run = await startedRun();
+    await act(async () => {
+      run.handlers.onChips?.([{ targetBindingId: 'b-sum', label: 'Summarize' }]);
+    });
+
+    await act(async () => {
+      run.handlers.onChips?.([]);
+      run.handlers.onChips?.([{ bogus: true }]);
+    });
+
+    expect(screen.getByTestId('consumer-chip-b-sum')).toBeInTheDocument();
+  });
+
+  it('a NEW non-empty chip set replaces the previous one (chips track the latest output)', async () => {
+    const run = await startedRun();
+    await act(async () => {
+      run.handlers.onChips?.([{ targetBindingId: 'b-old', label: 'Old step' }]);
+    });
+    await act(async () => {
+      run.handlers.onChips?.([{ targetBindingId: 'b-new', label: 'New step' }]);
+    });
+
+    expect(screen.queryByTestId('consumer-chip-b-old')).not.toBeInTheDocument();
+    expect(screen.getByTestId('consumer-chip-b-new')).toBeInTheDocument();
+  });
+
+  it('a chip click renders the dispatched STORED output as an assistant message and re-arms the strip from the dispatch chips', async () => {
+    dispatchConsumerSpy.mockResolvedValueOnce({
+      streamId: 'stream-test',
+      status: 'complete' as const,
+      result: { tldr: 'Dispatched TL;DR.', summary: 'Dispatched summary.', keywords: ['dispatch'] },
+      chips: [{ bindingId: 'b-again', label: 'Summarize again' }],
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    } as any);
+
+    const run = await startedRun();
+    await act(async () => {
+      run.handlers.onChips?.([
+        { targetBindingId: 'b-sum', label: 'Summarize', requiresAttachments: true },
+      ]);
+    });
+
+    await act(async () => {
+      fireEvent.click(screen.getByTestId('consumer-chip-b-sum'));
+      for (let i = 0; i < 6; i++) await Promise.resolve();
+    });
+
+    // The dispatched output rendered in the CONVERSATION (ADR-040 render-follows-store)…
+    const contents = injectedMessages.map((m) => m.content);
+    expect(contents).toContainEqual(expect.stringContaining('**TL;DR:** Dispatched TL;DR.'));
+    expect(contents).toContainEqual(expect.stringContaining('Dispatched summary.'));
+    // …and the NEXT chip set arrived from the dispatch stream (never a dead strip).
+    expect(screen.getByTestId('consumer-chip-b-again')).toHaveTextContent('Summarize again');
   });
 });
 

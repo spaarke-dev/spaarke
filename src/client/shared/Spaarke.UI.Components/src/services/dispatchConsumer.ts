@@ -165,7 +165,7 @@ export function parseConsumerChips(raw: unknown): ConsumerChip[] {
  * declared in the deleted SpaarkeAi `sseToPaneEventBridge.ts`.
  */
 export interface AnalysisChunk {
-  /** Event discriminator: "text" | "complete" | "error" | "delta". */
+  /** Event discriminator: "text" | "complete" | "error" | "delta" | "chips". */
   type: string;
   /** Token chunk for "text" events (legacy free-form streaming). */
   content?: string;
@@ -173,10 +173,18 @@ export interface AnalysisChunk {
   done?: boolean;
   /** Structured result on "complete". */
   result?: unknown;
+  /** Legacy full-text summary on "complete" (Completed(string) server overload). */
+  summary?: string;
   /** Error message on "error". Never forwarded to the bus (ADR-019). */
   error?: string;
   /** Structured-field delta payload on "delta". */
   delta?: AnalysisFieldDelta;
+  /**
+   * Next-step consumer chips on "chips" (G-P1 UAT fix, 2026-07-05 — the
+   * dispatched Binding's `sprk_chiptransitions`, unified EventChip wire shape).
+   * Raw wire value; parse with {@link parseConsumerChips}.
+   */
+  chips?: unknown;
 }
 
 /** The `type: "delta"` payload (BFF `FieldDelta`). */
@@ -275,6 +283,18 @@ export interface DispatchConsumerResult {
   readonly streamId: string;
   /** Terminal stream status. */
   readonly status: 'complete' | 'empty';
+  /**
+   * The terminal `complete` chunk's structured result (the STORED ledger payload
+   * — ADR-040 render-follows-store) or its legacy `summary` string. Hosts that
+   * render dispatched output in the conversation surface read THIS (G-P1 UAT
+   * fix, 2026-07-05); undefined when the stream ended without a result.
+   */
+  readonly result?: unknown;
+  /**
+   * Next-step chips delivered by the stream's `chips` chunk (the dispatched
+   * Binding's `sprk_chiptransitions`), parsed. Undefined when none arrived.
+   */
+  readonly chips?: ReadonlyArray<ConsumerChip>;
 }
 
 /**
@@ -383,6 +403,12 @@ export function createConsumerDispatcher(deps: ConsumerDispatchDeps): DispatchCo
     let started = false;
     let sawComplete = false;
     let sawError = false;
+    // G-P1 UAT fix (2026-07-05): capture the terminal result + next-step chips so
+    // hosts can render the dispatched output in the CONVERSATION surface and keep
+    // the chip strip alive after a click (chips previously arrived only on the
+    // Event path — every chip click permanently emptied the strip).
+    let terminalResult: unknown;
+    let capturedChips: ConsumerChip[] | undefined;
 
     const publishStartedOnce = (): void => {
       if (started) return;
@@ -431,7 +457,19 @@ export function createConsumerDispatcher(deps: ConsumerDispatchDeps): DispatchCo
           return;
         }
 
+        case 'chips': {
+          // Next-step chips (unified EventChip wire shape). Conversation-surface
+          // UI, not a bus payload — captured for the resolved result; tolerant
+          // parse; an empty/malformed payload never clobbers earlier chips.
+          const parsedChips = parseConsumerChips(chunk.chips);
+          if (parsedChips.length > 0) {
+            capturedChips = parsedChips;
+          }
+          return;
+        }
+
         case 'complete': {
+          terminalResult = chunk.result ?? chunk.summary ?? undefined;
           if (chunk.result && typeof chunk.result === 'object') {
             publishStartedOnce();
             const result = chunk.result as Record<string, unknown>;
@@ -523,9 +561,9 @@ export function createConsumerDispatcher(deps: ConsumerDispatchDeps): DispatchCo
         streamId,
         completionStatus: 'empty',
       });
-      return { streamId, status: 'empty' };
+      return { streamId, status: 'empty', result: terminalResult, chips: capturedChips };
     }
 
-    return { streamId, status: 'complete' };
+    return { streamId, status: 'complete', result: terminalResult, chips: capturedChips };
   };
 }

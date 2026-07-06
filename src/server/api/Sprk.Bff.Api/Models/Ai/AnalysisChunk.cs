@@ -32,6 +32,7 @@ namespace Sprk.Bff.Api.Models.Ai;
 /// <param name="Result">The structured analysis result (only set when type="complete").</param>
 /// <param name="Error">Error message if analysis failed.</param>
 /// <param name="Delta">Structured-field token delta payload (only set when type="delta"). Additive R5 variant; null/omitted for all other event types.</param>
+/// <param name="Chips">Next-step consumer chips (only set when type="chips"). Additive ai-architecture-redesign-r1 G-P1 UAT-fix variant (2026-07-05); null/omitted for all other event types. Existing consumers ignore the unknown discriminant (same back-compat contract as "delta").</param>
 public record AnalysisChunk(
     [property: JsonPropertyName("type")] string Type,
     [property: JsonPropertyName("content")] string Content,
@@ -41,7 +42,10 @@ public record AnalysisChunk(
     [property: JsonPropertyName("error")] string? Error = null,
     [property: JsonPropertyName("delta")]
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    FieldDelta? Delta = null)
+    FieldDelta? Delta = null,
+    [property: JsonPropertyName("chips")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    IReadOnlyList<AnalysisChunkChip>? Chips = null)
 {
     /// <summary>
     /// Create a content chunk (streaming partial result).
@@ -86,7 +90,38 @@ public record AnalysisChunk(
     public static AnalysisChunk FromDelta(string path, string content, int sequence) =>
         new(Type: "delta", Content: string.Empty, Done: false,
             Delta: new FieldDelta(Path: path, Content: content, Sequence: sequence));
+
+    /// <summary>
+    /// Create a next-step chips chunk (ai-architecture-redesign-r1 G-P1 UAT fix, 2026-07-05).
+    /// Type is "chips"; emitted by the Click-dispatch stream AFTER the terminal
+    /// <c>complete</c> chunk so a dispatched capability's <c>sprk_chiptransitions</c>
+    /// render as the NEXT chip set (e.g. summarize → "Summarize again"). Wire shape of
+    /// each chip matches the Event-path <c>EventChip</c> vocabulary
+    /// (<c>{targetBindingId, label, args?, requiresAttachments?}</c>) — ONE client parser
+    /// (<c>parseConsumerChips</c>) reads both.
+    /// </summary>
+    public static AnalysisChunk FromChips(IReadOnlyList<AnalysisChunkChip> chips) =>
+        new(Type: "chips", Content: string.Empty, Done: false, Chips: chips);
 }
+
+/// <summary>
+/// One next-step consumer chip carried by an <see cref="AnalysisChunk"/> with
+/// <see cref="AnalysisChunk.Type"/> = <c>"chips"</c>. Serialized names are pinned to the
+/// task-022/023b unified chip wire vocabulary (camelCase <c>EventChip</c> shape) so the
+/// client's single <c>parseConsumerChips</c> path consumes Event-path and Click-path chips
+/// identically (ADR-039: <c>targetBindingId</c> IS the routing decision).
+/// </summary>
+/// <param name="TargetBindingId">The <c>sprk_playbookconsumer</c> row GUID to dispatch on click.</param>
+/// <param name="Label">User-facing chip label.</param>
+/// <param name="Args">Optional capability args forwarded verbatim (e.g. <c>{ fileIds: [...] }</c>).</param>
+/// <param name="RequiresAttachments">Whether the target capability needs session attachments (client-side disabled-chip precondition).</param>
+public record AnalysisChunkChip(
+    [property: JsonPropertyName("targetBindingId")] string TargetBindingId,
+    [property: JsonPropertyName("label")] string Label,
+    [property: JsonPropertyName("args")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    object? Args = null,
+    [property: JsonPropertyName("requiresAttachments")] bool RequiresAttachments = false);
 
 /// <summary>
 /// A structured-field token delta payload carried by an <see cref="AnalysisChunk"/> with
