@@ -62,7 +62,7 @@ function makePublishSpy() {
 
 /** Response-like carrying an SSE body; each chunk arg becomes `data: <c>\n\n`. */
 function sseResponse(chunks: string[], status = 200): Response {
-  const wire = chunks.map((c) => `data: ${c}\n\n`).join('');
+  const wire = chunks.map(c => `data: ${c}\n\n`).join('');
   const encoder = new TextEncoder();
   const payload = encoder.encode(wire);
 
@@ -147,9 +147,7 @@ describe('parseConsumerChips', () => {
   });
 
   it('tolerates the BFF camelCase serialization twin of the wire shape', () => {
-    const chips = parseConsumerChips([
-      { targetBindingId: 'b-3', chipLabel: 'Summarize', requiresAttachments: true },
-    ]);
+    const chips = parseConsumerChips([{ targetBindingId: 'b-3', chipLabel: 'Summarize', requiresAttachments: true }]);
     expect(chips).toEqual([
       { bindingId: 'b-3', label: 'Summarize', prefillSlots: undefined, requiresAttachments: true },
     ]);
@@ -204,9 +202,9 @@ describe('dispatchConsumer preconditions', () => {
     const { publish, events } = makePublishSpy();
     const dispatchConsumer = makeDispatcher(publish);
 
-    await expect(
-      dispatchConsumer(BINDING_ID, { requiresAttachments: true, attachmentCount: 0 })
-    ).rejects.toMatchObject({ code: 'attachments-required' });
+    await expect(dispatchConsumer(BINDING_ID, { requiresAttachments: true, attachmentCount: 0 })).rejects.toMatchObject(
+      { code: 'attachments-required' }
+    );
     expect(mockFetch).not.toHaveBeenCalled();
     expect(events).toHaveLength(0);
   });
@@ -287,7 +285,7 @@ describe('dispatchConsumer SSE → workspace-channel bridging', () => {
     const result = await dispatchConsumer(BINDING_ID, { streamId: 'stream-1' });
 
     expect(result).toEqual({ streamId: 'stream-1', status: 'complete' });
-    expect(events.map((e) => e.event.type)).toEqual([
+    expect(events.map(e => e.event.type)).toEqual([
       'streaming_started',
       'field_delta',
       'field_delta',
@@ -302,7 +300,7 @@ describe('dispatchConsumer SSE → workspace-channel bridging', () => {
     expect(events[2].event).toMatchObject({ fieldPath: 'summary', fieldContent: 'Long' });
     expect(events[3].event).toMatchObject({ completionStatus: 'complete' });
     // every event carries the same channel + streamId
-    expect(events.every((e) => e.channel === 'workspace')).toBe(true);
+    expect(events.every(e => e.channel === 'workspace')).toBe(true);
   });
 
   it('terminal complete-with-result synthesizes per-field deltas before completion', async () => {
@@ -328,7 +326,7 @@ describe('dispatchConsumer SSE → workspace-channel bridging', () => {
     const result = await dispatchConsumer(BINDING_ID, { streamId: 's-2' });
 
     expect(result.status).toBe('complete');
-    expect(events.map((e) => e.event.type)).toEqual([
+    expect(events.map(e => e.event.type)).toEqual([
       'streaming_started',
       'field_delta',
       'field_delta',
@@ -341,13 +339,9 @@ describe('dispatchConsumer SSE → workspace-channel bridging', () => {
   it('error chunk publishes declined and rejects', async () => {
     const { publish, events } = makePublishSpy();
     const dispatchConsumer = makeDispatcher(publish);
-    mockFetch.mockResolvedValueOnce(
-      sseResponse(['{"type":"error","error":"boom","done":true}'])
-    );
+    mockFetch.mockResolvedValueOnce(sseResponse(['{"type":"error","error":"boom","done":true}']));
 
-    await expect(dispatchConsumer(BINDING_ID, { streamId: 's-3' })).rejects.toThrow(
-      /stream reported an error/
-    );
+    await expect(dispatchConsumer(BINDING_ID, { streamId: 's-3' })).rejects.toThrow(/stream reported an error/);
     const terminal = events[events.length - 1].event;
     expect(terminal).toMatchObject({
       type: 'streaming_complete',
@@ -405,7 +399,7 @@ describe('dispatchConsumer SSE → workspace-channel bridging', () => {
 
     const result = await dispatchConsumer(BINDING_ID, { streamId: 's-6' });
     expect(result.status).toBe('complete');
-    expect(events.map((e) => e.event.type)).toEqual(['streaming_started', 'streaming_complete']);
+    expect(events.map(e => e.event.type)).toEqual(['streaming_started', 'streaming_complete']);
   });
 
   it('generates a streamId when none is supplied', async () => {
@@ -438,11 +432,7 @@ describe('dispatchConsumer workspaceTarget', () => {
       },
     });
 
-    expect(events.map((e) => e.event.type)).toEqual([
-      'widget_load',
-      'streaming_started',
-      'streaming_complete',
-    ]);
+    expect(events.map(e => e.event.type)).toEqual(['widget_load', 'streaming_started', 'streaming_complete']);
     expect(events[0].event).toMatchObject({
       widgetType: 'structured-output-stream',
       displayName: 'Summary: contract.pdf',

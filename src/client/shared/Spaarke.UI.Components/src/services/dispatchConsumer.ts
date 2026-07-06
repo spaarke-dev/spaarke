@@ -128,8 +128,7 @@ export function parseConsumerChips(raw: unknown): ConsumerChip[] {
       bindingId,
       label,
       prefillSlots: slots && typeof slots === 'object' ? slots : undefined,
-      requiresAttachments:
-        wire.requires_attachments === true || wire.requiresAttachments === true,
+      requiresAttachments: wire.requires_attachments === true || wire.requiresAttachments === true,
     });
   }
   return chips;
@@ -194,10 +193,7 @@ export interface DispatchWorkspaceEvent {
  * Publisher for the `workspace` PaneEventBus channel. Hosts wire this from
  * `usePaneEventBus().dispatch` / `useDispatchPaneEvent()`.
  */
-export type DispatchPaneEventPublisher = (
-  channel: 'workspace',
-  event: DispatchWorkspaceEvent
-) => void;
+export type DispatchPaneEventPublisher = (channel: 'workspace', event: DispatchWorkspaceEvent) => void;
 
 // ---------------------------------------------------------------------------
 // Public dispatch contract
@@ -266,10 +262,7 @@ export interface DispatchConsumerResult {
  * network failure (after publishing a terminal `streaming_complete`
  * `declined` event when a stream lifecycle had begun).
  */
-export type DispatchConsumer = (
-  bindingId: string,
-  args?: DispatchConsumerArgs
-) => Promise<DispatchConsumerResult>;
+export type DispatchConsumer = (bindingId: string, args?: DispatchConsumerArgs) => Promise<DispatchConsumerResult>;
 
 /**
  * Thrown when a dispatch is refused BEFORE any network call or bus event
@@ -316,9 +309,7 @@ async function mapDispatchHttpError(response: Response): Promise<Error> {
   } catch {
     // Non-JSON body — keep fallback errorCode.
   }
-  return new Error(
-    `dispatchConsumer: dispatch failed (status=${response.status}, errorCode=${errorCode})`
-  );
+  return new Error(`dispatchConsumer: dispatch failed (status=${response.status}, errorCode=${errorCode})`);
 }
 
 /**
@@ -335,18 +326,12 @@ export function createConsumerDispatcher(deps: ConsumerDispatchDeps): DispatchCo
   ): Promise<DispatchConsumerResult> {
     // ── Click preconditions (no network, no bus events) ─────────────────────
     if (!bindingId || bindingId.trim().length === 0) {
-      throw new DispatchPreconditionError(
-        'binding-id-required',
-        'dispatchConsumer: bindingId is required'
-      );
+      throw new DispatchPreconditionError('binding-id-required', 'dispatchConsumer: bindingId is required');
     }
 
     const sessionId = getSessionId();
     if (!sessionId) {
-      throw new DispatchPreconditionError(
-        'no-session',
-        'dispatchConsumer: no active chat session'
-      );
+      throw new DispatchPreconditionError('no-session', 'dispatchConsumer: no active chat session');
     }
 
     // Empty-attachments guard (Event/Click precondition per task 025 handoff):
