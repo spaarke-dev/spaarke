@@ -142,9 +142,28 @@ describe('ResolverWriteHandler', () => {
 
     mockUpdateRecord = jest.fn().mockResolvedValue({ id: 'ok' });
     mockRetrieveMultipleRecords = jest.fn().mockResolvedValue({ entities: [] });
+    // v1.4.1 (SRFR-048): tests must return nav-props matching the host entity's
+    // actual schema. Default: sprk_todo has all 11 lookups. Individual tests
+    // override this to model narrower hosts (sprk_event, sprk_invoice, etc.)
+    // which only carry a subset of parent lookups.
     mockFetch = jest.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({ value: [] }),
+      json: async () => ({
+        value: [
+          { ReferencingAttribute: 'sprk_regardingmatter', ReferencingEntityNavigationPropertyName: 'sprk_RegardingMatter', ReferencedEntity: 'sprk_matter' },
+          { ReferencingAttribute: 'sprk_regardingproject', ReferencingEntityNavigationPropertyName: 'sprk_RegardingProject', ReferencedEntity: 'sprk_project' },
+          { ReferencingAttribute: 'sprk_regardingevent', ReferencingEntityNavigationPropertyName: 'sprk_RegardingEvent', ReferencedEntity: 'sprk_event' },
+          { ReferencingAttribute: 'sprk_regardingcommunication', ReferencingEntityNavigationPropertyName: 'sprk_RegardingCommunication', ReferencedEntity: 'sprk_communication' },
+          { ReferencingAttribute: 'sprk_regardingworkassignment', ReferencingEntityNavigationPropertyName: 'sprk_RegardingWorkAssignment', ReferencedEntity: 'sprk_workassignment' },
+          { ReferencingAttribute: 'sprk_regardinginvoice', ReferencingEntityNavigationPropertyName: 'sprk_RegardingInvoice', ReferencedEntity: 'sprk_invoice' },
+          { ReferencingAttribute: 'sprk_regardingbudget', ReferencingEntityNavigationPropertyName: 'sprk_RegardingBudget', ReferencedEntity: 'sprk_budget' },
+          { ReferencingAttribute: 'sprk_regardinganalysis', ReferencingEntityNavigationPropertyName: 'sprk_RegardingAnalysis', ReferencedEntity: 'sprk_analysis' },
+          { ReferencingAttribute: 'sprk_regardingorganization', ReferencingEntityNavigationPropertyName: 'sprk_RegardingOrganization', ReferencedEntity: 'sprk_organization' },
+          { ReferencingAttribute: 'sprk_regardingcontact', ReferencingEntityNavigationPropertyName: 'sprk_RegardingContact', ReferencedEntity: 'contact' },
+          { ReferencingAttribute: 'sprk_regardingdocument', ReferencingEntityNavigationPropertyName: 'sprk_RegardingDocument', ReferencedEntity: 'sprk_document' },
+          { ReferencingAttribute: 'sprk_regardingrecordtype', ReferencingEntityNavigationPropertyName: 'sprk_RegardingRecordType', ReferencedEntity: 'sprk_recordtype_ref' },
+        ],
+      }),
     });
   });
 
@@ -245,6 +264,59 @@ describe('ResolverWriteHandler', () => {
     const cleared = Object.entries(payload).filter(([k, v]) => k.endsWith('@odata.bind') && v === null);
     // 10 OTHER entity-specific lookups should be nulled (catalog has 11 entries; chose 1, so 10 are cleared).
     expect(cleared.length).toBeGreaterThanOrEqual(10);
+  });
+
+  // -------------------------------------------------------------------------
+  // SRFR-048 v1.4.1 — nav-prop-limited clear (only null lookups that exist on host)
+  // -------------------------------------------------------------------------
+
+  test('SRFR-048 — narrower host (sprk_event) only nulls lookups that exist on that entity', async () => {
+    // sprk_event carries only Matter/Project/Invoice/WorkAssignment lookups.
+    // Attempting to null sprk_regardingcommunication / sprk_regardingorganization /
+    // etc. would fail Dataverse validation (v1.4.0 failure mode).
+    const narrowerFetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        value: [
+          { ReferencingAttribute: 'sprk_regardingmatter', ReferencingEntityNavigationPropertyName: 'sprk_RegardingMatter', ReferencedEntity: 'sprk_matter' },
+          { ReferencingAttribute: 'sprk_regardingproject', ReferencingEntityNavigationPropertyName: 'sprk_RegardingProject', ReferencedEntity: 'sprk_project' },
+          { ReferencingAttribute: 'sprk_regardinginvoice', ReferencingEntityNavigationPropertyName: 'sprk_RegardingInvoice', ReferencedEntity: 'sprk_invoice' },
+          { ReferencingAttribute: 'sprk_regardingworkassignment', ReferencingEntityNavigationPropertyName: 'sprk_RegardingWorkAssignment', ReferencedEntity: 'sprk_workassignment' },
+          { ReferencingAttribute: 'sprk_regardingrecordtype', ReferencingEntityNavigationPropertyName: 'sprk_RegardingRecordType', ReferencedEntity: 'sprk_recordtype_ref' },
+        ],
+      }),
+    });
+
+    const result = await applyRegardingSelection(
+      {
+        webApi: { retrieveMultipleRecords: mockRetrieveMultipleRecords, updateRecord: mockUpdateRecord },
+        hostEntity: 'sprk_event',
+        hostRecordId: '55555555-5555-5555-5555-555555555555',
+      },
+      { entityType: 'sprk_matter', recordId: '33333333-3333-3333-3333-333333333333', recordName: 'X' },
+      undefined,
+      narrowerFetch as unknown as typeof fetch
+    );
+
+    expect(result.success).toBe(true);
+    const [, , payload] = mockUpdateRecord.mock.calls[0];
+    const nulledKeys = Object.entries(payload)
+      .filter(([k, v]) => k.endsWith('@odata.bind') && v === null)
+      .map(([k]) => k);
+
+    // Must NOT contain any lookup that doesn't exist on sprk_event.
+    expect(nulledKeys.some(k => k.includes('sprk_RegardingCommunication'))).toBe(false);
+    expect(nulledKeys.some(k => k.includes('sprk_RegardingOrganization'))).toBe(false);
+    expect(nulledKeys.some(k => k.includes('sprk_RegardingContact'))).toBe(false);
+    expect(nulledKeys.some(k => k.includes('sprk_RegardingBudget'))).toBe(false);
+    expect(nulledKeys.some(k => k.includes('sprk_RegardingAnalysis'))).toBe(false);
+    expect(nulledKeys.some(k => k.includes('sprk_RegardingDocument'))).toBe(false);
+    expect(nulledKeys.some(k => k.includes('sprk_RegardingEvent'))).toBe(false); // event isn't a parent of itself
+
+    // Must include the OTHER 3 lookups that DO exist on sprk_event (not Matter — that's the chosen one).
+    expect(nulledKeys.some(k => k.includes('sprk_RegardingProject'))).toBe(true);
+    expect(nulledKeys.some(k => k.includes('sprk_RegardingInvoice'))).toBe(true);
+    expect(nulledKeys.some(k => k.includes('sprk_RegardingWorkAssignment'))).toBe(true);
   });
 
   // -------------------------------------------------------------------------

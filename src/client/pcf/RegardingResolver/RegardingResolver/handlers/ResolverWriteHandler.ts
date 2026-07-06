@@ -213,15 +213,27 @@ export async function applyRegardingSelection(
 
   const navProps = await discoverHostNavProps(ctx.hostEntity, fetchImpl);
 
-  // 1. Pre-clear the 10 OTHER entity-specific lookups (clear-and-set per FR-13).
+  // 1. Pre-clear the OTHER entity-specific lookups that ACTUALLY EXIST on this
+  //    host entity (clear-and-set per FR-13).
+  //
+  // v1.4.1 (SRFR-048): only clear lookups that exist on the host — sprk_event /
+  // sprk_invoice / sprk_communication / sprk_kpiassessment carry only a subset
+  // of the 11 possible entity-specific lookups (per each entity's polymorphic
+  // parent list). Skipping entries where `navProps.find(...)` returns undefined
+  // avoids the v1.4.0 failure mode: writing `sprk_regardingcommunication@odata.bind = null`
+  // on sprk_event → Dataverse rejects with "Invalid property".
+  //
+  // navProps is the host entity's DISCOVERED nav-props (from RelationshipDefinitions
+  // via discoverHostNavProps). A nav-prop is present ONLY if the lookup exists on
+  // the host. So iterating navProps-limited entries is the correct membership check.
   const payload: Record<string, unknown> = {};
   for (const other of TODO_REGARDING_CATALOG) {
     if (other.entityType === catalogEntry.entityType) continue;
     const navProp = navProps.find(
       n => n.referencedEntity === other.entityType && n.columnName.toLowerCase().includes(other.navPropHint)
     );
-    const key = navProp?.navPropName ?? other.lookupAttribute;
-    payload[`${key}@odata.bind`] = null;
+    if (!navProp) continue; // Lookup doesn't exist on this host entity — skip.
+    payload[`${navProp.navPropName}@odata.bind`] = null;
   }
 
   // 2. Delegate to the shared service for the SET path (chosen lookup + 5 resolver fields).
@@ -288,12 +300,14 @@ export async function clearRegarding(
 
   const payload: Record<string, unknown> = {};
 
+  // v1.4.1 (SRFR-048): only null lookups that ACTUALLY EXIST on this host.
+  // Same rationale as applyRegardingSelection — see comment above.
   for (const target of TODO_REGARDING_CATALOG) {
     const navProp = navProps.find(
       n => n.referencedEntity === target.entityType && n.columnName.toLowerCase().includes(target.navPropHint)
     );
-    const key = navProp?.navPropName ?? target.lookupAttribute;
-    payload[`${key}@odata.bind`] = null;
+    if (!navProp) continue; // Lookup doesn't exist on this host entity — skip.
+    payload[`${navProp.navPropName}@odata.bind`] = null;
   }
 
   const recordTypeNavProp = navProps.find(
