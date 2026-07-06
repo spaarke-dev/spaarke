@@ -107,8 +107,8 @@
 
 | # | Task | FR | Rigor | Deps | Status |
 |---|---|---|---|---|---|
-| 032 | Loop-native elicitation + modal escape + Gate markers | FR-P2-03 | FULL | 030, 031 | 🔲 |
-| 033 | Honest refusal Binding + `dispatch_refused` telemetry | FR-P2-04 | FULL | 030 | 🔲 |
+| 032 | Loop-native elicitation (BindingInputSchemaValidator + ElicitationTurnRouter; suspend into ONE pending store, marker-before-render; capture_mode=modal → elicitation_modal SSE; mid-elicitation answers deterministic; unified POST /gates/{gateId}/resolve; 031-W1 throw; 28 new tests; eval +GU-043..046) | FR-P2-03 | FULL | 030, 031 | ✅ |
+| 033 | Honest refusal (REF-CHAT@v1 `8d337be2` + no_match_handler Binding `48dcd7ec` on spaarkedev1; RefusalCapabilityTool loop-projected; dispatch_refused AiTelemetry counter; grounded-outcomes directive; 12 new tests; eval +GU-041/042; App Insights live-evidence deferred to gate-038 deploy) | FR-P2-04 | FULL | 030 | ✅ |
 
 ### Wave W-P2-C (serial)
 

@@ -93,10 +93,25 @@ public sealed class NullPendingPlanManager : PendingPlanManager
 
     public override Task<SessionGate?> WriteGateMarkerAsync(
         string tenantId, string sessionId, string gateId, string kind, string status,
-        string? bindingId = null, string? sideEffectClass = null, int turn = 0,
+        string? bindingId = null, string? sideEffectClass = null,
+        IReadOnlyList<string>? missingFields = null, int turn = 0,
         CancellationToken ct = default)
     {
         LogDisabled(nameof(WriteGateMarkerAsync));
+        throw new FeatureDisabledException(ErrorCode, DetailMessage);
+    }
+
+    public override Task<bool> CloseInvocationAsync(
+        string tenantId, string sessionId, string gateId, string status, CancellationToken ct = default)
+    {
+        LogDisabled(nameof(CloseInvocationAsync));
+        throw new FeatureDisabledException(ErrorCode, DetailMessage);
+    }
+
+    public override Task<SessionGate?> ResolveElicitationOnDispatchAsync(
+        string tenantId, string sessionId, Guid bindingId, CancellationToken ct = default)
+    {
+        LogDisabled(nameof(ResolveElicitationOnDispatchAsync));
         throw new FeatureDisabledException(ErrorCode, DetailMessage);
     }
 

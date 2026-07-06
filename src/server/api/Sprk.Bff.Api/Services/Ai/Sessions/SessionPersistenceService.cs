@@ -572,6 +572,7 @@ public class SessionPersistenceService : ISessionPersistenceService
                 Turn = g.Turn,
                 BindingId = g.BindingId,
                 SideEffectClass = g.SideEffectClass,
+                MissingFields = g.MissingFields is { Count: > 0 } ? g.MissingFields.ToList() : null,
                 OutputKey = g.OutputKey,
                 CreatedAt = g.CreatedAt,
                 ResolvedAt = g.ResolvedAt
@@ -588,6 +589,7 @@ public class SessionPersistenceService : ISessionPersistenceService
                 Turn = s.Turn,
                 BindingId = s.BindingId,
                 SideEffectClass = s.SideEffectClass,
+                MissingFields = s.MissingFields is { Count: > 0 } ? s.MissingFields : null,
                 OutputKey = s.OutputKey,
                 CreatedAt = s.CreatedAt,
                 ResolvedAt = s.ResolvedAt

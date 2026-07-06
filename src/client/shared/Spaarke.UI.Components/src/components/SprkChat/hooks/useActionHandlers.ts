@@ -311,38 +311,109 @@ export function navigateToTarget(payload: INavigatePayload): void {
 }
 
 /**
+ * Builds the unified-gate resolution URL (FR-P2-03 / task 032). `actionId` IS the
+ * gate id — server-side suspensions (PendingPlanManager) surface their GateId as
+ * the `action_confirmation` event's actionId (task 034 wires the loop-boundary
+ * emitter to this contract).
+ */
+function buildGateResolveUrl(apiBaseUrl: string, sessionId: string, gateId: string): string {
+  return (
+    `${apiBaseUrl}/api/ai/chat/sessions/${encodeURIComponent(sessionId)}` +
+    `/gates/${encodeURIComponent(gateId)}/resolve`
+  );
+}
+
+/** Shared POST to the gate-resolve endpoint. */
+async function resolveGate(
+  pendingAction: IPendingAction,
+  apiBaseUrl: string,
+  authenticatedFetch: (url: string, init?: RequestInit) => Promise<Response>,
+  approved: boolean
+): Promise<{ success: boolean; message: string }> {
+  try {
+    const response = await authenticatedFetch(
+      buildGateResolveUrl(apiBaseUrl, pendingAction.sessionId, pendingAction.actionId),
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ approved }),
+      }
+    );
+
+    if (response.status === 409) {
+      return {
+        success: false,
+        message: `${pendingAction.actionName} was already resolved or has expired. Please retry the request in chat.`,
+      };
+    }
+
+    if (!response.ok) {
+      let errorCode = 'gate.resolve-failed';
+      try {
+        const problem = (await response.json()) as { errorCode?: string };
+        if (problem && typeof problem.errorCode === 'string') {
+          errorCode = problem.errorCode;
+        }
+      } catch {
+        // Non-JSON body — keep the fallback code (ADR-019: stable codes only surface).
+      }
+      return {
+        success: false,
+        message: `${pendingAction.actionName} could not be ${approved ? 'dispatched' : 'cancelled'} (${errorCode}).`,
+      };
+    }
+
+    const result = (await response.json()) as { status?: string; summary?: string | null };
+    return approved
+      ? {
+          success: true,
+          message: result.summary
+            ? `${pendingAction.actionName} completed. ${result.summary}`
+            : `${pendingAction.actionName} completed.`,
+        }
+      : { success: true, message: `${pendingAction.actionName} was cancelled.` };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Network error';
+    return {
+      success: false,
+      message: `${pendingAction.actionName} could not be ${approved ? 'dispatched' : 'cancelled'}: ${message}`,
+    };
+  }
+}
+
+/**
  * Resolves a confirmed action after the user clicks Confirm in the
- * ActionConfirmationDialog.
+ * ActionConfirmationDialog — the presentation leg of the ONE Confirmation Gate.
  *
- * D12 / FR-P2-02 (spaarke-ai-architecture-redesign-r1 task 031): the R2-052
- * per-action HITL confirm endpoint this function used to POST to was DELETED —
- * it was the platform's SECOND confirmation store (a stub with no execution and
- * no server emitter for its `action_confirmation` trigger event, making this leg
- * unreachable in production). Side-effect confirmation is unified behind the ONE
- * gate (BFF `PendingPlanManager`: suspend/resume/reject + ledger Gate markers per
- * ADR-040). This dialog becomes a presentation of that gate when the W-P2-B loop
- * wave (task 032) wires client resume; until then this returns a local failure
- * so any unexpected invocation is visible instead of silently 404ing.
+ * D12 / FR-P2-02 → FR-P2-03 (spaarke-ai-architecture-redesign-r1 tasks 031/032):
+ * the deleted R2-052 per-action confirm endpoint is replaced by the unified-gate
+ * resolution route `POST /api/ai/chat/sessions/{sessionId}/gates/{gateId}/resolve`
+ * (BFF `PendingPlanManager` resume + ledger Gate marker per ADR-040; Binding-backed
+ * invocations execute via the ONE dispatch seam). `pendingAction.actionId` carries
+ * the gate id.
  *
  * Auth v2 (D-AUTH-1) signature preserved for export compatibility.
  */
 export async function dispatchConfirmedAction(
   pendingAction: IPendingAction,
-  _apiBaseUrl: string,
-  _authenticatedFetch: (url: string, init?: RequestInit) => Promise<Response>
+  apiBaseUrl: string,
+  authenticatedFetch: (url: string, init?: RequestInit) => Promise<Response>
 ): Promise<{ success: boolean; message: string }> {
-  console.warn(
-    '[useActionHandlers] dispatchConfirmedAction invoked, but the per-action confirm ' +
-      'endpoint was removed by the unified Confirmation Gate (D12 / FR-P2-02). ' +
-      'Gate resume wiring lands with the W-P2-B loop wave (task 032). actionId:',
-    pendingAction.actionId
-  );
-  return {
-    success: false,
-    message:
-      `${pendingAction.actionName} could not be dispatched: this confirmation path ` +
-      'was replaced by the unified Confirmation Gate. Please retry the request in chat.',
-  };
+  return resolveGate(pendingAction, apiBaseUrl, authenticatedFetch, true);
+}
+
+/**
+ * Rejects a pending action after the user clicks Cancel in the
+ * ActionConfirmationDialog — writes the `rejected` Gate resolution marker
+ * server-side (ADR-040 append-only correlation) instead of silently dropping
+ * the suspension client-side.
+ */
+export async function rejectPendingAction(
+  pendingAction: IPendingAction,
+  apiBaseUrl: string,
+  authenticatedFetch: (url: string, init?: RequestInit) => Promise<Response>
+): Promise<{ success: boolean; message: string }> {
+  return resolveGate(pendingAction, apiBaseUrl, authenticatedFetch, false);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

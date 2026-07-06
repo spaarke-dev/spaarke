@@ -215,7 +215,11 @@ export type ChatSseEventType =
   | 'context_event'
   // chat-routing-redesign-r1 task 117a/117b — file-aware playbook routing
   // surfaces top-N candidates + an Open Library CTA inline in the chat.
-  | 'playbook_options';
+  | 'playbook_options'
+  // FR-P2-03 task 032 — capture_mode: modal wizard escape for a suspended
+  // capability invocation with missing required args (pending elicitation
+  // Gate marker precedes this event — ADR-040).
+  | 'elicitation_modal';
 
 /** A parsed SSE event from the stream, matching ChatSseEvent from the server. */
 export interface IChatSseEvent {
@@ -472,6 +476,52 @@ export interface IPlaybookOptionsPayload {
    * `rerankInvoked` is `false`.
    */
   rerankReason?: string | null;
+}
+
+/**
+ * One missing input field on an `elicitation_modal` SSE event (FR-P2-03,
+ * spaarke-ai-architecture-redesign-r1 task 032). Name/prompt/type come from the
+ * Binding's DECLARED input schema (`sprk_inputschema`) — the wizard must render
+ * these fields verbatim, never invent its own (ADR-039 grounded outputs).
+ *
+ * @see `Sprk.Bff.Api.Api.Ai.ChatSseElicitationFieldData`
+ */
+export interface IElicitationModalField {
+  /** Declared schema field name. */
+  name: string;
+  /** Maker-authored elicitation prompt (`elicitation_prompt` ?? `description`); null when undeclared. */
+  prompt?: string | null;
+  /** Declared JSON-schema type token, when present. */
+  type?: string | null;
+}
+
+/**
+ * Payload for the `elicitation_modal` SSE event (FR-P2-03): a capability
+ * invocation is suspended awaiting missing required inputs, and its Binding
+ * declares `capture_mode: modal` — the wizard surface collects the fields
+ * instead of conversational Q&A.
+ *
+ * Host contract: render a form/wizard for `missingFields` (pre-filling
+ * `providedArgs`), then complete by invoking the ONE client dispatch helper —
+ * `dispatchConsumer(bindingId, { slots: completedArgs })` — which executes the
+ * Binding and resolves the pending elicitation gate server-side (the P3 matter
+ * pre-fill wizard builds on this contract).
+ *
+ * @see `Sprk.Bff.Api.Api.Ai.ChatSseElicitationModalData`
+ */
+export interface IElicitationModalPayload {
+  /** Pending elicitation gate id (session-ledger correlation key). */
+  gateId: string;
+  /** Target Binding row GUID — the ONLY routing datum (ADR-039). */
+  bindingId: string;
+  /** Stable consumer-type code (presentation fallback title). */
+  consumerType: string;
+  /** The Binding's maker-authored tool description, when present. */
+  title?: string | null;
+  /** Declared required fields still missing. */
+  missingFields: IElicitationModalField[];
+  /** Arguments already supplied (wizard pre-fill); null/absent when none. */
+  providedArgs?: Record<string, unknown> | null;
 }
 
 /**
@@ -750,6 +800,21 @@ export interface ISprkChatProps {
    * defeats the point.
    */
   onPlaybookOptions?: ((payload: IPlaybookOptionsPayload) => void) | null;
+
+  /**
+   * Callback fired for `elicitation_modal` SSE events (FR-P2-03,
+   * spaarke-ai-architecture-redesign-r1 task 032 — capture_mode: modal escape).
+   *
+   * The host opens its wizard/form surface for the payload's `missingFields`
+   * (pre-filling `providedArgs`) and completes by invoking
+   * `dispatchConsumer(payload.bindingId, { slots })` — the server resolves the
+   * pending elicitation gate at the dispatch seam. When omitted, the event is
+   * logged and dropped (the assistant's chat notice still tells the user a form
+   * was intended; conversational elicitation resumes on their next reply).
+   *
+   * Synchronous callback-ref pattern (same as onPlaybookOptions).
+   */
+  onElicitationModal?: ((payload: IElicitationModalPayload) => void) | null;
 
   /**
    * Callback fired when the user clicks a candidate playbook link button rendered
@@ -1621,6 +1686,16 @@ export interface IUseSseStreamResult {
    * decisionId, outcome, durationMs, etc.) — no user content.
    */
   setOnContextEvent: (handler: ((data: IChatSseEventData) => void) | null) => void;
+
+  /**
+   * FR-P2-03 (task 032) — register/unregister a synchronous callback for
+   * `elicitation_modal` SSE forwarding (capture_mode: modal wizard escape).
+   *
+   * Same callback-ref pattern as setOnPlaybookOptions. SprkChat wires this to
+   * its `onElicitationModal` prop; the host opens the wizard and completes via
+   * `dispatchConsumer(bindingId, { slots })`. Pass `null` to unregister.
+   */
+  setOnElicitationModal: (handler: ((payload: IElicitationModalPayload) => void) | null) => void;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

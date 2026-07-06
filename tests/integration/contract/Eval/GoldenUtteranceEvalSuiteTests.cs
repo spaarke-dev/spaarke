@@ -2,6 +2,7 @@ using System.Text.Json;
 using System.Text.Json.Serialization;
 using FluentAssertions;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Xrm.Sdk;
@@ -172,34 +173,59 @@ public class GoldenUtteranceEvalSuiteTests
                 case "dispatch":
                     c.Expected.ConsumerType.Should().NotBeNullOrWhiteSpace(
                         $"case {c.CaseId}: dispatch cases must name their expected capability binding");
-                    if (string.Equals(c.Expected.CatalogStatus, "existing", StringComparison.OrdinalIgnoreCase))
-                    {
-                        // Grounding against the REAL closed catalog: renaming or removing a
-                        // consumer type in ConsumerTypes.cs fails the eval inventory here.
-                        ConsumerTypes.All.Should().Contain(c.Expected.ConsumerType,
-                            $"case {c.CaseId}: consumer type '{c.Expected.ConsumerType}' is declared " +
-                            "catalogStatus=existing, so it must be a member of ConsumerTypes.All");
-                    }
-                    else
-                    {
-                        c.Expected.CatalogStatus.Should().Be("planned",
-                            $"case {c.CaseId}: catalogStatus is a closed existing|planned vocabulary for dispatch cases");
-                        c.Expected.PlannedBy.Should().NotBeNullOrWhiteSpace(
-                            $"case {c.CaseId}: planned consumer types must cite the FR that introduces them " +
-                            "(closed-catalog doctrine — no invented capability names)");
-                        ConsumerTypes.All.Should().NotContain(c.Expected.ConsumerType,
-                            $"case {c.CaseId}: '{c.Expected.ConsumerType}' is declared planned but already exists " +
-                            "in ConsumerTypes.All — flip catalogStatus to existing");
-                    }
-
+                    AssertConsumerTypeGrounding(c);
                     break;
 
                 case "clarify":
+                    // P2 evolution (tasks 032/033, 2026-07-06): loop-native elicitation
+                    // (FR-P2-03) makes clarify a capability-TARGETED outcome — a clarify
+                    // case MAY name the capability whose declared required args are being
+                    // elicited (conversational or capture_mode:modal). When it does, the
+                    // same closed-catalog grounding as dispatch applies. Cases with no
+                    // target (M4 event confirmation) keep consumerType null.
+                    if (c.Expected.ConsumerType is not null)
+                    {
+                        AssertConsumerTypeGrounding(c);
+                    }
+
+                    break;
+
                 case "refuse":
                     c.Expected.ConsumerType.Should().BeNull(
-                        $"case {c.CaseId}: clarify/refuse outcomes resolve no binding");
+                        $"case {c.CaseId}: refuse outcomes resolve no user capability — the tenant's " +
+                        "no_match_handler Binding renders the refusal server-side (FR-P2-04); the CASE " +
+                        "declares no target");
                     break;
             }
+        }
+    }
+
+    /// <summary>
+    /// Closed-catalog grounding for a case's expected consumer type (dispatch cases
+    /// always; clarify cases when they name the capability under elicitation):
+    /// <c>existing</c> must be a member of <see cref="ConsumerTypes.All"/>;
+    /// <c>planned</c> must cite the introducing FR and must NOT already exist.
+    /// </summary>
+    private static void AssertConsumerTypeGrounding(GoldenUtteranceCase c)
+    {
+        if (string.Equals(c.Expected.CatalogStatus, "existing", StringComparison.OrdinalIgnoreCase))
+        {
+            // Grounding against the REAL closed catalog: renaming or removing a
+            // consumer type in ConsumerTypes.cs fails the eval inventory here.
+            ConsumerTypes.All.Should().Contain(c.Expected.ConsumerType,
+                $"case {c.CaseId}: consumer type '{c.Expected.ConsumerType}' is declared " +
+                "catalogStatus=existing, so it must be a member of ConsumerTypes.All");
+        }
+        else
+        {
+            c.Expected.CatalogStatus.Should().Be("planned",
+                $"case {c.CaseId}: catalogStatus is a closed existing|planned vocabulary for capability-targeted cases");
+            c.Expected.PlannedBy.Should().NotBeNullOrWhiteSpace(
+                $"case {c.CaseId}: planned consumer types must cite the FR that introduces them " +
+                "(closed-catalog doctrine — no invented capability names)");
+            ConsumerTypes.All.Should().NotContain(c.Expected.ConsumerType,
+                $"case {c.CaseId}: '{c.Expected.ConsumerType}' is declared planned but already exists " +
+                "in ConsumerTypes.All — flip catalogStatus to existing");
         }
     }
 
@@ -532,6 +558,101 @@ public class GoldenUtteranceEvalSuiteTests
                 "stream in declaration order; tldr must stream first (R5 FR-02 TL;DR-first UX)");
 
         _output.WriteLine($"P1 LIVE schema-conformance — SUM-CHAT@v1 contract pinned at {schemaPath}");
+    }
+
+    // -------------------------------------------------------------------------
+    // P2 live refusal-surface assertions (task 033, FR-P2-04) — the honest-refusal
+    // family's ROUTING + PROJECTION legs are live; the NL-loop dispatch assertion
+    // (off-catalog utterance → the model invoking the refusal tool) activates with
+    // task 037 (FR-P2-08) per each case's activation declaration.
+    //
+    // What "live" means here (mirrors the P1 pattern — no dispatcher invented):
+    //   • The tenant's no_match_handler Binding resolves through the REAL
+    //     ListTextProjectableBindingsAsync — the EXACT projection read
+    //     SprkChatAgentFactory performs to put the refusal tool in the loop's
+    //     tool list. Dataverse stubbed at the module boundary with a row shaped
+    //     like the seeded spaarkedev1 catalog row (task 033).
+    //   • The resolved Binding constructs the RefusalCapabilityTool projection
+    //     (deterministic name, maker-authored description, catalog schema).
+    //   • The REF-CHAT@v1 output-schema contract file is pinned (NFR-06) —
+    //     the single required `refusal` string the loop relays verbatim.
+    // -------------------------------------------------------------------------
+
+    /// <summary>The REF-CHAT@v1 <c>sprk_analysisaction</c> target seeded on spaarkedev1 (task 033).</summary>
+    private static readonly Guid RefChatActionId = new("8d337be2-3d79-f111-ab0e-7ced8ddc4cc6");
+
+    [Fact]
+    public async Task P2RefusalSurface_NoMatchHandlerBinding_ResolvesAndProjectsThroughTheClosedCatalog()
+    {
+        var suite = LoadSuite();
+        var refusalCases = suite.Cases
+            .Where(c => string.Equals(c.Family, "refusal", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        refusalCases.Should().NotBeEmpty("FR-P2-04: the refusal family carries text-channel refuse cases");
+        refusalCases.Should().OnlyContain(c => IsOutcome(c, "refuse"),
+            "the refusal family's outcome class is honest refusal — the fourth outcome of the G-P2 contract");
+
+        // Dataverse boundary stub shaped like the seeded spaarkedev1 row (task 033):
+        // enabled no_match_handler Binding, sprk_action → REF-CHAT@v1 (Prompted),
+        // maker-authored sprk_tooldescription (the projection opt-in), assistant surface.
+        var refusalRow = BuildActionTargetRow(
+            ConsumerTypes.NoMatchHandler, RefChatActionId, ucid: "L4-REFUSAL");
+        refusalRow["sprk_tooldescription"] =
+            "REFUSAL — call this when the user's request matches no other available capability.";
+        refusalRow["sprk_surfaces"] = "assistant";
+
+        var entityService = new Mock<IGenericEntityService>();
+        entityService
+            .Setup(s => s.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(new List<Entity> { refusalRow }));
+
+        var routing = CreateRoutingService(entityService);
+
+        // ── Projection leg: the EXACT read SprkChatAgentFactory performs (FR-P2-01/FR-P2-04).
+        var projectable = await routing.ListTextProjectableBindingsAsync();
+
+        var binding = projectable.Should().ContainSingle(
+            b => string.Equals(b.ConsumerType, ConsumerTypes.NoMatchHandler, StringComparison.OrdinalIgnoreCase),
+            "the tenant's no_match_handler Binding is text-projectable — the refusal template is CATALOG data " +
+            "(ADR-039: routing config lives only in the Binding table)").Subject;
+        binding.ActionId.Should().Be(RefChatActionId,
+            "the Binding's sprk_action lookup targets the REF-CHAT@v1 prompted Action (the refusal template)");
+        binding.ActionKind.Should().Be(ActionKind.Prompted,
+            "the refusal renders through the prompted executor — prompt-controlled honest copy");
+        binding.ToolDescription.Should().NotBeNullOrWhiteSpace(
+            "the maker-authored sprk_tooldescription is the projection opt-in AND the loop's intent surface");
+
+        // ── Tool-projection leg: the resolved Binding constructs the refusal tool the
+        // loop invokes (deterministic name — the system-prompt directive references it).
+        var tool = new Sprk.Bff.Api.Services.Ai.Chat.RefusalCapabilityTool(
+            binding,
+            new ServiceCollection().BuildServiceProvider(),
+            "tenant-eval", "session-eval",
+            Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance);
+        tool.Name.Should().Be("capability_no_match_handler");
+        tool.Description.Should().Be(binding.ToolDescription,
+            "no hardcoded refusal copy — description comes from the catalog row");
+
+        // ── NFR-06 schema-conformance leg: the REF-CHAT@v1 contract file is pinned.
+        var schemaPath = Path.Combine(
+            FindRepoRoot(), "infra", "dataverse", "outputschemas", "ref-chat-v1.schema.json");
+        File.Exists(schemaPath).Should().BeTrue(
+            $"the REF-CHAT@v1 output-schema contract must exist at {schemaPath} " +
+            "(it mirrors sprk_analysisaction.sprk_outputschemajson on spaarkedev1)");
+        using var doc = JsonDocument.Parse(File.ReadAllText(schemaPath));
+        doc.RootElement.GetProperty("title").GetString().Should().Contain("REF-CHAT@v1");
+        doc.RootElement.GetProperty("additionalProperties").GetBoolean().Should().BeFalse(
+            "structured outputs are closed — the model cannot invent fields");
+        doc.RootElement.GetProperty("required").EnumerateArray().Select(e => e.GetString())
+            .Should().BeEquivalentTo(new[] { "refusal" },
+                "the refusal payload's single required field is what RefusalCapabilityTool relays verbatim");
+
+        _output.WriteLine("P2 LIVE refusal-surface assertions (FR-P2-04):");
+        foreach (var c in refusalCases)
+        {
+            _output.WriteLine($"  {c.CaseId}  \"{c.Utterance}\"  ->  refuse via {binding.ConsumerType} " +
+                              $"binding {binding.BindingId} -> action {binding.ActionId} (REF-CHAT@v1)");
+        }
     }
 
     // -------------------------------------------------------------------------

@@ -463,6 +463,78 @@
       "expected": { "outcomeClass": "clarify", "consumerType": null, "consumerCode": null, "catalogStatus": null },
       "assertions": { "schemaConformance": null, "citationIntegrity": false },
       "activation": { "dispatchAssertPhase": "P1", "activatedBy": "task 026 (FR-P1-07; event-path cases added by task 022)" }
+    },
+    {
+      "caseId": "GU-041",
+      "family": "refusal",
+      "ucId": "UC-C-1",
+      "channel": "text",
+      "utterance": "translate this NDA into Spanish",
+      "notes": "FR-P2-04 (task 033) — the canonical Scenario D refusal (§3.10.7.3): no translation capability in the closed catalog; the loop invokes the tenant's no_match_handler Binding (RefusalCapabilityTool) — the refusal template is catalog data (REF-CHAT@v1 prompted Action), ledger-written BEFORE render (ADR-040), dispatch_refused telemetry emitted (identifiers only, NFR-07). Never a free-form apology, never an improvised translation.",
+      "context": { "surface": "assistant-chat", "sessionHasDocument": true },
+      "expected": { "outcomeClass": "refuse", "consumerType": null, "consumerCode": null, "catalogStatus": null },
+      "assertions": { "schemaConformance": "REF-CHAT@v1", "citationIntegrity": false },
+      "activation": { "dispatchAssertPhase": "P2", "activatedBy": "task 033 (FR-P2-04 refusal Binding + routing-surface assertion); task 037 (FR-P2-08) activates the NL-loop dispatch assertion" }
+    },
+    {
+      "caseId": "GU-042",
+      "family": "refusal",
+      "ucId": "UC-C-2",
+      "channel": "text",
+      "utterance": "book me a flight to Dallas for the deposition next week",
+      "notes": "FR-P2-04 (task 033) — off-domain ACTION ask: no travel capability exists and none can be improvised from read tools; must land the honest-refusal outcome (fourth outcome of the G-P2 contract), not a fabricated confirmation or a partial itinerary from general knowledge.",
+      "context": { "surface": "record-form-chat", "recordType": "sprk_matter" },
+      "expected": { "outcomeClass": "refuse", "consumerType": null, "consumerCode": null, "catalogStatus": null },
+      "assertions": { "schemaConformance": "REF-CHAT@v1", "citationIntegrity": false },
+      "activation": { "dispatchAssertPhase": "P2", "activatedBy": "task 033 (FR-P2-04 refusal Binding + routing-surface assertion); task 037 (FR-P2-08) activates the NL-loop dispatch assertion" }
+    },
+    {
+      "caseId": "GU-043",
+      "family": "elicitation",
+      "ucId": "UC-H-1",
+      "channel": "text",
+      "utterance": "create a to do for reviewing the NDA issues",
+      "notes": "FR-P2-03 (task 032) — walkthrough steps 10-11: the invocation is missing the DECLARED required inputs (due_date, owner per the Action's sprk_inputschema); the loop suspends it (pending elicitation Gate marker written BEFORE the clarifying turn renders — ADR-040) and asks ONE clarifying question grounded in the declared field names/prompts. Never executes with absent/guessed values, never invents fields.",
+      "context": { "surface": "assistant-chat", "sessionHasDocument": true },
+      "expected": { "outcomeClass": "clarify", "consumerType": null, "consumerCode": null, "catalogStatus": null },
+      "assertions": { "schemaConformance": null, "citationIntegrity": false },
+      "activation": { "dispatchAssertPhase": "P2", "activatedBy": "task 032 (FR-P2-03 loop-native elicitation — unit-proven in LoopElicitationTests); task 037 (FR-P2-08) activates the NL-loop dispatch assertion" }
+    },
+    {
+      "caseId": "GU-044",
+      "family": "elicitation",
+      "ucId": "UC-H-1",
+      "channel": "text",
+      "utterance": "7/9/2026 and yes me",
+      "notes": "FR-P2-03 (task 032) — walkthrough step 12: a pending elicitation Gate exists in the session ledger; the utterance is neither a hard slash nor an exact restart phrase, so it deterministically parses as the ANSWER to the pending invocation (the loop re-invokes the suspended capability tool with the previously provided args plus the parsed values; a successful dispatch resolves the gate as confirmed). No intent classification anywhere on this path.",
+      "context": { "surface": "assistant-chat", "sessionHasDocument": true, "pendingElicitation": true },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "create-task", "consumerCode": "default", "catalogStatus": "planned", "plannedBy": "FR-P3-03" },
+      "assertions": { "schemaConformance": null, "citationIntegrity": false },
+      "activation": { "dispatchAssertPhase": "P2", "activatedBy": "task 032 (FR-P2-03 mid-elicitation answer semantics — unit-proven in LoopElicitationTests); task 037 (FR-P2-08) activates the NL-loop dispatch assertion" }
+    },
+    {
+      "caseId": "GU-045",
+      "family": "elicitation",
+      "ucId": "UC-A-1",
+      "channel": "text",
+      "utterance": "/summarize",
+      "notes": "FR-P2-03 (task 032) — hard-slash escape mid-elicitation: with a pending elicitation Gate in the ledger, a hard-slash command breaks out deterministically (gate closed 'superseded', payload deleted) and the command executes normally. The escape set is closed: hard slash + exact restart phrases only (ADR-039 — no second intent mechanism).",
+      "context": { "surface": "assistant-chat", "sessionHasDocument": true, "pendingElicitation": true },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "chat-summarize", "consumerCode": "default", "catalogStatus": "existing" },
+      "assertions": { "schemaConformance": "SUM-CHAT@v1", "citationIntegrity": false },
+      "activation": { "dispatchAssertPhase": "P2", "activatedBy": "task 032 (FR-P2-03 deterministic escape — unit-proven in LoopElicitationTests); task 034 (FR-P2-05 soft-slash direct invocation) activates the live assertion" }
+    },
+    {
+      "caseId": "GU-046",
+      "family": "elicitation",
+      "ucId": "UC-D-1",
+      "channel": "text",
+      "utterance": "start a new matter for this NDA",
+      "notes": "FR-P2-03 (task 032) — capture_mode: modal escape: the matter pre-fill capability declares sprk_capturemode=modal (8+ required fields — wizard scale per canonical D3); missing required args route to the wizard surface via the elicitation_modal SSE event (pending Gate marker first — ADR-040) instead of conversational Q&A; wizard completion dispatches by Binding id (dispatchConsumer) and resolves the gate at the dispatch seam. P3's matter pre-fill wizard (FR-P3-01) builds on this contract.",
+      "context": { "surface": "assistant-chat", "sessionHasDocument": true },
+      "expected": { "outcomeClass": "clarify", "consumerType": "matter-pre-fill", "consumerCode": "default", "catalogStatus": "existing" },
+      "assertions": { "schemaConformance": null, "citationIntegrity": false },
+      "activation": { "dispatchAssertPhase": "P3", "activatedBy": "P3 wave (FR-P3-01 matter-pre-fill Binding + wizard surface; modal routing unit-proven in LoopElicitationTests at P2)" }
     }
   ]
 }

@@ -50,6 +50,9 @@ public class AiTelemetry : IDisposable
     private readonly Counter<long> _privilegeFilterApplied;
     private readonly Counter<long> _privilegeFilterEmptyResult;
 
+    // Honest-refusal metrics (FR-P2-04, spaarke-ai-architecture-redesign-r1 task 033)
+    private readonly Counter<long> _dispatchRefused;
+
     // Meter name for OpenTelemetry
     private const string MeterName = "Sprk.Bff.Api.Ai";
 
@@ -71,6 +74,14 @@ public class AiTelemetry : IDisposable
             name: "ai_retrieval_privilege_filter_empty_result_total",
             unit: "{request}",
             description: "Total number of RAG search requests where user has no matching groups (public docs only)");
+
+        // === Honest-Refusal Metrics (FR-P2-04 / ADR-039 L4) ===
+        _dispatchRefused = _meter.CreateCounter<long>(
+            name: "dispatch_refused",
+            unit: "{refusal}",
+            description: "Number of text-path turns that ended in the honest-refusal outcome " +
+                         "(the tenant's no_match_handler Binding rendered). The refusal-backlog " +
+                         "product signal (FR-P4-07 deferred admin view) aggregates this counter.");
 
         // === Summarization Metrics ===
         _summarizeRequests = _meter.CreateCounter<long>(
@@ -160,6 +171,41 @@ public class AiTelemetry : IDisposable
             name: "ai.export.file_size",
             unit: "By",
             description: "Size of exported files in bytes");
+    }
+
+    /// <summary>
+    /// Record one honest-refusal outcome of the agent-turn loop (FR-P2-04 /
+    /// ADR-039 grounded-execution clause (d)): an utterance matched nothing in the
+    /// closed catalog, could not be answered as a cited ad-hoc read, and the
+    /// tenant's <c>no_match_handler</c> Binding rendered the refusal.
+    /// </summary>
+    /// <remarks>
+    /// Lands in App Insights as <c>customMetrics | where name == "dispatch_refused"</c>.
+    /// Dimensions are BOUNDED per the R5SummarizeTelemetry cardinality discipline:
+    /// <c>tenant.id</c> (low-cardinality, ADR-014 precedent) and
+    /// <c>render_status</c> ∈ { <c>rendered</c>, <c>render_failed</c> }. Session /
+    /// binding / output-key identifiers ride the companion structured log line
+    /// (<c>[FR-P2-04][dispatch_refused]</c> in <see cref="Services.Ai.Chat.RefusalCapabilityTool"/>)
+    /// — identifiers only, never utterance content (NFR-07 / ADR-015).
+    /// </remarks>
+    /// <param name="rendered">
+    /// True when the tenant template rendered + ledger-stored; false when the refusal
+    /// capability itself failed (the turn still ends in a refusal, so the backlog
+    /// signal is still counted).
+    /// </param>
+    /// <param name="tenantId">Optional low-cardinality tenant id dimension; null omits it.</param>
+    public void RecordDispatchRefused(bool rendered, string? tenantId = null)
+    {
+        var tags = new TagList
+        {
+            { "render_status", rendered ? "rendered" : "render_failed" },
+        };
+        if (!string.IsNullOrEmpty(tenantId))
+        {
+            tags.Add("tenant.id", tenantId);
+        }
+
+        _dispatchRefused.Add(1, tags);
     }
 
     /// <summary>

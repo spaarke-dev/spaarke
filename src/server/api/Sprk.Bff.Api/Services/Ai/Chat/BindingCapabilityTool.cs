@@ -1,6 +1,7 @@
 using System.Text.Json;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
+using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 
 namespace Sprk.Bff.Api.Services.Ai.Chat;
@@ -64,17 +65,32 @@ public sealed class BindingCapabilityTool : AIFunction
     private readonly string _tenantId;
     private readonly string _sessionId;
     private readonly ILogger _logger;
+    private readonly Func<Api.Ai.ChatSseEvent, CancellationToken, Task>? _sseWriter;
     private readonly string _name;
     private readonly string _description;
     private readonly JsonElement _schema;
 
+    /// <param name="binding">The projected catalog Binding row.</param>
+    /// <param name="rootServices">ROOT service provider (fresh scope per invocation — ADR-010).</param>
+    /// <param name="tenantId">Tenant id (ADR-014).</param>
+    /// <param name="sessionId">Chat session id.</param>
+    /// <param name="logger">Logger.</param>
+    /// <param name="sseWriter">
+    /// Optional chat-stream SSE writer (FR-P2-03): carries the <c>elicitation_modal</c>
+    /// wizard-routing event when the Binding declares <c>capture_mode: modal</c> and
+    /// required args are missing. Null on surfaces without a chat SSE stream — modal
+    /// capture then degrades to loop elicitation (logged). Does not perturb the
+    /// projected name/description/schema (NFR-04 cache stability).
+    /// </param>
     public BindingCapabilityTool(
         Binding binding,
         IServiceProvider rootServices,
         string tenantId,
         string sessionId,
-        ILogger logger)
+        ILogger logger,
+        Func<Api.Ai.ChatSseEvent, CancellationToken, Task>? sseWriter = null)
     {
+        _sseWriter = sseWriter;
         _binding = binding ?? throw new ArgumentNullException(nameof(binding));
         _rootServices = rootServices ?? throw new ArgumentNullException(nameof(rootServices));
         _tenantId = !string.IsNullOrWhiteSpace(tenantId) ? tenantId : throw new ArgumentException("tenantId required", nameof(tenantId));
@@ -162,6 +178,22 @@ public sealed class BindingCapabilityTool : AIFunction
             return "This capability is not available in the current environment (dispatch service disabled).";
         }
 
+        // ── FR-P2-03 loop-native elicitation ─────────────────────────────────────
+        // Validate the model's arguments against the Binding's DECLARED input schema
+        // BEFORE dispatch. Missing required args suspend the invocation into the ONE
+        // pending store (ledger Gate marker first — ADR-040) and yield a clarifying
+        // turn (or the wizard escape when capture_mode: modal) instead of executing
+        // with absent/guessed values. This elicitation-triggering call still consumed
+        // one budget unit and is recorded on the ToolChain (NFR-09: elicitation turns
+        // count within the per-turn tool budget).
+        var missing = BindingInputSchemaValidator.FindMissingRequired(_binding.InputSchemaJson, arguments);
+        if (missing.Count > 0)
+        {
+            return await SuspendForElicitationAsync(
+                scope.ServiceProvider, missing, arguments, cancellationToken).ConfigureAwait(false);
+        }
+        // ── End FR-P2-03 validation ──────────────────────────────────────────────
+
         JsonElement? args = null;
         if (arguments is { Count: > 0 })
         {
@@ -214,4 +246,116 @@ public sealed class BindingCapabilityTool : AIFunction
             return $"The '{_binding.ConsumerType}' capability cannot run right now ({ex.ErrorCode}). Tell the user honestly and suggest an alternative.";
         }
     }
+
+    /// <summary>
+    /// FR-P2-03: suspends a missing-required-args invocation — pending Gate marker to the
+    /// ledger FIRST (ADR-040 storage-precedes-rendering; via the unified store), resumable
+    /// partial-args payload second, THEN the grounded turn instruction (loop clarify or
+    /// modal escape). A re-suspension mid-elicitation (partial answer) reuses the pending
+    /// gate id: the fresh pending marker carries the REMAINING fields (append-only
+    /// correlation) and the payload overwrite merges what the model re-supplied.
+    /// </summary>
+    private async Task<object?> SuspendForElicitationAsync(
+        IServiceProvider services,
+        IReadOnlyList<ElicitationField> missing,
+        AIFunctionArguments arguments,
+        CancellationToken cancellationToken)
+    {
+        var pendingManager = services.GetService<PendingPlanManager>();
+        var sessionManager = services.GetService<ChatSessionManager>();
+        if (pendingManager is null || sessionManager is null)
+        {
+            // Degraded environment (no unified store in this DI graph). Still refuse to
+            // execute with missing args — the clarifying turn stays grounded; only the
+            // cross-turn marker is unavailable. Loud log so the gap is visible.
+            _logger.LogWarning(
+                "[agent-turn.elicitation] pending store unavailable — clarifying without ledger marker. " +
+                "binding={BindingId} session={SessionId}",
+                _binding.BindingId, _sessionId);
+            return ElicitationTurnRouter.BuildClarifyInstruction(_binding.ConsumerType, Name, missing);
+        }
+
+        // Reuse the gate id of an already-pending elicitation for this Binding (the
+        // partial-answer walk stays ONE logical invocation across turns).
+        var session = await sessionManager.GetSessionAsync(_tenantId, _sessionId, cancellationToken).ConfigureAwait(false);
+        var existing = PendingPlanManager.FindPendingGate(
+            session?.Gates, PendingPlanManager.GateKindElicitation, _binding.BindingId.ToString());
+        var gateId = existing?.GateId ?? $"elicitation-{Guid.NewGuid():N}";
+
+        var providedArgsJson = arguments is { Count: > 0 }
+            ? JsonSerializer.Serialize(arguments.ToDictionary(a => a.Key, a => a.Value))
+            : "{}";
+
+        var suspended = await pendingManager.SuspendInvocationAsync(
+            new PendingInvocation
+            {
+                GateId = gateId,
+                Kind = PendingPlanManager.GateKindElicitation,
+                SessionId = _sessionId,
+                TenantId = _tenantId,
+                ToolId = Name,
+                BindingId = _binding.BindingId.ToString(),
+                MissingFields = missing.Select(f => f.Name).ToList(),
+                Risk = MapRisk(_binding.Risk),
+                ArgsJson = providedArgsJson,
+                Title = _binding.ConsumerType,
+                Turn = existing?.Turn ?? 0,
+            },
+            cancellationToken).ConfigureAwait(false);
+
+        var wantsModal = _binding.CaptureMode == BindingCaptureMode.Modal;
+        if (wantsModal && _sseWriter is not null)
+        {
+            // Marker already written above — the wizard-routing event renders AFTER storage
+            // (ADR-040). The client dispatch helper (task 023 dispatchConsumer) closes the
+            // loop: wizard completion POSTs the completed args by Binding id; the dispatch
+            // seam resolves this gate (PendingPlanManager.ResolveElicitationOnDispatchAsync).
+            await _sseWriter(
+                new Api.Ai.ChatSseEvent(
+                    "elicitation_modal",
+                    null,
+                    new Api.Ai.ChatSseElicitationModalData(
+                        GateId: suspended.GateId,
+                        BindingId: _binding.BindingId.ToString(),
+                        ConsumerType: _binding.ConsumerType,
+                        Title: _binding.ToolDescription,
+                        MissingFields: missing
+                            .Select(f => new Api.Ai.ChatSseElicitationFieldData(f.Name, f.Prompt, f.Type))
+                            .ToArray(),
+                        ProvidedArgs: arguments is { Count: > 0 }
+                            ? JsonSerializer.SerializeToElement(arguments.ToDictionary(a => a.Key, a => a.Value))
+                            : null)),
+                cancellationToken).ConfigureAwait(false);
+
+            _logger.LogInformation(
+                "[agent-turn.elicitation] modal escape — gateId={GateId} binding={BindingId} " +
+                "missingFieldCount={MissingFieldCount} session={SessionId}",
+                suspended.GateId, _binding.BindingId, missing.Count, _sessionId);
+
+            return ElicitationTurnRouter.BuildModalNotice(_binding.ConsumerType, missing);
+        }
+
+        if (wantsModal)
+        {
+            _logger.LogWarning(
+                "[agent-turn.elicitation] capture_mode=modal but no SSE surface on this invocation — " +
+                "degrading to loop elicitation. binding={BindingId} session={SessionId}",
+                _binding.BindingId, _sessionId);
+        }
+
+        _logger.LogInformation(
+            "[agent-turn.elicitation] suspended — gateId={GateId} binding={BindingId} " +
+            "missingFieldCount={MissingFieldCount} captureMode={CaptureMode} session={SessionId}",
+            suspended.GateId, _binding.BindingId, missing.Count, _binding.CaptureMode, _sessionId);
+
+        return ElicitationTurnRouter.BuildClarifyInstruction(_binding.ConsumerType, Name, missing);
+    }
+
+    /// <summary>Ledger/audit vocabulary for the Binding risk posture (mirrors sprk_risk labels).</summary>
+    private static string MapRisk(BindingRisk risk) => risk switch
+    {
+        BindingRisk.AlwaysConfirm => "always-confirm",
+        BindingRisk.ConfirmWhenUncertain => "confirm-when-uncertain",
+        _ => "none",
+    };
 }

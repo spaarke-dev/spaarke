@@ -60,7 +60,7 @@ import { useChatFileAttachment } from './hooks/useChatFileAttachment';
 import type { ISprkChatInputHandle } from './types';
 import { Toaster, useToastController, useId, Toast, ToastTitle, ToastBody } from '@fluentui/react-components';
 import { ActionConfirmationDialog } from './ActionConfirmationDialog';
-import { openCodePageDialog, navigateToTarget, dispatchConfirmedAction } from './hooks/useActionHandlers';
+import { openCodePageDialog, navigateToTarget, dispatchConfirmedAction, rejectPendingAction } from './hooks/useActionHandlers';
 import type { IPendingAction, IChatSseEventData } from './types';
 
 // ---------------------------------------------------------------------------
@@ -353,6 +353,8 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   onOpenLibraryModal,
   // R6 Pillar 6c / task 095 — trace bridge: context_event SSE forwarding to host.
   onContextEvent: onContextEventProp,
+  // FR-P2-03 task 032 — capture_mode: modal wizard escape forwarding to host.
+  onElicitationModal: onElicitationModalProp,
 }) => {
   const styles = useStyles();
   const messageListRef = React.useRef<HTMLDivElement>(null);
@@ -443,6 +445,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
     setOnPaneEvent,
     setOnPlaybookOptions,
     setOnContextEvent,
+    setOnElicitationModal,
   } = sseStream;
 
   // Track current streaming state
@@ -759,11 +762,25 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
 
   /**
    * Cancel the pending action (user clicked Cancel in ActionConfirmationDialog).
-   * Clears the dialog without executing.
+   * Rejects the gate server-side (FR-P2-03 / task 032: the `rejected` Gate marker
+   * lands in the session ledger — ADR-040 append-only correlation) and clears the
+   * dialog. Rejection failures are logged, never blocking the dialog close.
    */
   const handleActionCancel = React.useCallback(() => {
+    const action = pendingAction;
     setPendingAction(null);
-  }, []);
+    if (!action) return;
+
+    rejectPendingAction(action, apiBaseUrl, authenticatedFetch)
+      .then(result => {
+        if (!result.success) {
+          console.warn('[SprkChat] gate reject failed:', result.message);
+        }
+      })
+      .catch((err: unknown) => {
+        console.warn('[SprkChat] gate reject failed:', err);
+      });
+  }, [pendingAction, apiBaseUrl, authenticatedFetch]);
 
   // Initialize session on mount.
   //
@@ -1044,6 +1061,32 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
       setOnPlaybookOptions(null);
     };
   }, [onPlaybookOptionsProp, setOnPlaybookOptions]);
+
+  // ── FR-P2-03 task 032: register elicitation_modal callback ────────────────
+  //
+  // Forwards the SSE `elicitation_modal` payload (capture_mode: modal wizard
+  // escape) to the host. The host opens its wizard for the missing declared
+  // fields and completes via dispatchConsumer(bindingId, { slots }) — the
+  // server resolves the pending elicitation gate at the dispatch seam.
+  // Synchronous callback-ref pattern — mirrors setOnPlaybookOptions.
+  React.useEffect(() => {
+    if (!onElicitationModalProp) {
+      setOnElicitationModal(null);
+      return;
+    }
+
+    setOnElicitationModal(payload => {
+      try {
+        onElicitationModalProp(payload);
+      } catch (err) {
+        console.error('[SprkChat] Failed to forward elicitation_modal SSE event:', err);
+      }
+    });
+
+    return () => {
+      setOnElicitationModal(null);
+    };
+  }, [onElicitationModalProp, setOnElicitationModal]);
 
   // R6 Pillar 6c / task 095 — wire `onContextEvent` prop into the SSE pipeline.
   // Synchronous callback-ref pattern — mirrors the setOnPlaybookOptions useEffect

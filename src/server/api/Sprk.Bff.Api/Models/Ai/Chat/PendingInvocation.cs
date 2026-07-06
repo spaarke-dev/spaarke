@@ -33,6 +33,19 @@ public sealed record PendingInvocation
     /// <summary>Stable gate id correlating this store entry with its ledger <c>SessionGate</c> markers.</summary>
     public required string GateId { get; init; }
 
+    /// <summary>
+    /// Gate kind this suspension represents — <c>confirmation</c> (default; side-effect
+    /// approval) or <c>elicitation</c> (FR-P2-03: in-flight invocation awaiting missing
+    /// required args). Drives the <c>SessionGate.Kind</c> written on every marker.
+    /// </summary>
+    public string Kind { get; init; } = "confirmation";
+
+    /// <summary>
+    /// For <c>elicitation</c> suspensions: the declared input-schema field NAMES still
+    /// missing (identifiers only — mirrors the ledger marker; NFR-07).
+    /// </summary>
+    public IReadOnlyList<string>? MissingFields { get; init; }
+
     /// <summary>Session the invocation was suspended in.</summary>
     public required string SessionId { get; init; }
 

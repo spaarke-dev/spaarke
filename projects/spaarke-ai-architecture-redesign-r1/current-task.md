@@ -9,10 +9,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | W-P2-B: 032 (loop-native elicitation + modal escape + Gate markers) + 033 (honest refusal + dispatch_refused) — dispatching |
-| **Step** | W-P2-A COMPLETE (030 + 031 ✅, wave committed). P1 closed earlier tonight. |
+| **Task** | 034 — HARD CUTOVER chat NL → agent loop (serial, parallel-safe FALSE) — dispatching |
+| **Step** | W-P2-A + W-P2-B COMPLETE (030/031/032/033 ✅). P1 closed earlier tonight. |
 | **Status** | autonomous overnight execution (operator directive 2026-07-06: "move on to P2 while i sleep") |
-| **Next Action** | On W-P2-B agents' return: flip TASK-INDEX, build + suite triage vs KNOWN list, commit (`git pull --rebase` first), push, portfolio sync, then 034 (HARD CUTOVER, serial) → 035+036 → 037. STOP at gate 038 (operator browser UAT — NEVER auto-pass, NFR-11). |
+| **Next Action** | On 034's return: flip TASK-INDEX, build + suite triage vs KNOWN list, commit (`git pull --rebase` first), push, portfolio sync, then W-P2-D (035 + 036 parallel deletions) → 037 (eval + injection). STOP at gate 038 (operator browser UAT — NEVER auto-pass, NFR-11). |
 
 ### P1 close summary (2026-07-06)
 - G-P1 ran TWO UAT rounds. Round-2 findings + fixes: `notes/g-p1-uat-round2-findings.md` — RD-1 chip strip stranded at top → SprkChat `aboveInputSlot` prop, chips now above input zone; RD-2 "Summarize again" frozen to original fileIds → transition chips carry NO args, dispatch-time FR-08 default-all; RD-3 latent composer-strip gating → session-level count (promotedChipIds ∪ composer-ready).
@@ -49,6 +49,12 @@
 - /healthz/catalog on the DEPLOYED instance stays Degraded until next branch deploy (deleted TemplateHandler still in the running registry) — flips at gate 038 deploy.
 - 031 W1 (suspend on missing session skips marker — tighten at W-P2-B) + W2 (extra catalog query on legacy path — dies at 034) + client dead-leg (032 rewires ActionConfirmationDialog as gate presentation).
 
+## W-P2-B outcomes (2026-07-06, both Step 9.5 PASS)
+- **032**: elicitation = loop state. BindingCapabilityTool validates against sprk_inputschema → missing args suspend into the ONE pending store with elicitation Gate marker BEFORE render; clarifying turn grounded in declared fields only; capture_mode=modal → `elicitation_modal` SSE → wizard; mid-elicitation utterances route as ANSWERS via ElicitationTurnRouter (hard-slash/restart-phrase escape); resolve at SessionDispatchOrchestrator.ResolveElicitationOnDispatchAsync; unified gate-resolve endpoint POST /sessions/{id}/gates/{gateId}/resolve; client ActionConfirmationDialog rewired to it; 031-W1 now throws. NOTE: no spaarkedev1 row declares required inputs yet — machinery activates with P3 create-task/matter-pre-fill.
+- **033**: refusal = fourth loop outcome, pure catalog data. REF-CHAT@v1 Action `8d337be2-3d79-f111-ab0e-7ced8ddc4cc6` + no_match_handler Binding `48dcd7ec-3d79-f111-ab0e-7ced8ddc4cc6` (ucid L4-REFUSAL) on spaarkedev1; RefusalCapabilityTool renders via IActionRunner (file-less-safe) + ledger-before-return + `dispatch_refused` counter (meter Sprk.Bff.Api.Ai); grounded-outcomes system-prompt directive (NFR-04 stable). App Insights LIVE evidence deferred to gate-038 deploy (KQL in notes/task-033-honest-refusal-notes.md). 033 evolved 032's GU-046 eval invariant (clarify MAY name capability under elicitation) — acked by main session in wave commit.
+- Combined-tree suite (main session): 8059 — 7952 passed / 6 failed, ALL known (5 pre-existing + PhaseB flake). Eval 12/12.
+- 034 integration notes in notes/task-030/031/032/033-*.md: delete PlaybookDispatcher pre-pass + Phase-B + DetectToolCallsAsync blocks; keep isElicitationAnswerTurn effectiveTurnMessage substitution; keep FR-P2-04 directive block; AgentToolCatalogProjector+Finalize = single projection path; route resumed invocations through SessionDispatchOrchestrator.
+
 ## Parallel Execution
 
-W-P2-B dispatching: agents for tasks 032 + 033 (032 deps 030+031; 033 deps 030 — both satisfied).
+034 dispatching (serial — parallel-safe FALSE; hard cutover).

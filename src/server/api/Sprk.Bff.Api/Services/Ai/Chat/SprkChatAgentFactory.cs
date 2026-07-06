@@ -538,8 +538,25 @@ public class SprkChatAgentFactory
                     .ConfigureAwait(false);
                 foreach (var binding in bindings)
                 {
+                    // FR-P2-04: the tenant's no_match_handler Binding projects as the
+                    // dedicated refusal tool (honest-refusal loop outcome — file-less
+                    // prompted render + ledger write + dispatch_refused telemetry).
+                    // Every other opted-in Binding projects as the generic capability
+                    // tool (dispatch by id through SessionDispatchOrchestrator). The
+                    // discriminator is CATALOG DATA (the row's consumer type), not a
+                    // tool-name list (ADR-039).
+                    if (string.Equals(binding.ConsumerType, Sprk.Bff.Api.Services.Ai.PublicContracts.ConsumerTypes.NoMatchHandler, StringComparison.OrdinalIgnoreCase))
+                    {
+                        tools.Add(new RefusalCapabilityTool(
+                            binding, _serviceProvider, tenantId, sessionId, _logger));
+                        continue;
+                    }
+
+                    // sseWriter rides along for the FR-P2-03 capture_mode: modal escape
+                    // (elicitation_modal event); null on non-chat surfaces (degrades to
+                    // loop elicitation inside the tool).
                     tools.Add(new BindingCapabilityTool(
-                        binding, _serviceProvider, tenantId, sessionId, _logger));
+                        binding, _serviceProvider, tenantId, sessionId, _logger, sseWriter));
                 }
 
                 _logger.LogInformation(
@@ -586,6 +603,36 @@ public class SprkChatAgentFactory
             finalTools.Count, tools.Count, turnOptions.ToolCallBudget,
             AgentToolProjection.ComputeProjectionFingerprint(finalTools));
         // === End FR-P2-01 finalization ==================================================
+
+        // === FR-P2-04 — grounded-outcomes directive (honest refusal) ====================
+        // When the tenant's no_match_handler Binding survived projection + pre-filter,
+        // pin the G-P2 four-outcome contract in the system prompt so an off-catalog
+        // utterance ends in the refusal TOOL — never a free-form apology or an
+        // improvised answer (ADR-039 grounded outputs). The directive is loop-contract
+        // instruction (like the Citation Guidelines block); the user-facing refusal
+        // COPY stays catalog data (the Binding's REF-CHAT@v1 Action). Deterministic
+        // constant text — prompt-cache-stable across turns (NFR-04).
+        if (finalTools.Any(t => (t as BudgetedAIFunction)?.Inner is RefusalCapabilityTool || t is RefusalCapabilityTool))
+        {
+            var refusalToolName = BindingCapabilityTool.BuildFunctionName(
+                Sprk.Bff.Api.Services.Ai.PublicContracts.ConsumerTypes.NoMatchHandler);
+            context = context with
+            {
+                SystemPrompt = context.SystemPrompt +
+                    "\n\n## Grounded Outcomes (Spaarke platform contract)\n" +
+                    "Every reply must be one of: (1) invoking an available capability tool, " +
+                    "(2) an answer grounded in tool results with [N] citations, " +
+                    "(3) a clarifying question needed to invoke a capability, or " +
+                    "(4) an honest refusal.\n" +
+                    $"If the user's request matches no available tool or capability and cannot be answered " +
+                    $"from the session's documents or connected records via the available read tools, call " +
+                    $"`{refusalToolName}` with a short neutral `{RefusalCapabilityTool.UnsupportedRequestArgName}` " +
+                    "label and relay its returned message verbatim. NEVER answer from general knowledge, " +
+                    "NEVER invent or imply capabilities that are not in your tool list, and NEVER decline or " +
+                    "apologize in your own words instead of calling that tool.",
+            };
+        }
+        // === End FR-P2-04 directive ======================================================
 
         // === capability_change SSE event ===
         // Emit when the per-turn tool set differs from the previous turn's tool set.

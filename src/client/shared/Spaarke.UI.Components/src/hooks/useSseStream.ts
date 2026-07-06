@@ -51,6 +51,7 @@ import type {
   IUseSseStreamResult,
   ICitationSseItem,
   IPlaybookOptionsPayload,
+  IElicitationModalPayload,
   AccessTokenGetter,
 } from '../components/SprkChat/types';
 
@@ -333,6 +334,13 @@ interface SseEventHandlers {
    * typed enumerated fields ONLY.
    */
   onContextEvent: (data: IChatSseEventData) => void;
+  /**
+   * FR-P2-03 (spaarke-ai-architecture-redesign-r1 task 032) — receives the
+   * `elicitation_modal` payload (capture_mode: modal wizard escape). Verbatim
+   * forward; the host owns the wizard + `dispatchConsumer(bindingId, {slots})`
+   * completion.
+   */
+  onElicitationModal: (payload: IElicitationModalPayload) => void;
   onDone: () => void;
   onError: (message: string) => void;
 }
@@ -414,6 +422,23 @@ function processEvent(event: IChatSseEvent, handlers: SseEventHandlers): void {
       rerankInvoked: typeof data.rerankInvoked === 'boolean' ? data.rerankInvoked : false,
       rerankReason: data.rerankReason ?? null,
     });
+  } else if (event.type === 'elicitation_modal') {
+    // FR-P2-03 task 032 — capture_mode: modal wizard routing. Payload shape locked
+    // by ChatSseElicitationModalData (camelCase): { gateId, bindingId, consumerType,
+    // title?, missingFields: [{name, prompt?, type?}], providedArgs? }. Tolerant
+    // parse: an event without the two routing ids is dropped (never throws).
+    const data = (event.data ?? {}) as unknown as Partial<IElicitationModalPayload>;
+    if (typeof data.gateId === 'string' && data.gateId.length > 0 &&
+        typeof data.bindingId === 'string' && data.bindingId.length > 0) {
+      handlers.onElicitationModal({
+        gateId: data.gateId,
+        bindingId: data.bindingId,
+        consumerType: typeof data.consumerType === 'string' ? data.consumerType : '',
+        title: data.title ?? null,
+        missingFields: Array.isArray(data.missingFields) ? data.missingFields : [],
+        providedArgs: data.providedArgs ?? null,
+      });
+    }
   } else if (event.type === 'context_event') {
     // R6 task 095 — trace bridge. Forward the raw payload to the host so it
     // can dispatch on the `context` PaneEventBus channel. Tier-1 safe by BFF
@@ -503,6 +528,10 @@ export function useSseStream(): IUseSseStreamResult {
   // wires this so the host can forward to ExecutionTraceWidget via the bus.
   const onContextEventRef = useRef<((data: IChatSseEventData) => void) | null>(null);
 
+  // FR-P2-03 task 032 — callback ref for `elicitation_modal` SSE events
+  // (capture_mode: modal wizard escape). Same callback-ref pattern.
+  const onElicitationModalRef = useRef<((payload: IElicitationModalPayload) => void) | null>(null);
+
   const abortControllerRef = useRef<AbortController | null>(null);
 
   const cancelStream = useCallback(() => {
@@ -549,6 +578,11 @@ export function useSseStream(): IUseSseStreamResult {
   // context channel where ExecutionTraceWidget renders it.
   const setOnContextEvent = useCallback((handler: ((data: IChatSseEventData) => void) | null) => {
     onContextEventRef.current = handler;
+  }, []);
+
+  // FR-P2-03 task 032 — register/unregister the elicitation_modal callback.
+  const setOnElicitationModal = useCallback((handler: ((payload: IElicitationModalPayload) => void) | null) => {
+    onElicitationModalRef.current = handler;
   }, []);
 
   const startStream = useCallback(
@@ -618,6 +652,20 @@ export function useSseStream(): IUseSseStreamResult {
               const handler = onContextEventRef.current;
               if (handler) {
                 handler(data);
+              }
+            },
+            onElicitationModal: (payload: IElicitationModalPayload) => {
+              // FR-P2-03 task 032 — forward to host via the registered callback ref.
+              // No host handler = drop with a warning (the assistant's chat notice
+              // already told the user; conversational elicitation resumes on reply).
+              const handler = onElicitationModalRef.current;
+              if (handler) {
+                handler(payload);
+              } else {
+                console.warn(
+                  '[useSseStream] elicitation_modal received but no onElicitationModal handler registered — gateId:',
+                  payload.gateId
+                );
               }
             },
             onDone: () => {
@@ -701,5 +749,6 @@ export function useSseStream(): IUseSseStreamResult {
     setOnPaneEvent,
     setOnPlaybookOptions,
     setOnContextEvent,
+    setOnElicitationModal,
   };
 }

@@ -75,6 +75,9 @@ public class PendingPlanManager
     /// <summary>Ledger vocabulary: gate kind for side-effect confirmations (ADR-040).</summary>
     public const string GateKindConfirmation = "confirmation";
 
+    /// <summary>Ledger vocabulary: gate kind for in-flight elicitations (FR-P2-03 / ADR-040).</summary>
+    public const string GateKindElicitation = "elicitation";
+
     /// <summary>Ledger vocabulary: gate status <c>pending</c> (ADR-040 <c>pending | confirmed | rejected | expired | superseded</c>).</summary>
     public const string GateStatusPending = "pending";
 
@@ -83,6 +86,12 @@ public class PendingPlanManager
 
     /// <summary>Ledger vocabulary: gate status <c>rejected</c>.</summary>
     public const string GateStatusRejected = "rejected";
+
+    /// <summary>Ledger vocabulary: gate status <c>expired</c> (resumable payload TTL lapsed).</summary>
+    public const string GateStatusExpired = "expired";
+
+    /// <summary>Ledger vocabulary: gate status <c>superseded</c> (user broke out — hard slash / explicit restart / new work).</summary>
+    public const string GateStatusSuperseded = "superseded";
 
     /// <summary>
     /// Reproduces the on-wire cache key produced by <see cref="ITenantCache"/> for legacy
@@ -193,18 +202,30 @@ public class PendingPlanManager
             new SessionGate
             {
                 GateId = invocation.GateId,
-                Kind = GateKindConfirmation,
+                Kind = invocation.Kind,
                 Status = GateStatusPending,
                 Turn = invocation.Turn,
                 BindingId = invocation.BindingId,
                 SideEffectClass = invocation.SideEffectClass,
+                MissingFields = invocation.MissingFields,
                 CreatedAt = DateTimeOffset.UtcNow,
             },
             ct).ConfigureAwait(false);
 
+        if (appended is null)
+        {
+            // Task 032 W1 tightening (Step 9.5 review of task 031): a suspension whose pending
+            // marker cannot land in the ledger MUST NOT proceed — ADR-040 storage-precedes-
+            // rendering means an unmarked suspended payload would be invisible ledger state.
+            throw new InvalidOperationException(
+                $"Cannot suspend invocation '{invocation.GateId}': chat session " +
+                $"'{invocation.SessionId}' no longer exists — the ADR-040 pending Gate marker " +
+                "could not be written, so the suspension is aborted.");
+        }
+
         var suspended = invocation with
         {
-            Turn = appended?.Entry.Turn ?? invocation.Turn,
+            Turn = appended.Value.Entry.Turn,
             CreatedAt = invocation.CreatedAt == default ? DateTimeOffset.UtcNow : invocation.CreatedAt,
         };
 
@@ -221,10 +242,12 @@ public class PendingPlanManager
 
         // 3. Gate telemetry (ADR-016 / NFR-09: counts + identifiers, never content).
         _logger.LogInformation(
-            "gate_suspended — gateId={GateId}, tool={ToolId}, sideEffectClass={SideEffectClass}, " +
-            "risk={Risk}, bindingId={BindingId}, turn={Turn}, session={SessionId}, tenant={TenantId}, ttl=30m",
-            suspended.GateId, suspended.ToolId, suspended.SideEffectClass,
-            suspended.Risk, suspended.BindingId, suspended.Turn, suspended.SessionId, suspended.TenantId);
+            "gate_suspended — gateId={GateId}, kind={Kind}, tool={ToolId}, sideEffectClass={SideEffectClass}, " +
+            "risk={Risk}, bindingId={BindingId}, missingFieldCount={MissingFieldCount}, turn={Turn}, " +
+            "session={SessionId}, tenant={TenantId}, ttl=30m",
+            suspended.GateId, suspended.Kind, suspended.ToolId, suspended.SideEffectClass,
+            suspended.Risk, suspended.BindingId, suspended.MissingFields?.Count ?? 0,
+            suspended.Turn, suspended.SessionId, suspended.TenantId);
 
         return suspended;
     }
@@ -329,6 +352,7 @@ public class PendingPlanManager
         string status,
         string? bindingId = null,
         string? sideEffectClass = null,
+        IReadOnlyList<string>? missingFields = null,
         int turn = 0,
         CancellationToken ct = default)
     {
@@ -343,6 +367,7 @@ public class PendingPlanManager
                 Turn = turn,
                 BindingId = bindingId,
                 SideEffectClass = sideEffectClass,
+                MissingFields = missingFields,
                 CreatedAt = DateTimeOffset.UtcNow,
                 ResolvedAt = status is GateStatusPending ? null : DateTimeOffset.UtcNow,
             },
@@ -382,15 +407,144 @@ public class PendingPlanManager
             new SessionGate
             {
                 GateId = invocation.GateId,
-                Kind = GateKindConfirmation,
+                Kind = invocation.Kind,
                 Status = status,
                 Turn = invocation.Turn,
                 BindingId = invocation.BindingId,
                 SideEffectClass = invocation.SideEffectClass,
+                MissingFields = invocation.MissingFields,
                 CreatedAt = DateTimeOffset.UtcNow,
                 ResolvedAt = DateTimeOffset.UtcNow,
             },
             ct).ConfigureAwait(false);
+    }
+
+    /// <summary>
+    /// Closes a suspended invocation with an arbitrary terminal status
+    /// (<see cref="GateStatusSuperseded"/> for deterministic break-outs — hard slash /
+    /// explicit restart, FR-P2-03; <see cref="GateStatusExpired"/> when a caller detects
+    /// TTL lapse while the payload still exists). Deletes the resumable payload and
+    /// appends the resolution marker. Idempotent — closing an expired/resolved gate is
+    /// a no-op returning false (callers holding only the ledger marker use
+    /// <see cref="WriteGateMarkerAsync"/> for the marker-only close).
+    /// </summary>
+    public virtual async Task<bool> CloseInvocationAsync(
+        string tenantId,
+        string sessionId,
+        string gateId,
+        string status,
+        CancellationToken ct = default)
+    {
+        var invocation = await TakeInvocationAsync(tenantId, sessionId, gateId, ct).ConfigureAwait(false);
+        if (invocation is null)
+        {
+            return false;
+        }
+
+        await AppendResolutionAsync(invocation, status, ct).ConfigureAwait(false);
+
+        _logger.LogInformation(
+            "gate_closed — gateId={GateId}, kind={Kind}, status={Status}, tool={ToolId}, " +
+            "turn={Turn}, session={SessionId}, tenant={TenantId}",
+            invocation.GateId, invocation.Kind, status, invocation.ToolId,
+            invocation.Turn, sessionId, tenantId);
+
+        return true;
+    }
+
+    /// <summary>
+    /// THE deterministic pending-gate ledger query (FR-P2-03): the most recent gate of
+    /// <paramref name="kind"/> (optionally scoped to <paramref name="bindingId"/>) whose
+    /// LATEST entry is still <c>pending</c>. Append-only correlation: entries group by
+    /// <see cref="SessionGate.GateId"/>; the last-appended entry per gate id is its
+    /// current state. Pure — no store access, no classification.
+    /// </summary>
+    public static SessionGate? FindPendingGate(
+        IReadOnlyList<SessionGate>? gates,
+        string kind,
+        string? bindingId = null)
+    {
+        if (gates is not { Count: > 0 })
+        {
+            return null;
+        }
+
+        // Ledger order IS append order (AppendGateAsync appends); the last entry per
+        // gate id is the gate's current state.
+        SessionGate? latestPending = null;
+        var currentByGate = new Dictionary<string, SessionGate>(StringComparer.Ordinal);
+        foreach (var entry in gates)
+        {
+            currentByGate[entry.GateId] = entry;
+        }
+
+        foreach (var entry in gates)
+        {
+            var current = currentByGate[entry.GateId];
+            if (!string.Equals(current.Status, GateStatusPending, StringComparison.Ordinal) ||
+                !string.Equals(current.Kind, kind, StringComparison.Ordinal))
+            {
+                continue;
+            }
+
+            if (bindingId is not null &&
+                !string.Equals(current.BindingId, bindingId, StringComparison.OrdinalIgnoreCase))
+            {
+                continue;
+            }
+
+            latestPending = current; // later appends win — the newest pending gate
+        }
+
+        return latestPending;
+    }
+
+    /// <summary>
+    /// Resolves the session's pending <c>elicitation</c> gate for <paramref name="bindingId"/>
+    /// after a successful dispatch of that Binding (FR-P2-03). Called by
+    /// <see cref="SessionDispatchOrchestrator"/> at the ONE dispatch seam — a completed
+    /// dispatch of the awaited Binding IS the elicitation's answer, whether it arrived via
+    /// the loop re-invoking the capability tool with completed args, the wizard surface
+    /// (capture_mode modal) posting through <c>dispatchConsumer</c>, or a chip click.
+    /// No-op when no elicitation is pending for the Binding.
+    /// </summary>
+    /// <returns>The confirmed resolution marker, or null when nothing was pending.</returns>
+    public virtual async Task<SessionGate?> ResolveElicitationOnDispatchAsync(
+        string tenantId,
+        string sessionId,
+        Guid bindingId,
+        CancellationToken ct = default)
+    {
+        var session = await _sessionManager.GetSessionAsync(tenantId, sessionId, ct).ConfigureAwait(false);
+        var pending = FindPendingGate(session?.Gates, GateKindElicitation, bindingId.ToString());
+        if (pending is null)
+        {
+            return null;
+        }
+
+        // Best-effort payload cleanup (may already be TTL-expired — that's fine).
+        await _cache.RemoveAsync(
+            tenantId, GateCacheResource, BuildGateKey(sessionId, pending.GateId), CacheVersion, ct: ct)
+            .ConfigureAwait(false);
+
+        var resolved = await WriteGateMarkerAsync(
+            tenantId,
+            sessionId,
+            pending.GateId,
+            GateKindElicitation,
+            GateStatusConfirmed,
+            bindingId: pending.BindingId,
+            sideEffectClass: pending.SideEffectClass,
+            missingFields: pending.MissingFields,
+            turn: pending.Turn,
+            ct: ct).ConfigureAwait(false);
+
+        _logger.LogInformation(
+            "elicitation_resolved — gateId={GateId}, bindingId={BindingId}, turn={Turn}, " +
+            "session={SessionId}, tenant={TenantId}",
+            pending.GateId, pending.BindingId, pending.Turn, sessionId, tenantId);
+
+        return resolved;
     }
 
     private static string BuildGateKey(string sessionId, string gateId) => $"{sessionId}:{gateId}";

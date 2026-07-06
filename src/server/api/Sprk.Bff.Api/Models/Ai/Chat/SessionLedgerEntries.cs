@@ -181,6 +181,13 @@ public sealed record SessionGate
     /// <summary>Declared side-effect class driving the gate (<c>read | write | communicate | pure</c>).</summary>
     public string? SideEffectClass { get; init; }
 
+    /// <summary>
+    /// For <c>elicitation</c> gates: the declared input-schema field NAMES still missing
+    /// when the marker was written (FR-P2-03). Identifiers only — schema field names,
+    /// never captured values (NFR-07).
+    /// </summary>
+    public IReadOnlyList<string>? MissingFields { get; init; }
+
     /// <summary>Ledger key of the Output entry produced once the gate resolved, when applicable.</summary>
     public string? OutputKey { get; init; }
 

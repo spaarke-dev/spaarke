@@ -245,6 +245,9 @@ public sealed class AgentTurnContract
     internal static readonly HashSet<string> AlwaysRedactedArgNames = new(StringComparer.OrdinalIgnoreCase)
     {
         "query", "text", "body", "message", "content", "prompt", "instruction", "question",
+        // FR-P2-04 (task 033): the refusal tool's request label paraphrases the user's
+        // utterance — redact by name so it never lands in the ToolChain audit (NFR-07).
+        RefusalCapabilityTool.UnsupportedRequestArgName,
     };
 
     private static int ValueLength(object? value) => value switch

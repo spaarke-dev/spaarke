@@ -77,6 +77,7 @@ public class SessionDispatchOrchestrator
     private readonly IActionRunner _actionRunner;
     private readonly ISessionFileTextSource _sessionFileTextSource;
     private readonly IOutputRouter _outputRouter;
+    private readonly PendingPlanManager _pendingPlanManager;
     private readonly ILogger<SessionDispatchOrchestrator> _logger;
 
     public SessionDispatchOrchestrator(
@@ -86,6 +87,7 @@ public class SessionDispatchOrchestrator
         IActionRunner actionRunner,
         ISessionFileTextSource sessionFileTextSource,
         IOutputRouter outputRouter,
+        PendingPlanManager pendingPlanManager,
         ILogger<SessionDispatchOrchestrator> logger)
     {
         _sessionManager = sessionManager ?? throw new ArgumentNullException(nameof(sessionManager));
@@ -94,6 +96,7 @@ public class SessionDispatchOrchestrator
         _actionRunner = actionRunner ?? throw new ArgumentNullException(nameof(actionRunner));
         _sessionFileTextSource = sessionFileTextSource ?? throw new ArgumentNullException(nameof(sessionFileTextSource));
         _outputRouter = outputRouter ?? throw new ArgumentNullException(nameof(outputRouter));
+        _pendingPlanManager = pendingPlanManager ?? throw new ArgumentNullException(nameof(pendingPlanManager));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -113,6 +116,7 @@ public class SessionDispatchOrchestrator
         _actionRunner = null!;
         _sessionFileTextSource = null!;
         _outputRouter = null!;
+        _pendingPlanManager = null!;
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -321,6 +325,16 @@ public class SessionDispatchOrchestrator
                 output,
                 sourceRefs: targetFiles.Select(f => f.FileId).ToList(),
                 cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
+
+        // ── FR-P2-03: a successful dispatch of this Binding resolves any pending
+        // elicitation gate awaiting it — whether the completed args arrived via the loop
+        // re-invoking the capability tool, the wizard surface (capture_mode: modal →
+        // dispatchConsumer), or a chip click. ONE resolution point at the ONE dispatch
+        // seam (ADR-039); marker written BEFORE the terminal chunk renders (ADR-040).
+        await _pendingPlanManager
+            .ResolveElicitationOnDispatchAsync(
+                request.TenantId, request.SessionId, binding.BindingId, cancellationToken)
             .ConfigureAwait(false);
 
         yield return DeserializeResultChunk(routed.Entry.Payload.GetRawText());

@@ -536,6 +536,14 @@ public sealed class DispatchSessionEndpointTestFixture : IAsyncLifetime, IDispos
         builder.Services.AddSingleton<IActionRunner, ActionRunner>();
         builder.Services.AddSingleton<IOutputRouter>(Router);
 
+        // FR-P2-03 (task 032): the orchestrator resolves pending elicitation gates at
+        // the dispatch seam — the REAL unified store over the test session manager +
+        // in-memory tenant cache (no Redis).
+        builder.Services.AddSingleton(sp => new PendingPlanManager(
+            new Sprk.Bff.Api.Tests.Infrastructure.Cache.InMemoryTenantCache(),
+            Sessions,
+            sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<PendingPlanManager>>()));
+
         builder.Services.AddScoped<SessionDispatchOrchestrator>();
 
         builder.WebHost.UseTestServer();

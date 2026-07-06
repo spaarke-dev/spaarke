@@ -115,6 +115,18 @@ public static class ConsumerTypes
     public const string ComposeSummarize = "compose-summarize";
 
     /// <summary>
+    /// The per-tenant honest-refusal capability (FR-P2-04 / ADR-039 grounded-execution
+    /// clause (d); canonical doc §3.10.7.2 Layer 4). When the agent-turn loop matches
+    /// nothing in the closed catalog and cannot ground a cited ad-hoc answer, it
+    /// invokes THIS Binding — the refusal template is catalog data (the Binding's
+    /// REF-CHAT@v1 prompted Action), never hardcoded copy. Projected into the loop
+    /// as <c>RefusalCapabilityTool</c>; emits <c>dispatch_refused</c> telemetry
+    /// (the refusal-backlog product signal). Added by
+    /// spaarke-ai-architecture-redesign-r1 task 033.
+    /// </summary>
+    public const string NoMatchHandler = "no_match_handler";
+
+    /// <summary>
     /// Read-only list of all consumer-type constants. Intended for startup
     /// health-log diffing against Dataverse (chat-routing-redesign-r1 task
     /// 028e exit gate).
@@ -131,5 +143,6 @@ public static class ConsumerTypes
         DailyBriefingNarrate,
         DocumentProfile,
         ComposeSummarize,
+        NoMatchHandler,
     };
 }

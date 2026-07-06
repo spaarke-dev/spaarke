@@ -98,9 +98,18 @@ public static class AgentToolProjection
 
         foreach (var tool in tools)
         {
-            if (tool is BindingCapabilityTool capability)
+            // Binding-projected tools (generic capability + the FR-P2-04 refusal
+            // capability) filter on the catalog's sprk_surfaces column — the same
+            // pure predicate for both projections.
+            var surfaces = tool switch
             {
-                var surfaces = capability.Binding.Surfaces;
+                BindingCapabilityTool capability => capability.Binding.Surfaces,
+                RefusalCapabilityTool refusal => refusal.Binding.Surfaces,
+                _ => null,
+            };
+
+            if (surfaces is not null)
+            {
                 // Empty = offered on ALL surfaces (column dictionary rule).
                 var surfaceMatch = surfaces.Count == 0
                     || surfaces.Contains(context.Surface, StringComparer.OrdinalIgnoreCase);

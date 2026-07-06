@@ -175,6 +175,10 @@ public class StoredGate
     [JsonPropertyName("sideEffectClass")]
     public string? SideEffectClass { get; set; }
 
+    /// <summary>For elicitation gates: missing input-schema field names (identifiers only — NFR-07).</summary>
+    [JsonPropertyName("missingFields")]
+    public List<string>? MissingFields { get; set; }
+
     /// <summary>Ledger key of the Output entry produced once the gate resolved.</summary>
     [JsonPropertyName("outputKey")]
     public string? OutputKey { get; set; }

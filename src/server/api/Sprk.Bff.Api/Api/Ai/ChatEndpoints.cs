@@ -229,6 +229,31 @@ public static class ChatEndpoints
         // no execution behind it. ALL side-effect confirmation now flows through the ONE
         // gate: PendingPlanManager (suspend/resume/reject + ledger Gate markers, ADR-040).
 
+        // POST /api/ai/chat/sessions/{sessionId}/gates/{gateId}/resolve — resolve a
+        // suspended invocation through the ONE gate (FR-P2-03 / task 032). The client
+        // ActionConfirmationDialog rewires its confirm/cancel legs here (the presentation
+        // of the unified gate). Component Justification (§11): /plan/approve resolves the
+        // PLAN-shaped session-singleton entry only; no surface resolved generalized
+        // PendingInvocations — without this route the dialog's Confirm has no server path
+        // and the loop-boundary suspensions (task 034) have no resume surface.
+        group.MapPost("/sessions/{sessionId}/gates/{gateId}/resolve", ResolveGateAsync)
+            .AddAiAuthorizationFilter()
+            .RequireRateLimiting("ai-stream")
+            .WithName("ResolveGate")
+            .WithSummary("Confirm or reject a suspended invocation in the unified confirmation gate")
+            .WithDescription(
+                "Resolves a pending gate entry (PendingPlanManager unified store). approved=true " +
+                "resumes the suspended invocation — Binding-backed invocations execute via the " +
+                "SessionDispatchOrchestrator dispatch seam (ledger write before render, ADR-040) " +
+                "and the result summary is returned as JSON. approved=false rejects it. " +
+                "Returns 409 when the gate is expired or already resolved (double-click protection).")
+            .Produces<GateResolveResult>()
+            .ProducesProblem(400)
+            .ProducesProblem(401)
+            .ProducesProblem(409)
+            .ProducesProblem(422)
+            .ProducesProblem(429);
+
         // GET /api/ai/chat/sessions/{sessionId}/commands — resolve dynamic command catalog
         group.MapGet("/sessions/{sessionId}/commands", GetCommandsAsync)
             .AddAiAuthorizationFilter()
@@ -508,6 +533,21 @@ public static class ChatEndpoints
                     WriteChatSSEAsync(response, new ChatSseEvent("context_event", null, dto), ct);
             }
 
+            // === FR-P2-03 (task 032) — mid-elicitation deterministic turn routing =====
+            // While an elicitation Gate is pending in the session ledger (ADR-040), an
+            // incoming utterance is an ANSWER to the pending invocation unless it is a
+            // hard-slash command or an explicit restart — deterministic string checks
+            // only, never intent classification (ADR-039; walkthrough steps 10-12).
+            // Answer turns ride the loop with a platform elicitation frame prepended to
+            // the effective message (same composed-message pattern as attachments); the
+            // PERSISTED history keeps request.Message verbatim.
+            var elicitationTurn = await ResolveElicitationTurnAsync(
+                session, request.Message, effectiveMessage,
+                tenantId, sessionId, pendingPlanManager, logger, cancellationToken);
+            var isElicitationAnswerTurn = elicitationTurn is not null;
+            var effectiveTurnMessage = elicitationTurn?.FramedMessage ?? effectiveMessage;
+            // === End FR-P2-03 routing =================================================
+
             // === R2: Create the R2 SSE emitter for the six new event types.
             // Available to the response pipeline for duration of this request.
             // R1 events (token, done, error, etc.) continue to be emitted via WriteChatSSEAsync
@@ -553,7 +593,12 @@ public static class ChatEndpoints
             // FR-07 (task 050): pass the effectiveMessage so compound-intent detection sees
             // the attachment context. The agent SDK reuses this same text downstream — there is
             // still exactly ONE LLM call per user turn (D-01 single-LLM-call invariant).
-            var toolCalls = await agent.DetectToolCallsAsync(effectiveMessage, history, cancellationToken);
+            // FR-P2-03: an elicitation-answer turn is a CONTINUATION of one pending
+            // invocation — the legacy compound pre-pass must not re-dispatch it (the
+            // loop resolves the answer by re-invoking the suspended capability tool).
+            var toolCalls = isElicitationAnswerTurn
+                ? (IReadOnlyList<FunctionCallContent>)Array.Empty<FunctionCallContent>()
+                : await agent.DetectToolCallsAsync(effectiveTurnMessage, history, cancellationToken);
             var intentDetector = new CompoundIntentDetector(logger);
 
             // Declared side-effect-class lookup (built from sprk_analysistool rows) — only
@@ -630,7 +675,13 @@ public static class ChatEndpoints
             // a playbook via PlaybookDispatcher. If a match is found, route through
             // PlaybookOutputHandler for typed output handling (dialog, navigation, download, insert).
             // Text output falls through to the standard streaming flow below.
-            var dispatcher = await agentFactory.CreatePlaybookDispatcherAsync(tenantId, cancellationToken);
+            // FR-P2-03: null on elicitation-answer turns — the legacy dispatcher
+            // pre-passes are bypassed entirely (the turn continues ONE pending
+            // invocation; it is not a fresh dispatch). This whole region dies at
+            // the P2 hard cutover (task 034).
+            var dispatcher = isElicitationAnswerTurn
+                ? null
+                : await agentFactory.CreatePlaybookDispatcherAsync(tenantId, cancellationToken);
 
             // === FR-49 / FR-50: File-aware playbook OPTIONS flow ===
             // When the user turn has attachments, run Phase B vector match → top-N candidate
@@ -642,7 +693,7 @@ public static class ChatEndpoints
             // When the user turn has NO attachments, fall through to the existing single-match
             // auto-dispatch flow below (preserves R6 backward compatibility for natural-language
             // slash + non-attachment paths).
-            if (request.Attachments is { Count: > 0 })
+            if (dispatcher is not null && request.Attachments is { Count: > 0 })
             {
                 var phaseBResults = await dispatcher
                     .RunPhaseBVectorMatchAsync(
@@ -739,12 +790,14 @@ public static class ChatEndpoints
             // FR-20 (task 115): also forward the soft-slash intentHint as a vector-query bias
             // signal. Phase B uses it to prefix the per-file query; the pre-task-115 path is
             // preserved when IntentHint is null/empty.
-            var dispatchResult = await dispatcher.DispatchAsync(
-                request.Message,
-                session.HostContext,
-                cancellationToken,
-                attachments: request.Attachments,
-                intentHint: request.IntentHint);
+            var dispatchResult = dispatcher is null
+                ? null
+                : await dispatcher.DispatchAsync(
+                    request.Message,
+                    session.HostContext,
+                    cancellationToken,
+                    attachments: request.Attachments,
+                    intentHint: request.IntentHint);
 
             // Task 048 (FR-14d) — the gate now also fires for non-Chat NodeDestination
             // values (Workspace / Both / FormPrefill / SideEffect). The destination is
@@ -842,7 +895,9 @@ public static class ChatEndpoints
             // attachment context — this is the SINGLE LLM call that produces the response
             // (D-01 invariant). The agent receives one composed message; no second extraction
             // or summarization LLM call is introduced.
-            await foreach (var update in agent.SendMessageAsync(effectiveMessage, history, cancellationToken))
+            // FR-P2-03: effectiveTurnMessage carries the elicitation answer frame on
+            // mid-elicitation turns; otherwise it IS effectiveMessage.
+            await foreach (var update in agent.SendMessageAsync(effectiveTurnMessage, history, cancellationToken))
             {
                 var content = update.Text;
                 if (!string.IsNullOrEmpty(content))
@@ -2594,6 +2649,220 @@ public static class ChatEndpoints
     }
 
     /// <summary>
+    /// State of an FR-P2-03 elicitation-answer turn: the framed message the loop
+    /// receives (the utterance parsed as answers to the pending invocation) + the
+    /// pending gate id (identifiers only).
+    /// </summary>
+    private sealed record ElicitationTurnState(string FramedMessage, string GateId);
+
+    /// <summary>
+    /// FR-P2-03 mid-elicitation deterministic routing (walkthrough steps 10-12):
+    /// <list type="bullet">
+    ///   <item>No pending <c>elicitation</c> Gate in the ledger → null (normal turn).</item>
+    ///   <item>Hard-slash / explicit-restart utterance → the gate is closed
+    ///   <c>superseded</c> (deterministic escape) and the turn proceeds normally.</item>
+    ///   <item>Resumable payload TTL-expired → the marker is closed <c>expired</c>
+    ///   and the turn proceeds normally.</item>
+    ///   <item>Otherwise → the utterance IS the answer: return the framed turn message
+    ///   instructing the loop to resolve it into the suspended invocation.</item>
+    /// </list>
+    /// The pending-state check is ledger state (ADR-040), the escapes are exact string
+    /// checks (<see cref="ElicitationTurnRouter"/>) — no intent classification (ADR-039).
+    /// </summary>
+    private static async Task<ElicitationTurnState?> ResolveElicitationTurnAsync(
+        ChatSession session,
+        string userMessage,
+        string effectiveMessage,
+        string tenantId,
+        string sessionId,
+        PendingPlanManager pendingPlanManager,
+        ILogger logger,
+        CancellationToken cancellationToken)
+    {
+        var pending = PendingPlanManager.FindPendingGate(
+            session.Gates, PendingPlanManager.GateKindElicitation);
+        if (pending is null)
+        {
+            return null;
+        }
+
+        if (ElicitationTurnRouter.IsHardSlash(userMessage) ||
+            ElicitationTurnRouter.IsExplicitRestart(userMessage))
+        {
+            var closed = await pendingPlanManager.CloseInvocationAsync(
+                tenantId, sessionId, pending.GateId,
+                PendingPlanManager.GateStatusSuperseded, cancellationToken);
+            if (!closed)
+            {
+                // Payload already TTL-expired — marker-only close (append-only resolution).
+                await pendingPlanManager.WriteGateMarkerAsync(
+                    tenantId, sessionId, pending.GateId,
+                    PendingPlanManager.GateKindElicitation, PendingPlanManager.GateStatusSuperseded,
+                    bindingId: pending.BindingId, sideEffectClass: pending.SideEffectClass,
+                    missingFields: pending.MissingFields, turn: pending.Turn, ct: cancellationToken);
+            }
+
+            logger.LogInformation(
+                "[FR-P2-03] elicitation superseded (deterministic escape) — gateId={GateId}, session={SessionId}",
+                pending.GateId, sessionId);
+            return null;
+        }
+
+        var invocation = await pendingPlanManager.GetInvocationAsync(
+            tenantId, sessionId, pending.GateId, cancellationToken);
+        if (invocation is null)
+        {
+            // Resumable payload lapsed (30-min TTL) — the walk-away expired cleanly.
+            await pendingPlanManager.WriteGateMarkerAsync(
+                tenantId, sessionId, pending.GateId,
+                PendingPlanManager.GateKindElicitation, PendingPlanManager.GateStatusExpired,
+                bindingId: pending.BindingId, sideEffectClass: pending.SideEffectClass,
+                missingFields: pending.MissingFields, turn: pending.Turn, ct: cancellationToken);
+
+            logger.LogInformation(
+                "[FR-P2-03] elicitation expired — gateId={GateId}, session={SessionId}",
+                pending.GateId, sessionId);
+            return null;
+        }
+
+        logger.LogInformation(
+            "[FR-P2-03] mid-elicitation answer turn — gateId={GateId}, tool={ToolId}, " +
+            "missingFieldCount={MissingFieldCount}, session={SessionId}",
+            pending.GateId, invocation.ToolId, invocation.MissingFields?.Count ?? 0, sessionId);
+
+        return new ElicitationTurnState(
+            ElicitationTurnRouter.BuildAnswerFrame(invocation, effectiveMessage),
+            pending.GateId);
+    }
+
+    /// <summary>
+    /// POST /api/ai/chat/sessions/{sessionId}/gates/{gateId}/resolve — the unified-gate
+    /// resolution surface (FR-P2-03 / task 032; presentation contract for
+    /// ActionConfirmationDialog and future loop-boundary suspensions per task 034).
+    /// </summary>
+    private static async Task<IResult> ResolveGateAsync(
+        string sessionId,
+        string gateId,
+        GateResolveRequest request,
+        PendingPlanManager pendingPlanManager,
+        SessionDispatchOrchestrator dispatchOrchestrator,
+        HttpContext httpContext,
+        ILogger<SprkChatAgentFactory> logger)
+    {
+        var tenantId = ExtractTenantId(httpContext);
+        if (string.IsNullOrEmpty(tenantId))
+        {
+            return Results.Problem(
+                detail: "Tenant ID not found in token claims or X-Tenant-Id header",
+                statusCode: StatusCodes.Status400BadRequest,
+                title: "Bad Request");
+        }
+
+        var cancellationToken = httpContext.RequestAborted;
+
+        if (!request.Approved)
+        {
+            var rejected = await pendingPlanManager.RejectInvocationAsync(
+                tenantId, sessionId, gateId, cancellationToken);
+            return rejected
+                ? Results.Ok(new GateResolveResult("rejected", null))
+                : GateNotPendingProblem();
+        }
+
+        // Confirm: get-then-delete (double-confirm → 409) + confirmed ledger marker.
+        var invocation = await pendingPlanManager.ResumeInvocationAsync(
+            tenantId, sessionId, gateId, cancellationToken);
+        if (invocation is null)
+        {
+            return GateNotPendingProblem();
+        }
+
+        if (!Guid.TryParse(invocation.BindingId, out var bindingId) || bindingId == Guid.Empty)
+        {
+            // Non-Binding-backed invocations resume at the loop seam (task 034 wires the
+            // loop-boundary confirmation suspend/resume); this surface executes catalog
+            // Bindings only (ADR-039 closed catalog).
+            return Results.Problem(
+                detail: "The confirmed invocation has no Binding target; it cannot be executed from this surface.",
+                statusCode: StatusCodes.Status422UnprocessableEntity,
+                title: "Unprocessable Entity",
+                extensions: new Dictionary<string, object?> { ["errorCode"] = "gate.no-binding-target" });
+        }
+
+        JsonElement? args = null;
+        if (!string.IsNullOrWhiteSpace(invocation.ArgsJson))
+        {
+            try
+            {
+                using var doc = JsonDocument.Parse(invocation.ArgsJson);
+                args = doc.RootElement.Clone();
+            }
+            catch (JsonException)
+            {
+                // Store-only payload should always be valid JSON; degrade to no args.
+                logger.LogWarning(
+                    "ResolveGate: malformed ArgsJson on gate {GateId} — dispatching without args. session={SessionId}",
+                    gateId, sessionId);
+            }
+        }
+
+        try
+        {
+            // Execute via THE dispatch seam (ADR-039). The orchestrator ledger-writes the
+            // output BEFORE the terminal chunk (ADR-040); this handler drains the chunks
+            // and returns the terminal summary as JSON (the dialog presentation is a
+            // toast, not a stream — streamed resume presentation arrives with task 034's
+            // loop-boundary wiring).
+            string? summary = null;
+            string? error = null;
+            await foreach (var chunk in dispatchOrchestrator.DispatchAsync(
+                new SessionDispatchRequest(tenantId, sessionId, bindingId, args), cancellationToken))
+            {
+                if (chunk.Done)
+                {
+                    error = chunk.Error;
+                    summary = chunk.Summary ?? chunk.Content;
+                }
+            }
+
+            if (error is not null)
+            {
+                return Results.Problem(
+                    detail: error,
+                    statusCode: StatusCodes.Status502BadGateway,
+                    title: "Dispatch Failed",
+                    extensions: new Dictionary<string, object?> { ["errorCode"] = "gate.dispatch-failed" });
+            }
+
+            return Results.Ok(new GateResolveResult("confirmed", summary));
+        }
+        catch (DispatchRejectedException ex)
+        {
+            return Results.Problem(
+                detail: ex.Message,
+                statusCode: ex.StatusCode,
+                title: "Dispatch Rejected",
+                extensions: new Dictionary<string, object?> { ["errorCode"] = ex.ErrorCode });
+        }
+        catch (InvalidOperationException ex) when (ex.Message.Contains("not found", StringComparison.OrdinalIgnoreCase))
+        {
+            // Session vanished between resume and dispatch — same 404 mapping contract
+            // as DispatchSessionEndpoint (the sibling dispatch surface).
+            return Results.Problem(
+                detail: ex.Message,
+                statusCode: StatusCodes.Status404NotFound,
+                title: "Not Found",
+                extensions: new Dictionary<string, object?> { ["errorCode"] = "gate.session-not-found" });
+        }
+
+        static IResult GateNotPendingProblem() => Results.Problem(
+            detail: "The gate is expired or already resolved.",
+            statusCode: StatusCodes.Status409Conflict,
+            title: "Conflict",
+            extensions: new Dictionary<string, object?> { ["errorCode"] = "gate.not-pending" });
+    }
+
+    /// <summary>
     /// Extracts the tenant ID from the JWT 'tid' claim (ADR-014) with X-Tenant-Id header fallback
     /// for service-to-service calls that don't carry a user JWT.
     /// </summary>
@@ -3635,3 +3904,51 @@ public record ChatSseNavigateData(
 /// <param name="Description">Optional playbook description.</param>
 /// <param name="IsPublic">Whether the playbook is public/shared.</param>
 public record ChatPlaybookInfo(string Id, string Name, string? Description, bool IsPublic);
+
+// =============================================================================
+// FR-P2-03 loop-native elicitation records (task 032)
+// =============================================================================
+
+/// <summary>
+/// One missing input field on an <c>elicitation_modal</c> SSE event. Name/prompt/type
+/// come EXCLUSIVELY from the Binding's declared input schema (ADR-039 grounded
+/// outputs — never invented fields).
+/// </summary>
+/// <param name="Name">Declared schema field name.</param>
+/// <param name="Prompt">Maker-authored elicitation prompt (<c>elicitation_prompt</c> ?? <c>description</c>); null when undeclared.</param>
+/// <param name="Type">Declared JSON-schema type token, when present.</param>
+public record ChatSseElicitationFieldData(string Name, string? Prompt, string? Type);
+
+/// <summary>
+/// Data payload for the <c>elicitation_modal</c> SSE event (FR-P2-03): a capability
+/// invocation with missing required args whose Binding declares
+/// <c>capture_mode: modal</c> routes to the wizard surface instead of conversational
+/// elicitation. The pending <c>elicitation</c> Gate marker is in the session ledger
+/// BEFORE this event renders (ADR-040). The host wizard collects
+/// <see cref="MissingFields"/> (pre-filling <see cref="ProvidedArgs"/>) and completes
+/// by invoking the task-023 client dispatch helper —
+/// <c>dispatchConsumer(bindingId, {slots})</c> — which resolves the gate at the
+/// dispatch seam.
+/// </summary>
+/// <param name="GateId">Pending elicitation gate id (ledger correlation key).</param>
+/// <param name="BindingId">Target <c>sprk_playbookconsumer</c> row GUID — the ONLY routing datum (ADR-039).</param>
+/// <param name="ConsumerType">Stable consumer-type code for presentation (e.g. wizard title fallback).</param>
+/// <param name="Title">The Binding's maker-authored tool description, when present.</param>
+/// <param name="MissingFields">Declared required fields still missing.</param>
+/// <param name="ProvidedArgs">Arguments the model already supplied (wizard pre-fill); null when none.</param>
+public record ChatSseElicitationModalData(
+    string GateId,
+    string BindingId,
+    string ConsumerType,
+    string? Title,
+    IReadOnlyList<ChatSseElicitationFieldData> MissingFields,
+    JsonElement? ProvidedArgs);
+
+/// <summary>Request body for <c>POST /sessions/{sessionId}/gates/{gateId}/resolve</c>.</summary>
+/// <param name="Approved">True = confirm and execute the suspended invocation; false = reject it.</param>
+public record GateResolveRequest(bool Approved);
+
+/// <summary>Result of a unified-gate resolution.</summary>
+/// <param name="Status"><c>confirmed</c> or <c>rejected</c>.</param>
+/// <param name="Summary">Terminal output summary for confirmed Binding-backed executions (already ledger-written per ADR-040); null on reject.</param>
+public record GateResolveResult(string Status, string? Summary);
