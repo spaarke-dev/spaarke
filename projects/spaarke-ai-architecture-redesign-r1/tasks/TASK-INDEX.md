@@ -51,7 +51,7 @@
 |---|---|---|---|---|---|
 | 014 | P0 deploy + G-P0 evidence + **ADR-040 → Accepted** (deployed spaarke-bff-dev 46.87 MB; /healthz 200 + /healthz/catalog Degraded-by-design; evidence at notes/g-p0-evidence.md; F-1 ruled accept-until-cutover) | G-P0 | STANDARD | 001–012 | ✅ |
 
-## Phase P1 — First capability end-to-end (gate G-P1, BROWSER)
+## Phase P1 — First capability end-to-end (gate G-P1, BROWSER) — ✅ **PHASE COMPLETE 2026-07-06** (G-P1 two UAT rounds; ADR-039 Accepted; evidence: notes/g-p1-uat-round1-findings.md + round2)
 
 ### Wave W-P1-A (parallel ×3)
 
@@ -88,7 +88,7 @@
 | # | Task | FR | Rigor | Deps | Status |
 |---|---|---|---|---|---|
 | 026 | Eval UC-A-1 green (11/11 live routing asserts; NFR-06 schema pinned); eval-gate CI job merge-blocking; **ADR-039 → Accepted both copies** (hot-path ci-workflows flipped N→Y) | FR-P1-07 | TEST-MODIFYING | 020–025 | ✅ |
-| 027 | P1 deploy + **G-P1 browser UAT** (operator, spaarkedev1) | G-P1 | STANDARD | all P1 | 🔲 |
+| 027 | P1 deploy + **G-P1 browser UAT** (2 rounds; round-1: chips/batching/UX-ruling fixed `befcaa5da`; round-2: chip placement + frozen-fileIds + gating fixed `9ee30e672`, both surfaces redeployed; operator-directed close 2026-07-06 — notes/g-p1-uat-round2-findings.md; placement spot-check folds into 038) | G-P1 | STANDARD | all P1 | ✅ |
 
 ## Phase P2 — Text-path hard cutover (gate G-P2, BROWSER)
 
