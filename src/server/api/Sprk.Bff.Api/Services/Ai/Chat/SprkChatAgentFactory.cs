@@ -145,13 +145,6 @@ public class SprkChatAgentFactory
     /// omit the parameter behave exactly as before.
     /// </param>
     /// <param name="cancellationToken">Cancellation token.</param>
-    /// <param name="intentHint">
-    /// Optional closed-vocabulary soft-slash hint emitted by the frontend
-    /// `SoftSlashRouter.decorateBody()` (`summarize` / `draft` /
-    /// `extract-entities` / `analyze`). Biases the PlaybookDispatcher Phase B
-    /// vector query downstream (task 115), where the slash + natural-language
-    /// flows converge. Default null preserves backward compatibility.
-    /// </param>
     /// <returns>
     /// A fully configured <see cref="ISprkChatAgent"/> ready to receive messages.
     /// The returned agent is wrapped with the middleware pipeline (AIPL-057, AIPU-072):
@@ -169,8 +162,7 @@ public class SprkChatAgentFactory
         string? latestUserMessage = null,
         IReadOnlyList<string>? previousTurnToolNames = null,
         IReadOnlyList<ChatSessionFile>? uploadedFiles = null,
-        CancellationToken cancellationToken = default,
-        string? intentHint = null)
+        CancellationToken cancellationToken = default)
     {
         _logger.LogInformation(
             "Creating SprkChatAgent for session={SessionId}, document={DocumentId}, playbook={PlaybookId}, tenant={TenantId}",

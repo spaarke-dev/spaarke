@@ -9,10 +9,13 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 034 — HARD CUTOVER chat NL → agent loop (serial, parallel-safe FALSE) — dispatching |
-| **Step** | W-P2-A + W-P2-B COMPLETE (030/031/032/033 ✅). P1 closed earlier tonight. |
-| **Status** | autonomous overnight execution (operator directive 2026-07-06: "move on to P2 while i sleep") |
-| **Next Action** | On 034's return: flip TASK-INDEX, build + suite triage vs KNOWN list, commit (`git pull --rebase` first), push, portfolio sync, then W-P2-D (035 + 036 parallel deletions) → 037 (eval + injection). STOP at gate 038 (operator browser UAT — NEVER auto-pass, NFR-11). |
+| **Task** | W-P2-D: 035 (dispatcher-stack deletion) + 036 (Chat/Tools deletion) — dispatching parallel |
+| **Step** | 034 HARD CUTOVER COMPLETE ✅ (chat NL = the loop, nothing else). 030–034 all ✅. |
+| **Status** | autonomous overnight execution (operator directive 2026-07-06) |
+| **Next Action** | On W-P2-D return: flip TASK-INDEX, build + suite triage, commit, push, portfolio sync, then 037 (eval full-catalog + injection). Then gate-038 PREP (deploy both surfaces, /healthz/catalog should flip Healthy, App Insights KQL ready) and STOP for operator browser UAT (NEVER auto-pass, NFR-11). |
+
+### 🔔 OPERATOR RULING NEEDED AT GATE 038 (from 034 escalation)
+Soft-slash deterministic invocation (FR-P2-05 criterion 2) is PARTIAL BY DESIGN: /summarize→chat-summarize works; /draft, /extract-entities, /analyze have NO Binding rows until P3. Client cannot resolve Binding GUIDs for typed commands without an ADR-039 violation (hardcoded GUIDs / second resolution vocabulary / routing pre-pass). 034 retired intentHint+SoftSlashRouter; soft-slash text now enters the loop. RECOMMENDED: full determinism = P3 FR-P3-06 (binding-id-carrying launchers); optional interim = client capability-discovery read mapping the closed 4-command vocab → returned Binding GUIDs via existing dispatchConsumer. UAT-7 at 038 verifies in-browser.
 
 ### P1 close summary (2026-07-06)
 - G-P1 ran TWO UAT rounds. Round-2 findings + fixes: `notes/g-p1-uat-round2-findings.md` — RD-1 chip strip stranded at top → SprkChat `aboveInputSlot` prop, chips now above input zone; RD-2 "Summarize again" frozen to original fileIds → transition chips carry NO args, dispatch-time FR-08 default-all; RD-3 latent composer-strip gating → session-level count (promotedChipIds ∪ composer-ready).
@@ -55,6 +58,13 @@
 - Combined-tree suite (main session): 8059 — 7952 passed / 6 failed, ALL known (5 pre-existing + PhaseB flake). Eval 12/12.
 - 034 integration notes in notes/task-030/031/032/033-*.md: delete PlaybookDispatcher pre-pass + Phase-B + DetectToolCallsAsync blocks; keep isElicitationAnswerTurn effectiveTurnMessage substitution; keep FR-P2-04 directive block; AgentToolCatalogProjector+Finalize = single projection path; route resumed invocations through SessionDispatchOrchestrator.
 
+## 034 outcomes (Step 9.5 PASS, adr-check "ADR-039 strengthened")
+- Deleted from ChatEndpoints.SendMessageAsync: compound-intent pre-pass (DetectToolCallsAsync→plan_preview), PlaybookDispatcher single-match auto-dispatch, FR-49 playbook_options flow. Sole surviving pre-loop branch: 032's effectiveTurnMessage elicitation-answer substitution.
+- intentHint retired end-to-end (server param, factory signature, PlaybookDispatcher bias, client SoftSlashRouter + 3 client test files + 2 server test files DELETED; git grep -il intenthint → zero tracked files).
+- AgentContentSafetyMiddleware proven innermost on the loop path (NFR-03); no ungated write path (dispatch P1 envelope + gate suspension).
+- Leftovers INVENTORIED for 035/036: PlaybookDispatcher/IntentRerankerService/PlaybookCandidateSelector/CompoundIntentDetector + tests → 035; PlaybookOutputHandler + Chat/Tools/* → 036; dead click endpoints ExecutePlaybookAsync + ApprovePlanAsync/plan endpoints + plan_preview/playbook_options SSE DTOs → delete with the stack; client 117b playbook_options handlers + soft-slash launchers → P3 FR-P3-06.
+- Gate-038 zero-legacy-traffic framing in notes/task-034-chat-nl-hard-cutover-notes.md.
+
 ## Parallel Execution
 
-034 dispatching (serial — parallel-safe FALSE; hard cutover).
+W-P2-D dispatching: 035 + 036 parallel (deps 034 ✅).

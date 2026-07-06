@@ -116,7 +116,7 @@
 
 | # | Task | FR | Rigor | Deps | Status |
 |---|---|---|---|---|---|
-| 034 | **HARD CUTOVER** chat NL → loop; intentHint retired | FR-P2-05 | FULL | 030–033 | 🔲 |
+| 034 | **HARD CUTOVER** chat NL → loop (3 pre-passes deleted from SendMessageAsync; intentHint retired grep-zero end-to-end incl. SoftSlashRouter; content-safety-on-loop evidenced; eval 12/12; publish ±0; 🔔 soft-slash determinism PARTIAL — only /summarize has a Binding; recommended P3 FR-P3-06, operator rules at 038; dead click endpoints left for 035/036) | FR-P2-05 | FULL | 030–033 | ✅ |
 
 ### Wave W-P2-D (parallel ×2)
 

@@ -144,12 +144,17 @@ import { parse as parseCommandIntent } from "./CommandRouter";
 // R6 Phase D Wave D-G1 — Pillar 8 Command Router wired via the new
 // onDecorateOutboundBody seam in SprkChat (ADR-012 context-agnostic prop).
 // Hard slashes (081) dispatch client-side + cancel the BFF send by returning null.
-// Soft slashes (082) decorate the outbound body with `intentHint` for
-// CapabilityRouter Layer 0.5 strong-intent routing. (Wire field renamed
-// `commandIntent` → `intentHint` per FR-07 / task 022, 2026-06-22.)
 // References (083) resolve `#scope` / `@<entity>` / `#<filename>` at parse time
 // and attach `resolvedReferences` to the body. NFR-11 binding: natural-language
 // input (no slash, no references) passes through unchanged.
+//
+// FR-P2-05 hard cutover (task 034): the soft-slash intent-bias decoration
+// (formerly `SoftSlashRouter.decorateBody`) is RETIRED end-to-end (NFR-08). No
+// client-to-server intent-bias hint is sent; soft-slash text now enters the
+// agent-turn loop like any NL utterance. Turning the four soft slashes into
+// Click-path deterministic direct invocations (dispatchConsumer by binding id)
+// is deferred to the P3 binding-id-carrying launcher work (FR-P3-06) — see the
+// escalation note in this task's integration notes.
 import {
   executeHardSlash,
   defaultTelemetrySink,
@@ -159,7 +164,6 @@ import {
 } from "./HardSlashExecutor";
 import { CommandHelpPanel } from "./CommandHelpPanel";
 import { HelpAffordance } from "./HelpAffordance";
-import { decorateBody as decorateSoftSlashBody } from "./SoftSlashRouter";
 import ReferenceResolver, {
   createScopeFetch,
   createFileLookupFromSessionMap,
@@ -1465,14 +1469,16 @@ export function ConversationPane(): React.JSX.Element {
   // ── R6 Phase D Wave D-G1 — Pillar 8 Command Router integration ────────────
   //
   // The decoration callback below is the SINGLE seam through which tasks 081
-  // (hard slashes), 082 (soft slashes), and 083 (references) dispatch. It
-  // runs INSIDE SprkChat's handleSend, between body construction and stream
-  // start (see ISprkChatProps.onDecorateOutboundBody JSDoc). Hard slashes
-  // return null → cancel the BFF send. Soft slashes decorate the body with
-  // `intentHint` for CapabilityRouter Layer 0.5. References attach
-  // `resolvedReferences` to the body so the BFF prompt builder can use them.
-  // Natural-language input (no slash, no refs) passes through unchanged
-  // (NFR-11 backward compat).
+  // (hard slashes) and 083 (references) dispatch. It runs INSIDE SprkChat's
+  // handleSend, between body construction and stream start (see
+  // ISprkChatProps.onDecorateOutboundBody JSDoc). Hard slashes return null →
+  // cancel the BFF send. References attach `resolvedReferences` to the body so
+  // the BFF prompt builder can use them. Natural-language input (no slash, no
+  // refs) passes through unchanged (NFR-11 backward compat).
+  //
+  // FR-P2-05 hard cutover (task 034): the former soft-slash body decoration
+  // (intent-bias wire field) is retired — soft slashes are no longer special-
+  // cased here (see the import-block note above).
   //
   // Some executor capabilities (conversation-history serialization for
   // `/export`, focused-tab tracking for `/pin`) require deeper plumbing
@@ -1602,9 +1608,12 @@ export function ConversationPane(): React.JSX.Element {
         return null;
       }
 
-      let decorated: Record<string, unknown> = intent.isSoftSlash
-        ? (decorateSoftSlashBody(intent, body as Parameters<typeof decorateSoftSlashBody>[1]) as Record<string, unknown>)
-        : body;
+      // FR-P2-05 hard cutover (task 034): soft slashes are NO LONGER decorated
+      // with an intent-bias wire field (retired end-to-end, NFR-08). The body
+      // passes through unchanged; the utterance enters the agent-turn loop. The
+      // Click-path deterministic direct invocation for the four soft slashes
+      // (dispatchConsumer by binding id) awaits the P3 launcher work (FR-P3-06).
+      let decorated: Record<string, unknown> = body;
 
       if (intent.references.length > 0) {
         try {

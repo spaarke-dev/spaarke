@@ -348,10 +348,13 @@ public static class ChatEndpoints
     /// Send a user message and receive SSE-streamed agent response.
     /// POST /api/ai/chat/sessions/{sessionId}/messages
     ///
-    /// Phase 2F (task 071): Before streaming the agent response, this endpoint performs compound
-    /// intent detection via <see cref="ISprkChatAgent.DetectToolCallsAsync"/>. If compound intent is
-    /// detected (2+ tools, write-back, or external action), a <c>plan_preview</c> SSE event is emitted
-    /// and execution halts until the user approves via POST /plan/approve (task 072).
+    /// FR-P2-05 hard cutover (task 034): the chat text path is the agent-turn loop and
+    /// nothing else (ADR-039 — one dispatch protocol). Every NL utterance enters
+    /// <see cref="ISprkChatAgent.SendMessageAsync"/>; the former compound-intent, single-match
+    /// PlaybookDispatcher, and FR-49 file-aware-options pre-passes are DELETED (no chat NL
+    /// utterance reaches a legacy dispatcher). Write/communicate side effects gate at the
+    /// loop's dispatch seam (FR-P2-02); mid-elicitation answers ride the loop (FR-P2-03);
+    /// off-catalog utterances refuse via the no_match_handler Binding (FR-P2-04).
     /// </summary>
     private static async Task SendMessageAsync(
         string sessionId,
@@ -544,7 +547,12 @@ public static class ChatEndpoints
             var elicitationTurn = await ResolveElicitationTurnAsync(
                 session, request.Message, effectiveMessage,
                 tenantId, sessionId, pendingPlanManager, logger, cancellationToken);
-            var isElicitationAnswerTurn = elicitationTurn is not null;
+            // FR-P2-05 hard cutover: the ONLY surviving consumer of elicitation-turn
+            // routing is the effective-message substitution below — an answer turn rides
+            // the loop with the answer frame prepended (persisted history keeps the raw
+            // user text). The legacy compound / dispatcher pre-passes that this flag used
+            // to gate are deleted (see below); NO chat NL utterance reaches a legacy
+            // dispatcher anymore — every turn enters the SprkChatAgent loop.
             var effectiveTurnMessage = elicitationTurn?.FramedMessage ?? effectiveMessage;
             // === End FR-P2-03 routing =================================================
 
@@ -569,283 +577,39 @@ public static class ChatEndpoints
                 sseWriter,
                 latestUserMessage: effectiveMessage,
                 uploadedFiles: session.UploadedFiles,
-                cancellationToken: cancellationToken,
-                // R6 Pillar 8 / task 082 / FR-50: forward the soft-slash hint downstream.
-                // Wire-format field renamed `commandIntent` → `intentHint` per
-                // chat-routing-redesign-r1 FR-07 / task 022 (2026-06-22).
-                intentHint: request.IntentHint);
+                cancellationToken: cancellationToken);
 
             // Convert session history to AI framework messages for context
             var history = BuildAiHistory(session.Messages);
 
-            // === Phase 2F: Compound Intent Detection (task 071) ===
-            // Perform a pre-execution tool call inspection to detect compound intent before
-            // any tools run. If compound intent is detected, emit a plan_preview SSE event
-            // and halt execution — the user must approve via POST /plan/approve (task 072).
+            // === FR-P2-05 HARD CUTOVER (task 034) — legacy dispatch pre-passes DELETED ===
+            // Before this cutover, three pre-passes ran here between agent creation and the
+            // loop stream, giving a chat NL utterance up to three ways to reach a LEGACY
+            // dispatcher: (1) a compound-intent pre-pass (agent.DetectToolCallsAsync +
+            // CompoundIntentDetector → plan_preview), (2) a PlaybookDispatcher single-match
+            // auto-dispatch (DispatchAsync → PlaybookOutputHandler), and (3) the FR-49
+            // file-aware playbook_options flow (RunPhaseBVectorMatchAsync → reranker).
             //
-            // Compound intent triggers (FR-P2-02 / ADR-039 — task 031 rewired gating from
-            // hardcoded tool-NAME lists to DECLARED catalog metadata):
-            //   - 2 or more tool calls in the proposed plan (structural)
-            //   - Any tool whose sprk_analysistool row declares sprk_sideeffectclass
-            //     write/communicate (via PendingPlanManager.RequiresConfirmation)
+            // ADR-039 mandates ONE dispatch protocol. Those three mechanisms are now DELETED
+            // outright (no fallback flag, no compat shim — NFR-08 hard-cutover doctrine): the
+            // agent-turn loop (SprkChatAgent, FR-P2-01) is the SOLE text-path dispatcher.
+            // Every chat NL utterance now flows straight into agent.SendMessageAsync below.
+            //   - Gating: the loop's dispatch seam (SessionDispatchOrchestrator, via the
+            //     projected BindingCapabilityTool) rejects non-informational dispositions
+            //     pre-run, so no ungated write/communicate side effect is reachable through
+            //     the loop (task 030 §Integration); write-shaped capabilities suspend into
+            //     the ONE confirmation gate (PendingPlanManager, FR-P2-02) at that seam.
+            //   - Elicitation: mid-elicitation answer turns still ride the loop via
+            //     effectiveTurnMessage (the answer frame — resolved above, FR-P2-03).
+            //   - Refusal: off-catalog utterances are the loop invoking the no_match_handler
+            //     Binding (RefusalCapabilityTool, FR-P2-04) — an honest refusal, not a
+            //     silent legacy DispatchResult.NoMatch fall-through.
             //
-            // This satisfies spec constraint FR-11: "No write-back executes without user Proceed."
-            // FR-07 (task 050): pass the effectiveMessage so compound-intent detection sees
-            // the attachment context. The agent SDK reuses this same text downstream — there is
-            // still exactly ONE LLM call per user turn (D-01 single-LLM-call invariant).
-            // FR-P2-03: an elicitation-answer turn is a CONTINUATION of one pending
-            // invocation — the legacy compound pre-pass must not re-dispatch it (the
-            // loop resolves the answer by re-invoking the suspended capability tool).
-            var toolCalls = isElicitationAnswerTurn
-                ? (IReadOnlyList<FunctionCallContent>)Array.Empty<FunctionCallContent>()
-                : await agent.DetectToolCallsAsync(effectiveTurnMessage, history, cancellationToken);
-            var intentDetector = new CompoundIntentDetector(logger);
-
-            // Declared side-effect-class lookup (built from sprk_analysistool rows) — only
-            // fetched when the turn actually proposed tool calls. This path is deleted at
-            // the P2 hard cutover (task 034) when the loop gates at its own invocation seam.
-            var declaredClassLookup = toolCalls.Count > 0
-                ? await BuildDeclaredSideEffectLookupAsync(httpContext, logger, cancellationToken)
-                : null;
-
-            if (intentDetector.IsCompoundIntent(toolCalls, declaredClassLookup))
-            {
-                // Build the pending plan from the detected tool calls
-                var pendingPlan = intentDetector.BuildPlan(
-                    toolCalls,
-                    sessionId,
-                    tenantId,
-                    agent.Context,
-                    declaredClassLookup);
-
-                // Store in Redis — 30-minute TTL per task 070 design
-                await pendingPlanManager.StoreAsync(pendingPlan, cancellationToken);
-
-                // ADR-040 (FR-P2-02): the pending Gate marker lands in the session ledger
-                // BEFORE the plan_preview gate UI renders (storage precedes rendering).
-                // GateId = PlanId — approval writes the confirmed marker with the same id.
-                await pendingPlanManager.WriteGateMarkerAsync(
-                    tenantId,
-                    sessionId,
-                    pendingPlan.PlanId,
-                    PendingPlanManager.GateKindConfirmation,
-                    PendingPlanManager.GateStatusPending,
-                    sideEffectClass: DerivePlanSideEffectClass(toolCalls, declaredClassLookup),
-                    ct: cancellationToken);
-
-                // Emit plan_preview SSE event with the plan steps
-                var planPreviewData = new ChatSsePlanPreviewData(
-                    PlanId: pendingPlan.PlanId,
-                    PlanTitle: pendingPlan.PlanTitle,
-                    Steps: pendingPlan.Steps.Select(s => new ChatSsePlanStep(s.Id, s.Description, "pending")).ToArray(),
-                    AnalysisId: pendingPlan.AnalysisId,
-                    WriteBackTarget: pendingPlan.WriteBackTarget);
-
-                await WriteChatSSEAsync(
-                    response,
-                    new ChatSseEvent("plan_preview", null, planPreviewData),
-                    cancellationToken);
-
-                // Emit done event to close the SSE stream
-                await WriteChatSSEAsync(response, new ChatSseEvent("done", null), cancellationToken);
-
-                logger.LogInformation(
-                    "Compound intent detected — plan_preview emitted and execution halted: session={SessionId}, planId={PlanId}, steps={StepCount}",
-                    sessionId, pendingPlan.PlanId, pendingPlan.Steps.Length);
-
-                // Persist the user message to history so the conversation record is intact.
-                // The assistant message will be stored when the plan is approved/executed (task 072).
-                var seqBaseForPlan = session.Messages.Count;
-                var planUserMessage = new DvChatMessage(
-                    MessageId: Guid.NewGuid().ToString("N"),
-                    SessionId: sessionId,
-                    Role: ChatMessageRole.User,
-                    Content: request.Message,
-                    TokenCount: 0,
-                    CreatedAt: DateTimeOffset.UtcNow,
-                    SequenceNumber: seqBaseForPlan + 1);
-                await historyManager.AddMessageAsync(session, planUserMessage, CancellationToken.None);
-
-                return;
-            }
-            // === End Phase 2F ===
-
-            // === R2-018: Playbook Output Routing ===
-            // Before streaming the standard chat response, check if the user's message matches
-            // a playbook via PlaybookDispatcher. If a match is found, route through
-            // PlaybookOutputHandler for typed output handling (dialog, navigation, download, insert).
-            // Text output falls through to the standard streaming flow below.
-            // FR-P2-03: null on elicitation-answer turns — the legacy dispatcher
-            // pre-passes are bypassed entirely (the turn continues ONE pending
-            // invocation; it is not a fresh dispatch). This whole region dies at
-            // the P2 hard cutover (task 034).
-            var dispatcher = isElicitationAnswerTurn
-                ? null
-                : await agentFactory.CreatePlaybookDispatcherAsync(tenantId, cancellationToken);
-
-            // === FR-49 / FR-50: File-aware playbook OPTIONS flow ===
-            // When the user turn has attachments, run Phase B vector match → top-N candidate
-            // selection (PlaybookCandidateSelector) → optional reranker (IntentRerankerService)
-            // → playbook_options SSE event. This NEVER auto-executes (FR-48 invariant); the user
-            // picks via the FE link buttons (task 117b) which POSTs to
-            // /api/ai/playbook-dispatch/execute (see ExecutePlaybookAsync below).
-            //
-            // When the user turn has NO attachments, fall through to the existing single-match
-            // auto-dispatch flow below (preserves R6 backward compatibility for natural-language
-            // slash + non-attachment paths).
-            if (dispatcher is not null && request.Attachments is { Count: > 0 })
-            {
-                var phaseBResults = await dispatcher
-                    .RunPhaseBVectorMatchAsync(
-                        request.Message,
-                        request.Attachments,
-                        sessionFiles: session.UploadedFiles?
-                            .Select(f => (ChatSessionFile?)f)
-                            .ToList(),
-                        cancellationToken: cancellationToken,
-                        intentHint: request.IntentHint);
-
-                // Map request.Attachments → AttachmentMetadata for the reranker LLM input
-                // (ADR-015 tier-1 — filename + content-type + integer text length only).
-                var rerankerAttachmentMetadata = request.Attachments
-                    .Select(a => new AttachmentMetadata
-                    {
-                        Filename = a.Filename,
-                        ContentType = a.ContentType,
-                        TextLength = a.TextContent?.Length ?? 0,
-                    })
-                    .ToList();
-
-                // Best-effort correlation of attachment → session file ID by index. When the
-                // upload manifest hasn't been wired for a given attachment, the corresponding
-                // ID is omitted (ADR-015 tier-1 — opaque IDs only).
-                var sessionAttachmentIds = new List<string>();
-                if (session.UploadedFiles is { Count: > 0 })
-                {
-                    for (var i = 0; i < request.Attachments.Count && i < session.UploadedFiles.Count; i++)
-                    {
-                        var fileId = session.UploadedFiles[i].FileId;
-                        if (!string.IsNullOrWhiteSpace(fileId))
-                        {
-                            sessionAttachmentIds.Add(fileId);
-                        }
-                    }
-                }
-
-                var builder = httpContext.RequestServices
-                    .GetRequiredService<PlaybookOptionsEventBuilder>();
-                var payload = await builder
-                    .BuildAsync(phaseBResults, request.Message, rerankerAttachmentMetadata,
-                                sessionAttachmentIds, cancellationToken)
-                    .ConfigureAwait(false);
-
-                // FR-P2-02 / FR-48: the must-click options flow IS a presentation of the
-                // ONE confirmation gate. Write the pending Gate marker to the session
-                // ledger BEFORE the playbook_options gate UI renders (ADR-040 — storage
-                // precedes rendering). The user's pick (POST /api/ai/playbook-dispatch/
-                // execute) resolves this marker as confirmed with the same gate id.
-                var optionsGateId = $"options-{Guid.NewGuid():N}";
-                await pendingPlanManager.WriteGateMarkerAsync(
-                    tenantId,
-                    sessionId,
-                    optionsGateId,
-                    PendingPlanManager.GateKindConfirmation,
-                    PendingPlanManager.GateStatusPending,
-                    ct: cancellationToken);
-
-                // Emit the playbook_options SSE event then close the stream.
-                var sseEvent = ChatSseEventFactory.CreatePlaybookOptionsEvent(payload);
-                await WriteChatSSEAsync(response, sseEvent, cancellationToken);
-                await WriteChatSSEAsync(response, new ChatSseEvent("done", null), cancellationToken);
-
-                // Persist the user message so the conversation history reflects the turn.
-                var seqBaseForOptions = session.Messages.Count;
-                var optionsUserMessage = new DvChatMessage(
-                    MessageId: Guid.NewGuid().ToString("N"),
-                    SessionId: sessionId,
-                    Role: ChatMessageRole.User,
-                    Content: request.Message,
-                    TokenCount: 0,
-                    CreatedAt: DateTimeOffset.UtcNow,
-                    SequenceNumber: seqBaseForOptions + 1);
-                await historyManager.AddMessageAsync(session, optionsUserMessage, CancellationToken.None);
-
-                // ADR-015 tier-1 telemetry: counts and flags only — no message text, no
-                // attachment names beyond what PlaybookOptionsEventBuilder already logs.
-                logger.LogInformation(
-                    "FR-49 playbook_options emitted — session={SessionId}, candidateCount={CandidateCount}, " +
-                    "rerankInvoked={RerankInvoked}, attachmentCount={AttachmentCount}, sessionFileIdCount={SessionFileIdCount}",
-                    sessionId, payload.Candidates.Count, payload.RerankInvoked,
-                    request.Attachments.Count, sessionAttachmentIds.Count);
-
-                return;
-            }
-            // === End FR-49 / FR-50 ===
-
-            // FR-15 (task 110): forward per-turn attachments to the dispatcher so the Phase 5R
-            // Wave 5-A pipeline (tasks 111R/112/113R/114R) can apply file-aware classification.
-            // For task 110 the dispatcher accepts but does not act on attachments — the parameter
-            // is wired here so downstream-task migrations don't require a second touch of this
-            // call site. Null when the user turn has no attachments (existing message-only path).
-            // FR-20 (task 115): also forward the soft-slash intentHint as a vector-query bias
-            // signal. Phase B uses it to prefix the per-file query; the pre-task-115 path is
-            // preserved when IntentHint is null/empty.
-            var dispatchResult = dispatcher is null
-                ? null
-                : await dispatcher.DispatchAsync(
-                    request.Message,
-                    session.HostContext,
-                    cancellationToken,
-                    attachments: request.Attachments,
-                    intentHint: request.IntentHint);
-
-            // Task 048 (FR-14d) — the gate now also fires for non-Chat NodeDestination
-            // values (Workspace / Both / FormPrefill / SideEffect). The destination is
-            // populated by PlaybookDispatcher (task 047) from the matched playbook's
-            // DeliverOutput node's sprk_configjson; Workspace-bound playbooks like
-            // summarize-document-for-workspace have OutputType.Text (their content is
-            // text — only the destination surface differs), so routing solely on
-            // OutputType would never hand the dispatch to the handler. The Chat default
-            // path remains: when NodeDestination == Chat AND OutputType == Text, the
-            // handler is bypassed and standard streaming below runs unchanged.
-            var routesViaHandler =
-                dispatchResult is { Matched: true } &&
-                (dispatchResult.OutputType != OutputType.Text ||
-                 dispatchResult.NodeDestination != NodeDestination.Chat);
-
-            if (routesViaHandler)
-            {
-                var outputHandler = agentFactory.CreatePlaybookOutputHandler();
-                var handled = await outputHandler.HandleOutputAsync(
-                    dispatchResult,
-                    (evt, ct) => WriteChatSSEAsync(response, evt, ct),
-                    session.HostContext,
-                    cancellationToken);
-
-                if (handled)
-                {
-                    // Emit done event and persist the user message
-                    await WriteChatSSEAsync(response, new ChatSseEvent("done", null), cancellationToken);
-
-                    var seqBaseForDispatch = session.Messages.Count;
-                    var dispatchUserMessage = new DvChatMessage(
-                        MessageId: Guid.NewGuid().ToString("N"),
-                        SessionId: sessionId,
-                        Role: ChatMessageRole.User,
-                        Content: request.Message,
-                        TokenCount: 0,
-                        CreatedAt: DateTimeOffset.UtcNow,
-                        SequenceNumber: seqBaseForDispatch + 1);
-                    await historyManager.AddMessageAsync(session, dispatchUserMessage, CancellationToken.None);
-
-                    logger.LogInformation(
-                        "PlaybookDispatch: output handled — session={SessionId}, playbook={PlaybookId}, " +
-                        "outputType={OutputType}",
-                        sessionId, dispatchResult.PlaybookId, dispatchResult.OutputType);
-                    return;
-                }
-            }
-            // === End R2-018 ===
+            // The PlaybookDispatcher / CompoundIntentDetector / reranker / candidate-selector
+            // classes themselves become unreachable and are DELETED in tasks 035/036. The
+            // click-triggered /plan/approve + /playbook-dispatch/execute endpoints (which
+            // used to consume plan_preview / playbook_options events this handler no longer
+            // emits) are now dead legs pending that same dispatcher-stack removal.
 
             // Emit typing_start immediately before the first AI token to signal the frontend
             // to show a typing indicator animation (NFR-01: first token < 500ms).
@@ -2562,91 +2326,12 @@ public static class ChatEndpoints
     // Private Helpers
     // =========================================================================
 
-    /// <summary>
-    /// Builds the declared side-effect-class lookup for the confirmation gate
-    /// (FR-P2-02 / ADR-039): <c>sprk_analysistool</c> rows keyed by BOTH raw
-    /// <c>sprk_name</c> and the sanitised LLM function name (the shape
-    /// <see cref="FunctionCallContent.Name"/> carries — see
-    /// <see cref="ToolHandlerToAIFunctionAdapter.SanitiseToolName"/>).
-    /// </summary>
-    /// <returns>
-    /// The lookup, or null when the tool catalog is unavailable (AI-off DI state or
-    /// query failure) — the detector then applies the structural trigger only and warns.
-    /// </returns>
-    private static async Task<Func<string, ToolSideEffectClass?>?> BuildDeclaredSideEffectLookupAsync(
-        HttpContext httpContext,
-        ILogger logger,
-        CancellationToken cancellationToken)
-    {
-        var toolCatalog = httpContext.RequestServices.GetService<AnalysisToolService>();
-        if (toolCatalog is null)
-        {
-            return null;
-        }
-
-        try
-        {
-            var rows = await toolCatalog.ListToolsAsync(
-                new ScopeListOptions { Page = 1, PageSize = 200 }, cancellationToken);
-
-            var byName = new Dictionary<string, ToolSideEffectClass>(StringComparer.OrdinalIgnoreCase);
-            foreach (var row in rows.Items)
-            {
-                if (row.SideEffectClass is not { } declaredClass || string.IsNullOrWhiteSpace(row.Name))
-                {
-                    continue;
-                }
-
-                byName[row.Name] = declaredClass;
-                byName[ToolHandlerToAIFunctionAdapter.SanitiseToolName(row.Name)] = declaredClass;
-            }
-
-            return name =>
-                !string.IsNullOrWhiteSpace(name) && byName.TryGetValue(name, out var cls)
-                    ? cls
-                    : null;
-        }
-        catch (Exception ex)
-        {
-            // ADR-015: identifiers only. Degrading to structural-only gating is logged
-            // loudly by the detector itself.
-            logger.LogWarning(ex,
-                "Declared side-effect-class lookup unavailable for this turn — tool catalog query failed.");
-            return null;
-        }
-    }
-
-    /// <summary>
-    /// Derives the ledger side-effect-class vocabulary value for a plan-shaped gate entry:
-    /// the highest-impact DECLARED class across the plan's tool calls
-    /// (<c>communicate</c> > <c>write</c> > null). Identifiers only (NFR-07).
-    /// </summary>
-    private static string? DerivePlanSideEffectClass(
-        IReadOnlyList<FunctionCallContent> toolCalls,
-        Func<string, ToolSideEffectClass?>? declaredClassLookup)
-    {
-        if (declaredClassLookup is null)
-        {
-            return null;
-        }
-
-        ToolSideEffectClass? highest = null;
-        foreach (var call in toolCalls)
-        {
-            var cls = declaredClassLookup(call.Name ?? string.Empty);
-            if (cls == ToolSideEffectClass.Communicate)
-            {
-                return PendingPlanManager.ToLedgerSideEffectClass(cls);
-            }
-
-            if (cls == ToolSideEffectClass.Write)
-            {
-                highest = cls;
-            }
-        }
-
-        return PendingPlanManager.ToLedgerSideEffectClass(highest);
-    }
+    // FR-P2-05 hard cutover (task 034): BuildDeclaredSideEffectLookupAsync and
+    // DerivePlanSideEffectClass were DELETED with the compound-intent pre-pass that was
+    // their sole caller. Declared side-effect-class gating now happens loop-native at the
+    // dispatch seam (SessionDispatchOrchestrator / PendingPlanManager.RequiresConfirmation,
+    // FR-P2-02); ChatEndpoints no longer inspects tool calls before the loop runs. The
+    // per-tool-proposing-turn catalog query flagged in task 031-W2 dies here.
 
     /// <summary>
     /// State of an FR-P2-03 elicitation-answer turn: the framed message the loop
@@ -3452,22 +3137,16 @@ public record ChatSessionCreatedResponse(string SessionId, DateTimeOffset Create
 /// in-memory only). Default null preserves backwards compatibility for clients that omit
 /// the field. See <see cref="ValidateAttachments"/> for validation rules (NFR-04).
 /// </param>
-/// <param name="IntentHint">
-/// Optional closed-vocabulary soft-slash hint emitted by the frontend
-/// `SoftSlashRouter.decorateBody()` (`summarize` / `draft` / `extract-entities`
-/// / `analyze`). The hint biases the PlaybookDispatcher Phase B per-file vector query (task 115)
-/// so slash + natural-language flows converge on the SAME path. Default null
-/// preserves backwards compatibility.
-/// ADR-015 audit: this is a closed-vocabulary identifier, NEVER raw user message text.
-///
-/// Wire-format field: <c>intentHint</c> (renamed from <c>commandIntent</c> per
-/// chat-routing-redesign-r1 FR-07 / task 022).
-/// </param>
+/// <remarks>
+/// FR-P2-05 hard cutover (task 034): the former soft-slash bias field was RETIRED
+/// end-to-end (NFR-08). There is no longer any client-to-server intent-bias hint —
+/// every chat NL utterance enters the agent-turn loop unbiased; the four retained soft
+/// slashes invoke deterministically through the Click path, not via a wire hint.
+/// </remarks>
 public record ChatSendMessageRequest(
     string Message,
     string? DocumentId = null,
-    IReadOnlyList<ChatMessageAttachment>? Attachments = null,
-    string? IntentHint = null);
+    IReadOnlyList<ChatMessageAttachment>? Attachments = null);
 
 /// <summary>
 /// In-memory chat-message attachment with client-extracted text content (FR-07).
