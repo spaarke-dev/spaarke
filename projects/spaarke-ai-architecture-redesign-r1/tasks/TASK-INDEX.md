@@ -59,9 +59,9 @@
 
 | # | Task | FR | Rigor | Deps | Status |
 |---|---|---|---|---|---|
-| 020 | `chat-summarize` as Action+Binding; endpoint delegates | FR-P1-01 | FULL | 014 | 🔲 |
-| 025 | Close r7 tactical branch (keep 4 fixes, drop 3 patches) | FR-P1-06 | FULL | 013 | 🔲 |
-| 073 | Track-B batch 4: stale catalogs/seeds/docs/scripts | FR-TB-01 | STANDARD | — | 🔲 |
+| 020 | `chat-summarize` catalog capability (SUM-CHAT@v1 live on spaarkedev1; orchestrator 703→405, dual-path grep-zero; FIXED 3 pre-existing contract-test reds; ADR-040 seam marked for 021) | FR-P1-01 | FULL | 014 | ✅ |
+| 025 | r7 branch closed (4 keepers inherited by ancestry; 492 lines of linear_dispatch/regex deleted in place, grep-zero; remote branch safe-to-delete — operator/repo-cleanup) | FR-P1-06 | FULL | 013 | ✅ |
+| 073 | Track-B batch 4: 2 ERD docs deleted; catalog twin already-gone; seeds/Seed-JpsActions/fallbacks/LoadKnowledge KEPT-with-reason (live) — regen deferred to 050/051; Seed-JpsActions sweep needs main session | FR-TB-01 | STANDARD | — | ✅ |
 
 ### Wave W-P1-B (serial)
 

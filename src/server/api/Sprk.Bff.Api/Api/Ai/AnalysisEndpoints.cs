@@ -306,14 +306,6 @@ public static class AnalysisEndpoints
         // consumers (Chat / Insight Engine / etc.). See
         // docs/architecture/SPAARKE-LINEAR-AI-CONSUMER-ARCHITECTURE.md.
         var consumerTypeForLinear = linearOptions.Value.GetConsumerTypeForPlaybookId(request.PlaybookId.Value);
-        logger.LogInformation(
-            "[LinearDispatch] PlaybookId={PlaybookId} LinearMapSize={MapSize} PlaybookMapKeys=[{Keys}] PlaybookMapValues=[{Values}] MatchedConsumer={Consumer} ConsumerTypesDocumentProfile={ExpectedConsumer}",
-            request.PlaybookId.Value,
-            linearOptions.Value.PlaybookIds.Count,
-            string.Join(",", linearOptions.Value.PlaybookIds.Keys),
-            string.Join(",", linearOptions.Value.PlaybookIds.Values.Select(v => v.ToString())),
-            consumerTypeForLinear ?? "(none)",
-            ConsumerTypes.DocumentProfile);
 
         if (string.Equals(consumerTypeForLinear, ConsumerTypes.DocumentProfile, StringComparison.OrdinalIgnoreCase))
         {

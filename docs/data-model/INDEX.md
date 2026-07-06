@@ -41,8 +41,8 @@ This directory contains authoritative documentation for Dataverse entity schemas
 
 | Document | Description | Last Updated | Last Reviewed | Status |
 |----------|-------------|--------------|---------------|--------|
-| [sprk_ERD-ai-analysis-entities.md](sprk_ERD-ai-analysis-entities.md) | AI analysis entity ERD | 2026-02-13 | — | — |
-| [sprk_ai-analysis-related-entities.md](sprk_ai-analysis-related-entities.md) | AI analysis related entities | 2026-02-13 | — | — |
+| ~~sprk_ERD-ai-analysis-entities.md~~ | AI analysis entity ERD — **deleted 2026-07-05** (stale 2026-02 snapshot showed `sprk_actiontypeid`, dropped in R7; replacement authored by `spaarke-ai-architecture-redesign-r1` task 052 at P4) | 2026-02-13 | — | Deleted |
+| ~~sprk_ai-analysis-related-entities.md~~ | AI analysis related entities — **deleted 2026-07-05** (stale 2026-02 snapshot; replacement authored by `spaarke-ai-architecture-redesign-r1` task 052 at P4) | 2026-02-13 | — | Deleted |
 
 ### Entity Documentation — Matter / Event
 

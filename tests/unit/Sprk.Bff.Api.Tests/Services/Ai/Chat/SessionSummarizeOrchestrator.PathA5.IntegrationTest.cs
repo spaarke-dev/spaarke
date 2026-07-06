@@ -1,12 +1,9 @@
-using System.Runtime.CompilerServices;
-using System.Text.Json;
 using FluentAssertions;
-using Microsoft.AspNetCore.Http;
-using Sprk.Bff.Api.Infrastructure.Cache;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
 using Moq;
 using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
@@ -18,38 +15,29 @@ using Xunit;
 namespace Sprk.Bff.Api.Tests.Services.Ai.Chat;
 
 /// <summary>
-/// Path A.5 integration tests for <see cref="SessionSummarizeOrchestrator"/> covering the
-/// FR-17 acceptance scenarios from task 090 design (§5.2). These exercise the orchestrator
-/// end-to-end through the canonical <see cref="IPlaybookOrchestrationService"/> dispatch
-/// triangle with the SSE adapter producing wire-shape <see cref="AnalysisChunk"/> sequences.
+/// Catalog-path integration tests for <see cref="SessionSummarizeOrchestrator"/> (FR-P1-01,
+/// ai-architecture-redesign-r1 task 020). These exercise the orchestrator end-to-end through
+/// the REAL prompted executor — <see cref="ActionRunner"/> + <see cref="PromptSchemaRenderer"/>
+/// rendering the REAL SUM-CHAT@v1 JPS — with mocks only at the module boundaries
+/// (<see cref="IConsumerRoutingService"/>, <see cref="IScopeResolverService"/>,
+/// <see cref="ISessionFileTextSource"/>, <see cref="IOpenAiClient"/>) per ADR-038.
 ///
 /// <para>
 /// <b>KEEP-protected per ADR-038 + tests/CLAUDE.md</b>: each [Fact] anchors a concrete
-/// contract behavior that would regress without the test — routing-table dispatch
-/// (FR-17 / FR-1R-05), kill-switch fail-fast (ADR-030 P3), and mid-stream failure
-/// terminator (chat client requires explicit FromError terminator, not silent disconnect).
+/// contract behavior — catalog dispatch through the Binding row (FR-P1-01 / ADR-039),
+/// SUM-CHAT@v1 JPS render through PromptSchemaRenderer (the jps-validate render test),
+/// kill-switch fail-fast (ADR-030 P3), and the LLM-failure FromError terminator (the chat
+/// client requires an explicit error chunk, not a silent disconnect).
 /// </para>
 ///
 /// <para>
 /// <b>Why orchestrator-level integration (not WebApplicationFactory)</b>: the chat-summarize
-/// dispatch lives entirely below the endpoint boundary
+/// execution lives entirely below the endpoint boundary
 /// (<see cref="Api.Ai.SummarizeSessionEndpoint"/> is a thin SSE writer that calls into the
-/// orchestrator + writes its <see cref="AnalysisChunk"/> output verbatim to the wire).
-/// Exercising the orchestrator with a real <see cref="ChatSessionManager"/> stub + the real
-/// SSE adapter + a mock <see cref="IPlaybookOrchestrationService"/> at the dispatch
-/// boundary covers the integration contract per ADR-038 §1 (integration-heavy pyramid)
-/// while keeping the test honest (no transport-level mocks per ADR-038 ban B1).
-/// </para>
-///
-/// <para>
-/// <b>Scenarios covered</b> (3 of 7 from task 090 design §5.2 — per user task 091 instructions):
-/// <list type="bullet">
-///   <item>Scenario 1 — routing-table HIT → IPlaybookOrchestrationService dispatch (FR-17 / FR-1R-05)</item>
-///   <item>Scenario 4 — AI kill-switch OFF → NullSessionSummarizeOrchestrator → FeatureDisabledException</item>
-///   <item>Scenario 7 — mid-stream LLM failure → RunFailed event → terminal AnalysisChunk.FromError</item>
-/// </list>
-/// Additional scenarios (2 typed-options fallback, 3 fail-fast, 5 NFR-02 cap, 6 FR-04 interjection)
-/// are covered by <see cref="SessionSummarizeOrchestratorTests"/> in the sibling file.
+/// orchestrator + writes its <see cref="AnalysisChunk"/> output verbatim to the wire, covered
+/// by <c>SummarizeSessionEndpointContractTests</c>). Exercising the orchestrator with the real
+/// executor stack + a stub LLM boundary covers the integration contract per ADR-038 §1
+/// (integration-heavy pyramid) with no transport-level mocks (ban B1).
 /// </para>
 /// </summary>
 public class SessionSummarizeOrchestratorPathA5IntegrationTest
@@ -57,118 +45,122 @@ public class SessionSummarizeOrchestratorPathA5IntegrationTest
     private const string TenantId = "tenant-integration";
     private const string SessionId = "session-integration";
     private const string FileId1 = "file-int-001";
-    private const string FileId2 = "file-int-002";
-    private const string ConfiguredChatSummarizePlaybookId = "44285d15-1360-f111-ab0b-70a8a59455f4";
-    private static readonly Guid ResolvedChatSummarizePlaybookGuid =
-        Guid.Parse(ConfiguredChatSummarizePlaybookId);
+
+    private static readonly Guid BindingId = Guid.Parse("651194cd-3670-f111-ab0e-70a8a590c51c");
+    private static readonly Guid ActionId = Guid.Parse("eeb05bfd-1260-f111-ab0b-70a8a59455f4");
 
     /// <summary>
-    /// Scenario 1 — routing-table HIT path (FR-17 / FR-1R-05). Validates that with a
-    /// seeded sprk_playbookconsumer row, the orchestrator: (a) consults
-    /// <see cref="IConsumerRoutingService"/> with <see cref="ConsumerTypes.ChatSummarize"/>,
-    /// (b) dispatches through <see cref="IPlaybookOrchestrationService.ExecuteAsync"/> with
-    /// the routing-table-returned playbook GUID, (c) emits a per-token
-    /// <see cref="AnalysisChunk.FromContent"/> sequence as <c>NodeProgress</c> events arrive,
-    /// and (d) emits a terminal <see cref="AnalysisChunk.Completed(DocumentAnalysisResult)"/>
-    /// when the playbook's DeliverOutput node finalizes.
+    /// The REAL SUM-CHAT@v1 JPS as authored by task 020 (canonical artifact:
+    /// <c>projects/spaarke-ai-architecture-redesign-r1/notes/jps/SUM-CHAT-v1.jps.json</c>;
+    /// deployed to <c>sprk_analysisaction.sprk_systemprompt</c> on the SUM-CHAT@v1 row).
+    /// Embedded verbatim (minus examples, which don't affect format detection) so this test
+    /// is the executable render test: PromptSchemaRenderer MUST detect JPS format and render
+    /// the instruction sections + the ## Document section.
+    /// </summary>
+    private const string SumChatJps = """
+        {
+          "$schema": "https://spaarke.com/schemas/prompt/v1",
+          "$version": 1,
+          "instruction": {
+            "role": "You are the Spaarke Summarize-for-Chat assistant, an expert legal-operations document summarizer.",
+            "task": "Read the session file text supplied in the ## Document section (1-N uploaded files, concatenated in file-then-chunk order) and produce a structured summary — TL;DR bullets, narrative summary, keywords, and named entities — suitable for progressive rendering in the Spaarke Assistant Workspace pane.",
+            "constraints": [
+              "Emit a JSON object matching the configured output schema EXACTLY; additionalProperties is false — do not invent fields.",
+              "STREAMING-AWARE EMISSION ORDER (LOAD-BEARING): emit fields in EXACTLY this order: tldr, then summary, then keywords, then entities.",
+              "tldr: 1-3 concise bullets, each 140 characters or fewer. Emit FIRST.",
+              "summary: at most 2 paragraphs of prose and 2000 characters total. Emit SECOND.",
+              "keywords: a single comma-separated string (NOT an array), 5-15 keywords. Emit THIRD.",
+              "entities: an object of shape { organizations: string[], persons: string[] }. Emit LAST.",
+              "Do NOT include rawResponse, parsedSuccessfully, or emailMetadata fields.",
+              "Do NOT fabricate content."
+            ]
+          },
+          "input": {
+            "document": { "required": true, "maxLength": 100000, "placeholder": "{{document.extractedText}}" }
+          },
+          "output": {
+            "fields": [
+              { "name": "tldr", "type": "array", "description": "1-3 concise bullet takeaways." },
+              { "name": "summary", "type": "string", "description": "Narrative summary." },
+              { "name": "keywords", "type": "string", "description": "Comma-separated keywords." },
+              { "name": "entities", "type": "object", "description": "Named entities." }
+            ],
+            "structuredOutput": true
+          },
+          "metadata": {
+            "description": "SUM-CHAT@v1 — chat-session file summarization (UC-A-1).",
+            "tags": ["chat-summarize", "UC-A-1", "prompted"]
+          }
+        }
+        """;
+
+    private const string SumChatOutputSchema =
+        """{"type":"object","additionalProperties":false,"required":["tldr","summary","keywords","entities"],"properties":{"tldr":{"type":"array","items":{"type":"string"}},"summary":{"type":"string"},"keywords":{"type":"string"},"entities":{"type":"object","additionalProperties":false,"required":["organizations","persons"],"properties":{"organizations":{"type":"array","items":{"type":"string"}},"persons":{"type":"array","items":{"type":"string"}}}}}}""";
+
+    private const string LlmResultJson =
+        """{"tldr":["Engagement letter for Acme Corporation","Fees billed at $450/hour"],"summary":"Integration test summary of the engagement letter.","keywords":"engagement letter, Acme Corporation, fees","entities":{"organizations":["Acme Corporation"],"persons":["Jane Smith"]}}""";
+
+    /// <summary>
+    /// Scenario 1 — catalog HIT end-to-end (FR-P1-01 / ADR-039). With the chat-summarize
+    /// Binding row resolved via <see cref="IConsumerRoutingService.ResolveBindingAsync"/>, the
+    /// orchestrator loads the SUM-CHAT@v1 Action and executes it through the REAL
+    /// <see cref="ActionRunner"/> + <see cref="PromptSchemaRenderer"/>: (a) the JPS is
+    /// detected + rendered (role text + ## Document section with the session file text in the
+    /// prompt sent to the LLM boundary), and (b) the structured completion surfaces as the
+    /// terminal <see cref="AnalysisChunk.Completed(DocumentAnalysisResult)"/> wire chunk.
     /// </summary>
     [Fact]
-    public async Task PathA5_RoutingTableHit_DispatchesViaOrchestrationServiceAndPreservesSseShape()
+    public async Task CatalogPath_BindingHit_RendersJpsAndCompletesWithStructuredResult()
     {
-        // Arrange — set up a routing-table HIT with a distinct GUID (proves dispatch uses
-        // the routing-table value, not the typed-options fallback).
-        var routingTableGuid = Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
-        var (sut, orchestrationMock, _, _, _) = CreateOrchestratorWithRoutingHit(routingTableGuid);
-
-        // Playbook emits a realistic event sequence: RunStarted → NodeStarted → 3 NodeProgress
-        // (per-token deltas) → terminal NodeCompleted with DeliverOutput → RunCompleted.
-        var runId = Guid.NewGuid();
-        var aiNodeId = Guid.NewGuid();
-        var deliverNodeId = Guid.NewGuid();
-        var structuredResult = JsonSerializer.SerializeToElement(new DocumentAnalysisResult
-        {
-            Summary = "Integration test summary",
-            TlDr = new[] { "Point A", "Point B" },
-            ParsedSuccessfully = true
-        });
-
-        orchestrationMock
-            .Setup(o => o.ExecuteAsync(
-                It.IsAny<PlaybookRunRequest>(),
-                It.IsAny<HttpContext>(),
-                It.IsAny<CancellationToken>()))
-            .Returns(EventStream(
-                PlaybookStreamEvent.RunStarted(runId, routingTableGuid, nodeCount: 2),
-                PlaybookStreamEvent.NodeStarted(runId, routingTableGuid, aiNodeId, "ChatSummarizeAi"),
-                PlaybookStreamEvent.NodeProgress(runId, routingTableGuid, aiNodeId, "Document "),
-                PlaybookStreamEvent.NodeProgress(runId, routingTableGuid, aiNodeId, "discusses "),
-                PlaybookStreamEvent.NodeProgress(runId, routingTableGuid, aiNodeId, "key terms."),
-                PlaybookStreamEvent.NodeCompleted(runId, routingTableGuid, deliverNodeId, "DeliverOutput",
-                    new NodeOutput
-                    {
-                        NodeId = deliverNodeId,
-                        OutputVariable = "summary",
-                        Success = true,
-                        IsDeliverOutput = true,
-                        TextContent = "Integration test summary",
-                        StructuredData = structuredResult,
-                        Metrics = new NodeExecutionMetrics()
-                    }),
-                PlaybookStreamEvent.RunCompleted(runId, routingTableGuid, new PlaybookRunMetrics
-                {
-                    TotalNodes = 2,
-                    CompletedNodes = 2
-                })));
+        // Arrange — real executor stack, stub LLM boundary.
+        var openAi = new StubStructuredOpenAiClient { RawJsonToReturn = LlmResultJson };
+        var sut = CreateSut(openAi);
 
         var request = new SummarizeSessionFilesRequest(
             TenantId, SessionId, new[] { FileId1 }, StyleHint: "executive",
             Path: SummarizeInvocationPath.DirectEndpoint,
             CorrelationId: "integration-corr-001");
 
-        // Act — drive the orchestrator end-to-end.
+        // Act
         var chunks = await Collect(sut.SummarizeSessionFilesAsync(request));
 
-        // Assert — verify the SSE shape that SummarizeSessionEndpoint will write to the wire.
-        chunks.Should().HaveCount(4,
-            "3 NodeProgress per-token deltas + 1 terminal Completed chunk; lifecycle events (RunStarted/" +
-            "NodeStarted/RunCompleted) filtered out by the SSE adapter per task 090 design §3.5");
+        // Assert — (a) SUM-CHAT@v1 JPS rendered through PromptSchemaRenderer (render test).
+        openAi.CapturedPrompt.Should().NotBeNull("the prompted executor must reach the LLM boundary");
+        openAi.CapturedPrompt.Should().Contain("Spaarke Summarize-for-Chat assistant",
+            "instruction.role from the SUM-CHAT@v1 JPS renders as the prompt opening");
+        openAi.CapturedPrompt.Should().Contain("## Constraints",
+            "instruction.constraints render as a numbered section — proof the JPS format was " +
+            "detected (a flat-text fallback would have echoed raw JSON)");
+        openAi.CapturedPrompt.Should().Contain("## Document",
+            "PromptSchemaRenderer embeds the session file text in the ## Document section");
+        openAi.CapturedPrompt.Should().Contain("uploaded engagement letter text",
+            "the fetched session-file text is what the LLM summarizes");
+        openAi.CapturedSchemaJson.Should().Contain("\"tldr\"",
+            "constrained decoding uses the Action row's OutputSchemaJson (SUM-CHAT@v1)");
 
-        chunks[0].Type.Should().Be("text");
-        chunks[0].Content.Should().Be("Document ", "per-token FromContent preserves chat-client progressive UX");
-        chunks[1].Content.Should().Be("discusses ");
-        chunks[2].Content.Should().Be("key terms.");
-
-        chunks[3].Type.Should().Be("complete");
-        chunks[3].Done.Should().BeTrue();
-        chunks[3].Result.Should().NotBeNull();
-        chunks[3].Result!.Summary.Should().Be("Integration test summary");
-        chunks[3].Result!.TlDr.Should().BeEquivalentTo(new[] { "Point A", "Point B" });
-
-        // Verify dispatch used the routing-table GUID (not the typed-options fallback).
-        orchestrationMock.Verify(
-            o => o.ExecuteAsync(
-                It.Is<PlaybookRunRequest>(r => r.PlaybookId == routingTableGuid),
-                It.IsAny<HttpContext>(),
-                It.IsAny<CancellationToken>()),
-            Times.Once,
-            "FR-17 — dispatch routes through IPlaybookOrchestrationService with the routing-table-resolved GUID");
+        // Assert — (b) wire shape: terminal complete chunk with the parsed structured result.
+        chunks.Should().HaveCount(1, "single-file request: no interjection, one terminal chunk");
+        chunks[0].Type.Should().Be("complete");
+        chunks[0].Done.Should().BeTrue();
+        chunks[0].Result.Should().NotBeNull();
+        chunks[0].Result!.Summary.Should().Be("Integration test summary of the engagement letter.");
+        chunks[0].Result!.TlDr.Should().BeEquivalentTo(
+            new[] { "Engagement letter for Acme Corporation", "Fees billed at $450/hour" });
+        chunks[0].Result!.Keywords.Should().Contain("Acme Corporation");
+        chunks[0].Result!.ParsedSuccessfully.Should().BeTrue();
     }
 
     /// <summary>
     /// Scenario 4 — AI kill-switch OFF (compound-AI feature disabled).
     /// <see cref="NullSessionSummarizeOrchestrator"/> short-circuits at the first
-    /// <c>MoveNextAsync()</c> with <see cref="Configuration.FeatureDisabledException"/>
-    /// per ADR-030 P3. The endpoint catches this BEFORE setting SSE headers and emits a
-    /// 503 ProblemDetails. This integration test confirms the kill-switch contract is
-    /// preserved after the R7 refactor — the null subclass continues to throw without
-    /// dereferencing any of the new DI dependencies (<see cref="IPlaybookOrchestrationService"/>,
-    /// <see cref="IHttpContextAccessor"/>).
+    /// <c>MoveNextAsync()</c> with <see cref="FeatureDisabledException"/> per ADR-030 P3.
+    /// The endpoint catches this BEFORE setting SSE headers and emits a 503 ProblemDetails.
+    /// Contract preserved unchanged across the FR-P1-01 catalog cutover — the Null subclass
+    /// continues to throw without dereferencing any of the catalog-path dependencies.
     /// </summary>
     [Fact]
-    public async Task PathA5_NullKillSwitchSubclass_ThrowsFeatureDisabledOnFirstMoveNext()
+    public async Task NullKillSwitchSubclass_ThrowsFeatureDisabledOnFirstMoveNext()
     {
-        // Arrange — construct the Null subclass directly (mirrors AnalysisServicesModule's
-        // P3 fail-fast registration when compound-AI is OFF).
         var loggerMock = new Mock<ILogger<SessionSummarizeOrchestrator>>();
         var sut = new NullSessionSummarizeOrchestrator(loggerMock.Object);
 
@@ -176,7 +168,6 @@ public class SessionSummarizeOrchestratorPathA5IntegrationTest
             TenantId, SessionId, new[] { FileId1 }, StyleHint: null,
             Path: SummarizeInvocationPath.DirectEndpoint);
 
-        // Act + Assert — first MoveNextAsync throws FeatureDisabledException.
         var act = async () => { await foreach (var _ in sut.SummarizeSessionFilesAsync(request)) { } };
         var thrown = await act.Should().ThrowAsync<FeatureDisabledException>();
         thrown.Which.ErrorCode.Should().Be("ai.summarize.disabled",
@@ -186,117 +177,108 @@ public class SessionSummarizeOrchestratorPathA5IntegrationTest
     }
 
     /// <summary>
-    /// Scenario 7 — mid-stream LLM failure. Orchestration emits one NodeProgress chunk then
-    /// a <see cref="PlaybookEventType.RunFailed"/> event. The SSE adapter MUST emit a
-    /// terminal <see cref="AnalysisChunk.FromError"/> rather than silently terminating the
-    /// stream. The chat client relies on the explicit error chunk to render a failure-state
-    /// UX — a silent disconnect would leave the user staring at a partial summary.
+    /// Scenario 7 — LLM failure at the executor boundary. The orchestrator MUST emit a
+    /// terminal <see cref="AnalysisChunk.FromError"/> rather than letting the exception kill
+    /// the stream mid-flight. The chat client relies on the explicit error chunk to render a
+    /// failure-state UX — a silent disconnect would leave the user staring at a spinner.
     /// </summary>
     [Fact]
-    public async Task PathA5_MidStreamRunFailed_EmitsTerminalFromErrorChunk()
+    public async Task LlmFailure_EmitsTerminalFromErrorChunk()
     {
-        // Arrange — routing-table HIT + orchestration emits partial stream then RunFailed.
-        var routingTableGuid = Guid.Parse("11111111-2222-3333-4444-555555555555");
-        var (sut, orchestrationMock, _, _, _) = CreateOrchestratorWithRoutingHit(routingTableGuid);
-
-        var runId = Guid.NewGuid();
-        var nodeId = Guid.NewGuid();
-        const string failureMessage = "Azure OpenAI service returned HTTP 503 after retries exhausted.";
-
-        orchestrationMock
-            .Setup(o => o.ExecuteAsync(
-                It.IsAny<PlaybookRunRequest>(),
-                It.IsAny<HttpContext>(),
-                It.IsAny<CancellationToken>()))
-            .Returns(EventStream(
-                PlaybookStreamEvent.NodeProgress(runId, routingTableGuid, nodeId, "Partial output before failure..."),
-                PlaybookStreamEvent.RunFailed(runId, routingTableGuid, failureMessage)));
+        var openAi = new StubStructuredOpenAiClient
+        {
+            ExceptionToThrow = new InvalidOperationException(
+                "Azure OpenAI service returned HTTP 503 after retries exhausted.")
+        };
+        var sut = CreateSut(openAi);
 
         var request = new SummarizeSessionFilesRequest(
             TenantId, SessionId, new[] { FileId1 }, StyleHint: null,
             Path: SummarizeInvocationPath.DirectEndpoint);
 
-        // Act
         var chunks = await Collect(sut.SummarizeSessionFilesAsync(request));
 
-        // Assert — partial token chunk followed by terminal error chunk.
-        chunks.Should().HaveCount(2,
-            "partial NodeProgress emission + terminal RunFailed must both reach the chat client");
-
-        chunks[0].Type.Should().Be("text");
-        chunks[0].Content.Should().Be("Partial output before failure...");
-        chunks[0].Done.Should().BeFalse("intermediate chunks are not terminal");
-
-        chunks[1].Type.Should().Be("error");
-        chunks[1].Error.Should().Be(failureMessage,
-            "SSE adapter MUST surface the orchestration-layer error message verbatim (no rewrites)");
-        chunks[1].Done.Should().BeTrue("error chunks are terminal per the AnalysisChunk envelope contract");
+        chunks.Should().HaveCount(1, "the failure must reach the chat client as a chunk");
+        chunks[0].Type.Should().Be("error");
+        chunks[0].Error.Should().Contain("AI summarization failed",
+            "friendly wire message; the raw exception detail stays in server logs (ADR-019)");
+        chunks[0].Done.Should().BeTrue("error chunks are terminal per the AnalysisChunk envelope contract");
     }
 
-    // ─── Helpers ─────────────────────────────────────────────────────────────────────────────
+    // ─── Wiring ──────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
-    /// Constructs a fully-wired <see cref="SessionSummarizeOrchestrator"/> with a routing-table
-    /// HIT on <see cref="ConsumerTypes.ChatSummarize"/> returning the supplied GUID. The
-    /// session contains 1 file (avoids the FR-04 multi-file interjection so scenario assertions
-    /// can focus on dispatch behavior).
+    /// Constructs the orchestrator with the REAL prompted executor
+    /// (<see cref="ActionRunner"/> + <see cref="PromptSchemaRenderer"/>) over the supplied
+    /// LLM stub, a catalog boundary returning the chat-summarize Binding + SUM-CHAT@v1
+    /// Action, and a session containing one file.
     /// </summary>
-    private static (
-        SessionSummarizeOrchestrator Sut,
-        Mock<IPlaybookOrchestrationService> Orchestration,
-        Mock<IConsumerRoutingService> Routing,
-        Mock<IPlaybookLookupService> Lookup,
-        TestableChatSessionManager SessionManager)
-        CreateOrchestratorWithRoutingHit(Guid playbookId)
+    private static SessionSummarizeOrchestrator CreateSut(StubStructuredOpenAiClient openAi)
     {
         var sessionManager = new TestableChatSessionManager
         {
             Session = BuildSession(FileId1)
         };
 
-        var orchestration = new Mock<IPlaybookOrchestrationService>();
-        var httpAccessor = new Mock<IHttpContextAccessor>();
-        httpAccessor.SetupGet(a => a.HttpContext).Returns(new DefaultHttpContext());
-        var lookup = new Mock<IPlaybookLookupService>();
         var routing = new Mock<IConsumerRoutingService>();
-
         routing
-            .Setup(r => r.ResolveAsync(
+            .Setup(r => r.ResolveBindingAsync(
                 ConsumerTypes.ChatSummarize,
                 It.IsAny<string?>(),
                 It.IsAny<IRoutingContext?>(),
                 It.IsAny<string?>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(playbookId);
+            .ReturnsAsync(new Binding
+            {
+                BindingId = BindingId,
+                ConsumerType = ConsumerTypes.ChatSummarize,
+                ConsumerCode = "default",
+                Environment = "*",
+                ActionId = ActionId,
+                ActionKind = ActionKind.Prompted,
+                Ucid = "UC-A-1",
+                Disposition = BindingDisposition.Informational,
+            });
 
-        var workspaceOptions = Options.Create(new WorkspaceOptions
-        {
-            ChatSummarizePlaybookId = ConfiguredChatSummarizePlaybookId
-        });
-        var logger = new Mock<ILogger<SessionSummarizeOrchestrator>>();
+        var scopeResolver = new Mock<IScopeResolverService>();
+        scopeResolver
+            .Setup(s => s.GetActionAsync(ActionId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AnalysisAction
+            {
+                Id = ActionId,
+                Name = "Summarize Document for Chat",
+                SystemPrompt = SumChatJps,
+                OutputSchemaJson = SumChatOutputSchema,
+                Temperature = 0.0m,
+            });
 
-        // R7 Wave 12.3 ctor deps (pre-existing HEAD compile gap fixed by
-        // ai-architecture-redesign-r1 task 006): these scenarios exercise the engine
-        // (routing-table → Playbook Engine) path — ResolveActionAsync is unmocked and
-        // returns null by default, so the Linear deps are never invoked.
-        var sessionFileTextSource = Mock.Of<ISessionFileTextSource>();
-        var fileSummarizeService = new FileSummarizeService(
-            Mock.Of<IActionResolver>(),
-            Mock.Of<IActionRunner>(),
-            Mock.Of<ILogger<FileSummarizeService>>());
+        var textSource = new Mock<ISessionFileTextSource>();
+        textSource
+            .Setup(t => t.FetchAsync(
+                TenantId, SessionId,
+                It.IsAny<IReadOnlyList<ChatSessionFile>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SessionFileText
+            {
+                ExtractedText = "uploaded engagement letter text between Acme Corporation and Smith Legal Group",
+                DisplayName = $"{FileId1}.pdf",
+                ChunkCount = 1
+            });
 
-        var sut = new SessionSummarizeOrchestrator(
+        // REAL prompted executor: ActionRunner + PromptSchemaRenderer (module-boundary mock
+        // is the IOpenAiClient only, per ADR-038).
+        var actionRunner = new ActionRunner(
+            openAi,
+            new PromptSchemaRenderer(Mock.Of<ILogger<PromptSchemaRenderer>>()),
+            Options.Create(new LinearConsumersOptions()),
+            Mock.Of<ILogger<ActionRunner>>());
+
+        return new SessionSummarizeOrchestrator(
             sessionManager,
-            orchestration.Object,
-            httpAccessor.Object,
-            lookup.Object,
             routing.Object,
-            workspaceOptions,
-            sessionFileTextSource,
-            fileSummarizeService,
-            logger.Object);
-
-        return (sut, orchestration, routing, lookup, sessionManager);
+            scopeResolver.Object,
+            actionRunner,
+            textSource.Object,
+            Mock.Of<ILogger<SessionSummarizeOrchestrator>>());
     }
 
     private static async Task<List<AnalysisChunk>> Collect(IAsyncEnumerable<AnalysisChunk> source)
@@ -307,16 +289,6 @@ public class SessionSummarizeOrchestratorPathA5IntegrationTest
             list.Add(chunk);
         }
         return list;
-    }
-
-    private static async IAsyncEnumerable<PlaybookStreamEvent> EventStream(
-        params PlaybookStreamEvent[] events)
-    {
-        foreach (var ev in events)
-        {
-            await Task.Yield();
-            yield return ev;
-        }
     }
 
     private static ChatSession BuildSession(params string[] fileIds)
@@ -359,5 +331,55 @@ public class SessionSummarizeOrchestratorPathA5IntegrationTest
         public override Task<ChatSession?> GetSessionAsync(
             string tenantId, string sessionId, CancellationToken ct = default)
             => Task.FromResult(Session);
+    }
+
+    /// <summary>
+    /// Stub <see cref="IOpenAiClient"/> covering the single method the prompted executor uses
+    /// (<see cref="IOpenAiClient.GetStructuredCompletionRawAsync"/>). Captures the rendered
+    /// prompt + schema so tests can assert the SUM-CHAT@v1 JPS render. All other members
+    /// throw to make accidental use visible.
+    /// </summary>
+    private sealed class StubStructuredOpenAiClient : IOpenAiClient
+    {
+        public string RawJsonToReturn { get; set; } = "{}";
+        public Exception? ExceptionToThrow { get; set; }
+        public string? CapturedPrompt { get; private set; }
+        public string? CapturedSchemaJson { get; private set; }
+
+        public Task<string> GetStructuredCompletionRawAsync(
+            string prompt, BinaryData jsonSchema, string schemaName, string? model = null,
+            int? maxOutputTokens = null, float? temperature = null,
+            CancellationToken cancellationToken = default)
+        {
+            CapturedPrompt = prompt;
+            CapturedSchemaJson = jsonSchema.ToString();
+            if (ExceptionToThrow is not null)
+            {
+                throw ExceptionToThrow;
+            }
+            return Task.FromResult(RawJsonToReturn);
+        }
+
+        public IAsyncEnumerable<string> StreamStructuredCompletionAsync(
+            IEnumerable<global::OpenAI.Chat.ChatMessage> messages, BinaryData jsonSchema,
+            string schemaName, string? model = null, int? maxOutputTokens = null,
+            CancellationToken cancellationToken = default)
+            => throw new NotSupportedException("Not used by catalog-path tests.");
+        public IAsyncEnumerable<string> StreamCompletionAsync(string prompt, string? model = null, int? maxOutputTokens = null, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException("Not used by catalog-path tests.");
+        public Task<string> GetCompletionAsync(string prompt, string? model = null, int? maxOutputTokens = null, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException("Not used by catalog-path tests.");
+        public IAsyncEnumerable<string> StreamVisionCompletionAsync(string prompt, byte[] imageBytes, string mediaType, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException("Not used by catalog-path tests.");
+        public Task<string> GetVisionCompletionAsync(string prompt, byte[] imageBytes, string mediaType, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException("Not used by catalog-path tests.");
+        public Task<ReadOnlyMemory<float>> GenerateEmbeddingAsync(string text, string? model = null, int? dimensions = null, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException("Not used by catalog-path tests.");
+        public Task<IReadOnlyList<ReadOnlyMemory<float>>> GenerateEmbeddingsAsync(IEnumerable<string> texts, string? model = null, int? dimensions = null, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException("Not used by catalog-path tests.");
+        public Task<ChatCompletionResult> GetChatCompletionWithToolsAsync(IEnumerable<global::OpenAI.Chat.ChatMessage> messages, IEnumerable<global::OpenAI.Chat.ChatTool> tools, string? model = null, int? maxOutputTokens = null, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException("Not used by catalog-path tests.");
+        public Task<T> GetStructuredCompletionAsync<T>(IEnumerable<global::OpenAI.Chat.ChatMessage> messages, BinaryData jsonSchema, string schemaName, string deploymentName, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException("Not used by catalog-path tests.");
     }
 }

@@ -71,7 +71,6 @@ public sealed class WorkspaceOptionsValidatorTests
             ProjectPreFillPlaybookId = null,
             AiSummaryPlaybookId = "   ",
             SummarizePlaybookId = "",
-            ChatSummarizePlaybookId = "",
         };
 
         var result = validator.Validate(null, options);
@@ -88,7 +87,6 @@ public sealed class WorkspaceOptionsValidatorTests
     [InlineData(nameof(WorkspaceOptions.ProjectPreFillPlaybookId), "Workspace__ProjectPreFillPlaybookId")]
     [InlineData(nameof(WorkspaceOptions.AiSummaryPlaybookId), "Workspace__AiSummaryPlaybookId")]
     [InlineData(nameof(WorkspaceOptions.SummarizePlaybookId), "Workspace__SummarizePlaybookId")]
-    [InlineData(nameof(WorkspaceOptions.ChatSummarizePlaybookId), "Workspace__ChatSummarizePlaybookId")]
     public void Validate_SingleEnvVarSet_WarnsWithKeyNameOnly(string propertyName, string expectedKeyName)
     {
         var validator = CreateValidator();
@@ -117,7 +115,6 @@ public sealed class WorkspaceOptionsValidatorTests
             ProjectPreFillPlaybookId = DummyGuid,
             AiSummaryPlaybookId = DummyGuid,
             SummarizePlaybookId = DummyGuid,
-            ChatSummarizePlaybookId = DummyGuid,
         };
 
         var result = validator.Validate(null, options);
@@ -131,7 +128,6 @@ public sealed class WorkspaceOptionsValidatorTests
         msg.Should().Contain("Workspace__ProjectPreFillPlaybookId");
         msg.Should().Contain("Workspace__AiSummaryPlaybookId");
         msg.Should().Contain("Workspace__SummarizePlaybookId");
-        msg.Should().Contain("Workspace__ChatSummarizePlaybookId");
     }
 
     // ── ADR-015 tier-1: NEVER log the GUID value ────────────────────────────
@@ -147,7 +143,6 @@ public sealed class WorkspaceOptionsValidatorTests
             ProjectPreFillPlaybookId = DummyGuid,
             AiSummaryPlaybookId = DummyGuid,
             SummarizePlaybookId = DummyGuid,
-            ChatSummarizePlaybookId = DummyGuid,
         };
 
         validator.Validate(null, options);
@@ -193,7 +188,8 @@ public sealed class WorkspaceOptionsValidatorTests
             nameof(WorkspaceOptions.ProjectPreFillPlaybookId),
             nameof(WorkspaceOptions.AiSummaryPlaybookId),
             nameof(WorkspaceOptions.SummarizePlaybookId),
-            nameof(WorkspaceOptions.ChatSummarizePlaybookId),
+            // ChatSummarizePlaybookId removed by FR-P1-01 (ai-architecture-redesign-r1
+            // task 020) — the chat /summarize fallback dissolved with the dual-path.
         };
 
         WorkspaceOptionsValidator.DeprecatedKeys.Keys.Should().BeEquivalentTo(expected);

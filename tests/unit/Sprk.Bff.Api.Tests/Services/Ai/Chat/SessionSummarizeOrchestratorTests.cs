@@ -1,12 +1,9 @@
 using System.Reflection;
-using System.Runtime.CompilerServices;
+using System.Text.Json;
 using FluentAssertions;
-using Microsoft.AspNetCore.Http;
-using Sprk.Bff.Api.Infrastructure.Cache;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using Moq;
-using Sprk.Bff.Api.Configuration;
+using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
@@ -18,31 +15,30 @@ using Xunit;
 namespace Sprk.Bff.Api.Tests.Services.Ai.Chat;
 
 /// <summary>
-/// Unit tests for <see cref="SessionSummarizeOrchestrator"/> — the chat-Summarize convergence
-/// orchestrator.
+/// Unit tests for <see cref="SessionSummarizeOrchestrator"/> — the chat-session boundary for
+/// the catalog-driven <c>chat-summarize</c> capability (FR-P1-01, ai-architecture-redesign-r1
+/// task 020).
 ///
 /// <para>
-/// <b>R7 task 091 (FR-17) update</b>: the orchestrator now dispatches through the canonical
-/// <see cref="IPlaybookOrchestrationService.ExecuteAsync"/> per ADR-013 (Option 1 from task 090
-/// design — in-zone code may inject the orchestration service directly to preserve per-token
-/// SSE UX). Tests verify the orchestrator's boundary responsibilities:
+/// <b>FR-P1-01 cutover</b>: the orchestrator dual-path (Playbook Engine dispatch +
+/// <c>Workspace:ChatSummarizePlaybookId</c> typed-options fallback) is DELETED. The single
+/// remaining path is: <see cref="IConsumerRoutingService.ResolveBindingAsync"/> (the
+/// ADR-039 Binding contract) → <see cref="IScopeResolverService.GetActionAsync"/> (the
+/// SUM-CHAT@v1 <c>kind: prompted</c> Action row) → <see cref="IActionRunner"/> (the prompted
+/// executor: ActionRunner + PromptSchemaRenderer). These tests verify:
 /// </para>
 /// <list type="bullet">
-///   <item>Public <see cref="SessionSummarizeOrchestrator.SummarizeSessionFilesAsync"/>
-///         signature unchanged (convergence + ADR-010 reflection).</item>
-///   <item>Argument validation (tenant + session required; NFR-02 ≤20 file cap).</item>
-///   <item>Session lookup at the orchestrator boundary (missing session →
-///         InvalidOperationException; endpoint maps to 404).</item>
-///   <item>FR-1R-05 — routing-table consulted via IConsumerRoutingService.ResolveAsync with
-///         ConsumerTypes.ChatSummarize; graceful-degrade to typed-options fallback on
-///         null/empty.</item>
-///   <item>Dispatch via IPlaybookOrchestrationService.ExecuteAsync (NOT
-///         IPlaybookExecutionEngine.ExecuteChatSummarizeAsync — that path was retired by R7
-///         task 091).</item>
-///   <item>FR-04 multi-file interjection emitted BEFORE the playbook stream begins.</item>
-///   <item>SSE adapter projects PlaybookStreamEvent → AnalysisChunk preserving per-token UX
-///         (NodeProgress → FromContent, terminal NodeCompleted+DeliverOutput → Completed,
-///         RunFailed → FromError).</item>
+///   <item>Catalog dispatch: Binding resolved with <see cref="ConsumerTypes.ChatSummarize"/>;
+///         the Binding's Action row loaded and executed via the prompted executor.</item>
+///   <item>Hard cutover fail-fast: no Binding / no Action target / non-prompted kind /
+///         unloadable Action row → <see cref="InvalidOperationException"/> BEFORE any chunk
+///         (no fallback of any kind, NFR-08).</item>
+///   <item>Boundary responsibilities preserved: arg validation, NFR-02 20-file cap, session
+///         lookup (404 mapping contract), FR-04 multi-file interjection, FR-08 file-id
+///         defaulting.</item>
+///   <item>Wire contract: terminal <see cref="AnalysisChunk.Completed(DocumentAnalysisResult)"/>
+///         from the executor's structured JSON; graceful text-only degrade on parse failure;
+///         FromError chunks for fetch/LLM runtime failures.</item>
 /// </list>
 /// </summary>
 public class SessionSummarizeOrchestratorTests
@@ -52,198 +48,243 @@ public class SessionSummarizeOrchestratorTests
     private const string FileId1 = "file-001";
     private const string FileId2 = "file-002";
 
-    // FR-05 task 015 (chat-routing-redesign-r1): tests configure WorkspaceOptions with the
-    // canonical DEV-environment value for the summarize-document-for-chat@v1 playbook.
-    private const string ConfiguredChatSummarizePlaybookId = "44285d15-1360-f111-ab0b-70a8a59455f4";
-    private static readonly Guid ResolvedChatSummarizePlaybookGuid =
-        Guid.Parse(ConfiguredChatSummarizePlaybookId);
+    private static readonly Guid BindingId = Guid.Parse("651194cd-3670-f111-ab0e-70a8a590c51c");
+    private static readonly Guid ActionId = Guid.Parse("eeb05bfd-1260-f111-ab0b-70a8a59455f4");
+
+    private const string ValidResultJson =
+        """{"tldr":["Point A"],"summary":"A summary.","keywords":"alpha, beta","entities":{"organizations":[],"persons":[]}}""";
 
     private readonly TestableChatSessionManager _sessionManagerStub;
-    private readonly Mock<IPlaybookOrchestrationService> _orchestrationServiceMock;
-    private readonly Mock<IHttpContextAccessor> _httpContextAccessorMock;
-    private readonly HttpContext _httpContext;
-    private readonly Mock<IPlaybookLookupService> _playbookLookupMock;
     private readonly Mock<IConsumerRoutingService> _consumerRoutingMock;
-    private readonly IOptions<WorkspaceOptions> _workspaceOptions;
+    private readonly Mock<IScopeResolverService> _scopeResolverMock;
+    private readonly Mock<IActionRunner> _actionRunnerMock;
     private readonly Mock<ISessionFileTextSource> _sessionFileTextSourceMock;
-    private readonly FileSummarizeService _fileSummarizeService;
     private readonly Mock<ILogger<SessionSummarizeOrchestrator>> _loggerMock;
 
     public SessionSummarizeOrchestratorTests()
     {
         _sessionManagerStub = new TestableChatSessionManager();
-        _orchestrationServiceMock = new Mock<IPlaybookOrchestrationService>();
-        _httpContextAccessorMock = new Mock<IHttpContextAccessor>();
-        _httpContext = new DefaultHttpContext();
-        _httpContextAccessorMock.SetupGet(a => a.HttpContext).Returns(_httpContext);
-
-        // R7 Wave 12.3 ctor deps (pre-existing HEAD compile gap fixed by
-        // ai-architecture-redesign-r1 task 006): the Linear path is only taken when
-        // IConsumerRoutingService.ResolveActionAsync returns a non-empty action id — these
-        // tests exercise the engine path, so loose mocks (default null/empty) suffice.
-        _sessionFileTextSourceMock = new Mock<ISessionFileTextSource>();
-        _fileSummarizeService = new FileSummarizeService(
-            Mock.Of<IActionResolver>(),
-            Mock.Of<IActionRunner>(),
-            Mock.Of<ILogger<FileSummarizeService>>());
-        _playbookLookupMock = new Mock<IPlaybookLookupService>();
         _consumerRoutingMock = new Mock<IConsumerRoutingService>();
-        _workspaceOptions = Options.Create(new WorkspaceOptions
-        {
-            ChatSummarizePlaybookId = ConfiguredChatSummarizePlaybookId
-        });
+        _scopeResolverMock = new Mock<IScopeResolverService>();
+        _actionRunnerMock = new Mock<IActionRunner>();
+        _sessionFileTextSourceMock = new Mock<ISessionFileTextSource>();
         _loggerMock = new Mock<ILogger<SessionSummarizeOrchestrator>>();
 
-        // Default stub: GetByIdAsync(<configured id>, ct) → PlaybookResponse with Id = GUID.
-        _playbookLookupMock
-            .Setup(p => p.GetByIdAsync(ConfiguredChatSummarizePlaybookId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new PlaybookResponse
-            {
-                Id = ResolvedChatSummarizePlaybookGuid,
-                Name = "summarize-document-for-chat@v1",
-                PlaybookCode = string.Empty,
-                IsActive = true
-            });
-
-        // Default stub: routing-table returns null → fallback to typed-options path
-        // (preserves the pre-028d behavior verbatim across the existing test surface).
-        // Tests covering the FR-1R-05 happy path override this setup explicitly.
+        // Default: catalog fully wired — Binding row → prompted Action → executor result.
         _consumerRoutingMock
-            .Setup(c => c.ResolveAsync(
-                It.IsAny<string>(),
+            .Setup(c => c.ResolveBindingAsync(
+                ConsumerTypes.ChatSummarize,
                 It.IsAny<string?>(),
                 It.IsAny<IRoutingContext?>(),
                 It.IsAny<string?>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Guid?)null);
+            .ReturnsAsync(BuildBinding());
 
-        // Default orchestration stub: emit an empty stream. Tests that exercise dispatch
-        // override this with explicit event sequences.
-        _orchestrationServiceMock
-            .Setup(o => o.ExecuteAsync(
-                It.IsAny<PlaybookRunRequest>(),
-                It.IsAny<HttpContext>(),
-                It.IsAny<CancellationToken>()))
-            .Returns(EmptyEventStream());
+        _scopeResolverMock
+            .Setup(s => s.GetActionAsync(ActionId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(BuildAction());
+
+        _sessionFileTextSourceMock
+            .Setup(t => t.FetchAsync(
+                It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<IReadOnlyList<ChatSessionFile>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SessionFileText
+            {
+                ExtractedText = "lorem ipsum extracted text",
+                DisplayName = $"{FileId1}.pdf",
+                ChunkCount = 1
+            });
+
+        _actionRunnerMock
+            .Setup(r => r.RunAsync(
+                It.IsAny<AnalysisAction>(), It.IsAny<DocumentText>(),
+                It.IsAny<LinearRunContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(ParseJson(ValidResultJson));
     }
 
     private SessionSummarizeOrchestrator CreateSut() => new(
         _sessionManagerStub,
-        _orchestrationServiceMock.Object,
-        _httpContextAccessorMock.Object,
-        _playbookLookupMock.Object,
         _consumerRoutingMock.Object,
-        _workspaceOptions,
+        _scopeResolverMock.Object,
+        _actionRunnerMock.Object,
         _sessionFileTextSourceMock.Object,
-        _fileSummarizeService,
         _loggerMock.Object);
 
-    // ─── (a) R7 — dispatches through IPlaybookOrchestrationService with resolved playbookId ────
+    // ─── (a) FR-P1-01 — catalog dispatch: Binding → Action → prompted executor ────────────────
 
     [Fact]
-    public async Task SummarizeSessionFilesAsync_DispatchesThroughOrchestrationService_WithResolvedPlaybookId()
+    public async Task SummarizeSessionFilesAsync_ResolvesBindingAndExecutesPromptedAction()
     {
-        _sessionManagerStub.Session = BuildSession(FileId1, FileId2);
+        _sessionManagerStub.Session = BuildSession(FileId1);
 
-        PlaybookRunRequest? capturedRequest = null;
-        _orchestrationServiceMock
-            .Setup(o => o.ExecuteAsync(
-                It.IsAny<PlaybookRunRequest>(),
-                It.IsAny<HttpContext>(),
-                It.IsAny<CancellationToken>()))
-            .Callback<PlaybookRunRequest, HttpContext, CancellationToken>(
-                (req, _, _) => capturedRequest = req)
-            .Returns(EmptyEventStream());
+        AnalysisAction? capturedAction = null;
+        LinearRunContext? capturedContext = null;
+        _actionRunnerMock
+            .Setup(r => r.RunAsync(
+                It.IsAny<AnalysisAction>(), It.IsAny<DocumentText>(),
+                It.IsAny<LinearRunContext>(), It.IsAny<CancellationToken>()))
+            .Callback<AnalysisAction, DocumentText, LinearRunContext, CancellationToken>(
+                (a, _, ctx, _) => { capturedAction = a; capturedContext = ctx; })
+            .ReturnsAsync(ParseJson(ValidResultJson));
 
         var request = new SummarizeSessionFilesRequest(
             TenantId, SessionId, new[] { FileId1 }, StyleHint: "executive",
             Path: SummarizeInvocationPath.DirectEndpoint,
             CorrelationId: "corr-001");
 
-        var sut = CreateSut();
-        _ = await Collect(sut.SummarizeSessionFilesAsync(request));
+        var chunks = await Collect(CreateSut().SummarizeSessionFilesAsync(request));
 
-        capturedRequest.Should().NotBeNull();
-        capturedRequest!.PlaybookId.Should().Be(ResolvedChatSummarizePlaybookGuid,
-            "R7 task 091 binding — chat /summarize MUST route through IPlaybookOrchestrationService " +
-            "with the summarize-document-for-chat@v1 playbook ID resolved via the routing-table fallback path");
-        _orchestrationServiceMock.Verify(
-            o => o.ExecuteAsync(It.IsAny<PlaybookRunRequest>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()),
+        _consumerRoutingMock.Verify(
+            c => c.ResolveBindingAsync(
+                ConsumerTypes.ChatSummarize,
+                It.IsAny<string?>(),
+                It.IsAny<IRoutingContext?>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()),
             Times.Once,
-            "FR-17 — dispatch goes through the canonical orchestration triangle (not the retired ExecuteChatSummarizeAsync)");
+            "FR-P1-01 — the Binding row is THE routing surface (ADR-039); resolution goes " +
+            "through ResolveBindingAsync with the compile-safe ConsumerTypes constant");
+
+        capturedAction.Should().NotBeNull("the Binding's Action row is what executes");
+        capturedAction!.Id.Should().Be(ActionId);
+        capturedContext.Should().NotBeNull();
+        capturedContext!.ConsumerType.Should().Be(ConsumerTypes.ChatSummarize,
+            "ADR-015 — run context carries deterministic identifiers only");
+        capturedContext.TenantId.Should().Be(TenantId);
+        capturedContext.CorrelationId.Should().Be("corr-001", "NFR-17 correlation propagation");
+
+        chunks.Should().ContainSingle(c => c.Type == "complete",
+            "the prompted executor's structured output surfaces as the terminal complete chunk");
     }
 
-    // ─── (b) R7 — Parameters dictionary carries tenant/session/file-manifest discriminators ────
-
     [Fact]
-    public async Task SummarizeSessionFilesAsync_ParametersDictionary_CarriesDeterministicIdentifiers()
+    public async Task SummarizeSessionFilesAsync_CompleteChunk_CarriesParsedDocumentAnalysisResult()
     {
-        _sessionManagerStub.Session = BuildSession(FileId1, FileId2);
+        _sessionManagerStub.Session = BuildSession(FileId1);
 
-        PlaybookRunRequest? capturedRequest = null;
-        _orchestrationServiceMock
-            .Setup(o => o.ExecuteAsync(
-                It.IsAny<PlaybookRunRequest>(),
-                It.IsAny<HttpContext>(),
-                It.IsAny<CancellationToken>()))
-            .Callback<PlaybookRunRequest, HttpContext, CancellationToken>(
-                (req, _, _) => capturedRequest = req)
-            .Returns(EmptyEventStream());
+        var request = DefaultRequest(FileId1);
+        var chunks = await Collect(CreateSut().SummarizeSessionFilesAsync(request));
 
-        var request = new SummarizeSessionFilesRequest(
-            TenantId, SessionId, new[] { FileId1, FileId2 }, StyleHint: "executive",
-            Path: SummarizeInvocationPath.DirectEndpoint,
-            CorrelationId: "corr-001");
-
-        var sut = CreateSut();
-        _ = await Collect(sut.SummarizeSessionFilesAsync(request));
-
-        capturedRequest.Should().NotBeNull();
-        capturedRequest!.Parameters.Should().NotBeNull();
-        capturedRequest.Parameters!["tenantId"].Should().Be(TenantId, "ADR-014 tenant isolation parameter");
-        capturedRequest.Parameters["sessionId"].Should().Be(SessionId, "ADR-014 session isolation parameter");
-        capturedRequest.Parameters["styleHint"].Should().Be("executive");
-        capturedRequest.Parameters["fileCount"].Should().Be("2");
-        capturedRequest.Parameters["isMultiFile"].Should().Be("true");
-        capturedRequest.Parameters["invocationPath"].Should().Be("direct_endpoint",
-            "Path discriminator preserved in parameters for telemetry consistency");
-        capturedRequest.Parameters["correlationId"].Should().Be("corr-001",
-            "NFR-17 correlation ID propagation");
-        capturedRequest.Parameters["sessionFilesManifest"].Should().Contain(FileId1)
-            .And.Contain(FileId2, "Manifest serialized as JSON for the RAG node's session+file filter");
+        chunks.Should().HaveCount(1);
+        chunks[0].Type.Should().Be("complete");
+        chunks[0].Done.Should().BeTrue();
+        chunks[0].Result.Should().NotBeNull();
+        chunks[0].Result!.Summary.Should().Be("A summary.");
+        chunks[0].Result!.TlDr.Should().BeEquivalentTo(new[] { "Point A" });
+        chunks[0].Result!.ParsedSuccessfully.Should().BeTrue();
     }
 
-    // ─── (c) FR-04 — multi-file interjection emitted BEFORE the playbook stream ────────────────
+    [Fact]
+    public async Task SummarizeSessionFilesAsync_UnparsableExecutorOutput_DegradesToTextCompletion()
+    {
+        _sessionManagerStub.Session = BuildSession(FileId1);
+        _actionRunnerMock
+            .Setup(r => r.RunAsync(
+                It.IsAny<AnalysisAction>(), It.IsAny<DocumentText>(),
+                It.IsAny<LinearRunContext>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(ParseJson("\"just a string, not the schema shape\""));
+
+        var chunks = await Collect(CreateSut().SummarizeSessionFilesAsync(DefaultRequest(FileId1)));
+
+        chunks.Should().HaveCount(1);
+        chunks[0].Type.Should().Be("complete",
+            "graceful degrade — the client always sees a terminal complete chunk, never silent EOF");
+    }
+
+    // ─── (b) NFR-08 hard cutover — fail-fast, no fallback of any kind ──────────────────────────
 
     [Fact]
-    public async Task SummarizeSessionFilesAsync_MultiFile_EmitsInterjectionBeforePlaybookStream()
+    public async Task SummarizeSessionFilesAsync_NoBindingRow_ThrowsInvalidOperationException()
+    {
+        _sessionManagerStub.Session = BuildSession(FileId1);
+        _consumerRoutingMock
+            .Setup(c => c.ResolveBindingAsync(
+                It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<IRoutingContext?>(),
+                It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Binding?)null);
+
+        var act = async () => { await foreach (var _ in CreateSut().SummarizeSessionFilesAsync(DefaultRequest(FileId1))) { } };
+        var thrown = await act.Should().ThrowAsync<InvalidOperationException>();
+        thrown.Which.Message.Should().Contain("sprk_playbookconsumer",
+            "operator diagnostic must point at the Binding table");
+        thrown.Which.Message.Should().NotContain("not found",
+            "endpoint maps InvalidOperationException containing 'not found' to 404 " +
+            "session-not-found; catalog failures must be a 500, not a 404");
+
+        _actionRunnerMock.Verify(
+            r => r.RunAsync(It.IsAny<AnalysisAction>(), It.IsAny<DocumentText>(),
+                It.IsAny<LinearRunContext>(), It.IsAny<CancellationToken>()),
+            Times.Never,
+            "NFR-08 hard cutover — nothing executes without a Binding row; there is NO fallback");
+    }
+
+    [Fact]
+    public async Task SummarizeSessionFilesAsync_BindingWithoutActionTarget_ThrowsInvalidOperationException()
+    {
+        _sessionManagerStub.Session = BuildSession(FileId1);
+        _consumerRoutingMock
+            .Setup(c => c.ResolveBindingAsync(
+                It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<IRoutingContext?>(),
+                It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(BuildBinding() with { ActionId = null, PlaybookId = Guid.NewGuid() });
+
+        var act = async () => { await foreach (var _ in CreateSut().SummarizeSessionFilesAsync(DefaultRequest(FileId1))) { } };
+        var thrown = await act.Should().ThrowAsync<InvalidOperationException>();
+        thrown.Which.Message.Should().Contain("sprk_action",
+            "a legacy playbook-only row is a misconfiguration on this path — the engine " +
+            "dispatch was deleted (FR-P1-01); the message must direct the operator to set sprk_action");
+    }
+
+    [Fact]
+    public async Task SummarizeSessionFilesAsync_CodedActionKind_ThrowsInvalidOperationException()
+    {
+        _sessionManagerStub.Session = BuildSession(FileId1);
+        _consumerRoutingMock
+            .Setup(c => c.ResolveBindingAsync(
+                It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<IRoutingContext?>(),
+                It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(BuildBinding() with { ActionKind = ActionKind.Coded });
+
+        var act = async () => { await foreach (var _ in CreateSut().SummarizeSessionFilesAsync(DefaultRequest(FileId1))) { } };
+        var thrown = await act.Should().ThrowAsync<InvalidOperationException>();
+        thrown.Which.Message.Should().Contain("prompted",
+            "chat-summarize executes prompted Actions only (SUM-CHAT@v1, kind: prompted)");
+    }
+
+    [Fact]
+    public async Task SummarizeSessionFilesAsync_ActionRowUnloadable_ThrowsInvalidOperationException()
+    {
+        _sessionManagerStub.Session = BuildSession(FileId1);
+        _scopeResolverMock
+            .Setup(s => s.GetActionAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((AnalysisAction?)null);
+
+        var act = async () => { await foreach (var _ in CreateSut().SummarizeSessionFilesAsync(DefaultRequest(FileId1))) { } };
+        var thrown = await act.Should().ThrowAsync<InvalidOperationException>();
+        thrown.Which.Message.Should().Contain("sprk_action lookup",
+            "operator diagnostic points at the broken Binding→Action FK");
+        thrown.Which.Message.Should().NotContain("not found",
+            "must not trip the endpoint's 404 session-not-found mapping");
+    }
+
+    // ─── (c) FR-04 — multi-file interjection ───────────────────────────────────────────────────
+
+    [Fact]
+    public async Task SummarizeSessionFilesAsync_MultiFile_EmitsInterjectionBeforeResult()
     {
         _sessionManagerStub.Session = BuildSession(FileId1, FileId2);
-
-        // Playbook emits a single NodeProgress event after the interjection.
-        _orchestrationServiceMock
-            .Setup(o => o.ExecuteAsync(
-                It.IsAny<PlaybookRunRequest>(),
-                It.IsAny<HttpContext>(),
-                It.IsAny<CancellationToken>()))
-            .Returns(EventStream(
-                PlaybookStreamEvent.NodeProgress(Guid.NewGuid(), ResolvedChatSummarizePlaybookGuid, Guid.NewGuid(), "playbook-token")));
 
         var request = new SummarizeSessionFilesRequest(
             TenantId, SessionId, new[] { FileId1, FileId2 }, StyleHint: null,
             Path: SummarizeInvocationPath.DirectEndpoint);
 
-        var sut = CreateSut();
-        var chunks = await Collect(sut.SummarizeSessionFilesAsync(request));
+        var chunks = await Collect(CreateSut().SummarizeSessionFilesAsync(request));
 
         chunks.Should().HaveCount(2,
-            "FR-04 — multi-file interjection chunk emitted BEFORE the playbook stream begins");
+            "FR-04 — multi-file interjection chunk emitted BEFORE the executor result");
         chunks[0].Type.Should().Be("text");
-        chunks[0].Content.Should().Contain("Multiple files",
-            "FR-04 interjection is a 'text' AnalysisChunk introducing the combined summary");
-        chunks[1].Type.Should().Be("text");
-        chunks[1].Content.Should().Be("playbook-token",
-            "playbook NodeProgress events translate to FromContent chunks preserving per-token cadence");
+        chunks[0].Content.Should().Contain("Multiple files");
+        chunks[1].Type.Should().Be("complete");
     }
 
     [Fact]
@@ -251,147 +292,122 @@ public class SessionSummarizeOrchestratorTests
     {
         _sessionManagerStub.Session = BuildSession(FileId1);
 
-        _orchestrationServiceMock
-            .Setup(o => o.ExecuteAsync(
-                It.IsAny<PlaybookRunRequest>(),
-                It.IsAny<HttpContext>(),
-                It.IsAny<CancellationToken>()))
-            .Returns(EventStream(
-                PlaybookStreamEvent.NodeProgress(Guid.NewGuid(), ResolvedChatSummarizePlaybookGuid, Guid.NewGuid(), "single-token")));
-
-        var request = new SummarizeSessionFilesRequest(
-            TenantId, SessionId, new[] { FileId1 }, StyleHint: null,
-            Path: SummarizeInvocationPath.DirectEndpoint);
-
-        var sut = CreateSut();
-        var chunks = await Collect(sut.SummarizeSessionFilesAsync(request));
+        var chunks = await Collect(CreateSut().SummarizeSessionFilesAsync(DefaultRequest(FileId1)));
 
         chunks.Should().HaveCount(1,
-            "single-file requests skip the FR-04 interjection — only the playbook stream surfaces");
-        chunks[0].Content.Should().Be("single-token");
+            "single-file requests skip the FR-04 interjection — only the result chunk surfaces");
+        chunks[0].Type.Should().Be("complete");
     }
 
-    // ─── (d) SSE adapter — NodeProgress → FromContent (per-token preservation) ─────────────────
+    // ─── (d) FR-08 — file-id defaulting + no-files edge ────────────────────────────────────────
 
     [Fact]
-    public async Task SummarizeSessionFilesAsync_NodeProgressEvents_TranslateToFromContentInOrder()
+    public async Task SummarizeSessionFilesAsync_NullFileIds_DefaultsToAllSessionFiles()
     {
-        _sessionManagerStub.Session = BuildSession(FileId1);
-        var runId = Guid.NewGuid();
-        var nodeId = Guid.NewGuid();
+        _sessionManagerStub.Session = BuildSession(FileId1, FileId2);
 
-        _orchestrationServiceMock
-            .Setup(o => o.ExecuteAsync(
-                It.IsAny<PlaybookRunRequest>(),
-                It.IsAny<HttpContext>(),
-                It.IsAny<CancellationToken>()))
-            .Returns(EventStream(
-                PlaybookStreamEvent.NodeProgress(runId, ResolvedChatSummarizePlaybookGuid, nodeId, "alpha"),
-                PlaybookStreamEvent.NodeProgress(runId, ResolvedChatSummarizePlaybookGuid, nodeId, "beta"),
-                PlaybookStreamEvent.NodeProgress(runId, ResolvedChatSummarizePlaybookGuid, nodeId, "gamma")));
+        IReadOnlyList<ChatSessionFile>? capturedFiles = null;
+        _sessionFileTextSourceMock
+            .Setup(t => t.FetchAsync(
+                It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<IReadOnlyList<ChatSessionFile>>(), It.IsAny<CancellationToken>()))
+            .Callback<string, string, IReadOnlyList<ChatSessionFile>, CancellationToken>(
+                (_, _, files, _) => capturedFiles = files)
+            .ReturnsAsync(new SessionFileText
+            {
+                ExtractedText = "combined text",
+                DisplayName = "session-files-combined"
+            });
 
         var request = new SummarizeSessionFilesRequest(
-            TenantId, SessionId, new[] { FileId1 }, StyleHint: null,
+            TenantId, SessionId, FileIds: null, StyleHint: null,
             Path: SummarizeInvocationPath.DirectEndpoint);
 
-        var sut = CreateSut();
-        var chunks = await Collect(sut.SummarizeSessionFilesAsync(request));
+        _ = await Collect(CreateSut().SummarizeSessionFilesAsync(request));
 
-        chunks.Should().HaveCount(3, "every NodeProgress emits one FromContent chunk in order");
-        chunks.Select(c => c.Content).Should().ContainInOrder("alpha", "beta", "gamma");
-        chunks.Should().AllSatisfy(c => c.Type.Should().Be("text"));
-        chunks.Should().AllSatisfy(c => c.Done.Should().BeFalse());
+        capturedFiles.Should().NotBeNull();
+        capturedFiles!.Select(f => f.FileId).Should().BeEquivalentTo(new[] { FileId1, FileId2 },
+            "FR-08 — omitted fileIds default to ALL files in the session manifest");
     }
 
-    // ─── (e) SSE adapter — RunFailed → FromError ───────────────────────────────────────────────
-
     [Fact]
-    public async Task SummarizeSessionFilesAsync_RunFailedEvent_TranslatesToFromErrorChunk()
+    public async Task SummarizeSessionFilesAsync_NoMatchingFiles_YieldsFromErrorChunk()
     {
         _sessionManagerStub.Session = BuildSession(FileId1);
 
-        _orchestrationServiceMock
-            .Setup(o => o.ExecuteAsync(
-                It.IsAny<PlaybookRunRequest>(),
-                It.IsAny<HttpContext>(),
-                It.IsAny<CancellationToken>()))
-            .Returns(EventStream(
-                PlaybookStreamEvent.RunFailed(Guid.NewGuid(), ResolvedChatSummarizePlaybookGuid, "LLM upstream failure")));
-
         var request = new SummarizeSessionFilesRequest(
-            TenantId, SessionId, new[] { FileId1 }, StyleHint: null,
+            TenantId, SessionId, new[] { "file-does-not-exist" }, StyleHint: null,
             Path: SummarizeInvocationPath.DirectEndpoint);
 
-        var sut = CreateSut();
-        var chunks = await Collect(sut.SummarizeSessionFilesAsync(request));
+        var chunks = await Collect(CreateSut().SummarizeSessionFilesAsync(request));
 
         chunks.Should().HaveCount(1);
         chunks[0].Type.Should().Be("error");
-        chunks[0].Error.Should().Be("LLM upstream failure");
+        _actionRunnerMock.Verify(
+            r => r.RunAsync(It.IsAny<AnalysisAction>(), It.IsAny<DocumentText>(),
+                It.IsAny<LinearRunContext>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    // ─── (e) Runtime failures surface as FromError chunks (never silent EOF) ───────────────────
+
+    [Fact]
+    public async Task SummarizeSessionFilesAsync_TextFetchFails_YieldsFromErrorChunk()
+    {
+        _sessionManagerStub.Session = BuildSession(FileId1);
+        _sessionFileTextSourceMock
+            .Setup(t => t.FetchAsync(
+                It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<IReadOnlyList<ChatSessionFile>>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("search transport failure"));
+
+        var chunks = await Collect(CreateSut().SummarizeSessionFilesAsync(DefaultRequest(FileId1)));
+
+        chunks.Should().HaveCount(1);
+        chunks[0].Type.Should().Be("error");
+        chunks[0].Error.Should().Contain("retrieve session file content",
+            "fetch failures surface as a friendly FromError chunk, not a raw exception");
+    }
+
+    [Fact]
+    public async Task SummarizeSessionFilesAsync_EmptyExtractedText_YieldsFromErrorChunk()
+    {
+        _sessionManagerStub.Session = BuildSession(FileId1);
+        _sessionFileTextSourceMock
+            .Setup(t => t.FetchAsync(
+                It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<IReadOnlyList<ChatSessionFile>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SessionFileText { ExtractedText = "", DisplayName = "f.pdf" });
+
+        var chunks = await Collect(CreateSut().SummarizeSessionFilesAsync(DefaultRequest(FileId1)));
+
+        chunks.Should().HaveCount(1);
+        chunks[0].Type.Should().Be("error");
+        _actionRunnerMock.Verify(
+            r => r.RunAsync(It.IsAny<AnalysisAction>(), It.IsAny<DocumentText>(),
+                It.IsAny<LinearRunContext>(), It.IsAny<CancellationToken>()),
+            Times.Never,
+            "no text → no LLM call");
+    }
+
+    [Fact]
+    public async Task SummarizeSessionFilesAsync_ExecutorFails_YieldsFromErrorChunk()
+    {
+        _sessionManagerStub.Session = BuildSession(FileId1);
+        _actionRunnerMock
+            .Setup(r => r.RunAsync(
+                It.IsAny<AnalysisAction>(), It.IsAny<DocumentText>(),
+                It.IsAny<LinearRunContext>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("Azure OpenAI 503"));
+
+        var chunks = await Collect(CreateSut().SummarizeSessionFilesAsync(DefaultRequest(FileId1)));
+
+        chunks.Should().HaveCount(1);
+        chunks[0].Type.Should().Be("error");
         chunks[0].Done.Should().BeTrue("error chunks are terminal per the AnalysisChunk envelope");
     }
 
-    // ─── (f) SSE adapter — lifecycle events (RunStarted/NodeStarted) filtered out ──────────────
-
-    [Fact]
-    public async Task SummarizeSessionFilesAsync_LifecycleEvents_AreFilteredFromStream()
-    {
-        _sessionManagerStub.Session = BuildSession(FileId1);
-        var runId = Guid.NewGuid();
-        var nodeId = Guid.NewGuid();
-
-        _orchestrationServiceMock
-            .Setup(o => o.ExecuteAsync(
-                It.IsAny<PlaybookRunRequest>(),
-                It.IsAny<HttpContext>(),
-                It.IsAny<CancellationToken>()))
-            .Returns(EventStream(
-                PlaybookStreamEvent.RunStarted(runId, ResolvedChatSummarizePlaybookGuid, nodeCount: 3),
-                PlaybookStreamEvent.NodeStarted(runId, ResolvedChatSummarizePlaybookGuid, nodeId, "ChatSummarize"),
-                PlaybookStreamEvent.NodeProgress(runId, ResolvedChatSummarizePlaybookGuid, nodeId, "alpha"),
-                PlaybookStreamEvent.RunCompleted(runId, ResolvedChatSummarizePlaybookGuid, new PlaybookRunMetrics())));
-
-        var request = new SummarizeSessionFilesRequest(
-            TenantId, SessionId, new[] { FileId1 }, StyleHint: null,
-            Path: SummarizeInvocationPath.DirectEndpoint);
-
-        var sut = CreateSut();
-        var chunks = await Collect(sut.SummarizeSessionFilesAsync(request));
-
-        chunks.Should().HaveCount(1,
-            "only NodeProgress reaches the chat client — RunStarted/NodeStarted/RunCompleted have no AnalysisChunk equivalent");
-        chunks[0].Content.Should().Be("alpha");
-    }
-
-    // ─── (g) ADR-014 — tenant + session forwarded via parameters dictionary ────────────────────
-
-    [Fact]
-    public async Task SummarizeSessionFilesAsync_PropagatesTenantAndSessionIdViaParameters()
-    {
-        _sessionManagerStub.Session = BuildSession(FileId1);
-
-        PlaybookRunRequest? captured = null;
-        _orchestrationServiceMock
-            .Setup(o => o.ExecuteAsync(
-                It.IsAny<PlaybookRunRequest>(),
-                It.IsAny<HttpContext>(),
-                It.IsAny<CancellationToken>()))
-            .Callback<PlaybookRunRequest, HttpContext, CancellationToken>((req, _, _) => captured = req)
-            .Returns(EmptyEventStream());
-
-        var request = new SummarizeSessionFilesRequest(
-            TenantId, SessionId, new[] { FileId1 }, StyleHint: null,
-            Path: SummarizeInvocationPath.DirectEndpoint);
-
-        var sut = CreateSut();
-        _ = await Collect(sut.SummarizeSessionFilesAsync(request));
-
-        captured.Should().NotBeNull();
-        captured!.Parameters!["tenantId"].Should().Be(TenantId, "ADR-014 tenant isolation forwarded");
-        captured.Parameters["sessionId"].Should().Be(SessionId, "ADR-014 session isolation forwarded");
-    }
-
-    // ─── (h) NFR-02 — hard cap 20 files per session — orchestrator boundary ────────────────────
+    // ─── (f) Boundary validation (unchanged responsibilities) ──────────────────────────────────
 
     [Fact]
     public async Task SummarizeSessionFilesAsync_RejectsMoreThanTwentyFileIds()
@@ -402,79 +418,35 @@ public class SessionSummarizeOrchestratorTests
             TenantId, SessionId, tooMany, StyleHint: null,
             Path: SummarizeInvocationPath.DirectEndpoint);
 
-        var sut = CreateSut();
-
-        var act = async () => { await foreach (var _ in sut.SummarizeSessionFilesAsync(request)) { } };
+        var act = async () => { await foreach (var _ in CreateSut().SummarizeSessionFilesAsync(request)) { } };
         await act.Should().ThrowAsync<ArgumentException>().WithMessage("*NFR-02*");
 
-        _orchestrationServiceMock.Verify(
-            o => o.ExecuteAsync(It.IsAny<PlaybookRunRequest>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()),
+        _actionRunnerMock.Verify(
+            r => r.RunAsync(It.IsAny<AnalysisAction>(), It.IsAny<DocumentText>(),
+                It.IsAny<LinearRunContext>(), It.IsAny<CancellationToken>()),
             Times.Never,
-            "NFR-02 cap fails fast at orchestrator boundary; orchestration MUST NOT be called");
+            "NFR-02 cap fails fast at the boundary; the executor MUST NOT be called");
     }
-
-    // ─── (i) Session not found → InvalidOperationException (endpoint maps to 404) ──────────────
 
     [Fact]
     public async Task SummarizeSessionFilesAsync_SessionNotFound_ThrowsInvalidOperationException()
     {
-        _sessionManagerStub.Session = null; // session lookup returns null
+        _sessionManagerStub.Session = null;
 
         var request = new SummarizeSessionFilesRequest(
             TenantId, SessionId, FileIds: null, StyleHint: null,
             Path: SummarizeInvocationPath.DirectEndpoint);
 
-        var sut = CreateSut();
-
-        var act = async () => { await foreach (var _ in sut.SummarizeSessionFilesAsync(request)) { } };
+        var act = async () => { await foreach (var _ in CreateSut().SummarizeSessionFilesAsync(request)) { } };
         await act.Should().ThrowAsync<InvalidOperationException>().WithMessage("*not found*");
 
-        _orchestrationServiceMock.Verify(
-            o => o.ExecuteAsync(It.IsAny<PlaybookRunRequest>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()),
+        _consumerRoutingMock.Verify(
+            c => c.ResolveBindingAsync(
+                It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<IRoutingContext?>(),
+                It.IsAny<string?>(), It.IsAny<CancellationToken>()),
             Times.Never,
-            "missing session fails at orchestrator boundary; orchestration MUST NOT be called");
+            "missing session fails at the boundary BEFORE catalog resolution");
     }
-
-    // ─── (j) ADR-010 — class has no orchestrator-authored interface ────────────────────────────
-
-    [Fact]
-    public void SessionSummarizeOrchestrator_HasNoOrchestratorAuthoredInterface()
-    {
-        var ifaces = typeof(SessionSummarizeOrchestrator).GetInterfaces();
-        // Filter out framework-supplied interfaces (System.*, Microsoft.*); any remaining
-        // would indicate an orchestrator-authored interface, which ADR-010 forbids unless a
-        // genuine seam exists.
-        var authored = ifaces.Where(i =>
-            !i.Namespace?.StartsWith("System", StringComparison.Ordinal) is true
-            && !i.Namespace?.StartsWith("Microsoft", StringComparison.Ordinal) is true).ToList();
-        authored.Should().BeEmpty(
-            "ADR-010 forbids interfaces-for-testability-alone; SessionSummarizeOrchestrator is concrete by design");
-    }
-
-    // ─── (k) Convergence — exactly ONE public streaming entry point ────────────────────────────
-
-    [Fact]
-    public void SessionSummarizeOrchestrator_ExposesExactlyOneConvergenceMethod()
-    {
-        var publicMethods = typeof(SessionSummarizeOrchestrator)
-            .GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly)
-            .Where(m => !m.IsSpecialName) // exclude property accessors / operators
-            .ToList();
-
-        // The convergence shape: returns IAsyncEnumerable<AnalysisChunk>.
-        var convergence = publicMethods
-            .Where(m => m.ReturnType.IsGenericType
-                && m.ReturnType.GetGenericTypeDefinition() == typeof(IAsyncEnumerable<>)
-                && m.ReturnType.GetGenericArguments()[0] == typeof(AnalysisChunk))
-            .ToList();
-
-        convergence.Should().HaveCount(1,
-            "spec FR-01 + FR-08 + SC-08 require a single convergence method that both the " +
-            "direct endpoint and the agent-tool path delegate to");
-        convergence[0].Name.Should().Be(nameof(SessionSummarizeOrchestrator.SummarizeSessionFilesAsync));
-    }
-
-    // ─── (l) Empty input validation — required tenant + session ID ────────────────────────────
 
     [Fact]
     public async Task SummarizeSessionFilesAsync_EmptyTenantId_Throws()
@@ -483,9 +455,7 @@ public class SessionSummarizeOrchestratorTests
             TenantId: "", SessionId: SessionId, FileIds: null, StyleHint: null,
             Path: SummarizeInvocationPath.DirectEndpoint);
 
-        var sut = CreateSut();
-
-        var act = async () => { await foreach (var _ in sut.SummarizeSessionFilesAsync(request)) { } };
+        var act = async () => { await foreach (var _ in CreateSut().SummarizeSessionFilesAsync(request)) { } };
         await act.Should().ThrowAsync<ArgumentException>();
     }
 
@@ -496,206 +466,74 @@ public class SessionSummarizeOrchestratorTests
             TenantId: TenantId, SessionId: "", FileIds: null, StyleHint: null,
             Path: SummarizeInvocationPath.DirectEndpoint);
 
-        var sut = CreateSut();
-
-        var act = async () => { await foreach (var _ in sut.SummarizeSessionFilesAsync(request)) { } };
+        var act = async () => { await foreach (var _ in CreateSut().SummarizeSessionFilesAsync(request)) { } };
         await act.Should().ThrowAsync<ArgumentException>();
     }
 
-    // ─── (m) FR-05 — fail-fast on missing configuration (no hardcoded fallback at convergence) ─
+    // ─── (g) ADR-010 shape contracts ────────────────────────────────────────────────────────────
 
     [Fact]
-    public async Task SummarizeSessionFilesAsync_EmptyConfiguredId_ThrowsInvalidOperationException()
+    public void SessionSummarizeOrchestrator_HasNoOrchestratorAuthoredInterface()
     {
-        // FR-05 task 015 + R6 FR-26: at the chat /summarize convergence point, missing
-        // per-env config MUST fail fast (no hardcoded fallback).
-        _sessionManagerStub.Session = BuildSession(FileId1);
-        var emptyOptions = Options.Create(new WorkspaceOptions
-        {
-            ChatSummarizePlaybookId = string.Empty
-        });
-        var sut = new SessionSummarizeOrchestrator(
-            _sessionManagerStub,
-            _orchestrationServiceMock.Object,
-            _httpContextAccessorMock.Object,
-            _playbookLookupMock.Object,
-            _consumerRoutingMock.Object,
-            emptyOptions,
-            _sessionFileTextSourceMock.Object,
-            _fileSummarizeService,
-            _loggerMock.Object);
-
-        var request = new SummarizeSessionFilesRequest(
-            TenantId, SessionId, new[] { FileId1 }, StyleHint: null,
-            Path: SummarizeInvocationPath.DirectEndpoint);
-
-        var act = async () => { await foreach (var _ in sut.SummarizeSessionFilesAsync(request)) { } };
-        var thrown = await act.Should().ThrowAsync<InvalidOperationException>();
-        thrown.Which.Message.Should().Contain("routing-table",
-            "FR-1R-05 error message MUST point operators at the routing-table + " +
-            "Workspace:ChatSummarizePlaybookId fallback path");
-
-        _playbookLookupMock.Verify(
-            p => p.GetByIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
-            Times.Never,
-            "fail-fast — lookup MUST NOT be attempted with an empty configured value");
-        _orchestrationServiceMock.Verify(
-            o => o.ExecuteAsync(It.IsAny<PlaybookRunRequest>(), It.IsAny<HttpContext>(), It.IsAny<CancellationToken>()),
-            Times.Never,
-            "fail-fast — orchestration MUST NOT be called when playbook resolution failed at config layer");
+        var ifaces = typeof(SessionSummarizeOrchestrator).GetInterfaces();
+        var authored = ifaces.Where(i =>
+            !i.Namespace?.StartsWith("System", StringComparison.Ordinal) is true
+            && !i.Namespace?.StartsWith("Microsoft", StringComparison.Ordinal) is true).ToList();
+        authored.Should().BeEmpty(
+            "ADR-010 forbids interfaces-for-testability-alone; SessionSummarizeOrchestrator is concrete by design");
     }
 
-    // ─── (n) FR-1R-05 task 028d — routing-table happy path resolves via IConsumerRoutingService ─
-
     [Fact]
-    public async Task SummarizeSessionFilesAsync_RoutingTableReturnsId_UsesRoutingTablePlaybookIdAndSkipsLookup()
+    public void SessionSummarizeOrchestrator_ExposesExactlyOneConvergenceMethod()
     {
-        _sessionManagerStub.Session = BuildSession(FileId1);
-        var routingTableGuid = Guid.Parse("11111111-2222-3333-4444-555555555555");
-        _consumerRoutingMock
-            .Setup(c => c.ResolveAsync(
-                ConsumerTypes.ChatSummarize,
-                It.IsAny<string?>(),
-                It.IsAny<IRoutingContext?>(),
-                It.IsAny<string?>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(routingTableGuid);
+        var publicMethods = typeof(SessionSummarizeOrchestrator)
+            .GetMethods(BindingFlags.Public | BindingFlags.Instance | BindingFlags.DeclaredOnly)
+            .Where(m => !m.IsSpecialName)
+            .ToList();
 
-        PlaybookRunRequest? captured = null;
-        _orchestrationServiceMock
-            .Setup(o => o.ExecuteAsync(
-                It.IsAny<PlaybookRunRequest>(),
-                It.IsAny<HttpContext>(),
-                It.IsAny<CancellationToken>()))
-            .Callback<PlaybookRunRequest, HttpContext, CancellationToken>((req, _, _) => captured = req)
-            .Returns(EmptyEventStream());
+        var convergence = publicMethods
+            .Where(m => m.ReturnType.IsGenericType
+                && m.ReturnType.GetGenericTypeDefinition() == typeof(IAsyncEnumerable<>)
+                && m.ReturnType.GetGenericArguments()[0] == typeof(AnalysisChunk))
+            .ToList();
 
-        var request = new SummarizeSessionFilesRequest(
-            TenantId, SessionId, new[] { FileId1 }, StyleHint: null,
-            Path: SummarizeInvocationPath.DirectEndpoint);
-
-        var sut = CreateSut();
-        _ = await Collect(sut.SummarizeSessionFilesAsync(request));
-
-        captured.Should().NotBeNull();
-        captured!.PlaybookId.Should().Be(routingTableGuid,
-            "FR-1R-05 — routing-table resolution is the primary path; the GUID returned by " +
-            "IConsumerRoutingService MUST be forwarded as PlaybookRunRequest.PlaybookId verbatim");
-        _consumerRoutingMock.Verify(
-            c => c.ResolveAsync(
-                ConsumerTypes.ChatSummarize,
-                It.IsAny<string?>(),
-                It.IsAny<IRoutingContext?>(),
-                It.IsAny<string?>(),
-                It.IsAny<CancellationToken>()),
-            Times.Once,
-            "FR-1R-05 — orchestrator MUST consult IConsumerRoutingService with the ConsumerTypes constant");
-        _playbookLookupMock.Verify(
-            p => p.GetByIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
-            Times.Never,
-            "FR-1R-05 — fallback path (typed-options → IPlaybookLookupService) MUST NOT execute when " +
-            "the routing-table returned a non-null GUID");
-    }
-
-    // ─── (o) FR-1R-05 task 028d — routing-table returns null → fallback to typed-options ──────
-
-    [Fact]
-    public async Task SummarizeSessionFilesAsync_RoutingTableReturnsNull_FallsBackToTypedOptionsPath()
-    {
-        // Default _consumerRoutingMock setup returns null → implicit fallback path test.
-        _sessionManagerStub.Session = BuildSession(FileId1);
-
-        PlaybookRunRequest? captured = null;
-        _orchestrationServiceMock
-            .Setup(o => o.ExecuteAsync(
-                It.IsAny<PlaybookRunRequest>(),
-                It.IsAny<HttpContext>(),
-                It.IsAny<CancellationToken>()))
-            .Callback<PlaybookRunRequest, HttpContext, CancellationToken>((req, _, _) => captured = req)
-            .Returns(EmptyEventStream());
-
-        var request = new SummarizeSessionFilesRequest(
-            TenantId, SessionId, new[] { FileId1 }, StyleHint: null,
-            Path: SummarizeInvocationPath.DirectEndpoint);
-
-        var sut = CreateSut();
-        _ = await Collect(sut.SummarizeSessionFilesAsync(request));
-
-        captured.Should().NotBeNull();
-        captured!.PlaybookId.Should().Be(ResolvedChatSummarizePlaybookGuid,
-            "FR-1R-05 graceful-degrade — null from IConsumerRoutingService → orchestrator MUST " +
-            "resolve via WorkspaceOptions.ChatSummarizePlaybookId + IPlaybookLookupService " +
-            "(pre-028d behavior preserved verbatim for the FR-1R-06 deprecation window)");
-        _playbookLookupMock.Verify(
-            p => p.GetByIdAsync(ConfiguredChatSummarizePlaybookId, It.IsAny<CancellationToken>()),
-            Times.Once,
-            "FR-1R-05 graceful-degrade — fallback path invokes IPlaybookLookupService with the " +
-            "configured typed-options value when the routing-table has no matching row");
-    }
-
-    // ─── (p) FR-1R-05 task 028d — routing-table returns empty Guid → treats as null, falls back ─
-
-    [Fact]
-    public async Task SummarizeSessionFilesAsync_RoutingTableReturnsEmptyGuid_FallsBackToTypedOptionsPath()
-    {
-        _sessionManagerStub.Session = BuildSession(FileId1);
-        _consumerRoutingMock
-            .Setup(c => c.ResolveAsync(
-                ConsumerTypes.ChatSummarize,
-                It.IsAny<string?>(),
-                It.IsAny<IRoutingContext?>(),
-                It.IsAny<string?>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(Guid.Empty);
-
-        PlaybookRunRequest? captured = null;
-        _orchestrationServiceMock
-            .Setup(o => o.ExecuteAsync(
-                It.IsAny<PlaybookRunRequest>(),
-                It.IsAny<HttpContext>(),
-                It.IsAny<CancellationToken>()))
-            .Callback<PlaybookRunRequest, HttpContext, CancellationToken>((req, _, _) => captured = req)
-            .Returns(EmptyEventStream());
-
-        var request = new SummarizeSessionFilesRequest(
-            TenantId, SessionId, new[] { FileId1 }, StyleHint: null,
-            Path: SummarizeInvocationPath.DirectEndpoint);
-
-        var sut = CreateSut();
-        _ = await Collect(sut.SummarizeSessionFilesAsync(request));
-
-        captured.Should().NotBeNull();
-        captured!.PlaybookId.Should().Be(ResolvedChatSummarizePlaybookGuid,
-            "FR-1R-05 defensive edge — Guid.Empty from the routing service is semantically " +
-            "no-match and MUST trigger the same fallback as null");
-        captured.PlaybookId.Should().NotBe(Guid.Empty,
-            "orchestration MUST NOT be called with Guid.Empty — the fallback path resolves a real GUID");
-    }
-
-    // ─── (q) R7 — orchestrator throws when HttpContextAccessor returns null ────────────────────
-
-    [Fact]
-    public async Task SummarizeSessionFilesAsync_HttpContextNull_ThrowsInvalidOperationException()
-    {
-        // R7 task 091 — orchestrator requires HttpContext for OBO auth in downstream node
-        // executors. If HttpContextAccessor returns null (invoked outside a request scope),
-        // fail fast with a clear diagnostic.
-        _sessionManagerStub.Session = BuildSession(FileId1);
-        _httpContextAccessorMock.SetupGet(a => a.HttpContext).Returns((HttpContext?)null);
-
-        var request = new SummarizeSessionFilesRequest(
-            TenantId, SessionId, new[] { FileId1 }, StyleHint: null,
-            Path: SummarizeInvocationPath.DirectEndpoint);
-
-        var sut = CreateSut();
-
-        var act = async () => { await foreach (var _ in sut.SummarizeSessionFilesAsync(request)) { } };
-        var thrown = await act.Should().ThrowAsync<InvalidOperationException>();
-        thrown.Which.Message.Should().Contain("HttpContext",
-            "diagnostic must reference HttpContext so operators can diagnose misuse");
+        convergence.Should().HaveCount(1,
+            "one convergence method that every dispatch leg delegates to");
+        convergence[0].Name.Should().Be(nameof(SessionSummarizeOrchestrator.SummarizeSessionFilesAsync));
     }
 
     // ─── Helpers ─────────────────────────────────────────────────────────────────────────────
+
+    private static SummarizeSessionFilesRequest DefaultRequest(params string[] fileIds) => new(
+        TenantId, SessionId, fileIds, StyleHint: null,
+        Path: SummarizeInvocationPath.DirectEndpoint);
+
+    private static Binding BuildBinding() => new()
+    {
+        BindingId = BindingId,
+        ConsumerType = ConsumerTypes.ChatSummarize,
+        ConsumerCode = "default",
+        Environment = "*",
+        ActionId = ActionId,
+        ActionKind = ActionKind.Prompted,
+        Ucid = "UC-A-1",
+        Disposition = BindingDisposition.Informational,
+    };
+
+    private static AnalysisAction BuildAction() => new()
+    {
+        Id = ActionId,
+        Name = "Summarize Document for Chat",
+        SystemPrompt = """{"$schema":"https://spaarke.com/schemas/prompt/v1","instruction":{"role":"Summarizer","task":"Summarize the document."}}""",
+        OutputSchemaJson = """{"type":"object","additionalProperties":false,"required":["tldr"],"properties":{"tldr":{"type":"array","items":{"type":"string"}}}}""",
+        Temperature = 0.0m,
+    };
+
+    private static JsonElement ParseJson(string json)
+    {
+        using var doc = JsonDocument.Parse(json);
+        return doc.RootElement.Clone();
+    }
 
     private static async Task<List<AnalysisChunk>> Collect(IAsyncEnumerable<AnalysisChunk> source)
     {
@@ -705,23 +543,6 @@ public class SessionSummarizeOrchestratorTests
             list.Add(chunk);
         }
         return list;
-    }
-
-    private static async IAsyncEnumerable<PlaybookStreamEvent> EmptyEventStream(
-        [EnumeratorCancellation] CancellationToken cancellationToken = default)
-    {
-        await Task.CompletedTask;
-        yield break;
-    }
-
-    private static async IAsyncEnumerable<PlaybookStreamEvent> EventStream(
-        params PlaybookStreamEvent[] events)
-    {
-        foreach (var ev in events)
-        {
-            await Task.Yield();
-            yield return ev;
-        }
     }
 
     private static ChatSession BuildSession(params string[] fileIds)

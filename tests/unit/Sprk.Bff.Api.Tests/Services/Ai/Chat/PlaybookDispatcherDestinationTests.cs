@@ -50,7 +50,7 @@ public class PlaybookDispatcherDestinationTests
 
     // Anchored to the R6 FR-26 convergence-point playbook GUID
     // (see project CLAUDE.md "Decisions Made": "Chat-summarize migrates first (FR-05)").
-    private static readonly string ChatSummarizePlaybookId = "44285d15-0000-0000-0000-000000000001";
+    private static readonly string ChatSummarizeDestPlaybookId = "44285d15-0000-0000-0000-000000000001";
     private const string ChatSummarizePlaybookName = "summarize-document-for-chat";
 
     private const string TestTenantId = "test-tenant-destination-001";
@@ -205,12 +205,12 @@ public class PlaybookDispatcherDestinationTests
         // configJson shape that has NO destination/widgetType properties.
         // Per FR-26: parse-default = Chat, so no special case is needed in the dispatcher.
         SetupSearchReturnsPlaybook(
-            playbookId: ChatSummarizePlaybookId,
+            playbookId: ChatSummarizeDestPlaybookId,
             playbookName: ChatSummarizePlaybookName,
             score: 0.93);
 
         SetupNodeServiceReturnsOutputNodeWithConfig(
-            playbookId: ChatSummarizePlaybookId,
+            playbookId: ChatSummarizeDestPlaybookId,
             configJson: """{"deliveryType":"markdown","template":"## Summary\n{{summary.output.tldr}}"}""");
 
         var dispatcher = CreateDispatcher();
@@ -223,7 +223,7 @@ public class PlaybookDispatcherDestinationTests
         // Assert — FR-26 convergence: chat-summarize MUST remain Chat
         result.Should().NotBeNull();
         result!.Matched.Should().BeTrue();
-        result.PlaybookId.Should().Be(ChatSummarizePlaybookId);
+        result.PlaybookId.Should().Be(ChatSummarizeDestPlaybookId);
         result.NodeDestination.Should().Be(NodeDestination.Chat);
         result.WidgetType.Should().BeNull();
     }

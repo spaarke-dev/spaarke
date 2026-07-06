@@ -74,19 +74,10 @@ public class WorkspaceOptions
     /// </remarks>
     public string? SummarizePlaybookId { get; set; }
 
-    /// <summary>
-    /// Stable-ID lookup value for the chat "summarize document" path (spec FR-05).
-    /// </summary>
-    /// <remarks>
-    /// Bound from <c>Workspace:ChatSummarizePlaybookId</c> config key. GUID-format opaque ID
-    /// per Q&amp;A 2026-06-22 Q1 (value mirrors the row's <c>sprk_analysisplaybookid</c> PK).
-    /// Pre-seated by chat-routing-redesign-r1 task 013 (CRIT-1 race-condition fix)
-    /// so wave 1-E consumer migrations (task 016) can land in parallel without
-    /// colliding on <see cref="WorkspaceOptions"/>. Resolved at runtime via
-    /// <c>IPlaybookLookupService.GetByIdAsync</c> per ADR-018 typed-options +
-    /// Pattern A stable-ID resolution. Default is empty string — populated per-env at deploy time.
-    /// </remarks>
-    public string ChatSummarizePlaybookId { get; set; } = string.Empty;
+    // NOTE (FR-P1-01, ai-architecture-redesign-r1 task 020): ChatSummarizePlaybookId was
+    // DELETED. The chat /summarize path resolves exclusively via the sprk_playbookconsumer
+    // Binding row (IConsumerRoutingService.ResolveBindingAsync — ADR-039 single routing
+    // surface); the typed-options fallback dissolved with the orchestrator dual-path.
 
     /// <summary>
     /// Stable-ID lookup value for the "Create New Matter Pre-Fill" playbook

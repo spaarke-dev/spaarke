@@ -279,25 +279,6 @@ public static class ChatSseEventFactory
     }
 
     /// <summary>
-    /// Creates a <c>linear_dispatch</c> <see cref="ChatSseEvent"/> for explicit-intent
-    /// keyword matches that deterministically identify a Linear AI Consumer.
-    /// R7 Wave 12.3 Phase 12.3a (2026-07-03). See <see cref="LinearDispatchSseEvent"/>
-    /// for the design contrast with <c>playbook_options</c>.
-    /// </summary>
-    public static ChatSseEvent CreateLinearDispatchEvent(LinearDispatchSseEventData data)
-    {
-        try
-        {
-            _ = JsonSerializer.SerializeToUtf8Bytes(data, SerializerOptions);
-            return new ChatSseEvent(LinearDispatchSseEvent.EventType, null, data);
-        }
-        catch (JsonException ex)
-        {
-            return CreateSerializationErrorEvent(LinearDispatchSseEvent.EventType, ex);
-        }
-    }
-
-    /// <summary>
     /// Serializes <paramref name="value"/> to a <see cref="JsonElement"/> using the shared
     /// camelCase serializer options.
     ///

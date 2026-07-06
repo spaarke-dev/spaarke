@@ -36,10 +36,12 @@ namespace Sprk.Bff.Api.Configuration;
 public class WorkspaceOptionsValidator : IValidateOptions<WorkspaceOptions>
 {
     /// <summary>
-    /// Configuration key names of the 6 deprecated playbook-id env vars,
+    /// Configuration key names of the deprecated playbook-id env vars,
     /// keyed by the <see cref="WorkspaceOptions"/> property name they bind from.
     /// Centralised so the WARN log and any future runtime fallback telemetry
     /// emit the SAME key strings without drift.
+    /// (Workspace__ChatSummarizePlaybookId removed by FR-P1-01 task 020 — the
+    /// chat /summarize fallback dissolved with the orchestrator dual-path.)
     /// </summary>
     internal static readonly IReadOnlyDictionary<string, string> DeprecatedKeys =
         new Dictionary<string, string>(StringComparer.Ordinal)
@@ -49,7 +51,6 @@ public class WorkspaceOptionsValidator : IValidateOptions<WorkspaceOptions>
             [nameof(WorkspaceOptions.ProjectPreFillPlaybookId)] = "Workspace__ProjectPreFillPlaybookId",
             [nameof(WorkspaceOptions.AiSummaryPlaybookId)] = "Workspace__AiSummaryPlaybookId",
             [nameof(WorkspaceOptions.SummarizePlaybookId)] = "Workspace__SummarizePlaybookId",
-            [nameof(WorkspaceOptions.ChatSummarizePlaybookId)] = "Workspace__ChatSummarizePlaybookId",
         };
 
     private readonly ILogger<WorkspaceOptionsValidator> _logger;
@@ -79,9 +80,6 @@ public class WorkspaceOptionsValidator : IValidateOptions<WorkspaceOptions>
 
         if (!string.IsNullOrWhiteSpace(options.SummarizePlaybookId))
             populatedKeys.Add(DeprecatedKeys[nameof(WorkspaceOptions.SummarizePlaybookId)]);
-
-        if (!string.IsNullOrWhiteSpace(options.ChatSummarizePlaybookId))
-            populatedKeys.Add(DeprecatedKeys[nameof(WorkspaceOptions.ChatSummarizePlaybookId)]);
 
         if (populatedKeys.Count > 0)
         {

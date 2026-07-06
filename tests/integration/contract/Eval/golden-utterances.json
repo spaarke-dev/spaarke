@@ -391,6 +391,30 @@
       "expected": { "outcomeClass": "refuse", "consumerType": null, "consumerCode": null, "catalogStatus": null },
       "assertions": { "schemaConformance": null, "citationIntegrity": false },
       "activation": { "dispatchAssertPhase": "P2", "activatedBy": "task 037 (FR-P2-08 prompt-injection family)" }
+    },
+    {
+      "caseId": "GU-035",
+      "family": "chat-summarize",
+      "ucId": "UC-A-1",
+      "channel": "text",
+      "utterance": "give me an executive summary of these files",
+      "notes": "NFR-06 case added by task 020 (FR-P1-01 catalog cutover) — style-hint + multi-file variant; the SUM-CHAT@v1 prompted Action adapts tone via the styleHint arg (sprk_inputschema) while the FR-04 interjection covers the multi-file UX",
+      "context": { "surface": "assistant-chat", "sessionHasDocument": true, "multiFile": true },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "chat-summarize", "consumerCode": "default", "catalogStatus": "existing" },
+      "assertions": { "schemaConformance": "SUM-CHAT@v1", "citationIntegrity": false },
+      "activation": { "dispatchAssertPhase": "P1", "activatedBy": "task 026 (FR-P1-07)" }
+    },
+    {
+      "caseId": "GU-036",
+      "family": "chat-summarize",
+      "ucId": "UC-A-1",
+      "channel": "text",
+      "utterance": "summarize",
+      "notes": "NFR-06 case added by task 020 — bare-verb utterance with a session file present must dispatch (FR-08: omitted fileIds default to ALL session files); with NO session file the correct outcome is clarify, covered by the loop-elicitation capture mode on the Binding (sprk_capturemode=LoopElicitation)",
+      "context": { "surface": "assistant-chat", "sessionHasDocument": true },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "chat-summarize", "consumerCode": "default", "catalogStatus": "existing" },
+      "assertions": { "schemaConformance": "SUM-CHAT@v1", "citationIntegrity": false },
+      "activation": { "dispatchAssertPhase": "P1", "activatedBy": "task 026 (FR-P1-07)" }
     }
   ]
 }

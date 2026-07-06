@@ -11,32 +11,34 @@ using Sprk.Bff.Api.Services.Ai.Chat;
 namespace Sprk.Bff.Api.Api.Ai;
 
 /// <summary>
-/// R5 task 014 / D2-04 — direct BFF endpoint for the chat-driven Summarize vertical slice.
+/// Direct BFF endpoint for the catalog-driven chat-summarize capability (FR-P1-01).
 /// <c>POST /api/ai/chat/sessions/{sessionId}/summarize</c>.
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Convergence (spec FR-01 + FR-08 + SC-08)</b>: this endpoint is the HTTP entry point for
-/// the dual-path convention described in spec §4 — the slash command <c>/summarize</c>
-/// (task 019 / D2-10) calls this endpoint directly, while the agent-tool
-/// <c>InvokeSummarizePlaybookTool</c> (task 015 / D2-05) reaches the same destination via
-/// the LLM tool-call path. Both legs converge on
-/// <see cref="SessionSummarizeOrchestrator.SummarizeSessionFilesAsync"/> (task 012 / D2-03)
-/// so behavior is identical regardless of entry — including the new <c>FieldDelta</c>
-/// variant (task 005 / D1-05) emitted progressively as Structured Outputs streams.
+/// <b>Catalog path (FR-P1-01, ai-architecture-redesign-r1 task 020)</b>: this endpoint is a
+/// thin SSE writer that delegates to
+/// <see cref="SessionSummarizeOrchestrator.SummarizeSessionFilesAsync"/>, which resolves the
+/// <c>chat-summarize</c> Binding row (<c>sprk_playbookconsumer</c>) via
+/// <c>IConsumerRoutingService.ResolveBindingAsync</c>, loads the SUM-CHAT@v1
+/// <c>sprk_analysisaction</c> row (<c>kind: prompted</c>), and executes it via the prompted
+/// executor (ActionRunner + PromptSchemaRenderer). No summarize-specific orchestration or
+/// routing logic lives in this endpoint (ADR-039: the Binding table is the only routing
+/// surface). The pre-redesign dual-path (Playbook Engine + typed-options fallback) is
+/// deleted, not shimmed (NFR-08 hard cutover).
 /// </para>
 /// <para>
-/// <b>Placement Justification (per <c>.claude/constraints/bff-extensions.md</c> + R5 CLAUDE.md §10)</b>:
+/// <b>Placement Justification (per <c>.claude/constraints/bff-extensions.md</c> + CLAUDE.md §10)</b>:
 /// this endpoint belongs in BFF — not in CRUD code, not in a shared library, not as a
 /// direct PCF/Code-Page call. Reasons:
 /// <list type="number">
 ///   <item><b>SSE streaming requires a long-lived HTTP connection</b> — only the BFF
 ///         server-side surface can hold the connection open while
-///         <see cref="SessionSummarizeOrchestrator"/> emits incremental
-///         <see cref="AnalysisChunk"/> deltas.</item>
-///   <item><b>Server-side AI orchestration</b> — the orchestrator composes
-///         <see cref="IRagService"/> + <see cref="IOpenAiClient"/> + Structured Outputs +
-///         the JPS prompt loaded from <c>sprk_analysisaction</c>. None of these can be
+///         <see cref="SessionSummarizeOrchestrator"/> emits
+///         <see cref="AnalysisChunk"/> events.</item>
+///   <item><b>Server-side AI execution</b> — the orchestrator composes the session-file
+///         text source + <see cref="IOpenAiClient"/> Structured Outputs + the SUM-CHAT@v1
+///         JPS prompt loaded from <c>sprk_analysisaction</c>. None of these can be
 ///         safely composed in a client.</item>
 ///   <item><b>OBO auth</b> — the orchestrator's downstream Graph + AI Search calls run on
 ///         a fresh bearer token resolved from the request principal per Auth v2 (ADR-028).
@@ -62,16 +64,17 @@ namespace Sprk.Bff.Api.Api.Ai;
 /// </para>
 /// <para>
 /// <b>Fresh OBO token per request (ADR-028)</b>: the handler never snapshots the bearer
-/// token into a closure. The orchestrator + its downstream <see cref="IRagService"/> /
-/// <see cref="IOpenAiClient"/> dependencies resolve their tokens via DI inside the
-/// per-request scope — verified by reading task 012's <c>SessionSummarizeOrchestrator</c>
+/// token into a closure. The orchestrator + its downstream dependencies (session-file
+/// text source, <see cref="IOpenAiClient"/>) resolve their tokens via DI inside the
+/// per-request scope — verified by reading the <c>SessionSummarizeOrchestrator</c>
 /// constructor (no string token parameter).
 /// </para>
 /// <para>
 /// <b>Asymmetric-registration (R5 CLAUDE.md §10 F.1)</b>: this endpoint maps
 /// UNCONDITIONALLY (no <c>if (flag)</c> guard). <see cref="SessionSummarizeOrchestrator"/>
-/// is registered UNCONDITIONALLY in <c>AnalysisServicesModule.AddAnalysisOrchestrationServices</c>
-/// (task 012, line 336). Asymmetric-registration rule satisfied.
+/// is registered UNCONDITIONALLY within <c>AnalysisServicesModule.AddAnalysisOrchestrationServices</c>
+/// (compound-ON) with a Null-Object mirror in <c>AddNullObjectsForCompoundOff</c>.
+/// Asymmetric-registration rule satisfied.
 /// </para>
 /// </remarks>
 public static class SummarizeSessionEndpoint
@@ -110,14 +113,14 @@ public static class SummarizeSessionEndpoint
         group.MapPost("/sessions/{sessionId}/summarize", SummarizeAsync)
             .AddAiAuthorizationFilter()
             .WithName("SummarizeChatSession")
-            .WithSummary("Summarize files uploaded into a chat session (R5 D2-04)")
+            .WithSummary("Summarize files uploaded into a chat session (catalog-driven, FR-P1-01)")
             .WithDescription(
-                "Direct entry point for the chat-driven Summarize vertical slice. Streams " +
-                "AnalysisChunk SSE events including the additive FieldDelta variant so the " +
-                "Workspace tab populates progressively (TL;DR first → summary → per-file " +
-                "highlights). Convergence sibling: the agent-tool InvokeSummarizePlaybookTool " +
-                "(task 015) reaches the same SessionSummarizeOrchestrator via the LLM " +
-                "tool-call path — identical output regardless of entry point.")
+                "Direct entry point for the catalog-driven chat-summarize capability. Resolves " +
+                "the chat-summarize Binding row, executes the SUM-CHAT@v1 prompted Action via " +
+                "ActionRunner + PromptSchemaRenderer, and streams AnalysisChunk SSE events " +
+                "(optional multi-file interjection followed by a terminal 'complete' chunk " +
+                "carrying the structured DocumentAnalysisResult; the client synthesizes " +
+                "per-field workspace deltas from it).")
             .Produces(StatusCodes.Status200OK, contentType: "text/event-stream")
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -221,7 +224,7 @@ public static class SummarizeSessionEndpoint
             return;
         }
 
-        // ─── Build orchestrator request (convergence contract — task 012) ─────────────
+        // ─── Build orchestrator request (orchestrator boundary contract) ──────────────
         // The endpoint passes SummarizeInvocationPath.DirectEndpoint to drive the
         // telemetry 'path' dimension. Output is byte-identical for the same
         // (TenantId, SessionId, FileIds, StyleHint) tuple per the orchestrator contract.
@@ -241,7 +244,8 @@ public static class SummarizeSessionEndpoint
         // SSE headers so we can return a normal JSON ProblemDetails. The orchestrator
         // SHOULD yield AnalysisChunk.FromError instead of throwing for runtime errors,
         // but:
-        //   - InvalidOperationException("session not found") is documented (line 188)
+        //   - InvalidOperationException("session not found") is documented on the orchestrator;
+        //     catalog-resolution failures (no Binding / wrong kind) also throw pre-stream
         //   - FeatureDisabledException can propagate through the orchestrator's deps if
         //     a downstream Null-Object service is wired up (ADR-018/ADR-032)
         //   - ArgumentException (NFR-02 cap) is defensive; we filter > 20 above so this
@@ -302,8 +306,9 @@ public static class SummarizeSessionEndpoint
                 return;
             }
 
-            // Orchestrator throws InvalidOperationException for session-not-found
-            // (SessionSummarizeOrchestrator.cs line 188-190). Map to 404.
+            // Orchestrator throws InvalidOperationException with "not found" ONLY for
+            // session-not-found (catalog-resolution failure messages deliberately avoid
+            // the phrase). Map to 404.
             if (ex is InvalidOperationException ioe && ioe.Message.Contains("not found", StringComparison.OrdinalIgnoreCase))
             {
                 logger.LogInformation(

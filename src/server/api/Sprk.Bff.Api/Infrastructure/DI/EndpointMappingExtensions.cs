@@ -165,12 +165,12 @@ public static class EndpointMappingExtensions
         app.MapFeedbackEndpoints();
         app.MapChatEndpoints();
 
-        // R5 task 014 (D2-04) — direct entry point for the chat-driven Summarize vertical
-        // slice. Maps POST /api/ai/chat/sessions/{sessionId}/summarize and delegates to
-        // SessionSummarizeOrchestrator (task 012). UNCONDITIONAL mapping per R5 §3.2 — the
-        // orchestrator is also registered unconditionally in AnalysisServicesModule.cs
-        // (asymmetric-registration rule R5 §10 F.1 satisfied). Sibling agent-tool path
-        // (task 015) converges on the same orchestrator.
+        // FR-P1-01 (ai-architecture-redesign-r1 task 020) — catalog-driven chat-summarize.
+        // Maps POST /api/ai/chat/sessions/{sessionId}/summarize and delegates to
+        // SessionSummarizeOrchestrator, which resolves the chat-summarize Binding row and
+        // executes the SUM-CHAT@v1 prompted Action via ActionRunner + PromptSchemaRenderer.
+        // UNCONDITIONAL mapping — the orchestrator has a Null-Object mirror registered on
+        // the compound-OFF branch (asymmetric-registration rule §10 F.1 satisfied).
         app.MapSummarizeSessionEndpoint();
 
         try { app.MapChatDocumentEndpoints(); }

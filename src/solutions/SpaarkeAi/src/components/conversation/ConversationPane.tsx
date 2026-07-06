@@ -106,9 +106,9 @@ import { HistoryMenu } from "./HistoryOverlay";
 // /documents promotion + /summarize SSE streaming + PaneEventBus bridging.
 // See notes/task-036-design-2026-06-05.md for design rationale.
 // R7 Wave 12.3 Phase 12.3a (2026-07-03): `matchIntent` is retired from
-// summarize dispatch (server-side keyword-match handles NL + slash + button
-// uniformly via `linear_dispatch`). Import kept as a comment reference in case
-// future intent categories reintroduce a client-side matcher.
+// summarize dispatch. The R7 server-side keyword-match replacement was itself
+// dropped by ai-architecture-redesign-r1 task 025 (FR-P1-06 / ADR-039);
+// summarize now flows via the Event/Click entry paths (tasks 022/023).
 // import { matchIntent } from "./intentMatcher";
 // R6 closeout (Pillar 8 / task 097): /new-session needs to POST /api/ai/chat/sessions
 // and return the new session id so HardSlashExecutor.execNewSession can complete.
@@ -146,15 +146,9 @@ import ReferenceResolver, {
   type ResolverContext,
 } from "./ReferenceResolver";
 // R7 Wave 12.3 Phase 12.3a (2026-07-03) — `executeSummarizeIntent` retired for
-// NL/button paths; server-side keyword-match auto-dispatch now handles them via
-// `linear_dispatch` SSE. The helper module itself is retained for reference /
-// possible future direct-invoke callers, but the import is unused here.
-//
-// `executeLinearDispatch` is the companion for the linear_dispatch pathway.
-// Server emits `linear_dispatch` when NL like "summarize this document" matches
-// a keyword; the handler POSTs to the pre-composed dispatchUrl and streams the
-// response into the Summary tab (same workspace flow as `/summarize` slash).
-import { executeLinearDispatch } from "./executeLinearDispatch";
+// NL/button paths. Its R7 server-side keyword auto-dispatch replacement was
+// dropped by ai-architecture-redesign-r1 task 025 (FR-P1-06 / ADR-039); the
+// behavior re-homes as an Event/Click-path precondition (tasks 022/023).
 // ---------------------------------------------------------------------------
 // Types
 // ---------------------------------------------------------------------------
@@ -1266,29 +1260,20 @@ export function ConversationPane(): React.JSX.Element {
       // SEPARATE endpoint and is UNAFFECTED by this change.
       // ── R7 Wave 12.3 Phase 12.3a (2026-07-03) — RETIRED NL branch ─────────
       // Previously this branch fired `executeSummarizeIntent` locally for
-      // natural-language summarize intents (`intent.via !== "slash"`). That
-      // path is now replaced by the server-side deterministic keyword-match
-      // auto-dispatch: BFF `ChatEndpoints.TryDetectExplicitConsumerType`
-      // matches "summarize"/"summary"/"summarise" whole-word case-insensitive
-      // (including "/summarize" slash-command text) → emits `linear_dispatch`
-      // SSE event → client `handleLinearDispatch` → `executeLinearDispatch`
-      // POSTs to /api/ai/chat/sessions/{id}/summarize and streams into the
-      // workspace Summary tab.
+      // natural-language summarize intents (`intent.via !== "slash"`). Firing
+      // it in parallel with a server-side dispatch caused a double-dispatch
+      // race (Wave 12.3 UAT 2026-07-03): two parallel /summarize streams
+      // competed for the Summary tab; one succeeded with empty content, one
+      // errored — so the client-side NL branch was removed.
       //
-      // Firing BOTH paths caused a double-dispatch race (Wave 12.3 UAT
-      // 2026-07-03): two parallel /summarize streams competed for the Summary
-      // tab; one succeeded with empty content, one errored. Removing the
-      // client-side NL branch consolidates dispatch on the server-side path
-      // per operator direction D-13 ("slash + NL converge on same dispatch").
+      // The R7 server-side keyword-match auto-dispatch that replaced it was
+      // itself dropped by ai-architecture-redesign-r1 task 025 (FR-P1-06 /
+      // ADR-039 — no second intent-detection mechanism). Summarize dispatch
+      // re-homes on the Event/Click entry paths (tasks 022/023).
       //
-      // Held-file promotion is now the server's job — SessionFileTextSource
-      // reads session-file rows (populated at upload time via the shared
-      // paperclip upload flow, NOT by executeSummarizeIntent), so no client
-      // /documents call is needed here.
-      //
-      // Slash `/summarize` was already excluded from this branch (`intent.via
-      // !== "slash"`) and now flows via the same server-side keyword-match
-      // path. That satisfies the "same behavior as NL" contract naturally.
+      // Held-file promotion is the server's job — SessionFileTextSource reads
+      // session-file rows (populated at upload time via the shared paperclip
+      // upload flow), so no client /documents call is needed here.
       // ── End retired NL branch ─────────────────────────────────────────────
 
       // ── Existing task 020 multi-file interjection (untouched) ───────────
@@ -1670,88 +1655,6 @@ export function ConversationPane(): React.JSX.Element {
       });
     },
     []
-  );
-
-  /**
-   * R7 Wave 12.3 Phase 12.3a (2026-07-03) — handle `linear_dispatch` SSE events.
-   *
-   * Fires when the BFF has deterministically matched an explicit-intent keyword
-   * (e.g. "summarize" whole-word case-insensitive) AND attachments are present.
-   * Semantic OPPOSITE of `playbook_options` (which requires a click per FR-48):
-   * this handler POSTs to `payload.dispatchUrl` with `payload.requestBody`
-   * immediately, no user confirmation, and routes the SSE response into the
-   * same workspace tab-loading flow as the `/summarize` slash command.
-   *
-   * Files are ALREADY promoted server-side (the SSE payload carries
-   * `sessionAttachmentIds` referring to existing session-file rows), so we skip
-   * the /documents promotion step of `executeSummarizeIntent` and go directly
-   * to widget_load + streaming POST.
-   *
-   * ADR-015: payload is tier-1 safe by BFF construction (consumer-type key,
-   * URL from route table, opaque IDs, controlled-vocabulary reason). Log
-   * STRUCTURAL signals only — never the payload contents.
-   */
-  const handleLinearDispatch = React.useCallback(
-    (payload: {
-      consumerType: string;
-      dispatchUrl: string;
-      requestBody: string;
-      reason: string;
-      sessionAttachmentIds: string[];
-    }): void => {
-      // ADR-015: log ONLY the discriminants + counts, never the URL or body.
-      console.log(
-        '[ConversationPane] linear_dispatch received — consumerType:%s reason:%s attachments:%d',
-        payload.consumerType,
-        payload.reason,
-        payload.sessionAttachmentIds.length,
-      );
-
-      // R7 Wave 12.3 Phase 12.3a UAT hardening (2026-07-03): defensive skip
-      // for empty sessionAttachmentIds. Server-side guard now blocks this at
-      // source, but a redundant client-side check keeps stale bundles safe
-      // and future consumer types will benefit as they onboard.
-      if (payload.sessionAttachmentIds.length === 0) {
-        console.warn(
-          '[ConversationPane] linear_dispatch dropped (no sessionAttachmentIds) — consumerType:%s',
-          payload.consumerType,
-        );
-        return;
-      }
-
-      // Interstitial chat message so the user sees intent recognition happened
-      // before the Summary tab loads.
-      const interstitial =
-        payload.consumerType === 'chat-summarize'
-          ? payload.sessionAttachmentIds.length === 1
-            ? "I'll summarize that file for you."
-            : `I'll summarize those ${payload.sessionAttachmentIds.length} files for you.`
-          : "I'll run that for you.";
-      setPendingInjection(makeLocalAssistantMessage(interstitial));
-
-      // Fire-and-forget; the workspace tab reflects streaming progress.
-      void (async () => {
-        try {
-          await executeLinearDispatch({
-            consumerType: payload.consumerType,
-            dispatchUrl: payload.dispatchUrl,
-            requestBody: payload.requestBody,
-            sessionAttachmentIds: payload.sessionAttachmentIds,
-            bffBaseUrl,
-            getAccessToken,
-            publishPaneEvent: dispatch,
-          });
-        } catch (err) {
-          // ADR-019: surface stable errorCode when present; never raw exception text.
-          const message =
-            err instanceof Error
-              ? `I couldn't complete that — ${err.message}`
-              : "I couldn't complete that. Please try again.";
-          setPendingInjection(makeLocalAssistantMessage(message));
-        }
-      })();
-    },
-    [bffBaseUrl, getAccessToken, dispatch]
   );
 
   /**
@@ -2688,11 +2591,6 @@ export function ConversationPane(): React.JSX.Element {
               onPlaybookOptions={handlePlaybookOptions}
               onSelectPlaybook={handleSelectPlaybook}
               onOpenLibraryModal={handleOpenLibraryModal}
-              // R7 Wave 12.3 Phase 12.3a (2026-07-03) — explicit-intent
-              // deterministic auto-dispatch. Server emits `linear_dispatch`
-              // when NL keyword matches (e.g. "summarize"); client POSTs to the
-              // pre-composed dispatchUrl and streams into the Summary tab.
-              onLinearDispatch={handleLinearDispatch}
               // R6 Pillar 6c / task 095 — trace bridge. Forward each
               // context_event SSE payload to the `context` PaneEventBus channel
               // so ExecutionTraceWidget renders in real time. ADR-015: payload

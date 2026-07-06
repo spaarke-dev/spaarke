@@ -51,7 +51,6 @@ import type {
   IUseSseStreamResult,
   ICitationSseItem,
   IPlaybookOptionsPayload,
-  ILinearDispatchPayload,
   AccessTokenGetter,
 } from '../components/SprkChat/types';
 
@@ -204,15 +203,6 @@ interface SseEventHandlers {
    */
   onPlaybookOptions: (payload: IPlaybookOptionsPayload) => void;
   /**
-   * R7 Wave 12.3 Phase 12.3a (2026-07-03) — receives the `linear_dispatch`
-   * SSE payload (deterministic explicit-intent auto-dispatch to a Linear AI
-   * Consumer endpoint). Payload is tier-1 safe by BFF construction (consumer
-   * type constant, endpoint URL from a code-defined route table, opaque
-   * session file IDs, controlled-vocabulary reason). Caller POSTs to
-   * `payload.dispatchUrl` with `payload.requestBody` immediately.
-   */
-  onLinearDispatch: (payload: ILinearDispatchPayload) => void;
-  /**
    * R6 Pillar 6c / task 095 — receives the raw `context_event` SSE payload
    * (with `contextEventType` discriminant + typed fields). Caller forwards to
    * the `context` PaneEventBus channel verbatim. ADR-015: payload contains
@@ -300,22 +290,6 @@ function processEvent(event: IChatSseEvent, handlers: SseEventHandlers): void {
       rerankInvoked: typeof data.rerankInvoked === 'boolean' ? data.rerankInvoked : false,
       rerankReason: data.rerankReason ?? null,
     });
-  } else if (event.type === 'linear_dispatch') {
-    // R7 Wave 12.3 Phase 12.3a (2026-07-03) — explicit-intent auto-dispatch.
-    // Locked payload shape (see LinearDispatchSseEvent.cs):
-    //   { consumerType, dispatchUrl, requestBody (JSON string), reason,
-    //     sessionAttachmentIds: [...] }
-    // Semantic contrast with `playbook_options` (which carries FR-48 "MUST click"
-    // invariant): this event carries the OPPOSITE contract — caller POSTs
-    // immediately. Tier-1 safe by BFF construction.
-    const data = event.data ?? ({} as IChatSseEventData);
-    handlers.onLinearDispatch({
-      consumerType: typeof data.consumerType === 'string' ? data.consumerType : '',
-      dispatchUrl: typeof data.dispatchUrl === 'string' ? data.dispatchUrl : '',
-      requestBody: typeof data.requestBody === 'string' ? data.requestBody : '',
-      reason: typeof data.reason === 'string' ? data.reason : '',
-      sessionAttachmentIds: Array.isArray(data.sessionAttachmentIds) ? data.sessionAttachmentIds : [],
-    });
   } else if (event.type === 'context_event') {
     // R6 task 095 — trace bridge. Forward the raw payload to the host so it
     // can dispatch on the `context` PaneEventBus channel. Tier-1 safe by BFF
@@ -399,12 +373,6 @@ export function useSseStream(): IUseSseStreamResult {
   // append a structured playbook_options chat message to its in-memory thread.
   const onPlaybookOptionsRef = useRef<((payload: IPlaybookOptionsPayload) => void) | null>(null);
 
-  // R7 Wave 12.3 Phase 12.3a (2026-07-03) — callback ref for `linear_dispatch`
-  // SSE events. Same synchronous callback-ref pattern as onPlaybookOptionsRef.
-  // SprkChat wires this to the `onLinearDispatch` prop so the host
-  // (ConversationPane) can POST to payload.dispatchUrl immediately.
-  const onLinearDispatchRef = useRef<((payload: ILinearDispatchPayload) => void) | null>(null);
-
   // R6 Pillar 6c / task 095 — callback ref for `context_event` SSE events
   // (trace bridge from BFF ContextEventEmitter to PaneEventBus context channel).
   // Same synchronous callback-ref pattern as setOnPlaybookOptions. SprkChat
@@ -450,14 +418,6 @@ export function useSseStream(): IUseSseStreamResult {
   // chat message + handle click → playbook execute.
   const setOnPlaybookOptions = useCallback((handler: ((payload: IPlaybookOptionsPayload) => void) | null) => {
     onPlaybookOptionsRef.current = handler;
-  }, []);
-
-  // R7 Wave 12.3 Phase 12.3a (2026-07-03): register/unregister the linear_dispatch callback.
-  // SprkChat wires this to the host (typically ConversationPane in SpaarkeAi)
-  // via the `onLinearDispatch` prop. Host POSTs to payload.dispatchUrl immediately
-  // (no confirmation) and routes the streaming response into the workspace tab.
-  const setOnLinearDispatch = useCallback((handler: ((payload: ILinearDispatchPayload) => void) | null) => {
-    onLinearDispatchRef.current = handler;
   }, []);
 
   // R6 Pillar 6c / task 095 — register/unregister the context_event callback.
@@ -556,14 +516,6 @@ export function useSseStream(): IUseSseStreamResult {
               // Synchronous callback (same pattern as onDocumentStreamEvent and onPaneEvent).
               // No React state on the hook for this event — caller manages its own state.
               const handler = onPlaybookOptionsRef.current;
-              if (handler) {
-                handler(payload);
-              }
-            },
-            onLinearDispatch: (payload: ILinearDispatchPayload) => {
-              // R7 Wave 12.3 Phase 12.3a — synchronous callback (same pattern as
-              // onPlaybookOptions). Host POSTs to payload.dispatchUrl verbatim.
-              const handler = onLinearDispatchRef.current;
               if (handler) {
                 handler(payload);
               }
@@ -686,7 +638,6 @@ export function useSseStream(): IUseSseStreamResult {
     setOnDocumentStreamEvent,
     setOnPaneEvent,
     setOnPlaybookOptions,
-    setOnLinearDispatch,
     setOnContextEvent,
   };
 }

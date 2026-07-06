@@ -17,8 +17,9 @@ namespace Sprk.Bff.Api.Services.Ai.Chat;
 /// <c>EndpointMappingExtensions</c>) injects <see cref="SessionSummarizeOrchestrator"/>
 /// directly. Without a Null subclass registered on the compound-OFF branch, minimal-API
 /// parameter inference fails at host startup ("Failure to infer one or more parameters")
-/// because the real orchestrator's DI graph (<c>IRagService</c> + <c>IOpenAiClient</c> +
-/// <c>IGenericEntityService</c>) is unresolvable when the compound AI gate is off.
+/// because the real orchestrator's DI graph (<c>IActionRunner</c> +
+/// <c>IScopeResolverService</c> + <c>ISessionFileTextSource</c>, the FR-P1-01 catalog-path
+/// dependencies) is unresolvable when the compound AI gate is off.
 /// </para>
 /// <para>
 /// <see cref="SummarizeSessionFilesAsync"/> throws <see cref="FeatureDisabledException"/>
@@ -32,6 +33,7 @@ namespace Sprk.Bff.Api.Services.Ai.Chat;
 /// Construction: uses the protected base ctor that only requires <c>ILogger</c> — none of
 /// the AI dependencies are resolved, which keeps the DI graph valid when those services
 /// are absent. Registered via <c>AnalysisServicesModule.AddNullObjectsForCompoundOff</c>.
+/// Contract preserved unchanged across the FR-P1-01 catalog cutover (task 020).
 /// </para>
 /// </remarks>
 public sealed class NullSessionSummarizeOrchestrator : SessionSummarizeOrchestrator

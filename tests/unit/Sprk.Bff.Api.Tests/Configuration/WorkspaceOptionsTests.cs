@@ -32,15 +32,15 @@ public class WorkspaceOptionsTests
     [Fact]
     public void Defaults_ForChatRoutingR1IdProperties_AreEmptyString_PerQA_2026_06_22_Q1()
     {
-        // Per Q&A 2026-06-22 Q1, the 2 new typed stable-ID properties default to empty string
+        // Per Q&A 2026-06-22 Q1, the typed stable-ID properties default to empty string
         // (populated per-env at deploy time with the row's sprk_analysisplaybookid PK GUID).
+        // NOTE: ChatSummarizePlaybookId was DELETED by FR-P1-01 (ai-architecture-redesign-r1
+        // task 020) — chat /summarize resolves via the Binding row only.
 
         // Arrange + Act
         var options = new WorkspaceOptions();
 
         // Assert
-        options.ChatSummarizePlaybookId.Should().BeEmpty(
-            "ChatSummarizePlaybookId default is empty string; populated per-env at deploy time");
         options.MatterPreFillPlaybookId.Should().BeEmpty(
             "MatterPreFillPlaybookId default is empty string; populated per-env at deploy time");
     }
@@ -91,7 +91,6 @@ public class WorkspaceOptionsTests
     // -----------------------------------------------------------------
 
     [Theory]
-    [InlineData("Workspace:ChatSummarizePlaybookId", "11111111-1111-1111-1111-111111111111")]
     [InlineData("Workspace:MatterPreFillPlaybookId", "22222222-2222-2222-2222-222222222222")]
     public void ChatRoutingR1_IdProperties_BindFromConfiguration(string configKey, string overrideValue)
     {
@@ -118,7 +117,6 @@ public class WorkspaceOptionsTests
 
         // Assert — empty string defaults per Q&A 2026-06-22 Q1
         // (per-env config will populate the GUID at deploy time).
-        options.ChatSummarizePlaybookId.Should().BeEmpty();
         options.MatterPreFillPlaybookId.Should().BeEmpty();
     }
 
@@ -132,14 +130,12 @@ public class WorkspaceOptionsTests
         var configData = new Dictionary<string, string?>
         {
             ["Workspace:SummarizePlaybookId"] = "4a72f99c-a119-f111-8343-7ced8d1dc988",
-            ["Workspace:ChatSummarizePlaybookId"] = "33333333-3333-3333-3333-333333333333",
             ["Workspace:MatterPreFillPlaybookId"] = "44444444-4444-4444-4444-444444444444"
         };
         var options = BuildBoundOptions(configData);
 
         // Assert: all properties carry their configured values
         options.SummarizePlaybookId.Should().Be("4a72f99c-a119-f111-8343-7ced8d1dc988");
-        options.ChatSummarizePlaybookId.Should().Be("33333333-3333-3333-3333-333333333333");
         options.MatterPreFillPlaybookId.Should().Be("44444444-4444-4444-4444-444444444444");
     }
 

@@ -504,13 +504,14 @@ public static class AnalysisServicesModule
         services.AddSingleton<IInsightsIntentClassifier>(sp =>
             new NullInsightsIntentClassifier(sp.GetRequiredService<ILogger<InsightsIntentClassifier>>()));
 
-        // R5 task 014 / D2-04 — SessionSummarizeOrchestrator (P3 Fail-Fast subclass).
-        // The R5 Summarize endpoint (POST /api/ai/chat/sessions/{sessionId}/summarize) is
+        // SessionSummarizeOrchestrator (P3 Fail-Fast subclass). The Summarize endpoint
+        // (POST /api/ai/chat/sessions/{sessionId}/summarize) is
         // mapped UNCONDITIONALLY in EndpointMappingExtensions and injects the concrete
         // SessionSummarizeOrchestrator. Real impl is registered scoped inside
         // AddAnalysisOrchestrationServices (compound-ON only). Without this Null mirror,
         // minimal-API parameter inference fails at host startup ("Failure to infer one
-        // or more parameters") because IRagService + IOpenAiClient + IGenericEntityService
+        // or more parameters") because IActionRunner + IScopeResolverService +
+        // ISessionFileTextSource (FR-P1-01 catalog-path deps)
         // are unavailable when compound AI is OFF. The Null subclass throws
         // FeatureDisabledException at first MoveNextAsync(); SummarizeSessionEndpoint
         // catches it and emits a canonical 503 ProblemDetails per ADR-018 + ADR-019.
@@ -607,24 +608,24 @@ public static class AnalysisServicesModule
         // entirely; runs FetchXML directly via IGenericEntityService (Scoped — matches lifetime).
         services.AddScoped<Sprk.Bff.Api.Services.Ai.Narrators.DailyBriefingCollector>();
 
-        // R5 task 012 (D2-03) — SessionSummarizeOrchestrator. Concrete sealed class (no
-        // interface per ADR-010); registered Scoped to match the lifetime of its dependencies
-        // (ChatSessionManager + IGenericEntityService are both Scoped; IRagService + IOpenAiClient
-        // are Singleton; R5SummarizeTelemetry is Singleton — Scoped is the safe lifetime that
-        // respects every wrapped lifetime).
+        // SessionSummarizeOrchestrator — chat-session boundary for the catalog-driven
+        // chat-summarize capability (FR-P1-01, ai-architecture-redesign-r1 task 020). Concrete
+        // class (no interface per ADR-010); registered Scoped to match the lifetime of its
+        // dependencies (ChatSessionManager + IScopeResolverService + ISessionFileTextSource are
+        // Scoped; IConsumerRoutingService + IActionRunner are Singleton — Scoped is the safe
+        // lifetime that respects every wrapped lifetime).
         //
-        // ZERO new Program.cs lines per R5 CLAUDE.md §3.3. ZERO new feature flags per R5
-        // CLAUDE.md §3.2 — kill-switch coverage inherits from the parent compound gate
-        // (Analysis:Enabled && DocumentIntelligence:Enabled) that wraps this method.
+        // FR-P1-01 hard cutover (2026-07-05): the pre-redesign dual-path (Playbook Engine dispatch
+        // + Workspace:ChatSummarizePlaybookId typed-options fallback) was DELETED. Resolution goes
+        // through IConsumerRoutingService.ResolveBindingAsync (ADR-039 single routing surface) and
+        // execution through the prompted executor (ActionRunner + PromptSchemaRenderer).
         //
         // §F.1 asymmetric-registration audit: this registration is unconditional within the
-        // already-gated outer block; task 014 (endpoint) maps unconditionally and task 015
-        // (tool handler) registers behind the same compound gate via SprkChatAgentFactory.
-        // No new `if (R5Flag)` block introduced. Forward-compat: if a future fine-grained
-        // R5 kill-switch is required, follow ADR-030 Null-Object pattern (not flag-conditional
-        // registration).
+        // already-gated outer block; the endpoint maps unconditionally with the Null-Object
+        // mirror registered in AddNullObjectsForCompoundOff. Kill-switch coverage inherits from
+        // the parent compound gate (Analysis:Enabled && DocumentIntelligence:Enabled).
         services.AddScoped<Sprk.Bff.Api.Services.Ai.Chat.SessionSummarizeOrchestrator>();
-        Console.WriteLine("✓ R5 SessionSummarizeOrchestrator registered (task 012; ADR-010 concrete; chat-session Summarize convergence)");
+        Console.WriteLine("✓ SessionSummarizeOrchestrator registered (FR-P1-01 catalog path; ADR-010 concrete; chat-session Summarize boundary)");
 
         // R6 Pillar 7 (task 064, D-C-17) — SummarizationCompressionService. Sliding-window
         // compression primitive: folds the oldest M chat turns into a single System-role
