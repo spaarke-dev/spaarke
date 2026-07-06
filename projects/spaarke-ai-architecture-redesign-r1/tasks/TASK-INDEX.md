@@ -78,7 +78,7 @@
 | # | Task | FR | Rigor | Deps | Status |
 |---|---|---|---|---|---|
 | 022 | Event path live (CLS-CHAT@v1 chat-classify created as catalog data; 4 bounds + precondition + M4 gate test-proven; SSE chip contract for 023; publish −1.31 MB) | FR-P1-03 | FULL | 021 | ✅ |
-| 023 | Click path client: dispatchConsumer + ConsumerChips; executeSummarizeIntent/intentMatcher grep-zero; ONE SSE loop client-wide. GAP → 023b: server /dispatch endpoint + chips envelope | FR-P1-04 | FULL | 021 | ✅ |
+| 023 | Click path COMPLETE incl. 023b server /dispatch endpoint (GUID-resolved, catalog+ledger-first, 13 contract tests) + 022b Event-path client leg (upload→classify+summary+chips wired, 27 tests); ONE SSE loop + ONE chip vocabulary client-wide | FR-P1-04 | FULL | 021 | ✅ |
 | 024 | Engine-output→ledger adapter E-2 (attach: InvokePlaybookHandler; interim BindingId=playbookId → re-point at 040; frozen diff empty; NOTE: 044's F-1 deletion must relocate the adapter call) | FR-P1-05 | FULL | 021 | ✅ |
 
 ### Wave W-P1-D + Gate
@@ -87,7 +87,7 @@
 
 | # | Task | FR | Rigor | Deps | Status |
 |---|---|---|---|---|---|
-| 026 | Eval UC-A-1 green; **ADR-039 → Accepted** | FR-P1-07 | TEST-MODIFYING | 020–025 | 🔲 |
+| 026 | Eval UC-A-1 green (11/11 live routing asserts; NFR-06 schema pinned); eval-gate CI job merge-blocking; **ADR-039 → Accepted both copies** (hot-path ci-workflows flipped N→Y) | FR-P1-07 | TEST-MODIFYING | 020–025 | ✅ |
 | 027 | P1 deploy + **G-P1 browser UAT** (operator, spaarkedev1) | G-P1 | STANDARD | all P1 | 🔲 |
 
 ## Phase P2 — Text-path hard cutover (gate G-P2, BROWSER)

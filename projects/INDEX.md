@@ -46,7 +46,7 @@ Status legend:
 
 | Project | Branch | Worktree Path | BFF | SpaarkeAi | CI Workflows | Skill Directives | Last Commit | Status |
 |---|---|---|---|---|---|---|---|---|
-| `spaarke-ai-architecture-redesign-r1` | `work/spaarke-ai-architecture-redesign-r1` | `C:/code_files/spaarke-wt-spaarke-ai-architecture-redesign-r1` | Y | Y | N | Y | 2026-07-05 | **Active — AI architecture redesign (Issue #550, Epic #421); ABSORBS + CLOSES `spaarke-ai-platform-unification-r7` at P0/P1 (FR-P0-11/FR-P1-06); deletes the dispatcher stack `spaarke-ai-platform-chat-routing-redesign-r1` also touches — coordinate before P2** |
+| `spaarke-ai-architecture-redesign-r1` | `work/spaarke-ai-architecture-redesign-r1` | `C:/code_files/spaarke-wt-spaarke-ai-architecture-redesign-r1` | Y | Y | Y | Y | 2026-07-05 | **Active — AI architecture redesign (Issue #550, Epic #421); ABSORBS + CLOSES `spaarke-ai-platform-unification-r7` at P0/P1 (FR-P0-11/FR-P1-06); deletes the dispatcher stack `spaarke-ai-platform-chat-routing-redesign-r1` also touches — coordinate before P2** |
 | `spaarke-dataset-grid-framework-r2` | `work/spaarke-dataset-grid-framework-r2` | `C:/code_files/spaarke-wt-spaarke-dataset-grid-framework-r2` | Y | Y | N | Y | 2026-07-02 | **Code complete pending PR #537 merge + deploy regression (2026-07-02); DEF-002 follow-on flipped BFF hot-path N→Y** |
 | `record-header-and-notepad-r1` | `work/record-header-and-notepad-r1` | `C:/code_files/spaarke-wt-record-header-and-notepad-r1` | N | N | N | N | 2026-07-03 | **Code complete (33/36 tasks, 237 tests); env-dependent tasks 025/039/040 pending owner deploy + QA** |
 | `ai-spaarke-ai-workspace-UI-r2` | `work/ai-spaarke-ai-workspace-UI-r2` | `C:/code_files/spaarke-wt-ai-spaarke-ai-workspace-UI-r2` | N | Y | N | N | 2026-07-01 | **Complete pending PR #530 merge (2026-07-01)** |
@@ -126,7 +126,7 @@ This section surfaces where parallel projects collide on the same hot-path surfa
 
 ### CI Workflows (`.github/workflows/**`)
 
-**2 active projects touch CI workflows in scope**: `ci-cd-unit-test-remediation-r1` (modifies existing workflows) and `spaarke-redis-cache-remediation-r2` (adds NEW `.github/workflows/redis-key-rotation.yml` — no existing-file conflict).
+**3 active projects touch CI workflows in scope**: `ci-cd-unit-test-remediation-r1` (modifies existing workflows), `spaarke-redis-cache-remediation-r2` (adds NEW `.github/workflows/redis-key-rotation.yml` — no existing-file conflict), and `spaarke-ai-architecture-redesign-r1` (adds ONE self-contained `eval-gate` job to `sdap-ci.yml` — zero existing lines modified; task 026, NFR-02 merge gate; coordinate with ci-cd-unit-test-remediation-r1 before restructuring that file).
 
 `spaarke-devops-project-tracking-r1` design notes a Phase-5 polish workflow but explicitly out of r1 acceptance (D-22). No conflict.
 

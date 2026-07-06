@@ -42,27 +42,25 @@ The quality spine of the AI architecture redesign. Every case is a golden uttera
 
 | Phase | Active assertions |
 |---|---|
-| **P0 (now)** | Inventory integrity (≥30 cases, unique ids, UC traceability, closed vocabularies); consumer-type grounding against `ConsumerTypes.All`; NFR-06 schema round-trip; routing-surface smoke driving the real `ConsumerRoutingService.ResolveBindingAsync` selection algorithm (Dataverse boundary stubbed); pending-inventory declaration |
-| **P1** (task 026, FR-P1-07) | UC-A-1 `chat-summarize` family dispatch assertions go live (utterance → binding via the single-hop dispatcher) + SUM-CHAT@v1 schema-conformance; **merge gate activates** (below) |
-| **P2** (task 037, FR-P2-08) | Refusal + compound + prompt-injection families; clarify outcomes (loop elicitation); citation-integrity |
+| **P0** | Inventory integrity (≥30 cases, unique ids, UC traceability, closed vocabularies); consumer-type grounding against `ConsumerTypes.All`; NFR-06 schema round-trip; routing-surface smoke driving the real `ConsumerRoutingService.ResolveBindingAsync` selection algorithm (Dataverse boundary stubbed); pending-inventory declaration |
+| **P1 (ACTIVE — task 026, FR-P1-07)** | UC-A-1 families LIVE: Text-path cases resolve `chat-summarize` → Prompted SUM-CHAT@v1 Action through the real `ResolveBindingAsync` (the exact read + preconditions `SessionSummarizeOrchestrator` enforces); Event-path cases resolve `document_uploaded` ordered members chat-classify(1) → chat-summarize(2) through the real `ResolveEventBindingsAsync`; M4 clarify policy dial pinned (behavior proven in `EventRulesServiceTests`); SUM-CHAT@v1 output-schema contract pinned (`infra/dataverse/outputschemas/sum-chat-v1.schema.json` — required fields + load-bearing declaration order). **Merge gate ACTIVE** (below). NOTE: typo-tolerant NL matching ("any phrasing of summarize") is a bounded-loop property — it activates at P2; at P1 the utterances are the traceability record and the dispatch route is the assertion. |
+| **P2** (task 037, FR-P2-08) | Refusal + compound + prompt-injection families; clarify outcomes (loop elicitation); citation-integrity; typo/paraphrase dispatch through the loop |
 | **P3** (FR-P3-01/02/03) | Remaining consumer families: document-profile, matter/project pre-fill, workspace summarize-file, email-analysis, insights ask/search, draft-correspondence, create-task |
 
-## CI wiring (P0) and merge-gate activation (P1)
+## CI wiring and the merge gate (ACTIVE since task 026)
 
-**Wired now**: this suite compiles into `Sprk.Bff.Api.Tests` (member of `Spaarke.sln`) and therefore runs inside the root `dotnet test` of `.github/workflows/sdap-ci.yml` (`build-test` job, test pass 1) on every PR. The seed JSON is copied to test output via a `Content` include in `Sprk.Bff.Api.Tests.csproj`; `*.json` edits under `tests/**` are NOT in the workflow's `paths-ignore`, so BA-only case edits trigger a CI run.
+**Pass 1 (informational)**: this suite compiles into `Sprk.Bff.Api.Tests` (member of `Spaarke.sln`) and runs inside the root `dotnet test` of `.github/workflows/sdap-ci.yml` (`build-test` job, test pass 1) on every PR. The seed JSON is copied to test output via a `Content` include in `Sprk.Bff.Api.Tests.csproj`; `*.json` edits under `tests/**` are NOT in the workflow's `paths-ignore`, so BA-only case edits trigger a CI run.
 
-**Activation switch (task 026 executes this — do not activate early)**:
+**Merge gate (blocking — NFR-02)**: the dedicated `eval-gate` job in `sdap-ci.yml` runs
 
-1. Add a dedicated required step to the `build-test` job (after "Final test verdict"):
-   ```yaml
-   - name: Golden-utterance eval gate (NFR-02 — merge-blocking)
-     shell: pwsh
-     run: dotnet test -c ${{ matrix.configuration }} --no-build --filter "Category=GoldenUtteranceEval"
-   ```
-   No `continue-on-error` on the step; the trait filter exists precisely so this step is additive (no workflow restructuring).
-2. The `build-test` job currently carries `continue-on-error: true` (2026-06-24 informational-CI posture). Task 026 must either remove it or mark the eval step's job as a REQUIRED status check in branch protection so a red eval suite blocks merge (NFR-02).
-3. Green the UC-A-1 family: replace the pending declaration for `dispatchAssertPhase: P1` cases with live utterance→binding dispatch assertions against the P1 dispatcher.
+```
+dotnet test tests/unit/Sprk.Bff.Api.Tests/Sprk.Bff.Api.Tests.csproj -c Debug --filter "Category=GoldenUtteranceEval"
+```
+
+with **no `continue-on-error`**. Placement rationale (deviation from the original task-011 sketch, which put a step inside `build-test`): the `build-test` job carries job-level `continue-on-error: true` (2026-06-24 informational posture), which swallows any step failure inside it — and branch protection is currently disabled on the repo, so the workflow-run conclusion is the only mechanical merge signal. A separate no-tolerance job is the only additive change that turns a red eval into a red workflow run. When branch protection / rulesets are re-enabled, mark **"Eval Gate (Golden Utterances)"** as a REQUIRED status check to hard-block merge.
+
+Verified 2026-07-05 (task 026): a deliberately failing scratch case made `dotnet test --filter "Category=GoldenUtteranceEval"` exit 1; the scratch case was then removed.
 
 ## Deletion-safety
 
-KEEP-protected per ADR-038 (`tests/integration/contract/**`). From P1 the suite is a merge gate (NFR-02); every catalog/prompt change adds or updates cases (NFR-06).
+KEEP-protected per ADR-038 (`tests/integration/contract/**`). Since P1 (task 026) the suite is an ACTIVE merge gate (NFR-02); every catalog/prompt change adds or updates cases (NFR-06).

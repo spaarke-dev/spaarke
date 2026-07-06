@@ -1,6 +1,6 @@
 # ADR-039: Grounded Execution & Closed Catalogs
 
-- **Status**: Proposed (2026-07-05); accepted-in-principle by operator with the v0.4 converged target (`docs/architecture/SPAARKE-AI-ARCHITECTURE-AND-COMPONENT-DESIGN.md`). Moves to Accepted when migration phase P1 ships.
+- **Status**: **Accepted** (2026-07-05) — proposed 2026-07-05; accepted-in-principle by operator with the v0.4 converged target (`docs/architecture/SPAARKE-AI-ARCHITECTURE-AND-COMPONENT-DESIGN.md`); promoted Proposed → Accepted at migration phase P1 per this ADR's stated condition ("moves to Accepted when migration phase P1 ships") by `spaarke-ai-architecture-redesign-r1` task 026 (FR-P1-07). See "Acceptance evidence (P1)" below.
 - **Deciders**: Operator + `spaarke-ai-code-audit-r1` convergence review (2026-07-05)
 - **Concise version**: [`.claude/adr/ADR-039-grounded-execution-closed-catalogs.md`](../../.claude/adr/ADR-039-grounded-execution-closed-catalogs.md) (the operational MUST/MUST-NOT surface — binding)
 
@@ -22,6 +22,19 @@ Spaarke AI has exactly **one dispatch protocol** — three entry paths — over 
 4. **Control flow is code; behavior is data** (OQ-2 resolution): makers author prompts, schemas, scopes, bindings, chips, event rules, thresholds — never branches or loops. Composite capabilities are `coded` C# workflows (engineering deliverables) reading their prompts from Action rows. No maker-facing graph authoring exists.
 
 The full MUST/MUST NOT surface is in the concise version and is binding.
+
+## Acceptance evidence (P1 — 2026-07-05, task 026)
+
+The promotion condition — P1 ships with the one-dispatch-protocol / two-closed-catalogs contract as the enforced state of the codebase — is met:
+
+- **Catalog-routed capability live** (task 020, FR-P1-01): `chat-summarize` resolves exclusively via `IConsumerRoutingService.ResolveBindingAsync` to the SUM-CHAT@v1 prompted Action (`SessionSummarizeOrchestrator`); the pre-redesign dual-path dispatch (Linear-vs-engine conditional + `Workspace:ChatSummarizePlaybookId` config fallback) deleted, grep-zero — no engine or config fallback exists.
+- **Event path live** (task 022, FR-P1-03): `EventRulesService` executes `document_uploaded` members declared in `sprk_playbookconsumer.sprk_oneventbindings` (chat-classify(1) → chat-summarize(2)) via `ResolveEventBindingsAsync`, under the four bounds + explicit-command supersede + M4 confidence policy.
+- **Click path live** (tasks 023/023b, FR-P1-04): client `dispatchConsumer` + `POST /api/ai/chat/sessions/{id}/dispatch` resolving by Binding id via `GetBindingByIdAsync`; `executeSummarizeIntent`/`intentMatcher` grep-zero — ONE SSE loop client-wide.
+- **Grounded-output invariant live** (task 021, FR-P1-02): every output ledger-written via `OutputRouter` BEFORE rendering (ADR-040 — itself Accepted at task 014), addressable as `{bindingId}@t{n}`.
+- **Stray dispatch surface closed** (task 025, FR-P1-06): r7 branch closed; 492 lines of `linear_dispatch`/regex intent code deleted in place, grep-zero.
+- **Eval merge gate active** (task 026, FR-P1-07 / NFR-02): UC-A-1 golden-utterance families green with LIVE dispatch assertions (`tests/integration/contract/Eval/`); dedicated `eval-gate` CI job (`dotnet test --filter "Category=GoldenUtteranceEval"`, no `continue-on-error`) fails the workflow on any eval regression.
+
+Dispatcher-deletion of the remaining legacy chat text-path mechanisms is P2 scope and was NOT required for promotion — the ADR's stated condition is P1 shipping, which the above satisfies.
 
 ## Alternatives considered
 

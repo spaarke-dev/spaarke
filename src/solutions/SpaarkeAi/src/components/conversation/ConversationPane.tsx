@@ -115,6 +115,20 @@ import {
   type DispatchWorkspaceEvent,
 } from "@spaarke/ui-components";
 import { ConsumerChips } from "./ConsumerChips";
+// ai-architecture-redesign-r1 task 022b (FR-P1-03 / ADR-039): the Event entry
+// path client leg. When an upload batch completes (last per-file /documents
+// 202, coalesced 250 ms), the pane POSTs the document-uploaded Event endpoint
+// ONCE via the canonical SSE path and renders the rule's stream:
+// event_classification (classification line), event_output (the STORED ledger
+// entry — ADR-040 render-follows-store), event_confirmation / event_notice
+// (message + chips), chips (next-step Click-path chips). The server owns
+// every routing decision — typedCommand is passed verbatim (no pre-filter).
+import {
+  runDocumentUploadedEvent,
+  formatClassificationMessage,
+  formatEventOutputMarkdown,
+  formatNoticeMessage,
+} from "./DocumentUploadedEventStream";
 // R6 closeout (Pillar 8 / task 097): /new-session needs to POST /api/ai/chat/sessions
 // and return the new session id so HardSlashExecutor.execNewSession can complete.
 import { buildBffApiUrl } from "@spaarke/auth";
@@ -998,6 +1012,39 @@ export function ConversationPane(): React.JSX.Element {
   const pendingConfirmFilenamesRef = React.useRef<string[]>([]);
   const READY_CONFIRMATION_DEBOUNCE_MS = 250;
 
+  // ── task 022b / FR-P1-03: Event-path upload-batch state ───────────────────
+  //
+  // The Event entry path fires ONCE per upload batch, AFTER the last per-file
+  // `POST /documents` 202 (the server contract requires session-file document
+  // ids — which only exist post-promotion). Batch coalescing mirrors the
+  // ready-confirmation pattern above: each successful promotion queues its
+  // `{chipId, documentId}` pair and (re)starts a 250 ms timer; on expiry the
+  // batch POSTs `/events/document-uploaded` via the canonical SSE path.
+  //
+  //   - `pendingEventFilesRef` — promoted-but-not-yet-event-fired docs.
+  //   - `eventBatchTimerRef`   — the coalescing timer.
+  //   - `eventBatchOpenedAtRef`— when the batch's FIRST chip became ready
+  //     (the operator-visible upload gesture). A message sent at-or-after
+  //     this instant is the "typed command accompanying the upload" and is
+  //     passed verbatim as `typedCommand` (the SERVER decides supersede —
+  //     ADR-039: no client pre-filtering).
+  //   - `lastSentAtRef`        — timestamp twin of `lastSentMessageRef`.
+  //   - `attachmentChipsRef`   — render-free chip mirror so the fire callback
+  //     can order fileIds by upload order (index 0 = deterministic top-1).
+  const pendingEventFilesRef = React.useRef<Array<{ chipId: string; documentId: string }>>([]);
+  const eventBatchTimerRef = React.useRef<ReturnType<typeof setTimeout> | null>(null);
+  const eventBatchOpenedAtRef = React.useRef<number | null>(null);
+  const lastSentAtRef = React.useRef<number | null>(null);
+  const attachmentChipsRef = React.useRef<AttachmentChip[]>([]);
+  const EVENT_BATCH_DEBOUNCE_MS = 250;
+
+  // Assistant-message injection queue (task 022b). `pendingInjection` is a
+  // single one-shot slot; the Event stream can deliver several renderable
+  // events in one network chunk (classification → output → notice), so
+  // Event-path messages enqueue and drain through SprkChat's
+  // onLocalMessageInjected acknowledgement (see enqueueAssistantMessage).
+  const injectionQueueRef = React.useRef<IChatMessage[]>([]);
+
   // Per-id tracking of which chip IDs have already been dispatched on the
   // `context.files_staged` PaneEventBus channel — prevents re-dispatch on
   // chip status mutations unrelated to the ready transition.
@@ -1021,11 +1068,14 @@ export function ConversationPane(): React.JSX.Element {
   // knows the session has them before extraction completes.
   const uploadedFileCount = attachmentChips.length;
 
-  // Cleanup the debounce timer + interjection ref set on unmount.
+  // Cleanup the debounce timers + interjection ref set on unmount.
   React.useEffect(() => {
     return () => {
       if (readyConfirmationTimerRef.current !== null) {
         clearTimeout(readyConfirmationTimerRef.current);
+      }
+      if (eventBatchTimerRef.current !== null) {
+        clearTimeout(eventBatchTimerRef.current);
       }
     };
   }, []);
@@ -1039,6 +1089,9 @@ export function ConversationPane(): React.JSX.Element {
   const handleAttachmentsChanged = React.useCallback(
     (chips: AttachmentChip[]) => {
       setAttachmentChips(chips);
+      // task 022b: render-free mirror for the Event-path fire callback
+      // (upload-order fileIds sorting without re-subscribing the effect).
+      attachmentChipsRef.current = chips;
 
       // Detect ready transitions for inline confirmation + PaneEventBus dispatch.
       // We can't observe transitions purely from the chip array (a chip is
@@ -1059,6 +1112,14 @@ export function ConversationPane(): React.JSX.Element {
       }
       for (const id of Array.from(confirmedReadyIdsRef.current)) {
         if (!currentIds.has(id)) confirmedReadyIdsRef.current.delete(id);
+      }
+
+      // task 022b (FR-P1-03): the first ready transition of a fresh batch
+      // OPENS the Event-path batch window. Any message the user sends at or
+      // after this instant counts as the command that accompanied the upload
+      // (passed verbatim as `typedCommand` — the server decides supersede).
+      if (readyChipsThisTick.length > 0 && eventBatchOpenedAtRef.current === null) {
+        eventBatchOpenedAtRef.current = Date.now();
       }
 
       // Side effect 1: inline confirmation message (debounced).
@@ -1169,12 +1230,33 @@ export function ConversationPane(): React.JSX.Element {
   );
 
   /**
+   * enqueueAssistantMessage — ordered, loss-free injection of Assistant
+   * messages through the single-slot `pendingInjection` prop (task 022b).
+   *
+   * The Event-path SSE stream can deliver several renderable events within
+   * one React batch (e.g. event_classification + event_output arriving in the
+   * same network chunk). Direct `setPendingInjection` calls would clobber one
+   * another under state batching, so Event-path messages go through this
+   * queue: when the slot is free the message occupies it immediately;
+   * otherwise it waits in `injectionQueueRef` and drains one-per-injection
+   * via SprkChat's onLocalMessageInjected acknowledgement below.
+   */
+  const enqueueAssistantMessage = React.useCallback((message: IChatMessage): void => {
+    setPendingInjection((prev) => {
+      if (prev === null) return message;
+      injectionQueueRef.current.push(message);
+      return prev;
+    });
+  }, []);
+
+  /**
    * onLocalMessageInjected — SprkChat fires this after `pendingInjection`
    * has been appended to the thread. The host clears the prop back to null
-   * so re-renders do not re-inject the same message.
+   * (or promotes the next queued Event-path message — task 022b) so
+   * re-renders do not re-inject the same message.
    */
   const handleLocalMessageInjected = React.useCallback(() => {
-    setPendingInjection(null);
+    setPendingInjection(() => injectionQueueRef.current.shift() ?? null);
   }, []);
 
   /**
@@ -1194,6 +1276,11 @@ export function ConversationPane(): React.JSX.Element {
       // `originalMessage` when the user picks a candidate.
       // ADR-015: kept in a ref (never rendered, never logged).
       lastSentMessageRef.current = messageText;
+      // task 022b (FR-P1-03): timestamp twin — a message sent at/after the
+      // current upload batch opened is the batch's accompanying typed
+      // command; the Event-path fire callback passes it verbatim as
+      // `typedCommand` (the SERVER decides supersede — ADR-039).
+      lastSentAtRef.current = Date.now();
 
       // ── R5 task 036 / P2-CLOSEOUT-05: deterministic intent dispatch ─────
       //
@@ -1472,6 +1559,137 @@ export function ConversationPane(): React.JSX.Element {
           dispatch(channel, event as WorkspacePaneEvent),
       }),
     [bffBaseUrl, getAccessToken, dispatch]
+  );
+
+  // ── Event path (task 022b / FR-P1-03 / ADR-039) ──────────────────────────
+  //
+  // fireDocumentUploadedEvent — the batch timer callback. Drains the pending
+  // promoted-document queue, orders fileIds by the chip strip's upload order
+  // (index 0 = deterministic top-1 for the bulk bound), resolves the
+  // accompanying typed command (sent at/after the batch opened — passed
+  // VERBATIM; the server enforces supersede, opt-out, daily cap, M4 policy),
+  // then consumes the Event SSE stream through the canonical
+  // runDocumentUploadedEvent helper (readSseStream inside — the ONE SSE path):
+  //   event_classification → classification line (assistant message)
+  //   event_output         → the STORED ledger payload rendered as the summary
+  //                          (ADR-040 render-follows-store)
+  //   event_confirmation   → confirmation message + its chips
+  //   event_notice         → subtle inline notice (+ chips when present)
+  //   chips (any carrier)  → <ConsumerChips> via the shared parseConsumerChips
+  //   error                → safe server message as an assistant line
+  // Stream/HTTP failures render ONE stable failure line (ADR-019 — never raw
+  // server detail). ADR-015: logs carry structural counts/flags only.
+  const fireDocumentUploadedEvent = React.useCallback((): void => {
+    eventBatchTimerRef.current = null;
+    const pending = pendingEventFilesRef.current;
+    pendingEventFilesRef.current = [];
+    const openedAt = eventBatchOpenedAtRef.current;
+    eventBatchOpenedAtRef.current = null;
+
+    const sessionId = chatSessionIdRef.current;
+    if (pending.length === 0 || !sessionId) return;
+
+    // fileIds in upload order — promotions complete out of order, so sort by
+    // the chip strip's order (attachmentChipsRef mirrors SprkChat's array).
+    const chipOrder = new Map<string, number>(
+      attachmentChipsRef.current.map((c, index) => [c.id, index])
+    );
+    const fileIds = pending
+      .slice()
+      .sort(
+        (a, b) =>
+          (chipOrder.get(a.chipId) ?? Number.MAX_SAFE_INTEGER) -
+          (chipOrder.get(b.chipId) ?? Number.MAX_SAFE_INTEGER)
+      )
+      .map((p) => p.documentId);
+
+    const typedCommand =
+      openedAt !== null &&
+      lastSentAtRef.current !== null &&
+      lastSentAtRef.current >= openedAt &&
+      lastSentMessageRef.current.trim().length > 0
+        ? lastSentMessageRef.current
+        : null;
+
+    // ADR-015: structural signals only — never file ids or command text.
+    console.log(
+      "[ConversationPane] document-uploaded event dispatch — files:%d typedCommand:%s",
+      fileIds.length,
+      typedCommand !== null
+    );
+
+    const eventFailureMessage =
+      "Sorry — I couldn't process those files automatically. You can still ask me about them.";
+
+    void runDocumentUploadedEvent({
+      bffBaseUrl,
+      sessionId,
+      fileIds,
+      typedCommand,
+      getAccessToken,
+      handlers: {
+        onClassification: (data) => {
+          enqueueAssistantMessage(
+            makeLocalAssistantMessage(formatClassificationMessage(data))
+          );
+        },
+        onOutput: (data) => {
+          enqueueAssistantMessage(
+            makeLocalAssistantMessage(formatEventOutputMarkdown(data.payload))
+          );
+        },
+        onConfirmation: (data) => {
+          if (typeof data.message === "string" && data.message.length > 0) {
+            enqueueAssistantMessage(makeLocalAssistantMessage(data.message));
+          }
+        },
+        onNotice: (data) => {
+          enqueueAssistantMessage(
+            makeLocalAssistantMessage(formatNoticeMessage(data))
+          );
+        },
+        onChips: (raw) => {
+          // Chips are conversation-surface UI — same tolerant parse + render
+          // path as the Click-path consumer_chips context_event above.
+          setConsumerChips(parseConsumerChips(raw));
+        },
+        onError: (message) => {
+          // Server `error` content is the safe message by contract (same
+          // shape existing chat streams render).
+          enqueueAssistantMessage(
+            makeLocalAssistantMessage(message || eventFailureMessage)
+          );
+        },
+      },
+    }).catch(() => {
+      enqueueAssistantMessage(makeLocalAssistantMessage(eventFailureMessage));
+    });
+  }, [bffBaseUrl, getAccessToken, enqueueAssistantMessage]);
+
+  /**
+   * queueDocumentUploadedEvent — called once per successful per-file
+   * `/documents` promotion (202) with the server-issued documentId. Queues
+   * the pair and (re)starts the 250 ms coalescing timer so a multi-file
+   * batch fires the Event endpoint exactly ONCE, after its last 202.
+   */
+  const queueDocumentUploadedEvent = React.useCallback(
+    (chipId: string, documentId: string): void => {
+      pendingEventFilesRef.current.push({ chipId, documentId });
+      // Defensive: the batch normally opens at the ready transition in
+      // handleAttachmentsChanged; re-open here if a promotion arrives for an
+      // already-closed batch (e.g. retry succeeding after the batch fired).
+      if (eventBatchOpenedAtRef.current === null) {
+        eventBatchOpenedAtRef.current = Date.now();
+      }
+      if (eventBatchTimerRef.current !== null) {
+        clearTimeout(eventBatchTimerRef.current);
+      }
+      eventBatchTimerRef.current = setTimeout(
+        fireDocumentUploadedEvent,
+        EVENT_BATCH_DEBOUNCE_MS
+      );
+    },
+    [fireDocumentUploadedEvent]
   );
 
   /**
@@ -1959,6 +2177,17 @@ export function ConversationPane(): React.JSX.Element {
           clearTimeout(readyConfirmationTimerRef.current);
           readyConfirmationTimerRef.current = null;
         }
+        // task 022b / FR-P1-03: promoted document ids are session-scoped —
+        // a queued Event batch must not fire against a different session.
+        // The batch-opened timestamp is KEPT: in the cold-start gesture
+        // (attach → type → first send creates the session) promotion runs
+        // AFTER this callback, and the accompanying typed command must still
+        // resolve against the pre-session batch-open instant.
+        pendingEventFilesRef.current = [];
+        if (eventBatchTimerRef.current !== null) {
+          clearTimeout(eventBatchTimerRef.current);
+          eventBatchTimerRef.current = null;
+        }
       }
     },
     [setChatSessionId]
@@ -2114,6 +2343,24 @@ export function ConversationPane(): React.JSX.Element {
             next.add(chipId);
             return next;
           });
+          // task 022b (FR-P1-03): the 202 body is DocumentUploadResponse —
+          // its documentId is the session-file id the Event endpoint's
+          // `fileIds` contract requires. Queue it into the batch coalescer;
+          // the batch fires the document-uploaded Event ONCE after the last
+          // promotion (+250 ms). Tolerant parse: a missing/malformed body
+          // skips the Event leg for this file (promotion itself succeeded).
+          try {
+            const uploadJson = (await response.json()) as { documentId?: string };
+            const documentId =
+              typeof uploadJson?.documentId === "string" && uploadJson.documentId.length > 0
+                ? uploadJson.documentId
+                : null;
+            if (documentId !== null) {
+              queueDocumentUploadedEvent(chipId, documentId);
+            }
+          } catch {
+            // Non-JSON body — promotion stands; Event leg skipped for this file.
+          }
         } catch (err) {
           // ADR-015: log error name + basic classification only, never the message
           // (may contain URLs / headers). "Failed to fetch" is a TypeError from the
@@ -2138,7 +2385,7 @@ export function ConversationPane(): React.JSX.Element {
         }
       })();
     }
-  }, [chatSessionId, attachmentChips, promotedChipIds, authenticatedFetch, bffBaseUrl]);
+  }, [chatSessionId, attachmentChips, promotedChipIds, authenticatedFetch, bffBaseUrl, queueDocumentUploadedEvent]);
 
   const handleAttachmentReady = React.useCallback(
     (attachment: ChatAttachment) => {

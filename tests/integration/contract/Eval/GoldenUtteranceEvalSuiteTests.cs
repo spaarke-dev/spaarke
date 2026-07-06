@@ -42,15 +42,26 @@ namespace Sprk.Bff.Api.Tests.Eval.GoldenUtterances;
 /// they are NOT silently skipped tests.
 /// </para>
 /// <para>
-/// <b>Merge-gate wiring (NFR-02)</b>: this class compiles into
-/// <c>Sprk.Bff.Api.Tests</c> via the contract-path Compile glob and therefore runs
-/// inside the root <c>dotnet test</c> of <c>.github/workflows/sdap-ci.yml</c>
-/// (build-test job, pass 1) on every PR. ACTIVATION as a blocking gate happens at
-/// P1 task 026 (FR-P1-07): flip the informational <c>continue-on-error</c> posture
-/// for the eval subset — the <c>[Trait("Category", "GoldenUtteranceEval")]</c>
-/// filter exists precisely so 026 can add a dedicated required step
-/// (<c>dotnet test --filter "Category=GoldenUtteranceEval"</c>) without
-/// restructuring the workflow. Full activation plan:
+/// <b>P1 ACTIVATED (task 026, FR-P1-07)</b>: the UC-A-1 families' P1 dispatch
+/// assertions are LIVE (see the "P1 live dispatch assertions" region) — they
+/// drive the REAL <see cref="ConsumerRoutingService"/> reads the three entry
+/// paths use at P1 (<c>ResolveBindingAsync</c> for the Text-path summarize
+/// boundary, <c>ResolveEventBindingsAsync</c> for the Event path) plus the
+/// SUM-CHAT@v1 schema-conformance contract (NFR-06). Typo-tolerant NL matching
+/// ("any phrasing of summarize") is a property of the bounded function-calling
+/// loop and activates at P2 (task 037, FR-P2-08) — at P1 the utterances are
+/// the traceability record; the assertable dispatch behavior is
+/// utterance-family → Binding → Action resolution through the closed catalog.
+/// </para>
+/// <para>
+/// <b>Merge-gate wiring (NFR-02 — ACTIVE since task 026)</b>: this class
+/// compiles into <c>Sprk.Bff.Api.Tests</c> via the contract-path Compile glob
+/// and runs inside the root <c>dotnet test</c> of
+/// <c>.github/workflows/sdap-ci.yml</c> (build-test job, pass 1) on every PR.
+/// In addition, the dedicated <c>eval-gate</c> job runs
+/// <c>dotnet test --filter "Category=GoldenUtteranceEval"</c> with NO
+/// <c>continue-on-error</c> — a red eval suite fails the workflow (the
+/// build-test job's job-level informational posture cannot swallow it). See
 /// <c>tests/integration/contract/Eval/README.md</c>.
 /// </para>
 /// </remarks>
@@ -250,15 +261,7 @@ public class GoldenUtteranceEvalSuiteTests
                 return new EntityCollection(new List<Entity> { BuildConsumerRow(requestedType!) });
             });
 
-        var hostEnvironment = new Mock<IHostEnvironment>();
-        hostEnvironment.SetupGet(e => e.EnvironmentName).Returns("Development");
-
-        using var cache = new MemoryCache(new MemoryCacheOptions());
-        var routing = new ConsumerRoutingService(
-            entityService.Object,
-            cache,
-            hostEnvironment.Object,
-            NullLogger<ConsumerRoutingService>.Instance);
+        var routing = CreateRoutingService(entityService);
 
         foreach (var consumerType in existingConsumerTypes)
         {
@@ -273,9 +276,223 @@ public class GoldenUtteranceEvalSuiteTests
     }
 
     // -------------------------------------------------------------------------
-    // Pending-by-design declaration (P0): dispatch assertions are stubbed, not
-    // silently skipped. This test PASSES while making the pending inventory
-    // visible in the run output with its activating task per family.
+    // P1 live dispatch assertions (task 026, FR-P1-07) — the UC-A-1 families.
+    //
+    // What "live" means at P1 (no NL loop until P2): every P1-phase case's
+    // dispatch route is exercised against the REAL routing reads the shipped
+    // entry paths use — no dispatcher is invented here:
+    //   • Text path  — SessionSummarizeOrchestrator resolves chat-summarize via
+    //     IConsumerRoutingService.ResolveBindingAsync and fail-fasts unless the
+    //     Binding targets a Prompted Action (SUM-CHAT@v1). These tests assert
+    //     exactly those preconditions through the real selection algorithm.
+    //   • Event path — EventRulesService resolves document_uploaded members via
+    //     ResolveEventBindingsAsync (chat-classify order 1 → chat-summarize
+    //     order 2). These tests assert the ordered membership resolution.
+    //   • M4 clarify — the low-confidence confirmation policy dial (the
+    //     surviving D1 dial) is pinned; the suspend behavior itself is proven
+    //     in EventRulesServiceTests (task 022).
+    // Dataverse is stubbed at the module boundary with rows shaped like the
+    // seeded spaarkedev1 catalog rows (ADR-038: no Mock<HttpMessageHandler>,
+    // no DI-registration assertions).
+    // -------------------------------------------------------------------------
+
+    /// <summary>The SUM-CHAT@v1 <c>sprk_analysisaction</c> target the stub catalog rows point at.</summary>
+    private static readonly Guid SumChatActionId = new("eeb05bfd-1260-f111-ab0b-70a8a59455f4");
+
+    /// <summary>The CLS-CHAT@v1 <c>sprk_analysisaction</c> target (task 022 event-rule member 1).</summary>
+    private static readonly Guid ClsChatActionId = new("aaaa1111-0022-4022-9022-000000000022");
+
+    [Fact]
+    public async Task P1LiveDispatch_TextChatSummarizeCases_ResolveBindingToPromptedSumChatAction()
+    {
+        var suite = LoadSuite();
+        var cases = suite.Cases
+            .Where(c => IsPhase(c, "P1") && IsOutcome(c, "dispatch") && IsChannel(c, "text"))
+            .ToList();
+
+        cases.Should().NotBeEmpty("FR-P1-07: the UC-A-1 family carries P1 text-channel dispatch cases");
+        cases.Should().OnlyContain(
+            c => string.Equals(c.Family, "chat-summarize", StringComparison.OrdinalIgnoreCase),
+            "chat-summarize is the ONLY live text-dispatch family at P1 (FR-P1-01); a new P1 text " +
+            "family needs its own live assertion before declaring dispatchAssertPhase=P1");
+
+        // Dataverse boundary stub shaped like the seeded spaarkedev1 row: enabled
+        // chat-summarize Binding, sprk_action lookup → SUM-CHAT@v1, kind Prompted.
+        var entityService = new Mock<IGenericEntityService>();
+        entityService
+            .Setup(s => s.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((QueryExpression query, CancellationToken _) =>
+            {
+                var requestedType = query.Criteria.Conditions
+                    .First(c => c.AttributeName == "sprk_consumertype")
+                    .Values[0] as string;
+                return new EntityCollection(new List<Entity>
+                {
+                    BuildActionTargetRow(requestedType!, SumChatActionId, ucid: "UC-A-1"),
+                });
+            });
+
+        var routing = CreateRoutingService(entityService);
+
+        _output.WriteLine("P1 LIVE dispatch assertions — Text path (UC-A-1 chat-summarize family):");
+        foreach (var c in cases)
+        {
+            var binding = await routing.ResolveBindingAsync(c.Expected.ConsumerType!, c.Expected.ConsumerCode);
+
+            binding.Should().NotBeNull(
+                $"case {c.CaseId} (\"{c.Utterance}\"): the chat-summarize Binding must resolve through " +
+                "the real FR-1R-03 selection algorithm — this is the exact read SessionSummarizeOrchestrator performs");
+            binding!.ConsumerType.Should().Be(ConsumerTypes.ChatSummarize,
+                $"case {c.CaseId}: UC-A-1 text dispatch lands on the chat-summarize capability binding");
+            binding.ActionId.Should().Be(SumChatActionId,
+                $"case {c.CaseId}: the Binding's sprk_action lookup targets the SUM-CHAT@v1 Action — " +
+                "SessionSummarizeOrchestrator fail-fasts (no engine/config fallback, NFR-08) without it");
+            binding.ActionKind.Should().Be(ActionKind.Prompted,
+                $"case {c.CaseId}: the chat /summarize path executes prompted Actions only (FR-P1-01)");
+            binding.Ucid.Should().Be("UC-A-1",
+                $"case {c.CaseId}: the seeded Binding row carries the §3 UC id, tying catalog data to this eval family");
+
+            // NFR-06 — every UC-A-1 dispatch case pins its output schema id.
+            c.Assertions.Should().NotBeNull(
+                $"case {c.CaseId}: P1 dispatch cases must carry a schema-conformance assertion (NFR-06)");
+            c.Assertions!.SchemaConformance.Should().Be("SUM-CHAT@v1",
+                $"case {c.CaseId}: P1 schema-conformance is live — the SUM-CHAT@v1 contract is " +
+                "pinned by P1SchemaConformance_SumChatOutputSchemaContract_PinsLoadBearingShape");
+
+            _output.WriteLine(
+                $"  {c.CaseId}  \"{c.Utterance}\"  ->  {binding.ConsumerType} binding {binding.BindingId} " +
+                $"-> action {binding.ActionId} (SUM-CHAT@v1, {binding.ActionKind})");
+        }
+    }
+
+    [Fact]
+    public async Task P1LiveDispatch_DocumentUploadedEventCases_ResolveOrderedCatalogMembers()
+    {
+        var suite = LoadSuite();
+        var cases = suite.Cases
+            .Where(c => IsPhase(c, "P1") && IsOutcome(c, "dispatch") && IsChannel(c, "event"))
+            .ToList();
+
+        cases.Should().NotBeEmpty("FR-P1-03/FR-P1-07: task 022 seeded P1 event-channel dispatch cases");
+
+        // Dataverse boundary stub shaped like the seeded document_uploaded rule:
+        // chat-classify (member order 1, CLS-CHAT@v1) + chat-summarize (member
+        // order 2, SUM-CHAT@v1) declared in sprk_oneventbindings.
+        var entityService = new Mock<IGenericEntityService>();
+        entityService
+            .Setup(s => s.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(new List<Entity>
+            {
+                BuildActionTargetRow(
+                    ConsumerTypes.ChatClassify, ClsChatActionId, ucid: "UC-A-7",
+                    onEventBindingsJson: """[{"event":"document_uploaded","order":1}]"""),
+                BuildActionTargetRow(
+                    ConsumerTypes.ChatSummarize, SumChatActionId, ucid: "UC-A-1",
+                    onEventBindingsJson: """[{"event":"document_uploaded","order":2}]"""),
+            }));
+
+        var routing = CreateRoutingService(entityService);
+
+        var members = await routing.ResolveEventBindingsAsync("document_uploaded");
+
+        members.Should().HaveCount(2,
+            "the FR-P1-03 launch rule declares exactly two ordered members for document_uploaded");
+        members[0].ConsumerType.Should().Be(ConsumerTypes.ChatClassify,
+            "member order 1 is the Layer-0 classification step (CLS-CHAT@v1, GU-037)");
+        members[1].ConsumerType.Should().Be(ConsumerTypes.ChatSummarize,
+            "member order 2 is the silent summarize continuation (SUM-CHAT@v1, GU-038)");
+        members.Should().OnlyContain(m => m.ActionId != null && m.ActionKind == ActionKind.Prompted,
+            "every event-rule member executes through the prompted executor at P1 (thinness invariant)");
+
+        _output.WriteLine("P1 LIVE dispatch assertions — Event path (document_uploaded ordered members):");
+        foreach (var c in cases)
+        {
+            members.Select(m => m.ConsumerType).Should().Contain(c.Expected.ConsumerType,
+                $"case {c.CaseId}: its expected capability must be a resolved member of the document_uploaded rule");
+
+            var expectedSchema = string.Equals(c.Expected.ConsumerType, ConsumerTypes.ChatClassify, StringComparison.OrdinalIgnoreCase)
+                ? "CLS-CHAT@v1"
+                : "SUM-CHAT@v1";
+            c.Assertions.Should().NotBeNull(
+                $"case {c.CaseId}: P1 dispatch cases must carry a schema-conformance assertion (NFR-06)");
+            c.Assertions!.SchemaConformance.Should().Be(expectedSchema,
+                $"case {c.CaseId}: NFR-06 — event-path outputs are schema-validated structured outputs");
+
+            _output.WriteLine($"  {c.CaseId}  \"{c.Utterance}\"  ->  {c.Expected.ConsumerType} ({expectedSchema})");
+        }
+    }
+
+    [Fact]
+    public void P1LiveDispatch_EventClarifyCase_M4ConfidencePolicyDialIsPinned()
+    {
+        var suite = LoadSuite();
+        var clarifyCases = suite.Cases
+            .Where(c => IsPhase(c, "P1") && IsOutcome(c, "clarify"))
+            .ToList();
+
+        clarifyCases.Should().NotBeEmpty(
+            "GU-040 (low classify confidence → M4 confirmation turn) activates at P1 with the event rule");
+        clarifyCases.Should().OnlyContain(c => IsChannel(c, "event"),
+            "the only P1 clarify surface is the Event path's M4 confirmation — text-path clarify " +
+            "requires the P2 loop (Binding.CaptureMode LoopElicitation)");
+
+        // The deterministic policy surface: confidence below the operator dial
+        // suspends member order 2 into an event_confirmation turn. Pinning the
+        // default makes a silent policy-default change a dispatch-behavior
+        // regression caught here (NFR-06); a deliberate change updates this
+        // case in the same PR.
+        var options = new Sprk.Bff.Api.Services.Ai.EventRules.EventRulesOptions();
+        options.ClassifyConfidenceThreshold.Should().Be(0.85,
+            "canonical §3.10 step 3 — the surviving D1 dial's default");
+        options.ClassifyConfidenceThreshold.Should().BeInRange(0.0, 1.0,
+            "the threshold is a calibrated probability bound");
+
+        _output.WriteLine(
+            "P1 LIVE clarify assertion — M4 policy dial pinned at " +
+            $"{options.ClassifyConfidenceThreshold}. Suspend/confirmation BEHAVIOR proven in " +
+            "EventRulesServiceTests.FireAsync_ClassifyConfidenceBelowThreshold_FiresM4Confirmation_SummarizeSuspended (task 022).");
+    }
+
+    /// <summary>
+    /// NFR-06 schema-conformance, live at P1: the SUM-CHAT@v1 output-schema
+    /// contract pinned in the repo must keep its load-bearing shape. A schema
+    /// edit that degrades summarize output (dropped field, reordered streaming
+    /// properties, opened additionalProperties) fails CI here — not UAT.
+    /// </summary>
+    [Fact]
+    public void P1SchemaConformance_SumChatOutputSchemaContract_PinsLoadBearingShape()
+    {
+        var schemaPath = Path.Combine(
+            FindRepoRoot(), "infra", "dataverse", "outputschemas", "sum-chat-v1.schema.json");
+        File.Exists(schemaPath).Should().BeTrue(
+            $"the SUM-CHAT@v1 output-schema contract must exist at {schemaPath} " +
+            "(it mirrors sprk_analysisaction.sprk_outputschemajson on spaarkedev1)");
+
+        using var doc = JsonDocument.Parse(File.ReadAllText(schemaPath));
+        var root = doc.RootElement;
+
+        root.GetProperty("title").GetString().Should().Contain("SUM-CHAT@v1",
+            "the contract file names the action code the eval cases reference");
+        root.GetProperty("additionalProperties").GetBoolean().Should().BeFalse(
+            "structured outputs are closed — the model cannot invent fields");
+        root.GetProperty("required").EnumerateArray().Select(e => e.GetString())
+            .Should().BeEquivalentTo(new[] { "tldr", "summary", "keywords", "entities" },
+                "all four SUM-CHAT@v1 output fields are required");
+        root.GetProperty("properties").EnumerateObject().Select(p => p.Name)
+            .Should().Equal(new[] { "tldr", "summary", "keywords", "entities" },
+                "property DECLARATION ORDER is load-bearing — Azure OpenAI structured outputs " +
+                "stream in declaration order; tldr must stream first (R5 FR-02 TL;DR-first UX)");
+
+        _output.WriteLine($"P1 LIVE schema-conformance — SUM-CHAT@v1 contract pinned at {schemaPath}");
+    }
+
+    // -------------------------------------------------------------------------
+    // Pending-by-design declaration (P2/P3): dispatch assertions not yet
+    // activated are stubbed, not silently skipped. This test PASSES while
+    // making the remaining pending inventory visible in the run output with
+    // its activating task per family. P1 was ACTIVATED by task 026 (FR-P1-07)
+    // — its cases are asserted live above and are guarded here so no new
+    // P1-phase case can be added without a live assertion covering it.
     // -------------------------------------------------------------------------
 
     [Fact]
@@ -283,12 +500,29 @@ public class GoldenUtteranceEvalSuiteTests
     {
         var suite = LoadSuite();
 
-        _output.WriteLine("PENDING dispatch-assertion inventory (P0 scaffold — no dispatch loop exists yet):");
+        // Activation guard (task 026): every P1-phase case MUST be covered by one
+        // of the live P1 assertions above. A case added with dispatchAssertPhase=P1
+        // outside these selectors fails here until a live assertion exists —
+        // pending-by-design never silently returns at an activated phase.
+        foreach (var c in suite.Cases.Where(c => IsPhase(c, "P1")))
+        {
+            var covered =
+                (IsOutcome(c, "dispatch") && IsChannel(c, "text")
+                    && string.Equals(c.Family, "chat-summarize", StringComparison.OrdinalIgnoreCase))
+                || (IsOutcome(c, "dispatch") && IsChannel(c, "event"))
+                || (IsOutcome(c, "clarify") && IsChannel(c, "event"));
+            covered.Should().BeTrue(
+                $"case {c.CaseId} declares dispatchAssertPhase=P1, but no live P1 assertion in this " +
+                "suite covers its (channel, outcomeClass, family) — add one before declaring P1");
+        }
+
+        _output.WriteLine("PENDING dispatch-assertion inventory (P2/P3 — P1 activated live by task 026):");
         _output.WriteLine("");
         _output.WriteLine($"{"family",-22} {"cases",5}  {"phase",-6} activated by");
         _output.WriteLine(new string('-', 90));
 
         foreach (var group in suite.Cases
+                     .Where(c => !IsPhase(c, "P1"))
                      .GroupBy(c => c.Family, StringComparer.OrdinalIgnoreCase)
                      .OrderBy(g => g.Min(c => c.Activation.DispatchAssertPhase), StringComparer.OrdinalIgnoreCase)
                      .ThenBy(g => g.Key, StringComparer.OrdinalIgnoreCase))
@@ -332,6 +566,87 @@ public class GoldenUtteranceEvalSuiteTests
         ReadCommentHandling = JsonCommentHandling.Skip,
         AllowTrailingCommas = true,
     };
+
+    private static bool IsPhase(GoldenUtteranceCase c, string phase)
+        => string.Equals(c.Activation.DispatchAssertPhase, phase, StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsChannel(GoldenUtteranceCase c, string channel)
+        => string.Equals(c.Channel, channel, StringComparison.OrdinalIgnoreCase);
+
+    private static bool IsOutcome(GoldenUtteranceCase c, string outcomeClass)
+        => string.Equals(c.Expected.OutcomeClass, outcomeClass, StringComparison.OrdinalIgnoreCase);
+
+    /// <summary>
+    /// Construct the REAL <see cref="ConsumerRoutingService"/> over the stubbed
+    /// Dataverse boundary — the single shared harness seam every routing-surface
+    /// test (P0 smoke + P1 live) plugs into. Cache is fresh per call so cases
+    /// never observe each other's resolutions.
+    /// </summary>
+    private static ConsumerRoutingService CreateRoutingService(Mock<IGenericEntityService> entityService)
+    {
+        var hostEnvironment = new Mock<IHostEnvironment>();
+        hostEnvironment.SetupGet(e => e.EnvironmentName).Returns("Development");
+
+        return new ConsumerRoutingService(
+            entityService.Object,
+            new MemoryCache(new MemoryCacheOptions()),
+            hostEnvironment.Object,
+            NullLogger<ConsumerRoutingService>.Instance);
+    }
+
+    /// <summary>
+    /// One enabled <c>sprk_playbookconsumer</c> row with an <c>sprk_action</c>
+    /// TARGET, shaped like the P1 catalog rows seeded on spaarkedev1 (task 020
+    /// chat-summarize → SUM-CHAT@v1; task 022 chat-classify → CLS-CHAT@v1 with
+    /// <c>sprk_oneventbindings</c> membership). The aliased <c>action.sprk_kind</c>
+    /// mirrors the left-outer Action link the real query projects.
+    /// </summary>
+    private static Entity BuildActionTargetRow(
+        string consumerType,
+        Guid actionId,
+        string ucid,
+        string? onEventBindingsJson = null)
+    {
+        var entity = new Entity("sprk_playbookconsumer", Guid.NewGuid());
+        entity["sprk_playbookconsumerid"] = entity.Id;
+        entity["sprk_consumertype"] = consumerType;
+        entity["sprk_consumercode"] = "default";
+        entity["sprk_priority"] = 100;
+        entity["sprk_enabled"] = true;
+        entity["sprk_ucid"] = ucid;
+        entity["sprk_action"] = new EntityReference("sprk_analysisaction", actionId);
+        entity["action.sprk_kind"] = new AliasedValue(
+            "sprk_analysisaction", "sprk_kind", new OptionSetValue((int)ActionKind.Prompted));
+        if (onEventBindingsJson is not null)
+        {
+            entity["sprk_oneventbindings"] = onEventBindingsJson;
+        }
+
+        return entity;
+    }
+
+    /// <summary>
+    /// Walk up from the test bin directory to the repo root (identified by
+    /// <c>Spaarke.sln</c>) — the established pattern for repo-pinned contract
+    /// files (see WorkspaceFileEndpointsTests, Phase2EndToEndTests).
+    /// </summary>
+    private static string FindRepoRoot()
+    {
+        var dir = new DirectoryInfo(AppContext.BaseDirectory);
+        while (dir is not null)
+        {
+            if (File.Exists(Path.Combine(dir.FullName, "Spaarke.sln")))
+            {
+                return dir.FullName;
+            }
+
+            dir = dir.Parent;
+        }
+
+        throw new InvalidOperationException(
+            "Could not locate the repo root (Spaarke.sln) from AppContext.BaseDirectory — " +
+            "the SUM-CHAT@v1 schema-contract assertion requires an in-repo test run.");
+    }
 
     private static GoldenUtteranceSuite LoadSuite()
     {

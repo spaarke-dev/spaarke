@@ -1,7 +1,12 @@
 # ADR-039: Grounded Execution & Closed Catalogs (Concise)
 
-> **Status**: Proposed (2026-07-05) — accepted-in-principle by operator with the
-> v0.4 converged target; moves to Accepted when migration P1 ships.
+> **Status**: Accepted (2026-07-05) — promoted Proposed → Accepted at migration
+> P1 per the stated condition, by `spaarke-ai-architecture-redesign-r1` task 026
+> (FR-P1-07). P1 evidence: chat-summarize via catalog (task 020), ledger
+> write-before-render (021), Event path (022), Click path (023/023b), r7 stray
+> dispatch surface closed (025), UC-A-1 eval family green with live dispatch
+> assertions + `eval-gate` CI job merge-blocking (026, NFR-02). Full evidence:
+> docs/adr twin "Acceptance evidence (P1)".
 > **Domain**: AI platform — dispatch, execution, safety
 > **Source**: `spaarke-ai-code-audit-r1` (ADR review A-4); encodes ratified
 > decisions D5/D6/D7 + OQ-1/OQ-2 (canonical AI architecture doc v0.4 §4.5/§7.7).
