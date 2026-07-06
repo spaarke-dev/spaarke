@@ -42,12 +42,13 @@ namespace Sprk.Bff.Api.Services.Ai.Chat;
 /// </list>
 /// </para>
 /// <para>
-/// <b>ADR-040 ledger seam (task 021)</b>: the full structured output
-/// (<see cref="JsonElement"/>) and the resolved <see cref="Binding.BindingId"/> both exist at
-/// the point marked <c>ADR-040 SEAM</c> below, BEFORE any result chunk is yielded. The
-/// universal ledger-write-before-render (SessionOutput keyed <c>{bindingId}@t{n}</c>) slots in
-/// exactly there. This task introduces no render-before-store path beyond the pre-existing one
-/// that task 021 universally closes.
+/// <b>ADR-040 ledger seam (task 021 — LIVE, FR-P1-02)</b>: at the point marked
+/// <c>ADR-040 SEAM</c> below the full structured output (<see cref="JsonElement"/>) and the
+/// resolved <see cref="Binding.BindingId"/> + <see cref="Binding.Disposition"/> coexist and
+/// nothing has rendered. <see cref="IOutputRouter.RouteAsync"/> writes the addressable
+/// <see cref="Models.Ai.Chat.SessionOutput"/> (keyed <c>{bindingId}@t{n}</c>) through the
+/// session store FIRST, then routes by disposition; the terminal result chunk is rendered
+/// from the STORED entry's payload (render follows store — test-proven ordering).
 /// </para>
 /// <para>
 /// <b>ADR-010</b>: concrete class, no orchestrator-authored interface. Non-sealed to permit
@@ -73,6 +74,7 @@ public class SessionSummarizeOrchestrator
     private readonly IScopeResolverService _scopeResolver;
     private readonly IActionRunner _actionRunner;
     private readonly ISessionFileTextSource _sessionFileTextSource;
+    private readonly IOutputRouter _outputRouter;
     private readonly ILogger<SessionSummarizeOrchestrator> _logger;
 
     public SessionSummarizeOrchestrator(
@@ -81,6 +83,7 @@ public class SessionSummarizeOrchestrator
         IScopeResolverService scopeResolver,
         IActionRunner actionRunner,
         ISessionFileTextSource sessionFileTextSource,
+        IOutputRouter outputRouter,
         ILogger<SessionSummarizeOrchestrator> logger)
     {
         _sessionManager = sessionManager ?? throw new ArgumentNullException(nameof(sessionManager));
@@ -88,6 +91,7 @@ public class SessionSummarizeOrchestrator
         _scopeResolver = scopeResolver ?? throw new ArgumentNullException(nameof(scopeResolver));
         _actionRunner = actionRunner ?? throw new ArgumentNullException(nameof(actionRunner));
         _sessionFileTextSource = sessionFileTextSource ?? throw new ArgumentNullException(nameof(sessionFileTextSource));
+        _outputRouter = outputRouter ?? throw new ArgumentNullException(nameof(outputRouter));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -106,6 +110,7 @@ public class SessionSummarizeOrchestrator
         _scopeResolver = null!;
         _actionRunner = null!;
         _sessionFileTextSource = null!;
+        _outputRouter = null!;
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -292,13 +297,26 @@ public class SessionSummarizeOrchestrator
             yield break;
         }
 
-        // ── ADR-040 SEAM (task 021 — universal ledger write-before-render) ─────────────────
+        // ── ADR-040 SEAM (task 021 — universal ledger write-before-render, LIVE) ───────────
         // At this exact point the FULL structured output (`output`) and the Binding identity
         // (`binding.BindingId`, disposition `binding.Disposition`) are both in hand and NOTHING
-        // has been rendered yet (the FR-04 interjection is a UX hint, not output). Task 021's
-        // OutputRouter writes the SessionOutput ledger entry (keyed {bindingId}@t{n}) HERE,
-        // then routing-by-disposition renders from the stored entry.
-        yield return DeserializeResultChunk(output.GetRawText());
+        // has been rendered yet (the FR-04 interjection is a UX hint, not output). The
+        // OutputRouter (FR-P1-02) writes the SessionOutput ledger entry (keyed {bindingId}@t{n})
+        // through the session store FIRST, then routes by the Binding's declared disposition —
+        // informational returns the STORED entry, which is what renders below (render follows
+        // store). Non-informational dispositions throw loud P3 NotSupported stubs inside the
+        // router — never a silent inline-render fallback. SourceRefs carry the grounding file
+        // ids (identifiers only, NFR-07).
+        var routed = await _outputRouter
+            .RouteAsync(
+                session,
+                binding,
+                output,
+                sourceRefs: targetFiles.Select(f => f.FileId).ToList(),
+                cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
+
+        yield return DeserializeResultChunk(routed.Entry.Payload.GetRawText());
     }
 
     /// <summary>

@@ -108,6 +108,9 @@ public class SessionSummarizeOrchestratorTests
         _scopeResolverMock.Object,
         _actionRunnerMock.Object,
         _sessionFileTextSourceMock.Object,
+        // REAL OutputRouter over the testable session manager (FR-P1-02, task 021):
+        // every behavior test below now exercises the live ledger-write-before-render seam.
+        new OutputRouter(_sessionManagerStub, Mock.Of<ILogger<OutputRouter>>()),
         _loggerMock.Object);
 
     // ─── (a) FR-P1-01 — catalog dispatch: Binding → Action → prompted executor ────────────────
@@ -502,6 +505,105 @@ public class SessionSummarizeOrchestratorTests
         convergence[0].Name.Should().Be(nameof(SessionSummarizeOrchestrator.SummarizeSessionFilesAsync));
     }
 
+    // ─── (h) FR-P1-02 / ADR-040 — universal ledger write BEFORE rendering (task 021) ──────────
+
+    [Fact]
+    public async Task SummarizeSessionFilesAsync_LedgerWrite_StrictlyPrecedesResultChunk()
+    {
+        // THE ordering proof (spec FR-P1-02 acceptance: "render follows store — test-proven
+        // ordering"). The persist callback fires synchronously inside the session-store write;
+        // the consumer records each yielded chunk. Store MUST come first.
+        _sessionManagerStub.Session = BuildSession(FileId1);
+        var events = new List<string>();
+        _sessionManagerStub.OnPersist = _ => events.Add("ledger-write");
+
+        await foreach (var chunk in CreateSut().SummarizeSessionFilesAsync(DefaultRequest(FileId1)))
+        {
+            events.Add($"render:{chunk.Type}");
+        }
+
+        events.Should().Equal(new[] { "ledger-write", "render:complete" },
+            "ADR-040 storage precedes rendering — the SessionOutput ledger write completes " +
+            "BEFORE the terminal result chunk is emitted to the stream");
+    }
+
+    [Fact]
+    public async Task SummarizeSessionFilesAsync_Execution_ProducesAddressableSessionOutput()
+    {
+        // Addressability (spec FR-P1-02 acceptance: "every execution produces an addressable
+        // SessionOutput"). Retrieval goes through the production read path (GetSessionAsync
+        // over the persisted state), keyed {bindingId}@t{n}.
+        _sessionManagerStub.Session = BuildSession(FileId1);
+
+        _ = await Collect(CreateSut().SummarizeSessionFilesAsync(DefaultRequest(FileId1)));
+
+        var persisted = await _sessionManagerStub.GetSessionAsync(TenantId, SessionId);
+        persisted!.Outputs.Should().NotBeNull();
+        var expectedKey = SessionLedger.BuildOutputKey(BindingId.ToString(), 1);
+        var entry = persisted.Outputs!.Should().ContainSingle(o => o.Key == expectedKey).Subject;
+
+        entry.BindingId.Should().Be(BindingId.ToString());
+        entry.UcId.Should().Be("UC-A-1", "the Binding row's sprk_ucid flows onto the entry");
+        entry.Turn.Should().Be(1);
+        entry.Disposition.Should().Be("informational",
+            "the Binding row's sprk_disposition is the ONLY rendering contract (ADR-039/ADR-040)");
+        entry.Payload.GetRawText().Should().Be(ParseJson(ValidResultJson).GetRawText(),
+            "the FULL structured output is the stored composition carrier");
+        entry.SourceRefs.Should().BeEquivalentTo(new[] { FileId1 },
+            "grounding file ids ride along as source refs (identifiers only, NFR-07)");
+    }
+
+    [Fact]
+    public async Task SummarizeSessionFilesAsync_SequentialExecutions_IncrementTurnOrdinal()
+    {
+        // {bindingId}@t{n} uniqueness within the session: the second execution of the SAME
+        // binding allocates the next monotonic ordinal (documented turn-numbering decision).
+        _sessionManagerStub.Session = BuildSession(FileId1);
+        var sut = CreateSut();
+
+        _ = await Collect(sut.SummarizeSessionFilesAsync(DefaultRequest(FileId1)));
+        _ = await Collect(sut.SummarizeSessionFilesAsync(DefaultRequest(FileId1)));
+
+        var persisted = await _sessionManagerStub.GetSessionAsync(TenantId, SessionId);
+        persisted!.Outputs.Should().HaveCount(2, "the ledger is append-only — no overwrites");
+        persisted.Outputs!.Select(o => o.Key).Should().Equal(
+            SessionLedger.BuildOutputKey(BindingId.ToString(), 1),
+            SessionLedger.BuildOutputKey(BindingId.ToString(), 2));
+    }
+
+    [Fact]
+    public async Task SummarizeSessionFilesAsync_NonInformationalDisposition_ThrowsLoudStub_AfterLedgerWrite()
+    {
+        // P1 routes ONLY the informational disposition. Any other declared disposition hits a
+        // LOUD NotSupported stub (task 021 contract — no silent fallback to inline render),
+        // AND the ledger write still happened first (storage is never coupled to rendering).
+        _sessionManagerStub.Session = BuildSession(FileId1);
+        _consumerRoutingMock
+            .Setup(c => c.ResolveBindingAsync(
+                It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<IRoutingContext?>(),
+                It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(BuildBinding() with { Disposition = BindingDisposition.Email });
+
+        var rendered = new List<AnalysisChunk>();
+        var act = async () =>
+        {
+            await foreach (var chunk in CreateSut().SummarizeSessionFilesAsync(DefaultRequest(FileId1)))
+            {
+                rendered.Add(chunk);
+            }
+        };
+
+        var thrown = await act.Should().ThrowAsync<NotSupportedException>(
+            "unimplemented disposition legs FAIL LOUDLY (they land at P3) — never a silent inline render");
+        thrown.Which.Message.Should().Contain("email").And.Contain("P3");
+
+        rendered.Should().BeEmpty("nothing may render through an unimplemented disposition leg");
+        _sessionManagerStub.PersistedSessions.Should().ContainSingle()
+            .Which.Outputs.Should().ContainSingle(o => o.Disposition == "email",
+                "storage precedes rendering UNIVERSALLY — the entry is stored and addressable " +
+                "even when the rendering leg is missing (ADR-040: storage never couples to rendering)");
+    }
+
     // ─── Helpers ─────────────────────────────────────────────────────────────────────────────
 
     private static SummarizeSessionFilesRequest DefaultRequest(params string[] fileIds) => new(
@@ -574,7 +676,9 @@ public class SessionSummarizeOrchestratorTests
     /// <summary>
     /// Subclass of <see cref="ChatSessionManager"/> that overrides the virtual
     /// <see cref="ChatSessionManager.GetSessionAsync(string, string, CancellationToken)"/> so we can
-    /// inject a fixed session without wiring Redis/Dataverse.
+    /// inject a fixed session without wiring Redis/Dataverse, and the internal-virtual
+    /// <see cref="ChatSessionManager.UpdateSessionCacheAsync"/> so FR-P1-02 tests can observe
+    /// the ledger write (persisted sessions + a persist callback for ordering proof).
     /// </summary>
     private sealed class TestableChatSessionManager : ChatSessionManager
     {
@@ -589,8 +693,24 @@ public class SessionSummarizeOrchestratorTests
 
         public ChatSession? Session { get; set; }
 
+        /// <summary>Every session instance written through the persistence seam, in order.</summary>
+        public List<ChatSession> PersistedSessions { get; } = new();
+
+        /// <summary>Invoked synchronously inside the persistence write (ordering capture).</summary>
+        public Action<ChatSession>? OnPersist { get; set; }
+
         public override Task<ChatSession?> GetSessionAsync(
             string tenantId, string sessionId, CancellationToken ct = default)
             => Task.FromResult(Session);
+
+        internal override Task UpdateSessionCacheAsync(ChatSession session, CancellationToken ct = default)
+        {
+            PersistedSessions.Add(session);
+            OnPersist?.Invoke(session);
+            // Store-backed read model: subsequent GetSessionAsync returns the persisted state,
+            // so addressability tests retrieve the SessionOutput through the production read path.
+            Session = session;
+            return Task.CompletedTask;
+        }
     }
 }

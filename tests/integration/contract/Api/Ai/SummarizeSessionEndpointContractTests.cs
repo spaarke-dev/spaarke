@@ -475,6 +475,12 @@ public sealed class SummarizeSessionEndpointTestFixture : IAsyncLifetime, IDispo
         builder.Services.Configure<LinearConsumersOptions>(_ => { });
         builder.Services.AddSingleton<IActionRunner, ActionRunner>();
 
+        // FR-P1-02 (task 021) — REAL OutputRouter over the fixture's session manager: the
+        // contract tests now exercise the live ledger write-before-render seam (the stored
+        // SessionOutput is observable via Sessions.Session.Outputs after a happy-path POST).
+        builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.IOutputRouter,
+                                   Sprk.Bff.Api.Services.Ai.OutputRouter>();
+
         // Orchestrator itself — concrete (ADR-010); registered Scoped to mirror prod.
         builder.Services.AddScoped<SessionSummarizeOrchestrator>();
 

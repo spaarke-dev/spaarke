@@ -278,6 +278,9 @@ public class SessionSummarizeOrchestratorPathA5IntegrationTest
             scopeResolver.Object,
             actionRunner,
             textSource.Object,
+            // REAL OutputRouter over the same session manager (FR-P1-02, task 021) — the
+            // catalog-path integration now exercises the live ledger-write-before-render seam.
+            new OutputRouter(sessionManager, Mock.Of<ILogger<OutputRouter>>()),
             Mock.Of<ILogger<SessionSummarizeOrchestrator>>());
     }
 

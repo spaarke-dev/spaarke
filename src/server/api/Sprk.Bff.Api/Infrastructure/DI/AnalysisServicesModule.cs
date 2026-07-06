@@ -627,6 +627,23 @@ public static class AnalysisServicesModule
         services.AddScoped<Sprk.Bff.Api.Services.Ai.Chat.SessionSummarizeOrchestrator>();
         Console.WriteLine("✓ SessionSummarizeOrchestrator registered (FR-P1-01 catalog path; ADR-010 concrete; chat-session Summarize boundary)");
 
+        // IOutputRouter — the universal ledger write-before-render seam (ADR-040 / FR-P1-02,
+        // ai-architecture-redesign-r1 task 021). Every capability execution writes an
+        // addressable SessionOutput ({bindingId}@t{n}) through this seam BEFORE rendering,
+        // then routing follows the Binding's declared disposition (informational live at P1;
+        // remaining dispositions are loud P3 NotSupported stubs — no silent fallback).
+        // Scoped: wraps ChatSessionManager (Scoped).
+        //
+        // §F.1 asymmetric-registration audit (static scan run 2026-07-05): IOutputRouter is
+        // consumed ONLY by the concrete SessionSummarizeOrchestrator ctor (registered in this
+        // same compound-ON block). No endpoint handler injects IOutputRouter directly
+        // (rg "[\s,(]IOutputRouter\s" src/server/api/Sprk.Bff.Api/Api/ → zero hits), and the
+        // compound-OFF path resolves NullSessionSummarizeOrchestrator via its logger-only ctor
+        // which never touches this seam → transitively conditional; no ADR-032 Null peer needed.
+        services.AddScoped<Sprk.Bff.Api.Services.Ai.IOutputRouter,
+                           Sprk.Bff.Api.Services.Ai.OutputRouter>();
+        Console.WriteLine("✓ OutputRouter registered (FR-P1-02 universal ledger write-before-render; disposition routing per ADR-040)");
+
         // R6 Pillar 7 (task 064, D-C-17) — SummarizationCompressionService. Sliding-window
         // compression primitive: folds the oldest M chat turns into a single System-role
         // summary message when the conversation exceeds the NFR-10 8K system-prompt budget.

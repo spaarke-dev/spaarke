@@ -69,7 +69,7 @@
 
 | # | Task | FR | Rigor | Deps | Status |
 |---|---|---|---|---|---|
-| 021 | Universal ledger write + OutputRouter | FR-P1-02 | FULL | 020 | 🔲 |
+| 021 | Universal ledger write + OutputRouter (store-precedes-render test-proven; {bindingId}@t{n} addressable; loud stubs for P3 dispositions; size-cap enforcement deferred to 047) | FR-P1-02 | FULL | 020 | ✅ |
 
 ### Wave W-P1-C (parallel ×3)
 
