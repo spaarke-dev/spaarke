@@ -329,6 +329,15 @@ public sealed class ToolHandlerToAIFunctionAdapter : AIFunction
         return InvalidToolNameChars.Replace(raw.Trim(), "_");
     }
 
+    /// <summary>
+    /// The wrapped <c>sprk_analysistool</c> catalog row (FR-P2-02, task 037): exposes the
+    /// row's DECLARED metadata — notably <see cref="AnalysisTool.SideEffectClass"/> — so
+    /// <see cref="SprkChatAgentFactory"/> can apply the ONE confirmation gate
+    /// (<see cref="SideEffectGateAIFunction"/>) by declaration, never by tool-name list
+    /// (ADR-039).
+    /// </summary>
+    public AnalysisTool Tool => _tool;
+
     /// <inheritdoc />
     /// <remarks>
     /// FR-10: this is the natural-language description the LLM consults when deciding

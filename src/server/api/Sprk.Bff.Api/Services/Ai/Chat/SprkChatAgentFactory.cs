@@ -509,6 +509,29 @@ public class SprkChatAgentFactory
             playbookId ?? Guid.Empty, documentId, analysisId, httpContext, sseWriter, citationContext,
             cancellationToken).ConfigureAwait(false)).ToList();
 
+        // === FR-P2-02 — the ONE confirmation gate at the loop's tool-invocation boundary =
+        // Every projected typed-handler tool whose catalog row DECLARES a side-effecting
+        // class (write / communicate per PendingPlanManager.RequiresConfirmation — ADR-039:
+        // by declaration, never tool-name lists) is wrapped in SideEffectGateAIFunction:
+        // when the LLM invokes it, the invocation SUSPENDS into the unified pending store
+        // (ledger Gate marker BEFORE any render, ADR-040) instead of executing. This is the
+        // NFR-03 last line — adversarial instructions in uploaded-document text or tool
+        // results can at worst produce a suspended, user-visible confirmation, never an
+        // executed side effect. Landed by task 037 (FR-P2-08) after the eval suite's
+        // injection family exposed that the interim pre-pass gate deleted in task 034 had
+        // no loop-native replacement for typed-handler tools. NFR-04: the wrapper preserves
+        // name/description/schema verbatim, so the projected block is byte-identical.
+        for (var i = 0; i < tools.Count; i++)
+        {
+            if (tools[i] is ToolHandlerToAIFunctionAdapter adapter
+                && adapter.Tool.SideEffectClass is { } declaredClass
+                && PendingPlanManager.RequiresConfirmation(declaredClass))
+            {
+                tools[i] = new SideEffectGateAIFunction(
+                    adapter, declaredClass, _serviceProvider, tenantId, sessionId, _logger, sseWriter);
+            }
+        }
+
         // === FR-P2-01 — capability-tools projection from the Binding catalog ============
         // Every enabled Binding row with a maker-authored sprk_tooldescription projects
         // into the loop's tool list as a capability tool (ADR-039 loop-as-dispatcher:

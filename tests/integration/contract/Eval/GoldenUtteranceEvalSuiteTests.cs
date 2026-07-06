@@ -687,13 +687,16 @@ public class GoldenUtteranceEvalSuiteTests
                 "suite covers its (channel, outcomeClass, family) — add one before declaring P1");
         }
 
-        _output.WriteLine("PENDING dispatch-assertion inventory (P2/P3 — P1 activated live by task 026):");
+        // P2 was ACTIVATED by task 037 (FR-P2-08) — its live assertions + the P2
+        // activation guard live in P2LoopInjectionEvalSuiteTests (same Category
+        // trait, same merge gate). Only P3 remains pending-by-design.
+        _output.WriteLine("PENDING dispatch-assertion inventory (P3 — P1 activated by task 026; P2 by task 037):");
         _output.WriteLine("");
         _output.WriteLine($"{"family",-22} {"cases",5}  {"phase",-6} activated by");
         _output.WriteLine(new string('-', 90));
 
         foreach (var group in suite.Cases
-                     .Where(c => !IsPhase(c, "P1"))
+                     .Where(c => !IsPhase(c, "P1") && !IsPhase(c, "P2"))
                      .GroupBy(c => c.Family, StringComparer.OrdinalIgnoreCase)
                      .OrderBy(g => g.Min(c => c.Activation.DispatchAssertPhase), StringComparer.OrdinalIgnoreCase)
                      .ThenBy(g => g.Key, StringComparer.OrdinalIgnoreCase))

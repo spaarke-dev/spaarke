@@ -2692,6 +2692,31 @@ public record ChatSseElicitationModalData(
     IReadOnlyList<ChatSseElicitationFieldData> MissingFields,
     JsonElement? ProvidedArgs);
 
+// =============================================================================
+// FR-P2-02 loop-boundary confirmation-gate records (task 037 / FR-P2-08)
+// =============================================================================
+
+/// <summary>
+/// Data payload for the <c>action_confirmation</c> SSE event: a side-effecting
+/// typed-handler tool invocation was SUSPENDED into the unified confirmation gate
+/// (<see cref="Sprk.Bff.Api.Services.Ai.Chat.SideEffectGateAIFunction"/>) instead of
+/// executing. The pending <c>SessionGate</c> ledger marker is written BEFORE this
+/// event renders (ADR-040). The client ActionConfirmationDialog resolves it via
+/// <c>POST /sessions/{sessionId}/gates/{gateId}/resolve</c> (task 032) — reject
+/// closes the gate; confirm on a non-Binding invocation returns 422
+/// <c>gate.no-binding-target</c> until the P3 typed-handler resume seam lands.
+/// Field names mirror the client <c>IActionConfirmationPayload</c> contract.
+/// </summary>
+/// <param name="ActionId">The gate id (ledger correlation key + resolve-route parameter).</param>
+/// <param name="ActionName">The suspended tool's LLM-facing function name (identifier only).</param>
+/// <param name="Summary">User-renderable one-liner (NFR-07-safe argument summary; free text redacted).</param>
+/// <param name="Parameters">Reserved presentation slot (client contract compatibility); values stay in the Tier-3 store.</param>
+public record ChatSseActionConfirmationData(
+    string ActionId,
+    string ActionName,
+    string Summary,
+    IReadOnlyDictionary<string, string> Parameters);
+
 /// <summary>Request body for <c>POST /sessions/{sessionId}/gates/{gateId}/resolve</c>.</summary>
 /// <param name="Approved">True = confirm and execute the suspended invocation; false = reject it.</param>
 public record GateResolveRequest(bool Approved);

@@ -133,7 +133,7 @@
 
 | # | Task | FR | Rigor | Deps | Status |
 |---|---|---|---|---|---|
-| 037 | Eval: full catalog + refusal + compound + injection | FR-P2-08 | TEST-MODIFYING | 034–036 | 🔲 |
+| 037 | Eval expanded to 55 cases / 20 families (+full-catalog, compound, 5 injection); FOUND+FIXED real defect: loop-invoked write tools ran UNGATED post-cutover → new SideEffectGateAIFunction (declared-class wrap, fail-closed, suspend-into-gate, marker-before-render); eval 29/29; P3 seam: typed-handler confirm-resume (422 today) → FR-P3-03 | FR-P2-08 | TEST-MODIFYING | 034–036 | ✅ |
 | 038 | P2 deploy + **G-P2 browser UAT** (four outcomes; session memory; confirmed writes) | G-P2 | STANDARD | all P2 | 🔲 |
 
 ## Phase P3 — Consumer + client consolidation (gate G-P3, BROWSER)
