@@ -5,7 +5,7 @@ namespace Sprk.Bff.Api.Models.Ai.Chat;
 /// playbook discovery without coupling SprkChat to any specific host workspace.
 ///
 /// When provided, the host context:
-///   - Scopes <see cref="Services.Ai.Chat.Tools.DocumentSearchTools.SearchDiscoveryAsync"/>
+///   - Scopes the DocumentSearchHandler discovery method (<c>SearchDiscovery</c>)
 ///     to the parent entity boundary (prevents cross-workspace data leakage).
 ///   - Enables playbook discovery filtered by entity type and workspace.
 ///

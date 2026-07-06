@@ -59,23 +59,9 @@ public sealed class NullSprkChatAgentFactory : SprkChatAgentFactory
         throw new FeatureDisabledException(ErrorCode, DetailMessage);
     }
 
-    public override Task<PlaybookDispatcher> CreatePlaybookDispatcherAsync(
-        string tenantId,
-        CancellationToken cancellationToken = default)
-    {
-        LogDisabled(nameof(CreatePlaybookDispatcherAsync));
-        throw new FeatureDisabledException(ErrorCode, DetailMessage);
-    }
-
     public override DynamicCommandResolver CreateCommandResolver()
     {
         LogDisabled(nameof(CreateCommandResolver));
-        throw new FeatureDisabledException(ErrorCode, DetailMessage);
-    }
-
-    public override PlaybookOutputHandler CreatePlaybookOutputHandler()
-    {
-        LogDisabled(nameof(CreatePlaybookOutputHandler));
         throw new FeatureDisabledException(ErrorCode, DetailMessage);
     }
 

@@ -32,7 +32,7 @@ namespace Sprk.Bff.Api.Models.Ai.Chat;
 /// </para>
 /// <para>
 /// <b>Out of scope</b>: <see cref="Sprk.Bff.Api.Services.Ai.Chat.StandaloneChatContextProvider"/>
-/// and <see cref="Sprk.Bff.Api.Services.Ai.Chat.Tools.DataverseQueryTools"/> still
+/// still
 /// operate on raw logical names (a different bounded context — pre-session probe
 /// and tool-allow-listing). Audit 120 disposition §A: minimum-touch — normalize
 /// at the chat-session boundary only.

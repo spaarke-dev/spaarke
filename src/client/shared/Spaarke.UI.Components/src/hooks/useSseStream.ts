@@ -410,7 +410,7 @@ function processEvent(event: IChatSseEvent, handlers: SseEventHandlers): void {
     }
   } else if (event.type === 'playbook_options') {
     // chat-routing-redesign-r1 task 117a/117b — FR-49 / 50 / 51.
-    // Locked payload shape (see PlaybookOptionsSseEvent.cs):
+    // Locked payload shape (server emitter retired in task 035 / FR-P2-06):
     //   { candidates: [...], libraryModalCta: true, sessionAttachmentIds: [...],
     //     rerankInvoked: bool, rerankReason?: string }
     // Forwarded verbatim to the consumer; tier-1 safe by BFF construction.

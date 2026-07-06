@@ -8,7 +8,7 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// <summary>
 /// Chat-side (and playbook-side) typed handler that retrieves knowledge from a tenant's
 /// indexed knowledge sources via <see cref="IRagService"/> (R6 Wave 7c). Replaces the
-/// legacy hardcoded <c>KnowledgeRetrievalTools</c> class previously registered in
+/// legacy hardcoded <c>KnowledgeRetrieval chat-tools</c> class previously registered in
 /// <c>SprkChatAgentFactory.ResolveTools</c>.
 /// </summary>
 /// <remarks>
@@ -627,7 +627,7 @@ public sealed class KnowledgeRetrievalHandler : IToolHandler
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
-    // Formatting (preserved from legacy KnowledgeRetrievalTools so chat output is
+    // Formatting (preserved from legacy KnowledgeRetrieval chat-tools so chat output is
     // unchanged for end users)
     // ─────────────────────────────────────────────────────────────────────────────
 

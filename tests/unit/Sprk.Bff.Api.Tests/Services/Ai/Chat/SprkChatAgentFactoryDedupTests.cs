@@ -18,7 +18,7 @@ namespace Sprk.Bff.Api.Tests.Services.Ai.Chat;
 /// Pre-141: the directive was driven by <c>CapabilityRoutingResult.SelectedPlaybookId</c>
 /// (the now-deleted CapabilityRouter). Post-141: the same directive is driven by the
 /// explicit <c>playbookId</c> parameter passed to <see cref="SprkChatAgentFactory.CreateAgentAsync"/>
-/// (resolved upstream by the PlaybookDispatcher in ChatEndpoints).
+/// (resolved upstream in ChatEndpoints).
 ///
 /// These tests assert the wire-level invariant: the SYSTEM PROMPT carries the correct
 /// directive given (playbookId, terminal destination) — so the chat-agent LLM emits ONE
@@ -334,9 +334,8 @@ public class SprkChatAgentFactoryDedupTests
     {
         var services = new ServiceCollection();
 
-        // Required: IChatClient (default + keyed "raw") for SprkChatAgentFactory ctor.
+        // Required: IChatClient for SprkChatAgentFactory ctor.
         services.AddSingleton(Mock.Of<IChatClient>());
-        services.AddKeyedSingleton<IChatClient>("raw", Mock.Of<IChatClient>());
 
         // Required: IChatContextProvider (scoped — resolved from per-call scope).
         services.AddScoped(_ => contextProvider);

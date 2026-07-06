@@ -177,4 +177,47 @@ public record ChatInvocationContext : ToolInvocationContextBase
     /// not to the structured-log sink).
     /// </remarks>
     public Func<Models.Ai.Chat.DocumentStreamEvent, CancellationToken, Task>? DocumentStreamWriter { get; init; }
+
+    /// <summary>
+    /// Optional playbook id from the active chat session (spaarke-ai-architecture-redesign-r1
+    /// task 036 / FR-P2-07). Deterministic session-level identifier set by the
+    /// <c>AgentToolCatalogProjector</c> context factory. Read by chat-side handlers that
+    /// re-execute the session's playbook (currently <c>AnalysisExecutionHandler</c> method
+    /// <c>rerun</c>). Null when the session has no playbook bound — handlers that require it
+    /// MUST return <see cref="ToolResult.Error"/> with a clear diagnostic, never throw.
+    /// </summary>
+    /// <remarks>
+    /// Mirrors the shape of <see cref="MatterId"/> / <see cref="AnalysisId"/>: optional,
+    /// init-only, deterministic identifier (ADR-015 — never user content).
+    /// </remarks>
+    public Guid? PlaybookId { get; init; }
+
+    /// <summary>
+    /// Optional active-document id from the chat session (task 036 / FR-P2-07). Deterministic
+    /// identifier string set by the <c>AgentToolCatalogProjector</c> context factory; carried
+    /// as string because legacy session payloads are not guaranteed GUID-shaped. Read by
+    /// <c>AnalysisExecutionHandler</c> (method <c>rerun</c>) to target the re-analysis.
+    /// Null/empty when no document is bound.
+    /// </summary>
+    public string? DocumentId { get; init; }
+
+    /// <summary>
+    /// Optional per-request writer for out-of-band chat SSE events (task 036 / FR-P2-07,
+    /// following the ADR-033 side-channel operating principle established by
+    /// <see cref="DocumentStreamWriter"/>). Forwarded by
+    /// <c>ToolHandlerToAIFunctionAdapter</c> from its constructor-supplied SSE writer onto
+    /// every per-call context. Read by handlers that must emit progress or
+    /// <c>document_replace</c> events DURING execution (currently
+    /// <c>AnalysisExecutionHandler</c> — a playbook re-run is a long-running operation whose
+    /// per-stage progress cannot be deferred to post-execution metadata). Null when the SSE
+    /// pipe is not wired — handlers MUST skip emission silently and still return their
+    /// <see cref="ToolResult"/>.
+    /// </summary>
+    /// <remarks>
+    /// ADR-015: the delegate writes to the SSE pipe, never to the structured-log sink.
+    /// Prefer <see cref="ToolResultMetadataKeys"/> post-processing (adapter-side side effects)
+    /// for single completion-time events; use this writer only when emission must interleave
+    /// with execution.
+    /// </remarks>
+    public Func<Api.Ai.ChatSseEvent, CancellationToken, Task>? SseWriter { get; init; }
 }

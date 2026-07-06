@@ -6,7 +6,7 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 
 /// <summary>
 /// Typed <see cref="IToolHandler"/> implementation of text refinement / key-point extraction /
-/// summary generation (R6 Pillar 2 Wave 7 Q9 migration of <c>TextRefinementTools</c>).
+/// summary generation (R6 Pillar 2 Wave 7 Q9 migration of <c>TextRefinement chat-tools</c>).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -25,7 +25,7 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// The handler reads the discriminator at execution time and routes to the corresponding
 /// internal method. This gives the LLM three distinct tools (each with its own description
 /// + input shape) while keeping a single handler class — matching the pre-R6 exposure model
-/// that hand-registered three <c>AIFunction</c>s from one <c>TextRefinementTools</c> instance.
+/// that hand-registered three <c>AIFunction</c>s from one <c>TextRefinement chat-tools</c> instance.
 /// </para>
 /// <para>
 /// <strong>Pipeline</strong>: input args → method-discriminator dispatch →
@@ -47,7 +47,7 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// <item><strong>ADR-013</strong>: lives under <c>Services/Ai/Handlers/</c>; CRUD-side code
 /// routes through <c>PublicContracts</c> facades, never directly into this handler.</item>
 /// <item><strong>ADR-014</strong>: no handler-side cache layer — pre-R6
-/// <c>TextRefinementTools</c> did not cache; <see cref="IChatClient"/>'s downstream caching
+/// <c>TextRefinement chat-tools</c> did not cache; <see cref="IChatClient"/>'s downstream caching
 /// (if any) is preserved unchanged.</item>
 /// <item><strong>ADR-015</strong>: telemetry emits handler name + IDs + method discriminator
 /// + outcome + duration ONLY. NEVER input text, NEVER the instruction, NEVER output content.</item>
@@ -299,15 +299,9 @@ public sealed class TextRefinementHandler : IToolHandler
                 new ToolExecutionMetadata { StartedAt = startedAt, CompletedAt = DateTimeOffset.UtcNow });
         }
 
-        var messages = method switch
-        {
-            MethodRefine => BuildRefineMessages(args.Text, args.Instruction ?? string.Empty),
-            MethodKeypoints => BuildKeypointsMessages(args.Text, args.MaxPoints),
-            MethodSummary => BuildSummaryMessages(args.Text, args.Format),
-            _ => throw new InvalidOperationException($"Unsupported method '{method}'.")
-        };
-
-        // Special validation: refine requires instruction
+        // Special validation: refine requires instruction (checked BEFORE building the
+        // messages — BuildRefineMessages guards against whitespace instructions since it
+        // became the shared public prompt builder for the streaming refine endpoint).
         if (method == MethodRefine && string.IsNullOrWhiteSpace(args.Instruction))
         {
             stopwatch.Stop();
@@ -317,6 +311,14 @@ public sealed class TextRefinementHandler : IToolHandler
                 ToolErrorCodes.ValidationFailed,
                 new ToolExecutionMetadata { StartedAt = startedAt, CompletedAt = DateTimeOffset.UtcNow });
         }
+
+        var messages = method switch
+        {
+            MethodRefine => BuildRefineMessages(args.Text, args.Instruction!),
+            MethodKeypoints => BuildKeypointsMessages(args.Text, args.MaxPoints),
+            MethodSummary => BuildSummaryMessages(args.Text, args.Format),
+            _ => throw new InvalidOperationException($"Unsupported method '{method}'.")
+        };
 
         var response = await _chatClient.GetResponseAsync(
             messages, cancellationToken: cancellationToken);
@@ -356,16 +358,35 @@ public sealed class TextRefinementHandler : IToolHandler
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
-    // Method-specific prompt builders (mirror pre-R6 TextRefinementTools shape)
+    // Method-specific prompt builders (mirror pre-R6 TextRefinement chat-tools shape)
     // ─────────────────────────────────────────────────────────────────────────────
 
-    private static List<ChatMessage> BuildRefineMessages(string text, string instruction)
+    /// <summary>
+    /// Builds the prompt messages for a text refinement operation.
+    /// </summary>
+    /// <remarks>
+    /// Public static because the <c>ChatEndpoints</c> streaming refine endpoint
+    /// (<c>POST /sessions/{sessionId}/refine</c>) uses the same prompt shape with
+    /// <see cref="IChatClient.GetStreamingResponseAsync"/> — hoisted here from the legacy
+    /// chat-tool class at its FR-P2-07 deletion (task 036) so the refine prompt has ONE
+    /// owner. The optional <paramref name="surroundingContext"/> carries surrounding
+    /// paragraphs for selection-refine quality; tool-call invocations pass null.
+    /// </remarks>
+    public static List<ChatMessage> BuildRefineMessages(
+        string text,
+        string instruction,
+        string? surroundingContext = null)
     {
+        ArgumentException.ThrowIfNullOrWhiteSpace(text, nameof(text));
+        ArgumentException.ThrowIfNullOrWhiteSpace(instruction, nameof(instruction));
+
         var systemPrompt =
             "You are a professional editor. Apply the user's instruction to refine the provided text. " +
             "Output only the refined text — no explanation, preamble, or meta-commentary.";
 
-        var userPrompt = $"Instruction: {instruction}\n\nText to refine:\n{text}";
+        var userPrompt = string.IsNullOrWhiteSpace(surroundingContext)
+            ? $"Instruction: {instruction}\n\nText to refine:\n{text}"
+            : $"Instruction: {instruction}\n\nSurrounding context (for reference only — do NOT include in output):\n{surroundingContext}\n\nText to refine:\n{text}";
 
         return
         [

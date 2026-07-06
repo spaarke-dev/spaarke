@@ -37,7 +37,7 @@ namespace Sprk.Bff.Api.Tests.Services.Ai.Chat;
 /// whatever <c>tool.Description</c> contains, so verifying the rendering function
 /// independently is sufficient for unit coverage. Full E2E (chat-session start →
 /// LLM sees menu) is integration-level and covered downstream by
-/// <c>PlaybookDispatcherIntegrationTests</c>.
+/// the retired dispatcher-stack suites (deleted in task 035 / FR-P2-06).
 /// </para>
 /// </remarks>
 [Trait("status", "passing")]

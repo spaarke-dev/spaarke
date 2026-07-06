@@ -13,7 +13,7 @@ namespace Sprk.Bff.Api.Infrastructure.Sse;
 ///   workspace_widget, context_update, context_highlight, workspace_action,
 ///   suggestions, capability_change, safety_annotation.
 ///
-/// Unknown event types (R1 events: token, done, error, citations, plan_preview, etc.)
+/// Unknown event types (R1 events: token, done, error, citations, etc.)
 /// pass through as <see cref="SseEventValidationResult.Valid"/> without inspection.
 ///
 /// Schema definitions are intrinsic to <see cref="SseEventSchemaValidator"/> (loaded at

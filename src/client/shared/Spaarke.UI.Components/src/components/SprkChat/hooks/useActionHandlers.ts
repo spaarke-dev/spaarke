@@ -9,7 +9,7 @@
  * - **Change Mode** (category: "settings", id: "change_mode"): Toggles write mode
  *   between "stream" and "diff", persists to localStorage.
  * - **Re-analyze** (category: "actions", id: "reanalyze"): Sends a chat message
- *   processed by server-side AnalysisExecutionTools.
+ *   processed by the server-side analysis-execution handler.
  * - **Summarize** (category: "actions", id: "summarize"): Sends a chat message.
  * - **Search** (category: "search"): Focuses input with search prefix.
  *
@@ -171,7 +171,7 @@ const handleChangeMode = (currentMode: WriteMode, setWriteMode: (mode: WriteMode
  * Re-analyze handler.
  *
  * Sends a "Rerun analysis" chat message via the existing sendMessage flow.
- * The server-side AnalysisExecutionTools (task 078) handles the message through
+ * The server-side analysis-execution handler (task 078 lineage) handles the message through
  * the chat pipeline with progress tracking, document_replace SSE events, and
  * undo stack management.
  */

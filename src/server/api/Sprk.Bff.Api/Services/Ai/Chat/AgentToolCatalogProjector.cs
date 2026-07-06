@@ -1,18 +1,17 @@
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
 using Sprk.Bff.Api.Models.Ai.Chat;
-using Sprk.Bff.Api.Services.Ai.Chat.Tools;
 
 namespace Sprk.Bff.Api.Services.Ai.Chat;
 
 /// <summary>
 /// The agent-turn loop's tool-catalog resolution component (FR-P2-01,
 /// spaarke-ai-architecture-redesign-r1 task 030). Owns what used to be
-/// <c>SprkChatAgentFactory.ResolveTools</c> — the capability-gated legacy tool
-/// groups plus the data-driven <c>sprk_analysistool</c> projection (FR-11 /
-/// ToolHandlerToAIFunctionAdapter) — extracted verbatim so the factory shrinks
-/// to prompt/context assembly while the closed-catalog tool projection gets a
-/// single owned home (ADR-039: the catalogs are the ONLY tool source).
+/// <c>SprkChatAgentFactory.ResolveTools</c> — since FR-P2-07 (task 036) deleted the
+/// last hardcoded legacy tool group, this is EXCLUSIVELY the data-driven
+/// <c>sprk_analysistool</c> projection (FR-11 / ToolHandlerToAIFunctionAdapter);
+/// the factory keeps prompt/context assembly while the closed-catalog tool
+/// projection has a single owned home (ADR-039: the catalogs are the ONLY tool source).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -21,76 +20,64 @@ namespace Sprk.Bff.Api.Services.Ai.Chat;
 /// before the extraction.
 /// </para>
 /// <para>
-/// The moved implementation is byte-preserved apart from: (1) the method rename
-/// <c>ResolveTools → ResolveToolsAsync</c>, (2) <c>_chatClient</c>/<c>_logger</c>
-/// becoming ctor-injected fields, and (3) the dynamic invoke_playbook
-/// description building via the <c>_invokePlaybookDescriptionFactory</c> delegate
-/// (the D-A-14 tenant-menu rendering stays on the factory, which owns the
-/// playbook-listing dependencies).
+/// The dynamic invoke_playbook description building routes through the
+/// <c>_invokePlaybookDescriptionFactory</c> delegate (the D-A-14 tenant-menu
+/// rendering stays on the factory, which owns the playbook-listing dependencies).
 /// </para>
 /// </remarks>
 internal sealed class AgentToolCatalogProjector
 {
-    private readonly IChatClient _chatClient;
     private readonly ILogger _logger;
     private readonly Func<IServiceProvider, string, HttpContext?, CancellationToken, Task<string>> _invokePlaybookDescriptionFactory;
 
     public AgentToolCatalogProjector(
-        IChatClient chatClient,
         ILogger logger,
         Func<IServiceProvider, string, HttpContext?, CancellationToken, Task<string>> invokePlaybookDescriptionFactory)
     {
-        _chatClient = chatClient ?? throw new ArgumentNullException(nameof(chatClient));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _invokePlaybookDescriptionFactory = invokePlaybookDescriptionFactory
             ?? throw new ArgumentNullException(nameof(invokePlaybookDescriptionFactory));
     }
 
     /// <summary>
-    /// Creates <see cref="AIFunction"/> tool instances for the agent session.
-    ///
-    /// Tool classes are instantiated directly (not resolved from DI) per the AIPL-053 design:
-    /// this keeps tool class lifetimes scoped to a single agent session and avoids registering
-    /// them in the DI container (ADR-010: no unnecessary DI registrations).
-    ///
-    /// Required services (IRagService, IAnalysisOrchestrationService, IChatClient) are already
-    /// registered in DI and are resolved here from <paramref name="scopedProvider"/>.
-    ///
-    /// Tools gated by playbook capabilities (AnalysisExecutionTools, WebSearchTools) are only
-    /// included when the playbook declares the corresponding capability. Ungated tools
-    /// (DocumentSearchTools, KnowledgeRetrievalTools, TextRefinementTools) are registered based
-    /// on service availability — task 047 will refactor these to be capability-gated as well.
-    /// AnalysisQueryTools was migrated to typed handler AnalysisQueryHandler in R6 Wave 7
-    /// (data-driven via the SYS-Analysis Query sprk_analysistool row + the FR-11 block below).
+    /// Creates <see cref="AIFunction"/> tool instances for the agent session — EXCLUSIVELY
+    /// from the closed <c>sprk_analysistool</c> catalog (ADR-039). FR-P2-07 (task 036)
+    /// deleted the last hardcoded legacy tool group; every tool the loop sees is a catalog
+    /// row wrapped via <see cref="ToolHandlerToAIFunctionAdapter"/>.
     ///
     /// FR-23 per-playbook tool filtering: the <paramref name="capabilities"/> set carries either
     /// the matched playbook's declared capabilities (playbookId resolved) or the always-on core
-    /// capabilities (standalone conversational chat). Tools gated by capability are registered
-    /// only when the gating capability is in the set.
+    /// capabilities (standalone conversational chat). Rows gated by <c>sprk_requiredcapability</c>
+    /// are registered only when the gating capability is in the set.
     /// </summary>
     /// <param name="scopedProvider">The scoped DI provider for this agent creation call.</param>
-    /// <param name="tenantId">Tenant ID from the authenticated session — injected into tool constructors (ADR-014).</param>
+    /// <param name="tenantId">Tenant ID from the authenticated session (ADR-014).</param>
     /// <param name="knowledgeScope">
     /// Knowledge scope from the playbook, containing RAG source IDs for search filtering.
-    /// Null when the playbook has no knowledge sources configured.
+    /// Null when the playbook has no knowledge sources configured. Forwarded onto each
+    /// per-call <see cref="ChatInvocationContext.KnowledgeScope"/>.
     /// </param>
     /// <param name="capabilities">
     /// Effective capability set for this turn: either the playbook capabilities (full set)
-    /// or the router-validated subset (per-turn minimum). Tools gated behind a capability
-    /// are only registered when the capability is present in this set. See <see cref="PlaybookCapabilities"/>.
+    /// or the router-validated subset (per-turn minimum). See <see cref="PlaybookCapabilities"/>.
     /// </param>
-    /// <param name="playbookId">The playbook ID — passed to AnalysisExecutionTools for re-analysis.</param>
-    /// <param name="documentId">The active document ID — passed to AnalysisExecutionTools for re-analysis.</param>
+    /// <param name="playbookId">The session's playbook ID — forwarded onto each per-call
+    /// <see cref="ChatInvocationContext.PlaybookId"/> (consumed by the analysis-rerun handler).</param>
+    /// <param name="documentId">The active document ID — forwarded onto each per-call
+    /// <see cref="ChatInvocationContext.DocumentId"/>.</param>
     /// <param name="analysisId">
-    /// Optional GUID string of the active <c>sprk_analysisoutput</c> record.
-    /// Passed to <see cref="WorkingDocumentTools"/> for write-back target resolution (spec FR-12).
+    /// Optional GUID string of the active <c>sprk_analysisoutput</c> record. Forwarded (parsed)
+    /// to the adapter for write-back target resolution (spec FR-12) and analysis refinement.
     /// Null when SprkChat is not launched from the Analysis Workspace.
     /// </param>
-    /// <param name="httpContext">HTTP context for OBO auth — passed to AnalysisExecutionTools for re-analysis.</param>
-    /// <param name="sseWriter">SSE writer delegate — passed to AnalysisExecutionTools for progress/document_replace events.</param>
+    /// <param name="httpContext">HTTP context — source of the principal's oid claim for
+    /// user-scoped handlers and of the hoisted document-stream writer.</param>
+    /// <param name="sseWriter">SSE writer delegate — forwarded to the adapter for widget
+    /// emission and onto each per-call <see cref="ChatInvocationContext.SseWriter"/> for
+    /// mid-execution progress / document_replace events.</param>
     /// <param name="citationContext">
-    /// Shared citation context for search tools to populate with source metadata (chunk IDs, source names, excerpts).
-    /// Passed to DocumentSearchTools and KnowledgeRetrievalTools so they register citations during execution.
+    /// Shared citation context populated with source metadata (chunk IDs, source names,
+    /// excerpts) by the adapter's post-processing of handler citation metadata.
     /// </param>
     /// <returns>List of registered <see cref="AIFunction"/> instances, or empty list on failure.</returns>
     public async Task<IReadOnlyList<AIFunction>> ResolveToolsAsync(
@@ -107,163 +94,51 @@ internal sealed class AgentToolCatalogProjector
         CitationContext? citationContext,
         CancellationToken cancellationToken = default)
     {
-        // Resolve services that tool classes depend on from DI.
-        // IRagService and IAnalysisOrchestrationService are registered in Program.cs.
-        // IChatClient is registered in AiModule.cs (AIPL-050).
-        var ragService = scopedProvider.GetService<IRagService>();
-        var analysisService = scopedProvider.GetService<IAnalysisOrchestrationService>();
-
         var tools = new List<AIFunction>();
 
-        // ADR-033 (R6 Wave 9): hoisted document-stream SSE writer. Built ONCE per ResolveTools
-        // call and consumed in two places:
-        //   1. The legacy WorkingDocumentTools block below (which requires a non-null delegate,
-        //      so we coalesce to a no-op when httpContext is unavailable). This block exits
-        //      in Wave 9 Stage 4 once the typed WorkingDocumentHandler is the sole emitter.
-        //   2. The data-driven adapter construction (FR-11 block ~line 1290) where the writer
-        //      is passed to ToolHandlerToAIFunctionAdapter and forwarded onto each per-call
-        //      ChatInvocationContext.DocumentStreamWriter so the typed WorkingDocumentHandler
-        //      can emit Start → N×Token → End events directly during streaming.
-        //
-        // The adapter receives the NULLABLE variant (null when httpContext is unavailable)
-        // per ADR-033 §3.1 — the typed handler checks for null and degrades gracefully via
-        // ToolResult.Failure with a clear "no stream writer wired" message. The no-op
-        // fallback below is specific to the LEGACY WorkingDocumentTools class which
-        // requires a non-null delegate by ctor contract.
+        // ADR-033 (R6 Wave 9): hoisted document-stream SSE writer. Built ONCE per
+        // ResolveToolsAsync call and passed to ToolHandlerToAIFunctionAdapter, which forwards
+        // it onto each per-call ChatInvocationContext.DocumentStreamWriter so the typed
+        // WorkingDocumentHandler can emit Start → N×Token → End events directly during
+        // streaming. The adapter receives the NULLABLE variant (null when httpContext is
+        // unavailable) per ADR-033 §3.1 — the typed handler checks for null and degrades
+        // gracefully via ToolResult.Failure with a clear "no stream writer wired" message.
         var documentStreamWriter = httpContext != null
             ? Api.Ai.ChatEndpoints.CreateDocumentStreamSseWriter(httpContext.Response)
             : null;
 
         // ADR-033 Stage 4 (R6 Wave 9): parse the analysis id string carried on the chat
-        // context's AnalysisMetadata into a Guid for the typed-handler path. The legacy
-        // hardcoded WorkingDocumentTools block captures the string directly via ctor; the
-        // typed WorkingDocumentHandler reads ChatInvocationContext.AnalysisId (Guid?) which
-        // we forward through the adapter constructor below. Null when standalone chat
-        // (no analysis bound) or when the string isn't a parseable Guid.
+        // context's AnalysisMetadata into a Guid for the typed-handler path. The typed
+        // WorkingDocumentHandler / analysis-refinement handler read
+        // ChatInvocationContext.AnalysisId (Guid?) which we forward through the adapter
+        // constructor below. Null when standalone chat (no analysis bound) or when the
+        // string isn't a parseable Guid.
         Guid? analysisIdGuid = Guid.TryParse(analysisId, out var parsedAnalysisId) ? parsedAnalysisId : null;
 
-        // Per-tool error isolation (AIPU2-063): each tool group is wrapped in its own
-        // try-catch so that a failure in one group (constructor throws, missing config,
-        // transient dependency fault) never prevents other healthy tools from resolving.
-        // Failed groups are logged as warnings and excluded from the returned tool list.
-        // The agent executes normally with whatever subset of tools resolved successfully —
-        // an empty tool list is a valid (if degraded) operating state.
-        int attempted = 0;
-        int resolved = 0;
-        var failedTools = new List<string>();
-
-        // --- DocumentSearchTools ---
-        // REMOVED in R6 Wave 8 (Q9 chat-tool batch migration): replaced by the typed
-        // DocumentSearchHandler (Services/Ai/Handlers/DocumentSearchHandler.cs) auto-discovered
-        // via ToolFrameworkExtensions.AddToolHandlersFromAssembly (ADR-010) and surfaced to the
-        // chat agent by the data-driven block below (FR-11) via two sprk_analysistool rows:
-        //   - SYS-Document Search    (DOCUMENT-SEARCH)    → method=SearchDocuments (knowledge-scoped, MinScore=0.7, topK=5)
-        //   - SYS-Document Discovery (DOCUMENT-DISCOVERY) → method=SearchDiscovery (tenant-wide, MinScore=0.5, topK=10)
-        // Both rows set sprk_requiredcapability = null (always available — gating mirrors the
-        // legacy `ragService != null` condition; handler's DI resolution is the runtime gate).
-        // Citations + widget metadata + output_pane SSE events are returned via
-        // ToolResult.Metadata and the adapter performs side effects (Wave 7b infrastructure).
-        // Tenant isolation (ADR-014) preserved via ChatInvocationContext.TenantId.
-
-        // --- AnalysisQueryTools (R6 Wave 7 — migrated to typed handler AnalysisQueryHandler) ---
-        // The legacy hardcoded registration was removed in R6 Wave 7. The replacement
-        // AnalysisQueryHandler (Services/Ai/Handlers/AnalysisQueryHandler.cs) is auto-discovered
-        // via ToolFrameworkExtensions.AddToolHandlersFromAssembly and surfaced to the chat agent
-        // by the data-driven block below (FR-11) once the SYS-Analysis Query sprk_analysistool
-        // row is seeded (see infra/dataverse/sprk_analysistool-analysis-query-row.json +
-        // scripts/Seed-TypedHandlers.ps1). One row + 'method' enum discriminator exposes
-        // GetAnalysisResult vs GetAnalysisSummary as a single LLM tool with a method parameter.
-
-        // --- KnowledgeRetrievalTools ---
-        // REMOVED in R6 Wave 7c: replaced by the typed KnowledgeRetrievalHandler
-        // (Services/Ai/Handlers/KnowledgeRetrievalHandler.cs) auto-discovered via
-        // ToolFrameworkExtensions.AddToolHandlersFromAssembly (ADR-010) and surfaced to the
-        // chat agent by the data-driven block below (FR-11) via two sprk_analysistool rows:
-        //   - SYS-Knowledge Source Retrieval (KNOWLEDGE-SOURCE-GET) → method=GetKnowledgeSource
-        //   - SYS-Knowledge Base Search      (KNOWLEDGE-BASE-SEARCH) → method=SearchKnowledgeBase
-        // Citations + source_pane SSE events are returned via ToolResult.Metadata and the
-        // adapter performs side effects (Wave 7b infrastructure). The ChatKnowledgeScope
-        // forwards into ChatInvocationContext.KnowledgeScope so the handler can filter to
-        // the playbook's knowledge sources.
-
-        // --- TextRefinementTools ---
-        // REMOVED in R6 Wave 7 (Q9 chat-tool batch migration): replaced by the typed
-        // TextRefinementHandler (Services/Ai/Handlers/TextRefinementHandler.cs) registered
-        // via three sprk_analysistool Dataverse rows (TEXT-REFINE / TEXT-KEYPOINTS /
-        // TEXT-SUMMARY) sharing a method-discriminator in sprk_configuration. The chat
-        // adapter (ToolHandlerToAIFunctionAdapter) exposes each row as a distinct
-        // AIFunction to the LLM. The class TextRefinementTools is retained for
-        // ChatEndpoints.RefineTextAsync (SSE streaming refine endpoint) which uses
-        // BuildRefineMessages directly — that path is NOT an LLM tool call.
-
-        // --- WorkingDocumentTools ---
-        // REMOVED in R6 Wave 9 (Q9 chat-tool batch migration — closes Q9 at 10/10): replaced
-        // by the typed WorkingDocumentHandler (Services/Ai/Handlers/WorkingDocumentHandler.cs)
-        // auto-discovered via ToolFrameworkExtensions.AddToolHandlersFromAssembly (ADR-010)
-        // and surfaced to the chat agent by the data-driven block below (FR-11) via three
-        // sprk_analysistool rows sharing a method discriminator in sprk_configuration:
-        //   - SYS-Working Document Edit          (WORKING-DOC-EDIT)           → method=EditWorkingDocument (streaming)
-        //   - SYS-Working Document Append Section (WORKING-DOC-APPEND-SECTION) → method=AppendSection (streaming)
-        //   - SYS-Working Document Write Back    (WORKING-DOC-WRITE-BACK)     → method=WriteBackToWorkingDocument (persistence; FR-12 safety)
-        //
-        // Capability gate preservation: sprk_requiredcapability = "write_back" on all 3 rows.
-        // The data-driven block's IsCapabilityGateSatisfied replaces the hardcoded
-        // `if (capabilities.Contains(PlaybookCapabilities.WriteBack))` check above.
-        //
-        // ADR-033 binding pattern (R6 Wave 9 — first invocation of the side-channel
-        // operating principle):
-        //   The hoisted `documentStreamWriter` above is forwarded to the adapter via the
-        //   `documentStreamWriter:` parameter of `ToolHandlerToAIFunctionAdapter`. The
-        //   adapter sets it on every per-call ChatInvocationContext.DocumentStreamWriter.
-        //   The handler reads `context.DocumentStreamWriter` and emits DocumentStreamEvent
-        //   Start → N×Token → End directly during streaming. Null → ToolResult.Failure with
-        //   "no stream writer wired" diagnostic per ADR-033 §3.1.
-        //
-        //   The parsed `analysisIdGuid` above is forwarded to the adapter via the
-        //   `analysisId:` parameter. The adapter sets it on every per-call
-        //   ChatInvocationContext.AnalysisId. The handler reads it to fetch the current
-        //   working document (EditWorkingDocument / AppendSection) and to target the
-        //   write-back persistence (WriteBackToWorkingDocument).
-        //
-        // Plan-preview gate preservation (spec FR-11, rewired by FR-P2-02 / task 031): the
-        //   gate fires on the row's DECLARED sprk_sideeffectclass (write) via
-        //   PendingPlanManager.RequiresConfirmation — the pre-D12 hardcoded tool-name
-        //   lists were deleted per ADR-039 (no gating by tool names).
-        //
-        // FR-12 safety preservation: the typed handler routes write-back EXCLUSIVELY through
-        //   IWorkingDocumentService → IGenericEntityService (Dataverse); it NEVER calls
-        //   SpeFileStore, GraphServiceClient writes, or any SPE/SharePoint write operation.
-        //   WorkingDocumentHandlerTests asserts this via the explicit
-        //   `WriteBack_Never_CallsIChatClient_FR12Safety` test.
-
-        // --- AnalysisExecutionTools ---
-        // Gated behind "reanalyze" capability (task 079).
-        // Requires IAnalysisOrchestrationService + IChatClient.
-        // Only available when the playbook declares the "reanalyze" capability, preventing
-        // re-analysis from appearing in lightweight playbooks (e.g., "Quick Q&A").
-        // Task 080: Now wired with real orchestration — requires httpContext for OBO auth
-        // and sseWriter for progress/document_replace SSE events during re-analysis.
-        if (capabilities.Contains(PlaybookCapabilities.Reanalyze) && analysisService != null)
-        {
-            attempted++;
-            try
-            {
-                var analysisExecutionTools = new AnalysisExecutionTools(
-                    analysisService, _chatClient,
-                    analysisId: null,
-                    playbookId: playbookId,
-                    documentId: documentId,
-                    httpContext: httpContext,
-                    sseWriter: sseWriter);
-                tools.AddRange(analysisExecutionTools.GetTools());
-                resolved++;
-            }
-            catch (Exception ex)
-            {
-                _logger.LogWarning(ex, "Failed to resolve AnalysisExecutionTools — skipping");
-                failedTools.Add(nameof(AnalysisExecutionTools));
-            }
-        }
+        // === Legacy hardcoded tool groups: ALL RETIRED (FR-P2-07 closes the set) ============
+        // The pre-catalog hardcoded groups migrated to typed handlers + sprk_analysistool rows
+        // across R6 Waves 7-9 and this project's P2; the FR-11 data-driven block below is now
+        // the ONLY tool source (ADR-039 closed catalog). Row map for the migrated families:
+        //   - Document search    → DocumentSearchHandler   (SYS-Document Search / SYS-Document Discovery)
+        //   - Analysis query     → AnalysisQueryHandler    (SYS-Analysis Query; method discriminator)
+        //   - Knowledge retrieval→ KnowledgeRetrievalHandler (SYS-Knowledge Source Retrieval / SYS-Knowledge Base Search)
+        //   - Text refinement    → TextRefinementHandler   (SYS-Text Refinement / SYS-Text Key Points / SYS-Text Summary; text.* tool ids)
+        //   - Working document   → WorkingDocumentHandler  (SYS-Working Document Edit / Append Section / Write Back;
+        //                          sprk_requiredcapability = "write_back"; gate fires on the row's DECLARED
+        //                          sprk_sideeffectclass via PendingPlanManager — never tool-name lists (ADR-039);
+        //                          FR-12 safety proven by WorkingDocumentHandlerTests)
+        //   - Analysis execution → AnalysisExecutionHandler (SYS-Analysis Rerun / SYS-Analysis Refine; analysis.* tool
+        //                          ids; sprk_requiredcapability = "reanalyze" preserves the task-079 capability gate;
+        //                          rerun declares side_effect_class = write; migrated by FR-P2-07 / task 036 as the
+        //                          last live group — session playbook/document ids + the SSE writer now flow through
+        //                          ChatInvocationContext.PlaybookId/DocumentId/SseWriter below)
+        //   - Web search / code interpreter / legal research / citation verification →
+        //                          WebSearchHandler / CodeInterpreterHandler / LegalResearchHandler /
+        //                          VerifyCitationsHandler (capability-gated per row: "web_search",
+        //                          "code_interpreter", "legal_research", "verify_citations"; ADR-018
+        //                          kill-switches remain at the underlying service registrations)
+        // Citations + widget metadata are returned via ToolResult.Metadata and the adapter
+        // performs the side effects (Wave 7b infrastructure).
 
         // --- InvokeSummarizePlaybookTool ---
         // REMOVED in R6 Wave 10 / task 023 (D-A-15, Pillar 3 cleanup): replaced by the
@@ -350,86 +225,9 @@ internal sealed class AgentToolCatalogProjector
         //   ai.rag.disabled / ai.intent-classification.disabled) remain in force at the
         //   downstream service boundary — unchanged by this deletion.
 
-        // --- WebSearchTools ---
-        // REMOVED in R6 Wave 8 (Q9 chat-tool batch migration): replaced by the typed
-        // WebSearchHandler (Services/Ai/Handlers/WebSearchHandler.cs) auto-discovered via
-        // ToolFrameworkExtensions.AddToolHandlersFromAssembly (ADR-010) and surfaced to the
-        // chat agent by the data-driven block below (FR-11) via one sprk_analysistool row:
-        //   - SYS-Web Search (WEB-SEARCH) → WebSearchHandler (single function, no method discriminator)
-        //
-        // Capability gate preservation (Wave 7b infrastructure):
-        //   The hardcoded `if (capabilities.Contains(PlaybookCapabilities.WebSearch))` check is
-        //   replaced by sprk_requiredcapability = "web_search" on the row. The data-driven
-        //   block's IsCapabilityGateSatisfied enforces the same admin-controlled boundary.
-        //
-        // Behavior preserved verbatim by the handler:
-        //   - Static SemaphoreSlim(2,2) Bing concurrency gate (ADR-016)
-        //   - 5s HTTP timeout, 10s semaphore acquire timeout
-        //   - Graceful mock fallback when BingSearch:ApiKey is not configured
-        //   - FR-10 scope-guided search via ChatInvocationContext.KnowledgeScope.ScopeSearchGuidance
-        //   - ADR-015 telemetry: query length + result count + timing only; no result bodies above Debug
-        // Citations returned via ToolResult.Metadata (Wave 7b infrastructure).
-
-        // --- CodeInterpreterTools ---
-        // REMOVED in R6 Wave 8 (Q9 chat-tool batch migration): replaced by the typed
-        // CodeInterpreterHandler (Services/Ai/Handlers/CodeInterpreterHandler.cs) auto-discovered
-        // via ToolFrameworkExtensions.AddToolHandlersFromAssembly (ADR-010) and surfaced to the
-        // chat agent by the data-driven block below (FR-11) via two sprk_analysistool rows:
-        //   - SYS-Code Analyze Data    (CODE-ANALYZE) → method=AnalyzeData
-        //   - SYS-Code Generate Chart  (CODE-CHART)   → method=GenerateChart
-        //
-        // Capability gate preservation: sprk_requiredcapability = "code_interpreter" on both
-        // rows; data-driven block's IsCapabilityGateSatisfied replaces the hardcoded check.
-        //
-        // Behavior preserved verbatim by the handler:
-        //   - ADR-018 kill switch (CodeInterpreterOptions.Enabled) checked before every invocation
-        //   - ADR-016 static SemaphoreSlim concurrency gate
-        //   - ADR-015 data governance: only caller-supplied data excerpts; no external fetch
-        //   - Chart bytes returned as base64 inside Metadata["widget"] (ChartViewer envelope)
-        //     AND inline as markdown image data URI in the chat-visible text (dual rendering).
-
-        // --- LegalResearchTools ---
-        // REMOVED in R6 Wave 8 (Q9 chat-tool batch migration): replaced by the typed
-        // LegalResearchHandler (Services/Ai/Handlers/LegalResearchHandler.cs) auto-discovered
-        // via ToolFrameworkExtensions.AddToolHandlersFromAssembly (ADR-010) and surfaced to the
-        // chat agent by the data-driven block below (FR-11) via two sprk_analysistool rows:
-        //   - SYS-Legal Research      (LEGAL-RESEARCH)     → method=ResearchLegal
-        //   - SYS-Legal Case Lookup   (LEGAL-CASE-LOOKUP)  → method=LookupCase
-        //
-        // Capability gate preservation: sprk_requiredcapability = "legal_research" on both
-        // rows; data-driven block's IsCapabilityGateSatisfied replaces the hardcoded check.
-        //
-        // Behavior preserved verbatim by the handler:
-        //   - ADR-015 PII sanitization (QuerySanitizer.Sanitize) before every Bing call
-        //   - ADR-018 kill switch (BingGroundingOptions.Enabled) returns user-readable string when disabled
-        //   - ADR-015 telemetry: query length + result count + timing only; no query text above Debug
-        //   - Uses Azure AI Foundry Bing Grounding via AgentServiceClient (NOT Bing Web Search REST)
-        //
-        // Concurrency simplification (Wave 8): the legacy double-semaphore (handler-level
-        // BingGroundingOptions.MaxConcurrency + SDK-level AgentServiceOptions.MaxConcurrency)
-        // is collapsed to just the SDK gate. BingGroundingOptions.MaxConcurrency is no longer
-        // consulted at runtime; the property is retained for now (unmodified) and may be pruned
-        // in a follow-up. Concurrency-exhaustion still degrades gracefully via the SDK.
-
-        // --- VerifyCitationsTool ---
-        // REMOVED in R6 Wave 7c: replaced by the typed VerifyCitationsHandler
-        // (Services/Ai/Handlers/VerifyCitationsHandler.cs) auto-discovered via
-        // ToolFrameworkExtensions.AddToolHandlersFromAssembly (ADR-010) and surfaced to the
-        // chat agent by the data-driven block below (FR-11) via one sprk_analysistool row:
-        //   - SYS-Citation Verification (CITATION-VERIFY) → VerifyCitationsHandler
-        //
-        // Capability gate preservation (Wave 7b infrastructure):
-        //   The hardcoded `if (capabilities.Contains(PlaybookCapabilities.VerifyCitations))`
-        //   check that previously gated this block is replaced by the per-row
-        //   `sprk_requiredcapability = "verify_citations"` column on the seeded row. The
-        //   data-driven block's IsCapabilityGateSatisfied(row.RequiredCapability, capabilities)
-        //   enforces the same security boundary at chat-session start. Standalone chat
-        //   (capabilities = CoreCapabilities; "verify_citations" not included) continues to
-        //   skip this tool exactly as before — preserving the pre-Wave-7c boundary.
-        //
-        // NFR-13 unchanged: the automatic post-LLM CitationSafetyCheck middleware
-        // continues to run unconditionally after every response regardless of whether
-        // VerifyCitationsHandler is exposed to the LLM for the current playbook.
+        // NFR-13 unchanged: the automatic post-LLM CitationSafetyCheck middleware runs
+        // unconditionally after every response regardless of whether VerifyCitationsHandler
+        // is exposed to the LLM for the current playbook.
 
         // === R6 Pillar 2 / Task D-A-11 (FR-11) — Data-Driven Tool Resolution =================
         // Append AIFunctions for `sprk_analysistool` rows whose
@@ -437,24 +235,18 @@ internal sealed class AgentToolCatalogProjector
         // ToolHandlerToAIFunctionAdapter (task 010) using the IToolHandler whose HandlerId
         // matches the row's HandlerClass (looked up via IToolHandlerRegistry).
         //
-        // STRATEGY: ADDITIVE during Q9 migration window (NFR-11 binding).
-        //   Existing hardcoded tools above (DocumentSearch, AnalysisQuery, etc.) continue to
-        //   work; data-driven tools are APPENDED. Task 012 (Q9 BIG-BANG) will remove the
-        //   hardcoded registrations once each tool has a corresponding `sprk_analysistool`
-        //   row with `sprk_handlerclass` populated. Until then, the two paths coexist.
+        // STRATEGY (post-FR-P2-07): the catalog is the ONLY tool source. The Q9 "additive"
+        //   migration window closed when task 036 deleted the last hardcoded group — every
+        //   chat tool is a catalog row resolved here.
         //
         // DEDUPLICATION: rows whose Name collides with an already-registered tool's Name are
-        //   skipped (with a warning log) — defensive guard against double-registration when
-        //   task 012 partially seeds a row before its hardcoded counterpart is removed. The
-        //   hardcoded version wins; the data-driven row is skipped until the hardcoded path
-        //   is removed.
+        //   skipped (with a warning log) — defensive guard against duplicate active rows
+        //   claiming the same tool name (the FR-P0-04 health check also reports duplicate
+        //   sprk_toolid claims as Unhealthy).
         //
-        // FALLBACK (FR-11 step 5): if the query yields ZERO chat-available rows (e.g., before
-        //   task 012 seeds rows), this block contributes no AIFunctions and the agent
-        //   continues with only the hardcoded set. Because the existing hardcoded tools are
-        //   untouched, the chat agent remains operational with zero behavior change. The
-        //   conversational ability (NFR-01) is preserved unconditionally — even a zero-tool
-        //   list yields a working conversational agent.
+        // FALLBACK (FR-11 step 5): if the query yields ZERO chat-available rows, this block
+        //   contributes no AIFunctions. The conversational ability (NFR-01) is preserved
+        //   unconditionally — even a zero-tool list yields a working conversational agent.
         //
         // ADR-014 caching: the tool-list query happens at chat-session start (per-session,
         //   not per-message). At ~10 chat tools per tenant, the Dataverse round-trip is
@@ -476,8 +268,8 @@ internal sealed class AgentToolCatalogProjector
         // ADR-010: no new top-level DI registration. All dependencies resolved from
         //   the existing scoped provider.
         //
-        // ADR-018: NO new feature flag — the additive strategy needs no kill-switch (the
-        //   existing tools remain authoritative until task 012 explicitly retires them).
+        // ADR-018: NO feature flag — the closed-catalog projection needs no kill-switch
+        //   (rows are deactivated in Dataverse to withdraw a tool).
         var dataDrivenAttemptedRows = 0;
         var dataDrivenResolvedRows = 0;
         var dataDrivenSkippedDuplicates = 0;
@@ -495,13 +287,13 @@ internal sealed class AgentToolCatalogProjector
                 // AnalysisToolService which is gated by the same compound flag.
                 _logger.LogDebug(
                     "[FR-11] AnalysisToolService not registered (Analysis:Enabled=false); " +
-                    "skipping data-driven chat-tool discovery. Hardcoded tools continue to work.");
+                    "skipping data-driven chat-tool discovery.");
             }
             else if (toolHandlerRegistry is null)
             {
                 _logger.LogWarning(
                     "[FR-11] IToolHandlerRegistry not registered; cannot resolve handlers for " +
-                    "data-driven tools. Hardcoded tools continue to work.");
+                    "data-driven tools.");
             }
             else
             {
@@ -559,7 +351,7 @@ internal sealed class AgentToolCatalogProjector
                     // include a CASE-INSENSITIVE match. This REPLACES the hardcoded
                     // `if (capabilities.Contains(PlaybookCapabilities.X))` gates removed in
                     // Waves 7c (VerifyCitations), 8 (LegalResearch / WebSearch /
-                    // CodeInterpreter), and 9 (WorkingDocumentTools) — preserving today's
+                    // CodeInterpreter), and 9 (WorkingDocument chat-tools) — preserving today's
                     // security boundary for capability-gated tools.
                     //
                     // ADR-018 distinction: this is NOT a feature flag — it is per-tool
@@ -629,7 +421,13 @@ internal sealed class AgentToolCatalogProjector
                         // to the playbook's knowledge sources without taking a separate DI
                         // dependency. ADR-014 per-tenant scope is preserved via TenantId above;
                         // the knowledge scope adds the playbook-level filter on top.
-                        KnowledgeScope = knowledgeScope
+                        KnowledgeScope = knowledgeScope,
+                        // FR-P2-07 (task 036): forward the session's playbook + active document
+                        // ids so the migrated AnalysisExecutionHandler (method=rerun) can target
+                        // the re-analysis. Deterministic identifiers only (ADR-015). Null/empty
+                        // when the session carries no playbook/document.
+                        PlaybookId = playbookId == Guid.Empty ? null : playbookId,
+                        DocumentId = string.IsNullOrWhiteSpace(documentId) ? null : documentId
                     };
 
                     // R6 Pillar 3 / task 022 (D-A-14) — dynamic invoke_playbook description.
@@ -749,36 +547,19 @@ internal sealed class AgentToolCatalogProjector
         }
         catch (Exception ex)
         {
-            // Soft failure: data-driven discovery is additive. If the query fails (Dataverse
-            // outage, transient auth failure, etc.) the chat agent still operates with the
-            // hardcoded tools above. NFR-01 conversational primacy is preserved.
+            // Soft failure: if the catalog query fails (Dataverse outage, transient auth
+            // failure, etc.) the chat agent still operates as a conversational agent with
+            // an empty tool list. NFR-01 conversational primacy is preserved.
             _logger.LogWarning(ex,
-                "[FR-11] Data-driven chat-tool discovery failed; hardcoded tools remain. " +
+                "[FR-11] Data-driven chat-tool discovery failed; the agent proceeds with zero tools (NFR-01 conversational primacy). " +
                 "tenant={TenantId}",
                 tenantId);
         }
         // === End R6 Pillar 2 / Task D-A-11 =====================================================
 
-        // Summary log: resolved vs. attempted so operators can detect partial degradation
-        // without grepping individual warning entries.
-        if (failedTools.Count > 0)
-        {
-            _logger.LogWarning(
-                "Tool resolution partial: {ResolvedGroups}/{AttemptedGroups} tool groups resolved. " +
-                "Failed groups: [{FailedTools}]. Agent will execute with {ToolCount} AIFunction(s).",
-                resolved, attempted, string.Join(", ", failedTools), tools.Count);
-        }
-        else
-        {
-            _logger.LogDebug(
-                "Tool resolution complete: {ResolvedGroups}/{AttemptedGroups} tool groups resolved, " +
-                "{ToolCount} AIFunction(s) registered.",
-                resolved, attempted, tools.Count);
-        }
-
-        // FR-23 per-playbook tool filtering: capability gating in the blocks above already
-        // limits tools to the matched playbook's declared capabilities (or the always-on
-        // core capabilities when no playbook is matched). No per-turn re-filter needed.
+        // FR-23 per-playbook tool filtering: capability gating in the data-driven block above
+        // already limits tools to the matched playbook's declared capabilities (or the
+        // always-on core capabilities when no playbook is matched). No per-turn re-filter needed.
 
         return tools;
     }

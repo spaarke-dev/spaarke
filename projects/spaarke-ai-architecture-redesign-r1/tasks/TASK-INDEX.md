@@ -124,8 +124,8 @@
 
 | # | Task | FR | Rigor | Deps | Status |
 |---|---|---|---|---|---|
-| 035 | DELETE dispatcher stack (4 services + tests) | FR-P2-06 | FULL | 034 | 🔲 |
-| 036 | DELETE legacy Chat/Tools after handler migration | FR-P2-07 | FULL | 034 | 🔲 |
+| 035 | DELETE dispatcher stack (4 services + whole PlaybookEmbedding subsystem + dead plan/execute endpoints ~814 lines; 27 symbols grep-zero; PhaseB flake dies with subject; gate-resolve endpoint intact; frozen engine untouched; live embeddings index → P4 sweep) | FR-P2-06 | FULL | 034 | ✅ |
+| 036 | DELETE legacy Chat/Tools (11 classes + PlaybookOutputHandler grep-zero) after migrating rerun/refine → AnalysisExecutionHandler (2 new sprk_analysistool rows `2b09dfb5`/`55521abc`; fixed latent refine null-analysisId bug; text.* re-namespaced; 11-toolid bijection holds; F-1 legs KEPT for 044; 🔔 analysis.rerun now confirmation-gated — UX change visible at 038) | FR-P2-07 | FULL | 034 | ✅ |
 
 ### Wave W-P2-E + Gate
 

@@ -390,7 +390,13 @@ public sealed class ToolHandlerToAIFunctionAdapter : AIFunction
             // per-call context. WorkingDocumentHandler reads it to fetch the current working
             // document and to target write-back persistence. Null when standalone chat —
             // handlers that require it MUST return ToolResult.Failure with diagnostic.
-            AnalysisId = _analysisId
+            AnalysisId = _analysisId,
+            // FR-P2-07 (task 036): forward the adapter-level chat SSE writer onto the
+            // per-call context so long-running handlers (AnalysisExecutionHandler rerun)
+            // can emit progress / document_replace events DURING execution — the
+            // post-execution widget metadata path cannot interleave with execution.
+            // Null when the SSE pipe is not wired; handlers skip emission silently.
+            SseWriter = _sseWriter
         };
 
         using var activity = ActivitySource.StartActivity("chat-tool.invoke");

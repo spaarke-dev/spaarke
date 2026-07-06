@@ -1,584 +1,752 @@
-# Spaarke AI Architecture Redesign Assessment
+# Update to Assessment: Memory, Context, Workspace Intelligence and Provider Architecture
 
-**Date:** 2026-07-06  
-**Assessment Target:** Spaarke AI Architecture Redesign R1  
-**Source Inputs:**
-- Spaarke AI Architecture Redesign R1 Specification
-- Architecture discussion regarding Workspace, M365 Copilot, Work IQ, Foundry IQ, MCP, and Assistant evolution
-- Current Spaarke capability/tool implementation direction
+> **Recommended addition to:** `spaarke-ai-architecture-redesign-assessment.md`
+>
+> **Version:** Assessment Addendum v2
+>
+> **Purpose:** Extend the original assessment with recommendations for:
+>
+> * Memory Architecture
+> * Context Architecture
+> * Workspace Intelligence
+> * Trust & Governance Architecture
+> * Pluggable Intelligence Providers
+> * Azure / Microsoft resource strategy
+> * Industry best practices as of July 2026
 
----
+# Executive Summary
 
-## Executive Summary
+Following review of the R1 redesign and subsequent architecture discussions, it is clear that **Memory Architecture** and **Context Architecture** represent the largest opportunity to improve user-perceived intelligence and user experience.
 
-The current Spaarke AI Architecture Redesign R1 represents a significant and strategically correct evolution from a route-based assistant architecture toward a capability-driven, ledger-backed, reasoning-oriented platform.
+Users generally do not perceive intelligence because of the underlying model.
 
-The strongest aspects of the redesign are:
+Users perceive intelligence because the system:
 
-- Closed capability catalog model
-- Closed tool catalog model
-- Event / Click / Text interaction contract
-- Session Ledger architecture
-- Unified confirmation and side-effect gate
-- Loop-native dispatch
-- Hard-cutover doctrine
-- Evaluation-first governance model
+* remembers previous interactions
+* understands user preferences
+* understands the current matter
+* understands the current workspace
+* understands organizational context
+* does not require repetitive prompting
 
-The redesign successfully shifts Spaarke from:
-
-```text
-Assistant
-    ->
-Intent Routes
-    ->
-Handlers
-    ->
-Executors
-```
-
-toward:
+The most important architectural insight from this assessment is:
 
 ```text
-Assistant
-    ->
-Reasoning Loop
-    ->
-Capabilities
-    ->
-Tools
-    ->
-Workspace
-```
-
-This direction aligns well with broader industry movement toward agentic architectures, MCP-based capability exposure, Microsoft Work IQ, Foundry IQ, and enterprise reasoning runtimes.
-
-The primary recommendation of this assessment is:
-
-> Explicitly define and promote a first-class **Spaarke Reasoning Runtime** platform layer.
-
-Most of the necessary building blocks already exist in the specification. The opportunity is to formalize them into a durable architecture capable of consuming future intelligence providers such as Work IQ, Foundry IQ, Copilot APIs, and external agents without redesigning the Assistant or Workspace experience.
-
----
-
-## Assessment Summary
-
-### Overall Assessment
-
-**Assessment:** Strongly Positive
-
-The redesign is not merely a refactoring effort. It is a platform transition.
-
-The target state establishes Spaarke as:
-
-- A legal operating system
-- A workspace-centric AI platform
-- A capability-based orchestration environment
-- A future-ready intelligence layer
-
-The architecture provides clear separation between:
-
-- User experience
-- Reasoning
-- Capabilities
-- Tooling
-- System of record
-- System of work
-
-This separation is necessary for future integration with Microsoft intelligence services.
-
----
-
-## Architectural Strengths
-
-### 1. Event / Click / Text Contract
-
-The introduction of three canonical invocation paths is one of the strongest decisions in the redesign.
-
-```text
-Event
-Click
-Text
-```
-
-This removes AI execution logic from the user interface layer and establishes a clean and extensible entry contract.
-
-**Benefits:**
-
-- Simplifies client architecture
-- Removes duplicate routing mechanisms
-- Enables a shared reasoning model
-- Supports future intelligence providers
-
-**Recommended Status:** Keep.
-
----
-
-### 2. Closed Capability Catalog
-
-The redesign correctly treats capabilities as governed inventory rather than unrestricted prompt execution.
-
-This creates:
-
-```text
-Open Expression
+User Experience Intelligence
+=
+Memory
 +
-Closed Execution Surface
-```
-
-This is the preferred model for enterprise legal AI.
-
-**Benefits:**
-
-- Safety
-- Governance
-- Discoverability
-- Auditability
-- Cost control
-
-**Recommended Status:** Keep.
-
----
-
-### 3. Tool Catalog
-
-The move toward typed tools is strategically important.
-
-Especially strong is the expansion of tool metadata such as:
-
-```text
-Tool ID
-Namespace
-Permission Scope
-Side Effect Class
-Budget Class
-Output Schema
-```
-
-This aligns well with MCP-style execution and future Work IQ integration.
-
-**Recommended Status:** Keep.
-
----
-
-### 4. Session Ledger
-
-The Session Ledger is arguably the most important component of the redesign.
-
-Without a ledger:
-
-```text
-Conversation = Chat History
-```
-
-With a ledger:
-
-```text
-Conversation = Addressable Work Objects
-```
-
-The ledger enables:
-
-- Output reuse
-- Draft continuation
-- Citation lineage
-- Follow-on actions
-- Task creation
-- Correspondence drafting
-- Workspace persistence
-
-**Recommended Status:** Double down.
-
-The ledger should become a foundational platform service.
-
----
-
-### 5. Unified Confirmation Gate
-
-The redesign correctly moves away from:
-
-```text
-Tool Name = Approval Policy
-```
-
-toward:
-
-```text
-Side Effect Class
+Context
 +
-Risk
+Reasoning
 +
-Confirmation Policy
+Workspace Awareness
 ```
 
-This is significantly more scalable.
-
-**Recommended Status:** Keep.
-
----
-
-### 6. Evaluation-Driven Governance
-
-The redesign treats evaluation as a merge gate rather than merely a testing activity.
-
-This is a hallmark of mature AI systems.
-
-Particularly strong elements include:
-
-- Golden utterances
-- Prompt-injection tests
-- Citation verification
-- Output validation
-- Schema conformance
-
-**Recommended Status:** Expand.
-
-Future provider integrations should also pass through eval gates.
-
----
-
-## Primary Recommendation
-
-### Explicitly Define a Spaarke Reasoning Runtime
-
-Most of the required components already exist. However, the specification does not yet formally name or elevate the runtime itself.
-
-Current implicit architecture:
+rather than:
 
 ```text
-Assistant
-   |
-Loop
-   |
-Tools
+User Experience Intelligence
+=
+Model
 ```
 
-Proposed explicit architecture:
+The recommendation is to evolve R1 toward a platform architecture built around:
 
 ```text
-Assistant
-        |
-        v
-
 Spaarke Reasoning Runtime
++
+Spaarke Memory Service
++
+Spaarke Context Binder
++
+Workspace Intelligence
+```
 
+# New Architectural Domain: Spaarke Memory Service
+
+## Why Memory Matters
+
+Memory is likely to become the largest contributor to user-perceived intelligence.
+
+A future-state assistant should always know:
+
+* who the user is
+* what they are working on
+* what matters are active
+* what drafts are in progress
+* how the user prefers work products to be generated
+* what prior outputs exist
+
+without requiring repeated prompts.
+
+## Recommendation
+
+Create a formal platform service:
+
+```text
+Spaarke Memory Service
+```
+
+This should become a first-class architectural component alongside:
+
+* Workspace
+* Reasoning Runtime
+* Capability Catalog
+
+## Recommended Memory Model
+
+### Conversation Memory
+
+Purpose:
+
+```text
+What happened during this conversation?
+```
+
+Duration:
+
+```text
+Minutes
+Hours
+Days
+```
+
+Implementation:
+
+* Session Ledger
+* Tool Chains
+* Outputs
+* Citations
+* Plans
+
+Current Status:
+
+R1 already contains most required components.
+
+### User Memory
+
+Purpose:
+
+```text
+Who is this user?
+```
+
+Examples:
+
+* drafting preferences
+* communication preferences
+* active areas of work
+* common matter types
+* recurring tasks
+
+Example:
+
+```json
+{
+  "scope": "user",
+  "type": "preference",
+  "category": "drafting",
+  "key": "executive_summary_style",
+  "value": "concise"
+}
+```
+
+Recommendation:
+
+Use structured memory, not embeddings.
+
+### Workspace Memory
+
+Purpose:
+
+```text
+What happened in this work?
+```
+
+Examples:
+
+* prior drafts
+* prior outputs
+* decisions
+* reviews
+* comments
+* unresolved issues
+* goals
+
+This becomes a major differentiator for Spaarke.
+
+### Organizational Memory
+
+Purpose:
+
+```text
+How does this organization work?
+```
+
+Examples:
+
+* approval models
+* outside counsel workflows
+* client servicing approaches
+* organizational structures
+
+Potential Future Provider:
+
+Work IQ may become a useful source of organizational memory and workplace context. Microsoft describes Work IQ as building a semantic understanding of people, roles, collaboration patterns, organizational structures, and work context.
+
+### Semantic Memory
+
+Purpose:
+
+```text
+What knowledge exists?
+```
+
+Examples:
+
+* documents
+* playbooks
+* regulations
+* prior work product
+* knowledge bases
+
+Current Platform Fit:
+
+* Azure AI Search
+* SharePoint Embedded
+* Foundry IQ (future option)
+
+## Memory Governance
+
+Every memory item should contain:
+
+```text
+Source
+Owner
+Confidence
+Scope
+Expiration
+Sensitivity
+Deletion Policy
+Created Date
+Updated Date
+```
+
+This is particularly important for enterprise legal environments.
+
+# New Architectural Domain: Context Architecture
+
+## Problem
+
+R1 contains context-related behavior but does not yet establish an explicit context subsystem.
+
+Context is currently implied.
+
+It should become intentional.
+
+## Recommendation
+
+Create:
+
+```text
+Spaarke Context Binder
+```
+
+## Responsibilities
+
+### User Context
+
+* Role
+* Preferences
+* Active matters
+* Workspace history
+
+### Workspace Context
+
+* Current document
+* Current artifact
+* Current draft
+* Open tasks
+
+### Business Context
+
+* Matter
+* Project
+* Task
+* Client
+* Engagement
+
+### Memory Context
+
+* User memory
+* Workspace memory
+* Conversation memory
+
+### Organizational Context
+
+Potential future Work IQ provider.
+
+### Semantic Context
+
+Potential future Foundry IQ or Azure AI Search provider.
+
+## Output
+
+Single runtime object:
+
+```csharp
+ContextEnvelope
+{
+    User,
+    Workspace,
+    Business,
+    Memory,
+    Organizational,
+    Semantic
+}
+```
+
+This becomes the canonical context contract for the runtime.
+
+# New Architectural Domain: Workspace Intelligence
+
+## Current Position
+
+Workspace currently acts as:
+
+```text
+Editor
+Artifact Host
+Document Rendering Surface
+```
+
+## Future Position
+
+Workspace should evolve into:
+
+```text
+Active Intelligence Surface
+```
+
+## Workspace Awareness
+
+Assistant should understand:
+
+### Goal
+
+```text
+What is the user trying to accomplish?
+```
+
+Examples:
+
+* Draft an engagement letter
+* Analyze patent application
+* Generate client update
+
+### Progress
+
+```text
+What has already been completed?
+```
+
+Examples:
+
+* Summary generated
+* Matter created
+* Letter drafted
+
+### Outstanding Work
+
+```text
+What remains?
+```
+
+Examples:
+
+* Review required
+* Missing attachments
+* Approval pending
+
+### Suggested Next Actions
+
+Examples:
+
+* Create follow-up task
+* Generate correspondence
+* Save to matter
+* Request review
+
+# New Architectural Domain: Trust & Governance
+
+R1 already includes strong foundations:
+
+* Confirmation Gates
+* Side Effect Classes
+* OBO Security
+* Citations
+* Eval Gates
+
+These should remain.
+
+## Additional Recommendation
+
+Introduce:
+
+```text
+Decision Traceability
+```
+
+This is separate from ToolChain logging.
+
+Example:
+
+```text
+User Request
+
+Context Used
+
+Memory Used
+
+Tools Selected
+
+Reasoning Outcome
+
+Approval Requirement
+
+Final Result
+```
+
+This improves explainability and user trust.
+
+## Risk Tier Model
+
+Recommended platform policy structure:
+
+### Tier 0
+
+```text
+Read
+```
+
+Examples:
+
+* Search
+* Summarize
+
+### Tier 1
+
+```text
+Draft
+```
+
+Examples:
+
+* Propose edits
+* Draft correspondence
+
+### Tier 2
+
+```text
+Create Records
+```
+
+Examples:
+
+* Create matter
+* Create project
+* Create task
+
+### Tier 3
+
+```text
+External Communications
+```
+
+Examples:
+
+* Send email
+* Client communications
+
+### Tier 4
+
+```text
+Business Commitments
+```
+
+Examples:
+
+* Financial actions
+* Formal legal commitments
+
+# Pluggable Intelligence Provider Architecture
+
+## Recommendation
+
+Treat intelligence services as providers.
+
+Not dependencies.
+
+## Proposed Model
+
+```text
+Spaarke Reasoning Runtime
         |
-        + Context Binder
-        + Capability Projection
-        + Planner / Loop
-        + Tool Orchestrator
-        + Session Ledger
-        + Confirmation Gate
-        + Evaluation Engine
-        + Renderer
-
-        |
-        v
-
-Capabilities + Tools
+        + Native Providers
+        + Work IQ Provider
+        + Foundry IQ Provider
+        + Future Providers
 ```
 
-This architectural promotion becomes especially important for future Work IQ and Foundry IQ integration.
+## Work IQ
 
----
+Most appropriate uses:
 
-## Proposed Runtime Responsibilities
+* Organizational context
+* People context
+* Meeting context
+* Email context
+* Workplace grounding
 
-### Intent Interpretation
+Microsoft describes Work IQ as providing personal memory, organizational understanding, context assembly, and workplace intelligence.
 
-Determine what the user is asking for:
+## Foundry IQ
+
+Most appropriate uses:
+
+* Knowledge retrieval
+* Enterprise knowledge bases
+* MCP-backed retrieval
+* Agentic search
+
+Less appropriate as a replacement for Workspace.
+
+# Azure Resource Strategy
+
+## Recommended Core Platform
+
+### Keep
 
 ```text
-Answer
-Execute
-Clarify
-Refuse
+Dataverse
 ```
 
----
+System of record.
 
-### Context Assembly
-
-Build a Context Envelope from:
-
-- Current matter
-- Current document
-- Workspace
-- Prior outputs
-- Uploaded content
-- User profile
-- Tenant settings
-- Available tools
-
-Future provider sources may include:
-
-- Work IQ context
-- Foundry IQ context
-
----
-
-### Capability Projection
-
-Determine:
+### Keep
 
 ```text
-What may be done?
+SharePoint Embedded
 ```
 
-not merely:
+System of work-product storage.
+
+### Keep
 
 ```text
-What exists?
+Azure AI Search
 ```
 
-Capability availability should become contextual.
+Primary semantic memory and retrieval platform.
 
----
-
-### Planning
-
-Determine whether the next step is:
-
-- Answer
-- Tool invocation
-- Clarifying question
-- Refusal
-- Workflow execution
-
----
-
-### Tool Orchestration
-
-Execute tools, workflows, and composites while enforcing budgets and governance.
-
----
-
-### State Management
-
-The Session Ledger should become the canonical memory layer for the conversation and work-product lifecycle.
-
----
-
-### Side Effect Control
-
-Use one gate, one approval model, and one policy engine.
-
----
-
-### Rendering
-
-Convert outcomes into:
-
-- Chat responses
-- Widgets
-- Drafts
-- Tasks
-- Workspace artifacts
-- Communications
-
----
-
-### Evaluation
-
-Every turn can be measured.
-
-Future evaluation dimensions may include:
-
-- Provider quality
-- Plan quality
-- Grounding quality
-- Tool success
-- Output usefulness
-
----
-
-## Future Provider Architecture
-
-The runtime should become provider-oriented.
-
-Proposed provider abstractions:
+### Keep
 
 ```text
-Reasoning Provider
-Context Provider
-Retrieval Provider
-Tool Provider
+Cosmos DB
 ```
 
-This allows Spaarke to support:
+Recommended storage for:
+
+* User Memory
+* Workspace Memory
+* Conversation Memory
+* Runtime Objects
+
+Strong fit due to:
+
+* flexibility
+* versioning
+* scalability
+
+### Use Dataverse Sparingly For Memory
+
+Dataverse should remain:
 
 ```text
-Spaarke Native
-Work IQ
-Foundry IQ
-Future Providers
-```
-
-without redesigning Assistant or Workspace.
-
----
-
-## Relationship to Work IQ
-
-Work IQ should not become the Spaarke Runtime.
-
-Instead:
-
-```text
-Spaarke Runtime
-    |
-    + Work IQ Context Provider
-```
-
-Work IQ can provide:
-
-- Email context
-- Meeting context
-- Organizational context
-- People context
-- Microsoft 365 grounding
-
-Spaarke should continue to own:
-
-- Legal workflows
-- Matters
-- Documents
-- Workspace
-- Governance
-
----
-
-## Relationship to Foundry IQ
-
-Foundry IQ should be viewed primarily as a retrieval provider.
-
-```text
-Spaarke Runtime
-    |
-    + Foundry IQ Retrieval Provider
-```
-
-Foundry IQ can provide:
-
-- Enterprise knowledge retrieval
-- MCP-backed knowledge
-- Grounding services
-
-without displacing Workspace.
-
----
-
-## Relationship to Microsoft 365 Copilot
-
-Microsoft 365 Copilot should be treated as:
-
-```text
-Optional Entry Point
+Business Records
 ```
 
 not:
 
 ```text
-Replacement Platform
+General AI Memory Store
 ```
 
-Preferred architecture:
+# Does Fabric Have A Role?
+
+## Yes, Potentially.
+
+But not as a primary memory system.
+
+## Recommended Fabric Use Cases
+
+### Organizational Intelligence
+
+Examples:
+
+* Matter trends
+* Knowledge utilization
+* Outside counsel analytics
+* Legal operations metrics
+
+### Enterprise Analytics
+
+Examples:
+
+* Cross-matter reporting
+* AI effectiveness analysis
+* User productivity analytics
+
+## Not Recommended
+
+Fabric should generally not become:
+
+* Conversation memory
+* User memory
+* Workspace memory
+
+Cosmos and Search are better aligned to those workloads.
+
+# Industry Best Practices (July 2026)
+
+## Memory Is Not A Vector Database
+
+Industry direction increasingly separates:
 
 ```text
-M365 Copilot
-       |
-Spaarke MCP
-       |
-Spaarke Runtime
-       |
-Workspace
+Structured Memory
 ```
 
-This preserves:
-
-- Workspace
-- Legal workflows
-- Matter management
-- Draft lifecycle
-
-while leveraging Microsoft enterprise intelligence where appropriate.
-
----
-
-## Recommended Future Phases
-
-### P5 — Runtime Formalization
-
-Create explicit runtime contracts, such as:
+from:
 
 ```text
-ReasoningRequest
-ReasoningDecision
-ContextEnvelope
-ToolInvocation
-LedgerWrite
+Semantic Memory
 ```
 
----
+Avoid storing all memory as embeddings.
 
-### P6 — Work IQ Provider
+## Memory Objects
 
-Introduce Work IQ as an optional context provider.
+Treat memory as explicit objects.
 
-Work IQ should be treated as a source of Microsoft 365 workplace context, not as a replacement runtime.
+Example:
 
----
+```json
+{
+  "scope": "user",
+  "type": "preference",
+  "value": "prefers concise summaries",
+  "source": "explicit",
+  "confidence": 1.0
+}
+```
 
-### P7 — Foundry IQ Provider
+## Context Assembly Layer
 
-Introduce Foundry IQ as an optional retrieval provider.
-
----
-
-### P8 — MCP Externalization
-
-Expose mature business capabilities such as:
-
-- Create Matter
-- Create Workspace Draft
-- Create Client Letter
-- Generate Matter Summary
-- Create Task
-
-rather than exposing only low-level CRUD.
-
----
-
-## Strategic Conclusion
-
-The current redesign is strongly aligned with the long-term evolution of enterprise AI systems.
-
-The architecture already contains most of the components required to support:
-
-- Native Spaarke intelligence
-- Work IQ
-- Foundry IQ
-- MCP
-- Microsoft 365 Copilot integrations
-- Future reasoning providers
-
-The most important next architectural step is to explicitly define and elevate:
+Modern agent architectures increasingly include:
 
 ```text
+Context Builder
+```
+
+or
+
+```text
+Context Assembler
+```
+
+as a dedicated subsystem.
+
+Spaarke should explicitly implement this concept.
+
+## Multi-Agent Future
+
+Do not optimize for this immediately.
+
+However future architecture should not prevent:
+
+```text
+Coordinator Agent
+    |
+    + Research Agent
+    + Drafting Agent
+    + Workspace Agent
+    + Matter Agent
+```
+
+Work IQ already supports agent-to-agent interaction patterns.
+
+# Updated Future-State Architecture
+
+```text
+Assistant
+      |
+      v
+
 Spaarke Reasoning Runtime
+
+      |
+      + Context Binder
+      + Planner
+      + Tool Orchestrator
+      + Gate Engine
+      + Evaluation Engine
+
+      |
+      v
+
+Spaarke Memory Service
+
+      |
+      + Conversation Memory
+      + User Memory
+      + Workspace Memory
+      + Organizational Memory
+      + Semantic Memory
+
+      |
+      + Work IQ Provider
+      + Foundry IQ Provider
+
+      |
+      v
+
+Capabilities
+
+      |
+      v
+
+Tools
+
+      |
+      v
+
+Dataverse
+SharePoint Embedded
+Azure AI Search
+Cosmos DB
 ```
 
-as a core platform layer.
+# Final Recommendation
 
-Future state:
+Following completion of R1, the highest-value architectural investments are:
 
-```text
-Assistant = User Experience
-Workspace = System of Work
-Reasoning Runtime = Orchestration Layer
-Capabilities = Business Functions
-Tools = Execution Surface
-Work IQ / Foundry IQ = Intelligence Providers
-M365 Copilot = Optional Enterprise Entry Point
-```
+1. Memory Architecture
+2. Context Architecture
+3. Workspace Intelligence
+4. Reasoning Runtime Formalization
+5. Pluggable Intelligence Provider Model
+6. Multi-Agent Readiness
 
-This positions Spaarke as a legal operating system with a pluggable intelligence architecture rather than a product dependent on any single AI vendor, model, or user interface.
+These investments are likely to create substantially more user-perceived intelligence than model upgrades alone, while preserving Spaarke's strategic differentiation around legal workflows, workspaces, matters, and enterprise legal operations.

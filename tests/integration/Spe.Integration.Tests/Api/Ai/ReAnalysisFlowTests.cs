@@ -87,7 +87,7 @@ public class ReAnalysisFlowTests : IClassFixture<ReAnalysisFlowTestFixture>
         var body = await response.Content.ReadAsStringAsync();
 
         // Assertion updated 2026-06-01 (RB-T028-03/04/05/06 repair): post-Phase-1b kill-switch,
-        // PlaybookDispatcher's PlaybookEmbeddingService (sealed concrete, not mocked) attempts
+        // the legacy dispatch path (retired by ai-architecture-redesign-r1 tasks 034/035) attempted
         // a real Azure Search call and surfaces RequestFailedException through SendMessageAsync's
         // catch block as a terminal SSE error chunk (data: {"type":"error", ...}). Pre-Phase-1b
         // this code path DI-resolved differently and reached the mock IChatClient producing
@@ -137,7 +137,7 @@ public class ReAnalysisFlowTests : IClassFixture<ReAnalysisFlowTestFixture>
 
         var body = await response.Content.ReadAsStringAsync();
         // Assertion updated 2026-06-01 (RB-T028-03/04/05/06 repair): post-Phase-1b kill-switch,
-        // PlaybookDispatcher reaches Azure Search and surfaces a terminal SSE error chunk
+        // the legacy dispatch path reached Azure Search and surfaced a terminal SSE error chunk
         // instead of token+done — see the rationale in ReAnalysis_HappyPath_*. This test
         // verifies the cost-control middleware is wired in the pipeline (200 OK + SSE envelope
         // emitted from the agent host), not the agent's token output. The actual budget
@@ -225,7 +225,7 @@ public class ReAnalysisFlowTests : IClassFixture<ReAnalysisFlowTestFixture>
 
         var body = await response.Content.ReadAsStringAsync();
         // Assertion updated 2026-06-01 (RB-T028-03/04/05/06 repair): post-Phase-1b kill-switch,
-        // PlaybookDispatcher reaches Azure Search and surfaces a terminal SSE error chunk
+        // the legacy dispatch path reached Azure Search and surfaced a terminal SSE error chunk
         // instead of token+done. This test verifies the agent factory wiring (200 OK, SSE
         // envelope present), which is the prerequisite for capability gating to function
         // when task 047 wires it up. Tracked under ADR-030.
@@ -331,7 +331,7 @@ public class ReAnalysisFlowTests : IClassFixture<ReAnalysisFlowTestFixture>
         using var doc = JsonDocument.Parse(lastJson);
         var lastType = doc.RootElement.GetProperty("type").GetString();
         // Assertion updated 2026-06-01 (RB-T028-03/04/05/06 repair): post-Phase-1b kill-switch,
-        // PlaybookDispatcher's PlaybookEmbeddingService surfaces RequestFailedException as a
+        // the legacy dispatch path surfaced RequestFailedException as a
         // terminal "error" chunk instead of "done". Pre-Phase-1b this code path streamed
         // token+done. The test now validates the stream is properly terminated with a
         // recognized terminal event type. Tracked under ADR-030.
@@ -515,7 +515,7 @@ public class ReAnalysisFlowTestFixture : WebApplicationFactory<Program>
             {
                 var chatClient = MockChatClient.Object;
                 var logger = NullLogger<SprkChatAgentFactory>.Instance;
-                return new SprkChatAgentFactory(chatClient, chatClient, sp, logger);
+                return new SprkChatAgentFactory(chatClient, sp, logger);
             });
 
             services.AddSingleton(MockChatClient.Object);
@@ -793,7 +793,7 @@ public class ReAnalysisFlowErrorFixture : ReAnalysisFlowTestFixture
             {
                 var chatClient = errorMockClient.Object;
                 var logger = NullLogger<SprkChatAgentFactory>.Instance;
-                return new SprkChatAgentFactory(chatClient, chatClient, sp, logger);
+                return new SprkChatAgentFactory(chatClient, sp, logger);
             });
         });
     }

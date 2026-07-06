@@ -245,7 +245,6 @@ This section is the operator's quick reference for "what data goes into which in
 | 4 | `spaarke-insights-index` | `Deploy-AllIndexes.ps1 -Indexes insights-index` (or Bicep `infra/insights/modules/search-index.bicep` — both valid per FR-11 resolved question) | `PrecedentProjectionSync` (Precedents) + pipeline re-run against event history (Observations) | Insights Bicep deployer retained for the insights index only; other 6 indexes are PowerShell-deployed |
 | 5 | `spaarke-session-files` | `Deploy-AllIndexes.ps1 -Indexes session-files` | (runtime — `FileIndexingService` + `PostUploadIndexingEnqueuer`; cleanup: `SessionFilesCleanupJob`) | Transient by design; sessions auto-cleaned per ADR-014; strict `tenantId + sessionId` pair-filter on every query |
 | 6 | `spaarke-invoices-index` | `Deploy-AllIndexes.ps1 -Indexes invoices-index` | (runtime — `InvoiceIndexingJobHandler`) | Schema-only for dev rebuild; MVP not in active testing |
-| 7 | `spaarke-playbook-embeddings` | `Deploy-AllIndexes.ps1 -Indexes playbook-embeddings` | `scripts/Index-ExistingPlaybooks.ps1 -Environment {env}` | Indexes Dataverse playbook catalog (admin key read from `AiSearch--AdminKey` per the 2026-06-26 script fix) |
 
 After every deploy + ingestion run, sanity-check non-zero document count for ingestible indexes:
 
@@ -341,7 +340,7 @@ Expect: `text-embedding-3-large`.
 
 ### 4.4 — Service Bus queue missing (ingestion jobs enqueue but never dequeue)
 
-**Symptom**: `Sync-RecordsToIndex.ps1` and `Index-ExistingPlaybooks.ps1` complete successfully (jobs enqueued) but no documents appear in the indexes. BFF logs show jobs being scheduled but no handler invocations.
+**Symptom**: `Sync-RecordsToIndex.ps1` completes successfully (jobs enqueued) but no documents appear in the indexes. BFF logs show jobs being scheduled but no handler invocations.
 
 **Root cause**: Service Bus queues `sdap-jobs` and/or `sdap-communication` are missing or disabled in the target environment's Service Bus namespace.
 
@@ -420,7 +419,7 @@ Invoke-RestMethod -Uri "$endpoint/indexes?api-version=2024-07-01" -Headers $head
   | Sort-Object name
 ```
 
-Expect 8 rows: `spaarke-discovery-index`, `spaarke-files-index`, `spaarke-insights-index`, `spaarke-invoices-index`, `spaarke-playbook-embeddings`, `spaarke-rag-references`, `spaarke-records-index`, `spaarke-session-files`. Any extra index (especially `spaarke-knowledge-index-v2`, `discovery-index` without the `spaarke-` prefix, `spaarke-knowledge-shared`) is a defect per the [retired-index appendix](../architecture/AI-SEARCH-INDEX-CATALOG.md#5-retired-indexes-appendix).
+Expect 7 rows: `spaarke-discovery-index`, `spaarke-files-index`, `spaarke-insights-index`, `spaarke-invoices-index`, `spaarke-rag-references`, `spaarke-records-index`, `spaarke-session-files`. (`spaarke-playbook-embeddings` was retired by ai-architecture-redesign-r1 task 035 / FR-P2-06 — an existing live index is a leftover to delete in the P4 sweep.) Any extra index (especially `spaarke-knowledge-index-v2`, `discovery-index` without the `spaarke-` prefix, `spaarke-knowledge-shared`) is a defect per the [retired-index appendix](../architecture/AI-SEARCH-INDEX-CATALOG.md#5-retired-indexes-appendix).
 
 ### 5.2 — Per-index field-flag verification
 
@@ -459,7 +458,7 @@ For `spaarke-rag-references`, expect the semantic config to reference field `doc
 ### 5.5 — Per-index document count
 
 ```powershell
-foreach ($name in @('spaarke-files-index','spaarke-discovery-index','spaarke-records-index','spaarke-rag-references','spaarke-insights-index','spaarke-session-files','spaarke-invoices-index','spaarke-playbook-embeddings')) {
+foreach ($name in @('spaarke-files-index','spaarke-discovery-index','spaarke-records-index','spaarke-rag-references','spaarke-insights-index','spaarke-session-files','spaarke-invoices-index')) {
     $count = Invoke-RestMethod -Uri "$endpoint/indexes/$name/docs/`$count?api-version=2024-07-01" -Headers $headers
     Write-Host ("{0,-35} count={1}" -f $name, $count)
 }
@@ -469,7 +468,6 @@ Expected post-ingestion for dev (per FR-18):
 
 - `spaarke-records-index` — non-zero (Dataverse records)
 - `spaarke-rag-references` — non-zero (KNW-*.md golden refs)
-- `spaarke-playbook-embeddings` — non-zero (Dataverse playbooks)
 - `spaarke-insights-index` — non-zero (Precedents at minimum; Observations after re-projection)
 - `spaarke-files-index`, `spaarke-discovery-index`, `spaarke-session-files`, `spaarke-invoices-index` — zero (schema-only for dev rebuild; discovery-index auto-populates when `RagIndexingPipeline` runs against files-index)
 
@@ -492,8 +490,8 @@ Invoke-RestMethod -Uri "$bff/healthz"
 # 4. Insights search (uses spaarke-insights-index)
 # POST /api/ai/insights/search
 
-# 5. Playbook dispatch (uses spaarke-playbook-embeddings)
-# Triggered via Dataverse action; verify Application Insights logs for successful dispatch routing
+# (The former item 5 — playbook dispatch via the retired embeddings index — was deleted
+#  by ai-architecture-redesign-r1 task 035 / FR-P2-06; the loop dispatches from Bindings.)
 ```
 
 See [`spec.md` FR-19](../../projects/spaarke-ai-azure-setup-dev-r1/spec.md) for the full functional acceptance criteria.

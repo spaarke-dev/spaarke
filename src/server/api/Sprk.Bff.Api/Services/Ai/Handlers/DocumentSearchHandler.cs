@@ -8,7 +8,7 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// <summary>
 /// Chat-side (and playbook-side) typed handler that performs document vector search over the
 /// tenant's knowledge index (R6 Wave 8). Replaces the legacy hardcoded
-/// <c>DocumentSearchTools</c> class previously instantiated in
+/// <c>DocumentSearch chat-tools</c> class previously instantiated in
 /// <c>SprkChatAgentFactory.ResolveTools</c>.
 /// </summary>
 /// <remarks>
@@ -526,7 +526,7 @@ public sealed class DocumentSearchHandler : IToolHandler
                 execution: new ToolExecutionMetadata { StartedAt = startedAt, CompletedAt = DateTimeOffset.UtcNow });
         }
 
-        // Discovery truncates content for preview (matches legacy DocumentSearchTools behavior).
+        // Discovery truncates content for preview (matches legacy DocumentSearch chat-tools behavior).
         var previews = response.Results
             .Select(r => r.Content.Length > DiscoveryExcerptCap
                 ? r.Content[..DiscoveryExcerptCap] + "..."
@@ -666,7 +666,7 @@ public sealed class DocumentSearchHandler : IToolHandler
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
-    // Formatting (preserved from legacy DocumentSearchTools so chat output is
+    // Formatting (preserved from legacy DocumentSearch chat-tools so chat output is
     // unchanged for end users)
     // ─────────────────────────────────────────────────────────────────────────────
 

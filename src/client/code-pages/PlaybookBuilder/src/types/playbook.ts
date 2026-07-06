@@ -38,12 +38,12 @@ export enum PlaybookNodeType {
 }
 
 // ---------------------------------------------------------------------------
-// Output Type Enum (R2 — typed output dispatch for PlaybookDispatcher)
+// Output Type Enum (R2 — typed output dispatch)
 // ---------------------------------------------------------------------------
 
 /**
  * Output types for DeliverOutput nodes.
- * Determines how the PlaybookDispatcher presents the final result to the user.
+ * Determines how the output layer presents the final result to the user.
  *
  *   text       — inline text/markdown response in chat
  *   dialog     — open a Code Page dialog (targetPage required)
@@ -128,9 +128,9 @@ export interface PlaybookNodeData {
   retryCount?: number;
 
   // HITL / autonomous execution flag (R2)
-  // When true, PlaybookDispatcher opens confirmation UI before executing.
+  // When true, the output layer opens confirmation UI before executing.
   // When false, executes autonomously. Default behavior is determined by
-  // outputType in PlaybookDispatcher (dialog → true, text → false).
+  // outputType (dialog → true, text → false).
   requiresConfirmation?: boolean;
 
   // Type-specific config (maps to sprk_configjson)
@@ -154,8 +154,8 @@ export interface PlaybookNodeData {
   // form hint here). 'both' is the chat-routing-redesign-r1 addition (renders inline in chat
   // AND opens a workspace tab). 'form-prefill' / 'side-effect' are the Pillar 5 enums for
   // pre-fill flows + fire-and-forget paths. Serialized into sprk_configjson via the
-  // DeliverOutput case in buildConfigJson(); read by PlaybookDispatcher /
-  // PlaybookOutputHandler / WorkspaceWidgetRegistry server-side.
+  // DeliverOutput case in buildConfigJson(); read server-side by the output
+  // routing layer / WorkspaceWidgetRegistry.
   destination?: 'chat' | 'workspace' | 'both' | 'form-prefill' | 'side-effect';
   widgetType?: string;
 

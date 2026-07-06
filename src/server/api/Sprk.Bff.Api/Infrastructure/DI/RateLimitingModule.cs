@@ -224,19 +224,9 @@ public static class RateLimitingModule
                 });
             });
 
-            // 12. AI Indexing - Playbook embedding indexing (ADR-016: 30 req/min, tenant-scoped)
-            options.AddPolicy("ai-indexing", context =>
-            {
-                var tenantId = context.User?.FindFirst("tid")?.Value
-                    ?? context.Request.Headers["X-Tenant-Id"].FirstOrDefault()
-                    ?? GetUserId(context);
-                return RateLimitPartition.GetFixedWindowLimiter(tenantId, _ => new FixedWindowRateLimiterOptions
-                {
-                    Window = TimeSpan.FromMinutes(1),
-                    PermitLimit = 30,
-                    QueueLimit = 5
-                });
-            });
+            // (Former policy 12 "ai-indexing" was DELETED by ai-architecture-redesign-r1
+            // task 035 / FR-P2-06 — its only consumer was the retired playbook-embeddings
+            // trigger endpoint.)
 
             // 13. AI Context - Read-heavy context resolution endpoints (ADR-016: 60 req/min/user)
             options.AddPolicy("ai-context", context =>

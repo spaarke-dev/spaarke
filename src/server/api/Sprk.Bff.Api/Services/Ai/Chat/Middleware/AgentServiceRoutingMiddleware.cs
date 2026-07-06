@@ -273,17 +273,6 @@ public sealed class AgentServiceRoutingMiddleware : ISprkChatAgent
         }
     }
 
-    /// <inheritdoc />
-    /// <remarks>
-    /// Pass-through to the inner agent. Compound intent detection always uses the direct
-    /// pipeline (raw IChatClient) for plan gating — routing does not apply here.
-    /// </remarks>
-    public Task<IReadOnlyList<FunctionCallContent>> DetectToolCallsAsync(
-        string message,
-        IReadOnlyList<AiChatMessage> history,
-        CancellationToken cancellationToken)
-        => _inner.DetectToolCallsAsync(message, history, cancellationToken);
-
     // ── Classification engine (NFR-03: synchronous, no I/O) ─────────────────
 
     /// <summary>

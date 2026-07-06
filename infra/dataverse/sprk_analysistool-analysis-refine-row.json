@@ -1,0 +1,48 @@
+{
+  "_comment_top": "spaarke-ai-architecture-redesign-r1 task 036 (FR-P2-07) — seed row for the AnalysisExecutionHandler 'refine' method: conversational refinement of the current analysis output via a focused inner LLM call.",
+  "_comment_routing": "Runtime invocation routes to AnalysisExecutionHandler via sprk_handlerclass; sprk_configuration.method = 'refine' selects the refinement pipeline. The active analysis id reaches the handler through ChatInvocationContext.AnalysisId (forwarded by ToolHandlerToAIFunctionAdapter from the session's AnalysisMetadata).",
+  "_comment_side_effect": "sprk_sideeffectclass = 100000000 (Read) — fetches the current analysis output, transforms it with an inner LLM call, and returns text to the conversation. No persistence; never gated by class.",
+  "_comment_identity": "The analysis read (IAnalysisOrchestrationService.GetAnalysisAsync) runs under application identity (audit F-2c-adjacent; G-P0 ruling accept-until-cutover). sprk_permissionscope = 'app-only-engine' declares it; P3 task 044 remediates the surviving app-only legs.",
+  "_comment_capability_gate": "sprk_requiredcapability = 'reanalyze' — same gate as the sibling ANALYSIS-RERUN row (both lived behind the legacy 'reanalyze' capability block).",
+  "_comment_consumption": "Read by scripts/Seed-TypedHandlers.ps1. Idempotent — UPSERT by sprk_toolcode with sprk_name 'SYS-%' safety filter.",
+  "sprk_name": "SYS-Analysis Refine",
+  "sprk_toolcode": "ANALYSIS-REFINE",
+  "sprk_toolid": "analysis.refine",
+  "sprk_namespace": "analysis",
+  "sprk_sideeffectclass": 100000000,
+  "sprk_permissionscope": "app-only-engine",
+  "sprk_budgetclass": "standard",
+  "sprk_requiredcapability": "reanalyze",
+  "sprk_description": "Refine the current analysis output based on a conversational follow-up instruction — adjust, expand, or narrow the existing analysis without re-running it (e.g. 'focus more on the risk factors', 'make the recommendations more actionable'). Fetches the session's current analysis output and applies the instruction with a focused single-turn transform, returning the complete refined analysis text. Requires an active analysis in the session.",
+  "sprk_handlerclass": "AnalysisExecutionHandler",
+  "sprk_availableincontexts": 100000001,
+  "_comment_availableincontexts": "100000001 = Chat only — mirrors the legacy chat-only exposure.",
+  "sprk_jsonschema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "analysis.refine Request",
+    "description": "Argument shape for chat-driven analysis refinement.",
+    "type": "object",
+    "required": ["refinementInstruction"],
+    "properties": {
+      "refinementInstruction": {
+        "type": "string",
+        "minLength": 1,
+        "description": "The specific refinement instruction to apply to the current analysis output."
+      }
+    },
+    "additionalProperties": false
+  },
+  "sprk_outputschema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "analysis.refine Result",
+    "type": "object",
+    "properties": {
+      "method": { "const": "refine" },
+      "text": { "type": "string", "description": "The complete refined analysis text." }
+    }
+  },
+  "sprk_configuration": {
+    "_comment": "method = 'refine' is the dispatch discriminator. Sibling row ANALYSIS-RERUN exposes the rerun method.",
+    "method": "refine"
+  }
+}

@@ -471,11 +471,10 @@ public class AgentTurnLoopContractTests
             });
 
         var agent = new SprkChatAgent(
-            chatClient.Object, Mock.Of<IChatClient>(),
+            chatClient.Object,
             new ChatContext(SystemPrompt: "sp", DocumentSummary: null, AnalysisMetadata: null, PlaybookId: null),
             tools: [],
             citationContext: citations,
-            new CompoundIntentDetector(Mock.Of<ILogger<CompoundIntentDetector>>()),
             Mock.Of<ILogger<SprkChatAgent>>(),
             turn);
 
@@ -500,10 +499,9 @@ public class AgentTurnLoopContractTests
     {
         var turn = new AgentTurnContract(8);
         ISprkChatAgent agent = new SprkChatAgent(
-            Mock.Of<IChatClient>(), Mock.Of<IChatClient>(),
+            Mock.Of<IChatClient>(),
             new ChatContext(SystemPrompt: "sp", DocumentSummary: null, AnalysisMetadata: null, PlaybookId: null),
             tools: [], citationContext: null,
-            new CompoundIntentDetector(Mock.Of<ILogger<CompoundIntentDetector>>()),
             Mock.Of<ILogger<SprkChatAgent>>(),
             turn);
 

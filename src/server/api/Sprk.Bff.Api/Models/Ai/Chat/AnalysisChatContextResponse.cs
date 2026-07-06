@@ -26,7 +26,7 @@ namespace Sprk.Bff.Api.Models.Ai.Chat;
 /// </param>
 /// <param name="SearchGuidance">
 /// Scope-level search guidance from <c>sprk_searchGuidance</c> on the active scope(s).
-/// Consumed by <see cref="Services.Ai.Chat.Tools.WebSearchTools"/> for scope-guided web search (FR-10).
+/// Consumed by <see cref="Services.Ai.Handlers.WebSearchHandler"/> for scope-guided web search (FR-10).
 /// Null when no scopes have search guidance configured.
 /// </param>
 /// <param name="ScopeMetadata">

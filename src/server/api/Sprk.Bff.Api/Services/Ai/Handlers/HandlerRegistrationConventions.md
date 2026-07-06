@@ -84,7 +84,7 @@ Some chat tools are intentionally restricted to playbooks that opt-in via the `s
 | LegalResearch | `legal_research` | Bing Grounding cost + governance scope (ADR-015) |
 | WebSearch | `web_search` | External egress — only playbooks with explicit web-search permission |
 | CodeInterpreter | `code_interpreter` | Sandbox code execution — explicit data-governance opt-in (ADR-018) |
-| WorkingDocumentTools (write_back) | `write_back` | Mutating tool — limited to playbooks that target the active document |
+| WorkingDocument chat-tools (write_back) | `write_back` | Mutating tool — limited to playbooks that target the active document |
 
 **Contract** (R6 Wave 7b infrastructure):
 

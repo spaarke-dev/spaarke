@@ -11,12 +11,10 @@ using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat.Middleware;
-using Sprk.Bff.Api.Services.Ai.Chat.Tools;
 using Sprk.Bff.Api.Services.Ai.Export;
 using Sprk.Bff.Api.Services.Ai.Foundry;
 using Sprk.Bff.Api.Models.Workspace;
 using Sprk.Bff.Api.Services.Ai.Memory;
-using Sprk.Bff.Api.Services.Ai.PlaybookEmbedding;
 using Sprk.Bff.Api.Services.Ai.Safety.Citations;
 using Sprk.Bff.Api.Services.Workspace;
 
@@ -52,18 +50,15 @@ namespace Sprk.Bff.Api.Services.Ai.Chat;
 public class SprkChatAgentFactory
 {
     private readonly IChatClient _chatClient;
-    private readonly IChatClient _rawChatClient;
     private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<SprkChatAgentFactory> _logger;
 
     public SprkChatAgentFactory(
         IChatClient chatClient,
-        [FromKeyedServices("raw")] IChatClient rawChatClient,
         IServiceProvider serviceProvider,
         ILogger<SprkChatAgentFactory> logger)
     {
         _chatClient = chatClient;
-        _rawChatClient = rawChatClient;
         _serviceProvider = serviceProvider;
         _logger = logger;
     }
@@ -82,7 +77,6 @@ public class SprkChatAgentFactory
     protected SprkChatAgentFactory(ILogger<SprkChatAgentFactory> logger)
     {
         _chatClient = null!;
-        _rawChatClient = null!;
         _serviceProvider = null!;
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -111,8 +105,9 @@ public class SprkChatAgentFactory
     /// cross-referencing. Propagated to <see cref="ChatKnowledgeScope.AdditionalDocumentIds"/>.
     /// </param>
     /// <param name="httpContext">
-    /// HTTP context for OBO authentication. Required by <see cref="AnalysisExecutionTools"/> to call
-    /// <see cref="IAnalysisOrchestrationService.ExecutePlaybookAsync"/> which downloads files from SPE.
+    /// HTTP context for OBO authentication — source of the principal's oid claim and of the
+    /// document-stream SSE writer for catalog-projected handlers (e.g. the analysis-rerun
+    /// handler's SPE file downloads via <see cref="IAnalysisOrchestrationService.ExecutePlaybookAsync"/>).
     /// May be null for non-streaming contexts (e.g., background processing).
     /// </param>
     /// <param name="sseWriter">
@@ -405,7 +400,7 @@ public class SprkChatAgentFactory
         // (R5 Gap A — path A vs path B parallelism is a smell; structurally eliminated here).
         //
         // The resolved playbook ID arrives via the explicit `playbookId` parameter (resolved
-        // upstream by PlaybookDispatcher in ChatEndpoints). Semantics: when there is a
+        // upstream in ChatEndpoints). Semantics: when there is a
         // confident playbook resolution and its terminal destination is not chat, suppress
         // LLM inline analysis (R5 Gap A — path A vs path B parallelism is a smell;
         // structurally eliminated here).
@@ -494,21 +489,21 @@ public class SprkChatAgentFactory
         }
         // === End FR-24 dedup ============================================================
 
-        // Create a shared CitationContext for search tools to populate with source metadata.
-        // This context is passed to DocumentSearchTools and KnowledgeRetrievalTools so they
-        // can register citations during tool execution. The SprkChatAgent resets it before
-        // each message to keep citation numbering scoped per assistant response.
+        // Create a shared CitationContext for search handlers to populate with source
+        // metadata (via ToolResult.Metadata post-processing in the adapter). The
+        // SprkChatAgent resets it before each message to keep citation numbering scoped
+        // per assistant response.
         var citationContext = new CitationContext();
 
-        // Extract analysisId from AnalysisMetadata for WorkingDocumentTools write-back.
-        // This is the sprk_analysisoutput record GUID — populated when SprkChat is launched
-        // from the Analysis Workspace with full context (task 002, task 020).
+        // Extract analysisId from AnalysisMetadata for the write-back / analysis-refinement
+        // handlers. This is the sprk_analysisoutput record GUID — populated when SprkChat is
+        // launched from the Analysis Workspace with full context (task 002, task 020).
         var analysisId = context.AnalysisMetadata?.GetValueOrDefault("analysisId");
 
         // Resolve AIFunction tools. FR-23 per-playbook tool filtering is enforced via the
         // `capabilities` set above (matched-playbook capabilities OR always-on core capabilities).
         var catalogProjector = new AgentToolCatalogProjector(
-            _chatClient, _logger, BuildInvokePlaybookDescriptionAsync);
+            _logger, BuildInvokePlaybookDescriptionAsync);
         var tools = (await catalogProjector.ResolveToolsAsync(
             scope.ServiceProvider, tenantId, sessionId, context.KnowledgeScope, capabilities,
             playbookId ?? Guid.Empty, documentId, analysisId, httpContext, sseWriter, citationContext,
@@ -642,16 +637,12 @@ public class SprkChatAgentFactory
             playbookId, finalTools.Count, context.DocumentSummary != null);
 
         var agentLogger = scope.ServiceProvider.GetRequiredService<ILogger<SprkChatAgent>>();
-        var loggerFactory = scope.ServiceProvider.GetRequiredService<ILoggerFactory>();
-        var intentLogger = loggerFactory.CreateLogger<CompoundIntentDetector>();
 
         ISprkChatAgent agent = new SprkChatAgent(
             _chatClient,
-            _rawChatClient,
             context,
             finalTools,
             citationContext,
-            new CompoundIntentDetector(intentLogger),
             agentLogger,
             turnContract);
 
@@ -719,48 +710,8 @@ public class SprkChatAgentFactory
         return agent;
     }
 
-    /// <summary>
-    /// Factory-instantiates a <see cref="PlaybookDispatcher"/> for the given tenant.
-    ///
-    /// ADR-010: PlaybookDispatcher is NOT registered in DI — it is created here with
-    /// resolved dependencies from the scoped service provider.
-    ///
-    /// Dependencies resolved from DI:
-    ///   - <see cref="SearchIndexClient"/> (singleton) — for PlaybookEmbeddingService
-    ///   - <see cref="IOpenAiClient"/> (singleton) — for PlaybookEmbeddingService
-    ///   - <see cref="INodeService"/> (scoped) — for output node metadata lookup
-    ///   - <see cref="IDistributedCache"/> (singleton) — for result caching (ADR-009)
-    /// </summary>
-    /// <param name="tenantId">Tenant ID for cache key scoping (ADR-014).</param>
-    /// <param name="cancellationToken">Cancellation token.</param>
-    /// <returns>A configured <see cref="PlaybookDispatcher"/> instance.</returns>
-    public virtual async Task<PlaybookDispatcher> CreatePlaybookDispatcherAsync(
-        string tenantId,
-        CancellationToken cancellationToken = default)
-    {
-        await using var scope = _serviceProvider.CreateAsyncScope();
-        var loggerFactory = scope.ServiceProvider.GetRequiredService<ILoggerFactory>();
-
-        // Resolve dependencies for PlaybookEmbeddingService (factory-instantiated)
-        var searchIndexClient = scope.ServiceProvider.GetRequiredService<SearchIndexClient>();
-        var openAiClient = scope.ServiceProvider.GetRequiredService<IOpenAiClient>();
-        var embeddingService = new PlaybookEmbeddingService(
-            searchIndexClient,
-            openAiClient,
-            loggerFactory.CreateLogger<PlaybookEmbeddingService>());
-
-        // Resolve remaining dependencies
-        var nodeService = scope.ServiceProvider.GetRequiredService<INodeService>();
-        var cache = scope.ServiceProvider.GetRequiredService<Sprk.Bff.Api.Infrastructure.Cache.ITenantCache>();
-
-        return new PlaybookDispatcher(
-            embeddingService,
-            _rawChatClient,
-            nodeService,
-            cache,
-            tenantId,
-            loggerFactory.CreateLogger<PlaybookDispatcher>());
-    }
+    // FR-P2-06 (task 035): the dispatcher factory method was DELETED with the dispatcher
+    // stack (ADR-039 — the agent-turn loop is the ONE dispatch protocol).
 
     /// <summary>
     /// Factory-instantiates a <see cref="DynamicCommandResolver"/> for the given tenant.
@@ -785,32 +736,8 @@ public class SprkChatAgentFactory
             loggerFactory.CreateLogger<DynamicCommandResolver>());
     }
 
-    /// <summary>
-    /// Factory-instantiates a <see cref="PlaybookOutputHandler"/> for routing typed playbook outputs.
-    ///
-    /// ADR-010: PlaybookOutputHandler is NOT registered in DI — it is created here with
-    /// resolved dependencies from the scoped service provider.
-    ///
-    /// Dependencies:
-    ///   - <see cref="CompoundIntentDetector"/> (stateless, instantiated directly)
-    ///   - <see cref="DocxExportService"/> (resolved from DI via <see cref="IExportService"/>)
-    /// </summary>
-    /// <returns>A configured <see cref="PlaybookOutputHandler"/> instance.</returns>
-    public virtual PlaybookOutputHandler CreatePlaybookOutputHandler()
-    {
-        using var scope = _serviceProvider.CreateScope();
-        var loggerFactory = scope.ServiceProvider.GetRequiredService<ILoggerFactory>();
-
-        var intentDetector = new CompoundIntentDetector(
-            loggerFactory.CreateLogger<CompoundIntentDetector>());
-
-        var docxExport = scope.ServiceProvider.GetRequiredService<DocxExportService>();
-
-        return new PlaybookOutputHandler(
-            intentDetector,
-            docxExport,
-            loggerFactory.CreateLogger<PlaybookOutputHandler>());
-    }
+    // FR-P2-06 (task 035): the playbook-output-router factory method was DELETED — its sole caller was
+    // the dead /api/ai/playbook-dispatch/execute click endpoint removed in the same task.
 
     // === Private helpers ===
 

@@ -423,7 +423,7 @@ export interface IChatSseEventData {
 /**
  * A single playbook candidate surfaced in a `playbook_options` SSE event.
  * Mirrors the BFF `PlaybookOptionCandidate` record in
- * `Sprk.Bff.Api.Services.Ai.Chat.SseEventTypes.PlaybookOptionsSseEvent`.
+ * the retired BFF options SSE event type (deleted in task 035 / FR-P2-06).
  *
  * ADR-015: All fields are tier-1 safe — admin-facing display name + opaque IDs +
  * controlled-vocabulary reason. No user message content, no file content.
@@ -448,10 +448,9 @@ export interface IPlaybookOptionCandidate {
 }
 
 /**
- * Payload for the `playbook_options` SSE event emitted by the BFF after
- * file-aware classification. Locked by spec FR-49.
- *
- * @see `Sprk.Bff.Api.Services.Ai.Chat.SseEventTypes.PlaybookOptionsSseEventData`
+ * Payload for the legacy `playbook_options` SSE event. The BFF stopped emitting
+ * this event at the FR-P2-05/06 hard cutover (ai-architecture-redesign-r1 tasks
+ * 034/035); the client handler surface is P3 FR-P3-06 consolidation scope.
  */
 export interface IPlaybookOptionsPayload {
   /**
@@ -469,7 +468,7 @@ export interface IPlaybookOptionsPayload {
    * MIME types, sizes, or content (ADR-015 tier-1).
    */
   sessionAttachmentIds: string[];
-  /** Whether the upstream `IIntentRerankerService` was invoked to refine the list. */
+  /** Whether the upstream (retired) rerank service was invoked to refine the list. */
   rerankInvoked: boolean;
   /**
    * Controlled-vocabulary tag explaining the rerank outcome. `null`/absent when

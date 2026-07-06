@@ -51,9 +51,7 @@ Sprk.Bff.Api/
 │           ├── IChatContextProvider.cs     # Context resolution interface
 │           ├── PlaybookChatContextProvider.cs # Playbook-driven context + entity scope
 │           ├── SprkChatAgentFactory.cs     # Agent construction with context
-│           └── Tools/
-│               ├── DocumentSearchTools.cs  # Entity-scoped search discovery
-│               └── KnowledgeRetrievalTools.cs # Knowledge source-scoped retrieval
+│           └── AgentToolCatalogProjector.cs # Closed-catalog tool projection (ADR-039)
 ├── Filters/                               # Endpoint filters for auth (ADR-008)
 │   └── DocumentAuthorizationFilter.cs
 └── appsettings.json                       # Configuration template
@@ -277,7 +275,8 @@ The Chat system provides playbook-driven conversational AI with entity-scoped RA
 ```
 ChatEndpoints → ChatSessionManager → SprkChatAgentFactory
   → PlaybookChatContextProvider → ChatKnowledgeScope
-    → DocumentSearchTools / KnowledgeRetrievalTools → RagService → Azure AI Search
+    → AgentToolCatalogProjector (sprk_analysistool rows → DocumentSearchHandler /
+      KnowledgeRetrievalHandler / ...) → RagService → Azure AI Search
 ```
 
 HostContext flows through every layer. When null, search remains tenant-wide (backward compatible).

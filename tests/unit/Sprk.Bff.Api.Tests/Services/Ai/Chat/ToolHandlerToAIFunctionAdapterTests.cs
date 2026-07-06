@@ -861,7 +861,7 @@ public class ToolHandlerToAIFunctionAdapterTests
     // Per ADR-033 §3.1 the typed handler (WorkingDocumentHandler, Stage 3) reads the field
     // from context and degrades gracefully when null — the adapter MUST NOT coalesce null to
     // a no-op delegate (that's a legacy-class-only fallback inside the factory's hardcoded
-    // WorkingDocumentTools block).
+    // WorkingDocument chat-tools block).
 
     [Fact]
     public async Task InvokeAsync_DocumentStreamWriter_NonNull_ForwardedToContext()

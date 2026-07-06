@@ -10,17 +10,13 @@ namespace Sprk.Bff.Api.Services.Ai.Chat;
 /// (design decision D12 / FR-P2-02, <c>spaarke-ai-architecture-redesign-r1</c> task 031).
 ///
 /// Every suspended side-effecting invocation lives here until the user confirms or
-/// rejects it:
-/// <list type="bullet">
-///   <item><b>Generalized invocations</b> (<see cref="PendingInvocation"/>) — write/communicate
-///   tool calls suspended by the agent-turn loop, must-click capability confirmations
-///   (FR-48), and any other side-effect awaiting explicit user consent. Keyed per gate id;
-///   suspend/resume/reject via <see cref="SuspendInvocationAsync"/> /
-///   <see cref="ResumeInvocationAsync"/> / <see cref="RejectInvocationAsync"/>.</item>
-///   <item><b>Compound plans</b> (<see cref="PendingPlan"/>) — the plan-preview presentation
-///   of the same gate (session-singleton key; approve via
-///   <c>POST /api/ai/chat/sessions/{sessionId}/plan/approve</c>).</item>
-/// </list>
+/// rejects it: <b>generalized invocations</b> (<see cref="PendingInvocation"/>) —
+/// write/communicate tool calls suspended by the agent-turn loop, must-click capability
+/// confirmations (FR-48), and any other side-effect awaiting explicit user consent.
+/// Keyed per gate id; suspend/resume/reject via <see cref="SuspendInvocationAsync"/> /
+/// <see cref="ResumeInvocationAsync"/> / <see cref="RejectInvocationAsync"/>.
+/// (The legacy plan-shaped session-singleton entries were DELETED by task 035 / FR-P2-06
+/// with the dispatcher stack that produced them.)
 ///
 /// <b>Gating policy (ADR-039)</b>: whether an invocation needs the gate is decided by
 /// <see cref="RequiresConfirmation(ToolSideEffectClass?, BindingRisk, bool)"/> from the
@@ -60,11 +56,8 @@ namespace Sprk.Bff.Api.Services.Ai.Chat;
 /// </summary>
 public class PendingPlanManager
 {
-    /// <summary>Absolute TTL for pending gate entries — plans AND generalized invocations (task 070 design).</summary>
+    /// <summary>Absolute TTL for pending gate entries (task 070 design).</summary>
     internal static readonly TimeSpan PendingPlanTtl = TimeSpan.FromMinutes(30);
-
-    /// <summary>Tenant-cache resource name for pending plan payloads (FR-05).</summary>
-    internal const string CacheResource = "pending-plan";
 
     /// <summary>Tenant-cache resource name for generalized pending-invocation payloads (D12).</summary>
     internal const string GateCacheResource = "pending-gate";
@@ -92,14 +85,6 @@ public class PendingPlanManager
 
     /// <summary>Ledger vocabulary: gate status <c>superseded</c> (user broke out — hard slash / explicit restart / new work).</summary>
     public const string GateStatusSuperseded = "superseded";
-
-    /// <summary>
-    /// Reproduces the on-wire cache key produced by <see cref="ITenantCache"/> for legacy
-    /// test consumers that asserted on the raw Redis key shape pre-FR-05.
-    /// Format: <c>tenant:{tenantId}:pending-plan:{sessionId}:v1</c>.
-    /// </summary>
-    internal static string BuildPendingPlanKey(string tenantId, string sessionId)
-        => $"tenant:{tenantId}:{CacheResource}:{sessionId}:v{CacheVersion}";
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -338,10 +323,9 @@ public class PendingPlanManager
 
     /// <summary>
     /// Writes a <see cref="SessionGate"/> ledger marker WITHOUT a store payload — for gate
-    /// presentations whose resumable state lives elsewhere in this same store (the
-    /// plan-preview flow keys its <see cref="PendingPlan"/> per session; the FR-48
-    /// must-click options flow resolves by user click). Task 032 (loop-native elicitation)
-    /// uses this for its in-flight <c>elicitation</c> markers.
+    /// presentations whose resolution happens outside the payload store (e.g. resolved
+    /// directly by a user click). Task 032 (loop-native elicitation) uses this for its
+    /// in-flight <c>elicitation</c> markers.
     /// </summary>
     /// <returns>The stored entry (with allocated turn), or null when the session no longer exists.</returns>
     public virtual async Task<SessionGate?> WriteGateMarkerAsync(
@@ -549,9 +533,11 @@ public class PendingPlanManager
 
     private static string BuildGateKey(string sessionId, string gateId) => $"{sessionId}:{gateId}";
 
-    // =========================================================================
-    // Plan-shaped gate entries (plan-preview presentation of the same gate)
-    // =========================================================================
+    // FR-P2-06 (task 035): the plan-shaped session-singleton entries (StoreAsync /
+    // GetAsync / GetAndDeleteAsync / DeleteAsync over the legacy plan record) were
+    // DELETED with the dispatcher stack and the /plan/approve endpoint — nothing
+    // produced or consumed them after the FR-P2-05 cutover. The generalized
+    // PendingInvocation store above IS the ONE gate.
 
     /// <summary>
     /// Protected constructor used only by <see cref="NullPendingPlanManager"/> when the
@@ -567,114 +553,5 @@ public class PendingPlanManager
         _cache = null!;
         _sessionManager = null!;
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-    }
-
-    /// <summary>
-    /// Stores a pending plan in Redis with the 30-minute TTL.
-    /// Overwrites any existing pending plan for the session.
-    /// </summary>
-    /// <param name="plan">The pending plan to store.</param>
-    /// <param name="ct">Cancellation token.</param>
-    public virtual async Task StoreAsync(PendingPlan plan, CancellationToken ct = default)
-    {
-        // Tenant-scoped via ITenantCache per FR-05. PendingPlan is JSON-serialised
-        // by the wrapper using the same JsonSerializerOptions defaults; we keep the
-        // pre-migration camelCase casing by serialising through SetStringAsync.
-        var json = JsonSerializer.Serialize(plan, JsonOptions);
-        await _cache.SetStringAsync(
-            plan.TenantId,
-            CacheResource,
-            plan.SessionId,
-            CacheVersion,
-            json,
-            ttl: PendingPlanTtl,
-            ct: ct);
-
-        _logger.LogInformation(
-            "PendingPlan stored — planId={PlanId}, session={SessionId}, tenant={TenantId}, steps={StepCount}, ttl=30m",
-            plan.PlanId, plan.SessionId, plan.TenantId, plan.Steps.Length);
-    }
-
-    /// <summary>
-    /// Retrieves the pending plan for the given session without deleting it.
-    /// Returns null if no pending plan exists (e.g., expired or never created).
-    /// </summary>
-    /// <param name="tenantId">Tenant ID (ADR-014 tenant isolation).</param>
-    /// <param name="sessionId">Session ID.</param>
-    /// <param name="ct">Cancellation token.</param>
-    public virtual async Task<PendingPlan?> GetAsync(string tenantId, string sessionId, CancellationToken ct = default)
-    {
-        var json = await _cache.GetStringAsync(
-            tenantId, CacheResource, sessionId, CacheVersion, ct: ct);
-
-        if (json is null)
-        {
-            _logger.LogDebug(
-                "PendingPlan not found (expired or never created) — session={SessionId}, tenant={TenantId}",
-                sessionId, tenantId);
-            return null;
-        }
-
-        return JsonSerializer.Deserialize<PendingPlan>(json, JsonOptions);
-    }
-
-    /// <summary>
-    /// Atomically retrieves and deletes the pending plan for the given session.
-    ///
-    /// Used by <c>POST /plan/approve</c> to prevent double-execution:
-    /// - First approval request: finds the key, deletes it, returns the plan → proceed with execution.
-    /// - Second (duplicate) approval request: key already gone → returns null → caller returns 409 Conflict.
-    ///
-    /// Note: IDistributedCache does not provide true atomic get+delete (it requires Lua scripts
-    /// or the StackExchange.Redis API directly). This implementation uses a two-step approach
-    /// (get then delete) which is safe for the approval scenario because:
-    ///   1. The TTL window (30 min) makes the race window very narrow.
-    ///   2. Plan approval is a deliberate user action, not a high-frequency operation.
-    ///   3. The planId validation provides an additional idempotency check.
-    /// </summary>
-    /// <param name="tenantId">Tenant ID.</param>
-    /// <param name="sessionId">Session ID.</param>
-    /// <param name="ct">Cancellation token.</param>
-    /// <returns>The pending plan, or null if not found (expired or already deleted).</returns>
-    public virtual async Task<PendingPlan?> GetAndDeleteAsync(string tenantId, string sessionId, CancellationToken ct = default)
-    {
-        var json = await _cache.GetStringAsync(
-            tenantId, CacheResource, sessionId, CacheVersion, ct: ct);
-
-        if (json is null)
-        {
-            _logger.LogInformation(
-                "PendingPlan not found on approval attempt — session={SessionId}, tenant={TenantId} (expired or already approved)",
-                sessionId, tenantId);
-            return null;
-        }
-
-        // Delete the key before parsing — ensures the plan is not approved twice
-        // even in a race condition (the second request will find null after the delete)
-        await _cache.RemoveAsync(tenantId, CacheResource, sessionId, CacheVersion, ct: ct);
-
-        var plan = JsonSerializer.Deserialize<PendingPlan>(json, JsonOptions);
-
-        _logger.LogInformation(
-            "PendingPlan retrieved and deleted for approval — planId={PlanId}, session={SessionId}, tenant={TenantId}",
-            plan?.PlanId, sessionId, tenantId);
-
-        return plan;
-    }
-
-    /// <summary>
-    /// Deletes the pending plan for the given session without returning it.
-    /// Used when the user cancels or the session is closed.
-    /// </summary>
-    /// <param name="tenantId">Tenant ID.</param>
-    /// <param name="sessionId">Session ID.</param>
-    /// <param name="ct">Cancellation token.</param>
-    public virtual async Task DeleteAsync(string tenantId, string sessionId, CancellationToken ct = default)
-    {
-        await _cache.RemoveAsync(tenantId, CacheResource, sessionId, CacheVersion, ct: ct);
-
-        _logger.LogDebug(
-            "PendingPlan deleted — session={SessionId}, tenant={TenantId}",
-            sessionId, tenantId);
     }
 }

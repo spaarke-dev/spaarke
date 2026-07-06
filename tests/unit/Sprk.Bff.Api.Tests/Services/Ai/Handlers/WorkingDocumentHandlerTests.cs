@@ -18,7 +18,7 @@ namespace Sprk.Bff.Api.Tests.Services.Ai.Handlers;
 
 /// <summary>
 /// Unit tests for <see cref="WorkingDocumentHandler"/> (R6 Wave 9 — replaces the legacy
-/// hardcoded <c>WorkingDocumentTools</c> class previously instantiated in
+/// hardcoded <c>WorkingDocument chat-tools</c> class previously instantiated in
 /// <see cref="SprkChatAgentFactory"/>). Closes the Q9 chat-tool migration at 10/10.
 /// </summary>
 /// <remarks>
@@ -50,7 +50,7 @@ namespace Sprk.Bff.Api.Tests.Services.Ai.Handlers;
 /// <para>
 /// <strong>R6 Wave 9 dispatch note (Stage 3)</strong>: this test file assumes
 /// <see cref="ChatInvocationContext"/> carries an optional <c>AnalysisId</c> field. The legacy
-/// <c>WorkingDocumentTools</c> received <c>analysisId</c> via constructor capture from
+/// <c>WorkingDocument chat-tools</c> received <c>analysisId</c> via constructor capture from
 /// <see cref="SprkChatAgentFactory.ResolveTools"/>; under the ADR-033 typed-handler model the
 /// handler must resolve it from the per-call context. If the field has not yet been added by
 /// Stage 2 (ADR-033 §4.1 currently documents only <c>DocumentStreamWriter</c>) or by main session

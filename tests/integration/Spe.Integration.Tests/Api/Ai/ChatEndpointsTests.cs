@@ -124,7 +124,7 @@ public class ChatEndpointsTests : IClassFixture<ChatEndpointsTestFixture>
 
         var body = await response.Content.ReadAsStringAsync();
         // Assertion updated 2026-06-01 (RB-T028-03/04/05/06 repair): post-Phase-1b kill-switch,
-        // PlaybookDispatcher's PlaybookEmbeddingService (sealed concrete, not mocked) attempts a
+        // the legacy dispatch path (retired by ai-architecture-redesign-r1 tasks 034/035) attempted a
         // real Azure Search call and surfaces RequestFailedException through SendMessageAsync's
         // catch block as a terminal SSE error chunk (data: {"type":"error", ...}). Pre-Phase-1b
         // this code path DI-resolved differently and reached the mock IChatClient producing
@@ -522,7 +522,7 @@ public class ChatEndpointsTestFixture : WebApplicationFactory<Program>
             {
                 var chatClient = MockChatClient.Object;
                 var logger = NullLogger<SprkChatAgentFactory>.Instance;
-                return new SprkChatAgentFactory(chatClient, chatClient, sp, logger);
+                return new SprkChatAgentFactory(chatClient, sp, logger);
             });
 
             // Register IChatClient mock for RefineText endpoint and SprkChatAgentFactory.

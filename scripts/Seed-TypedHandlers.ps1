@@ -250,6 +250,16 @@ $RowFiles = @{
     "DATAVERSE-CREATE-RECORD"          = "$RepoRoot/infra/dataverse/sprk_analysistool-dataverse-create-record-row.json"
     "DATAVERSE-UPDATE-RECORD"          = "$RepoRoot/infra/dataverse/sprk_analysistool-dataverse-update-record-row.json"
     "DATAVERSE-DELETE-RECORD"          = "$RepoRoot/infra/dataverse/sprk_analysistool-dataverse-delete-record-row.json"
+
+    # spaarke-ai-architecture-redesign-r1 task 036 (FR-P2-07) — AnalysisExecutionHandler
+    # serves 2 rows via the method discriminator in sprk_configuration (rerun / refine):
+    # the typed-handler migration of the last live legacy chat-tool group. Both rows are
+    # capability-gated by sprk_requiredcapability = 'reanalyze' (preserves the legacy gate).
+    # ANALYSIS-RERUN declares sprk_sideeffectclass = Write (100000001) — engine persistence —
+    # so the ONE confirmation gate suspends it by declaration; ANALYSIS-REFINE is Read.
+    # Namespaced tool ids per the FR-P0-03 contract: analysis.rerun / analysis.refine.
+    "ANALYSIS-RERUN"                   = "$RepoRoot/infra/dataverse/sprk_analysistool-analysis-rerun-row.json"
+    "ANALYSIS-REFINE"                  = "$RepoRoot/infra/dataverse/sprk_analysistool-analysis-refine-row.json"
 }
 
 # -----------------------------------------------------------------------------

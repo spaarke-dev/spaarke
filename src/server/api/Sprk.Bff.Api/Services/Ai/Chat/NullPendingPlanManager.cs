@@ -9,12 +9,11 @@ namespace Sprk.Bff.Api.Services.Ai.Chat;
 /// </summary>
 /// <remarks>
 /// <para>
-/// P3 Fail-Fast pattern per D-09 §2 B3 (task 011 Phase 1b Tier 3, 2026-06-01). Pending plans gate
-/// compound-intent multi-tool chains; silently returning <c>null</c> from <see cref="GetAsync"/>
-/// would let chat believe no plan is pending and execute single-tool defaults, masking the
+/// P3 Fail-Fast pattern per D-09 §2 B3 (task 011 Phase 1b Tier 3, 2026-06-01). Silently
+/// no-oping the unified gate would let chat believe no gate is pending and mask the
 /// disabled state. Every public entry point throws <see cref="FeatureDisabledException"/>;
-/// consumer endpoints (<c>ChatEndpoints.SendMessageAsync</c>, <c>ChatEndpoints.ApprovePlanAsync</c>)
-/// catch the exception in their try-blocks and emit an SSE <c>error</c> chunk per ADR-018 + ADR-019.
+/// consumer endpoints (<c>ChatEndpoints.SendMessageAsync</c>) catch the exception in their
+/// try-blocks and emit an SSE <c>error</c> chunk per ADR-018 + ADR-019.
 /// </para>
 /// <para>
 /// Construction: uses the protected base ctor that bypasses Redis injection — kept consistent
@@ -35,29 +34,8 @@ public sealed class NullPendingPlanManager : PendingPlanManager
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
-    public override Task StoreAsync(PendingPlan plan, CancellationToken ct = default)
-    {
-        LogDisabled(nameof(StoreAsync));
-        throw new FeatureDisabledException(ErrorCode, DetailMessage);
-    }
-
-    public override Task<PendingPlan?> GetAsync(string tenantId, string sessionId, CancellationToken ct = default)
-    {
-        LogDisabled(nameof(GetAsync));
-        throw new FeatureDisabledException(ErrorCode, DetailMessage);
-    }
-
-    public override Task<PendingPlan?> GetAndDeleteAsync(string tenantId, string sessionId, CancellationToken ct = default)
-    {
-        LogDisabled(nameof(GetAndDeleteAsync));
-        throw new FeatureDisabledException(ErrorCode, DetailMessage);
-    }
-
-    public override Task DeleteAsync(string tenantId, string sessionId, CancellationToken ct = default)
-    {
-        LogDisabled(nameof(DeleteAsync));
-        throw new FeatureDisabledException(ErrorCode, DetailMessage);
-    }
+    // FR-P2-06 (task 035): the plan-shaped Null overrides were DELETED with the
+    // plan-shaped base members and the dispatcher stack that produced pending plans.
 
     // === Generalized unified-gate surface (D12 / FR-P2-02, task 031) ===
     // ADR-032: the Null peer stays consistent with the generalized store contract —

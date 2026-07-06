@@ -298,7 +298,7 @@ public class PlaybookChatContextProvider : IChatContextProvider
             }
 
             // Standalone mode: when the chat has no document but has a valid host context
-            // (entityType + entityId), provide a minimal KnowledgeScope so that DocumentSearchTools
+            // (entityType + entityId), provide a minimal KnowledgeScope so that DocumentSearch chat-tools
             // can entity-scope its discovery search. RagKnowledgeSourceIds is empty, meaning
             // SearchDocumentsAsync runs tenant-wide (no knowledge source filter) while
             // SearchDiscoveryAsync is constrained to the entity boundary via ParentEntityType/Id.

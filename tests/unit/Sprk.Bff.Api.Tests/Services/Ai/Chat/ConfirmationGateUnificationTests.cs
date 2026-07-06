@@ -23,8 +23,8 @@ namespace Sprk.Bff.Api.Tests.Services.Ai.Chat;
 ///     (<see cref="PendingPlanManager"/>), with double-confirm protection.
 ///  3. Every suspend/confirm/reject transition writes a <see cref="SessionGate"/>
 ///     ledger entry BEFORE the gate renders, correlated by gate id (ADR-040).
-///  4. <see cref="CompoundIntentDetector"/> gates single tool calls by declared class,
-///     never by name (the pre-D12 hardcoded name lists are deleted).
+/// (The former section 4 — detector-level declared-class gating — was deleted by
+/// task 035 / FR-P2-06 with its subject; anchor 1 covers the ADR-039 contract.)
 /// </summary>
 public class ConfirmationGateUnificationTests
 {
@@ -177,51 +177,6 @@ public class ConfirmationGateUnificationTests
 
         var stored = await _sessionManager.GetSessionAsync(TenantId, session.SessionId);
         stored!.Gates!.Where(g => g.GateId == "options-abc").Should().HaveCount(2);
-    }
-
-    // =========================================================================
-    // 4. CompoundIntentDetector — declared-metadata gating, no name lists
-    // =========================================================================
-
-    [Fact]
-    public void IsCompoundIntent_SingleWriteDeclaredTool_TriggersGate()
-    {
-        var detector = new CompoundIntentDetector(new Mock<ILogger>().Object);
-        var calls = new[] { new FunctionCallContent("c1", "AnyToolName") };
-
-        detector.IsCompoundIntent(calls, _ => ToolSideEffectClass.Write).Should().BeTrue();
-    }
-
-    [Fact]
-    public void IsCompoundIntent_SingleReadDeclaredTool_DoesNotTriggerGate()
-    {
-        var detector = new CompoundIntentDetector(new Mock<ILogger>().Object);
-        var calls = new[] { new FunctionCallContent("c1", "AnyToolName") };
-
-        detector.IsCompoundIntent(calls, _ => ToolSideEffectClass.Read).Should().BeFalse();
-    }
-
-    [Fact]
-    public void IsCompoundIntent_TwoToolCalls_TriggersGateStructurally()
-    {
-        var detector = new CompoundIntentDetector(new Mock<ILogger>().Object);
-        var calls = new[]
-        {
-            new FunctionCallContent("c1", "ToolA"),
-            new FunctionCallContent("c2", "ToolB"),
-        };
-
-        detector.IsCompoundIntent(calls, _ => null).Should().BeTrue();
-    }
-
-    [Fact]
-    public void IsCompoundIntent_SingleCallWithoutDeclarationLookup_DegradesToStructuralOnly()
-    {
-        var detector = new CompoundIntentDetector(new Mock<ILogger>().Object);
-        var calls = new[] { new FunctionCallContent("c1", "AnyToolName") };
-
-        detector.IsCompoundIntent(calls).Should().BeFalse(
-            "without declarations only the structural (2+ calls) trigger applies — warned by the detector");
     }
 
     // =========================================================================

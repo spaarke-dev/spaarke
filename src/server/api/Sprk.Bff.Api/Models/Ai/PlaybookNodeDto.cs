@@ -6,7 +6,7 @@ namespace Sprk.Bff.Api.Models.Ai;
 
 /// <summary>
 /// Output types for DeliverOutput nodes (R2).
-/// Determines how the PlaybookDispatcher presents the final result to the user.
+/// Determines how the output layer presents the final result to the user.
 /// Serialized as camelCase strings in JPS JSON.
 /// </summary>
 [JsonConverter(typeof(JsonStringEnumConverter))]
@@ -141,16 +141,16 @@ public record PlaybookNodeDto
 
     /// <summary>
     /// Whether this node requires human confirmation before execution (R2).
-    /// When true, PlaybookDispatcher opens HITL confirmation UI before executing.
+    /// When true, the output layer opens HITL confirmation UI before executing.
     /// When false, executes autonomously. Default is determined by OutputType
-    /// in PlaybookDispatcher (dialog → true, text → false).
+    /// (dialog → true, text → false).
     /// Null means use default behavior based on output type.
     /// </summary>
     public bool? RequiresConfirmation { get; init; }
 
     /// <summary>
     /// Typed output for DeliverOutput nodes (R2).
-    /// Determines how the PlaybookDispatcher presents the result.
+    /// Determines how the output layer presents the result.
     /// Only applicable when NodeType is Output.
     /// </summary>
     public OutputType? OutputType { get; init; }

@@ -148,7 +148,6 @@ public static class EndpointMappingExtensions
         {
             app.MapAnalysisEndpoints();
             app.MapPlaybookEndpoints();
-            app.MapPlaybookEmbeddingEndpoints();
             app.MapAiPlaybookBuilderEndpoints();
             app.MapScopeEndpoints();
             app.MapNodeEndpoints();

@@ -353,9 +353,8 @@ public static class AnalysisServicesModule
         // AddAnalysisOrchestrationServices (conditional); Phase 1c re-re-triage 2026-06-01 surfaced
         // ChatEndpoints.SendMessageAsync line 318 injects IWorkingDocumentService as a hard [FromServices]
         // parameter → DI resolve failure (500 NoServiceFound) when Analysis:Enabled=false. Same root cause
-        // pattern as ChatContextMappingService + DocxExportService. Note: ChatEndpoints.ApprovePlanAsync
-        // line 1334 uses defensive RequestServices.GetService<>() — that path was tolerant; SendMessageAsync
-        // was not. Promoted under D-02 cluster exception. ADR-010.
+        // pattern as ChatContextMappingService + DocxExportService. Promoted under D-02 cluster
+        // exception. ADR-010.
         services.AddScoped<IWorkingDocumentService, WorkingDocumentService>();
 
         // L5 — AnalysisChatContextResolver (deps: IGenericEntityService + IDistributedCache + ILogger).
@@ -502,7 +501,7 @@ public static class AnalysisServicesModule
         // B3 — PendingPlanManager (P3 Fail-Fast subclass). Task 011 Phase 1b Tier 3, D-09 §2 B3.
         // Real impl registered scoped inside AddAiModule (compound-ON only). The Null subclass
         // surfaces compound-intent plan operations as FeatureDisabledException; ChatEndpoints
-        // SendMessageAsync + ApprovePlanAsync catch and emit SSE error chunks per ADR-018.
+        // SendMessageAsync catches and emits SSE error chunks per ADR-018.
         services.AddScoped<PendingPlanManager>(sp =>
             new NullPendingPlanManager(sp.GetRequiredService<ILogger<PendingPlanManager>>()));
 
@@ -1176,8 +1175,8 @@ public static class AnalysisServicesModule
 
         // CodeInterpreterBridge — thin wrapper around AgentServiceClient for Code Interpreter sandbox
         // invocations (AIPU-070). Singleton: stateless, thread-safe. Kill switch: CodeInterpreter:Enabled.
-        // CodeInterpreterTools are NOT registered here — they are factory-instantiated by SprkChatAgentFactory
-        // following the WebSearchTools pattern (ADR-010: no unnecessary DI registrations).
+        // CodeInterpreterHandler resolves this bridge via DI when catalog rows expose the sandbox tools
+        // (ADR-010: no per-tool DI registrations beyond the handler assembly scan).
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Foundry.CodeInterpreterBridge>();
 
         // GroundingVerifier — D-P9 / D-47 / LAVERN ADR 10.6 platform primitive (Insights Engine Phase 1).

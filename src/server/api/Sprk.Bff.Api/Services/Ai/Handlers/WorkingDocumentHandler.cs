@@ -19,7 +19,7 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 
 /// <summary>
 /// Chat-side typed handler that performs working-document mutation operations (R6 Wave 9).
-/// Replaces the legacy hardcoded <c>WorkingDocumentTools</c> class previously instantiated
+/// Replaces the legacy hardcoded working-document chat-tool class previously instantiated
 /// in <c>SprkChatAgentFactory.ResolveTools</c>. Closes the Q9 chat-tool migration at 10/10.
 /// </summary>
 /// <remarks>
@@ -126,7 +126,7 @@ public sealed class WorkingDocumentHandler : IToolHandler
 
     /// <summary>
     /// Chunk size for WriteBack token-progress emission. Matches the legacy
-    /// <c>WorkingDocumentTools</c> value to preserve client rendering cadence.
+    /// legacy chat-tool value to preserve client rendering cadence.
     /// </summary>
     private const int WriteBackChunkSize = 100;
 
@@ -174,7 +174,7 @@ public sealed class WorkingDocumentHandler : IToolHandler
 
     /// <inheritdoc />
     /// <remarks>
-    /// Chat-only. The legacy <c>WorkingDocumentTools</c> was registered exclusively for chat;
+    /// Chat-only. The legacy working-document chat-tool class was registered exclusively for chat;
     /// document-mutation tools must not be invocable from playbook orchestration per spec FR-12
     /// safety constraint, and the 11 production node executors (NFR-08) do not include a
     /// document mutation executor.
@@ -537,7 +537,7 @@ public sealed class WorkingDocumentHandler : IToolHandler
         var contentBuilder = new StringBuilder();
 
         // ADR-015: log lengths + section title — section title is a deterministic structural
-        // label (not user content body) and is preserved per legacy WorkingDocumentTools.
+        // label (not user content body) and is preserved per the legacy chat-tool behavior.
         _logger.LogInformation(
             "WorkingDocumentHandler ({Correlation}) AppendSection starting — operationId={OperationId}, sectionTitle={SectionTitle}, instructionLen={InstructionLen}",
             correlationLogId, operationId, args.SectionTitle, args.Instruction!.Length);
@@ -730,7 +730,7 @@ public sealed class WorkingDocumentHandler : IToolHandler
         {
             // R2-023 + ADR-033: stream the write-back content as document_stream_token events
             // so the client can render progress. Chunk size matches the legacy
-            // WorkingDocumentTools to preserve rendering cadence.
+            // the legacy chat-tool class to preserve rendering cadence.
             for (var offset = 0; offset < content.Length; offset += WriteBackChunkSize)
             {
                 cancellationToken.ThrowIfCancellationRequested();

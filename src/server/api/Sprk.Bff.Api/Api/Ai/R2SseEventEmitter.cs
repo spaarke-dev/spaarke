@@ -17,7 +17,7 @@ namespace Sprk.Bff.Api.Api.Ai;
 ///      skips the event when validation fails to protect the client from malformed frames.
 ///
 /// R1 event types (token, done, error, typing_start, typing_end, citations, suggestions,
-/// plan_preview, plan_step_start, plan_step_complete) are NOT handled here — they continue
+/// typing_start, typing_end) are NOT handled here — they continue
 /// to be emitted via <see cref="ChatEndpoints"/> directly to preserve backward compatibility.
 ///
 /// Lifecycle: create once per request using <see cref="ChatEndpoints.CreateR2Emitter"/>.

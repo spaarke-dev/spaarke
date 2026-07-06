@@ -143,13 +143,6 @@ public sealed class SafetyPipelineMiddleware : ISprkChatAgent
     /// <summary>Delegates the FR-P2-01 agent-turn contract to the inner agent (loop-contract state passes through the middleware pipeline).</summary>
     public AgentTurnContract? TurnContract => _inner.TurnContract;
 
-    /// <inheritdoc />
-    public Task<IReadOnlyList<FunctionCallContent>> DetectToolCallsAsync(
-        string message,
-        IReadOnlyList<AiChatMessage> history,
-        CancellationToken cancellationToken)
-        => _inner.DetectToolCallsAsync(message, history, cancellationToken);
-
     // =========================================================================
     // Core pipeline
     // =========================================================================
@@ -365,7 +358,7 @@ public sealed class SafetyPipelineMiddleware : ISprkChatAgent
     /// <summary>
     /// Extracts plain-text source passages from the inner agent's <see cref="CitationContext"/>.
     ///
-    /// The citation context is populated by DocumentSearchTools and KnowledgeRetrievalTools
+    /// The citation context is populated by DocumentSearchHandler and KnowledgeRetrievalHandler
     /// during the current turn. Between turns, <see cref="CitationContext.Reset"/> is called
     /// by <see cref="SprkChatAgent"/>, so these excerpts are always turn-scoped.
     ///

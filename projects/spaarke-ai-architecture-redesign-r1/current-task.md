@@ -9,10 +9,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | W-P2-D: 035 (dispatcher-stack deletion) + 036 (Chat/Tools deletion) — dispatching parallel |
-| **Step** | 034 HARD CUTOVER COMPLETE ✅ (chat NL = the loop, nothing else). 030–034 all ✅. |
+| **Task** | 037 — Eval: full catalog + refusal + compound + injection (TEST-MODIFYING) — dispatching |
+| **Step** | W-P2-D COMPLETE (035 + 036 ✅). 030–036 all ✅. |
 | **Status** | autonomous overnight execution (operator directive 2026-07-06) |
-| **Next Action** | On W-P2-D return: flip TASK-INDEX, build + suite triage, commit, push, portfolio sync, then 037 (eval full-catalog + injection). Then gate-038 PREP (deploy both surfaces, /healthz/catalog should flip Healthy, App Insights KQL ready) and STOP for operator browser UAT (NEVER auto-pass, NFR-11). |
+| **Next Action** | On 037's return: flip TASK-INDEX, suite triage, commit, push, portfolio sync. Then gate-038 PREP (deploy BFF + SpaarkeAi; verify /healthz/catalog flips Healthy — deleted handlers out of registry; re-run Seed-TypedHandlers if needed; App Insights KQL from task-033/034 notes) and STOP for operator browser UAT (NEVER auto-pass, NFR-11). |
 
 ### 🔔 OPERATOR RULING NEEDED AT GATE 038 (from 034 escalation)
 Soft-slash deterministic invocation (FR-P2-05 criterion 2) is PARTIAL BY DESIGN: /summarize→chat-summarize works; /draft, /extract-entities, /analyze have NO Binding rows until P3. Client cannot resolve Binding GUIDs for typed commands without an ADR-039 violation (hardcoded GUIDs / second resolution vocabulary / routing pre-pass). 034 retired intentHint+SoftSlashRouter; soft-slash text now enters the loop. RECOMMENDED: full determinism = P3 FR-P3-06 (binding-id-carrying launchers); optional interim = client capability-discovery read mapping the closed 4-command vocab → returned Binding GUIDs via existing dispatchConsumer. UAT-7 at 038 verifies in-browser.
@@ -65,6 +65,11 @@ Soft-slash deterministic invocation (FR-P2-05 criterion 2) is PARTIAL BY DESIGN:
 - Leftovers INVENTORIED for 035/036: PlaybookDispatcher/IntentRerankerService/PlaybookCandidateSelector/CompoundIntentDetector + tests → 035; PlaybookOutputHandler + Chat/Tools/* → 036; dead click endpoints ExecutePlaybookAsync + ApprovePlanAsync/plan endpoints + plan_preview/playbook_options SSE DTOs → delete with the stack; client 117b playbook_options handlers + soft-slash launchers → P3 FR-P3-06.
 - Gate-038 zero-legacy-traffic framing in notes/task-034-chat-nl-hard-cutover-notes.md.
 
+## W-P2-D outcomes (both Step 9.5 PASS)
+- **035**: dispatcher stack + PlaybookEmbedding subsystem (7 files, indexer, nightly job, endpoints, index schema, Index-ExistingPlaybooks.ps1) + dead plan/execute click endpoints (~814 lines) DELETED; 27 symbols grep-zero; PendingPlanManager plan-shaped members swept (invocation gate store intact); "raw" keyed IChatClient + ai-indexing rate policy removed; PhaseB flaky test died with subject. FLAG: live `spaarke-playbook-embeddings` index on spaarkedev1 → P4 sweep; 2 dated decision-record docs retain symbol names by design.
+- **036**: migrated-then-deleted — new AnalysisExecutionHandler (analysis.rerun Write-gated / analysis.refine Read; rows `2b09dfb5…`/`55521abc…` on spaarkedev1; seed JSONs + Seed-TypedHandlers registered; fixed latent refine null-analysisId bug); text.* rows re-namespaced; 11-toolid bijection green; then 11 Tools classes + PlaybookOutputHandler + dialog_open/navigate DTOs deleted grep-zero. F-1 legs (WorkingDocumentHandler/InvokePlaybookHandler/AnalysisQueryHandler + E-2 adapter) KEPT for 044; 044 should ALSO re-trace AnalysisExecutionHandler's app-only engine leg (noted in 036 notes). 🔔 analysis.rerun now confirmation-gated (honest Write declaration) — operator sees new UX at 038.
+- Combined suite: 7698 — 7591 passed / 6 failed all known (suite −339 legacy tests). Eval 12/12. Publish 46.83 MB (−0.12).
+
 ## Parallel Execution
 
-W-P2-D dispatching: 035 + 036 parallel (deps 034 ✅).
+037 dispatching (TEST-MODIFYING; deps 034–036 ✅).
