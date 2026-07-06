@@ -98,8 +98,8 @@
 
 | # | Task | FR | Rigor | Deps | Status |
 |---|---|---|---|---|---|
-| 030 | Agent-turn loop contract (budget/filter/cite/persist) | FR-P2-01 | FULL | 027 | 🔲 |
-| 031 | ONE Confirmation Gate (PendingPlanManager generalized) | FR-P2-02 | FULL | 027 | 🔲 |
+| 030 | Agent-turn loop contract (budget 8 CAS-reserved + BudgetedAIFunction; catalog capability-tools via SessionDispatchOrchestrator; deterministic pre-filter; NFR-04 fingerprint; citation repair block; ToolChain flush-before-render; orphan-handlers → Unhealthy, TemplateHandler deleted; factory −772 lines; 28 new tests; publish 45.59 MB) | FR-P2-01 | FULL | 027 | ✅ |
+| 031 | ONE Confirmation Gate (PendingPlanManager → unified PendingInvocation store; gating by sprk_sideeffectclass + Binding risk — tool-name lists deleted grep-zero; SessionGate ledger markers via AppendGateAsync; /actions/{id}/confirm second store DELETED; 13 new tests; publish −1.31 MB; Seed-TypedHandlers re-run on spaarkedev1) | FR-P2-02 | FULL | 027 | ✅ |
 
 ### Wave W-P2-B (parallel ×2)
 

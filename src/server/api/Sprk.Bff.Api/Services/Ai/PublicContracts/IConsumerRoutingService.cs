@@ -235,6 +235,39 @@ public interface IConsumerRoutingService
     Task<Binding?> GetBindingByIdAsync(
         Guid bindingId,
         CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// FR-P2-01 (spaarke-ai-architecture-redesign-r1 task 030) — the agent-turn
+    /// loop's capability-tools projection read: every enabled
+    /// <c>sprk_playbookconsumer</c> row whose maker-authored
+    /// <c>sprk_tooldescription</c> is non-empty (the explicit catalog opt-in to
+    /// text-path invocation, canonical §6.2), environment-filtered, ordered
+    /// deterministically by consumer type then binding id (NFR-04
+    /// prompt-cache-stable projection ordering starts at the query).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>ADR-039</b>: extends THIS service (rather than introducing a second
+    /// query path) so the Binding query + row→contract mapping stay in one
+    /// implementation — same extension rationale as
+    /// <see cref="ResolveEventBindingsAsync"/> / <see cref="GetBindingByIdAsync"/>.
+    /// Which rows project is decided by catalog columns only (tool description
+    /// opt-in here; <c>sprk_surfaces</c> is applied by the loop's deterministic
+    /// pre-filter against the session's surface). No tool-name lists.
+    /// </para>
+    /// <para>
+    /// <b>Resolution semantics</b>: no consumer-code / match-conditions filtering
+    /// (the projection offers the catalog; the model's tool choice IS the
+    /// dispatch decision, executed by Binding id). Results cache 5 minutes per
+    /// environment — same TTL policy as the other resolves.
+    /// </para>
+    /// </remarks>
+    /// <param name="environment">Environment scope; null reads <c>IHostEnvironment.EnvironmentName</c>.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>Deterministically-ordered projectable Bindings; empty when none opt in (loop degrades to handler tools only).</returns>
+    Task<IReadOnlyList<Binding>> ListTextProjectableBindingsAsync(
+        string? environment = null,
+        CancellationToken cancellationToken = default);
 }
 
 /// <summary>

@@ -886,6 +886,49 @@ public record AnalysisTool
     /// </para>
     /// </remarks>
     public string? RequiredCapability { get; init; }
+
+    /// <summary>
+    /// Declared side-effect class of the tool (<c>sprk_sideeffectclass</c> on
+    /// <c>sprk_analysistool</c>) — the metadata that drives the ONE confirmation
+    /// gate (ADR-039 / D12, spaarke-ai-architecture-redesign-r1 FR-P2-02).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Gating is by THIS declaration, never by tool-name lists (ADR-039 MUST NOT).
+    /// <see cref="ToolSideEffectClass.Write"/> and
+    /// <see cref="ToolSideEffectClass.Communicate"/> tools suspend into the unified
+    /// pending store (<c>PendingPlanManager</c>) until the user confirms;
+    /// <see cref="ToolSideEffectClass.Read"/> / <see cref="ToolSideEffectClass.Pure"/>
+    /// tools execute without a class-driven gate (Binding-level
+    /// <c>sprk_risk</c> may still gate the capability).
+    /// </para>
+    /// <para>
+    /// Nullable for legacy-row tolerance (FR-P0-03): rows created before the task-003
+    /// schema extension carry null. Null is treated as "no declared side effect"
+    /// (not gated by class) — mirroring <c>Binding.Risk</c>'s documented safe default.
+    /// </para>
+    /// </remarks>
+    public ToolSideEffectClass? SideEffectClass { get; init; }
+}
+
+/// <summary>
+/// Declared side-effect class vocabulary — the global <c>sprk_sideeffectclass</c>
+/// option set on <c>sprk_analysistool</c> (task-003 column dictionary; canonical §6.2
+/// <c>read | write | communicate | pure</c>). Drives the ONE confirmation gate (D12).
+/// </summary>
+public enum ToolSideEffectClass
+{
+    /// <summary>Reads tenant data under the user's context; no mutation.</summary>
+    Read = 100000000,
+
+    /// <summary>Mutates tenant data (Dataverse writes, document writes). Gated.</summary>
+    Write = 100000001,
+
+    /// <summary>Communicates beyond the platform (email drafts, notifications). Gated.</summary>
+    Communicate = 100000002,
+
+    /// <summary>Pure computation; no data access at all.</summary>
+    Pure = 100000003,
 }
 
 /// <summary>

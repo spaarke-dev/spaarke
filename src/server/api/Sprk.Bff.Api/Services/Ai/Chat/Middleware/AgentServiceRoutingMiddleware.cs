@@ -193,6 +193,9 @@ public sealed class AgentServiceRoutingMiddleware : ISprkChatAgent
     /// <inheritdoc />
     public CitationContext? Citations => _inner.Citations;
 
+    /// <summary>Delegates the FR-P2-01 agent-turn contract to the inner agent (loop-contract state passes through the middleware pipeline).</summary>
+    public AgentTurnContract? TurnContract => _inner.TurnContract;
+
     /// <summary>
     /// Classifies the message intent and routes to the appropriate backend.
     ///

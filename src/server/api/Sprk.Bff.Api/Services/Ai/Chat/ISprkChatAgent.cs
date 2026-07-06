@@ -33,6 +33,16 @@ public interface ISprkChatAgent
     CitationContext? Citations { get; }
 
     /// <summary>
+    /// The agent-turn loop contract state (FR-P2-01, spaarke-ai-architecture-redesign-r1
+    /// task 030): per-turn tool budget + the NFR-07-safe tool-call audit persisted to the
+    /// session ledger as a <c>ToolChain</c> entry BEFORE rendering (ADR-040).
+    /// Default implementation returns null so legacy implementations (Null objects,
+    /// test doubles) compile unchanged; middleware wrappers MUST delegate to their
+    /// inner agent so the endpoint can reach the contract through the pipeline.
+    /// </summary>
+    AgentTurnContract? TurnContract => null;
+
+    /// <summary>
     /// Sends a user message and streams the agent's response.
     /// </summary>
     /// <param name="message">The user's chat message.</param>

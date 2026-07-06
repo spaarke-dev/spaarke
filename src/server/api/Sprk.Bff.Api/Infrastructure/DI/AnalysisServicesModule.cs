@@ -591,6 +591,13 @@ public static class AnalysisServicesModule
     private static void AddAnalysisOrchestrationServices(IServiceCollection services, IConfiguration configuration)
     {
         services.Configure<AnalysisOptions>(configuration.GetSection(AnalysisOptions.SectionName));
+        // FR-P2-01 (spaarke-ai-architecture-redesign-r1 task 030): agent-turn loop
+        // contract settings — per-turn tool-call budget (default 8; NFR-09/ADR-016
+        // tunable platform setting). Options-only Configure — no service registration,
+        // no ADR-032 Null peer needed (consumed via GetService<IOptions<...>> with an
+        // in-place default when unbound).
+        services.Configure<Sprk.Bff.Api.Services.Ai.Chat.AgentTurnOptions>(
+            configuration.GetSection(Sprk.Bff.Api.Services.Ai.Chat.AgentTurnOptions.SectionName));
         services.AddHttpClient<AnalysisActionService>();
         services.AddHttpClient<AnalysisSkillService>();
         services.AddHttpClient<AnalysisKnowledgeService>();

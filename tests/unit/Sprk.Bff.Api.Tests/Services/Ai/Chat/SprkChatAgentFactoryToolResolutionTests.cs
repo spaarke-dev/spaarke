@@ -447,38 +447,41 @@ public class SprkChatAgentFactoryToolResolutionTests
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
-    // Reflection helpers — access the private static FR-11 helpers on the factory.
+    // Reflection helpers — access the private static FR-11 helpers, which moved
+    // verbatim from the factory to AgentToolCatalogProjector in FR-P2-01 (task 030).
     // ─────────────────────────────────────────────────────────────────────────────
 
     private static Guid InvokeTryParseChatSessionId(string sessionId)
     {
-        var method = typeof(SprkChatAgentFactory).GetMethod(
+        var method = typeof(AgentToolCatalogProjector).GetMethod(
             "TryParseChatSessionId",
             BindingFlags.NonPublic | BindingFlags.Static);
         method.Should().NotBeNull(
-            "FR-11: TryParseChatSessionId helper must exist on SprkChatAgentFactory " +
-            "(task 011 wiring contract).");
+            "FR-11: TryParseChatSessionId helper must exist on AgentToolCatalogProjector " +
+            "(task 011 wiring contract; moved by task 030).");
         return (Guid)method!.Invoke(null, new object[] { sessionId })!;
     }
 
     private static Guid? InvokeTryParseMatterId(ChatKnowledgeScope? scope)
     {
-        var method = typeof(SprkChatAgentFactory).GetMethod(
+        var method = typeof(AgentToolCatalogProjector).GetMethod(
             "TryParseMatterId",
             BindingFlags.NonPublic | BindingFlags.Static);
         method.Should().NotBeNull(
-            "FR-11: TryParseMatterId helper must exist on SprkChatAgentFactory " +
-            "(task 011 wiring contract).");
+            "FR-11: TryParseMatterId helper must exist on AgentToolCatalogProjector " +
+            "(task 011 wiring contract; moved by task 030).");
         return (Guid?)method!.Invoke(null, new object?[] { scope });
     }
 
     // Wave 7b: IsCapabilityGateSatisfied is `internal static` — Sprk.Bff.Api.csproj
     // exposes internals to Sprk.Bff.Api.Tests, so we can call it directly. Wrapper
     // keeps the per-test setup terse and gives a single seam if the signature evolves.
+    // FR-P2-01 (task 030): helper moved verbatim to AgentToolCatalogProjector with the
+    // ResolveTools extraction — the factory shrank; the gate semantics are unchanged.
     private static bool InvokeIsCapabilityGateSatisfied(
         string? requiredCapability,
         IReadOnlySet<string> capabilities) =>
-        SprkChatAgentFactory.IsCapabilityGateSatisfied(requiredCapability, capabilities);
+        AgentToolCatalogProjector.IsCapabilityGateSatisfied(requiredCapability, capabilities);
 
     // ─────────────────────────────────────────────────────────────────────────────
     // Test doubles — minimal IToolHandler implementations.

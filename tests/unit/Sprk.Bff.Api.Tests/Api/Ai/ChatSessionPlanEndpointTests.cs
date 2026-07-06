@@ -181,7 +181,15 @@ public class PendingPlanManagerTests
         _cache = new InMemoryTenantCache();
 
         _logger = Substitute.For<ILogger<PendingPlanManager>>();
-        _sut = new PendingPlanManager(_cache, _logger);
+
+        // D12 / FR-P2-02 (task 031): the unified pending store writes ledger Gate
+        // markers through ChatSessionManager — construct a real one over the same
+        // in-memory cache (repository unused by the plan lifecycle under test).
+        var sessionManager = new ChatSessionManager(
+            _cache,
+            Substitute.For<IChatDataverseRepository>(),
+            Substitute.For<ILogger<ChatSessionManager>>());
+        _sut = new PendingPlanManager(_cache, sessionManager, _logger);
     }
 
     // =========================================================================

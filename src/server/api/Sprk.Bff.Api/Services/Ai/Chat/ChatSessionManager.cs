@@ -286,6 +286,119 @@ public class ChatSessionManager
         FireAndForgetCosmosPersist(session);
     }
 
+    /// <summary>
+    /// Appends one <see cref="SessionToolChain"/> ledger entry to the session and
+    /// persists through the existing 3-tier pipeline (FR-P2-01 step 5 / ADR-040:
+    /// the text-turn tool chain is ledger-written BEFORE the turn's output renders).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The session is RE-FETCHED before appending so concurrent ledger writes made
+    /// during the same turn (e.g. capability dispatch appending an Output entry via
+    /// <see cref="Sprk.Bff.Api.Services.Ai.OutputRouter"/>) are not clobbered by a
+    /// stale snapshot held by the caller. Append-only: existing entries are never
+    /// mutated (ADR-040).
+    /// </para>
+    /// <para>
+    /// <b>NFR-07</b>: the entry carries identifiers/filters/counts only (enforced at
+    /// construction by <see cref="AgentTurnContract"/>); this method logs counts +
+    /// identifiers only. Ledger entries are Tier 3 — erased with the session.
+    /// </para>
+    /// </remarks>
+    /// <returns>The updated session carrying the appended entry (null when the session no longer exists).</returns>
+    public virtual async Task<ChatSession?> AppendToolChainAsync(
+        string tenantId,
+        string sessionId,
+        SessionToolChain entry,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentNullException.ThrowIfNull(entry);
+
+        var session = await GetSessionAsync(tenantId, sessionId, ct).ConfigureAwait(false);
+        if (session is null)
+        {
+            _logger.LogWarning(
+                "AppendToolChainAsync: session not found — tenant={TenantId} session={SessionId}; ToolChain entry dropped.",
+                tenantId, sessionId);
+            return null;
+        }
+
+        var appended = new List<SessionToolChain>(session.ToolChains ?? Array.Empty<SessionToolChain>()) { entry };
+        var updated = session with { ToolChains = appended };
+        await UpdateSessionCacheAsync(updated, ct).ConfigureAwait(false);
+
+        _logger.LogInformation(
+            "Ledger ToolChain stored: turn={Turn} calls={CallCount} tenant={TenantId} session={SessionId}",
+            entry.Turn, entry.Calls.Count, tenantId, sessionId);
+
+        return updated;
+    }
+
+    /// <summary>
+    /// Appends one <see cref="SessionGate"/> ledger entry to the session and persists
+    /// through the existing 3-tier pipeline (FR-P2-02 / ADR-040: gate markers are
+    /// ledger-written BEFORE any gate UI renders; resolutions are NEW entries with the
+    /// same <see cref="SessionGate.GateId"/> — append-only).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Mirrors <see cref="AppendToolChainAsync"/>: the session is RE-FETCHED before
+    /// appending so concurrent ledger writes in the same turn are not clobbered by a
+    /// stale caller snapshot. Written exclusively via <see cref="PendingPlanManager"/> —
+    /// the ONE confirmation gate (D12) — so every gate transition flows through one
+    /// append implementation.
+    /// </para>
+    /// <para>
+    /// Turn allocation: when <paramref name="entry"/>.Turn is not positive, the next
+    /// per-session gate ordinal (<c>max(existing Gates[].Turn, 0) + 1</c>) is allocated —
+    /// the same monotonic-ordinal scheme <see cref="Sprk.Bff.Api.Services.Ai.OutputRouter"/>
+    /// documents for Output entries. Resolution entries SHOULD pass the pending entry's
+    /// turn so the pending/resolved pair correlates.
+    /// </para>
+    /// <para><b>NFR-07</b>: gate entries and these logs carry identifiers only.</para>
+    /// </remarks>
+    /// <returns>
+    /// The updated session and the stored entry (with allocated turn), or null when the
+    /// session no longer exists (entry dropped, warning logged).
+    /// </returns>
+    public virtual async Task<(ChatSession Session, SessionGate Entry)?> AppendGateAsync(
+        string tenantId,
+        string sessionId,
+        SessionGate entry,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentNullException.ThrowIfNull(entry);
+
+        var session = await GetSessionAsync(tenantId, sessionId, ct).ConfigureAwait(false);
+        if (session is null)
+        {
+            _logger.LogWarning(
+                "AppendGateAsync: session not found — tenant={TenantId} session={SessionId}; Gate entry dropped.",
+                tenantId, sessionId);
+            return null;
+        }
+
+        var stored = entry.Turn > 0
+            ? entry
+            : entry with { Turn = (session.Gates is { Count: > 0 } ? session.Gates.Max(g => g.Turn) : 0) + 1 };
+
+        var appended = new List<SessionGate>(session.Gates ?? Array.Empty<SessionGate>()) { stored };
+        var updated = session with { Gates = appended };
+        await UpdateSessionCacheAsync(updated, ct).ConfigureAwait(false);
+
+        _logger.LogInformation(
+            "Ledger Gate stored: gateId={GateId} kind={Kind} status={Status} turn={Turn} " +
+            "sideEffectClass={SideEffectClass} bindingId={BindingId} tenant={TenantId} session={SessionId}",
+            stored.GateId, stored.Kind, stored.Status, stored.Turn,
+            stored.SideEffectClass, stored.BindingId, tenantId, sessionId);
+
+        return (updated, stored);
+    }
+
     // === Private helpers ===
 
     /// <summary>

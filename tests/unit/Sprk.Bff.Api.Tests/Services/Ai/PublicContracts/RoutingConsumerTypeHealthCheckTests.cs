@@ -250,21 +250,22 @@ public sealed class RoutingConsumerTypeHealthCheckTests
     }
 
     [Fact]
-    public async Task CheckHealthAsync_HandlerWithoutToolRow_ReturnsDegradedNamingOrphanHandler()
+    public async Task CheckHealthAsync_HandlerWithoutToolRow_ReturnsUnhealthyNamingOrphanHandler()
     {
-        // Orphan handlers are DEGRADED until the FR-P2-01 catalog-projection
-        // cutover (task 030): direct-wired chat handlers legitimately lack rows
-        // today, and F-1 deletion targets must not be seeded rows to appease a
-        // probe. Gate-014 semantic correction, 2026-07-05.
+        // FR-P2-01 catalog-projection cutover (task 030, 2026-07-06): the closed
+        // catalog is now the ONLY tool projection, so a registered handler with no
+        // sprk_analysistool row is dead code or a missing seed — full drift,
+        // Unhealthy. (Was Degraded-by-design between FR-P0-04 and this cutover —
+        // gate-014 deferral resolved.)
         SetupBindingRows(BindingRowsForAllConstants());
         SetupToolRows(ToolRow("Alpha Tool", "AlphaHandler"));
         var sut = CreateSut(handlerIds: new[] { "AlphaHandler", "OrphanHandler" });
 
         var result = await CheckAsync(sut);
 
-        result.Status.Should().Be(HealthStatus.Degraded);
+        result.Status.Should().Be(HealthStatus.Unhealthy);
         result.Description.Should().Contain("OrphanHandler");
-        result.Description.Should().Contain("escalates to Unhealthy at the FR-P2-01 cutover");
+        result.Description.Should().Contain("registered handlers without a sprk_analysistool row");
     }
 
     [Fact]

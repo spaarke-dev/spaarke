@@ -42,6 +42,7 @@ public sealed class SprkChatAgent : ISprkChatAgent
     private readonly IReadOnlyList<AIFunction> _tools;
     private readonly CitationContext? _citationContext;
     private readonly CompoundIntentDetector _intentDetector;
+    private readonly AgentTurnContract? _turnContract;
     private readonly ILogger<SprkChatAgent> _logger;
 
     /// <summary>
@@ -56,6 +57,14 @@ public sealed class SprkChatAgent : ISprkChatAgent
     /// May be null when no search tools are registered.
     /// </summary>
     public CitationContext? Citations => _citationContext;
+
+    /// <summary>
+    /// The agent-turn loop contract state (FR-P2-01): per-turn tool budget +
+    /// the NFR-07-safe tool-call audit that the chat endpoint persists to the
+    /// session ledger as a <c>ToolChain</c> entry BEFORE rendering (ADR-040).
+    /// Null on legacy construction paths that predate the loop contract.
+    /// </summary>
+    public AgentTurnContract? TurnContract => _turnContract;
 
     /// <summary>
     /// Creates a new SprkChatAgent.  Called exclusively by <see cref="SprkChatAgentFactory"/>.
@@ -89,7 +98,8 @@ public sealed class SprkChatAgent : ISprkChatAgent
         IReadOnlyList<AIFunction> tools,
         CitationContext? citationContext,
         CompoundIntentDetector intentDetector,
-        ILogger<SprkChatAgent> logger)
+        ILogger<SprkChatAgent> logger,
+        AgentTurnContract? turnContract = null)
     {
         _chatClient = chatClient;
         _rawChatClient = rawChatClient;
@@ -98,6 +108,7 @@ public sealed class SprkChatAgent : ISprkChatAgent
         _citationContext = citationContext;
         _intentDetector = intentDetector;
         _logger = logger;
+        _turnContract = turnContract;
     }
 
     /// <summary>
@@ -136,15 +147,50 @@ public sealed class SprkChatAgent : ISprkChatAgent
         // Citations are scoped per assistant response, not accumulated across the conversation.
         _citationContext?.Reset();
 
+        // FR-P2-01: reset the turn contract — budget + tool-call audit are scoped to
+        // a single turn (same per-message scoping as the citation context).
+        _turnContract?.Reset();
+
         // Build the full message list: [system] + [history] + [user]
         var messages = BuildMessages(message, history);
 
         // Build completion options with registered tools
         var options = BuildOptions();
 
+        // Accumulate the assistant text so the citation clause of the loop contract
+        // (FR-P2-01 step 4 / ADR-039 grounded outputs) can be evaluated at turn end.
+        var assistantText = new System.Text.StringBuilder();
+
         await foreach (var update in _chatClient.GetStreamingResponseAsync(messages, options, cancellationToken))
         {
+            if (update.Text is { Length: > 0 } text)
+            {
+                assistantText.Append(text);
+            }
+
             yield return update;
+        }
+
+        // ── Citation enforcement on reads (FR-P2-01 step 4) ─────────────────────────
+        // A turn that consumed read-tool results (citations registered) but rendered
+        // no [N] marker violates the turn contract. The turn is repaired with a
+        // deterministic sources block (the rendered output always carries its
+        // grounding) and the violation is telemetered for eval/regression assertions.
+        if (_citationContext is not null)
+        {
+            var enforcement = AgentTurnCitationEnforcer.Evaluate(assistantText.ToString(), _citationContext);
+            if (enforcement.Violation)
+            {
+                _logger.LogWarning(
+                    "[agent-turn.citation_violation] uncited read-derived turn repaired — " +
+                    "playbook={PlaybookId} citationsAvailable={CitationsAvailable} markers={Markers} budgetSpent={BudgetSpent}",
+                    _context.PlaybookId, enforcement.CitationsAvailable,
+                    enforcement.CitationMarkersInText, _turnContract?.BudgetSpent ?? 0);
+
+                yield return new ChatResponseUpdate(
+                    ChatRole.Assistant,
+                    AgentTurnCitationEnforcer.BuildRepairSuffix(_citationContext));
+            }
         }
     }
 

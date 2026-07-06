@@ -248,10 +248,13 @@ public static class AiModule
         // surfaced this metadata-gen abort. Promoted as Tier 1.5 residual under D-02 cluster
         // exception. See projects/sdap.bff.api-test-suite-repair-r2/decisions/D-09-nullobject-design.md.
 
-        // PendingPlanManager — scoped per ADR-010 (task 071, Phase 2F).
-        // Stores pending plans in Redis at "plan:pending:{tenantId}:{sessionId}" with 30-min TTL.
-        // Used by CompoundIntentDetector flow in ChatEndpoints.SendMessageAsync to gate
-        // multi-tool chains and write-back operations behind user approval.
+        // PendingPlanManager — scoped per ADR-010 (task 071, Phase 2F; generalized to THE
+        // unified pending store by D12 / FR-P2-02, ai-architecture-redesign-r1 task 031).
+        // The ONE Confirmation Gate: pending plans (session-keyed) AND generalized
+        // suspended side-effecting invocations (gate-id-keyed) in Redis with 30-min TTL,
+        // plus SessionGate ledger markers via ChatSessionManager (ADR-040 — storage
+        // precedes gate rendering). Gating decisions are metadata-driven
+        // (RequiresConfirmation: sprk_sideeffectclass + Binding sprk_risk, ADR-039).
         // ADR-009: Redis via IDistributedCache; no in-memory fallback.
         // ADR-010: Concrete type, no interface (single implementation).
         services.AddScoped<PendingPlanManager>();

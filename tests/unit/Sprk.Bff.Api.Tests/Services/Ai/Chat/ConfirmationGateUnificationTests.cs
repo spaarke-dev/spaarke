@@ -1,0 +1,256 @@
+using FluentAssertions;
+using Microsoft.Extensions.AI;
+using Microsoft.Extensions.Logging;
+using Moq;
+using Sprk.Bff.Api.Models.Ai.Chat;
+using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.Chat;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
+using Sprk.Bff.Api.Tests.Infrastructure.Cache;
+using Xunit;
+
+namespace Sprk.Bff.Api.Tests.Services.Ai.Chat;
+
+/// <summary>
+/// FR-P2-02 / D12 acceptance tests (spaarke-ai-architecture-redesign-r1 task 031):
+/// the ONE Confirmation Gate.
+///
+/// Contract anchors (maintain-class per ADR-038 — each protects a production behavior):
+///  1. Gating decisions are driven by DECLARED metadata (tool sprk_sideeffectclass +
+///     Binding sprk_risk) via <see cref="PendingPlanManager.RequiresConfirmation"/> —
+///     the ADR-039 MUST ("no tool-name-list gating").
+///  2. Write tools suspend into and resume through THE unified pending store
+///     (<see cref="PendingPlanManager"/>), with double-confirm protection.
+///  3. Every suspend/confirm/reject transition writes a <see cref="SessionGate"/>
+///     ledger entry BEFORE the gate renders, correlated by gate id (ADR-040).
+///  4. <see cref="CompoundIntentDetector"/> gates single tool calls by declared class,
+///     never by name (the pre-D12 hardcoded name lists are deleted).
+/// </summary>
+public class ConfirmationGateUnificationTests
+{
+    private const string TenantId = "tenant-gate-tests";
+
+    private readonly InMemoryTenantCache _cache = new();
+    private readonly ChatSessionManager _sessionManager;
+    private readonly PendingPlanManager _sut;
+
+    public ConfirmationGateUnificationTests()
+    {
+        _sessionManager = new ChatSessionManager(
+            _cache,
+            new Mock<IChatDataverseRepository>().Object,
+            new Mock<ILogger<ChatSessionManager>>().Object);
+        _sut = new PendingPlanManager(
+            _cache,
+            _sessionManager,
+            new Mock<ILogger<PendingPlanManager>>().Object);
+    }
+
+    // =========================================================================
+    // 1. Metadata-driven gate policy (ADR-039 — side_effect_class + Binding risk)
+    // =========================================================================
+
+    [Theory]
+    [InlineData(ToolSideEffectClass.Write, true)]
+    [InlineData(ToolSideEffectClass.Communicate, true)]
+    [InlineData(ToolSideEffectClass.Read, false)]
+    [InlineData(ToolSideEffectClass.Pure, false)]
+    [InlineData(null, false)]
+    public void RequiresConfirmation_ByDeclaredSideEffectClass_GatesWriteAndCommunicateOnly(
+        ToolSideEffectClass? declaredClass, bool expected)
+    {
+        PendingPlanManager.RequiresConfirmation(declaredClass).Should().Be(expected);
+    }
+
+    [Fact]
+    public void RequiresConfirmation_AlwaysConfirmRisk_GatesEvenDeclaredReadTools()
+    {
+        PendingPlanManager.RequiresConfirmation(
+            ToolSideEffectClass.Read, BindingRisk.AlwaysConfirm).Should().BeTrue();
+    }
+
+    [Theory]
+    [InlineData(true, true)]
+    [InlineData(false, false)]
+    public void RequiresConfirmation_ConfirmWhenUncertainRisk_GatesOnlyWhenDispatchUncertain(
+        bool dispatchUncertain, bool expected)
+    {
+        PendingPlanManager.RequiresConfirmation(
+            ToolSideEffectClass.Read, BindingRisk.ConfirmWhenUncertain, dispatchUncertain)
+            .Should().Be(expected);
+    }
+
+    // =========================================================================
+    // 2 + 3. Suspend / resume / reject through THE store, with ledger markers
+    // =========================================================================
+
+    [Fact]
+    public async Task SuspendInvocation_WritesPendingLedgerMarker_AndStoresResumablePayload()
+    {
+        var session = await SeedSessionAsync();
+        var invocation = BuildInvocation(session.SessionId, "gate-001");
+
+        var suspended = await _sut.SuspendInvocationAsync(invocation);
+
+        // Ledger pending marker exists BEFORE any rendering could occur (ADR-040).
+        var stored = await _sessionManager.GetSessionAsync(TenantId, session.SessionId);
+        stored!.Gates.Should().ContainSingle(g =>
+            g.GateId == "gate-001" &&
+            g.Kind == PendingPlanManager.GateKindConfirmation &&
+            g.Status == PendingPlanManager.GateStatusPending &&
+            g.SideEffectClass == "write");
+
+        // The resumable payload is retrievable from the ONE store.
+        var pending = await _sut.GetInvocationAsync(TenantId, session.SessionId, "gate-001");
+        pending.Should().NotBeNull();
+        pending!.ToolId.Should().Be("dataverse.create_record");
+        pending.ArgsJson.Should().Be("""{"table":"sprk_matter"}""");
+        pending.Turn.Should().Be(suspended.Turn).And.BePositive();
+    }
+
+    [Fact]
+    public async Task ResumeInvocation_ReturnsSuspendedInvocation_AndWritesConfirmedMarker()
+    {
+        var session = await SeedSessionAsync();
+        await _sut.SuspendInvocationAsync(BuildInvocation(session.SessionId, "gate-002"));
+
+        var resumed = await _sut.ResumeInvocationAsync(TenantId, session.SessionId, "gate-002");
+
+        resumed.Should().NotBeNull("the first confirm must return the invocation for execution");
+        resumed!.ToolId.Should().Be("dataverse.create_record");
+
+        // Resolution marker: NEW ledger entry, same gate id, correlated turn (append-only).
+        var stored = await _sessionManager.GetSessionAsync(TenantId, session.SessionId);
+        var entries = stored!.Gates!.Where(g => g.GateId == "gate-002").ToList();
+        entries.Should().HaveCount(2, "pending + confirmed entries correlate by gate id");
+        entries.Should().ContainSingle(g => g.Status == PendingPlanManager.GateStatusConfirmed);
+        entries.Select(g => g.Turn).Distinct().Should().HaveCount(1, "resolution reuses the pending turn");
+    }
+
+    [Fact]
+    public async Task ResumeInvocation_SecondConfirm_ReturnsNull_DoubleExecutionProtection()
+    {
+        var session = await SeedSessionAsync();
+        await _sut.SuspendInvocationAsync(BuildInvocation(session.SessionId, "gate-003"));
+
+        var first = await _sut.ResumeInvocationAsync(TenantId, session.SessionId, "gate-003");
+        var second = await _sut.ResumeInvocationAsync(TenantId, session.SessionId, "gate-003");
+
+        first.Should().NotBeNull();
+        second.Should().BeNull("the store entry is deleted on first confirm — a racer gets 409 semantics");
+    }
+
+    [Fact]
+    public async Task RejectInvocation_RemovesPayload_AndWritesRejectedMarker()
+    {
+        var session = await SeedSessionAsync();
+        await _sut.SuspendInvocationAsync(BuildInvocation(session.SessionId, "gate-004"));
+
+        var rejected = await _sut.RejectInvocationAsync(TenantId, session.SessionId, "gate-004");
+        var afterReject = await _sut.GetInvocationAsync(TenantId, session.SessionId, "gate-004");
+        var rejectAgain = await _sut.RejectInvocationAsync(TenantId, session.SessionId, "gate-004");
+
+        rejected.Should().BeTrue();
+        afterReject.Should().BeNull("a rejected invocation must never be executable");
+        rejectAgain.Should().BeFalse("reject is idempotent on resolved gates");
+
+        var stored = await _sessionManager.GetSessionAsync(TenantId, session.SessionId);
+        stored!.Gates.Should().ContainSingle(g =>
+            g.GateId == "gate-004" && g.Status == PendingPlanManager.GateStatusRejected);
+    }
+
+    [Fact]
+    public async Task WriteGateMarker_PendingThenConfirmed_CorrelatesByGateId()
+    {
+        var session = await SeedSessionAsync();
+
+        var pending = await _sut.WriteGateMarkerAsync(
+            TenantId, session.SessionId, "options-abc",
+            PendingPlanManager.GateKindConfirmation, PendingPlanManager.GateStatusPending);
+        var confirmed = await _sut.WriteGateMarkerAsync(
+            TenantId, session.SessionId, "options-abc",
+            PendingPlanManager.GateKindConfirmation, PendingPlanManager.GateStatusConfirmed,
+            turn: pending!.Turn);
+
+        pending.ResolvedAt.Should().BeNull();
+        confirmed!.ResolvedAt.Should().NotBeNull();
+
+        var stored = await _sessionManager.GetSessionAsync(TenantId, session.SessionId);
+        stored!.Gates!.Where(g => g.GateId == "options-abc").Should().HaveCount(2);
+    }
+
+    // =========================================================================
+    // 4. CompoundIntentDetector — declared-metadata gating, no name lists
+    // =========================================================================
+
+    [Fact]
+    public void IsCompoundIntent_SingleWriteDeclaredTool_TriggersGate()
+    {
+        var detector = new CompoundIntentDetector(new Mock<ILogger>().Object);
+        var calls = new[] { new FunctionCallContent("c1", "AnyToolName") };
+
+        detector.IsCompoundIntent(calls, _ => ToolSideEffectClass.Write).Should().BeTrue();
+    }
+
+    [Fact]
+    public void IsCompoundIntent_SingleReadDeclaredTool_DoesNotTriggerGate()
+    {
+        var detector = new CompoundIntentDetector(new Mock<ILogger>().Object);
+        var calls = new[] { new FunctionCallContent("c1", "AnyToolName") };
+
+        detector.IsCompoundIntent(calls, _ => ToolSideEffectClass.Read).Should().BeFalse();
+    }
+
+    [Fact]
+    public void IsCompoundIntent_TwoToolCalls_TriggersGateStructurally()
+    {
+        var detector = new CompoundIntentDetector(new Mock<ILogger>().Object);
+        var calls = new[]
+        {
+            new FunctionCallContent("c1", "ToolA"),
+            new FunctionCallContent("c2", "ToolB"),
+        };
+
+        detector.IsCompoundIntent(calls, _ => null).Should().BeTrue();
+    }
+
+    [Fact]
+    public void IsCompoundIntent_SingleCallWithoutDeclarationLookup_DegradesToStructuralOnly()
+    {
+        var detector = new CompoundIntentDetector(new Mock<ILogger>().Object);
+        var calls = new[] { new FunctionCallContent("c1", "AnyToolName") };
+
+        detector.IsCompoundIntent(calls).Should().BeFalse(
+            "without declarations only the structural (2+ calls) trigger applies — warned by the detector");
+    }
+
+    // =========================================================================
+    // Helpers
+    // =========================================================================
+
+    private async Task<ChatSession> SeedSessionAsync()
+    {
+        var now = DateTimeOffset.UtcNow;
+        var session = new ChatSession(
+            SessionId: Guid.NewGuid().ToString("N"),
+            TenantId: TenantId,
+            DocumentId: null,
+            PlaybookId: null,
+            CreatedAt: now,
+            LastActivity: now,
+            Messages: new List<Sprk.Bff.Api.Models.Ai.Chat.ChatMessage>());
+        await _sessionManager.UpdateSessionCacheAsync(session);
+        return session;
+    }
+
+    private static PendingInvocation BuildInvocation(string sessionId, string gateId) => new()
+    {
+        GateId = gateId,
+        SessionId = sessionId,
+        TenantId = TenantId,
+        ToolId = "dataverse.create_record",
+        SideEffectClass = "write",
+        Risk = "none",
+        ArgsJson = """{"table":"sprk_matter"}""",
+    };
+}

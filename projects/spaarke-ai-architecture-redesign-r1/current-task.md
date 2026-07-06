@@ -9,10 +9,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | W-P2-A: 030 (agent-turn loop contract) + 031 (ONE Confirmation Gate) — parallel agents |
-| **Step** | P1 COMPLETE (027 ✅ operator-directed close after round-2 fixes `9ee30e672` deployed). P2 running. |
+| **Task** | W-P2-B: 032 (loop-native elicitation + modal escape + Gate markers) + 033 (honest refusal + dispatch_refused) — dispatching |
+| **Step** | W-P2-A COMPLETE (030 + 031 ✅, wave committed). P1 closed earlier tonight. |
 | **Status** | autonomous overnight execution (operator directive 2026-07-06: "move on to P2 while i sleep") |
-| **Next Action** | On W-P2-A agents' return: main session flips TASK-INDEX rows, build + suite triage vs KNOWN list, commit (`git pull --rebase` first), push, then dispatch W-P2-B (032, 033) → 034 (HARD CUTOVER, serial) → 035+036 → 037. STOP at gate 038 (operator browser UAT — NEVER auto-pass, NFR-11). |
+| **Next Action** | On W-P2-B agents' return: flip TASK-INDEX, build + suite triage vs KNOWN list, commit (`git pull --rebase` first), push, portfolio sync, then 034 (HARD CUTOVER, serial) → 035+036 → 037. STOP at gate 038 (operator browser UAT — NEVER auto-pass, NFR-11). |
 
 ### P1 close summary (2026-07-06)
 - G-P1 ran TWO UAT rounds. Round-2 findings + fixes: `notes/g-p1-uat-round2-findings.md` — RD-1 chip strip stranded at top → SprkChat `aboveInputSlot` prop, chips now above input zone; RD-2 "Summarize again" frozen to original fileIds → transition chips carry NO args, dispatch-time FR-08 default-all; RD-3 latent composer-strip gating → session-level count (promotedChipIds ∪ composer-ready).
@@ -42,6 +42,13 @@
 ## Decisions This Session (operator-ratified where noted)
 1. Stop-after-init; Target 2026-08-15. 2. ConversationPane ≤300-line budget + valve. 3. F-1 accept-until-cutover. 4. /healthz split; dup-detection keys sprk_toolid; orphans Degraded until 030. 5. ComposeSummarize/ChatClassify constants. 6. OBO mcp.tools spike FAIL-with-path. 7. Upload UX: auto-classify + chip-offered summarize (catalog data). 8. **027 operator-directed close + autonomous P2 overnight (2026-07-06)**.
 
+## W-P2-A outcomes (2026-07-06, both Step 9.5 PASS)
+- **030**: budget-8 CAS contract + BudgetedAIFunction; Binding capability-tools projected into the loop via SessionDispatchOrchestrator (opt-in = non-empty sprk_tooldescription; 5-min cache); deterministic pre-filter (sprk_surfaces + structural facts only); NFR-04 SHA-256 projection fingerprint; citation repair block at stream end; ToolChain flushed to ledger BEFORE each rendered segment; orphan handlers now Unhealthy (TemplateHandler deleted — the "14 orphans" figure was stale); SprkChatAgentFactory 2714→1942 lines.
+- **031**: PendingPlanManager = THE pending store (PendingInvocation suspend/resume/reject, double-confirm safe); gating = RequiresConfirmation(side_effect_class, risk, dispatchUncertain); CompoundIntentDetector tool-name lists deleted grep-zero; /actions/{id}/confirm endpoint + DTOs + client leg deleted; SessionGate markers via ChatSessionManager.AppendGateAsync; working-doc write-back tool row declares sprk_sideeffectclass=Write (Seed-TypedHandlers re-run DONE on spaarkedev1).
+- Integration seams for 032/034 documented in notes/task-030-agent-turn-loop-notes.md + notes/task-031-confirmation-gate-notes.md.
+- /healthz/catalog on the DEPLOYED instance stays Degraded until next branch deploy (deleted TemplateHandler still in the running registry) — flips at gate 038 deploy.
+- 031 W1 (suspend on missing session skips marker — tighten at W-P2-B) + W2 (extra catalog query on legacy path — dies at 034) + client dead-leg (032 rewires ActionConfirmationDialog as gate presentation).
+
 ## Parallel Execution
 
-W-P2-A dispatching: agents for tasks 030 + 031 (see TASK-INDEX wave header for the /goal condition — operator-side; agents follow task-execute).
+W-P2-B dispatching: agents for tasks 032 + 033 (032 deps 030+031; 033 deps 030 — both satisfied).

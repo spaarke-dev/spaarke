@@ -20,8 +20,13 @@ namespace Sprk.Bff.Api.Services.Ai.Chat;
 ///
 /// This satisfies spec constraint FR-11: "No write-back executes without user Proceed confirmation."
 ///
-/// Detection approach: Keyword-based heuristic on tool names (task 071 scope).
-/// Full ML-based intent classification is out of scope for this iteration.
+/// <b>ADR-039 / FR-P2-02 (task 031)</b>: the pre-D12 hardcoded tool-NAME lists
+/// (write-back names + external-action names) are DELETED. Gating decisions key on
+/// declared catalog metadata (<c>sprk_sideeffectclass</c> on <c>sprk_analysistool</c> rows)
+/// supplied by the caller as a name → side-effect-class lookup (keys cover both raw
+/// <c>sprk_name</c> and the sanitised LLM function name). The single decision function is
+/// <see cref="PendingPlanManager.RequiresConfirmation"/>. A null lookup degrades to the
+/// structural (2+ calls) trigger only, with a warning — production callers MUST supply it.
 ///
 /// Lifetime: Transient (instantiated per detection call; no state). Can be made a singleton
 /// since it is stateless — registered as transient per ADR-010 (no unnecessary DI registrations;
@@ -32,36 +37,6 @@ namespace Sprk.Bff.Api.Services.Ai.Chat;
 /// </summary>
 public sealed class CompoundIntentDetector
 {
-    /// <summary>
-    /// Tool names that constitute a "write-back" operation.
-    /// Any tool in this set triggers compound intent even if it is the only tool in the plan.
-    /// This ensures ALL write-back operations are plan-preview-gated (spec FR-11).
-    ///
-    /// Task 073: Added "WriteBackToWorkingDocument" — the primary Dataverse write-back tool
-    /// that persists AI-generated content to sprk_analysisoutput.sprk_workingdocument.
-    /// </summary>
-    private static readonly HashSet<string> WriteBackToolNames = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "EditWorkingDocument",
-        "AppendSection",
-        "WriteBackToWorkingDocument",
-        "SaveWorkingDocument",
-        "UpdateAnalysisOutput",
-        "WriteToDataverse"
-    };
-
-    /// <summary>
-    /// Tool names that constitute an "external action" (beyond document analysis).
-    /// Any tool in this set triggers compound intent even if it is the only tool in the plan.
-    /// </summary>
-    private static readonly HashSet<string> ExternalActionToolNames = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "SendEmail",
-        "CreateTask",
-        "PostToTeams",
-        "CreateCalendarEvent"
-    };
-
     private readonly ILogger _logger;
 
     public CompoundIntentDetector(ILogger logger)
@@ -73,18 +48,26 @@ public sealed class CompoundIntentDetector
     /// Determines whether the given tool call list represents compound intent.
     ///
     /// Compound intent is declared when ANY of the following is true:
-    ///   - 2 or more tool calls in the list
-    ///   - Any tool is a write-back tool (see <see cref="WriteBackToolNames"/>)
-    ///   - Any tool is an external action (see <see cref="ExternalActionToolNames"/>)
+    ///   - 2 or more tool calls in the list (structural trigger)
+    ///   - The single proposed tool's DECLARED side-effect class requires confirmation
+    ///     per <see cref="PendingPlanManager.RequiresConfirmation"/> (write / communicate)
     /// </summary>
     /// <param name="toolCalls">The list of tool calls proposed by the AI model.</param>
-    /// <returns>True when compound intent is detected; false when single non-write tool.</returns>
-    public bool IsCompoundIntent(IReadOnlyList<FunctionCallContent> toolCalls)
+    /// <param name="declaredSideEffectClassLookup">
+    /// Resolves an LLM function-call name to the tool's declared
+    /// <see cref="ToolSideEffectClass"/> (null result = no declaration / unknown tool).
+    /// Built by the caller from <c>sprk_analysistool</c> catalog rows. When the lookup
+    /// itself is null, only the structural trigger applies (warned — not a production state).
+    /// </param>
+    /// <returns>True when compound intent is detected; false when single non-side-effecting tool.</returns>
+    public bool IsCompoundIntent(
+        IReadOnlyList<FunctionCallContent> toolCalls,
+        Func<string, ToolSideEffectClass?>? declaredSideEffectClassLookup = null)
     {
         if (toolCalls.Count == 0)
             return false;
 
-        // Multiple tool calls → compound intent
+        // Multiple tool calls → compound intent (structural — not a name list).
         if (toolCalls.Count >= 2)
         {
             _logger.LogDebug(
@@ -93,22 +76,25 @@ public sealed class CompoundIntentDetector
             return true;
         }
 
-        // Single tool call: check if it's a write-back or external action
+        // Single tool call: gate on the DECLARED side-effect class (ADR-039 — never on names).
         var toolName = toolCalls[0].Name ?? string.Empty;
 
-        if (WriteBackToolNames.Contains(toolName))
+        if (declaredSideEffectClassLookup is null)
         {
-            _logger.LogDebug(
-                "Compound intent detected: write-back tool '{ToolName}' proposed",
+            _logger.LogWarning(
+                "Compound intent detection ran without a declared side-effect-class lookup — " +
+                "single-call side-effect gating is unavailable for this turn (tool={ToolName}). " +
+                "Callers must supply the catalog lookup (FR-P2-02).",
                 toolName);
-            return true;
+            return false;
         }
 
-        if (ExternalActionToolNames.Contains(toolName))
+        var declaredClass = declaredSideEffectClassLookup(toolName);
+        if (PendingPlanManager.RequiresConfirmation(declaredClass))
         {
             _logger.LogDebug(
-                "Compound intent detected: external action tool '{ToolName}' proposed",
-                toolName);
+                "Compound intent detected: tool '{ToolName}' declares side-effect class {SideEffectClass}",
+                toolName, declaredClass);
             return true;
         }
 
@@ -131,12 +117,18 @@ public sealed class CompoundIntentDetector
     /// <param name="context">
     /// The chat context (contains AnalysisMetadata and KnowledgeScope for write-back target resolution).
     /// </param>
+    /// <param name="declaredSideEffectClassLookup">
+    /// Same declared-metadata lookup passed to <see cref="IsCompoundIntent"/> — used to
+    /// detect write-declared steps for plan-level write-back metadata (ADR-039: declared
+    /// class, never tool names). Null skips write-back metadata resolution.
+    /// </param>
     /// <returns>A fully constructed <see cref="PendingPlan"/> ready for storage and SSE emission.</returns>
     public PendingPlan BuildPlan(
         IReadOnlyList<FunctionCallContent> toolCalls,
         string sessionId,
         string tenantId,
-        ChatContext context)
+        ChatContext context,
+        Func<string, ToolSideEffectClass?>? declaredSideEffectClassLookup = null)
     {
         var planId = Guid.NewGuid().ToString("N");
         var steps = new PendingPlanStep[toolCalls.Count];
@@ -157,8 +149,9 @@ public sealed class CompoundIntentDetector
                 ToolName: toolName,
                 ParametersJson: parametersJson);
 
-            // Detect write-back metadata for plan-level fields
-            if (WriteBackToolNames.Contains(toolName))
+            // Detect write-back metadata for plan-level fields — keyed on the DECLARED
+            // side-effect class (ADR-039), never on tool names.
+            if (declaredSideEffectClassLookup?.Invoke(toolName) is ToolSideEffectClass.Write)
             {
                 analysisId = context.AnalysisMetadata?.GetValueOrDefault("analysisId");
                 writeBackTarget = "sprk_analysisoutput.sprk_workingdocument";

@@ -73,6 +73,7 @@ public sealed class ConsumerRoutingService : IConsumerRoutingService
     private const string BindingCacheKeyPrefix = "consumer-routing-binding:";
     private const string BindingByIdCacheKeyPrefix = "consumer-routing-binding-id:";
     private const string EventBindingsCacheKeyPrefix = "consumer-routing-event:";
+    private const string TextProjectableCacheKeyPrefix = "consumer-routing-text-projectable:";
     private static readonly TimeSpan CacheDuration = TimeSpan.FromMinutes(5);
 
     private static readonly string[] Columns =
@@ -246,6 +247,132 @@ public sealed class ConsumerRoutingService : IConsumerRoutingService
             string.Join(",", resolved.Select(b => b.BindingId)), stopwatch.ElapsedMilliseconds);
 
         return resolved;
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<Binding>> ListTextProjectableBindingsAsync(
+        string? environment = null,
+        CancellationToken cancellationToken = default)
+    {
+        var normalizedEnv = string.IsNullOrWhiteSpace(environment)
+            ? _hostEnvironment.EnvironmentName?.ToLowerInvariant() ?? "*"
+            : environment.ToLowerInvariant();
+        var cacheKey = $"{TextProjectableCacheKeyPrefix}{normalizedEnv}";
+
+        if (_cache.TryGetValue<IReadOnlyList<Binding>>(cacheKey, out var cached) && cached is not null)
+        {
+            _logger.LogDebug(
+                "ConsumerRoutingService text-projectable cache hit (env={Env}, count={Count}).",
+                normalizedEnv, cached.Count);
+            return cached;
+        }
+
+        var stopwatch = Stopwatch.StartNew();
+        IReadOnlyList<Binding> resolved;
+        try
+        {
+            resolved = SelectTextProjectable(
+                await QueryTextProjectableCandidatesAsync(cancellationToken).ConfigureAwait(false),
+                normalizedEnv);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Routing must NEVER throw to the consumer (same contract as the other
+            // resolves) — the loop projection graceful-degrades to handler tools only.
+            _logger.LogError(ex,
+                "ConsumerRoutingService failed to list text-projectable bindings (env={Env}). Returning empty.",
+                normalizedEnv);
+            return Array.Empty<Binding>();
+        }
+        finally
+        {
+            stopwatch.Stop();
+        }
+
+        _cache.Set(cacheKey, resolved, new MemoryCacheEntryOptions
+        {
+            AbsoluteExpirationRelativeToNow = CacheDuration,
+        });
+
+        _logger.LogInformation(
+            "ConsumerRoutingService listed text-projectable bindings (env={Env}, count={Count}, " +
+            "consumerTypes={ConsumerTypes}, cacheHit=false, durationMs={DurationMs}).",
+            normalizedEnv, resolved.Count,
+            string.Join(",", resolved.Select(b => b.ConsumerType)), stopwatch.ElapsedMilliseconds);
+
+        return resolved;
+    }
+
+    /// <summary>
+    /// Deterministic environment filter + ordering for the loop projection
+    /// (FR-P2-01 / NFR-04): consumer type ordinal, then binding id — same inputs
+    /// always produce the same ordered list. Exposed for direct testability.
+    /// </summary>
+    internal static IReadOnlyList<Binding> SelectTextProjectable(
+        IReadOnlyList<Binding> candidates,
+        string environment)
+    {
+        return candidates
+            .Where(b => !string.IsNullOrWhiteSpace(b.ToolDescription)
+                        && MatchesEnvironment(b.Environment, environment))
+            .OrderBy(b => b.ConsumerType, StringComparer.Ordinal)
+            .ThenBy(b => b.BindingId)
+            .ToList();
+    }
+
+    /// <summary>
+    /// Query every enabled row with a non-null <c>sprk_tooldescription</c>
+    /// (the catalog opt-in to loop projection), with the same left-outer Action
+    /// link + <see cref="MapBinding"/> mapping as every other resolve path.
+    /// </summary>
+    private async Task<IReadOnlyList<Binding>> QueryTextProjectableCandidatesAsync(
+        CancellationToken cancellationToken)
+    {
+        var query = new QueryExpression(EntityLogicalName)
+        {
+            ColumnSet = new ColumnSet(Columns),
+            Criteria = new FilterExpression(LogicalOperator.And),
+        };
+        query.Criteria.AddCondition("sprk_enabled", ConditionOperator.Equal, true);
+        query.Criteria.AddCondition("sprk_tooldescription", ConditionOperator.NotNull);
+        query.AddOrder("sprk_priority", OrderType.Ascending);
+
+        var actionLink = query.AddLink(
+            ActionEntityLogicalName,
+            ActionLookupColumn,
+            "sprk_analysisactionid",
+            JoinOperator.LeftOuter);
+        actionLink.EntityAlias = ActionLinkAlias;
+        actionLink.Columns = new ColumnSet(ActionColumns);
+
+        var result = await _entityService
+            .RetrieveMultipleAsync(query, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (result?.Entities is null || result.Entities.Count == 0)
+        {
+            return Array.Empty<Binding>();
+        }
+
+        var candidates = new List<Binding>(result.Entities.Count);
+        foreach (var entity in result.Entities)
+        {
+            var playbookLookup = entity.GetAttributeValue<EntityReference>(PlaybookLookupColumn);
+            var actionLookup = entity.GetAttributeValue<EntityReference>(ActionLookupColumn);
+            if ((playbookLookup is null || playbookLookup.Id == Guid.Empty)
+                && (actionLookup is null || actionLookup.Id == Guid.Empty))
+            {
+                continue; // admin error — same skip rule as the other query paths.
+            }
+
+            candidates.Add(MapBinding(entity, playbookLookup, actionLookup));
+        }
+
+        return candidates;
     }
 
     /// <inheritdoc />

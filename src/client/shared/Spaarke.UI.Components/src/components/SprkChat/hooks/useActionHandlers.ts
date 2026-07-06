@@ -311,51 +311,38 @@ export function navigateToTarget(payload: INavigatePayload): void {
 }
 
 /**
- * Dispatches a confirmed action to the BFF API.
+ * Resolves a confirmed action after the user clicks Confirm in the
+ * ActionConfirmationDialog.
  *
- * Called after the user clicks Confirm in the ActionConfirmationDialog.
- * Sends POST /api/ai/chat/sessions/{sessionId}/actions/{actionId}/confirm.
+ * D12 / FR-P2-02 (spaarke-ai-architecture-redesign-r1 task 031): the R2-052
+ * per-action HITL confirm endpoint this function used to POST to was DELETED —
+ * it was the platform's SECOND confirmation store (a stub with no execution and
+ * no server emitter for its `action_confirmation` trigger event, making this leg
+ * unreachable in production). Side-effect confirmation is unified behind the ONE
+ * gate (BFF `PendingPlanManager`: suspend/resume/reject + ledger Gate markers per
+ * ADR-040). This dialog becomes a presentation of that gate when the W-P2-B loop
+ * wave (task 032) wires client resume; until then this returns a local failure
+ * so any unexpected invocation is visible instead of silently 404ing.
  *
- * Auth v2 (D-AUTH-1): takes `authenticatedFetch` instead of an `accessToken: string`
- * snapshot. The fetch function handles fresh-token attachment + X-Tenant-Id internally.
+ * Auth v2 (D-AUTH-1) signature preserved for export compatibility.
  */
 export async function dispatchConfirmedAction(
   pendingAction: IPendingAction,
-  apiBaseUrl: string,
-  authenticatedFetch: (url: string, init?: RequestInit) => Promise<Response>
+  _apiBaseUrl: string,
+  _authenticatedFetch: (url: string, init?: RequestInit) => Promise<Response>
 ): Promise<{ success: boolean; message: string }> {
-  const baseUrl = apiBaseUrl.replace(/\/+$/, '');
-  const url = `${baseUrl}/api/ai/chat/sessions/${pendingAction.sessionId}/actions/${pendingAction.actionId}/confirm`;
-
-  try {
-    const response = await authenticatedFetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        actionId: pendingAction.actionId,
-        parameters: pendingAction.parameters,
-      }),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      return {
-        success: false,
-        message: `Action failed (${response.status}): ${errorText}`,
-      };
-    }
-
-    const result = await response.json().catch(() => ({}));
-    return {
-      success: true,
-      message: result.message || `${pendingAction.actionName} completed successfully.`,
-    };
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Unknown error';
-    return { success: false, message: `Action dispatch failed: ${message}` };
-  }
+  console.warn(
+    '[useActionHandlers] dispatchConfirmedAction invoked, but the per-action confirm ' +
+      'endpoint was removed by the unified Confirmation Gate (D12 / FR-P2-02). ' +
+      'Gate resume wiring lands with the W-P2-B loop wave (task 032). actionId:',
+    pendingAction.actionId
+  );
+  return {
+    success: false,
+    message:
+      `${pendingAction.actionName} could not be dispatched: this confirmation path ` +
+      'was replaced by the unified Confirmation Gate. Please retry the request in chat.',
+  };
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

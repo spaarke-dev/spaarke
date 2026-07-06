@@ -223,20 +223,11 @@ public static class ChatEndpoints
             .ProducesProblem(429)
             .ProducesProblem(500);
 
-        // POST /api/ai/chat/sessions/{sessionId}/actions/{actionId}/confirm — confirm and execute a pending HITL action (Task R2-052)
-        group.MapPost("/sessions/{sessionId}/actions/{actionId}/confirm", ConfirmActionAsync)
-            .AddAiAuthorizationFilter()
-            .WithName("ConfirmAction")
-            .WithSummary("Confirm and execute a pending HITL action")
-            .WithDescription(
-                "Called after the user clicks Confirm in the ActionConfirmationDialog. " +
-                "Dispatches the confirmed action to the PlaybookOutputHandler for execution. " +
-                "Returns 200 with a result message on success. " +
-                "Returns 404 if the session or action does not exist.")
-            .Produces<ActionConfirmResult>()
-            .ProducesProblem(400)
-            .ProducesProblem(401)
-            .ProducesProblem(404);
+        // D12 / FR-P2-02 (spaarke-ai-architecture-redesign-r1 task 031): the R2-052
+        // per-action HITL confirm endpoint is DELETED. It was the platform's SECOND
+        // confirmation store — a stub with no server emitter for its trigger event and
+        // no execution behind it. ALL side-effect confirmation now flows through the ONE
+        // gate: PendingPlanManager (suspend/resume/reject + ledger Gate markers, ADR-040).
 
         // GET /api/ai/chat/sessions/{sessionId}/commands — resolve dynamic command catalog
         group.MapGet("/sessions/{sessionId}/commands", GetCommandsAsync)
@@ -552,10 +543,11 @@ public static class ChatEndpoints
             // any tools run. If compound intent is detected, emit a plan_preview SSE event
             // and halt execution — the user must approve via POST /plan/approve (task 072).
             //
-            // Compound intent triggers:
-            //   - 2 or more tool calls in the proposed plan
-            //   - Any write-back tool (EditWorkingDocument, AppendSection, etc.)
-            //   - Any external action tool (SendEmail, CreateTask, etc.)
+            // Compound intent triggers (FR-P2-02 / ADR-039 — task 031 rewired gating from
+            // hardcoded tool-NAME lists to DECLARED catalog metadata):
+            //   - 2 or more tool calls in the proposed plan (structural)
+            //   - Any tool whose sprk_analysistool row declares sprk_sideeffectclass
+            //     write/communicate (via PendingPlanManager.RequiresConfirmation)
             //
             // This satisfies spec constraint FR-11: "No write-back executes without user Proceed."
             // FR-07 (task 050): pass the effectiveMessage so compound-intent detection sees
@@ -564,17 +556,37 @@ public static class ChatEndpoints
             var toolCalls = await agent.DetectToolCallsAsync(effectiveMessage, history, cancellationToken);
             var intentDetector = new CompoundIntentDetector(logger);
 
-            if (intentDetector.IsCompoundIntent(toolCalls))
+            // Declared side-effect-class lookup (built from sprk_analysistool rows) — only
+            // fetched when the turn actually proposed tool calls. This path is deleted at
+            // the P2 hard cutover (task 034) when the loop gates at its own invocation seam.
+            var declaredClassLookup = toolCalls.Count > 0
+                ? await BuildDeclaredSideEffectLookupAsync(httpContext, logger, cancellationToken)
+                : null;
+
+            if (intentDetector.IsCompoundIntent(toolCalls, declaredClassLookup))
             {
                 // Build the pending plan from the detected tool calls
                 var pendingPlan = intentDetector.BuildPlan(
                     toolCalls,
                     sessionId,
                     tenantId,
-                    agent.Context);
+                    agent.Context,
+                    declaredClassLookup);
 
                 // Store in Redis — 30-minute TTL per task 070 design
                 await pendingPlanManager.StoreAsync(pendingPlan, cancellationToken);
+
+                // ADR-040 (FR-P2-02): the pending Gate marker lands in the session ledger
+                // BEFORE the plan_preview gate UI renders (storage precedes rendering).
+                // GateId = PlanId — approval writes the confirmed marker with the same id.
+                await pendingPlanManager.WriteGateMarkerAsync(
+                    tenantId,
+                    sessionId,
+                    pendingPlan.PlanId,
+                    PendingPlanManager.GateKindConfirmation,
+                    PendingPlanManager.GateStatusPending,
+                    sideEffectClass: DerivePlanSideEffectClass(toolCalls, declaredClassLookup),
+                    ct: cancellationToken);
 
                 // Emit plan_preview SSE event with the plan steps
                 var planPreviewData = new ChatSsePlanPreviewData(
@@ -676,6 +688,20 @@ public static class ChatEndpoints
                                 sessionAttachmentIds, cancellationToken)
                     .ConfigureAwait(false);
 
+                // FR-P2-02 / FR-48: the must-click options flow IS a presentation of the
+                // ONE confirmation gate. Write the pending Gate marker to the session
+                // ledger BEFORE the playbook_options gate UI renders (ADR-040 — storage
+                // precedes rendering). The user's pick (POST /api/ai/playbook-dispatch/
+                // execute) resolves this marker as confirmed with the same gate id.
+                var optionsGateId = $"options-{Guid.NewGuid():N}";
+                await pendingPlanManager.WriteGateMarkerAsync(
+                    tenantId,
+                    sessionId,
+                    optionsGateId,
+                    PendingPlanManager.GateKindConfirmation,
+                    PendingPlanManager.GateStatusPending,
+                    ct: cancellationToken);
+
                 // Emit the playbook_options SSE event then close the stream.
                 var sseEvent = ChatSseEventFactory.CreatePlaybookOptionsEvent(payload);
                 await WriteChatSSEAsync(response, sseEvent, cancellationToken);
@@ -772,6 +798,45 @@ public static class ChatEndpoints
             // to show a typing indicator animation (NFR-01: first token < 500ms).
             await WriteChatSSEAsync(response, new ChatSseEvent("typing_start", null), cancellationToken);
 
+            // === FR-P2-01 step 5 — ToolChain ledger persistence (ADR-040) ============
+            // The turn's tool-call chain (recorded on the agent's AgentTurnContract by
+            // the BudgetedAIFunction wrappers) is written to the session ledger BEFORE
+            // the content that follows it renders (storage precedes rendering, D2/D8).
+            // Tool phases and text phases can interleave within one turn; each text
+            // segment is preceded by a flush of the calls accumulated since the last
+            // flush — a turn with interleaved phases appends multiple chain segments
+            // under the same turn ordinal (append-only; ADR-040). NFR-07: entries carry
+            // identifiers/filters/counts only, enforced at recording time.
+            var turnContract = agent.TurnContract;
+            var toolChainTurn = (session.ToolChains is { Count: > 0 }
+                ? session.ToolChains.Max(tc => tc.Turn) : 0) + 1;
+
+            async Task FlushToolChainLedgerAsync()
+            {
+                if (turnContract is null || !turnContract.HasUnpersistedCalls)
+                {
+                    return;
+                }
+
+                var segment = turnContract.DrainUnpersistedCalls();
+                if (segment.Count == 0)
+                {
+                    return;
+                }
+
+                await sessionManager.AppendToolChainAsync(
+                    tenantId,
+                    sessionId,
+                    new SessionToolChain
+                    {
+                        Turn = toolChainTurn,
+                        Calls = segment,
+                        CreatedAt = DateTimeOffset.UtcNow,
+                    },
+                    CancellationToken.None); // ledger write completes even if the client disconnects mid-render
+            }
+            // === End FR-P2-01 step 5 setup ============================================
+
             // Stream the agent response via IAsyncEnumerable<ChatResponseUpdate>.
             // FR-07 (task 050): effectiveMessage contains the user's typed text PLUS any
             // attachment context — this is the SINGLE LLM call that produces the response
@@ -782,9 +847,24 @@ public static class ChatEndpoints
                 var content = update.Text;
                 if (!string.IsNullOrEmpty(content))
                 {
+                    // ADR-040: ledger write BEFORE this content renders.
+                    await FlushToolChainLedgerAsync();
                     fullResponse.Append(content);
                     await WriteChatSSEAsync(response, new ChatSseEvent("token", content), cancellationToken);
                 }
+            }
+
+            // Trailing flush: tool calls with no following text (e.g. budget-ended turns)
+            // still persist their chain before the citations/done frames render.
+            await FlushToolChainLedgerAsync();
+
+            if (turnContract is not null && (turnContract.BudgetSpent > 0 || turnContract.DeniedCalls > 0))
+            {
+                // ADR-016 per-turn budget telemetry (NFR-09): counts + identifiers only.
+                logger.LogInformation(
+                    "[ADR-016][agent-turn.summary] session={SessionId} turn={Turn} budgetSpent={BudgetSpent}/{Budget} denied={Denied}",
+                    sessionId, toolChainTurn, turnContract.BudgetSpent,
+                    turnContract.ToolCallBudget, turnContract.DeniedCalls);
             }
 
             // Emit typing_end to signal that token generation is complete.
@@ -1202,53 +1282,9 @@ public static class ChatEndpoints
         return Results.NoContent();
     }
 
-    /// <summary>
-    /// Confirm and execute a pending HITL action (Task R2-052).
-    /// POST /api/ai/chat/sessions/{sessionId}/actions/{actionId}/confirm
-    ///
-    /// Called after the user clicks Confirm in the ActionConfirmationDialog.
-    /// Currently a stub that returns success — future iterations will execute
-    /// the action tool associated with the playbook.
-    /// </summary>
-    private static async Task<IResult> ConfirmActionAsync(
-        string sessionId,
-        string actionId,
-        [Microsoft.AspNetCore.Mvc.FromBody] ActionConfirmRequest request,
-        ChatSessionManager sessionManager,
-        HttpContext httpContext,
-        ILoggerFactory loggerFactory,
-        CancellationToken cancellationToken)
-    {
-        var logger = loggerFactory.CreateLogger("Sprk.Bff.Api.Api.Ai.ChatEndpoints");
-        var tenantId = ExtractTenantId(httpContext);
-        if (tenantId is null)
-        {
-            return Results.Problem(
-                detail: "Unable to determine tenant. Ensure the 'tid' claim is present in the token.",
-                statusCode: 403);
-        }
-
-        // Verify the session exists
-        var session = await sessionManager.GetSessionAsync(tenantId, sessionId, cancellationToken);
-        if (session is null)
-        {
-            return Results.Problem(
-                detail: $"Session {sessionId} not found.",
-                statusCode: 404,
-                title: "Session Not Found");
-        }
-
-        logger.LogInformation(
-            "Action confirmed: sessionId={SessionId}, actionId={ActionId}, paramCount={ParamCount}",
-            sessionId, actionId, request.Parameters?.Count ?? 0);
-
-        // TODO: In future iterations, execute the action tool here.
-        // For now, return a success stub indicating the action was acknowledged.
-        return Results.Ok(new ActionConfirmResult(
-            Success: true,
-            Message: $"Action {actionId} confirmed and executed successfully.",
-            ActionId: actionId));
-    }
+    // The R2-052 per-action HITL confirm handler was DELETED by D12 / FR-P2-02 (task 031):
+    // it was the second confirmation store's handler. Side-effect confirmation is unified
+    // behind PendingPlanManager — see that type's doc for the suspend/resume contract.
 
     /// <summary>
     /// Approve a pending plan and execute it as an SSE stream.
@@ -1362,6 +1398,16 @@ public static class ChatEndpoints
             await response.WriteAsJsonAsync(new { error = "Plan ID does not match the pending plan. Please resend your request." }, cancellationToken);
             return;
         }
+
+        // ADR-040 (FR-P2-02): resolve the gate in the ledger BEFORE executing — a
+        // confirmed Gate marker correlated to the pending entry by GateId (= PlanId).
+        await pendingPlanManager.WriteGateMarkerAsync(
+            tenantId,
+            sessionId,
+            pendingPlan.PlanId,
+            PendingPlanManager.GateKindConfirmation,
+            PendingPlanManager.GateStatusConfirmed,
+            ct: cancellationToken);
 
         // All validation passed — open SSE stream (matches pattern from SendMessageAsync).
         // X-Accel-Buffering prevents reverse proxy buffering (NFR-01).
@@ -2235,6 +2281,7 @@ public static class ChatEndpoints
         ChatHistoryManager historyManager,
         SprkChatAgentFactory agentFactory,
         IPlaybookLookupService playbookLookup,
+        PendingPlanManager pendingPlanManager,
         HttpContext httpContext,
         ILogger<SprkChatAgentFactory> logger)
     {
@@ -2349,6 +2396,30 @@ public static class ChatEndpoints
             return;
         }
 
+        // FR-P2-02 / FR-48: the user's pick IS the confirmation of the must-click options
+        // gate. Resolve the session's most recent unresolved 'options-' Gate marker as
+        // confirmed (same gate id, pending entry's turn — ADR-040 append-only correlation)
+        // BEFORE execution begins. No marker found = the execute was invoked outside the
+        // options flow (e.g. direct dispatch) — nothing to resolve.
+        var optionsGate = session.Gates?
+            .Where(g => g.GateId.StartsWith("options-", StringComparison.Ordinal))
+            .GroupBy(g => g.GateId)
+            .Where(grp => grp.All(g => g.Status == PendingPlanManager.GateStatusPending))
+            .Select(grp => grp.OrderByDescending(g => g.CreatedAt).First())
+            .OrderByDescending(g => g.CreatedAt)
+            .FirstOrDefault();
+        if (optionsGate is not null)
+        {
+            await pendingPlanManager.WriteGateMarkerAsync(
+                tenantId,
+                request.SessionId!,
+                optionsGate.GateId,
+                PendingPlanManager.GateKindConfirmation,
+                PendingPlanManager.GateStatusConfirmed,
+                turn: optionsGate.Turn,
+                ct: cancellationToken);
+        }
+
         // Set SSE headers — output streams via PlaybookOutputHandler.HandleOutputAsync.
         response.ContentType = "text/event-stream";
         response.Headers.CacheControl = "no-cache";
@@ -2435,6 +2506,92 @@ public static class ChatEndpoints
     // =========================================================================
     // Private Helpers
     // =========================================================================
+
+    /// <summary>
+    /// Builds the declared side-effect-class lookup for the confirmation gate
+    /// (FR-P2-02 / ADR-039): <c>sprk_analysistool</c> rows keyed by BOTH raw
+    /// <c>sprk_name</c> and the sanitised LLM function name (the shape
+    /// <see cref="FunctionCallContent.Name"/> carries — see
+    /// <see cref="ToolHandlerToAIFunctionAdapter.SanitiseToolName"/>).
+    /// </summary>
+    /// <returns>
+    /// The lookup, or null when the tool catalog is unavailable (AI-off DI state or
+    /// query failure) — the detector then applies the structural trigger only and warns.
+    /// </returns>
+    private static async Task<Func<string, ToolSideEffectClass?>?> BuildDeclaredSideEffectLookupAsync(
+        HttpContext httpContext,
+        ILogger logger,
+        CancellationToken cancellationToken)
+    {
+        var toolCatalog = httpContext.RequestServices.GetService<AnalysisToolService>();
+        if (toolCatalog is null)
+        {
+            return null;
+        }
+
+        try
+        {
+            var rows = await toolCatalog.ListToolsAsync(
+                new ScopeListOptions { Page = 1, PageSize = 200 }, cancellationToken);
+
+            var byName = new Dictionary<string, ToolSideEffectClass>(StringComparer.OrdinalIgnoreCase);
+            foreach (var row in rows.Items)
+            {
+                if (row.SideEffectClass is not { } declaredClass || string.IsNullOrWhiteSpace(row.Name))
+                {
+                    continue;
+                }
+
+                byName[row.Name] = declaredClass;
+                byName[ToolHandlerToAIFunctionAdapter.SanitiseToolName(row.Name)] = declaredClass;
+            }
+
+            return name =>
+                !string.IsNullOrWhiteSpace(name) && byName.TryGetValue(name, out var cls)
+                    ? cls
+                    : null;
+        }
+        catch (Exception ex)
+        {
+            // ADR-015: identifiers only. Degrading to structural-only gating is logged
+            // loudly by the detector itself.
+            logger.LogWarning(ex,
+                "Declared side-effect-class lookup unavailable for this turn — tool catalog query failed.");
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Derives the ledger side-effect-class vocabulary value for a plan-shaped gate entry:
+    /// the highest-impact DECLARED class across the plan's tool calls
+    /// (<c>communicate</c> > <c>write</c> > null). Identifiers only (NFR-07).
+    /// </summary>
+    private static string? DerivePlanSideEffectClass(
+        IReadOnlyList<FunctionCallContent> toolCalls,
+        Func<string, ToolSideEffectClass?>? declaredClassLookup)
+    {
+        if (declaredClassLookup is null)
+        {
+            return null;
+        }
+
+        ToolSideEffectClass? highest = null;
+        foreach (var call in toolCalls)
+        {
+            var cls = declaredClassLookup(call.Name ?? string.Empty);
+            if (cls == ToolSideEffectClass.Communicate)
+            {
+                return PendingPlanManager.ToLedgerSideEffectClass(cls);
+            }
+
+            if (cls == ToolSideEffectClass.Write)
+            {
+                highest = cls;
+            }
+        }
+
+        return PendingPlanManager.ToLedgerSideEffectClass(highest);
+    }
 
     /// <summary>
     /// Extracts the tenant ID from the JWT 'tid' claim (ADR-014) with X-Tenant-Id header fallback
@@ -3087,16 +3244,9 @@ public record ChatSwitchContextRequest(
     ChatHostContext? HostContext = null,
     IReadOnlyList<string>? AdditionalDocumentIds = null);
 
-/// <summary>Request body for POST /sessions/{id}/actions/{actionId}/confirm (Task R2-052).</summary>
-/// <param name="ActionId">The action identifier to confirm (matches URL parameter for validation).</param>
-/// <param name="Parameters">Extracted parameters submitted with the confirmation.</param>
-public record ActionConfirmRequest(string ActionId, Dictionary<string, string>? Parameters = null);
-
-/// <summary>Response body for POST /sessions/{id}/actions/{actionId}/confirm (Task R2-052).</summary>
-/// <param name="Success">Whether the action was executed successfully.</param>
-/// <param name="Message">Human-readable result message.</param>
-/// <param name="ActionId">The action identifier that was confirmed.</param>
-public record ActionConfirmResult(bool Success, string Message, string ActionId);
+// The R2-052 per-action confirm request/response records were DELETED by D12 / FR-P2-02
+// (task 031) together with their endpoint — the second confirmation store.
+// The ONE gate is PendingPlanManager.
 
 /// <summary>
 /// Request body for POST /api/ai/playbook-dispatch/execute (FR-50).

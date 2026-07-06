@@ -59,6 +59,47 @@ public sealed class NullPendingPlanManager : PendingPlanManager
         throw new FeatureDisabledException(ErrorCode, DetailMessage);
     }
 
+    // === Generalized unified-gate surface (D12 / FR-P2-02, task 031) ===
+    // ADR-032: the Null peer stays consistent with the generalized store contract —
+    // every unified-gate entry point fails fast under the kill-switch-OFF DI state.
+
+    public override Task<PendingInvocation> SuspendInvocationAsync(
+        PendingInvocation invocation, CancellationToken ct = default)
+    {
+        LogDisabled(nameof(SuspendInvocationAsync));
+        throw new FeatureDisabledException(ErrorCode, DetailMessage);
+    }
+
+    public override Task<PendingInvocation?> GetInvocationAsync(
+        string tenantId, string sessionId, string gateId, CancellationToken ct = default)
+    {
+        LogDisabled(nameof(GetInvocationAsync));
+        throw new FeatureDisabledException(ErrorCode, DetailMessage);
+    }
+
+    public override Task<PendingInvocation?> ResumeInvocationAsync(
+        string tenantId, string sessionId, string gateId, CancellationToken ct = default)
+    {
+        LogDisabled(nameof(ResumeInvocationAsync));
+        throw new FeatureDisabledException(ErrorCode, DetailMessage);
+    }
+
+    public override Task<bool> RejectInvocationAsync(
+        string tenantId, string sessionId, string gateId, CancellationToken ct = default)
+    {
+        LogDisabled(nameof(RejectInvocationAsync));
+        throw new FeatureDisabledException(ErrorCode, DetailMessage);
+    }
+
+    public override Task<SessionGate?> WriteGateMarkerAsync(
+        string tenantId, string sessionId, string gateId, string kind, string status,
+        string? bindingId = null, string? sideEffectClass = null, int turn = 0,
+        CancellationToken ct = default)
+    {
+        LogDisabled(nameof(WriteGateMarkerAsync));
+        throw new FeatureDisabledException(ErrorCode, DetailMessage);
+    }
+
     private void LogDisabled(string method)
     {
         _logger.LogDebug(

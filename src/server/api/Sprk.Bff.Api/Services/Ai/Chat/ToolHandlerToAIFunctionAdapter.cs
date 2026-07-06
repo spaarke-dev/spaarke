@@ -287,7 +287,7 @@ public sealed class ToolHandlerToAIFunctionAdapter : AIFunction
                 $"[FR-10] Handler '{handler.HandlerId}' does not declare InvocationContextKind.Chat " +
                 $"(reports {supported}). Refusing to expose to LLM. Override " +
                 $"IToolHandler.SupportedInvocationContexts and implement ValidateChat/ExecuteChatAsync " +
-                $"to opt in (see TemplateHandler.cs).");
+                $"to opt in (see Services/Ai/Handlers/HandlerRegistrationConventions.md).");
         }
     }
 

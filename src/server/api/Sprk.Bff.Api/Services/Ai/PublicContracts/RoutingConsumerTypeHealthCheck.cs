@@ -113,18 +113,16 @@ public sealed class RoutingConsumerTypeHealthCheck : IHostedService, IHealthChec
             if (report.HasDrift)
             {
                 // FR-P0-04: drift is a startup FAILURE (surfaced as Unhealthy at
-                // /healthz via CheckHealthAsync). The hosted-service run logs the
-                // same report at Error so the drift is visible in startup logs
-                // even before the first health probe.
+                // /healthz/catalog via CheckHealthAsync). The hosted-service run logs
+                // the same report at Error so the drift is visible in startup logs
+                // even before the first health probe. Since the FR-P2-01 cutover
+                // (task 030) the orphan-handler dimension is PART of drift — the
+                // catalog is the ONLY tool projection, so a registered handler
+                // without a sprk_analysistool row is dead code or a missing seed,
+                // never "direct-wired by design".
                 _logger.LogError(
                     "RoutingConsumerTypeHealthCheck FAILED: {DriftReport}",
                     report.BuildDriftDescription());
-            }
-            else if (report.HasOrphanHandlers)
-            {
-                _logger.LogWarning(
-                    "RoutingConsumerTypeHealthCheck DEGRADED: {OrphanReport}",
-                    report.BuildOrphanDescription());
             }
             else
             {
@@ -176,13 +174,12 @@ public sealed class RoutingConsumerTypeHealthCheck : IHostedService, IHealthChec
             var report = await ReconcileAsync(scope.ServiceProvider, entityService, cancellationToken)
                 .ConfigureAwait(false);
 
-            if (report.HasDrift)
-            {
-                return HealthCheckResult.Unhealthy(report.BuildDriftDescription());
-            }
-
-            return report.HasOrphanHandlers
-                ? HealthCheckResult.Degraded(report.BuildOrphanDescription())
+            // FR-P2-01 escalation (task 030; gate-014 deferral resolved): orphan
+            // registered handlers are now full drift → Unhealthy. With the closed
+            // catalog as the ONLY tool projection, "registered but row-less" means
+            // dead code or a missing seed — see HandlersWithoutToolRows in HasDrift.
+            return report.HasDrift
+                ? HealthCheckResult.Unhealthy(report.BuildDriftDescription())
                 : HealthCheckResult.Healthy(report.BuildHealthyDescription());
         }
         catch (OperationCanceledException)
@@ -367,22 +364,21 @@ public sealed class RoutingConsumerTypeHealthCheck : IHostedService, IHealthChec
         int HandlerCount,
         string? ToolBijectionSkippedReason)
     {
+        /// <summary>
+        /// Any dimension out of reconciliation ⇒ Unhealthy. The orphan-handler
+        /// dimension (<see cref="HandlersWithoutToolRows"/>) was Degraded-by-design
+        /// between FR-P0-04 and the FR-P2-01 catalog-projection cutover; task 030
+        /// (2026-07-05 gate-014 deferral) escalated it to full drift: the closed
+        /// catalog is now the ONLY tool projection, so every registered handler
+        /// MUST have a <c>sprk_analysistool</c> row (or be deleted).
+        /// </summary>
         public bool HasDrift =>
             ConstantsWithoutRows.Count > 0 ||
             RowsWithoutConstants.Count > 0 ||
             ToolRowsWithoutHandlers.Count > 0 ||
             ToolRowsMissingHandlerClass.Count > 0 ||
-            DuplicateToolRowsPerHandler.Count > 0;
-
-        /// <summary>
-        /// Registered handlers with no catalog row. DEGRADED (not Unhealthy)
-        /// until the FR-P2-01 catalog-projection cutover (task 030): today
-        /// several handlers are direct-wired to chat contexts without rows,
-        /// and the F-1 deletion targets (audit 2026-07-05) must NOT be given
-        /// rows just to satisfy a probe. Task 030 escalates this dimension to
-        /// Unhealthy when the closed catalog becomes the ONLY projection.
-        /// </summary>
-        public bool HasOrphanHandlers => HandlersWithoutToolRows.Count > 0;
+            DuplicateToolRowsPerHandler.Count > 0 ||
+            HandlersWithoutToolRows.Count > 0;
 
         public string BuildDriftDescription()
         {
@@ -418,13 +414,16 @@ public sealed class RoutingConsumerTypeHealthCheck : IHostedService, IHealthChec
                     $"duplicate sprk_toolid across active tool rows (tool identity violated): {string.Join(", ", DuplicateToolRowsPerHandler)}");
             }
 
+            if (HandlersWithoutToolRows.Count > 0)
+            {
+                parts.Add(
+                    $"registered handlers without a sprk_analysistool row (Unhealthy since the FR-P2-01 catalog-projection cutover, task 030 — seed the row via scripts/Seed-TypedHandlers.ps1 or delete the handler): {string.Join(", ", HandlersWithoutToolRows)}");
+            }
+
             return
                 "AI catalog drift detected (ADR-039 / FR-P0-04 boot reconciliation): "
                 + string.Join("; ", parts) + ".";
         }
-
-        public string BuildOrphanDescription() =>
-            $"Catalog rows and constants reconcile, but {HandlersWithoutToolRows.Count} registered handlers have no sprk_analysistool row (not catalog-invocable; escalates to Unhealthy at the FR-P2-01 cutover, task 030): {string.Join(", ", HandlersWithoutToolRows)}.";
 
         public string BuildHealthyDescription() =>
             ToolBijectionSkippedReason is null

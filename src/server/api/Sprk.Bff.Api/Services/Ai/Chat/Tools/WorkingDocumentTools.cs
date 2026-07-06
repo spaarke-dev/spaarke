@@ -379,9 +379,11 @@ public sealed class WorkingDocumentTools
     /// <c>sprk_analysisoutput.sprk_workingdocument</c>. It MUST NEVER call SpeFileStore,
     /// GraphServiceClient write methods, or any SharePoint Embedded write operation.
     ///
-    /// PLAN GATE (spec FR-11): This tool is listed in <see cref="CompoundIntentDetector.WriteBackToolNames"/>
-    /// and therefore ALWAYS triggers a plan preview gate before execution. It should only be
-    /// called from an approved plan execution (POST /api/ai/chat/sessions/{sessionId}/plan/approve).
+    /// PLAN GATE (spec FR-11, rewired by FR-P2-02 / task 031): this tool's catalog row
+    /// declares <c>sprk_sideeffectclass = Write</c>, so it ALWAYS triggers the unified
+    /// confirmation gate (<see cref="PendingPlanManager.RequiresConfirmation"/>) before
+    /// execution. It should only be called from an approved plan execution
+    /// (POST /api/ai/chat/sessions/{sessionId}/plan/approve).
     ///
     /// When <c>_analysisId</c> is null (no analysis context available), the method returns
     /// an informative error string so the agent can surface a helpful message to the user.
@@ -504,9 +506,9 @@ public sealed class WorkingDocumentTools
     /// Called by <see cref="SprkChatAgentFactory.ResolveTools"/> to register document-editing
     /// tools into the agent's tool set. Uses <see cref="AIFunctionFactory.Create"/> per ADR-013.
     ///
-    /// WriteBackToWorkingDocument is included in the returned tools and is registered in
-    /// <see cref="CompoundIntentDetector.WriteBackToolNames"/>, ensuring it always triggers
-    /// the plan preview gate before execution (spec FR-11).
+    /// WriteBackToWorkingDocument is included in the returned tools; its catalog row's
+    /// declared <c>sprk_sideeffectclass = Write</c> ensures it always triggers the unified
+    /// confirmation gate before execution (spec FR-11, rewired by FR-P2-02 / task 031).
     /// </summary>
     /// <returns>An enumerable of <see cref="AIFunction"/> objects wrapping the tool methods.</returns>
     public IEnumerable<AIFunction> GetTools()
