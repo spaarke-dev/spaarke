@@ -60,7 +60,12 @@ import { useChatFileAttachment } from './hooks/useChatFileAttachment';
 import type { ISprkChatInputHandle } from './types';
 import { Toaster, useToastController, useId, Toast, ToastTitle, ToastBody } from '@fluentui/react-components';
 import { ActionConfirmationDialog } from './ActionConfirmationDialog';
-import { openCodePageDialog, navigateToTarget, dispatchConfirmedAction, rejectPendingAction } from './hooks/useActionHandlers';
+import {
+  openCodePageDialog,
+  navigateToTarget,
+  dispatchConfirmedAction,
+  rejectPendingAction,
+} from './hooks/useActionHandlers';
 import type { IPendingAction, IChatSseEventData } from './types';
 
 // ---------------------------------------------------------------------------

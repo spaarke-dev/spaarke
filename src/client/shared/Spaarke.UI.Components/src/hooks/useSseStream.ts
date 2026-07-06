@@ -428,8 +428,12 @@ function processEvent(event: IChatSseEvent, handlers: SseEventHandlers): void {
     // title?, missingFields: [{name, prompt?, type?}], providedArgs? }. Tolerant
     // parse: an event without the two routing ids is dropped (never throws).
     const data = (event.data ?? {}) as unknown as Partial<IElicitationModalPayload>;
-    if (typeof data.gateId === 'string' && data.gateId.length > 0 &&
-        typeof data.bindingId === 'string' && data.bindingId.length > 0) {
+    if (
+      typeof data.gateId === 'string' &&
+      data.gateId.length > 0 &&
+      typeof data.bindingId === 'string' &&
+      data.bindingId.length > 0
+    ) {
       handlers.onElicitationModal({
         gateId: data.gateId,
         bindingId: data.bindingId,

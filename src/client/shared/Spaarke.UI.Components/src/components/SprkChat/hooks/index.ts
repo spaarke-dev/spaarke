@@ -17,7 +17,13 @@ export type { IUseChatPlaybooksResult } from './useChatPlaybooks';
 export { useActionMenuData } from './useActionMenuData';
 export type { UseActionMenuDataOptions, IUseActionMenuDataResult } from './useActionMenuData';
 
-export { useActionHandlers, openCodePageDialog, navigateToTarget, dispatchConfirmedAction, rejectPendingAction } from './useActionHandlers';
+export {
+  useActionHandlers,
+  openCodePageDialog,
+  navigateToTarget,
+  dispatchConfirmedAction,
+  rejectPendingAction,
+} from './useActionHandlers';
 export type {
   UseActionHandlersOptions,
   IUseActionHandlersResult,
