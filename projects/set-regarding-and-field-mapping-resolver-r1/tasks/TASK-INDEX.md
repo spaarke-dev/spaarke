@@ -2,7 +2,7 @@
 
 > **Project**: set-regarding-and-field-mapping-resolver-r1
 > **Plan**: [`../plan.md`](../plan.md)
-> **Total tasks**: 36 (28 original + 8 out-of-plan polish/fix follow-ons SRFR-034, SRFR-035, SRFR-036, SRFR-037, SRFR-038, SRFR-039, SRFR-041, SRFR-042)
+> **Total tasks**: 39 (28 original + 11 out-of-plan polish/fix follow-ons SRFR-034, SRFR-035, SRFR-036, SRFR-037, SRFR-038, SRFR-039, SRFR-041, SRFR-042, SRFR-043, SRFR-044, SRFR-045)
 > **Wave count**: 10 (0–9)
 
 ## Legend
@@ -51,6 +51,9 @@
 | 039 | [RegardingResolver v1.3.3 → v1.3.4 — restore Row 2 Name cell inline (1/3 : 2/3 grid) with top-aligned OOB-parity labels "Regarding Number" / "Regarding Name" (owner correction to SRFR-034 §6; Path A exception extended to Row 2 labels 12px/400/#616161)](./039-regarding-resolver-restore-name-cell-v1.3.4.poml) | ✅ | FULL | 1h30min est / **~55min actual** | post-SRFR-037 follow-on (parallel with SRFR-041 form revert) |
 | 041 | [sprk_todo FormXml revert — hide OOB fields again (undo SRFR-038 visibility flip; preserve OnLoad handler wiring; owner clarified OOB fields were intentionally hidden)](./041-sprk-todo-form-revert-hide-oob-fields.poml) | ✅ | STANDARD | 30min est / **~15min actual** | post-SRFR-038 revert (parallel with SRFR-039 PCF v1.3.4) |
 | 042 | [RegardingResolver v1.3.4 → v1.3.5 — Row 2 hyperlink onLoad fix (pre-loaded records: derive click target from bound sprk_regardingrecordurl attr via URL-parse fallback; selectedTarget wins on fresh picker selection)](./042-regarding-resolver-hyperlink-onload-fix-v1.3.5.poml) | ✅ | FULL | 1h30min est / **~50min actual** | post-SRFR-039 owner bug report (v1.3.4 hyperlink no-op on pre-loaded records) |
+| 043 | RegardingResolver v1.3.5 → v1.3.6 — Row 2 hyperlink WebAPI-based fix (v1.3.5 Xrm.Page URL read never fired because sprk_regardingrecordurl not on sprk_todo form; replace with context.webAPI.retrieveRecord at click time) | ✅ | FULL | (in-code) | post-SRFR-042 (v1.3.5 shipped but URL-parse path unreachable in prod) |
+| 044 | RegardingResolver v1.3.6 → v1.3.7 — navigateTo this-binding fix (extracted `const navigateTo = xrm.Navigation.navigateTo` reference loses `this`, platform impl accesses `this.Navigation._clientApiExecutor` and throws; call as `xrm.Navigation.navigateTo(...)` instead) | ✅ | FULL | (in-code) | post-SRFR-043 owner bug report |
+| 045 | [RegardingResolver v1.3.7 → v1.4.0 — consolidation with AssociationResolver (port subgrid auto-detect; retire AssociationResolver)](./045-regarding-resolver-v1.4.0-consolidation.poml) | ✅ | FULL | 3h est / **~1h30min actual** | post-SRFR-044 owner clarification (two PCFs redundant; consolidate on RegardingResolver) |
 
 ### Wave 4 — Presave webresource (independent, parallel with Wave 3)
 

@@ -1,5 +1,43 @@
 /**
- * RegardingResolverApp — v1.3.6 streamlined 2-row UI for the polymorphic regarding picker.
+ * RegardingResolverApp — v1.4.0 polymorphic parent picker for any child entity
+ * following the N:1 polymorphic pattern.
+ *
+ * # v1.4.0 (SRFR-045 consolidation with AssociationResolver — subgrid auto-detect)
+ *
+ * Owner clarified use case: the resolver goes on the CHILD form (e.g. sprk_todo,
+ * sprk_event, sprk_invoice, sprk_communication, sprk_kpiassessment) so the
+ * child associates to a polymorphic parent AND the parent's subgrids show
+ * the child via the entity-specific `sprk_regarding{Entity}` lookup. When
+ * the user clicks "+ new" from a parent's subgrid, Dataverse auto-populates
+ * the `sprk_regarding{Entity}` lookup via relationship mapping. This resolver
+ * must detect that pre-populated lookup at mount time and auto-write the 5
+ * denormalized fields without requiring the user to click the picker.
+ *
+ * The one AssociationResolver feature worth keeping — auto-detect from
+ * subgrid — is ported here. AssociationResolver is retired in this same
+ * task; both PCFs did essentially the same job. Key differences that
+ * disqualified AssociationResolver: field-mapping cascade is now driven
+ * from the parent side (SRFR-062 push ribbon), so the write-time
+ * FieldMappingHandler is redundant.
+ *
+ * Behavior on mount (React useEffect):
+ *   - Iterate `sprk_regarding{entityName}` field names derived from the
+ *     bound catalog (via ResolverWriteHandler.resolveAllowedCatalog).
+ *   - For each, ask `Xrm.Page.getAttribute(...).getValue()` if the lookup
+ *     has a value.
+ *   - First hit → auto-detect the parent → apply resolver fields:
+ *     * CREATE mode (no host record id): use `Xrm.Page.getAttribute(...).setValue()`
+ *       to write the 5 denormalized fields to form attributes so they save
+ *       with the record on first save. Also populate
+ *       `window.__sprk_regarding_pending__` for the SRFR-040 presave webresource fallback.
+ *     * UPDATE mode (host record id): use `context.webAPI.updateRecord(...)`
+ *       with the applyResolverFields payload (existing UPDATE-mode write path).
+ *   - Populate `selectedTarget` React state so the Row 2 hyperlink works immediately.
+ *
+ * All existing v1.3.x features preserved: refresh button, auto-refresh,
+ * showVersionFooter, PolymorphicPicker consumption, Row 2 grid + labels,
+ * name cell, title semi-bold + reduced top padding, click-time WebAPI-based
+ * hyperlink target resolution.
  *
  * # v1.3.6 (SRFR-043 Row 2 hyperlink WebAPI-based fix)
  *
@@ -121,13 +159,17 @@
  *         based on the new `showVersionFooter` input property (SRFR-034 §2,
  *         default true).
  *
- * # HOST-only usage (binding contract — R4-112 clarification 2026-06-24)
+ * # Child-form binding (v1.4.0 SRFR-045)
  *
- * Bind this PCF ONLY to entities that HOST the polymorphic regarding fields
- * (`sprk_regardingrecordtype` lookup + `sprk_regardingrecordid` / `name` / `url`
- * + `sprk_regardingrecordnumber` text fields + the 11 `sprk_Regarding<X>`
- * entity-specific lookups). Currently host entities: `sprk_todo`,
- * `sprk_communication` (FR-22).
+ * Bind this PCF to CHILD entities in an N:1 polymorphic relationship — those
+ * hosting the polymorphic regarding fields (`sprk_regardingrecordtype` lookup +
+ * `sprk_regardingrecordid` / `name` / `url` + `sprk_regardingrecordnumber` text
+ * fields + the 11 `sprk_Regarding<X>` entity-specific lookups). Designed for
+ * child entities: `sprk_todo`, `sprk_event`, `sprk_invoice`, `sprk_communication`,
+ * `sprk_kpiassessment` (plus any future entity following the resolver pattern).
+ * When placed on a child form, the PCF associates the child to its polymorphic
+ * parent AND exposes the child in the parent's subgrids via the entity-specific
+ * `sprk_regarding{Entity}` lookup.
  *
  * # Read-only mode (FR-A5-01 / NFR-04) — preserved by SRFR-033 + SRFR-034
  *
@@ -200,7 +242,7 @@ import {
 // in index.ts and the manifest attributes on every release (SRFR-033).
 // ---------------------------------------------------------------------------
 
-const BUILD_DATE = '2026-07-04';
+const BUILD_DATE = '2026-07-05';
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -614,6 +656,109 @@ function getHostRecordId(): string | undefined {
 }
 
 /**
+ * v1.4.0 (SRFR-045) — Detect a pre-populated `sprk_regarding{Entity}` lookup on
+ * the child form (subgrid-driven "+ new" flow).
+ *
+ * When a user clicks "+ new" from a parent's subgrid (e.g. Matter subgrid of
+ * Todos), Dataverse auto-populates the entity-specific `sprk_regarding{Entity}`
+ * lookup via relationship mapping. This helper iterates the catalog's
+ * lookupAttribute fields, checks `Xrm.Page.getAttribute(...).getValue()`, and
+ * returns the first hit as a synthesized selection payload.
+ *
+ * Returns `null` when Xrm.Page is unavailable OR no lookup is populated. All
+ * paths defensive — never throws to the host form.
+ *
+ * @param catalog - The allowed catalog subset (from resolveAllowedCatalog).
+ */
+function detectPrePopulatedParent(
+  catalog: ReadonlyArray<ITodoRegardingTargetCatalogEntry>
+): { entityType: string; recordId: string; recordName: string; lookupAttribute: string } | null {
+  const xrm = getXrm();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const page = xrm?.Page as any;
+  if (!page || typeof page.getAttribute !== 'function') {
+    return null;
+  }
+
+  for (const entry of catalog) {
+    try {
+      const attr = page.getAttribute(entry.lookupAttribute);
+      if (!attr) continue;
+      const value = attr.getValue?.();
+      if (value && Array.isArray(value) && value.length > 0) {
+        const lookupValue = value[0];
+        if (lookupValue && typeof lookupValue.id === 'string' && lookupValue.id.length > 0) {
+          return {
+            entityType: entry.entityType,
+            recordId: String(lookupValue.id).replace(/[{}]/g, ''),
+            recordName: typeof lookupValue.name === 'string' ? lookupValue.name : '',
+            lookupAttribute: entry.lookupAttribute,
+          };
+        }
+      }
+    } catch (err) {
+      console.warn(
+        `[RegardingResolver] Error probing ${entry.lookupAttribute} for auto-detect:`,
+        err
+      );
+    }
+  }
+  return null;
+}
+
+/**
+ * v1.4.0 (SRFR-045) — Xrm.Page setValue helpers for CREATE-mode auto-detect.
+ *
+ * When a child form is in CREATE mode (no host record id yet), the write
+ * pathway is DIFFERENT from UPDATE mode: instead of calling
+ * `webApi.updateRecord`, we mutate the form's pending-attribute buffer via
+ * `Xrm.Page.getAttribute(...).setValue()` so the fields ride the INSERT
+ * transaction. This mirrors the AssociationResolver setLookupValue /
+ * setTextValue helpers (see AssociationResolver/handlers/RecordSelectionHandler.ts
+ * lines 204-287, from which this is adapted per SRFR-045).
+ *
+ * Defensive throughout: field not on form → warn + return false. Xrm
+ * unavailable → warn + return false. Never throws to the host form.
+ */
+function setFormLookupValue(
+  fieldName: string,
+  entityType: string,
+  id: string,
+  name: string
+): boolean {
+  const xrm = getXrm();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const page = xrm?.Page as any;
+  if (!page || typeof page.getAttribute !== 'function') return false;
+  try {
+    const attr = page.getAttribute(fieldName);
+    if (!attr) return false;
+    const cleanId = String(id).replace(/[{}]/g, '');
+    attr.setValue([{ id: cleanId, name, entityType }]);
+    return true;
+  } catch (err) {
+    console.warn(`[RegardingResolver] setFormLookupValue(${fieldName}) failed:`, err);
+    return false;
+  }
+}
+
+function setFormTextValue(fieldName: string, value: string | null): boolean {
+  const xrm = getXrm();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const page = xrm?.Page as any;
+  if (!page || typeof page.getAttribute !== 'function') return false;
+  try {
+    const attr = page.getAttribute(fieldName);
+    if (!attr) return false;
+    attr.setValue(value);
+    return true;
+  } catch (err) {
+    console.warn(`[RegardingResolver] setFormTextValue(${fieldName}) failed:`, err);
+    return false;
+  }
+}
+
+/**
  * Adapt the internal `TODO_REGARDING_CATALOG` shape (used by the write path
  * per ADR-024) to the shared `RecordTypeCatalogEntry` shape consumed by
  * `PolymorphicPicker`. The shared picker only needs a stable key, display
@@ -696,6 +841,11 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
   const [isWriting, setIsWriting] = React.useState(false);
   const [selectedTarget, setSelectedTarget] = React.useState<IRegardingSelection | null>(null);
 
+  // v1.4.0 (SRFR-045) — guard against double-firing auto-detect if React
+  // re-renders during the effect. `useRef` persists across renders without
+  // triggering re-renders itself.
+  const autoDetectFiredRef = React.useRef<boolean>(false);
+
   // ---------------- Write context ----------------
   const writeCtx = React.useMemo<IResolverWriteContext>(
     () => ({
@@ -706,6 +856,138 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
     }),
     [context.webAPI, hostEntity]
   );
+
+  // ---------------- v1.4.0 (SRFR-045) Auto-detect from subgrid ----------------
+  //
+  // On mount, detect if any bound `sprk_regarding{Entity}` lookup is
+  // pre-populated (subgrid-driven "+ new" flow). First hit → resolve the
+  // Record Type + record-number via shared primitives → write the 5
+  // denormalized fields. CREATE mode uses setValue on form attributes;
+  // UPDATE mode uses updateRecord (existing applyRegardingSelection path).
+  //
+  // The effect runs once per mount (autoDetectFiredRef guard). Read-only
+  // mode SKIPS auto-detect — the resolver fields shouldn't be mutated on
+  // a read-only form. Errors are swallowed with warn only — never crash
+  // the host form.
+  React.useEffect(() => {
+    if (autoDetectFiredRef.current) return;
+    if (readOnly) {
+      autoDetectFiredRef.current = true;
+      return;
+    }
+    if (!hostEntity) {
+      autoDetectFiredRef.current = true;
+      return;
+    }
+
+    const detected = detectPrePopulatedParent(catalog);
+    if (!detected) {
+      autoDetectFiredRef.current = true;
+      return;
+    }
+    autoDetectFiredRef.current = true;
+
+    const runAutoDetect = async (): Promise<void> => {
+      const hostRecordId = getHostRecordId();
+      const isCreateMode = !hostRecordId;
+
+      try {
+        if (isCreateMode) {
+          // CREATE mode: no host record id yet — write to form attributes
+          // via setValue so the fields ride the INSERT transaction. Do NOT
+          // call applyResolverFields' updateRecord path (there's no record
+          // to update).
+          const recordType = await resolveRecordType(writeCtx.webApi, detected.entityType);
+
+          // Write the 4 always-known fields immediately.
+          setFormTextValue('sprk_regardingrecordid', detected.recordId);
+          setFormTextValue('sprk_regardingrecordname', detected.recordName);
+          setFormTextValue(
+            'sprk_regardingrecordurl',
+            buildRecordUrl(detected.entityType, detected.recordId)
+          );
+          if (recordType) {
+            setFormLookupValue(
+              'sprk_regardingrecordtype',
+              'sprk_recordtype_ref',
+              recordType.id,
+              recordType.name
+            );
+            // Notify PCF class so the bound lookup output tracks
+            onRecordTypeChanged({
+              id: recordType.id,
+              name: recordType.name,
+              entityType: 'sprk_recordtype_ref',
+            });
+          }
+
+          // Populate selectedTarget so Row 2 hyperlink works immediately.
+          setSelectedTarget({
+            entityType: detected.entityType,
+            recordId: detected.recordId,
+            recordName: detected.recordName,
+          });
+
+          // Populate SRFR-040 presave bridge fallback. The presave
+          // webresource will stage sprk_regardingrecordnumber on save.
+          (
+            window as unknown as {
+              __sprk_regarding_pending__?: Record<string, unknown>;
+            }
+          ).__sprk_regarding_pending__ = {
+            hostEntity,
+            entityType: detected.entityType,
+            entitySet: undefined,
+            lookupAttribute: detected.lookupAttribute,
+            recordId: detected.recordId,
+            recordName: detected.recordName,
+            recordUrl: buildRecordUrl(detected.entityType, detected.recordId),
+            recordNumber: null,
+          };
+        } else {
+          // UPDATE mode: host record exists — use applyRegardingSelection
+          // which internally calls webApi.updateRecord with the full payload.
+          const selection: IRegardingSelection = {
+            entityType: detected.entityType,
+            recordId: detected.recordId,
+            recordName: detected.recordName,
+          };
+          const result = await applyRegardingSelection(writeCtx, selection);
+          if (!result.success) {
+            console.warn(
+              '[RegardingResolver] Auto-detect UPDATE-mode applyRegardingSelection failed:',
+              result.error
+            );
+            return;
+          }
+
+          setSelectedTarget(selection);
+
+          // Notify PCF class so the bound lookup output tracks.
+          try {
+            const recordType = await resolveRecordType(writeCtx.webApi, detected.entityType);
+            if (recordType) {
+              onRecordTypeChanged({
+                id: recordType.id,
+                name: recordType.name,
+                entityType: 'sprk_recordtype_ref',
+              });
+            }
+          } catch (rtErr) {
+            console.warn(
+              '[RegardingResolver] Auto-detect resolveRecordType for output notify failed:',
+              rtErr
+            );
+          }
+        }
+      } catch (err) {
+        // Defensive: never crash the host form.
+        console.warn('[RegardingResolver] Auto-detect from subgrid failed:', err);
+      }
+    };
+
+    void runAutoDetect();
+  }, [catalog, hostEntity, readOnly, writeCtx, onRecordTypeChanged]);
 
   // ---------------- PolymorphicPicker onSelect ----------------
 

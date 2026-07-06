@@ -1726,4 +1726,266 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
       expect(['#616161', 'rgb(97, 97, 97)']).toContain(computed.color);
     });
   });
+
+  // ---------------------------------------------------------------------------
+  // SRFR-045 — v1.4.0 auto-detect pre-populated parent from subgrid
+  //
+  // When a user clicks "+ new" from a parent's subgrid, Dataverse
+  // auto-populates the entity-specific `sprk_regarding{Entity}` lookup via
+  // relationship mapping. The v1.4.0 resolver detects that lookup on mount
+  // and auto-writes the 5 denormalized fields without requiring the user to
+  // click the picker.
+  //
+  // CREATE mode: use Xrm.Page.getAttribute().setValue() so the fields ride
+  //              the INSERT transaction. Also populate the SRFR-040 presave
+  //              bridge fallback.
+  // UPDATE mode: use webApi.updateRecord via applyRegardingSelection.
+  //
+  // These tests validate the CREATE-mode path (dominant subgrid-driven "+ new"
+  // scenario) and the no-lookup-populated no-op path.
+  // ---------------------------------------------------------------------------
+
+  describe('SRFR-045 — v1.4.0 auto-detect pre-populated parent from subgrid', () => {
+    /**
+     * Build an Xrm.Page mock in CREATE mode with pre-populated
+     * `sprk_regarding{Entity}` lookup attributes. Each field returns a fresh
+     * attr object; setValue calls are recorded in `attrCalls`.
+     */
+    const buildCreateModeXrmWithPrePopulated = (
+      prePopulated: Record<string, { id: string; name: string; entityType: string } | null>
+    ): { attrCalls: Record<string, unknown[]>; restore: () => void } => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const w = window as any;
+      const originalXrm = w.Xrm;
+      const attrCalls: Record<string, unknown[]> = {};
+      const attrs: Record<string, { getValue: () => unknown; setValue: (v: unknown) => void }> = {};
+
+      // Pre-populate the specified lookup fields.
+      Object.entries(prePopulated).forEach(([field, val]) => {
+        attrs[field] = {
+          getValue: () => (val ? [val] : null),
+          setValue: (v: unknown) => {
+            if (!attrCalls[field]) attrCalls[field] = [];
+            attrCalls[field].push(v);
+          },
+        };
+      });
+
+      // For every other field that setValue may target, provide a stub.
+      const stubFields = [
+        'sprk_regardingrecordid',
+        'sprk_regardingrecordname',
+        'sprk_regardingrecordurl',
+        'sprk_regardingrecordtype',
+      ];
+      stubFields.forEach(f => {
+        if (!attrs[f]) {
+          attrs[f] = {
+            getValue: () => null,
+            setValue: (v: unknown) => {
+              if (!attrCalls[f]) attrCalls[f] = [];
+              attrCalls[f].push(v);
+            },
+          };
+        }
+      });
+
+      w.Xrm = {
+        Page: {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          getAttribute: (name: string) => attrs[name] ?? null,
+          data: { entity: { getId: () => '' } },
+          ui: { getFormType: () => 1 },
+        },
+      };
+
+      return {
+        attrCalls,
+        restore: () => {
+          if (originalXrm === undefined) delete w.Xrm;
+          else w.Xrm = originalXrm;
+        },
+      };
+    };
+
+    test('auto-detect fires on mount when sprk_regardingmatter is pre-populated → 5 fields written via setValue in CREATE mode → picker state reflects the selection', async () => {
+      const { attrCalls, restore } = buildCreateModeXrmWithPrePopulated({
+        sprk_regardingmatter: {
+          id: '{aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa}',
+          name: 'Smith v. Jones',
+          entityType: 'sprk_matter',
+        },
+      });
+      const onRecordTypeChanged = jest.fn();
+
+      try {
+        const { context } = buildContext();
+        renderWithProvider(
+          <RegardingResolverApp
+            context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
+            readOnly={false}
+            onRecordTypeChanged={onRecordTypeChanged}
+            version="1.4.0"
+          />
+        );
+
+        // Auto-detect runs in an effect after mount; wait for the record-type
+        // resolve to complete + the resolver-fields setValue calls to fire.
+        await waitFor(() => {
+          expect(mockResolveRecordType).toHaveBeenCalledWith(
+            expect.anything(),
+            'sprk_matter'
+          );
+        });
+
+        // 4 always-known form-attribute setValue calls MUST have fired:
+        //   sprk_regardingrecordid  → 'aaaa...' (no braces)
+        //   sprk_regardingrecordname → 'Smith v. Jones'
+        //   sprk_regardingrecordurl  → non-empty (buildRecordUrl output)
+        //   sprk_regardingrecordtype → lookup value with rt-guid + Matter
+        await waitFor(() => {
+          expect(attrCalls.sprk_regardingrecordid).toBeDefined();
+        });
+        expect(attrCalls.sprk_regardingrecordid?.[0]).toBe(
+          'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
+        );
+        expect(attrCalls.sprk_regardingrecordname?.[0]).toBe('Smith v. Jones');
+        expect(typeof attrCalls.sprk_regardingrecordurl?.[0]).toBe('string');
+        expect(String(attrCalls.sprk_regardingrecordurl?.[0])).toContain('sprk_matter');
+        expect(String(attrCalls.sprk_regardingrecordurl?.[0])).toContain(
+          'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
+        );
+
+        // Record Type lookup value shape.
+        await waitFor(() => {
+          expect(attrCalls.sprk_regardingrecordtype).toBeDefined();
+        });
+        const rtValue = attrCalls.sprk_regardingrecordtype?.[0];
+        expect(Array.isArray(rtValue)).toBe(true);
+        expect((rtValue as Array<{ id: string; name: string; entityType: string }>)[0].id).toBe(
+          'rt-guid'
+        );
+        expect(
+          (rtValue as Array<{ id: string; name: string; entityType: string }>)[0].entityType
+        ).toBe('sprk_recordtype_ref');
+
+        // onRecordTypeChanged fired so the bound lookup output tracks.
+        expect(onRecordTypeChanged).toHaveBeenCalledWith(
+          expect.objectContaining({
+            id: 'rt-guid',
+            entityType: 'sprk_recordtype_ref',
+          })
+        );
+
+        // SRFR-040 presave-bridge seam populated for the on-save fallback.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const seam = (window as any).__sprk_regarding_pending__;
+        expect(seam).toBeDefined();
+        expect(seam.entityType).toBe('sprk_matter');
+        expect(seam.recordId).toBe('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
+        expect(seam.recordName).toBe('Smith v. Jones');
+        expect(seam.lookupAttribute).toBe('sprk_regardingmatter');
+      } finally {
+        restore();
+      }
+    });
+
+    test('auto-detect fires on mount when sprk_regardingproject is pre-populated → same behavior for different entity type', async () => {
+      // Owner clarification: resolver placed on child forms (sprk_todo, etc.)
+      // where the parent could be ANY of the 11 catalog entities. Confirm the
+      // detect loop is entity-agnostic by using sprk_regardingproject here.
+      mockResolveRecordType.mockResolvedValueOnce({ id: 'proj-rt-guid', name: 'Project' });
+
+      const { attrCalls, restore } = buildCreateModeXrmWithPrePopulated({
+        sprk_regardingproject: {
+          id: '{bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb}',
+          name: 'Alpha Project',
+          entityType: 'sprk_project',
+        },
+      });
+
+      try {
+        const { context } = buildContext();
+        renderWithProvider(
+          <RegardingResolverApp
+            context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
+            readOnly={false}
+            onRecordTypeChanged={() => undefined}
+            version="1.4.0"
+          />
+        );
+
+        await waitFor(() => {
+          expect(mockResolveRecordType).toHaveBeenCalledWith(
+            expect.anything(),
+            'sprk_project'
+          );
+        });
+
+        await waitFor(() => {
+          expect(attrCalls.sprk_regardingrecordid).toBeDefined();
+        });
+        expect(attrCalls.sprk_regardingrecordid?.[0]).toBe(
+          'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
+        );
+        expect(attrCalls.sprk_regardingrecordname?.[0]).toBe('Alpha Project');
+        expect(String(attrCalls.sprk_regardingrecordurl?.[0])).toContain('sprk_project');
+
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const seam = (window as any).__sprk_regarding_pending__;
+        expect(seam).toBeDefined();
+        expect(seam.entityType).toBe('sprk_project');
+        expect(seam.lookupAttribute).toBe('sprk_regardingproject');
+      } finally {
+        restore();
+      }
+    });
+
+    test('no pre-populated lookup → no auto-detect fires → picker starts empty', async () => {
+      // No lookup pre-populated (all attrs return null from getValue). Auto-detect
+      // must silently no-op — no setValue calls, no seam populated, no
+      // resolveRecordType calls.
+      const { attrCalls, restore } = buildCreateModeXrmWithPrePopulated({
+        // All the picker's catalog attributes return null.
+        sprk_regardingmatter: null,
+        sprk_regardingproject: null,
+        sprk_regardingevent: null,
+      });
+
+      try {
+        const { context } = buildContext();
+        renderWithProvider(
+          <RegardingResolverApp
+            context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
+            readOnly={false}
+            onRecordTypeChanged={() => undefined}
+            version="1.4.0"
+          />
+        );
+
+        // Give the effect a chance to run + settle (any auto-detect fire
+        // would occur within microtasks / next tick).
+        await new Promise(resolve => setTimeout(resolve, 0));
+        await new Promise(resolve => setTimeout(resolve, 0));
+
+        // Zero setValue calls fired.
+        expect(attrCalls.sprk_regardingrecordid).toBeUndefined();
+        expect(attrCalls.sprk_regardingrecordname).toBeUndefined();
+        expect(attrCalls.sprk_regardingrecordurl).toBeUndefined();
+        expect(attrCalls.sprk_regardingrecordtype).toBeUndefined();
+
+        // No presave seam populated.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        expect((window as any).__sprk_regarding_pending__).toBeUndefined();
+
+        // No resolveRecordType called (short-circuit).
+        expect(mockResolveRecordType).not.toHaveBeenCalled();
+
+        // Picker still renders (empty starting state).
+        expect(screen.getByTestId('regarding-resolver-root')).toBeInTheDocument();
+      } finally {
+        restore();
+      }
+    });
+  });
 });

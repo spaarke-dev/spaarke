@@ -106,11 +106,22 @@ The Record Type entity serves as the lookup target for resolver fields:
 | **IDataverseService** | `QueryRecordTypeRefAsync()` for server-side `sprk_recordtype_ref` lookups | `src/server/shared/Spaarke.Dataverse/IDataverseService.cs` |
 | **FieldMappingService** | Applies parent field values to child records | `src/client/shared/.../services/FieldMappingService.ts` |
 
+### Active PCF (single consolidated resolver, post-SRFR-045)
+
+| Component | Purpose | Location |
+|-----------|---------|----------|
+| **RegardingResolver PCF** | Polymorphic parent picker for ANY child entity in an N:1 polymorphic relationship. Writes 5 resolver fields + entity-specific lookup via `applyResolverFields`. Auto-detects pre-populated parent lookup on subgrid "+ new" flow (SRFR-045). Placed on child forms: sprk_todo, sprk_event, sprk_invoice, sprk_communication, sprk_kpiassessment. | `src/client/pcf/RegardingResolver/` (v1.4.0+) |
+
+### Retired (SRFR-045, 2026-07-05)
+
+| Component | Retirement rationale |
+|-----------|----------------------|
+| AssociationResolver PCF | Deleted. Primary function (5-field write on polymorphic child) was identical to RegardingResolver. Unique features either ported to RegardingResolver v1.4.0 (auto-detect from subgrid) or redundant with parent-side push (SRFR-062 ribbon supersedes child-write-time cascade). Never placed on any form → zero user-facing regression. |
+
 ### Archival (PCF Controls — deployed but not actively used in wizard/service code paths)
 
 | Component | Purpose | Location |
 |-----------|---------|----------|
-| AssociationResolver PCF | Form-based selection UI via Xrm.Page | `src/client/pcf/AssociationResolver/` |
 | RegardingLink PCF | Grid customizer for clickable regarding links | `src/client/pcf/RegardingLink/` |
 | UpdateRelatedButton PCF | Parent form button to push field mappings | `src/client/pcf/UpdateRelatedButton/` |
 
@@ -218,3 +229,4 @@ The resolver pattern integrates with the Field Mapping Framework. When a parent 
 ## Revision Log
 
 - **2026-07-02 (SRFR-071)**: Extended field write from 4 → 5 (added `sprk_regardingrecordnumber`); no MUST/MUST NOT rule changes.
+- **2026-07-05 (SRFR-045)**: Retired AssociationResolver PCF (deleted source + spaarkedev1 solution). RegardingResolver v1.4.0 becomes the sole active resolver PCF for the polymorphic-child pattern. Added subgrid auto-detect capability: on form mount, iterate the bound catalog's `sprk_regarding{entityName}` field names via `Xrm.Page.getAttribute()`; first pre-populated lookup found (from a parent's "+ new" subgrid click) triggers auto-write of the 5 denormalized fields — via `setValue` in CREATE mode + `__sprk_regarding_pending__` bridge for the SRFR-040 presave webresource; via `applyResolverFields` + `webApi.updateRecord` in UPDATE mode. No MUST/MUST NOT rule changes; the auto-detect path uses the same 5-field write contract as the existing picker path.
