@@ -145,6 +145,9 @@ Two items worth explicit note (neither requires an exception/amendment):
 
 ### Prerequisites
 
+- **🚧 BLOCKED ON PR #549 (`set-regarding-and-field-mapping-resolver-r1`)** — hard prerequisite (owner decision 2026-07-05). It refactors `PolymorphicResolverService` (`applyResolverFields`), **extracts the polymorphic picker** (overlaps `AssociateToStep`), and edits ADR-024. Wizard tasks MUST consume the **post-#549** resolver API + extracted picker. Do not start resolver-dependent implementation until #549 merges.
+- **⚠️ COORDINATE WITH PR #525 (`feat/pcf-visualhost-uat-tracking-field-trio`)** — direct file collision on `CardChrome.tsx`, `VisualHostRoot.tsx`, `ControlManifest.Input.xml`, `bundle.js`, VisualHost solution files. Sequence to rebase on #525; PCF version-bump must account for #525's bump.
+- Pipeline re-run (`/project-pipeline`) is **paused** until #549 (and ideally #525) merge — see `notes/pipeline-paused.md`.
 - Phase 0 discovery: live-schema read of `sprk_document` (confirm host + Event/Invoice child lookups); validate owner-provided manifests (required flags, option-set values).
 - Dataverse schema: **none.** All resolver fields, chart-def columns, and document lookups already exist.
 
