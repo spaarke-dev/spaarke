@@ -29,7 +29,7 @@
  */
 
 import * as React from 'react';
-import { makeStyles, tokens, shorthands, Text, Button, CounterBadge } from '@fluentui/react-components';
+import { makeStyles, tokens, shorthands, Text, Button, Badge } from '@fluentui/react-components';
 import { DismissRegular, Calendar24Regular, ErrorCircle12Filled } from '@fluentui/react-icons';
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -288,6 +288,7 @@ const useStyles = makeStyles({
     fontSize: tokens.fontSizeBase100,
     fontWeight: tokens.fontWeightSemibold,
     color: tokens.colorNeutralForeground3,
+    textTransform: 'uppercase',
     ...shorthands.padding('4px', '0'),
   },
   dayCell: {
@@ -296,9 +297,11 @@ const useStyles = makeStyles({
     alignItems: 'center',
     justifyContent: 'center',
     position: 'relative',
-    minHeight: '36px',
+    minHeight: '44px',
     ...shorthands.padding('4px'),
     ...shorthands.borderRadius('4px'),
+    backgroundColor: tokens.colorNeutralBackground1,
+    ...shorthands.border('1px', 'solid', tokens.colorNeutralStroke2),
     cursor: 'pointer',
     // Task 127 (R13 follow-up #6): removed the base :hover from dayCell.
     // The neutral-background hover now lives on `dayCellNeutralHover` and
@@ -326,10 +329,20 @@ const useStyles = makeStyles({
     minHeight: '36px',
     ...shorthands.padding('4px'),
   },
+  // Adjacent-month days now render as dimmed, non-interactive boxed cells so
+  // the month reads as a complete grid (matching the VisualHost "Tasks &
+  // Events" calendar look). Supersedes the task-127 hidden-placeholder
+  // treatment — the boxed grid needs the corner cells filled to look right.
   dayCellOtherMonth: {
     color: tokens.colorNeutralForeground4,
+    backgroundColor: tokens.colorNeutralBackground3,
+    opacity: 0.5,
+    cursor: 'default',
   },
+  // Boxed today outline (2px brand border) — matches the VisualHost calendar's
+  // today treatment. The border shorthand overrides the base 1px dayCell border.
   dayCellToday: {
+    ...shorthands.border('2px', 'solid', tokens.colorBrandBackground),
     fontWeight: tokens.fontWeightBold,
     color: tokens.colorBrandForeground1,
   },
@@ -374,10 +387,13 @@ const useStyles = makeStyles({
   //        class. Now there's no cascade fight; dayWithEvents simply has
   //        no :hover at all (the rest-state styling persists). The
   //        !important hack from 126 is removed.
+  // Event days: soft brand tint + brand stroke (matching the VisualHost
+  // calendar). The event count is now carried by the filled brand Badge under
+  // the day number (see eventBadge), so the cell no longer needs the heavy
+  // solid-blue fill that task 122 used to make counts legible.
   dayWithEvents: {
-    backgroundColor: tokens.colorBrandBackground,
-    color: tokens.colorNeutralForegroundOnBrand,
-    fontWeight: tokens.fontWeightSemibold,
+    backgroundColor: tokens.colorBrandBackground2,
+    ...shorthands.border('1px', 'solid', tokens.colorBrandStroke1),
   },
   dayNumber: {
     fontSize: tokens.fontSizeBase200,
@@ -399,10 +415,11 @@ const useStyles = makeStyles({
   // without competing with the dayWithEvents background or the overdue
   // indicator (which sits bottom-right). Single-event days (count === 1)
   // skip the badge entirely (parity rule).
-  countBadgeWrapper: {
-    position: 'absolute',
-    top: '1px',
-    right: '1px',
+  // Event-count badge — filled brand Badge rendered UNDER the day number
+  // (matching the VisualHost "Tasks & Events" calendar). Replaces the prior
+  // top-right CounterBadge. Shown for any day with events (count > 0).
+  eventBadge: {
+    marginTop: '2px',
     pointerEvents: 'none',
   },
   // Task 064 (R4 B-8): overdue indicator — small danger-colored dot in the
@@ -827,7 +844,11 @@ export const CalendarSection: React.FC<CalendarSectionProps> = ({
               // placeholder div that preserves grid alignment but has no
               // day number, click handler, hover, or event indicator.
               if (isOtherMonth) {
-                return <div key={dayIdx} className={styles.dayCellEmpty} aria-hidden="true" />;
+                return (
+                  <div key={dayIdx} className={`${styles.dayCell} ${styles.dayCellOtherMonth}`} aria-hidden="true">
+                    <span className={styles.dayNumber}>{day.getDate()}</span>
+                  </div>
+                );
               }
 
               // Task 127: dayCellNeutralHover applies ONLY when no other
@@ -862,16 +883,16 @@ export const CalendarSection: React.FC<CalendarSectionProps> = ({
                   {/* Task 064 (R4 B-8): count badge — only when count > 1
                       (parity: single-event days stay clutter-free). Uses
                       Fluent v9 CounterBadge (semantic tokens, ADR-021). */}
-                  {eventInfo && eventInfo.count > 1 && (
-                    <span className={styles.countBadgeWrapper} aria-hidden="true">
-                      <CounterBadge
-                        count={eventInfo.count}
-                        size="small"
-                        appearance="filled"
-                        color="informative"
-                        overflowCount={99}
-                      />
-                    </span>
+                  {eventInfo && eventInfo.count > 0 && (
+                    <Badge
+                      className={styles.eventBadge}
+                      size="small"
+                      appearance="filled"
+                      color="brand"
+                      aria-hidden="true"
+                    >
+                      {eventInfo.count}
+                    </Badge>
                   )}
 
                   {/* Task 064 (R4 B-8): overdue indicator — only when
@@ -880,10 +901,7 @@ export const CalendarSection: React.FC<CalendarSectionProps> = ({
                       indicator swaps to the foregroundOnBrand token so it
                       remains legible. */}
                   {eventInfo?.overdue === true && (
-                    <span
-                      className={`${styles.overdueIndicator} ${showEventsTint ? styles.overdueIndicatorOnBrand : ''}`}
-                      aria-label="Overdue"
-                    >
+                    <span className={styles.overdueIndicator} aria-label="Overdue">
                       <ErrorCircle12Filled />
                     </span>
                   )}
