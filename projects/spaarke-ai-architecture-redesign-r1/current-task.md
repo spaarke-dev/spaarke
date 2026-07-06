@@ -10,9 +10,9 @@
 | Field | Value |
 |-------|-------|
 | **Task** | 027 — G-P1 gate (browser UAT round 2 pending) + in-flight "027-fix" agent |
-| **Step** | P1 code complete (tasks 020–026 + follow-ups 022b/023b ✅); UAT round 1 found 3 defects; fix agent RUNNING |
-| **Status** | in-progress — blocked on (a) fix-agent completion, (b) redeploy, (c) operator re-UAT |
-| **Next Action** | When the 027-fix agent completes: verify its report → `dotnet build` + full suite + eval + SpaarkeAi `npm run build` → commit → deploy BOTH surfaces (`pwsh -File scripts/Deploy-BffApi.ps1` + `npm run build` in src/solutions/SpaarkeAi then `pwsh -File scripts/Deploy-SpaarkeAi.ps1`) → hand operator the round-2 UAT script (below) → on PASS mark 027 ✅, close P1 in TASK-INDEX, sync portfolio, dispatch W-P2-A (tasks 030, 031 in parallel) |
+| **Step** | 027-fix COMPLETE + COMMITTED (`befcaa5da`) + BOTH SURFACES DEPLOYED to spaarkedev1 (2026-07-06) |
+| **Status** | blocked ONLY on operator round-2 browser UAT |
+| **Next Action** | Operator runs the round-2 UAT script (below). On PASS: mark 027 ✅ + P1 PHASE COMPLETE in TASK-INDEX, sync portfolio Tasks Completed=27, dispatch W-P2-A (tasks 030, 031 in parallel per wave protocol). On FAIL: triage findings, fix, redeploy, re-UAT. |
 
 ### In-flight background agent (027-fix) — its brief, so results can be judged post-compaction
 Fixes 3 G-P1 UAT round-1 defects PLUS the operator UX ruling (sent mid-flight, acked via SendMessage):
