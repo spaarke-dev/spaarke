@@ -574,15 +574,18 @@ public class SessionSummarizeOrchestratorTests
     [Fact]
     public async Task SummarizeSessionFilesAsync_NonInformationalDisposition_ThrowsLoudStub_AfterLedgerWrite()
     {
-        // P1 routes ONLY the informational disposition. Any other declared disposition hits a
-        // LOUD NotSupported stub (task 021 contract — no silent fallback to inline render),
-        // AND the ledger write still happened first (storage is never coupled to rendering).
+        // The orchestrator routes ONLY the informational disposition inline. A declared
+        // disposition whose leg is still unimplemented hits a LOUD NotSupported stub
+        // (task 021 contract — no silent fallback to inline render), AND the ledger write
+        // still happened first (storage is never coupled to rendering).
+        // Example disposition switched email → work_product at task 043 (FR-P3-04
+        // implemented the email leg; work_product remains a stub until task 047).
         _sessionManagerStub.Session = BuildSession(FileId1);
         _consumerRoutingMock
             .Setup(c => c.ResolveBindingAsync(
                 It.IsAny<string>(), It.IsAny<string?>(), It.IsAny<IRoutingContext?>(),
                 It.IsAny<string?>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(BuildBinding() with { Disposition = BindingDisposition.Email });
+            .ReturnsAsync(BuildBinding() with { Disposition = BindingDisposition.WorkProduct });
 
         var rendered = new List<AnalysisChunk>();
         var act = async () =>
@@ -595,11 +598,11 @@ public class SessionSummarizeOrchestratorTests
 
         var thrown = await act.Should().ThrowAsync<NotSupportedException>(
             "unimplemented disposition legs FAIL LOUDLY (they land at P3) — never a silent inline render");
-        thrown.Which.Message.Should().Contain("email").And.Contain("P3");
+        thrown.Which.Message.Should().Contain("work_product").And.Contain("P3");
 
         rendered.Should().BeEmpty("nothing may render through an unimplemented disposition leg");
         _sessionManagerStub.PersistedSessions.Should().ContainSingle()
-            .Which.Outputs.Should().ContainSingle(o => o.Disposition == "email",
+            .Which.Outputs.Should().ContainSingle(o => o.Disposition == "work_product",
                 "storage precedes rendering UNIVERSALLY — the entry is stored and addressable " +
                 "even when the rendering leg is missing (ADR-040: storage never couples to rendering)");
     }

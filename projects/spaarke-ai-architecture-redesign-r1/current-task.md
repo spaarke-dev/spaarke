@@ -9,10 +9,19 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 038 — G-P2 BROWSER UAT (operator, spaarkedev1). ALL P2 CODE COMPLETE (030–037 ✅, 35/51). |
-| **Step** | Both surfaces deployed @ `29f079ee4` (BFF spaarke-bff-dev; sprk_spaarkeai 4782 KB) |
-| **Status** | ⛔ STOPPED at gate 038 — operator UAT required (NFR-11; never auto-passed) |
-| **Next Action** | Operator runs the G-P2 UAT script below + rules on the two escalations. On PASS: mark 038 ✅ + P2 PHASE COMPLETE, portfolio 36, dispatch W-P3-A (040, 041 per plan). On FAIL: triage, fix, redeploy, re-UAT. |
+| **Task** | W-P3-A second half: 040 (consumers→Bindings) + 042 (create-task + confirm-RESUME) — dispatching after wave-close commit |
+| **Step** | P2 CLOSED (030–038 ✅; G-P2 round-1 by operator, fix wave landed). P3: 041 ✅ + 043 ✅ + G-P2 fix wave landed (uncommitted → this wave-close commit). |
+| **Status** | autonomous execution (operator engaged; round-2 spot-check available after this redeploy) |
+| **Next Action** | Commit wave (pull --rebase first), push, portfolio 38, deploy BFF + SpaarkeAi, ping operator with round-2 script (in notes/g-p2-uat-round1-fixwave-notes.md), dispatch 040 + 042. Then 044 (deps 040+043) → 045/047 → 046 → STOP at gate 048. |
+
+### G-P2 fix wave landed (all 5 findings + 2 rulings — notes/g-p2-uat-round1-fixwave-notes.md)
+Chips inline via SprkChat `transcriptFooterSlot` + label "Summarize this document" (+ bulk_chip_label contract); Insert hidden by default (`enableInsertToEditor`, AnalysisWorkspace opts in); loop context now includes last-8 ledger outputs via ChatHistoryManager.BuildLedgerOutputsContext (cache-stable tail, NFR-03 framing); manifest readiness probe at SessionDispatchOrchestrator seam (reuses EventRulesOptions.ReadinessProbe); honest confirm (`confirmed-unexecutable` ledger status + errorCode `gate.no-binding-target` + transcript message); analysis.rerun row `2b09dfb5` Write→Read (operator ruling); six dataverse.* rows' sprk_description enriched with live-schema entity map (sprk_matter etc.).
+
+### Known-issue register updates
+- "prepare a briefing" in chat → clean `dispatch.action-kind-unsupported` refusal (default briefing Binding is now coded-kind; loop coded-exec seam = future). Expected at UAT.
+- Refresh-ScopeModelIndex.ps1 BROKEN (pre-existing): 400 on sprk_analysisknowledges query — script drift; catalogs index stale until task 051 regenerates. /defer candidate.
+- Publish ~50.02 MB (043's run; whole-wave tree) — under 55 review threshold; task 055 re-baselines.
+- DAILY-BRIEFING-NARRATE playbook `7b5a6ed3` + nodes ORPHANED on spaarkedev1 → Track-B/050 sweep. Live spaarke-playbook-embeddings index also still live → P4.
 
 ### G-P2 UAT script (operator, spaarkedev1 — hard-refresh the SpaarkeAi page first)
 1. **Four outcomes**: (a) upload file + click [Summarize] chip → capability output (chips now sit ABOVE THE INPUT BOX — also closes the P1 spot-check); (b) typed NL "summarize this document" → NOW WORKS through the loop (the old "Open Library" no-match reply is deleted); (c) an off-catalog ask (e.g. "book me a flight") → honest refusal text (maker-editable), NOT an apology loop; (d) a write-shaped ask (e.g. "create a task about this" / "re-run the analysis") → CONFIRMATION PROMPT, nothing executes; reject cancels.

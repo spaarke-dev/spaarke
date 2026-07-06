@@ -366,6 +366,100 @@ public class EventRulesServiceTests
             "above the per-file chip cap only the bulk chip renders (strip readability)");
     }
 
+    // ─── Composite chip labels use the SHORT form (G-P2 UAT round-1 finding 1) ─────────
+
+    [Fact]
+    public async Task FireAsync_BulkUpload_MultiWordChipLabel_DerivesFirstWordForCompositeLabels()
+    {
+        // The catalog now authors chip_label as a full phrase ("Summarize this document").
+        // Composite (bulk + per-file) labels must NOT read "Summarize this document all
+        // 3 files?" — without an authored bulk_chip_label the short form is
+        // deterministically the first word of chip_label.
+        UseRule(ClassifyBinding() with
+        {
+            ChipTransitions = new[]
+            {
+                new ChipTransition
+                {
+                    TargetBindingId = SummarizeBindingId.ToString(),
+                    ChipLabel = "Summarize this document",
+                    RequiresAttachments = true,
+                },
+            },
+        });
+        _sessionManager.SessionToReturn = BuildSession(
+            BuildFile("file-1", "first.pdf"),
+            BuildFile("file-2", "second.pdf"),
+            BuildFile("file-3", "third.pdf"));
+
+        var events = await FireAsync(new[] { "file-1", "file-2", "file-3" });
+
+        var chips = (EventChipsData)events.Single(e => e.Type == EventRuleSseEvents.Chips).Data!;
+        chips.Chips.Should().ContainSingle(c => c.Label == "Summarize all 3 files?",
+            "the derived bulk label uses the first word of the phrase, never the whole phrase");
+        chips.Chips.Should().Contain(c => c.Label == "Summarize: second.pdf",
+            "per-file composite labels use the same short form");
+        chips.Chips.Should().NotContain(c => c.Label.Contains("this document all"),
+            "the pre-fix concatenation bug: '{phrase} all N files?' must not resurface");
+    }
+
+    [Fact]
+    public async Task FireAsync_BulkUpload_AuthoredBulkChipLabel_WinsOverDerivedFirstWord()
+    {
+        // Maker-authored bulk_chip_label is the explicit data-driven override for phrases
+        // whose first word is not the verb ("Give me a summary" → "Give" would be wrong).
+        UseRule(ClassifyBinding() with
+        {
+            ChipTransitions = new[]
+            {
+                new ChipTransition
+                {
+                    TargetBindingId = SummarizeBindingId.ToString(),
+                    ChipLabel = "Give me a summary",
+                    BulkChipLabel = "Summarize",
+                    RequiresAttachments = true,
+                },
+            },
+        });
+        _sessionManager.SessionToReturn = BuildSession(
+            BuildFile("file-1", "first.pdf"),
+            BuildFile("file-2", "second.pdf"));
+
+        var events = await FireAsync(new[] { "file-1", "file-2" });
+
+        var chips = (EventChipsData)events.Single(e => e.Type == EventRuleSseEvents.Chips).Data!;
+        chips.Chips.Should().ContainSingle(c => c.Label == "Summarize all 2 files?");
+        chips.Chips.Should().Contain(c => c.Label == "Summarize: first.pdf");
+        chips.Chips.Should().NotContain(c => c.Label.StartsWith("Give all"),
+            "the authored bulk_chip_label wins over the first-word fallback");
+    }
+
+    [Fact]
+    public async Task FireAsync_SingleFile_TransitionChipKeepsFullPhraseLabel()
+    {
+        // Single-file transitions render chip_label VERBATIM — the phrase ("Summarize
+        // this document") is exactly what the operator ruled the strip should read.
+        UseRule(ClassifyBinding() with
+        {
+            ChipTransitions = new[]
+            {
+                new ChipTransition
+                {
+                    TargetBindingId = SummarizeBindingId.ToString(),
+                    ChipLabel = "Summarize this document",
+                    BulkChipLabel = "Summarize",
+                    RequiresAttachments = true,
+                },
+            },
+        });
+
+        var events = await FireAsync(new[] { "file-1" });
+
+        var chips = (EventChipsData)events.Single(e => e.Type == EventRuleSseEvents.Chips).Data!;
+        chips.Chips.Should().ContainSingle(c => c.Label == "Summarize this document",
+            "bulk_chip_label only affects DERIVED composite labels, never the authored single-file chip");
+    }
+
     // ─── Per-file failure resilience (G-P1 Defect 2/3): one bad file ≠ dead batch ──────
 
     [Fact]

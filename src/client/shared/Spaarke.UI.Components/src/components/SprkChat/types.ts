@@ -724,6 +724,32 @@ export interface ISprkChatProps {
    * transcript. Renders nothing when omitted/null.
    */
   aboveInputSlot?: React.ReactNode;
+  /**
+   * Host-provided content rendered at the END of the message transcript, INSIDE
+   * the scrollable message list — directly beneath the last assistant message.
+   * Pure layout seam like `aboveInputSlot`: SprkChat applies no styling and
+   * attaches no behavior; the host owns the slot's content and interactions.
+   *
+   * Added for the Click-path next-step consumer chips (ai-architecture-redesign-r1
+   * G-P2 UAT round-1 finding 1, 2026-07-06): the operator ruled the chips belong
+   * inline in the conversation flow (beneath the "Classified…" entry), not in the
+   * strip above the composer. Renders nothing when omitted/null.
+   *
+   * Auto-scroll: SprkChat re-anchors the transcript to the bottom when this node's
+   * identity changes, so freshly arrived chips land visible. Hosts SHOULD memoize
+   * the node (React.useMemo keyed on the slot's actual data) so unrelated host
+   * re-renders don't force a scroll-to-bottom.
+   */
+  transcriptFooterSlot?: React.ReactNode;
+  /**
+   * Whether assistant messages offer the "Insert" (insert-into-editor) affordance.
+   * The affordance dispatches an IDocumentInsertEvent on the `sprk-document-insert`
+   * BroadcastChannel — meaningful ONLY in hosts with an insert target listening
+   * (AnalysisWorkspace's Lexical editor via useDocumentInsert). Defaults to FALSE:
+   * hosts without an insert target (e.g. the SpaarkeAi conversation pane) must not
+   * show a button that does nothing (G-P2 UAT round-1 finding 2, 2026-07-06).
+   */
+  enableInsertToEditor?: boolean;
   /** Available documents for context switching */
   documents?: IDocumentOption[];
   /** Available playbooks for context switching */

@@ -84,7 +84,7 @@ public sealed class ConsumerRoutingServiceBindingContractTests
         entity["sprk_tooldescription"] = "Summarize the current document for the user.";
         entity["sprk_disposition"] = new OptionSetValue(100000001);      // Work Product
         entity["sprk_chiptransitions"] =
-            """[{"target_binding_id":"55555555-5555-5555-5555-555555555555","chip_label":"Send welcome email"},{"target_binding_id":"66666666-6666-6666-6666-666666666666","chip_label":"Save to matter"}]""";
+            """[{"target_binding_id":"55555555-5555-5555-5555-555555555555","chip_label":"Send welcome email","bulk_chip_label":"Send"},{"target_binding_id":"66666666-6666-6666-6666-666666666666","chip_label":"Save to matter"}]""";
         entity["sprk_risk"] = new OptionSetValue(100000002);             // Always Confirm
         entity["sprk_capturemode"] = new OptionSetValue(100000001);      // Modal
         entity["sprk_oneventbindings"] =
@@ -136,7 +136,10 @@ public sealed class ConsumerRoutingServiceBindingContractTests
         binding.ChipTransitions.Should().HaveCount(2);
         binding.ChipTransitions[0].TargetBindingId.Should().Be("55555555-5555-5555-5555-555555555555");
         binding.ChipTransitions[0].ChipLabel.Should().Be("Send welcome email");
+        binding.ChipTransitions[0].BulkChipLabel.Should().Be("Send",
+            "the optional bulk_chip_label member (G-P2 finding-1 fix) parses when authored");
         binding.ChipTransitions[1].ChipLabel.Should().Be("Save to matter");
+        binding.ChipTransitions[1].BulkChipLabel.Should().BeNull("bulk_chip_label is optional");
         binding.Risk.Should().Be(BindingRisk.AlwaysConfirm);
         binding.CaptureMode.Should().Be(BindingCaptureMode.Modal);
         binding.OnEventBindings.Should().ContainSingle();

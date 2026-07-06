@@ -84,10 +84,13 @@ public static class ConsumerTypes
     public const string EmailAnalysis = "email-analysis";
 
     /// <summary>
-    /// <c>DailyBriefingEndpoints.HandleNarrate</c> — daily-briefing narration
-    /// dispatch (spaarke-daily-update-service-r4 FR-12 Path A.5; routes to
-    /// the <c>DAILY-BRIEFING-NARRATE</c> playbook GUID via
-    /// <see cref="IConsumerRoutingService"/>).
+    /// <c>DailyBriefingCompositeService</c> — the Daily Briefing coded composite
+    /// (FR-P3-04, spaarke-ai-architecture-redesign-r1 task 043; the platform's FIRST
+    /// full <c>coded</c> Action). Two Binding rows: <c>default</c> (informational —
+    /// widget render via /render + /narrate) and <c>email</c> (email disposition —
+    /// Communication-service delivery via /email; scheduled trigger declared in
+    /// <c>sprk_oneventbindings</c>). Resolves the Action's <c>sprk_workflowclass</c>
+    /// through <see cref="IConsumerRoutingService.ResolveBindingAsync"/>.
     /// </summary>
     public const string DailyBriefingNarrate = "daily-briefing-narrate";
 
@@ -127,6 +130,20 @@ public static class ConsumerTypes
     public const string NoMatchHandler = "no_match_handler";
 
     /// <summary>
+    /// The draft-correspondence proving capability (FR-P3-02 / spec §Owner
+    /// Clarifications): a prompted Action (DRAFT-CORR@v1) that composes professional
+    /// correspondence grounded in the session's documents and ledger outputs, projected
+    /// into the agent loop as <c>capability_draft-correspondence</c>. The companion
+    /// <c>email.draft</c> typed tool (declared <c>side_effect_class: communicate</c> —
+    /// confirmation-gated) materializes the reviewed draft as a Spaarke
+    /// <c>sprk_communication</c> DRAFT record in the Communication (Email) service —
+    /// NOT an Outlook draft; sending stays user-initiated there (DRAFT-ONLY; FR-P4-07
+    /// defers assistant-initiated send). Added by spaarke-ai-architecture-redesign-r1
+    /// task 041.
+    /// </summary>
+    public const string DraftCorrespondence = "draft-correspondence";
+
+    /// <summary>
     /// Read-only list of all consumer-type constants. Intended for startup
     /// health-log diffing against Dataverse (chat-routing-redesign-r1 task
     /// 028e exit gate).
@@ -144,5 +161,6 @@ public static class ConsumerTypes
         DocumentProfile,
         ComposeSummarize,
         NoMatchHandler,
+        DraftCorrespondence,
     };
 }

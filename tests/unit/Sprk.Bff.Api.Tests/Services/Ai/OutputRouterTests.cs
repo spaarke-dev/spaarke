@@ -105,11 +105,11 @@ public class OutputRouterTests
     }
 
     // ─── Loud P3 stubs: no silent fallback, storage never couples to rendering ────────────────
+    // (email left this list at task 043 — its leg is implemented; see the email facts below)
 
     [Theory]
     [InlineData(BindingDisposition.WorkProduct, "work_product")]
     [InlineData(BindingDisposition.Overlay, "overlay")]
-    [InlineData(BindingDisposition.Email, "email")]
     [InlineData(BindingDisposition.Record, "record")]
     [InlineData(BindingDisposition.Notification, "notification")]
     public async Task RouteAsync_NonInformationalDisposition_StoresEntryThenThrowsLoudNotSupported(
@@ -129,6 +129,66 @@ public class OutputRouterTests
             .Which.Outputs.Should().ContainSingle(o =>
                 o.Disposition == expectedLedgerValue
                 && o.Key == SessionLedger.BuildOutputKey(BindingId.ToString(), 1));
+    }
+
+    // ─── Email disposition leg (FR-P3-04, task 043): store THEN deliver ───────────────────────
+
+    [Fact]
+    public async Task RouteAsync_EmailDisposition_StoresEntryThenDeliversEnvelopeViaSender()
+    {
+        var binding = BuildBinding() with { Disposition = BindingDisposition.Email };
+        var sender = new RecordingEmailSender(_sessionManager);
+        var payload = ParseJson("""
+            {
+              "sections": { "tldr": { "summary": "s" } },
+              "email": { "to": ["user@contoso.com"], "subject": "Your Daily Briefing", "htmlBody": "<html>b</html>" }
+            }
+            """);
+
+        var routed = await new OutputRouter(_sessionManager, Mock.Of<ILogger<OutputRouter>>(), sender)
+            .RouteAsync(BuildSession(), binding, payload);
+
+        // Store preceded delivery, and the entry is the addressable stored one.
+        _sessionManager.PersistedSessions.Should().ContainSingle();
+        routed.Entry.Disposition.Should().Be("email");
+
+        var envelope = sender.Sent.Should().ContainSingle().Subject;
+        envelope.To.Should().BeEquivalentTo(new[] { "user@contoso.com" });
+        envelope.Subject.Should().Be("Your Daily Briefing");
+        envelope.HtmlBody.Should().Contain("<html>");
+        envelope.CorrelationId.Should().Be(routed.Entry.Key, "the ledger key is the delivery correlation id");
+        sender.StoredCountAtSend.Should().Be(1, "the ledger write happens BEFORE delivery (ADR-040)");
+    }
+
+    [Fact]
+    public async Task RouteAsync_EmailDisposition_MissingEnvelope_StoresThenThrowsLoud()
+    {
+        var binding = BuildBinding() with { Disposition = BindingDisposition.Email };
+        var sender = new RecordingEmailSender(_sessionManager);
+
+        var act = () => new OutputRouter(_sessionManager, Mock.Of<ILogger<OutputRouter>>(), sender)
+            .RouteAsync(BuildSession(), binding, ParseJson("""{"sections":{}}"""));
+
+        (await act.Should().ThrowAsync<InvalidOperationException>(
+            "a malformed capability payload fails LOUDLY — never a silent skip"))
+            .Which.Message.Should().Contain("email");
+        _sessionManager.PersistedSessions.Should().ContainSingle("storage still precedes the failed delivery");
+        sender.Sent.Should().BeEmpty();
+    }
+
+    [Fact]
+    public async Task RouteAsync_EmailDisposition_NoSenderRegistered_StoresThenThrowsLoud()
+    {
+        var binding = BuildBinding() with { Disposition = BindingDisposition.Email };
+
+        // Constructed WITHOUT a sender (the pre-P3 shape) — delivery must fail loudly.
+        var act = () => CreateSut().RouteAsync(BuildSession(), binding, ParseJson("""
+            {"email":{"to":["u@x.com"],"subject":"s","htmlBody":"b"}}
+            """));
+
+        (await act.Should().ThrowAsync<InvalidOperationException>())
+            .Which.Message.Should().Contain("IEmailDispositionSender");
+        _sessionManager.PersistedSessions.Should().ContainSingle();
     }
 
     // ─── Helpers ────────────────────────────────────────────────────────────────────────────────
@@ -165,6 +225,31 @@ public class OutputRouterTests
     {
         using var doc = JsonDocument.Parse(json);
         return doc.RootElement.Clone();
+    }
+
+    /// <summary>
+    /// Recording <see cref="IEmailDispositionSender"/> — captures delivered envelopes and
+    /// the persisted-session count AT send time (proves store-precedes-delivery ordering).
+    /// </summary>
+    private sealed class RecordingEmailSender : IEmailDispositionSender
+    {
+        private readonly RecordingChatSessionManager? _sessionManager;
+
+        public RecordingEmailSender(RecordingChatSessionManager? sessionManager = null)
+        {
+            _sessionManager = sessionManager;
+        }
+
+        public List<EmailDispositionEnvelope> Sent { get; } = new();
+
+        public int StoredCountAtSend { get; private set; }
+
+        public Task SendAsync(EmailDispositionEnvelope envelope, CancellationToken cancellationToken = default)
+        {
+            StoredCountAtSend = _sessionManager?.PersistedSessions.Count ?? 0;
+            Sent.Add(envelope);
+            return Task.CompletedTask;
+        }
     }
 
     /// <summary>

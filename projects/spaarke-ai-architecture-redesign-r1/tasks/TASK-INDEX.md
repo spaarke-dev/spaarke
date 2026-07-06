@@ -134,7 +134,7 @@
 | # | Task | FR | Rigor | Deps | Status |
 |---|---|---|---|---|---|
 | 037 | Eval expanded to 55 cases / 20 families (+full-catalog, compound, 5 injection); FOUND+FIXED real defect: loop-invoked write tools ran UNGATED post-cutover → new SideEffectGateAIFunction (declared-class wrap, fail-closed, suspend-into-gate, marker-before-render); eval 29/29; P3 seam: typed-handler confirm-resume (422 today) → FR-P3-03 | FR-P2-08 | TEST-MODIFYING | 034–036 | ✅ |
-| 038 | P2 deploy + **G-P2 browser UAT** (four outcomes; session memory; confirmed writes) | G-P2 | STANDARD | all P2 | 🔲 |
+| 038 | P2 deploy + **G-P2 browser UAT** (operator round-1 2026-07-06: 7 findings — 2 PASS incl. dark mode + FR-08 re-target; 5 → fix wave in flight; rulings: soft-slash→P3 FR-P3-06, analysis.rerun ungated-by-declaration; operator-directed close "continue with P3"; residual verification folds into G-P3 048; notes/g-p2-uat-round1-findings.md) | G-P2 | STANDARD | all P2 | ✅ |
 
 ## Phase P3 — Consumer + client consolidation (gate G-P3, BROWSER)
 
@@ -145,9 +145,9 @@
 | # | Task | FR | Rigor | Deps | Status |
 |---|---|---|---|---|---|
 | 040 | Remaining consumers → Bindings; 3 config blocks deleted | FR-P3-01 | FULL | 038 | 🔲 |
-| 041 | **`draft-correspondence`** (Communication service, DRAFT-only, gated) | FR-P3-02 | FULL | 038 | 🔲 |
+| 041 | **`draft-correspondence`** shipped as catalog data + EmailDraftToolHandler (`email.draft` Communicate→gated; DRAFT-only server-pinned under hostile args; zero Graph; user-OBO; rows DRAFT-CORR@v1 `4b8b50f4`, Binding `f7dc4a00`, tool `bc11e90d`; eval 57 cases; confirm-resume 422 until 042) | FR-P3-02 | FULL | 038 | ✅ |
 | 042 | **`create-task`** (`sprk_event(type=task)` + ledger refs) | FR-P3-03 | FULL | 038 | 🔲 |
-| 043 | Daily Briefing = first coded composite; flag deleted | FR-P3-04 | FULL | 038 | 🔲 |
+| 043 | Daily Briefing = FIRST coded composite (DailyBriefingCompositeService via ResolveBindingAsync + ICodedWorkflowRegistry; OutputRouter EMAIL disposition leg implemented store-precedes-send; /narrate engine default + NarrateUseCodeBasedNarrator flag DELETED grep-zero; rows DAILY-BRIEFING@v1 `2fa8ab19` + email Binding `800cc81f`; DAILY-BRIEFING-NARRATE playbook orphaned → Track-B; live email = gate 048; chat "prepare a briefing" refuses cleanly until loop coded-exec seam) | FR-P3-04 | FULL | 038 | ✅ |
 
 ### Wave W-P3-B (serial)
 

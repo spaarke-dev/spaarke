@@ -1,0 +1,99 @@
+{
+  "_comment_top": "spaarke-ai-architecture-redesign-r1 task 041 (FR-P3-02) — seed row for the email.draft COMMUNICATE tool. Creates a Spaarke sprk_communication DRAFT record for user review in the Communication (Email) service — explicitly NOT an Outlook draft (spec §Owner Clarifications). DRAFT-ONLY: statuscode is server-pinned to Draft(1) inside the handler; sending stays user-initiated through the Communication service (which sends via Graph); assistant-initiated send is the named FR-P4-07 deferral.",
+  "_comment_routing": "Runtime invocation routes to EmailDraftToolHandler via sprk_handlerclass. Auto-discovered (ADR-010). The P2+ loop projects the LLM-facing function name from sprk_toolid; sprk_name keeps the SYS- display convention required by the seed script's safety filter.",
+  "_comment_obo": "spec MUST rule: the draft record is created through IDataverseUserClient under the calling user's OBO token — a user who cannot create communications fails with their own access error; no app-only path is reachable from the handler.",
+  "_comment_side_effect": "sprk_sideeffectclass = 100000002 (Communicate) — SIDE-EFFECT tool and the FIRST communicate-class consumer. The ONE confirmation gate (FR-P2-02 / SideEffectGateAIFunction) suspends/resumes this tool BY THIS DECLARED CLASS (never by tool-name list); the handler itself contains NO gating logic. Typed-handler confirm-resume is the P3 seam (FR-P3-03 note in task-037); until it lands, confirm closes the gate confirmed-unexecutable — suspend-only remains the safe posture.",
+  "_comment_grounding": "source_refs carries the addressable ledger keys ({bindingId}@t{n}) and/or record citation paths the draft was composed from (e.g. the draft-correspondence capability output and the matter created earlier in the session) — identifiers only (NFR-07).",
+  "_comment_consumption": "Read by scripts/Seed-TypedHandlers.ps1. Idempotent — UPSERT by sprk_handlerclass + sprk_toolcode with sprk_name 'SYS-%' filter.",
+  "sprk_name": "SYS-Email Draft",
+  "sprk_toolcode": "EMAIL-DRAFT",
+  "sprk_toolid": "email.draft",
+  "sprk_namespace": "email",
+  "sprk_sideeffectclass": 100000002,
+  "sprk_permissionscope": "dataverse-user-context",
+  "sprk_budgetclass": "light",
+  "sprk_description": "Creates a DRAFT email record in Spaarke's Communication service for the user to review and send. NEVER sends email — sending is always user-initiated from the Communication service. Compose the subject and body from grounded session outputs (summaries, records created this session) and cite their ledger keys in source_refs. Optionally associate the draft to a record via 'regarding' (e.g. the matter it concerns). COMMUNICATE tool: invocation is confirmation-gated; the record is created with the user's own privileges.",
+  "sprk_handlerclass": "EmailDraftToolHandler",
+  "sprk_availableincontexts": 100000001,
+  "_comment_availableincontexts": "100000001 = Chat only — email.draft exists for the agent loop (P3), not playbook nodes (the frozen engine's SendEmailNodeExecutor remains the engine-side write shape).",
+  "sprk_jsonschema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "email.draft Request",
+    "description": "Creates a Spaarke communication DRAFT record (Communication service; NOT Outlook; DRAFT-ONLY).",
+    "type": "object",
+    "required": ["subject", "body", "to"],
+    "properties": {
+      "subject": {
+        "type": "string",
+        "minLength": 1,
+        "maxLength": 400,
+        "description": "Email subject line."
+      },
+      "body": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Full email body text. Plain text by default; set body_format to 'html' when the body is HTML."
+      },
+      "to": {
+        "type": "array",
+        "items": { "type": "string" },
+        "minItems": 1,
+        "maxItems": 20,
+        "description": "Recipient email addresses (at least one)."
+      },
+      "cc": {
+        "type": "array",
+        "items": { "type": "string" },
+        "maxItems": 20,
+        "description": "Optional CC email addresses."
+      },
+      "body_format": {
+        "type": "string",
+        "enum": ["text", "html"],
+        "description": "Body format; defaults to 'text'."
+      },
+      "regarding": {
+        "type": "object",
+        "required": ["table", "recordId"],
+        "properties": {
+          "table": {
+            "type": "string",
+            "enum": ["sprk_matter", "sprk_organization", "contact", "sprk_project", "sprk_analysis", "sprk_budget", "sprk_invoice", "sprk_workassignment"],
+            "description": "Logical name of the record type this draft is about (Communication-service regarding contract)."
+          },
+          "recordId": { "type": "string", "description": "GUID of the regarding record — e.g. the matter created earlier this session." },
+          "name": { "type": "string", "description": "Optional display name of the regarding record." }
+        },
+        "additionalProperties": false,
+        "description": "Optional record association for the draft."
+      },
+      "source_refs": {
+        "type": "array",
+        "items": { "type": "string" },
+        "maxItems": 20,
+        "description": "Ledger output keys ({bindingId}@t{n}) and/or record citation paths (tables/{table}/records/{guid}) the draft content was composed from. Cite every session output you used."
+      }
+    },
+    "additionalProperties": false
+  },
+  "sprk_outputschema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "email.draft Result",
+    "type": "object",
+    "required": ["tool", "status"],
+    "properties": {
+      "tool": { "const": "email.draft" },
+      "status": { "const": "draft", "description": "ALWAYS 'draft' — this tool never sends (DRAFT-ONLY invariant, server-pinned)." },
+      "communicationId": { "type": ["string", "null"], "description": "GUID of the created sprk_communication DRAFT record (null only if Dataverse did not echo the created row)." },
+      "path": { "type": ["string", "null"], "description": "tables/sprk_communication/records/{communicationId} — citable record path." },
+      "recipientCount": { "type": "integer" },
+      "ccCount": { "type": "integer" },
+      "regardingTable": { "type": ["string", "null"] },
+      "regardingRecordId": { "type": ["string", "null"] },
+      "sourceRefs": { "type": "array", "items": { "type": "string" }, "description": "The ledger/record references the draft was composed from (identifiers only)." }
+    }
+  },
+  "sprk_configuration": {
+    "_comment": "No method-discriminator dispatch — single LLM-facing function. Reserved for per-environment defaults."
+  }
+}

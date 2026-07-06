@@ -1901,6 +1901,26 @@ export function ConversationPane(): React.JSX.Element {
   );
 
   /**
+   * Consumer-chip strip node for SprkChat's transcriptFooterSlot (G-P2 UAT
+   * round-1 finding 1, 2026-07-06): the operator ruled the chips render INLINE
+   * IN THE TRANSCRIPT, directly beneath the last assistant message (the
+   * "Classified…" entry) — not in the strip above the composer (the G-P1
+   * round-2 placement). Memoized on the actual chip data so SprkChat's
+   * slot-keyed auto-scroll fires exactly when chips change, never on unrelated
+   * ConversationPane re-renders (per the transcriptFooterSlot prop contract).
+   */
+  const consumerChipsSlot = React.useMemo(
+    () => (
+      <ConsumerChips
+        chips={consumerChips}
+        attachmentCount={sessionAttachmentCount}
+        onChipClick={handleConsumerChipClick}
+      />
+    ),
+    [consumerChips, sessionAttachmentCount, handleConsumerChipClick]
+  );
+
+  /**
    * onPlaybookOptions — fired by SprkChat for each `playbook_options` SSE event.
    * Synthesizes an Assistant chat message via the existing `injectLocalMessage`
    * mechanism (R5 task 020 contract). The message carries
@@ -3070,24 +3090,20 @@ export function ConversationPane(): React.JSX.Element {
               // persisted chatSessionId when SprkChat resumed a stale id.
               onSessionStale={handleSessionStale}
               // ── Click-path next-step chips (task 023 / FR-P1-04 / ADR-039) ──
-              // G-P1 UAT round-2 fix (2026-07-06): the strip renders ABOVE THE
-              // INPUT ZONE (below the transcript) via SprkChat's aboveInputSlot
-              // — round-2 found it stranded at the top of the pane, detached
-              // from the conversation flow. Chips carry binding_id from the
-              // completed Binding's chip transitions; a click dispatches
-              // through the ONE shared dispatchConsumer helper. Attachment-
-              // requiring chips gate on SESSION files (manifest-promoted ∪
-              // composer-ready) — not the composer chip strip alone, which
-              // SprkChat clears on stream completion (FR-07) even though the
-              // session manifest still holds the files. ADR-021: Fluent v9
-              // tokens only.
-              aboveInputSlot={
-                <ConsumerChips
-                  chips={consumerChips}
-                  attachmentCount={sessionAttachmentCount}
-                  onChipClick={handleConsumerChipClick}
-                />
-              }
+              // G-P2 UAT round-1 finding 1 (2026-07-06): the chips render INLINE
+              // IN THE TRANSCRIPT via SprkChat's transcriptFooterSlot — directly
+              // beneath the last assistant message (e.g. the "Classified…"
+              // entry). The G-P1 round-2 aboveInputSlot placement read as
+              // composer chrome, detached from the conversation flow. Chips
+              // carry binding_id from the completed Binding's chip transitions;
+              // a click dispatches through the ONE shared dispatchConsumer
+              // helper. Attachment-requiring chips gate on SESSION files
+              // (manifest-promoted ∪ composer-ready) — not the composer chip
+              // strip alone, which SprkChat clears on stream completion (FR-07)
+              // even though the session manifest still holds the files.
+              // ADR-021: Fluent v9 tokens only. Node memoized above so the
+              // slot-keyed auto-scroll fires only when chips actually change.
+              transcriptFooterSlot={consumerChipsSlot}
               onPlaybookChange={handlePlaybookChange}
               predefinedPrompts={predefinedPrompts}
               hostContext={hostContext}

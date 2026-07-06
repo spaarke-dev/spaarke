@@ -327,6 +327,13 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   // ai-architecture-redesign-r1 G-P1 round-2 (2026-07-06) — host content slot
   // rendered above the input zone (e.g. the Click-path next-step chip strip).
   aboveInputSlot,
+  // ai-architecture-redesign-r1 G-P2 round-1 finding 1 (2026-07-06) — host content
+  // slot rendered at the END of the transcript, beneath the last assistant message
+  // (the consumer chips moved here from aboveInputSlot).
+  transcriptFooterSlot,
+  // G-P2 round-1 finding 2 (2026-07-06) — Insert affordance is opt-in per host;
+  // only hosts with an insert target (AnalysisWorkspace editor) enable it.
+  enableInsertToEditor = false,
   documents = [],
   playbooks = [],
   predefinedPrompts = [],
@@ -746,6 +753,20 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
             ),
             { intent: 'success', timeout: 5000 }
           );
+        } else if (result.errorCode === 'gate.no-binding-target') {
+          // G-P2 UAT round-1 finding 6 (2026-07-06): confirming a typed-handler
+          // (non-Binding) invocation has no execution seam until FR-P3-03 — the
+          // server records the approval and closes the gate `confirmed-unexecutable`.
+          // Render an HONEST assistant message in the transcript (a transient toast
+          // read as "nothing happened" in UAT). No fabricated success, no silence.
+          addMessage({
+            role: 'Assistant',
+            content:
+              `Got it — "${action.actionName}" is recorded and approved, but executing ` +
+              'record changes from chat isn\'t enabled yet in this build. It arrives in ' +
+              'the next phase; nothing was created or modified.',
+            timestamp: new Date().toISOString(),
+          });
         } else {
           dispatchToast(
             React.createElement(
@@ -762,7 +783,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
         setPendingAction(null);
       }
     },
-    [apiBaseUrl, authenticatedFetch, dispatchToast]
+    [apiBaseUrl, authenticatedFetch, dispatchToast, addMessage]
   );
 
   /**
@@ -1120,12 +1141,16 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
     };
   }, [onContextEventProp, setOnContextEvent]);
 
-  // Auto-scroll to bottom on new messages
+  // Auto-scroll to bottom on new messages.
+  // transcriptFooterSlot is a dependency (G-P2 finding 1): consumer chips arrive
+  // AFTER the assistant message finalizes (chips SSE event → host state change), so
+  // the scroll must re-anchor when the slot's node changes for the chips to land
+  // visible. Hosts memoize the slot node so unrelated re-renders don't retrigger.
   React.useEffect(() => {
     if (messageListRef.current) {
       messageListRef.current.scrollTop = messageListRef.current.scrollHeight;
     }
-  }, [messages, streamedContent]);
+  }, [messages, streamedContent, transcriptFooterSlot]);
 
   // R6 task 097b / TIER-C — fire onMessagesChange whenever the messages array
   // changes so hosts (ConversationPane / future "summarize conversation"
@@ -2420,10 +2445,14 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
             message: effectiveMessage,
             isStreaming: isStreaming && isLastAssistant,
             citations: messageCitations,
-            // Phase 2D: wire Insert button on all completed assistant messages.
+            // Phase 2D: wire Insert button on completed assistant messages.
             // SprkChat dispatches document_insert BroadcastChannel event.
             // Only pass onInsert for assistant messages to prevent button showing on user messages.
-            ...(msg.role === 'Assistant' && {
+            // G-P2 UAT round-1 finding 2 (2026-07-06): prop-gated — only hosts that
+            // declare an insert target (enableInsertToEditor, e.g. AnalysisWorkspace's
+            // Lexical editor) get the affordance; hosts without one (SpaarkeAi
+            // conversation pane) must not render a button that does nothing.
+            ...(enableInsertToEditor && msg.role === 'Assistant' && {
               onInsert: handleInsert,
             }),
             ...(isPlanPreview && {
@@ -2454,6 +2483,14 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
 
         {/* Typing indicator — visible between typing_start and first token arrival */}
         {isTyping && !streamedContent && <SprkChatTypingIndicator />}
+
+        {/* Host slot — content rendered at the END of the transcript, directly
+            beneath the last assistant message and INSIDE the scrollable message
+            list (e.g. the Click-path next-step consumer chips — G-P2 UAT round-1
+            finding 1, 2026-07-06). Pure layout seam: no styling, no behavior.
+            The auto-scroll effect below keys on this node so fresh chips land
+            visible at the transcript's bottom edge. */}
+        {transcriptFooterSlot}
 
         {/* Follow-up suggestions shown after the latest assistant response */}
         {suggestions.length > 0 && (

@@ -86,6 +86,18 @@ public class PendingPlanManager
     /// <summary>Ledger vocabulary: gate status <c>superseded</c> (user broke out — hard slash / explicit restart / new work).</summary>
     public const string GateStatusSuperseded = "superseded";
 
+    /// <summary>
+    /// Ledger vocabulary: gate status <c>confirmed-unexecutable</c> — the user CONFIRMED
+    /// the gate, but the invocation has no execution seam in this build (typed-handler
+    /// confirm-resume is the P3 FR-P3-03 seam; gate-resolve executes catalog Bindings
+    /// only). Honest terminal state (G-P2 UAT round-1 finding 6, 2026-07-06): a plain
+    /// <c>confirmed</c> marker would falsely record an executed side effect, and leaving
+    /// the gate <c>pending</c> would contradict the user's explicit click. ADR-040
+    /// vocabulary extension — append-only resolution correlated by gate id, like every
+    /// other terminal status.
+    /// </summary>
+    public const string GateStatusConfirmedUnexecutable = "confirmed-unexecutable";
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase

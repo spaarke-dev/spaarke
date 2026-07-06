@@ -216,6 +216,17 @@ public sealed record ChipTransition
     [JsonPropertyName("chip_label")]
     public string? ChipLabel { get; init; }
 
+    /// <summary>
+    /// Optional SHORT verb form used inside server-derived composite chip labels
+    /// ("{bulk} all N files?", "{bulk}: {fileName}") when the primary
+    /// <see cref="ChipLabel"/> is a full phrase (e.g. chip_label "Summarize this
+    /// document" + bulk_chip_label "Summarize"). Added by the G-P2 UAT round-1
+    /// finding-1 fix (2026-07-06); when absent the Event path deterministically falls
+    /// back to the first whitespace-delimited token of <see cref="ChipLabel"/>.
+    /// </summary>
+    [JsonPropertyName("bulk_chip_label")]
+    public string? BulkChipLabel { get; init; }
+
     /// <summary>Whether the target capability requires session attachments (client disables the chip at zero attachments).</summary>
     [JsonPropertyName("requires_attachments")]
     public bool? RequiresAttachments { get; init; }

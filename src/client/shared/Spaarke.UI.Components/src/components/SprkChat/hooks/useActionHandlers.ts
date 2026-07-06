@@ -323,13 +323,27 @@ function buildGateResolveUrl(apiBaseUrl: string, sessionId: string, gateId: stri
   );
 }
 
+/**
+ * Result of a gate-resolve POST. `errorCode` carries the server's stable ADR-019
+ * machine code on failures so callers can branch on SPECIFIC outcomes — added for
+ * G-P2 UAT round-1 finding 6 (2026-07-06): `gate.no-binding-target` (typed-handler
+ * confirm has no execution seam until FR-P3-03) must render an honest transcript
+ * message, not a generic failure toast.
+ */
+export interface IGateResolveOutcome {
+  success: boolean;
+  message: string;
+  /** Stable server errorCode (ADR-019) on failure; undefined on success. */
+  errorCode?: string;
+}
+
 /** Shared POST to the gate-resolve endpoint. */
 async function resolveGate(
   pendingAction: IPendingAction,
   apiBaseUrl: string,
   authenticatedFetch: (url: string, init?: RequestInit) => Promise<Response>,
   approved: boolean
-): Promise<{ success: boolean; message: string }> {
+): Promise<IGateResolveOutcome> {
   try {
     const response = await authenticatedFetch(
       buildGateResolveUrl(apiBaseUrl, pendingAction.sessionId, pendingAction.actionId),
@@ -343,6 +357,7 @@ async function resolveGate(
     if (response.status === 409) {
       return {
         success: false,
+        errorCode: 'gate.not-pending',
         message: `${pendingAction.actionName} was already resolved or has expired. Please retry the request in chat.`,
       };
     }
@@ -359,6 +374,7 @@ async function resolveGate(
       }
       return {
         success: false,
+        errorCode,
         message: `${pendingAction.actionName} could not be ${approved ? 'dispatched' : 'cancelled'} (${errorCode}).`,
       };
     }
@@ -398,7 +414,7 @@ export async function dispatchConfirmedAction(
   pendingAction: IPendingAction,
   apiBaseUrl: string,
   authenticatedFetch: (url: string, init?: RequestInit) => Promise<Response>
-): Promise<{ success: boolean; message: string }> {
+): Promise<IGateResolveOutcome> {
   return resolveGate(pendingAction, apiBaseUrl, authenticatedFetch, true);
 }
 
@@ -412,7 +428,7 @@ export async function rejectPendingAction(
   pendingAction: IPendingAction,
   apiBaseUrl: string,
   authenticatedFetch: (url: string, init?: RequestInit) => Promise<Response>
-): Promise<{ success: boolean; message: string }> {
+): Promise<IGateResolveOutcome> {
   return resolveGate(pendingAction, apiBaseUrl, authenticatedFetch, false);
 }
 

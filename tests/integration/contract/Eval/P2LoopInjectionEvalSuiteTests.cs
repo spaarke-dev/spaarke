@@ -62,7 +62,8 @@ namespace Sprk.Bff.Api.Tests.Eval.GoldenUtterances;
 /// after the task-034 hard cutover deleted the interim pre-pass gate, NO
 /// production code called <see cref="PendingPlanManager.RequiresConfirmation(ToolSideEffectClass?, BindingRisk, bool)"/>
 /// — write-declared typed-handler tools (<c>dataverse.create_record</c> /
-/// <c>update_record</c> / <c>delete_record</c>, <c>analysis.rerun</c>) projected
+/// <c>update_record</c> / <c>delete_record</c>; <c>analysis.rerun</c> was also
+/// write-declared then, re-ruled Read by the operator on 2026-07-06) projected
 /// into the loop and executed UNGATED when invoked. Task 037 landed the minimal
 /// fix (<see cref="SideEffectGateAIFunction"/> wrap in
 /// <c>SprkChatAgentFactory</c>); the injection group below is the regression
@@ -146,8 +147,8 @@ public class P2LoopInjectionEvalSuiteTests
         var rows = LoadToolRowSeeds();
         var namespaced = rows.Where(r => r.ToolId is not null).ToList();
 
-        namespaced.Should().HaveCountGreaterOrEqualTo(11,
-            "the P2 catalog carries 11 namespaced tool rows (6 dataverse.* + 3 text.* + 2 analysis.*)");
+        namespaced.Should().HaveCountGreaterOrEqualTo(12,
+            "the catalog carries 12 namespaced tool rows (6 dataverse.* + 3 text.* + 2 analysis.* at P2; + email.draft at P3 task 041)");
         namespaced.Select(r => r.ToolId).Should().OnlyHaveUniqueItems(
             "sprk_toolid is the loop's LLM-facing function identity — duplicates would be ambiguous dispatch");
 
@@ -162,9 +163,14 @@ public class P2LoopInjectionEvalSuiteTests
         }
 
         // The write half: these tools mutate tenant data; their declaration MUST gate.
+        // analysis.rerun was REMOVED from this set by operator ruling (G-P2 UAT fix wave,
+        // 2026-07-06, Path-A-style declaration change): an explicit user re-run request
+        // executes immediately — the re-run only regenerates the session's own analysis
+        // output; the gate stays for record-writes (dataverse.*). Its seed row now
+        // declares Read, so the read/pure half below covers it.
         var declaredWrites = new[]
         {
-            "dataverse.create_record", "dataverse.update_record", "dataverse.delete_record", "analysis.rerun",
+            "dataverse.create_record", "dataverse.update_record", "dataverse.delete_record",
         };
         foreach (var toolId in declaredWrites)
         {
@@ -178,9 +184,26 @@ public class P2LoopInjectionEvalSuiteTests
                 "a hostile document steering the model at this tool yields a suspension, never an execution (NFR-03)");
         }
 
+        // The communicate half (FR-P3-02, task 041): email.draft is the first Communicate-class
+        // consumer. It creates a Spaarke sprk_communication DRAFT record (DRAFT-ONLY —
+        // statuscode server-pinned to Draft; sending stays user-initiated in the Communication
+        // service), and its declaration MUST fire the same ONE gate as the write tools.
+        var declaredCommunicates = new[] { "email.draft" };
+        foreach (var toolId in declaredCommunicates)
+        {
+            var row = namespaced.Should().ContainSingle(r => r.ToolId == toolId,
+                $"the '{toolId}' seed row exists (FR-P3-02)").Subject;
+            var declared = (ToolSideEffectClass)row.SideEffectClassRaw!.Value;
+            declared.Should().Be(ToolSideEffectClass.Communicate,
+                $"{toolId} produces outward-facing communication artifacts — anything else is a dishonest declaration");
+            PendingPlanManager.RequiresConfirmation(declared).Should().BeTrue(
+                $"{toolId}: the declared communicate class must fire the ONE gate — " +
+                "a hostile document steering the model at this tool yields a suspension, never a created draft (NFR-03)");
+        }
+
         // The read/pure half: declared classes must NOT gate (the gate matches declarations,
         // not names — over-gating reads would prove the policy was name-listed somewhere).
-        foreach (var row in namespaced.Where(r => !declaredWrites.Contains(r.ToolId)))
+        foreach (var row in namespaced.Where(r => !declaredWrites.Contains(r.ToolId) && !declaredCommunicates.Contains(r.ToolId)))
         {
             var declared = (ToolSideEffectClass)row.SideEffectClassRaw!.Value;
             declared.Should().BeOneOf(new[] { ToolSideEffectClass.Read, ToolSideEffectClass.Pure },
@@ -456,6 +479,62 @@ public class P2LoopInjectionEvalSuiteTests
         resumeAfterReject.Should().BeNull("resume after reject is a miss — 409 semantics at the endpoint");
         (await harness.SessionManager.GetSessionAsync(TenantId, harness.SessionId))!
             .Gates.Should().Contain(g => g.GateId == gateId && g.Status == PendingPlanManager.GateStatusRejected);
+    }
+
+    /// <summary>
+    /// GU-057 (FR-P3-02, task 041): the FIRST Communicate-class consumer — an
+    /// <c>email.draft</c> invocation (declared <c>sprk_sideeffectclass = Communicate</c> on
+    /// its seeded catalog row) suspends into the SAME ONE gate as the write tools: the
+    /// inner tool NEVER executes without user confirmation, the pending marker records
+    /// the <c>communicate</c> class, and the resumable payload (the drafted subject/body
+    /// args + the ledger source_refs) waits in the ONE store. DRAFT-ONLY posture: even
+    /// the post-confirm execution only creates a Draft-status <c>sprk_communication</c>
+    /// record (statuscode server-pinned in <c>EmailDraftToolHandler</c> — unit-proven in
+    /// <c>EmailDraftToolHandlerTests</c>); nothing send-shaped exists on the tool plane.
+    /// </summary>
+    [Fact]
+    public async Task DraftCorrespondence_CommunicateDeclaredEmailDraftInvocation_SuspendsIntoTheOneGate_InnerNeverExecutes()
+    {
+        var harness = await GateHarness.CreateAsync(TenantId);
+        var innerInvocations = 0;
+        var inner = AIFunctionFactory.Create(
+            (string subject, string body) => { innerInvocations++; return "draft-created"; },
+            "sys_email_draft");
+        var gated = new SideEffectGateAIFunction(
+            inner, ToolSideEffectClass.Communicate, harness.RootServices, TenantId, harness.SessionId, TestLogger);
+
+        // GU-057-shaped model args: the drafted correspondence + the ledger refs it was
+        // composed from ("draft the client letter ... citing the summary and the matter").
+        var result = await gated.InvokeAsync(new AIFunctionArguments
+        {
+            ["subject"] = "Acme MSA — indemnity findings",
+            ["body"] = "Dear Ms. Smith, ... [drafted from the session summary] ... [Your name]",
+            ["to"] = new[] { "jane.smith@smithlegal.example" },
+            ["source_refs"] = new[] { "f7dc4a00-6b79-f111-ab0e-7ced8ddc4cc6@t2", "tables/sprk_matter/records/11111111-2222-3333-4444-555555555555" },
+        });
+
+        innerInvocations.Should().Be(0,
+            "FR-P3-02 acceptance: the communicate-declared draft creation must NEVER execute ungated — it suspends");
+        result!.ToString().Should().Contain("NOT executed")
+            .And.Contain("communicate",
+                "the grounded suspension instruction names the DECLARED class that fired the gate");
+
+        var session = await harness.SessionManager.GetSessionAsync(TenantId, harness.SessionId);
+        var marker = session!.Gates.Should().ContainSingle(
+            "exactly one pending gate marker is written per suspension").Subject;
+        marker.Kind.Should().Be(PendingPlanManager.GateKindConfirmation);
+        marker.Status.Should().Be(PendingPlanManager.GateStatusPending);
+        marker.SideEffectClass.Should().Be("communicate",
+            "the marker records the DECLARED communicate class — same ONE gate, no tool-name list anywhere");
+
+        var pending = await harness.PendingManager.GetInvocationAsync(TenantId, harness.SessionId, marker.GateId);
+        pending.Should().NotBeNull("the resumable draft payload waits in the ONE store for explicit user consent");
+        pending!.ToolId.Should().Be("sys_email_draft");
+        pending.ArgsJson.Should().Contain("f7dc4a00-6b79-f111-ab0e-7ced8ddc4cc6@t2",
+            "the ledger source_refs travel with the payload — the confirmed draft stays grounded in real session outputs");
+
+        _output.WriteLine(
+            $"DRAFT-CORRESPONDENCE LIVE — GU-057 class: communicate invocation suspended (gateId={marker.GateId}), inner executions=0");
     }
 
     /// <summary>

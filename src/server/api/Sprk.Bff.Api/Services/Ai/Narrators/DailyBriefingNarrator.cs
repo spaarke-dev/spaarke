@@ -19,9 +19,10 @@
 // (R4 placeholder pass-through) collapse into method arguments — no equivalents needed
 // because data flow is C# method arguments, not template references.
 //
-// FEATURE FLAG: gated by Features:NarrateUseCodeBasedNarrator (default false). HandleNarrate
-// branches on this flag; flag-off path is unchanged (existing playbook engine via
-// IInvokePlaybookAi). Toggle on at App Service level to compare.
+// DISPATCH (FR-P3-04, task 043): the R7 spike flag is GONE — this narrator IS the
+// briefing's `coded` composite workflow, resolved by class reference from its Action row
+// (sprk_workflowclass = "DailyBriefingNarrator") via DailyBriefingCompositeService.
+// The Binding table decides; there is no engine fallback (NFR-08 hard cutover).
 //
 // References:
 //   - projects/spaarke-ai-platform-unification-r7/notes/spikes/narrator-spike-plan.md
@@ -36,9 +37,10 @@ using Sprk.Bff.Api.Api.Ai;
 namespace Sprk.Bff.Api.Services.Ai.Narrators;
 
 /// <summary>
-/// Code-defined narrator for the Daily Briefing /narrate endpoint. Replaces the playbook
-/// engine path with explicit C# calls when feature flag <c>Features:NarrateUseCodeBasedNarrator</c>
-/// is enabled.
+/// Code-defined narrator for the Daily Briefing — the platform's first <c>coded</c>
+/// composite workflow (FR-P3-04). Dispatched exclusively via its catalog Action/Binding
+/// rows through <see cref="DailyBriefingCompositeService"/>; the former playbook-engine
+/// path and its parallel-run feature flag were deleted (NFR-08 hard cutover, task 043).
 /// </summary>
 /// <remarks>
 /// <para>

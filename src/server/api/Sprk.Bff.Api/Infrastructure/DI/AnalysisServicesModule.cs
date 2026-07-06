@@ -574,6 +574,16 @@ public static class AnalysisServicesModule
             new Sprk.Bff.Api.Services.Ai.Narrators.NullDailyBriefingCollector(
                 sp.GetRequiredService<ILogger<Sprk.Bff.Api.Services.Ai.Narrators.DailyBriefingCollector>>()));
 
+        // DailyBriefingCompositeService Null peer (FR-P3-04, task 043) — the /render,
+        // /narrate, /email endpoints map unconditionally and inject the concrete composite;
+        // this mirror keeps minimal-API parameter inference valid on the compound-OFF path
+        // and throws FeatureDisabledException (ai.briefing.disabled) on first call, which
+        // the endpoints map to the canonical 503. Canonical pattern siblings: the narrator
+        // + collector Null peers directly above.
+        services.AddScoped<Sprk.Bff.Api.Services.Ai.Narrators.DailyBriefingCompositeService>(sp =>
+            new Sprk.Bff.Api.Services.Ai.Narrators.NullDailyBriefingCompositeService(
+                sp.GetRequiredService<ILogger<Sprk.Bff.Api.Services.Ai.Narrators.DailyBriefingCompositeService>>()));
+
         // IEventRulesService (P3 Fail-Fast) — FR-P1-03, ai-architecture-redesign-r1 task 022.
         // The document_uploaded event route (POST /api/ai/chat/sessions/{id}/events/
         // document-uploaded) is mapped UNCONDITIONALLY in ChatDocumentEndpoints and injects
@@ -635,18 +645,17 @@ public static class AnalysisServicesModule
         services.AddScoped<IAnalysisOrchestrationService, AnalysisOrchestrationService>();
         services.AddScoped<IAppOnlyAnalysisService, AppOnlyAnalysisService>();
 
-        // R7 Wave 11 T116 narrator spike (2026-06-30): code-defined narrator for /narrate.
-        // Gated at request-time by Features:NarrateUseCodeBasedNarrator (default false) in
-        // DailyBriefingEndpoints.HandleNarrate — DI registration is unconditional so the
-        // service is always resolvable; the endpoint chooses which path runs.
+        // DailyBriefingNarrator — the platform's first `coded` composite workflow
+        // (FR-P3-04, ai-architecture-redesign-r1 task 043; ICodedWorkflow retrofit in
+        // task 007). Dispatched exclusively by class reference from its Action row
+        // (sprk_workflowclass) via DailyBriefingCompositeService below — the R7 spike
+        // flag + playbook-engine fallback were DELETED (NFR-08 hard cutover).
         //
         // Lifetime: Transient — depends on AnalysisActionService (typed HttpClient = Transient)
         // and IOpenAiClient (Singleton) and IEntityNameScrubber (Singleton). Transient is the
         // safe choice given the HttpClient dependency.
         //
         // Scrubber: Singleton — pure algorithm, no state, no per-request data.
-        //
-        // Spike plan: projects/spaarke-ai-platform-unification-r7/notes/spikes/narrator-spike-plan.md
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Narrators.IEntityNameScrubber,
                               Sprk.Bff.Api.Services.Ai.Narrators.EntityNameScrubber>();
         services.AddTransient<Sprk.Bff.Api.Services.Ai.Narrators.DailyBriefingNarrator>();
@@ -655,6 +664,28 @@ public static class AnalysisServicesModule
         // backs the new POST /api/ai/daily-briefing/render endpoint. Bypasses appnotification
         // entirely; runs FetchXML directly via IGenericEntityService (Scoped — matches lifetime).
         services.AddScoped<Sprk.Bff.Api.Services.Ai.Narrators.DailyBriefingCollector>();
+
+        // DailyBriefingCompositeService — the briefing's coded-composite dispatch boundary
+        // (FR-P3-04, task 043). Resolves the Binding (ADR-039 single routing surface),
+        // executes the coded workflow via ICodedWorkflowRegistry, writes the session-ledger
+        // entries BEFORE rendering/emailing via IOutputRouter (ADR-040), routes by the
+        // Binding's disposition. Concrete class (ADR-010); Scoped — wraps IOutputRouter +
+        // ICodedWorkflowRegistry + DailyBriefingCollector (all Scoped).
+        //
+        // §F.1 asymmetric-registration audit: the /render, /narrate, /email endpoints map
+        // unconditionally and inject the concrete type; the compound-OFF branch registers
+        // the NullDailyBriefingCompositeService mirror in AddNullObjectsForCompoundOff.
+        services.AddScoped<Sprk.Bff.Api.Services.Ai.Narrators.DailyBriefingCompositeService>();
+        Console.WriteLine("✓ DailyBriefingCompositeService registered (FR-P3-04 first coded composite; Binding-decided dispatch; ledger-before-render)");
+
+        // IEmailDispositionSender — the OutputRouter email-disposition delivery seam
+        // (FR-P3-04, task 043). Delegates to the Communication (Email) service
+        // (unconditional singleton) under SendMode.User OBO. Scoped to match its consumer
+        // (OutputRouter). See IEmailDispositionSender remarks for the ADR-010/§11
+        // interface justification.
+        services.AddScoped<Sprk.Bff.Api.Services.Ai.IEmailDispositionSender,
+                           Sprk.Bff.Api.Services.Ai.CommunicationEmailDispositionSender>();
+        Console.WriteLine("✓ EmailDispositionSender registered (FR-P3-04 email disposition leg → Communication service)");
 
         // SessionSummarizeOrchestrator — chat-session boundary for the catalog-driven
         // chat-summarize capability (FR-P1-01, ai-architecture-redesign-r1 task 020). Concrete
@@ -695,12 +726,14 @@ public static class AnalysisServicesModule
         // remaining dispositions are loud P3 NotSupported stubs — no silent fallback).
         // Scoped: wraps ChatSessionManager (Scoped).
         //
-        // §F.1 asymmetric-registration audit (static scan run 2026-07-05): IOutputRouter is
-        // consumed ONLY by the concrete SessionSummarizeOrchestrator ctor (registered in this
-        // same compound-ON block). No endpoint handler injects IOutputRouter directly
+        // §F.1 asymmetric-registration audit (static scan 2026-07-05; refreshed by task 043
+        // 2026-07-06): IOutputRouter is consumed by the concrete SessionSummarizeOrchestrator,
+        // SessionDispatchOrchestrator, EventRulesService, EngineOutputLedgerAdapter, and
+        // DailyBriefingCompositeService ctors — ALL registered in this same compound-ON block.
+        // No endpoint handler injects IOutputRouter directly
         // (rg "[\s,(]IOutputRouter\s" src/server/api/Sprk.Bff.Api/Api/ → zero hits), and the
-        // compound-OFF path resolves NullSessionSummarizeOrchestrator via its logger-only ctor
-        // which never touches this seam → transitively conditional; no ADR-032 Null peer needed.
+        // compound-OFF path resolves the logger-only Null peers of every consumer, which never
+        // touch this seam → transitively conditional; no ADR-032 Null peer needed.
         services.AddScoped<Sprk.Bff.Api.Services.Ai.IOutputRouter,
                            Sprk.Bff.Api.Services.Ai.OutputRouter>();
         Console.WriteLine("✓ OutputRouter registered (FR-P1-02 universal ledger write-before-render; disposition routing per ADR-040)");

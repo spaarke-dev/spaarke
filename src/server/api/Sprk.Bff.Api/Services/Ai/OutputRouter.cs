@@ -47,8 +47,11 @@ public interface IOutputRouter
     /// <returns>
     /// The stored ledger entry + updated session. For the <c>informational</c> disposition
     /// the caller renders FROM the returned <see cref="RoutedOutput.Entry"/> (render follows
-    /// store). Non-informational dispositions throw <see cref="NotSupportedException"/>
-    /// AFTER the ledger write (loud P3 stubs — never a silent fallback to inline render).
+    /// store). The <c>email</c> disposition (FR-P3-04) delivers via
+    /// <see cref="IEmailDispositionSender"/> AFTER the ledger write (the payload must carry
+    /// the capability-supplied <c>email</c> envelope), then returns the stored entry.
+    /// Remaining dispositions throw <see cref="NotSupportedException"/> AFTER the ledger
+    /// write (loud P3 stubs — never a silent fallback to inline render).
     /// </returns>
     Task<RoutedOutput> RouteAsync(
         ChatSession session,
@@ -105,11 +108,24 @@ public sealed class OutputRouter : IOutputRouter
 
     private readonly ChatSessionManager _sessionManager;
     private readonly ILogger<OutputRouter> _logger;
+    private readonly IEmailDispositionSender? _emailSender;
 
-    public OutputRouter(ChatSessionManager sessionManager, ILogger<OutputRouter> logger)
+    /// <param name="sessionManager">Session persistence seam (the ledger write path).</param>
+    /// <param name="logger">Logger (identifiers only per NFR-07).</param>
+    /// <param name="emailSender">
+    /// FR-P3-04 email disposition delivery seam. Optional with a null default so DI (which
+    /// registers the sender in the same compound-AI-ON block) injects it while existing
+    /// constructions stay valid; when null, the email leg fails LOUDLY at routing time —
+    /// never a silent skip.
+    /// </param>
+    public OutputRouter(
+        ChatSessionManager sessionManager,
+        ILogger<OutputRouter> logger,
+        IEmailDispositionSender? emailSender = null)
     {
         _sessionManager = sessionManager ?? throw new ArgumentNullException(nameof(sessionManager));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _emailSender = emailSender;
     }
 
     /// <inheritdoc />
@@ -167,30 +183,92 @@ public sealed class OutputRouter : IOutputRouter
 
         // ── 3. ROUTE by disposition — the ONLY rendering contract (ADR-040 / ADR-039).
         // No branching by capability name, consumer type, or any second routing surface.
-        return binding.Disposition switch
+        switch (binding.Disposition)
         {
             // Informational: pass-through — the caller renders from the STORED entry on its
             // existing SSE path (render follows store).
-            BindingDisposition.Informational => new RoutedOutput { Entry = entry, Session = updated },
+            case BindingDisposition.Informational:
+                return new RoutedOutput { Entry = entry, Session = updated };
 
-            // P3 dispositions: LOUD NotSupported stubs (task-021 contract — no silent
-            // fallback to inline render). The ledger entry above IS stored and addressable;
-            // only the rendering leg is missing until P3 lands.
-            BindingDisposition.WorkProduct or
-            BindingDisposition.Overlay or
-            BindingDisposition.Email or
-            BindingDisposition.Record or
-            BindingDisposition.Notification => throw new NotSupportedException(
-                $"OutputRouter: disposition '{binding.Disposition.ToLedgerValue()}' routing is not implemented yet " +
-                $"(lands at phase P3 of spaarke-ai-architecture-redesign-r1). The output WAS stored to the session " +
-                $"ledger as '{entry.Key}' (storage precedes rendering — ADR-040); only the rendering leg is missing. " +
-                "Do NOT work around this by rendering inline — that would silently violate the disposition contract."),
+            // Email (FR-P3-04, task 043): deliver via the Communication (Email) service.
+            // The capability supplies presentation IN the stored payload (`email` object:
+            // to[] / subject / htmlBody — see IEmailDispositionSender remarks); the router
+            // supplies storage-then-delivery. Storage already happened above (ADR-040
+            // store-precedes-render); a delivery failure propagates AFTER the ledger write —
+            // the entry stays addressable, the invocation fails loudly.
+            case BindingDisposition.Email:
+                await DeliverEmailAsync(entry, cancellationToken).ConfigureAwait(false);
+                return new RoutedOutput { Entry = entry, Session = updated };
 
-            _ => throw new ArgumentOutOfRangeException(
-                nameof(binding),
-                binding.Disposition,
-                "Unknown BindingDisposition value — Binding contract / OutputRouter drift."),
-        };
+            // Remaining P3 dispositions: LOUD NotSupported stubs (task-021 contract — no
+            // silent fallback to inline render). The ledger entry above IS stored and
+            // addressable; only the rendering leg is missing until its P3 task lands
+            // (work_product/record → task 047; overlay/notification → later P3 waves).
+            case BindingDisposition.WorkProduct:
+            case BindingDisposition.Overlay:
+            case BindingDisposition.Record:
+            case BindingDisposition.Notification:
+                throw new NotSupportedException(
+                    $"OutputRouter: disposition '{binding.Disposition.ToLedgerValue()}' routing is not implemented yet " +
+                    $"(lands at phase P3 of spaarke-ai-architecture-redesign-r1). The output WAS stored to the session " +
+                    $"ledger as '{entry.Key}' (storage precedes rendering — ADR-040); only the rendering leg is missing. " +
+                    "Do NOT work around this by rendering inline — that would silently violate the disposition contract.");
+
+            default:
+                throw new ArgumentOutOfRangeException(
+                    nameof(binding),
+                    binding.Disposition,
+                    "Unknown BindingDisposition value — Binding contract / OutputRouter drift.");
+        }
+    }
+
+    /// <summary>
+    /// FR-P3-04 email leg: parse the capability-supplied <c>email</c> envelope from the
+    /// STORED payload and deliver via <see cref="IEmailDispositionSender"/>. Loud on every
+    /// failure mode (missing sender, missing/malformed envelope) — never a silent skip.
+    /// </summary>
+    private async Task DeliverEmailAsync(SessionOutput entry, CancellationToken cancellationToken)
+    {
+        if (_emailSender is null)
+        {
+            throw new InvalidOperationException(
+                $"OutputRouter: output '{entry.Key}' declares the email disposition but no IEmailDispositionSender " +
+                "is registered. The entry WAS stored (ADR-040); delivery is unconfigured — register " +
+                "CommunicationEmailDispositionSender in the compound-AI-ON block.");
+        }
+
+        if (!entry.Payload.TryGetProperty("email", out var emailElement)
+            || emailElement.ValueKind != JsonValueKind.Object
+            || !emailElement.TryGetProperty("subject", out var subjectEl) || subjectEl.ValueKind != JsonValueKind.String
+            || !emailElement.TryGetProperty("htmlBody", out var bodyEl) || bodyEl.ValueKind != JsonValueKind.String
+            || !emailElement.TryGetProperty("to", out var toEl) || toEl.ValueKind != JsonValueKind.Array)
+        {
+            throw new InvalidOperationException(
+                $"OutputRouter: output '{entry.Key}' declares the email disposition but its payload carries no " +
+                "valid 'email' envelope ({ to: string[], subject: string, htmlBody: string }). The capability " +
+                "supplies presentation; the router supplies delivery — fix the capability's routed payload.");
+        }
+
+        var recipients = toEl.EnumerateArray()
+            .Where(e => e.ValueKind == JsonValueKind.String)
+            .Select(e => e.GetString()!)
+            .Where(s => !string.IsNullOrWhiteSpace(s))
+            .ToList();
+
+        await _emailSender.SendAsync(
+            new EmailDispositionEnvelope
+            {
+                To = recipients,
+                Subject = subjectEl.GetString()!,
+                HtmlBody = bodyEl.GetString()!,
+                CorrelationId = entry.Key,
+            },
+            cancellationToken).ConfigureAwait(false);
+
+        // NFR-07: identifiers only.
+        _logger.LogInformation(
+            "Ledger output {Key} routed to email disposition: recipients={RecipientCount}",
+            entry.Key, recipients.Count);
     }
 }
 

@@ -234,6 +234,22 @@ public class AgentTurnLoopContractTests
     }
 
     [Fact]
+    public void SummarizeArguments_EmailDraftSubject_RedactsByName()
+    {
+        // FR-P3-02 (task 041): email.draft's subject is drafted FROM document/session
+        // content — even a single-token subject is verbatim content. Redact by NAME so
+        // it never lands in the ToolChain audit or the confirmation-card summary (NFR-07).
+        var summary = AgentTurnContract.SummarizeArguments(new AIFunctionArguments
+        {
+            ["subject"] = "Indemnity",
+            ["to"] = "jane.smith@smithlegal.example",
+        });
+
+        summary.Should().NotContain("Indemnity", "NFR-07: the drafted subject is content, not an identifier");
+        summary.Should().Contain("subject=<redacted:9>");
+    }
+
+    [Fact]
     public void SummarizeArguments_EmptyOrNull_ReturnsNull()
     {
         AgentTurnContract.SummarizeArguments(null).Should().BeNull();

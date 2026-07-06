@@ -159,6 +159,40 @@ public class ConfirmationGateUnificationTests
             g.GateId == "gate-004" && g.Status == PendingPlanManager.GateStatusRejected);
     }
 
+    // =========================================================================
+    // G-P2 UAT round-1 finding 6 (2026-07-06): honest close for typed-handler confirms
+    // =========================================================================
+
+    [Fact]
+    public async Task CloseInvocation_ConfirmedUnexecutable_WritesHonestMarkerAndRemovesPayload()
+    {
+        // A typed-handler (non-Binding) invocation confirmed by the user has NO execution
+        // seam until FR-P3-03 — the gate-resolve endpoint closes it `confirmed-unexecutable`
+        // (approval recorded, execution honestly unavailable) instead of the pre-fix
+        // `confirmed` marker that falsely recorded an executed side effect.
+        var session = await SeedSessionAsync();
+        await _sut.SuspendInvocationAsync(BuildInvocation(session.SessionId, "gate-006"));
+
+        var closed = await _sut.CloseInvocationAsync(
+            TenantId, session.SessionId, "gate-006",
+            PendingPlanManager.GateStatusConfirmedUnexecutable);
+        var afterClose = await _sut.GetInvocationAsync(TenantId, session.SessionId, "gate-006");
+        var closeAgain = await _sut.CloseInvocationAsync(
+            TenantId, session.SessionId, "gate-006",
+            PendingPlanManager.GateStatusConfirmedUnexecutable);
+
+        closed.Should().BeTrue();
+        afterClose.Should().BeNull("the payload is removed — the invocation can never execute later by accident");
+        closeAgain.Should().BeFalse("close is idempotent — a raced second resolve maps to 409 semantics");
+
+        var stored = await _sessionManager.GetSessionAsync(TenantId, session.SessionId);
+        var entries = stored!.Gates!.Where(g => g.GateId == "gate-006").ToList();
+        entries.Should().HaveCount(2, "pending + terminal entries correlate by gate id (ADR-040 append-only)");
+        entries.Should().ContainSingle(g => g.Status == PendingPlanManager.GateStatusConfirmedUnexecutable);
+        entries.Should().NotContain(g => g.Status == PendingPlanManager.GateStatusConfirmed,
+            "no plain `confirmed` marker — nothing executed, and the ledger must not claim otherwise");
+    }
+
     [Fact]
     public async Task WriteGateMarker_PendingThenConfirmed_CorrelatesByGateId()
     {

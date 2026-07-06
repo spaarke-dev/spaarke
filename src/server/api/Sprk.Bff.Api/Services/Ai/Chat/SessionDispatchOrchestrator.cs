@@ -1,7 +1,9 @@
 using System.Runtime.CompilerServices;
 using System.Text.Json;
+using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
+using Sprk.Bff.Api.Services.Ai.EventRules;
 using Sprk.Bff.Api.Services.Ai.LinearConsumers;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 
@@ -78,6 +80,7 @@ public class SessionDispatchOrchestrator
     private readonly ISessionFileTextSource _sessionFileTextSource;
     private readonly IOutputRouter _outputRouter;
     private readonly PendingPlanManager _pendingPlanManager;
+    private readonly EventRulesOptions _manifestProbeOptions;
     private readonly ILogger<SessionDispatchOrchestrator> _logger;
 
     public SessionDispatchOrchestrator(
@@ -88,6 +91,7 @@ public class SessionDispatchOrchestrator
         ISessionFileTextSource sessionFileTextSource,
         IOutputRouter outputRouter,
         PendingPlanManager pendingPlanManager,
+        IOptions<EventRulesOptions> manifestProbeOptions,
         ILogger<SessionDispatchOrchestrator> logger)
     {
         _sessionManager = sessionManager ?? throw new ArgumentNullException(nameof(sessionManager));
@@ -97,6 +101,11 @@ public class SessionDispatchOrchestrator
         _sessionFileTextSource = sessionFileTextSource ?? throw new ArgumentNullException(nameof(sessionFileTextSource));
         _outputRouter = outputRouter ?? throw new ArgumentNullException(nameof(outputRouter));
         _pendingPlanManager = pendingPlanManager ?? throw new ArgumentNullException(nameof(pendingPlanManager));
+        // G-P2 UAT round-1 finding 4 (§11 reuse): the manifest readiness probe settings
+        // are the SAME wait-briefly-or-degrade policy the Event path applies to the SAME
+        // upload → manifest-write → cache-propagation race (G-P1 Defect 3) — reusing
+        // EventRulesOptions keeps ONE probe policy instead of a second config surface.
+        _manifestProbeOptions = manifestProbeOptions?.Value ?? throw new ArgumentNullException(nameof(manifestProbeOptions));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -117,6 +126,7 @@ public class SessionDispatchOrchestrator
         _sessionFileTextSource = null!;
         _outputRouter = null!;
         _pendingPlanManager = null!;
+        _manifestProbeOptions = null!;
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -230,6 +240,47 @@ public class SessionDispatchOrchestrator
         // ── FR-08 file resolution: explicit args subset, else the full session manifest.
         var uploadedFiles = session.UploadedFiles ?? Array.Empty<ChatSessionFile>();
         var targetFiles = ResolveTargetFiles(requestedFileIds, uploadedFiles);
+
+        // ── G-P2 UAT round-1 finding 4 (2026-07-06): manifest readiness probe at the
+        // ONE dispatch seam (covers the loop's BindingCapabilityTool, chip clicks, and
+        // gate-resolve — every caller of DispatchAsync). A fresh upload's manifest write
+        // can lag the user's immediate "summarize this document" (upload 202 → manifest
+        // write → cache propagation), so requested ids (or the default-all manifest)
+        // resolve empty and the capability honestly reports the file as missing.
+        // Wait-briefly-or-degrade, IDENTICAL policy + bounds to the Event path's G-P1
+        // Defect 3 probe (EventRulesOptions.ReadinessProbe*, ~5s default): re-read the
+        // session until requested ids all resolve (explicit subset) or the manifest is
+        // non-empty (default-all), then degrade to whatever resolved. Task.Delay matches
+        // the Event-path precedent; the TimeProvider refactor is on the /defer list.
+        if (IsResolutionIncomplete(requestedFileIds, targetFiles))
+        {
+            for (var attempt = 1; attempt <= _manifestProbeOptions.ReadinessProbeAttempts; attempt++)
+            {
+                await Task.Delay(Math.Max(0, _manifestProbeOptions.ReadinessProbeDelayMs), cancellationToken)
+                    .ConfigureAwait(false);
+                var refreshed = await _sessionManager
+                    .GetSessionAsync(request.TenantId, request.SessionId, cancellationToken)
+                    .ConfigureAwait(false);
+                if (refreshed is null)
+                {
+                    break;
+                }
+                session = refreshed;
+                uploadedFiles = session.UploadedFiles ?? Array.Empty<ChatSessionFile>();
+                targetFiles = ResolveTargetFiles(requestedFileIds, uploadedFiles);
+                if (!IsResolutionIncomplete(requestedFileIds, targetFiles))
+                {
+                    break;
+                }
+            }
+
+            _logger.LogInformation(
+                "SessionDispatchOrchestrator: manifest readiness probe finished — resolved {ResolvedCount} file(s) " +
+                "(requested {RequestedCount}, manifest {ManifestCount}). tenant={TenantId} session={SessionId} binding={BindingId}",
+                targetFiles.Count, requestedFileIds?.Count ?? 0, uploadedFiles.Count,
+                request.TenantId, request.SessionId, binding.BindingId);
+        }
+
         if (targetFiles.Count == 0)
         {
             yield return AnalysisChunk.FromError(
@@ -436,6 +487,19 @@ public class SessionDispatchOrchestrator
         }
         return ids.Count > 0 ? ids : null;
     }
+
+    /// <summary>
+    /// Whether file resolution is INCOMPLETE for readiness-probe purposes (finding 4):
+    /// an explicit subset that did not fully resolve against the manifest, or a
+    /// default-all request against an empty manifest (a just-uploaded file may not be
+    /// visible yet). Pure predicate — same completeness rule the Event path applies.
+    /// </summary>
+    private static bool IsResolutionIncomplete(
+        IReadOnlyList<string>? requestedFileIds,
+        IReadOnlyList<ChatSessionFile> targetFiles)
+        => requestedFileIds is { Count: > 0 }
+            ? targetFiles.Count < requestedFileIds.Count
+            : targetFiles.Count == 0;
 
     /// <summary>
     /// Resolve the effective target files: the explicit args subset filtered against the

@@ -541,6 +541,25 @@ public static class ChatEndpoints
             // Convert session history to AI framework messages for context
             var history = BuildAiHistory(session.Messages);
 
+            // === G-P2 UAT round-1 finding 3 (2026-07-06) — surface ledger outputs ====
+            // Event/Click outputs (auto-classification, chip-dispatched summaries) live
+            // in the session LEDGER (session.Outputs, ADR-040) and render client-side;
+            // they never enter session.Messages, so without this block the loop cannot
+            // see the summary the user is looking at and a follow-on transform
+            // ("provide a more concise summary") degrades to a generic clarifying
+            // question. Appended AFTER history, BEFORE the user turn: volatile content
+            // rides the tail so the [system]+[history] prefix stays prompt-cache-stable
+            // (NFR-04). Recent-window + per-output caps in ChatHistoryManager.
+            var ledgerOutputsContext = ChatHistoryManager.BuildLedgerOutputsContext(session.Outputs);
+            if (ledgerOutputsContext is not null)
+            {
+                var augmented = new List<AiChatMessage>(history.Count + 1);
+                augmented.AddRange(history);
+                augmented.Add(new AiChatMessage(ChatRole.System, ledgerOutputsContext));
+                history = augmented;
+            }
+            // === End finding-3 ledger context =========================================
+
             // === FR-P2-05 HARD CUTOVER (task 034) — legacy dispatch pre-passes DELETED ===
             // Before the cutover, three pre-passes ran here between agent creation and the
             // loop stream (compound-intent detection, single-match auto-dispatch, and the
@@ -1736,24 +1755,50 @@ public static class ChatEndpoints
                 : GateNotPendingProblem();
         }
 
-        // Confirm: get-then-delete (double-confirm → 409) + confirmed ledger marker.
-        var invocation = await pendingPlanManager.ResumeInvocationAsync(
+        // Confirm — G-P2 UAT round-1 finding 6 (2026-07-06): PEEK the invocation FIRST
+        // so a typed-handler (non-Binding) confirm closes the gate with the HONEST
+        // terminal status instead of the pre-fix sequence (ResumeInvocationAsync wrote a
+        // `confirmed` marker, then the 422 left the ledger claiming an execution that
+        // never happened). Binding-backed invocations proceed through the unchanged
+        // get-then-delete resume below (double-confirm → 409).
+        var peeked = await pendingPlanManager.GetInvocationAsync(
             tenantId, sessionId, gateId, cancellationToken);
-        if (invocation is null)
+        if (peeked is null)
         {
             return GateNotPendingProblem();
         }
 
-        if (!Guid.TryParse(invocation.BindingId, out var bindingId) || bindingId == Guid.Empty)
+        if (!Guid.TryParse(peeked.BindingId, out var bindingId) || bindingId == Guid.Empty)
         {
-            // Non-Binding-backed invocations resume at the loop seam (task 034 wires the
-            // loop-boundary confirmation suspend/resume); this surface executes catalog
-            // Bindings only (ADR-039 closed catalog).
+            // Non-Binding-backed invocations (typed-handler tools suspended by
+            // SideEffectGateAIFunction) have NO execution seam until FR-P3-03 lands —
+            // this surface executes catalog Bindings only (ADR-039 closed catalog).
+            // Close the gate `confirmed-unexecutable` (approval recorded, execution
+            // honestly unavailable) and return the STABLE 422 errorCode the client maps
+            // to its honest "recorded but not executable yet" transcript message —
+            // distinguishing resume-not-yet-supported from real failures (ADR-019).
+            var closed = await pendingPlanManager.CloseInvocationAsync(
+                tenantId, sessionId, gateId,
+                PendingPlanManager.GateStatusConfirmedUnexecutable, cancellationToken);
+            if (!closed)
+            {
+                // Raced by a concurrent resolve/expiry between peek and close.
+                return GateNotPendingProblem();
+            }
+
             return Results.Problem(
                 detail: "The confirmed invocation has no Binding target; it cannot be executed from this surface.",
                 statusCode: StatusCodes.Status422UnprocessableEntity,
                 title: "Unprocessable Entity",
                 extensions: new Dictionary<string, object?> { ["errorCode"] = "gate.no-binding-target" });
+        }
+
+        // Binding-backed: get-then-delete (double-confirm → 409) + confirmed ledger marker.
+        var invocation = await pendingPlanManager.ResumeInvocationAsync(
+            tenantId, sessionId, gateId, cancellationToken);
+        if (invocation is null)
+        {
+            return GateNotPendingProblem();
         }
 
         JsonElement? args = null;
@@ -2703,8 +2748,10 @@ public record ChatSseElicitationModalData(
 /// executing. The pending <c>SessionGate</c> ledger marker is written BEFORE this
 /// event renders (ADR-040). The client ActionConfirmationDialog resolves it via
 /// <c>POST /sessions/{sessionId}/gates/{gateId}/resolve</c> (task 032) — reject
-/// closes the gate; confirm on a non-Binding invocation returns 422
-/// <c>gate.no-binding-target</c> until the P3 typed-handler resume seam lands.
+/// closes the gate; confirm on a non-Binding invocation closes the gate
+/// <c>confirmed-unexecutable</c> (approval recorded, execution honestly unavailable)
+/// and returns 422 <c>gate.no-binding-target</c>, which the client renders as an
+/// honest transcript message, until the P3 typed-handler resume seam (FR-P3-03) lands.
 /// Field names mirror the client <c>IActionConfirmationPayload</c> contract.
 /// </summary>
 /// <param name="ActionId">The gate id (ledger correlation key + resolve-route parameter).</param>

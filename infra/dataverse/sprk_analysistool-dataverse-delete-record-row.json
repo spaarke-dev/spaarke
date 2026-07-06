@@ -11,7 +11,7 @@
   "sprk_sideeffectclass": 100000001,
   "sprk_permissionscope": "dataverse-user-context",
   "sprk_budgetclass": "light",
-  "sprk_description": "Deletes one row from a Dataverse table under the calling user's permissions. Proceed solely on explicit user consent: set hasUserApproved to true only after the user has affirmatively confirmed the deletion. The delete is permanent and executes with the user's own privileges; if the user cannot delete the record, the call fails with their access error. WRITE tool.",
+  "sprk_description": "Deletes one row from a Dataverse table under the calling user's permissions. Proceed solely on explicit user consent: set hasUserApproved to true only after the user has affirmatively confirmed the deletion. The delete is permanent and executes with the user's own privileges; if the user cannot delete the record, the call fails with their access error. WRITE tool. Spaarke entity map: 'matter' = sprk_matter (name column sprk_mattername), 'project' = sprk_project (sprk_projectname), 'document' = sprk_document (sprk_documentname); people = contact, companies = account.",
   "sprk_handlerclass": "DataverseDeleteRecordHandler",
   "sprk_availableincontexts": 100000001,
   "_comment_availableincontexts": "100000001 = Chat only — dataverse.* tools exist for the agent loop (P2), not playbook nodes.",

@@ -23,17 +23,20 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// </para>
 /// <list type="bullet">
 /// <item><c>method = "rerun"</c> — row <c>SYS-Analysis Rerun</c>, tool id <c>analysis.rerun</c>,
-/// declared <c>side_effect_class = write</c> (re-execution persists a new analysis output via
-/// the engine) so the ONE confirmation gate (FR-P2-02) suspends it by declaration — never by
-/// tool-name list (ADR-039).</item>
+/// declared <c>side_effect_class = read</c> since the 2026-07-06 operator ruling (G-P2 UAT
+/// fix wave): an explicit re-run executes immediately without the confirmation gate because
+/// it regenerates the session's OWN analysis output (client undo preserved) — it never
+/// mutates tenant records. Originally declared write by task 036. Gating stays
+/// declaration-driven — never a tool-name list (ADR-039); <c>dataverse.*</c> writes stay gated.</item>
 /// <item><c>method = "refine"</c> — row <c>SYS-Analysis Refine</c>, tool id
 /// <c>analysis.refine</c>, declared <c>side_effect_class = read</c> (fetches the current
 /// analysis output, transforms it with a focused inner LLM call, returns text to the
 /// conversation — no persistence).</item>
 /// </list>
 /// <para>
-/// Two rows (not one row + method arg) because the two methods carry DIFFERENT declared
-/// side-effect classes and the gate fires on the row's declaration.
+/// Two rows (not one row + method arg) because each method carries its OWN declared
+/// side-effect class and the gate fires on the row's declaration (the classes happen to
+/// coincide at read since the 2026-07-06 ruling, but they remain independently declarable).
 /// </para>
 /// <para>
 /// <strong>Session context</strong>: <c>rerun</c> reads <see cref="ChatInvocationContext.PlaybookId"/>

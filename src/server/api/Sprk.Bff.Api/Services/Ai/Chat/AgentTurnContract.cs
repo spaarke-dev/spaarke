@@ -248,6 +248,9 @@ public sealed class AgentTurnContract
         // FR-P2-04 (task 033): the refusal tool's request label paraphrases the user's
         // utterance — redact by name so it never lands in the ToolChain audit (NFR-07).
         RefusalCapabilityTool.UnsupportedRequestArgName,
+        // FR-P3-02 (task 041): email.draft's subject line is drafted from document/session
+        // content — even a single-token subject is verbatim content; redact by name (NFR-07).
+        "subject",
     };
 
     private static int ValueLength(object? value) => value switch

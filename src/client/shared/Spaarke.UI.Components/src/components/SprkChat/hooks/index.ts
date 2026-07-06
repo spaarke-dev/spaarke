@@ -27,6 +27,7 @@ export {
 export type {
   UseActionHandlersOptions,
   IUseActionHandlersResult,
+  IGateResolveOutcome,
   ActionHandlerContext,
   ActionHandler,
   ActionHandlerMap,

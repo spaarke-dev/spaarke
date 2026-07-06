@@ -656,6 +656,106 @@ public class GoldenUtteranceEvalSuiteTests
     }
 
     // -------------------------------------------------------------------------
+    // P3 live draft-correspondence surface assertions (task 041, FR-P3-02) —
+    // the ROUTING + PROJECTION + schema-pin legs are live (same pattern as the
+    // P2 refusal surface above); the NL-loop dispatch assertion activates at the
+    // G-P3 gate per each case's activation declaration. The companion
+    // email.draft Communicate-class gate contract is asserted in
+    // P2LoopInjectionEvalSuiteTests (seed-row declaration + live suspension).
+    // -------------------------------------------------------------------------
+
+    /// <summary>The DRAFT-CORR@v1 <c>sprk_analysisaction</c> target seeded on spaarkedev1 (task 041).</summary>
+    private static readonly Guid DraftCorrActionId = new("4b8b50f4-6a79-f111-ab0e-7ced8ddc4cc6");
+
+    /// <summary>The draft-correspondence <c>sprk_playbookconsumer</c> row seeded on spaarkedev1 (task 041).</summary>
+    private static readonly Guid DraftCorrBindingId = new("f7dc4a00-6b79-f111-ab0e-7ced8ddc4cc6");
+
+    [Fact]
+    public async Task P3DraftCorrespondenceSurface_BindingResolvesAndProjectsThroughTheClosedCatalog()
+    {
+        var suite = LoadSuite();
+        var draftCases = suite.Cases
+            .Where(c => string.Equals(c.Family, "draft-correspondence", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        draftCases.Should().NotBeEmpty("FR-P3-02: the draft-correspondence family exists (closed-catalog coverage)");
+        draftCases.Should().Contain(c => IsOutcome(c, "dispatch"),
+            "the drafting leg is a cataloged dispatch (DRAFT-CORR@v1 prompted Action)");
+        draftCases.Should().Contain(c => IsOutcome(c, "clarify"),
+            "the email.draft leg presents as a confirmation gate (Communicate class) — the clarify-shaped outcome");
+
+        // Dataverse boundary stub shaped like the seeded spaarkedev1 row (task 041):
+        // enabled draft-correspondence Binding, sprk_action → DRAFT-CORR@v1 (Prompted),
+        // maker-authored sprk_tooldescription (the projection opt-in), assistant surface.
+        var draftRow = BuildActionTargetRow(
+            ConsumerTypes.DraftCorrespondence, DraftCorrActionId, ucid: "UC-G-2", rowId: DraftCorrBindingId);
+        draftRow["sprk_tooldescription"] =
+            "Draft professional correspondence (a client letter or email) about this session's documents. " +
+            "Produces a REVIEWABLE draft grounded in the session files — it does NOT send anything.";
+        draftRow["sprk_surfaces"] = "assistant";
+
+        var entityService = new Mock<IGenericEntityService>();
+        entityService
+            .Setup(s => s.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(new List<Entity> { draftRow }));
+
+        var routing = CreateRoutingService(entityService);
+
+        // ── Projection leg: the EXACT read SprkChatAgentFactory performs (FR-P2-01).
+        var projectable = await routing.ListTextProjectableBindingsAsync();
+
+        var binding = projectable.Should().ContainSingle(
+            b => string.Equals(b.ConsumerType, ConsumerTypes.DraftCorrespondence, StringComparison.OrdinalIgnoreCase),
+            "the draft-correspondence Binding is text-projectable — 'draft the client letter' dispatches through " +
+            "the closed catalog (ADR-039: routing config lives only in the Binding table)").Subject;
+        binding.BindingId.Should().Be(DraftCorrBindingId,
+            "ledger outputs key on {bindingId}@t{n} — the seeded row GUID is the addressable identity (ADR-040)");
+        binding.ActionId.Should().Be(DraftCorrActionId,
+            "the Binding's sprk_action lookup targets the DRAFT-CORR@v1 prompted Action");
+        binding.ActionKind.Should().Be(ActionKind.Prompted,
+            "the draft renders through the prompted executor (ActionRunner + PromptSchemaRenderer) — " +
+            "no code-path routing outside the Binding table");
+        binding.ToolDescription.Should().NotBeNullOrWhiteSpace(
+            "the maker-authored sprk_tooldescription is the projection opt-in AND the loop's intent surface");
+
+        // ── Tool-projection leg: the resolved Binding constructs the capability tool the
+        // loop invokes (deterministic name; catalog-authored description).
+        var tool = new Sprk.Bff.Api.Services.Ai.Chat.BindingCapabilityTool(
+            binding,
+            new ServiceCollection().BuildServiceProvider(),
+            "tenant-eval", "session-eval",
+            Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance);
+        tool.Name.Should().Be("capability_draft-correspondence");
+        tool.Description.Should().Be(binding.ToolDescription,
+            "no hardcoded drafting copy — description comes from the catalog row");
+
+        // ── NFR-06 schema-conformance leg: the DRAFT-CORR@v1 contract file is pinned.
+        var schemaPath = Path.Combine(
+            FindRepoRoot(), "infra", "dataverse", "outputschemas", "draft-corr-v1.schema.json");
+        File.Exists(schemaPath).Should().BeTrue(
+            $"the DRAFT-CORR@v1 output-schema contract must exist at {schemaPath} " +
+            "(it mirrors sprk_analysisaction.sprk_outputschemajson on spaarkedev1)");
+        using var doc = JsonDocument.Parse(File.ReadAllText(schemaPath));
+        doc.RootElement.GetProperty("title").GetString().Should().Contain("DRAFT-CORR@v1");
+        doc.RootElement.GetProperty("additionalProperties").GetBoolean().Should().BeFalse(
+            "structured outputs are closed — the model cannot invent fields");
+        doc.RootElement.GetProperty("required").EnumerateArray().Select(e => e.GetString())
+            .Should().BeEquivalentTo(new[] { "subject", "body", "recipients_suggestion", "cited_refs" },
+                "the drafted correspondence contract: subject + body + suggested recipients + cited sources");
+        doc.RootElement.GetProperty("properties").EnumerateObject().Select(p => p.Name)
+            .Should().Equal(new[] { "subject", "body", "recipients_suggestion", "cited_refs" },
+                "property DECLARATION ORDER is the streaming emission order — subject first for the review card");
+        doc.RootElement.GetProperty("properties").GetProperty("cited_refs").GetProperty("minItems").GetInt32()
+            .Should().Be(1, "an uncited draft is invalid — grounded outputs (ADR-039); NFR-06 citation-integrity leg");
+
+        _output.WriteLine("P3 LIVE draft-correspondence surface assertions (FR-P3-02):");
+        foreach (var c in draftCases)
+        {
+            _output.WriteLine($"  {c.CaseId}  \"{c.Utterance}\"  ->  {c.Expected.OutcomeClass} via {binding.ConsumerType} " +
+                              $"binding {binding.BindingId} -> action {binding.ActionId} (DRAFT-CORR@v1)");
+        }
+    }
+
+    // -------------------------------------------------------------------------
     // Pending-by-design declaration (P2/P3): dispatch assertions not yet
     // activated are stubbed, not silently skipped. This test PASSES while
     // making the remaining pending inventory visible in the run output with

@@ -255,8 +255,9 @@ $RowFiles = @{
     # serves 2 rows via the method discriminator in sprk_configuration (rerun / refine):
     # the typed-handler migration of the last live legacy chat-tool group. Both rows are
     # capability-gated by sprk_requiredcapability = 'reanalyze' (preserves the legacy gate).
-    # ANALYSIS-RERUN declares sprk_sideeffectclass = Write (100000001) — engine persistence —
-    # so the ONE confirmation gate suspends it by declaration; ANALYSIS-REFINE is Read.
+    # ANALYSIS-RERUN declares sprk_sideeffectclass = Read (100000000) since the 2026-07-06
+    # operator ruling (G-P2 UAT fix wave): explicit re-runs execute ungated — they regenerate
+    # the session's OWN analysis output, never tenant records. ANALYSIS-REFINE is also Read.
     # Namespaced tool ids per the FR-P0-03 contract: analysis.rerun / analysis.refine.
     "ANALYSIS-RERUN"                   = "$RepoRoot/infra/dataverse/sprk_analysistool-analysis-rerun-row.json"
     "ANALYSIS-REFINE"                  = "$RepoRoot/infra/dataverse/sprk_analysistool-analysis-refine-row.json"

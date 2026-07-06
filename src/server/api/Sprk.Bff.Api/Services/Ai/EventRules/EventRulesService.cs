@@ -477,10 +477,18 @@ public sealed class EventRulesService : IEventRulesService
             }
             else if (transitions.Count > 0)
             {
+                // G-P2 UAT round-1 finding 1 (2026-07-06): chip_label is now a full
+                // user-facing phrase ("Summarize this document"), which reads wrong
+                // inside the derived composite labels ("Summarize this document all
+                // 3 files?"). Composite labels use the SHORT form: the maker-authored
+                // bulk_chip_label when present, else deterministically the first
+                // whitespace-delimited token of chip_label — data-driven either way,
+                // no per-capability code (ADR-039).
                 var primary = transitions[0];
+                var shortLabel = ShortChipLabel(primary);
                 chips.Add(new EventChip(
                     primary.TargetBindingId!,
-                    $"{primary.ChipLabel} all {batchFiles.Count} files?",
+                    $"{shortLabel} all {batchFiles.Count} files?",
                     new { fileIds = allFileIds },
                     primary.RequiresAttachments == true));
 
@@ -490,7 +498,7 @@ public sealed class EventRulesService : IEventRulesService
                     {
                         chips.Add(new EventChip(
                             primary.TargetBindingId!,
-                            $"{primary.ChipLabel}: {file.FileName}",
+                            $"{shortLabel}: {file.FileName}",
                             new { fileIds = new[] { file.FileId } },
                             primary.RequiresAttachments == true));
                     }
@@ -521,6 +529,25 @@ public sealed class EventRulesService : IEventRulesService
     /// "…all N files?" chip renders (keeps the strip readable; the manifest cap is 20).
     /// </summary>
     private const int MaxPerFileChips = 3;
+
+    /// <summary>
+    /// SHORT verb form for server-derived composite chip labels (bulk + per-file):
+    /// the maker-authored <see cref="ChipTransition.BulkChipLabel"/> when present, else
+    /// the first whitespace-delimited token of <see cref="ChipTransition.ChipLabel"/>.
+    /// Deterministic and purely catalog-data-driven (G-P2 UAT round-1 finding 1).
+    /// Callers guarantee a non-blank ChipLabel (the transitions list is pre-filtered).
+    /// </summary>
+    private static string ShortChipLabel(ChipTransition transition)
+    {
+        if (!string.IsNullOrWhiteSpace(transition.BulkChipLabel))
+        {
+            return transition.BulkChipLabel!.Trim();
+        }
+
+        var label = transition.ChipLabel!.Trim();
+        var firstSpace = label.IndexOf(' ');
+        return firstSpace > 0 ? label[..firstSpace] : label;
+    }
 
     // ─── Helpers ────────────────────────────────────────────────────────────────────────
 

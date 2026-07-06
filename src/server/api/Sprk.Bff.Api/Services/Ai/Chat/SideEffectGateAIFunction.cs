@@ -30,7 +30,8 @@ namespace Sprk.Bff.Api.Services.Ai.Chat;
 /// <see cref="AIFunction"/>s; putting it inside the adapter would give the
 /// schema/context bridge a store dependency + root-provider lifetime it does not have.
 /// (3) <i>Cost of doing nothing</i> — <c>dataverse.create_record</c> /
-/// <c>update_record</c> / <c>delete_record</c> and <c>analysis.rerun</c> execute
+/// <c>update_record</c> / <c>delete_record</c> (and <c>analysis.rerun</c>, until the
+/// 2026-07-06 operator ruling re-declared it read) execute
 /// UNGATED from the loop, so adversarial instructions embedded in uploaded-document
 /// text or tool results can trigger real Dataverse writes without user confirmation
 /// (NFR-03 violation; eval cases GU-051/GU-052 fail without this class).
