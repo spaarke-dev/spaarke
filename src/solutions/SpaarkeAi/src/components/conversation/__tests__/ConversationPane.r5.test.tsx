@@ -74,7 +74,7 @@ jest.mock('@spaarke/ui-components', () => {
     SprkChat: (props: ISprkChatProps) => {
       // Capture the latest props on every render so tests can drive callbacks.
       sprkChatPropsRef.current = props;
-      return <div data-testid="sprkchat-stub" />;
+      return <div data-testid="sprkchat-stub">{props.aboveInputSlot}</div>;
     },
   };
 });

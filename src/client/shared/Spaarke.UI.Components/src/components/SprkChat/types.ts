@@ -664,6 +664,17 @@ export interface ISprkChatProps {
   onPlaybookChange?: (playbookId: string) => void;
   /** Optional CSS class name applied to the root element */
   className?: string;
+  /**
+   * Host-provided content rendered directly ABOVE the input zone (below the
+   * message transcript). Layout slot only — SprkChat applies no styling and
+   * attaches no behavior; the host owns the slot's content and interactions.
+   *
+   * Added for the Click-path next-step chip strip (ai-architecture-redesign-r1
+   * G-P1 UAT round-2, 2026-07-06): suggested-next-step affordances belong at
+   * the conversation's leading edge (above the composer), not above the
+   * transcript. Renders nothing when omitted/null.
+   */
+  aboveInputSlot?: React.ReactNode;
   /** Available documents for context switching */
   documents?: IDocumentOption[];
   /** Available playbooks for context switching */

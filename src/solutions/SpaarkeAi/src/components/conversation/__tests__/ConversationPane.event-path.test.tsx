@@ -73,7 +73,9 @@ jest.mock('@spaarke/ui-components', () => {
         injectedMessages.push(message);
         props.onLocalMessageInjected?.();
       });
-      return <div data-testid="sprkchat-stub" />;
+      // Render the host slot like the real component does (G-P1 round-2:
+      // the consumer chip strip lives in aboveInputSlot, above the input zone).
+      return <div data-testid="sprkchat-stub">{props.aboveInputSlot}</div>;
     },
     createConsumerDispatcher: (...args: unknown[]) =>
       (createConsumerDispatcherSpy as (...a: unknown[]) => unknown)(...args),

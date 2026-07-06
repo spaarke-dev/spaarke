@@ -319,6 +319,9 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   onSessionStale,
   onPlaybookChange,
   className,
+  // ai-architecture-redesign-r1 G-P1 round-2 (2026-07-06) — host content slot
+  // rendered above the input zone (e.g. the Click-path next-step chip strip).
+  aboveInputSlot,
   documents = [],
   playbooks = [],
   predefinedPrompts = [],
@@ -2465,6 +2468,11 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
           </Button>
         </div>
       )}
+
+      {/* Host slot — content the embedding host renders directly above the
+          input zone (e.g. the Click-path next-step consumer chips, G-P1
+          round-2 2026-07-06). Pure layout seam: no styling, no behavior. */}
+      {aboveInputSlot}
 
       {/*
         FR-08 + FR-09 (task 025): Input zone restructure.

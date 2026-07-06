@@ -329,9 +329,8 @@ public class SessionDispatchOrchestrator
         // Binding's curated sprk_chiptransitions follow the terminal complete chunk so the
         // conversation surface always shows the CURRENT next steps after a Click dispatch
         // (e.g. summarize → "Summarize again"). Previously only the Event path emitted
-        // chips — every chip click permanently emptied the strip. The dispatched batch's
-        // fileIds are pre-filled so the follow-up chip re-targets the same files.
-        var transitionChips = BuildTransitionChips(binding, targetFiles);
+        // chips — every chip click permanently emptied the strip.
+        var transitionChips = BuildTransitionChips(binding);
         if (transitionChips.Count > 0)
         {
             yield return AnalysisChunk.FromChips(transitionChips);
@@ -339,14 +338,15 @@ public class SessionDispatchOrchestrator
     }
 
     /// <summary>
-    /// Map the Binding's valid <c>sprk_chiptransitions</c> to the unified chip wire shape,
-    /// pre-filling the dispatched file set (authored <c>prefill_slots</c> win when present).
+    /// Map the Binding's valid <c>sprk_chiptransitions</c> to the unified chip wire shape.
+    /// Authored <c>prefill_slots</c> forward verbatim; otherwise NO args are attached so a
+    /// follow-up click resolves the file set AT DISPATCH TIME (FR-08 default = the full
+    /// CURRENT session manifest). G-P1 UAT round-2 fix (2026-07-06): pre-filling the
+    /// dispatched batch's fileIds froze "Summarize again" to the ORIGINAL files — a file
+    /// uploaded after the first dispatch was silently excluded.
     /// </summary>
-    private static IReadOnlyList<AnalysisChunkChip> BuildTransitionChips(
-        Binding binding,
-        IReadOnlyList<ChatSessionFile> targetFiles)
+    private static IReadOnlyList<AnalysisChunkChip> BuildTransitionChips(Binding binding)
     {
-        var fileIds = targetFiles.Select(f => f.FileId).ToArray();
         var chips = new List<AnalysisChunkChip>();
         foreach (var transition in binding.ChipTransitions)
         {
@@ -358,7 +358,7 @@ public class SessionDispatchOrchestrator
             chips.Add(new AnalysisChunkChip(
                 TargetBindingId: transition.TargetBindingId!,
                 Label: transition.ChipLabel!,
-                Args: transition.PrefillSlots is { } slots ? (object)slots : new { fileIds },
+                Args: transition.PrefillSlots is { } slots ? (object)slots : null,
                 RequiresAttachments: transition.RequiresAttachments == true));
         }
         return chips;

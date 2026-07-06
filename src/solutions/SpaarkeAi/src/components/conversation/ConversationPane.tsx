@@ -1643,6 +1643,21 @@ export function ConversationPane(): React.JSX.Element {
   // on session change.
   const [consumerChips, setConsumerChips] = React.useState<ReadonlyArray<ConsumerChip>>([]);
 
+  // Session-level attachment count for the empty-attachments Click precondition
+  // (G-P1 UAT round-2 hardening, 2026-07-06). The composer chip strip is the
+  // WRONG proxy on its own: SprkChat clears it on every stream completion
+  // (FR-07) while the session manifest still holds the promoted files — an
+  // attachment-requiring chip must stay dispatchable as long as the SESSION
+  // has files. Union of manifest-promoted chip ids (pruned on removal + reset
+  // on session change) and composer chips already ready but not yet promoted.
+  const sessionAttachmentCount = React.useMemo(() => {
+    const ids = new Set<string>(promotedChipIds);
+    for (const chip of attachmentChips) {
+      if (chip.status === "ready") ids.add(chip.id);
+    }
+    return ids.size;
+  }, [attachmentChips, promotedChipIds]);
+
   // The bound dispatcher. Stable per (bffBaseUrl, session, auth, bus) — the
   // helper re-reads the session id per dispatch via the getter.
   const chatSessionIdRef = React.useRef<string | null>(chatSessionId);
@@ -1838,17 +1853,15 @@ export function ConversationPane(): React.JSX.Element {
       // Single dispatch decision per turn: consume the chip set on click.
       setConsumerChips([]);
 
-      const readyAttachmentCount = attachmentChips.filter(
-        (c) => c.status === "ready"
-      ).length;
-
       // ADR-015: log structural signals only — never the label/binding values.
       console.log("[ConversationPane] consumer chip dispatched");
 
       void dispatchConsumer(chip.bindingId, {
         slots: chip.prefillSlots,
         requiresAttachments: chip.requiresAttachments,
-        attachmentCount: readyAttachmentCount,
+        // Session-level count (manifest-promoted ∪ composer-ready) — the
+        // composer strip alone empties on stream completion (round-2 fix).
+        attachmentCount: sessionAttachmentCount,
       })
         .then((dispatched) => {
           // G-P1 Defect-1 fix (2026-07-05): render the dispatched capability's
@@ -1875,7 +1888,7 @@ export function ConversationPane(): React.JSX.Element {
           );
         });
     },
-    [attachmentChips, dispatchConsumer, enqueueAssistantMessage]
+    [sessionAttachmentCount, dispatchConsumer, enqueueAssistantMessage]
   );
 
   /**
@@ -3008,22 +3021,7 @@ export function ConversationPane(): React.JSX.Element {
             </div>
           )}
 
-          {/* ── Click-path next-step chips (task 023 / FR-P1-04 / ADR-039) ── */}
-          {/*
-            Chips carry binding_id from the completed Binding's chip
-            transitions; a click dispatches through the ONE shared
-            dispatchConsumer helper. Attachment-requiring chips render
-            disabled when the session has zero ready attachments
-            (empty-attachments Click precondition). ADR-021: Fluent v9
-            tokens only — dark-mode verified at gate 027.
-          */}
-          <ConsumerChips
-            chips={consumerChips}
-            attachmentCount={attachmentChips.filter((c) => c.status === "ready").length}
-            onChipClick={handleConsumerChipClick}
-          />
-
-          {/* ── SprkChat — fills remaining height below the chip bar ── */}
+          {/* ── SprkChat — fills remaining height ── */}
           {/*
             Spaarke Auth v2 §H-4: pass `authenticatedFetch` (for one-shot BFF
             calls) and `getAccessToken` (escape hatch for SSE ReadableStream)
@@ -3062,6 +3060,25 @@ export function ConversationPane(): React.JSX.Element {
               // R7 Wave 12.3 Phase 12.3a UAT fix (2026-07-03) — clear the
               // persisted chatSessionId when SprkChat resumed a stale id.
               onSessionStale={handleSessionStale}
+              // ── Click-path next-step chips (task 023 / FR-P1-04 / ADR-039) ──
+              // G-P1 UAT round-2 fix (2026-07-06): the strip renders ABOVE THE
+              // INPUT ZONE (below the transcript) via SprkChat's aboveInputSlot
+              // — round-2 found it stranded at the top of the pane, detached
+              // from the conversation flow. Chips carry binding_id from the
+              // completed Binding's chip transitions; a click dispatches
+              // through the ONE shared dispatchConsumer helper. Attachment-
+              // requiring chips gate on SESSION files (manifest-promoted ∪
+              // composer-ready) — not the composer chip strip alone, which
+              // SprkChat clears on stream completion (FR-07) even though the
+              // session manifest still holds the files. ADR-021: Fluent v9
+              // tokens only.
+              aboveInputSlot={
+                <ConsumerChips
+                  chips={consumerChips}
+                  attachmentCount={sessionAttachmentCount}
+                  onChipClick={handleConsumerChipClick}
+                />
+              }
               onPlaybookChange={handlePlaybookChange}
               predefinedPrompts={predefinedPrompts}
               hostContext={hostContext}

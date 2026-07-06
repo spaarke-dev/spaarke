@@ -49,7 +49,7 @@ jest.mock('@spaarke/ui-components', () => {
     ...actual,
     SprkChat: (props: ISprkChatProps) => {
       sprkChatPropsRef.current = props;
-      return <div data-testid="sprkchat-stub" />;
+      return <div data-testid="sprkchat-stub">{props.aboveInputSlot}</div>;
     },
   };
 });

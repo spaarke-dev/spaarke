@@ -217,8 +217,12 @@ public class DispatchSessionEndpointContractTests : IClassFixture<DispatchSessio
         body.Should().Contain("Summarize again");
         body.Should().Contain("\"requiresAttachments\":true",
             "the authored requires_attachments flag survives the transition → chip mapping");
-        body.Should().Contain("file-001",
-            "the dispatched fileIds are pre-filled so the follow-up chip re-targets the same files");
+        var chipsSegment = body[body.IndexOf("\"type\":\"chips\"", StringComparison.Ordinal)..];
+        chipsSegment.Should().NotContain("\"args\"",
+            "transition chips carry NO frozen fileIds — a follow-up click (e.g. 'Summarize again') " +
+            "resolves the file set AT DISPATCH TIME (FR-08 default = the CURRENT session manifest). " +
+            "G-P1 UAT round-2 fix 2026-07-06: pre-filled fileIds froze the follow-up to the ORIGINAL " +
+            "files, silently excluding files uploaded after the first dispatch");
     }
 
     [Fact]
