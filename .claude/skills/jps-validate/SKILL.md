@@ -243,7 +243,8 @@ Generate validation report.
 
 {IF all passed}
 ✅ JPS is valid and ready for deployment!
-  Seed to Dataverse: scripts/Seed-JpsActions.ps1
+  Create the row via Dataverse MCP create_record + mirror in infra/dataverse/
+  (Seed-JpsActions.ps1 RETIRED 2026-07-07 — see scripts/README.md)
 ```
 
 ---

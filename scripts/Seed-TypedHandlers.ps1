@@ -118,6 +118,10 @@ $RowFiles = @{
     # sprk_configuration (GetKnowledgeSource / SearchKnowledgeBase). Same multi-row-per-
     # handler pattern as TextRefinementHandler — upsert disambiguated by sprk_toolcode.
     "KNOWLEDGE-SOURCE-GET"             = "$RepoRoot/infra/dataverse/sprk_analysistool-knowledge-source-get-row.json"
+    # ai-architecture-redesign-r1 task 041 (FR-P3-02) — email.draft typed handler
+    # (Communicate-gated). Mirror existed since 041; map entry added by task 051's
+    # seed-governance reconciliation (FR-P4-02) so the seed covers the full live set.
+    "EMAIL-DRAFT"                      = "$RepoRoot/infra/dataverse/sprk_analysistool-email-draft-row.json"
     "KNOWLEDGE-BASE-SEARCH"            = "$RepoRoot/infra/dataverse/sprk_analysistool-knowledge-base-search-row.json"
     # Wave 7c — VerifyCitationsHandler: single row, capability-gated via
     # sprk_requiredcapability = 'verify_citations'. The data-driven block's

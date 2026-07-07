@@ -1,308 +1,351 @@
 <#
 .SYNOPSIS
-    Seed the sprk_playbookconsumer Dataverse table with the 6 initial
-    consumer→playbook routing records used by the BFF IConsumerRoutingService
-    (chat-routing-redesign-r1 Phase 1R, FR-1R-07).
+    Seed / export / round-trip-verify the sprk_playbookconsumer Binding table —
+    the SINGLE routing surface of the Spaarke AI platform (ADR-039).
 
 .DESCRIPTION
-    Idempotent UPSERT against the sprk_playbookconsumer table for the 6
-    consumers being migrated off Workspace__*PlaybookId environment variables
-    (FR-1R-05): matter-pre-fill, project-pre-fill, ai-summary, summarize-file,
-    chat-summarize, email-analysis.
+    REGENERATED 2026-07-07 by spaarke-ai-architecture-redesign-r1 task 051 (FR-P4-02)
+    from the LIVE spaarkedev1 Binding table. The previous version of this script was a
+    stale chat-routing-redesign-r1 (2026-06-24) projection: 7 playbook-only rows on the
+    abandoned R4 taxonomy, none of the FR-P0-03 extended columns. This version is a
+    faithful projection of the post-redesign table and is DATA-DRIVEN:
 
-    Idempotency is guaranteed by UPSERT via the alternate key
-    sprk_ConsumerTypeCodeEnvironment = (sprk_consumertype + sprk_consumercode +
-    sprk_environment). Rerun is safe — existing records are updated (no-op if
-    values unchanged); missing records are created.
+        MIRROR FILE (single source for row data — never edit rows in this script):
+            infra/dataverse/sprk_playbookconsumer-rows.json
 
-    PRINTS all 6 rows BEFORE write for manual review (binding defense against
-    the 2026-06-24 UAT-2 env-var-misconfigured failure mode that motivated
-    this Phase 1R work).
+    Three modes:
 
-    Playbook GUIDs are environment-specific. The default record set ships
-    with the Dev GUIDs documented in spec.md FR-1R-05 + verified in task 028
-    evidence. When seeding a NEW environment, the operator MUST update the
-    $Records hashtable below with that environment's playbook GUIDs (look up
-    via PAC CLI or Dataverse maker portal) before running.
+      Seed (default)  Mirror -> environment. Idempotent UPSERT of every mirror row via
+                      the alternate key sprk_ConsumerTypeCodeEnvironment
+                      (sprk_consumertype + sprk_consumercode + sprk_environment).
+                      Lookups are resolved PER ENVIRONMENT at run time:
+                        actionCode    -> sprk_analysisaction  by sprk_actioncode
+                        playbookName  -> sprk_analysisplaybook by sprk_name
+                      so the mirror carries no environment-specific GUIDs in its
+                      semantic fields. A null actionCode/playbookName CLEARS the lookup
+                      on the target row (DELETE $ref), guaranteeing convergence.
+
+      -Export         Environment -> mirror. Reads the live table (statecode=0) and
+                      REWRITES the mirror file as the normalized projection. Run after
+                      any deliberate live catalog change, then commit the mirror.
+
+      -DiffOnly       The ROUND-TRIP PROOF. Re-exports the live table in memory and
+                      compares it field-by-field against the mirror file. Exit 0 =
+                      zero semantic drift (env == seed); exit 1 = drift, printed
+                      per row/field. CI- and reviewer-friendly.
+
+    ROUND-TRIP CONTRACT (FR-P4-02 "seed round-trips"): running -Export then -DiffOnly
+    is always clean; running Seed against an environment that already matches the
+    mirror is a no-op (upsert converges); Seed into a CLEAN environment followed by
+    -DiffOnly reproduces the mirror exactly.
+
+    The Binding table is the ONE routing surface — the mirror is a projection OF the
+    table, never a second source of truth. Regeneration direction is table -> mirror
+    (-Export). Do NOT hand-author routing here that does not exist in a live table
+    (spec MUST NOT: no routing config outside the Binding table).
 
 .PARAMETER DataverseUrl
-    Dataverse environment URL. Defaults to DATAVERSE_URL environment variable.
-    Example: https://spaarkedev1.crm.dynamics.com
+    Dataverse environment URL. Defaults to DATAVERSE_URL env var, then spaarkedev1.
+
+.PARAMETER MirrorFile
+    Path to the row mirror JSON. Default: infra/dataverse/sprk_playbookconsumer-rows.json
+
+.PARAMETER Export
+    Export live table -> mirror file (overwrites the mirror).
+
+.PARAMETER DiffOnly
+    Compare live table vs mirror; no writes anywhere. Exit 1 on drift.
 
 .PARAMETER DryRun
-    Print the records that would be written without actually calling Dataverse.
+    Seed mode only: print what would be written without calling Dataverse.
 
 .PARAMETER SkipConfirm
-    Skip the interactive confirmation prompt. Use in CI or non-interactive contexts.
+    Seed mode only: skip the interactive confirmation prompt.
 
 .EXAMPLE
-    .\Seed-PlaybookConsumers.ps1
-    .\Seed-PlaybookConsumers.ps1 -DataverseUrl "https://spaarkedev1.crm.dynamics.com"
-    .\Seed-PlaybookConsumers.ps1 -DryRun
-    .\Seed-PlaybookConsumers.ps1 -SkipConfirm
+    # Round-trip proof (read-only)
+    .\Seed-PlaybookConsumers.ps1 -DiffOnly
+
+.EXAMPLE
+    # Refresh the mirror after deliberate live catalog edits
+    .\Seed-PlaybookConsumers.ps1 -Export
+
+.EXAMPLE
+    # Seed a new environment from the mirror
+    .\Seed-PlaybookConsumers.ps1 -DataverseUrl "https://myorg.crm.dynamics.com" -SkipConfirm
 
 .NOTES
-    Author:           Spaarke AI Platform Team
-    Created:          2026-06-24
-    Task:             chat-routing-redesign-r1 / 028b (FR-1R-07)
-    Entity:           sprk_playbookconsumer
-    Entity set:       sprk_playbookconsumers
-    Alternate key:    sprk_ConsumerTypeCodeEnvironment (consumertype + consumercode + environment)
-    Auth:             Azure CLI (az account get-access-token). Run 'az login' first.
-    Environment:      Dev = https://spaarkedev1.crm.dynamics.com
-    Spec:             projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md § Phase 1R
-
-    GUID provenance (Dev environment, as of 2026-06-24):
-      matter-pre-fill     2d660cad-d418-f111-8343-7ced8d1dc988  (PB-008 Create New Matter Pre-Fill)
-      project-pre-fill    fc343e9c-3460-f111-ab0b-7c1e521b425f  (Create New Project Pre-Fill)
-      ai-summary          18cf3cc8-02ec-f011-8406-7c1e520aa4df  (PB-002 Document Profile)
-      summarize-file      4a72f99c-a119-f111-8343-7ced8d1dc988  (PB-015 Summarize File)
-      chat-summarize      44285d15-1360-f111-ab0b-70a8a59455f4  (summarize-document-for-chat@v1)
-      email-analysis      bc71facf-6af1-f011-8406-7ced8d1dc988  (PB-003 Email Analysis)
-      compose-summarize   47686eb1-9916-f111-8343-7c1e520aa4df  (Document Summary — added by spaarkeai-compose-r1 task 011)
+    Author:        spaarke-ai-architecture-redesign-r1 task 051 (FR-P4-02)
+    Entity:        sprk_playbookconsumer   (entity set: sprk_playbookconsumers)
+    Alternate key: sprk_ConsumerTypeCodeEnvironment
+    Auth:          Azure CLI (az account get-access-token). Run 'az login' first.
+    ADRs:          ADR-039 (closed catalogs / one routing surface), ADR-027 (sprk_ prefix)
+    Convention:    sprk_environment is ALWAYS a literal value ('*' = all environments) —
+                   never null. Null cannot be addressed by the alternate key (upsert
+                   would duplicate the row). Live spaarkedev1 was normalized 2026-07-07
+                   (two legacy rows null -> '*'; router semantics identical per Binding.cs).
 #>
 
 [CmdletBinding()]
 param(
     [string]$DataverseUrl = $env:DATAVERSE_URL,
+    [string]$MirrorFile,
+    [switch]$Export,
+    [switch]$DiffOnly,
     [switch]$DryRun,
     [switch]$SkipConfirm
 )
 
 $ErrorActionPreference = 'Stop'
 
-# ---------------------------------------------------------------------------
-# Records to seed — UPDATE GUIDs PER ENVIRONMENT before running.
-# ---------------------------------------------------------------------------
-# Schema notes:
-#   sprk_consumertype:   stable consumer code (lowercase + hyphens)
-#   sprk_consumercode:   sub-discriminator; "default" for canonical row
-#   sprk_environment:    env scope ("*" = all envs)
-#   sprk_priority:       0-1000; lower wins; 500 is the spec default
-#   sprk_enabled:        true (soft-disable via Power Apps without delete)
-#   sprk_matchconditions: null for default rows; JSON predicate per FR-1R-04 when scoping
-#   sprk_playbookid:     lookup target — sprk_analysisplaybookid system PK GUID
-#
-# DEV GUIDS as of 2026-06-24; update for other environments.
+if (-not $DataverseUrl) { $DataverseUrl = 'https://spaarkedev1.crm.dynamics.com' }
+$DataverseUrl = $DataverseUrl.TrimEnd('/')
+$ApiBase   = "$DataverseUrl/api/data/v9.2"
+$EntitySet = 'sprk_playbookconsumers'
 
-$Records = @(
-    @{
-        Name              = 'Wizard New Matter Create'
-        ConsumerType      = 'matter-pre-fill'
-        ConsumerCode      = 'default'
-        Environment       = '*'
-        Priority          = 500
-        Enabled           = $true
-        PlaybookId        = '2d660cad-d418-f111-8343-7ced8d1dc988'
-        PlaybookComment   = 'PB-008 Create New Matter Pre-Fill'
-    },
-    @{
-        Name              = 'Wizard New Project Create'
-        ConsumerType      = 'project-pre-fill'
-        ConsumerCode      = 'default'
-        Environment       = '*'
-        Priority          = 500
-        Enabled           = $true
-        PlaybookId        = 'fc343e9c-3460-f111-ab0b-7c1e521b425f'
-        PlaybookComment   = 'Create New Project Pre-Fill'
-    },
-    @{
-        Name              = 'AI Summary (Document Profile)'
-        ConsumerType      = 'ai-summary'
-        ConsumerCode      = 'default'
-        Environment       = '*'
-        Priority          = 500
-        Enabled           = $true
-        PlaybookId        = '18cf3cc8-02ec-f011-8406-7c1e520aa4df'
-        PlaybookComment   = 'PB-002 Document Profile'
-    },
-    @{
-        Name              = 'Summarize File (Workspace)'
-        ConsumerType      = 'summarize-file'
-        ConsumerCode      = 'default'
-        Environment       = '*'
-        Priority          = 500
-        Enabled           = $true
-        PlaybookId        = '4a72f99c-a119-f111-8343-7ced8d1dc988'
-        PlaybookComment   = 'PB-015 Summarize File'
-    },
-    @{
-        Name              = 'Chat Summarize Document'
-        ConsumerType      = 'chat-summarize'
-        ConsumerCode      = 'default'
-        Environment       = '*'
-        Priority          = 500
-        Enabled           = $true
-        PlaybookId        = '44285d15-1360-f111-ab0b-70a8a59455f4'
-        PlaybookComment   = 'summarize-document-for-chat@v1'
-    },
-    @{
-        Name              = 'Email Analysis'
-        ConsumerType      = 'email-analysis'
-        ConsumerCode      = 'default'
-        Environment       = '*'
-        Priority          = 500
-        Enabled           = $true
-        PlaybookId        = 'bc71facf-6af1-f011-8406-7ced8d1dc988'
-        PlaybookComment   = 'PB-003 Email Analysis'
-    },
-    @{
-        Name              = 'Compose Whole-Document Summarize'
-        ConsumerType      = 'compose-summarize'
-        ConsumerCode      = 'default'
-        Environment       = '*'
-        Priority          = 500
-        Enabled           = $true
-        PlaybookId        = '47686eb1-9916-f111-8343-7c1e520aa4df'
-        PlaybookComment   = 'Document Summary (PB-002 reused) — spaarkeai-compose-r1 task 011'
+$RepoRoot = (Resolve-Path (Join-Path (Split-Path -Parent $MyInvocation.MyCommand.Path) '../..')).Path
+if (-not $MirrorFile) { $MirrorFile = Join-Path $RepoRoot 'infra/dataverse/sprk_playbookconsumer-rows.json' }
+
+# ---------------------------------------------------------------------------
+# Auth + HTTP helpers
+# ---------------------------------------------------------------------------
+function Get-Headers {
+    $token = az account get-access-token --resource $DataverseUrl --query accessToken -o tsv 2>$null
+    if (-not $token) { throw "Failed to obtain access token. Run 'az login' first." }
+    return @{
+        'Authorization'    = "Bearer $token"
+        'Accept'           = 'application/json'
+        'Content-Type'     = 'application/json; charset=utf-8'
+        'OData-MaxVersion' = '4.0'
+        'OData-Version'    = '4.0'
     }
+}
+
+function Invoke-DvGet {
+    param([string]$Path, [hashtable]$Headers)
+    return Invoke-RestMethod -Uri "$ApiBase/$Path" -Headers $Headers -Method Get
+}
+
+# ---------------------------------------------------------------------------
+# Normalized row shape — the ONE projection used by Export, Diff, and Seed.
+# Field order is fixed so mirror diffs stay stable.
+# ---------------------------------------------------------------------------
+$SelectColumns = @(
+    'sprk_name', 'sprk_consumertype', 'sprk_consumercode', 'sprk_environment',
+    'sprk_priority', 'sprk_enabled', 'sprk_ucid', 'sprk_disposition', 'sprk_risk',
+    'sprk_capturemode', 'sprk_surfaces', 'sprk_chiptransitions', 'sprk_oneventbindings',
+    'sprk_matchconditions', 'sprk_tooldescription'
+) -join ','
+
+function Get-LiveRows {
+    param([hashtable]$Headers)
+    # Lookup columns come back as _<attr>_value; resolve to portable code/name via one
+    # catalog read each (navigation-property names differ from attribute logical names,
+    # so $expand is deliberately avoided).
+    $actionCodeById = @{}
+    (Invoke-DvGet -Path "sprk_analysisactions?`$select=sprk_analysisactionid,sprk_actioncode" -Headers $Headers).value |
+        ForEach-Object { $actionCodeById[$_.sprk_analysisactionid] = $_.sprk_actioncode }
+    $playbookNameById = @{}
+    (Invoke-DvGet -Path "sprk_analysisplaybooks?`$select=sprk_analysisplaybookid,sprk_name" -Headers $Headers).value |
+        ForEach-Object { $playbookNameById[$_.sprk_analysisplaybookid] = $_.sprk_name }
+
+    $q = "$EntitySet`?`$select=$SelectColumns,_sprk_action_value,_sprk_playbook_value&`$filter=statecode eq 0&`$orderby=sprk_consumertype,sprk_consumercode"
+    $resp = Invoke-DvGet -Path $q -Headers $Headers
+    return @($resp.value | ForEach-Object {
+        [ordered]@{
+            consumerType    = $_.sprk_consumertype
+            consumerCode    = $_.sprk_consumercode
+            environment     = $_.sprk_environment
+            name            = $_.sprk_name
+            priority        = $_.sprk_priority
+            enabled         = $_.sprk_enabled
+            playbookName    = if ($_._sprk_playbook_value) { $playbookNameById[$_._sprk_playbook_value] } else { $null }
+            actionCode      = if ($_._sprk_action_value)   { $actionCodeById[$_._sprk_action_value] }     else { $null }
+            ucid            = $_.sprk_ucid
+            disposition     = $_.sprk_disposition
+            risk            = $_.sprk_risk
+            captureMode     = $_.sprk_capturemode
+            surfaces        = $_.sprk_surfaces
+            chipTransitions = $_.sprk_chiptransitions
+            onEventBindings = $_.sprk_oneventbindings
+            matchConditions = $_.sprk_matchconditions
+            toolDescription = $_.sprk_tooldescription
+        }
+    })
+}
+
+function Read-MirrorRows {
+    if (-not (Test-Path $MirrorFile)) { throw "Mirror file not found: $MirrorFile" }
+    $doc = Get-Content $MirrorFile -Raw -Encoding utf8 | ConvertFrom-Json
+    return @($doc.rows)
+}
+
+$RowFieldOrder = @(
+    'consumerType','consumerCode','environment','name','priority','enabled',
+    'playbookName','actionCode','ucid','disposition','risk','captureMode',
+    'surfaces','chipTransitions','onEventBindings','matchConditions','toolDescription'
 )
 
-# ---------------------------------------------------------------------------
-# Defaults
-# ---------------------------------------------------------------------------
-if (-not $DataverseUrl) {
-    $DataverseUrl = 'https://spaarkedev1.crm.dynamics.com'
-    Write-Host "DataverseUrl not supplied - using default: $DataverseUrl" -ForegroundColor Yellow
-}
-
-$DataverseUrl = $DataverseUrl.TrimEnd('/')
-$ApiBase      = "$DataverseUrl/api/data/v9.2"
-$EntitySet    = "sprk_playbookconsumers"
+function Get-RowKey { param($Row) return "$($Row.consumerType)|$($Row.consumerCode)|$($Row.environment)" }
 
 # ---------------------------------------------------------------------------
-# Header banner
+# Mode: Export (environment -> mirror)
 # ---------------------------------------------------------------------------
-Write-Host ""
-Write-Host "=== Seed-PlaybookConsumers.ps1 ===" -ForegroundColor Cyan
-Write-Host "Target:      $DataverseUrl"
-Write-Host "Entity set:  $EntitySet"
-Write-Host "Records:     $($Records.Count)"
-if ($DryRun) { Write-Host "Mode:        DRY-RUN (no changes will be made)" -ForegroundColor Yellow }
-else         { Write-Host "Mode:        LIVE" -ForegroundColor Green }
-Write-Host ""
-
-# ---------------------------------------------------------------------------
-# Print all records BEFORE write (binding defense per FR-1R-07 + spec §1R notes)
-# ---------------------------------------------------------------------------
-Write-Host "[1/4] Records to seed:" -ForegroundColor Yellow
-$Records | ForEach-Object {
-    [PSCustomObject]@{
-        Name         = $_.Name
-        ConsumerType = $_.ConsumerType
-        ConsumerCode = $_.ConsumerCode
-        Environment  = $_.Environment
-        Priority     = $_.Priority
-        PlaybookId   = $_.PlaybookId
-        Playbook     = $_.PlaybookComment
+if ($Export) {
+    Write-Host "`n=== Seed-PlaybookConsumers: EXPORT (env -> mirror) ===" -ForegroundColor Cyan
+    Write-Host "Source: $DataverseUrl`nMirror: $MirrorFile`n"
+    $headers = Get-Headers
+    $rows = Get-LiveRows -Headers $headers
+    $doc = [ordered]@{
+        '$comment'  = 'Projection of the LIVE sprk_playbookconsumer Binding table (the single AI routing surface, ADR-039). Regenerate with Seed-PlaybookConsumers.ps1 -Export; verify with -DiffOnly; seed a new environment with the default mode. Lookups are portable (actionCode / playbookName), resolved per environment at seed time. Direction of truth: table -> mirror. Do NOT hand-author routing here.'
+        '$exported' = (Get-Date -Format 'yyyy-MM-ddTHH:mm:ssK')
+        '$source'   = $DataverseUrl
+        rows        = $rows
     }
-} | Format-Table -AutoSize
-
-if (-not ($DryRun -or $SkipConfirm)) {
-    $response = Read-Host "Proceed with seeding? [y/N]"
-    if ($response -notmatch '^[yY]$') {
-        Write-Host "Aborted by operator." -ForegroundColor Yellow
-        exit 0
-    }
-}
-
-if ($DryRun) {
-    Write-Host ""
-    Write-Host "DRY-RUN: no Dataverse calls made. Exiting." -ForegroundColor Yellow
+    $json = $doc | ConvertTo-Json -Depth 10
+    [System.IO.File]::WriteAllText($MirrorFile, $json, [System.Text.UTF8Encoding]::new($false))
+    Write-Host "Exported $($rows.Count) rows -> $MirrorFile" -ForegroundColor Green
     exit 0
 }
 
 # ---------------------------------------------------------------------------
-# Auth
+# Mode: DiffOnly (round-trip proof: env vs mirror, read-only)
 # ---------------------------------------------------------------------------
-Write-Host ""
-Write-Host "[2/4] Authenticating with Azure CLI..." -ForegroundColor Yellow
-$token = (az account get-access-token --resource $DataverseUrl --query accessToken -o tsv 2>&1)
-if (-not $token -or $token -match 'ERROR') {
-    Write-Error "Failed to obtain access token. Run 'az login' and ensure you have access to $DataverseUrl."
+if ($DiffOnly) {
+    Write-Host "`n=== Seed-PlaybookConsumers: DIFF (round-trip proof) ===" -ForegroundColor Cyan
+    Write-Host "Env:    $DataverseUrl`nMirror: $MirrorFile`n"
+    $headers = Get-Headers
+    $live   = Get-LiveRows -Headers $headers
+    $mirror = Read-MirrorRows
+
+    $liveByKey   = @{}; foreach ($r in $live)   { $liveByKey[(Get-RowKey $r)]   = $r }
+    $mirrorByKey = @{}; foreach ($r in $mirror) { $mirrorByKey[(Get-RowKey $r)] = $r }
+
+    $drift = 0
+    foreach ($k in ($mirrorByKey.Keys | Sort-Object)) {
+        if (-not $liveByKey.ContainsKey($k)) { Write-Host "  MISSING IN ENV   $k" -ForegroundColor Red; $drift++ }
+    }
+    foreach ($k in ($liveByKey.Keys | Sort-Object)) {
+        if (-not $mirrorByKey.ContainsKey($k)) { Write-Host "  MISSING IN MIRROR $k" -ForegroundColor Red; $drift++ }
+    }
+    foreach ($k in ($mirrorByKey.Keys | Sort-Object)) {
+        if (-not $liveByKey.ContainsKey($k)) { continue }
+        $m = $mirrorByKey[$k]; $l = $liveByKey[$k]
+        foreach ($f in $RowFieldOrder) {
+            $mv = $m.$f; $lv = $l[$f]
+            $mvs = if ($null -eq $mv) { '<null>' } else { [string]$mv }
+            $lvs = if ($null -eq $lv) { '<null>' } else { [string]$lv }
+            if ($mvs -cne $lvs) {
+                Write-Host "  DRIFT  $k :: $f" -ForegroundColor Yellow
+                Write-Host "         mirror: $($mvs.Substring(0, [Math]::Min(120, $mvs.Length)))"
+                Write-Host "         env:    $($lvs.Substring(0, [Math]::Min(120, $lvs.Length)))"
+                $drift++
+            }
+        }
+    }
+
+    Write-Host ""
+    if ($drift -eq 0) {
+        Write-Host "ROUND-TRIP CLEAN: $($mirror.Count) mirror rows == $($live.Count) live rows, zero semantic drift." -ForegroundColor Green
+        exit 0
+    }
+    Write-Host "DRIFT DETECTED: $drift difference(s). Reconcile deliberately, then -Export + commit." -ForegroundColor Red
     exit 1
 }
-Write-Host "  Token acquired." -ForegroundColor Green
-
-$headers = @{
-    'Authorization'    = "Bearer $token"
-    'Accept'           = 'application/json'
-    'Content-Type'     = 'application/json'
-    'OData-MaxVersion' = '4.0'
-    'OData-Version'    = '4.0'
-    'Prefer'           = 'return=representation'
-}
 
 # ---------------------------------------------------------------------------
-# UPSERT loop via alternate-key URL — PATCH /sprk_playbookconsumers(altKey)
-# Dataverse PATCH semantics on alternate-key URL = upsert: create when not
-# found; update when found.
+# Mode: Seed (mirror -> environment)
 # ---------------------------------------------------------------------------
+Write-Host "`n=== Seed-PlaybookConsumers: SEED (mirror -> env) ===" -ForegroundColor Cyan
+Write-Host "Target: $DataverseUrl`nMirror: $MirrorFile"
+$rows = Read-MirrorRows
+Write-Host "Rows:   $($rows.Count)"
+if ($DryRun) { Write-Host "Mode:   DRY-RUN" -ForegroundColor Yellow } else { Write-Host "Mode:   LIVE" -ForegroundColor Green }
 Write-Host ""
-Write-Host "[3/4] UPSERT $($Records.Count) records via alternate key sprk_ConsumerTypeCodeEnvironment..." -ForegroundColor Yellow
 
-$summary = @{
-    Created       = 0
-    Updated       = 0
-    Failed        = 0
+$rows | ForEach-Object {
+    [PSCustomObject]@{
+        ConsumerType = $_.consumerType; ConsumerCode = $_.consumerCode; Env = $_.environment
+        Priority = $_.priority; Enabled = $_.enabled; Playbook = $_.playbookName; Action = $_.actionCode
+        Ucid = $_.ucid; Disposition = $_.disposition
+    }
+} | Format-Table -AutoSize
+
+if (-not ($DryRun -or $SkipConfirm)) {
+    $response = Read-Host 'Proceed with seeding? [y/N]'
+    if ($response -notmatch '^[yY]$') { Write-Host 'Aborted by operator.' -ForegroundColor Yellow; exit 0 }
 }
+if ($DryRun) { Write-Host 'DRY-RUN: no Dataverse calls made.' -ForegroundColor Yellow; exit 0 }
 
-foreach ($r in $Records) {
-    # Build the alternate-key URL fragment.
-    # NOTE: Dataverse Web API alternate-key syntax allows multiple key=value
-    # pairs comma-separated inside the parentheses. Values are URL-encoded.
-    $ctEnc = [Uri]::EscapeDataString($r.ConsumerType)
-    $ccEnc = [Uri]::EscapeDataString($r.ConsumerCode)
-    $envEnc = [Uri]::EscapeDataString($r.Environment)
+$headers = Get-Headers
+
+# Resolve per-environment lookup GUID maps ONCE.
+$actionMap = @{}
+(Invoke-DvGet -Path "sprk_analysisactions?`$select=sprk_analysisactionid,sprk_actioncode&`$filter=statecode eq 0" -Headers $headers).value |
+    Where-Object { $_.sprk_actioncode } | ForEach-Object { $actionMap[$_.sprk_actioncode] = $_.sprk_analysisactionid }
+$playbookMap = @{}
+(Invoke-DvGet -Path "sprk_analysisplaybooks?`$select=sprk_analysisplaybookid,sprk_name&`$filter=statecode eq 0" -Headers $headers).value |
+    Where-Object { $_.sprk_name } | ForEach-Object { $playbookMap[$_.sprk_name] = $_.sprk_analysisplaybookid }
+
+$summary = @{ Upserted = 0; Failed = 0 }
+
+foreach ($r in $rows) {
+    $ctEnc  = [Uri]::EscapeDataString([string]$r.consumerType)
+    $ccEnc  = [Uri]::EscapeDataString([string]$r.consumerCode)
+    $envEnc = [Uri]::EscapeDataString([string]$r.environment)
     $altKey = "sprk_consumertype='$ctEnc',sprk_consumercode='$ccEnc',sprk_environment='$envEnc'"
-    $url = "$ApiBase/$EntitySet($altKey)"
+    $url    = "$ApiBase/$EntitySet($altKey)"
 
-    $body = @{
-        'sprk_name'                  = $r.Name
-        'sprk_consumertype'          = $r.ConsumerType
-        'sprk_consumercode'          = $r.ConsumerCode
-        'sprk_environment'           = $r.Environment
-        'sprk_priority'              = $r.Priority
-        'sprk_enabled'               = $r.Enabled
-        'sprk_playbook@odata.bind'   = "/sprk_analysisplaybooks($($r.PlaybookId))"
-    } | ConvertTo-Json -Depth 5
+    $body = [ordered]@{
+        sprk_name             = $r.name
+        sprk_consumertype     = $r.consumerType
+        sprk_consumercode     = $r.consumerCode
+        sprk_environment      = $r.environment
+        sprk_priority         = $r.priority
+        sprk_enabled          = $r.enabled
+        sprk_ucid             = $r.ucid
+        sprk_disposition      = $r.disposition
+        sprk_risk             = $r.risk
+        sprk_capturemode      = $r.captureMode
+        sprk_surfaces         = $r.surfaces
+        sprk_chiptransitions  = $r.chipTransitions
+        sprk_oneventbindings  = $r.onEventBindings
+        sprk_matchconditions  = $r.matchConditions
+        sprk_tooldescription  = $r.toolDescription
+    }
+    if ($r.actionCode) {
+        if (-not $actionMap.ContainsKey($r.actionCode)) {
+            Write-Host "  FAILED   $($r.consumerType)/$($r.consumerCode) -> actionCode '$($r.actionCode)' not found in target env (seed the Action row first)" -ForegroundColor Red
+            $summary.Failed++; continue
+        }
+        $body['sprk_action@odata.bind'] = "/sprk_analysisactions($($actionMap[$r.actionCode]))"
+    }
+    if ($r.playbookName) {
+        if (-not $playbookMap.ContainsKey($r.playbookName)) {
+            Write-Host "  FAILED   $($r.consumerType)/$($r.consumerCode) -> playbookName '$($r.playbookName)' not found in target env (deploy the playbook first)" -ForegroundColor Red
+            $summary.Failed++; continue
+        }
+        $body['sprk_playbook@odata.bind'] = "/sprk_analysisplaybooks($($playbookMap[$r.playbookName]))"
+    }
 
     try {
-        $resp = Invoke-WebRequest -Uri $url -Headers $headers -Method Patch -Body $body -UseBasicParsing
-        # 201 Created vs 204 No Content (updated). Some PATCHes return 200 OK when Prefer=return=representation.
-        $status = [int]$resp.StatusCode
-        if ($status -in 201) {
-            $summary.Created++
-            Write-Host "  CREATED  $($r.ConsumerType.PadRight(22)) -> $($r.PlaybookId)" -ForegroundColor Green
-        } else {
-            $summary.Updated++
-            Write-Host "  UPDATED  $($r.ConsumerType.PadRight(22)) -> $($r.PlaybookId)" -ForegroundColor Cyan
+        Invoke-WebRequest -Uri $url -Headers $headers -Method Patch -Body ($body | ConvertTo-Json -Depth 5) -UseBasicParsing | Out-Null
+        # Null lookups in the mirror must CLEAR any existing value (convergence).
+        foreach ($nav in @(@{ f = $r.actionCode; n = 'sprk_action' }, @{ f = $r.playbookName; n = 'sprk_playbook' })) {
+            if (-not $nav.f) {
+                try { Invoke-WebRequest -Uri "$url/$($nav.n)/`$ref" -Headers $headers -Method Delete -UseBasicParsing | Out-Null } catch { }
+            }
         }
+        $summary.Upserted++
+        Write-Host "  UPSERTED $($r.consumerType.PadRight(24)) $($r.consumerCode)" -ForegroundColor Cyan
     }
     catch {
         $summary.Failed++
-        $errMsg = $_.Exception.Message
-        Write-Host "  FAILED   $($r.ConsumerType.PadRight(22)) -> $errMsg" -ForegroundColor Red
+        Write-Host "  FAILED   $($r.consumerType)/$($r.consumerCode) -> $($_.Exception.Message)" -ForegroundColor Red
     }
 }
 
-# ---------------------------------------------------------------------------
-# Summary
-# ---------------------------------------------------------------------------
-Write-Host ""
-Write-Host "[4/4] Summary:" -ForegroundColor Yellow
-Write-Host "  Created: $($summary.Created)" -ForegroundColor Green
-Write-Host "  Updated: $($summary.Updated)" -ForegroundColor Cyan
-$failedColor = if ($summary.Failed -gt 0) { 'Red' } else { 'Gray' }
-Write-Host "  Failed:  $($summary.Failed)" -ForegroundColor $failedColor
-Write-Host ""
-
-if ($summary.Failed -gt 0) {
-    Write-Host "One or more records failed. Investigate above output." -ForegroundColor Red
-    exit 1
-}
-
-Write-Host "Seed complete. Verify in Power Apps maker portal or via:" -ForegroundColor Green
-Write-Host "  read_query('SELECT sprk_name, sprk_consumertype, sprk_playbook FROM sprk_playbookconsumer ORDER BY sprk_consumertype')" -ForegroundColor Gray
-Write-Host ""
+Write-Host "`nSummary: Upserted=$($summary.Upserted) Failed=$($summary.Failed)" -ForegroundColor $(if ($summary.Failed) { 'Red' } else { 'Green' })
+Write-Host "Verify the round-trip: .\Seed-PlaybookConsumers.ps1 -DiffOnly`n"
+if ($summary.Failed -gt 0) { exit 1 }
 exit 0

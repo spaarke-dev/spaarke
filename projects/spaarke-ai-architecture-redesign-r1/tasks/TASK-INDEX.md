@@ -184,7 +184,7 @@
 | # | Task | FR | Rigor | Deps | Status |
 |---|---|---|---|---|---|
 | 050 | Track-B completion audit (zero unexplained survivors) | FR-P4-01 | STANDARD | 048, 070–073 | 🔲 |
-| 051 | Catalog governance (single index; seed round-trips) | FR-P4-02 | STANDARD | 048 | 🔲 |
+| 051 | Catalog governance ✅ (dispatched early per operator overlap ruling 2026-07-07): ONE scope-model-index regenerated with live GUIDs (60 Actions/31 Skills/31 Knowledge/40 Tools); Seed-PlaybookConsumers regenerated data-driven (18-row mirror, Seed/-Export/-DiffOnly, ROUND-TRIP CLEAN shown); Refresh-ScopeModelIndex FIXED (sprk_externalid→sprk_knowledgecode drift); Seed-JpsActions RETIRED (closes 073 deferral); EMAIL-DRAFT map entry added; sprk_nodetype gap OBSOLETE (schema evolved to sprk_executortype incl. DeliverComposite); 2 env writes (environment null→'*' pre-fill rows); TL-004/006/008/010 + KNW dupes → 050/operator | FR-P4-02 | STANDARD | 048 | ✅ |
 | 053 | PlaybookBuilder de-scope → BA Action/Binding editor | FR-P4-04 | FULL | 048 | 🔲 |
 | 054 | Per-tenant metering counters + KQL pack | FR-P4-05 | FULL | 048 | 🔲 |
 

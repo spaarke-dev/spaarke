@@ -27,34 +27,27 @@ This registry tracks all scripts in this directory, their purpose, usage frequen
 ## AI Playbook & Scope Provisioning
 
 ### `dataverse/Seed-PlaybookConsumers.ps1`
-**Purpose:** Seed the `sprk_playbookconsumer` Dataverse table with the 6 initial consumer→playbook routing records (matter-pre-fill, project-pre-fill, ai-summary, summarize-file, chat-summarize, email-analysis) consumed by the BFF `IConsumerRoutingService` (chat-routing-redesign-r1 Phase 1R, FR-1R-07). Replaces the `Workspace__*PlaybookId` environment-variable pattern with Dataverse-backed routing.
-**Usage:** 🟡 Occasional - Run once per environment during Phase 1R rollout; rerun is a no-op (idempotent UPSERT by alternate key).
-**Lifecycle:** ✅ Maintained
-**Dependencies:** Azure CLI (`az login`); Dataverse `sprk_playbookconsumer` table created with alternate key `sprk_ConsumerTypeCodeEnvironment` per spec FR-1R-01.
+**Purpose:** Seed / export / round-trip-verify the `sprk_playbookconsumer` **Binding table** — the single AI routing surface (ADR-039). Data-driven: rows live in the mirror file `infra/dataverse/sprk_playbookconsumer-rows.json` (all FR-P0-03 extended columns: ucid, disposition, risk, captureMode, surfaces, chipTransitions, onEventBindings, matchConditions, toolDescription); the script is a faithful projection tool of the live table.
+**Usage:** 🟡 Occasional - `-DiffOnly` any time (read-only round-trip proof); `-Export` after deliberate live catalog edits; Seed mode when standing up a new environment.
+**Lifecycle:** ✅ Maintained — REGENERATED 2026-07-07 by ai-architecture-redesign-r1 task 051 (FR-P4-02). The 2026-06-24 chat-routing-redesign-r1 version (7 playbook-only rows, hard-coded GUIDs, no extended columns) is superseded.
+**Dependencies:** Azure CLI (`az login`); alternate key `sprk_ConsumerTypeCodeEnvironment`; target Action rows (`sprk_actioncode`) + playbooks (`sprk_name`) must exist in the target environment — lookups are resolved per environment at seed time (no GUIDs in the mirror).
 **Owner:** AI Team
 
-**Idempotency**: Records are upserted via the alternate-key URL `sprk_playbookconsumers(sprk_consumertype='X',sprk_consumercode='default',sprk_environment='*')`. Existing records are updated in-place; missing records are created. The script prints all 6 rows BEFORE write — the binding defense against the 2026-06-24 UAT-2 env-var-misconfigured failure mode that motivated Phase 1R.
-
-**Environment-specific GUIDs**: Default record set ships with Dev GUIDs (verified 2026-06-24). When seeding a new environment, update the `$Records` hashtable in the script with that environment's playbook GUIDs first (look up via PAC CLI, MCP `read_query`, or Power Apps maker portal). The 6 consumer types (`matter-pre-fill`, `project-pre-fill`, `ai-summary`, `summarize-file`, `chat-summarize`, `email-analysis`) and the playbook display names referenced are stable across environments; only the GUIDs differ.
-
-**When to Use:**
-- Initial Phase 1R rollout to Dev / Test / Prod
-- Adding a new consumer type to the routing table (extend `$Records` hashtable + rerun)
-- Recovering after an accidental delete
+**Round-trip contract (FR-P4-02)**: `-Export` then `-DiffOnly` is always clean; Seed into a clean environment followed by `-DiffOnly` reproduces the mirror exactly; Seed against an already-matching environment converges as a no-op. `sprk_environment` is always a literal (`'*'` = all envs, never null — null can't be addressed by the alternate key).
 
 **Example:**
 ```powershell
-# Dry-run preview
-.\scripts\dataverse\Seed-PlaybookConsumers.ps1 -DryRun
+# Round-trip proof (read-only; exit 1 on drift)
+.\scripts\dataverse\Seed-PlaybookConsumers.ps1 -DiffOnly
 
-# Live seed against Dev (default)
-.\scripts\dataverse\Seed-PlaybookConsumers.ps1
+# Refresh the mirror from the live table after deliberate catalog edits
+.\scripts\dataverse\Seed-PlaybookConsumers.ps1 -Export
 
-# Live seed against a specific environment
+# Seed a new environment from the mirror
 .\scripts\dataverse\Seed-PlaybookConsumers.ps1 -DataverseUrl "https://spaarketest1.crm.dynamics.com" -SkipConfirm
 ```
 
-**Related**: spec `projects/spaarke-ai-platform-chat-routing-redesign-r1/spec.md` § Phase 1R; task POML `tasks/028b-seed-playbookconsumers-script.poml`; verification evidence at `notes/handoffs/028b-seed-verification-evidence.md`.
+**Related**: `projects/spaarke-ai-architecture-redesign-r1/notes/catalog-governance.md` (regeneration evidence + reconciliation table); ADR-039; `docs/data-model/sprk-playbookconsumer.md`.
 
 ---
 
@@ -158,10 +151,10 @@ This registry tracks all scripts in this directory, their purpose, usage frequen
 ### `Refresh-ScopeModelIndex.ps1`
 **Purpose:** Regenerate `.claude/catalogs/scope-model-index.json` from current Dataverse state — keeps the scope catalog in sync for Claude Code
 **Usage:** 🟡 Occasional - After adding new scopes to Dataverse
-**Lifecycle:** ✅ Maintained
-**Dependencies:** Azure CLI (`az login`), Dataverse connection
+**Lifecycle:** ✅ Maintained — REPAIRED 2026-07-07 by ai-architecture-redesign-r1 task 051 (FR-P4-02): the knowledge query 400-failed because `$select` still referenced `sprk_externalid`, which was removed from `sprk_analysisknowledge` (code column is now `sprk_knowledgecode`). Entries now also carry the deployed row GUID (`id`), Action `kind`/`modelTier`, and Tool `toolId`/`sideEffectClass` per the post-redesign closed-catalog taxonomy (ADR-039).
+**Dependencies:** Azure CLI (`az login`), Dataverse connection (`-DataverseUrl` or `DATAVERSE_URL`)
 **Owner:** AI Team
-**Last Used:** March 2026
+**Last Used:** July 2026 (task 051 catalog regeneration)
 
 **When to Use:**
 - After seeding new actions, skills, knowledge, or tools to Dataverse
@@ -170,23 +163,15 @@ This registry tracks all scripts in this directory, their purpose, usage frequen
 
 **Command:**
 ```powershell
-.\Refresh-ScopeModelIndex.ps1 -Environment dev
+.\Refresh-ScopeModelIndex.ps1 -DataverseUrl "https://spaarkedev1.crm.dynamics.com"
 ```
 
 ---
 
-### `Seed-JpsActions.ps1`
-**Purpose:** Seed JPS (JSON Prompt Schema) action definitions to Dataverse — creates/updates `sprk_analysisactions` records with full prompt content
-**Usage:** 🟡 Occasional - After creating or modifying JPS files
-**Lifecycle:** ✅ Maintained
-**Dependencies:** Azure CLI, JPS files in `projects/ai-json-prompt-schema-system/notes/jps-conversions/`
-**Owner:** AI Team
-**Last Used:** March 2026
-
-**Command:**
-```powershell
-.\Seed-JpsActions.ps1
-```
+### `Seed-JpsActions.ps1` — ⚠️ RETIRED (2026-07-07)
+**Retired by:** ai-architecture-redesign-r1 task 051 (FR-P4-02 catalog governance; deletion deferred from Track-B batch 4 / task 073).
+**Why:** Unrunnable — both JPS source directories it read (`projects/ai-json-prompt-schema-system/notes/jps-conversions/`, `projects/jps-server-rollout/notes/jps-conversions/`) no longer exist in the repo. Its job (bulk-refresh `sprk_systemprompt` on the legacy ACT-0xx engine Actions from repo JPS files) belongs to the FROZEN engine; those rows are live in Dataverse and hot-editable there.
+**Replacement:** New/changed chat Actions are authored via the `jps-action-create` skill (writes the row directly; JPS artifact mirrored under the owning project's `notes/jps/`; input schemas authored mirror-first at `infra/dataverse/inputschemas/` with CI validation per `CatalogInputSchemaContractTests`). Binding rows round-trip via `dataverse/Seed-PlaybookConsumers.ps1`.
 
 ---
 
