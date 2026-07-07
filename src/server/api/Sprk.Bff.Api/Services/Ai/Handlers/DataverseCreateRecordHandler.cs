@@ -67,10 +67,18 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
                      "dataverse.describe first if the table's schema is unknown — do NOT guess column logical " +
                      "names from display names. Choice columns require numeric option values, not labels. " +
                      "LOOKUP columns REQUIRE a recordId GUID: resolve the target record's GUID FIRST via " +
-                     "dataverse.search_data or dataverse.read_query; a lookup object without recordId is " +
+                     "dataverse.search_data or dataverse.read_query — in the same turn you draft the proposal, " +
+                     "BEFORE asking the user to confirm; a lookup object without recordId is " +
                      "rejected. If you cannot resolve a GUID for an optional lookup/choice, OMIT the column " +
                      "(mention the value in a text column instead). Records you create belong to the calling " +
                      "user automatically — never set owner/assignee columns for the requesting user themselves. " +
+                     // G-P3 UAT round-3 R3-4 (2026-07-07): the model tried to satisfy "add this to
+                     // documents" by creating a bare sprk_document row (DATAVERSE_BAD_REQUEST) —
+                     // document records require an SPE file and no chat tool can upload one.
+                     "Do NOT use this tool to create sprk_document rows: document records require a file " +
+                     "uploaded to SharePoint Embedded and no chat tool can upload file content — if asked to " +
+                     "save chat output 'to documents', say honestly that you cannot create documents from " +
+                     "chat and offer an alternative (create a task, draft an email, or open a workspace tab). " +
                      "SIDE-EFFECT tool (write): the create is executed with the user's own privileges; " +
                      "if the user cannot create rows in the table, the call fails with their access error.",
         Version: "1.0.0",

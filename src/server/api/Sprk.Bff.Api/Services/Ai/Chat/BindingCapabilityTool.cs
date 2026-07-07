@@ -242,11 +242,19 @@ public sealed class BindingCapabilityTool : AIFunction
             // 14:50/15:02/15:05/15:07Z, session 5329…). Capability tools GENERATE
             // content only; the result text now states that explicitly so the model
             // cannot conflate generation success with record creation.
+            //
+            // G-P3 UAT round-3 R3-1 (2026-07-07): after the round-2 reframe the model
+            // RE-INVOKED this drafting capability on every user confirmation (4× in
+            // App Insights 16:40:34–16:41:36Z) and never invoked the write tool —
+            // the result text now closes that loop explicitly: user already confirmed
+            // → invoke the write tool NOW; never re-draft; never re-ask in chat.
             return $"Capability '{_binding.ConsumerType}' finished GENERATING its output " +
                    "(a draft stored to the session ledger — shown below). This tool call did NOT create, " +
                    "save, send, or modify any record, task, email, or tab. If the user asked to create/save/" +
                    "send this content, you must still invoke the corresponding write tool (it will ask the " +
-                   $"user to confirm before executing).\nOutput:\n{text}";
+                   "user to confirm before executing). If the user has ALREADY confirmed, invoke the write " +
+                   "tool NOW — do NOT invoke this capability again for the same request, and do NOT ask the " +
+                   $"user to confirm again in chat: the write tool's confirmation dialog IS the approval step.\nOutput:\n{text}";
         }
         catch (DispatchRejectedException ex)
         {

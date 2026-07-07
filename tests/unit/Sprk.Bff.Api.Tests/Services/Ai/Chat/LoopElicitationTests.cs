@@ -243,6 +243,11 @@ public class LoopElicitationTests
         // side effect and drove the round-2 "has now been created" fabrications.
         result!.ToString().Should().Contain("finished GENERATING");
         result.ToString().Should().Contain("did NOT create, save, send, or modify");
+        // G-P3 UAT round-3 R3-1 pin (2026-07-07): the model re-invoked the drafting
+        // capability on every user confirmation instead of the write tool — the result
+        // must carry the confirmed→invoke-write-tool-NOW bridge + the no-re-ask rule.
+        result.ToString().Should().Contain("If the user has ALREADY confirmed, invoke the write");
+        result.ToString().Should().Contain("do NOT invoke this capability again");
         (await _sessionManager.GetSessionAsync(TenantId, session.SessionId))!
             .Gates.Should().BeNullOrEmpty("no elicitation gate for a complete invocation");
     }

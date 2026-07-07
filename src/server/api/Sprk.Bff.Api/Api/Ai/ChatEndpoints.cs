@@ -1880,11 +1880,7 @@ public static class ChatEndpoints
                 await PersistGateOutcomeMessageAsync(
                     httpContext, tenantId, sessionId, failureText, logger, cancellationToken);
 
-                return Results.Problem(
-                    detail: outcome.Error ?? "The confirmed action failed.",
-                    statusCode: StatusCodes.Status502BadGateway,
-                    title: "Dispatch Failed",
-                    extensions: new Dictionary<string, object?> { ["errorCode"] = "gate.dispatch-failed" });
+                return BuildGateDispatchFailedProblem(outcome.Error);
             }
 
             // R2-C: the executed outcome must reach the NEXT turn's model. The
@@ -1958,11 +1954,7 @@ public static class ChatEndpoints
                     BuildGateOutcomeMessage(success: false, invocation.Title ?? invocation.ToolId, error, ledgerKey: null),
                     logger, cancellationToken);
 
-                return Results.Problem(
-                    detail: error,
-                    statusCode: StatusCodes.Status502BadGateway,
-                    title: "Dispatch Failed",
-                    extensions: new Dictionary<string, object?> { ["errorCode"] = "gate.dispatch-failed" });
+                return BuildGateDispatchFailedProblem(error);
             }
 
             await PersistGateOutcomeMessageAsync(
@@ -1997,6 +1989,23 @@ public static class ChatEndpoints
             title: "Conflict",
             extensions: new Dictionary<string, object?> { ["errorCode"] = "gate.not-pending" });
     }
+
+    /// <summary>
+    /// Builds the gate-resolve failure response — the single construction site for
+    /// BOTH resolve legs (typed-handler resume + Binding dispatch).
+    /// G-P3 UAT round-3 R3-2 (2026-07-07): handler-reported dispatch failures
+    /// (write-mapper validation, Dataverse 400s) are REQUEST-CONTENT problems —
+    /// <b>422</b> ProblemDetails carrying the stable <c>gate.dispatch-failed</c>
+    /// errorCode (ADR-019) and the handler's instructive detail. The previous 502
+    /// falsely signaled a gateway fault for what is a correctable payload problem;
+    /// 5xx is reserved for genuinely unexpected exceptions (which propagate to the
+    /// global exception handler).
+    /// </summary>
+    internal static IResult BuildGateDispatchFailedProblem(string? detail) => Results.Problem(
+        detail: detail ?? "The confirmed action failed.",
+        statusCode: StatusCodes.Status422UnprocessableEntity,
+        title: "Dispatch Failed",
+        extensions: new Dictionary<string, object?> { ["errorCode"] = "gate.dispatch-failed" });
 
     /// <summary>
     /// Maximum characters of a gate-outcome transcript message (Dataverse

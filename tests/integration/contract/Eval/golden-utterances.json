@@ -715,6 +715,18 @@
       "expected": { "outcomeClass": "dispatch", "consumerType": "chat-summarize", "consumerCode": "matter-summary", "catalogStatus": "existing" },
       "assertions": { "schemaConformance": "SUM-CHAT@v1", "citationIntegrity": false },
       "activation": { "dispatchAssertPhase": "P3", "activatedBy": "P3 wave (FR-P3-08 task 047 — dispatch-envelope widening + loud no-host-context failure unit/contract-asserted with the task; browser chip proof at gate task 048)" }
+    },
+    {
+      "caseId": "GU-062",
+      "family": "refusal",
+      "ucId": "UC-C-2",
+      "channel": "text",
+      "utterance": "add this summaries table to the documents as a new document",
+      "notes": "G-P3 UAT round-3 R3-4 (2026-07-07) — no document-creation capability exists in the closed catalog (SPE file upload is not a chat tool; a bare sprk_document row is a broken record and dataverse.create_record's description now bans it). The honest outcome is refusal-with-alternatives (create a task, draft an email, open a workspace tab) — never a promise loop and never a fileless sprk_document create. Document-creation capability is a named operator-verdict backlog candidate, NOT scope of this project.",
+      "context": { "surface": "assistant-chat", "sessionHasDocument": true },
+      "expected": { "outcomeClass": "refuse", "consumerType": null, "consumerCode": null, "catalogStatus": null },
+      "assertions": { "schemaConformance": "REF-CHAT@v1", "citationIntegrity": false },
+      "activation": { "dispatchAssertPhase": "P2", "activatedBy": "task 033 (FR-P2-04 refusal Binding) — case added by the G-P3 round-3 fix wave; live-LLM proof in the round-4 UAT script" }
     }
   ]
 }

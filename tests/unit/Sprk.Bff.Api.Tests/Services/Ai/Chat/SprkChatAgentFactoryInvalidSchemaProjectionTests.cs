@@ -184,6 +184,20 @@ public class SprkChatAgentFactoryInvalidSchemaProjectionTests
         agent.Context.SystemPrompt.Should().Contain(
             "tab, view, editor, workspace, or dialog",
             "R2-D: the model claimed UI surfaces were opened without any confirming tool result");
+
+        // G-P3 UAT round-3 extensions (2026-07-07):
+        agent.Context.SystemPrompt.Should().Contain(
+            "AT MOST ONCE per action",
+            "R3-1: the model confirm-looped four times in chat without ever invoking the write " +
+            "tool — the directive must cap chat confirmation at one and bridge confirmed→invoke");
+        agent.Context.SystemPrompt.Should().Contain(
+            "NEVER re-run a capability_* drafting tool instead of invoking the write tool",
+            "R3-1: every round-3 confirm-loop turn re-invoked capability_create-task (drafting) " +
+            "instead of dataverse.create_record");
+        agent.Context.SystemPrompt.Should().Contain(
+            "resolve each reference to its record GUID FIRST",
+            "R3-2: the model proposed a create carrying an unresolved person lookup — lookups " +
+            "must be resolved BEFORE proposing, not discovered as failures after the user confirms");
     }
 
     [Fact]

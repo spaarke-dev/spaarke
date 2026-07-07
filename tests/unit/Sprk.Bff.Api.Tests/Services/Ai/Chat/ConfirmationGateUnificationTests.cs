@@ -1,4 +1,6 @@
 using FluentAssertions;
+using Microsoft.AspNetCore.Http;
+using Microsoft.AspNetCore.Http.HttpResults;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Logging;
 using Moq;
@@ -282,6 +284,30 @@ public class ConfirmationGateUnificationTests
         capped.Length.Should().BeLessThanOrEqualTo(
             Sprk.Bff.Api.Api.Ai.ChatEndpoints.MaxGateOutcomeMessageChars + 1,
             because: "transcript messages must stay well inside the Dataverse sprk_content cap");
+    }
+
+    [Fact]
+    public void BuildGateDispatchFailedProblem_MapsTo422_WithStableErrorCodeAndDetail()
+    {
+        // G-P3 UAT round-3 R3-2 (2026-07-07): confirmed-gate dispatch failures
+        // (write-mapper validation, Dataverse 400) previously surfaced as 502 Bad
+        // Gateway — a false gateway-fault signal for a correctable request-content
+        // problem. Pin the 422 + stable errorCode + preserved detail contract for
+        // BOTH resolve legs (single construction site).
+        var result = Sprk.Bff.Api.Api.Ai.ChatEndpoints.BuildGateDispatchFailedProblem(
+            "Column 'sprk_assignedattorney1': lookup objects require a 'recordId' GUID on the native transport.");
+
+        var problem = result.Should().BeOfType<ProblemHttpResult>().Subject;
+        problem.StatusCode.Should().Be(StatusCodes.Status422UnprocessableEntity,
+            because: "a validation/dispatch rejection is Unprocessable Entity, never a 5xx");
+        problem.ProblemDetails.Detail.Should().Contain("recordId",
+            because: "the handler's instructive detail must reach the client verbatim");
+        problem.ProblemDetails.Extensions["errorCode"].Should().Be("gate.dispatch-failed",
+            because: "ADR-019: stable errorCode survives the status-code change");
+
+        var fallback = Sprk.Bff.Api.Api.Ai.ChatEndpoints.BuildGateDispatchFailedProblem(null);
+        fallback.Should().BeOfType<ProblemHttpResult>()
+            .Which.ProblemDetails.Detail.Should().Be("The confirmed action failed.");
     }
 
     // =========================================================================

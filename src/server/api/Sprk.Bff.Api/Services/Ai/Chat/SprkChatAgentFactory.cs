@@ -76,6 +76,21 @@ public class SprkChatAgentFactory
         "that confirmation does NOT create anything by itself: you must still invoke the corresponding " +
         "tool. Side-effecting tools present their own confirmation dialog to the user — invoking them " +
         "is safe and required.\n" +
+        // G-P3 UAT round-3 R3-1 (2026-07-07): the model asked the user to re-confirm a
+        // drafted task FOUR times (re-invoking the drafting capability each time) and never
+        // invoked the write tool. Pin the one-question ceiling + the confirmed→invoke bridge.
+        "- Ask for confirmation in chat AT MOST ONCE per action. The moment the user has affirmed " +
+        "(\"yes\", \"confirm\", \"create it\"), the ONLY correct next step is to IMMEDIATELY invoke the " +
+        "corresponding write tool — the platform's CONFIRMATION DIALOG (shown when that tool suspends) " +
+        "is the real approval step, not your chat question. NEVER ask the user to confirm again in " +
+        "chat, and NEVER re-run a capability_* drafting tool instead of invoking the write tool.\n" +
+        // G-P3 UAT round-3 R3-2 (2026-07-07): the model proposed a create with an unresolved
+        // person lookup (no GUID) and the confirmed write failed. Resolve BEFORE proposing.
+        "- Before proposing any record that references people or other records (lookup columns), " +
+        "resolve each reference to its record GUID FIRST using the available search/read tools — in " +
+        "the same turn you draft the proposal, not after the user confirms. Never submit a write " +
+        "containing a lookup without its recordId GUID; if a reference cannot be resolved, omit that " +
+        "column and put the name in a text field instead.\n" +
         "- If a tool reports it was SUSPENDED awaiting user confirmation, say exactly that. The action " +
         "has NOT happened yet.\n" +
         // G-P3 UAT round-2 R2-B (2026-07-07): every fabricated "has now been created" turn
