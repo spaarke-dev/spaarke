@@ -1,6 +1,6 @@
 # VisualHost PCF Control - Setup & Configuration Guide
 
-> **Version**: 1.3.0 | **Last Updated**: March 10, 2026
+> **Version**: 1.3.1 | **Last Updated**: July 7, 2026
 >
 > **Audience**: Dataverse administrators, form designers, solution configurators
 >
@@ -822,31 +822,72 @@ When the expand button is clicked, VisualHost passes these parameters to the web
 | `viewId` | `sprk_baseviewid` (cleaned) | Saved view for the grid to use |
 | `mode` | Always `"dialog"` | Tells the web resource it's running in a dialog |
 
-### Setting Up Drill-Through to the Events Page
+### Setting Up Drill-Through into a DataGrid Framework Page (Events, Invoices, KPI Assessments…)
 
-**Goal:** When a user clicks the expand button on an Events bar chart on a Matter form, open the Events Page in a dialog showing only events for that Matter.
+> **This is the common case, and it has THREE required pieces, not one.** When the drill-through
+> target is a **DataGrid Framework** Custom Page (`sprk_eventspage.html`, `sprk_invoicespage.html`,
+> `sprk_kpiassessmentspage.html`, …), setting `sprk_drillthroughtarget` on the chart definition is
+> necessary but **not sufficient**. The parent-record filter only works when all three of the
+> following line up. See [`DATAGRID-FRAMEWORK-CONFIGURATION-GUIDE.md`](DATAGRID-FRAMEWORK-CONFIGURATION-GUIDE.md#step-6--wire-the-host-shell) for the grid-side detail.
+
+**Goal:** Click the expand button on a Matter form's Events/Calendar chart → open the Events Page in a dialog showing **only** events regarding that Matter.
+
+| # | Piece | Where | Value (Event → Matter example) |
+|---|-------|-------|--------------------------------|
+| 1 | **Chart definition** | `sprk_chartdefinition` record | `sprk_drillthroughtarget` = `sprk_eventspage.html`; `sprk_contextfieldname` = **`_sprk_regardingmatter_value`** (see note) |
+| 2 | **Grid config `parentContextFilter`** | `sprk_gridconfiguration.sprk_configjson` (the config the page mounts) | `{ "attribute": "sprk_regardingmatter", "parentContextKey": "matterId", "operator": "eq" }` |
+| 3 | **Page shell parses `filterValue`** | `src/solutions/<Page>/src/*.tsx` (code) | shell reads the `filterValue` key from the `data=` envelope and exposes it under the `parentContextKey` (`matterId`) |
 
 1. **Chart Definition:**
 
-   | Field | Value |
-   |-------|-------|
-   | Name | Events by Type |
-   | Visual Type | BarChart (100000001) |
-   | Entity Logical Name | `sprk_event` |
-   | Group By Field | `_sprk_eventtype_ref_value` |
-   | Base View ID | *(GUID of "Active Tasks" view)* |
-   | Context Field Name | `sprk_regardingrecordid` |
-   | **Drill-Through Target** | `sprk_eventspage.html` |
+   | Field | Value | Why |
+   |-------|-------|-----|
+   | Entity Logical Name | `sprk_event` | the entity the chart queries (the CHILD entity) |
+   | Visual Type | any (Calendar, BarChart, …) | |
+   | Context Field Name (`sprk_contextfieldname`) | **`_sprk_regardingmatter_value`** | the child's lookup column reference back to the parent. **Must be non-empty** — VisualHost only appends `filterValue=<parentGuid>` to the drill-through URL when this field is set ([VisualHostRoot.tsx:418](../../src/client/pcf/VisualHost/control/components/VisualHostRoot.tsx#L418)). |
+   | Drill-Through Target (`sprk_drillthroughtarget`) | `sprk_eventspage.html` | |
+   | Drill Through Views (`sprk_drillthroughviews`) | *(optional)* delimited saved-query GUIDs, e.g. `<AllTasksGuid>;<AllDeadlinesGuid>` | restricts the drill-through page's view-switcher to these views (forwarded as the `availableViews` envelope param → `<DataGrid availableViewsAllowlist>`). Blank = all views shown. See the "Restricting which views appear" note below. |
 
-2. **PCF Properties on Form:**
+   > **Context Field Name format:** use the lookup-column reference (`_<lookup>_value`), e.g. `_sprk_regardingmatter_value` for Event→Matter, `_sprk_matter_value` for Invoice/KPI→Matter. VisualHost strips the `_` prefix and `_value` suffix before putting the name in `filterField`, so `sprk_regardingmatter` and `_sprk_regardingmatter_value` normalize to the same value — but author the `_..._value` form for consistency with the [parent-context pattern](../../projects/spaarke-datagrid-framework-r1/notes/parent-context-pattern.md). The lookup is **not** uniformly named `sprk_matter` — Event's is `sprk_regardingmatter`. Inspect entity metadata before configuring.
 
-   | Property | Value |
-   |----------|-------|
-   | contextFieldName | `sprk_regardingrecordid` |
-   | enableDrillThrough | Yes |
-   | showToolbar | Yes |
+2. **The page shell must parse `filterValue`.** VisualHost passes the parent id in the `data=`
+   envelope as **`filterValue`** (with `entityName` set to the *chart's* entity, e.g. `sprk_event`, NOT
+   the parent). The shell MUST read `filterValue` and expose it under the config's `parentContextKey`.
+   The `sprk_invoicespage` / `sprk_kpiassessmentspage` shells do this; a shell that instead looks for a
+   `recordId` param or requires `entityName === 'sprk_matter'` will silently render **unfiltered**.
+   See the [DataGrid guide, Step 6](DATAGRID-FRAMEWORK-CONFIGURATION-GUIDE.md#step-6--wire-the-host-shell).
 
-3. **Result:** Clicking the expand icon opens the Events Page in a dialog, filtered to show only events where `sprk_regardingrecordid` matches the current Matter's GUID. The Calendar side pane is suppressed in the dialog.
+3. **Result:** Clicking the expand icon opens the page in a dialog. The framework overlays
+   `<condition attribute="sprk_regardingmatter" operator="eq" value="<matterGuid>"/>` onto the grid's
+   FetchXML, showing only events regarding that Matter. The Calendar side pane is suppressed in dialog mode.
+
+> **Restricting which views appear in the dialog's view-switcher (operator-configurable, no code):**
+> by default the picker lists *every* active saved query for the entity. To curate it (e.g. only
+> "All Tasks" / "All Deadlines"), fill the chart definition's **Drill Through Views**
+> (`sprk_drillthroughviews`) field with a **delimited list of saved-query GUIDs** (separate with `;`
+> or `,`). VisualHost forwards these to the drill-through page, which restricts its view-switcher to
+> exactly those views. This works with **any** grid-config source type (including `savedquery-set`)
+> and needs no edit to the grid config record.
+>
+> ```
+> sprk_drillthroughviews:  a1b2c3d4-...-1111 ; e5f6a7b8-...-2222
+> ```
+>
+> Find a view's GUID in the maker portal (open the view → the URL contains `viewid=<GUID>`) or via
+> `SELECT savedqueryid, name FROM savedquery WHERE returnedtypecode = 'sprk_event'`. Leave the field
+> blank for the default behavior (all views shown). *(Equivalent grid-config-side allowlist:
+> [DATAGRID-FRAMEWORK-CONFIGURATION-GUIDE.md § Step 3.5](DATAGRID-FRAMEWORK-CONFIGURATION-GUIDE.md#step-35--restrict-which-views-appear-in-the-view-switcher-availableviews).)*
+
+**Creating a drill-through for a different entity** (Matter → KPI Assessments, Invoices, Report Cards, …):
+follow the end-to-end recipe with the verified child-lookup reference table in
+[DATAGRID-FRAMEWORK-CONFIGURATION-GUIDE.md § Recipe](DATAGRID-FRAMEWORK-CONFIGURATION-GUIDE.md#recipe--build-a-visualhost-drill-through-into-a-related-records-grid).
+Two shells already exist and need no code — `sprk_invoicespage.html` and `sprk_kpiassessmentspage.html`.
+
+> **Troubleshooting — "drill-through shows ALL records":** In the dialog's DevTools console, look for
+> `[DataGrid] fetchXml composition`. If `parentContext.matterId` is empty → the shell never received/parsed
+> `filterValue` (piece 3) **or** the chart def's `sprk_contextfieldname` is blank (piece 1). If
+> `hasParentFilterMatch: false` → the grid config's `parentContextFilter.attribute` doesn't match the
+> child's lookup attribute (piece 2).
 
 ### Setting Up Drill-Through for Other Web Resources
 

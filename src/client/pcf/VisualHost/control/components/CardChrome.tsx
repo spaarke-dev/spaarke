@@ -27,9 +27,16 @@ import * as React from 'react';
 import { makeStyles, tokens, Button, Tooltip, Text, shorthands } from '@fluentui/react-components';
 import { OpenRegular, Sparkle20Regular } from '@fluentui/react-icons';
 import {
-  AiSummaryPopover,
+  AiSummaryPopover as RawAiSummaryPopover,
+  type IAiSummaryPopoverProps,
   type ISummaryData,
 } from '../../../../shared/Spaarke.UI.Components/src/components/AiSummaryPopover';
+
+// React 18/19 types-version drift workaround: the shared lib's local
+// node_modules pulls @types/react@19, whose FC return type
+// (`ReactNode | Promise<ReactNode>`) is not assignable to React 18's
+// ReactNode. Cast through ComponentType to bridge. Runtime behavior unchanged.
+const AiSummaryPopover = RawAiSummaryPopover as unknown as React.ComponentType<IAiSummaryPopoverProps>;
 
 /**
  * Props for the CardChrome wrapper.
