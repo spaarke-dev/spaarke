@@ -163,8 +163,8 @@
 
 | # | Task | FR | Rigor | Deps | Status |
 |---|---|---|---|---|---|
-| 045 | Client consolidation: ConversationPane + shared helper + ONE SSE path | FR-P3-06 | FULL | 038 | 🔲 |
-| 047 | Work-product record persistence (Binding-declared) | FR-P3-08 | FULL | 038 | 🔲 |
+| 045 | Client consolidation: ConversationPane 3,172→**300 lines** (11 modules; batch-state extraction landed); ONE SSE path client-wide grep-zero (1 keep-with-reason: office-addins SseClient — no @spaarke dep, richer SSE semantics); LW SummarizeFiles cluster deleted; Compose already-migrated verified; net −5,300 lines; slash launchers → needs server capability-discovery endpoint (documented, POML silent); wizard→dispatchConsumer needs server contract ruling | FR-P3-06 | FULL | 038 | ✅ |
+| 047 | work_product disposition leg live (TopicRegistryWorkProductPersister: Binding disposition → sprk_aitopicregistry → host record, user-OBO If-Match, store-precedes-persist proven; matter-summary Binding `05618e5d` + registry `cfca6a65` + new sprk_matter.sprk_mattersummary column; 🔔 ADR-040 size-cap NOT in POML — needs home ruling at 048: P4 or Track B) | FR-P3-08 | FULL | 038 | ✅ |
 
 ### Wave W-P3-D + Gate
 

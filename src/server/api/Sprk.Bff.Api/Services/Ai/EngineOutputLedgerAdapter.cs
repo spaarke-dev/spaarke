@@ -26,7 +26,7 @@ namespace Sprk.Bff.Api.Services.Ai;
 /// verdict marks 🔧 fills (tool framework + handlers), NOT inside
 /// <c>PlaybookOrchestrationService</c> or its nodes (the frozen surface — ADR-039:
 /// no new capability lands on the frozen engine; this adapter is a boundary shim on OUR side
-/// of the freeze line). P3 FR-P3-08 adds the record-context leg as a second caller.
+/// of the freeze line).
 /// </para>
 /// <para>
 /// <b>Binding identity (FR-P3-01, task 040 — re-pointed)</b>: the adapter reverse-resolves
@@ -53,13 +53,19 @@ namespace Sprk.Bff.Api.Services.Ai;
 /// code list, no intent mechanism is introduced.
 /// </para>
 /// <para>
-/// <b>Session scope (documented decision, task 024)</b>: ledger entries are session-scoped,
-/// so the adapter covers session-attached (chat-invoked) engine runs only. Record/widget
-/// context engine runs (<c>PlaybookRunEndpoints</c>, insights ask/assistant endpoints,
-/// scheduler, app-only ingest) have no <see cref="ChatSession"/> and join the ledger at P3
-/// FR-P3-08 (work-product persistence). When the chat session cannot be found (expired /
-/// GDPR-erased mid-turn), the adapter degrades gracefully — identifiers-only Warning, null
-/// return — rather than inventing a session store.
+/// <b>Session scope (documented decision, task 024; confirmed at FR-P3-08 task 047)</b>:
+/// ledger entries are session-scoped, so the adapter covers session-attached (chat-invoked)
+/// engine runs only. Record/widget context engine runs (<c>PlaybookRunEndpoints</c>,
+/// insights ask/assistant endpoints, scheduler, app-only ingest) have no
+/// <see cref="ChatSession"/> and remain OUTSIDE the session ledger by design — their
+/// durable outputs persist via their playbook persistence nodes (the widgets-r1 pattern,
+/// e.g. matter-health's <c>persistEnvelope</c>). Task 047 landed the GENERALIZED record
+/// persistence as the OutputRouter <c>work_product</c> disposition leg
+/// (<see cref="IWorkProductRecordPersister"/>) for session-attached capabilities; a
+/// session-less ledger join was evaluated and NOT built (no session, no ledger carrier).
+/// When the chat session cannot be found (expired / GDPR-erased mid-turn), the adapter
+/// degrades gracefully — identifiers-only Warning, null return — rather than inventing a
+/// session store.
 /// </para>
 /// <para>
 /// <b>ADR-040 store-precedes-render</b>: <see cref="Handlers.AnalysisExecutionHandler"/>
@@ -71,8 +77,8 @@ namespace Sprk.Bff.Api.Services.Ai;
 /// <para>
 /// <b>Interface rationale (ADR-010 tension, documented)</b>: mirrors
 /// <see cref="IOutputRouter"/> — this is a genuine module boundary: the chat handler mocks it
-/// per ADR-038, and P3 FR-P3-08 adds the record-context leg as a second caller while task 040
-/// swaps the Binding source. Not interface-for-testability-alone.
+/// per ADR-038, and task 040 swapped the Binding source under the same contract. Not
+/// interface-for-testability-alone.
 /// </para>
 /// <para>
 /// <b>NFR-07 / ADR-015</b>: this type logs identifiers only (tenant, session, playbook, run,
@@ -102,7 +108,8 @@ public interface IEngineOutputLedgerAdapter
     /// <param name="cancellationToken">Cancellation token.</param>
     /// <returns>
     /// The stored, addressable ledger entry; <c>null</c> when the session is not
-    /// session-store-resolvable (record-context runs join the ledger at P3 FR-P3-08).
+    /// session-store-resolvable (session-less record-context runs stay outside the
+    /// session ledger by design — see the class remarks' Session-scope paragraph).
     /// </returns>
     Task<SessionOutput?> RecordAsync(
         string tenantId,
@@ -199,7 +206,8 @@ public sealed class EngineOutputLedgerAdapter : IEngineOutputLedgerAdapter
             _logger.LogWarning(
                 "EngineOutputLedgerAdapter: chat session not found — engine output NOT recorded to the ledger. " +
                 "tenant={TenantId} session={ChatSessionId} playbookId={PlaybookId} runId={RunId}. " +
-                "Record-context runs join the ledger at P3 FR-P3-08.",
+                "Session-less record-context runs stay outside the session ledger by design (task-024 decision; " +
+                "confirmed at FR-P3-08).",
                 tenantId, chatSessionId, playbookId, output.RunId);
             return null;
         }

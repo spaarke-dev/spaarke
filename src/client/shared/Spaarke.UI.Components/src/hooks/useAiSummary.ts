@@ -9,6 +9,7 @@
  */
 
 import { useState, useCallback, useRef, useEffect } from 'react';
+import { readSseStream, parseSseEvent } from './useSseStream';
 
 /**
  * Stable playbook ID (GUID format) for the "Document Profile" playbook used by
@@ -191,7 +192,12 @@ interface StreamState {
 }
 
 /**
- * SSE chunk from Document Intelligence API
+ * SSE chunk from Document Intelligence API (the server's `AnalysisStreamChunk`
+ * envelope — every chunk carries a string `type`, so the canonical
+ * `parseSseEvent` from useSseStream.ts parses each `data:` line; the
+ * `data: [DONE]` terminator parses to null and is ignored (the post-stream
+ * completion path below covers it). task 045 / FR-P3-06: the former local
+ * `parseSseLine` + getReader loop were deleted — NFR-08 one reader loop.
  */
 interface SseChunk {
   /** Event type: "text" | "complete" | "error" */
@@ -213,27 +219,6 @@ interface SseChunk {
   /** User-friendly message about storage result */
   storageMessage?: string;
 }
-
-/**
- * Parse SSE line to extract data
- */
-const parseSseLine = (line: string): SseChunk | null => {
-  const trimmed = line.trim();
-  if (!trimmed || trimmed.startsWith(':')) return null;
-
-  if (trimmed.startsWith('data:')) {
-    const jsonStr = trimmed.slice(5).trim();
-    if (!jsonStr || jsonStr === '[DONE]') {
-      return { done: true };
-    }
-    try {
-      return JSON.parse(jsonStr) as SseChunk;
-    } catch {
-      return { content: jsonStr };
-    }
-  }
-  return null;
-};
 
 /**
  * useAiSummary Hook
@@ -355,119 +340,116 @@ export const useAiSummary = (options: UseAiSummaryOptions): UseAiSummaryResult =
           throw new Error('Playbook unavailable. Please contact your administrator.');
         }
 
-        // Step 2: Execute analysis with new unified endpoint
+        // Step 2: Execute analysis with new unified endpoint.
+        // task 045 (FR-P3-06, NFR-08): the canonical readSseStream owns the
+        // fetch + reader + buffer machinery. This hook's auth is the optional
+        // `getToken` (no X-Tenant-Id derivation, Accept: text/event-stream
+        // header), so we supply a fetchImpl that preserves those exact headers
+        // instead of the token-getter mode.
         const streamUrl = `${apiBaseUrl}/api/ai/analysis/execute`;
         console.log('[useAiSummary] Fetching:', streamUrl);
 
-        const authHeaders = await getAuthHeaders();
+        // Set once the terminal done chunk has been handled — subsequent lines
+        // are skipped (pre-consolidation behavior returned out of the loop).
+        let finished = false;
 
-        const response = await fetch(streamUrl, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-            Accept: 'text/event-stream',
-            ...authHeaders,
-          },
-          body: JSON.stringify({
+        await readSseStream({
+          url: streamUrl,
+          body: {
             documentIds: [documentId], // Array for multi-document support
             playbookId: playbookId,
             actionId: null, // Use playbook's default action
             additionalContext: null,
-          }),
+          },
+          fetchImpl: async (fetchUrl, init) => {
+            const authHeaders = await getAuthHeaders();
+            return fetch(fetchUrl, {
+              ...init,
+              headers: {
+                ...(init.headers as Record<string, string>),
+                Accept: 'text/event-stream',
+                ...authHeaders,
+              },
+            });
+          },
           signal: abortController.signal,
+          mapHttpError: async response => {
+            const errorText = await response.text();
+            return new Error(errorText || `HTTP ${response.status}`);
+          },
+          onLine: (line: string) => {
+            if (finished) return;
+            // Canonical `data:` line parse; the server's AnalysisStreamChunk
+            // envelope always carries a string `type`, so the parse succeeds
+            // for every chunk ([DONE] terminator → null → skipped).
+            const chunk = parseSseEvent(line) as unknown as SseChunk | null;
+            if (!chunk) return;
+
+            // Handle error event
+            if (chunk.type === 'error' || chunk.error) {
+              throw new Error(chunk.error || 'Unknown error');
+            }
+
+            // Handle metadata event (analysisId, documentName)
+            if (chunk.type === 'metadata') {
+              if (chunk.analysisId) {
+                updateDocument(documentId, {
+                  analysisId: chunk.analysisId,
+                });
+                console.log('[useAiSummary] Analysis ID:', chunk.analysisId);
+              }
+              return;
+            }
+
+            // Handle done event (analysis complete)
+            if (chunk.type === 'done' || chunk.done) {
+              const updates: Partial<DocumentSummaryState> = {
+                status: 'complete',
+                summary: accumulatedSummary,
+              };
+
+              // Add analysis metadata
+              if (chunk.analysisId) {
+                updates.analysisId = chunk.analysisId;
+              }
+
+              // Add storage result metadata (soft failure handling)
+              if (chunk.partialStorage !== undefined) {
+                updates.partialStorage = chunk.partialStorage;
+              }
+              if (chunk.storageMessage) {
+                updates.storageMessage = chunk.storageMessage;
+              }
+
+              // Legacy callback for backward compatibility
+              if (onSummaryComplete && updates.summary) {
+                onSummaryComplete(documentId, updates.summary);
+              }
+
+              updateDocument(documentId, updates);
+              activeStreamsRef.current.delete(documentId);
+              console.log('[useAiSummary] Analysis complete:', {
+                analysisId: chunk.analysisId,
+                partialStorage: chunk.partialStorage,
+                storageMessage: chunk.storageMessage,
+              });
+              finished = true;
+              return;
+            }
+
+            // Handle streaming text content (type="chunk")
+            if (chunk.type === 'chunk' || chunk.content) {
+              accumulatedSummary += chunk.content || '';
+              updateDocument(documentId, { summary: accumulatedSummary });
+            }
+          },
         });
 
-        if (!response.ok) {
-          const errorText = await response.text();
-          throw new Error(errorText || `HTTP ${response.status}`);
-        }
-
-        if (!response.body) {
-          throw new Error('Response body not readable');
-        }
-
-        const reader = response.body.getReader();
-        const decoder = new TextDecoder();
-        let buffer = '';
-
-        while (true) {
-          const { done, value } = await reader.read();
-
-          if (done) {
-            // Stream ended without complete event - mark as complete with accumulated data
-            updateDocument(documentId, { status: 'complete' });
-            if (onSummaryComplete && accumulatedSummary) {
-              onSummaryComplete(documentId, accumulatedSummary);
-            }
-            break;
-          }
-
-          buffer += decoder.decode(value, { stream: true });
-          const events = buffer.split('\n\n');
-          buffer = events.pop() || '';
-
-          for (const event of events) {
-            for (const line of event.split('\n')) {
-              const chunk = parseSseLine(line);
-              if (chunk) {
-                // Handle error event
-                if (chunk.type === 'error' || chunk.error) {
-                  throw new Error(chunk.error || 'Unknown error');
-                }
-
-                // Handle metadata event (analysisId, documentName)
-                if (chunk.type === 'metadata') {
-                  if (chunk.analysisId) {
-                    updateDocument(documentId, {
-                      analysisId: chunk.analysisId,
-                    });
-                    console.log('[useAiSummary] Analysis ID:', chunk.analysisId);
-                  }
-                  continue;
-                }
-
-                // Handle done event (analysis complete)
-                if (chunk.type === 'done' || chunk.done) {
-                  const updates: Partial<DocumentSummaryState> = {
-                    status: 'complete',
-                    summary: accumulatedSummary,
-                  };
-
-                  // Add analysis metadata
-                  if (chunk.analysisId) {
-                    updates.analysisId = chunk.analysisId;
-                  }
-
-                  // Add storage result metadata (soft failure handling)
-                  if (chunk.partialStorage !== undefined) {
-                    updates.partialStorage = chunk.partialStorage;
-                  }
-                  if (chunk.storageMessage) {
-                    updates.storageMessage = chunk.storageMessage;
-                  }
-
-                  // Legacy callback for backward compatibility
-                  if (onSummaryComplete && updates.summary) {
-                    onSummaryComplete(documentId, updates.summary);
-                  }
-
-                  updateDocument(documentId, updates);
-                  activeStreamsRef.current.delete(documentId);
-                  console.log('[useAiSummary] Analysis complete:', {
-                    analysisId: chunk.analysisId,
-                    partialStorage: chunk.partialStorage,
-                    storageMessage: chunk.storageMessage,
-                  });
-                  return;
-                }
-
-                // Handle streaming text content (type="chunk")
-                if (chunk.type === 'chunk' || chunk.content) {
-                  accumulatedSummary += chunk.content || '';
-                  updateDocument(documentId, { summary: accumulatedSummary });
-                }
-              }
-            }
+        if (!finished) {
+          // Stream ended without complete event - mark as complete with accumulated data
+          updateDocument(documentId, { status: 'complete' });
+          if (onSummaryComplete && accumulatedSummary) {
+            onSummaryComplete(documentId, accumulatedSummary);
           }
         }
       } catch (err) {

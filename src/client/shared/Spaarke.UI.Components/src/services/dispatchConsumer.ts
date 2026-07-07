@@ -20,9 +20,16 @@
  *     mapping is encapsulated INSIDE this helper (sole consumer was the
  *     deleted orchestrator)
  *
- * P3 (FR-P3-06) migrates LegalWorkspace `summarizeService` and Compose
- * `executeComposeSummarize` onto this same helper — which is why it lives in
- * the shared `@spaarke/ui-components` package all three surfaces consume.
+ * P3 (FR-P3-06, task 045) outcome — no further dispatch migration happened:
+ * Compose's `executeComposeSummarize` was already deleted 2026-07-02 by
+ * spaarkeai-compose-r1 (commit 0420562e6); LegalWorkspace's local
+ * `summarizeService` is deleted in task 045 as an orphaned duplicate of the
+ * shared SummarizeFilesWizard service; and that shared summarize wizard KEEPS
+ * its `/api/workspace/files/summarize` multipart contract (server-side Binding
+ * resolution by consumerType) — its parse loop is consolidated onto
+ * `readSseStream`, not routed through this helper. This helper remains the
+ * ONE Click-path dispatch entry, in the shared `@spaarke/ui-components`
+ * package every surface consumes.
  *
  * SSE consumption: the canonical `readSseStream` + `parseSseEvent` primitives
  * from `hooks/useSseStream.ts` (the ONE SSE parse path client-wide). No

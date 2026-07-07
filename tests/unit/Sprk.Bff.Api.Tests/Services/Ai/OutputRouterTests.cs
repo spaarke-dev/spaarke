@@ -105,10 +105,10 @@ public class OutputRouterTests
     }
 
     // ─── Loud P3 stubs: no silent fallback, storage never couples to rendering ────────────────
-    // (email left this list at task 043 — its leg is implemented; see the email facts below)
+    // (email left this list at task 043; work_product at task 047 — their legs are
+    // implemented; see the email + work_product facts below)
 
     [Theory]
-    [InlineData(BindingDisposition.WorkProduct, "work_product")]
     [InlineData(BindingDisposition.Overlay, "overlay")]
     [InlineData(BindingDisposition.Record, "record")]
     [InlineData(BindingDisposition.Notification, "notification")]
@@ -191,6 +191,61 @@ public class OutputRouterTests
         _sessionManager.PersistedSessions.Should().ContainSingle();
     }
 
+    // ─── Work-product disposition leg (FR-P3-08, task 047): store THEN persist ────────────────
+
+    [Fact]
+    public async Task RouteAsync_WorkProductDisposition_StoresEntryThenPersistsToHostRecord()
+    {
+        var binding = BuildBinding() with { Disposition = BindingDisposition.WorkProduct };
+        var persister = new RecordingWorkProductPersister(_sessionManager);
+        var session = BuildSessionWithHostContext();
+
+        var routed = await new OutputRouter(
+                _sessionManager, Mock.Of<ILogger<OutputRouter>>(), emailSender: null, workProductPersister: persister)
+            .RouteAsync(session, binding, ParseJson("""{"summary":"matter work product"}"""));
+
+        // Store preceded persistence, and the persister received the STORED entry.
+        _sessionManager.PersistedSessions.Should().ContainSingle();
+        persister.StoredCountAtPersist.Should().Be(1,
+            "the ledger write happens BEFORE the host-record persistence (ADR-040 storage precedes persistence)");
+        var call = persister.Persisted.Should().ContainSingle().Subject;
+        call.Entry.Should().BeSameAs(routed.Entry, "the persisted envelope derives from the STORED ledger entry");
+        call.Entry.Disposition.Should().Be("work_product");
+        call.Binding.Should().BeSameAs(binding);
+        call.HostContext.Should().BeSameAs(session.HostContext,
+            "the session's host record IS the persistence target");
+    }
+
+    [Fact]
+    public async Task RouteAsync_WorkProductDisposition_NoPersisterRegistered_StoresThenThrowsLoud()
+    {
+        var binding = BuildBinding() with { Disposition = BindingDisposition.WorkProduct };
+
+        // Constructed WITHOUT a persister — persistence must fail loudly, never a silent skip.
+        var act = () => CreateSut().RouteAsync(BuildSessionWithHostContext(), binding, ParseJson("{}"));
+
+        (await act.Should().ThrowAsync<InvalidOperationException>())
+            .Which.Message.Should().Contain("IWorkProductRecordPersister");
+        _sessionManager.PersistedSessions.Should().ContainSingle("storage still precedes the failed persistence");
+    }
+
+    [Fact]
+    public async Task RouteAsync_WorkProductDisposition_NoHostContext_StoresThenThrowsLoud()
+    {
+        var binding = BuildBinding() with { Disposition = BindingDisposition.WorkProduct };
+        var persister = new RecordingWorkProductPersister(_sessionManager);
+
+        // Session WITHOUT a host record context — there is no record to persist to.
+        var act = () => new OutputRouter(
+                _sessionManager, Mock.Of<ILogger<OutputRouter>>(), emailSender: null, workProductPersister: persister)
+            .RouteAsync(BuildSession(), binding, ParseJson("{}"));
+
+        (await act.Should().ThrowAsync<InvalidOperationException>())
+            .Which.Message.Should().Contain("HostContext");
+        _sessionManager.PersistedSessions.Should().ContainSingle("storage still precedes the failed persistence");
+        persister.Persisted.Should().BeEmpty("a session without a host record has no persistence target");
+    }
+
     // ─── Helpers ────────────────────────────────────────────────────────────────────────────────
 
     private static Binding BuildBinding() => new()
@@ -209,6 +264,11 @@ public class OutputRouterTests
         CreatedAt: DateTimeOffset.UtcNow,
         LastActivity: DateTimeOffset.UtcNow,
         Messages: Array.Empty<ChatMessage>());
+
+    private static ChatSession BuildSessionWithHostContext() => BuildSession() with
+    {
+        HostContext = new ChatHostContext("matter", "7d9c30d1-bbbb-f111-ab0e-70a8a590c51c"),
+    };
 
     private static SessionOutput BuildOutput(string bindingId, int turn) => new()
     {
@@ -249,6 +309,41 @@ public class OutputRouterTests
             StoredCountAtSend = _sessionManager?.PersistedSessions.Count ?? 0;
             Sent.Add(envelope);
             return Task.CompletedTask;
+        }
+    }
+
+    /// <summary>
+    /// Recording <see cref="IWorkProductRecordPersister"/> — captures persisted entries and
+    /// the persisted-session count AT persist time (proves store-precedes-persistence ordering).
+    /// </summary>
+    private sealed class RecordingWorkProductPersister : IWorkProductRecordPersister
+    {
+        private readonly RecordingChatSessionManager? _sessionManager;
+
+        public RecordingWorkProductPersister(RecordingChatSessionManager? sessionManager = null)
+        {
+            _sessionManager = sessionManager;
+        }
+
+        public List<(SessionOutput Entry, Binding Binding, ChatHostContext HostContext)> Persisted { get; } = new();
+
+        public int StoredCountAtPersist { get; private set; }
+
+        public Task<WorkProductPersistenceReceipt> PersistAsync(
+            SessionOutput entry,
+            Binding binding,
+            ChatHostContext hostContext,
+            CancellationToken cancellationToken = default)
+        {
+            StoredCountAtPersist = _sessionManager?.PersistedSessions.Count ?? 0;
+            Persisted.Add((entry, binding, hostContext));
+            return Task.FromResult(new WorkProductPersistenceReceipt
+            {
+                EntityLogicalName = "sprk_matter",
+                RecordId = Guid.Parse(hostContext.EntityId),
+                TargetField = "sprk_mattersummary",
+                LedgerKey = entry.Key,
+            });
         }
     }
 

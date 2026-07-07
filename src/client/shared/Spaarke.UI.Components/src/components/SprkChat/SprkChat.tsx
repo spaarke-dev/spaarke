@@ -49,7 +49,7 @@ import { SprkChatTypingIndicator } from './SprkChatTypingIndicator';
 import { SprkChatUploadZone } from './SprkChatUploadZone';
 import type { UploadedDocument } from './SprkChatUploadZone';
 import type { InlineAiAction, InlineActionBroadcastEvent } from '../InlineAiToolbar/inlineAiToolbar.types';
-import { useSseStream, parseSseEvent } from '../../hooks/useSseStream';
+import { useSseStream, parseSseEvent, readSseStream } from '../../hooks/useSseStream';
 import { useChatSession } from './hooks/useChatSession';
 import { useChatPlaybooks } from './hooks/useChatPlaybooks';
 import { useSelectionListener } from './hooks/useSelectionListener';
@@ -100,28 +100,29 @@ const INLINE_ACTION_CHANNEL = 'sprk-inline-action';
 const DOCUMENT_INSERT_CHANNEL = 'sprk-document-insert';
 
 // ---------------------------------------------------------------------------
-// Auth helpers (Auth v2)
+// SSE HTTP-error helper (task 045 / FR-P3-06)
 // ---------------------------------------------------------------------------
 
 /**
- * Extract the JWT `tid` (tenant ID) claim from a Bearer token, used to attach
- * the `X-Tenant-Id` header on SSE/XHR code paths that bypass `authenticatedFetch`
- * (which would set this header internally).
+ * HTTP-status-carrying error for the `readSseStream` `mapHttpError` seam.
+ * The plan-approve stream needs per-status handling (409 already-approved,
+ * 404 expired, generic non-OK) AFTER the canonical primitive throws — this
+ * class carries the status + body text so the catch block can preserve the
+ * exact pre-consolidation user-facing messages.
  *
- * For JSON API calls, prefer `authenticatedFetch` — this helper is only used
- * for SSE streams (plan-approve, editor-refine) where we manage the fetch
- * directly to consume the ReadableStream body.
- *
- * Returns `null` on any parse failure; the caller silently omits the header.
+ * (The former `extractTidFromToken` helper was deleted in task 045: both SSE
+ * code paths now delegate token attachment + X-Tenant-Id derivation to the
+ * canonical `readSseStream` in hooks/useSseStream.ts — NFR-08.)
  */
-function extractTidFromToken(token: string): string | null {
-  try {
-    const parts = token.split('.');
-    if (parts.length !== 3) return null;
-    const payload = JSON.parse(atob(parts[1])) as { tid?: string };
-    return payload.tid ?? null;
-  } catch {
-    return null;
+class SseHttpError extends Error {
+  public readonly status: number;
+  public readonly bodyText: string;
+
+  constructor(status: number, bodyText: string) {
+    super(`HTTP ${status}: ${bodyText}`);
+    this.name = 'SseHttpError';
+    this.status = status;
+    this.bodyText = bodyText;
   }
 }
 
@@ -1425,125 +1426,56 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
       addMessage(executionMessage);
 
       const runApprovalStream = async () => {
+        let accumulated = '';
         try {
-          // Auth v2 (D-AUTH-7): fresh token per stream open. We use raw fetch (not
-          // authenticatedFetch) because we need the ReadableStream body for SSE;
-          // attach the Bearer + X-Tenant-Id manually after re-acquiring the token.
-          const token = await getAccessToken();
-          const tenantId = extractTidFromToken(token);
-          const response = await fetch(approveUrl, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${token}`,
-              ...(tenantId ? { 'X-Tenant-Id': tenantId } : {}),
-            },
-            body: JSON.stringify({ planId: planIdToApprove }),
+          // task 045 (FR-P3-06, NFR-08): the canonical readSseStream owns the
+          // fetch + reader + buffer machinery (fresh token per open, X-Tenant-Id
+          // derivation, remainder-buffer delivery). Per-event handling preserved
+          // verbatim; HTTP-status branches preserved via SseHttpError below.
+          await readSseStream({
+            url: approveUrl,
+            body: { planId: planIdToApprove },
+            getAccessToken,
             signal: controller.signal,
-          });
-
-          if (response.status === 409) {
-            // Double-click or already approved — update message to reflect this
-            updateLastMessage('This plan was already approved or has expired. Please send a new message.');
-            return;
-          }
-
-          if (response.status === 404) {
-            updateLastMessage('Plan not found. It may have expired (30-minute limit). Please resend your request.');
-            return;
-          }
-
-          if (!response.ok) {
-            const errorText = await response.text();
-            updateLastMessage(`Plan approval failed (${response.status}): ${errorText}`);
-            return;
-          }
-
-          if (!response.body) {
-            updateLastMessage('Plan approval response body is empty.');
-            return;
-          }
-
-          const reader = response.body.getReader();
-          const decoder = new TextDecoder();
-          let buffer = '';
-          let accumulated = '';
-
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-
-            buffer += decoder.decode(value, { stream: true });
-            const parts = buffer.split('\n\n');
-            buffer = parts.pop() || '';
-
-            for (const part of parts) {
-              const lines = part.split('\n');
-              for (const line of lines) {
-                const event = parseSseEvent(line);
-                if (!event) continue;
-
-                if (event.type === 'plan_step_start' && event.data?.stepId) {
-                  // Update the plan preview card to show this step as running.
-                  // Uses function updater to avoid stale closure on `messages`.
-                  const stepId = event.data.stepId;
-                  updateMessageMetadataAt(messageIndex, current => ({
-                    ...current,
-                    responseType: 'plan_preview',
-                    plan:
-                      current?.plan?.map(s => (s.id === stepId ? { ...s, status: 'running' as const } : s)) ??
-                      current?.plan,
-                  }));
-                } else if (event.type === 'token' && event.content) {
-                  accumulated += event.content;
-                  updateLastMessage(accumulated);
-                } else if (event.type === 'plan_step_complete' && event.data?.stepId) {
-                  const stepId = event.data.stepId;
-                  const stepStatus = event.data.status === 'failed' ? 'failed' : 'completed';
-                  const stepResult = event.data.result ?? undefined;
-                  // Update the plan step status on the plan preview card.
-                  // Uses function updater to avoid stale closure on `messages`.
-                  updateMessageMetadataAt(messageIndex, current => ({
-                    ...current,
-                    responseType: 'plan_preview',
-                    plan:
-                      current?.plan?.map(s =>
-                        s.id === stepId ? { ...s, status: stepStatus as 'completed' | 'failed', result: stepResult } : s
-                      ) ?? current?.plan,
-                  }));
-                } else if (event.type === 'done') {
-                  if (accumulated.length === 0) {
-                    updateLastMessage('Plan executed successfully.');
-                  }
-                  console.debug('[SprkChat] Plan approval stream complete — planId:', planIdToApprove);
-                } else if (event.type === 'error') {
-                  // Mark all non-completed steps as 'failed' (ErrorCircle icon)
-                  updateMessageMetadataAt(messageIndex, current => ({
-                    ...current,
-                    responseType: 'plan_preview',
-                    plan:
-                      current?.plan?.map(s => (s.status === 'completed' ? s : { ...s, status: 'failed' as const })) ??
-                      current?.plan,
-                  }));
-                  updateLastMessage(`Plan execution error: ${event.content ?? 'Unknown error'}`);
-                }
-              }
-            }
-          }
-
-          // Process any remaining buffer
-          if (buffer.trim()) {
-            const lines = buffer.split('\n');
-            for (const line of lines) {
+            mapHttpError: async response =>
+              new SseHttpError(response.status, await response.text().catch(() => '')),
+            onLine: (line: string) => {
               const event = parseSseEvent(line);
-              if (!event) continue;
-              if (event.type === 'token' && event.content) {
+              if (!event) return;
+
+              if (event.type === 'plan_step_start' && event.data?.stepId) {
+                // Update the plan preview card to show this step as running.
+                // Uses function updater to avoid stale closure on `messages`.
+                const stepId = event.data.stepId;
+                updateMessageMetadataAt(messageIndex, current => ({
+                  ...current,
+                  responseType: 'plan_preview',
+                  plan:
+                    current?.plan?.map(s => (s.id === stepId ? { ...s, status: 'running' as const } : s)) ??
+                    current?.plan,
+                }));
+              } else if (event.type === 'token' && event.content) {
                 accumulated += event.content;
                 updateLastMessage(accumulated);
+              } else if (event.type === 'plan_step_complete' && event.data?.stepId) {
+                const stepId = event.data.stepId;
+                const stepStatus = event.data.status === 'failed' ? 'failed' : 'completed';
+                const stepResult = event.data.result ?? undefined;
+                // Update the plan step status on the plan preview card.
+                // Uses function updater to avoid stale closure on `messages`.
+                updateMessageMetadataAt(messageIndex, current => ({
+                  ...current,
+                  responseType: 'plan_preview',
+                  plan:
+                    current?.plan?.map(s =>
+                      s.id === stepId ? { ...s, status: stepStatus as 'completed' | 'failed', result: stepResult } : s
+                    ) ?? current?.plan,
+                }));
               } else if (event.type === 'done') {
                 if (accumulated.length === 0) {
                   updateLastMessage('Plan executed successfully.');
                 }
+                console.debug('[SprkChat] Plan approval stream complete — planId:', planIdToApprove);
               } else if (event.type === 'error') {
                 // Mark all non-completed steps as 'failed' (ErrorCircle icon)
                 updateMessageMetadataAt(messageIndex, current => ({
@@ -1555,11 +1487,31 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
                 }));
                 updateLastMessage(`Plan execution error: ${event.content ?? 'Unknown error'}`);
               }
-            }
-          }
+            },
+          });
         } catch (err: unknown) {
           if (err instanceof DOMException && err.name === 'AbortError') {
             // Cancelled (component unmount or new plan approval started) — not an error
+            return;
+          }
+          if (err instanceof SseHttpError) {
+            // HTTP-status branches (pre-consolidation behavior: message only,
+            // no step-failure marking).
+            if (err.status === 409) {
+              // Double-click or already approved — update message to reflect this
+              updateLastMessage('This plan was already approved or has expired. Please send a new message.');
+              return;
+            }
+            if (err.status === 404) {
+              updateLastMessage('Plan not found. It may have expired (30-minute limit). Please resend your request.');
+              return;
+            }
+            updateLastMessage(`Plan approval failed (${err.status}): ${err.bodyText}`);
+            return;
+          }
+          if (err instanceof Error && err.message === 'Response body is empty') {
+            // readSseStream's empty-body throw — pre-consolidation early return.
+            updateLastMessage('Plan approval response body is empty.');
             return;
           }
           const errorMsg = err instanceof Error ? err.message : 'Unknown plan approval error';
@@ -2008,92 +1960,37 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
             operationType: 'diff',
           });
 
-          // Auth v2 (D-AUTH-7): fresh token per stream open. Raw fetch is required
-          // here for the ReadableStream body (SSE); authenticatedFetch cannot be used.
-          const token = await getAccessToken();
-          const tenantId = extractTidFromToken(token);
+          // task 045 (FR-P3-06, NFR-08): the canonical readSseStream owns the
+          // fetch + reader + buffer machinery (Auth v2 fresh token per open +
+          // X-Tenant-Id derivation). Per-event handling preserved verbatim.
           const baseUrl = apiBaseUrl.replace(/\/+$/, '');
           const refineUrl = `${baseUrl}/api/ai/chat/sessions/${session.sessionId}/refine`;
 
-          const response = await fetch(refineUrl, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${token}`,
-              ...(tenantId ? { 'X-Tenant-Id': tenantId } : {}),
-            },
-            body: JSON.stringify({
+          await readSseStream({
+            url: refineUrl,
+            body: {
               selectedText,
               instruction,
               // TRACKED: GitHub #234 - PH-112-A: surroundingContext not yet available
               surroundingContext: null,
-            }),
+            },
+            getAccessToken,
             signal: controller.signal,
-          });
-
-          if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(`Refine request failed (${response.status}): ${errorText}`);
-          }
-
-          if (!response.body) {
-            throw new Error('Response body is empty');
-          }
-
-          const reader = response.body.getReader();
-          const decoder = new TextDecoder();
-          let buffer = '';
-
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-
-            buffer += decoder.decode(value, { stream: true });
-
-            // Parse SSE events separated by double newlines
-            const parts = buffer.split('\n\n');
-            buffer = parts.pop() || '';
-
-            for (const part of parts) {
-              const lines = part.split('\n');
-              for (const line of lines) {
-                const event = parseSseEvent(line);
-                if (!event) continue;
-
-                if (event.type === 'token' && event.content) {
-                  // Route token through bridge for Analysis Workspace consumption
-                  bridge.emit('document_stream_token', {
-                    operationId,
-                    token: event.content,
-                    index: tokenIndex++,
-                  });
-                } else if (event.type === 'done') {
-                  // Stream completed successfully
-                  bridge.emit('document_stream_end', {
-                    operationId,
-                    cancelled: false,
-                    totalTokens: tokenIndex,
-                  });
-                } else if (event.type === 'error') {
-                  throw new Error(event.content || 'Refinement stream error');
-                }
-              }
-            }
-          }
-
-          // Process any remaining buffer
-          if (buffer.trim()) {
-            const lines = buffer.split('\n');
-            for (const line of lines) {
+            mapHttpError: async response =>
+              new Error(`Refine request failed (${response.status}): ${await response.text()}`),
+            onLine: (line: string) => {
               const event = parseSseEvent(line);
-              if (!event) continue;
+              if (!event) return;
+
               if (event.type === 'token' && event.content) {
+                // Route token through bridge for Analysis Workspace consumption
                 bridge.emit('document_stream_token', {
                   operationId,
                   token: event.content,
                   index: tokenIndex++,
                 });
               } else if (event.type === 'done') {
+                // Stream completed successfully
                 bridge.emit('document_stream_end', {
                   operationId,
                   cancelled: false,
@@ -2102,8 +1999,8 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
               } else if (event.type === 'error') {
                 throw new Error(event.content || 'Refinement stream error');
               }
-            }
-          }
+            },
+          });
 
           // Update the chat status message
           if (tokenIndex === 0) {

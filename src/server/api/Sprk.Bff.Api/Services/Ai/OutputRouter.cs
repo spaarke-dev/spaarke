@@ -17,10 +17,10 @@ namespace Sprk.Bff.Api.Services.Ai;
 /// <para>
 /// <b>Interface rationale (ADR-010 tension, documented)</b>: ADR-010 prefers concrete
 /// registrations, but this seam is a genuine module boundary — P1 tasks 022/023/024 and
-/// every P2/P3 executor write through it, P3 adds the remaining disposition legs
-/// (work_product / overlay / email / record / notification), and callers mock it at the
-/// module boundary per ADR-038. That is "multiple consumers + evolving implementations",
-/// not interface-for-testability-alone.
+/// every P2/P3 executor write through it, P3 added the email (task 043) and work_product
+/// (task 047) disposition legs with overlay/record/notification still to land, and callers
+/// mock it at the module boundary per ADR-038. That is "multiple consumers + evolving
+/// implementations", not interface-for-testability-alone.
 /// </para>
 /// <para>
 /// <b>ADR-039</b>: the disposition consumed here comes exclusively from the resolved
@@ -50,6 +50,10 @@ public interface IOutputRouter
     /// store). The <c>email</c> disposition (FR-P3-04) delivers via
     /// <see cref="IEmailDispositionSender"/> AFTER the ledger write (the payload must carry
     /// the capability-supplied <c>email</c> envelope), then returns the stored entry.
+    /// The <c>work_product</c> disposition (FR-P3-08) persists the stored entry's envelope
+    /// to the session's host Dataverse record via <see cref="IWorkProductRecordPersister"/>
+    /// AFTER the ledger write, then returns the stored entry (callers may still render it —
+    /// storage, persistence, and rendering are independent contracts).
     /// Remaining dispositions throw <see cref="NotSupportedException"/> AFTER the ledger
     /// write (loud P3 stubs — never a silent fallback to inline render).
     /// </returns>
@@ -94,11 +98,14 @@ public sealed record RoutedOutput
 /// turn, tenant, session, payload SIZE) — never payload content.
 /// </para>
 /// <para>
-/// <b>Inline payload size cap (ADR-040)</b>: P1 outputs (chat summaries) are small; the
-/// blob/SPE-pointer offload lands with the work_product disposition leg (P3) where large
-/// outputs first occur. Until then, payloads exceeding
+/// <b>Inline payload size cap (ADR-040)</b>: payloads exceeding
 /// <see cref="InlinePayloadWarnBytes"/> log a Warning (size only) so oversized entries are
-/// observable before the offload mechanism exists.
+/// observable. The blob/SPE-pointer OFFLOAD for over-cap inline payloads remains DEFERRED:
+/// task 047 (FR-P3-08) landed the work_product leg, whose envelope persists to the host
+/// Dataverse record (a durable out-of-session copy), but the inline ledger payload is not
+/// yet pointer-swapped — the POML did not prescribe the offload and building an
+/// unprescribed storage path would be scope creep (CLAUDE.md §11). Escalated at task 047
+/// for an operator ruling on where the offload lands (P4 hardening / Track B).
 /// </para>
 /// </remarks>
 public sealed class OutputRouter : IOutputRouter
@@ -109,6 +116,7 @@ public sealed class OutputRouter : IOutputRouter
     private readonly ChatSessionManager _sessionManager;
     private readonly ILogger<OutputRouter> _logger;
     private readonly IEmailDispositionSender? _emailSender;
+    private readonly IWorkProductRecordPersister? _workProductPersister;
 
     /// <param name="sessionManager">Session persistence seam (the ledger write path).</param>
     /// <param name="logger">Logger (identifiers only per NFR-07).</param>
@@ -118,14 +126,21 @@ public sealed class OutputRouter : IOutputRouter
     /// constructions stay valid; when null, the email leg fails LOUDLY at routing time —
     /// never a silent skip.
     /// </param>
+    /// <param name="workProductPersister">
+    /// FR-P3-08 work_product disposition persistence seam (same optional-with-loud-failure
+    /// shape as <paramref name="emailSender"/>): when null, the work_product leg fails
+    /// LOUDLY at routing time — never a silent skip.
+    /// </param>
     public OutputRouter(
         ChatSessionManager sessionManager,
         ILogger<OutputRouter> logger,
-        IEmailDispositionSender? emailSender = null)
+        IEmailDispositionSender? emailSender = null,
+        IWorkProductRecordPersister? workProductPersister = null)
     {
         _sessionManager = sessionManager ?? throw new ArgumentNullException(nameof(sessionManager));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _emailSender = emailSender;
+        _workProductPersister = workProductPersister;
     }
 
     /// <inheritdoc />
@@ -200,11 +215,19 @@ public sealed class OutputRouter : IOutputRouter
                 await DeliverEmailAsync(entry, cancellationToken).ConfigureAwait(false);
                 return new RoutedOutput { Entry = entry, Session = updated };
 
+            // Work product (FR-P3-08, task 047): persist the STORED entry's envelope to the
+            // session's host Dataverse record via the topic-registry target mapping
+            // (widgets-r1 pattern, generalized). Storage already happened above (ADR-040
+            // store-precedes-persistence); a persistence failure propagates AFTER the
+            // ledger write — the entry stays addressable, the invocation fails loudly.
+            case BindingDisposition.WorkProduct:
+                await PersistWorkProductAsync(entry, binding, session, cancellationToken).ConfigureAwait(false);
+                return new RoutedOutput { Entry = entry, Session = updated };
+
             // Remaining P3 dispositions: LOUD NotSupported stubs (task-021 contract — no
             // silent fallback to inline render). The ledger entry above IS stored and
-            // addressable; only the rendering leg is missing until its P3 task lands
-            // (work_product/record → task 047; overlay/notification → later P3 waves).
-            case BindingDisposition.WorkProduct:
+            // addressable; only the rendering leg is missing until its task lands
+            // (overlay/record/notification → later waves).
             case BindingDisposition.Overlay:
             case BindingDisposition.Record:
             case BindingDisposition.Notification:
@@ -269,6 +292,46 @@ public sealed class OutputRouter : IOutputRouter
         _logger.LogInformation(
             "Ledger output {Key} routed to email disposition: recipients={RecipientCount}",
             entry.Key, recipients.Count);
+    }
+
+    /// <summary>
+    /// FR-P3-08 work_product leg: persist the STORED entry's envelope to the session's
+    /// host Dataverse record via <see cref="IWorkProductRecordPersister"/> (topic-registry
+    /// target mapping; user-OBO write). Loud on every failure mode (missing persister,
+    /// missing/invalid host context, persistence failure) — never a silent skip.
+    /// </summary>
+    private async Task PersistWorkProductAsync(
+        SessionOutput entry,
+        Binding binding,
+        ChatSession session,
+        CancellationToken cancellationToken)
+    {
+        if (_workProductPersister is null)
+        {
+            throw new InvalidOperationException(
+                $"OutputRouter: output '{entry.Key}' declares the work_product disposition but no " +
+                "IWorkProductRecordPersister is registered. The entry WAS stored (ADR-040); persistence is " +
+                "unconfigured — register TopicRegistryWorkProductPersister in the compound-AI-ON block.");
+        }
+
+        if (session.HostContext is null || !session.HostContext.IsValid())
+        {
+            throw new InvalidOperationException(
+                $"OutputRouter: output '{entry.Key}' declares the work_product disposition but the session " +
+                "carries no valid host record context (HostContext). Work-product envelopes persist to the " +
+                "session's HOST RECORD — invoke this capability from a record-hosted surface (the session " +
+                "must be created with a HostContext), or change the Binding's disposition. The entry WAS " +
+                "stored to the session ledger (ADR-040).");
+        }
+
+        var receipt = await _workProductPersister
+            .PersistAsync(entry, binding, session.HostContext, cancellationToken)
+            .ConfigureAwait(false);
+
+        // NFR-07: identifiers only.
+        _logger.LogInformation(
+            "Ledger output {Key} routed to work_product disposition: entity={Entity} recordId={RecordId} targetField={TargetField}",
+            receipt.LedgerKey, receipt.EntityLogicalName, receipt.RecordId, receipt.TargetField);
     }
 }
 

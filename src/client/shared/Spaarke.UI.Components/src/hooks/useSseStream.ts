@@ -19,9 +19,11 @@
  * mid-session, and then attached to an SSE stream that consequently 401'd silently
  * (EventSource has no auto-401 retry).
  *
- * NOTE: `authenticatedFetch` cannot be used here because SSE requires streaming the
- * ReadableStream body, which the wrapper function does not expose. The hook
- * replicates the same token-attachment + X-Tenant-Id derivation pattern internally.
+ * NOTE: the `useSseStream` HOOK always uses the token-getter mode (fresh token +
+ * X-Tenant-Id derivation per stream open). The underlying `readSseStream`
+ * primitive ALSO accepts a caller-supplied `fetchImpl` (typically
+ * `authenticatedFetch` from `@spaarke/auth`) for consumers whose auth is owned
+ * by a wrapper fetch — see the task 045 extension note on {@link readSseStream}.
  *
  * CONSOLIDATION NOTE (AIPU2-082):
  * Two prior implementations were merged here:
@@ -187,13 +189,27 @@ function extractTenantId(token: string): string | null {
 export interface ReadSseStreamOptions {
   /** Fully-constructed streaming endpoint URL (never a raw template literal). */
   url: string;
-  /** JSON request body for the POST. */
-  body: Record<string, unknown>;
+  /**
+   * POST request body. A plain record is `JSON.stringify`'d and sent with
+   * `Content-Type: application/json`; a `FormData` is passed through verbatim
+   * WITHOUT a Content-Type header so the browser sets the multipart boundary
+   * (task 045 / FR-P3-06 — multipart consumers such as the Summarize wizard).
+   */
+  body: Record<string, unknown> | FormData;
   /**
    * Fresh access-token getter (Auth v2 / D-AUTH-7). Invoked ONCE per stream
    * open, immediately before the fetch — never snapshot the token.
+   * Exactly ONE of `getAccessToken` / `fetchImpl` MUST be provided.
    */
-  getAccessToken: AccessTokenGetter;
+  getAccessToken?: AccessTokenGetter;
+  /**
+   * Caller-supplied fetch (typically `authenticatedFetch` from `@spaarke/auth`).
+   * When provided, `readSseStream` calls it with method/headers/body/signal and
+   * does NOT attach Authorization / X-Tenant-Id — the wrapper owns auth per
+   * ADR-028. Exactly ONE of `getAccessToken` / `fetchImpl` MUST be provided.
+   * (task 045 / FR-P3-06)
+   */
+  fetchImpl?: (url: string, init: RequestInit) => Promise<Response>;
   /** Optional AbortSignal for cancellation. AbortError propagates to the caller. */
   signal?: AbortSignal;
   /**
@@ -225,24 +241,60 @@ export interface ReadSseStreamOptions {
  * Token attachment + X-Tenant-Id derivation are identical to the pre-extraction
  * hook behavior. Errors (HTTP non-OK, empty body, network) throw; AbortError
  * propagates so hook callers can treat cancellation as a non-error.
+ *
+ * ai-architecture-redesign-r1 task 045 (FR-P3-06, NFR-08) extension — additive,
+ * backwards-compatible:
+ *   - `body` also accepts `FormData` (multipart pass-through, no Content-Type
+ *     header so the browser sets the boundary).
+ *   - `getAccessToken` is now optional; the new `fetchImpl` option lets callers
+ *     whose auth is owned by an `authenticatedFetch` wrapper (ADR-028) open the
+ *     stream without this function attaching Authorization / X-Tenant-Id.
+ *     Exactly one of the two MUST be provided.
+ * These extensions let every former hand-rolled SSE loop in this package
+ * (SprkChat plan-approve/editor-refine, useAiSummary, DocumentEmailWizard,
+ * SummarizeFilesWizard summarizeService, CreateMatterWizard matterService)
+ * consolidate onto this ONE reader loop.
  */
 export async function readSseStream(options: ReadSseStreamOptions): Promise<void> {
-  const { url, body, getAccessToken, signal, onLine, mapHttpError } = options;
+  const { url, body, getAccessToken, fetchImpl, signal, onLine, mapHttpError } = options;
 
-  // Auth v2 (D-AUTH-7): re-acquire a fresh token for THIS stream open.
-  const token = await getAccessToken();
-  const tenantId = extractTenantId(token);
+  // task 045: exactly ONE auth mode per stream open.
+  if (!getAccessToken && !fetchImpl) {
+    throw new Error('readSseStream: exactly one of getAccessToken or fetchImpl must be provided (got neither)');
+  }
+  if (getAccessToken && fetchImpl) {
+    throw new Error('readSseStream: exactly one of getAccessToken or fetchImpl must be provided (got both)');
+  }
 
-  const response = await fetch(url, {
-    method: 'POST',
-    headers: {
-      'Content-Type': 'application/json',
-      Authorization: `Bearer ${token}`,
-      ...(tenantId ? { 'X-Tenant-Id': tenantId } : {}),
-    },
-    body: JSON.stringify(body),
-    signal,
-  });
+  const isFormData = typeof FormData !== 'undefined' && body instanceof FormData;
+  const requestBody: BodyInit = isFormData ? (body as FormData) : JSON.stringify(body);
+  // FormData: NO Content-Type header — the browser sets the multipart boundary.
+  const contentHeaders: Record<string, string> = isFormData ? {} : { 'Content-Type': 'application/json' };
+
+  let response: Response;
+  if (fetchImpl) {
+    // ADR-028: the caller's authenticatedFetch owns Authorization / X-Tenant-Id.
+    response = await fetchImpl(url, {
+      method: 'POST',
+      headers: contentHeaders,
+      body: requestBody,
+      signal,
+    });
+  } else {
+    // Auth v2 (D-AUTH-7): re-acquire a fresh token for THIS stream open.
+    const token = await (getAccessToken as AccessTokenGetter)();
+    const tenantId = extractTenantId(token);
+    response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        ...contentHeaders,
+        Authorization: `Bearer ${token}`,
+        ...(tenantId ? { 'X-Tenant-Id': tenantId } : {}),
+      },
+      body: requestBody,
+      signal,
+    });
+  }
 
   if (!response.ok) {
     if (mapHttpError) {

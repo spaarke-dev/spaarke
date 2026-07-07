@@ -324,13 +324,16 @@ public class DispatchSessionEndpointContractTests : IClassFixture<DispatchSessio
     }
 
     [Fact]
-    public async Task Post_NonInformationalDisposition_Returns422_DispositionNotSupported()
+    public async Task Post_StubbedDisposition_Returns422_DispositionNotSupported()
     {
         _fx.Reset();
         _fx.Sessions.Session = BuildSession(TestSessionId, fileId: "file-001");
+        // Overlay's OutputRouter leg is still a loud stub — the dispatch seam rejects it
+        // PRE-RUN (before any LLM spend). WorkProduct left this rejection at task 047
+        // (FR-P3-08) when its routing leg landed; Informational left it at P1.
         _fx.ConsumerRoutingMock
             .Setup(c => c.GetBindingByIdAsync(TestBindingId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(_fx.BuildDefaultBinding() with { Disposition = BindingDisposition.WorkProduct });
+            .ReturnsAsync(_fx.BuildDefaultBinding() with { Disposition = BindingDisposition.Overlay });
 
         var client = _fx.CreateAuthenticatedClient();
         var response = await client.PostAsJsonAsync(
@@ -338,7 +341,7 @@ public class DispatchSessionEndpointContractTests : IClassFixture<DispatchSessio
             new { bindingId = TestBindingId.ToString() });
 
         response.StatusCode.Should().Be(HttpStatusCode.UnprocessableEntity,
-            "only Informational renders at P1 — rejected PRE-RUN (before any LLM spend)");
+            "a disposition whose routing leg is still a stub is rejected PRE-RUN (before any LLM spend)");
         (await response.Content.ReadAsStringAsync()).Should().Contain("dispatch.disposition-not-supported");
     }
 

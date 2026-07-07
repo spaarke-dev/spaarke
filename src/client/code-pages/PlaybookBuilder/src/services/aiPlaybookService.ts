@@ -16,6 +16,13 @@
  * expose. The same constraint applies to the canonical useSseStream hook in
  * @spaarke/ui-components — see its file header for the full rationale.
  *
+ * task 045 (FR-P3-06 / NFR-08): the SSE READ loop (fetch + getReader +
+ * TextDecoder + buffer split) is the canonical `readSseStream` from
+ * @spaarke/ui-components — exactly ONE SSE parse path client-wide. This
+ * service's wire format uses `event: {name}\ndata: {json}` pairs, so the
+ * event/data pairing is a small stateful line handler in `onLine`; the
+ * reader/buffer machinery itself is shared.
+ *
  * SSE Event Types:
  * - thinking: AI is processing
  * - dataverse_operation: Dataverse record created/updated
@@ -29,6 +36,7 @@
  * @version 3.0.0 (Auth v2 — function-based contract, task 024)
  */
 
+import { readSseStream } from '@spaarke/ui-components';
 import { getAccessToken } from './authInit';
 
 // ============================================================================
@@ -262,7 +270,12 @@ export class AiPlaybookService {
   /**
    * Build playbook canvas via SSE streaming.
    * Acquires a fresh Bearer token from the @spaarke/auth provider before
-   * opening this stream (D-AUTH-7 — never snapshotted, never reused).
+   * opening this stream (D-AUTH-7 — never snapshotted, never reused;
+   * `readSseStream` invokes the getter ONCE immediately before the fetch).
+   *
+   * task 045 (FR-P3-06 / NFR-08): the reader loop is the canonical
+   * `readSseStream`. The `event:`/`data:` pairing for this endpoint's wire
+   * format is a stateful line handler in `onLine` below.
    */
   async buildPlaybookCanvas(request: BuildPlaybookCanvasRequest, handlers: AiPlaybookEventHandlers): Promise<void> {
     // Abort any existing request
@@ -276,40 +289,65 @@ export class AiPlaybookService {
       this.abortController?.abort();
     }, this.config.timeout);
 
-    try {
-      // Auth v2 (D-AUTH-7): re-acquire a fresh token for THIS stream open.
-      // Cannot use authenticatedFetch — SSE requires ReadableStream body access
-      // that the wrapper does not expose. See file header for full rationale.
-      const accessToken = await getAccessToken();
+    // Stateful `event:`/`data:` pairing — tracks the last seen `event:` name;
+    // the following `data:` line completes the pair and is dispatched.
+    let pendingEventType: SseEventType | null = null;
+    // Mirrors the retired hand-rolled loop: stop consuming after done/error.
+    let stopped = false;
 
+    try {
       const url = `${this.config.apiBaseUrl}/api/ai/playbook-builder/process`;
 
-      const response = await fetch(url, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Authorization: `Bearer ${accessToken}`,
-          Accept: 'text/event-stream',
-        },
-        body: JSON.stringify(request),
+      await readSseStream({
+        url,
+        body: request as unknown as Record<string, unknown>,
+        getAccessToken,
         signal,
+        mapHttpError: async response => {
+          const errorText = await response.text();
+          return new Error(`HTTP ${response.status}: ${errorText || response.statusText}`);
+        },
+        onLine: (line: string) => {
+          if (stopped) {
+            return;
+          }
+          const trimmed = line.trim();
+
+          if (trimmed.startsWith('event:')) {
+            pendingEventType = trimmed.substring(6).trim() as SseEventType;
+            return;
+          }
+
+          if (trimmed.startsWith('data:') && pendingEventType !== null) {
+            const eventType = pendingEventType;
+            pendingEventType = null;
+
+            const dataStr = trimmed.substring(5).trim();
+            let data: unknown;
+            try {
+              data = JSON.parse(dataStr);
+            } catch {
+              console.warn('[AiPlaybookService] Failed to parse event data:', dataStr);
+              return;
+            }
+
+            this.dispatchEvent({ type: eventType, data }, handlers);
+
+            // The retired hand-rolled loop stopped reading after done/error;
+            // abort the stream to preserve that termination behavior (the
+            // AbortError is swallowed below, matching the original early return).
+            if (eventType === 'done' || eventType === 'error') {
+              stopped = true;
+              this.abortController?.abort();
+            }
+          }
+        },
       });
-
-      if (!response.ok) {
-        const errorText = await response.text();
-        throw new Error(`HTTP ${response.status}: ${errorText || response.statusText}`);
-      }
-
-      if (!response.body) {
-        throw new Error('Response body is null');
-      }
-
-      // Process the SSE stream
-      await this.processStream(response.body, handlers);
     } catch (error) {
       if (error instanceof Error) {
         if (error.name === 'AbortError') {
-          // Request was aborted, don't call error handler
+          // Request was aborted (user abort, timeout, or post-done/error stop)
+          // — don't call error handler
           return;
         }
         handlers.onConnectionError?.(error);
@@ -337,94 +375,6 @@ export class AiPlaybookService {
    */
   isStreaming(): boolean {
     return this.abortController !== null;
-  }
-
-  /**
-   * Process the SSE stream.
-   */
-  private async processStream(body: ReadableStream<Uint8Array>, handlers: AiPlaybookEventHandlers): Promise<void> {
-    const reader = body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
-
-    try {
-      while (true) {
-        const { done, value } = await reader.read();
-
-        if (done) {
-          break;
-        }
-
-        // Decode chunk and add to buffer
-        const chunk = decoder.decode(value, { stream: true });
-        buffer += chunk;
-
-        // Process complete events from buffer
-        const events = this.parseEventsFromBuffer(buffer);
-        buffer = events.remaining;
-
-        for (const event of events.parsed) {
-          this.dispatchEvent(event, handlers);
-
-          // Stop processing if done or error
-          if (event.type === 'done' || event.type === 'error') {
-            return;
-          }
-        }
-      }
-
-      // Process any remaining data in buffer
-      if (buffer.trim()) {
-        const events = this.parseEventsFromBuffer(buffer + '\n\n');
-        for (const event of events.parsed) {
-          this.dispatchEvent(event, handlers);
-        }
-      }
-    } finally {
-      reader.releaseLock();
-    }
-  }
-
-  /**
-   * Parse SSE events from buffer.
-   * SSE format: event: {type}\ndata: {json}\n\n
-   */
-  private parseEventsFromBuffer(buffer: string): {
-    parsed: SseEvent[];
-    remaining: string;
-  } {
-    const parsed: SseEvent[] = [];
-    const eventRegex = /event:\s*(\w+)\s*\ndata:\s*([^\n]+)(?=\n\n|\nevent:|\n?$)/g;
-
-    let lastIndex = 0;
-    let match: RegExpExecArray | null;
-
-    while ((match = eventRegex.exec(buffer)) !== null) {
-      const [fullMatch, eventType, dataStr] = match;
-      lastIndex = match.index + fullMatch.length;
-
-      try {
-        // Check if this event is complete (followed by double newline or end)
-        const afterMatch = buffer.slice(lastIndex);
-        if (!afterMatch.startsWith('\n') && afterMatch.length > 0 && !afterMatch.startsWith('\nevent:')) {
-          // Event might be incomplete, stop here
-          break;
-        }
-
-        const data = JSON.parse(dataStr.trim());
-        parsed.push({
-          type: eventType as SseEventType,
-          data,
-        });
-      } catch {
-        console.warn('[AiPlaybookService] Failed to parse event data:', dataStr);
-      }
-    }
-
-    // Return remaining unparsed buffer
-    const remaining = lastIndex > 0 ? buffer.slice(lastIndex).replace(/^\n+/, '') : buffer;
-
-    return { parsed, remaining };
   }
 
   /**

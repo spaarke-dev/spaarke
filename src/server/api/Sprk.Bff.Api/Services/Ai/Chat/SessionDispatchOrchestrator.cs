@@ -211,15 +211,19 @@ public class SessionDispatchOrchestrator
                 "the P1 dispatch path executes prompted Actions only.");
         }
 
-        // P1 envelope: only Informational renders. Rejecting PRE-RUN is cheaper and more
-        // honest than letting OutputRouter's loud P3 stubs throw after the LLM spend.
-        if (binding.Disposition != BindingDisposition.Informational)
+        // Disposition envelope: the dispatch seam executes the dispositions whose
+        // OutputRouter legs are IMPLEMENTED — Informational (P1 task 021) and WorkProduct
+        // (FR-P3-08 task 047: host-record persistence). Rejecting the still-stubbed legs
+        // PRE-RUN is cheaper and more honest than letting OutputRouter's loud stubs throw
+        // after the LLM spend. (Email is deliberately NOT dispatchable here — its only
+        // consumer is the coded briefing composite, which routes directly; see task 043.)
+        if (binding.Disposition is not (BindingDisposition.Informational or BindingDisposition.WorkProduct))
         {
             throw new DispatchRejectedException(
                 DispatchRejectedException.DispositionUnsupported,
                 StatusCodes.Status422UnprocessableEntity,
                 $"The requested binding declares disposition '{binding.Disposition}'; " +
-                "only informational outputs render at P1.");
+                "only informational and work_product outputs execute on the dispatch path.");
         }
 
         var action = await _scopeResolver
@@ -556,7 +560,7 @@ public sealed class DispatchRejectedException : Exception
     /// <summary>The Binding targets a kind the P1 dispatch path cannot execute (422).</summary>
     public const string ActionKindUnsupported = "dispatch.action-kind-unsupported";
 
-    /// <summary>The Binding declares a disposition that does not render at P1 (422).</summary>
+    /// <summary>The Binding declares a disposition whose routing leg the dispatch path cannot execute yet (422).</summary>
     public const string DispositionUnsupported = "dispatch.disposition-not-supported";
 
     /// <summary>Stable machine error code (ADR-019 ProblemDetails extension).</summary>

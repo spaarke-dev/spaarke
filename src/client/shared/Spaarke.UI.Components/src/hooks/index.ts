@@ -10,7 +10,10 @@ export * from './useWriteMode';
 export { useSseStream, parseSseEvent, parsePaneEvent, readSseStream } from './useSseStream';
 export type { ReadSseStreamOptions } from './useSseStream';
 export * from './useAiSummary';
-export * from './useLinearRunProgress';
+// task 045 (FR-P3-06, NFR-08): the useLinearRunProgress HOOK was deleted (dead
+// hook body — zero runtime call sites; duplicated the canonical readSseStream
+// loop). Only its event/state TYPES remain at the same module path.
+export type { LinearRunEvent, LinearRunEventKind, LinearRunState } from './useLinearRunProgress';
 export * from './useAiPrefill';
 export * from './useForceSimulation';
 export * from './useInlineAiToolbar';

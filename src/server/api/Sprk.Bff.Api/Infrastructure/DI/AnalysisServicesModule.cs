@@ -660,6 +660,18 @@ public static class AnalysisServicesModule
                            Sprk.Bff.Api.Services.Ai.CommunicationEmailDispositionSender>();
         Console.WriteLine("✓ EmailDispositionSender registered (FR-P3-04 email disposition leg → Communication service)");
 
+        // IWorkProductRecordPersister — the OutputRouter work_product-disposition
+        // persistence seam (FR-P3-08, task 047; same optional-dependency shape as the
+        // email sender above). Generalizes the widgets-r1 topic-registry pattern: resolves
+        // the capability's sprk_aitopicregistry target mapping (topic = the Binding's
+        // capability code) and PATCHes the stored ledger envelope onto the session's host
+        // record under user-OBO (IDataverseUserClient — unconditional typed HttpClient,
+        // fail-closed). Scoped to match its consumer (OutputRouter). See
+        // IWorkProductRecordPersister remarks for the ADR-010/§11 interface justification.
+        services.AddScoped<Sprk.Bff.Api.Services.Ai.IWorkProductRecordPersister,
+                           Sprk.Bff.Api.Services.Ai.TopicRegistryWorkProductPersister>();
+        Console.WriteLine("✓ WorkProductRecordPersister registered (FR-P3-08 work_product disposition leg → host-record persistence)");
+
         // SessionDispatchOrchestrator — THE dispatch seam (FR-P1-04 task 023b; FR-P3-05
         // task 044 convergence). Resolves a Binding row BY ID (chips carry binding_id —
         // ADR-039 D4: the id IS the routing decision) via
@@ -682,7 +694,8 @@ public static class AnalysisServicesModule
         // ai-architecture-redesign-r1 task 021). Every capability execution writes an
         // addressable SessionOutput ({bindingId}@t{n}) through this seam BEFORE rendering,
         // then routing follows the Binding's declared disposition (informational live at P1;
-        // remaining dispositions are loud P3 NotSupported stubs — no silent fallback).
+        // email live since task 043; work_product live since task 047; overlay/record/
+        // notification remain loud NotSupported stubs — no silent fallback).
         // Scoped: wraps ChatSessionManager (Scoped).
         //
         // §F.1 asymmetric-registration audit (static scan 2026-07-05; refreshed by task 044
@@ -704,7 +717,9 @@ public static class AnalysisServicesModule
         // IOutputRouter write path. Boundary shim on OUR side of the ADR-039 freeze line —
         // zero changes inside PlaybookOrchestrationService/nodes; attaches in
         // AnalysisExecutionHandler (the sole surviving chat-session-attached engine leg
-        // after the task-044 F-1 deletions). P3 FR-P3-08 adds the record-context leg.
+        // after the task-044 F-1 deletions). FR-P3-08 (task 047) landed record persistence
+        // as the OutputRouter work_product leg — session-scoped by design; session-less
+        // engine runs keep their playbook-node persistence (widgets-r1 pattern).
         // Scoped: wraps ChatSessionManager (Scoped) + IOutputRouter (Scoped).
         //
         // §F.1 asymmetric-registration audit (task 024; refreshed task 044): consumed ONLY

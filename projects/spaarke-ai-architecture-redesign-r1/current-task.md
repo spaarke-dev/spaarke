@@ -9,10 +9,15 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | W-P3-C: 045 (client consolidation: ConversationPane ≤300 + ONE SSE path) + 047 (work-product record persistence) — dispatching |
-| **Step** | 044 ✅ COMPLETE (engine shells + F-1 legs deleted, −11,849 lines). P3: 040–044 ✅. |
+| **Task** | 046 — widget layer (dedupe registries; ExecutionTraceWidget from ledger ToolChain; FieldDelta deleted) — dispatching |
+| **Step** | W-P3-C ✅ (045 + 047). P3: 040–045 + 047 ✅ — only 046 + gate 048 remain in P3. |
 | **Status** | autonomous execution |
-| **Next Action** | On W-P3-C return: wave close, then 046 (widget layer; deps 045) → gate-048 deploy (BFF + SpaarkeAi) + STOP for operator UAT. |
+| **Next Action** | On 046 return: wave close, deploy BFF + SpaarkeAi + verify healthz/catalog, write consolidated gate-048 UAT script + rulings list into this file, STOP for operator UAT (NFR-11). |
+
+### W-P3-C outcomes (both Step 9.5 PASS)
+- **045**: ConversationPane 3,172 → 300 lines over 11 modules (semantics verbatim, 216/216 before+after; unstable-identity review warning fixed — all hooks memoized). ONE SSE path: every hand-rolled parser deleted/re-pointed (LW SummarizeFiles cluster gone; useAiSummary/matterService×2/summarizeService/aiPlaybookService/analysisApi/SprkChat plan-approve loops consolidated; useSseStream gained FormData+fetchImpl modes). Keep-with-reason: office-addins SseClient (🔔 ruling optional). Wizard multipart summarize NOT moved to dispatchConsumer (server resolves Binding by consumerType — ADR-039-conform; full migration needs a file-carrying dispatch contract = server decision). Slash: POML silent; needs a capability-discovery READ endpoint (recorded for backlog/r2). Dormant playbook_options client leg → 046/Track-B candidate. /defer-worthy: AnalysisWorkspace jest ESM debt + 22/32 pre-existing code-page tsc errors.
+- **047**: work_product leg live (store→persist, loud-after-store, idempotent single-field PATCH; dispatch envelope admits Informational+WorkProduct). Rows: matter-summary Binding 05618e5d + topic-registry cfca6a65 + NEW sprk_matter.sprk_mattersummary memo column. 🔔 ADR-040 size-cap needs a home (048 ruling: P4 FR-P4-06 window or Track B).
+- Gate-048 UAT additions from 045/047 recorded in their notes files (§9 / §UAT).
 
 ### 044 outcomes (Step 9.5 PASS ×2)
 - Deleted: PlaybookExecutionEngine (+iface), SessionSummarizeOrchestrator (+Null +tests; /summarize → SessionDispatchOrchestrator = 4th caller of THE seam; FR-04 interjection retired; /summarize now emits chips chunk), FileSummarizeService + DocumentProfileService (call sites absorbed onto ActionRunner primitives; summarize-file ENGINE FALLBACK deleted — row-without-Action = honest error; new NullActionResolver/NullActionRunner peers), F-1 legs InvokePlaybookHandler/AnalysisQueryHandler/WorkingDocumentHandler + IInvokePlaybookAi facade triangle + ~330 lines D-A-14 machinery (5 tool rows DEACTIVATED on spaarkedev1: 7389739e/8e33860b/d90f647e/3db0c084/ae580d84; catalog stays Healthy), orphaned R5SummarizeTelemetry.

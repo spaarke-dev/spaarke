@@ -691,6 +691,30 @@
       "expected": { "outcomeClass": "clarify", "consumerType": "create-task", "consumerCode": "default", "catalogStatus": "existing" },
       "assertions": { "schemaConformance": null, "citationIntegrity": false },
       "activation": { "dispatchAssertPhase": "P3", "activatedBy": "P3 wave (FR-P3-03 task 042 — suspend + confirm-resume + ledger-refs live-asserted with the task; browser walkthrough steps 10-14 at gate task 048)" }
+    },
+    {
+      "caseId": "GU-060",
+      "family": "matter-summary",
+      "ucId": "UC-A-1",
+      "channel": "text",
+      "utterance": "summarize this document and save the summary to the matter",
+      "notes": "FR-P3-08 (task 047) — the work_product disposition leg (canonical §3.10.3: same UC-A-1 engine, second Consumer with a different disposition — the 'matter-summary-artifact' pattern). The chat-summarize/matter-summary Binding row (sprk_disposition=work_product) targets the SAME SUM-CHAT@v1 prompted Action as the default row and projects into the loop via its sprk_tooldescription. On dispatch, OutputRouter stores the SessionOutput ledger entry FIRST (ADR-040), then TopicRegistryWorkProductPersister resolves the topic-registry target mapping (sprk_aitopicregistry topic 'matter-summary' -> sprk_matter.sprk_mattersummary) and PATCHes the work-product-envelope-v1 onto the session's host matter record under user-OBO (If-Match update-only; idempotent single-field overwrite). Envelope contract pinned at infra/dataverse/outputschemas/work-product-envelope-v1.schema.json; store-then-persist + envelope conformance live-asserted by WorkProductEnvelopePersistenceContractTests; browser proof (envelope visible on the matter) at gate task 048.",
+      "context": { "surface": "record-form-chat", "sessionHasDocument": true, "recordType": "sprk_matter" },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "chat-summarize", "consumerCode": "matter-summary", "catalogStatus": "existing" },
+      "assertions": { "schemaConformance": "SUM-CHAT@v1", "citationIntegrity": false },
+      "activation": { "dispatchAssertPhase": "P3", "activatedBy": "P3 wave (FR-P3-08 task 047 — store-then-persist ordering + persisted-envelope schema conformance contract-asserted with the task; NL-loop dispatch + on-record visibility at gate task 048)" }
+    },
+    {
+      "caseId": "GU-061",
+      "family": "matter-summary",
+      "ucId": "UC-A-1",
+      "channel": "click",
+      "utterance": "[Save summary to matter] chip / matter-summary Binding dispatched by binding_id from a matter-hosted session",
+      "notes": "FR-P3-08 (task 047) — the Click-path shape of the work_product leg. A chip or wizard carrying the chat-summarize/matter-summary binding_id dispatches through the ONE seam (SessionDispatchOrchestrator), whose disposition envelope now admits work_product alongside informational (the still-stubbed overlay/record/notification legs stay 422 dispatch.disposition-not-supported). A session WITHOUT a host record context fails LOUDLY after the ledger store (the entry stays addressable; no silent skip) — work products persist to the session's HOST record only.",
+      "context": { "surface": "record-form-chat", "sessionHasDocument": true, "recordType": "sprk_matter" },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "chat-summarize", "consumerCode": "matter-summary", "catalogStatus": "existing" },
+      "assertions": { "schemaConformance": "SUM-CHAT@v1", "citationIntegrity": false },
+      "activation": { "dispatchAssertPhase": "P3", "activatedBy": "P3 wave (FR-P3-08 task 047 — dispatch-envelope widening + loud no-host-context failure unit/contract-asserted with the task; browser chip proof at gate task 048)" }
     }
   ]
 }
