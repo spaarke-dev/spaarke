@@ -86,6 +86,13 @@ export {
   // FR-A4-01 / FR-C1-01 additions (set-regarding-and-field-mapping-resolver-r1):
   resolveRecordNumberFieldName,
   _resetRecordNumberFieldCacheForTests,
+  // SRFR-052 (2026-07-06) — display-name resolution via
+  // `sprk_recordtype_ref.sprk_recorddisplaynamefield`. Fixes owner UAT bug
+  // where picker returned Matter's `sprk_matternumber` (its Primary Name)
+  // as the display name; resolver now queries the target for the catalog-
+  // nominated display-name column (e.g., `sprk_mattername`, `name`, `fullname`).
+  resolveRecordDisplayNameFieldName,
+  _resetDisplayNameFieldCacheForTests,
 } from './PolymorphicResolverService';
 export type {
   IPolymorphicWebApi,

@@ -31,7 +31,9 @@
 import {
   applyResolverFields,
   resolveRecordNumberFieldName,
+  resolveRecordDisplayNameFieldName,
   _resetRecordNumberFieldCacheForTests,
+  _resetDisplayNameFieldCacheForTests,
 } from '../PolymorphicResolverService';
 import type { INavPropEntry, IPolymorphicWebApi } from '../PolymorphicResolverService';
 
@@ -40,39 +42,92 @@ import type { INavPropEntry, IPolymorphicWebApi } from '../PolymorphicResolverSe
 // ---------------------------------------------------------------------------
 
 /**
- * Simulated `sprk_recordtype_ref` catalog rows (as-of Wave 0 task 002).
- * Value `null` = intentional graceful-blank (Contact/Person + host-only rows
- * that don't have a natural business-key text field).
+ * Simulated `sprk_recordtype_ref` catalog rows (as-of SRFR-052 2026-07-06).
+ * `recordNumberField` null = intentional graceful-blank (Contact/Person +
+ * host-only rows that don't have a natural business-key text field).
+ * `recordDisplayNameField` names the DISPLAY-NAME column on each target
+ * entity (SRFR-052 — mirrors the deployed schema). Owner UAT surfaced that
+ * `Xrm.Utility.lookupObjects` returns the Primary Name column, which for
+ * sprk_matter is `sprk_matternumber` (not `sprk_mattername`); the resolver
+ * now queries the catalog-nominated display-name column.
  */
-const CATALOG: Record<string, { recordTypeId: string; recordDisplayName: string; recordNumberField: string | null }> = {
-  sprk_matter: { recordTypeId: 'rt-matter', recordDisplayName: 'Matter', recordNumberField: 'sprk_matternumber' },
-  sprk_project: { recordTypeId: 'rt-project', recordDisplayName: 'Project', recordNumberField: 'sprk_projectnumber' },
-  sprk_event: { recordTypeId: 'rt-event', recordDisplayName: 'Event', recordNumberField: 'sprk_eventnumber' },
+const CATALOG: Record<
+  string,
+  {
+    recordTypeId: string;
+    recordDisplayName: string;
+    recordNumberField: string | null;
+    recordDisplayNameField: string | null;
+  }
+> = {
+  sprk_matter: {
+    recordTypeId: 'rt-matter',
+    recordDisplayName: 'Matter',
+    recordNumberField: 'sprk_matternumber',
+    recordDisplayNameField: 'sprk_mattername',
+  },
+  sprk_project: {
+    recordTypeId: 'rt-project',
+    recordDisplayName: 'Project',
+    recordNumberField: 'sprk_projectnumber',
+    recordDisplayNameField: 'sprk_projectname',
+  },
+  sprk_event: {
+    recordTypeId: 'rt-event',
+    recordDisplayName: 'Event',
+    recordNumberField: 'sprk_eventnumber',
+    recordDisplayNameField: 'sprk_eventname',
+  },
   sprk_workassignment: {
     recordTypeId: 'rt-wa',
     recordDisplayName: 'Work Assignment',
     recordNumberField: 'sprk_workassignmentnumber',
+    recordDisplayNameField: 'sprk_workassignmentname',
   },
-  sprk_invoice: { recordTypeId: 'rt-invoice', recordDisplayName: 'Invoice', recordNumberField: 'sprk_invoicenumber' },
-  sprk_budget: { recordTypeId: 'rt-budget', recordDisplayName: 'Budget', recordNumberField: 'sprk_budgetnumber' },
+  sprk_invoice: {
+    recordTypeId: 'rt-invoice',
+    recordDisplayName: 'Invoice',
+    recordNumberField: 'sprk_invoicenumber',
+    recordDisplayNameField: 'sprk_invoicename',
+  },
+  sprk_budget: {
+    recordTypeId: 'rt-budget',
+    recordDisplayName: 'Budget',
+    recordNumberField: 'sprk_budgetnumber',
+    recordDisplayNameField: 'sprk_budgetname',
+  },
   sprk_analysis: {
     recordTypeId: 'rt-analysis',
     recordDisplayName: 'Analysis',
     recordNumberField: 'sprk_analysisnumber',
+    recordDisplayNameField: 'sprk_analysisname',
   },
   sprk_organization: {
     recordTypeId: 'rt-org',
     recordDisplayName: 'Organization',
     recordNumberField: 'sprk_organizationnumber',
+    recordDisplayNameField: 'sprk_organizationname',
   },
   sprk_document: {
     recordTypeId: 'rt-doc',
     recordDisplayName: 'Document',
     recordNumberField: 'sprk_documentnumber',
+    recordDisplayNameField: 'sprk_documentname',
   },
-  account: { recordTypeId: 'rt-account', recordDisplayName: 'Account', recordNumberField: 'accountnumber' },
-  // Contact: intentional-null per Q-06 / A-07 (no natural business-key on OOB contact).
-  contact: { recordTypeId: 'rt-contact', recordDisplayName: 'Person', recordNumberField: null },
+  account: {
+    recordTypeId: 'rt-account',
+    recordDisplayName: 'Account',
+    recordNumberField: 'accountnumber',
+    recordDisplayNameField: 'name',
+  },
+  // Contact: intentional-null recordNumberField per Q-06 / A-07 (no natural
+  // business-key on OOB contact). Display-name uses OOB `fullname` (SRFR-052).
+  contact: {
+    recordTypeId: 'rt-contact',
+    recordDisplayName: 'Person',
+    recordNumberField: null,
+    recordDisplayNameField: 'fullname',
+  },
 };
 
 /**
@@ -112,16 +167,25 @@ function buildHostNavProps(): INavPropEntry[] {
 /**
  * Build a mock `IPolymorphicWebApi` that answers three families of queries:
  *   1. `sprk_recordtype_ref` catalog lookups (by logical name) — used by
- *      both `resolveRecordType` and `resolveRecordNumberFieldName`.
- *   2. Target-record lookups (by `${entity}id eq …`) — used by the new
- *      record-number read path.
+ *      `resolveRecordType`, `resolveRecordNumberFieldName`, and (SRFR-052)
+ *      `resolveRecordDisplayNameFieldName`. Returns ALL three catalog columns
+ *      regardless of `$select` since the mock is $select-agnostic.
+ *   2. Target-record lookups (by `${entity}id eq …`) — used by the resolver's
+ *      combined number + display-name read path. Supports multi-field
+ *      `$select=fieldA,fieldB` (SRFR-052 consolidated one round-trip).
  *   3. Anything else → empty entities array.
  *
- * `targetRecordValues` maps target entity logical name → record-number value.
- * `null` (or missing entry) means "target record has no value" for the null-
- * value scenario.
+ * `targetRecordValues` maps target entity logical name → per-field values.
+ * Supports two shapes:
+ *   - `{ sprk_matter: 'M-00042' }` → treated as `{ [numberField]: 'M-00042' }`
+ *     for backward compat with the FR-A4-01 tests.
+ *   - `{ sprk_matter: { sprk_matternumber: 'M-00042', sprk_mattername: 'Smith v Jones' } }`
+ *     → per-field values for the SRFR-052 display-name tests.
+ * Missing entry / null value = target record has no value for that field.
  */
-function buildMockWebApi(targetRecordValues: Record<string, string | null>): IPolymorphicWebApi {
+type TargetRecordValueSpec = string | null | Record<string, string | null>;
+
+function buildMockWebApi(targetRecordValues: Record<string, TargetRecordValueSpec>): IPolymorphicWebApi {
   return {
     retrieveMultipleRecords: jest.fn(async (entityLogicalName: string, query: string, _maxPageSize?: number) => {
       if (entityLogicalName === 'sprk_recordtype_ref') {
@@ -135,6 +199,7 @@ function buildMockWebApi(targetRecordValues: Record<string, string | null>): IPo
                 sprk_recordtype_refid: row.recordTypeId,
                 sprk_recorddisplayname: row.recordDisplayName,
                 sprk_regardingrecordnumberfield: row.recordNumberField,
+                sprk_recorddisplaynamefield: row.recordDisplayNameField,
               },
             ],
           };
@@ -143,23 +208,37 @@ function buildMockWebApi(targetRecordValues: Record<string, string | null>): IPo
       }
 
       // Target-record lookup (any entity except sprk_recordtype_ref).
-      // Fixture layer: return whatever `targetRecordValues[entity]` says
-      // for the source-field key. We infer the source-field name from
-      // the `$select=...` fragment.
+      // Support multi-field $select per SRFR-052 (resolver now reads both
+      // number and display-name in one round trip).
       const selectMatch = query.match(/\$select=([^&]+)/);
-      const selectedField = selectMatch ? selectMatch[1] : null;
-      if (selectedField && targetRecordValues[entityLogicalName] !== undefined) {
-        const value = targetRecordValues[entityLogicalName];
-        return {
-          entities: [
-            {
-              [selectedField]: value,
-            },
-          ],
-        };
+      const selectedFields = selectMatch ? selectMatch[1].split(',') : [];
+      const spec = targetRecordValues[entityLogicalName];
+      if (selectedFields.length === 0 || spec === undefined) {
+        return { entities: [] };
       }
 
-      return { entities: [] };
+      const record: Record<string, string | null> = {};
+      if (typeof spec === 'string' || spec === null) {
+        // Legacy single-value shape — assumed to be the record-number field.
+        // Populate whichever of the requested fields matches the catalog's
+        // number-field for this entity; leave others absent (=> null in the
+        // resolver's read).
+        const numberField = CATALOG[entityLogicalName]?.recordNumberField;
+        for (const field of selectedFields) {
+          if (field === numberField) {
+            record[field] = spec;
+          }
+        }
+      } else {
+        // Per-field object — return the requested subset.
+        for (const field of selectedFields) {
+          if (field in spec) {
+            record[field] = spec[field];
+          }
+        }
+      }
+
+      return { entities: [record] };
     }),
   };
 }
@@ -172,6 +251,7 @@ let consoleWarnSpy: jest.SpyInstance;
 
 beforeEach(() => {
   _resetRecordNumberFieldCacheForTests();
+  _resetDisplayNameFieldCacheForTests();
   consoleWarnSpy = jest.spyOn(console, 'warn').mockImplementation(() => {
     /* silence for expected-warn assertions */
   });
@@ -483,11 +563,16 @@ describe('applyResolverFields — NFR-06 graceful-blank', () => {
         'Matter',
         'matter'
       )
-    ).resolves.toEqual({ recordNumber: null, recordNumberSourceField: 'sprk_matternumber' });
+    ).resolves.toMatchObject({ recordNumber: null, recordNumberSourceField: 'sprk_matternumber' });
 
     expect(payload['sprk_regardingrecordnumber']).toBeUndefined();
+    // Warn message now includes both source fields because SRFR-052 consolidated
+    // the number + display-name reads into a single $select. Catalog fixture in
+    // this test only returns `sprk_regardingrecordnumberfield` (display-name
+    // catalog value defaults to null → excluded from $select), so the failed
+    // read's $select contains just `sprk_matternumber` — old assertion still holds.
     expect(consoleWarnSpy).toHaveBeenCalledWith(
-      expect.stringContaining('Failed to read "sprk_matternumber"'),
+      expect.stringContaining('Failed to read [sprk_matternumber]'),
       expect.any(Error)
     );
   });
@@ -615,5 +700,167 @@ describe('applyResolverFields — backward compat + explicit override', () => {
     // Fell back to catalog → resolved sprk_matternumber → target value M-00042.
     expect(payload['sprk_regardingrecordnumber']).toBe('M-00042');
     expect(result.recordNumberSourceField).toBe('sprk_matternumber');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// SRFR-052 (2026-07-06) — display-name resolution via
+// `sprk_recordtype_ref.sprk_recorddisplaynamefield`.
+//
+// Root cause fixed: `Xrm.Utility.lookupObjects` returns the target record's
+// Primary Name. For sprk_matter, the Primary Name column is
+// `sprk_matternumber` (NOT `sprk_mattername`), so the picker was returning
+// the number as the display name. Fix: catalog nominates the true display-
+// name column per entity; resolver queries the target for that column's
+// value and writes it to `sprk_regardingrecordname`. Falls back to the
+// picker-provided `parentRecordName` on null/missing (NFR-06 graceful-blank).
+// ---------------------------------------------------------------------------
+
+describe('resolveRecordDisplayNameFieldName', () => {
+  it('returns sprk_mattername for sprk_matter', async () => {
+    const webApi = buildMockWebApi({});
+    const result = await resolveRecordDisplayNameFieldName(webApi, 'sprk_matter');
+    expect(result).toBe('sprk_mattername');
+  });
+
+  it('returns name for account (OOB display-name column)', async () => {
+    const webApi = buildMockWebApi({});
+    const result = await resolveRecordDisplayNameFieldName(webApi, 'account');
+    expect(result).toBe('name');
+  });
+
+  it('returns fullname for contact (OOB display-name column)', async () => {
+    const webApi = buildMockWebApi({});
+    const result = await resolveRecordDisplayNameFieldName(webApi, 'contact');
+    expect(result).toBe('fullname');
+  });
+
+  it('caches on subsequent calls (single query per entity per page)', async () => {
+    const webApi = buildMockWebApi({});
+    await resolveRecordDisplayNameFieldName(webApi, 'sprk_matter');
+    await resolveRecordDisplayNameFieldName(webApi, 'sprk_matter');
+    await resolveRecordDisplayNameFieldName(webApi, 'sprk_matter');
+    expect(webApi.retrieveMultipleRecords).toHaveBeenCalledTimes(1);
+  });
+});
+
+describe('applyResolverFields — SRFR-052 display-name resolution', () => {
+  it("writes target's sprk_mattername value to sprk_regardingrecordname when metadata is present", async () => {
+    // Simulate the owner UAT bug scenario: picker hands back the Matter's
+    // Primary Name (sprk_matternumber → "M-00042") as parentRecordName; the
+    // resolver should REPLACE that with the true display name from
+    // sprk_mattername ("Smith v Jones") sourced from the catalog.
+    const webApi = buildMockWebApi({
+      sprk_matter: {
+        sprk_matternumber: 'M-00042',
+        sprk_mattername: 'Smith v Jones',
+      },
+    });
+    const payload: Record<string, unknown> = {};
+
+    const result = await applyResolverFields(
+      webApi,
+      payload,
+      buildHostNavProps(),
+      'sprk_matter',
+      'sprk_matters',
+      'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      // Simulate the picker returning the Primary Name (= sprk_matternumber
+      // value) as the display name — this is the UAT bug. The resolver
+      // should override this with the true display name.
+      'M-00042',
+      'matter'
+    );
+
+    // The resolved display name from the catalog wins over the picker fallback.
+    expect(payload['sprk_regardingrecordname']).toBe('Smith v Jones');
+    expect(result.displayName).toBe('Smith v Jones');
+    // 5th field still populated as normal.
+    expect(payload['sprk_regardingrecordnumber']).toBe('M-00042');
+    expect(result.recordNumber).toBe('M-00042');
+    expect(result.recordNumberSourceField).toBe('sprk_matternumber');
+  });
+
+  it('falls back to parentRecordName when metadata field is null (NFR-06 graceful)', async () => {
+    // Simulate a fresh environment where sprk_recorddisplaynamefield is NOT
+    // populated on the catalog row. The resolver should preserve the historical
+    // behavior (write parentRecordName) rather than skipping the field entirely.
+    const webApi: IPolymorphicWebApi = {
+      retrieveMultipleRecords: jest.fn(async (entityLogicalName: string, query: string) => {
+        if (entityLogicalName === 'sprk_recordtype_ref') {
+          return {
+            entities: [
+              {
+                sprk_recordtype_refid: 'rt-matter',
+                sprk_recorddisplayname: 'Matter',
+                sprk_regardingrecordnumberfield: 'sprk_matternumber',
+                sprk_recorddisplaynamefield: null, // NOT populated yet
+              },
+            ],
+          };
+        }
+        // Target-record query — number field only (display-name field excluded
+        // from $select because its catalog value is null).
+        const selectMatch = query.match(/\$select=([^&]+)/);
+        const selectedFields = selectMatch ? selectMatch[1].split(',') : [];
+        const record: Record<string, string | null> = {};
+        for (const field of selectedFields) {
+          if (field === 'sprk_matternumber') record[field] = 'M-00042';
+        }
+        return { entities: [record] };
+      }),
+    };
+    const payload: Record<string, unknown> = {};
+
+    const result = await applyResolverFields(
+      webApi,
+      payload,
+      buildHostNavProps(),
+      'sprk_matter',
+      'sprk_matters',
+      'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      'Fallback Matter Name',
+      'matter'
+    );
+
+    // Fell back to the picker-provided name (never left blank per NFR-06).
+    expect(payload['sprk_regardingrecordname']).toBe('Fallback Matter Name');
+    expect(result.displayName).toBe('Fallback Matter Name');
+    // Number path still works independently.
+    expect(payload['sprk_regardingrecordnumber']).toBe('M-00042');
+    // Warn logged for diagnostics.
+    expect(consoleWarnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('No sprk_recorddisplaynamefield mapping for "sprk_matter"')
+    );
+  });
+
+  it("falls back to parentRecordName when target record's display-name value is null (NFR-06 graceful)", async () => {
+    // Catalog resolves display-name field to `sprk_mattername`, but the target
+    // record's value is null (e.g., freshly created Matter without a name).
+    // Preserve the picker-provided fallback.
+    const webApi = buildMockWebApi({
+      sprk_matter: {
+        sprk_matternumber: 'M-00042',
+        sprk_mattername: null,
+      },
+    });
+    const payload: Record<string, unknown> = {};
+
+    const result = await applyResolverFields(
+      webApi,
+      payload,
+      buildHostNavProps(),
+      'sprk_matter',
+      'sprk_matters',
+      'aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee',
+      'Picker Fallback',
+      'matter'
+    );
+
+    expect(payload['sprk_regardingrecordname']).toBe('Picker Fallback');
+    expect(result.displayName).toBe('Picker Fallback');
+    expect(consoleWarnSpy).toHaveBeenCalledWith(
+      expect.stringContaining('has null/empty "sprk_mattername"')
+    );
   });
 });
