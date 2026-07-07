@@ -17,9 +17,13 @@ import {
 } from '@fluentui/react-components';
 import { OpenRegular, SparkleRegular } from '@fluentui/react-icons';
 import {
-  AiSummaryPopover,
+  AiSummaryPopover as RawAiSummaryPopover,
+  type IAiSummaryPopoverProps,
   type ISummaryData,
 } from '../../../../shared/Spaarke.UI.Components/src/components/AiSummaryPopover';
+
+// React 18/19 types-version drift workaround: see CardChrome.tsx for rationale.
+const AiSummaryPopover = RawAiSummaryPopover as unknown as React.ComponentType<IAiSummaryPopoverProps>;
 import { AppInsightsService } from '../../../../shared/Spaarke.UI.Components/src/services/AppInsightsService';
 import { IInputs } from '../generated/ManifestTypes';
 import { IChartDefinition, IChartData, DrillInteraction } from '../types';
@@ -765,7 +769,7 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({ context, notify
         ))}
 
       {/* Version badge - lower left, unobtrusive (controlled by showVersion PCF prop) */}
-      {showVersion && <span className={styles.versionBadge}>v1.4.16 • 2026-06-01</span>}
+      {showVersion && <span className={styles.versionBadge}>v1.4.25 • 2026-06-30</span>}
 
       {/* Main chart area */}
       <div className={styles.chartContainer}>

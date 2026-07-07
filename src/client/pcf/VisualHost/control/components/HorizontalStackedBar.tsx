@@ -45,10 +45,8 @@ export interface IHorizontalStackedBarProps {
 
 // ============= Constants =============
 
-// v1.4.7 — bar height 24 → 32 to read closer to the donut arc thickness
-// (donut at innerRadius 0.62 has ~38% of radius as arc width; on a typical
-// 200px donut that's ~38px). The two visualizations now feel coordinated.
-const DEFAULT_BAR_HEIGHT = 32;
+// v1.4.24 — bar height 26 → 20 per UAT.
+const DEFAULT_BAR_HEIGHT = 20;
 const FILL_TRANSITION_MS = 400;
 
 // ============= Color Token Resolution =============
@@ -168,6 +166,42 @@ const useStyles = makeStyles({
     color: tokens.colorNeutralForeground3,
     padding: tokens.spacingVerticalM,
   },
+  // v1.4.21 — empty state: text positioned at 40% from the left margin,
+  // above a faint 2-section bar that mimics the real bar's layout. Mirrors
+  // the donut empty-state treatment so both visuals read as "pending data,
+  // layout is fine" instead of "broken".
+  placeholderText: {
+    fontFamily: '"Segoe UI", system-ui, sans-serif',
+    fontSize: '14px',
+    lineHeight: '18px',
+    color: tokens.colorNeutralForeground3,
+    textAlign: 'left',
+    whiteSpace: 'nowrap',
+    marginBottom: tokens.spacingVerticalXS,
+  },
+  placeholderTextRow: {
+    width: '100%',
+    paddingLeft: '40%',
+    boxSizing: 'border-box',
+    display: 'flex',
+    alignItems: 'center',
+  },
+  placeholderBar: {
+    width: '100%',
+    borderRadius: tokens.borderRadiusMedium,
+    overflow: 'hidden',
+    display: 'flex',
+    flexDirection: 'row',
+    opacity: 0.5,
+  },
+  placeholderBarSegmentA: {
+    width: '35%',
+    backgroundColor: tokens.colorNeutralStroke2,
+  },
+  placeholderBarSegmentB: {
+    width: '65%',
+    backgroundColor: tokens.colorNeutralBackground3,
+  },
   // ----- headlineAboveBar layout (FR-VH-04) -----
   headlineStack: {
     display: 'flex',
@@ -230,8 +264,14 @@ export const HorizontalStackedBar: React.FC<IHorizontalStackedBarProps> = ({
     return (
       <div className={styles.container}>
         {title && <Text className={styles.title}>{title}</Text>}
-        <div className={styles.placeholder}>
-          <Text>No data available for this measure</Text>
+        <div className={styles.placeholderTextRow}>
+          <Text className={styles.placeholderText} aria-live="polite">
+            No data available for this measure
+          </Text>
+        </div>
+        <div className={styles.placeholderBar} style={{ height: `${height}px` }} aria-hidden={true}>
+          <div className={styles.placeholderBarSegmentA} />
+          <div className={styles.placeholderBarSegmentB} />
         </div>
       </div>
     );

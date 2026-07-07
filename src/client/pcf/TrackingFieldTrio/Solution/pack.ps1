@@ -1,7 +1,7 @@
-# Pack VisualHost Solution
-$version = "1.4.25"
-$solutionName = "VisualHostSolution"
-$controlName = "sprk_Spaarke.Visuals.VisualHost"
+# Pack TrackingFieldTrio Solution
+$version = "1.0.4"
+$solutionName = "TrackingFieldTrioSolution"
+$controlName = "sprk_Spaarke.Controls.TrackingFieldTrio"
 
 $scriptDir = Split-Path -Parent $MyInvocation.MyCommand.Path
 $binDir = "$scriptDir/bin"
@@ -21,7 +21,7 @@ if (Test-Path $zipPath) {
 
 $zip = [System.IO.Compression.ZipFile]::Open($zipPath, 'Create')
 
-# Add Content_Types with brackets in archive name (save temp file without brackets)
+# Add [Content_Types].xml with brackets in archive name (save temp without brackets)
 $contentTypesXml = @"
 <?xml version="1.0" encoding="utf-8"?>
 <Types xmlns="http://schemas.openxmlformats.org/package/2006/content-types">
@@ -33,7 +33,6 @@ $contentTypesXml = @"
 $tempFile = "$scriptDir/Content_Types.xml"
 $contentTypesXml | Out-File -FilePath $tempFile -Encoding utf8
 
-
 $contentTypesEntry = $zip.CreateEntry('[Content_Types].xml')
 $contentTypesStream = $contentTypesEntry.Open()
 $contentTypesBytes = [System.IO.File]::ReadAllBytes($tempFile)
@@ -41,7 +40,7 @@ $contentTypesStream.Write($contentTypesBytes, 0, $contentTypesBytes.Length)
 $contentTypesStream.Close()
 Remove-Item $tempFile -Force
 
-# Add other files
+# Add other files (ZIP entry names MUST be lowercase per pcf-deploy skill)
 [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, "$scriptDir/solution.xml", "solution.xml") | Out-Null
 [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, "$scriptDir/customizations.xml", "customizations.xml") | Out-Null
 [System.IO.Compression.ZipFileExtensions]::CreateEntryFromFile($zip, "$scriptDir/Controls/$controlName/ControlManifest.xml", "Controls/$controlName/ControlManifest.xml") | Out-Null

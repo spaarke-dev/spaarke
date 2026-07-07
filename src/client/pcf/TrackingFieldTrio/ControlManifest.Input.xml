@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="utf-8" ?>
+<manifest>
+  <control namespace="Spaarke.Controls"
+           constructor="TrackingFieldTrio"
+           version="1.0.4"
+           display-name-key="Tracking Field Trio"
+           description-key="Compact 3-field control for tracking flags (v1.0.4). Combines two Yes/No toggles (Monitor, High Priority) with a 3-value segmented picker (Access Permission). Designed to fit inside a 33% form column."
+           control-type="standard">
+    <external-service-usage enabled="false" />
+
+    <property name="monitor"
+              display-name-key="Monitor"
+              description-key="Bound Two-Option field for the Monitor flag"
+              of-type="TwoOptions"
+              usage="bound"
+              required="true" />
+
+    <property name="highPriority"
+              display-name-key="High Priority"
+              description-key="Bound Two-Option field for the High Priority flag"
+              of-type="TwoOptions"
+              usage="bound"
+              required="true" />
+
+    <property name="accessPermission"
+              display-name-key="Access Permission"
+              description-key="Bound OptionSet field with three values: Standard (100000000), Limited (100000001), Restricted (100000002)"
+              of-type="OptionSet"
+              usage="bound"
+              required="true" />
+
+    <!-- v1.0.1 — display toggles. v1.0.3 — showTitle default flipped to true
+         so captions render out of the box (matches the visual rhythm of the
+         standard field labels on adjacent cards). Set to No in form editor
+         to hide when a compact layout is preferred. -->
+    <property name="showTitle"
+              display-name-key="Show Title"
+              description-key="Show the field caption labels (Monitor, High Priority, Access Permission) above each control. When hidden, the row moves up. Default: visible."
+              of-type="TwoOptions"
+              usage="input"
+              required="false"
+              default-value="true" />
+
+    <property name="showVersion"
+              display-name-key="Show Version"
+              description-key="Show the version badge in the bottom-right corner. Default: hidden."
+              of-type="TwoOptions"
+              usage="input"
+              required="false"
+              default-value="false" />
+
+    <resources>
+      <code path="index.ts" order="1" />
+      <css path="styles.css" order="1" />
+      <platform-library name="React" version="16.14.0" />
+      <platform-library name="Fluent" version="9.46.2" />
+    </resources>
+  </control>
+</manifest>
