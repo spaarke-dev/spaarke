@@ -2,6 +2,7 @@ using System.Diagnostics;
 using System.Text.Json;
 using System.Text.Json.Serialization;
 using Sprk.Bff.Api.Models.Workspace;
+using Sprk.Bff.Api.Services.Ai.Handlers.Dataverse;
 using Sprk.Bff.Api.Services.Workspace;
 
 namespace Sprk.Bff.Api.Services.Ai.Handlers;
@@ -125,6 +126,7 @@ public sealed class SendWorkspaceArtifactHandler : IToolHandler
     private readonly IGuidProvider _guidProvider;
     private readonly TimeProvider _timeProvider;
     private readonly WorkspaceLayoutService _layoutService;
+    private readonly IDataverseUserClient _dataverse;
     private readonly ILogger<SendWorkspaceArtifactHandler> _logger;
 
     public SendWorkspaceArtifactHandler(
@@ -132,12 +134,17 @@ public sealed class SendWorkspaceArtifactHandler : IToolHandler
         IGuidProvider guidProvider,
         TimeProvider timeProvider,
         WorkspaceLayoutService layoutService,
+        IDataverseUserClient dataverse,
         ILogger<SendWorkspaceArtifactHandler> logger)
     {
         _workspaceStateService = workspaceStateService ?? throw new ArgumentNullException(nameof(workspaceStateService));
         _guidProvider = guidProvider ?? throw new ArgumentNullException(nameof(guidProvider));
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
         _layoutService = layoutService ?? throw new ArgumentNullException(nameof(layoutService));
+        // R4-2 (2026-07-07): resolves a widgetData.documentId (sprk_document) into its SPE
+        // drive-item pointer for the Compose pre-seed — user-OBO, same posture as the
+        // dataverse.* handlers (a document invisible to the user fails as unresolvable).
+        _dataverse = dataverse ?? throw new ArgumentNullException(nameof(dataverse));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -152,7 +159,13 @@ public sealed class SendWorkspaceArtifactHandler : IToolHandler
                      "{\"kind\":\"Workspace\",\"layoutName\":\"<layout name>\"} (e.g. layoutName 'Compose' " +
                      "when the user asks to open the Compose editor / start composing or drafting a document " +
                      "in the workspace). The tab opens immediately in the workspace pane and the tool result " +
-                     "confirms it. Legacy artifact variants (Summary, DocumentViewer, Dashboard, Table) record " +
+                     // R4-2 (2026-07-07): Compose document pre-seed contract.
+                     "confirms it. When opening the Compose layout ABOUT A SPECIFIC DOCUMENT, add " +
+                     "widgetData.documentId (the sprk_document GUID, e.g. from a search result path " +
+                     "tables/sprk_document/records/{guid}) — Compose then opens WITH that document loaded. " +
+                     "Session-UPLOADED chat files cannot pre-seed Compose (they exist only as extracted " +
+                     "text, not stored documents) — the tab opens empty and the result says so; relay that " +
+                     "honestly. Legacy artifact variants (Summary, DocumentViewer, Dashboard, Table) record " +
                      "an artifact to workspace state but are NOT visible in the current workspace UI — avoid " +
                      "them unless explicitly instructed.",
         Version: "1.1.0",
@@ -173,7 +186,9 @@ public sealed class SendWorkspaceArtifactHandler : IToolHandler
             new ToolParameterDefinition(
                 "widgetData",
                 "JSON object carrying the per-variant payload. MUST include a 'kind' field equal to widgetType. " +
-                "Workspace: layoutName (the workspace layout's display name, e.g. 'Compose') or layoutId (GUID). " +
+                "Workspace: layoutName (the workspace layout's display name, e.g. 'Compose') or layoutId (GUID); " +
+                "optional documentId (sprk_document GUID) to pre-seed the Compose layout with that document " +
+                "(session-uploaded chat files are NOT pre-seedable — omit documentId for them). " +
                 "Legacy variants: Summary: body; DocumentViewer: documentId/filename/mimeType/sizeBytes; " +
                 "Dashboard: layoutId/dashboardName; Table: rowCount/filteredColumns/selectedRows.",
                 ToolParameterType.Object,
@@ -283,6 +298,20 @@ public sealed class SendWorkspaceArtifactHandler : IToolHandler
                     return ToolValidationResult.Failure(
                         "'widgetData' for widgetType 'Workspace' must include 'layoutName' (the layout's " +
                         "display name, e.g. 'Compose') or 'layoutId' (a GUID).");
+                }
+
+                // R4-2 (2026-07-07): optional Compose pre-seed pointer — when present it
+                // must be a real sprk_document GUID (session file ids are rejected here
+                // with an instructive message; they carry no SPE pointer to load from).
+                if (dataProp.TryGetProperty("documentId", out var docIdProp) &&
+                    docIdProp.ValueKind == JsonValueKind.String &&
+                    !string.IsNullOrWhiteSpace(docIdProp.GetString()) &&
+                    !Guid.TryParse(docIdProp.GetString(), out _))
+                {
+                    return ToolValidationResult.Failure(
+                        "'widgetData.documentId' must be a sprk_document GUID when provided. " +
+                        "Session-uploaded chat file ids cannot pre-seed Compose — omit documentId " +
+                        "and tell the user the Compose tab opens empty for session files.");
                 }
             }
 
@@ -552,9 +581,11 @@ public sealed class SendWorkspaceArtifactHandler : IToolHandler
                 Timed());
         }
 
-        // Parse layoutName / layoutId out of the validated widgetData payload.
+        // Parse layoutName / layoutId (+ optional R4-2 documentId pre-seed pointer) out of
+        // the validated widgetData payload.
         string? layoutName = null;
         Guid layoutId = Guid.Empty;
+        Guid documentId = Guid.Empty;
         try
         {
             using var doc = JsonDocument.Parse(args.WidgetDataRawJson);
@@ -565,6 +596,10 @@ public sealed class SendWorkspaceArtifactHandler : IToolHandler
             if (doc.RootElement.TryGetProperty("layoutId", out var liProp) && liProp.ValueKind == JsonValueKind.String)
             {
                 Guid.TryParse(liProp.GetString(), out layoutId);
+            }
+            if (doc.RootElement.TryGetProperty("documentId", out var diProp) && diProp.ValueKind == JsonValueKind.String)
+            {
+                Guid.TryParse(diProp.GetString(), out documentId);
             }
         }
         catch (JsonException ex)
@@ -614,11 +649,40 @@ public sealed class SendWorkspaceArtifactHandler : IToolHandler
 
             var tabId = _guidProvider.NewGuid().ToString("N");
             var displayName = string.IsNullOrWhiteSpace(args.Title) ? layout.Name : args.Title;
-            var widgetDataJson = JsonSerializer.Serialize(new
+
+            // ── R4-2 (2026-07-07): Compose document pre-seed ─────────────────────────
+            // A widgetData.documentId (sprk_document GUID) resolves — under the calling
+            // user's OBO token — to its SPE drive-item pointer, which rides the
+            // widgetData as a `compose` seed. The SpaarkeAi host threads it into
+            // ComposeLaunchContext so the Compose section opens LOADED instead of empty.
+            // Fail-honest: an unresolvable document (no stored file, no access, transport
+            // error) still opens the tab — EMPTY — and the summary says so explicitly.
+            ComposeSeed? composeSeed = null;
+            string? preSeedNote = null;
+            if (documentId != Guid.Empty)
             {
-                layoutId = layout.Id.ToString("D"),
-                layoutName = layout.Name
-            });
+                (composeSeed, preSeedNote) = await ResolveComposeSeedAsync(documentId, correlationLogId, cancellationToken)
+                    .ConfigureAwait(false);
+            }
+
+            var widgetDataJson = composeSeed is null
+                ? JsonSerializer.Serialize(new
+                {
+                    layoutId = layout.Id.ToString("D"),
+                    layoutName = layout.Name
+                })
+                : JsonSerializer.Serialize(new
+                {
+                    layoutId = layout.Id.ToString("D"),
+                    layoutName = layout.Name,
+                    compose = new
+                    {
+                        sprkDocumentId = composeSeed.SprkDocumentId,
+                        speDriveItemId = composeSeed.SpeDriveItemId,
+                        speDriveId = composeSeed.SpeDriveId,
+                        fileName = composeSeed.FileName
+                    }
+                });
 
             // Presentation frame — rides the existing context_event channel (ADR-030
             // additive; old clients ignore the unknown discriminant). Identifiers +
@@ -643,6 +707,20 @@ public sealed class SendWorkspaceArtifactHandler : IToolHandler
                 "SendWorkspaceArtifactHandler ({Correlation}) workspace tab opened layoutId={LayoutId} tabId={TabId} in {Duration}ms",
                 correlationLogId, layout.Id, tabId, stopwatch.ElapsedMilliseconds);
 
+            var summaryText = $"Opened the '{layout.Name}' workspace as a tab in the workspace pane" +
+                              (string.Equals(displayName, layout.Name, StringComparison.Ordinal)
+                                  ? "."
+                                  : $" (tab title '{displayName}').");
+            if (composeSeed is not null)
+            {
+                summaryText += " The tab is pre-seeded with the requested document — it opens loaded, not empty.";
+            }
+            else if (preSeedNote is not null)
+            {
+                // Honest partial success: the tab opened, the pre-seed did not.
+                summaryText += $" {preSeedNote}";
+            }
+
             return ToolResult.Ok(
                 HandlerId, tool.Id, tool.Name,
                 data: new
@@ -650,12 +728,10 @@ public sealed class SendWorkspaceArtifactHandler : IToolHandler
                     tabId,
                     widgetType = "Workspace",
                     layoutId = layout.Id.ToString("D"),
-                    layoutName = layout.Name
+                    layoutName = layout.Name,
+                    preSeededDocumentId = composeSeed?.SprkDocumentId
                 },
-                summary: $"Opened the '{layout.Name}' workspace as a tab in the workspace pane" +
-                         (string.Equals(displayName, layout.Name, StringComparison.Ordinal)
-                             ? "."
-                             : $" (tab title '{displayName}')."),
+                summary: summaryText,
                 confidence: 1.0,
                 execution: Timed());
         }
@@ -679,6 +755,99 @@ public sealed class SendWorkspaceArtifactHandler : IToolHandler
                 "Opening the workspace tab failed unexpectedly — the tab was NOT opened.",
                 ToolErrorCodes.InternalError,
                 Timed());
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Compose pre-seed resolution (G-P3 UAT round-4 R4-2, 2026-07-07)
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// The document pointer threaded to the client for the Compose pre-seed. Field names
+    /// mirror the ribbon/modal launch params (<c>launch-resolver.ts</c>
+    /// <c>SpaarkeAiComposeLaunchParams</c>) so the client maps them 1:1 into
+    /// <c>ComposeLaunchContext</c>.
+    /// </summary>
+    internal sealed record ComposeSeed(
+        string SprkDocumentId,
+        string SpeDriveItemId,
+        string? SpeDriveId,
+        string? FileName);
+
+    /// <summary>
+    /// Resolves a <c>sprk_document</c> GUID to its SPE drive-item pointer under the
+    /// calling user's OBO token. Returns <c>(seed, null)</c> on success or
+    /// <c>(null, honestNote)</c> when the pre-seed is impossible — the note is appended
+    /// to the tool summary so the model relays the truth ("opened empty because …").
+    /// </summary>
+    /// <remarks>
+    /// REALITY CHECK (round-2/round-4 investigation): session-UPLOADED chat files carry
+    /// NO SPE pointer (<c>ChatSessionFile</c> = extracted text + AI-Search chunk ids only),
+    /// so they can never pre-seed Compose — only promoted/real <c>sprk_document</c> rows
+    /// (with <c>sprk_graphitemid</c>) can. This method is the sprk_document leg; the
+    /// session-file leg is refused honestly at validation/description level.
+    /// </remarks>
+    private async Task<(ComposeSeed? Seed, string? HonestNote)> ResolveComposeSeedAsync(
+        Guid documentId,
+        string correlationLogId,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var response = await _dataverse.GetAsync(
+                $"sprk_documents({documentId:D})?$select=sprk_documentid,sprk_documentname,sprk_filename," +
+                "sprk_graphdriveid,sprk_graphitemid",
+                cancellationToken).ConfigureAwait(false);
+
+            if (!response.IsSuccess || response.Body is not { } body || body.ValueKind != JsonValueKind.Object)
+            {
+                _logger.LogInformation(
+                    "SendWorkspaceArtifactHandler ({Correlation}) compose pre-seed document unresolvable — documentId={DocumentId} errorCode={ErrorCode}",
+                    correlationLogId, documentId, response.ErrorCode);
+                return (null,
+                    "The requested document could not be loaded for pre-seeding (not found or not accessible " +
+                    "to you) — the Compose tab opened EMPTY; tell the user honestly and offer Browse/Search inside Compose.");
+            }
+
+            static string? Str(JsonElement el, string prop) =>
+                el.TryGetProperty(prop, out var p) && p.ValueKind == JsonValueKind.String ? p.GetString() : null;
+
+            var driveItemId = Str(body, "sprk_graphitemid");
+            if (string.IsNullOrWhiteSpace(driveItemId))
+            {
+                _logger.LogInformation(
+                    "SendWorkspaceArtifactHandler ({Correlation}) compose pre-seed document has no SPE file — documentId={DocumentId}",
+                    correlationLogId, documentId);
+                return (null,
+                    "The document record exists but has NO stored file (no SharePoint Embedded item), so Compose " +
+                    "cannot load it — the tab opened EMPTY; tell the user honestly.");
+            }
+
+            var seed = new ComposeSeed(
+                SprkDocumentId: documentId.ToString("D"),
+                SpeDriveItemId: driveItemId,
+                SpeDriveId: Str(body, "sprk_graphdriveid"),
+                FileName: Str(body, "sprk_documentname") ?? Str(body, "sprk_filename"));
+
+            // ADR-015: identifiers only — never the document/file name.
+            _logger.LogInformation(
+                "SendWorkspaceArtifactHandler ({Correlation}) compose pre-seed resolved — documentId={DocumentId} hasDriveId={HasDriveId}",
+                correlationLogId, documentId, seed.SpeDriveId is not null);
+
+            return (seed, null);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "SendWorkspaceArtifactHandler ({Correlation}) compose pre-seed resolution failed — documentId={DocumentId} errorType={ErrorType}",
+                correlationLogId, documentId, ex.GetType().Name);
+            return (null,
+                "Resolving the document for pre-seeding failed unexpectedly — the Compose tab opened EMPTY; " +
+                "tell the user honestly.");
         }
     }
 

@@ -262,6 +262,140 @@ public sealed class DataverseReadQueryHandlerTests : TypedToolHandlerTestFixture
     }
 
     // ═════════════════════════════════════════════════════════════════════════════
+    // R5-C — LOOKUP column rewrite to `_{name}_value` (G-P3 UAT round-5, 2026-07-07)
+    // ═════════════════════════════════════════════════════════════════════════════
+
+    /// <summary>Metadata mock INCLUDING attribute types (the R5-C $expand shape).</summary>
+    private void SetupMatterMetadataWithAttributes() =>
+        _dataverse
+            .Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith("EntityDefinitions(LogicalName='sprk_matter')")), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson("""
+                {
+                  "EntitySetName": "sprk_matters",
+                  "PrimaryIdAttribute": "sprk_matterid",
+                  "Attributes": [
+                    { "LogicalName": "sprk_mattername", "AttributeType": "String" },
+                    { "LogicalName": "sprk_practicearea", "AttributeType": "Lookup" },
+                    { "LogicalName": "sprk_mattertype", "AttributeType": "Lookup" },
+                    { "LogicalName": "ownerid", "AttributeType": "Owner" },
+                    { "LogicalName": "statecode", "AttributeType": "State" }
+                  ]
+                }
+                """)));
+
+    /// <summary>
+    /// The exact round-5 operator failure: "distribution of matters by practice area" →
+    /// SELECT sprk_practicearea FROM sprk_matter failed at the Web API because a LOOKUP
+    /// column must be addressed as `_{name}_value`. The handler now rewrites it (and maps
+    /// the response property back to the requested logical name).
+    /// </summary>
+    [Fact]
+    public async Task ExecuteChatAsync_SelectingLookupColumn_RewritesToValueForm_AndMapsRowsBack()
+    {
+        SetupMatterMetadataWithAttributes();
+        var id = Guid.NewGuid();
+        var practiceAreaRef = Guid.NewGuid();
+        string? capturedQuery = null;
+        _dataverse
+            .Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith("sprk_matters?")), It.IsAny<CancellationToken>()))
+            .Callback<string, CancellationToken>((path, _) => capturedQuery = path)
+            .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson($$"""
+                { "value": [ { "sprk_matterid": "{{id:D}}", "sprk_mattername": "Acme MSA", "_sprk_practicearea_value": "{{practiceAreaRef:D}}" } ] }
+                """)));
+
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: Args(
+            "SELECT sprk_mattername, sprk_practicearea FROM sprk_matter"));
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildReadQueryTool(), CancellationToken.None);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        capturedQuery.Should().Contain("_sprk_practicearea_value",
+            because: "the Web API addresses lookup columns as _{name}_value — selecting the logical name 400s");
+        capturedQuery.Should().NotContain("$select=sprk_matterid,sprk_mattername,sprk_practicearea&",
+            because: "the raw lookup logical name must not remain in the $select");
+
+        // The model asked for 'sprk_practicearea' — the row key maps BACK to it.
+        var rowsJson = result.Data!.Value.GetProperty("rows");
+        var firstRow = rowsJson.EnumerateArray().First();
+        firstRow.GetProperty("sprk_practicearea").GetString().Should().Be(practiceAreaRef.ToString("D"));
+        firstRow.TryGetProperty("_sprk_practicearea_value", out _).Should().BeFalse();
+
+        // Transparency: the model learns the values are GUIDs of the referenced table.
+        result.Warnings.Should().Contain(w => w.Contains("'sprk_practicearea'") && w.Contains("GUID"));
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_LookupColumnInWhereAndOrderBy_RewritesOutsideStringLiterals()
+    {
+        SetupMatterMetadataWithAttributes();
+        string? capturedQuery = null;
+        _dataverse
+            .Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith("sprk_matters?")), It.IsAny<CancellationToken>()))
+            .Callback<string, CancellationToken>((path, _) => capturedQuery = path)
+            .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson("""{ "value": [] }""")));
+
+        var refId = Guid.NewGuid().ToString("D");
+        // The string literal deliberately CONTAINS the column name — it must NOT be rewritten.
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: Args(
+            $"SELECT sprk_mattername FROM sprk_matter WHERE sprk_practicearea = '{refId}' AND sprk_mattername = 'about sprk_practicearea' ORDER BY sprk_mattertype DESC"));
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildReadQueryTool(), CancellationToken.None);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        var decoded = Uri.UnescapeDataString(capturedQuery!);
+        decoded.Should().Contain("_sprk_practicearea_value eq",
+            because: "lookup references in $filter rewrite to the _value form");
+        decoded.Should().Contain("'about sprk_practicearea'",
+            because: "text INSIDE string literals must never be rewritten");
+        decoded.Should().Contain("_sprk_mattertype_value desc",
+            because: "lookup references in $orderby rewrite too");
+    }
+
+    [Fact]
+    public void RewriteLookupReferences_QuoteSafety_AndFromValueForm_RoundTrip()
+    {
+        var lookups = new HashSet<string>(StringComparer.OrdinalIgnoreCase) { "sprk_practicearea" };
+
+        DataverseReadQueryHandler.RewriteLookupReferences(
+                "sprk_practicearea eq 'x sprk_practicearea y' or sprk_name eq 'a'", lookups)
+            .Should().Be("_sprk_practicearea_value eq 'x sprk_practicearea y' or sprk_name eq 'a'");
+
+        DataverseReadQueryHandler.FromValueForm("_sprk_practicearea_value", lookups)
+            .Should().Be("sprk_practicearea");
+        DataverseReadQueryHandler.FromValueForm("_unknown_value", lookups)
+            .Should().Be("_unknown_value", because: "only KNOWN lookup columns map back");
+        DataverseReadQueryHandler.FromValueForm("sprk_name", lookups).Should().Be("sprk_name");
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_NoLookupColumnsReferenced_QueryUnchanged()
+    {
+        SetupMatterMetadataWithAttributes();
+        string? capturedQuery = null;
+        _dataverse
+            .Setup(d => d.GetAsync(It.Is<string>(p => p.StartsWith("sprk_matters?")), It.IsAny<CancellationToken>()))
+            .Callback<string, CancellationToken>((path, _) => capturedQuery = path)
+            .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson("""{ "value": [] }""")));
+
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: Args(
+            "SELECT sprk_mattername FROM sprk_matter"));
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildReadQueryTool(), CancellationToken.None);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        capturedQuery.Should().Contain("$select=sprk_matterid,sprk_mattername",
+            because: "non-lookup selections keep the pre-R5-C shape verbatim");
+    }
+
+    [Fact]
+    public void Metadata_Description_CarriesAggregateYourselfAndLookupGuidance()
+    {
+        var description = CreateHandler().Metadata.Description;
+        description.Should().Contain("aggregate the values YOURSELF",
+            because: "GROUP BY is unsupported — distributions come from selecting rows and counting");
+        description.Should().Contain("GUID",
+            because: "lookup columns return referenced-record GUIDs, not labels");
+        description.Should().Contain("dataverse.describe");
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════
     // shared plumbing
     // ═════════════════════════════════════════════════════════════════════════════
 

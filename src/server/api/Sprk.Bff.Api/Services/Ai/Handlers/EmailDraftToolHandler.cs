@@ -127,6 +127,13 @@ public sealed class EmailDraftToolHandler : IToolHandler
                      "and send. Never sends email — sending is always user-initiated from the Communication " +
                      "service. Compose the subject and body from grounded session outputs (summaries, records " +
                      "created this session) and cite their ledger keys in source_refs. " +
+                     // G-P3 UAT round-4 R4-4 (2026-07-07): "send this as an email" after a combined
+                     // summary produced a generic draft REFERENCING AN ATTACHMENT that cannot exist.
+                     "The draft CANNOT carry attachments — never write body text that references an attached " +
+                     "or enclosed document ('please find attached', 'enclosed is'). When the user asks to " +
+                     "email content already produced in this conversation (a summary, findings, a comparison), " +
+                     "include that content INLINE in the body; if their request implies attaching a file, say " +
+                     "the email is sent without attachments and inline the material instead. " +
                      "SIDE-EFFECT tool (communicate): invocation is confirmation-gated.",
         Version: "1.0.0",
         SupportedInputTypes: new[] { "text/plain" },
@@ -315,7 +322,16 @@ public sealed class EmailDraftToolHandler : IToolHandler
                         [ToolResultMetadataKeys.Citations] = new[]
                         {
                             DataverseRecordCitations.ForRecord(CommunicationTable, communicationId.Value)
-                        }
+                        },
+                        // R4-6 (2026-07-07): the gate-resume path persists the outcome VERBATIM
+                        // into the transcript — the model-facing Summary above ("…tell the user
+                        // the draft is ready…") leaked instruction text to the operator. This is
+                        // the user-facing sentence the transcript renders instead. R4-3: record
+                        // reference for the clickable MDA link.
+                        [ToolResultMetadataKeys.UserSummary] =
+                            $"Draft email created ({args.To.Count} recipient(s)) — ready for your review in " +
+                            "Communications. No email was sent.",
+                        [ToolResultMetadataKeys.CreatedRecord] = new ToolCreatedRecord(CommunicationTable, communicationId.Value)
                     }
                 };
             }

@@ -65,6 +65,7 @@ import { WrenchRegular, HistoryRegular } from '@fluentui/react-icons';
 import type { ContextWidgetProps } from '../../types/widget-types';
 import { usePaneEvent } from '../../events/usePaneEvent';
 import type { ContextPaneEvent, TraceToolCallSummary } from '../../events/PaneEventTypes';
+import { getExecutionTraceBuffer } from './executionTraceBuffer';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -502,6 +503,27 @@ const ExecutionTraceWidget: React.FC<ExecutionTraceWidgetProps> = ({ data, isLoa
   );
 
   usePaneEvent('context', handleContextEvent);
+
+  // ── Replay-on-mount (G-P3 UAT round-5 R5-D, 2026-07-07) ────────────────────
+  // The widget mounts only when the user selects "Execution Trace" from the
+  // Context-pane Tools menu — typically AFTER the turns whose tool calls it
+  // should show. PaneEventBus does not buffer, so those events were dropped.
+  // The always-mounted bridge records every dispatched tool_chain event into
+  // the module buffer; replay it ONCE on mount through the SAME handler the
+  // live subscription uses (identical narrowing/NFR-07 discipline). The
+  // replayed events run before any post-mount live event can interleave
+  // (synchronous effect body), so ordering is preserved.
+  const replayedRef = useRef<boolean>(false);
+  useEffect(() => {
+    if (replayedRef.current) return;
+    replayedRef.current = true;
+    for (const buffered of getExecutionTraceBuffer()) {
+      handleContextEvent(buffered as unknown as ContextPaneEvent);
+    }
+    // handleContextEvent identity changes only with sessionFilter; replay must
+    // not re-run on filter change (entries would duplicate).
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, []);
 
   // Auto-scroll to the newest entry on each addition.
   useEffect(() => {

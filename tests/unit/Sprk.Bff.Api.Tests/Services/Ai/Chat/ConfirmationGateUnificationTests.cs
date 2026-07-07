@@ -287,6 +287,31 @@ public class ConfirmationGateUnificationTests
     }
 
     [Fact]
+    public void BuildGateOutcomeMessage_Success_WithRecordUrl_CarriesClickableMarkdownLink()
+    {
+        // G-P3 UAT round-4 R4-3 (2026-07-07): the ✅ transcript message must carry a
+        // CLICKABLE MDA deep link to the created record — durable across reloads
+        // (server-persisted) and the model's REAL link to relay instead of inventing
+        // one (round-4 saw a fabricated /WebResources/tables/… URL).
+        var url = "https://spaarkedev1.crm.dynamics.com/main.aspx?pagetype=entityrecord" +
+                  "&etn=sprk_matter&id=651194cd-3670-f111-ab0e-70a8a590c51c";
+        var text = Sprk.Bff.Api.Api.Ai.ChatEndpoints.BuildGateOutcomeMessage(
+            success: true, actionName: "SYS-Dataverse Create Record",
+            detail: "Record created in 'sprk_matter' (id 651194cd-3670-f111-ab0e-70a8a590c51c).",
+            ledgerKey: "loop@t3",
+            recordUrl: url);
+
+        text.Should().Contain($"[Open record]({url})",
+            because: "the transcript renders markdown — this is the clickable record link");
+        text.Should().Contain("loop@t3", because: "the ledger key still rides the message");
+
+        // Failure leg never carries a link — nothing exists to link to.
+        var failed = Sprk.Bff.Api.Api.Ai.ChatEndpoints.BuildGateOutcomeMessage(
+            success: false, actionName: "A", detail: "boom", ledgerKey: null, recordUrl: url);
+        failed.Should().NotContain("[Open record]");
+    }
+
+    [Fact]
     public void BuildGateDispatchFailedProblem_MapsTo422_WithStableErrorCodeAndDetail()
     {
         // G-P3 UAT round-3 R3-2 (2026-07-07): confirmed-gate dispatch failures

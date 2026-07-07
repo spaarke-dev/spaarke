@@ -13,7 +13,8 @@
  */
 
 import * as React from "react";
-import type { ContextPaneEvent, WorkspacePaneEvent } from "@spaarke/ai-widgets";
+import type { ContextPaneEvent, WorkspacePaneEvent, BufferedTraceEvent } from "@spaarke/ai-widgets";
+import { recordExecutionTraceEvent } from "@spaarke/ai-widgets";
 
 export interface ContextEventPayload {
   contextEventType?: string;
@@ -182,7 +183,7 @@ export function useContextEventBridge(deps: ContextEventBridgeDeps): {
           // copy (NFR-07 — identifiers/counts only; never a spread).
           const rawCalls = data.contextToolChainCalls;
           if (!Array.isArray(rawCalls) || rawCalls.length === 0) return;
-          dispatch("context", {
+          const toolChainEvent = {
             type: "tool_chain",
             timestamp,
             turn: typeof data.contextTurn === "number" ? data.contextTurn : 0,
@@ -195,7 +196,16 @@ export function useContextEventBridge(deps: ContextEventBridgeDeps): {
                 citationCount: typeof c.citationCount === "number" ? c.citationCount : undefined,
                 durationMs: typeof c.durationMs === "number" ? c.durationMs : undefined,
               })),
-          } as ContextPaneEvent);
+          };
+          // G-P3 UAT round-5 R5-D (2026-07-07): ALSO record into the replay
+          // buffer. The trace widget mounts only when the user picks it from
+          // the Context-pane Tools menu — usually AFTER these events fired —
+          // and PaneEventBus drops events with no subscriber. The buffer lets
+          // the widget backfill on mount (same page session; a hard refresh
+          // still loses history — server ToolChain read surface is the named
+          // follow-up).
+          recordExecutionTraceEvent(toolChainEvent as BufferedTraceEvent);
+          dispatch("context", toolChainEvent as ContextPaneEvent);
           break;
         }
         default:

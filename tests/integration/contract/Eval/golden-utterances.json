@@ -727,6 +727,18 @@
       "expected": { "outcomeClass": "refuse", "consumerType": null, "consumerCode": null, "catalogStatus": null },
       "assertions": { "schemaConformance": "REF-CHAT@v1", "citationIntegrity": false },
       "activation": { "dispatchAssertPhase": "P2", "activatedBy": "task 033 (FR-P2-04 refusal Binding) — case added by the G-P3 round-3 fix wave; live-LLM proof in the round-4 UAT script" }
+    },
+    {
+      "caseId": "GU-063",
+      "family": "draft-correspondence",
+      "ucId": "UC-G-2",
+      "channel": "text",
+      "utterance": "send this summary as an email to the client",
+      "notes": "G-P3 UAT round-4 R4-4 (2026-07-07) — 'send this' after a combined summary produced a generic draft REFERENCING AN ATTACHMENT that cannot exist. VERIFIED GAP: session ledger outputs do NOT flow into the DRAFT-CORR@v1 input (SessionDispatchOrchestrator feeds ONLY session-file extracted text into the prompted Action), so re-dispatching draft-correspondence cannot see the summary. The correct behavior for conversation-produced content is: the model composes the email body ITSELF (the summary is in its history / ledger-outputs context), includes the content INLINE — the email carries NO attachments (SYS-Email Draft description + DRAFT-CORR JPS both ban 'please find attached' phrasing) — and invokes email.draft directly (communicate gate suspends → clarify-shaped outcome, same as GU-057). Threading ledger outputs into the DRAFT-CORR dispatch input is a named operator-verdict backlog candidate, not this project's scope.",
+      "context": { "surface": "assistant-chat", "sessionHasDocument": true, "sessionHasLedgerOutputs": true },
+      "expected": { "outcomeClass": "clarify", "consumerType": "draft-correspondence", "consumerCode": "default", "catalogStatus": "existing" },
+      "assertions": { "schemaConformance": null, "citationIntegrity": false },
+      "activation": { "dispatchAssertPhase": "P3", "activatedBy": "G-P3 round-4 fix wave (R4-4 — no-attachments + inline-content steering on SYS-Email Draft row bc11e90d… + DRAFT-CORR@v1 system prompt 4b8b50f4…); live-LLM proof in the round-5 UAT script" }
     }
   ]
 }

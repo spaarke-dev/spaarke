@@ -194,7 +194,12 @@ public sealed partial class DataverseUpdateRecordHandler : IToolHandler
             {
                 Metadata = new Dictionary<string, object?>
                 {
-                    [ToolResultMetadataKeys.Citations] = new[] { DataverseRecordCitations.ForRecord(tablename, recordId) }
+                    [ToolResultMetadataKeys.Citations] = new[] { DataverseRecordCitations.ForRecord(tablename, recordId) },
+                    // R4-6/R4-3 (2026-07-07): user-facing outcome + record reference for the
+                    // gate-resume transcript message and its clickable MDA link.
+                    [ToolResultMetadataKeys.UserSummary] =
+                        $"Record updated in '{tablename}' ({mapped.Item.Columns.Count} column(s) changed).",
+                    [ToolResultMetadataKeys.CreatedRecord] = new ToolCreatedRecord(tablename, recordId)
                 }
             };
 

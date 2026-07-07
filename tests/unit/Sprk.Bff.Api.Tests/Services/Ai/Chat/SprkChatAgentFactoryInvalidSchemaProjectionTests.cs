@@ -198,6 +198,48 @@ public class SprkChatAgentFactoryInvalidSchemaProjectionTests
             "resolve each reference to its record GUID FIRST",
             "R3-2: the model proposed a create carrying an unresolved person lookup — lookups " +
             "must be resolved BEFORE proposing, not discovered as failures after the user confirms");
+
+        // G-P3 UAT round-4 extension (2026-07-07):
+        agent.Context.SystemPrompt.Should().Contain(
+            "NEVER compose, guess, or reconstruct record URLs",
+            "R4-3(b): asked 'do you have a link?', the model invented a /WebResources/tables/… " +
+            "URL — confirmed actions now carry a real [Open record] link in the transcript; the " +
+            "directive pins relay-only");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // G-P3 UAT round-5 R5-A — current-date context (2026-07-07)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task CreateAgentAsync_SystemPrompt_CarriesCurrentDateContext()
+    {
+        // Incident: "due date tomorrow" produced 6/13/2024 — the model has no clock
+        // and hallucinated the YEAR. The date line is UNCONDITIONAL (relative dates
+        // matter with or without tools) and sits at a stable end-of-prompt position.
+        var services = BuildServiceProvider(routingService: null);
+        var factory = new SprkChatAgentFactory(
+            Mock.Of<IChatClient>(), services, Mock.Of<ILogger<SprkChatAgentFactory>>());
+
+        var agent = await factory.CreateAgentAsync(
+            SessionId, DocumentId, playbookId: null, TenantId);
+
+        agent.Context.SystemPrompt.Should().Contain("## Current Date");
+        agent.Context.SystemPrompt.Should().Contain("Today's date is ");
+        agent.Context.SystemPrompt.Should().Contain("never guess the year");
+    }
+
+    [Fact]
+    public void BuildCurrentDateDirective_FormatsUtcDateDeterministically()
+    {
+        var text = SprkChatAgentFactory.BuildCurrentDateDirective(
+            new DateTimeOffset(2026, 7, 7, 18, 30, 0, TimeSpan.Zero));
+
+        text.Should().Contain("Today's date is 2026-07-07 (Tuesday, UTC)");
+        text.Should().Contain("'tomorrow'",
+            because: "the exact round-5 failure word is named in the resolution instruction");
+        text.Should().Contain("state the absolute date in your proposal",
+            because: "the user must be able to correct a mis-resolved date BEFORE confirming");
     }
 
     [Fact]

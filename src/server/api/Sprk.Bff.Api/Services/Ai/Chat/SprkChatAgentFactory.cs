@@ -104,8 +104,29 @@ public class SprkChatAgentFactory
         "- The same applies to UI actions: NEVER state that a tab, view, editor, workspace, or " +
         "dialog was opened unless a tool result in this conversation explicitly confirms it. If no " +
         "available tool can open the requested surface, say so honestly and offer what you CAN do.\n" +
+        // G-P3 UAT round-4 R4-3(b) (2026-07-07): asked "do you have a link?", the model
+        // INVENTED a /WebResources/tables/… URL. Confirmed actions now carry a real
+        // "[Open record](…)" markdown link in their ✅ outcome message — relay that.
+        "- NEVER compose, guess, or reconstruct record URLs or deep links. Only relay links that " +
+        "appear verbatim in tool results or earlier messages in this conversation (confirmed actions " +
+        "include an '[Open record](…)' link in their ✅ outcome message). If no link was provided, " +
+        "say you do not have one.\n" +
         "- If no available tool can perform the requested action, say so honestly instead of pretending " +
         "it was done.";
+
+    /// <summary>
+    /// Builds the current-date context line (G-P3 UAT round-5 R5-A, 2026-07-07): the model
+    /// receives no clock and hallucinated "tomorrow" as a 2024 date. Appended at the END of
+    /// the system prompt (stable position; rotates once per UTC day — the accepted daily
+    /// prompt-cache rotation). Exposed internal for the directive-presence tests.
+    /// </summary>
+    internal static string BuildCurrentDateDirective(DateTimeOffset utcNow) =>
+        "\n\n## Current Date\n" +
+        $"Today's date is {utcNow:yyyy-MM-dd} ({utcNow:dddd}, UTC). Resolve EVERY relative date the user " +
+        "gives ('today', 'tomorrow', 'next Friday', 'in two weeks') against THIS date before composing any " +
+        "field value — never guess the year. The user's local date may differ by one day near midnight UTC; " +
+        "when you propose an action containing a resolved date, state the absolute date in your proposal " +
+        "text so the user can correct it before confirming.";
 
     public SprkChatAgentFactory(
         IChatClient chatClient,
@@ -736,6 +757,20 @@ public class SprkChatAgentFactory
             };
         }
         // === End H6 directive ============================================================
+
+        // === G-P3 UAT round-5 R5-A — current-date context (2026-07-07) ==================
+        // Incident: "due date tomorrow" produced 6/13/2024 — the model had NO current-date
+        // context and hallucinated a date (wrong YEAR). Deterministic date line at a STABLE
+        // position (end of prompt): it changes once per day, which costs one prompt-cache
+        // rotation daily — accepted trade-off (NFR-04 note). The user's timezone is not
+        // available server-side (JWT claims carry no tz), so the line is UTC + an explicit
+        // near-midnight ambiguity instruction.
+        var timeProvider = scope.ServiceProvider.GetService<TimeProvider>() ?? TimeProvider.System;
+        context = context with
+        {
+            SystemPrompt = context.SystemPrompt + BuildCurrentDateDirective(timeProvider.GetUtcNow()),
+        };
+        // === End R5-A date context =======================================================
 
         // === capability_change SSE event ===
         // Emit when the per-turn tool set differs from the previous turn's tool set.

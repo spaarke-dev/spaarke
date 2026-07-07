@@ -78,6 +78,13 @@ import {
   AppInsightsService,
 } from "@spaarke/ui-components";
 import type { WorkspaceRenderer } from "@spaarke/ui-components";
+// G-P3 UAT round-4 R4-2 (2026-07-07): the renderer wrapper translates a chat-opened
+// tab's `launchData.compose` seed into ComposeLaunchContext so the embedded Compose
+// section opens LOADED with the referenced document instead of the empty state.
+// (This wiring lives HERE because @spaarke/ai-widgets cannot depend on
+// @spaarke/compose-components — the dependency runs the other way.)
+import { ComposeLaunchContext } from "@spaarke/compose-components";
+import type { ComposeLaunchContextValue } from "@spaarke/compose-components";
 
 // ---------------------------------------------------------------------------
 // BFF base URL baked in at build time via Vite env var (AIPU-091).
@@ -232,9 +239,37 @@ async function bootstrap(): Promise<void> {
   // `dailyBriefing.loadNotificationContext` option is @deprecated and ignored
   // by the factory (see dailyBriefing.registration.ts), so the loader was dead.
   const sectionsForSpaarkeAi = createLegalWorkspaceSectionRegistry({});
-  const SpaarkeAiWorkspaceRenderer: WorkspaceRenderer = (props) => (
-    <LegalWorkspaceApp {...props} sections={sectionsForSpaarkeAi} />
-  );
+  // R4-2 (2026-07-07): `launchData.compose` (from a chat-opened workspace tab's
+  // widgetData — server-resolved sprk_document → SPE pointer) becomes a
+  // tab-scoped ComposeLaunchContext provider. The provider NESTS INSIDE the
+  // ThreePaneShell-level provider (URL-param path), so the tab's own seed wins
+  // for the embedded tree only; tabs without a seed change nothing.
+  const SpaarkeAiWorkspaceRenderer: WorkspaceRenderer = ({ launchData, ...props }) => {
+    const app = <LegalWorkspaceApp {...props} sections={sectionsForSpaarkeAi} />;
+
+    const seed = launchData?.compose as
+      | {
+          sprkDocumentId?: string;
+          speDriveItemId?: string;
+          speDriveId?: string | null;
+          fileName?: string | null;
+        }
+      | undefined;
+    if (!seed || typeof seed.speDriveItemId !== "string" || seed.speDriveItemId.length === 0) {
+      return app;
+    }
+
+    const composeLaunch: ComposeLaunchContextValue = {
+      composeMode: "editor",
+      document: {
+        speDriveItemId: seed.speDriveItemId,
+        sprkDocumentId: seed.sprkDocumentId,
+        fileName: seed.fileName ?? undefined,
+      },
+      driveId: seed.speDriveId ?? "",
+    };
+    return <ComposeLaunchContext.Provider value={composeLaunch}>{app}</ComposeLaunchContext.Provider>;
+  };
   setDefaultWorkspaceRenderer(SpaarkeAiWorkspaceRenderer);
 
   // -------------------------------------------------------------------------

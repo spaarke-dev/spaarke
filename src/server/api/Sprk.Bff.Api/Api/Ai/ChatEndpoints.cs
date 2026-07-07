@@ -1888,12 +1888,23 @@ public static class ChatEndpoints
             // this transcript message additionally puts the confirmation event itself
             // into conversation history (and survives a page reload, unlike the
             // client-local rendering).
+            // R4-6 (2026-07-07): the transcript prefers the handler's USER-facing outcome
+            // sentence — the model-facing Summary leaked instruction text verbatim.
+            // R4-3: the server-composed MDA record link rides both the persisted message
+            // (markdown link, durable across reloads, real truth for the model to relay)
+            // and the response fields (client chip / local rendering).
+            var userFacingSummary = outcome.UserSummary ?? outcome.Summary;
             await PersistGateOutcomeMessageAsync(
                 httpContext, tenantId, sessionId,
-                BuildGateOutcomeMessage(success: true, resolution.Tool.Name, outcome.Summary, outcome.LedgerKey),
+                BuildGateOutcomeMessage(
+                    success: true, resolution.Tool.Name, userFacingSummary, outcome.LedgerKey, outcome.RecordUrl),
                 logger, cancellationToken);
 
-            return Results.Ok(new GateResolveResult("confirmed", outcome.Summary));
+            return Results.Ok(new GateResolveResult(
+                "confirmed", userFacingSummary,
+                RecordUrl: outcome.RecordUrl,
+                RecordEntityLogicalName: outcome.RecordEntityLogicalName,
+                RecordId: outcome.RecordId?.ToString("D")));
         }
 
         // Binding-backed: get-then-delete (double-confirm → 409) + confirmed ledger marker.
@@ -2015,14 +2026,20 @@ public static class ChatEndpoints
 
     /// <summary>
     /// Builds the honest gate-resolution transcript message (G-P3 UAT round-2
-    /// R2-A/R2-C, 2026-07-07). Success carries the executed summary (+ ledger key when
-    /// present); failure states EXPLICITLY that nothing was created or modified —
-    /// the exact counter-copy to the round-2 fabrication pattern.
+    /// R2-A/R2-C, 2026-07-07). Success carries the executed summary (+ a clickable
+    /// markdown record link when the handler reported the created/updated record —
+    /// R4-3, 2026-07-07 — and the ledger key when present); failure states EXPLICITLY
+    /// that nothing was created or modified — the exact counter-copy to the round-2
+    /// fabrication pattern. The success detail SHOULD be the handler's USER-facing
+    /// outcome sentence (R4-6): this message renders verbatim in the operator's
+    /// transcript, so instruction-to-model text must never reach it.
     /// </summary>
-    internal static string BuildGateOutcomeMessage(bool success, string actionName, string? detail, string? ledgerKey)
+    internal static string BuildGateOutcomeMessage(
+        bool success, string actionName, string? detail, string? ledgerKey, string? recordUrl = null)
     {
         var text = success
             ? $"✅ Confirmed action '{actionName}' executed. {detail ?? "Completed."}" +
+              (recordUrl is null ? string.Empty : $" [Open record]({recordUrl})") +
               (ledgerKey is null ? string.Empty : $" (ledger: {ledgerKey})")
             : $"❌ Confirmed action '{actionName}' FAILED: {detail ?? "The confirmed action failed."} " +
               "No record was created or modified by this confirmation.";
@@ -2992,5 +3009,22 @@ public record GateResolveRequest(bool Approved);
 
 /// <summary>Result of a unified-gate resolution.</summary>
 /// <param name="Status"><c>confirmed</c> or <c>rejected</c>.</param>
-/// <param name="Summary">Terminal output summary for confirmed Binding-backed executions (already ledger-written per ADR-040); null on reject.</param>
-public record GateResolveResult(string Status, string? Summary);
+/// <param name="Summary">
+/// Terminal output summary (already ledger-written per ADR-040); null on reject.
+/// For typed-handler confirms this is the handler's USER-facing outcome sentence
+/// (R4-6, 2026-07-07) — safe to render verbatim in the transcript.
+/// </param>
+/// <param name="RecordUrl">
+/// Server-composed MDA deep link to the created/updated record (R4-3, 2026-07-07;
+/// additive — null when the handler reported no record or the environment URL is
+/// unknown). See <c>TypedHandlerResumeExecutor.ResumeOutcome.RecordUrl</c> for the
+/// seam decision (server-composed, no appid).
+/// </param>
+/// <param name="RecordEntityLogicalName">Created/updated record's table logical name (additive, R4-3).</param>
+/// <param name="RecordId">Created/updated record's GUID as <c>D</c>-format string (additive, R4-3).</param>
+public record GateResolveResult(
+    string Status,
+    string? Summary,
+    string? RecordUrl = null,
+    string? RecordEntityLogicalName = null,
+    string? RecordId = null);

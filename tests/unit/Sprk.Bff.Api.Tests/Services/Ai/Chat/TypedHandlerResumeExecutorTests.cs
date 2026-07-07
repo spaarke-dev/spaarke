@@ -233,6 +233,103 @@ public class TypedHandlerResumeExecutorTests
     }
 
     // =========================================================================
+    // R4-6 user-facing summary + R4-3 record link (G-P3 UAT round-4, 2026-07-07)
+    // =========================================================================
+
+    [Fact]
+    public async Task ExecuteAsync_HandlerEmitsUserSummaryAndRecord_OutcomeCarriesBothAndComposesMdaLink()
+    {
+        var recordId = Guid.Parse("651194cd-3670-f111-ab0e-70a8a590c51c");
+        var row = BuildChatRow("SYS-Dataverse Create Record", handlerClass: SpyToolHandler.Id);
+        var handler = new SpyToolHandler
+        {
+            Result = tool => new ToolResult
+            {
+                HandlerId = SpyToolHandler.Id,
+                ToolId = tool.Id,
+                ToolName = tool.Name,
+                Success = true,
+                Execution = new ToolExecutionMetadata { StartedAt = DateTimeOffset.UtcNow, CompletedAt = DateTimeOffset.UtcNow },
+                // MODEL-facing summary deliberately carries instruction text — the exact
+                // R4-6 leak shape ("tell the user…") that must NOT reach the transcript.
+                Summary = "Created DRAFT — tell the user the draft is ready for their review.",
+                Metadata = new Dictionary<string, object?>
+                {
+                    [ToolResultMetadataKeys.UserSummary] = "Record created in 'sprk_matter' (id " + recordId.ToString("D") + ").",
+                    [ToolResultMetadataKeys.CreatedRecord] = new ToolCreatedRecord("sprk_matter", recordId),
+                },
+            },
+        };
+        var executor = BuildExecutor(new[] { row }, handler, out _, out var sessionId,
+            environmentUrl: "https://spaarkedev1.crm.dynamics.com/");
+        var invocation = BuildInvocation(sessionId, argsJson: """{"tablename":"sprk_matter"}""");
+
+        var resolution = await executor.TryResolveAsync(invocation.ToolId, CancellationToken.None);
+        var outcome = await executor.ExecuteAsync(resolution!, invocation, userObjectId: null, CancellationToken.None);
+
+        outcome.Success.Should().BeTrue();
+        outcome.UserSummary.Should().Be($"Record created in 'sprk_matter' (id {recordId:D}).",
+            "the user-facing sentence replaces the model-facing instruction text in the transcript (R4-6)");
+        outcome.UserSummary.Should().NotContain("tell the user");
+        outcome.RecordEntityLogicalName.Should().Be("sprk_matter");
+        outcome.RecordId.Should().Be(recordId);
+        outcome.RecordUrl.Should().Be(
+            $"https://spaarkedev1.crm.dynamics.com/main.aspx?pagetype=entityrecord&etn=sprk_matter&id={recordId:D}",
+            "the server composes the MDA deep link (trailing slash trimmed, no appid — see seam decision)");
+    }
+
+    [Fact]
+    public async Task ExecuteAsync_NoUserSummaryMetadata_OutcomeFallsBackGracefully_NoLinkWithoutEnvironmentUrl()
+    {
+        var row = BuildChatRow("SYS-Dataverse Create Record", handlerClass: SpyToolHandler.Id);
+        var handler = new SpyToolHandler(); // default result: no metadata
+        var executor = BuildExecutor(new[] { row }, handler, out _, out var sessionId); // no env URL
+        var invocation = BuildInvocation(sessionId, argsJson: """{"tablename":"sprk_event"}""");
+
+        var resolution = await executor.TryResolveAsync(invocation.ToolId, CancellationToken.None);
+        var outcome = await executor.ExecuteAsync(resolution!, invocation, userObjectId: null, CancellationToken.None);
+
+        outcome.Success.Should().BeTrue();
+        outcome.UserSummary.Should().BeNull("handlers without the metadata keep the pre-R4-6 Summary fallback");
+        outcome.RecordUrl.Should().BeNull("no environment URL and no record metadata — link enrichment degrades, never throws");
+    }
+
+    [Fact]
+    public void ExtractCreatedRecord_ToleratesJsonElementShape_AndRejectsMalformed()
+    {
+        // JsonElement round-trip shape (e.g. a handler that serialized the envelope).
+        var el = JsonSerializer.SerializeToElement(new
+        {
+            entityLogicalName = "sprk_communication",
+            recordId = "11111111-2222-3333-4444-555555555555",
+        });
+        var ok = TypedHandlerResumeExecutor.ExtractCreatedRecord(new ToolResult
+        {
+            HandlerId = "h",
+            ToolId = Guid.NewGuid(),
+            ToolName = "t",
+            Success = true,
+            Execution = new ToolExecutionMetadata { StartedAt = DateTimeOffset.UtcNow, CompletedAt = DateTimeOffset.UtcNow },
+            Metadata = new Dictionary<string, object?> { [ToolResultMetadataKeys.CreatedRecord] = el },
+        });
+        ok.Should().NotBeNull();
+        ok!.EntityLogicalName.Should().Be("sprk_communication");
+        ok.RecordId.Should().Be(Guid.Parse("11111111-2222-3333-4444-555555555555"));
+
+        // Malformed / empty shapes degrade to null (best-effort enrichment — never throws).
+        var bad = TypedHandlerResumeExecutor.ExtractCreatedRecord(new ToolResult
+        {
+            HandlerId = "h",
+            ToolId = Guid.NewGuid(),
+            ToolName = "t",
+            Success = true,
+            Execution = new ToolExecutionMetadata { StartedAt = DateTimeOffset.UtcNow, CompletedAt = DateTimeOffset.UtcNow },
+            Metadata = new Dictionary<string, object?> { [ToolResultMetadataKeys.CreatedRecord] = "not-an-object" },
+        });
+        bad.Should().BeNull();
+    }
+
+    // =========================================================================
     // NFR-07 args summarization (the ONE summarizer, rebuilt from stored JSON)
     // =========================================================================
 
@@ -265,7 +362,8 @@ public class TypedHandlerResumeExecutorTests
         IReadOnlyList<AnalysisTool> rows,
         IToolHandler handler,
         out ChatSessionManager sessionManager,
-        out string sessionId)
+        out string sessionId,
+        string? environmentUrl = null)
     {
         var cache = new InMemoryTenantCache();
         sessionManager = new ChatSessionManager(
@@ -293,7 +391,8 @@ public class TypedHandlerResumeExecutorTests
             new StubAnalysisToolService(rows),
             registry,
             sessionManager,
-            NullLogger.Instance);
+            NullLogger.Instance,
+            environmentUrl);
     }
 
     private static AnalysisTool BuildChatRow(string name, string handlerClass) => new()

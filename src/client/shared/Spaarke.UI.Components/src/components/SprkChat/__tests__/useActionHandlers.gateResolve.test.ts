@@ -69,6 +69,40 @@ describe('dispatchConfirmedAction — gate-resolve outcome contract (R2-A)', () 
     expect(outcome.message).toContain('Created record 651194cd');
   });
 
+  it('extracts the additive record-link fields on 200 (G-P3 round-4 R4-3)', async () => {
+    const recordUrl =
+      'https://spaarkedev1.crm.dynamics.com/main.aspx?pagetype=entityrecord&etn=sprk_matter&id=651194cd-3670-f111-ab0e-70a8a590c51c';
+    const outcome = await dispatchConfirmedAction(
+      pendingAction,
+      'https://bff.example',
+      fetchReturning(200, {
+        status: 'confirmed',
+        summary: "Record created in 'sprk_matter'.",
+        recordUrl,
+        recordEntityLogicalName: 'sprk_matter',
+        recordId: '651194cd-3670-f111-ab0e-70a8a590c51c',
+      })
+    );
+
+    expect(outcome.success).toBe(true);
+    expect(outcome.recordUrl).toBe(recordUrl);
+    expect(outcome.recordEntityLogicalName).toBe('sprk_matter');
+    expect(outcome.recordId).toBe('651194cd-3670-f111-ab0e-70a8a590c51c');
+  });
+
+  it('leaves record-link fields undefined when the server sends none (pre-R4-3 responses)', async () => {
+    const outcome = await dispatchConfirmedAction(
+      pendingAction,
+      'https://bff.example',
+      fetchReturning(200, { status: 'confirmed', summary: 'ok' })
+    );
+
+    expect(outcome.success).toBe(true);
+    expect(outcome.recordUrl).toBeUndefined();
+    expect(outcome.recordEntityLogicalName).toBeUndefined();
+    expect(outcome.recordId).toBeUndefined();
+  });
+
   it('maps 409 to gate.not-pending with retry copy', async () => {
     const outcome = await dispatchConfirmedAction(
       pendingAction,

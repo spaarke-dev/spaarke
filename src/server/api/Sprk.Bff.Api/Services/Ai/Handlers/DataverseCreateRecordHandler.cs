@@ -72,6 +72,20 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
                      "rejected. If you cannot resolve a GUID for an optional lookup/choice, OMIT the column " +
                      "(mention the value in a text column instead). Records you create belong to the calling " +
                      "user automatically — never set owner/assignee columns for the requesting user themselves. " +
+                     // G-P3 UAT round-4 R4-1 (2026-07-07): the model invented an
+                     // `sprk_practicearea@odata.bind` annotation on a create-matter proposal. The
+                     // write mapper rejects @-annotation keys by design (injection hardening) —
+                     // ban them explicitly and give the sprk_matter contract from REAL metadata.
+                     "NEVER use OData annotations as item keys — no '@odata.bind', no '@' or '.' in any key: " +
+                     "the ONLY way to set a lookup on this transport is the {relatedTable, recordId} object " +
+                     "form, and choice columns take plain numeric values. " +
+                     "sprk_matter write contract (from live metadata — verify anything else with " +
+                     "dataverse.describe): sprk_mattername (text, REQUIRED); sprk_matternumber (text); " +
+                     "sprk_matterdescription (multiline text); sprk_mattertype is a LOOKUP to " +
+                     "sprk_mattertype_ref and sprk_practicearea is a LOOKUP to sprk_practicearea_ref — " +
+                     "resolve the reference row's GUID via dataverse.read_query first and send " +
+                     "{\"relatedTable\":\"sprk_mattertype_ref\",\"recordId\":\"guid\"} (same pattern for " +
+                     "practice area), or OMIT the column and put the value in sprk_matterdescription. " +
                      // G-P3 UAT round-3 R3-4 (2026-07-07): the model tried to satisfy "add this to
                      // documents" by creating a bare sprk_document row (DATAVERSE_BAD_REQUEST) —
                      // document records require an SPE file and no chat tool can upload one.
@@ -93,7 +107,8 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
                 Required: true),
             new ToolParameterDefinition(
                 "item",
-                "Record field values as key-value pairs. Keys are column logical names from dataverse.describe. " +
+                "Record field values as key-value pairs. Keys are PLAIN column logical names from dataverse.describe — " +
+                "NEVER OData annotations ('sprk_column@odata.bind' is invalid on this transport and is rejected). " +
                 "Values: strings, numbers, or booleans for simple fields. For lookup/customer fields use an object: " +
                 "{\"relatedTable\": \"account\", \"name\": \"Contoso Ltd\", \"recordId\": \"guid\"} — recordId is " +
                 "REQUIRED on this transport (resolve it first via dataverse.search_data / dataverse.read_query; " +
@@ -235,7 +250,13 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
                 {
                     Metadata = new Dictionary<string, object?>
                     {
-                        [ToolResultMetadataKeys.Citations] = new[] { DataverseRecordCitations.ForRecord(tablename, createdId.Value) }
+                        [ToolResultMetadataKeys.Citations] = new[] { DataverseRecordCitations.ForRecord(tablename, createdId.Value) },
+                        // R4-6: user-facing outcome sentence (the transcript ✅ message renders
+                        // this verbatim — no instruction-to-model text). R4-3: the record
+                        // reference the gate-resume seam composes the clickable MDA link from.
+                        [ToolResultMetadataKeys.UserSummary] =
+                            $"Record created in '{tablename}' (id {createdId:D}).",
+                        [ToolResultMetadataKeys.CreatedRecord] = new ToolCreatedRecord(tablename, createdId.Value)
                     }
                 };
             }

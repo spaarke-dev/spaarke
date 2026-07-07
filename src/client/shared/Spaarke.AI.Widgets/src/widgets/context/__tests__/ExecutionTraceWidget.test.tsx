@@ -29,8 +29,18 @@ import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import { PaneEventBus } from '../../../events/PaneEventBus';
 import { PaneEventBusProvider } from '../../../events/PaneEventBusContext';
 import ExecutionTraceWidget, { MAX_TRACE_ENTRIES, type ExecutionTraceData } from '../ExecutionTraceWidget';
+import {
+  recordExecutionTraceEvent,
+  clearExecutionTraceBuffer,
+  type BufferedTraceEvent,
+} from '../executionTraceBuffer';
 import type { ContextPaneEvent, TraceToolCallSummary } from '../../../events/PaneEventTypes';
 import type { ContextWidgetProps } from '../../../types/widget-types';
+
+// The module-scoped replay buffer persists across tests — every test starts clean.
+beforeEach(() => {
+  clearExecutionTraceBuffer();
+});
 
 // ---------------------------------------------------------------------------
 // Mock scrollIntoView (jsdom does not implement it)
@@ -100,6 +110,57 @@ describe('ExecutionTraceWidget — empty state', () => {
   it('renders the widget region with the correct accessible name', () => {
     renderWidget();
     expect(screen.getByRole('region', { name: 'Execution trace' })).toBeInTheDocument();
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Replay-on-mount (G-P3 UAT round-5 R5-D, 2026-07-07)
+// ---------------------------------------------------------------------------
+
+describe('ExecutionTraceWidget — replay-on-mount from the trace buffer (R5-D)', () => {
+  it('backfills entries recorded BEFORE the widget mounted (the real-app ordering)', () => {
+    // The round-5 defect: tool_chain events fire during the streaming turn while
+    // the widget is UNMOUNTED (default Context tool is quick-start) — PaneEventBus
+    // drops them and the widget mounted empty forever. The always-mounted bridge
+    // now records each event; the widget replays the buffer on mount.
+    recordExecutionTraceEvent(
+      makeToolChainEvent([
+        { toolId: 'dataverse.search_data', resultCount: 3, durationMs: 210 },
+        { toolId: 'dataverse.create_record', durationMs: 890 },
+      ]) as unknown as BufferedTraceEvent
+    );
+    recordExecutionTraceEvent(
+      makeToolChainEvent([{ toolId: 'SYS-Email_Draft', durationMs: 300 }], {
+        turn: 2,
+      } as Partial<ContextPaneEvent>) as unknown as BufferedTraceEvent
+    );
+
+    renderWidget();
+
+    const rows = screen.getAllByTestId('execution-trace-row');
+    expect(rows).toHaveLength(3);
+    expect(rows[0]).toHaveAttribute('data-tool-id', 'dataverse.search_data');
+    expect(rows[1]).toHaveAttribute('data-tool-id', 'dataverse.create_record');
+    expect(rows[2]).toHaveAttribute('data-tool-id', 'SYS-Email_Draft');
+    expect(screen.queryByText('No execution trace yet')).not.toBeInTheDocument();
+  });
+
+  it('live events after mount append AFTER the replayed entries (no duplication)', () => {
+    recordExecutionTraceEvent(
+      makeToolChainEvent([{ toolId: 'buffered.tool' }]) as unknown as BufferedTraceEvent
+    );
+
+    const bus = new PaneEventBus();
+    renderWidget({}, bus);
+
+    act(() => {
+      bus.dispatch('context', makeToolChainEvent([{ toolId: 'live.tool' }], { turn: 2 } as Partial<ContextPaneEvent>));
+    });
+
+    const rows = screen.getAllByTestId('execution-trace-row');
+    expect(rows).toHaveLength(2);
+    expect(rows[0]).toHaveAttribute('data-tool-id', 'buffered.tool');
+    expect(rows[1]).toHaveAttribute('data-tool-id', 'live.tool');
   });
 });
 

@@ -60,7 +60,14 @@ public sealed class DataverseReadQueryHandler : IToolHandler
                      "read_query contract): SELECT [TOP n] explicit columns FROM one table [WHERE simple " +
                      "column-to-literal predicates with AND/OR] [ORDER BY]. Not supported: JOIN, GROUP BY, " +
                      "aggregates, subqueries, DISTINCT, HAVING, UNION, OFFSET. Use dataverse.describe first to " +
-                     "discover table and column logical names.",
+                     "discover table and column logical names. " +
+                     // G-P3 UAT round-5 R5-C (2026-07-07): distribution/aggregate steering + the
+                     // lookup-column contract (selecting a lookup previously failed at the Web API).
+                     "For distributions/aggregations (counts by category), SELECT the category column across " +
+                     "rows (TOP up to 200) and aggregate the values YOURSELF from the result. LOOKUP columns " +
+                     "(e.g. sprk_practicearea on sprk_matter) are selectable and return the referenced record's " +
+                     "GUID — query the referenced table (e.g. sprk_practicearea_ref) to map GUIDs to names. " +
+                     "Choice columns return numeric option values — map them to labels via dataverse.describe.",
         Version: "1.0.0",
         SupportedInputTypes: new[] { "text/plain" },
         Parameters: new[]
@@ -133,8 +140,13 @@ public sealed class DataverseReadQueryHandler : IToolHandler
         {
             // Resolve entity-set + primary id from metadata (under the user's token — a table
             // invisible to this user 404s here, which is the correct fail-closed behavior).
+            // R5-C (2026-07-07): also fetch attribute types so LOOKUP columns can be rewritten
+            // to their Web-API `_{name}_value` form — selecting a lookup by its logical name
+            // (e.g. sprk_practicearea on sprk_matter) previously failed the whole query with
+            // "property does not exist", which the model relayed as a broken column.
             var metaResponse = await _dataverse.GetAsync(
-                $"EntityDefinitions(LogicalName='{translation.EntityLogicalName}')?$select=EntitySetName,PrimaryIdAttribute",
+                $"EntityDefinitions(LogicalName='{translation.EntityLogicalName}')?$select=EntitySetName,PrimaryIdAttribute" +
+                "&$expand=Attributes($select=LogicalName,AttributeType)",
                 cancellationToken).ConfigureAwait(false);
             if (!metaResponse.IsSuccess)
             {
@@ -148,8 +160,33 @@ public sealed class DataverseReadQueryHandler : IToolHandler
                 return Error(tool, $"Table '{translation.EntityLogicalName}' metadata is incomplete.", ToolErrorCodes.InternalError, startedAt);
             }
 
+            // R5-C: rewrite referenced LOOKUP/Customer/Owner columns to `_{name}_value` in
+            // $select / $filter / $orderby (metadata-aware; the pure translator can't know
+            // column types). Row keys are mapped BACK to the requested logical names below,
+            // so the model sees the columns it asked for (values = referenced-record GUIDs).
+            var lookupAttributes = ExtractLookupAttributeNames(metaResponse.Body.Value);
+            var mappedLookups = translation.Columns!
+                .Where(lookupAttributes.Contains)
+                .ToList();
+            string odataQuery;
+            if (mappedLookups.Count > 0 ||
+                ContainsAnyLookup(translation.RawFilter, lookupAttributes) ||
+                ContainsAnyLookup(translation.RawOrderBy, lookupAttributes))
+            {
+                var mappedColumns = translation.Columns!
+                    .Select(c => lookupAttributes.Contains(c) ? ToValueForm(c) : c);
+                odataQuery = DataverseSqlQueryTranslator.AssembleODataQuery(
+                    mappedColumns,
+                    RewriteLookupReferences(translation.RawFilter, lookupAttributes),
+                    RewriteLookupReferences(translation.RawOrderBy, lookupAttributes),
+                    translation.Top);
+            }
+            else
+            {
+                odataQuery = translation.ODataQuery!;
+            }
+
             // ADR-039 grounding: guarantee the primary id is selected so every row is citable.
-            var odataQuery = translation.ODataQuery!;
             var primaryIdInjected = false;
             if (!translation.Columns!.Contains(primaryIdAttribute, StringComparer.OrdinalIgnoreCase))
             {
@@ -174,7 +211,10 @@ public sealed class DataverseReadQueryHandler : IToolHandler
                     foreach (var property in record.EnumerateObject())
                     {
                         if (property.Name.StartsWith("@odata", StringComparison.OrdinalIgnoreCase)) continue;
-                        row[property.Name] = property.Value.ValueKind switch
+                        // R5-C: map `_{col}_value` back to the logical name the model asked
+                        // for — the rewrite is a transport detail, not the model's problem.
+                        var propertyName = FromValueForm(property.Name, lookupAttributes);
+                        row[propertyName] = property.Value.ValueKind switch
                         {
                             JsonValueKind.Null => null,
                             JsonValueKind.String => property.Value.GetString(),
@@ -212,6 +252,14 @@ public sealed class DataverseReadQueryHandler : IToolHandler
             if (primaryIdInjected)
             {
                 warnings.Add($"Primary id column '{primaryIdAttribute}' was added to the selection automatically so results are citable.");
+            }
+            if (mappedLookups.Count > 0)
+            {
+                // R5-C: transparency for the model — lookup values are GUIDs, not labels.
+                warnings.Add(
+                    $"Lookup column(s) {string.Join(", ", mappedLookups.Select(c => $"'{c}'"))} return the referenced " +
+                    "record's GUID. To map GUIDs to display names, query the referenced table " +
+                    "(dataverse.describe shows the related table per lookup column).");
             }
             if (rows.Count >= translation.Top)
             {
@@ -253,6 +301,100 @@ public sealed class DataverseReadQueryHandler : IToolHandler
     }
 
     // ── helpers ───────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Extracts the logical names of LOOKUP-shaped attributes (Lookup / Customer / Owner)
+    /// from the expanded EntityDefinitions metadata (R5-C, 2026-07-07). These columns are
+    /// addressed as <c>_{name}_value</c> on the Web API — selecting/filtering by logical
+    /// name fails with "property does not exist".
+    /// </summary>
+    internal static HashSet<string> ExtractLookupAttributeNames(JsonElement metadata)
+    {
+        var result = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+        if (!metadata.TryGetProperty("Attributes", out var attributes) ||
+            attributes.ValueKind != JsonValueKind.Array)
+        {
+            return result;
+        }
+
+        foreach (var attribute in attributes.EnumerateArray())
+        {
+            if (attribute.ValueKind != JsonValueKind.Object) continue;
+            if (!attribute.TryGetProperty("AttributeType", out var typeProp) ||
+                typeProp.ValueKind != JsonValueKind.String)
+            {
+                continue;
+            }
+            var type = typeProp.GetString();
+            if (type is not ("Lookup" or "Customer" or "Owner")) continue;
+            if (attribute.TryGetProperty("LogicalName", out var nameProp) &&
+                nameProp.ValueKind == JsonValueKind.String &&
+                nameProp.GetString() is { Length: > 0 } name)
+            {
+                result.Add(name);
+            }
+        }
+
+        return result;
+    }
+
+    /// <summary>The Web API address form of a lookup column (<c>_{name}_value</c>).</summary>
+    internal static string ToValueForm(string logicalName) => $"_{logicalName}_value";
+
+    /// <summary>
+    /// Maps a response property back to the requested logical name when it is the
+    /// <c>_{name}_value</c> form of a known lookup column; other names pass through.
+    /// </summary>
+    internal static string FromValueForm(string propertyName, HashSet<string> lookupAttributes)
+    {
+        if (propertyName.Length > 7 &&
+            propertyName[0] == '_' &&
+            propertyName.EndsWith("_value", StringComparison.OrdinalIgnoreCase))
+        {
+            var candidate = propertyName[1..^6];
+            if (lookupAttributes.Contains(candidate))
+            {
+                return candidate;
+            }
+        }
+
+        return propertyName;
+    }
+
+    /// <summary>True when the raw filter/orderby text references any lookup column as a whole word.</summary>
+    internal static bool ContainsAnyLookup(string? rawClause, HashSet<string> lookupAttributes)
+    {
+        if (string.IsNullOrEmpty(rawClause) || lookupAttributes.Count == 0) return false;
+        return lookupAttributes.Any(col =>
+            System.Text.RegularExpressions.Regex.IsMatch(
+                rawClause, $@"\b{System.Text.RegularExpressions.Regex.Escape(col)}\b",
+                System.Text.RegularExpressions.RegexOptions.IgnoreCase));
+    }
+
+    /// <summary>
+    /// Rewrites whole-word lookup column references to <c>_{name}_value</c> OUTSIDE quoted
+    /// string literals (a literal like 'sprk_practicearea' must never be rewritten).
+    /// Splitting on single quotes puts literals at ODD indices — only EVEN segments rewrite.
+    /// </summary>
+    internal static string? RewriteLookupReferences(string? rawClause, HashSet<string> lookupAttributes)
+    {
+        if (string.IsNullOrEmpty(rawClause) || lookupAttributes.Count == 0) return rawClause;
+
+        var segments = rawClause.Split('\'');
+        for (var i = 0; i < segments.Length; i += 2)
+        {
+            foreach (var col in lookupAttributes)
+            {
+                segments[i] = System.Text.RegularExpressions.Regex.Replace(
+                    segments[i],
+                    $@"\b{System.Text.RegularExpressions.Regex.Escape(col)}\b",
+                    ToValueForm(col),
+                    System.Text.RegularExpressions.RegexOptions.IgnoreCase);
+            }
+        }
+
+        return string.Join("'", segments);
+    }
 
     internal static bool TryParseArgs(string? argsJson, out string querytext, out string? error)
     {

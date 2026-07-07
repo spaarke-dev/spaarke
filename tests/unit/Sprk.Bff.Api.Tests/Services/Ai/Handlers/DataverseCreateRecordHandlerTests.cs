@@ -220,6 +220,48 @@ public sealed class DataverseCreateRecordHandlerTests : TypedToolHandlerTestFixt
         var citations = (IEnumerable<ToolResultCitation>)result.Metadata![ToolResultMetadataKeys.Citations]!;
         citations.Should().ContainSingle(c =>
             c.ChunkId == $"tables/account/records/{createdId:D}" && c.SourceName == "account" && c.SourceType == "dataverse");
+
+        // G-P3 UAT round-4 R4-6/R4-3 (2026-07-07): user-facing outcome sentence
+        // (transcript-safe, no instruction-to-model text) + primary-record reference
+        // (the gate-resume seam composes the clickable MDA link from it).
+        result.Metadata.Should().ContainKey(ToolResultMetadataKeys.UserSummary);
+        var userSummary = (string)result.Metadata![ToolResultMetadataKeys.UserSummary]!;
+        userSummary.Should().Contain("account").And.Contain(createdId.ToString("D"));
+        userSummary.Should().NotContain("tell the user");
+        result.Metadata.Should().ContainKey(ToolResultMetadataKeys.CreatedRecord);
+        var record = (ToolCreatedRecord)result.Metadata![ToolResultMetadataKeys.CreatedRecord]!;
+        record.EntityLogicalName.Should().Be("account");
+        record.RecordId.Should().Be(createdId);
+    }
+
+    /// <summary>
+    /// G-P3 UAT round-4 R4-1 guidance pin (2026-07-07): the operator's create-matter
+    /// attempt failed because the model invented an <c>sprk_practicearea@odata.bind</c>
+    /// annotation. The handler description (mirrored on the catalog row) must carry
+    /// (a) the explicit @odata.bind ban, (b) the sprk_matter write contract FROM REAL
+    /// METADATA (sprk_practicearea / sprk_mattertype are LOOKUPS to *_ref tables — the
+    /// round-4 brief's "multi-select choice" assumption was disproven by
+    /// mcp describe: LOOKUP (GUID) → sprk_practicearea_ref), and (c) describe-first.
+    /// </summary>
+    [Fact]
+    public void Metadata_Description_CarriesODataBindBan_AndSprkMatterWriteContract()
+    {
+        var description = CreateHandler().Metadata.Description;
+
+        description.Should().Contain("@odata.bind",
+            because: "the ban must name the exact annotation the model invented");
+        description.Should().Contain("NEVER use OData annotations");
+        description.Should().Contain("sprk_mattername",
+            because: "the sprk_matter contract names the required primary column");
+        description.Should().Contain("sprk_practicearea_ref",
+            because: "practice area is a LOOKUP to sprk_practicearea_ref (live metadata), not a choice");
+        description.Should().Contain("sprk_mattertype_ref");
+        description.Should().Contain("dataverse.describe",
+            because: "describe-first for unknown tables stays reinforced");
+
+        var itemParam = CreateHandler().Metadata.Parameters.Single(p => p.Name == "item");
+        itemParam.Description.Should().Contain("@odata.bind",
+            because: "the item-shape documentation carries the same ban");
     }
 
     [Fact]

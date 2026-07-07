@@ -32,6 +32,9 @@ public sealed class SendWorkspaceArtifactHandlerTests : TypedToolHandlerTestFixt
     private readonly Mock<IGuidProvider> _guidProvider = new();
     private readonly Mock<IGenericEntityService> _entityService = new();
     private readonly FakeTimeProvider _timeProvider = new(DeterministicNow);
+    // R4-2 (2026-07-07): user-OBO Dataverse client for the Compose pre-seed
+    // sprk_document → SPE pointer resolution.
+    private readonly Mock<Sprk.Bff.Api.Services.Ai.Handlers.Dataverse.IDataverseUserClient> _dataverse = new();
 
     public SendWorkspaceArtifactHandlerTests()
     {
@@ -62,6 +65,7 @@ public sealed class SendWorkspaceArtifactHandlerTests : TypedToolHandlerTestFixt
         _guidProvider.Object,
         _timeProvider,
         new WorkspaceLayoutService(_entityService.Object, CreateLogger<WorkspaceLayoutService>()),
+        _dataverse.Object,
         CreateLogger<SendWorkspaceArtifactHandler>());
 
     private static AnalysisTool BuildArtifactTool() =>
@@ -325,6 +329,137 @@ public sealed class SendWorkspaceArtifactHandlerTests : TypedToolHandlerTestFixt
         result.ErrorMessage.Should().Contain("No workspace layout named 'Nonexistent'");
         result.ErrorMessage.Should().Contain("Available layouts:",
             because: "the model needs the real layout names to ground a retry or an honest answer");
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════
+    // Compose document pre-seed (G-P3 UAT round-4 R4-2, 2026-07-07)
+    // ═════════════════════════════════════════════════════════════════════════════
+
+    private static string BuildWorkspaceArgsJsonWithDocument(string documentId) =>
+        $$"""
+          {
+            "widgetType": "Workspace",
+            "title": "Compose",
+            "widgetData": {
+              "kind": "Workspace",
+              "layoutName": "Compose",
+              "documentId": "{{documentId}}"
+            }
+          }
+          """;
+
+    [Fact]
+    public async Task ExecuteChatAsync_WorkspaceLayout_WithResolvableDocument_CarriesComposeSeedInWidgetData()
+    {
+        SeedComposeSystemLayout();
+        var documentId = Guid.Parse("d0c00000-1111-2222-3333-444444444444");
+        _dataverse
+            .Setup(d => d.GetAsync(It.Is<string>(p => p.Contains($"sprk_documents({documentId:D})")), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Sprk.Bff.Api.Services.Ai.Handlers.Dataverse.DataverseUserResponse.Ok(200,
+                JsonSerializer.SerializeToElement(new
+                {
+                    sprk_documentid = documentId.ToString("D"),
+                    sprk_documentname = "NDA - Acme.docx",
+                    sprk_filename = "nda-acme.docx",
+                    sprk_graphdriveid = "b!driveId",
+                    sprk_graphitemid = "01ITEMID",
+                })));
+
+        var emitted = new List<Sprk.Bff.Api.Api.Ai.ChatSseEvent>();
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: BuildWorkspaceArgsJsonWithDocument(documentId.ToString("D"))) with
+        {
+            SseWriter = (evt, _) => { emitted.Add(evt); return Task.CompletedTask; }
+        };
+
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildArtifactTool(), CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        result.Summary.Should().Contain("pre-seeded",
+            because: "the tool result grounds the model's claim that Compose opened WITH the document");
+
+        var dto = emitted.Should().ContainSingle().Subject.Data
+            .Should().BeOfType<Sprk.Bff.Api.Services.Ai.Telemetry.ContextSseEventDto>().Subject;
+        using var widgetData = JsonDocument.Parse(dto.ContextWidgetDataJson!);
+        var compose = widgetData.RootElement.GetProperty("compose");
+        compose.GetProperty("sprkDocumentId").GetString().Should().Be(documentId.ToString("D"));
+        compose.GetProperty("speDriveItemId").GetString().Should().Be("01ITEMID");
+        compose.GetProperty("speDriveId").GetString().Should().Be("b!driveId");
+        compose.GetProperty("fileName").GetString().Should().Be("NDA - Acme.docx");
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_WorkspaceLayout_DocumentWithoutStoredFile_OpensTabEmpty_AndSaysSoHonestly()
+    {
+        SeedComposeSystemLayout();
+        var documentId = Guid.NewGuid();
+        _dataverse
+            .Setup(d => d.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Sprk.Bff.Api.Services.Ai.Handlers.Dataverse.DataverseUserResponse.Ok(200,
+                JsonSerializer.SerializeToElement(new
+                {
+                    sprk_documentid = documentId.ToString("D"),
+                    sprk_documentname = "Metadata-only doc",
+                    // no sprk_graphitemid — a fileless sprk_document row
+                })));
+
+        var emitted = new List<Sprk.Bff.Api.Api.Ai.ChatSseEvent>();
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: BuildWorkspaceArgsJsonWithDocument(documentId.ToString("D"))) with
+        {
+            SseWriter = (evt, _) => { emitted.Add(evt); return Task.CompletedTask; }
+        };
+
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildArtifactTool(), CancellationToken.None);
+
+        // The TAB still opens (partial success) — the pre-seed failure is stated honestly.
+        result.Success.Should().BeTrue();
+        result.Summary.Should().Contain("EMPTY",
+            because: "fail-honest: the model must relay that the document could not be loaded");
+        result.Summary.Should().Contain("NO stored file");
+
+        var dto = emitted.Should().ContainSingle().Subject.Data
+            .Should().BeOfType<Sprk.Bff.Api.Services.Ai.Telemetry.ContextSseEventDto>().Subject;
+        using var widgetData = JsonDocument.Parse(dto.ContextWidgetDataJson!);
+        widgetData.RootElement.TryGetProperty("compose", out _).Should().BeFalse(
+            because: "no seed rides the frame when the document has no SPE file");
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_WorkspaceLayout_DocumentNotAccessible_OpensTabEmpty_AndSaysSoHonestly()
+    {
+        SeedComposeSystemLayout();
+        _dataverse
+            .Setup(d => d.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Sprk.Bff.Api.Services.Ai.Handlers.Dataverse.DataverseUserResponse.Fail(
+                404, "DATAVERSE_NOT_FOUND", "The record was not found (or you lack access)."));
+
+        var emitted = new List<Sprk.Bff.Api.Api.Ai.ChatSseEvent>();
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: BuildWorkspaceArgsJsonWithDocument(Guid.NewGuid().ToString("D"))) with
+        {
+            SseWriter = (evt, _) => { emitted.Add(evt); return Task.CompletedTask; }
+        };
+
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildArtifactTool(), CancellationToken.None);
+
+        result.Success.Should().BeTrue("the tab itself opened — only the pre-seed degraded");
+        result.Summary.Should().Contain("EMPTY");
+        result.Summary.Should().Contain("not found or not accessible");
+    }
+
+    [Fact]
+    public void ValidateChat_WorkspaceKind_NonGuidDocumentId_RejectedWithSessionFileGuidance()
+    {
+        // Session-uploaded chat files (fileId shape, not a GUID) carry NO SPE pointer —
+        // the pre-seed is genuinely impossible for them (round-2/round-4 reality check).
+        var handler = CreateHandler();
+        const string argsJson =
+            """{"widgetType":"Workspace","title":"Compose","widgetData":{"kind":"Workspace","layoutName":"Compose","documentId":"session-file-abc123"}}""";
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: argsJson);
+
+        var result = handler.ValidateChat(ctx, BuildArtifactTool());
+
+        result.IsValid.Should().BeFalse();
+        result.Errors.Should().Contain(e => e.Contains("Session-uploaded", StringComparison.Ordinal),
+            because: "the rejection teaches the model the honest alternative (open empty + say so)");
     }
 
     [Fact]

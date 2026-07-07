@@ -52,10 +52,31 @@ internal static partial class DataverseSqlQueryTranslator
         IReadOnlyList<string>? Columns,
         string? ODataQuery,
         int Top,
-        string? Error)
+        string? Error,
+        // G-P3 UAT round-5 R5-C (2026-07-07): the UNESCAPED filter/orderby parts, exposed so
+        // the handler can rewrite LOOKUP column references to their Web-API `_{name}_value`
+        // form (metadata-aware — the translator itself stays pure/metadata-free) and
+        // reassemble via AssembleODataQuery.
+        string? RawFilter = null,
+        string? RawOrderBy = null)
     {
         public static TranslationResult Fail(string error) =>
             new(false, null, null, null, 0, error);
+    }
+
+    /// <summary>
+    /// Assembles the OData query string from structured parts — the ONE assembly site,
+    /// shared by <see cref="Translate"/> and the handler's R5-C lookup-column rewrite.
+    /// </summary>
+    internal static string AssembleODataQuery(
+        IEnumerable<string> selectColumns, string? rawFilter, string? rawOrderBy, int top)
+    {
+        var sb = new StringBuilder();
+        sb.Append("$select=").Append(string.Join(",", selectColumns));
+        if (rawFilter is not null) sb.Append("&$filter=").Append(Uri.EscapeDataString(rawFilter));
+        if (rawOrderBy is not null) sb.Append("&$orderby=").Append(Uri.EscapeDataString(rawOrderBy));
+        sb.Append("&$top=").Append(top);
+        return sb.ToString();
     }
 
     /// <summary>
@@ -200,13 +221,12 @@ internal static partial class DataverseSqlQueryTranslator
             return TranslationResult.Fail($"Unexpected token '{cursor.Peek()?.Text}' — supported shape: SELECT [TOP n] cols FROM table [WHERE …] [ORDER BY …].");
         }
 
-        var sb = new StringBuilder();
-        sb.Append("$select=").Append(string.Join(",", columns));
-        if (filter is not null) sb.Append("&$filter=").Append(Uri.EscapeDataString(filter));
-        if (orderBy is not null) sb.Append("&$orderby=").Append(Uri.EscapeDataString(orderBy));
-        sb.Append("&$top=").Append(top);
-
-        return new TranslationResult(true, table, columns, sb.ToString(), top, null);
+        return new TranslationResult(
+            true, table, columns,
+            AssembleODataQuery(columns, filter, orderBy, top),
+            top, null,
+            RawFilter: filter,
+            RawOrderBy: orderBy);
     }
 
     /// <summary>

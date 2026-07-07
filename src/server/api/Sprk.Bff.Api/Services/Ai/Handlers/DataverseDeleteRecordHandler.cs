@@ -181,7 +181,15 @@ public sealed partial class DataverseDeleteRecordHandler : IToolHandler
                 },
                 summary: $"Deleted record {recordId:D} from '{tablename}' (under the calling user's permissions).",
                 confidence: 1.0,
-                execution: Timed(startedAt));
+                execution: Timed(startedAt)) with
+            {
+                // R4-6 (2026-07-07): user-facing outcome for the gate-resume transcript
+                // message. No record reference — the record no longer exists to link to.
+                Metadata = new Dictionary<string, object?>
+                {
+                    [ToolResultMetadataKeys.UserSummary] = $"Record deleted from '{tablename}'."
+                }
+            };
 
             return LogOutcome(context, tablename, recordId, result, stopwatch);
         }

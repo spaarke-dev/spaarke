@@ -160,6 +160,40 @@ public sealed class EmailDraftToolHandlerTests : TypedToolHandlerTestFixture
 
         // The result relays the DRAFT posture to the model (grounded turn instruction).
         result.Summary.Should().Contain("DRAFT").And.Contain("NO email was sent");
+
+        // G-P3 UAT round-4 R4-6 pin (2026-07-07): the model-facing Summary carries
+        // instruction text ("tell the user…") which LEAKED verbatim into the operator's
+        // transcript on the gate-resume path. The handler now ALSO emits the user-facing
+        // sentence — the transcript renders THIS, never the Summary.
+        result.Metadata.Should().ContainKey(ToolResultMetadataKeys.UserSummary);
+        var userSummary = (string)result.Metadata![ToolResultMetadataKeys.UserSummary]!;
+        userSummary.Should().Be("Draft email created (1 recipient(s)) — ready for your review in Communications. No email was sent.");
+        userSummary.Should().NotContain("tell the user",
+            because: "instruction-to-model text must never reach the transcript");
+
+        // R4-3: primary-record reference — the gate-resume seam composes the MDA link.
+        result.Metadata.Should().ContainKey(ToolResultMetadataKeys.CreatedRecord);
+        var record = (ToolCreatedRecord)result.Metadata![ToolResultMetadataKeys.CreatedRecord]!;
+        record.EntityLogicalName.Should().Be("sprk_communication");
+        record.RecordId.Should().Be(createdId);
+    }
+
+    /// <summary>
+    /// G-P3 UAT round-4 R4-4 guidance pin (2026-07-07): "send this as an email" after a
+    /// combined summary produced a generic draft REFERENCING AN ATTACHMENT that cannot
+    /// exist (the capability cannot attach files). The tool description must carry the
+    /// no-attachments rule + inline-the-content steering.
+    /// </summary>
+    [Fact]
+    public void Metadata_Description_CarriesNoAttachmentsRule_AndInlineContentSteering()
+    {
+        var description = CreateHandler().Metadata.Description;
+
+        description.Should().Contain("CANNOT carry attachments");
+        description.Should().Contain("please find attached",
+            because: "the ban names the exact phrase the round-4 draft invented");
+        description.Should().Contain("INLINE",
+            because: "conversation-produced content (summaries, findings) goes in the body");
     }
 
     [Fact]

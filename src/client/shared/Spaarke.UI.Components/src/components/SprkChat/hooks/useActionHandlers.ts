@@ -335,6 +335,17 @@ export interface IGateResolveOutcome {
   message: string;
   /** Stable server errorCode (ADR-019) on failure; undefined on success. */
   errorCode?: string;
+  /**
+   * Server-composed MDA deep link to the created/updated record (G-P3 UAT round-4
+   * R4-3, 2026-07-07; additive). Present only on confirmed typed-handler executions
+   * that reported a record. Rendered as a markdown "[Open record](…)" link in the
+   * local ✅ transcript message (the server persists the matching durable copy).
+   */
+  recordUrl?: string;
+  /** Created/updated record's table logical name (additive, R4-3). */
+  recordEntityLogicalName?: string;
+  /** Created/updated record's GUID (additive, R4-3). */
+  recordId?: string;
 }
 
 /** Shared POST to the gate-resolve endpoint. */
@@ -390,13 +401,26 @@ async function resolveGate(
       };
     }
 
-    const result = (await response.json()) as { status?: string; summary?: string | null };
+    const result = (await response.json()) as {
+      status?: string;
+      summary?: string | null;
+      recordUrl?: string | null;
+      recordEntityLogicalName?: string | null;
+      recordId?: string | null;
+    };
     return approved
       ? {
           success: true,
           message: result.summary
             ? `${pendingAction.actionName} completed. ${result.summary}`
             : `${pendingAction.actionName} completed.`,
+          // R4-3 (2026-07-07): additive record-link fields — undefined when absent.
+          recordUrl: typeof result.recordUrl === 'string' && result.recordUrl.length > 0 ? result.recordUrl : undefined,
+          recordEntityLogicalName:
+            typeof result.recordEntityLogicalName === 'string' && result.recordEntityLogicalName.length > 0
+              ? result.recordEntityLogicalName
+              : undefined,
+          recordId: typeof result.recordId === 'string' && result.recordId.length > 0 ? result.recordId : undefined,
         }
       : { success: true, message: `${pendingAction.actionName} was cancelled.` };
   } catch (err: unknown) {

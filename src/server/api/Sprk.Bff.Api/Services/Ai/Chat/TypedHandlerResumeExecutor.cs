@@ -1,6 +1,8 @@
 using System.Text.Json;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.DependencyInjection;
+using Microsoft.Extensions.Options;
+using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Models.Ai.Chat;
 
 namespace Sprk.Bff.Api.Services.Ai.Chat;
@@ -87,17 +89,22 @@ public sealed class TypedHandlerResumeExecutor
     private readonly IToolHandlerRegistry _handlerRegistry;
     private readonly ChatSessionManager _sessionManager;
     private readonly ILogger _logger;
+    private readonly string? _dataverseEnvironmentUrl;
 
     internal TypedHandlerResumeExecutor(
         AnalysisToolService toolService,
         IToolHandlerRegistry handlerRegistry,
         ChatSessionManager sessionManager,
-        ILogger logger)
+        ILogger logger,
+        string? dataverseEnvironmentUrl = null)
     {
         _toolService = toolService ?? throw new ArgumentNullException(nameof(toolService));
         _handlerRegistry = handlerRegistry ?? throw new ArgumentNullException(nameof(handlerRegistry));
         _sessionManager = sessionManager ?? throw new ArgumentNullException(nameof(sessionManager));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _dataverseEnvironmentUrl = string.IsNullOrWhiteSpace(dataverseEnvironmentUrl)
+            ? null
+            : dataverseEnvironmentUrl.TrimEnd('/');
     }
 
     /// <summary>
@@ -118,7 +125,12 @@ public sealed class TypedHandlerResumeExecutor
             return null;
         }
 
-        return new TypedHandlerResumeExecutor(toolService, registry, sessionManager, logger);
+        // R4-3 (2026-07-07): the Dataverse environment URL is the server-known half of
+        // the MDA deep link. Optional — link composition degrades to "no link" when the
+        // options are not registered/populated (never blocks the resume).
+        var environmentUrl = requestServices.GetService<IOptions<DataverseOptions>>()?.Value?.EnvironmentUrl;
+
+        return new TypedHandlerResumeExecutor(toolService, registry, sessionManager, logger, environmentUrl);
     }
 
     /// <summary>
@@ -127,8 +139,40 @@ public sealed class TypedHandlerResumeExecutor
     /// </summary>
     public sealed record ResumeResolution(AnalysisTool Tool, IToolHandler Handler);
 
-    /// <summary>Terminal outcome of a resumed typed-handler execution.</summary>
-    public sealed record ResumeOutcome(bool Success, string? Summary, string? Error, string? LedgerKey);
+    /// <summary>
+    /// Terminal outcome of a resumed typed-handler execution.
+    /// </summary>
+    /// <param name="Success">Whether the handler executed successfully.</param>
+    /// <param name="Summary">MODEL-facing summary (may contain instruction-to-model text).</param>
+    /// <param name="Error">Handler-reported failure detail (instructive, user-safe).</param>
+    /// <param name="LedgerKey">The <c>loop@t{n}</c> ledger key of the stored output.</param>
+    /// <param name="UserSummary">
+    /// USER-facing outcome sentence (R4-6, from <see cref="ToolResultMetadataKeys.UserSummary"/>).
+    /// Null when the handler emits none — callers fall back to <paramref name="Summary"/>.
+    /// </param>
+    /// <param name="RecordEntityLogicalName">Created/updated record's table logical name (R4-3).</param>
+    /// <param name="RecordId">Created/updated record's GUID (R4-3).</param>
+    /// <param name="RecordUrl">
+    /// Server-composed MDA deep link (R4-3):
+    /// <c>{Dataverse:EnvironmentUrl}/main.aspx?pagetype=entityrecord&amp;etn={logicalName}&amp;id={guid}</c>.
+    /// SEAM DECISION (documented per operator ask): the URL is composed SERVER-side because the
+    /// transcript ✅ message is PERSISTED server-side (ChatEndpoints.PersistGateOutcomeMessageAsync)
+    /// and must carry the clickable link durably across reloads — and because the model needs a
+    /// real link IN ITS HISTORY to relay honestly. The server does not know the client's appid
+    /// (it lives in the MDA session), so the link omits it — <c>main.aspx?pagetype=entityrecord</c>
+    /// without appid resolves in the user's current app. A with-appid upgrade would thread the
+    /// appid through session-create HostContext (client reads Xrm.Utility.getCurrentAppProperties)
+    /// — recorded as a follow-up candidate, not built here.
+    /// </param>
+    public sealed record ResumeOutcome(
+        bool Success,
+        string? Summary,
+        string? Error,
+        string? LedgerKey,
+        string? UserSummary = null,
+        string? RecordEntityLogicalName = null,
+        Guid? RecordId = null,
+        string? RecordUrl = null);
 
     /// <summary>
     /// Resolves the suspended tool id back to its catalog row + registered handler.
@@ -289,8 +333,112 @@ public sealed class TypedHandlerResumeExecutor
             "ledgerKey={LedgerKey} session={SessionId} tenant={TenantId}",
             invocation.GateId, invocation.ToolId, ledgerKey, invocation.SessionId, invocation.TenantId);
 
-        return new ResumeOutcome(true, result.Summary, null, ledgerKey);
+        // R4-6: prefer the handler's USER-facing outcome sentence for transcript rendering.
+        // R4-3: compose the MDA deep link from the handler's record reference (see the
+        // ResumeOutcome.RecordUrl doc for the server-side seam decision).
+        var userSummary = ExtractUserSummary(result);
+        var record = ExtractCreatedRecord(result);
+        var recordUrl = record is not null ? BuildRecordUrl(record.EntityLogicalName, record.RecordId) : null;
+
+        return new ResumeOutcome(
+            true, result.Summary, null, ledgerKey,
+            UserSummary: userSummary,
+            RecordEntityLogicalName: record?.EntityLogicalName,
+            RecordId: record?.RecordId,
+            RecordUrl: recordUrl);
     }
+
+    /// <summary>
+    /// Tolerantly reads the handler's user-facing outcome sentence
+    /// (<see cref="ToolResultMetadataKeys.UserSummary"/>). Null when absent/malformed.
+    /// </summary>
+    internal static string? ExtractUserSummary(ToolResult result)
+    {
+        if (result.Metadata is null ||
+            !result.Metadata.TryGetValue(ToolResultMetadataKeys.UserSummary, out var value))
+        {
+            return null;
+        }
+
+        return value switch
+        {
+            string s when !string.IsNullOrWhiteSpace(s) => s,
+            JsonElement { ValueKind: JsonValueKind.String } el when el.GetString() is { Length: > 0 } s => s,
+            _ => null,
+        };
+    }
+
+    /// <summary>
+    /// Tolerantly reads the handler's primary-record reference
+    /// (<see cref="ToolResultMetadataKeys.CreatedRecord"/>). Null when absent/malformed —
+    /// record-link enrichment is best-effort and must never fail the resume.
+    /// </summary>
+    internal static ToolCreatedRecord? ExtractCreatedRecord(ToolResult result)
+    {
+        if (result.Metadata is null ||
+            !result.Metadata.TryGetValue(ToolResultMetadataKeys.CreatedRecord, out var value) ||
+            value is null)
+        {
+            return null;
+        }
+
+        if (value is ToolCreatedRecord typed)
+        {
+            return string.IsNullOrWhiteSpace(typed.EntityLogicalName) || typed.RecordId == Guid.Empty
+                ? null
+                : typed;
+        }
+
+        try
+        {
+            JsonElement el;
+            if (value is JsonElement pre)
+            {
+                el = pre;
+            }
+            else
+            {
+                using var doc = JsonDocument.Parse(JsonSerializer.SerializeToUtf8Bytes(value));
+                el = doc.RootElement.Clone();
+            }
+
+            if (el.ValueKind != JsonValueKind.Object)
+            {
+                return null;
+            }
+
+            string? entity = null;
+            if ((el.TryGetProperty("entityLogicalName", out var e1) || el.TryGetProperty("EntityLogicalName", out e1)) &&
+                e1.ValueKind == JsonValueKind.String)
+            {
+                entity = e1.GetString();
+            }
+
+            Guid recordId = Guid.Empty;
+            if ((el.TryGetProperty("recordId", out var r1) || el.TryGetProperty("RecordId", out r1)) &&
+                r1.ValueKind == JsonValueKind.String)
+            {
+                Guid.TryParse(r1.GetString(), out recordId);
+            }
+
+            return string.IsNullOrWhiteSpace(entity) || recordId == Guid.Empty
+                ? null
+                : new ToolCreatedRecord(entity, recordId);
+        }
+        catch (Exception)
+        {
+            return null;
+        }
+    }
+
+    /// <summary>
+    /// Composes the MDA deep link for a record (R4-3). Null when the Dataverse environment
+    /// URL is unavailable in this process (link enrichment degrades, resume proceeds).
+    /// </summary>
+    internal string? BuildRecordUrl(string entityLogicalName, Guid recordId) =>
+        _dataverseEnvironmentUrl is null || string.IsNullOrWhiteSpace(entityLogicalName) || recordId == Guid.Empty
+            ? null
+            : $"{_dataverseEnvironmentUrl}/main.aspx?pagetype=entityrecord&etn={entityLogicalName}&id={recordId:D}";
 
     /// <summary>
     /// Appends the executed result as an addressable <c>loop@t{n}</c> ledger output

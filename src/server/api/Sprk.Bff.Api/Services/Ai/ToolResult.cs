@@ -309,7 +309,43 @@ public static class ToolResultMetadataKeys
     /// dropped silently.
     /// </remarks>
     public const string Widget = "widget";
+
+    /// <summary>
+    /// Metadata key for a USER-FACING outcome sentence. Value SHOULD be a short string
+    /// suitable for rendering verbatim in the conversation transcript.
+    /// </summary>
+    /// <remarks>
+    /// G-P3 UAT round-4 R4-6 (2026-07-07): <see cref="ToolResult.Summary"/> is MODEL-facing —
+    /// handlers legitimately embed instruction-to-model text there ("tell the user the draft
+    /// is ready…"). The gate-resume path (<see cref="Chat.TypedHandlerResumeExecutor"/>)
+    /// persists the outcome directly into the transcript with NO model turn in between, so
+    /// the raw Summary leaked instruction text verbatim to the operator. Side-effecting
+    /// handlers now ALSO emit this user-facing sentence; the gate-outcome transcript message
+    /// prefers it. Handlers without it fall back to Summary (the pre-R4-6 behavior).
+    /// </remarks>
+    public const string UserSummary = "userSummary";
+
+    /// <summary>
+    /// Metadata key for the primary record a side-effecting handler created or updated.
+    /// Value SHOULD be a <see cref="ToolCreatedRecord"/>.
+    /// </summary>
+    /// <remarks>
+    /// G-P3 UAT round-4 R4-3 (2026-07-07): the gate-resume seam composes an MDA deep link
+    /// (<c>{orgUrl}/main.aspx?pagetype=entityrecord&amp;etn={logicalName}&amp;id={guid}</c>)
+    /// from this reference so the ✅ transcript message carries a CLICKABLE record link —
+    /// the model then has a REAL link to relay instead of inventing one.
+    /// </remarks>
+    public const string CreatedRecord = "createdRecord";
 }
+
+/// <summary>
+/// Primary-record reference envelope used in <see cref="ToolResult.Metadata"/> under
+/// <see cref="ToolResultMetadataKeys.CreatedRecord"/> (G-P3 UAT round-4 R4-3).
+/// Identifiers only — NFR-07 safe by construction.
+/// </summary>
+/// <param name="EntityLogicalName">Dataverse table logical name (e.g. <c>sprk_event</c>).</param>
+/// <param name="RecordId">The record's GUID.</param>
+public sealed record ToolCreatedRecord(string EntityLogicalName, Guid RecordId);
 
 /// <summary>
 /// Citation envelope used in <see cref="ToolResult.Metadata"/> under

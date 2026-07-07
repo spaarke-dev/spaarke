@@ -449,6 +449,16 @@ export {
 export { default as ExecutionTraceWidget } from './widgets/context/ExecutionTraceWidget';
 export type { ExecutionTraceData, ExecutionTraceWidgetProps } from './widgets/context/ExecutionTraceWidget';
 export { EXECUTION_TRACE_WIDGET_TYPE, MAX_TRACE_ENTRIES } from './widgets/context/ExecutionTraceWidget';
+// G-P3 UAT round-5 R5-D (2026-07-07): replay buffer for tool_chain events — the
+// always-mounted SSE bridge records; the late-mounting widget replays on mount
+// (PaneEventBus is fire-and-forget; without this every pre-mount event was lost).
+export {
+  recordExecutionTraceEvent,
+  getExecutionTraceBuffer,
+  clearExecutionTraceBuffer,
+  MAX_BUFFERED_TRACE_EVENTS,
+} from './widgets/context/executionTraceBuffer';
+export type { BufferedTraceEvent } from './widgets/context/executionTraceBuffer';
 
 // ---------------------------------------------------------------------------
 // Hooks: useWorkspaceLayouts (R4 task 051 / C-3 — consolidated workspace-layouts hook)

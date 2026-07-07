@@ -749,9 +749,14 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
         const result = await dispatchConfirmedAction(action, apiBaseUrl, authenticatedFetch);
 
         if (result.success) {
+          // G-P3 UAT round-4 R4-3 (2026-07-07): confirmed executions carry a
+          // server-composed MDA deep link to the created record — render it as a
+          // clickable markdown link (the transcript renderer opens links in a new
+          // tab). The server persists the matching durable copy with the same link.
+          const recordLink = result.recordUrl ? ` [Open record](${result.recordUrl})` : '';
           addMessage({
             role: 'Assistant',
-            content: `✅ ${result.message}`,
+            content: `✅ ${result.message}${recordLink}`,
             timestamp: new Date().toISOString(),
           });
         } else if (result.errorCode === 'gate.no-binding-target') {

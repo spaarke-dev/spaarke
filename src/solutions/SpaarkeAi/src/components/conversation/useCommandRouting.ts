@@ -63,6 +63,16 @@ export interface CommandRoutingController {
   setHelpPanelOpen: (open: boolean) => void;
   /** SprkChat remount key — `/clear` increments to wipe the message list. */
   sprkChatRemountKey: number;
+  /**
+   * Header "New session" affordance (G-P3 UAT round-4 R4-5, 2026-07-07):
+   * remounts SprkChat by bumping the remount key. The caller clears the
+   * persisted chat-session id FIRST (`clearChatSession()` from
+   * `useAiSession()`), so the remounted SprkChat mounts with
+   * `sessionId=undefined` and mints a fresh session — the same recovery leg
+   * the session-stale path uses. Scoped to the conversation pane by design
+   * (does NOT dispatch `session_reset` — workspace tabs and context survive).
+   */
+  startNewSession: () => void;
   handleDecorateOutboundBody: (
     body: Record<string, unknown>
   ) => Promise<Record<string, unknown> | null>;
@@ -232,12 +242,19 @@ export function useCommandRouting(deps: CommandRoutingDeps): CommandRoutingContr
     [hardSlashContext, referenceResolverContext, inject]
   );
 
+  // R4-5 (2026-07-07): header "New session" — remount SprkChat so a cleared
+  // persisted id resolves to a brand-new session on mount.
+  const startNewSession = React.useCallback((): void => {
+    setSprkChatRemountKey((k) => k + 1);
+  }, []);
+
   // Stable controller identity (Step 9.5 review) — changes only with state.
   return React.useMemo(
     () => ({
       helpPanelOpen,
       setHelpPanelOpen,
       sprkChatRemountKey,
+      startNewSession,
       handleDecorateOutboundBody,
       noteMessagesChanged,
       noteTabFocus,
@@ -246,6 +263,7 @@ export function useCommandRouting(deps: CommandRoutingDeps): CommandRoutingContr
       helpPanelOpen,
       setHelpPanelOpen,
       sprkChatRemountKey,
+      startNewSession,
       handleDecorateOutboundBody,
       noteMessagesChanged,
       noteTabFocus,

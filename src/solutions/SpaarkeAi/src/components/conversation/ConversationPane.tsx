@@ -17,9 +17,10 @@
  */
 
 import * as React from "react";
-import { ChatRegular } from "@fluentui/react-icons";
+import { Button, Tooltip } from "@fluentui/react-components";
+import { ChatRegular, ChatAddRegular } from "@fluentui/react-icons";
 import { PaneHeader, SprkChat } from "@spaarke/ui-components";
-import { useAiSession, useDispatchPaneEvent } from "@spaarke/ai-widgets";
+import { useAiSession, useDispatchPaneEvent, clearExecutionTraceBuffer } from "@spaarke/ai-widgets";
 import type { IChatMessage } from "@spaarke/ui-components";
 import type { IChatSession } from "@spaarke/ai-context";
 import { WelcomePanel } from "../WelcomePanel";
@@ -171,6 +172,9 @@ export function ConversationPane(): React.JSX.Element {
       resetAttachments();
       resetChips();
       resetEventBatch();
+      // R5-D (2026-07-07): the execution-trace replay buffer is session-scoped —
+      // a fresh session must not replay the previous session's tool calls.
+      clearExecutionTraceBuffer();
     },
     [setChatSessionId, clearRefinementPrompts, resetAttachments, resetChips, resetEventBatch]
   );
@@ -178,6 +182,20 @@ export function ConversationPane(): React.JSX.Element {
   const handleHeaderCollapse = React.useCallback(() => {
     paneCollapse?.toggle("assistant");
   }, [paneCollapse]);
+
+  // ── "New session" header affordance (G-P3 UAT round-4 R4-5, 2026-07-07) ────
+  // Sessions resume across hard refreshes by design (persisted chatSessionId);
+  // this is the user's control to start over: clear the persisted id (localStorage
+  // + sessionStorage via AiSessionProvider), then remount SprkChat — it mounts
+  // with sessionId=undefined, mints a fresh session, and onSessionCreated resets
+  // attachments/chips/refinement state (the existing handleSessionCreated leg).
+  // Deliberately NOT history browsing/deletion — that is the named r2 memory
+  // scope; the existing History menu remains the only history surface.
+  const { startNewSession } = commands;
+  const handleNewSession = React.useCallback(() => {
+    clearChatSession();
+    startNewSession();
+  }, [clearChatSession, startNewSession]);
 
   // R7 12.3a: normalize restored SessionRestoreMessage[] → IChatMessage[].
   const restoredInitialMessages = React.useMemo<IChatMessage[] | undefined>(() => {
@@ -221,11 +239,28 @@ export function ConversationPane(): React.JSX.Element {
         onCollapse={paneCollapse ? handleHeaderCollapse : undefined}
         expanded={!(paneCollapse?.isCollapsed("assistant") ?? false)}
         rightSlot={
-          <HistoryMenu
-            onSelectSession={setChatSessionId}
-            bffBaseUrl={bffBaseUrl}
-            authenticatedFetch={authenticatedFetch}
-          />
+          <>
+            {/* R4-5: New session — clears the persisted session id and remounts
+                SprkChat to mint a fresh session. PaneHeader's rightSlot already
+                stops propagation, so the header collapse never fires. */}
+            <Tooltip content="New session" relationship="label">
+              <Button
+                appearance="subtle"
+                size="small"
+                icon={<ChatAddRegular />}
+                aria-label="New session"
+                onClick={(e) => {
+                  e.stopPropagation();
+                  handleNewSession();
+                }}
+              />
+            </Tooltip>
+            <HistoryMenu
+              onSelectSession={setChatSessionId}
+              bffBaseUrl={bffBaseUrl}
+              authenticatedFetch={authenticatedFetch}
+            />
+          </>
         }
       />
 
