@@ -122,7 +122,8 @@ public class Phase1StableIdMigrationSuite
         parameters.Should().Contain(
             p => p.ParameterType == typeof(IPlaybookLookupService),
             "WorkspaceFileEndpoints.HandleSummarize must accept IPlaybookLookupService " +
-            "(task 019 Pattern A migration; resolves WorkspaceOptions.SummarizePlaybookId via GetByIdAsync)");
+            "(task 019 Pattern A migration; resolves the routed playbook id via GetByIdAsync — " +
+            "routing-only per FR-P3-01)");
 
         // ASSERT — RunSummarizePlaybookAsSSEAsync also accepts the lookup service (it owns the call).
         var helperMethod = typeof(WorkspaceFileEndpoints).GetMethod(

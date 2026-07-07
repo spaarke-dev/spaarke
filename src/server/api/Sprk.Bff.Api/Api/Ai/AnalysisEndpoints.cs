@@ -244,7 +244,7 @@ public static class AnalysisEndpoints
         IPlaybookOrchestrationService playbookOrchestrationService,
         AnalysisDocumentLoader documentLoader,
         IOptions<AnalysisOptions> options,
-        IOptions<LinearConsumersOptions> linearOptions,
+        IConsumerRoutingService consumerRouting,
         DocumentProfileService documentProfileService,
         NotificationService notificationService,
         IGenericEntityService entityService,
@@ -299,15 +299,22 @@ public static class AnalysisEndpoints
             string.Join(",", request.DocumentIds), request.ActionId, request.PlaybookId, context.TraceIdentifier);
 
         // R7 Wave 12 (2026-07-02): Linear AI Consumer dispatch. When the incoming
-        // playbookId matches a configured LinearConsumers entry (e.g., the Document
-        // Profile playbook), route through the code-defined DocumentProfileService
-        // rather than the Playbook Engine — same client SSE contract, no
-        // interpreter tax. Fall-through preserves engine dispatch for all other
-        // consumers (Chat / Insight Engine / etc.). See
+        // playbookId is the Document Profile playbook, route through the code-defined
+        // DocumentProfileService rather than the Playbook Engine — same client SSE
+        // contract, no interpreter tax. Fall-through preserves engine dispatch for all
+        // other consumers (Chat / Insight Engine / etc.). See
         // docs/architecture/SPAARKE-LINEAR-AI-CONSUMER-ARCHITECTURE.md.
-        var consumerTypeForLinear = linearOptions.Value.GetConsumerTypeForPlaybookId(request.PlaybookId.Value);
+        //
+        // FR-P3-01 (spaarke-ai-architecture-redesign-r1 task 040): the LinearConsumers
+        // config reverse-lookup was replaced by a compare against the document-profile
+        // Binding row's sprk_playbook (single routing surface, ADR-039 / NFR-08). Clients
+        // still submit the legacy playbookId; ResolveAsync is cached ~5 min, so the
+        // per-request call is fine.
+        var documentProfilePlaybookId = await consumerRouting.ResolveAsync(
+            ConsumerTypes.DocumentProfile, cancellationToken: cancellationToken);
 
-        if (string.Equals(consumerTypeForLinear, ConsumerTypes.DocumentProfile, StringComparison.OrdinalIgnoreCase))
+        if (documentProfilePlaybookId.HasValue &&
+            documentProfilePlaybookId.Value == request.PlaybookId.Value)
         {
             if (request.DocumentIds.Length != 1)
             {

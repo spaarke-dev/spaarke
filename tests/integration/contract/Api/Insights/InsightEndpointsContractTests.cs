@@ -289,10 +289,10 @@ public class InsightEndpointsContractTests : IClassFixture<InsightEndpointsTestF
     }
 
     [Fact]
-    public async Task PostAsk_NonGuidQuestion_NotInNameMap_Returns400()
+    public async Task PostAsk_NonGuidQuestion_NoBindingRowRegistered_Returns400()
     {
-        // Arrange — friendly name with empty map (default fixture has no map entries)
-        // → name resolution returns Guid.Empty → 400 with registered-names listing.
+        // Arrange — friendly name with NO insights-ask Binding rows registered (base
+        // fixture routing mock resolves nothing) → 400 pointing at the Binding table.
         var client = _fixture.CreateAuthenticatedTenantClient();
         var request = new { question = "predict-matter-cost", subject = SampleSubject };
 
@@ -301,19 +301,48 @@ public class InsightEndpointsContractTests : IClassFixture<InsightEndpointsTestF
 
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.BadRequest,
-            "name not registered in Insights:Playbooks:Map AND not a Guid → 400");
+            "name with no enabled insights-ask sprk_playbookconsumer row AND not a Guid → 400 (FR-P3-01)");
 
         var body = await response.Content.ReadAsStringAsync();
-        body.Should().Contain("Insights:Playbooks", "error must point operator to the config section that fixes this");
+        body.Should().Contain("sprk_playbookconsumer",
+            "error must point the operator to the Binding table that fixes this (the config map is gone)");
+        body.Should().Contain("insights-ask", "error must name the consumer type of the missing row");
         body.Should().Contain("predict-matter-cost", "error must echo the rejected name to aid debugging");
     }
 
     [Fact]
-    public async Task PostAsk_CanonicalNameInMap_ResolvesToGuid_ReturnsArtifact()
+    public async Task PostAsk_UnknownName_DefaultRowFallbackIsRejected_Returns400()
     {
-        // Arrange — canonical playbook name resolves via config map to a real Guid.
-        // The Guid we configure must match what AnswerQuestionAsync sees so we can assert
-        // the resolution actually happened (not just that the path succeeded).
+        // Arrange — the catalog has ONLY a 'default' row. ResolveBindingAsync falls back
+        // to it for unknown codes, but the endpoint's EXACT-code check must REJECT the
+        // fallback (returned ConsumerCode != requested name) — otherwise every typo'd
+        // name would silently run the Assistant default playbook.
+        _fixture.InsightsAiMock.Reset();
+
+        var client = _fixture.CreateAuthenticatedTenantClientWithInsightsAskBindings(new Dictionary<string, Guid>
+        {
+            ["default"] = Guid.Parse("a0d49d0d-4a65-f111-ab0c-70a8a590c51c")
+        });
+        var request = new { question = "not-a-registered-playbook", subject = SampleSubject };
+
+        // Act
+        var response = await client.PostAsJsonAsync("/api/insights/ask", request);
+
+        // Assert
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest,
+            "default-row fallback resolution must be rejected by the exact consumer-code check");
+        _fixture.InsightsAiMock.Verify(
+            s => s.AnswerQuestionAsync(It.IsAny<InsightsAgentRequest>(), It.IsAny<CancellationToken>()),
+            Times.Never,
+            "the facade must never be invoked with a playbook the caller did not name");
+    }
+
+    [Fact]
+    public async Task PostAsk_CanonicalNameWithBindingRow_ResolvesToGuid_ReturnsArtifact()
+    {
+        // Arrange — canonical playbook name resolves via its insights-ask Binding row to
+        // a real Guid. The Guid we register must match what AnswerQuestionAsync sees so
+        // we can assert the resolution actually happened (not just that the path succeeded).
         var configuredGuid = Guid.Parse("63b80630-975b-f111-a825-3833c5d9bcab");
         InsightsAgentRequest? captured = null;
 
@@ -323,7 +352,7 @@ public class InsightEndpointsContractTests : IClassFixture<InsightEndpointsTestF
             .Callback<InsightsAgentRequest, CancellationToken>((req, _) => captured = req)
             .ReturnsAsync(InsightsAgentResult.Success(BuildInferenceArtifact(), cacheHit: false, processingTimeMs: 12));
 
-        var client = _fixture.CreateAuthenticatedTenantClientWithNameMap(new Dictionary<string, Guid>
+        var client = _fixture.CreateAuthenticatedTenantClientWithInsightsAskBindings(new Dictionary<string, Guid>
         {
             ["predict-matter-cost@v1"] = configuredGuid
         });
@@ -333,15 +362,16 @@ public class InsightEndpointsContractTests : IClassFixture<InsightEndpointsTestF
         var response = await client.PostAsJsonAsync("/api/insights/ask", request);
 
         // Assert
-        response.StatusCode.Should().Be(HttpStatusCode.OK, "canonical name resolved via config map");
+        response.StatusCode.Should().Be(HttpStatusCode.OK, "canonical name resolved via its Binding row");
         captured.Should().NotBeNull();
         captured!.Question.Should().Be(configuredGuid, "endpoint must pass the resolved Guid, not parse the name as a Guid");
     }
 
     [Fact]
-    public async Task PostAsk_CanonicalNameInMap_LookupIsCaseInsensitive()
+    public async Task PostAsk_CanonicalNameWithBindingRow_LookupIsCaseInsensitive()
     {
-        // Arrange — mixed case input MUST resolve to the same Guid as the registered name.
+        // Arrange — mixed case input MUST resolve to the same Guid as the registered code
+        // (the endpoint's exact-code check compares OrdinalIgnoreCase).
         var configuredGuid = Guid.Parse("63b80630-975b-f111-a825-3833c5d9bcab");
         InsightsAgentRequest? captured = null;
 
@@ -351,7 +381,7 @@ public class InsightEndpointsContractTests : IClassFixture<InsightEndpointsTestF
             .Callback<InsightsAgentRequest, CancellationToken>((req, _) => captured = req)
             .ReturnsAsync(InsightsAgentResult.Success(BuildInferenceArtifact(), cacheHit: false, processingTimeMs: 7));
 
-        var client = _fixture.CreateAuthenticatedTenantClientWithNameMap(new Dictionary<string, Guid>
+        var client = _fixture.CreateAuthenticatedTenantClientWithInsightsAskBindings(new Dictionary<string, Guid>
         {
             ["predict-matter-cost@v1"] = configuredGuid // lower-case registration
         });
@@ -367,10 +397,10 @@ public class InsightEndpointsContractTests : IClassFixture<InsightEndpointsTestF
     }
 
     [Fact]
-    public async Task PostAsk_GuidQuestion_StillWorks_EvenWithMapConfigured()
+    public async Task PostAsk_GuidQuestion_StillWorks_EvenWithBindingRowsRegistered()
     {
-        // Arrange — backward compatibility: raw Guid path must continue working when a
-        // map is also configured. Guid attempt happens BEFORE map lookup.
+        // Arrange — backward compatibility: raw Guid path must continue working when
+        // Binding rows are also registered. Guid attempt happens BEFORE the catalog read.
         InsightsAgentRequest? captured = null;
 
         _fixture.InsightsAiMock.Reset();
@@ -380,7 +410,7 @@ public class InsightEndpointsContractTests : IClassFixture<InsightEndpointsTestF
             .ReturnsAsync(InsightsAgentResult.Success(BuildInferenceArtifact(), cacheHit: false, processingTimeMs: 5));
 
         var directGuid = Guid.NewGuid();
-        var client = _fixture.CreateAuthenticatedTenantClientWithNameMap(new Dictionary<string, Guid>
+        var client = _fixture.CreateAuthenticatedTenantClientWithInsightsAskBindings(new Dictionary<string, Guid>
         {
             ["predict-matter-cost@v1"] = Guid.Parse("63b80630-975b-f111-a825-3833c5d9bcab")
         });
@@ -392,7 +422,7 @@ public class InsightEndpointsContractTests : IClassFixture<InsightEndpointsTestF
         // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         captured.Should().NotBeNull();
-        captured!.Question.Should().Be(directGuid, "raw Guid must take precedence over map lookup");
+        captured!.Question.Should().Be(directGuid, "raw Guid must take precedence over the catalog read");
     }
 
     [Fact]
@@ -610,6 +640,12 @@ public class InsightEndpointsTestFixture : WebApplicationFactory<Program>
     public Mock<IInsightsAi> InsightsAiMock { get; } = new(MockBehavior.Loose);
 
     /// <summary>
+    /// Loose routing mock for the base clients — every ResolveBindingAsync returns null
+    /// (no insights-ask Binding rows registered), so non-Guid questions hit the 400 path.
+    /// </summary>
+    public Mock<IConsumerRoutingService> ConsumerRoutingMock { get; } = new(MockBehavior.Loose);
+
+    /// <summary>
     /// Tenant id injected as the <c>tid</c> claim by
     /// <see cref="InsightsAskTenantFakeAuthHandler"/>. Tests assert that the
     /// handler extracts this value and passes it as
@@ -721,6 +757,14 @@ public class InsightEndpointsTestFixture : WebApplicationFactory<Program>
             services.RemoveAll<IInsightsAi>();
             services.AddSingleton(InsightsAiMock.Object);
 
+            // FR-P3-01: /ask resolves canonical names through IConsumerRoutingService
+            // (insights-ask Binding rows). The default loose mock resolves nothing —
+            // the "no registered rows in this environment" baseline; per-test clients
+            // built via CreateAuthenticatedTenantClientWithInsightsAskBindings overlay
+            // a catalog-shaped mock.
+            services.RemoveAll<IConsumerRoutingService>();
+            services.AddSingleton(ConsumerRoutingMock.Object);
+
             // Remove background hosted services that depend on external infrastructure.
             services.RemoveAll<IHostedService>();
 
@@ -755,28 +799,51 @@ public class InsightEndpointsTestFixture : WebApplicationFactory<Program>
         => CreateClientWithTid(includeTid: true, includeAuth: false);
 
     /// <summary>
-    /// Authenticated tenant client with an additional <c>Insights:Playbooks:Map</c>
-    /// configuration overlay, so tests can exercise the canonical-name → Guid
-    /// resolution path on /api/insights/ask. Map entries are injected as in-memory
-    /// configuration and bound by <see cref="Sprk.Bff.Api.Api.Insights.InsightsPlaybookNameMapOptions"/>.
+    /// Authenticated tenant client with a routing mock shaped like a seeded insights-ask
+    /// Binding catalog (FR-P3-01 — replaces the deleted <c>Insights:Playbooks:Map</c>
+    /// config overlay): each dictionary entry is one enabled <c>sprk_playbookconsumer</c>
+    /// row (<c>sprk_consumercode</c> = key, <c>sprk_playbook</c> = value). The mock
+    /// mirrors <c>ConsumerRoutingService</c>'s documented resolution semantic — exact
+    /// (case-insensitive) consumer-code row first, then fallback to the <c>'default'</c>
+    /// row — so the endpoint's EXACT-code rejection contract is exercised for real.
     /// </summary>
-    public HttpClient CreateAuthenticatedTenantClientWithNameMap(Dictionary<string, Guid> map)
+    public HttpClient CreateAuthenticatedTenantClientWithInsightsAskBindings(Dictionary<string, Guid> bindings)
     {
-        var factory = this.WithWebHostBuilder(builder =>
-        {
-            builder.ConfigureAppConfiguration(config =>
+        var routingMock = new Mock<IConsumerRoutingService>();
+        routingMock
+            .Setup(r => r.ResolveBindingAsync(
+                ConsumerTypes.InsightsAsk,
+                It.IsAny<string?>(),
+                It.IsAny<IRoutingContext?>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((string _, string? code, IRoutingContext? _, string? _, CancellationToken _) =>
             {
-                var dict = new Dictionary<string, string?>();
-                foreach (var kvp in map)
+                var key = bindings.Keys.FirstOrDefault(
+                              k => string.Equals(k, code, StringComparison.OrdinalIgnoreCase))
+                          ?? bindings.Keys.FirstOrDefault(
+                              k => string.Equals(k, "default", StringComparison.OrdinalIgnoreCase));
+                if (key is null)
                 {
-                    // IConfiguration binder reads "Insights:Playbooks:Map:<name>" = "<guid>"
-                    dict[$"Insights:Playbooks:Map:{kvp.Key}"] = kvp.Value.ToString();
+                    return null;
                 }
-                config.AddInMemoryCollection(dict);
+
+                return new Binding
+                {
+                    BindingId = Guid.NewGuid(),
+                    ConsumerType = ConsumerTypes.InsightsAsk,
+                    ConsumerCode = key,
+                    PlaybookId = bindings[key]
+                };
             });
 
+        var factory = this.WithWebHostBuilder(builder =>
+        {
             builder.ConfigureTestServices(services =>
             {
+                services.RemoveAll<IConsumerRoutingService>();
+                services.AddSingleton(routingMock.Object);
+
                 services.AddSingleton(new InsightsAskAuthOptions(true));
 
                 services.AddAuthentication(options =>

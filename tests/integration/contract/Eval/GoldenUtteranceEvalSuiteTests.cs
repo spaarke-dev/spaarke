@@ -756,6 +756,259 @@ public class GoldenUtteranceEvalSuiteTests
     }
 
     // -------------------------------------------------------------------------
+    // P3 create-task surface (FR-P3-03, task 042) — same live-fact pattern as
+    // the draft-correspondence surface above: ROUTING + PROJECTION + the
+    // elicitation input-schema pin + output-schema pin are live; the NL-loop
+    // dispatch assertion activates at the G-P3 gate (walkthrough steps 10-14).
+    // The write leg's gate contract + typed-handler confirm-RESUME are asserted
+    // in P2LoopInjectionEvalSuiteTests (GU-051/GU-059 facts).
+    // -------------------------------------------------------------------------
+
+    /// <summary>The CREATE-TASK@v1 <c>sprk_analysisaction</c> target seeded on spaarkedev1 (task 042).</summary>
+    private static readonly Guid CreateTaskActionId = new("b66c8dda-8279-f111-ab0e-7ced8ddc4cc6");
+
+    /// <summary>The create-task <c>sprk_playbookconsumer</c> row seeded on spaarkedev1 (task 042).</summary>
+    private static readonly Guid CreateTaskBindingId = new("3d9724e5-8279-f111-ab0e-7ced8ddc4cc6");
+
+    /// <summary>
+    /// The elicitation contract seeded on the CREATE-TASK@v1 Action row's
+    /// <c>sprk_inputschema</c>: <c>due_date</c> + <c>assign_to</c> REQUIRED with
+    /// maker-authored elicitation prompts (walkthrough step 11: "What's the due date,
+    /// and should I assign it to you or someone else?").
+    /// </summary>
+    private const string CreateTaskInputSchema =
+        """{"type":"object","properties":{"fileIds":{"type":"array","items":{"type":"string"},"description":"Optional subset of session file ids the task should be grounded in. Omit to use all session files."},"due_date":{"type":"string","required":true,"elicitation_prompt":"What's the due date for this task?","description":"The task's due date as the user stated it (e.g. 7/9/2026)."},"assign_to":{"type":"string","required":true,"elicitation_prompt":"Should I assign it to you or someone else?","description":"Who the task is assigned to — 'me' or a person's name."}},"required":["due_date","assign_to"]}""";
+
+    [Fact]
+    public async Task P3CreateTaskSurface_BindingResolvesAndProjectsThroughTheClosedCatalog_ElicitationDeclared()
+    {
+        var suite = LoadSuite();
+        var taskCases = suite.Cases
+            .Where(c => string.Equals(c.Family, "create-task", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        taskCases.Should().NotBeEmpty("FR-P3-03: the create-task family exists (closed-catalog coverage)");
+        taskCases.Should().Contain(c => IsOutcome(c, "dispatch"),
+            "the proposal leg is a cataloged dispatch (CREATE-TASK@v1 prompted Action)");
+        taskCases.Should().Contain(c => IsOutcome(c, "clarify"),
+            "the dataverse.create_record write leg presents as a confirmation gate (Write class) — the clarify-shaped outcome");
+
+        // Dataverse boundary stub shaped like the seeded spaarkedev1 rows (task 042):
+        // enabled create-task Binding, sprk_action → CREATE-TASK@v1 (Prompted),
+        // maker-authored sprk_tooldescription (projection opt-in), assistant surface,
+        // and the Action's sprk_inputschema declaring the REQUIRED elicitation fields.
+        var taskRow = BuildActionTargetRow(
+            ConsumerTypes.CreateTask, CreateTaskActionId, ucid: "UC-H-1", rowId: CreateTaskBindingId);
+        taskRow["sprk_tooldescription"] =
+            "Create a follow-up task (a Spaarke To Do / action item) from this conversation. " +
+            "Drafts the proposed task grounded in the session material; the record is created by the " +
+            "gated dataverse.create_record write after user confirmation.";
+        taskRow["sprk_surfaces"] = "assistant";
+        taskRow["action.sprk_inputschema"] = new AliasedValue(
+            "sprk_analysisaction", "sprk_inputschema", CreateTaskInputSchema);
+
+        var entityService = new Mock<IGenericEntityService>();
+        entityService
+            .Setup(s => s.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(new List<Entity> { taskRow }));
+
+        var routing = CreateRoutingService(entityService);
+
+        // ── Projection leg: the EXACT read SprkChatAgentFactory performs (FR-P2-01).
+        var projectable = await routing.ListTextProjectableBindingsAsync();
+        var binding = projectable.Should().ContainSingle(
+            b => string.Equals(b.ConsumerType, ConsumerTypes.CreateTask, StringComparison.OrdinalIgnoreCase),
+            "the create-task Binding is text-projectable — 'create a follow-up task' dispatches through " +
+            "the closed catalog (ADR-039: routing config lives only in the Binding table)").Subject;
+        binding.BindingId.Should().Be(CreateTaskBindingId,
+            "ledger outputs key on {bindingId}@t{n} — the seeded row GUID is the addressable identity (ADR-040)");
+        binding.ActionId.Should().Be(CreateTaskActionId,
+            "the Binding's sprk_action lookup targets the CREATE-TASK@v1 prompted Action");
+        binding.ActionKind.Should().Be(ActionKind.Prompted,
+            "the proposal renders through the prompted executor — no code-path routing outside the Binding table");
+
+        // ── Tool-projection + FR-P2-03 elicitation legs: the projected capability tool
+        // carries the Action's DECLARED input schema, and the validator derives the
+        // walkthrough step-11 clarifying contract from it (due_date + assign_to).
+        var tool = new Sprk.Bff.Api.Services.Ai.Chat.BindingCapabilityTool(
+            binding,
+            new ServiceCollection().BuildServiceProvider(),
+            "tenant-eval", "session-eval",
+            Microsoft.Extensions.Logging.Abstractions.NullLogger.Instance);
+        tool.Name.Should().Be("capability_create-task");
+        tool.Description.Should().Be(binding.ToolDescription,
+            "no hardcoded task-creation copy — description comes from the catalog row");
+
+        var required = Sprk.Bff.Api.Services.Ai.Chat.BindingInputSchemaValidator
+            .GetRequiredFields(binding.InputSchemaJson);
+        required.Select(f => f.Name).Should().BeEquivalentTo(new[] { "due_date", "assign_to" },
+            "the Action DECLARES the walkthrough step-11 elicitation fields — missing values " +
+            "produce the FR-P2-03 loop-native clarifying turn, never an execute-with-guessed-values");
+        required.Should().OnlyContain(f => !string.IsNullOrWhiteSpace(f.Prompt),
+            "clarifying turns are grounded in the maker-authored elicitation prompts only (ADR-039)");
+
+        // ── NFR-06 schema-conformance leg: the CREATE-TASK@v1 contract file is pinned.
+        var schemaPath = Path.Combine(
+            FindRepoRoot(), "infra", "dataverse", "outputschemas", "create-task-v1.schema.json");
+        File.Exists(schemaPath).Should().BeTrue(
+            $"the CREATE-TASK@v1 output-schema contract must exist at {schemaPath} " +
+            "(it mirrors sprk_analysisaction.sprk_outputschemajson on spaarkedev1)");
+        using var doc = JsonDocument.Parse(File.ReadAllText(schemaPath));
+        doc.RootElement.GetProperty("title").GetString().Should().Contain("CREATE-TASK@v1");
+        doc.RootElement.GetProperty("additionalProperties").GetBoolean().Should().BeFalse(
+            "structured outputs are closed — the model cannot invent fields");
+        doc.RootElement.GetProperty("required").EnumerateArray().Select(e => e.GetString())
+            .Should().BeEquivalentTo(new[] { "title", "description", "priority_suggestion", "cited_refs" },
+                "the task-proposal contract: title + description + priority suggestion + cited sources " +
+                "(NO due date / assignee — those are user-supplied conversation values)");
+        doc.RootElement.GetProperty("properties").EnumerateObject().Select(p => p.Name)
+            .Should().Equal(new[] { "title", "description", "priority_suggestion", "cited_refs" },
+                "property DECLARATION ORDER is the streaming emission order — title first for the proposal card");
+        doc.RootElement.GetProperty("properties").GetProperty("cited_refs").GetProperty("minItems").GetInt32()
+            .Should().Be(1, "an uncited task proposal is invalid — grounded outputs (ADR-039); NFR-06 citation-integrity leg");
+
+        _output.WriteLine("P3 LIVE create-task surface assertions (FR-P3-03):");
+        foreach (var c in taskCases)
+        {
+            _output.WriteLine($"  {c.CaseId}  \"{c.Utterance}\"  ->  {c.Expected.OutcomeClass} via {binding.ConsumerType} " +
+                              $"binding {binding.BindingId} -> action {binding.ActionId} (CREATE-TASK@v1)");
+        }
+    }
+
+    // -------------------------------------------------------------------------
+    // P3 live insights-ask routing assertions (task 040, FR-P3-01) — the ROUTING
+    // leg of the UC-C-2 insights families is live (same pattern as the P1/P2/P3
+    // surfaces above; no dispatcher invented). FR-P3-01 deleted the
+    // Insights:Playbooks config map; the insights-ask Binding rows are now the
+    // ONLY canonical-name → playbook-Guid surface, read via the REAL
+    // ConsumerRoutingService.ResolveBindingAsync — the exact read InsightEndpoints
+    // (/api/insights/ask), AssistantToolCallHandler (Assistant playbook path) and
+    // InsightsOrchestrator.RunIngestAsync perform. insights-search has a
+    // catalog-registration row only (no playbook/action target — the
+    // /api/insights/search endpoint wraps IRagService directly), so no resolution
+    // is asserted for it; its constants↔rows parity is covered by
+    // DispatchCases_ExpectedConsumerTypes_AreGroundedInClosedCatalogOrNamedFr +
+    // the FR-P0-04 boot reconciliation.
+    // -------------------------------------------------------------------------
+
+    /// <summary>The shared playbook target of the seeded spaarkedev1 insights-ask rows (task 040).</summary>
+    private static readonly Guid InsightsAskDefaultPlaybookId = new("a0d49d0d-4a65-f111-ab0c-70a8a590c51c");
+
+    /// <summary>The 'default' insights-ask <c>sprk_playbookconsumer</c> row seeded on spaarkedev1 (task 040).</summary>
+    private static readonly Guid InsightsAskDefaultBindingId = new("f32a7931-8079-f111-ab0e-7ced8ddc4cc6");
+
+    /// <summary>The 'matter-health-single' insights-ask row seeded on spaarkedev1 (task 040).</summary>
+    private static readonly Guid InsightsAskMatterHealthBindingId = new("f82a7931-8079-f111-ab0e-7ced8ddc4cc6");
+
+    [Fact]
+    public async Task P3InsightsAskRouting_BindingRowsResolve_AndUnknownNamesSurfaceTheDefaultRowForCallerRejection()
+    {
+        var suite = LoadSuite();
+        var insightsCases = suite.Cases
+            .Where(c => string.Equals(c.Family, "insights-ask", StringComparison.OrdinalIgnoreCase)
+                     || string.Equals(c.Family, "insights-search", StringComparison.OrdinalIgnoreCase))
+            .ToList();
+        insightsCases.Should().NotBeEmpty(
+            "FR-P3-01: the UC-C-2 insights families exist (closed-catalog coverage)");
+        insightsCases.Should().OnlyContain(
+            c => string.Equals(c.Expected.CatalogStatus, "existing", StringComparison.OrdinalIgnoreCase),
+            "task 040 added insights-ask / insights-search to ConsumerTypes — planned would now fail grounding");
+
+        // Dataverse boundary stub shaped like the seeded spaarkedev1 insights-ask rows
+        // (task 040): 'default' + 'matter-health-single', both targeting the same
+        // sprk_analysisplaybook (UC-C-2, wildcard environment).
+        var defaultRow = BuildPlaybookTargetRow(
+            ConsumerTypes.InsightsAsk, "default", InsightsAskDefaultPlaybookId,
+            ucid: "UC-C-2", rowId: InsightsAskDefaultBindingId);
+        var matterHealthRow = BuildPlaybookTargetRow(
+            ConsumerTypes.InsightsAsk, "matter-health-single", InsightsAskDefaultPlaybookId,
+            ucid: "UC-C-2", rowId: InsightsAskMatterHealthBindingId);
+
+        var entityService = new Mock<IGenericEntityService>();
+        entityService
+            .Setup(s => s.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(new List<Entity> { defaultRow, matterHealthRow }));
+
+        var routing = CreateRoutingService(entityService);
+
+        // ── Assistant-default leg: classifier bypassed / no hint → the 'default' row.
+        var defaultBinding = await routing.ResolveBindingAsync(ConsumerTypes.InsightsAsk, "default");
+
+        defaultBinding.Should().NotBeNull(
+            "the 'default' insights-ask Binding must resolve through the real FR-1R-03 selection " +
+            "algorithm — this is the exact read AssistantToolCallHandler.ResolveInsightsPlaybookAsync performs");
+        defaultBinding!.BindingId.Should().Be(InsightsAskDefaultBindingId);
+        defaultBinding.ConsumerCode.Should().Be("default");
+        defaultBinding.PlaybookId.Should().Be(InsightsAskDefaultPlaybookId,
+            "the Binding's sprk_playbook lookup IS the per-environment playbook Guid — " +
+            "the deleted Insights:Playbooks config map has no successor outside the catalog (NFR-08)");
+        defaultBinding.Ucid.Should().Be("UC-C-2",
+            "the seeded Binding row carries the §3 UC id, tying catalog data to this eval family");
+
+        // ── Named-canonical leg: /api/insights/ask 'question' = canonical name.
+        var named = await routing.ResolveBindingAsync(ConsumerTypes.InsightsAsk, "matter-health-single");
+
+        named.Should().NotBeNull("registered canonical names resolve to their exact-code row");
+        named!.BindingId.Should().Be(InsightsAskMatterHealthBindingId);
+        named.ConsumerCode.Should().Be("matter-health-single",
+            "exact consumer-code match wins over the 'default' fallback");
+        named.PlaybookId.Should().Be(InsightsAskDefaultPlaybookId);
+
+        // ── EXACT-code rejection contract: an unknown code falls back to the 'default'
+        // row BY DESIGN (FR-1R-03), so every FR-P3-01 caller verifies the returned
+        // ConsumerCode equals the requested name (OrdinalIgnoreCase) and treats a
+        // mismatch as not-registered (InsightEndpoints → 400; AssistantToolCallHandler
+        // → 503 unconfigured; RunIngestAsync → honest ingest error).
+        var fallback = await routing.ResolveBindingAsync(ConsumerTypes.InsightsAsk, "nonexistent-name");
+
+        fallback.Should().NotBeNull("the selection algorithm falls back to the 'default' row by design");
+        fallback!.ConsumerCode.Should().Be("default",
+            "the fallback surfaces the default row — NOT an exact match for the requested code");
+        string.Equals(fallback.ConsumerCode, "nonexistent-name", StringComparison.OrdinalIgnoreCase)
+            .Should().BeFalse(
+                "callers MUST detect the fallback via the exact-code check and reject — otherwise " +
+                "every typo'd canonical name would silently run the Assistant default playbook");
+
+        _output.WriteLine("P3 LIVE insights-ask routing assertions (FR-P3-01):");
+        foreach (var c in insightsCases)
+        {
+            _output.WriteLine(
+                $"  {c.CaseId}  \"{c.Utterance}\"  ->  {c.Expected.ConsumerType} " +
+                $"(code {c.Expected.ConsumerCode ?? "default"})");
+        }
+        _output.WriteLine(
+            $"  default row {InsightsAskDefaultBindingId} -> playbook {InsightsAskDefaultPlaybookId} (UC-C-2); " +
+            "unknown codes surface the default row and are rejected caller-side (exact-code contract)");
+    }
+
+    /// <summary>
+    /// One enabled <c>sprk_playbookconsumer</c> row with a <c>sprk_playbook</c> TARGET,
+    /// shaped like the P3 insights-ask rows seeded on spaarkedev1 (task 040): explicit
+    /// consumer code, §3 UC id, wildcard environment, Informational / None /
+    /// LoopElicitation catalog values.
+    /// </summary>
+    private static Entity BuildPlaybookTargetRow(
+        string consumerType,
+        string consumerCode,
+        Guid playbookId,
+        string ucid,
+        Guid rowId)
+    {
+        var entity = new Entity("sprk_playbookconsumer", rowId);
+        entity["sprk_playbookconsumerid"] = rowId;
+        entity["sprk_consumertype"] = consumerType;
+        entity["sprk_consumercode"] = consumerCode;
+        entity["sprk_priority"] = 100;
+        entity["sprk_enabled"] = true;
+        entity["sprk_ucid"] = ucid;
+        entity["sprk_environment"] = "*";
+        entity["sprk_disposition"] = new OptionSetValue((int)BindingDisposition.Informational);
+        entity["sprk_risk"] = new OptionSetValue((int)BindingRisk.None);
+        entity["sprk_capturemode"] = new OptionSetValue((int)BindingCaptureMode.LoopElicitation);
+        entity["sprk_playbook"] = new EntityReference("sprk_analysisplaybook", playbookId);
+        return entity;
+    }
+
+    // -------------------------------------------------------------------------
     // Pending-by-design declaration (P2/P3): dispatch assertions not yet
     // activated are stubbed, not silently skipped. This test PASSES while
     // making the remaining pending inventory visible in the run output with

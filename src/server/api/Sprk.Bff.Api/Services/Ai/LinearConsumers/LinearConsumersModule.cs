@@ -1,4 +1,3 @@
-using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 
 namespace Sprk.Bff.Api.Services.Ai.LinearConsumers;
@@ -13,16 +12,15 @@ namespace Sprk.Bff.Api.Services.Ai.LinearConsumers;
 /// <see cref="IDocumentTextSource"/>, <see cref="IActionRunner"/>) + the
 /// per-consumer services (<see cref="DocumentProfileService"/> tonight;
 /// File Summarize / Prefills / DocCreateProfile in follow-on phases).
+/// FR-P3-01 (task 040): the <c>LinearConsumers</c> appsettings options block
+/// was retired — routing lives on the <c>sprk_playbookconsumer</c> Binding
+/// table (single routing surface, ADR-039).
 /// </remarks>
 public static class LinearConsumersModule
 {
     public static IServiceCollection AddLinearConsumers(
-        this IServiceCollection services,
-        IConfiguration configuration)
+        this IServiceCollection services)
     {
-        services.Configure<LinearConsumersOptions>(
-            configuration.GetSection(LinearConsumersOptions.SectionName));
-
         // Primitives — Singleton where stateless; Scoped where an OBO HttpContext
         // is required transitively (DocumentTextSource → AnalysisDocumentLoader
         // → IHttpContextAccessor).

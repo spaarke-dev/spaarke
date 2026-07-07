@@ -218,7 +218,8 @@ public interface IInsightsAi
     ///   <item><c>ForceMode == null</c>: invoke classifier; if BelowThreshold → RAG fallback;
     ///   else dispatch per classifier's <c>Path</c>.</item>
     ///   <item><c>ForceMode == "playbook"</c>: skip classifier; resolve playbook id via
-    ///   classifier hint OR <c>Insights:Playbooks:DefaultName</c>; invoke playbook path.</item>
+    ///   classifier hint OR the <c>'default'</c> insights-ask Binding row (FR-P3-01);
+    ///   invoke playbook path.</item>
     ///   <item><c>ForceMode == "rag"</c>: skip classifier; invoke RAG path directly.</item>
     /// </list>
     /// </para>

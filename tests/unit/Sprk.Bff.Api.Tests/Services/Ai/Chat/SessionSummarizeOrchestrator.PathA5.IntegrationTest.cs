@@ -1,6 +1,5 @@
 using FluentAssertions;
 using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
 using Moq;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Cache;
@@ -269,7 +268,6 @@ public class SessionSummarizeOrchestratorPathA5IntegrationTest
         var actionRunner = new ActionRunner(
             openAi,
             new PromptSchemaRenderer(Mock.Of<ILogger<PromptSchemaRenderer>>()),
-            Options.Create(new LinearConsumersOptions()),
             Mock.Of<ILogger<ActionRunner>>());
 
         return new SessionSummarizeOrchestrator(

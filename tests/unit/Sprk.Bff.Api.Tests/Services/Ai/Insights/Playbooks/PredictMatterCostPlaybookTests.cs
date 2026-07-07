@@ -60,9 +60,10 @@ public class PredictMatterCostPlaybookTests
     private readonly Mock<IOpenAiClient> _openAiMock = new(MockBehavior.Strict);
     // Wave C-G4 (task 022) — IIngestOrchestrator + InsightsIngestOptions retired; ctor now
     // takes IPlaybookOrchestrationService + IIngestDocumentSource (for the JPS-only ingest
-    // path) + IOptionsMonitor<InsightsPlaybookNameMapOptions> (per-env playbook Guid
-    // resolution). These tests cover the AnswerQuestion path only (predict-matter-cost@v1
-    // is a synthesis playbook, not ingest), so loose mocks suffice — they're never invoked.
+    // path) + IConsumerRoutingService (per-env playbook Guid resolution via the insights-ask
+    // Binding rows — FR-P3-01 replaced the config name map). These tests cover the
+    // AnswerQuestion path only (predict-matter-cost@v1 is a synthesis playbook, not ingest),
+    // so loose mocks suffice — they're never invoked.
     private readonly Mock<Sprk.Bff.Api.Services.Ai.IPlaybookOrchestrationService> _playbookOrchestrationMock = new();
     private readonly Mock<Sprk.Bff.Api.Services.Ai.Insights.Ingest.IIngestDocumentSource> _ingestDocumentSourceMock = new();
     // Wave E task 040 — IRagService dependency added for SearchAsync. Loose mock here
@@ -72,17 +73,14 @@ public class PredictMatterCostPlaybookTests
     // Loose mock for the classifier; handler is real with no-op deps; never invoked from this
     // test class (covers AnswerQuestion path only).
     private readonly Mock<Sprk.Bff.Api.Services.Ai.Insights.Routing.IInsightsIntentClassifier> _classifierMock = new();
-    private readonly Microsoft.Extensions.Options.IOptionsMonitor<Sprk.Bff.Api.Api.Insights.InsightsPlaybookNameMapOptions> _playbookNameMap =
-        new TestOptionsMonitor<Sprk.Bff.Api.Api.Insights.InsightsPlaybookNameMapOptions>(
-            new Sprk.Bff.Api.Api.Insights.InsightsPlaybookNameMapOptions());
+    private readonly Mock<Sprk.Bff.Api.Services.Ai.PublicContracts.IConsumerRoutingService> _consumerRoutingMock = new();
 
     private Sprk.Bff.Api.Services.Ai.Insights.AssistantToolCallHandler BuildAssistantHandler()
         => new(
             _classifierMock.Object,
-            _playbookNameMap,
+            _consumerRoutingMock.Object,
             new TestOptionsMonitor<Sprk.Bff.Api.Configuration.AssistantCitationHrefOptions>(
                 new Sprk.Bff.Api.Configuration.AssistantCitationHrefOptions()),
-            new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build(),
             NullLogger<Sprk.Bff.Api.Services.Ai.Insights.AssistantToolCallHandler>.Instance);
 
     private InsightsOrchestrator CreateSut() => new(
@@ -91,7 +89,7 @@ public class PredictMatterCostPlaybookTests
         _openAiMock.Object,
         _playbookOrchestrationMock.Object,
         _ingestDocumentSourceMock.Object,
-        _playbookNameMap,
+        _consumerRoutingMock.Object,
         _ragServiceMock.Object,
         BuildAssistantHandler(),
         NullLogger<InsightsOrchestrator>.Instance);

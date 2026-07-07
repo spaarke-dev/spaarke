@@ -32,7 +32,7 @@ The five artifacts you will produce for each new topic+mode pair:
 | 1 | **Playbook prompt** (system prompt + JPS schema) | You + SME | `sprk_analysisaction.sprk_systemprompt` row in Dataverse |
 | 2 | **Playbook orchestration JSON** | You | `src/server/api/Sprk.Bff.Api/Services/Ai/Insights/Playbooks/<name>.playbook.json` + `sprk_analysisplaybook` + 9× `sprk_playbooknode` rows |
 | 3 | **Topic registry row** | You (SME-editable) | `sprk_aitopicregistry` row in Dataverse — routes `(topic, mode, hostentity)` → playbook + display config |
-| 4 | **BFF config-map entry** | You | `appsettings.template.json` → `Insights:Playbooks:Map:<canonical-name>` |
+| 4 | **Binding row** (canonical-name routing) | You | `sprk_playbookconsumer` row — consumerType `insights-ask`, `sprk_consumercode` = your canonical name, `sprk_playbook` → the playbook row (FR-P3-01 replaced the `Insights:Playbooks:Map` appsettings block; seed mirror `infra/dataverse/sprk_playbookconsumer-insights-rows.json`) |
 | 5 | **Host form integration** (per host record type) | You | FormXml patch + 2 form web resources (pre-warm + mount glue) + 1 HTML host (iframe scope) |
 
 The `InsightSummaryCard` React component itself is **already built** (r1, `@spaarke/ai-widgets/src/components/InsightSummaryCard/`). You do not re-author it per topic — you only configure its props via the registry + host glue.
@@ -49,7 +49,7 @@ The card calls **`POST /api/insights/ask`** with:
 }
 ```
 
-- `question` accepts EITHER a `sprk_analysisplaybook` Guid OR a canonical playbook name registered in `Insights:Playbooks:Map`. The endpoint resolves via `InsightsPlaybookNameMapOptions.ResolveOrDefault` (`InsightEndpoints.cs:163`).
+- `question` accepts EITHER a `sprk_analysisplaybook` Guid OR a canonical playbook name registered as an enabled `sprk_playbookconsumer` row (consumerType `insights-ask`, `sprk_consumercode` = the canonical name). The endpoint resolves via `IConsumerRoutingService.ResolveBindingAsync` with exact consumer-code matching (`InsightEndpoints.cs`; FR-P3-01 single-routing-surface cutover, task 040).
 - `subject` is the **subject scheme** — for r1 Matter Health, it is `matter:<sprk_matterid>`.
 - The endpoint returns `200 OK` with the envelope; the persisted form lands in the host record's target longtext field (per registry `sprk_targetfield`).
 
@@ -60,7 +60,7 @@ The card calls **`POST /api/insights/ask`** with:
 | Playbook prompt | `sprk_analysisaction` row `5981632e-4165-f111-ab0c-7ced8ddc4cc6` (`matter-health-synthesis`) | Lives in `sprk_systemprompt`. Not in any `.txt` file. See §3.1. |
 | Playbook orchestration | `sprk_analysisplaybook` Guid `a0d49d0d-4a65-f111-ab0c-70a8a590c51c` (`matter-health-single`) | 9 nodes, 9 edges. |
 | Topic registry row | `sprk_aitopicregistryid` `c46b940e-4b65-f111-ab0c-70a8a590c51c` (`matter-health/single`) | TTL 60 min. |
-| BFF config-map entry | `Insights:Playbooks:Map:matter-health-single = a0d49d0d-…` | Dev appsettings (template); App Service uses snake_case (§3.2). |
+| Binding row | `sprk_playbookconsumer` `f82a7931-8079-f111-ab0e-7ced8ddc4cc6` (insights-ask / matter-health-single → `a0d49d0d-…`) | Replaces the former config-map entry (FR-P3-01). No appsettings/App Service change needed — routing takes effect within the 5-min cache TTL. |
 | Host form integration | Matter form id `4fa382f2-c273-f011-b4cb-6045bdd6a665` | 2 OnLoad libraries + 1 HTML host (iframe-scope mount target). |
 
 ---
@@ -324,21 +324,21 @@ The script:
 
 Verify: `sprk_analysisplaybook` queryable by name; `_sprk_actionid_value ne null` returns the full node count.
 
-#### BFF config-map entry (`appsettings.template.json`)
+#### Binding row (`sprk_playbookconsumer` — replaces the former appsettings config map)
 
-Add the playbook name → Guid mapping. r1 added:
+> **FR-P3-01 (spaarke-ai-architecture-redesign-r1 task 040, 2026-07-06)**: the `Insights:Playbooks:Map` appsettings block was DELETED under the ADR-039 single-routing-surface rule. Canonical-name routing now lives in the Binding table — no config change, no redeploy, no App Service snake_case caveat.
 
-```json
-"Insights": {
-  "Playbooks": {
-    "Map": {
-      "matter-health-single": "a0d49d0d-4a65-f111-ab0c-70a8a590c51c"
-    }
-  }
-}
-```
+Seed one enabled `sprk_playbookconsumer` row per canonical name:
 
-**App Service caveat** (Linux POSIX env-var rules): when you set this via Azure App Service Application Settings, the key MUST be snake_case (no `-`, no `@`). Use `Insights:Playbooks:Map:matter_health_single = <guid>`. The dev environment file binding tolerates hyphens (used here); the App Service path does not.
+| Column | Value |
+|---|---|
+| `sprk_consumertype` | `insights-ask` |
+| `sprk_consumercode` | your canonical name (e.g. `matter-health-single`) |
+| `sprk_playbook` | lookup → your `sprk_analysisplaybook` row (per-environment Guid) |
+| `sprk_environment` / `sprk_priority` / `sprk_enabled` | `*` / 500 / true |
+| `sprk_ucid` | your §3 use-case id (r1: `UC-C-2`) |
+
+Reference rows + full column values: `infra/dataverse/sprk_playbookconsumer-insights-rows.json` (r1's `matter-health-single` row on spaarkedev1: `f82a7931-8079-f111-ab0e-7ced8ddc4cc6`). Routing takes effect within the 5-minute routing cache TTL.
 
 #### Concurrency dedup — already done for you (FR-22)
 
@@ -679,11 +679,11 @@ The entries below are real r1 findings. Each one cost a deploy iteration or a de
 
 **A**: You are observing the r1 Phase 4 P1 gap — there is no `@spaarke/ai-widgets` IIFE bundle and the WebResource control on the target section is not yet wired. The mount glue script loads (you'll see `[Matter Insight Card] onLoad start` in console) and the pre-warm fires correctly, but the React card has no host DOM element to mount onto. Recovery path: §5.4 above.
 
-### 7.2 Q: "My POST returns 400 'question must be either a valid playbook Guid id OR a canonical name registered in Insights:Playbooks:Map'."
+### 7.2 Q: "My POST returns 400 'question must be either a valid playbook Guid id OR a canonical name registered as an enabled sprk_playbookconsumer row'."
 
-**A**: Two common causes:
+**A**: Two common causes (error wording updated at the FR-P3-01 cutover — the former `Insights:Playbooks:Map` config map no longer exists):
 1. **Wrong wire shape** — you are sending `{topic, mode, subject, parameters}`. Switch to `{question: "<canonical-playbook-name>", subject, parameters}` per §1.1. r1 Task 041 P1 finding; resolved before Task 043 deploy.
-2. **Branch not deployed** — the appsettings map entry exists in your branch but the BFF hasn't been redeployed. Two paths: (a) POST the **raw Guid** as `question` to bypass the name map (works against the currently-deployed BFF without a deploy); (b) deploy the BFF first via `bff-deploy` skill, then use the canonical name.
+2. **Missing/misspelled Binding row** — no enabled `sprk_playbookconsumer` row has consumerType `insights-ask` + `sprk_consumercode` equal to your canonical name (exact match). Seed/fix the row per §3.2; it takes effect within the 5-minute routing cache TTL (no deploy). Posting the **raw Guid** as `question` bypasses name routing entirely if you need an immediate check.
 
 ### 7.3 Q: "My playbook deploy fails with 'actionCode <X> does not resolve'."
 

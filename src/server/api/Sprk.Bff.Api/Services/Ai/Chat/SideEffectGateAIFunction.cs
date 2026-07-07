@@ -60,11 +60,13 @@ namespace Sprk.Bff.Api.Services.Ai.Chat;
 /// </para>
 /// <para>
 /// <b>Resume surface</b>: <c>POST /sessions/{sessionId}/gates/{gateId}/resolve</c>
-/// (task 032). Reject works end-to-end today; Confirm on a non-Binding invocation
-/// returns 422 <c>gate.no-binding-target</c> — resumed typed-handler EXECUTION is the
-/// P3 seam (FR-P3-03 create-task is the first legitimate consumer of these tools).
-/// Until then the safe posture is suspend-only: nothing at P2 legitimately drives
-/// these write tools from the loop.
+/// (task 032). Reject works end-to-end; Confirm on a non-Binding invocation executes
+/// through <see cref="TypedHandlerResumeExecutor"/> (FR-P3-03, task 042 — the seam this
+/// class's P2 landing deferred): the suspended tool resolves back to its catalog row +
+/// handler and runs under the confirming user's OBO scope, ledger-writing SessionOutput
+/// + ToolChain before the result renders. Invocations with no resolvable execution
+/// target still close honestly (<c>confirmed-unexecutable</c> + 422
+/// <c>gate.no-binding-target</c>).
 /// </para>
 /// <para>
 /// <b>NFR-04</b>: the wrapper preserves the inner function's name / description /

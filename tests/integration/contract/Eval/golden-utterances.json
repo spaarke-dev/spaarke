@@ -236,7 +236,7 @@
       "utterance": "what obligations are coming due in the next 30 days?",
       "notes": "§3 UC-C-2 trigger phrasing (verbatim)",
       "context": { "surface": "record-form-chat", "recordType": "sprk_matter" },
-      "expected": { "outcomeClass": "dispatch", "consumerType": "insights-ask", "consumerCode": "default", "catalogStatus": "planned", "plannedBy": "FR-P3-01 (Insights ask/search Bindings)" },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "insights-ask", "consumerCode": "default", "catalogStatus": "existing" },
       "assertions": { "schemaConformance": null, "citationIntegrity": true },
       "activation": { "dispatchAssertPhase": "P3", "activatedBy": "P3 wave (FR-P3-01)" }
     },
@@ -248,7 +248,7 @@
       "utterance": "who's assigned to this matter?",
       "notes": "§3 UC-C-2 trigger phrasing (verbatim)",
       "context": { "surface": "record-form-chat", "recordType": "sprk_matter" },
-      "expected": { "outcomeClass": "dispatch", "consumerType": "insights-ask", "consumerCode": "default", "catalogStatus": "planned", "plannedBy": "FR-P3-01" },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "insights-ask", "consumerCode": "default", "catalogStatus": "existing" },
       "assertions": { "schemaConformance": null, "citationIntegrity": true },
       "activation": { "dispatchAssertPhase": "P3", "activatedBy": "P3 wave (FR-P3-01)" }
     },
@@ -259,7 +259,7 @@
       "channel": "text",
       "utterance": "search my matters for indemnification disputes involving Acme",
       "context": { "surface": "assistant-chat" },
-      "expected": { "outcomeClass": "dispatch", "consumerType": "insights-search", "consumerCode": "default", "catalogStatus": "planned", "plannedBy": "FR-P3-01" },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "insights-search", "consumerCode": "default", "catalogStatus": "existing" },
       "assertions": { "schemaConformance": null, "citationIntegrity": true },
       "activation": { "dispatchAssertPhase": "P3", "activatedBy": "P3 wave (FR-P3-01)" }
     },
@@ -303,9 +303,9 @@
       "ucId": "UC-H-1",
       "channel": "text",
       "utterance": "create a task to review the indemnity clause by Friday",
-      "notes": "§3 UC-H-1 trigger: asks Assistant 'create a task to ...'; Dataverse write under user-Proceed gate (side_effect_class)",
+      "notes": "§3 UC-H-1 trigger: asks Assistant 'create a task to ...'; Dataverse write under user-Proceed gate (side_effect_class). Catalog rows landed by FR-P3-03 task 042 (CREATE-TASK@v1 prompted Action b66c8dda-8279-f111-ab0e-7ced8ddc4cc6 + create-task Binding 3d9724e5-8279-f111-ab0e-7ced8ddc4cc6 on spaarkedev1); the write leg is the EXISTING dataverse.create_record typed handler under the ONE confirmation gate, executed on confirm by TypedHandlerResumeExecutor.",
       "context": { "surface": "record-form-chat", "recordType": "sprk_matter" },
-      "expected": { "outcomeClass": "dispatch", "consumerType": "create-task", "consumerCode": "default", "catalogStatus": "planned", "plannedBy": "FR-P3-03 (create-task capability)" },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "create-task", "consumerCode": "default", "catalogStatus": "existing" },
       "assertions": { "schemaConformance": null, "citationIntegrity": false },
       "activation": { "dispatchAssertPhase": "P3", "activatedBy": "P3 wave (FR-P3-03)" }
     },
@@ -316,7 +316,7 @@
       "channel": "text",
       "utterance": "remind me to follow up on the Acme invoice next week",
       "context": { "surface": "assistant-chat" },
-      "expected": { "outcomeClass": "dispatch", "consumerType": "create-task", "consumerCode": "default", "catalogStatus": "planned", "plannedBy": "FR-P3-03" },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "create-task", "consumerCode": "default", "catalogStatus": "existing" },
       "assertions": { "schemaConformance": null, "citationIntegrity": false },
       "activation": { "dispatchAssertPhase": "P3", "activatedBy": "P3 wave (FR-P3-03)" }
     },
@@ -328,7 +328,7 @@
       "utterance": "[Create follow-up task] next-step affordance after a prior AI output",
       "notes": "§3 UC-H-1 trigger: offered as a next-step affordance from many other UCs",
       "context": { "surface": "assistant-chat", "sessionHasDocument": true },
-      "expected": { "outcomeClass": "dispatch", "consumerType": "create-task", "consumerCode": "default", "catalogStatus": "planned", "plannedBy": "FR-P3-03" },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "create-task", "consumerCode": "default", "catalogStatus": "existing" },
       "assertions": { "schemaConformance": null, "citationIntegrity": false },
       "activation": { "dispatchAssertPhase": "P3", "activatedBy": "P3 wave (FR-P3-03)" }
     },
@@ -508,7 +508,7 @@
       "utterance": "7/9/2026 and yes me",
       "notes": "FR-P2-03 (task 032) — walkthrough step 12: a pending elicitation Gate exists in the session ledger; the utterance is neither a hard slash nor an exact restart phrase, so it deterministically parses as the ANSWER to the pending invocation (the loop re-invokes the suspended capability tool with the previously provided args plus the parsed values; a successful dispatch resolves the gate as confirmed). No intent classification anywhere on this path.",
       "context": { "surface": "assistant-chat", "sessionHasDocument": true, "pendingElicitation": true },
-      "expected": { "outcomeClass": "dispatch", "consumerType": "create-task", "consumerCode": "default", "catalogStatus": "planned", "plannedBy": "FR-P3-03" },
+      "expected": { "outcomeClass": "dispatch", "consumerType": "create-task", "consumerCode": "default", "catalogStatus": "existing" },
       "assertions": { "schemaConformance": null, "citationIntegrity": false },
       "activation": { "dispatchAssertPhase": "P2", "activatedBy": "task 032 (FR-P2-03 mid-elicitation answer semantics — unit-proven in LoopElicitationTests); task 037 (FR-P2-08) activates the NL-loop dispatch assertion" }
     },
@@ -662,7 +662,7 @@
       "ucId": "UC-G-2",
       "channel": "text",
       "utterance": "looks good — save it as an email draft to jane.smith@smithlegal.example so I can send it",
-      "notes": "FR-P3-02 (task 041) — the email.draft write shape. The tool's sprk_analysistool row DECLARES sprk_sideeffectclass = Communicate (100000002), so the ONE confirmation gate (SideEffectGateAIFunction) SUSPENDS the invocation into the unified pending store (pending SessionGate marker BEFORE the action_confirmation presentation renders — ADR-040) instead of executing; on confirm the handler creates a Spaarke sprk_communication DRAFT record (statuscode server-pinned to Draft(1)) in the Communication (Email) service — NOT an Outlook draft; sending stays user-initiated there (assistant-initiated send is the named FR-P4-07 deferral). source_refs carries the ledger keys the draft was composed from. Suspension + declaration are live-asserted since task 041; the confirm-execute leg completes when the typed-handler resume seam lands (FR-P3-03 note in task-037).",
+      "notes": "FR-P3-02 (task 041) — the email.draft write shape. The tool's sprk_analysistool row DECLARES sprk_sideeffectclass = Communicate (100000002), so the ONE confirmation gate (SideEffectGateAIFunction) SUSPENDS the invocation into the unified pending store (pending SessionGate marker BEFORE the action_confirmation presentation renders — ADR-040) instead of executing; on confirm the handler creates a Spaarke sprk_communication DRAFT record (statuscode server-pinned to Draft(1)) in the Communication (Email) service — NOT an Outlook draft; sending stays user-initiated there (assistant-initiated send is the named FR-P4-07 deferral). source_refs carries the ledger keys the draft was composed from. Suspension + declaration are live-asserted since task 041; the typed-handler confirm-RESUME seam landed with FR-P3-03 task 042 (TypedHandlerResumeExecutor via POST /gates/{gateId}/resolve) — the confirm leg now executes end-to-end (live-asserted by the GU-059 confirm-resume fact).",
       "context": { "surface": "assistant-chat", "sessionHasDocument": true, "sessionHasLedgerOutputs": true },
       "expected": { "outcomeClass": "clarify", "consumerType": "draft-correspondence", "consumerCode": "default", "catalogStatus": "existing" },
       "assertions": { "schemaConformance": null, "citationIntegrity": false },
@@ -679,6 +679,18 @@
       "expected": { "outcomeClass": "dispatch", "consumerType": "daily-briefing-narrate", "consumerCode": "email", "catalogStatus": "existing" },
       "assertions": { "schemaConformance": null, "citationIntegrity": false },
       "activation": { "dispatchAssertPhase": "P3", "activatedBy": "P3 wave (FR-P3-04 task 043 — composite dispatch + ledger-before-render + email-envelope routing unit/contract-asserted with the task; briefing email arrival at gate task 048)" }
+    },
+    {
+      "caseId": "GU-059",
+      "family": "create-task",
+      "ucId": "UC-H-1",
+      "channel": "text",
+      "utterance": "yes, create it — due 7/9/2026, assign it to me",
+      "notes": "FR-P3-03 (task 042) — the create-task WRITE leg + typed-handler confirm-RESUME (walkthrough steps 13-14). After the CREATE-TASK@v1 proposal renders and elicitation completes (GU-044's answer shape), the model calls dataverse.create_record (tablename sprk_event, sprk_eventtype_ref=Task 124f5fc9-98ff-f011-8406-7c1e525abd8b) with the proposal fields + a provenance line carrying the source document file name and the source analysis ledger key ({bindingId}@t{n}, copied verbatim from the session-context block). The row's DECLARED sprk_sideeffectclass=Write fires the ONE gate (SideEffectGateAIFunction suspends; pending marker BEFORE the action_confirmation presentation — ADR-040); on user confirm, TypedHandlerResumeExecutor resolves the row+handler by declaration (ADR-039), executes the STORED args under the confirming user's OBO context, ledger-writes SessionOutput loop@t{n} (disposition record) + ToolChain BEFORE the result renders, and the gate closes confirmed. The client renders the completion message in the transcript. Live-asserted end-to-end by CreateTask_ConfirmedWriteInvocation_ExecutesThroughTheTypedHandlerStack_LedgerConfirmed_RecordCarriesLedgerRefs; browser proof (steps 10-14) at gate task 048.",
+      "context": { "surface": "assistant-chat", "sessionHasDocument": true, "sessionHasLedgerOutputs": true },
+      "expected": { "outcomeClass": "clarify", "consumerType": "create-task", "consumerCode": "default", "catalogStatus": "existing" },
+      "assertions": { "schemaConformance": null, "citationIntegrity": false },
+      "activation": { "dispatchAssertPhase": "P3", "activatedBy": "P3 wave (FR-P3-03 task 042 — suspend + confirm-resume + ledger-refs live-asserted with the task; browser walkthrough steps 10-14 at gate task 048)" }
     }
   ]
 }

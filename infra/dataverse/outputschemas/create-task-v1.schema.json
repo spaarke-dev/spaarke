@@ -1,0 +1,29 @@
+{
+  "title": "CREATE-TASK@v1 output schema — create-task capability (FR-P3-03, spaarke-ai-architecture-redesign-r1 task 042). Repo mirror of sprk_analysisaction.sprk_outputschemajson (row b66c8dda-8279-f111-ab0e-7ced8ddc4cc6 on spaarkedev1). Declaration order = streaming order: title → description → priority_suggestion → cited_refs. cited_refs minItems 1: an uncited task proposal is invalid (ADR-039 grounded outputs). The proposal deliberately carries NO due date / assignee — those are user-supplied conversation values (FR-P2-03 elicitation) the assistant carries into the gated dataverse.create_record write.",
+  "type": "object",
+  "properties": {
+    "title": {
+      "type": "string",
+      "maxLength": 200,
+      "description": "Concise, action-oriented task title starting with a verb."
+    },
+    "description": {
+      "type": "string",
+      "maxLength": 4000,
+      "description": "Complete task description grounded in the source documents: what to do, why, and the concrete details the assignee needs."
+    },
+    "priority_suggestion": {
+      "type": "string",
+      "enum": ["low", "normal", "high", "urgent"],
+      "description": "Suggested priority judged from the source material; 'normal' by default."
+    },
+    "cited_refs": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 1,
+      "description": "The source references the task drew from (file names; session output ledger keys when the request names them)."
+    }
+  },
+  "required": ["title", "description", "priority_suggestion", "cited_refs"],
+  "additionalProperties": false
+}

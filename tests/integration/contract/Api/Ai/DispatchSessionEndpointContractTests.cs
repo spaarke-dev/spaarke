@@ -532,7 +532,6 @@ public sealed class DispatchSessionEndpointTestFixture : IAsyncLifetime, IDispos
         builder.Services.AddSingleton(TextSourceMock.Object);
         builder.Services.AddSingleton<IOpenAiClient>(OpenAi);
         builder.Services.AddSingleton<PromptSchemaRenderer>();
-        builder.Services.Configure<LinearConsumersOptions>(_ => { });
         builder.Services.AddSingleton<IActionRunner, ActionRunner>();
         builder.Services.AddSingleton<IOutputRouter>(Router);
 

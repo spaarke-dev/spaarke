@@ -8,10 +8,11 @@ namespace Sprk.Bff.Api.Services.Ai.PublicContracts;
 /// <remarks>
 /// <para>
 /// <b>Phase 1R contract</b> per <c>chat-routing-redesign-r1</c> spec § Phase 1R
-/// (FR-1R-02 / FR-1R-03 / FR-1R-04). Replaces the per-consumer
-/// <c>Workspace__*PlaybookId</c> environment-variable lookup pattern that
-/// shipped in §1.7 Stable-ID migration. The owner-managed Dataverse table is
-/// the new source of truth; this facade is the single point of access for all
+/// (FR-1R-02 / FR-1R-03 / FR-1R-04). Replaced the per-consumer typed-options
+/// config lookup pattern that shipped in §1.7 Stable-ID migration; that config
+/// fallback surface was fully deleted by the FR-P3-01 hard cutover
+/// (ai-architecture-redesign-r1). The owner-managed Dataverse table is the ONLY
+/// source of truth; this facade is the single point of access for all
 /// BFF consumers.
 /// </para>
 /// <para>
@@ -40,11 +41,11 @@ public interface IConsumerRoutingService
 {
     /// <summary>
     /// Resolve the playbook GUID for the given consumer + context. Returns
-    /// <c>null</c> when no routing record matches; callers are expected to
-    /// fall back to their existing graceful-degrade path (typed-options
-    /// <c>WorkspaceOptions.*PlaybookId</c> read, or a feature-disabled
-    /// response — caller's choice; this facade is silent on what "no match"
-    /// means semantically).
+    /// <c>null</c> when no routing record matches; callers surface a clean
+    /// routing-missing error or a graceful-degrade response (caller's choice;
+    /// this facade is silent on what "no match" means semantically). No config
+    /// fallback exists per FR-P3-01 — the operator remedy is seeding the
+    /// <c>sprk_playbookconsumer</c> row.
     /// </summary>
     /// <param name="consumerType">
     /// Stable consumer-type code (lower-kebab-case, no spaces). MUST match
@@ -234,6 +235,51 @@ public interface IConsumerRoutingService
     /// </returns>
     Task<Binding?> GetBindingByIdAsync(
         Guid bindingId,
+        CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// FR-P3-01 (spaarke-ai-architecture-redesign-r1 task 040) — reverse lookup:
+    /// resolve the FULL <see cref="Binding"/> contract of the highest-priority
+    /// enabled <c>sprk_playbookconsumer</c> row whose <c>sprk_playbook</c> lookup
+    /// targets <paramref name="playbookId"/>, environment-filtered.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Two callers, both replacing config-map reverse scans deleted by the
+    /// single-routing-surface cutover:
+    /// <list type="bullet">
+    ///   <item><c>EngineOutputLedgerAdapter</c> (E-2) — re-points engine-origin
+    ///     ledger entries from the interim <c>BindingId = playbookId</c> identity
+    ///     onto the REAL resolved Binding row (task-024 interim contract closed).</item>
+    ///   <item><c>TopicRegistryTtlLookup</c> — reverse-maps a playbook GUID to its
+    ///     canonical name (<see cref="Binding.ConsumerCode"/>), replacing the
+    ///     deleted Insights playbook-name config map's linear scan.</item>
+    /// </list>
+    /// </para>
+    /// <para>
+    /// <b>ADR-039</b>: extends THIS service (rather than introducing a second query
+    /// path) so the Binding query + row→contract mapping stay in one implementation
+    /// — same extension rationale as <see cref="GetBindingByIdAsync"/>. The reverse
+    /// lookup makes NO routing decision: which playbook ran was already decided
+    /// upstream; this only recovers the catalog identity of that decision.
+    /// </para>
+    /// <para>
+    /// <b>Resolution semantics</b>: <c>sprk_enabled=true</c> rows with
+    /// <c>sprk_playbook = playbookId</c>, environment-filtered
+    /// (specific-environment rows win over wildcard, then priority, then row id —
+    /// deterministic). No consumer-code / match-conditions filtering. Results
+    /// (including null misses) cache 5 minutes. A playbook with no Binding row
+    /// returns null (callers keep their documented fallback: interim identity for
+    /// the ledger adapter, not-found for the TTL lookup).
+    /// </para>
+    /// </remarks>
+    /// <param name="playbookId">The <c>sprk_analysisplaybook</c> row id. Required (non-empty).</param>
+    /// <param name="environment">Environment scope; null reads <c>IHostEnvironment.EnvironmentName</c>.</param>
+    /// <param name="cancellationToken">Cancellation token.</param>
+    /// <returns>The best-match <see cref="Binding"/>, or <c>null</c> when no enabled row targets the playbook.</returns>
+    Task<Binding?> GetBindingByPlaybookIdAsync(
+        Guid playbookId,
+        string? environment = null,
         CancellationToken cancellationToken = default);
 
     /// <summary>

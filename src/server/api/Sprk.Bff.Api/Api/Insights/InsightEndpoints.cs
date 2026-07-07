@@ -3,7 +3,6 @@ using System.Security.Claims;
 using System.Security.Cryptography;
 using System.Text;
 using Microsoft.AspNetCore.Mvc;
-using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Models.Ai.PublicContracts;
 using Sprk.Bff.Api.Models.Insights;
@@ -128,7 +127,7 @@ public static class InsightEndpoints
         [FromBody] InsightAskRequest? request,
         HttpContext httpContext,
         IInsightsAi insightsAi,
-        IOptionsSnapshot<InsightsPlaybookNameMapOptions> nameMapOptions,
+        IConsumerRoutingService consumerRouting,
         InsightWidgetsTelemetry widgetTelemetry,
         ILogger<InsightAskRequest> logger,
         CancellationToken ct)
@@ -175,25 +174,43 @@ public static class InsightEndpoints
 
         // Resolve Question → Guid. Two acceptable inputs (in priority order):
         //   1. A raw Guid (advanced/direct path — original Phase 1 contract; still works).
-        //   2. A canonical playbook name (e.g., "predict-matter-cost@v1") registered in
-        //      the InsightsPlaybookNameMapOptions config map. Lets PCFs / code pages /
-        //      external clients use a stable name across Dev / Test / Prod without
-        //      hard-coding the env-specific Dataverse Guid.
+        //   2. A canonical playbook name (e.g., "matter-health-single") registered as an
+        //      enabled sprk_playbookconsumer Binding row (consumerType 'insights-ask',
+        //      sprk_consumercode = the canonical name, sprk_playbook = the per-env
+        //      sprk_analysisplaybook Guid). FR-P3-01 hard cutover (ADR-039 single routing
+        //      surface): this replaces the deleted per-environment config name map.
         // The Guid attempt comes first so existing Guid callers see no behavior change.
+        //
+        // EXACT-code semantic: ResolveBindingAsync falls back to the 'default' row when the
+        // requested code has no exact row. This endpoint must REJECT unknown canonical
+        // names, so it accepts the resolution only when the returned Binding's ConsumerCode
+        // equals the requested name (OrdinalIgnoreCase) — a default-row fallback means
+        // "not registered" here.
         if (!Guid.TryParse(request.Question, out var playbookId) || playbookId == Guid.Empty)
         {
-            playbookId = nameMapOptions.Value.ResolveOrDefault(request.Question);
-            if (playbookId == Guid.Empty)
-            {
-                var registered = nameMapOptions.Value.Map.Count == 0
-                    ? "<none — Insights:Playbooks:Map is empty in this environment's config>"
-                    : string.Join(", ", nameMapOptions.Value.Map.Keys);
+            var binding = await consumerRouting.ResolveBindingAsync(
+                ConsumerTypes.InsightsAsk, consumerCode: request.Question, cancellationToken: ct);
 
+            // Null/empty ConsumerCode is treated as "default" by the resolution algorithm —
+            // normalize before comparing so a null-code default row behaves identically to a
+            // literal "default" row (same normalization as AssistantToolCallHandler).
+            if (binding is not null
+                && string.Equals(
+                    string.IsNullOrWhiteSpace(binding.ConsumerCode) ? "default" : binding.ConsumerCode,
+                    request.Question,
+                    StringComparison.OrdinalIgnoreCase)
+                && binding.PlaybookId is { } boundPlaybookId
+                && boundPlaybookId != Guid.Empty)
+            {
+                playbookId = boundPlaybookId;
+            }
+            else
+            {
                 return BadRequest(
                     "'question' must be either a valid playbook Guid id OR a canonical name " +
-                    $"registered in '{InsightsPlaybookNameMapOptions.SectionName}:Map' configuration. " +
-                    $"Received: '{request.Question}'. " +
-                    $"Configured names in this environment: {registered}.");
+                    "registered as an enabled sprk_playbookconsumer row (consumerType " +
+                    $"'{ConsumerTypes.InsightsAsk}', sprk_consumercode = the canonical name). " +
+                    $"Received: '{request.Question}'.");
             }
         }
 

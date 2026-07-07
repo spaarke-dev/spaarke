@@ -72,6 +72,7 @@ public sealed class ConsumerRoutingService : IConsumerRoutingService
     private const string ActionCacheKeyPrefix = "consumer-routing-action:";
     private const string BindingCacheKeyPrefix = "consumer-routing-binding:";
     private const string BindingByIdCacheKeyPrefix = "consumer-routing-binding-id:";
+    private const string BindingByPlaybookCacheKeyPrefix = "consumer-routing-binding-playbook:";
     private const string EventBindingsCacheKeyPrefix = "consumer-routing-event:";
     private const string TextProjectableCacheKeyPrefix = "consumer-routing-text-projectable:";
     private static readonly TimeSpan CacheDuration = TimeSpan.FromMinutes(5);
@@ -479,6 +480,130 @@ public sealed class ConsumerRoutingService : IConsumerRoutingService
         }
 
         return MapBinding(entity, playbookLookup, actionLookup);
+    }
+
+    /// <inheritdoc />
+    public async Task<Binding?> GetBindingByPlaybookIdAsync(
+        Guid playbookId,
+        string? environment = null,
+        CancellationToken cancellationToken = default)
+    {
+        if (playbookId == Guid.Empty)
+        {
+            throw new ArgumentException("playbookId is required.", nameof(playbookId));
+        }
+
+        var normalizedEnv = string.IsNullOrWhiteSpace(environment)
+            ? _hostEnvironment.EnvironmentName?.ToLowerInvariant() ?? "*"
+            : environment.ToLowerInvariant();
+        var cacheKey = $"{BindingByPlaybookCacheKeyPrefix}{playbookId}:{normalizedEnv}";
+
+        if (_cache.TryGetValue<Binding?>(cacheKey, out var cached))
+        {
+            _logger.LogDebug(
+                "ConsumerRoutingService binding-by-playbook cache hit (playbookId={PlaybookId}, env={Env}, resolved={Resolved}).",
+                playbookId, normalizedEnv, cached is not null);
+            return cached;
+        }
+
+        var stopwatch = Stopwatch.StartNew();
+        Binding? resolved = null;
+        try
+        {
+            resolved = await QueryBindingByPlaybookIdAsync(playbookId, normalizedEnv, cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (OperationCanceledException)
+        {
+            // Don't poison the cache on cancellation — let next call retry.
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Routing must NEVER throw to the consumer (same contract as the other
+            // resolves) — reverse-lookup callers keep their documented fallbacks
+            // (interim ledger identity / TTL not-found). ADR-015: identifiers only.
+            _logger.LogError(ex,
+                "ConsumerRoutingService failed to resolve binding by playbook id (playbookId={PlaybookId}, env={Env}). Returning null.",
+                playbookId, normalizedEnv);
+            return null;
+        }
+        finally
+        {
+            stopwatch.Stop();
+        }
+
+        // Cache hits AND misses (same policy as the per-consumer resolves).
+        _cache.Set(cacheKey, resolved, new MemoryCacheEntryOptions
+        {
+            AbsoluteExpirationRelativeToNow = CacheDuration,
+        });
+
+        _logger.LogInformation(
+            "ConsumerRoutingService resolved binding by playbook id (playbookId={PlaybookId}, env={Env}, resolved={Resolved}, " +
+            "bindingId={BindingId}, consumerType={ConsumerType}, cacheHit=false, durationMs={DurationMs}).",
+            playbookId, normalizedEnv, resolved is not null, resolved?.BindingId, resolved?.ConsumerType,
+            stopwatch.ElapsedMilliseconds);
+
+        return resolved;
+    }
+
+    /// <summary>
+    /// Reverse-lookup query: enabled rows whose <c>sprk_playbook</c> targets the
+    /// playbook, with the same left-outer Action link + <see cref="MapBinding"/>
+    /// mapping as every other resolve path. Environment filtering + deterministic
+    /// best-match selection (specific env over wildcard, then priority, then row id)
+    /// happen in memory — a playbook is targeted by at most a handful of rows.
+    /// </summary>
+    private async Task<Binding?> QueryBindingByPlaybookIdAsync(
+        Guid playbookId,
+        string normalizedEnv,
+        CancellationToken cancellationToken)
+    {
+        var query = new QueryExpression(EntityLogicalName)
+        {
+            ColumnSet = new ColumnSet(Columns),
+            Criteria = new FilterExpression(LogicalOperator.And),
+        };
+        query.Criteria.AddCondition(PlaybookLookupColumn, ConditionOperator.Equal, playbookId);
+        query.Criteria.AddCondition("sprk_enabled", ConditionOperator.Equal, true);
+        query.AddOrder("sprk_priority", OrderType.Ascending);
+
+        var actionLink = query.AddLink(
+            ActionEntityLogicalName,
+            ActionLookupColumn,
+            "sprk_analysisactionid",
+            JoinOperator.LeftOuter);
+        actionLink.EntityAlias = ActionLinkAlias;
+        actionLink.Columns = new ColumnSet(ActionColumns);
+
+        var result = await _entityService
+            .RetrieveMultipleAsync(query, cancellationToken)
+            .ConfigureAwait(false);
+
+        if (result?.Entities is null || result.Entities.Count == 0)
+        {
+            return null;
+        }
+
+        var candidates = new List<Binding>(result.Entities.Count);
+        foreach (var entity in result.Entities)
+        {
+            var playbookLookup = entity.GetAttributeValue<EntityReference>(PlaybookLookupColumn);
+            var actionLookup = entity.GetAttributeValue<EntityReference>(ActionLookupColumn);
+            if (playbookLookup is null || playbookLookup.Id == Guid.Empty)
+            {
+                continue; // defensive — the query condition already requires the lookup.
+            }
+            candidates.Add(MapBinding(entity, playbookLookup, actionLookup));
+        }
+
+        return candidates
+            .Where(b => MatchesEnvironment(b.Environment, normalizedEnv))
+            .OrderByDescending(b => IsSpecificEnvironment(b.Environment, normalizedEnv))
+            .ThenBy(b => b.Priority)
+            .ThenBy(b => b.BindingId)
+            .FirstOrDefault();
     }
 
     /// <summary>

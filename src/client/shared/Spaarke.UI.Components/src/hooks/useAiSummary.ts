@@ -21,7 +21,8 @@ import { useState, useCallback, useRef, useEffect } from 'react';
  *
  * The constant lives at module scope (not in shared config) because:
  *   1. The hook is a context-agnostic shared library function; no backend
- *      `WorkspaceOptions` value is plumbed through to consumers.
+ *      playbook configuration is plumbed through to consumers (the backend
+ *      resolves playbooks via sprk_playbookconsumer Binding rows per FR-P3-01).
  *   2. The playbook ID is immutable per Q1 (2026-06-22) — the
  *      `sprk_playbookid` column mirrors the row's primary key and is portable
  *      across environments by convention.

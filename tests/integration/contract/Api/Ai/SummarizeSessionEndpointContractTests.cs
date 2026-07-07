@@ -472,7 +472,6 @@ public sealed class SummarizeSessionEndpointTestFixture : IAsyncLifetime, IDispo
         builder.Services.AddSingleton(TextSourceMock.Object);
         builder.Services.AddSingleton<IOpenAiClient>(OpenAi);
         builder.Services.AddSingleton<PromptSchemaRenderer>();
-        builder.Services.Configure<LinearConsumersOptions>(_ => { });
         builder.Services.AddSingleton<IActionRunner, ActionRunner>();
 
         // FR-P1-02 (task 021) — REAL OutputRouter over the fixture's session manager: the

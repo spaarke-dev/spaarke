@@ -102,15 +102,12 @@ public static class ConfigurationModule
             .Bind(configuration.GetSection(Sprk.Bff.Api.Services.Ai.Foundry.BingGroundingOptions.SectionName))
             .ValidateDataAnnotations();
 
-        // Workspace options — pre-fill / AI summary playbook IDs used by MatterPreFillService,
-        // ProjectPreFillService, and WorkspaceAiService. All properties are nullable with code-side
-        // fallbacks to hardcoded defaults, so validation is deferred (no ValidateOnStart) and the
-        // app starts cleanly when the "Workspace" section is absent.
-        services
-            .AddOptions<WorkspaceOptions>()
-            .Bind(configuration.GetSection(WorkspaceOptions.SectionName))
-            .ValidateDataAnnotations()
-            .ValidateOnStart();
+        // FR-P3-01 (ai-architecture-redesign-r1 task 040): the Workspace typed-options binding (and its
+        // deprecation-warning validator) was DELETED with the hard cutover to the
+        // sprk_playbookconsumer Binding routing table — no code reads the "Workspace"
+        // configuration section anymore. Playbook resolution for matter-pre-fill,
+        // project-pre-fill, ai-summary, and summarize-file flows exclusively through
+        // IConsumerRoutingService (see Infrastructure/DI/RoutingModule.cs).
 
         // SharePoint Embedded options — StagingContainerId used by pre-fill services (matter/project)
         // for staged file uploads. Nullable with code-side fallback (in-memory text extraction when
@@ -128,10 +125,6 @@ public static class ConfigurationModule
         // Custom validation for conditional requirements
         services.AddSingleton<IValidateOptions<GraphOptions>, GraphOptionsValidator>();
         services.AddSingleton<IValidateOptions<DocumentIntelligenceOptions>, DocumentIntelligenceOptionsValidator>();
-        // Phase 1R FR-1R-06: deprecation warning when any Workspace__*PlaybookId env var
-        // is set (routing now lives in sprk_playbookconsumer Dataverse table; env vars
-        // are graceful-degrade fallback only during the deprecation window).
-        services.AddSingleton<IValidateOptions<WorkspaceOptions>, WorkspaceOptionsValidator>();
 
         // Startup health check to validate configuration
         services.AddHostedService<StartupValidationService>();

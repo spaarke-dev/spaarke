@@ -161,10 +161,11 @@ const _SUMMARY_PREVIEW_CHAR_CAP = 600;
  * retired (zero production callers expected post-migration).
  *
  * The constant lives at module scope (not in shared config) because:
- *   1. The wizard is a context-agnostic shared library component; no
- *      backend `WorkspaceOptions:SummarizePlaybookId` value is plumbed
- *      through to consumers (PCF and code-page hosts inject only auth +
- *      bffBaseUrl, not playbook configuration).
+ *   1. The wizard is a context-agnostic shared library component; the backend
+ *      resolves its playbook via the `sprk_playbookconsumer` Binding row for
+ *      consumerType 'summarize-file' (FR-P3-01 — no config fallback), and no
+ *      playbook configuration is plumbed through to consumers (PCF and
+ *      code-page hosts inject only auth + bffBaseUrl).
  *   2. The playbook ID is immutable per Q1 (2026-06-22) — the
  *      `sprk_playbookid` column mirrors the row's primary key and is portable
  *      across environments by convention.

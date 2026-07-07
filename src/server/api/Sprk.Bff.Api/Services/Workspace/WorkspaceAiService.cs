@@ -1,9 +1,7 @@
 using System.Text.Json;
-using Microsoft.Extensions.Options;
 using Microsoft.Xrm.Sdk;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api.Workspace.Models;
-using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 
@@ -33,24 +31,21 @@ namespace Sprk.Bff.Api.Services.Workspace;
 /// - <c>sprk_document</c> — Document analysis
 /// </para>
 /// <para>
-/// <b>FR-02 stable-ID resolution</b> (chat-routing-redesign-r1 task 018, Wave 1-E
-/// Pattern A migration): the prior hardcoded
-/// <c>18cf3cc8-02ec-f011-8406-7c1e520aa4df</c> GUID constant (DEV "Document Profile"
-/// playbook, <c>sprk_playbookcode=PB-002</c>) and the raw
-/// <c>IConfiguration["Workspace:AiSummaryPlaybookId"]</c> indexer read have both been
-/// removed. The playbook is now resolved at runtime by looking up
-/// <see cref="WorkspaceOptions.AiSummaryPlaybookId"/> (typed-options per ADR-018)
-/// through <see cref="IPlaybookLookupService.GetByIdAsync"/>, which queries the
+/// <b>FR-P3-01 hard cutover</b> (ai-architecture-redesign-r1 task 040): the playbook is
+/// resolved EXCLUSIVELY via the <c>sprk_playbookconsumer</c> Binding routing table
+/// (<see cref="IConsumerRoutingService"/>, consumerType <c>ai-summary</c>). The legacy
+/// typed-options config fallback (FR-1R-05/FR-1R-06 deprecation window) was DELETED per
+/// NFR-08. The routed GUID is then loaded through
+/// <see cref="IPlaybookLookupService.GetByIdAsync"/>, which queries the
 /// <c>sprk_playbookid</c> alternate key on <c>sprk_analysisplaybook</c>
 /// (Q&amp;A 2026-06-22 Q1) with 1-hour caching (ADR-014).
 /// </para>
 /// <para>
-/// Empty / missing config is tolerated here (unlike the chat /summarize convergence
-/// point in <c>SessionSummarizeOrchestrator</c>): if the lookup fails for any reason
-/// the existing fallback-response path is taken so the workspace summary tile still
-/// renders a placeholder rather than 500-ing. Per-environment configuration values
-/// for <c>Workspace:AiSummaryPlaybookId</c> are populated at deploy time
-/// (DEV: <c>18cf3cc8-02ec-f011-8406-7c1e520aa4df</c>).
+/// A routing miss is tolerated here (unlike the chat /summarize convergence
+/// point in <c>SessionSummarizeOrchestrator</c>): if no enabled Binding row resolves or
+/// the lookup fails for any reason, the existing fallback-response path is taken so the
+/// workspace summary tile still renders a placeholder rather than 500-ing. The operator
+/// remedy is to seed the <c>sprk_playbookconsumer</c> row — no config fallback exists.
 /// </para>
 /// <para>
 /// TODO (future tasks): Replace mock Dataverse fetch with real IDataverseService queries.
@@ -64,7 +59,6 @@ public sealed class WorkspaceAiService
     private readonly ILogger<WorkspaceAiService> _logger;
     private readonly IPlaybookLookupService _playbookLookup;
     private readonly IConsumerRoutingService _consumerRouting;
-    private readonly IOptions<WorkspaceOptions> _workspaceOptions;
 
     private static readonly HashSet<string> SupportedEntityTypes =
         new(StringComparer.OrdinalIgnoreCase)
@@ -84,7 +78,6 @@ public sealed class WorkspaceAiService
         ILogger<WorkspaceAiService> logger,
         IPlaybookLookupService playbookLookup,
         IConsumerRoutingService consumerRouting,
-        IOptions<WorkspaceOptions> workspaceOptions,
         IWorkspacePrefillAi? prefillAi = null)
     {
         _genericEntityService = genericEntityService ?? throw new ArgumentNullException(nameof(genericEntityService));
@@ -92,7 +85,6 @@ public sealed class WorkspaceAiService
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _playbookLookup = playbookLookup ?? throw new ArgumentNullException(nameof(playbookLookup));
         _consumerRouting = consumerRouting ?? throw new ArgumentNullException(nameof(consumerRouting));
-        _workspaceOptions = workspaceOptions ?? throw new ArgumentNullException(nameof(workspaceOptions));
         _prefillAi = prefillAi; // Nullable: AI feature flags may be disabled. RequireAi() throws at use site.
     }
 
@@ -339,13 +331,12 @@ public sealed class WorkspaceAiService
         HttpContext httpContext,
         CancellationToken ct)
     {
-        // FR-1R-05 routing-table resolution (chat-routing-redesign-r1 task 028c / Pattern A):
-        // Primary lookup is now IConsumerRoutingService.ResolveAsync(ConsumerTypes.AiSummary)
-        // which queries sprk_playbookconsumer with 5-min TTL (ADR-014). When the table has no
-        // matching row, ResolveAsync returns null and we fall back to the legacy
-        // WorkspaceOptions.AiSummaryPlaybookId env-var (typed-options per ADR-018) for the
-        // FR-1R-06 deprecation window. Hardening (code-review S-5): use the
-        // ConsumerTypes.AiSummary compile-time constant — never a literal string.
+        // FR-P3-01 hard cutover (ai-architecture-redesign-r1 task 040): the playbook is resolved
+        // EXCLUSIVELY via IConsumerRoutingService.ResolveAsync(ConsumerTypes.AiSummary), which
+        // queries sprk_playbookconsumer with 5-min TTL (ADR-014). The legacy typed-options
+        // config fallback was DELETED per NFR-08 — routing null is a clean, terminal miss.
+        // Hardening (code-review S-5): use the ConsumerTypes.AiSummary compile-time constant —
+        // never a literal string.
         //
         // Graceful-degrade contract preserved (per Phase 1 task 018 evidence): unlike the
         // chat /summarize convergence point in SessionSummarizeOrchestrator (FR-26),
@@ -356,23 +347,17 @@ public sealed class WorkspaceAiService
             .ResolveAsync(ConsumerTypes.AiSummary, cancellationToken: ct)
             .ConfigureAwait(false);
 
-        string? configuredPlaybookId = routedPlaybookId?.ToString();
-        if (string.IsNullOrWhiteSpace(configuredPlaybookId))
+        if (routedPlaybookId is null)
         {
-            // Fallback to legacy env var during the FR-1R-06 deprecation window.
-            configuredPlaybookId = _workspaceOptions.Value.AiSummaryPlaybookId;
-        }
-
-        if (string.IsNullOrWhiteSpace(configuredPlaybookId))
-        {
-            _logger.LogWarning(
-                "AI summary playbook is not configured. Neither sprk_playbookconsumer " +
-                "(consumerType='{ConsumerType}') nor Workspace:AiSummaryPlaybookId returned a " +
-                "playbook id. Falling back to template response. EntityType={EntityType}, " +
-                "EntityId={EntityId}",
+            _logger.LogError(
+                "Routing table has no enabled sprk_playbookconsumer row for consumerType " +
+                "'{ConsumerType}'; seed the row — no config fallback exists per FR-P3-01. " +
+                "Falling back to template response. EntityType={EntityType}, EntityId={EntityId}",
                 ConsumerTypes.AiSummary, request.EntityType, request.EntityId);
             return BuildFallbackResponse(request);
         }
+
+        string configuredPlaybookId = routedPlaybookId.Value.ToString();
 
         Guid playbookId;
         try

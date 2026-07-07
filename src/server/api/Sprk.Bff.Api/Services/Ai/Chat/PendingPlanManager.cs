@@ -88,9 +88,11 @@ public class PendingPlanManager
 
     /// <summary>
     /// Ledger vocabulary: gate status <c>confirmed-unexecutable</c> — the user CONFIRMED
-    /// the gate, but the invocation has no execution seam in this build (typed-handler
-    /// confirm-resume is the P3 FR-P3-03 seam; gate-resolve executes catalog Bindings
-    /// only). Honest terminal state (G-P2 UAT round-1 finding 6, 2026-07-06): a plain
+    /// the gate, but the invocation has no resolvable execution target from this surface
+    /// (since FR-P3-03 / task 042 landed typed-handler confirm-resume, this is the
+    /// fallback for invocations whose tool row is not chat-available, has no registered
+    /// handler, or when the compound-AI services are off).
+    /// Honest terminal state (G-P2 UAT round-1 finding 6, 2026-07-06): a plain
     /// <c>confirmed</c> marker would falsely record an executed side effect, and leaving
     /// the gate <c>pending</c> would contradict the user's explicit click. ADR-040
     /// vocabulary extension — append-only resolution correlated by gate id, like every

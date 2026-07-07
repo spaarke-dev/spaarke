@@ -82,7 +82,13 @@ public class AnalysisToolService : DataverseHttpServiceBase
     /// <summary>
     /// List all available tools with pagination.
     /// </summary>
-    public async Task<ScopeListResult<AnalysisTool>> ListToolsAsync(
+    /// <remarks>
+    /// <c>virtual</c> (task 042, FR-P3-03): permits a test-double subclass stubbing the
+    /// Dataverse catalog read at the module boundary (ADR-038) for the typed-handler
+    /// confirm-resume tests — same convention as <c>ChatSessionManager</c> /
+    /// <c>PendingPlanManager</c> virtuals.
+    /// </remarks>
+    public virtual async Task<ScopeListResult<AnalysisTool>> ListToolsAsync(
         ScopeListOptions options,
         CancellationToken cancellationToken)
     {

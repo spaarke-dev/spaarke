@@ -99,11 +99,12 @@ public static class ConsumerTypes
     /// linear consumer. R7 Wave 12 (2026-07-02) — migrated off the Playbook
     /// Engine per <c>docs/architecture/SPAARKE-LINEAR-AI-CONSUMER-ARCHITECTURE.md</c>.
     /// Routes via the <c>sprk_playbookconsumer</c> routing table
-    /// (Wave 12.3 retired the config-map lookup); the corresponding entry in
-    /// <see cref="LinearConsumers.LinearConsumersOptions.PlaybookIds"/> is
-    /// used by <c>AnalysisEndpoints.ExecuteAnalysis</c> to dispatch when the
-    /// incoming request's <c>PlaybookId</c> matches (preserving the client
-    /// contract during migration).
+    /// (Wave 12.3 retired the config-map lookup). FR-P3-01 (task 040) deleted
+    /// the <c>LinearConsumers:PlaybookIds</c> reverse-lookup config too:
+    /// <c>AnalysisEndpoints.ExecuteAnalysis</c> now detects a Document Profile
+    /// dispatch by comparing the incoming legacy <c>PlaybookId</c> against this
+    /// Binding row's <c>sprk_playbook</c> lookup (preserving the client
+    /// contract with the Binding table as the only routing surface).
     /// </summary>
     public const string DocumentProfile = "document-profile";
 
@@ -144,6 +145,48 @@ public static class ConsumerTypes
     public const string DraftCorrespondence = "draft-correspondence";
 
     /// <summary>
+    /// The Insights Engine playbook-path catalog (FR-P3-01,
+    /// spaarke-ai-architecture-redesign-r1 task 040). Replaces the deleted
+    /// Insights playbook-name appsettings map (+ its default-name config
+    /// key — both retired at the cutover): the canonical playbook name
+    /// (e.g. <c>matter-health-single</c>, <c>universal-ingest@v1</c>) is the
+    /// Binding row's <c>sprk_consumercode</c>; the per-environment
+    /// <c>sprk_analysisplaybook</c> GUID is its <c>sprk_playbook</c> lookup.
+    /// Readers (<c>InsightEndpoints</c>, <c>AssistantToolCallHandler</c>,
+    /// <c>InsightsOrchestrator</c>, <c>TopicRegistryTtlLookup</c>) resolve via
+    /// <see cref="IConsumerRoutingService.ResolveBindingAsync"/> with EXACT
+    /// consumer-code matching (the default-row fallback is rejected so unknown
+    /// canonical names still fail clean). The <c>default</c> row is the
+    /// Assistant-path default when the classifier supplies no hint.
+    /// </summary>
+    public const string InsightsAsk = "insights-ask";
+
+    /// <summary>
+    /// The Insights Engine RAG search surface (FR-P3-01, task 040 — catalog
+    /// registration). <c>POST /api/insights/search</c> wraps <c>IRagService</c>
+    /// directly (no engine target), so no code resolves this Binding today; the
+    /// row exists for FR-P0-04 constants ↔ rows parity and anchors the later
+    /// loop-side insights capability projection.
+    /// </summary>
+    public const string InsightsSearch = "insights-search";
+
+    /// <summary>
+    /// The create-task capability (FR-P3-03 / UC-H-1, canonical walkthrough steps
+    /// 10-14): a prompted Action (CREATE-TASK@v1) that drafts a well-formed follow-up
+    /// task proposal grounded in the session's documents and ledger outputs, projected
+    /// into the agent loop as <c>capability_create-task</c>. The Action's input schema
+    /// declares <c>due_date</c> + <c>assign_to</c> REQUIRED, so missing values produce
+    /// the FR-P2-03 loop-native clarifying turn. The WRITE leg is the EXISTING
+    /// <c>dataverse.create_record</c> typed handler (declared
+    /// <c>side_effect_class: write</c> — confirmation-gated; executed on confirm by
+    /// <c>TypedHandlerResumeExecutor</c>) creating <c>sprk_event</c> with
+    /// <c>sprk_eventtype_ref = Task</c>, carrying provenance refs (source document +
+    /// source analysis <c>{bindingId}@t{n}</c>) per the Binding's tool description.
+    /// Added by spaarke-ai-architecture-redesign-r1 task 042.
+    /// </summary>
+    public const string CreateTask = "create-task";
+
+    /// <summary>
     /// Read-only list of all consumer-type constants. Intended for startup
     /// health-log diffing against Dataverse (chat-routing-redesign-r1 task
     /// 028e exit gate).
@@ -162,5 +205,8 @@ public static class ConsumerTypes
         ComposeSummarize,
         NoMatchHandler,
         DraftCorrespondence,
+        InsightsAsk,
+        InsightsSearch,
+        CreateTask,
     };
 }

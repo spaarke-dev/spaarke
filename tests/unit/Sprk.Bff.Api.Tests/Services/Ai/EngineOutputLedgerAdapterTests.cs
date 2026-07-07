@@ -26,9 +26,10 @@ namespace Sprk.Bff.Api.Tests.Services.Ai;
 /// </para>
 /// <para>
 /// <b>KEEP rationale (maintain-class)</b>: each fact anchors an E-2 contract later phases
-/// build on — the <c>{playbookId}@t{n}</c> interim addressing (P3 task 040 re-points the
-/// Binding source but the key contract stays), the interim <c>engine-playbook</c> UcId
-/// marker, identifiers-only sourceRefs (NFR-07), the failed-runs-never-enter-the-ledger
+/// build on — the FR-P3-01 (task 040) re-point onto the REAL reverse-resolved Binding row
+/// (<c>{bindingId}@t{n}</c> + catalog identity), the <c>{playbookId}@t{n}</c> +
+/// <c>engine-playbook</c> DEGRADE identity for playbooks no Binding row targets,
+/// identifiers-only sourceRefs (NFR-07), the failed-runs-never-enter-the-ledger
 /// rule, and the session-scope boundary (record-context runs join at P3 FR-P3-08).
 /// </para>
 /// </summary>
@@ -58,13 +59,14 @@ public class EngineOutputLedgerAdapterTests
 
         var entry = await sut.RecordAsync(TenantId, SessionGuid, PlaybookId, result);
 
-        // Addressable per the task-021 key contract: {bindingId}@t{n} with the interim
-        // binding identity = the invoked playbook (the frozen flow's identity).
+        // Addressable per the task-021 key contract: {bindingId}@t{n}. No Binding row
+        // targets this playbook (routing mock resolves null), so the FR-P3-01 degrade
+        // identity applies: bindingId = the invoked playbook (the frozen flow's identity).
         entry.Should().NotBeNull();
         entry!.Key.Should().Be(SessionLedger.BuildOutputKey(PlaybookId.ToString(), 1));
         entry.BindingId.Should().Be(PlaybookId.ToString());
         entry.UcId.Should().Be(EngineOutputLedgerAdapter.InterimConsumerType,
-            "engine-origin entries carry the interim 'engine-playbook' marker until P3 FR-P3-01 Binding rows exist");
+            "engine-origin entries for playbooks with no Binding row carry the 'engine-playbook' degrade marker (FR-P3-01)");
         entry.Disposition.Should().Be("informational",
             "the engine flow's actual rendering behavior today is the Assistant pane");
 
@@ -98,6 +100,43 @@ public class EngineOutputLedgerAdapterTests
         first!.Key.Should().Be(SessionLedger.BuildOutputKey(PlaybookId.ToString(), 1));
         second!.Key.Should().Be(SessionLedger.BuildOutputKey(PlaybookId.ToString(), 2),
             "sequential engine runs of the same composite must stay uniquely addressable (t{n} monotonic)");
+    }
+
+    // ─── FR-P3-01 (task 040): registered playbooks key on the REAL reverse-resolved Binding ────
+
+    [Fact]
+    public async Task RecordAsync_PlaybookWithBindingRow_KeysOnResolvedBindingIdentity()
+    {
+        // Shaped like the seeded spaarkedev1 insights-ask default row: an enabled
+        // sprk_playbookconsumer row targets the invoked playbook.
+        var resolvedBindingId = Guid.Parse("f32a7931-8079-f111-ab0e-7ced8ddc4cc6");
+        var routing = new Mock<IConsumerRoutingService>();
+        routing
+            .Setup(r => r.GetBindingByPlaybookIdAsync(PlaybookId, null, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Binding
+            {
+                BindingId = resolvedBindingId,
+                ConsumerType = ConsumerTypes.InsightsAsk,
+                ConsumerCode = "default",
+                PlaybookId = PlaybookId,
+                Ucid = "UC-C-2",
+                Disposition = BindingDisposition.Informational,
+            });
+        var sessionManager = new StubSessionManager(BuildSession());
+        var sut = CreateSut(sessionManager, routing.Object);
+
+        var entry = await sut.RecordAsync(TenantId, SessionGuid, PlaybookId, BuildSuccessResult());
+
+        // The ledger entry carries the CATALOG identity of the run — not the interim one.
+        entry.Should().NotBeNull();
+        entry!.Key.Should().Be(SessionLedger.BuildOutputKey(resolvedBindingId.ToString(), 1),
+            "FR-P3-01: engine-origin entries for registered playbooks key on the resolved Binding row id");
+        entry.BindingId.Should().Be(resolvedBindingId.ToString());
+        entry.UcId.Should().Be("UC-C-2",
+            "the resolved row's sprk_ucid replaces the interim 'engine-playbook' marker");
+        entry.Disposition.Should().Be("informational");
+        entry.Payload.GetProperty("playbookId").GetGuid().Should().Be(PlaybookId,
+            "the payload still records WHICH playbook ran (run identity is payload data, key identity is the Binding)");
     }
 
     // ─── Session-scope boundary (task-024 decision; P3 FR-P3-08 joins record-context runs) ────
@@ -154,6 +193,7 @@ public class EngineOutputLedgerAdapterTests
         var sut = new EngineOutputLedgerAdapter(
             manager,
             new OutputRouter(manager, Mock.Of<ILogger<OutputRouter>>()),
+            CreateNoRowRouting(),
             Mock.Of<ILogger<EngineOutputLedgerAdapter>>());
         var result = BuildSuccessResult(
             text: "Composite output crossing the wire.",
@@ -188,6 +228,7 @@ public class EngineOutputLedgerAdapterTests
         var sut = new EngineOutputLedgerAdapter(
             sessionManager,
             new OutputRouter(sessionManager, routerLog),
+            CreateNoRowRouting(),
             adapterLog);
         var result = BuildSuccessResult(
             text: $"Summary containing {sentinel}.",
@@ -203,10 +244,26 @@ public class EngineOutputLedgerAdapterTests
 
     // ─── Helpers ────────────────────────────────────────────────────────────────────────────────
 
-    private static EngineOutputLedgerAdapter CreateSut(StubSessionManager sessionManager) => new(
+    private static EngineOutputLedgerAdapter CreateSut(
+        StubSessionManager sessionManager,
+        IConsumerRoutingService? consumerRouting = null) => new(
         sessionManager,
         new OutputRouter(sessionManager, Mock.Of<ILogger<OutputRouter>>()),
+        consumerRouting ?? CreateNoRowRouting(),
         Mock.Of<ILogger<EngineOutputLedgerAdapter>>());
+
+    /// <summary>
+    /// Routing double for the FR-P3-01 degrade path: no Binding row targets any playbook
+    /// (reverse lookup resolves null), so the adapter records under the interim identity.
+    /// </summary>
+    private static IConsumerRoutingService CreateNoRowRouting()
+    {
+        var routing = new Mock<IConsumerRoutingService>();
+        routing
+            .Setup(r => r.GetBindingByPlaybookIdAsync(It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Binding?)null);
+        return routing.Object;
+    }
 
     /// <summary>Session id in the ChatSessionManager "N" format — the adapter's Guid → session-id resolution contract.</summary>
     private static ChatSession BuildSession() => new(

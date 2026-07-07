@@ -1770,27 +1770,61 @@ public static class ChatEndpoints
 
         if (!Guid.TryParse(peeked.BindingId, out var bindingId) || bindingId == Guid.Empty)
         {
-            // Non-Binding-backed invocations (typed-handler tools suspended by
-            // SideEffectGateAIFunction) have NO execution seam until FR-P3-03 lands —
-            // this surface executes catalog Bindings only (ADR-039 closed catalog).
-            // Close the gate `confirmed-unexecutable` (approval recorded, execution
-            // honestly unavailable) and return the STABLE 422 errorCode the client maps
-            // to its honest "recorded but not executable yet" transcript message —
-            // distinguishing resume-not-yet-supported from real failures (ADR-019).
-            var closed = await pendingPlanManager.CloseInvocationAsync(
-                tenantId, sessionId, gateId,
-                PendingPlanManager.GateStatusConfirmedUnexecutable, cancellationToken);
-            if (!closed)
+            // FR-P3-03 (task 042): typed-handler confirm-RESUME. Non-Binding invocations
+            // (tools suspended by SideEffectGateAIFunction) resolve back to their catalog
+            // row + registered handler and EXECUTE under the confirming user's OBO scope,
+            // with SessionOutput + ToolChain ledger writes before the result renders
+            // (TypedHandlerResumeExecutor). Resolution is peek-only FIRST so genuinely
+            // unsupported invocations (no chat-available row / no handler / compound AI
+            // off) keep the honest `confirmed-unexecutable` + 422 `gate.no-binding-target`
+            // interim path from the G-P2 UAT finding-6 fix (ADR-019 stable errorCode).
+            var resumeExecutor = TypedHandlerResumeExecutor.TryCreate(httpContext.RequestServices, logger);
+            var resolution = resumeExecutor is null
+                ? null
+                : await resumeExecutor.TryResolveAsync(peeked.ToolId, cancellationToken);
+
+            if (resolution is null)
             {
-                // Raced by a concurrent resolve/expiry between peek and close.
+                var closed = await pendingPlanManager.CloseInvocationAsync(
+                    tenantId, sessionId, gateId,
+                    PendingPlanManager.GateStatusConfirmedUnexecutable, cancellationToken);
+                if (!closed)
+                {
+                    // Raced by a concurrent resolve/expiry between peek and close.
+                    return GateNotPendingProblem();
+                }
+
+                return Results.Problem(
+                    detail: "The confirmed invocation has no executable target from this surface.",
+                    statusCode: StatusCodes.Status422UnprocessableEntity,
+                    title: "Unprocessable Entity",
+                    extensions: new Dictionary<string, object?> { ["errorCode"] = "gate.no-binding-target" });
+            }
+
+            // Supported: take the payload (double-confirm → 409) + `confirmed` marker
+            // (the user's approval — same marker contract as the Binding leg), then
+            // execute through the typed-handler stack (ValidateChat → ExecuteChatAsync —
+            // the same handler contract the loop's adapter drives).
+            var typedInvocation = await pendingPlanManager.ResumeInvocationAsync(
+                tenantId, sessionId, gateId, cancellationToken);
+            if (typedInvocation is null)
+            {
                 return GateNotPendingProblem();
             }
 
-            return Results.Problem(
-                detail: "The confirmed invocation has no Binding target; it cannot be executed from this surface.",
-                statusCode: StatusCodes.Status422UnprocessableEntity,
-                title: "Unprocessable Entity",
-                extensions: new Dictionary<string, object?> { ["errorCode"] = "gate.no-binding-target" });
+            var oid = ExtractUserId(httpContext);
+            var outcome = await resumeExecutor!.ExecuteAsync(
+                resolution, typedInvocation, oid?.ToString("D"), cancellationToken);
+            if (!outcome.Success)
+            {
+                return Results.Problem(
+                    detail: outcome.Error ?? "The confirmed action failed.",
+                    statusCode: StatusCodes.Status502BadGateway,
+                    title: "Dispatch Failed",
+                    extensions: new Dictionary<string, object?> { ["errorCode"] = "gate.dispatch-failed" });
+            }
+
+            return Results.Ok(new GateResolveResult("confirmed", outcome.Summary));
         }
 
         // Binding-backed: get-then-delete (double-confirm → 409) + confirmed ledger marker.

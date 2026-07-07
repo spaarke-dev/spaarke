@@ -172,7 +172,7 @@ public static class AnalysisServicesModule
             //  - IDocumentTextSource / ISessionFileTextSource — transitively conditional
             //    (consumed only by gated LinearConsumers services + compound-ON
             //    SessionSummarizeOrchestrator) → no peer.
-            services.AddLinearConsumers(configuration);
+            services.AddLinearConsumers();
             Console.WriteLine("✓ Linear AI Consumer library enabled (gated under compound AI gate — FR-P0-05)");
 
             AddBuilderServices(services);
@@ -690,12 +690,12 @@ public static class AnalysisServicesModule
         // SessionSummarizeOrchestrator — chat-session boundary for the catalog-driven
         // chat-summarize capability (FR-P1-01, ai-architecture-redesign-r1 task 020). Concrete
         // class (no interface per ADR-010); registered Scoped to match the lifetime of its
-        // dependencies (ChatSessionManager + IScopeResolverService + ISessionFileTextSource are
-        // Scoped; IConsumerRoutingService + IActionRunner are Singleton — Scoped is the safe
+        // dependencies (ChatSessionManager + IScopeResolverService + ISessionFileTextSource +
+        // IConsumerRoutingService are Scoped; IActionRunner is Singleton — Scoped is the safe
         // lifetime that respects every wrapped lifetime).
         //
         // FR-P1-01 hard cutover (2026-07-05): the pre-redesign dual-path (Playbook Engine dispatch
-        // + Workspace:ChatSummarizePlaybookId typed-options fallback) was DELETED. Resolution goes
+        // + the chat-summarize Workspace typed-options config fallback) was DELETED. Resolution goes
         // through IConsumerRoutingService.ResolveBindingAsync (ADR-039 single routing surface) and
         // execution through the prompted executor (ActionRunner + PromptSchemaRenderer).
         //
@@ -1269,8 +1269,9 @@ public static class AnalysisServicesModule
         // the per-call Ttl override is null. NOT a new interface seam (audit DR-002 / ADR-010);
         // registered as a singleton POCO alongside the cache so the Endpoint↔DI Symmetry rule
         // (audit DR-008) holds — both inside the compound-AI-ON gate that wraps AddInsightsCache.
-        // Dependencies (IDataverseService, IOptionsMonitor<InsightsPlaybookNameMapOptions>) are
-        // both Singleton; lifetime parity verified.
+        // Dependencies: IDataverseService (Singleton) + IServiceScopeFactory (Singleton;
+        // resolves the Scoped IConsumerRoutingService per reverse lookup — FR-P3-01
+        // replaced the config-map reverse scan); lifetime parity verified.
         services.AddSingleton<TopicRegistryTtlLookup>();
         services.AddSingleton<IInsightsPlaybookExecutionCache, InsightsPlaybookExecutionCache>();
     }

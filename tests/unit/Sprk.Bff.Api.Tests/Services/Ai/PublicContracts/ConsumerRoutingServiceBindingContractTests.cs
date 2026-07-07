@@ -426,4 +426,90 @@ public sealed class ConsumerRoutingServiceBindingContractTests
 
         await act.Should().ThrowAsync<ArgumentException>().WithParameterName("consumerType");
     }
+
+    // ── FR-P3-01 (task 040): reverse lookup by playbook id ──────────────────
+    // Serves the E-2 EngineOutputLedgerAdapter re-point + TopicRegistryTtlLookup
+    // reverse map (both replaced config-map scans at the single-routing-surface
+    // cutover).
+
+    [Fact]
+    public async Task GetBindingByPlaybookIdAsync_EnabledRowTargetsPlaybook_ResolvesFullContract()
+    {
+        SetupQueryResponse(BuildLegacyEntity(PlaybookA));
+        var sut = CreateService();
+
+        var binding = await sut.GetBindingByPlaybookIdAsync(PlaybookA);
+
+        binding.Should().NotBeNull();
+        binding!.BindingId.Should().Be(BindingRowId);
+        binding.ConsumerType.Should().Be("chat-summarize");
+        binding.ConsumerCode.Should().Be("default");
+        binding.PlaybookId.Should().Be(PlaybookA);
+    }
+
+    [Fact]
+    public async Task GetBindingByPlaybookIdAsync_NoRowTargetsPlaybook_ReturnsNull()
+    {
+        SetupQueryResponse(/* empty result set */);
+        var sut = CreateService();
+
+        var binding = await sut.GetBindingByPlaybookIdAsync(PlaybookA);
+
+        binding.Should().BeNull("callers keep their documented degrade paths (interim ledger identity / TTL not-found)");
+    }
+
+    [Fact]
+    public async Task GetBindingByPlaybookIdAsync_MultipleCandidates_SpecificEnvironmentWinsOverWildcardThenPriority()
+    {
+        var wildcardLowPriority = BuildLegacyEntity(PlaybookA, consumerCode: "wildcard", environment: "*", priority: 100);
+        wildcardLowPriority["sprk_playbookconsumerid"] = Guid.Parse("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
+        var devSpecific = BuildLegacyEntity(PlaybookA, consumerCode: "dev-specific", environment: "dev", priority: 500);
+        devSpecific["sprk_playbookconsumerid"] = Guid.Parse("cccccccc-cccc-cccc-cccc-cccccccccccc");
+        SetupQueryResponse(wildcardLowPriority, devSpecific);
+        var sut = CreateService();
+
+        var binding = await sut.GetBindingByPlaybookIdAsync(PlaybookA); // env from IHostEnvironment = "dev"
+
+        binding.Should().NotBeNull();
+        binding!.ConsumerCode.Should().Be("dev-specific",
+            "a specific-environment row wins over a wildcard row regardless of priority (same rule as the forward resolves)");
+    }
+
+    [Fact]
+    public async Task GetBindingByPlaybookIdAsync_ResultIsCached_SecondCallDoesNotRequery()
+    {
+        SetupQueryResponse(BuildLegacyEntity(PlaybookA));
+        var sut = CreateService();
+
+        _ = await sut.GetBindingByPlaybookIdAsync(PlaybookA);
+        _ = await sut.GetBindingByPlaybookIdAsync(PlaybookA);
+
+        _entityServiceMock.Verify(
+            s => s.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()),
+            Times.Once,
+            "reverse lookups cache 5 minutes like every other resolve — the ledger write path must not add a per-run query");
+    }
+
+    [Fact]
+    public async Task GetBindingByPlaybookIdAsync_DataverseThrows_ReturnsNullWithoutPropagating()
+    {
+        _entityServiceMock
+            .Setup(s => s.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("simulated Dataverse failure"));
+        var sut = CreateService();
+
+        var binding = await sut.GetBindingByPlaybookIdAsync(PlaybookA);
+
+        binding.Should().BeNull("routing never throws to the consumer — a ledger write must not fail on a routing blip");
+    }
+
+    [Fact]
+    public async Task GetBindingByPlaybookIdAsync_EmptyGuid_Throws()
+    {
+        var sut = CreateService();
+
+        var act = async () => await sut.GetBindingByPlaybookIdAsync(Guid.Empty);
+
+        await act.Should().ThrowAsync<ArgumentException>().WithParameterName("playbookId");
+    }
 }

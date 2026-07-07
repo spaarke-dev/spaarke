@@ -25,10 +25,10 @@
  *   { question: "matter-health-single", subject: "matter:{guid}", parameters: {} }
  *
  * Rationale: `BFF.Models.Insights.InsightAskRequest` expects `question` as
- * either a Guid OR a canonical playbook name resolvable via
- * `InsightsPlaybookNameMapOptions.Map` (which already maps
- * "matter-health-single" → the deployed playbook Guid per
- * `notes/handoffs/playbook-deploy.md`). The form OnLoad pre-warm in Task 041
+ * either a Guid OR a canonical playbook name resolvable via the `insights-ask`
+ * `sprk_playbookconsumer` Binding rows (FR-P3-01 — the row with
+ * `sprk_consumercode` "matter-health-single" targets the deployed playbook
+ * Guid per `notes/handoffs/playbook-deploy.md`). The form OnLoad pre-warm in Task 041
  * uses an INCORRECT shape (`{ topic, mode, subject, parameters }`); that's a
  * Task 041 follow-up to align — silent failure today because the pre-warm POST
  * swallows its 400 response per FR-18 fire-and-forget design. The CARD
@@ -248,7 +248,8 @@ interface SpaarkeAiWidgetsCardProps {
   ns._mode = "single";
 
   /**
-   * Canonical playbook name registered in `InsightsPlaybookNameMapOptions.Map`.
+   * Canonical playbook name registered as an `insights-ask` `sprk_playbookconsumer`
+   * Binding row (`sprk_consumercode`, FR-P3-01).
    * Used as the `question` field on `/api/insights/ask` per wire-shape Option (b).
    * Bare per Q-U1 — no `@v1`/`@vN` suffix.
    */

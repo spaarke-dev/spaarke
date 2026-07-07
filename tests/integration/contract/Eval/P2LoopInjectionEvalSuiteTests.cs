@@ -2,6 +2,7 @@ using System.Text.Json;
 using FluentAssertions;
 using Microsoft.Extensions.AI;
 using Microsoft.Extensions.Caching.Memory;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
@@ -538,6 +539,169 @@ public class P2LoopInjectionEvalSuiteTests
     }
 
     /// <summary>
+    /// GU-059 (FR-P3-03, task 042): the typed-handler confirm-RESUME leg — end-to-end
+    /// through REAL production components. A write-declared <c>dataverse.create_record</c>
+    /// invocation (real <see cref="ToolHandlerToAIFunctionAdapter"/> over the real
+    /// <c>DataverseCreateRecordHandler</c>, Dataverse boundary mocked at
+    /// <c>IDataverseUserClient</c> per its documented mock-boundary contract) SUSPENDS via
+    /// the real <see cref="SideEffectGateAIFunction"/> (inner never executes); user
+    /// confirmation resumes it through <see cref="TypedHandlerResumeExecutor"/>: the
+    /// STORED args execute through the handler stack, the CREATED RECORD carries the
+    /// provenance refs the args carried (source document + source analysis
+    /// <c>{bindingId}@t{n}</c> — the create-task acceptance), the gate closes
+    /// <c>confirmed</c> with the outcome ledger-written (SessionOutput <c>loop@t{n}</c> +
+    /// ToolChain) BEFORE the result renders, and double-confirm misses (409 semantics).
+    /// GU-051/052's suspension assertions above are UNCHANGED — the gate still suspends;
+    /// only the confirm leg goes live.
+    /// </summary>
+    [Fact]
+    public async Task CreateTask_ConfirmedWriteInvocation_ExecutesThroughTheTypedHandlerStack_LedgerConfirmed_RecordCarriesLedgerRefs()
+    {
+        var harness = await GateHarness.CreateAsync(TenantId);
+
+        // ── The catalog row + real handler stack (dataverse.create_record; task 009). ──
+        var toolRow = new AnalysisTool
+        {
+            Id = Guid.NewGuid(),
+            Name = "SYS-Dataverse Create Record",
+            Description = "Inserts one row into a Dataverse table under the calling user's permissions.",
+            HandlerClass = nameof(Sprk.Bff.Api.Services.Ai.Handlers.DataverseCreateRecordHandler),
+            AvailableInContexts = ToolAvailabilityContext.Chat,
+            SideEffectClass = ToolSideEffectClass.Write,
+            JsonSchema = """{"type":"object","properties":{"tablename":{"type":"string"},"item":{"type":"object"}},"required":["tablename","item"]}""",
+        };
+
+        var createdId = Guid.NewGuid();
+        string? postedBody = null;
+        var dataverse = new Mock<Sprk.Bff.Api.Services.Ai.Handlers.Dataverse.IDataverseUserClient>(MockBehavior.Strict);
+        dataverse
+            .Setup(c => c.GetAsync(It.Is<string>(p => p.StartsWith("EntityDefinitions(LogicalName='sprk_event')")), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Sprk.Bff.Api.Services.Ai.Handlers.Dataverse.DataverseUserResponse.Ok(
+                200, JsonDocument.Parse("""{"EntitySetName":"sprk_events","PrimaryIdAttribute":"sprk_eventid"}""").RootElement.Clone()));
+        dataverse
+            .Setup(c => c.PostAsync("/api/data/v9.2/sprk_events", It.IsAny<string>(), true, It.IsAny<CancellationToken>()))
+            .Callback((string _, string body, bool _, CancellationToken _) => postedBody = body)
+            .ReturnsAsync(() => Sprk.Bff.Api.Services.Ai.Handlers.Dataverse.DataverseUserResponse.Ok(
+                201, JsonDocument.Parse($$"""{"sprk_eventid":"{{createdId:D}}"}""").RootElement.Clone()));
+        var handler = new Sprk.Bff.Api.Services.Ai.Handlers.DataverseCreateRecordHandler(
+            dataverse.Object,
+            Microsoft.Extensions.Logging.Abstractions.NullLogger<Sprk.Bff.Api.Services.Ai.Handlers.DataverseCreateRecordHandler>.Instance);
+
+        var adapter = new ToolHandlerToAIFunctionAdapter(
+            toolRow, handler,
+            () => new Sprk.Bff.Api.Services.Ai.ChatInvocationContext
+            {
+                ChatSessionId = Guid.NewGuid(),
+                TenantId = TenantId,
+            });
+        var gated = new SideEffectGateAIFunction(
+            adapter, ToolSideEffectClass.Write, harness.RootServices, TenantId, harness.SessionId, TestLogger);
+
+        // ── Suspend: the model's create-task write args carry the PROVENANCE refs the ──
+        // Binding's tool description mandates (source document + source analysis
+        // ledger key) — walkthrough step 13's args shape.
+        const string sourceAnalysisRef = "3d9724e5-8279-f111-ab0e-7ced8ddc4cc6@t3";
+        var suspendResult = await gated.InvokeAsync(new AIFunctionArguments
+        {
+            ["tablename"] = "sprk_event",
+            ["item"] = JsonDocument.Parse($$"""
+                {
+                  "sprk_eventname": "Review NDA issues",
+                  "sprk_description": "Respond to the flagged indemnity findings. Provenance: source document nda-acme.pdf; source analysis {{sourceAnalysisRef}}",
+                  "sprk_duedate": "2026-07-09"
+                }
+                """).RootElement.Clone(),
+        });
+
+        postedBody.Should().BeNull("FR-P2-02: the write NEVER executes at suspension time");
+        suspendResult!.ToString().Should().Contain("NOT executed");
+        var pendingMarker = (await harness.SessionManager.GetSessionAsync(TenantId, harness.SessionId))!
+            .Gates.Should().ContainSingle().Subject;
+        pendingMarker.Status.Should().Be(PendingPlanManager.GateStatusPending);
+
+        // ── Confirm-resume: the FR-P3-03 seam (peek-resolve → resume → execute). ──
+        var executor = new TypedHandlerResumeExecutor(
+            new StubToolCatalog(new[] { toolRow }),
+            new Sprk.Bff.Api.Services.Ai.ToolHandlerRegistry(
+                new Sprk.Bff.Api.Services.Ai.IToolHandler[] { handler },
+                Microsoft.Extensions.Options.Options.Create(new Sprk.Bff.Api.Configuration.ToolFrameworkOptions()),
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<Sprk.Bff.Api.Services.Ai.ToolHandlerRegistry>.Instance),
+            harness.SessionManager,
+            TestLogger);
+
+        var peeked = await harness.PendingManager.GetInvocationAsync(TenantId, harness.SessionId, pendingMarker.GateId);
+        peeked.Should().NotBeNull();
+        peeked!.ToolId.Should().Be("SYS-Dataverse_Create_Record",
+            "the gate preserved the projection's sanitised LLM function name");
+        var resolution = await executor.TryResolveAsync(peeked.ToolId, CancellationToken.None);
+        resolution.Should().NotBeNull(
+            "the suspended LLM function name inverts to its catalog row + registered handler (ADR-039 declarations)");
+
+        var invocation = await harness.PendingManager.ResumeInvocationAsync(TenantId, harness.SessionId, pendingMarker.GateId);
+        invocation.Should().NotBeNull("first confirm takes the payload");
+        var outcome = await executor.ExecuteAsync(resolution!, invocation!, userObjectId: Guid.NewGuid().ToString("D"), CancellationToken.None);
+
+        // Executed — through the real handler, exactly once, with the stored args.
+        outcome.Success.Should().BeTrue();
+        outcome.Summary.Should().Contain(createdId.ToString("D"),
+            "the completion message names the created record — the client renders it in the transcript");
+        dataverse.Verify(c => c.PostAsync("/api/data/v9.2/sprk_events", It.IsAny<string>(), true, It.IsAny<CancellationToken>()), Times.Once);
+
+        // FR-P3-03 acceptance: the CREATED RECORD carries the ledger refs.
+        postedBody.Should().NotBeNull();
+        postedBody.Should().Contain(sourceAnalysisRef,
+            "the created sprk_event carries the source-analysis ledger key ({bindingId}@t{n})");
+        postedBody.Should().Contain("nda-acme.pdf",
+            "the created sprk_event carries the source-document reference");
+
+        // ADR-040: gate closed `confirmed` + outcome ledger-written before rendering.
+        var session = await harness.SessionManager.GetSessionAsync(TenantId, harness.SessionId);
+        session!.Gates.Should().HaveCount(2, "append-only: pending + confirmed resolution correlated by gate id");
+        session.Gates.Last().GateId.Should().Be(pendingMarker.GateId);
+        session.Gates.Last().Status.Should().Be(PendingPlanManager.GateStatusConfirmed);
+        var output = session.Outputs.Should().ContainSingle().Subject;
+        output.Key.Should().Be(outcome.LedgerKey);
+        output.BindingId.Should().Be("loop");
+        output.Disposition.Should().Be("record");
+        output.Payload.GetProperty("recordId").GetString().Should().Be(createdId.ToString("D"));
+        var call = session.ToolChains.Should().ContainSingle().Subject.Calls.Should().ContainSingle().Subject;
+        call.ToolId.Should().Be("SYS-Dataverse_Create_Record");
+        call.ArgsSummary.Should().NotContain("indemnity",
+            "NFR-07: record content never reaches the ToolChain audit entry");
+
+        // Double-confirm protection: the payload was taken — a second confirm misses (409).
+        (await harness.PendingManager.ResumeInvocationAsync(TenantId, harness.SessionId, pendingMarker.GateId))
+            .Should().BeNull("double-confirm yields gate.not-pending at the endpoint");
+
+        _output.WriteLine(
+            $"CREATE-TASK LIVE — GU-059: suspended → confirmed → EXECUTED (record {createdId:D}); " +
+            $"ledger {outcome.LedgerKey} + confirmed marker; provenance refs on the record");
+    }
+
+    /// <summary>
+    /// FR-P3-03 honest fallback: a suspended invocation whose tool id resolves to no
+    /// chat-available catalog row is UNSUPPORTED from the resume surface — resolution
+    /// returns null and the endpoint keeps the G-P2 finding-6 path (close
+    /// <c>confirmed-unexecutable</c> + 422 <c>gate.no-binding-target</c>; close
+    /// semantics proven in ConfirmationGateUnificationTests).
+    /// </summary>
+    [Fact]
+    public async Task CreateTask_UnsupportedSuspendedTool_ResolutionIsNull_HonestFallbackPathKept()
+    {
+        var executor = new TypedHandlerResumeExecutor(
+            new StubToolCatalog(Array.Empty<AnalysisTool>()),
+            new Sprk.Bff.Api.Services.Ai.ToolHandlerRegistry(
+                Array.Empty<Sprk.Bff.Api.Services.Ai.IToolHandler>(),
+                Microsoft.Extensions.Options.Options.Create(new Sprk.Bff.Api.Configuration.ToolFrameworkOptions()),
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<Sprk.Bff.Api.Services.Ai.ToolHandlerRegistry>.Instance),
+            (await GateHarness.CreateAsync(TenantId)).SessionManager,
+            TestLogger);
+
+        (await executor.TryResolveAsync("sys_unknown_tool", CancellationToken.None)).Should().BeNull(
+            "no catalog row claims the suspended tool — the confirm closes confirmed-unexecutable, never a fabricated execution");
+    }
+
+    /// <summary>
     /// GU-055: tool-call amplification demanded by hostile document text is bounded
     /// mechanically by the per-turn budget (NFR-09 / ADR-016; default 8, pinned here
     /// as a policy dial — a silent default change is a regression caught in CI).
@@ -950,6 +1114,40 @@ public class P2LoopInjectionEvalSuiteTests
         entity["sprk_enabled"] = true;
         entity["sprk_playbook"] = new EntityReference("sprk_playbook", Guid.NewGuid());
         return entity;
+    }
+
+    /// <summary>
+    /// Stubs the Dataverse catalog read for <see cref="TypedHandlerResumeExecutor"/> at
+    /// the module boundary (ADR-038 — same posture as the routing-service stubs above;
+    /// the base class never issues HTTP because the override returns the supplied rows).
+    /// </summary>
+    private sealed class StubToolCatalog : Sprk.Bff.Api.Services.Ai.AnalysisToolService
+    {
+        private readonly IReadOnlyList<AnalysisTool> _rows;
+
+        public StubToolCatalog(IReadOnlyList<AnalysisTool> rows)
+            : base(
+                new HttpClient(),
+                new Microsoft.Extensions.Configuration.ConfigurationBuilder()
+                    .AddInMemoryCollection(new Dictionary<string, string?>
+                    {
+                        ["Dataverse:ServiceUrl"] = "https://stub.crm.dynamics.com",
+                    }).Build(),
+                new Mock<Azure.Core.TokenCredential>().Object,
+                Microsoft.Extensions.Logging.Abstractions.NullLogger<Sprk.Bff.Api.Services.Ai.AnalysisToolService>.Instance)
+        {
+            _rows = rows;
+        }
+
+        public override Task<Sprk.Bff.Api.Services.Ai.ScopeListResult<AnalysisTool>> ListToolsAsync(
+            Sprk.Bff.Api.Services.Ai.ScopeListOptions options, CancellationToken cancellationToken)
+            => Task.FromResult(new Sprk.Bff.Api.Services.Ai.ScopeListResult<AnalysisTool>
+            {
+                Items = _rows.ToArray(),
+                TotalCount = _rows.Count,
+                Page = 1,
+                PageSize = options.PageSize,
+            });
     }
 
     /// <summary>

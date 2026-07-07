@@ -144,9 +144,9 @@
 
 | # | Task | FR | Rigor | Deps | Status |
 |---|---|---|---|---|---|
-| 040 | Remaining consumers → Bindings; 3 config blocks deleted | FR-P3-01 | FULL | 038 | 🔲 |
+| 040 | ALL remaining consumers → Bindings (8 consumers re-pointed; LinearConsumers/WorkspaceOptions/Insights:Playbooks config surfaces DELETED grep-zero; E-2 adapter reverse-resolves real Binding ids via GetBindingByPlaybookIdAsync; insights rows seeded `f32a7931`/`f82a7931`/`f89fa738`; W-1 live App-Service token key → deterministic ActionRunner ceiling 4000; universal-ingest NOT seeded — playbook absent, honest error; dead App-Service keys → operator hygiene) | FR-P3-01 | FULL | 038 | ✅ |
 | 041 | **`draft-correspondence`** shipped as catalog data + EmailDraftToolHandler (`email.draft` Communicate→gated; DRAFT-only server-pinned under hostile args; zero Graph; user-OBO; rows DRAFT-CORR@v1 `4b8b50f4`, Binding `f7dc4a00`, tool `bc11e90d`; eval 57 cases; confirm-resume 422 until 042) | FR-P3-02 | FULL | 038 | ✅ |
-| 042 | **`create-task`** (`sprk_event(type=task)` + ledger refs) | FR-P3-03 | FULL | 038 | 🔲 |
+| 042 | **`create-task`** live end-to-end (CREATE-TASK@v1 `b66c8dda` + Binding `3d9724e5`; required-args elicitation free via FR-P2-03; writes sprk_event(type=task) + ledger refs via existing dataverse.create_record) + **typed-handler confirm-RESUME** (TypedHandlerResumeExecutor: confirm executes under user OBO, ledger loop@t{n} before render, gate `confirmed`; activates dataverse writes + 041 email.draft; injection suspensions still green; 🔔 sprk_event-vs-sprk_todo ruling → gate 048, catalog-data-only to change) | FR-P3-03 | FULL | 038 | ✅ |
 | 043 | Daily Briefing = FIRST coded composite (DailyBriefingCompositeService via ResolveBindingAsync + ICodedWorkflowRegistry; OutputRouter EMAIL disposition leg implemented store-precedes-send; /narrate engine default + NarrateUseCodeBasedNarrator flag DELETED grep-zero; rows DAILY-BRIEFING@v1 `2fa8ab19` + email Binding `800cc81f`; DAILY-BRIEFING-NARRATE playbook orphaned → Track-B; live email = gate 048; chat "prepare a briefing" refuses cleanly until loop coded-exec seam) | FR-P3-04 | FULL | 038 | ✅ |
 
 ### Wave W-P3-B (serial)

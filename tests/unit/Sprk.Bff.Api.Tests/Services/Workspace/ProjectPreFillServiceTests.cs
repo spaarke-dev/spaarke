@@ -1,9 +1,5 @@
 using System.Reflection;
 using FluentAssertions;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
-using Moq;
-using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Workspace;
@@ -12,23 +8,22 @@ using Xunit;
 namespace Sprk.Bff.Api.Tests.Services.Workspace;
 
 /// <summary>
-/// Unit tests for <see cref="ProjectPreFillService"/> — focused on the FR-1R-05 / Pattern A
-/// routing-table migration landed by chat-routing-redesign-r1 task 028c.
+/// Unit tests for <see cref="ProjectPreFillService"/> — focused on the FR-P3-01 hard-cutover
+/// routing contract (ai-architecture-redesign-r1 task 040).
 ///
 /// <para>
 /// Mirrors the test surface of <see cref="MatterPreFillServiceTests"/>:
 /// </para>
 /// <list type="bullet">
-///   <item>Constructor injects <see cref="IConsumerRoutingService"/> (FR-1R-05 task 028c).</item>
-///   <item>Constructor still injects <see cref="IPlaybookLookupService"/> + typed
-///         <see cref="IOptions{TOptions}"/> of <see cref="WorkspaceOptions"/>
-///         (Pattern A — Phase 1 baseline preserved).</item>
+///   <item>Constructor injects <see cref="IConsumerRoutingService"/> — the ONLY
+///         playbook-resolution source per FR-P3-01 — plus <see cref="IPlaybookLookupService"/>
+///         for the downstream record load.</item>
+///   <item>The legacy typed-options config surface (WorkspaceOptions) is GONE from the
+///         constructor and the service body (FR-P3-01 / NFR-08: no shims).</item>
 ///   <item>Source body calls <c>_consumerRouting.ResolveAsync(ConsumerTypes.ProjectPreFill, …)</c>
 ///         using the compile-time constant (code-review S-5 hardening).</item>
-///   <item>Env-var fallback (<c>WorkspaceOptions.ProjectPreFillPlaybookId</c>) remains
-///         readable during the FR-1R-06 deprecation window.</item>
+///   <item>Routing null yields the clean empty response — no fallback.</item>
 ///   <item>The 45-second timeout invariant (NFR-07 binding) remains in the source.</item>
-///   <item>Public <c>AnalyzeFilesAsync</c> signature is unchanged (NFR-07 binding).</item>
 /// </list>
 ///
 /// <para>
@@ -36,57 +31,60 @@ namespace Sprk.Bff.Api.Tests.Services.Workspace;
 /// is intentionally OUT OF SCOPE — <see cref="Sprk.Bff.Api.Infrastructure.Graph.SpeFileStore"/>
 /// is a concrete non-virtual facade that cannot be cleanly mocked without a wider refactor,
 /// and the NFR-07-binding pre-fill flow is exercised end-to-end by existing integration tests.
+/// The routing contract is pinned via constructor reflection + source-text invariants
+/// (established pattern in this file since task 028c).
 /// </para>
 /// </summary>
 public class ProjectPreFillServiceTests
 {
-    // ─── (a) FR-1R-05 task 028c — IConsumerRoutingService is a constructor parameter ────────
+    // ─── (a) FR-P3-01 — IConsumerRoutingService is the ONLY resolution source ────────────
 
     [Fact]
-    public void ProjectPreFillService_Constructor_RequiresConsumerRoutingService_FR1R05()
+    public void ProjectPreFillService_Constructor_RequiresConsumerRoutingService_FRP301()
     {
-        // FR-1R-05 task 028c — the Pattern A migration to the sprk_playbookconsumer routing
-        // table MUST inject IConsumerRoutingService directly via the constructor (ADR-010
-        // DI minimalism). The constant ConsumerTypes.ProjectPreFill (compile-time typo defense
-        // per code-review S-5) is passed at the call site.
+        // FR-P3-01 — the sprk_playbookconsumer Binding routing table is the ONLY
+        // playbook-resolution source, so IConsumerRoutingService MUST be a constructor
+        // dependency (ADR-010 DI minimalism). The constant ConsumerTypes.ProjectPreFill
+        // (compile-time typo defense per code-review S-5) is passed at the call site.
         var ctor = typeof(ProjectPreFillService)
             .GetConstructors(BindingFlags.Public | BindingFlags.Instance)
             .Single();
 
         var parameters = ctor.GetParameters();
         parameters.Should().Contain(p => p.ParameterType == typeof(IConsumerRoutingService),
-            "FR-1R-05 task 028c — IConsumerRoutingService MUST be a constructor dependency " +
+            "FR-P3-01 — IConsumerRoutingService MUST be a constructor dependency " +
             "for sprk_playbookconsumer routing-table resolution");
     }
 
     [Fact]
     public void ProjectPreFillService_Constructor_RequiresPlaybookLookupService()
     {
-        // Phase 1 (task 017) Pattern A baseline: IPlaybookLookupService MUST remain a ctor
-        // dependency — the routing service resolves WHICH playbook (consumer→playbookId),
-        // the lookup service then loads the playbook record itself.
+        // Pattern A baseline: IPlaybookLookupService MUST remain a ctor dependency — the
+        // routing service resolves WHICH playbook (consumer→playbookId), the lookup
+        // service then loads the playbook record itself.
         var ctor = typeof(ProjectPreFillService)
             .GetConstructors(BindingFlags.Public | BindingFlags.Instance)
             .Single();
 
         var parameters = ctor.GetParameters();
         parameters.Should().Contain(p => p.ParameterType == typeof(IPlaybookLookupService),
-            "Phase 1 Pattern A — IPlaybookLookupService MUST remain a constructor dependency");
+            "Pattern A — IPlaybookLookupService MUST remain a constructor dependency");
     }
 
     [Fact]
-    public void ProjectPreFillService_Constructor_RequiresWorkspaceOptions()
+    public void ProjectPreFillService_Constructor_HasNoWorkspaceOptionsDependency_FRP301()
     {
-        // ADR-018 typed-options + FR-1R-06 deprecation-window env-var fallback: the typed
-        // options MUST remain a ctor dependency so the fallback path still works.
+        // FR-P3-01 hard cutover — the WorkspaceOptions typed-options fallback surface was
+        // DELETED (NFR-08: no shims). The constructor MUST NOT carry any WorkspaceOptions
+        // dependency; routing is the only source.
         var ctor = typeof(ProjectPreFillService)
             .GetConstructors(BindingFlags.Public | BindingFlags.Instance)
             .Single();
 
-        var parameters = ctor.GetParameters();
-        parameters.Should().Contain(p => p.ParameterType == typeof(IOptions<WorkspaceOptions>),
-            "ADR-018 typed-options — WorkspaceOptions MUST be consumed via IOptions<T> " +
-            "(env-var fallback for FR-1R-06 deprecation window)");
+        ctor.GetParameters().Should().NotContain(
+            p => p.ParameterType.FullName!.Contains("WorkspaceOptions"),
+            "FR-P3-01 — the WorkspaceOptions config fallback was deleted; " +
+            "the routing table is the ONLY playbook-resolution source");
     }
 
     // ─── (b) NFR-07 binding — 45s timeout invariant pinned in source ─────────────────────
@@ -95,70 +93,61 @@ public class ProjectPreFillServiceTests
     public void ProjectPreFillService_PreservesFortyFiveSecondTimeout_NFR07()
     {
         // NFR-07 BINDING: the pre-fill flow's 45-second timeout MUST NOT change. The
-        // migration only touches the internal routing/lookup mechanism. Source-text check.
+        // cutover only touches the internal routing/lookup mechanism. Source-text check.
         var sourcePath = LocateProjectPreFillServiceSource();
         var source = File.ReadAllText(sourcePath);
         source.Should().Contain("TimeSpan.FromSeconds(45)",
             "NFR-07 BINDING — pre-fill flow 45s timeout invariant MUST be preserved");
     }
 
-    // ─── (c) NFR-07 binding — public AnalyzeFilesAsync signature unchanged ───────────────
-
-
-    // ─── (d) Source-text invariants — migration uses ConsumerTypes.ProjectPreFill + fallback ─
+    // ─── (c) Source-text invariants — routing-only resolution ─────────────────────────────
 
     [Fact]
-    public void ProjectPreFillService_Source_CallsConsumerRoutingResolveAsync_FR1R05()
+    public void ProjectPreFillService_Source_ResolvesViaConsumerRoutingOnly_FRP301()
     {
-        // FR-1R-05 task 028c: the service body MUST call IConsumerRoutingService.ResolveAsync
-        // with the ConsumerTypes.ProjectPreFill compile-time constant (NOT a literal string —
-        // code-review S-5 hardening). The env-var fallback MUST remain readable during the
-        // FR-1R-06 deprecation window.
+        // The service body MUST call IConsumerRoutingService.ResolveAsync with the
+        // ConsumerTypes.ProjectPreFill compile-time constant (NOT a literal string —
+        // code-review S-5 hardening), and MUST NOT read any config fallback (FR-P3-01).
         var source = File.ReadAllText(LocateProjectPreFillServiceSource());
         source.Should().Contain("_consumerRouting",
-            "FR-1R-05 task 028c — service MUST hold an IConsumerRoutingService field");
+            "service MUST hold an IConsumerRoutingService field");
         source.Should().Contain("ConsumerTypes.ProjectPreFill",
             "code-review S-5 — service MUST use the ConsumerTypes.ProjectPreFill constant, " +
             "not a literal string");
         source.Should().Contain(".ResolveAsync(",
-            "FR-1R-05 — service MUST call IConsumerRoutingService.ResolveAsync");
-        source.Should().Contain("_workspaceOptions.ProjectPreFillPlaybookId",
-            "FR-1R-06 — env-var fallback MUST remain readable during the deprecation window");
+            "service MUST call IConsumerRoutingService.ResolveAsync");
+        source.Should().NotContain("_workspaceOptions",
+            "FR-P3-01 — the WorkspaceOptions field was deleted with the config fallback");
+        source.Should().NotContain("ProjectPreFillPlaybookId",
+            "FR-P3-01 — no reference to the deleted config property may remain, " +
+            "comments included (NFR-08 hard cutover)");
+    }
+
+    [Fact]
+    public void ProjectPreFillService_Source_RoutingNull_YieldsCleanEmptyResponse_FRP301()
+    {
+        // FR-P3-01 clean-error contract: when the routing table has no enabled
+        // sprk_playbookconsumer row, the service LogErrors (seed-the-row remedy) and
+        // returns ProjectPreFillResponse.Empty() — no config fallback, no exception.
+        // (ProjectPreFillResponse.Empty() carries no message parameter — the LogError is
+        // the operator-facing signal.)
+        var source = File.ReadAllText(LocateProjectPreFillServiceSource());
+        source.Should().Contain("no config fallback exists per FR-P3-01",
+            "FR-P3-01 — the routing-miss LogError MUST tell the operator to seed the row");
+        source.Should().Contain("ProjectPreFillResponse.Empty()",
+            "routing null MUST return the clean empty response");
     }
 
     [Fact]
     public void ProjectPreFillService_Source_StillCallsPlaybookLookupGetByIdAsync()
     {
-        // FR-1R-05 task 028c migrates the routing decision but NOT the playbook-record load.
-        // The downstream IPlaybookLookupService.GetByIdAsync call MUST remain unchanged so
+        // The routed GUID MUST still flow through IPlaybookLookupService.GetByIdAsync so
         // 1-hour playbook caching (ADR-014) and stable-ID semantics are preserved.
         var source = File.ReadAllText(LocateProjectPreFillServiceSource());
         source.Should().Contain("_playbookLookup",
-            "Phase 1 task 017 — service MUST still hold an IPlaybookLookupService field");
+            "service MUST still hold an IPlaybookLookupService field");
         source.Should().Contain(".GetByIdAsync(",
-            "Phase 1 task 017 — service MUST still call IPlaybookLookupService.GetByIdAsync");
-    }
-
-    // ─── (e) Fail-fast on null IConsumerRoutingService ─────────────────────────────────────
-
-    [Fact]
-    public void Constructor_NullConsumerRouting_ThrowsArgumentNullException()
-    {
-        // ADR-010 fail-fast on missing DI dependency — the constructor MUST throw
-        // ArgumentNullException when IConsumerRoutingService is null. SpeFileStore
-        // construction throws first (it has no parameterless ctor), so we just verify
-        // an exception surfaces — proving the ctor refuses construction.
-        var act = () => new ProjectPreFillService(
-            speFileStore: null!,
-            textExtractor: Mock.Of<ITextExtractor>(),
-            playbookLookup: Mock.Of<IPlaybookLookupService>(),
-            consumerRouting: null!,
-            workspaceOptions: Options.Create(new WorkspaceOptions()),
-            speOptions: Options.Create(new SharePointEmbeddedOptions()),
-            logger: Mock.Of<ILogger<ProjectPreFillService>>());
-
-        act.Should().Throw<Exception>(
-            "ctor must refuse to construct with missing dependencies (fail-fast)");
+            "service MUST still call IPlaybookLookupService.GetByIdAsync");
     }
 
     // ─── Helpers ─────────────────────────────────────────────────────────────────────────

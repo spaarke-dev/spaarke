@@ -19,8 +19,8 @@ namespace Sprk.Bff.Api.Services.Ai.Chat;
 /// <remarks>
 /// <para>
 /// <b>FR-P1-01 hard cutover (2026-07-05)</b>: the pre-redesign dual-path dispatch
-/// (Linear-vs-Playbook-Engine conditional with a typed-options
-/// <c>Workspace:ChatSummarizePlaybookId</c> fallback) is DELETED, not shimmed (NFR-08).
+/// (Linear-vs-Playbook-Engine conditional with a chat-summarize Workspace
+/// typed-options config fallback) is DELETED, not shimmed (NFR-08).
 /// The Binding row on <c>sprk_playbookconsumer</c> is the ONLY routing surface (ADR-039):
 /// resolution goes through <see cref="IConsumerRoutingService.ResolveBindingAsync"/> and
 /// fails fast when no enabled Binding with an Action target exists — there is no engine

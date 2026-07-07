@@ -735,7 +735,11 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
 
   /**
    * Confirm the pending action (user clicked Confirm in ActionConfirmationDialog).
-   * Dispatches the action to the BFF and shows success/error toast.
+   * Dispatches the action to the BFF; the confirmed result renders as an assistant
+   * message IN THE TRANSCRIPT (FR-P3-03 / task 042 — the G-P2 UAT finding-6 lesson:
+   * a transient toast reads as "nothing happened"; the completion message must live
+   * where the conversation lives). The server executed the suspended invocation and
+   * ledger-wrote the outcome BEFORE this response (ADR-040 render-follows-store).
    */
   const handleActionConfirm = React.useCallback(
     async (action: IPendingAction) => {
@@ -744,27 +748,24 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
         const result = await dispatchConfirmedAction(action, apiBaseUrl, authenticatedFetch);
 
         if (result.success) {
-          dispatchToast(
-            React.createElement(
-              Toast,
-              null,
-              React.createElement(ToastTitle, null, 'Action Completed'),
-              React.createElement(ToastBody, null, result.message)
-            ),
-            { intent: 'success', timeout: 5000 }
-          );
+          addMessage({
+            role: 'Assistant',
+            content: `✅ ${result.message}`,
+            timestamp: new Date().toISOString(),
+          });
         } else if (result.errorCode === 'gate.no-binding-target') {
-          // G-P2 UAT round-1 finding 6 (2026-07-06): confirming a typed-handler
-          // (non-Binding) invocation has no execution seam until FR-P3-03 — the
-          // server records the approval and closes the gate `confirmed-unexecutable`.
-          // Render an HONEST assistant message in the transcript (a transient toast
-          // read as "nothing happened" in UAT). No fabricated success, no silence.
+          // G-P2 UAT round-1 finding 6 (2026-07-06), narrowed by FR-P3-03 (task 042):
+          // typed-handler confirms now EXECUTE server-side; this branch remains only
+          // for invocations with no resolvable execution target (tool row not
+          // chat-available / handler missing / compound AI off) — the server records
+          // the approval and closes the gate `confirmed-unexecutable`. Render an
+          // HONEST assistant message in the transcript. No fabricated success.
           addMessage({
             role: 'Assistant',
             content:
-              `Got it — "${action.actionName}" is recorded and approved, but executing ` +
-              "record changes from chat isn't enabled yet in this build. It arrives in " +
-              'the next phase; nothing was created or modified.',
+              `Got it — "${action.actionName}" is recorded and approved, but this ` +
+              'action cannot be executed from chat in this environment. Nothing was ' +
+              'created or modified.',
             timestamp: new Date().toISOString(),
           });
         } else {

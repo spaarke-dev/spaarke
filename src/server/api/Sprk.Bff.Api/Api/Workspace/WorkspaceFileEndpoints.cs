@@ -2,7 +2,6 @@ using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
 using Microsoft.AspNetCore.Http.Features;
-using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Configuration;
@@ -29,27 +28,22 @@ public static class WorkspaceFileEndpoints
     private const long MaxFileSizeBytes = 10 * 1024 * 1024; // 10 MB
 
     // Summarize playbook — "Summarize New File(s)" playbook in Dataverse.
-    // Bound via WorkspaceOptions.SummarizePlaybookId (ADR-018 typed-options).
-    // Task 012 / spec FR-04 (chat-routing-redesign-r1) lifted the prior
-    // raw IConfiguration["Workspace:SummarizePlaybookId"] indexer read into
-    // WorkspaceOptions. Per Q&A 2026-06-22 Q1, SummarizePlaybookId is the canonical
-    // stable-ID lookup value (GUID; mirrors row's sprk_analysisplaybookid PK).
     //
-    // FR-1R-05 routing-table resolution (chat-routing-redesign-r1 task 028c): primary
-    // lookup is now IConsumerRoutingService.ResolveAsync(ConsumerTypes.SummarizeFile,
+    // FR-P3-01 hard cutover (ai-architecture-redesign-r1 task 040): the playbook is resolved
+    // EXCLUSIVELY via IConsumerRoutingService.ResolveAsync(ConsumerTypes.SummarizeFile,
     // consumerCode: "default", context: new RoutingContext { MimeType = file.ContentType })
-    // — the MimeType passed in RoutingContext lets future sprk_matchconditions JSON
-    // predicates route per content type (NDA PDF → specialized summarize playbook, etc.).
-    // When the table has no matching row, ResolveAsync returns null and we fall back to
-    // the legacy WorkspaceOptions.SummarizePlaybookId env var for the FR-1R-06 deprecation
-    // window. FR-04 / NFR-02 fail-fast preserved: when BOTH routing table and env var are
-    // empty, throw InvalidOperationException as before. Hardening (code-review S-5):
-    // use the ConsumerTypes.SummarizeFile compile-time constant — never a literal string.
+    // against the sprk_playbookconsumer Binding routing table. The MimeType passed in
+    // RoutingContext lets future sprk_matchconditions JSON predicates route per content
+    // type (NDA PDF → specialized summarize playbook, etc.). The legacy typed-options
+    // config fallback (FR-1R-05/FR-1R-06 deprecation window) was DELETED per NFR-08.
+    // FR-04 / NFR-02 fail-fast preserved: when the routing table has no enabled row,
+    // throw InvalidOperationException so the SSE stream surfaces an error chunk.
+    // Hardening (code-review S-5): use the ConsumerTypes.SummarizeFile compile-time
+    // constant — never a literal string.
     //
-    // FR-04 stable-ID resolution (chat-routing-redesign-r1 task 019 — historical): the
-    // prior hardcoded 4a72f99c-a119-f111-8343-7ced8d1dc988 GUID fallback was already
-    // removed in Phase 1; this task 028c migration only changes the routing-resolution
-    // step (env var → sprk_playbookconsumer table) ahead of IPlaybookLookupService.GetByIdAsync.
+    // Historical: the prior hardcoded GUID fallback was removed in Phase 1
+    // (chat-routing-redesign-r1 task 019); the config-key fallback surface was removed
+    // by FR-P3-01. Resolution now flows routing table → IPlaybookLookupService.GetByIdAsync.
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -163,7 +157,6 @@ public static class WorkspaceFileEndpoints
         IPlaybookOrchestrationService playbookService,
         IPlaybookLookupService playbookLookup,
         IConsumerRoutingService consumerRouting,
-        IOptions<WorkspaceOptions> workspaceOptions,
         Sprk.Bff.Api.Services.Ai.LinearConsumers.FileSummarizeService fileSummarizeService,
         HttpContext httpContext,
         ILogger<Program> logger,
@@ -250,7 +243,7 @@ public static class WorkspaceFileEndpoints
                 var mimeType = files.FirstOrDefault(f => !string.IsNullOrWhiteSpace(f.ContentType))?.ContentType;
 
                 await RunSummarizePlaybookAsSSEAsync(
-                    extractedText, playbookService, playbookLookup, consumerRouting, workspaceOptions,
+                    extractedText, playbookService, playbookLookup, consumerRouting,
                     mimeType, response, httpContext, logger, ct);
             }
 
@@ -290,7 +283,6 @@ public static class WorkspaceFileEndpoints
         IPlaybookOrchestrationService playbookService,
         IPlaybookLookupService playbookLookup,
         IConsumerRoutingService consumerRouting,
-        IOptions<WorkspaceOptions> workspaceOptions,
         string? mimeType,
         HttpResponse response,
         HttpContext httpContext,
@@ -305,15 +297,15 @@ public static class WorkspaceFileEndpoints
             documentText = documentText[..maxTextChars] + "\n\n[... content truncated ...]";
         }
 
-        // FR-1R-05 routing-table resolution (chat-routing-redesign-r1 task 028c): primary
-        // lookup is now IConsumerRoutingService.ResolveAsync(ConsumerTypes.SummarizeFile)
+        // FR-P3-01 hard cutover (ai-architecture-redesign-r1 task 040): the playbook is resolved
+        // EXCLUSIVELY via IConsumerRoutingService.ResolveAsync(ConsumerTypes.SummarizeFile)
         // with the uploaded file's MIME type in the routing context so future
-        // sprk_matchconditions predicates can pick a MIME-specific playbook. When the table
-        // has no matching row, ResolveAsync returns null and we fall back to the legacy
-        // WorkspaceOptions.SummarizePlaybookId env var (FR-1R-06 deprecation window).
-        // FR-04 / NFR-02 fail-fast preserved: when BOTH routing table and env var are empty,
-        // throw InvalidOperationException as before. Hardening (code-review S-5): use the
-        // ConsumerTypes.SummarizeFile compile-time constant — never a literal string.
+        // sprk_matchconditions predicates can pick a MIME-specific playbook. The legacy
+        // typed-options config fallback was DELETED per NFR-08. FR-04 / NFR-02 fail-fast
+        // preserved: when the routing table has no enabled row, throw
+        // InvalidOperationException so the SSE stream surfaces an error chunk. Hardening
+        // (code-review S-5): use the ConsumerTypes.SummarizeFile compile-time constant —
+        // never a literal string.
         var routedPlaybookId = await consumerRouting
             .ResolveAsync(
                 ConsumerTypes.SummarizeFile,
@@ -322,25 +314,20 @@ public static class WorkspaceFileEndpoints
                 cancellationToken: ct)
             .ConfigureAwait(false);
 
-        string? configuredPlaybookId = routedPlaybookId?.ToString();
-        if (string.IsNullOrWhiteSpace(configuredPlaybookId))
-        {
-            // Fallback to legacy env var during the FR-1R-06 deprecation window.
-            configuredPlaybookId = workspaceOptions.Value.SummarizePlaybookId;
-        }
-
-        if (string.IsNullOrWhiteSpace(configuredPlaybookId))
+        if (routedPlaybookId is null)
         {
             logger.LogError(
-                "Summarize-file playbook is not configured. Neither sprk_playbookconsumer " +
-                "(consumerType='{ConsumerType}', mimeType='{MimeType}') nor Workspace:SummarizePlaybookId " +
-                "returned a playbook id. CorrelationId={CorrelationId}. Configure the routing " +
-                "table or set the per-environment env var as a fallback.",
+                "Routing table has no enabled sprk_playbookconsumer row for consumerType " +
+                "'{ConsumerType}' (mimeType='{MimeType}'); seed the Binding row — no config " +
+                "fallback exists per FR-P3-01. CorrelationId={CorrelationId}",
                 ConsumerTypes.SummarizeFile, mimeType ?? "(none)", httpContext.TraceIdentifier);
             throw new InvalidOperationException(
-                "Workspace:SummarizePlaybookId is not configured. /api/workspace/files/summarize cannot resolve " +
-                "its playbook without per-environment configuration.");
+                "No enabled sprk_playbookconsumer row resolves consumerType 'summarize-file'. " +
+                "/api/workspace/files/summarize cannot resolve its playbook — seed the Binding row " +
+                "(FR-P3-01: config fallback removed).");
         }
+
+        string configuredPlaybookId = routedPlaybookId.Value.ToString();
 
         var playbook = await playbookLookup
             .GetByIdAsync(configuredPlaybookId, ct)

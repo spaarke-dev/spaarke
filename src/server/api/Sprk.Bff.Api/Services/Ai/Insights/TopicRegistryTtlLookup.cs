@@ -1,8 +1,7 @@
-using Microsoft.Extensions.Options;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
-using Sprk.Bff.Api.Api.Insights;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 
 namespace Sprk.Bff.Api.Services.Ai.Insights;
 
@@ -28,9 +27,8 @@ namespace Sprk.Bff.Api.Services.Ai.Insights;
 /// <list type="bullet">
 ///   <item>Cardinality is bounded (≤200 topic rows per tenant at r5+ scale per
 ///   <c>notes/topic-registry-schema-design.md</c> §6).</item>
-///   <item>Refresh window is short (default 5 min, configurable) — comparable to the
-///   per-instance settings cache used by <see cref="InsightsPlaybookNameMapOptions"/>
-///   via <see cref="IOptionsMonitor{TOptions}"/>.</item>
+///   <item>Refresh window is short (default 5 min, configurable) — same TTL policy as
+///   the <see cref="IConsumerRoutingService"/> Binding resolution cache.</item>
 ///   <item>Data is metadata only (TTL config), not authorization decisions (ADR-009
 ///   "MUST NOT cache authorization decisions" is not implicated).</item>
 ///   <item>The alternative (a Dataverse round-trip per cache.Get) would dwarf the
@@ -72,27 +70,36 @@ public sealed class TopicRegistryTtlLookup
     private const string EnabledAttribute = "sprk_enabled";
 
     private readonly IDataverseService _dataverseService;
-    private readonly IOptionsMonitor<InsightsPlaybookNameMapOptions> _playbookNameMap;
+    private readonly IServiceScopeFactory _scopeFactory;
     private readonly ILogger<TopicRegistryTtlLookup> _logger;
     private readonly TimeProvider _timeProvider;
     private readonly TimeSpan _refreshInterval;
     private readonly SemaphoreSlim _refreshGate = new(1, 1);
 
     // Snapshot of the registry — atomic swap on refresh. OrdinalIgnoreCase matches the
-    // case-insensitive lookup pattern used by InsightsPlaybookNameMapOptions.
+    // case-insensitive canonical-name matching used across the insights-ask Binding reads.
     private volatile IReadOnlyDictionary<string, TimeSpan> _ttlsByPlaybookName =
         new Dictionary<string, TimeSpan>(StringComparer.OrdinalIgnoreCase);
     private DateTimeOffset _lastLoadedUtc = DateTimeOffset.MinValue;
 
+    /// <remarks>
+    /// <b>Why <see cref="IServiceScopeFactory"/> rather than a direct
+    /// <see cref="IConsumerRoutingService"/> ctor dependency</b>: this class is a
+    /// Singleton (registered in <c>AnalysisServicesModule.AddInsightsCache</c>) while
+    /// <see cref="IConsumerRoutingService"/> is Scoped (<c>RoutingModule</c>). Direct
+    /// injection would be a captive scoped dependency and would fail DI scope validation;
+    /// the reverse lookup instead resolves the routing service from a short-lived scope
+    /// per call. FR-P3-01 (task 040): this replaced the deleted config-map reverse scan.
+    /// </remarks>
     public TopicRegistryTtlLookup(
         IDataverseService dataverseService,
-        IOptionsMonitor<InsightsPlaybookNameMapOptions> playbookNameMap,
+        IServiceScopeFactory scopeFactory,
         ILogger<TopicRegistryTtlLookup> logger,
         TimeProvider? timeProvider = null,
         TimeSpan? refreshInterval = null)
     {
         _dataverseService = dataverseService ?? throw new ArgumentNullException(nameof(dataverseService));
-        _playbookNameMap = playbookNameMap ?? throw new ArgumentNullException(nameof(playbookNameMap));
+        _scopeFactory = scopeFactory ?? throw new ArgumentNullException(nameof(scopeFactory));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _timeProvider = timeProvider ?? TimeProvider.System;
         _refreshInterval = refreshInterval ?? DefaultRefreshInterval;
@@ -100,8 +107,11 @@ public sealed class TopicRegistryTtlLookup
 
     /// <summary>
     /// Try to resolve a per-topic TTL for the supplied playbook Guid by reverse-mapping
-    /// to a canonical playbook name via <see cref="InsightsPlaybookNameMapOptions"/> and
-    /// looking that name up in the registry mirror.
+    /// to a canonical playbook name via
+    /// <see cref="IConsumerRoutingService.GetBindingByPlaybookIdAsync"/> (the insights-ask
+    /// Binding row whose <c>sprk_playbook</c> targets the Guid; its
+    /// <see cref="Binding.ConsumerCode"/> IS the canonical name — FR-P3-01) and looking
+    /// that name up in the registry mirror.
     /// </summary>
     /// <param name="playbookId">The Dataverse <c>sprk_analysisplaybook</c> row Guid the
     /// cache key was built from.</param>
@@ -109,7 +119,7 @@ public sealed class TopicRegistryTtlLookup
     /// from <c>sprk_aitopicregistry.sprk_cachettlminutes</c>; otherwise <see cref="TimeSpan.Zero"/>.</param>
     /// <param name="cancellationToken">Cancellation token for the (best-effort) refresh.</param>
     /// <returns><c>true</c> when a registry entry exists for the playbook; <c>false</c> when
-    /// either the Guid is not registered in the name map, the playbook name is not present
+    /// either no Binding row targets the Guid, the playbook name is not present
     /// in the registry, or the registry could not be loaded.</returns>
     public async Task<(bool Found, TimeSpan Ttl)> TryGetTtlForPlaybookIdAsync(
         Guid playbookId,
@@ -120,22 +130,22 @@ public sealed class TopicRegistryTtlLookup
             return (false, TimeSpan.Zero);
         }
 
-        // Reverse-resolve the canonical name from the playbook Guid. The forward map is
-        // (name → Guid); we scan it for the matching Guid. Map sizes are tiny (a handful
-        // of playbooks per environment), so a linear scan is negligible and avoids
-        // maintaining a parallel reverse map.
-        var nameMap = _playbookNameMap.CurrentValue;
-        string? playbookName = null;
-        foreach (var kvp in nameMap.Map)
+        // Reverse-resolve the canonical name from the playbook Guid via the Binding
+        // catalog (FR-P3-01 — replaces the deleted config-map linear scan). The routing
+        // service is Scoped; this Singleton resolves it from a short-lived scope per
+        // call. A null Binding (no row targets the Guid) or a meaningless ConsumerCode
+        // simply misses the registry below — same "no entry" degrade as before.
+        string? playbookName;
+        using (var scope = _scopeFactory.CreateScope())
         {
-            if (kvp.Value == playbookId)
-            {
-                playbookName = kvp.Key;
-                break;
-            }
+            var consumerRouting = scope.ServiceProvider.GetRequiredService<IConsumerRoutingService>();
+            var binding = await consumerRouting
+                .GetBindingByPlaybookIdAsync(playbookId, cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
+            playbookName = binding?.ConsumerCode;
         }
 
-        if (playbookName is null)
+        if (string.IsNullOrWhiteSpace(playbookName))
         {
             // No canonical name registered — caller used a direct-Guid path that bypasses
             // the topic registry. Cache falls back to DefaultTtl.

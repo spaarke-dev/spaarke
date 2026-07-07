@@ -68,7 +68,8 @@
     /**
      * Canonical playbook name resolved from topic+mode via `sprk_aitopicregistry` row at deploy time.
      * Per Task 042 wire-shape resolution (Option b, 2026-06-11): BFF `InsightEndpoints.Ask` accepts
-     * `question` as a canonical playbook name (resolved via `InsightsPlaybookNameMapOptions.ResolveOrDefault`),
+     * `question` as a canonical playbook name (resolved server-side via the `insights-ask`
+     * `sprk_playbookconsumer` Binding row whose `sprk_consumercode` equals the name — FR-P3-01),
      * NOT topic+mode. Client must send `{ question: <playbookName>, subject, parameters }`.
      * Earlier draft sent `{ topic, mode, ... }` and got 400 ProblemDetails (Task 041 P1 fix applied 2026-06-11).
      */

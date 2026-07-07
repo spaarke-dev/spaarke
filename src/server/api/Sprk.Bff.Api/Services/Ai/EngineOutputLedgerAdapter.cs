@@ -30,18 +30,20 @@ namespace Sprk.Bff.Api.Services.Ai;
 /// of the freeze line).
 /// </para>
 /// <para>
-/// <b>Interim Binding identity (documented decision, task 024)</b>: the Insights ask/search
-/// Binding rows do not exist until P3 (FR-P3-01), so no <c>sprk_playbookconsumer</c> row can
-/// be resolved for an engine run today. The adapter constructs an in-memory interim
-/// <see cref="Binding"/> whose <see cref="Binding.BindingId"/> is the invoked PLAYBOOK id —
-/// the deterministic identity of the frozen flow — so the ledger key is
-/// <c>{playbookId}@t{n}</c> and sequential runs of the same composite increment <c>t{n}</c>.
-/// <see cref="Binding.ConsumerType"/> is the interim marker
-/// <see cref="InterimConsumerType"/> (<c>engine-playbook</c>), which lands on
-/// <see cref="SessionOutput.UcId"/> via the router's legacy-row fallback and makes
-/// engine-origin entries discoverable. P3 task 040 (FR-P3-01) re-points this adapter at the
-/// real resolved insights Binding rows; nothing else changes because the write path and the
-/// entry shape are already the universal ones.
+/// <b>Binding identity (FR-P3-01, task 040 — re-pointed)</b>: the adapter reverse-resolves
+/// the REAL <c>sprk_playbookconsumer</c> row for the invoked playbook via
+/// <see cref="IConsumerRoutingService.GetBindingByPlaybookIdAsync"/> (the P3 insights
+/// Binding rows exist now), so engine-origin ledger entries key on the resolved row's
+/// <c>{bindingId}@t{n}</c> and carry its catalog identity (consumer type, ucid,
+/// disposition). The task-024 INTERIM identity (<see cref="Binding.BindingId"/> = the
+/// invoked PLAYBOOK id, <see cref="Binding.ConsumerType"/> =
+/// <see cref="InterimConsumerType"/> stamped onto <see cref="SessionOutput.UcId"/> via the
+/// router's legacy-row fallback) remains ONLY as the documented degrade path for playbooks
+/// no Binding row targets — <c>invoke_playbook</c> is a tenant-visible dispatch over ANY
+/// playbook, and an unregistered composite's output must still land in the ledger
+/// (ADR-040: store-precedes-render has no exception for catalog gaps). This is not a compat
+/// shim: no config key, no code list, no routing decision — the reverse lookup only recovers
+/// the catalog identity of a dispatch decided upstream.
 /// </para>
 /// <para>
 /// <b>ADR-039 (no second routing surface)</b>: the interim Binding makes NO routing decision.
@@ -84,8 +86,9 @@ public interface IEngineOutputLedgerAdapter
 {
     /// <summary>
     /// Writes a successful frozen-engine composite run's output to the session ledger as an
-    /// addressable <see cref="SessionOutput"/> (keyed <c>{playbookId}@t{n}</c> under the
-    /// interim E-2 Binding identity) via <see cref="IOutputRouter.RouteAsync"/>.
+    /// addressable <see cref="SessionOutput"/> via <see cref="IOutputRouter.RouteAsync"/> —
+    /// keyed <c>{bindingId}@t{n}</c> under the reverse-resolved Binding row (FR-P3-01), or
+    /// <c>{playbookId}@t{n}</c> under the interim E-2 identity when no row targets the playbook.
     /// </summary>
     /// <param name="tenantId">Tenant the chat session belongs to.</param>
     /// <param name="chatSessionId">
@@ -116,11 +119,13 @@ public interface IEngineOutputLedgerAdapter
 public sealed class EngineOutputLedgerAdapter : IEngineOutputLedgerAdapter
 {
     /// <summary>
-    /// Interim consumer-type marker for engine-origin ledger entries (lands on
-    /// <see cref="SessionOutput.UcId"/> via the router's legacy-row fallback). Replaced by
-    /// the real insights Binding rows at P3 FR-P3-01 / task 040. Deliberately NOT added to
-    /// <see cref="ConsumerTypes"/>: no <c>sprk_playbookconsumer</c> row exists for it yet and
-    /// the FR-P0-04 boot reconciliation requires constants ↔ rows parity.
+    /// Interim consumer-type marker for engine-origin ledger entries whose playbook has NO
+    /// <c>sprk_playbookconsumer</c> row (lands on <see cref="SessionOutput.UcId"/> via the
+    /// router's legacy-row fallback). Since FR-P3-01 (task 040) this is the DEGRADE path
+    /// only — registered playbooks (e.g. the insights-ask rows) resolve their real Binding
+    /// identity via <see cref="IConsumerRoutingService.GetBindingByPlaybookIdAsync"/>.
+    /// Deliberately NOT added to <see cref="ConsumerTypes"/>: no row exists for it by
+    /// definition and the FR-P0-04 boot reconciliation requires constants ↔ rows parity.
     /// </summary>
     internal const string InterimConsumerType = "engine-playbook";
 
@@ -131,15 +136,18 @@ public sealed class EngineOutputLedgerAdapter : IEngineOutputLedgerAdapter
 
     private readonly ChatSessionManager _sessionManager;
     private readonly IOutputRouter _outputRouter;
+    private readonly IConsumerRoutingService _consumerRouting;
     private readonly ILogger<EngineOutputLedgerAdapter> _logger;
 
     public EngineOutputLedgerAdapter(
         ChatSessionManager sessionManager,
         IOutputRouter outputRouter,
+        IConsumerRoutingService consumerRouting,
         ILogger<EngineOutputLedgerAdapter> logger)
     {
         _sessionManager = sessionManager ?? throw new ArgumentNullException(nameof(sessionManager));
         _outputRouter = outputRouter ?? throw new ArgumentNullException(nameof(outputRouter));
+        _consumerRouting = consumerRouting ?? throw new ArgumentNullException(nameof(consumerRouting));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -202,15 +210,33 @@ public sealed class EngineOutputLedgerAdapter : IEngineOutputLedgerAdapter
             .Distinct(StringComparer.Ordinal)
             .ToList();
 
-        // Interim E-2 Binding identity (see class remarks): playbookId is the key identity,
-        // Informational is the engine flow's actual rendering behavior. Ucid stays null so the
-        // router's legacy-row fallback stamps UcId = InterimConsumerType.
-        var binding = new Binding
+        // FR-P3-01 (task 040) re-point: reverse-resolve the REAL Binding row for the invoked
+        // playbook. Registered playbooks (the P3 insights-ask rows et al.) key their ledger
+        // entries on the resolved row's BindingId and carry its catalog identity (consumer
+        // type, ucid, disposition). Cached 5 min; a routing failure resolves null (the
+        // routing service never throws to consumers).
+        var binding = await _consumerRouting
+            .GetBindingByPlaybookIdAsync(playbookId, cancellationToken: cancellationToken)
+            .ConfigureAwait(false);
+
+        if (binding is null)
         {
-            BindingId = playbookId,
-            ConsumerType = InterimConsumerType,
-            Disposition = BindingDisposition.Informational,
-        };
+            // Degrade path (see class remarks): a playbook no Binding row targets — keep the
+            // task-024 interim identity so the output still lands in the ledger (ADR-040).
+            // playbookId is the key identity, Informational is the engine flow's actual
+            // rendering behavior. Ucid stays null so the router's legacy-row fallback stamps
+            // UcId = InterimConsumerType.
+            _logger.LogDebug(
+                "EngineOutputLedgerAdapter: no Binding row targets playbook {PlaybookId} — " +
+                "recording under the interim E-2 identity.",
+                playbookId);
+            binding = new Binding
+            {
+                BindingId = playbookId,
+                ConsumerType = InterimConsumerType,
+                Disposition = BindingDisposition.Informational,
+            };
+        }
 
         // STORE through the task-021 universal write path (write-before-render; append-only).
         var routed = await _outputRouter
@@ -218,9 +244,11 @@ public sealed class EngineOutputLedgerAdapter : IEngineOutputLedgerAdapter
             .ConfigureAwait(false);
 
         _logger.LogInformation(
-            "EngineOutputLedgerAdapter: engine output recorded key={Key} playbookId={PlaybookId} runId={RunId} " +
+            "EngineOutputLedgerAdapter: engine output recorded key={Key} playbookId={PlaybookId} " +
+            "bindingConsumerType={BindingConsumerType} runId={RunId} " +
             "citationCount={CitationCount} tenant={TenantId} session={SessionId}",
-            routed.Entry.Key, playbookId, result.RunId, sourceRefs.Count, tenantId, session.SessionId);
+            routed.Entry.Key, playbookId, binding.ConsumerType, result.RunId, sourceRefs.Count,
+            tenantId, session.SessionId);
 
         return routed.Entry;
     }

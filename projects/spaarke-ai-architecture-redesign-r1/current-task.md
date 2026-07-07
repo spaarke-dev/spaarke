@@ -9,10 +9,16 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | W-P3-A second half: 040 (consumers→Bindings) + 042 (create-task + confirm-RESUME) — dispatching after wave-close commit |
-| **Step** | P2 CLOSED (030–038 ✅; G-P2 round-1 by operator, fix wave landed). P3: 041 ✅ + 043 ✅ + G-P2 fix wave landed (uncommitted → this wave-close commit). |
-| **Status** | autonomous execution (operator engaged; round-2 spot-check available after this redeploy) |
-| **Next Action** | Commit wave (pull --rebase first), push, portfolio 38, deploy BFF + SpaarkeAi, ping operator with round-2 script (in notes/g-p2-uat-round1-fixwave-notes.md), dispatch 040 + 042. Then 044 (deps 040+043) → 045/047 → 046 → STOP at gate 048. |
+| **Task** | 044 — engine-shell deletions (serial W-P3-B; deps 040 ✅ + 043 ✅) — dispatching after this wave-close commit |
+| **Step** | W-P3-A COMPLETE: 040 + 041 + 042 + 043 all ✅. G-P2 fix wave deployed @ c8ff248b5 (operator round-2 spot-check available). |
+| **Status** | autonomous execution |
+| **Next Action** | Commit 040+042 wave (pull --rebase), push, portfolio 40, dispatch 044 (SERIAL). Then W-P3-C (045 + 047 parallel) → 046 → gate-048 deploy + STOP for operator UAT. |
+
+### W-P3-A outcomes (040/042 — both Step 9.5 PASS; 041/043 in prior commit)
+- **040**: Binding table = THE routing surface. 8 consumers re-pointed; LinearConsumersOptions/WorkspaceOptions(+Validator)/InsightsPlaybookNameMapOptions DELETED grep-zero (src comments included); E-2 adapter reverse-resolves real Binding ids (GetBindingByPlaybookIdAsync, 5-min cache; degrade = playbookId identity for unregistered playbooks); insights-ask default+matter-health-single + insights-search rows seeded (f32a7931/f82a7931/f89fa738; named-row priority 400); universal-ingest@v1 NOT seeded (playbook absent on dev — honest error; seed instruction in infra mirror). W-1: live App Service key LinearConsumers__MaxOutputTokens__summarize_file=4000 → ActionRunner.MaxOutputTokensCeiling=4000 (delete the dead env keys at next hygiene pass: Workspace__*PlaybookId ×5, LinearConsumers__* ×2, Insights__Playbooks__Map__predict_matter_cost_v1).
+- **042**: create-task = catalog data (CREATE-TASK@v1 b66c8dda + Binding 3d9724e5; required-args elicitation via 032 machinery; writes sprk_event type=task + {bindingId}@t{n} provenance via existing dataverse.create_record). TypedHandlerResumeExecutor: confirm now EXECUTES (user-OBO, ledger loop@t{n} before render, gate `confirmed`, transcript completion message; unsupported kinds keep honest fallback). Activates dataverse writes + 041 email.draft confirm legs. 🔔 OPERATOR RULING at 048: POML prescribed sprk_event(type=task); spaarke-todo-architecture says sprk_todo is first-class — implemented per POML (live-verified); switching = catalog-data-only.
+- JPS examples mirrored to .claude/skills/jps-action-create/examples/ (create-task, draft-correspondence, refusal-handler) — main session, done.
+- 044 runway notes: E-2 interim identity degrade-only; pre-fill/summarize-file/ai-summary/email-analysis still EXECUTE via engine — 044 absorbs wrappers + re-points; insights rows don't project into the loop yet (later catalog addition); ActionRunner ceiling interim until per-Action ADR-016 budget.
 
 ### G-P2 fix wave landed (all 5 findings + 2 rulings — notes/g-p2-uat-round1-fixwave-notes.md)
 Chips inline via SprkChat `transcriptFooterSlot` + label "Summarize this document" (+ bulk_chip_label contract); Insert hidden by default (`enableInsertToEditor`, AnalysisWorkspace opts in); loop context now includes last-8 ledger outputs via ChatHistoryManager.BuildLedgerOutputsContext (cache-stable tail, NFR-03 framing); manifest readiness probe at SessionDispatchOrchestrator seam (reuses EventRulesOptions.ReadinessProbe); honest confirm (`confirmed-unexecutable` ledger status + errorCode `gate.no-binding-target` + transcript message); analysis.rerun row `2b09dfb5` Write→Read (operator ruling); six dataverse.* rows' sprk_description enriched with live-schema entity map (sprk_matter etc.).
