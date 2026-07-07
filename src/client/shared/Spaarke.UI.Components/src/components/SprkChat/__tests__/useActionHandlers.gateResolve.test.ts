@@ -32,8 +32,7 @@ function fetchReturning(status: number, body: unknown): (url: string, init?: Req
 
 describe('dispatchConfirmedAction — gate-resolve outcome contract (R2-A)', () => {
   it('surfaces the ProblemDetails detail on a 502 gate.dispatch-failed', async () => {
-    const detail =
-      "Column 'sprk_assignedto': lookup objects require a 'recordId' GUID on the native transport.";
+    const detail = "Column 'sprk_assignedto': lookup objects require a 'recordId' GUID on the native transport.";
     const outcome = await dispatchConfirmedAction(
       pendingAction,
       'https://bff.example',
