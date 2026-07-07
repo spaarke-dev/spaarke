@@ -120,7 +120,13 @@ export function ConversationPane(): React.JSX.Element {
   });
   acceptChipsRef.current = chips.acceptChips;
 
-  const contextBridge = useContextEventBridge({ dispatch, acceptChips: chips.acceptChips });
+  const contextBridge = useContextEventBridge({
+    dispatch,
+    // R2-D (2026-07-07): `workspace_open_tab` SSE frames bridge to the workspace
+    // channel — same PaneEventBus dispatcher, explicit leg.
+    dispatchWorkspace: dispatch,
+    acceptChips: chips.acceptChips,
+  });
   const playbook = usePlaybookSelection({ setPlaybookId, toLoading, reset, dispatch });
   const playbookOptions = usePlaybookOptions({
     bffBaseUrl,

@@ -117,6 +117,49 @@ public sealed class DataverseCreateRecordHandlerTests : TypedToolHandlerTestFixt
             failMessage: "an empty item must never reach Dataverse");
     }
 
+    /// <summary>
+    /// G-P3 UAT round-2 R2-A repro pin (2026-07-07, session 5329…, App Insights
+    /// 15:00:59Z): the operator's confirmed create-task write failed
+    /// <c>VALIDATION_FAILED</c> after ONE metadata GET — the model composed the
+    /// sprk_event item per the Binding instruction but, told only
+    /// "assign to ralph.schroeder@spaarke.com" with no GUID, sent the assignee
+    /// lookup WITHOUT <c>recordId</c>. The mapper rejects it BEFORE any POST with
+    /// the instructive resolve-the-GUID-first message the model (and, post-R2-C,
+    /// the transcript) needs to self-correct.
+    /// </summary>
+    [Fact]
+    public async Task ExecuteChatAsync_Uat2CreateTaskShape_AssigneeLookupWithoutRecordId_FailsValidation_BeforeAnyPost()
+    {
+        SetupEntityMetadata("sprk_event", "sprk_events", "sprk_eventid");
+        const string argsJson =
+            """
+            {
+              "tablename": "sprk_event",
+              "item": {
+                "sprk_eventname": "Follow up on the indemnity findings",
+                "sprk_description": "Review the findings. Provenance: source document nda-acme.pdf; source analysis b66c8dda-8279-f111-ab0e-7ced8ddc4cc6@t1",
+                "sprk_duedate": "2026-07-08",
+                "sprk_eventtype_ref": {"relatedTable": "sprk_eventtype_ref", "name": "Task", "recordId": "124f5fc9-98ff-f011-8406-7c1e525abd8b"},
+                "sprk_assignedto": {"relatedTable": "contact", "name": "ralph.schroeder@spaarke.com"}
+              }
+            }
+            """;
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: argsJson);
+
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildCreateTool(), CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be(ToolErrorCodes.ValidationFailed);
+        result.ErrorMessage.Should().Contain("recordId",
+            because: "the rejection must name the missing field");
+        result.ErrorMessage.Should().Contain("dataverse.search_data",
+            because: "the error is the model's self-correction instruction — resolve the GUID first");
+        _dataverse.Verify(
+            d => d.PostAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()),
+            Times.Never,
+            failMessage: "the UAT payload must be rejected before any write reaches Dataverse");
+    }
+
     [Fact]
     public async Task ExecuteChatAsync_ItemKeyWithODataAnnotation_FailsValidation()
     {

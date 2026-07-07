@@ -175,6 +175,15 @@ public class SprkChatAgentFactoryInvalidSchemaProjectionTests
         agent.Context.SystemPrompt.Should().Contain(
             "does NOT create anything by itself",
             "a user's 'yes create it' on a conversational proposal must still route through the tool");
+
+        // G-P3 UAT round-2 extensions (2026-07-07):
+        agent.Context.SystemPrompt.Should().Contain(
+            "only GENERATE draft content",
+            "R2-B: every round-2 fabrication correlated with a capability_* DRAFTING call — " +
+            "the directive must pin the generation/execution split");
+        agent.Context.SystemPrompt.Should().Contain(
+            "tab, view, editor, workspace, or dialog",
+            "R2-D: the model claimed UI surfaces were opened without any confirming tool result");
     }
 
     [Fact]

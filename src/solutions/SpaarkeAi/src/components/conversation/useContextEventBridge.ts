@@ -13,7 +13,7 @@
  */
 
 import * as React from "react";
-import type { ContextPaneEvent } from "@spaarke/ai-widgets";
+import type { ContextPaneEvent, WorkspacePaneEvent } from "@spaarke/ai-widgets";
 
 export interface ContextEventPayload {
   contextEventType?: string;
@@ -42,11 +42,25 @@ export interface ContextEventPayload {
     citationCount?: number;
     durationMs?: number;
   }>;
+  // workspace_open_tab (G-P3 UAT round-2 R2-D, 2026-07-07): server-side
+  // SendWorkspaceArtifactHandler asks the client to open a workspace tab LIVE
+  // (e.g. the Compose layout). Bridged onto the SAME PaneEventBus
+  // `workspace.widget_load` mechanism the Workspaces menu uses.
+  contextWidgetType?: string;
+  contextDisplayName?: string;
+  contextTabId?: string;
+  contextWidgetDataJson?: string;
 }
 
 export interface ContextEventBridgeDeps {
   /** `context`-channel PaneEventBus publisher. */
   dispatch: (channel: "context", event: ContextPaneEvent) => void;
+  /**
+   * `workspace`-channel PaneEventBus publisher (R2-D `workspace_open_tab`
+   * bridge). Structurally the same dispatcher as `dispatch` — typed separately
+   * so the workspace leg is explicit.
+   */
+  dispatchWorkspace: (channel: "workspace", event: WorkspacePaneEvent) => void;
   /** Consumer-chips controller acceptor (`consumer_chips` carrier). */
   acceptChips: (raw: unknown) => void;
 }
@@ -54,7 +68,7 @@ export interface ContextEventBridgeDeps {
 export function useContextEventBridge(deps: ContextEventBridgeDeps): {
   handleContextEvent: (data: ContextEventPayload) => void;
 } {
-  const { dispatch, acceptChips } = deps;
+  const { dispatch, dispatchWorkspace, acceptChips } = deps;
 
   const handleContextEvent = React.useCallback(
     (data: ContextEventPayload): void => {
@@ -68,6 +82,35 @@ export function useContextEventBridge(deps: ContextEventBridgeDeps): {
       // replace-only-when-non-empty (G-P1 Defect-1 fix) inside acceptChips.
       if (eventType === "consumer_chips") {
         acceptChips(data.contextChips);
+        return;
+      }
+
+      // G-P3 UAT round-2 R2-D (2026-07-07): server-initiated workspace tab open
+      // (SendWorkspaceArtifactHandler widgetType 'Workspace' — e.g. the Compose
+      // layout). Dispatch the SAME `workspace.widget_load` event the Workspaces
+      // menu produces; WorkspacePane's existing subscriber adds + auto-activates
+      // the tab and the client-side tab persistence makes it survive reload.
+      // The event carries NO tabId on purpose — WorkspacePane treats tabId-less
+      // widget_load as the server-initiated "open a new tab" contract.
+      if (eventType === "workspace_open_tab") {
+        const widgetType = data.contextWidgetType;
+        if (!widgetType) return;
+        let widgetData: unknown = null;
+        if (typeof data.contextWidgetDataJson === "string" && data.contextWidgetDataJson.length > 0) {
+          try {
+            widgetData = JSON.parse(data.contextWidgetDataJson);
+          } catch {
+            // Malformed payload — open the tab without data rather than dropping
+            // the user-visible action on the floor.
+            widgetData = null;
+          }
+        }
+        dispatchWorkspace("workspace", {
+          type: "widget_load",
+          widgetType,
+          widgetData,
+          displayName: data.contextDisplayName,
+        } as WorkspacePaneEvent);
         return;
       }
 
@@ -159,9 +202,10 @@ export function useContextEventBridge(deps: ContextEventBridgeDeps): {
           return;
       }
     },
-    [dispatch, acceptChips]
+    [dispatch, dispatchWorkspace, acceptChips]
   );
 
   // Stable controller identity (Step 9.5 review).
   return React.useMemo(() => ({ handleContextEvent }), [handleContextEvent]);
 }
+

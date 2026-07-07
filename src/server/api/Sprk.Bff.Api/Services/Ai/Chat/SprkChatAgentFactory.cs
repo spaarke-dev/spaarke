@@ -78,6 +78,17 @@ public class SprkChatAgentFactory
         "is safe and required.\n" +
         "- If a tool reports it was SUSPENDED awaiting user confirmation, say exactly that. The action " +
         "has NOT happened yet.\n" +
+        // G-P3 UAT round-2 R2-B (2026-07-07): every fabricated "has now been created" turn
+        // correlated with a capability_* DRAFTING call — pin the generation/execution split.
+        "- Tools whose names start with 'capability_' only GENERATE draft content (proposals, " +
+        "summaries, drafts). Their success means content was drafted — NOT that a record, task, " +
+        "or email was created, saved, or sent. Creating it still requires the separate write tool, " +
+        "which asks the user to confirm.\n" +
+        // G-P3 UAT round-2 R2-D (2026-07-07): the model claimed tabs/editors were opened
+        // ("opened in a workspace tab titled …") without any tool result confirming it.
+        "- The same applies to UI actions: NEVER state that a tab, view, editor, workspace, or " +
+        "dialog was opened unless a tool result in this conversation explicitly confirms it. If no " +
+        "available tool can open the requested surface, say so honestly and offer what you CAN do.\n" +
         "- If no available tool can perform the requested action, say so honestly instead of pretending " +
         "it was done.";
 

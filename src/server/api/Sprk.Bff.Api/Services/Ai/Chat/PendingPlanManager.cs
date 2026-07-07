@@ -100,6 +100,18 @@ public class PendingPlanManager
     /// </summary>
     public const string GateStatusConfirmedUnexecutable = "confirmed-unexecutable";
 
+    /// <summary>
+    /// Ledger vocabulary: gate status <c>dispatch-failed</c> — the user CONFIRMED the gate
+    /// and the resumed execution ran but FAILED (handler validation rejection, Dataverse
+    /// error, dispatch error). Appended AFTER the <c>confirmed</c> marker (which records
+    /// the user's approval) so the ledger carries execution evidence instead of implying
+    /// a side effect that never landed (G-P3 UAT round-2 R2-A/R2-C, 2026-07-07: three
+    /// dataverse.create_record confirms failed server-side — VALIDATION_FAILED ×2,
+    /// DATAVERSE_BAD_REQUEST ×1 — with no ledger trace beyond <c>confirmed</c>).
+    /// ADR-040 vocabulary extension — append-only, correlated by gate id.
+    /// </summary>
+    public const string GateStatusDispatchFailed = "dispatch-failed";
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase

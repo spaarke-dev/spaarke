@@ -214,6 +214,77 @@ public class ConfirmationGateUnificationTests
     }
 
     // =========================================================================
+    // 4. Gate-outcome evidence (G-P3 UAT round-2 R2-A/R2-C, 2026-07-07)
+    //    A confirmed-then-FAILED execution must leave ledger + transcript
+    //    evidence — the round-2 create_record confirms failed with NOTHING
+    //    beyond the `confirmed` approval marker, so the model kept guessing.
+    // =========================================================================
+
+    [Fact]
+    public async Task WriteGateMarker_DispatchFailed_AppendsAfterConfirmed_SameGateId()
+    {
+        var session = await SeedSessionAsync();
+        var invocation = BuildInvocation(session.SessionId, "confirmation-outcome-1");
+        await _sut.SuspendInvocationAsync(invocation);
+        (await _sut.ResumeInvocationAsync(TenantId, session.SessionId, invocation.GateId))
+            .Should().NotBeNull();
+
+        var failed = await _sut.WriteGateMarkerAsync(
+            TenantId, session.SessionId, invocation.GateId,
+            PendingPlanManager.GateKindConfirmation, PendingPlanManager.GateStatusDispatchFailed,
+            sideEffectClass: invocation.SideEffectClass);
+
+        failed.Should().NotBeNull();
+        failed!.Status.Should().Be("dispatch-failed");
+        failed.ResolvedAt.Should().NotBeNull();
+
+        var stored = await _sessionManager.GetSessionAsync(TenantId, session.SessionId);
+        var statuses = stored!.Gates!
+            .Where(g => g.GateId == invocation.GateId)
+            .Select(g => g.Status)
+            .ToList();
+        statuses.Should().ContainInOrder(
+            PendingPlanManager.GateStatusPending,
+            PendingPlanManager.GateStatusConfirmed,
+            PendingPlanManager.GateStatusDispatchFailed);
+    }
+
+    [Fact]
+    public void BuildGateOutcomeMessage_Failure_StatesNothingWasCreated_AndCarriesTheRealError()
+    {
+        var text = Sprk.Bff.Api.Api.Ai.ChatEndpoints.BuildGateOutcomeMessage(
+            success: false,
+            actionName: "SYS-Dataverse Create Record",
+            detail: "Column 'sprk_assignedto': lookup objects require a 'recordId' GUID on the native transport.",
+            ledgerKey: null);
+
+        text.Should().StartWith("❌");
+        text.Should().Contain("FAILED");
+        text.Should().Contain("recordId",
+            because: "the handler's instructive error is the user's + next-turn model's correction signal");
+        text.Should().Contain("No record was created or modified",
+            because: "the exact counter-copy to the round-2 fabrication pattern");
+    }
+
+    [Fact]
+    public void BuildGateOutcomeMessage_Success_CarriesSummaryAndLedgerKey_AndCapsLength()
+    {
+        var ok = Sprk.Bff.Api.Api.Ai.ChatEndpoints.BuildGateOutcomeMessage(
+            success: true, actionName: "SYS-Dataverse Create Record",
+            detail: "Created record 651194cd-3670-f111-ab0e-70a8a590c51c in 'sprk_event'.",
+            ledgerKey: "loop@t3");
+        ok.Should().StartWith("✅");
+        ok.Should().Contain("loop@t3");
+
+        var longDetail = new string('x', 5_000);
+        var capped = Sprk.Bff.Api.Api.Ai.ChatEndpoints.BuildGateOutcomeMessage(
+            success: true, actionName: "A", detail: longDetail, ledgerKey: null);
+        capped.Length.Should().BeLessThanOrEqualTo(
+            Sprk.Bff.Api.Api.Ai.ChatEndpoints.MaxGateOutcomeMessageChars + 1,
+            because: "transcript messages must stay well inside the Dataverse sprk_content cap");
+    }
+
+    // =========================================================================
     // Helpers
     // =========================================================================
 

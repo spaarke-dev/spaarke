@@ -234,7 +234,19 @@ public sealed class BindingCapabilityTool : AIFunction
 
             // The capability output was ledger-written by the dispatch stack BEFORE this
             // return (ADR-040) — the model composes over an already-grounded output.
-            return $"Capability '{_binding.ConsumerType}' completed. Output (already stored to the session ledger):\n{text}";
+            //
+            // G-P3 UAT round-2 R2-B (2026-07-07): the previous framing ("Capability
+            // 'create-task' completed.") read as an EXECUTED side effect to the model —
+            // every fabricated "has now been created" turn in the round-2 transcript
+            // correlated with a capability_create-task DRAFTING call (App Insights
+            // 14:50/15:02/15:05/15:07Z, session 5329…). Capability tools GENERATE
+            // content only; the result text now states that explicitly so the model
+            // cannot conflate generation success with record creation.
+            return $"Capability '{_binding.ConsumerType}' finished GENERATING its output " +
+                   "(a draft stored to the session ledger — shown below). This tool call did NOT create, " +
+                   "save, send, or modify any record, task, email, or tab. If the user asked to create/save/" +
+                   "send this content, you must still invoke the corresponding write tool (it will ask the " +
+                   $"user to confirm before executing).\nOutput:\n{text}";
         }
         catch (DispatchRejectedException ex)
         {

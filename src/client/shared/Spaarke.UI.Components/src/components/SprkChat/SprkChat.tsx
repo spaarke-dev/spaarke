@@ -770,22 +770,25 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
             timestamp: new Date().toISOString(),
           });
         } else {
-          dispatchToast(
-            React.createElement(
-              Toast,
-              null,
-              React.createElement(ToastTitle, null, 'Action Failed'),
-              React.createElement(ToastBody, null, result.message)
-            ),
-            { intent: 'error', timeout: 8000 }
-          );
+          // G-P3 UAT round-2 R2-A (2026-07-07): a failed confirm previously rendered
+          // ONLY a transient error toast — the operator saw "nothing happened" while
+          // the server had returned a 502 with the real failure reason (three
+          // dataverse.create_record confirms failed silently this way). Apply the same
+          // G-P2 finding-6 lesson as the success branch: the outcome must live where
+          // the conversation lives. The server persists the matching transcript
+          // message for the next turn's model; this local message covers the live view.
+          addMessage({
+            role: 'Assistant',
+            content: `❌ ${result.message} Nothing was created or modified by this confirmation.`,
+            timestamp: new Date().toISOString(),
+          });
         }
       } finally {
         setIsConfirmingAction(false);
         setPendingAction(null);
       }
     },
-    [apiBaseUrl, authenticatedFetch, dispatchToast, addMessage]
+    [apiBaseUrl, authenticatedFetch, addMessage]
   );
 
   /**

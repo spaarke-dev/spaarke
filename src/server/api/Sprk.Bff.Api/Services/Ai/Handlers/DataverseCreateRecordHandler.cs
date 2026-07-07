@@ -66,6 +66,11 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
                      "the created record's id as a citable path (tables/{table}/records/{guid}). Call " +
                      "dataverse.describe first if the table's schema is unknown — do NOT guess column logical " +
                      "names from display names. Choice columns require numeric option values, not labels. " +
+                     "LOOKUP columns REQUIRE a recordId GUID: resolve the target record's GUID FIRST via " +
+                     "dataverse.search_data or dataverse.read_query; a lookup object without recordId is " +
+                     "rejected. If you cannot resolve a GUID for an optional lookup/choice, OMIT the column " +
+                     "(mention the value in a text column instead). Records you create belong to the calling " +
+                     "user automatically — never set owner/assignee columns for the requesting user themselves. " +
                      "SIDE-EFFECT tool (write): the create is executed with the user's own privileges; " +
                      "if the user cannot create rows in the table, the call fails with their access error.",
         Version: "1.0.0",
@@ -82,9 +87,11 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
                 "item",
                 "Record field values as key-value pairs. Keys are column logical names from dataverse.describe. " +
                 "Values: strings, numbers, or booleans for simple fields. For lookup/customer fields use an object: " +
-                "{\"relatedTable\": \"account\", \"name\": \"Contoso Ltd\", \"recordId\": \"guid\"} (recordId required " +
-                "on this transport). For choice fields use the numeric option value. For multi-select choice use " +
-                "comma-separated values like \"100000002,100000004\".",
+                "{\"relatedTable\": \"account\", \"name\": \"Contoso Ltd\", \"recordId\": \"guid\"} — recordId is " +
+                "REQUIRED on this transport (resolve it first via dataverse.search_data / dataverse.read_query; " +
+                "never send a lookup with only a name). For choice fields use the numeric option value, never the " +
+                "label. For multi-select choice use comma-separated values like \"100000002,100000004\". Omit any " +
+                "optional column whose value you cannot resolve precisely rather than guessing.",
                 ToolParameterType.Object,
                 Required: true)
         });

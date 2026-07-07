@@ -345,7 +345,8 @@ export interface IChatSseEventData {
     | 'playbook_node_completed'
     | 'decision_made'
     | 'tool_chain'
-    | 'consumer_chips';
+    | 'consumer_chips'
+    | 'workspace_open_tab';
 
   /** ISO-8601 UTC timestamp of the trace event. Present on 'context_event'. */
   contextTimestamp?: string;
@@ -408,6 +409,26 @@ export interface IChatSseEventData {
     citationCount?: number;
     durationMs?: number;
   }>;
+
+  // ── workspace_open_tab fields (ai-architecture-redesign-r1 G-P3 UAT round-2 R2-D) ──
+  //
+  // Server-initiated LIVE workspace tab open (SendWorkspaceArtifactHandler,
+  // widgetType 'Workspace' — e.g. the Compose layout). The host bridge
+  // dispatches PaneEventBus `workspace.widget_load` with these fields — the
+  // same mechanism the Workspaces menu uses. ADR-015: registry key + tab
+  // title + identifiers only.
+
+  /** Client workspace-widget registry key (workspace_open_tab), e.g. 'workspace'. */
+  contextWidgetType?: string;
+
+  /** Tab display title (workspace_open_tab). */
+  contextDisplayName?: string;
+
+  /** Server-generated tab correlation id (workspace_open_tab). */
+  contextTabId?: string;
+
+  /** JSON-serialized widgetData for the tab's widget (workspace_open_tab). */
+  contextWidgetDataJson?: string;
 
   // ── consumer_chips fields (ai-architecture-redesign-r1 task 023 / FR-P1-04) ──
   //

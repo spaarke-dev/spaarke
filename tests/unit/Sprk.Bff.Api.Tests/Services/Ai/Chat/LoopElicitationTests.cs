@@ -238,7 +238,11 @@ public class LoopElicitationTests
         });
 
         dispatcher.DispatchCount.Should().Be(1, "complete declared args execute normally");
-        result!.ToString().Should().Contain("completed");
+        // G-P3 UAT round-2 R2-B pin (2026-07-07): the capability result must frame
+        // itself as GENERATION only — the old "completed." framing read as an executed
+        // side effect and drove the round-2 "has now been created" fabrications.
+        result!.ToString().Should().Contain("finished GENERATING");
+        result.ToString().Should().Contain("did NOT create, save, send, or modify");
         (await _sessionManager.GetSessionAsync(TenantId, session.SessionId))!
             .Gates.Should().BeNullOrEmpty("no elicitation gate for a complete invocation");
     }

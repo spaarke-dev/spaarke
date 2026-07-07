@@ -1863,12 +1863,39 @@ public static class ChatEndpoints
                 resolution, typedInvocation, oid?.ToString("D"), cancellationToken);
             if (!outcome.Success)
             {
+                // G-P3 UAT round-2 R2-A/R2-C (2026-07-07): a failed confirm previously
+                // vanished — the 502 was toast-only client-side and NOTHING recorded the
+                // failure for the ledger or the next turn's model, which kept "guessing"
+                // the record existed. Now: (a) a `dispatch-failed` gate marker lands
+                // (append-only, after the `confirmed` approval marker), and (b) the
+                // honest failure is persisted as an assistant transcript message so the
+                // next turn's history carries the real outcome.
+                var failureText = BuildGateOutcomeMessage(
+                    success: false, resolution.Tool.Name, outcome.Error, ledgerKey: null);
+                await pendingPlanManager.WriteGateMarkerAsync(
+                    tenantId, sessionId, gateId,
+                    typedInvocation.Kind, PendingPlanManager.GateStatusDispatchFailed,
+                    bindingId: typedInvocation.BindingId, sideEffectClass: typedInvocation.SideEffectClass,
+                    missingFields: null, turn: typedInvocation.Turn, ct: cancellationToken);
+                await PersistGateOutcomeMessageAsync(
+                    httpContext, tenantId, sessionId, failureText, logger, cancellationToken);
+
                 return Results.Problem(
                     detail: outcome.Error ?? "The confirmed action failed.",
                     statusCode: StatusCodes.Status502BadGateway,
                     title: "Dispatch Failed",
                     extensions: new Dictionary<string, object?> { ["errorCode"] = "gate.dispatch-failed" });
             }
+
+            // R2-C: the executed outcome must reach the NEXT turn's model. The
+            // SessionOutput (loop@t{n}) already rides the ledger-outputs context block;
+            // this transcript message additionally puts the confirmation event itself
+            // into conversation history (and survives a page reload, unlike the
+            // client-local rendering).
+            await PersistGateOutcomeMessageAsync(
+                httpContext, tenantId, sessionId,
+                BuildGateOutcomeMessage(success: true, resolution.Tool.Name, outcome.Summary, outcome.LedgerKey),
+                logger, cancellationToken);
 
             return Results.Ok(new GateResolveResult("confirmed", outcome.Summary));
         }
@@ -1919,12 +1946,29 @@ public static class ChatEndpoints
 
             if (error is not null)
             {
+                // R2-A/R2-C symmetry with the typed-handler leg (2026-07-07): failure
+                // marker + honest transcript message so the outcome is never silent.
+                await pendingPlanManager.WriteGateMarkerAsync(
+                    tenantId, sessionId, gateId,
+                    invocation.Kind, PendingPlanManager.GateStatusDispatchFailed,
+                    bindingId: invocation.BindingId, sideEffectClass: invocation.SideEffectClass,
+                    missingFields: null, turn: invocation.Turn, ct: cancellationToken);
+                await PersistGateOutcomeMessageAsync(
+                    httpContext, tenantId, sessionId,
+                    BuildGateOutcomeMessage(success: false, invocation.Title ?? invocation.ToolId, error, ledgerKey: null),
+                    logger, cancellationToken);
+
                 return Results.Problem(
                     detail: error,
                     statusCode: StatusCodes.Status502BadGateway,
                     title: "Dispatch Failed",
                     extensions: new Dictionary<string, object?> { ["errorCode"] = "gate.dispatch-failed" });
             }
+
+            await PersistGateOutcomeMessageAsync(
+                httpContext, tenantId, sessionId,
+                BuildGateOutcomeMessage(success: true, invocation.Title ?? invocation.ToolId, summary, ledgerKey: null),
+                logger, cancellationToken);
 
             return Results.Ok(new GateResolveResult("confirmed", summary));
         }
@@ -1952,6 +1996,95 @@ public static class ChatEndpoints
             statusCode: StatusCodes.Status409Conflict,
             title: "Conflict",
             extensions: new Dictionary<string, object?> { ["errorCode"] = "gate.not-pending" });
+    }
+
+    /// <summary>
+    /// Maximum characters of a gate-outcome transcript message (Dataverse
+    /// <c>sprk_content</c> caps at 10 000; outcomes are summaries, not payloads).
+    /// </summary>
+    internal const int MaxGateOutcomeMessageChars = 2_000;
+
+    /// <summary>
+    /// Builds the honest gate-resolution transcript message (G-P3 UAT round-2
+    /// R2-A/R2-C, 2026-07-07). Success carries the executed summary (+ ledger key when
+    /// present); failure states EXPLICITLY that nothing was created or modified —
+    /// the exact counter-copy to the round-2 fabrication pattern.
+    /// </summary>
+    internal static string BuildGateOutcomeMessage(bool success, string actionName, string? detail, string? ledgerKey)
+    {
+        var text = success
+            ? $"✅ Confirmed action '{actionName}' executed. {detail ?? "Completed."}" +
+              (ledgerKey is null ? string.Empty : $" (ledger: {ledgerKey})")
+            : $"❌ Confirmed action '{actionName}' FAILED: {detail ?? "The confirmed action failed."} " +
+              "No record was created or modified by this confirmation.";
+
+        return text.Length <= MaxGateOutcomeMessageChars
+            ? text
+            : text[..MaxGateOutcomeMessageChars] + "…";
+    }
+
+    /// <summary>
+    /// Persists a gate-resolution outcome as an Assistant transcript message so
+    /// (a) the operator sees the outcome IN the conversation (it survives reload,
+    /// unlike the client-local rendering) and (b) the NEXT turn's model history
+    /// carries the real result instead of guessing (G-P3 UAT round-2 R2-C: the model
+    /// oscillated between "created" and "not found" because no gate outcome ever
+    /// entered <c>session.Messages</c>). Best-effort: history services unavailable
+    /// (kill switch) or a write failure degrade to a loud log — the gate resolution
+    /// itself already succeeded/failed and must not be masked by persistence errors.
+    /// </summary>
+    private static async Task PersistGateOutcomeMessageAsync(
+        HttpContext httpContext,
+        string tenantId,
+        string sessionId,
+        string content,
+        ILogger logger,
+        CancellationToken cancellationToken)
+    {
+        try
+        {
+            var historyManager = httpContext.RequestServices.GetService<ChatHistoryManager>();
+            var sessionManager = httpContext.RequestServices.GetService<ChatSessionManager>();
+            if (historyManager is null || sessionManager is null)
+            {
+                logger.LogWarning(
+                    "[gate-outcome] history services unavailable — gate outcome not persisted to transcript. session={SessionId}",
+                    sessionId);
+                return;
+            }
+
+            var session = await sessionManager.GetSessionAsync(tenantId, sessionId, cancellationToken);
+            if (session is null)
+            {
+                logger.LogWarning(
+                    "[gate-outcome] session not found — gate outcome not persisted. session={SessionId}",
+                    sessionId);
+                return;
+            }
+
+            var message = new DvChatMessage(
+                MessageId: Guid.NewGuid().ToString("N"),
+                SessionId: sessionId,
+                Role: ChatMessageRole.Assistant,
+                Content: content,
+                TokenCount: 0,
+                CreatedAt: DateTimeOffset.UtcNow,
+                SequenceNumber: session.Messages.Count + 1);
+
+            await historyManager.AddMessageAsync(session, message, cancellationToken);
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // NFR-07: identifiers only. The resolution outcome already returned to the
+            // client; a transcript-persistence failure must degrade loudly, not 5xx.
+            logger.LogError(ex,
+                "[gate-outcome] failed to persist gate outcome message — session={SessionId}",
+                sessionId);
+        }
     }
 
     /// <summary>

@@ -364,10 +364,19 @@ async function resolveGate(
 
     if (!response.ok) {
       let errorCode = 'gate.resolve-failed';
+      let detail: string | undefined;
       try {
-        const problem = (await response.json()) as { errorCode?: string };
+        const problem = (await response.json()) as { errorCode?: string; detail?: string };
         if (problem && typeof problem.errorCode === 'string') {
           errorCode = problem.errorCode;
+        }
+        // G-P3 UAT round-2 R2-A (2026-07-07): the ProblemDetails `detail` carries the
+        // handler's REAL failure reason (e.g. the write-mapper's instructive validation
+        // message). Surfacing it lets the user (and, via the server-persisted transcript
+        // message, the next turn's model) understand and correct the failure instead of
+        // seeing a generic code.
+        if (problem && typeof problem.detail === 'string' && problem.detail.length > 0) {
+          detail = problem.detail;
         }
       } catch {
         // Non-JSON body — keep the fallback code (ADR-019: stable codes only surface).
@@ -375,7 +384,9 @@ async function resolveGate(
       return {
         success: false,
         errorCode,
-        message: `${pendingAction.actionName} could not be ${approved ? 'dispatched' : 'cancelled'} (${errorCode}).`,
+        message: detail
+          ? `${pendingAction.actionName} failed: ${detail}`
+          : `${pendingAction.actionName} could not be ${approved ? 'dispatched' : 'cancelled'} (${errorCode}).`,
       };
     }
 

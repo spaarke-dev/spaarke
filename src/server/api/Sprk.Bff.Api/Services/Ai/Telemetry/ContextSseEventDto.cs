@@ -102,6 +102,33 @@ public sealed record ContextSseEventDto
 
     /// <summary>The persisted ledger ToolChain segment's calls (tool_chain). Identifiers/counts only.</summary>
     public IReadOnlyList<ContextToolChainCallDto>? ContextToolChainCalls { get; init; }
+
+    // ── workspace_open_tab fields (G-P3 UAT round-2 R2-D, 2026-07-07) ─────────
+    //
+    // Carried when ContextEventType == "workspace_open_tab": the loop-invoked
+    // SendWorkspaceArtifactHandler asks the client to materialize a workspace tab
+    // LIVE. The post-046 SpaarkeAi client owns its tab state (restore-on-mount +
+    // PATCH write-through — no polling channel exists anymore), so the server's
+    // only path to the tab strip is this SSE frame → useContextEventBridge →
+    // PaneEventBus `workspace.widget_load` → WorkspaceTabManager.addTab. ADR-030
+    // additive: old clients ignore the unknown discriminant.
+    //
+    // ADR-015: ContextWidgetType is a registry key, ContextDisplayName a tab
+    // title (user-visible UI content, not telemetry), ContextTabId a server-
+    // generated GUID, and ContextWidgetDataJson carries identifiers only for the
+    // v1 'workspace' variant ({layoutId, layoutName}).
+
+    /// <summary>Client workspace-widget registry key (workspace_open_tab), e.g. "workspace".</summary>
+    public string? ContextWidgetType { get; init; }
+
+    /// <summary>Tab display title (workspace_open_tab).</summary>
+    public string? ContextDisplayName { get; init; }
+
+    /// <summary>Server-generated tab correlation id (workspace_open_tab).</summary>
+    public string? ContextTabId { get; init; }
+
+    /// <summary>JSON-serialized widgetData payload for the tab's widget (workspace_open_tab).</summary>
+    public string? ContextWidgetDataJson { get; init; }
 }
 
 /// <summary>

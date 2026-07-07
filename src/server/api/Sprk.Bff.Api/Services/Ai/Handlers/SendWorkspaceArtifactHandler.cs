@@ -88,18 +88,33 @@ public sealed class SendWorkspaceArtifactHandler : IToolHandler
     private const string HandlerIdValue = nameof(SendWorkspaceArtifactHandler);
 
     /// <summary>
-    /// Closed enum of widget-type discriminators accepted by this handler. Mirrors
-    /// <see cref="WorkspaceTabWidgetData"/>'s <c>[JsonDerivedType]</c> annotations + the
-    /// TypeScript <c>WorkspaceTab</c> contract. Any value outside this set is rejected by
-    /// <see cref="ValidateChat"/> with a clear error.
+    /// Closed enum of widget-type discriminators accepted by this handler. The four
+    /// artifact variants mirror <see cref="WorkspaceTabWidgetData"/>'s
+    /// <c>[JsonDerivedType]</c> annotations + the R6-era TypeScript <c>WorkspaceTab</c>
+    /// contract. <c>Workspace</c> (G-P3 UAT round-2 R2-D, 2026-07-07) opens a NAMED
+    /// workspace LAYOUT (e.g. "Compose") as a live tab in the SpaarkeAi workspace pane —
+    /// the same mechanism the Workspaces menu drives client-side
+    /// (<c>widget_load {widgetType:'workspace', widgetData:{layoutId, layoutName}}</c>).
+    /// Any value outside this set is rejected by <see cref="ValidateChat"/> with a clear error.
     /// </summary>
     internal static readonly HashSet<string> SupportedWidgetTypes = new(StringComparer.Ordinal)
     {
         "Summary",
         "DocumentViewer",
         "Dashboard",
-        "Table"
+        "Table",
+        "Workspace"
     };
+
+    /// <summary>
+    /// The client workspace-widget registry key for a layout tab. MUST match the
+    /// registration in <c>register-workspace-widgets.ts</c> ("workspace" renders the
+    /// embedded LegalWorkspaceApp with <c>{layoutId, layoutName}</c>).
+    /// </summary>
+    internal const string ClientWorkspaceWidgetKey = "workspace";
+
+    /// <summary>SSE discriminant for the live tab-open frame (rides the existing context_event channel — ADR-030 additive).</summary>
+    internal const string WorkspaceOpenTabEventType = "workspace_open_tab";
 
     private static readonly JsonSerializerOptions WidgetDataJsonOptions = new()
     {
@@ -109,17 +124,20 @@ public sealed class SendWorkspaceArtifactHandler : IToolHandler
     private readonly IWorkspaceStateService _workspaceStateService;
     private readonly IGuidProvider _guidProvider;
     private readonly TimeProvider _timeProvider;
+    private readonly WorkspaceLayoutService _layoutService;
     private readonly ILogger<SendWorkspaceArtifactHandler> _logger;
 
     public SendWorkspaceArtifactHandler(
         IWorkspaceStateService workspaceStateService,
         IGuidProvider guidProvider,
         TimeProvider timeProvider,
+        WorkspaceLayoutService layoutService,
         ILogger<SendWorkspaceArtifactHandler> logger)
     {
         _workspaceStateService = workspaceStateService ?? throw new ArgumentNullException(nameof(workspaceStateService));
         _guidProvider = guidProvider ?? throw new ArgumentNullException(nameof(guidProvider));
         _timeProvider = timeProvider ?? throw new ArgumentNullException(nameof(timeProvider));
+        _layoutService = layoutService ?? throw new ArgumentNullException(nameof(layoutService));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -129,19 +147,22 @@ public sealed class SendWorkspaceArtifactHandler : IToolHandler
     /// <inheritdoc />
     public ToolHandlerMetadata Metadata { get; } = new(
         Name: "Send Workspace Artifact",
-        Description: "Send a finished artifact (Summary, DocumentViewer, Dashboard, or Table) to the user's " +
-                     "workspace pane as a new tab. Use this when you have produced a structured result the user " +
-                     "should be able to inspect, share, or pin to a matter — for example: a generated executive " +
-                     "summary (Summary), a previewed contract (DocumentViewer), a portfolio overview (Dashboard), " +
-                     "or a sortable result set (Table). The artifact materializes on the workspace tab strip; " +
-                     "the chat reply remains conversational.",
-        Version: "1.0.0",
+        Description: "Open a tab in the user's workspace pane. PREFERRED USE — open a named workspace " +
+                     "LAYOUT as a live tab: widgetType 'Workspace' with widgetData " +
+                     "{\"kind\":\"Workspace\",\"layoutName\":\"<layout name>\"} (e.g. layoutName 'Compose' " +
+                     "when the user asks to open the Compose editor / start composing or drafting a document " +
+                     "in the workspace). The tab opens immediately in the workspace pane and the tool result " +
+                     "confirms it. Legacy artifact variants (Summary, DocumentViewer, Dashboard, Table) record " +
+                     "an artifact to workspace state but are NOT visible in the current workspace UI — avoid " +
+                     "them unless explicitly instructed.",
+        Version: "1.1.0",
         SupportedInputTypes: new[] { "text/plain" },
         Parameters: new[]
         {
             new ToolParameterDefinition(
                 "widgetType",
-                "Closed enum: 'Summary' | 'DocumentViewer' | 'Dashboard' | 'Table'. Selects the workspace tab variant.",
+                "Closed enum: 'Workspace' (open a named workspace layout as a live tab — preferred) | " +
+                "'Summary' | 'DocumentViewer' | 'Dashboard' | 'Table' (legacy artifact variants).",
                 ToolParameterType.String,
                 Required: true),
             new ToolParameterDefinition(
@@ -151,9 +172,10 @@ public sealed class SendWorkspaceArtifactHandler : IToolHandler
                 Required: true),
             new ToolParameterDefinition(
                 "widgetData",
-                "JSON object carrying the per-variant payload. MUST include a 'kind' field equal to widgetType " +
-                "and the variant-specific fields (Summary: body; DocumentViewer: documentId/filename/mimeType/sizeBytes; " +
-                "Dashboard: layoutId/dashboardName; Table: rowCount/filteredColumns/selectedRows).",
+                "JSON object carrying the per-variant payload. MUST include a 'kind' field equal to widgetType. " +
+                "Workspace: layoutName (the workspace layout's display name, e.g. 'Compose') or layoutId (GUID). " +
+                "Legacy variants: Summary: body; DocumentViewer: documentId/filename/mimeType/sizeBytes; " +
+                "Dashboard: layoutId/dashboardName; Table: rowCount/filteredColumns/selectedRows.",
                 ToolParameterType.Object,
                 Required: true),
             new ToolParameterDefinition(
@@ -247,6 +269,23 @@ public sealed class SendWorkspaceArtifactHandler : IToolHandler
                     $"'widgetData.kind' ('{kindProp.GetString()}') must equal 'widgetType' ('{widgetType}').");
             }
 
+            // Workspace layout tabs (R2-D): the payload must name the layout to open.
+            if (string.Equals(widgetType, "Workspace", StringComparison.Ordinal))
+            {
+                var hasLayoutName = dataProp.TryGetProperty("layoutName", out var lnProp) &&
+                                    lnProp.ValueKind == JsonValueKind.String &&
+                                    !string.IsNullOrWhiteSpace(lnProp.GetString());
+                var hasLayoutId = dataProp.TryGetProperty("layoutId", out var liProp) &&
+                                  liProp.ValueKind == JsonValueKind.String &&
+                                  Guid.TryParse(liProp.GetString(), out _);
+                if (!hasLayoutName && !hasLayoutId)
+                {
+                    return ToolValidationResult.Failure(
+                        "'widgetData' for widgetType 'Workspace' must include 'layoutName' (the layout's " +
+                        "display name, e.g. 'Compose') or 'layoutId' (a GUID).");
+                }
+            }
+
             // matterId — optional; when present MUST be a valid GUID.
             if (doc.RootElement.TryGetProperty("matterId", out var matterIdProp) &&
                 matterIdProp.ValueKind == JsonValueKind.String &&
@@ -303,6 +342,18 @@ public sealed class SendWorkspaceArtifactHandler : IToolHandler
         _logger.LogInformation(
             "SendWorkspaceArtifactHandler ({Correlation}) dispatch start widgetType={WidgetType} tenantId={TenantId} matterScoped={MatterScoped} titleLen={TitleLen}",
             correlationLogId, args.WidgetType, context.TenantId, args.MatterId is not null, args.Title.Length);
+
+        // ── G-P3 UAT round-2 R2-D (2026-07-07): Workspace layout tab — live open ─────
+        // Opens a named workspace layout (e.g. "Compose") as a tab in the SpaarkeAi
+        // workspace pane by emitting a `workspace_open_tab` frame on the existing
+        // context_event SSE channel; the client bridge dispatches the SAME
+        // PaneEventBus `workspace.widget_load` event the Workspaces menu uses.
+        if (string.Equals(args.WidgetType, "Workspace", StringComparison.Ordinal))
+        {
+            return await ExecuteOpenWorkspaceTabAsync(
+                context, tool, args, startedAt, stopwatch, correlationLogId, cancellationToken)
+                .ConfigureAwait(false);
+        }
 
         // Resolve matter context: explicit matterId arg > ChatInvocationContext.MatterId > synthetic unattached.
         var matterContext = ResolveMatterContext(args, context);
@@ -378,9 +429,17 @@ public sealed class SendWorkspaceArtifactHandler : IToolHandler
                 "SendWorkspaceArtifactHandler ({Correlation}) dispatch complete tabId={TabId} widgetType={WidgetType} in {Duration}ms",
                 correlationLogId, tabId, args.WidgetType, stopwatch.ElapsedMilliseconds);
 
-            var summaryText = string.IsNullOrWhiteSpace(args.Title)
-                ? $"Workspace tab created (widgetType={args.WidgetType}, tabId={tabId})."
-                : $"Workspace tab '{args.Title}' created (widgetType={args.WidgetType}, tabId={tabId}).";
+            // G-P3 UAT round-2 R2-D honesty (2026-07-07): the four legacy artifact
+            // variants persist to workspace state (R6 Pillar 6a), but the post-046
+            // SpaarkeAi client has no polling channel and no registry keys for these
+            // widget types — the artifact is NOT visible on the live tab strip. The
+            // summary must not claim a visible tab (the round-2 fabrications built on
+            // exactly this kind of over-claiming result text).
+            var summaryText =
+                $"Workspace artifact '{args.Title}' recorded to workspace state (widgetType={args.WidgetType}, " +
+                $"tabId={tabId}). NOTE: this artifact is NOT visible as a tab in the current workspace UI — " +
+                "do not tell the user a tab was opened. To open a live workspace tab use widgetType 'Workspace' " +
+                "with a layoutName.";
 
             return ToolResult.Ok(
                 HandlerId, tool.Id, tool.Name,
@@ -440,6 +499,186 @@ public sealed class SendWorkspaceArtifactHandler : IToolHandler
                 $"Workspace artifact dispatch failed: {ex.Message}",
                 ToolErrorCodes.InternalError,
                 new ToolExecutionMetadata { StartedAt = startedAt, CompletedAt = _timeProvider.GetUtcNow() });
+        }
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────────
+    // Workspace layout tab — live open (G-P3 UAT round-2 R2-D, 2026-07-07)
+    // ─────────────────────────────────────────────────────────────────────────────
+
+    /// <summary>
+    /// Opens a named workspace layout as a LIVE tab in the SpaarkeAi workspace pane.
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// <b>Chain</b>: layout resolved by name/id against <see cref="WorkspaceLayoutService"/>
+    /// (hard-coded + Dataverse-system + user layouts, under the calling user) → a
+    /// <c>workspace_open_tab</c> frame is emitted on the context_event SSE channel via
+    /// <see cref="ChatInvocationContext.SseWriter"/> → the SpaarkeAi
+    /// <c>useContextEventBridge</c> dispatches PaneEventBus
+    /// <c>workspace.widget_load {widgetType:'workspace', widgetData:{layoutId, layoutName}}</c>
+    /// — byte-compatible with the Workspaces-menu path, so <c>WorkspaceTabManager.addTab</c>
+    /// materializes + auto-activates the tab and the client's own tab persistence
+    /// (PATCH /sessions/{id}/tabs) makes it survive reload.
+    /// </para>
+    /// <para>
+    /// <b>Fail-honest</b>: without a live SSE writer the tab CANNOT open (the post-046
+    /// client has no polling channel) — the handler returns an error instead of a
+    /// success the model would relay as "opened". An unknown layout name returns the
+    /// available layout names so the model can ground a retry or an honest answer.
+    /// </para>
+    /// </remarks>
+    private async Task<ToolResult> ExecuteOpenWorkspaceTabAsync(
+        ChatInvocationContext context,
+        AnalysisTool tool,
+        ParsedArgs args,
+        DateTimeOffset startedAt,
+        Stopwatch stopwatch,
+        string correlationLogId,
+        CancellationToken cancellationToken)
+    {
+        ToolExecutionMetadata Timed() => new() { StartedAt = startedAt, CompletedAt = _timeProvider.GetUtcNow() };
+
+        if (context.SseWriter is null)
+        {
+            stopwatch.Stop();
+            _logger.LogWarning(
+                "SendWorkspaceArtifactHandler ({Correlation}) workspace tab requested but no SSE writer on this surface — refused (fail-honest).",
+                correlationLogId);
+            return ToolResult.Error(
+                HandlerId, tool.Id, tool.Name,
+                "The workspace pane cannot be reached from this surface (no live chat stream) — the tab was NOT opened. Tell the user honestly.",
+                ToolErrorCodes.ValidationFailed,
+                Timed());
+        }
+
+        // Parse layoutName / layoutId out of the validated widgetData payload.
+        string? layoutName = null;
+        Guid layoutId = Guid.Empty;
+        try
+        {
+            using var doc = JsonDocument.Parse(args.WidgetDataRawJson);
+            if (doc.RootElement.TryGetProperty("layoutName", out var lnProp) && lnProp.ValueKind == JsonValueKind.String)
+            {
+                layoutName = lnProp.GetString();
+            }
+            if (doc.RootElement.TryGetProperty("layoutId", out var liProp) && liProp.ValueKind == JsonValueKind.String)
+            {
+                Guid.TryParse(liProp.GetString(), out layoutId);
+            }
+        }
+        catch (JsonException ex)
+        {
+            stopwatch.Stop();
+            return ToolResult.Error(
+                HandlerId, tool.Id, tool.Name,
+                $"widgetData payload could not be parsed for widgetType 'Workspace': {ex.Message}",
+                ToolErrorCodes.ValidationFailed,
+                Timed());
+        }
+
+        if (layoutId == Guid.Empty && string.IsNullOrWhiteSpace(layoutName))
+        {
+            stopwatch.Stop();
+            return ToolResult.Error(
+                HandlerId, tool.Id, tool.Name,
+                "widgetData for widgetType 'Workspace' must include 'layoutName' (e.g. 'Compose') or a 'layoutId' GUID.",
+                ToolErrorCodes.ValidationFailed,
+                Timed());
+        }
+
+        try
+        {
+            var layouts = await _layoutService
+                .GetLayoutsAsync(context.UserId ?? string.Empty, cancellationToken)
+                .ConfigureAwait(false);
+
+            var layout = layoutId != Guid.Empty
+                ? layouts.FirstOrDefault(l => l.Id == layoutId)
+                : layouts.FirstOrDefault(l => string.Equals(l.Name, layoutName, StringComparison.OrdinalIgnoreCase));
+
+            if (layout is null)
+            {
+                stopwatch.Stop();
+                var available = string.Join(", ", layouts.Select(l => $"'{l.Name}'"));
+                _logger.LogInformation(
+                    "SendWorkspaceArtifactHandler ({Correlation}) workspace layout not found — requestedById={ById} availableCount={Count}",
+                    correlationLogId, layoutId != Guid.Empty, layouts.Count);
+                return ToolResult.Error(
+                    HandlerId, tool.Id, tool.Name,
+                    $"No workspace layout named '{layoutName ?? layoutId.ToString("D")}' exists for this user. " +
+                    $"Available layouts: {available}. Tell the user honestly or retry with one of these names.",
+                    ToolErrorCodes.ValidationFailed,
+                    Timed());
+            }
+
+            var tabId = _guidProvider.NewGuid().ToString("N");
+            var displayName = string.IsNullOrWhiteSpace(args.Title) ? layout.Name : args.Title;
+            var widgetDataJson = JsonSerializer.Serialize(new
+            {
+                layoutId = layout.Id.ToString("D"),
+                layoutName = layout.Name
+            });
+
+            // Presentation frame — rides the existing context_event channel (ADR-030
+            // additive; old clients ignore the unknown discriminant). Identifiers +
+            // tab title only (ADR-015).
+            await context.SseWriter(
+                new Api.Ai.ChatSseEvent(
+                    "context_event",
+                    null,
+                    new Telemetry.ContextSseEventDto
+                    {
+                        ContextEventType = WorkspaceOpenTabEventType,
+                        ContextTimestamp = _timeProvider.GetUtcNow().ToString("o"),
+                        ContextWidgetType = ClientWorkspaceWidgetKey,
+                        ContextDisplayName = displayName,
+                        ContextTabId = tabId,
+                        ContextWidgetDataJson = widgetDataJson
+                    }),
+                cancellationToken).ConfigureAwait(false);
+
+            stopwatch.Stop();
+            _logger.LogInformation(
+                "SendWorkspaceArtifactHandler ({Correlation}) workspace tab opened layoutId={LayoutId} tabId={TabId} in {Duration}ms",
+                correlationLogId, layout.Id, tabId, stopwatch.ElapsedMilliseconds);
+
+            return ToolResult.Ok(
+                HandlerId, tool.Id, tool.Name,
+                data: new
+                {
+                    tabId,
+                    widgetType = "Workspace",
+                    layoutId = layout.Id.ToString("D"),
+                    layoutName = layout.Name
+                },
+                summary: $"Opened the '{layout.Name}' workspace as a tab in the workspace pane" +
+                         (string.Equals(displayName, layout.Name, StringComparison.Ordinal)
+                             ? "."
+                             : $" (tab title '{displayName}')."),
+                confidence: 1.0,
+                execution: Timed());
+        }
+        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
+        {
+            stopwatch.Stop();
+            return ToolResult.Error(
+                HandlerId, tool.Id, tool.Name,
+                "Workspace tab open was cancelled.",
+                ToolErrorCodes.Cancelled,
+                Timed());
+        }
+        catch (Exception ex)
+        {
+            stopwatch.Stop();
+            _logger.LogError(ex,
+                "SendWorkspaceArtifactHandler ({Correlation}) workspace tab open failed: {ErrorType}",
+                correlationLogId, ex.GetType().Name);
+            return ToolResult.Error(
+                HandlerId, tool.Id, tool.Name,
+                "Opening the workspace tab failed unexpectedly — the tab was NOT opened.",
+                ToolErrorCodes.InternalError,
+                Timed());
         }
     }
 
