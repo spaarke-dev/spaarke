@@ -58,13 +58,31 @@
  *
  * # Auth
  *
- * BFF `/push` requires user-context OBO. Plain JS webresources have no
- * `@spaarke/auth` module. This webresource uses the same cross-origin cookie
- * pattern used by the existing `sprk_updaterelated_commands.js` (Update
- * Related ribbon on Event entity): `fetch(url, { credentials: "include" })`.
- * The BFF is configured (per its CORS + auth setup) to accept host-context
- * credentials from Dataverse origins. This is Option (b) from the task POML
- * — proven-working, no new auth mechanism introduced.
+ * BFF `/push` requires a Bearer JWT (user-context OBO). Plain JS webresources
+ * cannot consume the `@spaarke/auth` TypeScript package, so this webresource
+ * mirrors the MSAL-browser CDN pattern used by the canonical
+ * `sprk_communication_send.js` (Communication Send ribbon on
+ * sprk_communication entity):
+ *
+ *   1. Load `msal-browser` from the Microsoft CDN at first use.
+ *   2. Resolve `sprk_MsalClientId`, `sprk_BffApiAppId`, `sprk_TenantId` from
+ *      Dataverse environment variables; derive `redirectUri` from
+ *      `Xrm.Utility.getGlobalContext().getClientUrl()`.
+ *   3. `PublicClientApplication.acquireTokenSilent` → `ssoSilent` →
+ *      `acquireTokenPopup` fallback chain to acquire the BFF scope
+ *      `api://{bffAppId}/user_impersonation`.
+ *   4. Attach the resulting access token as
+ *      `Authorization: Bearer <token>` on the `POST /field-mappings/push`
+ *      request.
+ *
+ * ADR-028 Path A (project-scoped exception): using `msal-browser` directly
+ * (instead of `@spaarke/auth`) is the established pattern for vanilla JS
+ * ribbon webresources — same rationale as `sprk_communication_send.js`,
+ * `sprk_emailactions.js`, and `sprk_DocumentOperations.js`.
+ *
+ * The previous cookie-credentials pattern (`credentials: "include"` without a
+ * Bearer token) was silently broken since v1.0.0 — the BFF rejects it with
+ * 401 because it requires JWTs. Fixed in v1.1.0 (SRFR-053, 2026-07-06).
  *
  * The BFF API base URL is read from the `sprk_BffApiBaseUrl` Dataverse
  * environment variable (canonical pattern; see `sprk_analysis_commands.js`
@@ -87,6 +105,10 @@
  * # Version
  *
  * v1.0.0 — initial implementation (SRFR-061, 2026-07-02)
+ * v1.1.0 — MSAL Bearer token auth for BFF /push (SRFR-053, 2026-07-06):
+ *          replaced broken `credentials: "include"` cookie approach with
+ *          MSAL silent → SSO → popup token chain (mirrors
+ *          `sprk_communication_send.js`).
  *
  * @namespace Spaarke.FieldMapping.Push
  */
@@ -104,7 +126,7 @@ Spaarke.FieldMapping.Push = Spaarke.FieldMapping.Push || {};
     // -----------------------------------------------------------------------
 
     /** Version for diagnostic logging. */
-    ns.VERSION = "1.0.0";
+    ns.VERSION = "1.1.0";
 
     /** Cache-key prefix for the visibility-check sessionStorage entries. */
     var CACHE_KEY_PREFIX = "sprk_fieldmapping_hasSource_";
@@ -447,14 +469,27 @@ Spaarke.FieldMapping.Push = Spaarke.FieldMapping.Push || {};
             sourceRecordId: sourceRecordId,
             targetEntity: targetEntity
         };
-        return fetch(url, {
-            method: "POST",
-            headers: {
-                "Content-Type": "application/json",
-                "Accept": "application/json"
-            },
-            body: JSON.stringify(body),
-            credentials: "include"
+        // Acquire a Bearer JWT via MSAL BEFORE issuing the /push fetch.
+        // Rationale: BFF `/api/v1/field-mappings/push` REQUIRES an OBO Bearer
+        // token; the previous cookie-credentials pattern (v1.0.0) hit 401. See
+        // module header §Auth for the ADR-028 Path A rationale. SRFR-053.
+        return getAuthTokenForBff().then(function (token) {
+            if (!token) {
+                // Token acquisition failed hard — surface a bucketed error
+                // rather than firing an unauthenticated request that we know
+                // will 401. `pushSequentially` counts a thrown rejection here
+                // as a network error, which is the correct bucket.
+                throw new Error("BFF auth token acquisition failed");
+            }
+            return fetch(url, {
+                method: "POST",
+                headers: {
+                    "Content-Type": "application/json",
+                    "Accept": "application/json",
+                    "Authorization": "Bearer " + token
+                },
+                body: JSON.stringify(body)
+            });
         }).then(function (response) {
             // 400 = validation error; MAY be over-limit (ProblemDetails
             // with title === "Limit Exceeded"). Parse body to disambiguate.
@@ -610,6 +645,262 @@ Spaarke.FieldMapping.Push = Spaarke.FieldMapping.Push || {};
                 recordTypeRefId + ":", err
             );
             return null;
+        });
+    }
+
+    // -----------------------------------------------------------------------
+    // Helpers — MSAL Bearer token for BFF (SRFR-053, v1.1.0)
+    // -----------------------------------------------------------------------
+    // Mirrors the pattern in `sprk_communication_send.js`:
+    //   1. Load msal-browser lib from Microsoft CDN (cached across pages).
+    //   2. Resolve MSAL config from Dataverse env vars (sprk_MsalClientId,
+    //      sprk_BffApiAppId, sprk_TenantId); redirectUri from Xrm context.
+    //   3. Init PublicClientApplication (reuse across calls; also reuse
+    //      Sprk.Communication.Send or Spaarke.Email instance if pre-existing
+    //      on the page — avoids duplicate popups for the same user session).
+    //   4. acquireTokenSilent → ssoSilent → acquireTokenPopup fallback chain.
+
+    /** Cached MSAL/BFF config resolved from Dataverse env vars. */
+    var _msalConfig = null;
+    var _configResolvePromise = null;
+
+    /** Cached MSAL PublicClientApplication instance. */
+    var _msalInstance = null;
+    var _msalInitPromise = null;
+
+    /** Cached logged-in account (for silent-token retry). */
+    var _currentAccount = null;
+
+    /**
+     * MSAL library CDN URL — SAME version as `sprk_communication_send.js`
+     * so a page load that already fetched msal-browser for the Send button
+     * won't reload it for the Push button.
+     */
+    var MSAL_CDN_URL = "https://alcdn.msauth.net/browser/2.38.0/js/msal-browser.min.js";
+
+    /**
+     * Resolve MSAL config (clientId, bffAppId, tenantId, redirectUri) from
+     * Dataverse Environment Variables. Cached on module.
+     */
+    function resolveMsalConfig() {
+        if (_configResolvePromise) {
+            return _configResolvePromise;
+        }
+        _configResolvePromise = Xrm.WebApi.retrieveMultipleRecords(
+            "environmentvariabledefinition",
+            "?$filter=" +
+                "schemaname eq 'sprk_BffApiAppId' or " +
+                "schemaname eq 'sprk_MsalClientId' or " +
+                "schemaname eq 'sprk_TenantId'" +
+            "&$select=schemaname,defaultvalue" +
+            "&$expand=environmentvariabledefinition_environmentvariablevalue($select=value)"
+        ).then(function (result) {
+            var resolved = {};
+            if (result && result.entities) {
+                result.entities.forEach(function (def) {
+                    var vals = def.environmentvariabledefinition_environmentvariablevalue;
+                    if (vals && vals.length > 0 && vals[0].value) {
+                        resolved[def.schemaname] = vals[0].value;
+                    } else if (def.defaultvalue) {
+                        resolved[def.schemaname] = def.defaultvalue;
+                    }
+                });
+            }
+            var required = ["sprk_BffApiAppId", "sprk_MsalClientId", "sprk_TenantId"];
+            var missing = required.filter(function (k) { return !resolved[k]; });
+            if (missing.length) {
+                throw new Error(
+                    "[FieldMapping.Push v" + ns.VERSION + "] Missing required env vars for MSAL: " +
+                    missing.join(", ")
+                );
+            }
+            var redirectUri;
+            try {
+                redirectUri = Xrm.Utility.getGlobalContext().getClientUrl();
+            } catch (e) {
+                throw new Error(
+                    "[FieldMapping.Push v" + ns.VERSION + "] Cannot determine redirectUri: " + e.message
+                );
+            }
+            _msalConfig = {
+                clientId: resolved["sprk_MsalClientId"],
+                bffAppId: resolved["sprk_BffApiAppId"],
+                tenantId: resolved["sprk_TenantId"],
+                redirectUri: redirectUri
+            };
+            console.log(
+                "[FieldMapping.Push v" + ns.VERSION + "] MSAL config resolved:",
+                {
+                    clientId: _msalConfig.clientId,
+                    bffAppId: _msalConfig.bffAppId,
+                    tenantId: _msalConfig.tenantId,
+                    redirectUri: _msalConfig.redirectUri
+                }
+            );
+            return _msalConfig;
+        }).catch(function (err) {
+            _configResolvePromise = null;
+            console.error("[FieldMapping.Push v" + ns.VERSION + "] MSAL config resolution failed:", err);
+            throw err;
+        });
+        return _configResolvePromise;
+    }
+
+    /**
+     * Load msal-browser from CDN (idempotent — checks window.msal first).
+     */
+    function loadMsalLibrary() {
+        return new Promise(function (resolve, reject) {
+            if (typeof msal !== "undefined" && msal.PublicClientApplication) {
+                resolve();
+                return;
+            }
+            var script = document.createElement("script");
+            script.src = MSAL_CDN_URL;
+            script.onload = function () {
+                console.log("[FieldMapping.Push v" + ns.VERSION + "] MSAL library loaded from CDN");
+                resolve();
+            };
+            script.onerror = function () {
+                reject(new Error("Failed to load MSAL library from " + MSAL_CDN_URL));
+            };
+            document.head.appendChild(script);
+        });
+    }
+
+    /**
+     * Initialize (or retrieve) the MSAL PublicClientApplication instance.
+     * Reuses `Sprk.Communication.Send._msalInstance` or
+     * `Spaarke.Email._msalInstance` if already present on the page — avoids
+     * duplicate popups when the user has already authenticated via another
+     * ribbon action in the same tab.
+     */
+    function initMsal() {
+        // Reuse existing MSAL instance from sibling ribbon modules if present.
+        if (typeof Sprk !== "undefined" && Sprk.Communication && Sprk.Communication.Send &&
+            Sprk.Communication.Send._msalInstance) {
+            console.log("[FieldMapping.Push v" + ns.VERSION + "] Reusing Sprk.Communication.Send MSAL instance");
+            _msalInstance = Sprk.Communication.Send._msalInstance;
+            if (Sprk.Communication.Send._currentAccount) {
+                _currentAccount = Sprk.Communication.Send._currentAccount;
+            }
+            // Config for THIS module still resolved (bffAppId needed for scope).
+            return resolveMsalConfig().then(function () { return _msalInstance; });
+        }
+        if (typeof Spaarke !== "undefined" && Spaarke.Email && Spaarke.Email._msalInstance) {
+            console.log("[FieldMapping.Push v" + ns.VERSION + "] Reusing Spaarke.Email MSAL instance");
+            _msalInstance = Spaarke.Email._msalInstance;
+            if (Spaarke.Email._currentAccount) {
+                _currentAccount = Spaarke.Email._currentAccount;
+            }
+            return resolveMsalConfig().then(function () { return _msalInstance; });
+        }
+        if (_msalInitPromise) {
+            return _msalInitPromise;
+        }
+        _msalInitPromise = Promise.all([
+            resolveMsalConfig(),
+            loadMsalLibrary()
+        ]).then(function (parts) {
+            var cfg = parts[0];
+            var authorityMetadata = JSON.stringify({
+                "authorization_endpoint": "https://login.microsoftonline.com/" + cfg.tenantId + "/oauth2/v2.0/authorize",
+                "token_endpoint": "https://login.microsoftonline.com/" + cfg.tenantId + "/oauth2/v2.0/token",
+                "issuer": "https://login.microsoftonline.com/" + cfg.tenantId + "/v2.0",
+                "jwks_uri": "https://login.microsoftonline.com/" + cfg.tenantId + "/discovery/v2.0/keys",
+                "end_session_endpoint": "https://login.microsoftonline.com/" + cfg.tenantId + "/oauth2/v2.0/logout"
+            });
+            var msalConfig = {
+                auth: {
+                    clientId: cfg.clientId,
+                    authority: "https://login.microsoftonline.com/" + cfg.tenantId,
+                    redirectUri: cfg.redirectUri,
+                    navigateToLoginRequestUrl: false,
+                    knownAuthorities: ["login.microsoftonline.com"],
+                    authorityMetadata: authorityMetadata
+                },
+                cache: {
+                    cacheLocation: "sessionStorage",
+                    storeAuthStateInCookie: false
+                },
+                system: {
+                    loggerOptions: {
+                        loggerCallback: function (level, message, containsPii) {
+                            if (containsPii) return;
+                            if (level <= 1) {
+                                console.log("[FieldMapping.Push MSAL] " + message);
+                            }
+                        },
+                        logLevel: 3
+                    }
+                }
+            };
+            _msalInstance = new msal.PublicClientApplication(msalConfig);
+            if (typeof _msalInstance.initialize === "function") {
+                return _msalInstance.initialize().then(function () {
+                    return _msalInstance.handleRedirectPromise();
+                });
+            }
+            return _msalInstance.handleRedirectPromise();
+        }).then(function (redirectResponse) {
+            if (redirectResponse && redirectResponse.account) {
+                _currentAccount = redirectResponse.account;
+            } else {
+                var accounts = _msalInstance.getAllAccounts();
+                if (accounts && accounts.length) {
+                    _currentAccount = accounts[0];
+                }
+            }
+            return _msalInstance;
+        }).catch(function (err) {
+            _msalInitPromise = null;
+            console.error("[FieldMapping.Push v" + ns.VERSION + "] MSAL init failed:", err);
+            throw err;
+        });
+        return _msalInitPromise;
+    }
+
+    /**
+     * Silent → SSO → popup fallback chain. Returns the resulting access token
+     * for the BFF scope `api://{bffAppId}/user_impersonation`. Returns `null`
+     * on any failure — caller decides whether to proceed unauthenticated
+     * (we do not — `pushOne` treats null as a hard failure).
+     */
+    function getAuthTokenForBff() {
+        return initMsal().then(function (msalInstance) {
+            var cfg = _msalConfig;
+            var scope = "api://" + cfg.bffAppId + "/user_impersonation";
+            if (_currentAccount) {
+                return msalInstance.acquireTokenSilent({
+                    scopes: [scope],
+                    account: _currentAccount
+                }).then(function (resp) {
+                    return resp.accessToken;
+                }).catch(function () {
+                    return ssoAndPopupFallback(msalInstance, scope);
+                });
+            }
+            return ssoAndPopupFallback(msalInstance, scope);
+        }).catch(function (err) {
+            console.error("[FieldMapping.Push v" + ns.VERSION + "] getAuthTokenForBff failed:", err);
+            return null;
+        });
+    }
+
+    /** SSO-silent → popup fallback (shared branch). */
+    function ssoAndPopupFallback(msalInstance, scope) {
+        return msalInstance.ssoSilent({ scopes: [scope] }).then(function (resp) {
+            if (resp.account) _currentAccount = resp.account;
+            return resp.accessToken;
+        }).catch(function () {
+            var popupRequest = {
+                scopes: [scope],
+                loginHint: _currentAccount ? _currentAccount.username : undefined
+            };
+            return msalInstance.acquireTokenPopup(popupRequest).then(function (resp) {
+                if (resp.account) _currentAccount = resp.account;
+                return resp.accessToken;
+            });
         });
     }
 
