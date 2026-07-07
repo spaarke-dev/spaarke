@@ -129,10 +129,19 @@ import { XrmDataverseClient } from '../../../../Spaarke.UI.Components/src/servic
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Configuration — the sprk_gridconfiguration record id that drives the grid.
-// Authored in DEV by task 030 (Phase D anchor). Same record drives EventsPage.
+//
+// Dedicated Calendar-widget config (2026-07-06): this is a COPY of the shared
+// "Event Default" record (e15c2b93-…, authored task 030 — still used by the
+// standalone EventsPage / VisualHost Event drill-through) with ONE difference:
+// the `source` is a `savedquery` + `availableViews` allowlist that curates the
+// view-selector dropdown to the due-date-relevant views (All Tasks / All Tasks
+// Open / …7 Days / My Tasks Open / Matter All Tasks Open 7 Days / All Deadlines),
+// defaulting to "All Tasks Open". Command bar, filter chips, row-open, secondary
+// action, and drill-through behavior are identical to the shared record. Split
+// out so curating the workspace dropdown does NOT affect the drill-through grid.
 // ─────────────────────────────────────────────────────────────────────────────
 
-const EVENT_CONFIG_ID = 'e15c2b93-a05f-f111-a825-70a8a59455f4';
+const EVENT_CONFIG_ID = '5294c28a-f078-f111-ab0e-7ced8ddc4a05';
 const EVENT_ENTITY_NAME = 'sprk_event';
 
 // ─────────────────────────────────────────────────────────────────────────────

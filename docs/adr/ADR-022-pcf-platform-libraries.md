@@ -4,8 +4,10 @@
 |-------|-------|
 | Status | **Accepted** (Revised) |
 | Date | 2025-12-30 |
-| Updated | 2026-02-23 |
+| Updated | 2026-07-07 |
 | Authors | Spaarke Engineering |
+
+> **2026-07-07 addendum**: Shared-library React-version drift (PCF ↔ Code Page) — the shared lib's `@types/react` 19 leaks into PCF source-imports (TS2786). Keep the PCF-imported surface **slim** + **re-cast at the import boundary**; do NOT realign `@types/react` workspace-wide or fork a second library. Operative rule + example: [`.claude/adr/ADR-022` § Shared-Library React-Version Drift](../../.claude/adr/ADR-022-pcf-platform-libraries.md). See Revision History.
 
 ---
 
@@ -359,3 +361,4 @@ When creating **React Code Pages** (standalone dialogs):
 |------|---------|---------|--------|
 | 2025-12-30 | 1.0 | Initial ADR — React 16 compatibility issue discovered during Visual Host v1.1.0 deployment | Spaarke Engineering |
 | 2026-02-23 | 1.1 | Revised for two-tier architecture (ADR-006 revision): added Scope section clarifying this ADR applies to field-bound PCF controls only — NOT React Code Pages. Added React Code Page section with React 18 patterns. Updated AI-Directed Coding Guidance to distinguish PCF vs Code Page rules. | Spaarke Engineering |
+| 2026-07-07 | 1.2 | Added **Shared-Library React-Version Drift (PCF ↔ Code Page boundary)** guidance — shared lib `@types/react` 19 leaks React-19 `ReactNode` into PCF source-imports (TS2786). Resolution: slim PCF-imported surface + re-cast at the import boundary; do NOT realign `@types/react` workspace-wide or fork a second library. Canonical rule in concise ADR; cross-linked from ADR-012. | Spaarke Engineering (Claude) |

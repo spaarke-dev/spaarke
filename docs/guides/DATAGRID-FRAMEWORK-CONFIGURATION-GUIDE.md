@@ -1,5 +1,6 @@
 # DataGrid Framework — Configuration Guide
 
+> **Last Updated**: July 7, 2026
 > **Audience**: Power Apps makers authoring `sprk_gridconfiguration` records, and developers wiring a new grid into a Custom Page or workspace widget.
 > **Architecture context**: [`SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE.md`](../architecture/SPAARKE-DATAGRID-FRAMEWORK-ARCHITECTURE.md)
 > **Schema reference**: [`DataGridConfiguration.ts`](../../src/client/shared/Spaarke.UI.Components/src/types/DataGridConfiguration.ts) (v1.0)
@@ -140,6 +141,51 @@ Use when you want whatever Dataverse considers the default view at render time. 
 Use when the config owns the query (no Dataverse savedquery record exists) — e.g. SemanticSearch results.
 
 > ⚠ **Do NOT** embed `<condition value='@MatterId'/>` placeholders in inline FetchXML. Dataverse rejects placeholders at save time. Use `behavior.parentContextFilter` (Step 4) instead.
+
+---
+
+## Step 3.5 — Restrict which views appear in the view-switcher (`availableViews`)
+
+By default the grid header's **view-switcher dropdown lists every active saved query for the entity** (e.g. `sprk_event` shows "All Events", "All Tasks", "All Deadlines", "Inactive Events", "My Events Open", …). To restrict the picker to a curated subset, add an **`availableViews`** allowlist of saved-query GUIDs to the `source`:
+
+```json
+"source": {
+  "type": "savedquery",
+  "savedQueryId": "<All Tasks view GUID>",   // the view shown first (the default)
+  "availableViews": [
+    "<All Tasks view GUID>",
+    "<All Deadlines view GUID>"
+  ]
+}
+```
+
+Now the switcher offers only "All Tasks" and "All Deadlines". Behavior:
+
+- **Empty array or omitted** = no restriction (all sibling views show) — the safe default, avoids an empty picker.
+- GUIDs are matched case-insensitively and tolerate `{}` braces.
+- The `savedQueryId` you set is the **default view** the grid opens on; include it in `availableViews` (or it won't be switch-back-able).
+
+> 🚨 **Gotcha — the allowlist is only honored for `source.type: "savedquery"`.** If your config uses
+> `savedquery-set` (Step 3), `availableViews` is **silently ignored** and the picker shows every view.
+> This is the #1 "why are all views showing?" cause. To restrict, switch the source to `savedquery`
+> with an explicit `savedQueryId` + `availableViews` (as above). *(A per-placement `availableViewsAllowlist`
+> prop on `<DataGrid>` also exists and works with any source type, but it requires host-shell code — the
+> config-level allowlist is the maker-friendly path.)*
+
+**Drill-through tip:** for a drill-through page whose only job is "show related records," a curated
+2–4 view allowlist (or a single-view config with no siblings) keeps the dialog focused. Point the chart
+definition's `sprk_baseviewid` at the same default view if you want VisualHost and the grid to agree.
+
+### Operator-friendly alternative: set the allowlist on the VisualHost chart definition
+
+For **drill-through dialogs specifically**, the allowlist can be set on the `sprk_chartdefinition` record
+(no grid-config edit, no code) via the **`sprk_drillthroughviews`** field — a delimited (`;` or `,`) list
+of saved-query GUIDs. VisualHost forwards it as an `availableViews` envelope param; `DataGridPageShell`
+parses it and passes it to `<DataGrid availableViewsAllowlist>`. Precedence: it maps to the framework's
+**instance-level** allowlist, so it **works with any source type (including `savedquery-set`)** and
+overrides the config-level `source.availableViews` when both are set. This is the right granularity for
+"restrict only the drill-through picker" — the shared grid config (used by workspace widgets too) stays
+untouched. See [VISUALHOST-SETUP-GUIDE.md](VISUALHOST-SETUP-GUIDE.md#setting-up-drill-through-into-a-datagrid-framework-page-events-invoices-kpi-assessments).
 
 ---
 
@@ -551,10 +597,20 @@ Copy one of the reference shells verbatim and change the `CONFIG_ID`:
 
 The shell is ~50 lines and does three things: parse the URL `data=` envelope for `matterId`, build `parentContext`, mount `<DataGrid configId=… parentContext=… dataverseClient={new XrmDataverseClient()} />`.
 
+> 🚨 **The shell MUST read `filterValue` from the envelope — this is the #1 drill-through bug.**
+> VisualHost's expand button opens the page via `Xrm.Navigation.navigateTo({pageType:'webresource'})`
+> with a form-encoded `data=` envelope whose keys are `entityName`, `filterField`, `filterValue`,
+> `viewId`, `mode`. **The parent record id arrives as `filterValue`** — and `entityName` is the
+> *chart's* reporting entity (e.g. `sprk_event`), **NOT** the parent entity. A shell that instead
+> looks for a `recordId` param, or gates on `entityName === 'sprk_matter'`, will receive `undefined`
+> parent context and render the grid **unfiltered (all records)**. Copy the reference shells verbatim:
+> [`sprk_invoicespage/main.tsx` `parseMatterId()`](../../src/solutions/sprk_invoicespage/src/main.tsx) reads
+> `params.get("filterValue")` and exposes it under the config's `parentContextKey` (`matterId`).
+
 Then update the VisualHost `sprk_chartdefinition` record:
 
 - `sprk_drillthroughtarget` = web-resource name (e.g. `sprk_kpiassessmentspage.html`)
-- `sprk_contextfieldname` = lookup column reference (`_sprk_matter_value` or `_sprk_regardingmatter_value`)
+- `sprk_contextfieldname` = lookup column reference (`_sprk_matter_value` or `_sprk_regardingmatter_value`) — **must be non-empty**, or VisualHost omits `filterValue` from the envelope entirely and the grid renders unfiltered.
 
 ### Workspace widget
 
@@ -655,11 +711,59 @@ Things to notice:
 
 ---
 
+## Recipe — build a VisualHost drill-through into a related-records grid
+
+This is the end-to-end procedure for "click the ⤢ expand button on a chart on a *parent* form → open a
+dialog showing only the *child* records related to that parent." It ties together the chart definition
+(VisualHost side) and the grid config + page shell (this framework). See also the companion
+[VISUALHOST-SETUP-GUIDE.md drill-through section](VISUALHOST-SETUP-GUIDE.md#setting-up-drill-through-into-a-datagrid-framework-page-events-invoices-kpi-assessments).
+
+### The three moving parts
+
+| # | Piece | Record / file | Key setting |
+|---|---|---|---|
+| 1 | **Chart definition** (VisualHost) | `sprk_chartdefinition` | `sprk_drillthroughtarget` = `<page>.html`; `sprk_contextfieldname` = `_<childLookup>_value` (**must be non-empty**) |
+| 2 | **Grid config** (this framework) | `sprk_gridconfiguration.sprk_configjson` | `behavior.parentContextFilter` = `{ attribute:"<childLookup>", parentContextKey:"matterId", operator:"eq" }` |
+| 3 | **Page shell** (Custom Page web resource) | `src/solutions/<name>/` | parses `filterValue` from the envelope, exposes it as `parentContext.matterId`, mounts `<DataGrid>` |
+
+VisualHost opens the page via `navigateTo({pageType:'webresource'})` with a form-encoded `data=` envelope
+(`entityName`, `filterField`, `filterValue`, `viewId`, `mode`). **The parent GUID is in `filterValue`**, and
+`entityName` is the *chart's* entity, not the parent — see the Step 6 warning. The framework then overlays
+`<condition attribute="<childLookup>" operator="eq" value="<parentGuid>"/>` onto the base view's FetchXML.
+
+### Step-by-step
+
+1. **Find the child entity's lookup back to the parent.** It is **not** uniformly `sprk_matter` — inspect metadata (Dataverse MCP `describe('tables/<entity>')` or the maker portal). Verified examples:
+
+   | Drill-through (from a Matter form) | Child entity | Child lookup → parent | `sprk_contextfieldname` | `parentContextFilter.attribute` |
+   |---|---|---|---|---|
+   | Matter → Events / Tasks | `sprk_event` | `sprk_regardingmatter` | `_sprk_regardingmatter_value` | `sprk_regardingmatter` |
+   | Matter → KPI Assessments | `sprk_kpiassessment` | `sprk_matter` | `_sprk_matter_value` | `sprk_matter` |
+   | Matter → Report Cards | `sprk_reportcard` | `sprk_regardingmatter` | `_sprk_regardingmatter_value` | `sprk_regardingmatter` |
+   | Matter → Invoices | `sprk_invoice` | `sprk_matter` | `_sprk_matter_value` | `sprk_matter` |
+   | Invoice → Invoice Line Items | `sprk_invoicelineitem` | `sprk_invoice` | `_sprk_invoice_value` | `sprk_invoice` |
+
+   > ⚠ **Two-hop relationships aren't drop-in.** `sprk_invoicelineitem` has **no lookup to Matter** — only to `sprk_invoice`. `parentContextFilter` injects **one** condition on a **direct** attribute of the child, so you can filter line items by *invoice* (drill from an Invoice), but "line items for a Matter" needs a link-entity in inline FetchXML, which is outside the single-condition overlay.
+
+2. **Does a page shell already exist for that child entity?** Check the registry in [`scripts/Deploy-AllDataGridConsumers.ps1`](../../scripts/Deploy-AllDataGridConsumers.ps1). Current shells: `sprk_eventspage.html` (Event), `sprk_invoicespage.html` (Invoice), `sprk_kpiassessmentspage.html` (KPI Assessment). If yes → reuse it; skip to step 4.
+
+3. **If no shell exists, create one.** Copy [`src/solutions/sprk_invoicespage`](../../src/solutions/sprk_invoicespage/src/main.tsx) verbatim, change `CONFIG_ID`, keep `parseMatterId()` (it reads `filterValue`). Add the new page to the `Deploy-AllDataGridConsumers.ps1` registry. Build + deploy.
+
+   > For a shell whose parent is **not** a Matter (e.g. Invoice → Line Items), rename the exposed key: expose `parentContext.invoiceId = filterValue` and set the grid config's `parentContextKey: "invoiceId"`. The key is just a label that must match between shell and config.
+
+4. **Author (or reuse) the `sprk_gridconfiguration` record** for the child entity (Steps 1–5 above). Add `behavior.parentContextFilter` with the `attribute` from the table. Optionally restrict the view picker with `availableViews` (Step 3.5).
+
+5. **Configure the chart definition:** `sprk_drillthroughtarget = <page>.html`, `sprk_contextfieldname = _<childLookup>_value`.
+
+6. **Verify:** open the dialog → DevTools console → `[DataGrid] fetchXml composition` shows `parentContext.matterId` populated and `hasParentFilterMatch: true`.
+
+---
+
 ## Troubleshooting
 
 | Symptom | First thing to check |
 |---|---|
-| Grid renders unfiltered (all records, not just the parent's) | DevTools Console → `[DataGrid] fetchXml composition`. Is `parentContext.matterId` empty? → `sprk_chartdefinition.sprk_contextfieldname` is not set. Is `hasParentFilterMatch: false`? → `behavior.parentContextFilter.attribute` doesn't match the lookup attribute on the child entity. |
+| Grid renders unfiltered (all records, not just the parent's) | DevTools Console → `[DataGrid] fetchXml composition`. Is `parentContext.matterId` empty? → EITHER the page shell doesn't parse `filterValue` from the VisualHost `data=` envelope (see Step 6 — the shell must read `filterValue`, not `recordId`, and must not gate on `entityName === 'sprk_matter'` since VisualHost sends the *chart's* entity), OR `sprk_chartdefinition.sprk_contextfieldname` is blank (VisualHost then omits `filterValue`). Is `hasParentFilterMatch: false`? → `behavior.parentContextFilter.attribute` doesn't match the lookup attribute on the child entity. |
 | "Failed to fetch" error | Network tab → request payload. Most R1 cause was Dataverse rejecting `top` + `page` together — fixed in `useLazyLoad.ts`. If new, check FetchXML validity in XrmToolBox. |
 | Column labels show technical names (`sprk_completionrate` instead of `Completion Rate`) | Entity metadata didn't load — `XrmDataverseClient.retrieveEntityMetadata` returning 0 attributes. Confirmed working in Spaarke env via `Xrm.WebApi.retrieveMultipleRecords('EntityDefinition', …)` fallback. |
 | Column header chevron menu missing | Column is not chip-eligible (e.g. text without metadata). Framework falls back to text-chip for every column when metadata is thin; verify `chipDescriptors` in DevTools React inspector. |

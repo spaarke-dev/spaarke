@@ -184,6 +184,8 @@ import { FindSimilarDialog } from "@spaarke/ui-components";
 import { FindSimilarDialog, WizardShell } from "@spaarke/ui-components";
 ```
 
+> **React-version type drift at this boundary**: because the shared lib carries `@types/react` 19, a PCF importing shared **source** can inherit React-19 `ReactNode` types and fail with `TS2786`. Keep the PCF-imported surface **slim** (inline small utils where only the PCF needs them) and **re-cast at the import boundary** (`x as unknown as React.ComponentType<Props>`). Full rule: [ADR-022 § Shared-Library React-Version Drift](ADR-022-pcf-platform-libraries.md#shared-library-react-version-drift).
+
 ---
 
 ## When to Add to Shared Library
