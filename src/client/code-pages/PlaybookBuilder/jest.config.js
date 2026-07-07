@@ -13,11 +13,9 @@ module.exports = {
   roots: ['<rootDir>/src'],
   testMatch: ['**/__tests__/**/*.test.ts', '**/__tests__/**/*.test.tsx'],
   collectCoverageFrom: [
-    'src/components/properties/RenameGuardDialog.tsx',
-    'src/components/properties/BranchPickerDialog.tsx',
-    'src/components/properties/LookupUserMembershipForm.tsx',
-    'src/services/canvasValidation.ts',
-    'src/stores/canvasStore.ts',
+    'src/components/catalog/**/*.tsx',
+    'src/services/schemaValidation.ts',
+    'src/services/catalogService.ts',
     '!src/**/*.d.ts',
     '!src/**/index.ts',
     '!src/**/__tests__/**'
@@ -26,18 +24,12 @@ module.exports = {
   moduleNameMapper: {
     '\\.(css|less|scss|sass)$': 'identity-obj-proxy'
   },
-  transformIgnorePatterns: [
-    'node_modules/(?!(d3-force|d3-dispatch|d3-quadtree|d3-timer|marked|@xyflow|zustand)/)'
-  ],
+  transformIgnorePatterns: ['node_modules/'],
   transform: {
     '^.+\\.tsx?$': ['ts-jest', {
-      // Production builds use esbuild-loader + a more permissive tsc pass;
-      // ts-jest in strict mode flags pre-existing typings drift in
-      // canvasStore.ts (line 423) and RenameGuardDialog.tsx (line 166) that
-      // we MUST NOT fix in test-only work (R3 task 094 boundary). Diagnostics
-      // disabled so the test runner mirrors the production transpile-only
-      // posture (compilation errors that ALREADY survive the prod build are
-      // not introduced by this task and remain visible to `tsc -p` separately).
+      // Production builds use esbuild-loader (transpile-only). Diagnostics
+      // disabled so the test runner mirrors the production posture; type
+      // errors remain visible to `tsc -p` separately.
       diagnostics: false,
       tsconfig: {
         jsx: 'react',

@@ -1,12 +1,15 @@
 /**
  * ScopeConfigEditorApp
  *
- * Root component that auto-detects the entity logical name and renders
- * the appropriate editor variant:
- *   sprk_analysisaction      → ActionEditor
+ * Root component that auto-detects the entity logical name (and, where it
+ * matters, the bound column) and renders the appropriate editor variant:
+ *   sprk_analysisaction      → ActionEditor (system prompt)
+ *                              or SchemaJsonEditor when bound to
+ *                              sprk_inputschema / sprk_outputschemajson (053)
  *   sprk_analysisskill      → SkillEditor
  *   sprk_analysisknowledge  → KnowledgeSourceEditor
  *   sprk_analysistool       → ToolEditor
+ *   sprk_playbookconsumer   → BindingConfigEditor (Binding variant, FR-P4-04)
  *
  * ADR-021: All styling via makeStyles / Fluent v9 tokens. No hardcoded colors.
  * ADR-022: React 16 APIs only. No createRoot.
@@ -18,6 +21,8 @@ import { ActionEditor } from './ActionEditor';
 import { SkillEditor } from './SkillEditor';
 import { KnowledgeSourceEditor } from './KnowledgeSourceEditor';
 import { ToolEditor } from './ToolEditor';
+import { BindingConfigEditor } from './BindingConfigEditor';
+import { SchemaJsonEditor } from './SchemaJsonEditor';
 
 // ─────────────────────────────────────────────────────────────────────────────
 // Types
@@ -26,6 +31,8 @@ import { ToolEditor } from './ToolEditor';
 export interface IScopeConfigEditorAppProps {
   /** Dataverse entity logical name (e.g., "sprk_analysisaction") */
   entityLogicalName: string;
+  /** Logical name of the bound column (e.g., "sprk_chiptransitions"); '' when unavailable */
+  boundAttributeName?: string;
   /** Current field value from the bound property */
   fieldValue: string;
   /** BFF API base URL for handler discovery (resolved at runtime from Dataverse env var) */
@@ -69,6 +76,7 @@ const useStyles = makeStyles({
 
 export const ScopeConfigEditorApp: React.FC<IScopeConfigEditorAppProps> = ({
   entityLogicalName,
+  boundAttributeName = '',
   fieldValue,
   apiBaseUrl,
   apiBaseUrlError,
@@ -78,9 +86,23 @@ export const ScopeConfigEditorApp: React.FC<IScopeConfigEditorAppProps> = ({
 
   const renderEditor = (): React.ReactElement => {
     const entity = entityLogicalName.toLowerCase();
+    const attribute = boundAttributeName.toLowerCase();
 
     if (entity === 'sprk_analysisaction') {
+      // Schema columns get the validated OpenAI-subset editor (task 053 —
+      // the G-P3 round-1 outage shape must not be authorable on the form).
+      if (attribute === 'sprk_inputschema' || attribute === 'sprk_outputschemajson') {
+        return (
+          <SchemaJsonEditor boundAttributeName={attribute} value={fieldValue} onChange={onValueChange} />
+        );
+      }
       return <ActionEditor value={fieldValue} onChange={onValueChange} />;
+    }
+
+    if (entity === 'sprk_playbookconsumer') {
+      return (
+        <BindingConfigEditor boundAttributeName={attribute} value={fieldValue} onChange={onValueChange} />
+      );
     }
 
     if (entity === 'sprk_analysisskill') {
@@ -101,7 +123,8 @@ export const ScopeConfigEditorApp: React.FC<IScopeConfigEditorAppProps> = ({
         <MessageBar intent="warning">
           <MessageBarBody>
             ScopeConfigEditor: unknown entity type &quot;{entityLogicalName}
-            &quot;. Expected one of: sprk_analysisaction, sprk_analysisskill, sprk_analysisknowledge, sprk_analysistool.
+            &quot;. Expected one of: sprk_analysisaction, sprk_analysisskill, sprk_analysisknowledge,
+            sprk_analysistool, sprk_playbookconsumer.
           </MessageBarBody>
         </MessageBar>
       </div>
@@ -111,7 +134,7 @@ export const ScopeConfigEditorApp: React.FC<IScopeConfigEditorAppProps> = ({
   return (
     <div className={styles.root}>
       {renderEditor()}
-      <Text className={styles.versionFooter}>v1.2.6 &bull; Built 2026-02-24</Text>
+      <Text className={styles.versionFooter}>v1.3.0 &bull; Built 2026-07-07</Text>
     </div>
   );
 };

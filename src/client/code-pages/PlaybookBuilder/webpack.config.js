@@ -50,7 +50,7 @@ module.exports = (env) => {
           ],
         },
         {
-          // CSS loader for @xyflow/react stylesheets
+          // CSS loader for library stylesheets
           test: /\.css$/,
           use: ['style-loader', 'css-loader'],
         },
