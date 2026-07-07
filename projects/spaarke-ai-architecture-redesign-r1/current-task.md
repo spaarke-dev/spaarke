@@ -9,10 +9,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 048 — G-P3 BROWSER UAT (operator, spaarkedev1). **ALL P3 CODE COMPLETE (040–047 ✅, 44/51).** |
-| **Step** | ROUND 3: both surfaces deployed @ `88c123f82` (two fix waves landed — 8 round-1 findings in notes/g-p3-uat-round1-findings.md + R2-A..D in notes/g-p3-uat-round2-findings.md incl. App Insights forensics). Round-3 script in round-2 findings note. |
-| **Status** | ⛔ STOPPED at gate 048 — operator round-3 UAT + 4 rulings required (NFR-11) |
-| **Next Action** | Operator runs the flagship-journey UAT below + rules. On PASS: 048 ✅ + P3 PHASE COMPLETE, portfolio 45, dispatch W-P4-A (050/051/053/054 ×4 parallel). On FAIL: triage, fix, redeploy, re-UAT. |
+| **Task** | 048 — G-P3 BROWSER UAT (operator). **47/51 — P3 code + overlap wave 051/052/053 ALL ✅.** |
+| **Step** | ROUND 4 ready: both surfaces @ `a5e0ce0f4` (3 fix waves: round-1 H1–H8, round-2 R2-A..D w/ App Insights forensics, round-3 R3-1..4). Round-4 script in notes/g-p3-uat-round3-findings.md. OVERLAP LANDED (operator ruling 2026-07-07): 051 catalog governance `f7a835a3e`, 052 docs `dee229cdf`, 053 BA editor `df874a910`; r2 design.md DRAFT v0.1 committed `14e0c8762` awaiting operator review. |
+| **Status** | ⛔ gate 048 open — operator round-4 UAT + 4 rulings (sprk_event/sprk_todo; rerun accept-with-note; size-cap home; SseClient keep) |
+| **Next Action** | Operator round-4 UAT + rulings. On PASS: 048 ✅ + P3 COMPLETE, dispatch 050 (Track-B audit — also picks up 053's blocked server leg: AiPlaybookBuilderService retarget + dead graph endpoint deletion) + 054 (metering) parallel → 055 → 090 wrap-up (incl. ADR A-3 refreshes deferred from 052, validator-triple-twin /defer from 053) → PR → merge → r2 pipeline (design.md v0.1 ready for operator review). On FAIL: fix wave round 4. |
 
 ### G-P3 UAT — the flagship ONE-CONVERSATION journey (operator, spaarkedev1; hard-refresh first)
 Open the Assistant on a MATTER form and run one continuous conversation:
