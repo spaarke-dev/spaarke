@@ -29,11 +29,7 @@ import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import { PaneEventBus } from '../../../events/PaneEventBus';
 import { PaneEventBusProvider } from '../../../events/PaneEventBusContext';
 import ExecutionTraceWidget, { MAX_TRACE_ENTRIES, type ExecutionTraceData } from '../ExecutionTraceWidget';
-import {
-  recordExecutionTraceEvent,
-  clearExecutionTraceBuffer,
-  type BufferedTraceEvent,
-} from '../executionTraceBuffer';
+import { recordExecutionTraceEvent, clearExecutionTraceBuffer, type BufferedTraceEvent } from '../executionTraceBuffer';
 import type { ContextPaneEvent, TraceToolCallSummary } from '../../../events/PaneEventTypes';
 import type { ContextWidgetProps } from '../../../types/widget-types';
 
@@ -146,9 +142,7 @@ describe('ExecutionTraceWidget — replay-on-mount from the trace buffer (R5-D)'
   });
 
   it('live events after mount append AFTER the replayed entries (no duplication)', () => {
-    recordExecutionTraceEvent(
-      makeToolChainEvent([{ toolId: 'buffered.tool' }]) as unknown as BufferedTraceEvent
-    );
+    recordExecutionTraceEvent(makeToolChainEvent([{ toolId: 'buffered.tool' }]) as unknown as BufferedTraceEvent);
 
     const bus = new PaneEventBus();
     renderWidget({}, bus);
