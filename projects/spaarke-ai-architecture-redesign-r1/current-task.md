@@ -10,8 +10,8 @@
 | Field | Value |
 |-------|-------|
 | **Task** | 048 — G-P3 BROWSER UAT (operator, spaarkedev1). **ALL P3 CODE COMPLETE (040–047 ✅, 44/51).** |
-| **Step** | Deploying both surfaces @ post-046 commit; then STOPPED. |
-| **Status** | ⛔ STOPPED at gate 048 — operator UAT + 4 rulings required (NFR-11; never auto-passed) |
+| **Step** | ROUND 3: both surfaces deployed @ `88c123f82` (two fix waves landed — 8 round-1 findings in notes/g-p3-uat-round1-findings.md + R2-A..D in notes/g-p3-uat-round2-findings.md incl. App Insights forensics). Round-3 script in round-2 findings note. |
+| **Status** | ⛔ STOPPED at gate 048 — operator round-3 UAT + 4 rulings required (NFR-11) |
 | **Next Action** | Operator runs the flagship-journey UAT below + rules. On PASS: 048 ✅ + P3 PHASE COMPLETE, portfolio 45, dispatch W-P4-A (050/051/053/054 ×4 parallel). On FAIL: triage, fix, redeploy, re-UAT. |
 
 ### G-P3 UAT — the flagship ONE-CONVERSATION journey (operator, spaarkedev1; hard-refresh first)
