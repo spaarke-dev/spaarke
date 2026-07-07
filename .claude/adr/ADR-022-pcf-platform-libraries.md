@@ -1,8 +1,8 @@
 # ADR-022: PCF Platform Libraries (Field-Bound Controls Only) (Concise)
 
-> **Status**: Accepted (Revised 2026-05-13)
+> **Status**: Accepted (Revised 2026-07-07)
 > **Domain**: PCF/Frontend Architecture
-> **Last Updated**: 2026-05-13
+> **Last Updated**: 2026-07-07 (added Shared-Library React-Version Drift section)
 > **Last Verified Against**: [Microsoft Learn — React controls & platform libraries](https://learn.microsoft.com/en-us/power-apps/developer/component-framework/react-controls-platform-libraries) (Microsoft doc updated 2025-10-10)
 
 ---
@@ -72,6 +72,28 @@ Code Page `package.json`:
 ```
 
 See ADR-006 for complete Code Page architecture.
+
+---
+
+## Shared-Library React-Version Drift
+
+> Added 2026-07-07. Governs the PCF ↔ Code Page boundary in `@spaarke/ui-components`.
+
+`@spaarke/ui-components` is consumed by **both** PCF controls (React 16/17, `@types/react` 16–18) and Code Pages (React 19). Its own `node_modules` carries `@types/react` **19**. When a PCF imports shared-lib **source** (e.g. a deep `../../shared/Spaarke.UI.Components/src/...` path), TypeScript resolves React from the shared lib's v19 types, whose `ReactNode` includes `Promise<AwaitedReactNode>` + `bigint`. That augments the PCF's global JSX namespace and breaks otherwise-valid FC components with **`TS2786 … 'bigint' is not assignable to ReactNode`**. `skipLibCheck` does **not** suppress it (global-namespace augmentation, not lib-checking).
+
+### Constraints
+
+- **SHOULD keep the shared surface that PCF imports SLIM.** Few components are mounted in *both* a PCF and a Code Page — prefer inlining a small util into the PCF over importing shared source when only the PCF needs it (precedent: `VisualHost/control/utils`, `EventDueDateCard`). Do not grow the PCF↔shared source-import surface casually (ties to [ADR-012](ADR-012-shared-components.md) + root CLAUDE §11 reuse rule).
+- **MUST re-cast at the import boundary** when a PCF must import a shared component whose types resolve React 19. Bridge to the PCF-local React type:
+  ```ts
+  import { AiSummaryPopover as RawAiSummaryPopover, type IAiSummaryPopoverProps } from '…/AiSummaryPopover';
+  // React 18/19 types-drift bridge — runtime behavior unchanged.
+  const AiSummaryPopover = RawAiSummaryPopover as unknown as React.ComponentType<IAiSummaryPopoverProps>;
+  ```
+  Canonical example: `VisualHost/control/components/CardChrome.tsx` + `VisualHostRoot.tsx`.
+- **MUST NOT realign `@types/react` workspace-wide** (e.g. force the shared lib to 18) solely to satisfy PCF — Code Pages legitimately target React 19. The per-boundary cast is the sanctioned bridge; a full second shared library is **not** warranted given how few components cross the boundary (slim-first).
+
+**Why this ADR and not a new one**: this is the same PCF-React-16/17 vs Code-Page-React-19 boundary this ADR already governs. Kept here to avoid a conflicting parallel ADR.
 
 ---
 
