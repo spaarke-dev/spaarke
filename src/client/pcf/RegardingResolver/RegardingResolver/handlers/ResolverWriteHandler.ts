@@ -108,8 +108,14 @@ export async function discoverHostNavProps(
   }
 
   try {
+    // v1.4.2 (SRFR-050): Dataverse entity logical names are lowercase-normalized;
+    // if the maker set `entity` input with wrong case (e.g., `sprk_Communication`),
+    // the metadata endpoint returns 200 with EMPTY results (not 404), which
+    // silently breaks nav-prop discovery + all downstream writes. Lowercase
+    // defensively.
+    const hostEntityLower = hostEntity.toLowerCase();
     const url =
-      `/api/data/v9.0/EntityDefinitions(LogicalName='${hostEntity}')/ManyToOneRelationships` +
+      `/api/data/v9.0/EntityDefinitions(LogicalName='${hostEntityLower}')/ManyToOneRelationships` +
       `?$select=ReferencingAttribute,ReferencingEntityNavigationPropertyName,ReferencedEntity`;
 
     const resp = await fetchImpl(url, { credentials: 'include' });
@@ -131,6 +137,17 @@ export async function discoverHostNavProps(
       navPropName: r.ReferencingEntityNavigationPropertyName,
       referencedEntity: r.ReferencedEntity,
     }));
+
+    // v1.4.2 (SRFR-050): diagnostic warning if discovery returned no entries.
+    // Common cause: `entity` input on the manifest was set to a non-existent /
+    // misspelled logical name. Silent empty was the v1.4.0/1.4.1 failure mode
+    // on sprk_communication placement.
+    if (entries.length === 0) {
+      console.warn(
+        `[RegardingResolver] Nav-prop discovery returned zero entries for hostEntity="${hostEntity}" (normalized "${hostEntityLower}"). ` +
+          `Verify the Host Entity input on the form matches an actual entity logical name. All resolver writes will silently fail.`
+      );
+    }
 
     _navPropCache[hostEntity] = entries;
     return entries;

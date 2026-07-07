@@ -8,7 +8,7 @@
     <Descriptions>
       <Description description="Virtual PCF: polymorphic parent picker for any child entity in an N:1 polymorphic relationship. Writes 5 resolver fields via applyResolverFields (ADR-024) with subgrid auto-detect (SRFR-045). Designed for sprk_todo, sprk_event, sprk_invoice, sprk_communication, sprk_kpiassessment." languagecode="1033" />
     </Descriptions>
-    <Version>1.4.1</Version>
+    <Version>1.4.2</Version>
     <Managed>0</Managed>
     <Publisher>
       <UniqueName>Spaarke</UniqueName>
