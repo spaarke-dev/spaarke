@@ -1,387 +1,228 @@
-# AI Guide — Wiring a New Consumer
+# AI Guide — Wiring a New Capability (Action + Binding)
 
-> **Audience**: Makers + AI engineers wiring a new surface (chat window, widget, code page, ad-hoc launcher) to invoke playbooks.
-> **Author**: spaarke-ai-platform-unification-r7 Wave 6 (FR-31)
-> **Status**: Maker-facing tutorial. For runtime mechanics (cache TTL, internal classes, match-conditions JSON predicates), see the canonical reference: [`docs/architecture/ai-architecture-playbook-consumer-routing.md`](../architecture/ai-architecture-playbook-consumer-routing.md) (READ-ONLY — do not modify).
-> **Last Updated**: 2026-06-28
+> **Audience**: Makers + AI engineers shipping a new AI capability onto the Spaarke platform.
+> **Author**: spaarke-ai-architecture-redesign-r1 task 052 (FR-P4-03)
+> **Last Updated**: 2026-07-07
+> **Status**: Current — the canonical capability-wiring tutorial for the Action + Binding catalog model (ADR-039).
+>
+> ⚠️ **Supersedes the R7 "Wiring a New Consumer" content** that previously lived at this path. That guide taught the `ConsumerTypes` + `ResolveAsync` + `IInvokePlaybookAi` triangle for wiring a code surface to a playbook. Under the redesigned architecture, most capabilities ship as **catalog data with ZERO new code**: an Action row + a Binding row. Even the R7 worked example (chat-summarize) is now just another catalog capability — Action `SUM-CHAT@v1` behind the `chat-summarize` Binding, dispatched like everything else. The `ConsumerTypes` constants + `IConsumerRoutingService.ResolveAsync` still exist for code-side consumers (Matter pre-fill, Document Profile, Insights) and for the FR-P0-04 constants↔rows boot parity check, but they are no longer how you add a chat/loop capability.
 
 ---
 
 ## What this guide covers
 
-You have a new place in the product — a chat window, a widget tile, a code page button, a background job — and you want it to call a playbook. This guide walks you through the **3-step wiring pattern** every consumer follows in Spaarke, with a worked example from the chat-summarize migration we shipped in R7.
+You want the Spaarke assistant (or a chip, ribbon, wizard, or platform event) to be able to do a new thing — "extract key dates", "draft a status memo", "create a follow-up task". This guide walks you through shipping that as **catalog data**:
+
+1. Author the **Action** row (`sprk_analysisaction`) — the execution unit: WHAT runs.
+2. Author the **Binding** row (`sprk_playbookconsumer`) — the invocation unit: WHEN/HOW it is offered and what happens to its output.
+3. Understand how the **three entry paths** (Event, Click, Text) reach your Binding with no per-capability code.
+4. Handle **side effects** through the ONE confirmation gate.
+5. Add a **golden-utterance eval case** — the merge gate.
 
 What this guide does **not** cover:
-- Authoring the playbook itself → [`PLAYBOOK-AUTHOR-GUIDE.md`](PLAYBOOK-AUTHOR-GUIDE.md)
-- Runtime resolution algorithm, cache semantics, `sprk_matchconditionsjson` JSON predicates → [`docs/architecture/ai-architecture-playbook-consumer-routing.md`](../architecture/ai-architecture-playbook-consumer-routing.md)
-- BFF placement / publish-size / CVE governance for new endpoints → [`.claude/constraints/bff-extensions.md`](../../.claude/constraints/bff-extensions.md) + root CLAUDE.md §10
+- The loop/gate/ledger runtime internals → [`docs/architecture/chat-architecture.md`](../architecture/chat-architecture.md)
+- Authoring multi-node playbooks (`sprk_analysisplaybook`) → [`PLAYBOOK-AUTHOR-GUIDE.md`](PLAYBOOK-AUTHOR-GUIDE.md)
+- Coded composite workflows (`sprk_kind = coded`, `ICodedWorkflow` — e.g. Daily Briefing) — those DO require code; this guide notes where they diverge.
 
 ---
 
-## §1. What is a consumer?
+## §1. The model: Action + Binding
 
-A **consumer** is any surface that invokes a playbook through Spaarke's unified dispatch model. Examples shipped today:
-
-- A workspace tile that summarizes a document (consumer surface = `WorkspaceAiService`)
-- The chat `/summarize` slash-command (consumer surface = `SessionSummarizeOrchestrator`)
-- The Matter form pre-fill flow (consumer surface = `MatterPreFillService`)
-- The daily-briefing narration endpoint (consumer surface = `DailyBriefingEndpoints.HandleNarrate`)
-
-What unifies them: each surface asks **two questions** at runtime:
-
-1. *Which playbook should I run for my current context?* → `IConsumerRoutingService.ResolveAsync(consumerType, …)`
-2. *Run it and give me the result.* → `IInvokePlaybookAi.InvokePlaybookAsync(playbookId, parameters, context, …)`
-
-The surface itself never hardcodes a playbook GUID. The mapping from "I am the chat-summarize surface" to "the playbook is `summarize-document-for-chat@v1`" lives in a Dataverse row (`sprk_playbookconsumer`) that an admin can change without touching code.
-
-**One-line definition**: a consumer is a `(ConsumerTypes.X identifier)` + `(sprk_playbookconsumer row)` + `(call site that resolves and invokes)`.
-
----
-
-## §2. When to add a new consumer
-
-Decision tree:
-
-```
-Are you invoking a playbook from a NEW surface (not already in the table in §5)?
-├── NO → Don't add a consumer. Extend the existing one (e.g., add a parameter, change the routing row).
-└── YES → Continue.
-    ├── Do you have a playbook GUID hardcoded somewhere?
-    │   ├── YES → Replace with consumer routing. The whole point is admin-changeable
-    │   │         mapping without redeploying code. See §3.
-    │   └── NO → Continue.
-    ├── Do you need streaming SSE (per-token UX, progressive rendering)?
-    │   ├── YES → Special case. See §6 "Streaming consumers (Path B variant)".
-    │   │         You still register a consumer; the call site is slightly different.
-    │   └── NO → Standard Path A.5. Follow §3 verbatim.
-    └── Do you have a document context + need legacy doc-bound semantics?
-        ├── YES → You may not need this guide. See ai-architecture-playbook-consumer-routing.md §4
-        │         "Path A / A.5 / B decision matrix" for which path to use.
-        └── NO → Standard Path A.5. Follow §3 verbatim.
-```
-
----
-
-## §3. The 3-step wiring pattern
-
-### Step 1 — Add your consumer-type identifier to `ConsumerTypes.cs`
-
-File: [`src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ConsumerTypes.cs`](../../src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ConsumerTypes.cs)
-
-Add a `public const string` with the stable lower-kebab-case identifier:
-
-```csharp
-public static class ConsumerTypes
-{
-    // ... existing constants ...
-
-    /// <summary>
-    /// <c>MyNewConsumerService</c> — pre-fills the Foo widget from selected files.
-    /// </summary>
-    public const string MyNewConsumer = "my-new-consumer";
-}
-```
-
-Then append it to the `All` list at the bottom (the startup health-check diffs `All` against the live Dataverse table):
-
-```csharp
-public static readonly IReadOnlyList<string> All = new[]
-{
-    // ... existing entries ...
-    MyNewConsumer,
-};
-```
-
-**Why a constant and not the literal string?** A 2026-06-24 UAT incident shipped `matter-pre-fil` (missing the final `l`) to a Power Apps form. The compiler can't catch a typo in a literal; it can catch a typo in a constant name. The `ConsumerTypes` class is the BFF-side defense.
-
-### Step 2 — Create a `sprk_playbookconsumer` row in Dataverse
-
-The row tells the routing service which playbook to dispatch when your consumer asks.
-
-| Column | Value for our example |
-|---|---|
-| `sprk_consumertype` | `my-new-consumer` (must match the constant value EXACTLY) |
-| `sprk_code` | `default` (use `default` unless you have per-instance discrimination) |
-| `sprk_enabled` | `true` |
-| `sprk_playbookid` | Lookup → the `sprk_analysisplaybook` row you want to invoke |
-| `sprk_environment` | `dev`, `test`, `prod`, or leave null for wildcard |
-| `sprk_priority` | `100` (lower wins when multiple rows match) |
-| `sprk_matchconditionsjson` | leave null (advanced — see canonical reference) |
-
-You can create the row two ways:
-
-**a) Maker-friendly (recommended for first wiring):** open the `sprk_playbookconsumer` table in Power Apps Maker portal → New Row → fill the columns → Save.
-
-**b) Scripted (for repeatable seed):** extend [`scripts/dataverse/Seed-PlaybookConsumers.ps1`](../../scripts/dataverse/Seed-PlaybookConsumers.ps1) with a new entry. The script is idempotent — re-running it does not duplicate rows.
-
-After saving, the next call to `ResolveAsync("my-new-consumer")` from any tenant + environment that matches will return your playbook ID.
-
-> **Cache note**: the routing service caches resolutions for 5 minutes. If you change a row and want to test immediately, restart the BFF App Service (or wait 5 minutes).
-
-### Step 3 — At the consumer surface, resolve and invoke
-
-This is the call-site pattern. Inject `IConsumerRoutingService` + `IInvokePlaybookAi` into your service, then:
-
-```csharp
-public sealed class MyNewConsumerService
-{
-    private readonly IConsumerRoutingService _consumerRouting;
-    private readonly IInvokePlaybookAi _invokePlaybookAi;
-    private readonly ILogger<MyNewConsumerService> _logger;
-
-    public MyNewConsumerService(
-        IConsumerRoutingService consumerRouting,
-        IInvokePlaybookAi invokePlaybookAi,
-        ILogger<MyNewConsumerService> logger)
-    {
-        _consumerRouting = consumerRouting;
-        _invokePlaybookAi = invokePlaybookAi;
-        _logger = logger;
-    }
-
-    public async Task<MyDomainResult> RunAsync(
-        MyRequest request,
-        HttpContext httpContext,
-        CancellationToken cancellationToken)
-    {
-        // Step 3a — resolve the playbook ID from Dataverse routing
-        var playbookId = await _consumerRouting.ResolveAsync(
-            ConsumerTypes.MyNewConsumer,
-            cancellationToken: cancellationToken).ConfigureAwait(false);
-
-        if (!playbookId.HasValue || playbookId.Value == Guid.Empty)
-        {
-            // Pick your fallback: feature-disabled response, typed-options
-            // backup ID, or fail-fast. The routing service is silent on what
-            // "no match" means semantically — you decide.
-            throw new InvalidOperationException(
-                "MyNewConsumer playbook not configured. Seed a " +
-                "sprk_playbookconsumer row for consumertype='my-new-consumer'.");
-        }
-
-        // Step 3b — build the parameter dictionary the playbook expects.
-        // ADR-015 binding: deterministic IDs and display values only — never
-        // raw user message content / file body / secrets.
-        var parameters = new Dictionary<string, string>
-        {
-            ["entityId"] = request.EntityId.ToString(),
-            ["entityName"] = request.EntityName,
-        };
-
-        // Step 3c — invoke the facade
-        var invocationContext = new PlaybookInvocationContext
-        {
-            TenantId = request.TenantId,
-            HttpContext = httpContext,            // ASP.NET primitive — OK on facade
-            CorrelationId = Activity.Current?.TraceId.ToString()
-        };
-
-        var result = await _invokePlaybookAi.InvokePlaybookAsync(
-            playbookId.Value,
-            parameters,
-            invocationContext,
-            cancellationToken).ConfigureAwait(false);
-
-        // Step 3d — translate the facade result to your domain shape
-        if (!result.Success)
-        {
-            _logger.LogWarning(
-                "MyNewConsumer playbook failed. RunId={RunId}, ErrorCode={ErrorCode}",
-                result.RunId, result.ErrorCode);
-            return MyDomainResult.Failure(result.ErrorMessage ?? "Playbook failed.");
-        }
-
-        return MyDomainResult.From(result.TextContent, result.StructuredData);
-    }
-}
-```
-
-That is the entire wiring. Three steps: constant, Dataverse row, call site. No new endpoint registration, no new DI module beyond your service registration, no new orchestrator code.
-
----
-
-## §4. Worked example — chat-summarize migration (R7 Wave 9 task 091)
-
-**The case**: chat's `/summarize` slash command originally called `IPlaybookExecutionEngine.ExecuteChatSummarizeAsync(playbookId, …)` — a chat-streaming-specific method buried inside the AI internals. The playbook ID itself came from `WorkspaceOptions.ChatSummarizePlaybookId` (a config-file setting). Every other consumer in the codebase was on the canonical triangle; chat-summarize was the only outlier.
-
-R7 task 091 fixed it.
-
-### BEFORE (chat-streaming-specific, non-canonical)
-
-```csharp
-// SessionSummarizeOrchestrator.cs (pre-R7)
-public async IAsyncEnumerable<AnalysisChunk> SummarizeSessionFilesAsync(
-    ChatSummarizeRequest request,
-    [EnumeratorCancellation] CancellationToken cancellationToken)
-{
-    var configuredId = _workspaceOptions.Value.ChatSummarizePlaybookId;
-    var playbook = await _playbookLookup.GetByIdAsync(configuredId, cancellationToken);
-
-    await foreach (var chunk in _executionEngine
-        .ExecuteChatSummarizeAsync(playbook.Id, engineRequest, cancellationToken)
-        .ConfigureAwait(false))
-    {
-        yield return chunk;
-    }
-}
-```
-
-Problems:
-1. Playbook ID hardcoded in config (one per environment) — admins can't redirect without a redeploy.
-2. `ExecuteChatSummarizeAsync` is AI-internal — CRUD-side orchestrator reaches across the ADR-013 facade boundary.
-3. The dispatch path doesn't exist for any other consumer — every other surface uses `IConsumerRoutingService` + the canonical triangle.
-
-### AFTER (consumer-routed, canonical triangle)
-
-```csharp
-// SessionSummarizeOrchestrator.cs (post-R7 task 091)
-public async IAsyncEnumerable<AnalysisChunk> SummarizeSessionFilesAsync(
-    ChatSummarizeRequest request,
-    [EnumeratorCancellation] CancellationToken cancellationToken)
-{
-    // Step 3a — resolve via the routing table (compile-time-safe identifier)
-    Guid resolvedPlaybookId;
-    var routedPlaybookId = await _consumerRouting
-        .ResolveAsync(ConsumerTypes.ChatSummarize, cancellationToken: cancellationToken)
-        .ConfigureAwait(false);
-
-    if (routedPlaybookId.HasValue && routedPlaybookId.Value != Guid.Empty)
-    {
-        resolvedPlaybookId = routedPlaybookId.Value;
-    }
-    else
-    {
-        // Graceful-degrade fallback (FR-1R-06 deprecation window only)
-        var configuredId = _workspaceOptions.Value.ChatSummarizePlaybookId;
-        var playbook = await _playbookLookup.GetByIdAsync(configuredId, cancellationToken);
-        resolvedPlaybookId = playbook.Id;
-    }
-
-    // Step 3c — invoke (this consumer uses IPlaybookOrchestrationService directly,
-    // NOT IInvokePlaybookAi, because it needs per-token SSE streaming — see §6)
-    var playbookRequest = new PlaybookRunRequest
-    {
-        PlaybookId = resolvedPlaybookId,
-        DocumentIds = Array.Empty<Guid>(),
-        Parameters = BuildParameters(request, session, uploadedFiles, resolvedFileIds)
-    };
-
-    await foreach (var ev in _orchestrationService
-        .ExecuteAsync(playbookRequest, httpContext, cancellationToken)
-        .ConfigureAwait(false))
-    {
-        var chunk = TranslateEventToChunk(ev);
-        if (chunk is not null) yield return chunk;
-    }
-}
-```
-
-What changed:
-- ✅ Identifier is `ConsumerTypes.ChatSummarize` (compile-time-safe), not a literal string.
-- ✅ Playbook ID comes from the routing table — admin redirect = Dataverse row update, no redeploy.
-- ✅ Dispatch is through a canonical Spaarke contract.
-- ✅ The previously hardcoded `WorkspaceOptions.ChatSummarizePlaybookId` is a graceful-degrade fallback for the deprecation window, not the primary path.
-
-**Why this consumer uses `IPlaybookOrchestrationService.ExecuteAsync` instead of `IInvokePlaybookAi.InvokePlaybookAsync`**: chat-summarize emits per-token `FieldDelta` chunks to give the user a progressive-rendering UX. `IInvokePlaybookAi` aggregates the SSE stream into a single result — that would break the load-bearing per-token rendering. The task-090 design picked direct orchestration injection with an inline SSE adapter (`TranslateEventToChunk`) instead. See §6 for when to do this.
-
-**Closing the loop**: task 092 created the corresponding `sprk_playbookconsumer` row (`sprk_consumertype = 'chat-summarize'`, pointing at `summarize-document-for-chat@v1`) in the spaarkedev1 environment.
-
----
-
-## §5. Existing consumers reference table
-
-These are the 7 consumer-type identifiers shipped in [`ConsumerTypes.cs`](../../src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ConsumerTypes.cs) as of R7:
-
-| Constant | Identifier | Surface (concrete consumer class) | What it does |
+| Unit | Table | Owns | Analogy |
 |---|---|---|---|
-| `MatterPreFill` | `matter-pre-fill` | `MatterPreFillService` | Pre-fills a new Matter form from uploaded documents |
-| `ProjectPreFill` | `project-pre-fill` | `ProjectPreFillService` | Pre-fills a new Project form from uploaded documents |
-| `AiSummary` | `ai-summary` | `WorkspaceAiService` | Generates the workspace tile AI summary (Document Profile playbook) |
-| `SummarizeFile` | `summarize-file` | `WorkspaceFileEndpoints` | File summarization behind the Workspace summarize button |
-| `ChatSummarize` | `chat-summarize` | `SessionSummarizeOrchestrator` | Chat-side `/summarize` slash command (R7 case study, §4) |
-| `EmailAnalysis` | `email-analysis` | `AppOnlyAnalysisService` | Email analysis pipeline (app-only execution context) |
-| `DailyBriefingNarrate` | `daily-briefing-narrate` | `DailyBriefingEndpoints.HandleNarrate` | Daily briefing narration dispatch — the canonical Path A.5 reference |
+| **Action** (execution unit) | `sprk_analysisaction` | `sprk_kind` (`prompted` \| `coded`), the system prompt / JPS, the output schema, `sprk_inputschema` (typed argument contract), default model tier | "the function body" |
+| **Binding** (invocation unit) | `sprk_playbookconsumer` | consumer type, `sprk_action` lookup → the Action, tool description, disposition, chips, risk, capture mode, event memberships, surfaces | "where the function is callable from, and what happens to its return value" |
 
-To see the live mapping in your environment, query the `sprk_playbookconsumer` table in Power Apps Maker portal or via `mcp__dataverse__read_query`:
+**The Binding table is THE only routing surface on the platform** (ADR-039). Every entry path resolves through it; there is no second routing contract, no tool-name allow-lists, no config-file playbook maps. The full typed contract is [`Services/Ai/PublicContracts/Binding.cs`](../../src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/Binding.cs) — read it once; every column you author below maps to a property there.
 
-```sql
-SELECT sprk_consumertype, sprk_code, sprk_environment, sprk_playbookid_value, sprk_enabled, sprk_priority
-FROM sprk_playbookconsumer
-WHERE sprk_enabled = true
-ORDER BY sprk_consumertype, sprk_priority
+One Action can be targeted by several Bindings (e.g. an "informational render" Binding and an "email disposition" Binding for the same Action — Daily Briefing does exactly this).
+
+---
+
+## §2. Step 1 — Author the Action row (`sprk_analysisaction`)
+
+| Column | What to put there |
+|---|---|
+| `sprk_name` / action code | Versioned code, e.g. `EXTRACT-DATES@v1` (existing examples: `SUM-CHAT@v1`, `CREATE-TASK@v1`, `DRAFT-CORR@v1`, `REF-CHAT@v1`) |
+| `sprk_kind` | `prompted` (JPS prompt run by ActionRunner + PromptSchemaRenderer — the default, and what this guide assumes) or `coded` (a registered `ICodedWorkflow` C# class named in `sprk_workflowclass` — requires code; see Daily Briefing, task 043) |
+| System prompt / JPS | The prompt content executed by the prompted executor. See [`JPS-AUTHORING-GUIDE.md`](JPS-AUTHORING-GUIDE.md) |
+| Output schema | The structured-completion schema the executor enforces (mirrors live in `infra/dataverse/outputschemas/`) |
+| `sprk_inputschema` | The typed argument contract — read the rules below **before** authoring |
+
+### 2.1 `sprk_inputschema` rules (G-P3 UAT hard lesson — read this)
+
+The input schema is a JSON-Schema object that becomes the projected tool's `function.parameters` when the agent loop offers your capability. Azure OpenAI validates **every** known JSON-Schema keyword in **every** projected tool schema and rejects the **entire request** (`invalid_function_parameters`) if any one is malformed.
+
+**The binding rule**: declare required-ness ONLY via the **object-level `required` array**. NEVER put `"required": true` inside a property definition. The G-P3 UAT round-1 incident (2026-07-07): one `CREATE-TASK@v1` row with property-level `"required": true` 400-failed **every text-path turn on the tenant** — every capability, not just create-task ([`notes/g-p3-uat-round1-findings.md`](../../projects/spaarke-ai-architecture-redesign-r1/notes/g-p3-uat-round1-findings.md) finding 1).
+
+```jsonc
+// ✅ CORRECT — object-level required array only
+{
+  "type": "object",
+  "properties": {
+    "due_date": {
+      "type": "string",
+      "description": "The task's due date as the user stated it (e.g. 7/9/2026).",
+      "elicitation_prompt": "What's the due date for this task?"
+    },
+    "assign_to": {
+      "type": "string",
+      "description": "Who the task is assigned to — 'me' or a person's name.",
+      "elicitation_prompt": "Should I assign it to you or someone else?"
+    }
+  },
+  "required": ["due_date", "assign_to"]
+}
+
+// ❌ WRONG — poisons EVERY loop turn, not just this tool
+// "due_date": { "type": "string", "required": true }
 ```
 
----
+Custom keywords like `elicitation_prompt` are tolerated (OpenAI ignores unknown keywords; the platform's elicitation reads them). Since the G-P3 fix, [`OpenAiFunctionSchemaValidator`](../../src/server/api/Sprk.Bff.Api/Services/Ai/Chat/OpenAiFunctionSchemaValidator.cs) excludes an invalid schema's tool at projection time (so one bad row can no longer take down the loop), flags the row via health check (Degraded), and emits `ai.tool.schema_invalid` telemetry — but the excluded tool is still **dead** until you fix the row. Author it correctly.
 
-## §6. Special case — streaming consumers (Path B variant)
+### 2.2 Author the schema mirror FIRST (CI-validated)
 
-If your consumer needs per-token SSE streaming (e.g., chat surfaces with progressive rendering), `IInvokePlaybookAi.InvokePlaybookAsync` is the wrong tool — it aggregates the stream into a single result before returning. The chat-summarize migration (§4) demonstrates the workaround:
-
-1. Still register your consumer in `ConsumerTypes.cs` (Step 1 from §3).
-2. Still create a `sprk_playbookconsumer` row in Dataverse (Step 2 from §3).
-3. At the call site, inject `IConsumerRoutingService` AND `IPlaybookOrchestrationService` directly (instead of `IInvokePlaybookAi`).
-4. Resolve via `ResolveAsync(ConsumerTypes.YourConsumer, …)` as normal.
-5. Call `_orchestrationService.ExecuteAsync(request, httpContext, ct)` — the SSE event stream is `IAsyncEnumerable<PlaybookStreamEvent>`.
-6. Translate each `PlaybookStreamEvent` into your surface's SSE chunk shape (chat uses `AnalysisChunk`; your surface may use something else).
-
-This is the **only** valid reason to bypass `IInvokePlaybookAi`. Per ADR-013, direct injection of `IPlaybookOrchestrationService` from CRUD code is normally a hygiene violation; the SSE streaming requirement is the documented exception. Cite the exception in your XML doc comment when you do this — task 091's `SessionSummarizeOrchestrator` class comment is the reference.
-
-For the runtime detail on what `PlaybookStreamEvent` carries, the SSE adapter pattern, and the Path A / A.5 / B decision matrix: [`docs/architecture/ai-architecture-playbook-consumer-routing.md`](../architecture/ai-architecture-playbook-consumer-routing.md) §3 and §4 (READ-ONLY — do not modify).
+Author your input schema in [`infra/dataverse/inputschemas/`](../../infra/dataverse/inputschemas/) as `{action-code}.input.schema.json` **before** writing it to Dataverse. The mirrors are CI-validated by `tests/integration/contract/Catalog/CatalogInputSchemaContractTests.cs` against the OpenAI function-parameters subset (property-level boolean `required` is explicitly banned). Workflow: author mirror → CI green → copy into the Dataverse row. See [`create-task-v1.input.schema.json`](../../infra/dataverse/inputschemas/create-task-v1.input.schema.json) for the annotated reference shape.
 
 ---
 
-## §7. Troubleshooting
+## §3. Step 2 — Author the Binding row (`sprk_playbookconsumer`)
 
-### "`ResolveAsync` returned null"
+| Column | Meaning | Authoring guidance |
+|---|---|---|
+| `sprk_consumertype` | Stable lower-kebab-case capability key (e.g. `create-task`) | Also add it to `ConsumerTypes.All` in [`ConsumerTypes.cs`](../../src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ConsumerTypes.cs) — the FR-P0-04 boot reconciliation diffs constants against live rows |
+| `sprk_action` | Lookup → your Action row | Required for dispatch-path execution; a Binding with no Action target is rejected `dispatch.action-kind-unsupported` |
+| `sprk_tooldescription` | **The intent surface the agent loop sees.** This text becomes the projected tool's `description` — it is what the model reads when deciding whether your capability matches the user's utterance. | **Treat it as prompt engineering.** Say what the capability does, when to use it, and what it does NOT do. A vague description = mis-dispatch; an empty one = the Binding is NOT text-projectable at all (non-empty `sprk_tooldescription` is the maker's explicit opt-in to the Text path, ADR-039) |
+| `sprk_disposition` | What happens to the output: `informational` \| `work_product` \| `overlay` \| `email` \| `record` \| `notification` | The dispatch path currently executes `informational` and `work_product`; other legs reject pre-run with stable errors until their OutputRouter legs land |
+| `sprk_chiptransitions` | Curated next-step chips: `[{"target_binding_id": "<binding row GUID>", "chip_label": "Summarize again"}]` (optional: `bulk_chip_label`, `requires_attachments`, `prefill_slots`) | Emitted after every successful dispatch of this Binding so the chip strip always shows current next steps |
+| `sprk_risk` | `none` \| `confirm-when-uncertain` \| `always-confirm` | Binding-level confirmation posture; tool-level `sprk_sideeffectclass` gating (§5) applies independently |
+| `sprk_capturemode` | `loop-elicitation` (default) or `modal` | How missing required args are collected (§6) |
+| `sprk_oneventbindings` | Event-path memberships: `[{"event": "document_uploaded", "order": 2}]` | Membership in a platform event's ordered composite (§4.1) |
+| `sprk_surfaces` | Comma-separated surface tokens (`assistant`, `record-form`, `wizard`, `office`, …) | Empty = offered on ALL surfaces; tool projection filters on the session's surface |
+| `sprk_modeltieroverride` | Optional per-Binding model tier (`fast` \| `standard` \| `reasoning`) | Overrides the Action's default tier |
 
-Most common cause. Check, in order:
-
-1. **Typo in the consumer-type string in Dataverse**. The row's `sprk_consumertype` must match `ConsumerTypes.YourConsumer` value EXACTLY (case-sensitive, no leading/trailing whitespace). Open the row in Maker portal and compare character-by-character.
-2. **`sprk_enabled = false`** on the row. Resolution ignores disabled rows.
-3. **Wrong environment**. If your row has `sprk_environment = "prod"` and you're running in `dev`, no match. Either set `sprk_environment` to wildcard (null/empty) or add a `dev` row.
-4. **Cache staleness**. The routing service caches for 5 minutes. If you just changed the row, restart the BFF or wait.
-5. **You're not registered in `ConsumerTypes.All`**. The startup health check ([`RoutingConsumerTypeHealthCheck.cs`](../../src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/RoutingConsumerTypeHealthCheck.cs)) diffs `ConsumerTypes.All` against the live Dataverse table on boot. Missing entries log a warning.
-
-### "Playbook not found" / `ErrorCode = PLAYBOOK_INVOCATION_FAILED`
-
-The `sprk_playbookconsumer` row points at a playbook ID that doesn't exist or isn't deployed. Verify:
-1. The lookup column `sprk_playbookid` resolves to a real `sprk_analysisplaybook` row.
-2. That playbook has `sprk_playbooknode` rows (i.e., it's actually a deployed playbook, not an empty shell).
-3. The playbook deployment is current per [`PLAYBOOK-AUTHOR-GUIDE.md`](PLAYBOOK-AUTHOR-GUIDE.md) Step 7.
-
-### "Parameter mismatch" / playbook errors on a `{{templateVariable}}` not resolving
-
-The playbook's nodes reference template variables (e.g., `{{entityId}}`) that you didn't pass in the `parameters` dictionary. Either:
-1. Add the missing keys to your `parameters` dictionary at the call site.
-2. Update the playbook to use defaults (`{{default entityId 'unknown'}}` — see [`PLAYBOOK-AUTHOR-GUIDE.md`](PLAYBOOK-AUTHOR-GUIDE.md) Handlebars Template Helpers).
-
-### "I changed the routing row but nothing happened"
-
-5-minute cache. Restart the BFF App Service or wait. The routing service does not subscribe to Dataverse change events — by design (the cost-of-doing-nothing for fresh-by-the-second routing isn't worth the complexity).
-
-### "Compile error: `IInvokePlaybookAi` not in scope"
-
-Add `using Sprk.Bff.Api.Services.Ai.PublicContracts;` at the top of your file. The facade lives in the `PublicContracts/` folder — the only types from `Services/Ai/` that CRUD-side code is permitted to inject per ADR-013.
-
-### Compile-time defense against future typos
-
-When you add a new consumer, also add it to `ConsumerTypes.All` (Step 1 in §3). The startup health check then guarantees that any production-environment row with a `sprk_consumertype` value NOT in `ConsumerTypes.All` will surface a warning at app boot. This is the line of defense against admins typing the consumer code freehand in Power Apps.
+Create the row in the Power Apps Maker portal, via `mcp__dataverse__create_record`, or extend `scripts/dataverse/Seed-PlaybookConsumers.ps1` (idempotent seed).
 
 ---
 
-## §8. See also
+## §4. Step 3 — How the three entry paths reach your Binding
 
-| Document | Why you'd read it |
+You do **not** wire the entry paths — they already exist and read the catalog. Authoring the columns above IS the wiring.
+
+### 4.1 Event path — `sprk_oneventbindings`
+
+When a platform event fires (e.g. `document_uploaded` on a chat-session file upload), the Event Rules service (`Services/Ai/EventRules/EventRulesService.cs`) calls `IConsumerRoutingService.ResolveEventBindingsAsync(event)` and executes the member Bindings in `order`. Shipped example: `document_uploaded` runs `chat-classify` (order 1, `CLS-CHAT@v1` Layer-0 classification) then `chat-summarize` (order 2, `SUM-CHAT@v1`). To join an event composite, add a membership entry to your Binding's `sprk_oneventbindings` — nothing else.
+
+### 4.2 Click path — dispatch by Binding id (zero LLM)
+
+Chips, ribbon buttons, and wizard actions carry your **Binding row GUID** and POST it to:
+
+```
+POST /api/ai/chat/sessions/{sessionId}/dispatch
+{ "bindingId": "<sprk_playbookconsumer row GUID>", "args": { "fileIds": ["..."] } }
+```
+
+([`Api/Ai/DispatchSessionEndpoint.cs`](../../src/server/api/Sprk.Bff.Api/Api/Ai/DispatchSessionEndpoint.cs); client helper: `@spaarke/ui-components` `dispatchConsumer(bindingId, args)`.) The id IS the routing decision — no intent detection, no LLM call. [`SessionDispatchOrchestrator`](../../src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SessionDispatchOrchestrator.cs) resolves the Binding by id (`GetBindingByIdAsync`), loads the Action, executes it via the prompted executor (ActionRunner + PromptSchemaRenderer), ledger-writes the output (`{bindingId}@t{n}`) BEFORE the terminal render chunk (ADR-040), then emits your `sprk_chiptransitions` as next-step chips. Unknown/disabled ids get clean stable errors (`dispatch.binding-not-found` 404, `dispatch.action-kind-unsupported` / `dispatch.disposition-not-supported` 422) — no fallback.
+
+### 4.3 Text path — the bounded agent loop
+
+Every NL utterance enters the agent-turn loop, which projects each text-projectable Binding (non-empty `sprk_tooldescription` + surface match) as a tool named `capability_{consumertype}` ([`BindingCapabilityTool`](../../src/server/api/Sprk.Bff.Api/Services/Ai/Chat/BindingCapabilityTool.cs)). The model choosing your tool IS the dispatch decision; invocation delegates to the SAME `SessionDispatchOrchestrator.DispatchAsync` seam as the Click path, so ledger, disposition routing, and chips behave identically. The catalog is closed — the model can only pick projected tools; off-catalog requests route to the `no_match_handler` refusal Binding (`REF-CHAT@v1`).
+
+**Important honesty contract**: a `capability_*` tool call only GENERATES content (a draft stored to the session ledger). It does not create/send/save anything — writes go through typed tools under the confirmation gate (§5). The loop's system prompt pins this (`SideEffectHonestyDirective`, G-P3).
+
+---
+
+## §5. Side effects — the ONE confirmation gate
+
+If your capability's flow ends in a real side effect (create a record, send/draft a communication), that side effect executes through a **typed tool** (`sprk_analysistool` row, e.g. `dataverse.create_record`, `email.draft`) whose row DECLARES `sprk_sideeffectclass` = `write` or `communicate`. Declared side-effecting tools never execute directly from the loop:
+
+1. [`SideEffectGateAIFunction`](../../src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SideEffectGateAIFunction.cs) wraps the tool at projection time (keyed EXCLUSIVELY on the declared class — never tool-name lists, ADR-039) and, on invocation, SUSPENDS it into the unified pending store ([`PendingPlanManager`](../../src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PendingPlanManager.cs)) — ledger marker first (ADR-040), then an `action_confirmation` SSE event renders the confirmation dialog. Fail-closed: if the store is unavailable, the tool is refused, never executed.
+2. The user confirms or rejects via:
+   ```
+   POST /api/ai/chat/sessions/{sessionId}/gates/{gateId}/resolve
+   { "approved": true | false }
+   ```
+   On confirm, [`TypedHandlerResumeExecutor`](../../src/server/api/Sprk.Bff.Api/Services/Ai/Chat/TypedHandlerResumeExecutor.cs) executes the suspended handler under the **confirming user's OBO scope**, ledger-writing `loop@t{n}` SessionOutput + ToolChain before rendering. Handler failures return **422** with stable errorCode `gate.dispatch-failed` (plus a `dispatch-failed` gate marker and an honest ❌ transcript message); success persists a ✅ transcript message — both so the next turn's model knows the real outcome.
+
+Authoring impact for you: declare the correct `sprk_sideeffectclass` on any new `sprk_analysistool` row, and write your Binding's `sprk_tooldescription` to instruct the draft→confirm→write flow (see the create-task tool description for the pattern). You never build a confirmation UI.
+
+---
+
+## §6. Elicitation — missing required args
+
+If the model invokes your capability without the `required` args your Action's input schema declares, `BindingInputSchemaValidator` catches it BEFORE dispatch and suspends into an elicitation gate instead of executing with guessed values (FR-P2-03). What happens next depends on the Binding's `sprk_capturemode`:
+
+- **`loop-elicitation`** (default) — the model asks a clarifying question in chat, using each property's `elicitation_prompt`; the re-invocation with completed args resumes through the same gate.
+- **`modal`** — an `elicitation_modal` SSE event routes the user to a wizard/form surface; the completed args come back through the dispatch endpoint, which resolves the pending gate.
+
+Never mark system-supplied properties as required (the DAILY-BRIEFING lesson: a required `briefingPayload` would make the loop ask the USER for an internal payload).
+
+---
+
+## §7. Step 4 — Add a golden-utterance eval case (merge gate)
+
+Every catalog change adds-or-updates eval cases (NFR-06). Edit the fixture
+[`tests/integration/contract/Eval/golden-utterances.json`](../../tests/integration/contract/Eval/golden-utterances.json) — JSON only, no code:
+
+```jsonc
+{
+  "caseId": "GU-0XX",
+  "family": "your-capability",
+  "ucId": "UC-…",                     // §3 trigger in the canonical design doc
+  "channel": "text",                   // text | click | event
+  "utterance": "extract the key dates from this contract",
+  "context": { "surface": "assistant", "sessionHasDocument": true },
+  "expected": { "outcomeClass": "dispatch", "consumerType": "your-capability" }
+}
+```
+
+Your `consumerType` must appear in `ConsumerTypes.All` (or be marked `catalogStatus: "planned"` citing the introducing FR). The suite runs as the **blocking `eval-gate` CI job** (`Category=GoldenUtteranceEval`, no `continue-on-error`) — eval green is a merge gate per spec NFR-02. Full case schema + phase activation rules: [`tests/integration/contract/Eval/README.md`](../../tests/integration/contract/Eval/README.md).
+
+---
+
+## §8. Worked example — the shipped create-task capability (FR-P3-03)
+
+The reference implementation of everything above, shipped by task 042 and hardened through three G-P3 UAT fix waves:
+
+| Piece | Value |
 |---|---|
-| [`docs/architecture/ai-architecture-playbook-consumer-routing.md`](../architecture/ai-architecture-playbook-consumer-routing.md) (READ-ONLY) | Runtime mechanics — cache TTL, `SelectBestMatch` algorithm, match-conditions JSON predicates, Path A/A.5/B decision matrix, R4 `/narrate` case study |
-| [`docs/guides/PLAYBOOK-AUTHOR-GUIDE.md`](PLAYBOOK-AUTHOR-GUIDE.md) | Authoring the playbook itself (nodes, edges, Handlebars helpers, deploy script) |
-| [`docs/guides/JPS-AUTHORING-GUIDE.md`](JPS-AUTHORING-GUIDE.md) | Authoring the JPS schema referenced by AI-driven nodes inside the playbook |
-| [`.claude/constraints/bff-extensions.md`](../../.claude/constraints/bff-extensions.md) | BFF Hygiene — required pre-merge checklist when your new consumer adds endpoints or services to the BFF |
-| Root [`CLAUDE.md`](../../CLAUDE.md) §10 (BFF Hygiene) | Binding governance — Placement Justification, publish-size verification, CVE scan |
-| Root [`CLAUDE.md`](../../CLAUDE.md) §11 (Component Justification) | Three-question template: Existing / Extension / Cost-of-doing-nothing — apply before adding a new consumer surface |
-| Spec FR-17 + FR-18 + FR-31 | The R7 functional requirements that drove the consumer-routing model and this guide |
-| [`src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/`](../../src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/) | The actual interfaces — `ConsumerTypes.cs`, `IConsumerRoutingService.cs`, `IInvokePlaybookAi.cs` |
+| Action | `CREATE-TASK@v1` (`sprk_kind = prompted`) — drafts a well-formed follow-up task proposal grounded in session documents + ledger outputs |
+| Input schema | `due_date` + `assign_to` in the object-level `required` array, each with an `elicitation_prompt` — mirror at [`infra/dataverse/inputschemas/create-task-v1.input.schema.json`](../../infra/dataverse/inputschemas/create-task-v1.input.schema.json) |
+| Binding | `sprk_consumertype = create-task`; tool description instructs draft→confirm→write; projected as `capability_create-task` |
+| Elicitation | "create a follow-up task" with no due date → loop asks "What's the due date for this task?" (loop-elicitation capture mode) |
+| Write leg | The EXISTING `dataverse.create_record` typed tool (declared `sprk_sideeffectclass = write`) creates `sprk_event` with `sprk_eventtype_ref = Task`, carrying provenance refs (source document + source analysis `{bindingId}@t{n}`) — suspended by the gate, executed on confirm by `TypedHandlerResumeExecutor` under the confirming user's OBO |
+| Eval | `capability_create-task` projection, elicitation contract, and the suspend → confirm → real-handler-execution walk are pinned in the eval suite (GU-051/052 + `CreateTask_ConfirmedWriteInvocation_*`) |
+
+End-to-end user experience: "create a follow-up task from this letter" → capability drafts a proposal (ledger-stored) → model asks for due date/assignee if missing (at most once) → user confirms → the write tool suspends into the confirmation dialog → user clicks Confirm → record created under their identity → ✅ outcome message in the transcript.
 
 ---
 
-*Created in R7 Wave 6 task 067 (FR-31). The companion canonical architecture doc is owned by `spaarke-ai-platform-chat-routing-redesign-r1` and is READ-ONLY in this project. Future updates to routing mechanics belong there; future updates to maker tutorials belong here.*
+## §9. Troubleshooting
+
+| Symptom | Likely cause |
+|---|---|
+| Capability never offered on the Text path | `sprk_tooldescription` empty (not text-projectable), or `sprk_surfaces` excludes the session's surface, or the input schema is invalid (check health check Degraded status + `[invalid-tool-schema]` error logs + `ai.tool.schema_invalid` telemetry) |
+| Model picks the wrong capability | Tool descriptions overlap/vague — sharpen the intent surface text; it is prompt engineering |
+| Chip click → 404 `dispatch.binding-not-found` | Chip carries a wrong/disabled Binding GUID; `sprk_chiptransitions.target_binding_id` must be the row GUID |
+| 422 `dispatch.action-kind-unsupported` | Binding has no `sprk_action` lookup, or targets a `coded` Action on the prompted-only dispatch envelope |
+| Every loop turn fails 400 `invalid_function_parameters` | Should no longer happen (projection-time validation) — but on an old build, a malformed input schema anywhere in the catalog. Check for property-level `"required": true` |
+| Confirmed write "vanishes" | Check the 422 `gate.dispatch-failed` ProblemDetails detail + the ❌ transcript message — handler validation / Dataverse rejection, correctable payload problem |
+| Routing changes don't take effect | Binding resolution is cached (~5 min); restart the BFF or wait |
+
+---
+
+## §10. See also
+
+| Document | Why |
+|---|---|
+| [`docs/architecture/chat-architecture.md`](../architecture/chat-architecture.md) | The agent-turn loop, gate, ledger, and SSE runtime this guide's capabilities execute in |
+| [`Services/Ai/PublicContracts/Binding.cs`](../../src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/Binding.cs) | The typed Binding contract — authoritative column semantics + safe defaults |
+| [`tests/integration/contract/Eval/README.md`](../../tests/integration/contract/Eval/README.md) | Eval case schema, BA workflow, merge-gate wiring |
+| [`JPS-AUTHORING-GUIDE.md`](JPS-AUTHORING-GUIDE.md) | Authoring the prompted Action's JPS content |
+| [`PLAYBOOK-AUTHOR-GUIDE.md`](PLAYBOOK-AUTHOR-GUIDE.md) | Multi-node playbooks (engine-target Bindings) |
+| Root [`CLAUDE.md`](../../CLAUDE.md) §10 + §11 | BFF Hygiene + Component Justification — apply if your capability genuinely needs new code (typed handler, coded workflow) |
+| [`projects/spaarke-ai-architecture-redesign-r1/notes/g-p3-uat-round1-findings.md`](../../projects/spaarke-ai-architecture-redesign-r1/notes/g-p3-uat-round1-findings.md) (+ round2/round3) | The UAT evidence behind the schema rules, honesty directives, and gate-outcome contracts cited here |
+
+---
+
+*Rewritten 2026-07-07 by spaarke-ai-architecture-redesign-r1 task 052 (FR-P4-03). The R7 consumer-wiring tutorial this replaces described the pre-redesign `ConsumerTypes`/`ResolveAsync`/`IInvokePlaybookAi` pattern; code-side consumers still using that triangle are documented inline in `ConsumerTypes.cs`.*

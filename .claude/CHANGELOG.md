@@ -23,6 +23,11 @@ If you're not sure whether to add an entry, add one. Too granular is better than
 
 ## [Unreleased]
 
+### Changed (2026-07-07 spaarke-ai-architecture-redesign-r1 — task 051/052 procedure-surface sync)
+- Root [`CLAUDE.md`](../CLAUDE.md) §17 — "Wiring a new consumer" row retitled to "Wiring a new capability (Action + Binding)" matching the task-052 rewrite of `ai-guide-consumer-wiring.md`.
+- [`.claude/catalogs/scope-model-index.json`](catalogs/scope-model-index.json) — regenerated against spaarkedev1 by task 051 (60 Actions / 31 Skills / 31 Knowledge / 40 Tools; entries now carry deployed GUIDs + kind/tier/side-effect metadata).
+- `jps-action-create` / `jps-validate` / `jps-playbook-design` SKILL.md — `Seed-JpsActions.ps1` pointers replaced with the MCP-create + `infra/dataverse/` mirror-first flow (script RETIRED by task 051); `sprk_externalid` → `sprk_knowledgecode` column drift fixed in jps-playbook-design.
+
 ### Changed (2026-07-07 spaarke-ai-architecture-redesign-r1 — G-P3 UAT hardening: input-schema authoring rules)
 - [`.claude/skills/jps-action-create/SKILL.md`](skills/jps-action-create/SKILL.md) — Step 4 checklist gains a **binding `sprk_inputschema` block** for loop-projectable capabilities: OpenAI function-parameters subset required; property-level `"required": true|false` **BANNED** (object-level array only); `type:array` needs `items`; legacy `{"args":[...]}` format retired (rows normalized 2026-07-07); author-mirror-first in `infra/dataverse/inputschemas/` (CI-validated by `CatalogInputSchemaContractTests`; server twin `OpenAiFunctionSchemaValidator`). Root cause: G-P3 UAT 2026-07-07 — one invalid authored schema (task 042's create-task row) 400'd EVERY agent-loop turn platform-wide. `jps-validate` should adopt the same rules (follow-up).
 - **Added** `.claude/skills/jps-action-create/examples/{create-task,draft-correspondence,refusal-handler}.json` (2026-07-06, main session) — JPS examples mirrored from ai-redesign-r1 tasks 041/042/033.

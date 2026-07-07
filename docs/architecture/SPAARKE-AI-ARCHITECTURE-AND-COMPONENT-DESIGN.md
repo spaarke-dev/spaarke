@@ -1,20 +1,22 @@
 # Spaarke AI — Architecture and Component Design (Canonical)
 
-> **Status**: **v0.4 — CONVERGED TARGET** (operator-ratified decisions,
-> 2026-07-05). §4-7 define the target architecture: three entry paths
-> (Event / Click / Text) with the bounded agent turn as the only probabilistic
-> decider; session ledger; prompted + coded execution (engine frozen per
-> OQ-2); Action + Binding manifest (no new tables); one confirmation gate.
-> All open questions resolved (OQ-1..OQ-4); ratified decision register at
-> §7.7; overlay exceptions E-1..E-5 ruled. Every §5 component carries its
-> **Fulfilled by** mapping to audited code. Companions in
+> **Status**: **v0.5 — SHIPPED ARCHITECTURE** (implemented by
+> `spaarke-ai-architecture-redesign-r1`; phases P0–P3 complete with browser
+> gates G-P0/G-P1/G-P2 passed and G-P3 through three UAT fix rounds; P4
+> hardening in flight as of 2026-07-07). §4-7 describe the architecture as
+> BUILT: three entry paths (Event / Click / Text) with the bounded agent turn
+> as the only probabilistic decider; session ledger; prompted + coded
+> execution (engine frozen per OQ-2); Action + Binding manifest (no new
+> tables); one confirmation gate. **ADR-039 and ADR-040 are Accepted.**
+> §8.1 records the as-built deltas versus the v0.4 target. Companions in
 > `projects/spaarke-ai-code-audit-r1/`: `GREENFIELD-CONCEPTUAL-DESIGN.md`
 > (clean-sheet rationale + review Q&A), `OVERLAY-MATRIX.md` (per-component
 > verdicts), `ADR-REVIEW-VS-GREENFIELD.md` (approved; ADR-037 amendment
 > applied), `SPAARKE-AI-MIGRATION-MAP.md` (sequencing; §8 summarizes).
-> §0-3 unchanged from v0.2.6.
+> Execution evidence: `projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md`
+> + `notes/g-p*-*.md`. §0-3 unchanged from v0.2.6.
 >
-> **Last updated**: 2026-07-05 (see §9 revision log for full history).
+> **Last updated**: 2026-07-07 (see §9 revision log for full history).
 >
 > **Purpose**: single canonical reference for the Spaarke AI platform's target
 > architecture and component design, anchored in real use cases. Consolidates
@@ -2590,7 +2592,91 @@ Authoritative sequencing:
 | **P4 Sweep + hardening** | Track B remainder; catalog governance; data-model docs; ADR-039/040 → Accepted; PlaybookBuilder de-scope | audit project graduates |
 
 Track B deletes with no dependencies start in P0 and run continuously
-("sweep-as-you-go"), not queued behind P4.---
+("sweep-as-you-go"), not queued behind P4.
+
+### 8.1 As-built record (2026-07-07 — spaarke-ai-architecture-redesign-r1, P0–P3 shipped)
+
+Everything in §4-7 shipped as designed unless listed here. Authoritative
+per-task evidence: `projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md`
+(the ✅ annotations) and `notes/g-p{0,1,2,3}-*.md`.
+
+**Landed as designed (highlights)**
+- Ledger (T-01): `SessionOutput` keyed `{bindingId}@t{n}` / `loop@t{n}`,
+  store-precedes-render test-proven; ToolChain / Gate markers; ADR-040
+  **Accepted** (task 014). Digest compaction generalized to outputs.
+- Catalog (T-02): FR-P0-03 column extensions live on all three tables;
+  `ConsumerRoutingService` reads the full Binding contract; boot
+  reconciliation health checks (6 drift classes → Unhealthy).
+- Three paths: Event (`document_uploaded → classify + summarize` composite,
+  CLS-CHAT@v1/SUM-CHAT@v1), Click (`POST /api/ai/chat/sessions/{id}/dispatch`,
+  GUID-resolved Binding, ONE client `dispatchConsumer` helper, chips carry
+  binding ids), Text (bounded loop: budget 8 CAS-reserved, deterministic
+  pre-filter, citation enforcement, honest refusal REF-CHAT@v1 +
+  `dispatch_refused` telemetry). ADR-039 **Accepted** (task 026).
+- ONE gate (T-06): `PendingPlanManager` unified store; loop-native
+  elicitation (`capture_mode: modal` → wizard SSE); unified
+  `POST …/gates/{gateId}/resolve`.
+- Deletions all grep-zero-verified: dispatcher stack + PlaybookEmbedding
+  subsystem (035), legacy Chat/Tools (036), engine shells + F-1 legs
+  (−11,849 lines, 044), `intentHint`/SoftSlashRouter (034), LinearConsumers /
+  Workspace / Insights routing config surfaces (040), FieldDelta dual-render
+  (046), `ConversationPane` 3,172 → 300 lines + ONE SSE parse path (045).
+- Consumers: 8 re-pointed to Bindings (040); `draft-correspondence`
+  (DRAFT-only `email.draft`, 041); `create-task` (`sprk_event` type=task,
+  042); Daily Briefing = first coded composite with the email disposition
+  leg store-precedes-send (043); matter-summary work_product leg via
+  `TopicRegistryWorkProductPersister` → `sprk_aitopicregistry` → host record
+  (047). Eval suite: 62 golden-utterance cases, merge-blocking CI gate.
+
+**As-built deltas / additions beyond the v0.4 text**
+1. **`SideEffectGateAIFunction` (task 037)** — the eval suite found
+   loop-invoked write tools running UNGATED post-cutover; a declared-class,
+   fail-closed wrap now suspends every `write`/`communicate` tool call into
+   the gate (marker-before-render). The design implied this; the shipped
+   mechanism is this named component.
+2. **`TypedHandlerResumeExecutor` (task 042)** — gate confirm executes the
+   suspended typed handler under user OBO with a `loop@t{n}` ledger write
+   before render. Gate dispatch failures return **422** (stable
+   `gate.dispatch-failed` errorCode) and persist an honest ❌ assistant
+   transcript message; successes persist ✅ + ledger key — so the next
+   turn's model sees real outcomes (G-P3 rounds 2–3).
+3. **Projection-time schema validation (G-P3 round 1)** —
+   `OpenAiFunctionSchemaValidator` walks every catalog input schema at tool
+   projection; an invalid row excludes that ONE tool (health check Degraded
+   naming the row) instead of 400-ing the whole loop. Catalog schemas are
+   authored mirror-first under `infra/dataverse/inputschemas/`
+   (CI-validated). Property-level `"required": true` is banned.
+4. **Model-steering directive layer (G-P3 rounds 1–3)** —
+   `SideEffectHonestyDirective` (action honesty: capability tools only
+   GENERATE drafts; never claim created/sent without a tool result;
+   confirm-once-then-invoke-the-write-tool; UI-action honesty) + host-record
+   identity enrichment (`PlaybookChatContextProvider` always renders the
+   host record name+id). Catalog `sprk_tooldescription` / tool
+   `sprk_description` text is load-bearing prompt engineering — UAT defects
+   were fixed as catalog data.
+5. **Assistant-drivable workspace tabs (G-P3 round 2)** —
+   `SendWorkspaceArtifactHandler` gained a `Workspace` variant that resolves
+   a layout by name and emits a `workspace_open_tab` frame on the
+   `context_event` SSE channel; the SpaarkeAi client bridges it onto
+   `PaneEventBus workspace.widget_load` (same mechanism as the Workspaces
+   menu). The four legacy artifact variants + Get/Update/Close workspace
+   tools still target the orphaned `IWorkspaceStateService` store — verdict
+   owed at FR-P4-01.
+6. **E-2 adapter relocation (044)** — the engine-output→ledger adapter call
+   moved to `AnalysisExecutionHandler` when the engine shells were deleted;
+   Binding ids reverse-resolve via `GetBindingByPlaybookIdAsync`.
+7. **Accepted-with-note residual (F-1)** — `analysis.rerun` retains an
+   app-only engine leg, ungated per operator ruling at G-P2; FR-P4-01
+   re-verifies.
+8. **Soft slashes (E-3 partial)** — only `/summarize` has a Binding;
+   full deterministic soft-slash coverage folded into FR-P3-06 and the
+   client capability-discovery follow-up (045 note).
+9. **`sprk_document` creation from chat is refused by policy** — no chat
+   tool can upload SPE file content; the catalog bans fileless
+   `sprk_document` creates with alternatives offered (G-P3 round 3). A real
+   document-creation capability is a named new-scope candidate.
+
+---
 
 ## 9. Revision log
 
@@ -2601,6 +2687,7 @@ Track B deletes with no dependencies start in P0 and run continuously
 
 | Version | Date/Time | Author | Notes |
 |---|---|---|---|
+| v0.5 | 2026-07-07 | Claude Fable 5 (redesign-r1 task 052, FR-P4-03) | **Status flipped CONVERGED TARGET → SHIPPED ARCHITECTURE.** P0–P3 complete (G-P0/G-P1/G-P2 passed; G-P3 through three UAT fix rounds; P4 in flight); ADR-039 + ADR-040 recorded Accepted. New **§8.1 As-built record**: landed-as-designed highlights + nine as-built deltas (SideEffectGateAIFunction, TypedHandlerResumeExecutor + 422/transcript gate outcomes, OpenAiFunctionSchemaValidator + inputschemas mirrors, honesty-directive layer, workspace_open_tab assistant-drivable layout tabs, E-2 adapter relocation, F-1 accepted-with-note residual, partial soft-slash coverage, document-creation refusal policy). No changes to §0-7 design content. |
 | v0.1 | 2026-07-04 15:00 (approx) | Claude (with operator direction) | Initial draft. §0-3 (intro, product context, competitive landscape, use case catalog) drafted for review. Architecture and component sections deferred pending §3 approval. |
 | v0.2 | 2026-07-04 19:30 (approx) | Claude (with operator direction) | **Sequence framing** added as §3.0 — establishes UCs as connected nodes in a session graph, not isolated tools. Every UC in §3.A-H updated with **Typical prior context** and **Typical next steps** fields defining handoff patterns. **Category H (Task and workflow orchestration)** added with 6 UCs (H-1 through H-6). **UC-G-3 (Document-to-matter-to-communication)** and **UC-G-4 (Briefing-to-action)** added as canonical composition journeys. **Competitive landscape** expanded with **Wordsmith AI** (direct market overlap, chat-only) and **Peppermint Technology** (Power Platform sibling, not AI-native). §0.1, §0.3, §0.4, §0.5 updated to reflect sequence framing. §4-8 remain deferred to v0.3. |
 | v0.2.1 | 2026-07-04 20:00 (approx) | Claude (with operator direction) | Added **§3.9 Relationship map and overlap analysis** — derives the UC graph from Typical next-step declarations. Sub-sections: 3.9.1 Universal hubs (E-3, H-1); 3.9.2 Primary entry points; 3.9.3 Flagship UC-G-3 spine (Mermaid); 3.9.4 Discovery/refinement loop (Mermaid); 3.9.5 Scheduled→action ripple (Mermaid); 3.9.6 Task lifecycle cluster (Mermaid); 3.9.7 Adjacency table with in/out-degree per UC; 3.9.8 Ten overlap points as component-consolidation candidates for §5+§6 (A-5⊂C-1, A-2/A-3 same shape, B-3/D-1 same generative capability, B-1/B-2 same pre-fill shape, D-2/H-4 same reminder capability, A-7 dual-role, G-* as Journeys, F-1/A-7 enum-proposal, E-1/E-3 template-fill, C-4 as mechanism not UC); 3.9.9 What this means for §4-8. |

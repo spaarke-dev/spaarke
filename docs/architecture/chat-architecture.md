@@ -1,8 +1,8 @@
 # Chat Architecture
 
-> **Last Updated**: 2026-07-06
-> **Last Reviewed**: 2026-07-06
-> **Reviewed By**: spaarke-ai-architecture-redesign-r1 (tasks 034/035/036 — FR-P2-05/06/07 hard cutover)
+> **Last Updated**: 2026-07-07
+> **Last Reviewed**: 2026-07-07
+> **Reviewed By**: spaarke-ai-architecture-redesign-r1 task 052 (verified against code; added P3 + G-P3 hardening mechanisms — tasks 037/042 + the three G-P3 UAT fix waves). Prior review: tasks 034/035/036 (FR-P2-05/06/07 hard cutover, 2026-07-06)
 > **Status**: Current
 > **Purpose**: Describes the SprkChat conversational AI subsystem — session management, the agent-turn loop (the ONE dispatch protocol, ADR-039), the unified confirmation gate, and the streaming response pipeline.
 
@@ -23,7 +23,13 @@ The key architectural decision is the **Agent Framework pattern** — each chat 
 | ISprkChatAgent | `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ISprkChatAgent.cs` | Agent interface enabling middleware decorator pattern |
 | ChatSessionManager | `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatSessionManager.cs` | Session lifecycle (create/get/delete); Redis hot cache with 24h TTL, Dataverse cold storage |
 | ChatHistoryManager | `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatHistoryManager.cs` | Message persistence, summarisation at 15 messages, archive at 50 messages |
-| PendingPlanManager | `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PendingPlanManager.cs` | THE unified confirmation gate (D12/FR-P2-02): Redis store for suspended invocations (30-min TTL) + SessionGate ledger markers (ADR-040) |
+| PendingPlanManager | `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PendingPlanManager.cs` | THE unified confirmation gate (D12/FR-P2-02): Redis store for suspended invocations (30-min TTL) + SessionGate ledger markers (ADR-040). Gate-status vocabulary: `pending`/`confirmed`/`rejected`/`expired`/`superseded` + `confirmed-unexecutable` (G-P2) + `dispatch-failed` (G-P3 R2-A/R2-C) |
+| SessionDispatchOrchestrator | `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SessionDispatchOrchestrator.cs` | THE dispatch seam (ADR-039): resolves a Binding BY ID, executes its prompted Action via ActionRunner, ledger-writes output BEFORE the terminal chunk (ADR-040); shared by chip clicks, `BindingCapabilityTool`, and gate confirm-resume |
+| BindingCapabilityTool | `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/BindingCapabilityTool.cs` | Projects one catalog Binding into the loop as a `capability_{consumerType}` tool; validates declared required args BEFORE dispatch (elicitation suspend on missing) |
+| SideEffectGateAIFunction | `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SideEffectGateAIFunction.cs` | Loop-boundary gate wrap on typed-handler tools whose `sprk_analysistool` row declares `sprk_sideeffectclass` write/communicate — suspends into the unified gate instead of executing; fail-closed (task 037/FR-P2-08) |
+| TypedHandlerResumeExecutor | `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/TypedHandlerResumeExecutor.cs` | Confirm-RESUME seam for suspended typed-handler invocations: resolves the tool row + handler and executes under the confirming user's OBO, ledger-writing `loop@t{n}` SessionOutput + ToolChain before render (task 042/FR-P3-03) |
+| OpenAiFunctionSchemaValidator | `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/OpenAiFunctionSchemaValidator.cs` | Projection-time validation of catalog input schemas against the OpenAI function-parameters subset — an invalid schema excludes ONLY its own tool (G-P3 H1) |
+| BindingInputSchemaValidator + ElicitationTurnRouter | `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/BindingInputSchemaValidator.cs`, `ElicitationTurnRouter.cs` | FR-P2-03 loop-native elicitation: missing declared-required args suspend into an elicitation gate; router builds the clarify instruction or the `elicitation_modal` escape (`capture_mode: modal`) |
 | PlaybookChatContextProvider | `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookChatContextProvider.cs` | Resolves ChatContext from playbook Action record, knowledge scopes, entity enrichment |
 | DynamicCommandResolver | `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/DynamicCommandResolver.cs` | Metadata-driven command catalog from system + playbook + scope capability sources |
 | AnalysisChatContextResolver | `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/AnalysisChatContextResolver.cs` | Resolves analysis-scoped context from sprk_analysisoutput and related records |
@@ -46,12 +52,59 @@ The key architectural decision is the **Agent Framework pattern** — each chat 
 6. **ChatHistoryManager** persists the message to Dataverse and updates Redis cache; the turn's ToolChain is ledger-written BEFORE rendering (ADR-040)
 7. **Summarisation** triggers at 15 messages; **archive** triggers at 50 messages
 
-Suspended invocations resume through `POST /api/ai/chat/sessions/{sessionId}/gates/{gateId}/resolve` — the single gate-resolution surface.
+Suspended invocations resume through `POST /api/ai/chat/sessions/{sessionId}/gates/{gateId}/resolve` — the single gate-resolution surface (semantics in "The confirmation gate end-to-end" below).
 
 ### Context Mapping Resolution
 
 1. **ChatContextMappingService** resolves playbook(s) using four-tier precedence: exact match (entityType + pageType) -> entity + any -> wildcard + pageType -> global fallback
 2. Results cached in Redis with 30-minute sliding TTL
+
+## The confirmation gate end-to-end (P3 + G-P3 hardening, 2026-07-07)
+
+The unified gate described above was hardened by task 037 (FR-P2-08), task 042 (FR-P3-03), and the three G-P3 UAT fix waves (`projects/spaarke-ai-architecture-redesign-r1/notes/g-p3-uat-round{1,2,3}-findings.md`). The full walk:
+
+### Suspend (loop tool-invocation boundary)
+
+**`SideEffectGateAIFunction`** (task 037) wraps every loop-projected typed-handler tool whose `sprk_analysistool` row DECLARES `sprk_sideeffectclass` = `write` or `communicate` (e.g. `dataverse.create_record`, `email.draft`). The gate decision keys exclusively on the declared class — never tool-name lists (ADR-039); wrap-site selection in `SprkChatAgentFactory` applies `PendingPlanManager.RequiresConfirmation` over catalog metadata only. On invocation the wrapper suspends into the unified store — pending `SessionGate` ledger marker FIRST (ADR-040), resumable args payload in the Tier-3 Redis store only (never logged, NFR-07), then the `action_confirmation` SSE event renders the client dialog. **Fail-closed** (NFR-03): if the store is unavailable or suspension fails, the inner tool does NOT execute — the model gets an honest "cannot execute" instruction. The wrapper preserves the inner tool's name/description/schema verbatim (NFR-04 projection stability).
+
+### Resolve — `POST /api/ai/chat/sessions/{sessionId}/gates/{gateId}/resolve`
+
+Handler: `ChatEndpoints.ResolveGateAsync`. Reject closes the gate with a `rejected` marker. Confirm has two legs:
+
+- **Binding-backed invocations** (elicitation gates, capability confirmations) resume through THE dispatch seam — `SessionDispatchOrchestrator.DispatchAsync` by Binding id.
+- **Typed-handler invocations** (suspended by `SideEffectGateAIFunction`; no Binding id) execute through **`TypedHandlerResumeExecutor`** (task 042): the suspended `ToolId` resolves back to its `sprk_analysistool` row + registered handler (catalog declarations only — no allow-lists), and runs the SAME `ValidateChat` → `ExecuteChatAsync` handler contract the loop would have used, **under the confirming user's OBO scope** (the handler resolves from the gate-resolve request's DI scope — no app-only path is reachable). On success the seam ledger-writes an addressable `loop@t{n}` `SessionOutput` + a `SessionToolChain` audit entry BEFORE the result renders (ADR-040). Invocations with no resolvable target (row not chat-available, no handler, compound AI off) close honestly as `confirmed-unexecutable` with 422 `gate.no-binding-target`.
+
+Concurrency: resume is get-then-delete; a double-confirm race yields 409 `gate.not-pending`.
+
+### Failure semantics — 422 `gate.dispatch-failed` (NOT 502)
+
+Handler-reported failures on a confirmed execution (write-mapper validation rejections, Dataverse 400s) are request-content problems, so the endpoint returns **422** ProblemDetails with the stable errorCode **`gate.dispatch-failed`** and the handler's instructive detail (G-P3 round-3 R3-2; the previous 502 falsely signaled a gateway fault). 5xx is reserved for genuinely unexpected exceptions. A `dispatch-failed` gate marker is appended AFTER the `confirmed` marker (append-only, correlated by gate id) so the ledger records the user's approval AND the execution failure.
+
+### Outcome persistence — the model must see the truth
+
+On BOTH outcomes the resolution is persisted as an **assistant transcript message** (G-P3 round-2 R2-A/R2-C): success → `✅ Confirmed action '{name}' executed. …` (+ ledger key when present); failure → `❌ Confirmed action '{name}' FAILED: … No record was created or modified by this confirmation.` This puts the real outcome into the next turn's conversation history (and survives page reload) — before this fix the model oscillated between "created" and "not found" because no gate outcome ever entered `session.Messages`.
+
+## Loop hardening (G-P3 fix waves, 2026-07-07)
+
+### Catalog schema validation at projection — `OpenAiFunctionSchemaValidator`
+
+Azure OpenAI validates every known JSON-Schema keyword in every projected tool's `function.parameters` and rejects the ENTIRE request (`invalid_function_parameters`) if any one tool's schema is malformed — one bad catalog row (property-level `"required": true` on `CREATE-TASK@v1`) 400-failed every text-path turn on the tenant (G-P3 round-1 H1). Now: `OpenAiFunctionSchemaValidator` (pragmatic OpenAI function-parameters subset walk) runs at tool projection on BOTH catalog legs (Binding projection in `SprkChatAgentFactory`; `sprk_analysistool` leg in `ToolHandlerToAIFunctionAdapter`, after its Draft 2020-12 meta-schema check). An invalid schema excludes ONLY its own tool (Error log `[invalid-tool-schema]`, identifiers + keyword-path only), emits `ai.tool.schema_invalid` telemetry (`Telemetry/AiTelemetry.cs`), and surfaces via `RoutingConsumerTypeHealthCheck` as **Degraded** (never Unhealthy) naming the offending row. Authoring rule + CI-validated mirrors: `infra/dataverse/inputschemas/` + `CatalogInputSchemaContractTests`.
+
+### Action honesty — `SideEffectHonestyDirective`
+
+A deterministic "## Action Honesty" directive (`SprkChatAgentFactory.SideEffectHonestyDirective`) is appended to the system prompt of every tool-bearing session (G-P3 rounds 1–3, findings H6/R2-B/R2-D/R3-1/R3-2). Pins: never claim a record/task/email/tab was created, saved, sent, or opened unless a TOOL RESULT confirms it; `capability_*` tools only GENERATE drafts — creating still requires the separate write tool; ask for chat confirmation AT MOST ONCE, then IMMEDIATELY invoke the write tool (its confirmation dialog IS the approval step — never re-draft, never re-ask); resolve lookup references to record GUIDs BEFORE proposing a write; a SUSPENDED tool means the action has NOT happened. `BindingCapabilityTool`'s result text reinforces the same split ("finished GENERATING… did NOT create, save, send…").
+
+### Elicitation (FR-P2-03)
+
+Before dispatching a `capability_*` invocation, `BindingCapabilityTool` validates the model's arguments against the Binding's DECLARED input schema (`BindingInputSchemaValidator.FindMissingRequired`). Missing required args suspend into an elicitation gate (kind `elicitation`; marker first per ADR-040) and yield either a grounded clarifying-turn instruction (`ElicitationTurnRouter.BuildClarifyInstruction`) or — when the Binding declares `capture_mode: modal` and a chat SSE surface exists — an `elicitation_modal` SSE event routing the user to a wizard (`BuildModalNotice`). A successful later dispatch of the same Binding resolves the pending elicitation gate at the ONE dispatch seam (`PendingPlanManager.ResolveElicitationOnDispatchAsync`). Partial answers reuse the same gate id (one logical invocation across turns); elicitation-triggering calls count within the per-turn tool budget (NFR-09).
+
+### `workspace_open_tab` context_event frame (G-P3 round-2 R2-D)
+
+When the loop invokes the `send_workspace_artifact` tool with `widgetType: "Workspace"` (a named workspace layout, e.g. "Compose"), `SendWorkspaceArtifactHandler` emits a **`workspace_open_tab`** frame on the existing `context_event` SSE channel (fields on `ContextSseEventDto` / SprkChat `types.ts`: widget registry key, tab title, server-generated tab correlation id, serialized `widgetData`). Client side, `useContextEventBridge` (SpaarkeAi ConversationPane) republishes it on the `workspace` PaneEventBus channel and the workspace pane opens a real layout tab — closing the fabrication gap where the model claimed "opened in a workspace tab" with no mechanism behind it.
+
+### Stable turn-failure error — `[chat.turn-failed]`
+
+The SendMessage catch-all no longer interpolates raw exception text into the SSE error event (G-P3 round-1 H3: an upstream `ClientResultException` with `tools[28]` internals rendered verbatim in the user's transcript). One construction site (`ChatEndpoints.BuildTurnFailedErrorEvent()`, errorCode const `chat.turn-failed`) emits the stable message `[chat.turn-failed] The assistant hit a problem completing this turn. Please try again.` — exception detail stays in the server-side `LogError` (ADR-019).
 
 ## Integration Points
 

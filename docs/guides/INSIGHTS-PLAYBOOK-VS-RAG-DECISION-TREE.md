@@ -1,5 +1,7 @@
 # Playbook vs. RAG — Decision Tree for Insights Engine Consumption
 
+
+> **Terminology note (2026-07-07, spaarke-ai-architecture-redesign-r1 task 052)**: references to `PlaybookExecutionEngine` in this doc mean "the playbook engine" loosely. The literal class `PlaybookExecutionEngine` (a chat-summarize shell) was DELETED at redesign-r1 task 044; the engine that executes Insights playbooks is `PlaybookOrchestrationService` + the `INodeExecutor` registry, which is **FROZEN** (Insights family only per OQ-2/D11 — new capability must NOT be built as node-graph playbooks). Insights honesty primitives, `IInsightsAi`, and the `spaarke-insights-index` substrate are unchanged.
 > **Audience**: Developers + SMEs choosing how to answer a new Insights-shaped question.
 > **Last Updated**: 2026-06-03 (Phase 1.5 Wave E4, task 043).
 > **Companion to**: [`INSIGHTS-ENGINE-GUIDE.md`](./INSIGHTS-ENGINE-GUIDE.md) §2.2 (heuristic table) and §3 (playbook authoring procedure).

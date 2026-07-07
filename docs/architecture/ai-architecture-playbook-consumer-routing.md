@@ -1,6 +1,8 @@
 # AI Architecture — Playbook Consumer Routing & Path A.5
 
-> **Last reviewed**: 2026-06-28
+> **⚠️ PARTIALLY SUPERSEDED (2026-07-07, spaarke-ai-architecture-redesign-r1 task 052)**: the 2026-07 redesign promoted `sprk_playbookconsumer` from "consumer→playbook redirect table" to **the Binding table — the single routing surface for ALL AI capability invocation** (Action FK, tool description, disposition, chips, risk, capture mode, on-event membership; schema truth: [`docs/data-model/sprk-playbookconsumer.md`](../data-model/sprk-playbookconsumer.md)). **`IInvokePlaybookAi` (the Path A.5 facade this doc centers on) was DELETED** at task 044 with the engine shells; `IConsumerRoutingService` survives, extended to read the full Binding contract. The Triangle/Path-A.5 material below is design history for the frozen engine era — wiring recipes live in [`docs/guides/ai-guide-consumer-wiring.md`](../guides/ai-guide-consumer-wiring.md); shipped architecture in [`SPAARKE-AI-ARCHITECTURE-AND-COMPONENT-DESIGN.md`](SPAARKE-AI-ARCHITECTURE-AND-COMPONENT-DESIGN.md).
+>
+> **Last reviewed**: 2026-06-28 (content) · 2026-07-07 (supersession banner only)
 > **Renamed from**: `ai-architecture-consumer-routing.md` (2026-06-28)
 > **Authored by**: canonical-truth loop step 3 (spaarke-daily-update-service-r4); augmented by chat-routing-redesign-r1 (2026-06-28) with origin context, Triangle diagram, runtime code example, consumer inventory, and Action Engine relationship.
 > **Status**: Canonical. Lifts the `sprk_playbookconsumer` / `IConsumerRoutingService` / `IInvokePlaybookAi` triangle from R4 `notes/decisions/030-dispatch-path.md` and chat-routing-redesign-r1 `architecture/stateful-chat-architecture.md` into a first-class architecture doc.

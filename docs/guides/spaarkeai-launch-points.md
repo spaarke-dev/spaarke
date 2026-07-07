@@ -1,6 +1,6 @@
 # SpaarkeAi Launch Points
 
-> **Last Updated**: 2026-05-16
+> **Last Updated**: 2026-07-07 (known-gap note added to Launch Point 2 — matter form ribbon registration missing, G-P3 UAT)
 > **Status**: Current
 > **Web Resource**: `sprk_spaarkeai`
 
@@ -51,6 +51,8 @@ When no parameters are passed, the AI opens in general (unscoped) mode.
 ---
 
 ## Launch Point 2: Entity Form Command Bar Button
+
+> ⚠️ **KNOWN GAP (found during G-P3 UAT, 2026-07-07)**: the **matter main form's EntityFormLaunch ribbon button registration is MISSING** — the launch point below is documented and the `sprk_spaarkeai_entityformlaunch` web resource + `EntityFormLaunch.ts` script exist, but the ribbon command is **not registered/wired on the matter form**, so no "Open SpaarkeAi" button appears there. Registration is outstanding, tracked in project `spaarke-ai-architecture-redesign-r1` G-P3 follow-ups. Until it lands, open SpaarkeAi for a matter via the deep-link URL (Launch Point 3) or the workspace command bar (Launch Point 1).
 
 **Trigger**: Command bar on any Dataverse entity form where the button has been added (e.g. Matter form, Contact form, Document form).
 

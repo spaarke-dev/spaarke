@@ -1,6 +1,6 @@
 # AI Search — Azure Setup & Operational Guide
 
-> **Last Updated**: 2026-06-26 (created by `spaarke-ai-azure-setup-dev-r1` task 003 per FR-02)
+> **Last Updated**: 2026-07-07 (drift check by `spaarke-ai-architecture-redesign-r1` task 052 — `spaarke-playbook-embeddings` marked orphaned/pending decommission per FR-P4-01; originally created by `spaarke-ai-azure-setup-dev-r1` task 003 per FR-02)
 > **Audience**: BFF operators, infrastructure engineers, platform DevOps
 > **Status**: Authoritative — operational runbook for provisioning Azure AI Search in any Spaarke environment
 
@@ -419,7 +419,11 @@ Invoke-RestMethod -Uri "$endpoint/indexes?api-version=2024-07-01" -Headers $head
   | Sort-Object name
 ```
 
-Expect 7 rows: `spaarke-discovery-index`, `spaarke-files-index`, `spaarke-insights-index`, `spaarke-invoices-index`, `spaarke-rag-references`, `spaarke-records-index`, `spaarke-session-files`. (`spaarke-playbook-embeddings` was retired by ai-architecture-redesign-r1 task 035 / FR-P2-06 — an existing live index is a leftover to delete in the P4 sweep.) Any extra index (especially `spaarke-knowledge-index-v2`, `discovery-index` without the `spaarke-` prefix, `spaarke-knowledge-shared`) is a defect per the [retired-index appendix](../architecture/AI-SEARCH-INDEX-CATALOG.md#5-retired-indexes-appendix).
+Expect 7 rows: `spaarke-discovery-index`, `spaarke-files-index`, `spaarke-insights-index`, `spaarke-invoices-index`, `spaarke-rag-references`, `spaarke-records-index`, `spaarke-session-files`.
+
+> **`spaarke-playbook-embeddings` is ORPHANED — pending decommission (FR-P4-01)**. `spaarke-ai-architecture-redesign-r1` task 035 (FR-P2-06) deleted the ENTIRE PlaybookEmbedding subsystem from the BFF (`PlaybookEmbeddingService`, `PlaybookIndexingService`, `PlaybookIndexingBackgroundService`, `PlaybookIndexDriftDetectionJob`), so the index has **zero code consumers** — nothing reads it, writes it, or detects drift on it. Do NOT deploy, ingest, or set it up as part of this guide. If it still exists live in an environment, it is a leftover awaiting the Track-B P4 decommission sweep (task 050 verdict); deleting it is safe once the FR-P4-01 sweep executes.
+
+Any extra index (especially `spaarke-knowledge-index-v2`, `discovery-index` without the `spaarke-` prefix, `spaarke-knowledge-shared`) is a defect per the [retired-index appendix](../architecture/AI-SEARCH-INDEX-CATALOG.md#5-retired-indexes-appendix).
 
 ### 5.2 — Per-index field-flag verification
 

@@ -194,7 +194,7 @@
 
 | # | Task | FR | Rigor | Deps | Status |
 |---|---|---|---|---|---|
-| 052 | Documentation refresh (data-model ×4, guides, ADR A-3) | FR-P4-03 | MINIMAL | 050, 051 | 🔲 |
+| 052 | Documentation refresh ✅ (dispatched early per operator overlap ruling): AI-ARCHITECTURE + canonical doc → v0.5 SHIPPED with as-built deltas; workspace arch §2.3/2.6/3.6 (assistant-drivable layouts, tab persistence, visible-to-assistant); ERD replacement — 3 NEW + 1 refreshed data-model docs live-schema-verified, INDEX reconciled zero dead links; consumer-wiring guide REWRITTEN as capability-wiring; auth runbook +SPA redirect URIs (AADSTS50011); doc-drift-audit CLEAN (7 High + 6 Medium all fixed); ADR A-3 minor refreshes deferred → 090 ADR-verification step; stale ChatEndpoints resume-seam comment → next code commit | FR-P4-03 | MINIMAL | 050, 051 | ✅ |
 | 055 | Publish-size + CVE verification; ADR-029 baseline | FR-P4-06 | STANDARD | 050–054 | 🔲 |
 
 ### Wrap-up (serial — `/goal clear` first)

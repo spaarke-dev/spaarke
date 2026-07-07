@@ -1,5 +1,7 @@
 # Build a New Narrative-Output Consumer
 
+
+> **⚠️ PARTIALLY SUPERSEDED (2026-07-07, spaarke-ai-architecture-redesign-r1 task 052)**: this guide was written for the R7 engine era. Since then: `IInvokePlaybookAi` was DELETED (task 044) — new BFF endpoints must NOT be built on it; the node-graph engine is FROZEN (Insights only, OQ-2/D11); Daily Briefing (the worked example) now ships as the FIRST coded composite (`DailyBriefingCompositeService` via `ICodedWorkflow`, task 043) with its email leg as an OutputRouter `email` disposition — not `/narrate` + engine playbook. For NEW narrative-output capabilities: author an Action + Binding per [`ai-guide-consumer-wiring.md`](ai-guide-consumer-wiring.md) (prompted single-LLM-call) or a coded `ICodedWorkflow` for multi-step composites. The JPS Layer-2 material (`PromptSchemaRenderer` `## Input` section) below remains current — `ActionRunner` uses the same renderer.
 > **Audience**: Playbook + Action JPS authors building new "LLM produces structured output from playbook runtime data" features for the Workspace UX, Insights Engine, or other Spaarke surfaces.
 > **Architecture reference**: [`docs/architecture/SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md`](../architecture/SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md)
 > **Last Updated**: 2026-06-29 (R7 Wave 11 task 111a)

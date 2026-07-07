@@ -1,7 +1,7 @@
 # Spaarke Auth — New Environment Setup Guide
 
-> **Version**: 1.0
-> **Last Updated**: 2026-05-19
+> **Version**: 1.1
+> **Last Updated**: 2026-07-07 (added §2.5 SPA redirect URIs for code-page MSAL — G-P3 UAT finding, AADSTS50011)
 > **Status**: Validated against the dev environment cutover (Phase C deploy, 2026-05-19)
 > **Applies To**: Deploying Spaarke Auth v2 to a new Dataverse + Azure tenant
 > **Audience**: Customer DevOps / platform operator. **Zero engineering decisions required** — every value below is mechanical.
@@ -90,6 +90,30 @@ Or set via PAC CLI / Web API (script-friendly).
 | `sprk_TenantId` | GUID | `{tenant-guid}` | Azure AD tenant GUID. Drives the MSAL authority (`https://login.microsoftonline.com/{sprk_TenantId}/`). |
 
 **Validation**: open any Dataverse model-driven app that hosts a Spaarke PCF. Browser console should log the authority as `https://login.microsoftonline.com/{tenant-guid}/` — **never** `/common` or `/organizations`. If you see the latter, `sprk_TenantId` is unset or has a stale value.
+
+### 2.5 BFF app registration — SPA redirect URIs (required for Code Page MSAL)
+
+> Added 2026-07-07 after the G-P3 UAT finding (`spaarke-ai-architecture-redesign-r1`, 2026-07-07): MSAL sign-in from the SpaarkeAi code page failed with **`AADSTS50011: The redirect URI ... does not match the redirect URIs configured for the application`** because the code-page web-resource path was missing from the app registration's SPA platform.
+
+Code Pages (React web resources such as `sprk_spaarkeai`) run MSAL as a **public SPA client against the BFF app registration** (`sprk_MsalClientId` = `{bff-app-id}` per §2). MSAL's redirect handling resolves against the page's own URL, so the BFF app registration's **SPA platform** (Azure Portal → App registrations → `{bff-app-id}` → *Authentication* → *Single-page application*) MUST include **BOTH** of the following redirect URIs per Dataverse environment:
+
+| Redirect URI | Why |
+|---|---|
+| `https://{dataverse-org}.crm.dynamics.com` | The bare Dataverse org origin — used by redirect/silent flows that resolve to the org root |
+| `https://{dataverse-org}.crm.dynamics.com/webresources/sprk_spaarkeai` | The code-page web-resource path itself — the URL the SpaarkeAi page runs at (full-page launch, modal launch, and deep-link) |
+
+Dev example (`spaarkedev1`):
+
+```
+https://spaarkedev1.crm.dynamics.com
+https://spaarkedev1.crm.dynamics.com/webresources/sprk_spaarkeai
+```
+
+Add them under the **SPA** platform (NOT "Web" — the auth-code-with-PKCE flow MSAL uses is rejected on Web-platform URIs). If the BFF serves multiple Dataverse environments (§6 note), add both URIs for each org.
+
+**Failure mode if missing**: sign-in from the SpaarkeAi code page fails with `AADSTS50011` (redirect URI mismatch) before any token is issued; PCF-hosted surfaces may continue to work (their host page URL is already registered), which makes the gap easy to miss until the code page is exercised.
+
+**Validation**: open the SpaarkeAi code page (`https://{dataverse-org}.crm.dynamics.com/WebResources/sprk_spaarkeai`) in a fresh browser session — MSAL should complete sign-in without an AADSTS error banner.
 
 ---
 

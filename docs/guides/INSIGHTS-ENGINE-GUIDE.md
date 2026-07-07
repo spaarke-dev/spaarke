@@ -1,5 +1,7 @@
 # Insights Engine Guide
 
+
+> **Terminology note (2026-07-07, spaarke-ai-architecture-redesign-r1 task 052)**: references to `PlaybookExecutionEngine` in this doc mean "the playbook engine" loosely. The literal class `PlaybookExecutionEngine` (a chat-summarize shell) was DELETED at redesign-r1 task 044; the engine that executes Insights playbooks is `PlaybookOrchestrationService` + the `INodeExecutor` registry, which is **FROZEN** (Insights family only per OQ-2/D11 — new capability must NOT be built as node-graph playbooks). Insights honesty primitives, `IInsightsAi`, and the `spaarke-insights-index` substrate are unchanged.
 > **Audience**: developers + technical SMEs extending the Spaarke Insights Engine
 > **Last Updated**: 2026-06-04 (Phase 1.5 r2 shipped — Waves A/B/C/D/E via PRs #330, #334, #336, #337 + Wave F contract v1.1 via PR #339; §7/§7A/§7B/§7C updated to reflect shipped state + new `Insights:CitationHref:BffBaseUrl` config requirement)
 > **Companion documents**:
