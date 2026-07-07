@@ -5,10 +5,12 @@
  *   - parseConsumerChips tolerant wire parsing
  *   - Click preconditions: missing bindingId, no session, empty-attachments
  *     guard (requiresAttachments + 0 attachments → NO fetch, NO bus events)
- *   - Happy delta path: streaming_started (once) → field_delta(s) →
- *     streaming_complete/complete; $.-prefix path normalization
- *   - Terminal complete-with-result synthesis (non-streaming executors):
- *     per-field field_delta events before streaming_complete
+ *   - Terminal complete-with-result section bridge (task 046 / amended
+ *     ADR-037): streaming_started (once) → section_started +
+ *     section_completed per top-level result key → streaming_complete.
+ *     Strings ride finalContent; arrays/objects ride finalStructuredData.
+ *   - Retired "delta" wire chunks are IGNORED (no server path emits them
+ *     post-cutover; verified AnalysisChunk.FromDelta has zero call sites)
  *   - Error chunk → streaming_complete/declined + rejection
  *   - HTTP non-OK → ADR-019 errorCode surfaced + declined event + rejection
  *   - Stream with no terminal chunk → streaming_complete/empty
@@ -329,7 +331,7 @@ describe('dispatchConsumer request contract', () => {
 // ---------------------------------------------------------------------------
 
 describe('dispatchConsumer SSE → workspace-channel bridging', () => {
-  it('delta path: started once → field_delta per delta → complete; $.-paths normalized', async () => {
+  it('retired "delta" wire chunks are IGNORED (post-cutover: no per-field vocabulary on the bus)', async () => {
     const { publish, events } = makePublishSpy();
     const dispatchConsumer = makeDispatcher(publish);
     mockFetch.mockResolvedValueOnce(
@@ -343,25 +345,14 @@ describe('dispatchConsumer SSE → workspace-channel bridging', () => {
     const result = await dispatchConsumer(BINDING_ID, { streamId: 'stream-1' });
 
     expect(result).toEqual({ streamId: 'stream-1', status: 'complete' });
-    expect(events.map(e => e.event.type)).toEqual([
-      'streaming_started',
-      'field_delta',
-      'field_delta',
-      'streaming_complete',
-    ]);
-    expect(events[1].event).toMatchObject({
-      streamId: 'stream-1',
-      fieldPath: 'tldr', // "$." prefix normalized
-      fieldContent: 'Short',
-      sequence: 0,
-    });
-    expect(events[2].event).toMatchObject({ fieldPath: 'summary', fieldContent: 'Long' });
-    expect(events[3].event).toMatchObject({ completionStatus: 'complete' });
-    // every event carries the same channel + streamId
+    // The retired chunks bridge to NOTHING; only the terminal lifecycle runs.
+    expect(events.map(e => e.event.type)).toEqual(['streaming_started', 'streaming_complete']);
+    expect(events[1].event).toMatchObject({ completionStatus: 'complete' });
+    // every event carries the same channel
     expect(events.every(e => e.channel === 'workspace')).toBe(true);
   });
 
-  it('terminal complete-with-result synthesizes per-field deltas before completion', async () => {
+  it('terminal complete-with-result bridges section pairs per top-level key before completion', async () => {
     const { publish, events } = makePublishSpy();
     const dispatchConsumer = makeDispatcher(publish);
     mockFetch.mockResolvedValueOnce(
@@ -386,12 +377,23 @@ describe('dispatchConsumer SSE → workspace-channel bridging', () => {
     expect(result.status).toBe('complete');
     expect(events.map(e => e.event.type)).toEqual([
       'streaming_started',
-      'field_delta',
-      'field_delta',
+      'section_started',
+      'section_completed',
+      'section_started',
+      'section_completed',
       'streaming_complete',
     ]);
-    expect(events[1].event).toMatchObject({ fieldPath: 'tldr', fieldContent: 'Short version' });
-    expect(events[2].event).toMatchObject({ fieldPath: 'keywords', fieldContent: '["a","b"]' });
+    // String value → finalContent; declaration-order sectionIndex.
+    expect(events[1].event).toMatchObject({ sectionName: 'tldr', sectionIndex: 0, streamId: 's-2' });
+    expect(events[2].event).toMatchObject({ sectionName: 'tldr', finalContent: 'Short version' });
+    // Array value → finalStructuredData (typed section rendering downstream).
+    expect(events[3].event).toMatchObject({ sectionName: 'keywords', sectionIndex: 1 });
+    expect(events[4].event).toMatchObject({ sectionName: 'keywords', finalStructuredData: ['a', 'b'] });
+    // Skipped keys never become sections.
+    const sectionNames = events
+      .filter(e => e.event.type === 'section_started')
+      .map(e => (e.event as DispatchWorkspaceEvent).sectionName);
+    expect(sectionNames).toEqual(['tldr', 'keywords']);
   });
 
   it('error chunk publishes declined and rejects', async () => {
@@ -429,6 +431,7 @@ describe('dispatchConsumer SSE → workspace-channel bridging', () => {
   it('stream ending without a terminal chunk publishes empty and resolves with status empty', async () => {
     const { publish, events } = makePublishSpy();
     const dispatchConsumer = makeDispatcher(publish);
+    // Only a retired/ignored chunk arrives — the stream ends with no terminal.
     mockFetch.mockResolvedValueOnce(
       sseResponse(['{"type":"delta","delta":{"path":"tldr","content":"x","sequence":0}}'])
     );

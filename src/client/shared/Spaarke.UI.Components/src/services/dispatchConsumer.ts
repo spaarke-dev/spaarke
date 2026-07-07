@@ -39,8 +39,17 @@
  * `@spaarke/ai-widgets` (which owns PaneEventBus) depends on this package,
  * not vice versa. The emitted event shapes are structurally assignable to
  * the `workspace` channel's `WorkspacePaneEvent` union (streaming_started /
- * field_delta / streaming_complete / widget_load — all pre-existing
- * discriminants; ADR-030 four-channel invariant untouched).
+ * section_started / section_completed / streaming_complete / widget_load —
+ * all pre-existing discriminants; ADR-030 four-channel invariant untouched).
+ *
+ * SECTION-KEYED RENDER CONTRACT (ai-architecture-redesign-r1 task 046 /
+ * FR-P3-07, amended ADR-037 2026-07-05): the legacy per-field-delta render
+ * vocabulary was DELETED at the last-playbook cutover — no server path emits
+ * `"delta"` chunks anymore (verified: `AnalysisChunk.FromDelta` has zero call
+ * sites), and the widget layer renders section-name-keyed events only. This
+ * helper bridges the terminal `complete` chunk's structured result onto
+ * `section_started` / `section_completed` pairs (one per top-level result
+ * key, in declaration order).
  *
  * Server contract (BUILT — task 023b `DispatchSessionEndpoint`, BFF):
  *   POST {bffBaseUrl}/api/ai/chat/sessions/{sessionId}/dispatch
@@ -172,7 +181,7 @@ export function parseConsumerChips(raw: unknown): ConsumerChip[] {
  * declared in the deleted SpaarkeAi `sseToPaneEventBridge.ts`.
  */
 export interface AnalysisChunk {
-  /** Event discriminator: "text" | "complete" | "error" | "delta" | "chips". */
+  /** Event discriminator: "text" | "complete" | "error" | "chips". */
   type: string;
   /** Token chunk for "text" events (legacy free-form streaming). */
   content?: string;
@@ -184,24 +193,12 @@ export interface AnalysisChunk {
   summary?: string;
   /** Error message on "error". Never forwarded to the bus (ADR-019). */
   error?: string;
-  /** Structured-field delta payload on "delta". */
-  delta?: AnalysisFieldDelta;
   /**
    * Next-step consumer chips on "chips" (G-P1 UAT fix, 2026-07-05 — the
    * dispatched Binding's `sprk_chiptransitions`, unified EventChip wire shape).
    * Raw wire value; parse with {@link parseConsumerChips}.
    */
   chips?: unknown;
-}
-
-/** The `type: "delta"` payload (BFF `FieldDelta`). */
-export interface AnalysisFieldDelta {
-  /** JSON path of the target field, e.g. "tldr" or "$.summary". */
-  path: string;
-  /** Token chunk to append to the field. */
-  content: string;
-  /** Monotonic sequence number for ordering. */
-  sequence: number;
 }
 
 // ---------------------------------------------------------------------------
@@ -212,13 +209,22 @@ export interface AnalysisFieldDelta {
  * The subset of `workspace`-channel events this helper emits. Structurally
  * assignable to `@spaarke/ai-widgets` `WorkspacePaneEvent` (all discriminants
  * pre-exist on that union; no new event type is introduced).
+ *
+ * Section events are keyed by section NAME (the result's top-level key) per
+ * amended ADR-037 — the ONLY streaming render vocabulary since the task 046
+ * cutover.
  */
 export interface DispatchWorkspaceEvent {
-  type: 'streaming_started' | 'field_delta' | 'streaming_complete' | 'widget_load';
+  type: 'streaming_started' | 'section_started' | 'section_completed' | 'streaming_complete' | 'widget_load';
   streamId?: string;
-  fieldPath?: string;
-  fieldContent?: string;
-  sequence?: number;
+  /** Section name (= top-level result key) on `section_started` / `section_completed`. */
+  sectionName?: string;
+  /** Declaration-order index of the section on `section_started`. */
+  sectionIndex?: number;
+  /** Final text content for a string-valued section on `section_completed`. */
+  finalContent?: string;
+  /** Final structured payload for a non-string section on `section_completed`. */
+  finalStructuredData?: unknown;
   completionStatus?: 'complete' | 'declined' | 'empty';
   widgetType?: string;
   widgetData?: unknown;
@@ -424,46 +430,28 @@ export function createConsumerDispatcher(deps: ConsumerDispatchDeps): DispatchCo
     };
 
     /**
-     * Bridge ONE AnalysisChunk to zero-or-more workspace events. Formerly
-     * `sseToPaneEventBridge.consume` — semantics preserved verbatim:
-     *  - "delta"    → field_delta (with `$.`-prefix path normalization)
-     *  - "complete" → synthesized per-field field_delta events from the
-     *                 terminal `result` payload (non-streaming executors emit
-     *                 ONE terminal chunk carrying the whole structured result)
-     *                 followed by streaming_complete/complete
+     * Bridge ONE AnalysisChunk to zero-or-more workspace events (formerly
+     * `sseToPaneEventBridge.consume`; section-keyed since the task 046
+     * cutover per amended ADR-037):
+     *  - "complete" → synthesized per-key `section_started` +
+     *                 `section_completed` pairs from the terminal `result`
+     *                 payload (executors emit ONE terminal chunk carrying the
+     *                 whole STORED ledger payload — ADR-040 render-follows-
+     *                 store), followed by streaming_complete/complete. String
+     *                 values ride `finalContent`; arrays/objects ride
+     *                 `finalStructuredData` so the section renderer's typed
+     *                 paths (lists, labeled blocks) apply.
      *  - "error"    → streaming_complete/declined (no error text on the bus,
      *                 ADR-019) + the helper rejects after the stream ends
-     *  - "text"/unknown → ignored (structured streams use delta + complete)
+     *  - "text"/unknown → ignored (structured streams use the terminal
+     *                 complete chunk; no server path emits per-field "delta"
+     *                 chunks anymore — verified at cutover)
      * `streaming_started` is emitted once before the first mapped event.
      */
     const consumeChunk = (chunk: AnalysisChunk): void => {
       if (!chunk || typeof chunk.type !== 'string') return;
 
       switch (chunk.type) {
-        case 'delta': {
-          const delta = chunk.delta;
-          if (
-            !delta ||
-            typeof delta.path !== 'string' ||
-            typeof delta.content !== 'string' ||
-            typeof delta.sequence !== 'number'
-          ) {
-            return;
-          }
-          // BFF's IncrementalJsonParser emits JSONPath-style keys ($.tldr);
-          // widget schemas declare bare top-level keys — normalize.
-          const normalizedPath = delta.path.startsWith('$.') ? delta.path.slice(2) : delta.path;
-          publishStartedOnce();
-          publishPaneEvent('workspace', {
-            type: 'field_delta',
-            streamId,
-            fieldPath: normalizedPath,
-            fieldContent: delta.content,
-            sequence: delta.sequence,
-          });
-          return;
-        }
-
         case 'chips': {
           // Next-step chips (unified EventChip wire shape). Conversation-surface
           // UI, not a bus payload — captured for the resolved result; tolerant
@@ -477,22 +465,31 @@ export function createConsumerDispatcher(deps: ConsumerDispatchDeps): DispatchCo
 
         case 'complete': {
           terminalResult = chunk.result ?? chunk.summary ?? undefined;
-          if (chunk.result && typeof chunk.result === 'object') {
+          if (chunk.result && typeof chunk.result === 'object' && !Array.isArray(chunk.result)) {
             publishStartedOnce();
             const result = chunk.result as Record<string, unknown>;
-            let seq = 0;
+            let index = 0;
             for (const [key, value] of Object.entries(result)) {
               if (value === null || value === undefined) continue;
               // Widget-internal metadata fields are not renderable content.
               if (key === 'parsedSuccessfully' || key === 'rawResponse') continue;
-              const content = typeof value === 'string' ? value : JSON.stringify(value);
-              if (content === '') continue;
+              if (typeof value === 'string' && value === '') continue;
+              // Section-keyed bridge (task 046 / amended ADR-037): one
+              // section per top-level result key, in declaration order.
               publishPaneEvent('workspace', {
-                type: 'field_delta',
+                type: 'section_started',
                 streamId,
-                fieldPath: key,
-                fieldContent: content,
-                sequence: seq++,
+                sectionName: key,
+                sectionIndex: index++,
+              });
+              publishPaneEvent('workspace', {
+                type: 'section_completed',
+                streamId,
+                sectionName: key,
+                // Strings render as section text; arrays/objects ride the
+                // structured payload so the section renderer's typed paths
+                // (bulleted lists, labeled blocks) apply.
+                ...(typeof value === 'string' ? { finalContent: value } : { finalStructuredData: value }),
               });
             }
           }

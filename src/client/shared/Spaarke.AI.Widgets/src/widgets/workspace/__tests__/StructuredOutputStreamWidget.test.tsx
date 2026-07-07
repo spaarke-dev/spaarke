@@ -1,30 +1,31 @@
 /**
- * StructuredOutputStreamWidget — unit tests for R6 task 040 schema-aware
- * ARRAY-typed field rendering (Pillar 5, fixes R5 SC-18 TL;DR bug / Gap C).
+ * StructuredOutputStreamWidget — unit tests for the schema-aware field
+ * renderer (R6 tasks 040/041; fixes R5 SC-18 / Gap C).
+ *
+ * CUTOVER NOTE (ai-architecture-redesign-r1 task 046 / amended ADR-037): the
+ * legacy per-field-delta streaming path was DELETED — streaming content is
+ * section-name-keyed (see StructuredOutputStreamWidget.sections.test.tsx).
+ * The schema-aware field renderer under test here now serves FINAL envelope
+ * content only (static `prefilledFields`). Tests deliver content via the
+ * `completeField` helper, which renders the terminal envelope exactly as a
+ * host would after the dispatch stream resolves.
  *
  * Verifies:
  *   (a) Schema-aware array dispatch: `outputSchema` declares `tldr: string[]`;
- *       on `streaming_complete`, the accumulated JSON array parses and renders
- *       as a Fluent v9 `<ul>` with one `<li>` per array element.
+ *       final content parses and renders as a Fluent v9 `<ul>`.
  *   (b) Backward compatibility (NFR-11): no `outputSchema` → widget renders
  *       via the legacy `displayHint` path with no regression.
- *   (c) Malformed JSON handling: accumulated chunk is not valid JSON →
- *       widget renders an inline error surface; does NOT crash; other fields
+ *   (c) Malformed JSON handling: graceful fallback; no crash; other fields
  *       continue to render normally.
- *   (d) Empty-array handling: outputSchema declares array but content is `[]`
- *       → renders an empty `<ul data-empty="true"/>`.
- *   (e) Streaming in-progress: mid-stream (before `streaming_complete`), the
- *       schema-aware path is GATED off; legacy skeleton/cursor flow continues
- *       to render. The schema-aware dispatch only activates post-complete.
- *   (f) Object-typed fields (task 041 scope) currently fall through to legacy
- *       displayHint rendering — verified explicitly so task 041 has a
- *       baseline to flip.
+ *   (d) Empty-array handling: `[]` → renders an empty `<ul data-empty>`.
+ *   (e) Streaming waiting UI: mid-stream (no delivered content), skeleton
+ *       placeholders render; schema-aware rendering activates on delivery.
+ *   (f) Object-typed fields render as labeled key-value blocks (task 041).
  *   (g) ADR-021 dark-mode compliance: no hard-coded hex colors in the
  *       schema-aware renderer's output (verified via DOM inline-style scan).
  *
  * R5 SC-18 bug reproduction: the rendered `tldr` field MUST NOT contain raw
- * JSON token fragments (e.g., `["first`, `\\"first`); it MUST contain the
- * parsed string values cleanly. Negative assertion captured.
+ * JSON token fragments; it MUST contain the parsed string values cleanly.
  */
 
 import '@testing-library/jest-dom';
@@ -47,22 +48,35 @@ function renderWidget(
   data: StructuredOutputStreamWidgetData,
   overrides: Partial<WorkspaceWidgetProps<StructuredOutputStreamWidgetData>> = {},
   bus: PaneEventBus = new PaneEventBus()
-): { bus: PaneEventBus; rerender: (next: StructuredOutputStreamWidgetData) => void } {
+): {
+  bus: PaneEventBus;
+  rerender: (next: StructuredOutputStreamWidgetData) => void;
+  completeField: (fieldPath: string, content: string) => void;
+} {
   const { rerender } = render(
     <PaneEventBusProvider bus={bus}>
       <StructuredOutputStreamWidget data={data} widgetType="structured-output-stream" {...overrides} />
     </PaneEventBusProvider>
   );
-  return {
-    bus,
-    rerender: (next: StructuredOutputStreamWidgetData) => {
-      rerender(
-        <PaneEventBusProvider bus={bus}>
-          <StructuredOutputStreamWidget data={next} widgetType="structured-output-stream" {...overrides} />
-        </PaneEventBusProvider>
-      );
-    },
+  const doRerender = (next: StructuredOutputStreamWidgetData): void => {
+    rerender(
+      <PaneEventBusProvider bus={bus}>
+        <StructuredOutputStreamWidget data={next} widgetType="structured-output-stream" {...overrides} />
+      </PaneEventBusProvider>
+    );
   };
+  // Post-cutover delivery helper (task 046 / amended ADR-037): the schema-
+  // aware field renderer consumes FINAL envelope content only. This mirrors
+  // how a host renders the terminal result after the dispatch stream
+  // resolves — re-render with the delivered field under `prefilledFields`.
+  const accumulated: Record<string, string> = { ...(data.prefilledFields ?? {}) };
+  const completeField = (fieldPath: string, content: string): void => {
+    accumulated[fieldPath] = content;
+    act(() => {
+      doRerender({ ...data, mode: 'static', prefilledFields: { ...accumulated } });
+    });
+  };
+  return { bus, rerender: doRerender, completeField };
 }
 
 /**
@@ -87,29 +101,6 @@ const SUM_CHAT_OUTPUT_SCHEMA: JsonSchema = {
 
 const STREAM_ID = 'test-stream-040';
 
-/**
- * Drive the streaming reducer end-to-end by dispatching the three lifecycle
- * events that `usePaneEvent('workspace', ...)` consumes. Wrapped in `act()`
- * so React state updates flush before assertions.
- */
-function streamFieldComplete(bus: PaneEventBus, fieldPath: string, content: string): void {
-  act(() => {
-    bus.dispatch('workspace', { type: 'streaming_started', streamId: STREAM_ID });
-  });
-  act(() => {
-    bus.dispatch('workspace', {
-      type: 'field_delta',
-      streamId: STREAM_ID,
-      fieldPath,
-      fieldContent: content,
-      sequence: 1,
-    });
-  });
-  act(() => {
-    bus.dispatch('workspace', { type: 'streaming_complete', streamId: STREAM_ID, completionStatus: 'complete' });
-  });
-}
-
 let consoleWarnSpy: jest.SpyInstance;
 let consoleDebugSpy: jest.SpyInstance;
 beforeAll(() => {
@@ -133,9 +124,9 @@ describe('StructuredOutputStreamWidget — schema-aware array dispatch (R6 task 
       correlationId: STREAM_ID,
       outputSchema: SUM_CHAT_OUTPUT_SCHEMA,
     };
-    const { bus } = renderWidget(data);
+    const { bus, completeField } = renderWidget(data);
 
-    streamFieldComplete(bus, 'tldr', JSON.stringify(['First key point', 'Second key point', 'Third key point']));
+    completeField('tldr', JSON.stringify(['First key point', 'Second key point', 'Third key point']));
 
     // The tldr field block exists with the schema-aware render hint.
     const tldrBlock = document.querySelector('[data-field-path="tldr"]');
@@ -156,9 +147,9 @@ describe('StructuredOutputStreamWidget — schema-aware array dispatch (R6 task 
       correlationId: STREAM_ID,
       outputSchema: SUM_CHAT_OUTPUT_SCHEMA,
     };
-    const { bus } = renderWidget(data);
+    const { bus, completeField } = renderWidget(data);
 
-    streamFieldComplete(bus, 'tldr', JSON.stringify(['alpha', 'beta']));
+    completeField('tldr', JSON.stringify(['alpha', 'beta']));
 
     const tldrBlock = document.querySelector('[data-field-path="tldr"]');
     const visibleText = tldrBlock!.textContent ?? '';
@@ -203,9 +194,9 @@ describe('StructuredOutputStreamWidget — backward compatibility (NFR-11)', () 
       correlationId: STREAM_ID,
       // No outputSchema — legacy path.
     };
-    const { bus } = renderWidget(data);
+    const { bus, completeField } = renderWidget(data);
 
-    streamFieldComplete(bus, 'tldr', 'This is the TL;DR string from a legacy action.');
+    completeField('tldr', 'This is the TL;DR string from a legacy action.');
 
     // No schema-array list — the legacy path uses the displayHint renderer.
     const tldrBlock = document.querySelector('[data-field-path="tldr"]');
@@ -249,11 +240,11 @@ describe('StructuredOutputStreamWidget — malformed JSON in schema-aware field'
       correlationId: STREAM_ID,
       outputSchema: SUM_CHAT_OUTPUT_SCHEMA,
     };
-    const { bus } = renderWidget(data);
+    const { bus, completeField } = renderWidget(data);
 
     // Malformed JSON: missing closing bracket — splitListContent's JSON branch
     // skips (not a complete `[...]` envelope), then falls through to comma split.
-    streamFieldComplete(bus, 'tldr', '["first", "second"');
+    completeField('tldr', '["first", "second"');
 
     const tldrBlock = document.querySelector('[data-field-path="tldr"]');
     expect(tldrBlock).not.toBeNull();
@@ -274,9 +265,9 @@ describe('StructuredOutputStreamWidget — malformed JSON in schema-aware field'
       correlationId: STREAM_ID,
       outputSchema: SUM_CHAT_OUTPUT_SCHEMA,
     };
-    const { bus } = renderWidget(data);
+    const { bus, completeField } = renderWidget(data);
 
-    streamFieldComplete(bus, 'tldr', JSON.stringify('not an array — a string'));
+    completeField('tldr', JSON.stringify('not an array — a string'));
 
     const tldrBlock = document.querySelector('[data-field-path="tldr"]');
     // No error surface — fallback renders the string as a single-item list.
@@ -321,9 +312,9 @@ describe('StructuredOutputStreamWidget — empty array', () => {
       correlationId: STREAM_ID,
       outputSchema: SUM_CHAT_OUTPUT_SCHEMA,
     };
-    const { bus } = renderWidget(data);
+    const { bus, completeField } = renderWidget(data);
 
-    streamFieldComplete(bus, 'tldr', '[]');
+    completeField('tldr', '[]');
 
     const tldrBlock = document.querySelector('[data-field-path="tldr"]');
     const list = tldrBlock!.querySelector('ul[data-display-hint="schema-array"]');
@@ -334,57 +325,37 @@ describe('StructuredOutputStreamWidget — empty array', () => {
 });
 
 // ---------------------------------------------------------------------------
-// (e) Streaming in-progress — schema-aware dispatch GATED off until complete
+// (e) Streaming waiting UI (post-cutover) — nothing renders mid-stream;
+//     schema-aware rendering activates when the final envelope is delivered
 // ---------------------------------------------------------------------------
 
-describe('StructuredOutputStreamWidget — streaming in-progress gate', () => {
-  it('does NOT activate schema-aware rendering until streaming_complete fires', () => {
+describe('StructuredOutputStreamWidget — streaming waiting UI (post-cutover)', () => {
+  it('renders no schema-aware content while streaming; activates on final delivery', () => {
     const data: StructuredOutputStreamWidgetData = {
       mode: 'streaming',
       schema: SUMMARIZE_SCHEMA,
       correlationId: STREAM_ID,
       outputSchema: SUM_CHAT_OUTPUT_SCHEMA,
     };
-    const { bus } = renderWidget(data);
+    const { bus, completeField } = renderWidget(data);
 
-    // Mid-stream: streaming_started + field_delta but NO streaming_complete yet.
+    // Mid-stream: streaming_started only — no content has been delivered
+    // (the retired per-field-delta vocabulary no longer carries content;
+    // streaming content is section-keyed per amended ADR-037).
     act(() => {
       bus.dispatch('workspace', { type: 'streaming_started', streamId: STREAM_ID });
     });
-    act(() => {
-      bus.dispatch('workspace', {
-        type: 'field_delta',
-        streamId: STREAM_ID,
-        fieldPath: 'tldr',
-        fieldContent: '["first", "sec',
-        sequence: 1,
-      });
-    });
 
-    // Schema-aware list MUST NOT render (mid-stream content is unparseable).
+    // Schema-aware list MUST NOT render — nothing delivered yet; the widget
+    // shows the field-plan waiting UI (skeleton placeholders).
     expect(document.querySelector('ul[data-display-hint="schema-array"]')).toBeNull();
-    // Legacy displayHint path takes over for mid-stream rendering — the partial
-    // raw content surfaces via the heading renderer (the existing behaviour
-    // task 040 explicitly preserves until streaming_complete arrives).
     const widget = screen.getByTestId('structured-output-stream-widget');
     expect(widget.getAttribute('data-render-state')).toBe('streaming');
+    expect(widget.getAttribute('data-render-mode')).toBe('fields');
 
-    // Now streaming_complete fires with the FULL parseable content.
-    act(() => {
-      bus.dispatch('workspace', {
-        type: 'field_delta',
-        streamId: STREAM_ID,
-        fieldPath: 'tldr',
-        fieldContent: 'ond"]',
-        sequence: 2,
-      });
-    });
-    act(() => {
-      bus.dispatch('workspace', { type: 'streaming_complete', streamId: STREAM_ID, completionStatus: 'complete' });
-    });
+    // The final envelope is delivered — the schema-aware list renders.
+    completeField('tldr', JSON.stringify(['first', 'second']));
 
-    // Now the schema-aware list renders.
-    expect(widget.getAttribute('data-render-state')).toBe('complete');
     const list = document.querySelector('ul[data-display-hint="schema-array"]');
     expect(list).not.toBeNull();
     const items = list!.querySelectorAll('li');
@@ -411,9 +382,9 @@ describe('StructuredOutputStreamWidget — schema-aware object dispatch (R6 task
       correlationId: STREAM_ID,
       outputSchema: SUM_CHAT_OUTPUT_SCHEMA,
     };
-    const { bus } = renderWidget(data);
+    const { bus, completeField } = renderWidget(data);
 
-    streamFieldComplete(bus, 'entities', JSON.stringify({ organizations: ['Acme Corp'], persons: ['Jane Doe'] }));
+    completeField('entities', JSON.stringify({ organizations: ['Acme Corp'], persons: ['Jane Doe'] }));
 
     const entitiesBlock = document.querySelector('[data-field-path="entities"]');
     expect(entitiesBlock).not.toBeNull();
@@ -446,11 +417,9 @@ describe('StructuredOutputStreamWidget — schema-aware object dispatch (R6 task
       correlationId: STREAM_ID,
       outputSchema: SUM_CHAT_OUTPUT_SCHEMA,
     };
-    const { bus } = renderWidget(data);
+    const { bus, completeField } = renderWidget(data);
 
-    streamFieldComplete(
-      bus,
-      'entities',
+    completeField('entities',
       JSON.stringify({
         organizations: ['Acme Corp', 'Beta Industries'],
         persons: ['Jane Doe', 'John Smith', 'Alice Brown'],
@@ -487,9 +456,9 @@ describe('StructuredOutputStreamWidget — schema-aware object dispatch (R6 task
       correlationId: STREAM_ID,
       outputSchema: SUM_CHAT_OUTPUT_SCHEMA,
     };
-    const { bus } = renderWidget(data);
+    const { bus, completeField } = renderWidget(data);
 
-    streamFieldComplete(bus, 'entities', JSON.stringify({ organizations: ['Acme'], persons: ['Alice'] }));
+    completeField('entities', JSON.stringify({ organizations: ['Acme'], persons: ['Alice'] }));
 
     const entitiesBlock = document.querySelector('[data-field-path="entities"]');
     const visibleText = entitiesBlock!.textContent ?? '';
@@ -543,11 +512,11 @@ describe('StructuredOutputStreamWidget — schema-aware object dispatch (R6 task
       correlationId: STREAM_ID,
       outputSchema: SUM_CHAT_OUTPUT_SCHEMA,
     };
-    const { bus } = renderWidget(data);
+    const { bus, completeField } = renderWidget(data);
 
     // Malformed JSON: missing closing brace. The B-G10c retry wraps in `{}` and
     // tries again; if still malformed, falls through to raw-text fallback.
-    streamFieldComplete(bus, 'entities', '{"organizations": ["Acme"');
+    completeField('entities', '{"organizations": ["Acme"');
 
     const entitiesBlock = document.querySelector('[data-field-path="entities"]');
     // No error surface.
@@ -567,9 +536,9 @@ describe('StructuredOutputStreamWidget — schema-aware object dispatch (R6 task
       correlationId: STREAM_ID,
       outputSchema: SUM_CHAT_OUTPUT_SCHEMA,
     };
-    const { bus } = renderWidget(data);
+    const { bus, completeField } = renderWidget(data);
 
-    streamFieldComplete(bus, 'entities', JSON.stringify(['not', 'an', 'object']));
+    completeField('entities', JSON.stringify(['not', 'an', 'object']));
 
     const entitiesBlock = document.querySelector('[data-field-path="entities"]');
     // No error surface.
@@ -578,45 +547,25 @@ describe('StructuredOutputStreamWidget — schema-aware object dispatch (R6 task
     expect(entitiesBlock!.querySelector('[data-display-hint="schema-object-raw-fallback"]')).not.toBeNull();
   });
 
-  it('does NOT activate schema-aware object rendering mid-stream (gate matches array path)', () => {
+  it('activates schema-aware object rendering only when the final envelope is delivered (post-cutover)', () => {
     const data: StructuredOutputStreamWidgetData = {
       mode: 'streaming',
       schema: SUMMARIZE_SCHEMA,
       correlationId: STREAM_ID,
       outputSchema: SUM_CHAT_OUTPUT_SCHEMA,
     };
-    const { bus } = renderWidget(data);
+    const { bus, completeField } = renderWidget(data);
 
-    // Mid-stream: streaming_started + partial field_delta, NO streaming_complete.
+    // Mid-stream: streaming_started only — no delivered content yet.
     act(() => {
       bus.dispatch('workspace', { type: 'streaming_started', streamId: STREAM_ID });
     });
-    act(() => {
-      bus.dispatch('workspace', {
-        type: 'field_delta',
-        streamId: STREAM_ID,
-        fieldPath: 'entities',
-        fieldContent: '{"organizations":["Acm',
-        sequence: 1,
-      });
-    });
 
-    // Schema-aware object container MUST NOT render — gate is post-complete.
+    // Schema-aware object container MUST NOT render before delivery.
     expect(document.querySelector('[data-display-hint="schema-object"]')).toBeNull();
 
-    // Complete the stream.
-    act(() => {
-      bus.dispatch('workspace', {
-        type: 'field_delta',
-        streamId: STREAM_ID,
-        fieldPath: 'entities',
-        fieldContent: 'e"],"persons":["Alice"]}',
-        sequence: 2,
-      });
-    });
-    act(() => {
-      bus.dispatch('workspace', { type: 'streaming_complete', streamId: STREAM_ID, completionStatus: 'complete' });
-    });
+    // The final envelope is delivered.
+    completeField('entities', '{"organizations":["Acme"],"persons":["Alice"]}');
 
     // Now the object dispatch activates.
     const objectContainer = document.querySelector(
@@ -813,8 +762,8 @@ describe('StructuredOutputStreamWidget — ADR-021 dark-mode compliance', () => 
 // with the existing stream reducer phases.
 // ---------------------------------------------------------------------------
 
-describe('StructuredOutputStreamWidget — schema-aware path coexists with existing phase machine', () => {
-  it('header badge transitions Streaming → Complete remain correct', () => {
+describe('StructuredOutputStreamWidget — phase machine (section-keyed lifecycle)', () => {
+  it('header badge transitions Waiting → Streaming → Complete via the section lifecycle', () => {
     const data: StructuredOutputStreamWidgetData = {
       mode: 'streaming',
       schema: SUMMARIZE_SCHEMA,
@@ -832,14 +781,22 @@ describe('StructuredOutputStreamWidget — schema-aware path coexists with exist
     });
     expect(within(screen.getByTestId('structured-output-stream-widget')).queryByText(/streaming/i)).not.toBeNull();
 
-    // Stream completes with parseable content.
+    // Section content arrives and the stream completes (the post-cutover
+    // vocabulary: section_started / section_completed / streaming_complete).
     act(() => {
       bus.dispatch('workspace', {
-        type: 'field_delta',
+        type: 'section_started',
         streamId: STREAM_ID,
-        fieldPath: 'tldr',
-        fieldContent: JSON.stringify(['done']),
-        sequence: 1,
+        sectionName: 'tldr',
+        sectionIndex: 0,
+      });
+    });
+    act(() => {
+      bus.dispatch('workspace', {
+        type: 'section_completed',
+        streamId: STREAM_ID,
+        sectionName: 'tldr',
+        finalContent: 'done',
       });
     });
     act(() => {
@@ -847,5 +804,7 @@ describe('StructuredOutputStreamWidget — schema-aware path coexists with exist
     });
 
     expect(within(screen.getByTestId('structured-output-stream-widget')).queryByText(/complete/i)).not.toBeNull();
+    // Section mode rendered the delivered content.
+    expect(screen.getByTestId('structured-output-stream-widget').getAttribute('data-render-mode')).toBe('sections');
   });
 });

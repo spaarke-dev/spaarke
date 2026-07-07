@@ -182,9 +182,8 @@ function loadWorkspaceRegistrations(): void {
 }
 
 function loadContextRegistrations(): void {
-  // Load both registration files to cover all 10 context widget types.
-  // eslint-disable-next-line @typescript-eslint/no-require-imports
-  require('../widgets/context/register-context-widgets').registerContextWidgets();
+  // ONE registration module covers ALL context widget types (task 046
+  // registry dedupe — shell context widgets + R1 source widgets).
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   require('../registry/register-context-widgets');
 }

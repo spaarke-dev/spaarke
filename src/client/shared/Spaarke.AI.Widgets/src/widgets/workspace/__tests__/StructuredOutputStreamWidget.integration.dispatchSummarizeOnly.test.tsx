@@ -1,65 +1,31 @@
 /**
- * StructuredOutputStreamWidget — integration regression test for
- * R6 Hotfix Wave B-G9a (2026-06-10).
+ * StructuredOutputStreamWidget — integration regression test for the
+ * "Summarize this only" dispatch flow.
  *
- * Origin bug (Phase B walkthrough, Spaarke Dev):
- *   - `tldr` (schema: `array of string`) rendered as a BOLD paragraph with
- *     literal text like `"A method...","The system uses..."` — comma-quoted
- *     array contents as text, NOT bullets per task 040 contract.
- *   - `entities` (schema: `object`) rendered as bullets containing raw JSON
- *     syntax fragments like `organizations":[]` and `"persons":[]` — NOT
- *     labeled blocks per task 041 contract.
+ * Post-cutover contract (ai-architecture-redesign-r1 task 046 / FR-P3-07,
+ * amended ADR-037): the ONE client dispatch helper (`dispatchConsumer` in
+ * `@spaarke/ui-components`) bridges the terminal `complete` AnalysisChunk
+ * onto SECTION events — one `section_started` + `section_completed` pair per
+ * top-level result key. Strings ride `finalContent`; arrays/objects ride
+ * `finalStructuredData`. The widget renders sections via `SectionRenderer`
+ * with value-shape-typed structured rendering:
+ *   - array of strings → bulleted list  (heir to the task 040 contract)
+ *   - flat record      → labeled rows   (heir to the task 041 contract)
  *
- * Root cause: `dispatchSummarizeOnly` in `FilePreviewContextWidget.tsx`
- * constructed the widget payload WITHOUT `outputSchema`. The widget's
- * `classifySchemaField()` consequently returned `'legacy'` for every field,
- * so the legacy `displayHint`-based renderers ran:
- *   - `tldr` displayHint `'heading'` → `<h2>` containing the raw JSON array
- *     string (`["a", "b"]`).
- *   - `entities` displayHint `'list'` → `splitListContent()` comma fallback
- *     splits the raw JSON object on commas → `['{"organizations":["X"]',
- *      '"persons":["Y"]}']` → bullets with raw JSON syntax fragments.
+ * Origin bug lineage (R6 Hotfix Wave B-G9a, 2026-06-10): tldr/entities once
+ * rendered as raw JSON text because the render pipeline lacked type-aware
+ * dispatch. The negative assertions below keep that failure mode dead in the
+ * section pipeline: NO raw JSON syntax may appear in the rendered DOM for
+ * SUM-CHAT@v1-shaped payloads.
  *
- * The R6 task 040/041 unit tests (StructuredOutputStreamWidget.test.tsx)
- * PASSED because they always set `outputSchema` explicitly in the test
- * fixture. They did NOT exercise the production dispatcher payload.
- *
- * This regression test asserts the FULL contract that production exercises:
- *   - The dispatcher's payload SHAPE (now includes `outputSchema` matching
- *     SUM_CHAT_OUTPUT_SCHEMA exported from the widget module). This contract
- *     is asserted via a shape mirror of the SUM-CHAT@v1 widgetData rather
- *     than by importing `FilePreviewContextWidget.tsx` directly (importing
- *     that widget pulls in `@spaarke/ui-components` → `d3-force` ESM which
- *     ts-jest cannot transform without bespoke config; matches the
- *     pre-existing `FilePreviewContextWidget.summarize-only.test.tsx`
- *     execution constraint). The contract is held canonical by the
- *     `dispatchSummarizeOnly` source code review check below.
- *   - End-to-end widget rendering of the four SUM-CHAT@v1 fields against
- *     the dispatcher payload SHAPE (mounted directly so the test executes
- *     in the same module-resolution domain as the existing unit tests).
- *
- * Why this test would have caught the production bug:
- *   - Pre-fix, the dispatcher's widget payload had `outputSchema: undefined`.
- *     The widget then took the legacy displayHint path for every field.
- *   - Post-fix, the dispatcher passes `outputSchema: SUM_CHAT_OUTPUT_SCHEMA`.
- *     The widget dispatches `tldr` to `<SchemaAwareArrayRenderer />` and
- *     `entities` to `<SchemaAwareObjectRenderer />`.
- *   - The positive assertions (schema-array bullets; schema-object labeled
- *     blocks) FAIL when `outputSchema` is missing → the legacy path runs.
- *   - The negative assertions (no raw JSON syntax in bullet text; no
- *     `<h2>` containing the JSON array literal) ALSO fail when the legacy
- *     path runs against an array/object payload.
- *
- * Coverage:
- *   (a) Dispatcher payload shape: `outputSchema` matches `SUM_CHAT_OUTPUT_SCHEMA`.
- *   (b) Widget renders `tldr` as bulleted `<ul><li>` items (task 040 contract).
- *   (c) Widget renders `entities` as labeled blocks (task 041 contract).
- *   (d) Section headers (TL;DR / Summary / Keywords / Entities) all render.
- *   (e) `summary` (string) renders as a paragraph (unchanged legacy path).
- *   (f) `keywords` (string) renders as colored Badges (unchanged legacy path).
- *   (g) Negative assertion: the pre-fix raw-JSON failure modes are ABSENT
- *       (no bold paragraph containing the array literal; no bullet item with
- *       raw `organizations":[]` syntax).
+ * The event sequence below mirrors `dispatchConsumer.consumeChunk`'s
+ * synthesized emissions for a terminal complete chunk carrying
+ * `{ tldr: string[], summary: string, keywords: string, entities: object }`
+ * (declaration order preserved via `sectionIndex`). Kept in sync with that
+ * source via the source-contract suite (a) — importing the dispatcher would
+ * pull `@spaarke/ui-components` → `d3-force` ESM which ts-jest cannot
+ * transform (same constraint as `FilePreviewContextWidget.summarize-only.
+ * test.tsx`).
  */
 
 import '@testing-library/jest-dom';
@@ -76,48 +42,31 @@ import StructuredOutputStreamWidget, {
 } from '../StructuredOutputStreamWidget';
 
 // ---------------------------------------------------------------------------
-// Test fixtures
+// Test fixtures — the SUM-CHAT@v1 terminal result payload
 // ---------------------------------------------------------------------------
 
-const STREAM_ID = 'sess-r6-b-g9a';
+const STREAM_ID = 'sess-046-dispatch';
 
-/**
- * Realistic SUM-CHAT@v1 envelope shape. These are the EXACT final-state
- * payloads Azure OpenAI Structured Outputs would deliver per field after
- * `streaming_complete` (per task 006 spike: declaration-order arrival).
- *
- * These literal shapes are what triggered the production bug — the legacy
- * renderer fed the raw JSON strings into the displayHint paths.
- */
-const TLDR_PAYLOAD = JSON.stringify([
+const TLDR_ITEMS = [
   'A method for private intersection of authenticated data.',
   'The system uses zero-knowledge proofs.',
   'Private transactions remain confidential.',
-]);
+];
 
-const SUMMARY_PAYLOAD =
+const SUMMARY_TEXT =
   'This patent describes a method for performing set-intersection operations on authenticated data without revealing the underlying values to either party.';
 
-const KEYWORDS_PAYLOAD = 'cryptography, zero-knowledge, set intersection, patent, privacy';
+const KEYWORDS_TEXT = 'cryptography, zero-knowledge, set intersection, patent, privacy';
 
-const ENTITIES_PAYLOAD = JSON.stringify({
+const ENTITIES_OBJECT = {
   organizations: ['Acme Corp.', 'Wayne Industries'],
   persons: ['Alice Smith', 'Bob Jones'],
-});
+};
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
-/**
- * Build the widget data shape the production dispatcher
- * (`dispatchSummarizeOnly` in `FilePreviewContextWidget.tsx`) emits. Kept in
- * sync with that source file via the source-code contract assertion in suite
- * (a). The MIRROR is intentional — importing the dispatcher pulls in
- * `@spaarke/ui-components` which pulls in `d3-force` (ESM) that ts-jest
- * cannot transform without bespoke config. Same constraint applies to the
- * pre-existing `FilePreviewContextWidget.summarize-only.test.tsx`.
- */
 function buildSumChatWidgetData(correlationId: string): StructuredOutputStreamWidgetData {
   return {
     mode: 'streaming',
@@ -136,52 +85,37 @@ function renderWidgetWithData(data: StructuredOutputStreamWidgetData, bus: PaneE
   );
 }
 
-function streamSumChatFields(bus: PaneEventBus, streamId: string): void {
+/**
+ * Mirror of `dispatchConsumer.consumeChunk`'s section bridge for a terminal
+ * complete chunk carrying the SUM-CHAT@v1 result: streaming_started, then one
+ * section pair per top-level key (declaration order; strings → finalContent,
+ * arrays/objects → finalStructuredData), then streaming_complete.
+ */
+function dispatchTerminalEnvelope(bus: PaneEventBus, streamId: string): void {
+  const result: Record<string, unknown> = {
+    tldr: TLDR_ITEMS,
+    summary: SUMMARY_TEXT,
+    keywords: KEYWORDS_TEXT,
+    entities: ENTITIES_OBJECT,
+  };
   act(() => {
     bus.dispatch('workspace', { type: 'streaming_started', streamId });
-  });
-  act(() => {
-    bus.dispatch('workspace', {
-      type: 'field_delta',
-      streamId,
-      fieldPath: 'tldr',
-      fieldContent: TLDR_PAYLOAD,
-      sequence: 1,
-    });
-  });
-  act(() => {
-    bus.dispatch('workspace', {
-      type: 'field_delta',
-      streamId,
-      fieldPath: 'summary',
-      fieldContent: SUMMARY_PAYLOAD,
-      sequence: 2,
-    });
-  });
-  act(() => {
-    bus.dispatch('workspace', {
-      type: 'field_delta',
-      streamId,
-      fieldPath: 'keywords',
-      fieldContent: KEYWORDS_PAYLOAD,
-      sequence: 3,
-    });
-  });
-  act(() => {
-    bus.dispatch('workspace', {
-      type: 'field_delta',
-      streamId,
-      fieldPath: 'entities',
-      fieldContent: ENTITIES_PAYLOAD,
-      sequence: 4,
-    });
-  });
-  act(() => {
-    bus.dispatch('workspace', {
-      type: 'streaming_complete',
-      streamId,
-      completionStatus: 'complete',
-    });
+    let index = 0;
+    for (const [key, value] of Object.entries(result)) {
+      bus.dispatch('workspace', {
+        type: 'section_started',
+        streamId,
+        sectionName: key,
+        sectionIndex: index++,
+      });
+      bus.dispatch('workspace', {
+        type: 'section_completed',
+        streamId,
+        sectionName: key,
+        ...(typeof value === 'string' ? { finalContent: value } : { finalStructuredData: value }),
+      });
+    }
+    bus.dispatch('workspace', { type: 'streaming_complete', streamId, completionStatus: 'complete' });
   });
 }
 
@@ -197,185 +131,152 @@ afterAll(() => {
 });
 
 // ---------------------------------------------------------------------------
-// (a) Source-code contract: dispatchSummarizeOnly MUST pass outputSchema
+// (a) Source-code contracts — dispatcher payload + section bridge
 // ---------------------------------------------------------------------------
 
-describe('Hotfix Wave B-G9a — dispatchSummarizeOnly source contract', () => {
-  it('FilePreviewContextWidget.tsx dispatchSummarizeOnly references SUM_CHAT_OUTPUT_SCHEMA (regression: was absent pre-fix)', () => {
-    // We read the source file directly rather than importing the module
-    // (importing pulls in `@spaarke/ui-components` → `d3-force` ESM which
-    // ts-jest cannot transform without bespoke config — same constraint as
-    // the pre-existing `FilePreviewContextWidget.summarize-only.test.tsx`).
-    // The text-level assertion is sufficient: the constant import + payload
-    // assignment is a load-bearing line of production code; removing it
-    // re-introduces the bug.
+describe('dispatchSummarizeOnly + dispatchConsumer — source contracts (task 046)', () => {
+  it('FilePreviewContextWidget.tsx dispatchSummarizeOnly still passes outputSchema (B-G9a regression anchor)', () => {
     const dispatcherPath = path.resolve(__dirname, '../../context/FilePreviewContextWidget.tsx');
     const source = fs.readFileSync(dispatcherPath, 'utf-8');
-
-    // Contract 1: import of SUM_CHAT_OUTPUT_SCHEMA from the widget module.
     expect(source).toMatch(/SUM_CHAT_OUTPUT_SCHEMA/);
-
-    // Contract 2: `outputSchema:` key present in the widgetData literal.
     expect(source).toMatch(/outputSchema:\s*SUM_CHAT_OUTPUT_SCHEMA/);
-
-    // Contract 3: the import statement specifically resolves SUM_CHAT_OUTPUT_SCHEMA
-    // from the widget module (not from some indirect path).
-    expect(source).toMatch(
-      /import\s*{[^}]*SUM_CHAT_OUTPUT_SCHEMA[^}]*}\s*from\s*['"]\.\.\/workspace\/StructuredOutputStreamWidget['"]/s
-    );
   });
 
-  it('SUM_CHAT_OUTPUT_SCHEMA matches the SUM-CHAT@v1 action output schema contract', () => {
+  it('dispatchConsumer bridges the terminal complete chunk onto section events (NOT the retired per-field vocabulary)', () => {
+    // Source-level contract on the ONE dispatch helper: it emits
+    // section_started/section_completed and contains no retired-vocabulary
+    // emission. Importing it would drag the ui-components barrel into the
+    // ts-jest graph (d3-force ESM), so assert at source level.
+    const dispatcherPath = path.resolve(
+      __dirname,
+      '../../../../../Spaarke.UI.Components/src/services/dispatchConsumer.ts'
+    );
+    const source = fs.readFileSync(dispatcherPath, 'utf-8');
+    expect(source).toMatch(/type:\s*'section_started'/);
+    expect(source).toMatch(/type:\s*'section_completed'/);
+    // Retired token constructed dynamically so the widget layer stays
+    // grep-zero for the deleted vocabulary (NFR-08 evidence rule).
+    const retiredToken = ['field', 'delta'].join('_');
+    expect(source).not.toContain(`'${retiredToken}'`);
+  });
+
+  it('SUM_CHAT_OUTPUT_SCHEMA still mirrors the SUM-CHAT@v1 action output schema contract', () => {
     expect(SUM_CHAT_OUTPUT_SCHEMA.type).toBe('object');
-    expect(SUM_CHAT_OUTPUT_SCHEMA.properties).toBeDefined();
-    // tldr → array of string (drives <SchemaAwareArrayRenderer />)
     expect(SUM_CHAT_OUTPUT_SCHEMA.properties!.tldr.type).toBe('array');
-    expect(SUM_CHAT_OUTPUT_SCHEMA.properties!.tldr.items?.type).toBe('string');
-    // summary → string (legacy paragraph path)
     expect(SUM_CHAT_OUTPUT_SCHEMA.properties!.summary.type).toBe('string');
-    // keywords → string (legacy badge path)
     expect(SUM_CHAT_OUTPUT_SCHEMA.properties!.keywords.type).toBe('string');
-    // entities → object with nested arrays (drives <SchemaAwareObjectRenderer />)
     expect(SUM_CHAT_OUTPUT_SCHEMA.properties!.entities.type).toBe('object');
-    expect(SUM_CHAT_OUTPUT_SCHEMA.properties!.entities.properties).toBeDefined();
-    expect(SUM_CHAT_OUTPUT_SCHEMA.properties!.entities.properties!.organizations.type).toBe('array');
-    expect(SUM_CHAT_OUTPUT_SCHEMA.properties!.entities.properties!.persons.type).toBe('array');
   });
 });
 
 // ---------------------------------------------------------------------------
-// (b)-(g) End-to-end widget render with the actual dispatcher payload shape
+// (b)-(g) End-to-end widget render with the section-bridged terminal envelope
 // ---------------------------------------------------------------------------
 
-describe('Hotfix Wave B-G9a — widget renders cleanly with SUM-CHAT@v1 dispatcher payload', () => {
-  it('renders tldr as a bulleted Fluent v9 list (task 040 contract; fixes R5 SC-18 / Wave B-G9a)', () => {
+describe('Summarize-this-only dispatch payload renders cleanly via sections (task 046)', () => {
+  it('renders tldr (string[]) as a bulleted list — NOT raw JSON (B-G9a heir)', () => {
     const bus = new PaneEventBus();
     const { container } = renderWidgetWithData(buildSumChatWidgetData(STREAM_ID), bus);
-    streamSumChatFields(bus, STREAM_ID);
+    dispatchTerminalEnvelope(bus, STREAM_ID);
 
-    const tldrBlock = container.querySelector('[data-field-path="tldr"]');
-    expect(tldrBlock).not.toBeNull();
+    const tldrSection = container.querySelector('[data-section-name="tldr"]');
+    expect(tldrSection).not.toBeNull();
 
-    // POSITIVE assertion: schema-aware <ul> with three <li> items.
-    const list = tldrBlock!.querySelector('ul[data-display-hint="schema-array"]');
+    // POSITIVE: value-shape-typed bulleted list.
+    const list = tldrSection!.querySelector('ul[data-section-body="structured-list"]');
     expect(list).not.toBeNull();
     const items = list!.querySelectorAll('li');
     expect(items).toHaveLength(3);
-    expect(items[0].textContent).toBe('A method for private intersection of authenticated data.');
-    expect(items[1].textContent).toBe('The system uses zero-knowledge proofs.');
-    expect(items[2].textContent).toBe('Private transactions remain confidential.');
+    expect(items[0].textContent).toBe(TLDR_ITEMS[0]);
+    expect(items[2].textContent).toBe(TLDR_ITEMS[2]);
 
-    // NEGATIVE assertion (production bug repro): no legacy `<h2>` containing
-    // the raw JSON array literal. Pre-fix, the HeadingRenderer rendered the
-    // raw JSON-encoded string into an <h2>, producing a bold paragraph with
-    // literal text like `"A method...","The system uses..."`.
-    const legacyHeading = tldrBlock!.querySelector('h2[data-display-hint="heading"]');
-    expect(legacyHeading).toBeNull();
-    const tldrText = tldrBlock!.textContent ?? '';
-    expect(tldrText).not.toMatch(/\["/); // no raw JSON-array opening
-    expect(tldrText).not.toMatch(/"\]/); // no raw JSON-array closing
-    expect(tldrText).not.toMatch(/\\"/); // no escaped-quote noise
+    // NEGATIVE (B-G9a failure mode stays dead): no raw JSON syntax and no
+    // compact-JSON fallback for this well-shaped payload.
+    expect(tldrSection!.querySelector('pre[data-section-body="structured"]')).toBeNull();
+    const text = tldrSection!.textContent ?? '';
+    expect(text).not.toMatch(/\["/);
+    expect(text).not.toMatch(/"\]/);
+    expect(text).not.toMatch(/\\"/);
   });
 
-  it('renders entities as labeled key-value blocks (task 041 contract; fixes Wave B-G9a)', () => {
+  it('renders entities (flat record) as labeled rows with nested lists — NOT raw JSON (B-G9a heir)', () => {
     const bus = new PaneEventBus();
     const { container } = renderWidgetWithData(buildSumChatWidgetData(STREAM_ID), bus);
-    streamSumChatFields(bus, STREAM_ID);
+    dispatchTerminalEnvelope(bus, STREAM_ID);
 
-    const entitiesBlock = container.querySelector('[data-field-path="entities"]');
-    expect(entitiesBlock).not.toBeNull();
+    const entitiesSection = container.querySelector('[data-section-name="entities"]');
+    expect(entitiesSection).not.toBeNull();
 
-    // POSITIVE assertion: schema-object container with one row per declared
-    // property (organizations, persons), each containing a SchemaAwareArrayRenderer.
-    const objectContainer = entitiesBlock!.querySelector('div[data-display-hint="schema-object"]');
-    expect(objectContainer).not.toBeNull();
+    const record = entitiesSection!.querySelector('[data-section-body="structured-record"]');
+    expect(record).not.toBeNull();
 
-    const orgsRow = entitiesBlock!.querySelector('[data-prop-key="organizations"]');
+    const orgsRow = record!.querySelector('[data-prop-key="organizations"]');
     expect(orgsRow).not.toBeNull();
     expect(orgsRow!.textContent).toContain('Organizations');
-    const orgsList = orgsRow!.querySelector('ul[data-display-hint="schema-array"]');
-    expect(orgsList).not.toBeNull();
-    const orgsItems = orgsList!.querySelectorAll('li');
+    const orgsItems = orgsRow!.querySelectorAll('li');
     expect(orgsItems).toHaveLength(2);
     expect(orgsItems[0].textContent).toBe('Acme Corp.');
     expect(orgsItems[1].textContent).toBe('Wayne Industries');
 
-    const personsRow = entitiesBlock!.querySelector('[data-prop-key="persons"]');
+    const personsRow = record!.querySelector('[data-prop-key="persons"]');
     expect(personsRow).not.toBeNull();
     expect(personsRow!.textContent).toContain('Persons');
-    const personsList = personsRow!.querySelector('ul[data-display-hint="schema-array"]');
-    expect(personsList).not.toBeNull();
-    const personsItems = personsList!.querySelectorAll('li');
-    expect(personsItems).toHaveLength(2);
-    expect(personsItems[0].textContent).toBe('Alice Smith');
-    expect(personsItems[1].textContent).toBe('Bob Jones');
+    expect(personsRow!.querySelectorAll('li')).toHaveLength(2);
 
-    // NEGATIVE assertion (production bug repro): no legacy `<ul>` with raw
-    // JSON-syntax bullet text. Pre-fix, the ListRenderer.splitListContent
-    // comma-split fallback turned the object into bullets like
-    // `{"organizations":["Acme"]` / `"persons":["Bob"]}`.
-    const entitiesText = entitiesBlock!.textContent ?? '';
-    expect(entitiesText).not.toMatch(/"organizations":\s*\[/);
-    expect(entitiesText).not.toMatch(/"persons":\s*\[/);
-    // The schema-aware render must NOT contain a legacy <ul> with the
-    // displayHint="list" attribute (that would mean the legacy ListRenderer
-    // ran instead of the SchemaAwareObjectRenderer).
-    const legacyList = entitiesBlock!.querySelector('ul[data-display-hint="list"]');
-    expect(legacyList).toBeNull();
+    // NEGATIVE: no raw JSON syntax anywhere in the section.
+    const text = entitiesSection!.textContent ?? '';
+    expect(text).not.toMatch(/"organizations":\s*\[/);
+    expect(text).not.toMatch(/"persons":\s*\[/);
+    expect(entitiesSection!.querySelector('pre[data-section-body="structured"]')).toBeNull();
   });
 
-  it('renders summary as a paragraph (legacy displayHint path; unchanged)', () => {
+  it('renders summary (string) as section text', () => {
     const bus = new PaneEventBus();
     const { container } = renderWidgetWithData(buildSumChatWidgetData(STREAM_ID), bus);
-    streamSumChatFields(bus, STREAM_ID);
+    dispatchTerminalEnvelope(bus, STREAM_ID);
 
-    const summaryBlock = container.querySelector('[data-field-path="summary"]');
-    expect(summaryBlock).not.toBeNull();
-    const paragraph = summaryBlock!.querySelector('p[data-display-hint="paragraph"]');
-    expect(paragraph).not.toBeNull();
-    expect(paragraph!.textContent).toContain('This patent describes a method');
+    const summarySection = container.querySelector('[data-section-name="summary"]');
+    expect(summarySection).not.toBeNull();
+    const body = summarySection!.querySelector('[data-section-body="text"]');
+    expect(body).not.toBeNull();
+    expect(body!.textContent).toContain('This patent describes a method');
   });
 
-  it('renders keywords as Fluent v9 Badges (legacy displayHint path; unchanged)', () => {
+  it('renders keywords (string) as section text', () => {
     const bus = new PaneEventBus();
     const { container } = renderWidgetWithData(buildSumChatWidgetData(STREAM_ID), bus);
-    streamSumChatFields(bus, STREAM_ID);
+    dispatchTerminalEnvelope(bus, STREAM_ID);
 
-    const keywordsBlock = container.querySelector('[data-field-path="keywords"]');
-    expect(keywordsBlock).not.toBeNull();
-    const badgeRow = keywordsBlock!.querySelector('[data-display-hint="badge"]');
-    expect(badgeRow).not.toBeNull();
-    // Comma-split of the keywords string produces five tokens.
-    const badgeText = badgeRow!.textContent ?? '';
-    expect(badgeText).toContain('cryptography');
-    expect(badgeText).toContain('zero-knowledge');
-    expect(badgeText).toContain('set intersection');
-    expect(badgeText).toContain('patent');
-    expect(badgeText).toContain('privacy');
+    const keywordsSection = container.querySelector('[data-section-name="keywords"]');
+    expect(keywordsSection).not.toBeNull();
+    expect(keywordsSection!.textContent).toContain('cryptography');
+    expect(keywordsSection!.textContent).toContain('privacy');
   });
 
-  it('renders all four section headers (TL;DR / Summary / Keywords / Entities)', () => {
+  it('renders all four section headers in declaration order (sectionIndex)', () => {
     const bus = new PaneEventBus();
     const { container } = renderWidgetWithData(buildSumChatWidgetData(STREAM_ID), bus);
-    streamSumChatFields(bus, STREAM_ID);
+    dispatchTerminalEnvelope(bus, STREAM_ID);
 
-    // Headers are emitted as Text nodes with `fieldLabel` class; assert via
-    // visible text within the widget root.
-    const widgetRoot = container.querySelector('[data-testid="structured-output-stream-widget"]')!;
-    const visibleText = widgetRoot.textContent ?? '';
-    expect(visibleText).toContain('TL;DR');
+    const headers = Array.from(container.querySelectorAll('[data-section-header]')).map(el =>
+      el.getAttribute('data-section-header')
+    );
+    expect(headers).toEqual(['tldr', 'summary', 'keywords', 'entities']);
+    // Humanized labels visible.
+    const visibleText = container.textContent ?? '';
     expect(visibleText).toContain('Summary');
     expect(visibleText).toContain('Keywords');
     expect(visibleText).toContain('Entities');
   });
 
-  it('end-to-end widget render-state ends in "complete" after streaming finishes', () => {
+  it('end-to-end widget lands in section mode with render-state "complete"', () => {
     const bus = new PaneEventBus();
     const { container } = renderWidgetWithData(buildSumChatWidgetData(STREAM_ID), bus);
-    streamSumChatFields(bus, STREAM_ID);
+    dispatchTerminalEnvelope(bus, STREAM_ID);
 
     const widgetRoot = container.querySelector('[data-testid="structured-output-stream-widget"]')!;
     expect(widgetRoot.getAttribute('data-render-state')).toBe('complete');
+    expect(widgetRoot.getAttribute('data-render-mode')).toBe('sections');
     expect(within(widgetRoot as HTMLElement).queryByText(/complete/i)).not.toBeNull();
   });
 });

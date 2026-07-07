@@ -9,10 +9,35 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 046 — widget layer (dedupe registries; ExecutionTraceWidget from ledger ToolChain; FieldDelta deleted) — dispatching |
-| **Step** | W-P3-C ✅ (045 + 047). P3: 040–045 + 047 ✅ — only 046 + gate 048 remain in P3. |
-| **Status** | autonomous execution |
-| **Next Action** | On 046 return: wave close, deploy BFF + SpaarkeAi + verify healthz/catalog, write consolidated gate-048 UAT script + rulings list into this file, STOP for operator UAT (NFR-11). |
+| **Task** | 048 — G-P3 BROWSER UAT (operator, spaarkedev1). **ALL P3 CODE COMPLETE (040–047 ✅, 44/51).** |
+| **Step** | Deploying both surfaces @ post-046 commit; then STOPPED. |
+| **Status** | ⛔ STOPPED at gate 048 — operator UAT + 4 rulings required (NFR-11; never auto-passed) |
+| **Next Action** | Operator runs the flagship-journey UAT below + rules. On PASS: 048 ✅ + P3 PHASE COMPLETE, portfolio 45, dispatch W-P4-A (050/051/053/054 ×4 parallel). On FAIL: triage, fix, redeploy, re-UAT. |
+
+### G-P3 UAT — the flagship ONE-CONVERSATION journey (operator, spaarkedev1; hard-refresh first)
+Open the Assistant on a MATTER form and run one continuous conversation:
+1. **Upload a document** → classification line + [Summarize this document] chip inline beneath it (round-2 P1/P2 fixes).
+2. **Click the chip** → summary streams; "Summarize again" chip re-arms.
+3. **"provide a more concise summary"** → concise rewrite grounded on the prior output (ledger-context fix).
+4. **"summarize this document and save the summary to the matter"** → summary in chat AND the envelope lands in the matter's new **Matter Summary (AI Work Product)** field (047). Repeat → field overwritten, no duplicates.
+5. **"create a follow-up task to review the findings"** → clarifying turn asks due date + assignee (elicitation) → answer ("7/9/2026 and yes me") → proposal → **Confirm** → task record CREATED under your user with a Provenance line + ledger key; transcript shows ✅ completion with record id (042 confirm-resume — the "not enabled yet" message is GONE for supported actions).
+6. **"draft an email to the client about this"** (or similar) → gated confirm → Draft-status `sprk_communication` record created; DRAFT-only (041).
+7. **"how many patent matters do we have?"** → first-try live sprk_matter query with citations (schema-grounded tool descriptions).
+8. **Off-catalog ask** → honest refusal. **Hostile-doc injection re-check** → summary normal, embedded writes suspend, disclosure refused.
+9. **ExecutionTraceWidget** (046): after a tools-invoking turn, the trace widget shows the REAL persisted tool chain (tool ids, counts, durations — no content); spot-check NFR-07 (no argument text).
+10. **Wizards intact** (045 regression): SummarizeFilesWizard per-step progress; CreateMatter AI draft summary; hard slashes /help /clear /export /playbooks.
+11. **Daily Briefing** (043): trigger /render (or the scheduled path) → briefing renders; /email leg sends via Communication service (live email arrival = this gate's acceptance).
+12. **Console clean + dark mode** across the above (ADR-021).
+Expected-but-not-failures: "prepare a briefing" typed in chat → clean refusal (coded-kind loop seam is future); soft slashes /draft /extract-entities /analyze route via the loop (deterministic launchers need a capability-discovery endpoint — deferred by ruling).
+
+### 🔔 FOUR RULINGS AT THIS GATE
+1. **create-task entity**: POML prescribed `sprk_event(type=task)` (implemented, live-verified); spaarke-todo-architecture says `sprk_todo` is the first-class To Do entity with document-regarding + Outlook/banner surfaces. Switch = catalog-data-only (Binding tooldescription + JPS sentence). Recommend: switch to sprk_todo unless sprk_event was intentional.
+2. **analysis.rerun residual F-1 leg**: the LAST LLM-reachable app-only engine write; ungated per your G-P2 ruling; bounded (BFF-resolved targets, capability-gated, ledger-written). Recommend: accept-with-note until engine retirement (FR-P4-01 re-verifies).
+3. **ADR-040 inline size-cap home**: not in 047's POML (TASK-INDEX note was wrong). Recommend: fold into P4 (055 hardening window) or Track B — pick one.
+4. **office-addins SseClient**: keep-with-reason (separate runtime, richer SSE semantics, no @spaarke dep). Recommend: accept.
+
+### 046 outcomes (Step 9.5 PASS)
+ONE register-context-widgets module (14 widgets); ExecutionTraceWidget = client face of ADR-040 (tool_chain context_event emitted strictly AFTER ledger append; rides existing chat SSE); FieldDelta deleted grep-zero across widget layer/bus/dispatch bridge (section_started/completed replace it; SectionRenderer shape-typed so Summarize-this-only ≠ raw JSON); publish 45.47 MB (−0.18). Track-B/050 additions: server AnalysisChunk.FieldDelta model, legacy ContextEventEmitter trace events (render-consumerless), playbook_options client leg.
 
 ### W-P3-C outcomes (both Step 9.5 PASS)
 - **045**: ConversationPane 3,172 → 300 lines over 11 modules (semantics verbatim, 216/216 before+after; unstable-identity review warning fixed — all hooks memoized). ONE SSE path: every hand-rolled parser deleted/re-pointed (LW SummarizeFiles cluster gone; useAiSummary/matterService×2/summarizeService/aiPlaybookService/analysisApi/SprkChat plan-approve loops consolidated; useSseStream gained FormData+fetchImpl modes). Keep-with-reason: office-addins SseClient (🔔 ruling optional). Wizard multipart summarize NOT moved to dispatchConsumer (server resolves Binding by consumerType — ADR-039-conform; full migration needs a file-carrying dispatch contract = server decision). Slash: POML silent; needs a capability-discovery READ endpoint (recorded for backlog/r2). Dormant playbook_options client leg → 046/Track-B candidate. /defer-worthy: AnalysisWorkspace jest ESM debt + 22/32 pre-existing code-page tsc errors.

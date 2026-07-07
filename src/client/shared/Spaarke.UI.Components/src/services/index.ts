@@ -129,7 +129,6 @@ export type {
   DispatchPaneEventPublisher,
   DispatchWorkspaceEvent,
   AnalysisChunk,
-  AnalysisFieldDelta,
 } from './dispatchConsumer';
 
 // Typed wrapper around POST /api/communications/send.

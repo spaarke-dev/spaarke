@@ -623,6 +623,35 @@ public static class ChatEndpoints
                         CreatedAt = DateTimeOffset.UtcNow,
                     },
                     CancellationToken.None); // ledger write completes even if the client disconnects mid-render
+
+                // === FR-P3-07 (task 046) — ExecutionTraceWidget ledger bridge =========
+                // Emit the JUST-PERSISTED ToolChain segment as a `context_event` SSE
+                // frame (discriminant "tool_chain") so the trace widget renders the
+                // REAL ledger records instead of the legacy live-telemetry trace
+                // source. Ordering is load-bearing: the AppendToolChainAsync ledger
+                // write above completed BEFORE this frame renders (ADR-040 storage-
+                // precedes-rendering). NFR-07: identifiers/filters/counts only —
+                // citations projected as a count; args summaries were redacted at
+                // recording time by AgentTurnContract.SummarizeArguments.
+                await WriteChatSSEAsync(
+                    response,
+                    new ChatSseEvent("context_event", null, new Services.Ai.Telemetry.ContextSseEventDto
+                    {
+                        ContextEventType = "tool_chain",
+                        ContextTimestamp = DateTimeOffset.UtcNow.ToString("o"),
+                        ContextTurn = toolChainTurn,
+                        ContextToolChainCalls = segment
+                            .Select(c => new Services.Ai.Telemetry.ContextToolChainCallDto
+                            {
+                                ToolId = c.ToolId,
+                                ArgsSummary = c.ArgsSummary,
+                                ResultCount = c.ResultCount,
+                                CitationCount = c.Citations?.Count,
+                                DurationMs = c.DurationMs,
+                            })
+                            .ToArray(),
+                    }),
+                    cancellationToken);
             }
             // === End FR-P2-01 step 5 setup ============================================
 

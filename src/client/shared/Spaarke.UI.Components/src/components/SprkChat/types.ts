@@ -331,7 +331,10 @@ export interface IChatSseEventData {
   // (ExecutionTraceWidget) can render in real time.
 
   /**
-   * Trace event sub-type. Matches the six R6 task 059 / 063 discriminants.
+   * Trace event sub-type. Matches the six R6 task 059 / 063 discriminants,
+   * plus `tool_chain` (ai-architecture-redesign-r1 task 046 / FR-P3-07 — a
+   * session-ledger ToolChain segment persisted by the BFF; ADR-040 storage-
+   * precedes-rendering) and the `consumer_chips` client-tolerance leg.
    * Present on 'context_event' SSE events ONLY.
    */
   contextEventType?:
@@ -341,6 +344,7 @@ export interface IChatSseEventData {
     | 'playbook_node_executing'
     | 'playbook_node_completed'
     | 'decision_made'
+    | 'tool_chain'
     | 'consumer_chips';
 
   /** ISO-8601 UTC timestamp of the trace event. Present on 'context_event'. */
@@ -384,6 +388,26 @@ export interface IChatSseEventData {
 
   /** Capability name (decision_made). */
   contextCapabilityName?: string;
+
+  // ── tool_chain fields (ai-architecture-redesign-r1 task 046 / FR-P3-07) ──
+  //
+  // The PERSISTED session-ledger ToolChain segment (ADR-040: the BFF appends
+  // the segment to the ledger, THEN emits this frame). NFR-07 / ADR-015
+  // binding: identifiers / redacted filter summaries / counts / durations
+  // ONLY — argsSummary is redacted at recording time server-side; citation
+  // ids stay in the ledger (a count rides the wire).
+
+  /** 1-based session turn of the persisted ToolChain segment (tool_chain). */
+  contextTurn?: number;
+
+  /** The persisted ledger segment's ordered tool calls (tool_chain). */
+  contextToolChainCalls?: ReadonlyArray<{
+    toolId?: string;
+    argsSummary?: string;
+    resultCount?: number;
+    citationCount?: number;
+    durationMs?: number;
+  }>;
 
   // ── consumer_chips fields (ai-architecture-redesign-r1 task 023 / FR-P1-04) ──
   //

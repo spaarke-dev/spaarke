@@ -172,7 +172,7 @@
 
 | # | Task | FR | Rigor | Deps | Status |
 |---|---|---|---|---|---|
-| 046 | Widget layer: dedupe registries; trace widget; FieldDelta deleted | FR-P3-07 | FULL | 045 | 🔲 |
+| 046 | Widget layer: ONE register-context-widgets module (14 widgets, dup deleted); ExecutionTraceWidget renders REAL ledger ToolChains (tool_chain context_event emitted AFTER AppendToolChainAsync — no new endpoint; NFR-07 identifiers-only wire); FieldDelta dual-render DELETED grep-zero (widget layer + bus discriminant + dispatchConsumer delta case; section_started/completed pairs replace it; SectionRenderer shape-typed); server AnalysisChunk.FieldDelta + legacy trace emitters + playbook_options leg → Track-B/050 candidates; publish 45.47 MB (−0.18) | FR-P3-07 | FULL | 045 | ✅ |
 | 048 | P3 deploy + **G-P3 browser UAT** (flagship one-conversation journey) | G-P3 | STANDARD | all P3 | 🔲 |
 
 ## Phase P4 — Sweep completion + hardening + graduation (gates G-P4 + G-M)

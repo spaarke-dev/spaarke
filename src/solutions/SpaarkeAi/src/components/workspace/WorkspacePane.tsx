@@ -784,7 +784,7 @@ export function WorkspacePane(): React.JSX.Element {
       // R5 task 038 — Manual override for the Summary tab auto-focus.
       //
       // When the user manually clicks a tab OTHER THAN Summary, set the
-      // override flag so subsequent `field_delta` / `streaming_complete`
+      // override flag so subsequent `section_*` / `streaming_complete`
       // events in the current stream cycle do NOT pull focus back to
       // Summary. The override is reset on the NEXT `streaming_started`
       // event (so the next stream can again auto-focus) AND on

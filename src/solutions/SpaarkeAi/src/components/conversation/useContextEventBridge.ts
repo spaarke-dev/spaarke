@@ -32,6 +32,16 @@ export interface ContextEventPayload {
   contextDecision?: string;
   contextCapabilityName?: string;
   contextChips?: ReadonlyArray<Record<string, unknown>>;
+  // tool_chain (task 046 / FR-P3-07): the PERSISTED session-ledger ToolChain
+  // segment (ADR-040 storage-precedes-rendering). Identifiers/counts only.
+  contextTurn?: number;
+  contextToolChainCalls?: ReadonlyArray<{
+    toolId?: string;
+    argsSummary?: string;
+    resultCount?: number;
+    citationCount?: number;
+    durationMs?: number;
+  }>;
 }
 
 export interface ContextEventBridgeDeps {
@@ -121,6 +131,30 @@ export function useContextEventBridge(deps: ContextEventBridgeDeps): {
             capabilityName: data.contextCapabilityName,
           } as ContextPaneEvent);
           break;
+        case "tool_chain": {
+          // Task 046 / FR-P3-07 — the ledger ToolChain bridge (ADR-040): the
+          // BFF emits this frame only AFTER the segment was appended to the
+          // session ledger. Forward the persisted records to the `context`
+          // bus where ExecutionTraceWidget renders them. Explicit per-field
+          // copy (NFR-07 — identifiers/counts only; never a spread).
+          const rawCalls = data.contextToolChainCalls;
+          if (!Array.isArray(rawCalls) || rawCalls.length === 0) return;
+          dispatch("context", {
+            type: "tool_chain",
+            timestamp,
+            turn: typeof data.contextTurn === "number" ? data.contextTurn : 0,
+            toolChainCalls: rawCalls
+              .filter((c) => typeof c?.toolId === "string" && c.toolId.length > 0)
+              .map((c) => ({
+                toolId: c.toolId as string,
+                argsSummary: typeof c.argsSummary === "string" ? c.argsSummary : undefined,
+                resultCount: typeof c.resultCount === "number" ? c.resultCount : undefined,
+                citationCount: typeof c.citationCount === "number" ? c.citationCount : undefined,
+                durationMs: typeof c.durationMs === "number" ? c.durationMs : undefined,
+              })),
+          } as ContextPaneEvent);
+          break;
+        }
         default:
           return;
       }

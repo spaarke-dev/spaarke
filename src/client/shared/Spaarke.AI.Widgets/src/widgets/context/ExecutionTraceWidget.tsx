@@ -1,69 +1,70 @@
 /**
  * @spaarke/ai-widgets — ExecutionTraceWidget
  *
- * Context-pane widget that renders an ordered, Claude-Code-like timeline of
- * the chat agent's deterministic activity. Subscribes to the six `context.*`
- * trace event types added by R6 task 059 and renders them as a vertical list
- * with the OLDEST entry at the top and the NEWEST at the bottom.
+ * Context-pane widget that renders the session ledger's persisted `ToolChain`
+ * entries (ADR-040) as an ordered, Claude-Code-like timeline of the agent's
+ * deterministic tool activity — the client face of ADR-040 decision
+ * traceability (ai-architecture-redesign-r1 task 046 / FR-P3-07).
  *
- * Subscribed event types (R6 task 059):
- *   - `tool_call_started`       — agent invoked a registered tool
- *   - `tool_call_completed`     — tool invocation returned
- *   - `knowledge_retrieved`     — knowledge-source retrieval produced a hit
- *   - `playbook_node_executing` — a playbook node has started executing
- *   - `playbook_node_completed` — a playbook node has finished
- *   - `decision_made`           — agent made an enumerated decision
+ * ── Data source (ADR-040 BINDING) ─────────────────────────────────────────
  *
- * ── ADR-015 BINDING (CRITICAL) ────────────────────────────────────────────
+ * The widget subscribes to the `context` channel and consumes the
+ * `tool_chain` event ONLY. Each event carries one ledger `ToolChain` segment
+ * that the BFF PERSISTED to the session ledger BEFORE emitting the event
+ * (storage precedes rendering — `ChatEndpoints.FlushToolChainLedgerAsync`
+ * appends via `ChatSessionManager.AppendToolChainAsync`, THEN writes the
+ * `context_event` SSE frame). The widget renders those persisted records
+ * verbatim; it MUST NOT and does not synthesize trace data client-side.
  *
- * The widget renders ONLY the typed enumerated fields from each event payload:
+ * This replaces the legacy R6 live-telemetry trace source (the six
+ * `tool_call_started` / `tool_call_completed` / … events emitted by
+ * `ContextEventEmitter` from adapter call sites) as the widget's data source.
+ * Those events remain on the bus vocabulary for telemetry, but the trace
+ * widget no longer renders them — the ledger is the single source of truth
+ * for what the agent did.
  *
- *   - timestamp        — ISO-8601 UTC (rendered as `HH:mm:ss`)
- *   - toolName         — registered tool name (Tier 1 safe)
- *   - durationMs       — wall-clock duration (Tier 1 safe)
- *   - success          — boolean outcome (Tier 1 safe)
- *   - knowledgeSourceId — registered source ID (Tier 1 safe)
- *   - relevanceScore   — numeric 0..1 (Tier 1 safe)
- *   - playbookId       — config ID (Tier 1 safe)
- *   - nodeId           — config ID (Tier 1 safe)
- *   - decision         — short enum-like string (Tier 1 safe)
- *   - decisionReason   — machine summary (Tier 1 safe; emitter responsibility)
+ * ── NFR-07 / ADR-015 BINDING ──────────────────────────────────────────────
  *
- * The widget NEVER renders `contextData`, `contextType`, `selectionRef`, or
- * any extra free-form fields that may have been attached to the event by a
- * misbehaving emitter. Each row builds its display string from the typed
- * fields above ONLY — defense in depth against accidental user-content leak.
+ * Each rendered row exposes ONLY the ledger `SessionToolCall` projection:
+ *
+ *   - toolId        — namespaced tool id (Tier 1 safe)
+ *   - argsSummary   — identifier/filter summary, redacted at RECORDING time by
+ *                     `AgentTurnContract.SummarizeArguments` (free text arrives
+ *                     as `<redacted:len>` markers — never verbatim content)
+ *   - resultCount   — numeric result count (Tier 1 safe)
+ *   - citationCount — numeric citation count (ids stay in the ledger)
+ *   - durationMs    — wall-clock duration (Tier 1 safe)
+ *   - turn          — 1-based session turn ordinal (Tier 1 safe)
+ *   - timestamp     — ISO-8601 UTC (rendered as `HH:mm:ss`)
+ *
+ * The handler copies these typed fields explicitly (never spreads the event)
+ * — defense in depth against a misbehaving emitter attaching extra fields.
  *
  * Standards:
  *   - ADR-012: lives in `@spaarke/ai-widgets`; Fluent v9 components.
- *   - ADR-015: typed-field-only rendering (see above).
+ *   - ADR-015 / NFR-07: identifiers/counts-only rendering (see above).
  *   - ADR-021: zero hardcoded colors; Fluent v9 semantic tokens only.
  *   - ADR-022: React 19 functional component + hooks.
  *   - ADR-030: subscribes to existing `context` channel — NO new channel.
+ *   - ADR-039: pure render surface — no routing/intent logic in the widget.
  *   - NFR-05:  4-channel PaneEventBus preserved.
  *
- * In-memory event log:
- *   - Capped at MAX_TRACE_ENTRIES (50) with FIFO eviction (oldest dropped).
+ * In-memory log:
+ *   - Capped at MAX_TRACE_ENTRIES (50) rendered calls with FIFO eviction.
  *   - Auto-scrolls to the newest entry on each addition.
+ *   - Live-session surface, not an audit log — the full history lives in the
+ *     session ledger (Redis/Cosmos via the 3-tier session stack).
  *
- * Task: R6-061 (D-C-14, Pillar 6c).
+ * Task: ai-architecture-redesign-r1 046 (supersedes R6-061 live-trace source).
  */
 
 import React, { useCallback, useRef, useState, useEffect, useMemo } from 'react';
-import { makeStyles, mergeClasses, tokens, Text, Divider, Spinner } from '@fluentui/react-components';
-import {
-  WrenchRegular,
-  CheckmarkCircleRegular,
-  ErrorCircleRegular,
-  BookSearchRegular,
-  FlowRegular,
-  BranchRegular,
-  HistoryRegular,
-} from '@fluentui/react-icons';
+import { makeStyles, mergeClasses, tokens, Text, Divider, Spinner, Badge } from '@fluentui/react-components';
+import { WrenchRegular, HistoryRegular } from '@fluentui/react-icons';
 
 import type { ContextWidgetProps } from '../../types/widget-types';
 import { usePaneEvent } from '../../events/usePaneEvent';
-import type { ContextPaneEvent } from '../../events/PaneEventTypes';
+import type { ContextPaneEvent, TraceToolCallSummary } from '../../events/PaneEventTypes';
 
 // ---------------------------------------------------------------------------
 // Constants
@@ -73,29 +74,13 @@ import type { ContextPaneEvent } from '../../events/PaneEventTypes';
 export const EXECUTION_TRACE_WIDGET_TYPE = 'execution-trace' as const;
 
 /**
- * Maximum number of trace entries retained in the in-memory event log. When a
- * new entry would push the count above this cap, the OLDEST entry is dropped
- * (FIFO). The cap is intentionally modest — the widget is a live activity
- * surface, not an audit log; older entries live in the BFF audit log
- * accessible via `correlationId` per ADR-015.
+ * Maximum number of rendered tool-call rows retained in the in-memory log.
+ * When a new ledger segment would push the count above this cap, the OLDEST
+ * rows are dropped (FIFO). The cap is intentionally modest — the widget is a
+ * live activity surface, not an audit log; the persisted `ToolChain` entries
+ * live in the session ledger (ADR-040) and remain addressable there.
  */
 export const MAX_TRACE_ENTRIES = 50;
-
-/**
- * The six discriminants from R6 task 059 that this widget renders. The
- * widget subscribes to the `context` channel (existing — no new channel per
- * ADR-030 / NFR-05) and filters incoming events to this enumerated set.
- */
-const TRACE_EVENT_TYPES = [
-  'tool_call_started',
-  'tool_call_completed',
-  'knowledge_retrieved',
-  'playbook_node_executing',
-  'playbook_node_completed',
-  'decision_made',
-] as const;
-
-type TraceEventType = (typeof TRACE_EVENT_TYPES)[number];
 
 // ---------------------------------------------------------------------------
 // Public data types
@@ -104,54 +89,41 @@ type TraceEventType = (typeof TRACE_EVENT_TYPES)[number];
 /**
  * Data payload delivered to the widget via `ContextWidgetProps.data`.
  *
- * The widget is fully self-contained for live trace events — it subscribes
- * to the PaneEventBus directly and does not require any data prop. The data
- * field is optional and reserved for future use (e.g. a server-pre-seeded
- * historical trace replay). When absent, the widget starts from an empty
- * trace and accumulates events from the live subscription.
+ * The widget is self-contained for live ledger events — it subscribes to the
+ * PaneEventBus directly and does not require any data prop.
  */
 export interface ExecutionTraceData {
   /**
-   * Optional session filter — when set, the widget only retains and renders
-   * trace events whose `sessionId` matches this value. When absent (or
-   * empty), all trace events are accepted regardless of session.
-   *
-   * Used by the SpaarkeAi shell to scope the trace widget to the active
-   * chat session — preventing trace bleed-through across sessions.
+   * Optional session filter — when set AND an incoming `tool_chain` event
+   * carries a `sessionId`, only matching events are retained. Events without
+   * a sessionId are accepted (the SSE relay is per-request/per-session, so
+   * cross-session bleed cannot occur on the transport).
    */
   sessionId?: string;
 }
 
 /**
- * One entry in the in-memory trace log. Carries ONLY the typed enumerated
- * fields necessary to render the row. NEVER carries free-form content fields
- * from the raw `ContextPaneEvent` (such as `contextData`, `contextType`,
- * `selectionRef`, `selectedFileId`, etc.) — defense in depth per ADR-015.
- *
- * The `id` is a per-entry monotonic identifier used as the React list key;
- * it is allocated by the widget when the entry is appended.
+ * One rendered row: a persisted ledger `SessionToolCall` plus the segment
+ * metadata it arrived with (turn + persisted-at timestamp). Built by explicit
+ * per-field copy from the `tool_chain` event — never a spread.
  */
 interface TraceEntry {
   /** Per-entry monotonic ID — used as React list key. */
   id: number;
-  /** Type discriminant (one of the six R6 task 059 event types). */
-  type: TraceEventType;
-  /** ISO-8601 UTC timestamp from the event payload (`timestamp`). */
+  /** 1-based session turn the persisted segment belongs to. */
+  turn: number;
+  /** ISO-8601 UTC timestamp the segment was persisted/emitted. */
   timestamp: string;
-  /** Optional correlation ID (BFF trace identifier). */
-  correlationId?: string;
-  // Per-type typed fields (subset of `ContextPaneEvent`). Each field is a
-  // Tier 1 safe value per ADR-015 — see the JSDoc on `ContextPaneEvent` for
-  // the binding rationale.
-  toolName?: string;
+  /** Ledger `SessionToolCall.ToolId`. */
+  toolId: string;
+  /** Ledger `SessionToolCall.ArgsSummary` (redacted at recording time). */
+  argsSummary?: string;
+  /** Ledger `SessionToolCall.ResultCount`. */
+  resultCount?: number;
+  /** Count of ledger citation ids (ids themselves stay in the ledger). */
+  citationCount?: number;
+  /** Ledger `SessionToolCall.DurationMs`. */
   durationMs?: number;
-  success?: boolean;
-  knowledgeSourceId?: string;
-  relevanceScore?: number;
-  playbookId?: string;
-  nodeId?: string;
-  decision?: string;
-  decisionReason?: string;
 }
 
 export type ExecutionTraceWidgetProps = ContextWidgetProps<ExecutionTraceData>;
@@ -204,7 +176,25 @@ const useStyles = makeStyles({
     gap: tokens.spacingVerticalS,
   },
 
-  // Per-entry row. Card surface keeps each entry visually distinct.
+  // Turn separator row (renders between segments of different turns).
+  turnDivider: {
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalS,
+    paddingTop: tokens.spacingVerticalXS,
+  },
+  turnDividerLabel: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
+    fontWeight: tokens.fontWeightSemibold,
+    whiteSpace: 'nowrap',
+  },
+  turnDividerLine: {
+    flex: 1,
+  },
+
+  // Per-call row. Card surface keeps each entry visually distinct.
   entry: {
     display: 'flex',
     flexDirection: 'row',
@@ -238,12 +228,6 @@ const useStyles = makeStyles({
     flexShrink: 0,
     marginTop: '2px',
   },
-  entryIconSuccess: {
-    color: tokens.colorPaletteGreenForeground1,
-  },
-  entryIconError: {
-    color: tokens.colorPaletteRedForeground1,
-  },
   entryBody: {
     display: 'flex',
     flexDirection: 'column',
@@ -276,9 +260,21 @@ const useStyles = makeStyles({
   entryDetail: {
     fontSize: tokens.fontSizeBase200,
     color: tokens.colorNeutralForeground2,
+    fontFamily: tokens.fontFamilyMonospace,
     overflow: 'hidden',
     textOverflow: 'ellipsis',
     whiteSpace: 'nowrap',
+  },
+  entryMetaRow: {
+    display: 'flex',
+    flexDirection: 'row',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalXS,
+    flexWrap: 'wrap',
+  },
+  entryMetaText: {
+    fontSize: tokens.fontSizeBase200,
+    color: tokens.colorNeutralForeground3,
   },
 
   // Empty state — never a blank pane.
@@ -317,15 +313,6 @@ const useStyles = makeStyles({
 // ---------------------------------------------------------------------------
 
 /**
- * Type-guard: returns `true` when the event's `type` field is one of the six
- * trace discriminants from R6 task 059. Used by the subscription handler to
- * filter incoming `context.*` events.
- */
-function isTraceEventType(type: string): type is TraceEventType {
-  return (TRACE_EVENT_TYPES as readonly string[]).includes(type);
-}
-
-/**
  * Format an ISO-8601 timestamp as a short `HH:mm:ss` clock string. Returns
  * the original string if parsing fails (defensive — never throw at render
  * time). Time-only (no date) is intentional — the widget is a live activity
@@ -346,7 +333,7 @@ function formatTimestamp(iso: string): string {
 
 /**
  * Format a millisecond duration as a short human-readable string. Returns
- * `''` when undefined.
+ * `''` when undefined / invalid.
  */
 function formatDuration(ms?: number): string {
   if (typeof ms !== 'number' || !Number.isFinite(ms) || ms < 0) return '';
@@ -355,121 +342,20 @@ function formatDuration(ms?: number): string {
 }
 
 /**
- * Format a numeric relevance score as a percentage / fixed-decimal label.
- * Returns `''` when undefined.
+ * Narrow one wire call record to the typed identifiers-only shape. Explicit
+ * per-field copy (never a spread) — any unexpected fields on the incoming
+ * record are physically excluded (NFR-07 defense in depth).
  */
-function formatScore(score?: number): string {
-  if (typeof score !== 'number' || !Number.isFinite(score)) return '';
-  // Clamp to [0, 1] to defend against emitter-side normalization bugs.
-  const clamped = Math.max(0, Math.min(1, score));
-  return clamped.toFixed(2);
-}
-
-/**
- * Pick a Fluent v9 icon for a trace entry based on its event type and (for
- * completion events) success outcome.
- */
-function pickIcon(entry: TraceEntry, styles: ReturnType<typeof useStyles>): React.ReactElement {
-  switch (entry.type) {
-    case 'tool_call_started':
-      return <WrenchRegular className={styles.entryIcon} aria-hidden="true" />;
-    case 'tool_call_completed':
-      return entry.success === false ? (
-        <ErrorCircleRegular className={mergeClasses(styles.entryIcon, styles.entryIconError)} aria-hidden="true" />
-      ) : (
-        <CheckmarkCircleRegular
-          className={mergeClasses(styles.entryIcon, styles.entryIconSuccess)}
-          aria-hidden="true"
-        />
-      );
-    case 'knowledge_retrieved':
-      return <BookSearchRegular className={styles.entryIcon} aria-hidden="true" />;
-    case 'playbook_node_executing':
-      return <FlowRegular className={styles.entryIcon} aria-hidden="true" />;
-    case 'playbook_node_completed':
-      return entry.success === false ? (
-        <ErrorCircleRegular className={mergeClasses(styles.entryIcon, styles.entryIconError)} aria-hidden="true" />
-      ) : (
-        <CheckmarkCircleRegular
-          className={mergeClasses(styles.entryIcon, styles.entryIconSuccess)}
-          aria-hidden="true"
-        />
-      );
-    case 'decision_made':
-      return <BranchRegular className={styles.entryIcon} aria-hidden="true" />;
-    default: {
-      // Exhaustiveness check — defensive. Unreachable under the type-guard.
-      const _exhaustive: never = entry.type;
-      void _exhaustive;
-      return <HistoryRegular className={styles.entryIcon} aria-hidden="true" />;
-    }
-  }
-}
-
-/**
- * Build the primary label (one-line summary) for a trace entry. ONLY the
- * typed enumerated fields from the event payload contribute — defense in
- * depth per ADR-015.
- */
-function buildLabel(entry: TraceEntry): string {
-  switch (entry.type) {
-    case 'tool_call_started':
-      return `Tool: ${entry.toolName ?? '(unknown)'}`;
-    case 'tool_call_completed': {
-      const outcome = entry.success === false ? ' (failed)' : '';
-      return `Tool: ${entry.toolName ?? '(unknown)'}${outcome}`;
-    }
-    case 'knowledge_retrieved':
-      return `Knowledge: ${entry.knowledgeSourceId ?? '(unknown)'}`;
-    case 'playbook_node_executing':
-      return `Node: ${entry.nodeId ?? '(unknown)'}`;
-    case 'playbook_node_completed': {
-      const outcome = entry.success === false ? ' (failed)' : '';
-      return `Node: ${entry.nodeId ?? '(unknown)'}${outcome}`;
-    }
-    case 'decision_made':
-      return `Decision: ${entry.decision ?? '(unknown)'}`;
-    default: {
-      const _exhaustive: never = entry.type;
-      void _exhaustive;
-      return 'Event';
-    }
-  }
-}
-
-/**
- * Build the secondary detail (subline) for a trace entry. ONLY the typed
- * enumerated fields from the event payload contribute. Returns `null` when
- * there is no useful subline.
- */
-function buildDetail(entry: TraceEntry): string | null {
-  switch (entry.type) {
-    case 'tool_call_started':
-      return null;
-    case 'tool_call_completed': {
-      const dur = formatDuration(entry.durationMs);
-      return dur || null;
-    }
-    case 'knowledge_retrieved': {
-      const score = formatScore(entry.relevanceScore);
-      return score ? `Relevance: ${score}` : null;
-    }
-    case 'playbook_node_executing':
-      return entry.playbookId ? `Playbook: ${entry.playbookId}` : null;
-    case 'playbook_node_completed': {
-      const dur = formatDuration(entry.durationMs);
-      const pb = entry.playbookId ? `Playbook: ${entry.playbookId}` : '';
-      if (dur && pb) return `${pb} · ${dur}`;
-      return dur || pb || null;
-    }
-    case 'decision_made':
-      return entry.decisionReason ?? null;
-    default: {
-      const _exhaustive: never = entry.type;
-      void _exhaustive;
-      return null;
-    }
-  }
+function narrowCall(raw: TraceToolCallSummary): Omit<TraceEntry, 'id' | 'turn' | 'timestamp'> | null {
+  if (typeof raw !== 'object' || raw === null) return null;
+  if (typeof raw.toolId !== 'string' || raw.toolId.length === 0) return null;
+  return {
+    toolId: raw.toolId,
+    argsSummary: typeof raw.argsSummary === 'string' ? raw.argsSummary : undefined,
+    resultCount: typeof raw.resultCount === 'number' ? raw.resultCount : undefined,
+    citationCount: typeof raw.citationCount === 'number' ? raw.citationCount : undefined,
+    durationMs: typeof raw.durationMs === 'number' ? raw.durationMs : undefined,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -482,36 +368,53 @@ interface TraceRowProps {
 }
 
 /**
- * One row in the trace timeline. Renders icon + label + timestamp + optional
- * detail subline. Stateless / pure.
+ * One persisted tool call in the timeline. Renders tool id + timestamp +
+ * optional args summary + counts/duration meta. Stateless / pure.
  */
 const TraceRow: React.FC<TraceRowProps> = ({ entry, styles }) => {
-  const label = buildLabel(entry);
-  const detail = buildDetail(entry);
   const ts = formatTimestamp(entry.timestamp);
+  const dur = formatDuration(entry.durationMs);
+  const metaParts: string[] = [];
+  if (typeof entry.resultCount === 'number') {
+    metaParts.push(`${entry.resultCount} result${entry.resultCount === 1 ? '' : 's'}`);
+  }
+  if (typeof entry.citationCount === 'number' && entry.citationCount > 0) {
+    metaParts.push(`${entry.citationCount} citation${entry.citationCount === 1 ? '' : 's'}`);
+  }
+  if (dur) {
+    metaParts.push(dur);
+  }
 
   return (
     <div
       className={styles.entry}
       role="listitem"
       data-testid="execution-trace-row"
-      data-event-type={entry.type}
+      data-tool-id={entry.toolId}
+      data-turn={entry.turn}
       data-entry-id={entry.id}
     >
-      {pickIcon(entry, styles)}
+      <WrenchRegular className={styles.entryIcon} aria-hidden="true" />
       <div className={styles.entryBody}>
         <div className={styles.entryHeaderRow}>
-          <Text className={styles.entryLabel} title={label}>
-            {label}
+          <Text className={styles.entryLabel} title={entry.toolId}>
+            {entry.toolId}
           </Text>
           <Text className={styles.entryTimestamp} title={entry.timestamp}>
             {ts}
           </Text>
         </div>
-        {detail !== null && (
-          <Text className={styles.entryDetail} title={detail}>
-            {detail}
+        {entry.argsSummary !== undefined && entry.argsSummary.length > 0 && (
+          <Text className={styles.entryDetail} title={entry.argsSummary} data-testid="execution-trace-args">
+            {entry.argsSummary}
           </Text>
+        )}
+        {metaParts.length > 0 && (
+          <div className={styles.entryMetaRow}>
+            <Text className={styles.entryMetaText} data-testid="execution-trace-meta">
+              {metaParts.join(' · ')}
+            </Text>
+          </div>
         )}
       </div>
     </div>
@@ -527,7 +430,8 @@ const ExecutionTraceEmpty: React.FC<{ styles: ReturnType<typeof useStyles> }> = 
     <HistoryRegular className={styles.emptyIcon} aria-hidden="true" />
     <Text className={styles.emptyTitle}>No execution trace yet</Text>
     <Text className={styles.emptyBody}>
-      Agent activity will appear here as tools run, knowledge is retrieved, and decisions are made.
+      Tool activity will appear here as the agent works — each entry is read from the session ledger after it is
+      recorded.
     </Text>
   </div>
 );
@@ -537,12 +441,13 @@ const ExecutionTraceEmpty: React.FC<{ styles: ReturnType<typeof useStyles> }> = 
 // ---------------------------------------------------------------------------
 
 /**
- * ExecutionTraceWidget — Context-pane Claude-Code-like execution trace.
+ * ExecutionTraceWidget — Context-pane render surface for the session ledger's
+ * persisted `ToolChain` entries (ADR-040).
  *
- * Subscribes to the `context` channel and filters for the six trace event
- * types added by R6 task 059. Maintains an in-memory FIFO log capped at
- * `MAX_TRACE_ENTRIES` and renders the entries in chronological order
- * (OLDEST first; NEWEST at bottom). Auto-scrolls to the newest entry.
+ * Subscribes to the `context` channel and consumes `tool_chain` events only.
+ * Maintains an in-memory FIFO log capped at `MAX_TRACE_ENTRIES` and renders
+ * calls in chronological order (OLDEST first; NEWEST at bottom), grouped by
+ * session turn. Auto-scrolls to the newest entry.
  *
  * @see ContextWidgetProps
  * @see ExecutionTraceData
@@ -559,48 +464,40 @@ const ExecutionTraceWidget: React.FC<ExecutionTraceWidgetProps> = ({ data, isLoa
   // scrolled into view whenever a new entry is appended.
   const scrollEndRef = useRef<HTMLDivElement | null>(null);
 
-  // Capture handler for `context.*` events.
+  // Handler for `context.tool_chain` events (the ledger bridge — ADR-040).
   //
-  // CRITICAL: the handler builds the in-memory `TraceEntry` from the typed
-  // enumerated fields of the incoming `ContextPaneEvent` ONLY. We deliberately
-  // do NOT spread the event payload — that would risk smuggling
-  // `contextData`, `contextType`, `selectionRef`, or other fields into the
-  // entry. Per ADR-015: tool name + decision + timestamp ONLY.
+  // CRITICAL: entries are built from the typed identifier fields of the
+  // incoming event ONLY (explicit per-field copy via `narrowCall` — never a
+  // spread). Per NFR-07: identifiers / filters / counts / durations only.
   const handleContextEvent = useCallback(
     (event: ContextPaneEvent) => {
-      if (!isTraceEventType(event.type)) return;
-      // Defense in depth: events without a timestamp cannot be ordered and
-      // are dropped — emitters are contractually required to attach one.
-      if (typeof event.timestamp !== 'string' || event.timestamp.length === 0) return;
-      // Session filter (defense in depth): when the host supplies a
-      // sessionId in data, only retain events with the matching sessionId.
-      if (sessionFilter !== '' && event.sessionId !== sessionFilter) return;
+      if (event.type !== 'tool_chain') return;
+      // Session filter (defense in depth): only applied when BOTH sides carry
+      // a session id — the SSE transport is already per-session.
+      if (sessionFilter !== '' && typeof event.sessionId === 'string' && event.sessionId !== sessionFilter) {
+        return;
+      }
+      const calls = event.toolChainCalls;
+      if (!Array.isArray(calls) || calls.length === 0) return;
+      const turn = typeof event.turn === 'number' ? event.turn : 0;
+      const timestamp =
+        typeof event.timestamp === 'string' && event.timestamp.length > 0
+          ? event.timestamp
+          : new Date().toISOString();
 
-      const id = nextIdRef.current;
-      nextIdRef.current = id + 1;
-
-      // Build the entry from the typed enumerated fields ONLY. We use an
-      // explicit per-field copy (NOT a spread) so any unexpected fields on
-      // the incoming event are physically excluded.
-      const entry: TraceEntry = {
-        id,
-        type: event.type,
-        timestamp: event.timestamp,
-        correlationId: event.correlationId,
-        toolName: event.toolName,
-        durationMs: event.durationMs,
-        success: event.success,
-        knowledgeSourceId: event.knowledgeSourceId,
-        relevanceScore: event.relevanceScore,
-        playbookId: event.playbookId,
-        nodeId: event.nodeId,
-        decision: event.decision,
-        decisionReason: event.decisionReason,
-      };
+      const appended: TraceEntry[] = [];
+      for (const raw of calls) {
+        const narrowed = narrowCall(raw);
+        if (narrowed === null) continue;
+        const id = nextIdRef.current;
+        nextIdRef.current = id + 1;
+        appended.push({ id, turn, timestamp, ...narrowed });
+      }
+      if (appended.length === 0) return;
 
       setEntries(prev => {
-        const next = prev.length >= MAX_TRACE_ENTRIES ? prev.slice(1) : prev;
-        return [...next, entry];
+        const merged = [...prev, ...appended];
+        return merged.length > MAX_TRACE_ENTRIES ? merged.slice(merged.length - MAX_TRACE_ENTRIES) : merged;
       });
     },
     [sessionFilter]
@@ -608,9 +505,7 @@ const ExecutionTraceWidget: React.FC<ExecutionTraceWidgetProps> = ({ data, isLoa
 
   usePaneEvent('context', handleContextEvent);
 
-  // Auto-scroll to the newest entry on each addition. `scrollIntoView` with
-  // `block: 'end'` keeps the scroll pinned at the bottom unless the user has
-  // scrolled away (browsers preserve user scroll intent).
+  // Auto-scroll to the newest entry on each addition.
   useEffect(() => {
     if (entries.length === 0) return;
     const target = scrollEndRef.current;
@@ -619,12 +514,11 @@ const ExecutionTraceWidget: React.FC<ExecutionTraceWidgetProps> = ({ data, isLoa
     }
   }, [entries.length]);
 
-  // Static label used as the widget aria-label / sub-title.
   const subtitle = useMemo(() => {
     if (entries.length === 0) return 'Waiting for activity';
     const count = entries.length;
-    const noun = count === 1 ? 'event' : 'events';
-    return `${count} ${noun} captured`;
+    const noun = count === 1 ? 'tool call' : 'tool calls';
+    return `${count} ${noun} from the session ledger`;
   }, [entries.length]);
 
   // Loading shim — the widget itself doesn't load any data, but the prop is
@@ -661,10 +555,23 @@ const ExecutionTraceWidget: React.FC<ExecutionTraceWidgetProps> = ({ data, isLoa
         <ExecutionTraceEmpty styles={styles} />
       ) : (
         <div className={styles.scrollContainer} data-testid="execution-trace-scroll">
-          <div className={styles.list} role="list" aria-label="Agent activity">
-            {entries.map(entry => (
-              <TraceRow key={entry.id} entry={entry} styles={styles} />
-            ))}
+          <div className={styles.list} role="list" aria-label="Agent tool activity">
+            {entries.map((entry, idx) => {
+              const isNewTurn = entry.turn > 0 && (idx === 0 || entries[idx - 1].turn !== entry.turn);
+              return (
+                <React.Fragment key={entry.id}>
+                  {isNewTurn && (
+                    <div className={styles.turnDivider} data-testid="execution-trace-turn" data-turn={entry.turn}>
+                      <Badge appearance="tint" color="brand" size="small">
+                        Turn {entry.turn}
+                      </Badge>
+                      <Divider appearance="subtle" className={styles.turnDividerLine} />
+                    </div>
+                  )}
+                  <TraceRow entry={entry} styles={styles} />
+                </React.Fragment>
+              );
+            })}
             {/* Sentinel: target for auto-scroll. */}
             <div ref={scrollEndRef} aria-hidden="true" />
           </div>

@@ -1,23 +1,25 @@
 /**
- * ExecutionTraceWidget — unit tests
+ * ExecutionTraceWidget — unit tests (ADR-040 ledger ToolChain source)
+ *
+ * ai-architecture-redesign-r1 task 046 / FR-P3-07: the widget renders the
+ * session ledger's PERSISTED ToolChain entries delivered via
+ * `context.tool_chain` events — it no longer consumes the legacy R6
+ * live-telemetry trace events.
  *
  * Covers:
- *  - Empty state renders the "No execution trace yet" hint when no events
- *    have arrived.
- *  - A single dispatched event is rendered as a single row with the typed
- *    fields (tool name + timestamp).
- *  - Multiple dispatched events render in chronological dispatch order
- *    (OLDEST first, NEWEST at bottom).
- *  - ADR-015 leak guard: events carrying extra free-form fields
- *    (`contextData`, `contextType`, `selectionRef`, etc.) do NOT render
- *    those fields anywhere in the DOM.
- *  - FIFO cap (`MAX_TRACE_ENTRIES`): the 51st event drops the oldest
- *    entry — the cap is enforced.
- *  - Events without a `timestamp` are dropped (defense in depth).
- *  - Non-trace `context.*` events (e.g. `context_update`) are ignored.
- *  - All six R6 task 059 event types render with a per-type label.
- *
- * Task: R6-061 (D-C-14, Pillar 6c).
+ *  - Empty state renders the "No execution trace yet" hint.
+ *  - A tool_chain event renders one row per persisted call with the ledger
+ *    projection fields (toolId, argsSummary, resultCount, citationCount,
+ *    durationMs) and a turn group header.
+ *  - Multiple segments render in arrival order (OLDEST first).
+ *  - Legacy live-telemetry trace events (tool_call_started etc.) are IGNORED
+ *    — the ledger is the only data source.
+ *  - NFR-07 leak guard: extra free-form fields on the event/calls do NOT
+ *    render anywhere in the DOM (explicit per-field copy, never a spread).
+ *  - FIFO cap (`MAX_TRACE_ENTRIES`) enforced across segments.
+ *  - Calls without a toolId are dropped; empty-call events are dropped.
+ *  - Session filter drops mismatched-session events (when both sides carry
+ *    a session id) and accepts events without one.
  */
 
 import '@testing-library/jest-dom';
@@ -27,7 +29,7 @@ import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 import { PaneEventBus } from '../../../events/PaneEventBus';
 import { PaneEventBusProvider } from '../../../events/PaneEventBusContext';
 import ExecutionTraceWidget, { MAX_TRACE_ENTRIES, type ExecutionTraceData } from '../ExecutionTraceWidget';
-import type { ContextPaneEvent } from '../../../events/PaneEventTypes';
+import type { ContextPaneEvent, TraceToolCallSummary } from '../../../events/PaneEventTypes';
 import type { ContextWidgetProps } from '../../../types/widget-types';
 
 // ---------------------------------------------------------------------------
@@ -36,8 +38,6 @@ import type { ContextWidgetProps } from '../../../types/widget-types';
 
 beforeAll(() => {
   if (typeof Element !== 'undefined') {
-    // jsdom does not implement scrollIntoView — install a no-op so the
-    // widget's auto-scroll effect does not throw during tests.
     (Element.prototype as unknown as { scrollIntoView: () => void }).scrollIntoView = (): void => {};
   }
 });
@@ -54,7 +54,6 @@ function Wrapper({ bus, children }: { bus: PaneEventBus; children: React.ReactNo
   );
 }
 
-/** Render the widget inside required providers, returning the bus + utils. */
 function renderWidget(
   props: Partial<ContextWidgetProps<ExecutionTraceData>> = {},
   bus: PaneEventBus = new PaneEventBus()
@@ -73,11 +72,16 @@ function renderWidget(
   return { ...result, bus };
 }
 
-/** Build a base trace event with safe defaults; merge overrides on top. */
-function makeEvent(overrides: Partial<ContextPaneEvent> & { type: ContextPaneEvent['type'] }): ContextPaneEvent {
+/** Build a `tool_chain` event carrying persisted ledger calls. */
+function makeToolChainEvent(
+  calls: ReadonlyArray<Partial<TraceToolCallSummary>>,
+  overrides: Partial<ContextPaneEvent> = {}
+): ContextPaneEvent {
   return {
-    timestamp: '2026-06-11T12:00:00.000Z',
-    sessionId: 'session-test-1',
+    type: 'tool_chain',
+    timestamp: '2026-07-06T10:30:15.000Z',
+    turn: 1,
+    toolChainCalls: calls as ReadonlyArray<TraceToolCallSummary>,
     ...overrides,
   } as ContextPaneEvent;
 }
@@ -90,7 +94,7 @@ describe('ExecutionTraceWidget — empty state', () => {
   it('renders the "No execution trace yet" hint when no events have arrived', () => {
     renderWidget();
     expect(screen.getByText('No execution trace yet')).toBeInTheDocument();
-    expect(screen.getByText(/Agent activity will appear here/i)).toBeInTheDocument();
+    expect(screen.getByText(/read from the session ledger/i)).toBeInTheDocument();
   });
 
   it('renders the widget region with the correct accessible name', () => {
@@ -100,289 +104,182 @@ describe('ExecutionTraceWidget — empty state', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Single event rendering
+// Ledger ToolChain rendering
 // ---------------------------------------------------------------------------
 
-describe('ExecutionTraceWidget — single event', () => {
-  it('renders a tool_call_started event as a row with the tool name', () => {
+describe('ExecutionTraceWidget — ledger ToolChain rendering', () => {
+  it('renders one row per persisted call with toolId + timestamp', () => {
     const { bus } = renderWidget();
     act(() => {
       bus.dispatch(
         'context',
-        makeEvent({
-          type: 'tool_call_started',
-          toolName: 'send_workspace_artifact',
-          timestamp: '2026-06-11T10:30:15.000Z',
-        })
+        makeToolChainEvent([
+          { toolId: 'dataverse.read', argsSummary: 'entity=sprk_matter; top=5', resultCount: 5, durationMs: 124 },
+          { toolId: 'session.recall', durationMs: 1500 },
+        ])
       );
     });
     const rows = screen.getAllByTestId('execution-trace-row');
-    expect(rows).toHaveLength(1);
-    expect(within(rows[0]).getByText('Tool: send_workspace_artifact')).toBeInTheDocument();
-    // Timestamp rendered as HH:mm:ss (UTC) — formatTimestamp impl.
+    expect(rows).toHaveLength(2);
+    expect(within(rows[0]).getByText('dataverse.read')).toBeInTheDocument();
     expect(within(rows[0]).getByText('10:30:15')).toBeInTheDocument();
+    expect(within(rows[1]).getByText('session.recall')).toBeInTheDocument();
   });
 
-  it('renders a tool_call_completed event with success indicator and duration', () => {
+  it('renders the ledger projection detail: argsSummary + result/citation counts + duration', () => {
     const { bus } = renderWidget();
     act(() => {
       bus.dispatch(
         'context',
-        makeEvent({
-          type: 'tool_call_completed',
-          toolName: 'send_workspace_artifact',
-          durationMs: 124,
-          success: true,
-        })
+        makeToolChainEvent([
+          {
+            toolId: 'knowledge.search',
+            argsSummary: 'query=<redacted:42>; top=3',
+            resultCount: 3,
+            citationCount: 2,
+            durationMs: 250,
+          },
+        ])
       );
     });
     const row = screen.getByTestId('execution-trace-row');
-    expect(within(row).getByText('Tool: send_workspace_artifact')).toBeInTheDocument();
-    expect(within(row).getByText('124 ms')).toBeInTheDocument();
+    expect(within(row).getByTestId('execution-trace-args')).toHaveTextContent('query=<redacted:42>; top=3');
+    expect(within(row).getByTestId('execution-trace-meta')).toHaveTextContent('3 results · 2 citations · 250 ms');
   });
 
-  it('renders a knowledge_retrieved event with source ID and relevance score', () => {
+  it('renders a turn group header carrying the ledger turn ordinal', () => {
     const { bus } = renderWidget();
     act(() => {
-      bus.dispatch(
-        'context',
-        makeEvent({
-          type: 'knowledge_retrieved',
-          knowledgeSourceId: 'kb-corp-policy-en',
-          relevanceScore: 0.87,
-        })
-      );
+      bus.dispatch('context', makeToolChainEvent([{ toolId: 'a.tool' }], { turn: 3 }));
     });
-    const row = screen.getByTestId('execution-trace-row');
-    expect(within(row).getByText('Knowledge: kb-corp-policy-en')).toBeInTheDocument();
-    expect(within(row).getByText('Relevance: 0.87')).toBeInTheDocument();
+    const turnHeader = screen.getByTestId('execution-trace-turn');
+    expect(turnHeader).toHaveAttribute('data-turn', '3');
+    expect(within(turnHeader).getByText('Turn 3')).toBeInTheDocument();
   });
 
-  it('renders a playbook_node_executing event with node ID + playbook ID detail', () => {
+  it('renders multiple segments in arrival order (OLDEST first) with per-turn grouping', () => {
     const { bus } = renderWidget();
     act(() => {
-      bus.dispatch(
-        'context',
-        makeEvent({
-          type: 'playbook_node_executing',
-          playbookId: 'summarize-document-for-chat@v1',
-          nodeId: 'extract-entities',
-        })
-      );
-    });
-    const row = screen.getByTestId('execution-trace-row');
-    expect(within(row).getByText('Node: extract-entities')).toBeInTheDocument();
-    expect(within(row).getByText('Playbook: summarize-document-for-chat@v1')).toBeInTheDocument();
-  });
-
-  it('renders a playbook_node_completed event with success + duration detail', () => {
-    const { bus } = renderWidget();
-    act(() => {
-      bus.dispatch(
-        'context',
-        makeEvent({
-          type: 'playbook_node_completed',
-          playbookId: 'p1',
-          nodeId: 'deliver-output',
-          durationMs: 1450,
-          success: true,
-        })
-      );
-    });
-    const row = screen.getByTestId('execution-trace-row');
-    expect(within(row).getByText('Node: deliver-output')).toBeInTheDocument();
-    // Detail combines playbook + duration.
-    expect(within(row).getByText('Playbook: p1 · 1.45 s')).toBeInTheDocument();
-  });
-
-  it('renders a decision_made event with decision + decisionReason', () => {
-    const { bus } = renderWidget();
-    act(() => {
-      bus.dispatch(
-        'context',
-        makeEvent({
-          type: 'decision_made',
-          decision: 'route:summarize',
-          decisionReason: 'capability-router:summarize-intent-matched',
-        })
-      );
-    });
-    const row = screen.getByTestId('execution-trace-row');
-    expect(within(row).getByText('Decision: route:summarize')).toBeInTheDocument();
-    expect(within(row).getByText('capability-router:summarize-intent-matched')).toBeInTheDocument();
-  });
-
-  it('renders a failed tool_call_completed event with (failed) suffix', () => {
-    const { bus } = renderWidget();
-    act(() => {
-      bus.dispatch(
-        'context',
-        makeEvent({
-          type: 'tool_call_completed',
-          toolName: 'create_workspace_tab',
-          success: false,
-          durationMs: 42,
-        })
-      );
-    });
-    const row = screen.getByTestId('execution-trace-row');
-    expect(within(row).getByText('Tool: create_workspace_tab (failed)')).toBeInTheDocument();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Ordering
-// ---------------------------------------------------------------------------
-
-describe('ExecutionTraceWidget — chronological order', () => {
-  it('renders dispatched events in dispatch order (oldest first, newest at bottom)', () => {
-    const { bus } = renderWidget();
-    act(() => {
-      bus.dispatch('context', makeEvent({ type: 'tool_call_started', toolName: 'alpha' }));
-      bus.dispatch('context', makeEvent({ type: 'tool_call_started', toolName: 'bravo' }));
-      bus.dispatch('context', makeEvent({ type: 'tool_call_started', toolName: 'charlie' }));
+      bus.dispatch('context', makeToolChainEvent([{ toolId: 'first.tool' }], { turn: 1 }));
+      bus.dispatch('context', makeToolChainEvent([{ toolId: 'second.tool' }, { toolId: 'third.tool' }], { turn: 2 }));
     });
     const rows = screen.getAllByTestId('execution-trace-row');
-    expect(rows).toHaveLength(3);
-    expect(within(rows[0]).getByText('Tool: alpha')).toBeInTheDocument();
-    expect(within(rows[1]).getByText('Tool: bravo')).toBeInTheDocument();
-    expect(within(rows[2]).getByText('Tool: charlie')).toBeInTheDocument();
+    expect(rows.map(r => r.getAttribute('data-tool-id'))).toEqual(['first.tool', 'second.tool', 'third.tool']);
+    // Two turn headers (turn 1 + turn 2); the third row shares turn 2's header.
+    expect(screen.getAllByTestId('execution-trace-turn')).toHaveLength(2);
+    expect(screen.getByText(/3 tool calls from the session ledger/)).toBeInTheDocument();
   });
 });
 
 // ---------------------------------------------------------------------------
-// ADR-015 leak guard
+// Legacy live-telemetry events are IGNORED (ledger is the only source)
 // ---------------------------------------------------------------------------
 
-describe('ExecutionTraceWidget — ADR-015 leak guard', () => {
-  it('does NOT render contextData, contextType, selectionRef, or selectedFileId fields', () => {
-    const { bus, container } = renderWidget();
-    // Note: we cast through unknown because the event payload deliberately
-    // attaches fields a misbehaving emitter might smuggle. The widget's
-    // ADR-015 contract is that NONE of these reach the DOM.
-    const leakyEvent: ContextPaneEvent = {
-      type: 'tool_call_started',
-      timestamp: '2026-06-11T12:00:00.000Z',
-      sessionId: 'session-test-1',
-      toolName: 'send_workspace_artifact',
-      // SENSITIVE: these would be ADR-015 violations if rendered.
-      contextType: 'LEAK-context-type-VALUE',
-      contextData: { secret: 'LEAK-context-data-USERTEXT' } as unknown,
-      selectionRef: 'LEAK-selection-ref-VALUE',
-      selectedFileId: 'LEAK-selected-file-VALUE',
-      citationId: 'LEAK-citation-id-VALUE',
-      stagedFileIds: ['LEAK-staged-file-VALUE'],
-    } as ContextPaneEvent;
-
-    act(() => {
-      bus.dispatch('context', leakyEvent);
-    });
-
-    // The typed tool name MUST render.
-    expect(screen.getByText('Tool: send_workspace_artifact')).toBeInTheDocument();
-    // None of the smuggled values appear anywhere in the DOM.
-    expect(container.textContent ?? '').not.toContain('LEAK-context-type-VALUE');
-    expect(container.textContent ?? '').not.toContain('LEAK-context-data-USERTEXT');
-    expect(container.textContent ?? '').not.toContain('LEAK-selection-ref-VALUE');
-    expect(container.textContent ?? '').not.toContain('LEAK-selected-file-VALUE');
-    expect(container.textContent ?? '').not.toContain('LEAK-citation-id-VALUE');
-    expect(container.textContent ?? '').not.toContain('LEAK-staged-file-VALUE');
-  });
-});
-
-// ---------------------------------------------------------------------------
-// FIFO cap
-// ---------------------------------------------------------------------------
-
-describe('ExecutionTraceWidget — FIFO cap', () => {
-  it('drops the oldest entry when the cap is exceeded (51st event drops the 1st)', () => {
-    const { bus } = renderWidget();
-    // Dispatch MAX_TRACE_ENTRIES + 1 events. The first one (`tool-0`) should
-    // be evicted, so the visible rows are `tool-1` .. `tool-50`.
-    act(() => {
-      for (let i = 0; i <= MAX_TRACE_ENTRIES; i++) {
-        bus.dispatch('context', makeEvent({ type: 'tool_call_started', toolName: `tool-${i}` }));
-      }
-    });
-    const rows = screen.getAllByTestId('execution-trace-row');
-    expect(rows).toHaveLength(MAX_TRACE_ENTRIES);
-    // Oldest visible should be `tool-1`; the eviction took `tool-0`.
-    expect(within(rows[0]).getByText('Tool: tool-1')).toBeInTheDocument();
-    // Newest should be `tool-50`.
-    expect(within(rows[rows.length - 1]).getByText(`Tool: tool-${MAX_TRACE_ENTRIES}`)).toBeInTheDocument();
-    // The evicted entry should be gone.
-    expect(screen.queryByText('Tool: tool-0')).not.toBeInTheDocument();
-  });
-});
-
-// ---------------------------------------------------------------------------
-// Filtering
-// ---------------------------------------------------------------------------
-
-describe('ExecutionTraceWidget — event filtering', () => {
-  it('ignores non-trace context.* events (e.g. context_update)', () => {
-    const { bus } = renderWidget();
-    act(() => {
-      bus.dispatch(
-        'context',
-        // context_update is a legacy discriminant — not in TRACE_EVENT_TYPES.
-        makeEvent({ type: 'context_update', contextType: 'document' })
-      );
-    });
-    expect(screen.getByText('No execution trace yet')).toBeInTheDocument();
-    expect(screen.queryAllByTestId('execution-trace-row')).toHaveLength(0);
-  });
-
-  it('drops events that arrive without a timestamp (defense in depth)', () => {
+describe('ExecutionTraceWidget — legacy trace source removed', () => {
+  it.each([
+    'tool_call_started',
+    'tool_call_completed',
+    'knowledge_retrieved',
+    'playbook_node_executing',
+    'playbook_node_completed',
+    'decision_made',
+    'context_update',
+  ] as const)('ignores %s events', eventType => {
     const { bus } = renderWidget();
     act(() => {
       bus.dispatch('context', {
-        type: 'tool_call_started',
-        toolName: 'no-ts',
-        sessionId: 'session-test-1',
-        // timestamp intentionally absent.
+        type: eventType,
+        timestamp: '2026-07-06T10:30:15.000Z',
+        toolName: 'should-not-render',
+        decision: 'should-not-render-either',
       } as ContextPaneEvent);
     });
     expect(screen.queryAllByTestId('execution-trace-row')).toHaveLength(0);
-  });
-
-  it('filters by sessionId when the host passes data.sessionId', () => {
-    const { bus } = renderWidget({ data: { sessionId: 'session-A' } });
-    act(() => {
-      bus.dispatch(
-        'context',
-        makeEvent({
-          type: 'tool_call_started',
-          toolName: 'in-session',
-          sessionId: 'session-A',
-        })
-      );
-      bus.dispatch(
-        'context',
-        makeEvent({
-          type: 'tool_call_started',
-          toolName: 'out-of-session',
-          sessionId: 'session-B',
-        })
-      );
-    });
-    const rows = screen.getAllByTestId('execution-trace-row');
-    expect(rows).toHaveLength(1);
-    expect(within(rows[0]).getByText('Tool: in-session')).toBeInTheDocument();
-    expect(screen.queryByText('Tool: out-of-session')).not.toBeInTheDocument();
+    expect(screen.getByText('No execution trace yet')).toBeInTheDocument();
   });
 });
 
 // ---------------------------------------------------------------------------
-// Loading state
+// NFR-07 / ADR-015 leak guard
 // ---------------------------------------------------------------------------
 
-describe('ExecutionTraceWidget — loading state', () => {
-  it('renders a Spinner when isLoading is true', () => {
+describe('ExecutionTraceWidget — NFR-07 leak guard', () => {
+  it('does not render unexpected free-form fields smuggled onto the event or calls', () => {
+    const { bus } = renderWidget();
+    const smuggledEvent = {
+      type: 'tool_chain',
+      timestamp: '2026-07-06T10:30:15.000Z',
+      turn: 1,
+      contextData: 'SMUGGLED-USER-CONTENT',
+      toolChainCalls: [
+        {
+          toolId: 'safe.tool',
+          rawArguments: 'SMUGGLED-VERBATIM-ARGS',
+          resultBody: 'SMUGGLED-RESULT-TEXT',
+        },
+      ],
+    } as unknown as ContextPaneEvent;
+    act(() => {
+      bus.dispatch('context', smuggledEvent);
+    });
+    expect(screen.getAllByTestId('execution-trace-row')).toHaveLength(1);
+    expect(screen.queryByText(/SMUGGLED/)).not.toBeInTheDocument();
+    expect(document.body.textContent).not.toContain('SMUGGLED');
+  });
+});
+
+// ---------------------------------------------------------------------------
+// Defensive handling
+// ---------------------------------------------------------------------------
+
+describe('ExecutionTraceWidget — defensive handling', () => {
+  it('drops calls without a toolId and events with zero valid calls', () => {
+    const { bus } = renderWidget();
+    act(() => {
+      bus.dispatch('context', makeToolChainEvent([{ argsSummary: 'no-tool-id' } as Partial<TraceToolCallSummary>]));
+      bus.dispatch('context', makeToolChainEvent([]));
+    });
+    expect(screen.queryAllByTestId('execution-trace-row')).toHaveLength(0);
+  });
+
+  it('enforces the FIFO cap across segments', () => {
+    const { bus } = renderWidget();
+    act(() => {
+      // Two segments totalling MAX + 5 calls.
+      const firstBatch = Array.from({ length: MAX_TRACE_ENTRIES }, (_, i) => ({ toolId: `tool-${i}` }));
+      bus.dispatch('context', makeToolChainEvent(firstBatch, { turn: 1 }));
+      bus.dispatch(
+        'context',
+        makeToolChainEvent(
+          Array.from({ length: 5 }, (_, i) => ({ toolId: `overflow-${i}` })),
+          { turn: 2 }
+        )
+      );
+    });
+    const rows = screen.getAllByTestId('execution-trace-row');
+    expect(rows).toHaveLength(MAX_TRACE_ENTRIES);
+    // Oldest 5 evicted; newest 5 present at the bottom.
+    expect(rows[0].getAttribute('data-tool-id')).toBe('tool-5');
+    expect(rows[rows.length - 1].getAttribute('data-tool-id')).toBe('overflow-4');
+  });
+
+  it('applies the session filter only when both sides carry a session id', () => {
+    const { bus } = renderWidget({ data: { sessionId: 'session-A' } });
+    act(() => {
+      // Mismatched session — dropped.
+      bus.dispatch('context', makeToolChainEvent([{ toolId: 'other.session' }], { sessionId: 'session-B' }));
+      // No session id on the event — accepted (transport is per-session).
+      bus.dispatch('context', makeToolChainEvent([{ toolId: 'no.session.id' }]));
+      // Matching session — accepted.
+      bus.dispatch('context', makeToolChainEvent([{ toolId: 'same.session' }], { sessionId: 'session-A' }));
+    });
+    const rows = screen.getAllByTestId('execution-trace-row');
+    expect(rows.map(r => r.getAttribute('data-tool-id'))).toEqual(['no.session.id', 'same.session']);
+  });
+
+  it('honours isLoading with a spinner state', () => {
     renderWidget({ isLoading: true });
-    // The widget shows a status region while loading; the empty hint is
-    // suppressed.
-    expect(screen.queryByText('No execution trace yet')).not.toBeInTheDocument();
     expect(screen.getByRole('status', { name: 'Loading' })).toBeInTheDocument();
+    expect(screen.queryByText('No execution trace yet')).not.toBeInTheDocument();
   });
 });
