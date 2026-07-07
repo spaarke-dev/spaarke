@@ -211,6 +211,7 @@ import {
   PolymorphicPicker as PolymorphicPickerRaw,
   buildRecordUrl,
   resolveRecordType,
+  resolveRecordDisplayNameFieldName,
   type IPolymorphicPickerWebApi,
   type ITodoRegardingTargetCatalogEntry,
   type PolymorphicPickerProps,
@@ -902,9 +903,45 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
           // to update).
           const recordType = await resolveRecordType(writeCtx.webApi, detected.entityType);
 
+          // v1.4.5 (SRFR-054): resolve the target's actual display-name field
+          // (from sprk_recordtype_ref.sprk_recorddisplaynamefield) and query
+          // the parent record for that value. Auto-detect's pre-populated
+          // Xrm.LookupValue.name = the parent's PRIMARY NAME column, which
+          // for sprk_matter/sprk_project is the NUMBER, not the human name.
+          // Without this async resolution the auto-detect CREATE path bypasses
+          // the SRFR-052 display-name fix that already works in UPDATE mode.
+          let resolvedDisplayName = detected.recordName;
+          try {
+            const displayField = await resolveRecordDisplayNameFieldName(
+              writeCtx.webApi,
+              detected.entityType
+            );
+            if (displayField) {
+              const primaryIdAttr = `${detected.entityType}id`;
+              const query =
+                `?$filter=${primaryIdAttr} eq ${detected.recordId}` +
+                `&$select=${displayField}&$top=1`;
+              const result = await writeCtx.webApi.retrieveMultipleRecords(
+                detected.entityType,
+                query,
+                1
+              );
+              const raw = result.entities?.[0]?.[displayField];
+              if (typeof raw === 'string' && raw.trim().length > 0) {
+                resolvedDisplayName = raw.trim();
+              }
+            }
+          } catch (err) {
+            // NFR-06 graceful-blank: fall back to detected.recordName on any error.
+            console.warn(
+              '[RegardingResolver] Auto-detect display-name resolution failed; falling back to picker-provided name:',
+              err
+            );
+          }
+
           // Write the 4 always-known fields immediately.
           setFormTextValue('sprk_regardingrecordid', detected.recordId);
-          setFormTextValue('sprk_regardingrecordname', detected.recordName);
+          setFormTextValue('sprk_regardingrecordname', resolvedDisplayName);
           setFormTextValue(
             'sprk_regardingrecordurl',
             buildRecordUrl(detected.entityType, detected.recordId)
@@ -925,14 +962,19 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
           }
 
           // Populate selectedTarget so Row 2 hyperlink works immediately.
+          // v1.4.5 (SRFR-054): use the resolved display-name for consistency
+          // with the form-attribute write above.
           setSelectedTarget({
             entityType: detected.entityType,
             recordId: detected.recordId,
-            recordName: detected.recordName,
+            recordName: resolvedDisplayName,
           });
 
           // Populate SRFR-040 presave bridge fallback. The presave
           // webresource will stage sprk_regardingrecordnumber on save.
+          // v1.4.5 (SRFR-054): recordName in the bridge must be the resolved
+          // display-name — the presave webresource reads pending.recordName
+          // and writes it as sprk_regardingrecordname on the form buffer.
           (
             window as unknown as {
               __sprk_regarding_pending__?: Record<string, unknown>;
@@ -943,7 +985,7 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
             entitySet: undefined,
             lookupAttribute: detected.lookupAttribute,
             recordId: detected.recordId,
-            recordName: detected.recordName,
+            recordName: resolvedDisplayName,
             recordUrl: buildRecordUrl(detected.entityType, detected.recordId),
             recordNumber: null,
           };
@@ -1049,7 +1091,13 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
             entitySet: result.catalogEntry?.entitySet,
             lookupAttribute: result.catalogEntry?.lookupAttribute,
             recordId: selection.recordId,
-            recordName: selection.recordName,
+            // v1.4.5 (SRFR-054): use the resolved display-name from
+            // applyResolverFields (SRFR-052 shared-lib fix). The presave
+            // webresource reads pending.recordName and writes it as
+            // sprk_regardingrecordname. Without this the presave staged the
+            // picker's returned Primary Name (which for sprk_matter is the
+            // number), producing "Regarding Name = number" on CREATE.
+            recordName: result.displayName ?? selection.recordName,
             recordUrl: buildRecordUrl(selection.entityType, selection.recordId),
             recordNumber: result.recordNumber ?? null,
           };

@@ -78,6 +78,17 @@ export interface IResolverWriteResult {
    * (SRFR-032 / SRFR-040 FR-A5-04).
    */
   recordNumber?: string | null;
+  /**
+   * v1.4.5 (SRFR-054): resolved display-name value from the target record.
+   * The shared `applyResolverFields` (SRFR-052) resolves this via
+   * `sprk_recordtype_ref.sprk_recorddisplaynamefield` metadata and target-record
+   * query. `null` when metadata was missing OR target's value was null/empty
+   * (NFR-06). Consumer (RegardingResolverApp CREATE-mode presave bridge) MUST
+   * propagate this into `__sprk_regarding_pending__.recordName` so the presave
+   * webresource stages the correct display-name for the INSERT transaction —
+   * NOT the picker-returned Primary Name (which for sprk_matter is the number).
+   */
+  displayName?: string | null;
   /** Error message if any step failed. */
   error?: string;
 }
@@ -282,6 +293,7 @@ export async function applyRegardingSelection(
         catalogEntry,
         payload,
         recordNumber: applyResult.recordNumber,
+        displayName: applyResult.displayName,
         error: err instanceof Error ? err.message : 'updateRecord failed',
       };
     }

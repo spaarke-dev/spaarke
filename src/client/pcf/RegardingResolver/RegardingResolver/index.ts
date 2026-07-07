@@ -29,7 +29,7 @@ import * as React from 'react';
 import { IInputs, IOutputs } from './generated/ManifestTypes';
 import { RegardingResolverHost } from './RegardingResolverHost';
 
-const CONTROL_VERSION = '1.4.4';
+const CONTROL_VERSION = '1.4.5';
 
 export class RegardingResolver implements ComponentFramework.ReactControl<IInputs, IOutputs> {
   private notifyOutputChanged: () => void = () => undefined;
