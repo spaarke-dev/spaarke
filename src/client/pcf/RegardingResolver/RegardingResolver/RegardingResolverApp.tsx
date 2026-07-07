@@ -299,13 +299,16 @@ const useStyles = makeStyles({
   },
   // Row-1 title — Dataverse OOB section-header parity (SRFR-034 §4, corrected
   // by SRFR-037 to font-weight 600 per actual OOB DevTools inspection).
+  // SRFR-051 (v1.4.3): top padding reduced from 4px → 2px per owner screenshot
+  // comparison with adjacent OOB "New Section" header — the OOB baseline sits
+  // 2px higher than v1.4.2.
   title: {
     fontFamily:
       '"Segoe UI", "Segoe UI Web (West European)", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", sans-serif',
     fontSize: '14px',
     fontWeight: 600,
     color: '#242424',
-    padding: '4px 0px',
+    padding: '2px 0px 4px',
     letterSpacing: 0,
     textTransform: 'uppercase',
   },
