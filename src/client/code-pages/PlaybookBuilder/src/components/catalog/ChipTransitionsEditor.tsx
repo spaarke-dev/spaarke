@@ -206,8 +206,8 @@ export function ChipTransitionsEditor({ value, bindings, onChange }: ChipTransit
     <div className={styles.root} data-testid="chip-transitions-editor">
       <Label weight="semibold">Next-step chips (chip transitions)</Label>
       <Text className={styles.hint}>
-        Curated follow-up capabilities offered after this Binding&apos;s output renders (Click path). Each chip
-        targets another Binding by id.
+        Curated follow-up capabilities offered after this Binding&apos;s output renders (Click path). Each chip targets
+        another Binding by id.
       </Text>
 
       {drafts.map((draft, index) => (
@@ -229,7 +229,9 @@ export function ChipTransitionsEditor({ value, bindings, onChange }: ChipTransit
               label="Target Binding id"
               hint={bindings.length > 0 ? 'Paste or pick a Binding row id from the Bindings tab.' : undefined}
               validationState={draft.target_binding_id.trim() === '' ? 'error' : 'none'}
-              validationMessage={draft.target_binding_id.trim() === '' ? 'Required — the Click path resolves it.' : undefined}
+              validationMessage={
+                draft.target_binding_id.trim() === '' ? 'Required — the Click path resolves it.' : undefined
+              }
             >
               <Input
                 value={draft.target_binding_id}

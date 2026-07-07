@@ -26,13 +26,7 @@ import {
   validateOnEventBindingsJson,
   validateSchemaForAuthoring,
 } from './schemaValidation';
-import {
-  ActionKind,
-  AiModelTier,
-  BindingCaptureMode,
-  BindingDisposition,
-  BindingRisk,
-} from '../types/catalog';
+import { ActionKind, AiModelTier, BindingCaptureMode, BindingDisposition, BindingRisk } from '../types/catalog';
 import type { ActionRow, BindingRow } from '../types/catalog';
 
 const ACTION_ENTITY_SET = 'sprk_analysisactions';

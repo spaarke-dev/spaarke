@@ -64,9 +64,7 @@ describe('ActionEditorForm', () => {
       target: { value: '{"type":"object","properties":{"x":{"type":"string","required":true}}}' },
     });
 
-    expect(
-      await screen.findByText(/property-level "required": true is not JSON Schema/)
-    ).toBeInTheDocument();
+    expect(await screen.findByText(/property-level "required": true is not JSON Schema/)).toBeInTheDocument();
   });
 
   it('flags a JPS prompt that is not valid JSON', async () => {

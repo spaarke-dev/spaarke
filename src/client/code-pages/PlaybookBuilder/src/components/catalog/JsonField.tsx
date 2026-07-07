@@ -50,12 +50,7 @@ export function JsonField({
   const error = externalError ?? liveError ?? undefined;
 
   return (
-    <Field
-      label={label}
-      hint={hint}
-      validationState={error ? 'error' : 'none'}
-      validationMessage={error}
-    >
+    <Field label={label} hint={hint} validationState={error ? 'error' : 'none'} validationMessage={error}>
       <Textarea
         id={id}
         className={styles.textarea}

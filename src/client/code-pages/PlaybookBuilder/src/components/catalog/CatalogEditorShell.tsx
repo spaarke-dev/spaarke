@@ -244,9 +244,7 @@ export function CatalogEditorShell(): JSX.Element {
           {actions.map(row => (
             <div
               key={row.id}
-              className={
-                draftAction?.id === row.id ? `${styles.listItem} ${styles.listItemSelected}` : styles.listItem
-              }
+              className={draftAction?.id === row.id ? `${styles.listItem} ${styles.listItemSelected}` : styles.listItem}
               role="button"
               tabIndex={0}
               data-testid={`action-list-item-${row.actionCode}`}
@@ -267,9 +265,7 @@ export function CatalogEditorShell(): JSX.Element {
         {bindings.map(row => (
           <div
             key={row.id}
-            className={
-              draftBinding?.id === row.id ? `${styles.listItem} ${styles.listItemSelected}` : styles.listItem
-            }
+            className={draftBinding?.id === row.id ? `${styles.listItem} ${styles.listItemSelected}` : styles.listItem}
             role="button"
             tabIndex={0}
             data-testid={`binding-list-item-${row.consumerType}`}
@@ -345,8 +341,8 @@ export function CatalogEditorShell(): JSX.Element {
               <MessageBar intent="success" data-testid="save-success-bar">
                 <MessageBarBody>
                   <MessageBarTitle>{savedRowLabel} saved.</MessageBarTitle>
-                  NFR-06 reminder: catalog and prompt changes must add or refresh an eval case
-                  (tests/unit GoldenUtteranceEval suite) before merge — the eval gate is green-to-merge.
+                  NFR-06 reminder: catalog and prompt changes must add or refresh an eval case (tests/unit
+                  GoldenUtteranceEval suite) before merge — the eval gate is green-to-merge.
                 </MessageBarBody>
               </MessageBar>
             )}
@@ -362,8 +358,8 @@ export function CatalogEditorShell(): JSX.Element {
               <MessageBar intent="error" data-testid="validation-error-bar">
                 <MessageBarBody>
                   <MessageBarTitle>Fix authoring errors before saving</MessageBarTitle>
-                  Invalid catalog rows are never written — an invalid input schema previously took down every
-                  assistant turn (G-P3 round 1).
+                  Invalid catalog rows are never written — an invalid input schema previously took down every assistant
+                  turn (G-P3 round 1).
                 </MessageBarBody>
               </MessageBar>
             )}

@@ -48,9 +48,9 @@ describe('openAiSchemaValidator twin — shared rule matrix', () => {
   });
 
   it('rejects array schemas without items (OpenAI subset rule)', () => {
-    expect(
-      validateSchemaForAuthoring('{"type":"object","properties":{"files":{"type":"array"}}}')
-    ).toContain("array schemas must declare 'items'");
+    expect(validateSchemaForAuthoring('{"type":"object","properties":{"files":{"type":"array"}}}')).toContain(
+      "array schemas must declare 'items'"
+    );
   });
 
   it('is authoring-strict: malformed JSON and non-object roots are errors', () => {
@@ -60,9 +60,7 @@ describe('openAiSchemaValidator twin — shared rule matrix', () => {
   });
 
   it('validates chip transitions / on-event bindings / match conditions pinned shapes', () => {
-    expect(
-      validateChipTransitionsJson('[{"target_binding_id":"b1","chip_label":"Summarize"}]')
-    ).toBeNull();
+    expect(validateChipTransitionsJson('[{"target_binding_id":"b1","chip_label":"Summarize"}]')).toBeNull();
     expect(validateChipTransitionsJson('[{"chip_label":"no target"}]')).toContain('target_binding_id');
 
     expect(validateOnEventBindingsJson('[{"event":"document_uploaded","order":1}]')).toBeNull();
@@ -148,9 +146,7 @@ describe('BindingConfigEditor (sprk_playbookconsumer variant)', () => {
 
   it('propagates edits through onChange', () => {
     const onChange = jest.fn();
-    renderWithProvider(
-      <BindingConfigEditor boundAttributeName="sprk_oneventbindings" value="" onChange={onChange} />
-    );
+    renderWithProvider(<BindingConfigEditor boundAttributeName="sprk_oneventbindings" value="" onChange={onChange} />);
 
     fireEvent.change(screen.getByLabelText('On-event bindings'), {
       target: { value: '[{"event":"document_uploaded","order":1}]' },
@@ -187,9 +183,7 @@ describe('SchemaJsonEditor (Action schema columns)', () => {
   });
 
   it('labels the output-schema variant distinctly', () => {
-    renderWithProvider(
-      <SchemaJsonEditor boundAttributeName="sprk_outputschemajson" value="" onChange={jest.fn()} />
-    );
+    renderWithProvider(<SchemaJsonEditor boundAttributeName="sprk_outputschemajson" value="" onChange={jest.fn()} />);
 
     expect(screen.getByText(/Output schema/)).toBeInTheDocument();
     expect(screen.getByText(/streaming emission order/i)).toBeInTheDocument();

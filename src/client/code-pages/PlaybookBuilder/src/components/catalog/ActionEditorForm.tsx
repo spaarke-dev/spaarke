@@ -10,16 +10,7 @@
  * ADR-021: Fluent v9 tokens only; verified in light + dark themes.
  */
 
-import {
-  Button,
-  Dropdown,
-  Field,
-  Input,
-  Option,
-  Textarea,
-  makeStyles,
-  tokens,
-} from '@fluentui/react-components';
+import { Button, Dropdown, Field, Input, Option, Textarea, makeStyles, tokens } from '@fluentui/react-components';
 import { ActionKind, AiModelTier } from '../../types/catalog';
 import type { ActionRow } from '../../types/catalog';
 import type { ValidationErrors } from '../../services/catalogService';
@@ -216,11 +207,7 @@ export function ActionEditorForm({ row, errors, onChange }: ActionEditorFormProp
           </Field>
           {row.systemPrompt.trim() === '' && (
             <div>
-              <Button
-                appearance="secondary"
-                size="small"
-                onClick={() => patch({ systemPrompt: JPS_STARTER_TEMPLATE })}
-              >
+              <Button appearance="secondary" size="small" onClick={() => patch({ systemPrompt: JPS_STARTER_TEMPLATE })}>
                 Insert JPS starter template
               </Button>
             </div>

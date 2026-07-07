@@ -24,13 +24,7 @@ import {
   makeStyles,
   tokens,
 } from '@fluentui/react-components';
-import {
-  AiModelTier,
-  BindingCaptureMode,
-  BindingDisposition,
-  BindingRisk,
-  SURFACE_TOKENS,
-} from '../../types/catalog';
+import { AiModelTier, BindingCaptureMode, BindingDisposition, BindingRisk, SURFACE_TOKENS } from '../../types/catalog';
 import type { ActionRow, BindingRow } from '../../types/catalog';
 import type { ValidationErrors } from '../../services/catalogService';
 import { validateMatchConditionsJson } from '../../services/schemaValidation';
@@ -281,12 +275,26 @@ export function BindingEditorForm({ row, actions, bindings, errors, onChange }: 
       </Field>
 
       <div className={styles.row}>
-        {enumDropdown('Disposition', 'Disposition', row.disposition, DISPOSITION_LABELS, disposition => patch({ disposition }), styles.grow)}
+        {enumDropdown(
+          'Disposition',
+          'Disposition',
+          row.disposition,
+          DISPOSITION_LABELS,
+          disposition => patch({ disposition }),
+          styles.grow
+        )}
         {enumDropdown('Risk', 'Risk', row.risk, RISK_LABELS, risk => patch({ risk }), styles.grow)}
       </div>
 
       <div className={styles.row}>
-        {enumDropdown('Capture mode', 'Capture mode', row.captureMode, CAPTURE_LABELS, captureMode => patch({ captureMode }), styles.grow)}
+        {enumDropdown(
+          'Capture mode',
+          'Capture mode',
+          row.captureMode,
+          CAPTURE_LABELS,
+          captureMode => patch({ captureMode }),
+          styles.grow
+        )}
         <Field className={styles.grow} label="Model tier override" hint="Overrides the Action's default tier.">
           <Dropdown
             value={row.modelTierOverride === null ? USE_ACTION_DEFAULT : TIER_LABELS[row.modelTierOverride]}

@@ -83,22 +83,24 @@ describe('findFirstSchemaError — server-tolerance port (OpenAiFunctionSchemaVa
     ['malformed JSON (degrades to default upstream)', '{ not json'],
     ['non-object root (degrades upstream)', '[1,2,3]'],
     ['legacy args wrapper (unknown keyword tolerated)', '{"args":[{"name":"fileIds"}]}'],
-    ['unknown maker keywords tolerated', '{"type":"object","properties":{"x":{"type":"string","elicitation_prompt":"?","ledger_resolution":"y"}}}'],
+    [
+      'unknown maker keywords tolerated',
+      '{"type":"object","properties":{"x":{"type":"string","elicitation_prompt":"?","ledger_resolution":"y"}}}',
+    ],
     ['missing root type tolerated', '{"properties":{"x":{"type":"string"}}}'],
     ['additionalProperties boolean', '{"type":"object","additionalProperties":false}'],
     ['type arrays of legal names', '{"type":"object","properties":{"x":{"type":["string","null"]}}}'],
-    ['nested anyOf of schema objects', '{"type":"object","properties":{"x":{"anyOf":[{"type":"string"},{"type":"null"}]}}}'],
+    [
+      'nested anyOf of schema objects',
+      '{"type":"object","properties":{"x":{"anyOf":[{"type":"string"},{"type":"null"}]}}}',
+    ],
   ])('tolerates %s', (_label, raw) => {
     expect(findFirstSchemaError(raw as string | null | undefined)).toBeNull();
   });
 
   // ── Rejection matrix ──
   it.each([
-    [
-      'root type not object',
-      '{"type":"array","items":{"type":"string"}}',
-      "root 'type' must be 'object'",
-    ],
+    ['root type not object', '{"type":"array","items":{"type":"string"}}', "root 'type' must be 'object'"],
     [
       'array schema without items (valid Draft 2020-12, rejected by OpenAI)',
       '{"type":"object","properties":{"files":{"type":"array"}}}',
@@ -106,30 +108,34 @@ describe('findFirstSchemaError — server-tolerance port (OpenAiFunctionSchemaVa
     ],
     ['illegal type name', '{"type":"object","properties":{"x":{"type":"text"}}}', 'not a legal JSON-Schema type'],
     ['type as number', '{"type":"object","properties":{"x":{"type":5}}}', 'must be a string or array of strings'],
-    [
-      'required as string',
-      '{"type":"object","required":"due_date"}',
-      'must be an array of property names',
-    ],
-    [
-      'required array with non-string entries',
-      '{"type":"object","required":[1]}',
-      'entries must be strings',
-    ],
+    ['required as string', '{"type":"object","required":"due_date"}', 'must be an array of property names'],
+    ['required array with non-string entries', '{"type":"object","required":[1]}', 'entries must be strings'],
     ['properties as array', '{"type":"object","properties":[]}', '$.properties: must be an object'],
     [
       'property value not a schema object',
       '{"type":"object","properties":{"x":"string"}}',
       'schema must be a JSON object',
     ],
-    ['enum not an array', '{"type":"object","properties":{"x":{"type":"string","enum":"a,b"}}}', '.enum: must be an array'],
-    ['description not a string', '{"type":"object","properties":{"x":{"type":"string","description":5}}}', '.description: must be a string'],
+    [
+      'enum not an array',
+      '{"type":"object","properties":{"x":{"type":"string","enum":"a,b"}}}',
+      '.enum: must be an array',
+    ],
+    [
+      'description not a string',
+      '{"type":"object","properties":{"x":{"type":"string","description":5}}}',
+      '.description: must be a string',
+    ],
     [
       'additionalProperties as string',
       '{"type":"object","additionalProperties":"no"}',
       'must be a boolean or schema object',
     ],
-    ['anyOf not an array', '{"type":"object","properties":{"x":{"anyOf":{"type":"string"}}}}', 'must be an array of schema objects'],
+    [
+      'anyOf not an array',
+      '{"type":"object","properties":{"x":{"anyOf":{"type":"string"}}}}',
+      'must be an array of schema objects',
+    ],
     [
       'items neither object nor array',
       '{"type":"object","properties":{"x":{"type":"array","items":"string"}}}',
@@ -217,8 +223,16 @@ describe('validateChipTransitionsJson — sprk_chiptransitions pinned shape', ()
     ['missing target_binding_id', '[{"chip_label":"x"}]', 'target_binding_id'],
     ['missing chip_label', '[{"target_binding_id":"abc"}]', 'chip_label'],
     ['boolean chip entry', '[true]', 'must be an object'],
-    ['requires_attachments non-boolean', '[{"target_binding_id":"a","chip_label":"b","requires_attachments":"yes"}]', 'must be a boolean'],
-    ['prefill_slots non-object', '[{"target_binding_id":"a","chip_label":"b","prefill_slots":[1]}]', 'must be an object'],
+    [
+      'requires_attachments non-boolean',
+      '[{"target_binding_id":"a","chip_label":"b","requires_attachments":"yes"}]',
+      'must be a boolean',
+    ],
+    [
+      'prefill_slots non-object',
+      '[{"target_binding_id":"a","chip_label":"b","prefill_slots":[1]}]',
+      'must be an object',
+    ],
     ['malformed JSON', '[{', 'not valid JSON'],
   ])('rejects %s', (_label, raw, fragment) => {
     const error = validateChipTransitionsJson(raw);

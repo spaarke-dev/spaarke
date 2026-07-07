@@ -12,13 +12,7 @@ import {
   validateBindingRow,
 } from '../catalogService';
 import * as dataverseClient from '../dataverseClient';
-import {
-  ActionKind,
-  BindingDisposition,
-  BindingRisk,
-  newActionRow,
-  newBindingRow,
-} from '../../types/catalog';
+import { ActionKind, BindingDisposition, BindingRisk, newActionRow, newBindingRow } from '../../types/catalog';
 import type { ActionRow, BindingRow } from '../../types/catalog';
 
 jest.mock('../dataverseClient', () => ({

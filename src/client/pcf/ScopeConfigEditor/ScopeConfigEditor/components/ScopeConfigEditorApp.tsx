@@ -92,17 +92,13 @@ export const ScopeConfigEditorApp: React.FC<IScopeConfigEditorAppProps> = ({
       // Schema columns get the validated OpenAI-subset editor (task 053 —
       // the G-P3 round-1 outage shape must not be authorable on the form).
       if (attribute === 'sprk_inputschema' || attribute === 'sprk_outputschemajson') {
-        return (
-          <SchemaJsonEditor boundAttributeName={attribute} value={fieldValue} onChange={onValueChange} />
-        );
+        return <SchemaJsonEditor boundAttributeName={attribute} value={fieldValue} onChange={onValueChange} />;
       }
       return <ActionEditor value={fieldValue} onChange={onValueChange} />;
     }
 
     if (entity === 'sprk_playbookconsumer') {
-      return (
-        <BindingConfigEditor boundAttributeName={attribute} value={fieldValue} onChange={onValueChange} />
-      );
+      return <BindingConfigEditor boundAttributeName={attribute} value={fieldValue} onChange={onValueChange} />;
     }
 
     if (entity === 'sprk_analysisskill') {
@@ -123,8 +119,8 @@ export const ScopeConfigEditorApp: React.FC<IScopeConfigEditorAppProps> = ({
         <MessageBar intent="warning">
           <MessageBarBody>
             ScopeConfigEditor: unknown entity type &quot;{entityLogicalName}
-            &quot;. Expected one of: sprk_analysisaction, sprk_analysisskill, sprk_analysisknowledge,
-            sprk_analysistool, sprk_playbookconsumer.
+            &quot;. Expected one of: sprk_analysisaction, sprk_analysisskill, sprk_analysisknowledge, sprk_analysistool,
+            sprk_playbookconsumer.
           </MessageBarBody>
         </MessageBar>
       </div>

@@ -126,10 +126,7 @@ describe('ScopeConfigEditorApp — entity routing', () => {
 
   it('renders BindingConfigEditor for sprk_playbookconsumer entity', () => {
     renderWithProvider(
-      <ScopeConfigEditorApp
-        {...makeDefaultProps('sprk_playbookconsumer')}
-        boundAttributeName="sprk_chiptransitions"
-      />
+      <ScopeConfigEditorApp {...makeDefaultProps('sprk_playbookconsumer')} boundAttributeName="sprk_chiptransitions" />
     );
 
     expect(screen.getByTestId('binding-config-editor')).toBeInTheDocument();
@@ -147,10 +144,7 @@ describe('ScopeConfigEditorApp — entity routing', () => {
 
   it('routes sprk_analysisaction + sprk_outputschemajson binding to the validated SchemaJsonEditor', () => {
     renderWithProvider(
-      <ScopeConfigEditorApp
-        {...makeDefaultProps('sprk_analysisaction')}
-        boundAttributeName="sprk_outputschemajson"
-      />
+      <ScopeConfigEditorApp {...makeDefaultProps('sprk_analysisaction')} boundAttributeName="sprk_outputschemajson" />
     );
 
     expect(screen.getByTestId('schema-json-editor')).toBeInTheDocument();

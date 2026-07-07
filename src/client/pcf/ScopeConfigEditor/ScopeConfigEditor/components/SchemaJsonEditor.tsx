@@ -63,7 +63,7 @@ export const SchemaJsonEditor: React.FC<ISchemaJsonEditorProps> = ({
 
   const label = isInput ? 'Input schema (typed capability args)' : 'Output schema (Structured Outputs)';
   const guidance = isInput
-    ? 'OpenAI function-parameters subset. Required-ness goes ONLY in the object-level \'required\' array — ' +
+    ? "OpenAI function-parameters subset. Required-ness goes ONLY in the object-level 'required' array — " +
       'property-level "required": true is invalid JSON Schema and previously took down every assistant turn ' +
       '(G-P3 round 1). Author mirrors first: infra/dataverse/inputschemas/.'
     : 'Structured-Outputs JSON Schema. Property declaration order = streaming emission order.';
