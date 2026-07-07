@@ -419,7 +419,8 @@ describe('StructuredOutputStreamWidget — schema-aware object dispatch (R6 task
     };
     const { bus, completeField } = renderWidget(data);
 
-    completeField('entities',
+    completeField(
+      'entities',
       JSON.stringify({
         organizations: ['Acme Corp', 'Beta Industries'],
         persons: ['Jane Doe', 'John Smith', 'Alice Brown'],

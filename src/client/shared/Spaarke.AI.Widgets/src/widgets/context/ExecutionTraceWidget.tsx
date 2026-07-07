@@ -481,9 +481,7 @@ const ExecutionTraceWidget: React.FC<ExecutionTraceWidgetProps> = ({ data, isLoa
       if (!Array.isArray(calls) || calls.length === 0) return;
       const turn = typeof event.turn === 'number' ? event.turn : 0;
       const timestamp =
-        typeof event.timestamp === 'string' && event.timestamp.length > 0
-          ? event.timestamp
-          : new Date().toISOString();
+        typeof event.timestamp === 'string' && event.timestamp.length > 0 ? event.timestamp : new Date().toISOString();
 
       const appended: TraceEntry[] = [];
       for (const raw of calls) {

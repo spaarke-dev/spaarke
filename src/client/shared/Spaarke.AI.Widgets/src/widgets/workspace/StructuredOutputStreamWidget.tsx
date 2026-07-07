@@ -1761,9 +1761,7 @@ const SectionRenderer: React.FC<SectionRendererProps> = ({ section, isMostRecent
     const entries = Object.entries(structured as Record<string, unknown>);
     const allFlat =
       entries.length > 0 &&
-      entries.every(
-        ([, v]) => typeof v === 'string' || (Array.isArray(v) && v.every(x => typeof x === 'string'))
-      );
+      entries.every(([, v]) => typeof v === 'string' || (Array.isArray(v) && v.every(x => typeof x === 'string')));
     if (allFlat) {
       structuredFlatRecord = entries as ReadonlyArray<[string, string | ReadonlyArray<string>]>;
     }
@@ -1771,7 +1769,12 @@ const SectionRenderer: React.FC<SectionRendererProps> = ({ section, isMostRecent
 
   // Compact-JSON fallback for anything the typed paths above don't cover.
   let structuredJson: string | null = null;
-  if (hasStructured && typeof structured !== 'string' && structuredStringList === null && structuredFlatRecord === null) {
+  if (
+    hasStructured &&
+    typeof structured !== 'string' &&
+    structuredStringList === null &&
+    structuredFlatRecord === null
+  ) {
     try {
       structuredJson = JSON.stringify(structured, null, 2);
     } catch {
