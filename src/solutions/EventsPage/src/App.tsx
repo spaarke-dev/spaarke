@@ -48,6 +48,17 @@ interface DrillThroughParams {
   mode: string | null;
   entityName: string | null;
   recordId: string | null;
+  /**
+   * VisualHost CardChrome drill-through envelope keys. VisualHost passes the
+   * PARENT record id as `filterValue` (NOT `recordId`) and sets `entityName` to
+   * the CHART's reporting entity (e.g. `sprk_event`, NOT the parent). The
+   * `filterField` is the child's lookup back to the parent (e.g.
+   * `sprk_regardingmatter`). See VisualHostRoot.handleExpandClick + the
+   * sprk_invoicespage / sprk_kpiassessmentspage reference shells, which read
+   * `filterValue` the same way.
+   */
+  filterValue: string | null;
+  filterField: string | null;
 }
 
 function parseDrillThroughParams(): DrillThroughParams {
@@ -65,9 +76,11 @@ function parseDrillThroughParams(): DrillThroughParams {
       mode,
       entityName: stdTypename || (dataParams?.get('entityName') ?? null),
       recordId: stdId || (dataParams?.get('recordId') ?? null),
+      filterValue: dataParams?.get('filterValue') ?? null,
+      filterField: dataParams?.get('filterField') ?? null,
     };
   } catch {
-    return { mode: null, entityName: null, recordId: null };
+    return { mode: null, entityName: null, recordId: null, filterValue: null, filterField: null };
   }
 }
 
@@ -152,8 +165,16 @@ export const App: React.FC = () => {
   }, [orchestrator]);
 
   const parentContext = React.useMemo<DataGridParentContext | undefined>(() => {
-    if (!DRILL_THROUGH_PARAMS.recordId) return undefined;
-    const cleanId = DRILL_THROUGH_PARAMS.recordId.replace(/[{}]/g, '');
+    // Two envelope shapes reach this page:
+    //   (a) Embedded / standalone host → parent id in `recordId`, `entityName`
+    //       is the PARENT entity (e.g. `sprk_matter`).
+    //   (b) VisualHost CardChrome drill-through (dialog) → parent id in
+    //       `filterValue`, `entityName` is the CHART's entity (`sprk_event`),
+    //       and `filterField` is the child lookup (`sprk_regardingmatter`).
+    // Resolve the id from whichever channel supplied it.
+    const rawId = DRILL_THROUGH_PARAMS.recordId ?? DRILL_THROUGH_PARAMS.filterValue;
+    if (!rawId) return undefined;
+    const cleanId = rawId.replace(/[{}]/g, '');
     const ctx: DataGridParentContext = {
       entityType: DRILL_THROUGH_PARAMS.entityName ?? '',
       id: cleanId,
@@ -162,10 +183,14 @@ export const App: React.FC = () => {
     // When the parent is a Matter, ALSO expose the id under the configjson's
     // parentContextKey ('matterId'). The framework reads
     // `parentContext[parentContextFilter.parentContextKey]` to overlay the
-    // FetchXML — without this line, the configjson's
-    // `behavior.parentContextFilter` (added 2026-06-04) would never find a value.
+    // FetchXML — without this, the configjson's `behavior.parentContextFilter`
+    // (attribute `sprk_regardingmatter`) would never find a value.
     // Same pattern as sprk_invoicespage / sprk_kpiassessmentspage.
-    if (DRILL_THROUGH_PARAMS.entityName === 'sprk_matter') {
+    // Match on either the embedded `entityName` OR the VisualHost `filterField`.
+    if (
+      DRILL_THROUGH_PARAMS.entityName === 'sprk_matter' ||
+      DRILL_THROUGH_PARAMS.filterField === 'sprk_regardingmatter'
+    ) {
       ctx.matterId = cleanId;
     }
     return ctx;

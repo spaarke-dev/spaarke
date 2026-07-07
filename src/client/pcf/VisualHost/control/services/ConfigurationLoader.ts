@@ -73,6 +73,9 @@ const FIELDS = {
   maxDisplayItems: 'sprk_maxdisplayitems',
   // Drill-through configuration
   drillThroughTarget: 'sprk_drillthroughtarget',
+  // Drill-through view allowlist — delimited (`;` or `,`) savedquery GUIDs.
+  // Forwarded to the DataGrid page shell to restrict the view-switcher.
+  drillThroughViews: 'sprk_drillthroughviews',
   // FetchXML fields
   fetchXmlQuery: 'sprk_fetchxmlquery',
   fetchXmlParams: 'sprk_fetchxmlparams',
@@ -103,6 +106,7 @@ const SELECT_COLUMNS = [
   FIELDS.viewListTabName,
   FIELDS.maxDisplayItems,
   FIELDS.drillThroughTarget,
+  FIELDS.drillThroughViews,
   FIELDS.fetchXmlQuery,
   FIELDS.fetchXmlParams,
   FIELDS.valueFormat,
@@ -315,6 +319,7 @@ function mapToChartDefinition(record: Record<string, unknown>): IChartDefinition
     sprk_maxdisplayitems: record[FIELDS.maxDisplayItems] as number | undefined,
     // Drill-through configuration
     sprk_drillthroughtarget: record[FIELDS.drillThroughTarget] as string | undefined,
+    sprk_drillthroughviews: record[FIELDS.drillThroughViews] as string | undefined,
     // FetchXML fields
     sprk_fetchxmlquery: record[FIELDS.fetchXmlQuery] as string | undefined,
     sprk_fetchxmlparams: record[FIELDS.fetchXmlParams] as string | undefined,

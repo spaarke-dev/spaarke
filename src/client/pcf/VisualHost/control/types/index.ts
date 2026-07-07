@@ -114,6 +114,10 @@ export interface IChartDefinition {
 
   // Drill-through configuration
   sprk_drillthroughtarget?: string;
+  /** Delimited (`;` or `,`) savedquery GUIDs. When set, restricts the
+   *  drill-through page's view-switcher to these views (forwarded to the
+   *  DataGrid page shell as the `availableViews` envelope param). */
+  sprk_drillthroughviews?: string;
 
   // MetricCard enhancement fields (v1.2.33)
   sprk_valueformat?: ValueFormat;

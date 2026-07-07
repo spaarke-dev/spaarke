@@ -160,6 +160,37 @@ function parseUrlParentContext(spec: UrlParentContextSpec): DataGridParentContex
   }
 }
 
+/**
+ * Parse a drill-through view allowlist from the URL `data=` envelope.
+ *
+ * VisualHost (chart-def `sprk_drillthroughviews`, operator-configured) forwards
+ * a delimited (`;` or `,`) list of savedquery GUIDs as the `availableViews`
+ * envelope param. This lets an operator restrict the drill-through page's
+ * view-switcher WITHOUT editing the grid config record or any code — the value
+ * is passed straight through to `<DataGrid availableViewsAllowlist>`, which
+ * applies it via `resolveEffectiveAvailableViews` (works with ANY source type,
+ * including `savedquery-set`). Returns `undefined` when absent (no restriction).
+ */
+function parseUrlAvailableViews(): string[] | undefined {
+  if (typeof window === 'undefined') return undefined;
+  try {
+    const outer = new URLSearchParams(window.location.search);
+    let raw = outer.get('availableViews');
+    if (!raw) {
+      const data = outer.get('data');
+      if (data) raw = new URLSearchParams(data).get('availableViews');
+    }
+    if (!raw) return undefined;
+    const views = raw
+      .split(/[;,]/)
+      .map(g => g.trim().replace(/[{}]/g, ''))
+      .filter(g => g.length > 0);
+    return views.length > 0 ? views : undefined;
+  } catch {
+    return undefined;
+  }
+}
+
 // ─────────────────────────────────────────────────────────────────────────────
 // Props
 // ─────────────────────────────────────────────────────────────────────────────
@@ -242,6 +273,7 @@ export const DataGridPageShell: React.FC<DataGridPageShellProps> = ({
   additionalHostFilters,
   theme: explicitTheme,
   dataverseClient: explicitClient,
+  availableViewsAllowlist: explicitAvailableViewsAllowlist,
   ...dataGridProps
 }) => {
   // Inject the canonical CSS reset once (safety net for shells that don't
@@ -281,6 +313,13 @@ export const DataGridPageShell: React.FC<DataGridPageShellProps> = ({
   }
   const dataverseClient = explicitClient ?? defaultClientRef.current ?? undefined;
 
+  // Drill-through view allowlist: an explicit prop (host-supplied) wins;
+  // otherwise parse the VisualHost `availableViews` envelope param once on mount.
+  const availableViewsAllowlist = React.useMemo<string[] | undefined>(
+    () => explicitAvailableViewsAllowlist ?? parseUrlAvailableViews(),
+    [explicitAvailableViewsAllowlist]
+  );
+
   // Side-pane filter subscription (only when configured).
   const paneFilters = useSidePaneFilter(
     sidePaneFilter?.paneId ?? '__no-pane__',
@@ -304,6 +343,7 @@ export const DataGridPageShell: React.FC<DataGridPageShellProps> = ({
         hostFilters={hostFilters}
         theme={resolvedTheme}
         dataverseClient={dataverseClient}
+        availableViewsAllowlist={availableViewsAllowlist}
       />
     </FluentProvider>
   );

@@ -455,6 +455,14 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({ context, notify
           if (filterField) params.set('filterField', filterField);
           if (filterValue) params.set('filterValue', filterValue);
           if (viewId) params.set('viewId', viewId.replace(/[{}]/g, ''));
+          // Drill-through view allowlist (operator-configured on the chart def,
+          // delimited by `;` or `,`). Forwarded so the DataGrid page shell can
+          // restrict its view-switcher without editing the grid config record.
+          const allowedViews = (chartDefinition.sprk_drillthroughviews ?? '')
+            .split(/[;,]/)
+            .map(g => g.trim().replace(/[{}]/g, ''))
+            .filter(g => g.length > 0);
+          if (allowedViews.length > 0) params.set('availableViews', allowedViews.join(';'));
           params.set('mode', 'dialog');
 
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -769,7 +777,7 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({ context, notify
         ))}
 
       {/* Version badge - lower left, unobtrusive (controlled by showVersion PCF prop) */}
-      {showVersion && <span className={styles.versionBadge}>v1.4.25 • 2026-06-30</span>}
+      {showVersion && <span className={styles.versionBadge}>v1.4.26 • 2026-07-07</span>}
 
       {/* Main chart area */}
       <div className={styles.chartContainer}>
