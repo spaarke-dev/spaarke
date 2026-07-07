@@ -33,6 +33,23 @@ namespace Sprk.Bff.Api.Api.Ai;
 /// </summary>
 public static class ChatEndpoints
 {
+    /// <summary>
+    /// Stable errorCode for an unexpected server-side failure of a chat turn
+    /// (G-P3 UAT round-1 H3 / ADR-019). The SSE 'error' event carries
+    /// <c>[chat.turn-failed]</c> + a safe, stable message; the exception detail
+    /// is logged server-side only — upstream-provider internals must never
+    /// render in a user transcript.
+    /// </summary>
+    public const string ChatTurnFailedErrorCode = "chat.turn-failed";
+
+    /// <summary>
+    /// The ONE construction site for the SendMessage catch-all SSE error event
+    /// (G-P3 UAT round-1 H3 / ADR-019). Takes NO exception input by design —
+    /// the safe copy cannot regress into interpolating server internals.
+    /// </summary>
+    internal static ChatSseEvent BuildTurnFailedErrorEvent() =>
+        new("error", $"[{ChatTurnFailedErrorCode}] The assistant hit a problem completing this turn. Please try again.");
+
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase
@@ -852,12 +869,12 @@ public static class ChatEndpoints
             {
                 // Emit typing_end before the error event so the frontend stops the typing animation.
                 await WriteChatSSEAsync(response, new ChatSseEvent("typing_end", null), CancellationToken.None);
-                // Include exception detail in dev to aid debugging (strip in production).
-                var errorDetail = $"An error occurred while generating a response. [{ex.GetType().Name}: {ex.Message}]";
-                await WriteChatSSEAsync(
-                    response,
-                    new ChatSseEvent("error", errorDetail),
-                    CancellationToken.None);
+                // G-P3 UAT round-1 H3 (ADR-019): server errors map to a STABLE, safe message
+                // with a stable errorCode — the raw exception (previously interpolated here)
+                // rendered upstream-provider internals (tools[N] indexes, exception type +
+                // message) verbatim into the operator's transcript. Detail is logged
+                // server-side only (LogError above); the client sees the code + safe copy.
+                await WriteChatSSEAsync(response, BuildTurnFailedErrorEvent(), CancellationToken.None);
             }
         }
         finally

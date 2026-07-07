@@ -53,6 +53,9 @@ public class AiTelemetry : IDisposable
     // Honest-refusal metrics (FR-P2-04, spaarke-ai-architecture-redesign-r1 task 033)
     private readonly Counter<long> _dispatchRefused;
 
+    // Invalid-tool-schema exclusions (G-P3 UAT round-1 H1, spaarke-ai-architecture-redesign-r1)
+    private readonly Counter<long> _invalidToolSchema;
+
     // Meter name for OpenTelemetry
     private const string MeterName = "Sprk.Bff.Api.Ai";
 
@@ -82,6 +85,14 @@ public class AiTelemetry : IDisposable
             description: "Number of text-path turns that ended in the honest-refusal outcome " +
                          "(the tenant's no_match_handler Binding rendered). The refusal-backlog " +
                          "product signal (FR-P4-07 deferred admin view) aggregates this counter.");
+
+        // === Invalid-Tool-Schema Metrics (G-P3 UAT round-1 H1) ===
+        _invalidToolSchema = _meter.CreateCounter<long>(
+            name: "ai.tool.schema_invalid",
+            unit: "{row}",
+            description: "Catalog rows excluded from the agent-turn tool projection because their " +
+                         "authored schema would fail OpenAI function-parameters validation (one bad " +
+                         "row must never 400 the whole turn — G-P3 UAT round-1 resilience fix).");
 
         // === Summarization Metrics ===
         _summarizeRequests = _meter.CreateCounter<long>(
@@ -206,6 +217,37 @@ public class AiTelemetry : IDisposable
         }
 
         _dispatchRefused.Add(1, tags);
+    }
+
+    /// <summary>
+    /// Record one catalog row excluded from the agent-turn tool projection because its
+    /// authored schema fails OpenAI function-parameters validation (G-P3 UAT round-1 H1:
+    /// one malformed row 400-failed every text-path turn until projection-time validation
+    /// excluded the row instead).
+    /// </summary>
+    /// <remarks>
+    /// Lands in App Insights as <c>customMetrics | where name == "ai.tool.schema_invalid"</c>.
+    /// Dimensions are BOUNDED (NFR-07 / ADR-015): <c>catalog</c> ∈ { <c>binding</c>,
+    /// <c>tool</c> }, <c>row.identifier</c> (deterministic consumer type / tool name — the
+    /// closed catalogs are small), and optional <c>tenant.id</c>. The validation error
+    /// detail rides the companion structured log line (<c>[invalid-tool-schema]</c>).
+    /// </remarks>
+    /// <param name="catalog">Which closed catalog the row belongs to: "binding" (sprk_playbookconsumer/sprk_analysisaction input schema) or "tool" (sprk_analysistool json schema).</param>
+    /// <param name="rowIdentifier">Deterministic catalog identifier (consumer type or tool name) — never content.</param>
+    /// <param name="tenantId">Optional low-cardinality tenant id dimension; null omits it.</param>
+    public void RecordInvalidToolSchema(string catalog, string rowIdentifier, string? tenantId = null)
+    {
+        var tags = new TagList
+        {
+            { "catalog", catalog },
+            { "row.identifier", rowIdentifier },
+        };
+        if (!string.IsNullOrEmpty(tenantId))
+        {
+            tags.Add("tenant.id", tenantId);
+        }
+
+        _invalidToolSchema.Add(1, tags);
     }
 
     /// <summary>

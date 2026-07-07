@@ -23,8 +23,14 @@ Seed JSON (row shape for re-creation in another environment):
   "sprk_actioncode": "DAILY-BRIEFING@v1",
   "sprk_kind": 100000001,
   "sprk_workflowclass": "DailyBriefingNarrator",
-  "sprk_inputschema": "{\"args\":[{\"name\":\"briefingPayload\",\"type\":\"object\",\"required\":true,\"ledger_resolution\":\"system-supplied — DailyBriefingCollector live-queries the acting user's 6 entity channels; never user-elicited\",\"elicitation\":null}]}"
+  "sprk_inputschema": "{\"type\":\"object\",\"properties\":{\"briefingPayload\":{\"type\":\"object\",\"description\":\"System-supplied briefing payload — DailyBriefingCollector live-queries the acting user's 6 entity channels; never user-elicited.\",\"ledger_resolution\":\"system-supplied — DailyBriefingCollector live-queries the acting user's 6 entity channels; never user-elicited\"}}}"
 }
+// ⚠️ NORMALIZED by the G-P3 UAT round-1 fix wave (2026-07-07): the original seed used the legacy
+// {"args":[...]} format (not JSON Schema — OpenAI tolerated it only because "args" is an unknown
+// keyword, projecting an empty permissive schema). Normalized to proper JSON Schema; briefingPayload
+// is DELIBERATELY not in a required array (it is system-supplied — a required entry would make
+// FR-P2-03 loop elicitation ask the USER for it). Canonical mirror (CI-validated):
+// infra/dataverse/inputschemas/daily-briefing-v1.input.schema.json. The live spaarkedev1 row was updated in place.
 ```
 
 ## 2. `sprk_playbookconsumer` — daily-briefing-narrate `default` Binding row (UPDATED — the cutover)

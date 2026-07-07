@@ -1,0 +1,16 @@
+{
+  "$comment": "Mirror of sprk_analysisaction.sprk_inputschema for DAILY-BRIEFING@v1 on spaarkedev1. Normalized from the legacy {\"args\":[{\"name\":\"briefingPayload\",\"required\":true,...}]} format by the G-P3 UAT round-1 fix wave (H2, 2026-07-07). DELIBERATE: briefingPayload is NOT in an object-level required array — it is SYSTEM-SUPPLIED (DailyBriefingCollector live-queries the acting user's 6 entity channels) and must NEVER trigger FR-P2-03 loop elicitation asking the USER for it; required-ness here had documentary value only. CI-validated against the OpenAI function-parameters subset by CatalogInputSchemaContractTests (H4).",
+  "actionCode": "DAILY-BRIEFING@v1",
+  "actionId": "2fa8ab19-7879-f111-ab0e-7ced8ddc4cc6",
+  "environment": "spaarkedev1",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "briefingPayload": {
+        "type": "object",
+        "description": "System-supplied briefing payload — DailyBriefingCollector live-queries the acting user's 6 entity channels; never user-elicited.",
+        "ledger_resolution": "system-supplied — DailyBriefingCollector live-queries the acting user's 6 entity channels; never user-elicited"
+      }
+    }
+  }
+}

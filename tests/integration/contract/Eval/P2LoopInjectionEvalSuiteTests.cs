@@ -370,6 +370,12 @@ public class P2LoopInjectionEvalSuiteTests
         result!.ToString().Should().Contain("NOT executed")
             .And.Contain("confirmation",
                 "the model receives the grounded suspension instruction (relay honestly, never fabricate success)");
+        // G-P3 UAT round-1 H6(b) pin: the suspended-tool result must explicitly forbid
+        // the model from claiming completion — the fabricated-write incident showed how
+        // the model behaves when honesty is not pinned at every layer.
+        result.ToString().Should().Contain("do NOT assume it succeeded")
+            .And.Contain("do NOT fabricate its result")
+            .And.Contain("awaiting their explicit confirmation");
 
         var session = await harness.SessionManager.GetSessionAsync(TenantId, harness.SessionId);
         var marker = session!.Gates.Should().ContainSingle(

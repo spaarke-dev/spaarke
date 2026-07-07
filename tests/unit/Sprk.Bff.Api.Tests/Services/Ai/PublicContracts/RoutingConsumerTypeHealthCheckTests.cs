@@ -358,6 +358,101 @@ public sealed class RoutingConsumerTypeHealthCheckTests
         result.Status.Should().Be(HealthStatus.Degraded);
     }
 
+    // ── G-P3 UAT round-1 H1: invalid authored schemas → Degraded (never Unhealthy)
+
+    /// <summary>The exact UAT payload — property-level "required": true.</summary>
+    private const string InvalidInputSchema =
+        """{"type":"object","properties":{"due_date":{"type":"string","required":true}},"required":["due_date"]}""";
+
+    private static Entity ActionRow(string actionCode, string? inputSchema)
+    {
+        var entity = new Entity("sprk_analysisaction");
+        entity["sprk_actioncode"] = actionCode;
+        entity["sprk_name"] = actionCode;
+        entity["sprk_inputschema"] = inputSchema;
+        return entity;
+    }
+
+    private void SetupActionRows(params Entity[] rows) =>
+        _entityServiceMock
+            .Setup(s => s.RetrieveMultipleAsync(
+                It.Is<QueryExpression>(q => q.EntityName == "sprk_analysisaction"),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new EntityCollection(rows.ToList()));
+
+    [Fact]
+    public async Task CheckHealthAsync_ActionRowWithInvalidInputSchema_ReturnsDegradedNamingTheRow()
+    {
+        // The G-P3 incident shape: catalog otherwise healthy; ONE action row's
+        // sprk_inputschema is invalid OpenAI function parameters. The projection
+        // excludes the row (the platform still functions) — the health check must
+        // surface it as Degraded naming the row, NOT Unhealthy.
+        SetupBindingRows(BindingRowsForAllConstants());
+        SetupToolRows(ToolRow("Alpha Tool", "AlphaHandler", "dataverse.alpha"));
+        SetupActionRows(
+            ActionRow("CREATE-TASK@v1", InvalidInputSchema),
+            ActionRow("SUM-CHAT@v1", """{"type":"object","properties":{"fileIds":{"type":"array","items":{"type":"string"}}}}"""));
+        var sut = CreateSut(handlerIds: new[] { "AlphaHandler" });
+
+        var result = await CheckAsync(sut);
+
+        result.Status.Should().Be(HealthStatus.Degraded,
+            "an invalid schema costs one excluded tool, not the platform — Degraded, never Unhealthy");
+        result.Description.Should().Contain("CREATE-TASK@v1", "the finding names the offending row");
+        result.Description.Should().Contain("required", "the finding carries the first keyword-path error");
+        result.Description.Should().NotContain("SUM-CHAT@v1", "valid rows are not findings");
+    }
+
+    [Fact]
+    public async Task CheckHealthAsync_ToolRowWithInvalidJsonSchema_ReturnsDegradedNamingTheRow()
+    {
+        SetupBindingRows(BindingRowsForAllConstants());
+        var badTool = ToolRow("Alpha Tool", "AlphaHandler", "dataverse.alpha");
+        badTool["sprk_jsonschema"] = """{"type":"object","properties":{"ids":{"type":"array"}}}"""; // array without items
+        SetupToolRows(badTool);
+        SetupActionRows();
+        var sut = CreateSut(handlerIds: new[] { "AlphaHandler" });
+
+        var result = await CheckAsync(sut);
+
+        result.Status.Should().Be(HealthStatus.Degraded);
+        result.Description.Should().Contain("dataverse.alpha");
+        result.Description.Should().Contain("items");
+    }
+
+    [Fact]
+    public async Task CheckHealthAsync_ValidAndLegacySchemas_StayHealthy()
+    {
+        SetupBindingRows(BindingRowsForAllConstants());
+        SetupToolRows(ToolRow("Alpha Tool", "AlphaHandler", "dataverse.alpha"));
+        SetupActionRows(
+            ActionRow("REF-CHAT@v1", """{"type":"object","properties":{"unsupported_request":{"type":"string"}},"required":["unsupported_request"]}"""),
+            // Legacy args wrapper: tolerated (unknown keyword — OpenAI projects a permissive schema).
+            ActionRow("LEGACY@v1", """{"args":[{"name":"fileIds","type":"array","required":false}]}"""),
+            ActionRow("NO-SCHEMA@v1", inputSchema: null));
+        var sut = CreateSut(handlerIds: new[] { "AlphaHandler" });
+
+        var result = await CheckAsync(sut);
+
+        result.Status.Should().Be(HealthStatus.Healthy,
+            "valid, legacy-args, and schema-less rows are all projectable — nothing to surface");
+    }
+
+    [Fact]
+    public async Task CheckHealthAsync_DriftAndInvalidSchemaTogether_UnhealthyWins()
+    {
+        // Severity ordering: drift (catalog broken) outranks degraded (one excluded row).
+        SetupBindingRows(BindingRowsForAllConstants().Append(BindingRow("typo-consumer")).ToArray());
+        SetupToolRows(ToolRow("Alpha Tool", "AlphaHandler", "dataverse.alpha"));
+        SetupActionRows(ActionRow("CREATE-TASK@v1", InvalidInputSchema));
+        var sut = CreateSut(handlerIds: new[] { "AlphaHandler" });
+
+        var result = await CheckAsync(sut);
+
+        result.Status.Should().Be(HealthStatus.Unhealthy,
+            "drift is the deploy gate — schema findings never mask it");
+    }
+
     // ── In-memory handler double (module-boundary only; never executed) ─────
 
     private sealed class FakeToolHandler : IToolHandler

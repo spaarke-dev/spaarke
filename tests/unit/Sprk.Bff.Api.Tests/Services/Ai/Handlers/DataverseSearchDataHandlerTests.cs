@@ -175,6 +175,98 @@ public sealed class DataverseSearchDataHandlerTests : TypedToolHandlerTestFixtur
     }
 
     // ═════════════════════════════════════════════════════════════════════════════
+    // G-P3 UAT round-1 H8 — canonical scope names + scoped-failure retry
+    // ═════════════════════════════════════════════════════════════════════════════
+
+    [Theory]
+    [InlineData("matter", "sprk_matter")]
+    [InlineData("matters", "sprk_matter")]
+    [InlineData("project", "sprk_project")]
+    [InlineData("invoices", "sprk_invoice")]
+    [InlineData("documents", "sprk_document")]
+    [InlineData("sprk_matter", "sprk_matter")]
+    [InlineData("account", "account")]
+    public void ToTableLogicalName_CanonicalAndPluralForms_MapToLogicalNames(string input, string expected)
+    {
+        DataverseSearchDataHandler.ToTableLogicalName(input).Should().Be(expected,
+            "the model naturally uses the canonical vocabulary the host context puts in front of it — " +
+            "sending 'matter' verbatim to the Search API rejected the WHOLE query (the G-P3 'technical issue')");
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_CanonicalScopeName_NormalizedToLogicalNameInRequest()
+    {
+        string? capturedBody = null;
+        _dataverse
+            .Setup(d => d.PostAsync("/api/search/v2.0/query", It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Callback<string, string, CancellationToken>((_, body, _) => capturedBody = body)
+            .ReturnsAsync(DataverseUserResponse.Ok(200, ParseJson("""{ "value": [] }""")));
+
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: """{"query":"commercial", "scope":"matter"}""");
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildSearchTool(), CancellationToken.None);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        using var doc = JsonDocument.Parse(capturedBody!);
+        doc.RootElement.GetProperty("entities").GetString().Should().Contain("sprk_matter")
+            .And.NotContain("\"matter\"",
+                "H8: canonical names normalize to the logical name the Search API accepts");
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_ScopedSearchRejected_RetriesOnceWithoutScopeAndSucceeds()
+    {
+        // The incident shape: the scoped query is rejected by the Search API; the fix
+        // retries ONCE without the entity filter (deterministically — the exact recovery
+        // the model attempted manually in the G-P3 transcript) instead of surfacing
+        // "a technical issue with the search".
+        var id = Guid.NewGuid();
+        var bodies = new List<string>();
+        _dataverse
+            .Setup(d => d.PostAsync("/api/search/v2.0/query", It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Callback<string, string, CancellationToken>((_, body, _) => bodies.Add(body))
+            .ReturnsAsync(() => bodies.Count == 1
+                ? DataverseUserResponse.Fail(400, "BadRequest", "Entity some_bogus_table is not search-enabled.")
+                : DataverseUserResponse.Ok(200, ParseJson($$"""
+                    { "value": [ { "entityname": "sprk_matter", "objectid": "{{id:D}}" } ] }
+                    """)));
+
+        var ctx = BuildChatInvocationContext(
+            toolArgumentsJson: """{"query":"commercial matter", "scope":"some_bogus_table"}""");
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildSearchTool(), CancellationToken.None);
+
+        result.Success.Should().BeTrue(result.ErrorMessage);
+        bodies.Should().HaveCount(2, "exactly one scope-less retry after a scoped rejection");
+        using (var first = JsonDocument.Parse(bodies[0]))
+        {
+            first.RootElement.TryGetProperty("entities", out _).Should().BeTrue("first attempt carries the scope");
+        }
+        using (var second = JsonDocument.Parse(bodies[1]))
+        {
+            second.RootElement.TryGetProperty("entities", out _).Should().BeFalse("the retry drops the entity filter");
+        }
+
+        result.Data!.Value.GetProperty("count").GetInt32().Should().Be(1);
+        result.Warnings.Should().ContainMatch("*scope filter*",
+            "the model is told the scope was dropped so it can relay honestly");
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_UnscopedSearchRejected_NoRetry_FailureSurfaces()
+    {
+        var calls = 0;
+        _dataverse
+            .Setup(d => d.PostAsync("/api/search/v2.0/query", It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .Callback(() => calls++)
+            .ReturnsAsync(DataverseUserResponse.Fail(400, "BadRequest", "Malformed search."));
+
+        var ctx = BuildChatInvocationContext(toolArgumentsJson: """{"query":"anything"}""");
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildSearchTool(), CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        calls.Should().Be(1, "the H8 retry exists only for scoped rejections — nothing to drop otherwise");
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════
     // Response-shape resilience (v2.0 has shipped nested/string response variants)
     // ═════════════════════════════════════════════════════════════════════════════
 

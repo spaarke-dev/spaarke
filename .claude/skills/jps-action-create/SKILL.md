@@ -169,6 +169,14 @@ Run validation checks:
 - [ ] At least 1 example provided
 - [ ] Metadata has description and tags
 
+**If the Action row also carries a `sprk_inputschema` (loop-projectable capabilities — Bindings with a tool description):** the value MUST be valid JSON Schema in the OpenAI function-parameters subset (G-P3 UAT 2026-07-07 — ONE invalid schema 400s EVERY loop turn until the projection-time validator excludes it):
+- [ ] Root is `"type": "object"` with `properties`
+- [ ] `required` is an ARRAY OF STRINGS at object level ONLY — property-level `"required": true|false` is **BANNED** (this exact mistake caused the outage; OpenAI: "True is not of type 'array'")
+- [ ] Every `"type": "array"` property has `items`
+- [ ] Custom keywords `elicitation_prompt` / `ledger_resolution` are allowed (ignored by OpenAI, read by the elicitation machinery)
+- [ ] Legacy `{"args":[...]}` format is RETIRED (normalized 2026-07-07) — do not author it
+- [ ] Author the mirror in `infra/dataverse/inputschemas/` FIRST — `CatalogInputSchemaContractTests` validates every mirror in CI (server twin: `OpenAiFunctionSchemaValidator`)
+
 ### Step 5: Save
 
 ```

@@ -277,6 +277,21 @@ public sealed class ToolHandlerToAIFunctionAdapter : AIFunction
         // materially better UX than LLM-invocation-time silent failures.
         ValidateAgainstMetaSchema(tool, _jsonSchema);
 
+        // G-P3 UAT round-1 H1 (2026-07-07): the Draft 2020-12 meta-schema above does NOT
+        // enforce OpenAI's stricter function-parameters subset (e.g. a type=array schema
+        // without 'items' is VALID JSON Schema but Azure OpenAI rejects the WHOLE request —
+        // invalid_function_parameters fails every tool in the turn, not just this one).
+        // Same pragmatic validator as the Binding capability projection; throwing
+        // ArgumentException here lands in the projector's per-row catch, excluding ONLY
+        // this tool while the rest of the catalog still projects.
+        if (OpenAiFunctionSchemaValidator.FindFirstError(tool.JsonSchema) is { } openAiSchemaError)
+        {
+            throw new ArgumentException(
+                $"[invalid-tool-schema] AnalysisTool '{tool.Name}' (id {tool.Id}) JsonSchema would fail " +
+                $"OpenAI function-parameters validation (and 400 the whole turn): {openAiSchemaError}",
+                nameof(tool));
+        }
+
         // FR-09 / D-A-09: defensive guard — task 009 added a default ValidateChat impl that
         // refuses chat invocation. Constructing the adapter for a handler that hasn't opted
         // in would expose a tool to the LLM that returns "not supported" on every call.

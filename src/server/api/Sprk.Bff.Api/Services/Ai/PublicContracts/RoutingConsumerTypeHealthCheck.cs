@@ -2,6 +2,7 @@ using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Services.Ai.Chat;
 
 namespace Sprk.Bff.Api.Services.Ai.PublicContracts;
 
@@ -66,6 +67,7 @@ public sealed class RoutingConsumerTypeHealthCheck : IHostedService, IHealthChec
 {
     private const string BindingEntityLogicalName = "sprk_playbookconsumer";
     private const string ToolEntityLogicalName = "sprk_analysistool";
+    private const string ActionEntityLogicalName = "sprk_analysisaction";
 
     private const string AnalysisEnabledKey = "Analysis:Enabled";
     private const string DocumentIntelligenceEnabledKey = "DocumentIntelligence:Enabled";
@@ -124,6 +126,15 @@ public sealed class RoutingConsumerTypeHealthCheck : IHostedService, IHealthChec
                     "RoutingConsumerTypeHealthCheck FAILED: {DriftReport}",
                     report.BuildDriftDescription());
             }
+            else if (report.HasInvalidSchemas)
+            {
+                // G-P3 UAT round-1 H1: degraded (not drift) — the projection excludes
+                // the offending rows; startup logs the findings loudly so the missing
+                // capability is diagnosable without waiting for a /healthz probe.
+                _logger.LogWarning(
+                    "RoutingConsumerTypeHealthCheck DEGRADED: {InvalidSchemaReport}",
+                    report.BuildInvalidSchemaDescription());
+            }
             else
             {
                 _logger.LogInformation(
@@ -178,8 +189,18 @@ public sealed class RoutingConsumerTypeHealthCheck : IHostedService, IHealthChec
             // registered handlers are now full drift → Unhealthy. With the closed
             // catalog as the ONLY tool projection, "registered but row-less" means
             // dead code or a missing seed — see HandlersWithoutToolRows in HasDrift.
-            return report.HasDrift
-                ? HealthCheckResult.Unhealthy(report.BuildDriftDescription())
+            //
+            // G-P3 UAT round-1 H1: invalid authored schemas are DEGRADED, not
+            // Unhealthy — the projection excludes the offending row so the platform
+            // still functions; the finding names the row so an operator fixes the
+            // catalog data instead of discovering a silently missing capability.
+            if (report.HasDrift)
+            {
+                return HealthCheckResult.Unhealthy(report.BuildDriftDescription());
+            }
+
+            return report.HasInvalidSchemas
+                ? HealthCheckResult.Degraded(report.BuildInvalidSchemaDescription())
                 : HealthCheckResult.Healthy(report.BuildHealthyDescription());
         }
         catch (OperationCanceledException)
@@ -244,6 +265,7 @@ public sealed class RoutingConsumerTypeHealthCheck : IHostedService, IHealthChec
         var toolRowsMissingHandlerClass = new List<string>();
         var handlersWithoutToolRows = new List<string>();
         var duplicateToolRowsPerHandler = new List<string>();
+        var toolRowsWithInvalidSchema = new List<string>();
         var toolRowCount = 0;
         var handlerCount = 0;
 
@@ -264,7 +286,7 @@ public sealed class RoutingConsumerTypeHealthCheck : IHostedService, IHealthChec
             {
                 var toolQuery = new QueryExpression(ToolEntityLogicalName)
                 {
-                    ColumnSet = new ColumnSet("sprk_name", "sprk_handlerclass", "sprk_toolid"),
+                    ColumnSet = new ColumnSet("sprk_name", "sprk_handlerclass", "sprk_toolid", "sprk_jsonschema"),
                     NoLock = true,
                     Criteria = new FilterExpression(LogicalOperator.And),
                 };
@@ -291,6 +313,19 @@ public sealed class RoutingConsumerTypeHealthCheck : IHostedService, IHealthChec
                     var label = string.IsNullOrWhiteSpace(toolId)
                         ? name ?? "(unnamed tool row)"
                         : $"{name ?? "(unnamed tool row)"} [{toolId}]";
+
+                    // (c) Schema-validity dimension (G-P3 UAT round-1 H1): a tool row
+                    // whose sprk_jsonschema would fail OpenAI function-parameters
+                    // validation is EXCLUDED at projection time (one bad row must never
+                    // 400 the whole turn) — DEGRADED here, not Unhealthy, because the
+                    // platform still functions minus that one tool. Null schemas are
+                    // playbook-only rows (FR-08) and are not findings.
+                    var toolSchema = row.GetAttributeValue<string>("sprk_jsonschema");
+                    if (!string.IsNullOrWhiteSpace(toolSchema) &&
+                        OpenAiFunctionSchemaValidator.FindFirstError(toolSchema) is { } toolSchemaError)
+                    {
+                        toolRowsWithInvalidSchema.Add($"{label}: {toolSchemaError}");
+                    }
 
                     if (string.IsNullOrWhiteSpace(handlerClass))
                     {
@@ -335,6 +370,44 @@ public sealed class RoutingConsumerTypeHealthCheck : IHostedService, IHealthChec
             }
         }
 
+        // ── (c) Action input-schema validity (G-P3 UAT round-1 H1) ──────────
+        // Every non-empty sprk_analysisaction.sprk_inputschema becomes some
+        // Binding capability tool's function.parameters. An invalid schema is
+        // EXCLUDED at projection time (SprkChatAgentFactory), so the platform
+        // still functions — the health check surfaces the row as a DEGRADED
+        // finding (never Unhealthy) naming the row + first keyword-path error
+        // (NFR-07: deterministic catalog identifiers only).
+        var actionRowsWithInvalidInputSchema = new List<string>();
+        var actionQuery = new QueryExpression(ActionEntityLogicalName)
+        {
+            ColumnSet = new ColumnSet("sprk_name", "sprk_actioncode", "sprk_inputschema"),
+            NoLock = true,
+            Criteria = new FilterExpression(LogicalOperator.And),
+        };
+        actionQuery.Criteria.AddCondition("statecode", ConditionOperator.Equal, 0); // Active rows only.
+
+        var actionResult = await entityService
+            .RetrieveMultipleAsync(actionQuery, cancellationToken)
+            .ConfigureAwait(false);
+
+        foreach (var row in actionResult?.Entities ?? Enumerable.Empty<Entity>())
+        {
+            var inputSchema = row.GetAttributeValue<string>("sprk_inputschema");
+            if (string.IsNullOrWhiteSpace(inputSchema))
+            {
+                continue; // Schema-less Actions project the safe default schema — not a finding.
+            }
+
+            if (OpenAiFunctionSchemaValidator.FindFirstError(inputSchema) is { } schemaError)
+            {
+                var actionCode = row.GetAttributeValue<string>("sprk_actioncode");
+                var actionLabel = string.IsNullOrWhiteSpace(actionCode)
+                    ? row.GetAttributeValue<string>("sprk_name") ?? "(unnamed action row)"
+                    : actionCode;
+                actionRowsWithInvalidInputSchema.Add($"{actionLabel}: {schemaError}");
+            }
+        }
+
         return new CatalogReconciliationReport(
             constantsWithoutRows,
             rowsWithoutConstants,
@@ -342,6 +415,8 @@ public sealed class RoutingConsumerTypeHealthCheck : IHostedService, IHealthChec
             toolRowsMissingHandlerClass,
             handlersWithoutToolRows,
             duplicateToolRowsPerHandler,
+            actionRowsWithInvalidInputSchema,
+            toolRowsWithInvalidSchema,
             dvSet.Count,
             toolRowCount,
             handlerCount,
@@ -359,6 +434,8 @@ public sealed class RoutingConsumerTypeHealthCheck : IHostedService, IHealthChec
         IReadOnlyList<string> ToolRowsMissingHandlerClass,
         IReadOnlyList<string> HandlersWithoutToolRows,
         IReadOnlyList<string> DuplicateToolRowsPerHandler,
+        IReadOnlyList<string> ActionRowsWithInvalidInputSchema,
+        IReadOnlyList<string> ToolRowsWithInvalidSchema,
         int ConsumerTypeCount,
         int ToolRowCount,
         int HandlerCount,
@@ -379,6 +456,38 @@ public sealed class RoutingConsumerTypeHealthCheck : IHostedService, IHealthChec
             ToolRowsMissingHandlerClass.Count > 0 ||
             DuplicateToolRowsPerHandler.Count > 0 ||
             HandlersWithoutToolRows.Count > 0;
+
+        /// <summary>
+        /// Invalid-schema findings are DEGRADED, never Unhealthy (G-P3 UAT
+        /// round-1 H1): the projection excludes the offending row so the
+        /// platform still functions — but the row's capability is silently
+        /// absent until an operator fixes the schema, which must be visible
+        /// at /healthz rather than discovered as a missing tool.
+        /// </summary>
+        public bool HasInvalidSchemas =>
+            ActionRowsWithInvalidInputSchema.Count > 0 ||
+            ToolRowsWithInvalidSchema.Count > 0;
+
+        public string BuildInvalidSchemaDescription()
+        {
+            var parts = new List<string>();
+
+            if (ActionRowsWithInvalidInputSchema.Count > 0)
+            {
+                parts.Add(
+                    $"sprk_analysisaction rows whose sprk_inputschema fails OpenAI function-parameters validation (their Binding capability tools are EXCLUDED from projection until fixed): {string.Join(", ", ActionRowsWithInvalidInputSchema)}");
+            }
+
+            if (ToolRowsWithInvalidSchema.Count > 0)
+            {
+                parts.Add(
+                    $"sprk_analysistool rows whose sprk_jsonschema fails OpenAI function-parameters validation (excluded from projection until fixed): {string.Join(", ", ToolRowsWithInvalidSchema)}");
+            }
+
+            return
+                "AI catalog schema findings (G-P3 UAT round-1 H1; Degraded — the loop excludes the rows and continues): "
+                + string.Join("; ", parts) + ".";
+        }
 
         public string BuildDriftDescription()
         {

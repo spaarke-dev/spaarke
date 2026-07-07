@@ -772,12 +772,18 @@ public class GoldenUtteranceEvalSuiteTests
 
     /// <summary>
     /// The elicitation contract seeded on the CREATE-TASK@v1 Action row's
-    /// <c>sprk_inputschema</c>: <c>due_date</c> + <c>assign_to</c> REQUIRED with
-    /// maker-authored elicitation prompts (walkthrough step 11: "What's the due date,
-    /// and should I assign it to you or someone else?").
+    /// <c>sprk_inputschema</c>: <c>due_date</c> + <c>assign_to</c> REQUIRED (object-level
+    /// <c>required</c> array ONLY) with maker-authored elicitation prompts (walkthrough
+    /// step 11: "What's the due date, and should I assign it to you or someone else?").
+    /// G-P3 UAT round-1 (2026-07-07): the original dual declaration ALSO put
+    /// <c>"required": true</c> INSIDE each property — invalid JSON Schema that Azure
+    /// OpenAI rejects with <c>invalid_function_parameters</c>, 400-failing EVERY
+    /// text-path turn. The spaarkedev1 row was corrected to this shape; property-level
+    /// <c>required</c> is now excluded at projection time by
+    /// <see cref="Sprk.Bff.Api.Services.Ai.Chat.OpenAiFunctionSchemaValidator"/>.
     /// </summary>
     private const string CreateTaskInputSchema =
-        """{"type":"object","properties":{"fileIds":{"type":"array","items":{"type":"string"},"description":"Optional subset of session file ids the task should be grounded in. Omit to use all session files."},"due_date":{"type":"string","required":true,"elicitation_prompt":"What's the due date for this task?","description":"The task's due date as the user stated it (e.g. 7/9/2026)."},"assign_to":{"type":"string","required":true,"elicitation_prompt":"Should I assign it to you or someone else?","description":"Who the task is assigned to — 'me' or a person's name."}},"required":["due_date","assign_to"]}""";
+        """{"type":"object","properties":{"fileIds":{"type":"array","items":{"type":"string"},"description":"Optional subset of session file ids the task should be grounded in. Omit to use all session files."},"due_date":{"type":"string","elicitation_prompt":"What's the due date for this task?","description":"The task's due date as the user stated it (e.g. 7/9/2026)."},"assign_to":{"type":"string","elicitation_prompt":"Should I assign it to you or someone else?","description":"Who the task is assigned to — 'me' or a person's name."}},"required":["due_date","assign_to"]}""";
 
     [Fact]
     public async Task P3CreateTaskSurface_BindingResolvesAndProjectsThroughTheClosedCatalog_ElicitationDeclared()
@@ -837,6 +843,14 @@ public class GoldenUtteranceEvalSuiteTests
         tool.Name.Should().Be("capability_create-task");
         tool.Description.Should().Be(binding.ToolDescription,
             "no hardcoded task-creation copy — description comes from the catalog row");
+
+        // G-P3 UAT round-1 H1 regression pin: the seeded input schema must pass the
+        // OpenAI function-parameters subset validator — an invalid schema no longer
+        // 400-fails the turn, but it EXCLUDES this capability from projection entirely.
+        Sprk.Bff.Api.Services.Ai.Chat.OpenAiFunctionSchemaValidator
+            .FindFirstError(binding.InputSchemaJson).Should().BeNull(
+                "G-P3 H1: the CREATE-TASK@v1 sprk_inputschema must be valid OpenAI function " +
+                "parameters or SprkChatAgentFactory excludes the capability tool at projection time");
 
         var required = Sprk.Bff.Api.Services.Ai.Chat.BindingInputSchemaValidator
             .GetRequiredFields(binding.InputSchemaJson);

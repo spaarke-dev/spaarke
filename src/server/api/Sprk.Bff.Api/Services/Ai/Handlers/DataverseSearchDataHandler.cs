@@ -79,7 +79,8 @@ public sealed partial class DataverseSearchDataHandler : IToolHandler
             new ToolParameterDefinition(
                 "scope",
                 "Optional search scope (GA MCP contract compatibility). On the native transport: a comma-separated " +
-                "list of table logical names to restrict the search (e.g. 'account,contact'). Omit to search all " +
+                "list of table logical names to restrict the search (e.g. 'sprk_matter,account'; common short names " +
+                "like 'matter'/'project'/'invoice' are accepted and normalized). Omit to search all " +
                 "search-enabled tables.",
                 ToolParameterType.String,
                 Required: false)
@@ -130,13 +131,18 @@ public sealed partial class DataverseSearchDataHandler : IToolHandler
         }
 
         // Parse scope into a table logical-name filter (native-transport interpretation).
+        // G-P3 UAT round-1 H8 (2026-07-07): the model frequently passes CANONICAL entity
+        // names ("matter", "projects") instead of Dataverse logical names — those pass the
+        // shape regex, reach the Search API as entities:["matter"], and the API rejects the
+        // WHOLE query, which surfaced to the operator as "a technical issue with the
+        // search". Canonical/plural forms now normalize to their logical names.
         var entityFilter = new List<string>();
         var warnings = new List<string>();
         if (!string.IsNullOrWhiteSpace(scope))
         {
             foreach (var candidate in scope.Split(',', StringSplitOptions.RemoveEmptyEntries | StringSplitOptions.TrimEntries))
             {
-                var normalized = candidate.ToLowerInvariant();
+                var normalized = ToTableLogicalName(candidate.ToLowerInvariant());
                 if (LogicalNameRegex().IsMatch(normalized))
                 {
                     entityFilter.Add(normalized);
@@ -167,6 +173,36 @@ public sealed partial class DataverseSearchDataHandler : IToolHandler
                 "/api/search/v2.0/query",
                 JsonSerializer.Serialize(requestBody),
                 cancellationToken).ConfigureAwait(false);
+
+            // G-P3 UAT round-1 H8: when a SCOPED query fails (typically an entity filter the
+            // Search API rejects — a name that is not a search-enabled table), retry ONCE
+            // without the filter instead of failing the whole search. This is exactly the
+            // recovery the model attempted manually in the incident transcript ("retry
+            // without the scope limitation") — doing it deterministically server-side turns
+            // a user-visible "technical issue" into a working (broader) search + warning.
+            if (!response.IsSuccess &&
+                response.ErrorCode != DataverseUserClientErrorCodes.NotFound &&
+                entityFilter.Count > 0)
+            {
+                _logger.LogWarning(
+                    "[dataverse.search_data][H8] scoped search rejected by the Search API " +
+                    "(errorCode={ErrorCode}, entityFilter={EntityFilter}); retrying once without the entity filter. " +
+                    "decisionId={DecisionId}",
+                    response.ErrorCode,
+                    string.Join(",", entityFilter),
+                    context.DecisionId);
+                warnings.Add(
+                    $"The scope filter ({string.Join(", ", entityFilter)}) was rejected by the search service " +
+                    "(entries must be search-enabled table logical names, e.g. sprk_matter); the search ran " +
+                    "across all search-enabled tables instead.");
+
+                requestBody.Remove("entities");
+                entityFilter.Clear();
+                response = await _dataverse.PostAsync(
+                    "/api/search/v2.0/query",
+                    JsonSerializer.Serialize(requestBody),
+                    cancellationToken).ConfigureAwait(false);
+            }
 
             if (!response.IsSuccess)
             {
@@ -358,6 +394,22 @@ public sealed partial class DataverseSearchDataHandler : IToolHandler
         }
         return null;
     }
+
+    /// <summary>
+    /// G-P3 UAT round-1 H8 — maps the CANONICAL entity vocabulary the model naturally
+    /// uses (matter / project / invoice, singular or plural — the same short forms
+    /// <c>ChatHostContext</c>/<c>EntityTypeNormalizer</c> put in front of it) to the
+    /// Dataverse table logical names the Search API requires. Unknown values pass
+    /// through unchanged (already-correct logical names, future tables).
+    /// </summary>
+    internal static string ToTableLogicalName(string candidate) => candidate switch
+    {
+        "matter" or "matters" => "sprk_matter",
+        "project" or "projects" => "sprk_project",
+        "invoice" or "invoices" => "sprk_invoice",
+        "document" or "documents" => "sprk_document",
+        _ => candidate,
+    };
 
     private ToolResult MapClientError(AnalysisTool tool, DataverseUserResponse response, DateTimeOffset startedAt) =>
         ToolResult.Error(HandlerId, tool.Id, tool.Name,

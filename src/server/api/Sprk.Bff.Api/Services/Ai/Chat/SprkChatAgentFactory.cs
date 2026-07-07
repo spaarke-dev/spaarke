@@ -53,6 +53,34 @@ public class SprkChatAgentFactory
     private readonly IServiceProvider _serviceProvider;
     private readonly ILogger<SprkChatAgentFactory> _logger;
 
+    /// <summary>
+    /// G-P3 UAT round-1 H6 (2026-07-07) — the side-effect honesty contract appended to
+    /// every tool-bearing session's system prompt. The model must never claim a side
+    /// effect (record created, task saved, email sent/drafted) that no tool result in
+    /// the current conversation confirms, and a user confirmation of a CONVERSATIONAL
+    /// proposal still requires invoking the tool (which then presents the platform's
+    /// own confirmation dialog). Deterministic constant text (NFR-04 cache stability).
+    /// Exposed internal for the directive-presence tests.
+    /// </summary>
+    internal const string SideEffectHonestyDirective =
+        "\n\n## Action Honesty (Spaarke platform contract)\n" +
+        "You can only perform actions — creating, updating, saving, sending, or drafting records, " +
+        "tasks, emails, or documents — by INVOKING one of your tools. You have no other way to " +
+        "change anything.\n" +
+        "- NEVER state that a record, task, draft, email, or any change was created, saved, sent, " +
+        "completed, or executed unless a TOOL RESULT in this conversation explicitly confirms it. " +
+        "There are no exceptions.\n" +
+        "- When the user asks you to create or change something and a matching tool or capability " +
+        "exists, INVOKE it. Do not describe, simulate, or role-play the flow instead of calling the tool.\n" +
+        "- If the user confirms a proposal you made in conversation (\"yes\", \"create it\", \"go ahead\"), " +
+        "that confirmation does NOT create anything by itself: you must still invoke the corresponding " +
+        "tool. Side-effecting tools present their own confirmation dialog to the user — invoking them " +
+        "is safe and required.\n" +
+        "- If a tool reports it was SUSPENDED awaiting user confirmation, say exactly that. The action " +
+        "has NOT happened yet.\n" +
+        "- If no available tool can perform the requested action, say so honestly instead of pretending " +
+        "it was done.";
+
     public SprkChatAgentFactory(
         IChatClient chatClient,
         IServiceProvider serviceProvider,
@@ -541,8 +569,32 @@ public class SprkChatAgentFactory
                 var bindings = await routingService
                     .ListTextProjectableBindingsAsync(cancellationToken: cancellationToken)
                     .ConfigureAwait(false);
+                var excludedInvalidSchemas = 0;
                 foreach (var binding in bindings)
                 {
+                    // G-P3 UAT round-1 H1 (2026-07-07): validate the Action's declared input
+                    // schema against the OpenAI function-parameters subset BEFORE projecting.
+                    // Azure OpenAI validates EVERY tool schema in the request and 400-fails the
+                    // WHOLE turn (invalid_function_parameters) when ANY one is invalid — the
+                    // CREATE-TASK@v1 property-level "required": true took down every text-path
+                    // turn at G-P3 UAT. One malformed catalog row must only ever cost its OWN
+                    // tool. Exclusion is loud: Error log (NFR-07: identifiers + keyword-path
+                    // error only), ai.tool.schema_invalid telemetry, and the
+                    // RoutingConsumerTypeHealthCheck reports the row as a Degraded finding.
+                    if (OpenAiFunctionSchemaValidator.FindFirstError(binding.InputSchemaJson) is { } schemaError)
+                    {
+                        excludedInvalidSchemas++;
+                        _logger.LogError(
+                            "[FR-P2-01][invalid-tool-schema] Binding EXCLUDED from tool projection — its " +
+                            "sprk_inputschema would fail OpenAI function-parameters validation and 400 the " +
+                            "whole turn. Fix the Action row's schema. binding={BindingId} " +
+                            "consumerType={ConsumerType} tenant={TenantId} error={SchemaError}",
+                            binding.BindingId, binding.ConsumerType, tenantId, schemaError);
+                        scope.ServiceProvider.GetService<Sprk.Bff.Api.Telemetry.AiTelemetry>()
+                            ?.RecordInvalidToolSchema("binding", binding.ConsumerType, tenantId);
+                        continue;
+                    }
+
                     // FR-P2-04: the tenant's no_match_handler Binding projects as the
                     // dedicated refusal tool (honest-refusal loop outcome — file-less
                     // prompted render + ledger write + dispatch_refused telemetry).
@@ -565,8 +617,9 @@ public class SprkChatAgentFactory
                 }
 
                 _logger.LogInformation(
-                    "[FR-P2-01] Binding capability-tools projected: count={BindingToolCount} tenant={TenantId}",
-                    bindings.Count, tenantId);
+                    "[FR-P2-01] Binding capability-tools projected: count={BindingToolCount} " +
+                    "excludedInvalidSchemas={ExcludedInvalidSchemas} tenant={TenantId}",
+                    bindings.Count - excludedInvalidSchemas, excludedInvalidSchemas, tenantId);
             }
         }
         catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
@@ -638,6 +691,25 @@ public class SprkChatAgentFactory
             };
         }
         // === End FR-P2-04 directive ======================================================
+
+        // === G-P3 UAT round-1 H6 — side-effect honesty directive (ADR-039) =============
+        // Root incident (2026-07-07, session b3c5340c…): the model ROLE-PLAYED an entire
+        // create-task flow — asked for due date + assignee, claimed "drafted", then on
+        // "yes create it" claimed "has now been created" — WITHOUT ever invoking a tool.
+        // No confirmation dialog rendered (SideEffectGateAIFunction never fired because
+        // no tool call happened) and no record existed. This directive pins the
+        // grounded-execution contract for actions: a claim of a performed side effect is
+        // valid ONLY when a tool result in the current conversation confirms it.
+        // Deterministic constant text, appended whenever ANY tools project —
+        // prompt-cache-stable across turns (NFR-04).
+        if (finalTools.Count > 0)
+        {
+            context = context with
+            {
+                SystemPrompt = context.SystemPrompt + SideEffectHonestyDirective,
+            };
+        }
+        // === End H6 directive ============================================================
 
         // === capability_change SSE event ===
         // Emit when the per-turn tool set differs from the previous turn's tool set.
