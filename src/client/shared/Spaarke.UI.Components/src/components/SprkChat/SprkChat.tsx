@@ -1437,8 +1437,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
             body: { planId: planIdToApprove },
             getAccessToken,
             signal: controller.signal,
-            mapHttpError: async response =>
-              new SseHttpError(response.status, await response.text().catch(() => '')),
+            mapHttpError: async response => new SseHttpError(response.status, await response.text().catch(() => '')),
             onLine: (line: string) => {
               const event = parseSseEvent(line);
               if (!event) return;

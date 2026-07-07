@@ -125,9 +125,9 @@ function sseResponse(wire: string, status = 200): Response {
 
 describe('readSseStream — auth-mode validation (task 045)', () => {
   it('throws a clear error when NEITHER getAccessToken nor fetchImpl is provided', async () => {
-    await expect(
-      readSseStream({ url: 'https://bff.test/stream', body: {}, onLine: () => undefined })
-    ).rejects.toThrow(/exactly one of getAccessToken or fetchImpl.*neither/);
+    await expect(readSseStream({ url: 'https://bff.test/stream', body: {}, onLine: () => undefined })).rejects.toThrow(
+      /exactly one of getAccessToken or fetchImpl.*neither/
+    );
   });
 
   it('throws a clear error when BOTH getAccessToken and fetchImpl are provided', async () => {
