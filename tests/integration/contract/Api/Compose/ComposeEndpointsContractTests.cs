@@ -5,7 +5,7 @@
 //   - Validate auth gating (401 unauthenticated), happy-path (200/204 with valid bearer),
 //     and validation (400 on bad input). For SPE-touching endpoints the IComposeService
 //     boundary is mocked; for the AI-dispatch endpoint the PublicContracts facade
-//     (IConsumerRoutingService + IInvokePlaybookAi) is mocked.
+//     (IConsumerRoutingService + the playbook-invocation boundary) is mocked.
 //   - Verify the refined ADR-013 boundary end-to-end: the dispatch path resolves through
 //     the facade types only — no AI-internal types are reached.
 //

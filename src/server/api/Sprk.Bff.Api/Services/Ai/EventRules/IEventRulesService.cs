@@ -25,7 +25,7 @@ namespace Sprk.Bff.Api.Services.Ai.EventRules;
 /// for the ADR-032 Null-Object kill-switch peer (<see cref="NullEventRulesService"/>)
 /// — the event endpoint maps unconditionally while the real implementation's DI
 /// graph (ActionRunner / ScopeResolver / OutputRouter) is compound-AI-gated.
-/// Same justification as <c>SessionSummarizeOrchestrator</c>'s Null subclass;
+/// Same justification as the dispatch seam's Null subclass;
 /// interface chosen over subclass because no protected-ctor state machine is
 /// needed here.
 /// </para>
@@ -34,7 +34,7 @@ namespace Sprk.Bff.Api.Services.Ai.EventRules;
 /// (1) <i>Existing</i> — overlaps nothing: grep shows no upload auto-analysis path
 /// on master (the r7 dispatch patches were dropped un-merged, task 025); the only
 /// event-shaped config surface is <c>sprk_oneventbindings</c>, which this reads.
-/// (2) <i>Extension</i> — cannot extend an existing service: SessionSummarizeOrchestrator
+/// (2) <i>Extension</i> — cannot extend an existing service: the summarize boundary
 /// is a single-capability chat boundary; the Event path is multi-member, ordered,
 /// bounded, and capability-agnostic. The Binding QUERY was implemented as an
 /// extension of the existing <c>IConsumerRoutingService</c> rather than a new query

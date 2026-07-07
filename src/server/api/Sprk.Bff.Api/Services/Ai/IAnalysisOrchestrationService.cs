@@ -13,9 +13,9 @@ namespace Sprk.Bff.Api.Services.Ai;
 /// </summary>
 public interface IAnalysisOrchestrationService
 {
-    // R7 Wave 4 task 042 (FR-11, 2026-06-28) — `ExecuteAnalysisAsync` was DELETED here per spec Q6.
+    // R7 Wave 4 task 042 (FR-11, 2026-06-28) — the legacy direct-invocation execute method was DELETED here per spec Q6.
     // Sole production caller (AnalysisEndpoints.ExecuteAnalysis) was migrated by task 041 to
-    // IPlaybookOrchestrationService.ExecuteAsync per ADR-013 Invariant 1 (IInvokePlaybookAi triangle
+    // IPlaybookOrchestrationService.ExecuteAsync per ADR-013 Invariant 1 (the facade triangle
     // is the canonical AI invocation surface). No transition shim per spec NFR-06.
 
     /// <summary>

@@ -23,9 +23,9 @@ namespace Sprk.Bff.Api.Services.Ai.Chat;
 /// <remarks>
 /// <para>
 /// <b>Component Justification (CLAUDE.md §11)</b>:
-/// (1) <i>Existing</i> — overlaps <see cref="SessionSummarizeOrchestrator"/>
-/// (task 020), which executes ONE fixed consumer type (<c>chat-summarize</c>) with
-/// summarize-specific UX (FR-04 interjection, style hint) resolved by consumer-type.
+/// (1) <i>Existing</i> — historically overlapped the summarize-named orchestrator shell
+/// (task 020), which executed ONE fixed consumer type (<c>chat-summarize</c>); that shell
+/// was deleted by FR-P3-05 (task 044) and /summarize now delegates HERE.
 /// (2) <i>Extension</i> — the Click path is capability-agnostic: it executes WHATEVER
 /// Binding the chip's id names. Embedding a by-id generic dispatch inside the
 /// summarize-named orchestrator would smuggle per-capability branching back into the
@@ -113,7 +113,7 @@ public class SessionDispatchOrchestrator
     /// Protected ctor used only by <see cref="NullSessionDispatchOrchestrator"/> so the
     /// kill-switch subclass can be constructed when the compound AI gate is OFF and the
     /// AI dependencies are absent (ADR-030 P3 / ADR-032 — mirrors
-    /// <see cref="SessionSummarizeOrchestrator"/>). The Null override never reads the
+    /// the canonical Null-subclass siblings). The Null override never reads the
     /// nulled fields — it throws <see cref="Configuration.FeatureDisabledException"/>
     /// before they are dereferenced.
     /// </summary>
@@ -436,7 +436,7 @@ public class SessionDispatchOrchestrator
     /// synthesizes per-field workspace deltas from <c>result</c>); anything else
     /// degrades to a text completion — the client always sees a terminal
     /// <c>complete</c> chunk, never a silent EOF. Same wire semantics as
-    /// <c>SessionSummarizeOrchestrator</c> so there is ONE AnalysisChunk vocabulary.
+    /// the pre-044 summarize shell so there is ONE AnalysisChunk vocabulary.
     /// </summary>
     private static AnalysisChunk DeserializeResultChunk(string jsonContent)
     {

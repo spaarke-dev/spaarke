@@ -858,7 +858,7 @@ public class ToolHandlerToAIFunctionAdapterTests
     // Existing fields (ChatSessionId, TenantId, KnowledgeScope, RequestedToolName,
     // ToolArgumentsJson, DecisionId) MUST remain unaffected.
     //
-    // Per ADR-033 §3.1 the typed handler (WorkingDocumentHandler, Stage 3) reads the field
+    // Per ADR-033 §3.1 a document-streaming typed handler (Stage 3) reads the field
     // from context and degrades gracefully when null — the adapter MUST NOT coalesce null to
     // a no-op delegate (that's a legacy-class-only fallback inside the factory's hardcoded
     // WorkingDocument chat-tools block).

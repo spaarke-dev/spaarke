@@ -103,8 +103,9 @@ $RowFiles = @{
     "ClauseAnalyzerHandler"            = "$RepoRoot/infra/dataverse/sprk_analysistool-clause-analyzer-row.json"
     "RiskDetectorHandler"              = "$RepoRoot/infra/dataverse/sprk_analysistool-risk-detector-row.json"
     "InvoiceExtractionToolHandler"     = "$RepoRoot/infra/dataverse/sprk_analysistool-invoice-extractor-row.json"
-    # Wave 7 — chat-tool migration (legacy hardcoded tool → typed handler)
-    "AnalysisQueryHandler"             = "$RepoRoot/infra/dataverse/sprk_analysistool-analysis-query-row.json"
+    # Wave 7 — chat-tool migration (legacy hardcoded tool → typed handler). NOTE
+    # (ai-architecture-redesign-r1 task 044 / FR-P3-05): the analysis-query row was
+    # RETIRED with its handler (audit F-1 closure) — do not re-seed.
     # Wave 7 — TextRefinementHandler serves 3 rows via the method-discriminator in
     # sprk_configuration (refine / keypoints / summary). Because the handler class is
     # the same for all three, the upsert key MUST be sprk_toolcode (not handler-class)
@@ -144,23 +145,9 @@ $RowFiles = @{
     # + ADR-018 kill switch + ADR-015 telemetry hygiene preserved by the handler.
     "LEGAL-RESEARCH"                   = "$RepoRoot/infra/dataverse/sprk_analysistool-legal-research-row.json"
     "LEGAL-CASE-LOOKUP"                = "$RepoRoot/infra/dataverse/sprk_analysistool-legal-case-lookup-row.json"
-    # Wave 9 — WorkingDocumentHandler serves 3 rows via the method discriminator. All 3
-    # capability-gated via sprk_requiredcapability = 'write_back'. Implements ADR-033 (the
-    # first invocation of the ADRs-Are-Defaults operating principle): handler reads
-    # ChatInvocationContext.DocumentStreamWriter for the streaming methods (EditWorkingDocument
-    # + AppendSection) and ChatInvocationContext.AnalysisId for the persistence target
-    # (WriteBackToWorkingDocument). Closes Q9 chat-tool migration at 10/10.
-    "WORKING-DOC-EDIT"                 = "$RepoRoot/infra/dataverse/sprk_analysistool-working-doc-edit-row.json"
-    "WORKING-DOC-APPEND-SECTION"       = "$RepoRoot/infra/dataverse/sprk_analysistool-working-doc-append-section-row.json"
-    "WORKING-DOC-WRITE-BACK"           = "$RepoRoot/infra/dataverse/sprk_analysistool-working-doc-write-back-row.json"
-    # R6 Pillar 3 / Q11 / task 021 — InvokePlaybookHandler: single row exposing the generic
-    # invoke_playbook(playbookId, parameters) chat tool. Dispatches to ANY tenant-accessible
-    # playbook via the IInvokePlaybookAi facade (task 020). Replaces the specialized
-    # InvokeSummarizePlaybookTool + InvokeInsightsQueryTool bridges (deleted in Wave 10 /
-    # task 023). sprk_requiredcapability = null (intentional — generic dispatcher available
-    # to all playbooks; per-playbook authorization enforced inside the facade + the handler's
-    # tenant-visibility check via IPlaybookService). sprk_availableincontexts = Chat (100000001).
-    "INVOKE-PLAYBOOK"                  = "$RepoRoot/infra/dataverse/sprk_analysistool-invoke-playbook-row.json"
+    # NOTE (ai-architecture-redesign-r1 task 044 / FR-P3-05): the Wave-9 working-document
+    # rows (edit / append-section / write-back) and the R6 generic playbook-dispatch row
+    # were RETIRED with their handlers (audit F-1 closure) — do not re-seed.
     # R6 Pillar 6b / D-C-05 / task 054 — SendWorkspaceArtifactHandler: single row exposing the
     # send_workspace_artifact(widgetType, title, widgetData, matterId?) chat tool. Constructs
     # a WorkspaceTab + persists via IWorkspaceStateService.UpsertTabAsync (Pillar 6a infra

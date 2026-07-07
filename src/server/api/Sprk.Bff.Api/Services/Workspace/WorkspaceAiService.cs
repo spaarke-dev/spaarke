@@ -42,7 +42,7 @@ namespace Sprk.Bff.Api.Services.Workspace;
 /// </para>
 /// <para>
 /// A routing miss is tolerated here (unlike the chat /summarize convergence
-/// point in <c>SessionSummarizeOrchestrator</c>): if no enabled Binding row resolves or
+/// point in the summarize dispatch path): if no enabled Binding row resolves or
 /// the lookup fails for any reason, the existing fallback-response path is taken so the
 /// workspace summary tile still renders a placeholder rather than 500-ing. The operator
 /// remedy is to seed the <c>sprk_playbookconsumer</c> row — no config fallback exists.
@@ -339,7 +339,7 @@ public sealed class WorkspaceAiService
         // never a literal string.
         //
         // Graceful-degrade contract preserved (per Phase 1 task 018 evidence): unlike the
-        // chat /summarize convergence point in SessionSummarizeOrchestrator (FR-26),
+        // chat /summarize convergence point (FR-26; the dispatch seam since task 044),
         // workspace AI summaries gracefully degrade to a template response when no playbook
         // can be resolved AND when lookup fails — the tile must still render rather than 500
         // (BuildFallbackResponse contract preserved).

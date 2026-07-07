@@ -27,10 +27,10 @@ public static class PlaybookCapabilities
     /// <summary>DocumentSearchHandler — semantic search across indexed documents.</summary>
     public const string Search = "search";
 
-    /// <summary>AnalysisQueryHandler — retrieve and query analysis results.</summary>
+    /// <summary>Retrieve and query analysis results (legacy handler deleted by task 044; capability id retained for row compatibility).</summary>
     public const string Analyze = "analyze";
 
-    /// <summary>WorkingDocumentHandler — write back edits to the active document.</summary>
+    /// <summary>Write back edits to the active document (legacy handler deleted by task 044; capability id retained for row compatibility).</summary>
     public const string WriteBack = "write_back";
 
     /// <summary>AnalysisExecutionHandler — trigger re-analysis of documents.</summary>

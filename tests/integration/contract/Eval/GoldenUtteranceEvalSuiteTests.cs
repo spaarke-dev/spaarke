@@ -307,7 +307,7 @@ public class GoldenUtteranceEvalSuiteTests
     // What "live" means at P1 (no NL loop until P2): every P1-phase case's
     // dispatch route is exercised against the REAL routing reads the shipped
     // entry paths use — no dispatcher is invented here:
-    //   • Text path  — SessionSummarizeOrchestrator resolves chat-summarize via
+    //   • Text path  — the /summarize dispatch path resolves chat-summarize via
     //     IConsumerRoutingService.ResolveBindingAsync and fail-fasts unless the
     //     Binding targets a Prompted Action (SUM-CHAT@v1). These tests assert
     //     exactly those preconditions through the real selection algorithm.
@@ -367,12 +367,12 @@ public class GoldenUtteranceEvalSuiteTests
 
             binding.Should().NotBeNull(
                 $"case {c.CaseId} (\"{c.Utterance}\"): the chat-summarize Binding must resolve through " +
-                "the real FR-1R-03 selection algorithm — this is the exact read SessionSummarizeOrchestrator performs");
+                "the real FR-1R-03 selection algorithm — this is the exact read the summarize dispatch path performs");
             binding!.ConsumerType.Should().Be(ConsumerTypes.ChatSummarize,
                 $"case {c.CaseId}: UC-A-1 text dispatch lands on the chat-summarize capability binding");
             binding.ActionId.Should().Be(SumChatActionId,
                 $"case {c.CaseId}: the Binding's sprk_action lookup targets the SUM-CHAT@v1 Action — " +
-                "SessionSummarizeOrchestrator fail-fasts (no engine/config fallback, NFR-08) without it");
+                "the summarize dispatch path fail-fasts (no engine/config fallback, NFR-08) without it");
             binding.ActionKind.Should().Be(ActionKind.Prompted,
                 $"case {c.CaseId}: the chat /summarize path executes prompted Actions only (FR-P1-01)");
             binding.Ucid.Should().Be("UC-A-1",

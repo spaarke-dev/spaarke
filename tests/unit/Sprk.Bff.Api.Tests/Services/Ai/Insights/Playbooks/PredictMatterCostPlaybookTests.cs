@@ -55,7 +55,17 @@ public class PredictMatterCostPlaybookTests
     private const string Subject = "matter:M-NEW-0042";
     private const string ScopeHash = "scope-hash-test";
 
-    private readonly Mock<IPlaybookExecutionEngine> _engineMock = new(MockBehavior.Strict);
+    // FR-P3-05 (task 044): the engine shell was deleted — the orchestrator invokes the
+    // frozen IPlaybookOrchestrationService directly with the request-scoped HttpContext.
+    private readonly Mock<Microsoft.AspNetCore.Http.IHttpContextAccessor> _httpContextAccessorMock = new();
+
+    public PredictMatterCostPlaybookTests()
+    {
+        // Task 044: supply the request-scoped HttpContext the orchestrator now resolves itself.
+        _httpContextAccessorMock
+            .Setup(a => a.HttpContext)
+            .Returns(new Microsoft.AspNetCore.Http.DefaultHttpContext());
+    }
     private readonly Mock<IInsightsPlaybookExecutionCache> _cacheMock = new(MockBehavior.Strict);
     private readonly Mock<IOpenAiClient> _openAiMock = new(MockBehavior.Strict);
     // Wave C-G4 (task 022) — IIngestOrchestrator + InsightsIngestOptions retired; ctor now
@@ -84,7 +94,7 @@ public class PredictMatterCostPlaybookTests
             NullLogger<Sprk.Bff.Api.Services.Ai.Insights.AssistantToolCallHandler>.Instance);
 
     private InsightsOrchestrator CreateSut() => new(
-        _engineMock.Object,
+        _httpContextAccessorMock.Object,
         _cacheMock.Object,
         _openAiMock.Object,
         _playbookOrchestrationMock.Object,
@@ -329,9 +339,9 @@ public class PredictMatterCostPlaybookTests
                     return InsightsEngineRunResult.FromArtifact(artifact);
                 });
 
-        _engineMock
-            .Setup(e => e.ExecuteBatchAsync(It.IsAny<PlaybookRunRequest>(), It.IsAny<CancellationToken>()))
-            .Returns<PlaybookRunRequest, CancellationToken>((req, ct) => SyntheticSufficientEvidenceStream(artifact, ct));
+        _playbookOrchestrationMock
+            .Setup(o => o.ExecuteAsync(It.IsAny<PlaybookRunRequest>(), It.IsAny<Microsoft.AspNetCore.Http.HttpContext>(), It.IsAny<CancellationToken>()))
+            .Returns<PlaybookRunRequest, Microsoft.AspNetCore.Http.HttpContext, CancellationToken>((req, http, ct) => SyntheticSufficientEvidenceStream(artifact, ct));
 
         var sut = CreateSut();
         var req = MakeRequest();
@@ -353,9 +363,10 @@ public class PredictMatterCostPlaybookTests
         result.Artifact.Predicate.Should().Be("predictedCost");
 
         // Engine was invoked once (cache miss)
-        _engineMock.Verify(
-            e => e.ExecuteBatchAsync(
+        _playbookOrchestrationMock.Verify(
+            o => o.ExecuteAsync(
                 It.Is<PlaybookRunRequest>(r => r.PlaybookId == PredictMatterCostPlaybookId),
+                It.IsAny<Microsoft.AspNetCore.Http.HttpContext>(),
                 It.IsAny<CancellationToken>()),
             Times.Once);
     }
@@ -408,9 +419,9 @@ public class PredictMatterCostPlaybookTests
                     return InsightsEngineRunResult.FromDecline(realDecline);
                 });
 
-        _engineMock
-            .Setup(e => e.ExecuteBatchAsync(It.IsAny<PlaybookRunRequest>(), It.IsAny<CancellationToken>()))
-            .Returns<PlaybookRunRequest, CancellationToken>((req, ct) => SyntheticInsufficientEvidenceStream(cohortCount, ct));
+        _playbookOrchestrationMock
+            .Setup(o => o.ExecuteAsync(It.IsAny<PlaybookRunRequest>(), It.IsAny<Microsoft.AspNetCore.Http.HttpContext>(), It.IsAny<CancellationToken>()))
+            .Returns<PlaybookRunRequest, Microsoft.AspNetCore.Http.HttpContext, CancellationToken>((req, http, ct) => SyntheticInsufficientEvidenceStream(cohortCount, ct));
 
         var sut = CreateSut();
         var req = MakeRequest();
@@ -472,9 +483,9 @@ public class PredictMatterCostPlaybookTests
                     return InsightsEngineRunResult.FromArtifact(verifiedArtifact);
                 });
 
-        _engineMock
-            .Setup(e => e.ExecuteBatchAsync(It.IsAny<PlaybookRunRequest>(), It.IsAny<CancellationToken>()))
-            .Returns<PlaybookRunRequest, CancellationToken>((req, ct) => SyntheticSufficientEvidenceStream(verifiedArtifact, ct));
+        _playbookOrchestrationMock
+            .Setup(o => o.ExecuteAsync(It.IsAny<PlaybookRunRequest>(), It.IsAny<Microsoft.AspNetCore.Http.HttpContext>(), It.IsAny<CancellationToken>()))
+            .Returns<PlaybookRunRequest, Microsoft.AspNetCore.Http.HttpContext, CancellationToken>((req, http, ct) => SyntheticSufficientEvidenceStream(verifiedArtifact, ct));
 
         var sut = CreateSut();
         var req = MakeRequest();
@@ -515,9 +526,9 @@ public class PredictMatterCostPlaybookTests
                     return InsightsEngineRunResult.FromArtifact(artifactWithPrecedent);
                 });
 
-        _engineMock
-            .Setup(e => e.ExecuteBatchAsync(It.IsAny<PlaybookRunRequest>(), It.IsAny<CancellationToken>()))
-            .Returns<PlaybookRunRequest, CancellationToken>((req, ct) => SyntheticSufficientEvidenceStream(artifactWithPrecedent, ct));
+        _playbookOrchestrationMock
+            .Setup(o => o.ExecuteAsync(It.IsAny<PlaybookRunRequest>(), It.IsAny<Microsoft.AspNetCore.Http.HttpContext>(), It.IsAny<CancellationToken>()))
+            .Returns<PlaybookRunRequest, Microsoft.AspNetCore.Http.HttpContext, CancellationToken>((req, http, ct) => SyntheticSufficientEvidenceStream(artifactWithPrecedent, ct));
 
         var sut = CreateSut();
         var req = MakeRequest();
@@ -566,9 +577,9 @@ public class PredictMatterCostPlaybookTests
                     return InsightsEngineRunResult.FromArtifact(artifact);
                 });
 
-        _engineMock
-            .Setup(e => e.ExecuteBatchAsync(It.IsAny<PlaybookRunRequest>(), It.IsAny<CancellationToken>()))
-            .Returns<PlaybookRunRequest, CancellationToken>((req, ct) => SyntheticSufficientEvidenceStream(artifact, ct));
+        _playbookOrchestrationMock
+            .Setup(o => o.ExecuteAsync(It.IsAny<PlaybookRunRequest>(), It.IsAny<Microsoft.AspNetCore.Http.HttpContext>(), It.IsAny<CancellationToken>()))
+            .Returns<PlaybookRunRequest, Microsoft.AspNetCore.Http.HttpContext, CancellationToken>((req, http, ct) => SyntheticSufficientEvidenceStream(artifact, ct));
 
         var sut = CreateSut();
         var req1 = MakeRequest();
@@ -594,8 +605,8 @@ public class PredictMatterCostPlaybookTests
             Times.Exactly(2));
 
         // Engine was invoked ONLY ONCE (cache miss on first call; cache hit short-circuits the second)
-        _engineMock.Verify(
-            e => e.ExecuteBatchAsync(It.IsAny<PlaybookRunRequest>(), It.IsAny<CancellationToken>()),
+        _playbookOrchestrationMock.Verify(
+            o => o.ExecuteAsync(It.IsAny<PlaybookRunRequest>(), It.IsAny<Microsoft.AspNetCore.Http.HttpContext>(), It.IsAny<CancellationToken>()),
             Times.Once,
             "second identical invocation must hit the D-P13 cache without re-executing the playbook");
     }

@@ -166,7 +166,7 @@ public static class EndpointMappingExtensions
 
         // FR-P1-01 (ai-architecture-redesign-r1 task 020) — catalog-driven chat-summarize.
         // Maps POST /api/ai/chat/sessions/{sessionId}/summarize and delegates to
-        // SessionSummarizeOrchestrator, which resolves the chat-summarize Binding row and
+        // the ONE dispatch seam (task 044), which resolves the chat-summarize Binding row and
         // executes the SUM-CHAT@v1 prompted Action via ActionRunner + PromptSchemaRenderer.
         // UNCONDITIONAL mapping — the orchestrator has a Null-Object mirror registered on
         // the compound-OFF branch (asymmetric-registration rule §10 F.1 satisfied).

@@ -5,7 +5,7 @@ namespace Sprk.Bff.Api.Services.Ai.LinearConsumers;
 /// <summary>
 /// Fetches the extracted text for a set of chat-session-uploaded files from the
 /// <c>spaarke-session-files</c> Azure AI Search index and concatenates it into a
-/// single string suitable for a Linear AI Consumer (e.g., <see cref="FileSummarizeService"/>).
+/// single string suitable for a prompted-executor consumer (e.g., the summarize dispatch path).
 /// </summary>
 /// <remarks>
 /// R7 Wave 12.3 (2026-07-02). The chat-summarize consumer needs text from files
@@ -45,7 +45,7 @@ public sealed record SessionFileText
     /// <summary>
     /// Display label — first file name when a single file is present, or
     /// "session-files-combined" for multi-file input. Passed to
-    /// <c>FileSummarizeService</c> for logging + prompt substitution.
+    /// the consuming pipeline for logging + prompt substitution.
     /// </summary>
     public string DisplayName { get; init; } = string.Empty;
 

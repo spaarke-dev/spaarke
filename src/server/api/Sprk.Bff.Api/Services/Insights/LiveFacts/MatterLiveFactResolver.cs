@@ -23,7 +23,7 @@ namespace Sprk.Bff.Api.Services.Insights.LiveFacts;
 /// <para>
 /// <b>Zone B placement</b> per SPEC §3.5 — lives under <c>Services/Insights/LiveFacts/</c>
 /// and consumes <see cref="IGenericEntityService"/> only. ZERO AI-internal imports (no
-/// <c>IOpenAiClient</c>, no <c>IPlaybookService</c>, no <c>PlaybookExecutionEngine</c>).
+/// <c>IOpenAiClient</c>, no <c>IPlaybookService</c>, no playbook engine).
 /// Verified by the §3.5.4 forbidden-imports grep in <c>.github/workflows/insights-eval.yml</c>.
 /// </para>
 /// <para>

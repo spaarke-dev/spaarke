@@ -181,7 +181,7 @@ public class AiTelemetry : IDisposable
     /// </summary>
     /// <remarks>
     /// Lands in App Insights as <c>customMetrics | where name == "dispatch_refused"</c>.
-    /// Dimensions are BOUNDED per the R5SummarizeTelemetry cardinality discipline:
+    /// Dimensions are BOUNDED per the R5 summarize-telemetry cardinality discipline:
     /// <c>tenant.id</c> (low-cardinality, ADR-014 precedent) and
     /// <c>render_status</c> ∈ { <c>rendered</c>, <c>render_failed</c> }. Session /
     /// binding / output-key identifiers ride the companion structured log line

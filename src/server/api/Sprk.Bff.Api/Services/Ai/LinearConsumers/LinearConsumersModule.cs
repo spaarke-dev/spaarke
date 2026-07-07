@@ -8,13 +8,14 @@ namespace Sprk.Bff.Api.Services.Ai.LinearConsumers;
 /// <remarks>
 /// R7 Wave 12 (2026-07-02) — see
 /// <c>docs/architecture/SPAARKE-LINEAR-AI-CONSUMER-ARCHITECTURE.md</c>.
-/// Registers the four shared primitives (<see cref="IActionResolver"/>,
-/// <see cref="IDocumentTextSource"/>, <see cref="IActionRunner"/>) + the
-/// per-consumer services (<see cref="DocumentProfileService"/> tonight;
-/// File Summarize / Prefills / DocCreateProfile in follow-on phases).
+/// Registers the shared executor primitives (<see cref="IActionResolver"/>,
+/// <see cref="IDocumentTextSource"/>, <see cref="ISessionFileTextSource"/>,
+/// <see cref="IActionRunner"/>).
 /// FR-P3-01 (task 040): the <c>LinearConsumers</c> appsettings options block
 /// was retired — routing lives on the <c>sprk_playbookconsumer</c> Binding
 /// table (single routing surface, ADR-039).
+/// FR-P3-05 (task 044): the consumer-specific wrapper classes were absorbed
+/// into their call sites — endpoints compose the primitives directly.
 /// </remarks>
 public static class LinearConsumersModule
 {
@@ -28,10 +29,6 @@ public static class LinearConsumersModule
         services.AddScoped<IDocumentTextSource, DocumentTextSource>();
         services.AddScoped<ISessionFileTextSource, SessionFileTextSource>();
         services.AddSingleton<IActionRunner, ActionRunner>();
-
-        // Consumer services.
-        services.AddScoped<DocumentProfileService>();
-        services.AddScoped<FileSummarizeService>();
 
         return services;
     }

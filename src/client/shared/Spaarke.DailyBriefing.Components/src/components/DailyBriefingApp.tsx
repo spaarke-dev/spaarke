@@ -101,7 +101,7 @@ export interface DailyBriefingAppProps {
    * webresourceName:'sprk_playbooklibrary', data:''}, {target:2, ...})`
    * thunk (shared lib stays Xrm-free per ADR-012). The launch reaches the
    * existing Library Code Page wrapper which preserves Path A.5 routing
-   * (`IConsumerRoutingService → IInvokePlaybookAi`) per ADR-013.
+   * (`IConsumerRoutingService` → the BFF playbook-invocation boundary) per ADR-013.
    *
    * Optional — when omitted, the overflow menu is not rendered (back-compat
    * for non-Dataverse hosts).

@@ -663,7 +663,7 @@ public record AnalysisAction
     /// Added in R7 spaarke-ai-platform-unification-r7 (task 002 / FR-12) to make the
     /// {SystemPrompt + OutputSchema + Temperature} triple first-class on the Action record
     /// per the project orchestrator decision. Previously, callers read
-    /// <c>sprk_outputschemajson</c> ad-hoc (see <c>PlaybookExecutionEngine</c>'s
+    /// <c>sprk_outputschemajson</c> ad-hoc (see the deleted engine shell's
     /// <c>ChatSummarizeActionConfig</c> path); the new <see cref="AiCompletionNodeExecutor"/>
     /// consumes this property directly to avoid ConfigJson-parsing duplication.
     /// </para>

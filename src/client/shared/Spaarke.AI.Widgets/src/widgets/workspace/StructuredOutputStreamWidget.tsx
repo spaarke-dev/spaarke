@@ -6,7 +6,7 @@
  * in R5 task 017 (D2-07) as the destination for:
  *
  *   - Summarize streaming output (FR-02): TL;DR-first progressive emission
- *     from `SessionSummarizeOrchestrator` via Azure OpenAI Structured Outputs
+ *     from the BFF summarize dispatch path via Azure OpenAI Structured Outputs
  *     token-stream (task 006 spike: ~191 events / ~932 chars; declaration-
  *     order field arrival).
  *   - Insights playbook static rendering (FR-13 / D2-16, task 026): the same

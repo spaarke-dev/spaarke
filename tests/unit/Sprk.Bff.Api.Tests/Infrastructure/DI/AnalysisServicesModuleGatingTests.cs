@@ -141,49 +141,42 @@ public class AnalysisServicesModuleGatingTests
 
     [Theory]
     [MemberData(nameof(CompoundOffCombinations))]
-    public async Task FileSummarize_WhenCompoundGateOff_ThrowsFeatureDisabledOnFirstMoveNext(
+    public async Task ExecutorPrimitives_WhenCompoundGateOff_ThrowFeatureDisabledOnUse(
         bool analysisEnabled, bool documentIntelligenceEnabled)
     {
         using var provider = BuildCompoundOffProvider(analysisEnabled, documentIntelligenceEnabled);
         using var scope = provider.CreateScope();
 
-        // WorkspaceFileEndpoints.HandleSummarize injects the CONCRETE type and is mapped
-        // unconditionally — resolution must succeed (Null subclass) and fail fast on use.
-        var summarize = scope.ServiceProvider.GetRequiredService<FileSummarizeService>();
-        summarize.Should().BeOfType<NullFileSummarizeService>(
-            "the real FileSummarizeService (AI ctor deps) must be unresolvable when the compound AI gate is off");
+        // FR-P3-05 (task 044 wrapper absorption): WorkspaceFileEndpoints.HandleSummarize
+        // injects IActionResolver + IActionRunner directly and is mapped unconditionally —
+        // resolution must succeed (Null peers) and fail fast on use with the stable errorCode.
+        var resolver = scope.ServiceProvider.GetRequiredService<IActionResolver>();
+        resolver.Should().BeOfType<NullActionResolver>(
+            "the real ActionResolver (AI ctor deps) must be unresolvable when the compound AI gate is off");
+        var runner = scope.ServiceProvider.GetRequiredService<IActionRunner>();
+        runner.Should().BeOfType<NullActionRunner>();
 
-        var act = async () =>
-        {
-            await foreach (var _ in summarize.ExecuteAsync(
-                "some extracted text", "file.pdf", "summarize-file", new DefaultHttpContext(), CancellationToken.None))
-            {
-            }
-        };
+        var act = () => resolver.ResolveAsync("summarize-file", CancellationToken.None);
 
         var ex = (await act.Should().ThrowAsync<FeatureDisabledException>(
             "the endpoint's catch (FeatureDisabledException) converts this to the 503 kill-switch pattern")).Which;
-        ex.ErrorCode.Should().Be(NullFileSummarizeService.ErrorCode);
+        ex.ErrorCode.Should().Be(NullActionResolver.ErrorCode);
         ex.ErrorCode.Should().Be("ai.linear-consumers.disabled",
             "errorCode must be stable across releases");
     }
 
     [Fact]
-    public void LinearConsumersPrimitives_WhenAnalysisDisabled_AreUnresolvable()
+    public void LinearConsumersTextSources_WhenAnalysisDisabled_AreUnresolvable()
     {
         using var provider = BuildCompoundOffProvider(analysisEnabled: false, documentIntelligenceEnabled: true);
         using var scope = provider.CreateScope();
 
-        // The prompted-executor stack toggles as ONE unit (FR-P0-05): none of the
-        // LinearConsumers primitives/consumer services may resolve when the compound AI
-        // gate is off. Consumers are either gated with them (DocumentProfileService via
-        // MapAnalysisEndpoints), tolerate null (Matter/ProjectPreFillService optional ctor
-        // params), or have a Null peer (FileSummarizeService, asserted above).
-        scope.ServiceProvider.GetService<IActionResolver>().Should().BeNull();
-        scope.ServiceProvider.GetService<IActionRunner>().Should().BeNull();
+        // The prompted-executor stack toggles as ONE unit (FR-P0-05): the text sources may
+        // not resolve when the compound AI gate is off (their consumers are gated with them
+        // via MapAnalysisEndpoints, or tolerate null). IActionResolver/IActionRunner have
+        // Null peers (asserted above) because WorkspaceFileEndpoints maps unconditionally.
         scope.ServiceProvider.GetService<IDocumentTextSource>().Should().BeNull();
         scope.ServiceProvider.GetService<ISessionFileTextSource>().Should().BeNull();
-        scope.ServiceProvider.GetService<DocumentProfileService>().Should().BeNull();
     }
 
     // ===================================================================

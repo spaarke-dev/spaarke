@@ -155,7 +155,7 @@
 
 | # | Task | FR | Rigor | Deps | Status |
 |---|---|---|---|---|---|
-| 044 | Engine-shell deletions (frozen engine untouched) | FR-P3-05 | FULL | 040, 043 | 🔲 |
+| 044 | Engine shells + F-1 legs DELETED (−11,849 lines: PlaybookExecutionEngine, SessionSummarizeOrchestrator→/summarize on THE dispatch seam, FileSummarize/DocumentProfile wrappers absorbed incl. engine-fallback deletion, InvokePlaybook/AnalysisQuery/WorkingDocument handlers + facade triangle grep-zero, 5 tool rows deactivated; E-2 adapter relocated to AnalysisExecutionHandler store-before-render; frozen engine diff-EMPTY; publish 46.81 MB net-reduction; 🔔 residual F-1: analysis.rerun app-only engine leg, ungated per operator ruling — accept-with-note recommended, FR-P4-01 re-verifies) | FR-P3-05 | FULL | 040, 043 | ✅ |
 
 ### Wave W-P3-C (parallel ×2)
 

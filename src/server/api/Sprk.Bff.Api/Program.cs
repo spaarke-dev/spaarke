@@ -130,7 +130,7 @@ builder.Services.AddAnalysisServicesModule(builder.Configuration);
 // R7 Wave 12 Linear AI Consumer library: registration MOVED into AnalysisServicesModule's
 // compound AI gate (Analysis:Enabled && DocumentIntelligence:Enabled) by
 // ai-architecture-redesign-r1 task 006 (FR-P0-05, 2026-07-05) so the whole prompted-executor
-// stack toggles as one unit. NullFileSummarizeService covers the unconditional
+// stack toggles as one unit. Null executor-primitive peers cover the unconditional
 // WorkspaceFileEndpoints consumer on the compound-OFF path (ADR-032).
 
 // Consumer→playbook routing (Phase 1R per chat-routing-redesign-r1 spec FR-1R-02).
@@ -159,7 +159,7 @@ builder.Services.AddInsightsIngestModule();
 
 // Spaarke Insights Engine — Zone A public facade per SPEC §3.5 (task 042).
 // IInsightsAi → InsightsOrchestrator: the ONLY Zone-A surface Zone B code may import.
-// Wraps IPlaybookExecutionEngine + IInsightsPlaybookExecutionCache (D-P13) + IOpenAiClient
+// Wraps IPlaybookOrchestrationService + IInsightsPlaybookExecutionCache (D-P13) + IOpenAiClient
 // + IPlaybookOrchestrationService behind a 3-method facade (AnswerQuestionAsync /
 // RunIngestAsync / EmbedTextAsync). RunIngestAsync invokes universal-ingest@v1 via the
 // orchestration service; the per-env playbook Guid is resolved through the insights-ask

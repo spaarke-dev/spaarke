@@ -22,7 +22,7 @@ namespace Sprk.Bff.Api.Tests.Services.Ai.Chat;
 ///
 /// These tests assert the wire-level invariant: the SYSTEM PROMPT carries the correct
 /// directive given (playbookId, terminal destination) — so the chat-agent LLM emits ONE
-/// brief acknowledgment per <c>invoke_playbook</c> call instead of duplicating the
+/// brief acknowledgment per capability tool call instead of duplicating the
 /// playbook's primary render. If these tests fail, the WP4 cutover regressed the R6
 /// FR-30 dedup invariant (one user intent → one render).
 /// </summary>

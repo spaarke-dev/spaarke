@@ -131,10 +131,9 @@ public class SprkChatAgentFactory
     /// <see cref="IChatContextProvider.GetContextAsync"/> so the returned
     /// <see cref="ChatContext.UploadedFiles"/> reflects session state, and surfaced as a
     /// compact "Session Files" manifest suffix on the system prompt so the LLM's tool-call
-    /// reasoning sees that uploaded files exist and can correctly invoke the generic
-    /// <c>invoke_playbook</c> chat tool with the chat-summarize playbook GUID (the Summarize
-    /// convergence path — FR-01 + FR-08). R6 task 023 (Wave 10 / Pillar 3) replaced the
-    /// specialized <c>InvokeSummarizePlaybookTool</c> bridge with the generic dispatcher.
+    /// reasoning sees that uploaded files exist and can pass the correct file IDs when
+    /// invoking a Binding capability tool (the Summarize convergence path — FR-01 + FR-08;
+    /// capability tools dispatch through the ONE seam per ADR-039 since FR-P2/P3).
     /// Manifest only (fileId + fileName); never carries extracted text (ADR-015).
     /// Default <c>null</c> for backward compatibility — pre-R5 sessions / call sites that
     /// omit the parameter behave exactly as before.
@@ -242,9 +241,9 @@ public class SprkChatAgentFactory
 
         // === R5 task 033 — Session Files manifest enrichment ====================
         // Surface uploaded session-file awareness (fileId + fileName) to the LLM so its
-        // tool-call reasoning correctly invokes the generic `invoke_playbook` chat tool
-        // (R6 task 023; the chat-summarize playbook is one of the playbooks listed in the
-        // tool's dynamic description per task 022) when the user asks to summarize. Without
+        // tool-call reasoning passes the correct file IDs when invoking a Binding
+        // capability tool (task 044: the former generic playbook dispatcher was deleted;
+        // capability tools carry the file-id vocabulary via their input schemas). Without
         // this signal the agent has historically (verbatim observed on Dev 2026-06-04)
         // declined: "I don't see the document uploaded yet".
         //
@@ -255,9 +254,6 @@ public class SprkChatAgentFactory
         //     reference materials + active capabilities + entity enrichment).
         //   - Additive — when no files uploaded, leaves the system prompt unchanged
         //     (zero behavior change for pre-R5 sessions and standalone chat).
-        //   - Tool-name binding — names `invoke_playbook` explicitly so the LLM has the
-        //     exact tool identifier to invoke (matches the AIFunction name registered for
-        //     InvokePlaybookHandler via the SYS-Invoke Playbook seed row — R6 task 021).
         if (context.UploadedFiles is { Count: > 0 } files)
         {
             try
@@ -394,7 +390,7 @@ public class SprkChatAgentFactory
         // === FR-24 (chat-routing-redesign-r1 task 141) — Render-routing dedup directive =========
         // When the dispatcher-resolved playbook (passed via the `playbookId` parameter) targets
         // a NON-chat terminal destination, append a dedup directive to the system prompt so the
-        // LLM emits ONLY a single-sentence acknowledgment for the `invoke_playbook` tool call —
+        // LLM emits ONLY a single-sentence acknowledgment for the capability tool call —
         // the playbook output renders at the destination (workspace tab / form-prefill /
         // side-effect) and the chat-agent's parallel inline text would be a redundant render
         // (R5 Gap A — path A vs path B parallelism is a smell; structurally eliminated here).
@@ -406,7 +402,7 @@ public class SprkChatAgentFactory
         // structurally eliminated here).
         //
         // NFR-01 binding: conversational primacy preserved. The directive applies ONLY to the
-        // `invoke_playbook` tool call response in THIS turn. Refinement, follow-up, comparison,
+        // capability tool call response in THIS turn. Refinement, follow-up, comparison,
         // and context-injection turns are unaffected — the next turn's routing resolves
         // separately and only adds the directive when it again resolves to a non-chat
         // destination playbook.
@@ -502,8 +498,7 @@ public class SprkChatAgentFactory
 
         // Resolve AIFunction tools. FR-23 per-playbook tool filtering is enforced via the
         // `capabilities` set above (matched-playbook capabilities OR always-on core capabilities).
-        var catalogProjector = new AgentToolCatalogProjector(
-            _logger, BuildInvokePlaybookDescriptionAsync);
+        var catalogProjector = new AgentToolCatalogProjector(_logger);
         var tools = (await catalogProjector.ResolveToolsAsync(
             scope.ServiceProvider, tenantId, sessionId, context.KnowledgeScope, capabilities,
             playbookId ?? Guid.Empty, documentId, analysisId, httpContext, sseWriter, citationContext,
@@ -770,28 +765,18 @@ public class SprkChatAgentFactory
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Format (R6 task 023 update — names the generic `invoke_playbook` tool instead of
-    /// the now-deleted `invoke_summarize_playbook` bridge):
+    /// Format (task 044 update — tool-agnostic since the generic playbook dispatcher was
+    /// deleted; capability tools carry the file-id vocabulary via their input schemas):
     /// <code>
     /// Session Files: This chat session has {N} uploaded file(s) available for tool calls:
-    /// {comma-separated fileNames}. When the user asks to summarize, invoke the
-    /// `invoke_playbook` tool with the chat-summarize playbook ID (see the tool's
-    /// description for tenant-accessible playbooks) and pass these file IDs in the
-    /// parameters object: {comma-separated fileIds}.
+    /// {comma-separated fileNames}. When a capability needs these files (e.g. summarize),
+    /// pass their file IDs in the tool call's fileIds argument: {comma-separated fileIds}.
     /// </code>
     /// </para>
     /// <para>
     /// ADR-015 invariant: only <see cref="ChatSessionFile.FileName"/> and
     /// <see cref="ChatSessionFile.FileId"/> are emitted — never extracted text, chunk
     /// content, MIME, or size beyond what the manifest already exposes.
-    /// </para>
-    /// <para>
-    /// Tool name reference: the literal <c>invoke_playbook</c> matches the AIFunction name
-    /// registered for <see cref="Sprk.Bff.Api.Services.Ai.Handlers.InvokePlaybookHandler"/>
-    /// via the SYS-Invoke Playbook Dataverse seed row (R6 task 021). Per R6 task 022's
-    /// dynamic invoke_playbook description (D-A-14), the tool description itself enumerates
-    /// the tenant-accessible playbook GUIDs at request time so the LLM can pick the
-    /// chat-summarize playbook without prior knowledge.
     /// </para>
     /// </remarks>
     /// <param name="uploadedFiles">Non-empty, non-null manifest list. Caller guarantees Count &gt; 0.</param>
@@ -820,12 +805,11 @@ public class SprkChatAgentFactory
 
         // Two leading newlines isolate the suffix as its own paragraph so the LLM does
         // not blend it into the preceding "### Active Capabilities" or entity enrichment.
-        // R6 task 023: names the generic `invoke_playbook` tool (replacing the deleted
-        // `invoke_summarize_playbook` bridge). The chat-summarize playbook GUID is one of
-        // the tenant-accessible playbooks enumerated in the tool's dynamic description
-        // (R6 task 022 / D-A-14), so the LLM can resolve it without prior knowledge.
+        // Task 044: tool-agnostic wording — the deleted generic playbook dispatcher is no
+        // longer named; capability tools accept the session file IDs via their declared
+        // fileIds argument (FR-08 default-all applies when omitted).
         return $"\n\nSession Files: This chat session has {usable.Count} uploaded file{pluralSuffix} available for tool calls: {fileNames}. " +
-               $"When the user asks to summarize, invoke the `invoke_playbook` tool with the chat-summarize playbook ID (see the tool's description for tenant-accessible playbooks) and pass these file IDs in the parameters object: {fileIds}.";
+               $"When a capability needs these files (e.g. summarize), pass their file IDs in the tool call's fileIds argument: {fileIds}.";
     }
 
 
@@ -883,7 +867,7 @@ public class SprkChatAgentFactory
             return null;
         }
 
-        // Terminal node = highest ExecutionOrder. Per PlaybookExecutionEngine and the
+        // Terminal node = highest ExecutionOrder. Per the frozen orchestration engine and the
         // DeliverOutputNodeExecutor contract, the last node in execution order is the
         // one whose ConfigJson carries the destination property (set by tasks 032/033/034/035).
         var terminal = nodes
@@ -904,7 +888,7 @@ public class SprkChatAgentFactory
     /// <summary>
     /// R6 task 042 (FR-30): Builds the system-prompt suffix that instructs the chat-agent
     /// LLM to emit ONLY a single-sentence acknowledgment when invoking
-    /// <c>invoke_playbook</c> for an intent that routes to a non-chat destination. The
+    /// a capability tool for an intent that routes to a non-chat destination. The
     /// playbook output renders elsewhere (workspace tab / form-prefill / side-effect); the
     /// chat-agent's parallel inline text would be a redundant render (R5 Gap A — path A vs
     /// path B parallelism eliminated structurally).
@@ -926,8 +910,8 @@ public class SprkChatAgentFactory
     /// <para>
     /// <b>Format</b>: two-newline-prefixed paragraph so the directive is isolated from
     /// preceding system-prompt sections (Active Capabilities, Session Files manifest,
-    /// entity enrichment). Names the literal <c>invoke_playbook</c> tool so the LLM has
-    /// the exact tool identifier the directive applies to.
+    /// entity enrichment). Tool-agnostic wording since task 044 — the LLM applies it to
+    /// whichever capability tool it invokes for this intent.
     /// </para>
     /// </remarks>
     internal static string BuildDedupDirective(Models.Ai.NodeDestination destination)
@@ -952,7 +936,7 @@ public class SprkChatAgentFactory
         // conversational primacy preserved — the LLM still acknowledges the intent).
         return $"\n\n## Render Routing Directive (R6 task 042 / FR-30, hardened B-G10)\n" +
                $"This user intent resolves to a playbook that renders its output to {target} " +
-               $"({surface}). When you invoke the `invoke_playbook` tool for this intent, " +
+               $"({surface}). When you invoke a capability tool for this intent, " +
                $"respond with a SINGLE-SENTENCE acknowledgment ONLY (e.g., " +
                $"\"Generating your result in {target}…\"). " +
                $"Do NOT emit the analysis content inline in this chat turn — the playbook " +
@@ -980,7 +964,7 @@ public class SprkChatAgentFactory
     /// </summary>
     /// <returns>
     /// A non-empty directive string instructing the LLM to emit a single brief acknowledgment
-    /// for the <c>invoke_playbook</c> tool call and to NOT generate analysis content inline
+    /// for the capability tool call and to NOT generate analysis content inline
     /// (the playbook will render the primary result in chat).
     /// </returns>
     /// <remarks>
@@ -1288,7 +1272,7 @@ public class SprkChatAgentFactory
         // suppressed to prevent hallucination + duplicate-fire.
         return $"\n\n## Render Routing Directive (Hotfix Wave B-G9b)\n" +
                $"This user intent resolves to a playbook that will render its result inline " +
-               $"in this chat conversation. When you invoke the `invoke_playbook` tool for " +
+               $"in this chat conversation. When you invoke a capability tool for " +
                $"this intent, respond with a SINGLE-SENTENCE acknowledgment ONLY (e.g., " +
                $"\"Working on that now…\" or \"I'll summarize that for you now.\"). " +
                $"Do NOT attempt to analyze, summarize, extract, or describe the document " +
@@ -1416,332 +1400,6 @@ public class SprkChatAgentFactory
 
         return new HashSet<string>(PlaybookCapabilities.All);
     }
-
-    // ─────────────────────────────────────────────────────────────────────────────
-    // R6 Pillar 3 / Task 022 (D-A-14) — Dynamic invoke_playbook tool description
-    // ─────────────────────────────────────────────────────────────────────────────
-
-    /// <summary>
-    /// ADR-014 cache-key prefix for the per-tenant dynamic invoke_playbook tool description
-    /// (R6 Pillar 3 / task 022). The <c>r6:</c> prefix scopes the cache to the R6 project
-    /// per project memory; the <c>chat-tools:</c> infix scopes to chat-side tooling.
-    /// </summary>
-    internal const string InvokePlaybookDescriptionCacheKeyPrefix = "r6:chat-tools:invoke-playbook-description:";
-
-    /// <summary>
-    /// ADR-014 TTL for the dynamic invoke_playbook description cache. Short enough that a
-    /// tenant admin adding/removing a playbook propagates to the LLM within minutes; long
-    /// enough to amortize the Dataverse round-trip across multiple chat sessions per tenant.
-    /// Matches the visibility-cache TTL used by <see cref="Handlers.InvokePlaybookHandler"/>.
-    /// </summary>
-    internal static readonly TimeSpan InvokePlaybookDescriptionCacheTtl = TimeSpan.FromMinutes(5);
-
-    /// <summary>
-    /// NFR-10 soft budget for the rendered invoke_playbook description. The 8K system-prompt
-    /// budget is shared across several context-providers (persona + chat history + memory +
-    /// knowledge retrieval + tool descriptions); allotting ~1500 chars (≈ 375 tokens) to this
-    /// single tool's description leaves comfortable headroom. When the rendered list would
-    /// exceed this budget, alphabetically-leading playbooks are listed in full and the rest
-    /// are summarized as "...and N more (request by name to discover their IDs)."
-    /// </summary>
-    internal const int InvokePlaybookDescriptionBudgetChars = 1500;
-
-    /// <summary>
-    /// R6 Pillar 3 / task 022 (D-A-14) — generates the dynamic <c>invoke_playbook</c> tool
-    /// description at chat-agent build time. Lists the tenant-accessible playbook IDs +
-    /// names + short descriptions so the LLM can pick the correct <c>playbookId</c> at
-    /// request time.
-    /// </summary>
-    /// <remarks>
-    /// <para>
-    /// <b>ADR-014 caching</b>: keyed by <c>{prefix}{tenantId}</c> in
-    /// <see cref="IMemoryCache"/> (per-process; cross-tenant isolation via the prefix).
-    /// TTL <see cref="InvokePlaybookDescriptionCacheTtl"/>. Cache miss falls through to the
-    /// Dataverse query; positive AND empty-list results are cached (LLM retries during a
-    /// turn shouldn't re-query).
-    /// </para>
-    /// <para>
-    /// <b>Tenant-accessible list</b>: mirrors the
-    /// <c>GET /api/ai/chat/playbooks</c> endpoint's surface — combines
-    /// <see cref="IPlaybookService.ListUserPlaybooksAsync"/> (when the http context carries
-    /// an <c>oid</c> claim) with <see cref="IPlaybookService.ListPublicPlaybooksAsync"/>,
-    /// deduplicated by ID. This is the canonical "what playbooks does this tenant see"
-    /// definition used elsewhere in the chat layer.
-    /// </para>
-    /// <para>
-    /// <b>NFR-10 budget</b>: render alphabetically-sorted entries until the running char
-    /// count would exceed <see cref="InvokePlaybookDescriptionBudgetChars"/>; append a
-    /// "...and N more (request by name to discover their IDs)" suffix when truncated. The
-    /// LLM can still discover truncated playbooks by name via a natural-language refusal +
-    /// follow-up — the description's purpose is to bias the LLM toward the most common
-    /// playbooks, not to be exhaustive.
-    /// </para>
-    /// <para>
-    /// <b>Empty list</b>: when no playbooks are tenant-accessible (rare but possible during
-    /// initial tenant onboarding), the description explicitly says "no playbooks currently
-    /// available" so the LLM doesn't invent fake GUIDs.
-    /// </para>
-    /// <para>
-    /// <b>ADR-015 telemetry</b>: emits <c>playbookCount</c> + <c>tenantId</c> +
-    /// <c>descriptionLengthChars</c> only. NEVER playbook names above Debug level — admin
-    /// debugging may rely on Debug-level rendering of the description but production
-    /// telemetry stays count-only.
-    /// </para>
-    /// </remarks>
-    private async Task<string> BuildInvokePlaybookDescriptionAsync(
-        IServiceProvider scopedProvider,
-        string tenantId,
-        HttpContext? httpContext,
-        CancellationToken cancellationToken)
-    {
-        // ADR-014: per-tenant cache lookup before the Dataverse round-trip.
-        var memoryCache = scopedProvider.GetService<IMemoryCache>();
-        var cacheKey = $"{InvokePlaybookDescriptionCacheKeyPrefix}{tenantId}";
-
-        if (memoryCache is not null
-            && memoryCache.TryGetValue<string>(cacheKey, out var cachedDescription)
-            && !string.IsNullOrEmpty(cachedDescription))
-        {
-            _logger.LogDebug(
-                "[D-A-14] Dynamic invoke_playbook description served from cache for tenant={TenantId} (lengthChars={LengthChars})",
-                tenantId, cachedDescription.Length);
-            return cachedDescription;
-        }
-
-        // Cache miss — query the tenant's accessible playbook list. Same surface as
-        // ChatEndpoints.ListPlaybooksAsync (the canonical "what playbooks does this tenant
-        // see" definition): merge user-owned + public, dedupe by id.
-        var playbookService = scopedProvider.GetService<IPlaybookService>();
-        if (playbookService is null)
-        {
-            // Pre-AI-DI environment (Analysis disabled). Surface a neutral description so
-            // the tool registration doesn't crash; the handler itself will refuse on every
-            // dispatch in this state. Do NOT cache — DI state may change.
-            _logger.LogDebug(
-                "[D-A-14] IPlaybookService not registered; using fallback invoke_playbook description for tenant={TenantId}",
-                tenantId);
-            return BuildEmptyPlaybookDescription();
-        }
-
-        var playbooks = await LoadTenantAccessiblePlaybooksAsync(
-            playbookService, httpContext, cancellationToken).ConfigureAwait(false);
-
-        var description = RenderInvokePlaybookDescription(playbooks);
-
-        // ADR-014: cache the result (including empty-list) under the per-tenant key so the
-        // LLM's retries within a turn don't re-query Dataverse.
-        if (memoryCache is not null)
-        {
-            memoryCache.Set(cacheKey, description, new MemoryCacheEntryOptions
-            {
-                AbsoluteExpirationRelativeToNow = InvokePlaybookDescriptionCacheTtl,
-                Size = 1
-            });
-        }
-
-        // ADR-015 telemetry: count + tenant + length only. NEVER playbook names above Debug.
-        _logger.LogInformation(
-            "[D-A-14][ADR-015] Dynamic invoke_playbook description generated for tenant={TenantId} playbookCount={PlaybookCount} descriptionLengthChars={LengthChars}",
-            tenantId, playbooks.Count, description.Length);
-
-        return description;
-    }
-
-    /// <summary>
-    /// Loads the tenant-accessible playbook list — owner playbooks (when an oid claim is
-    /// present on the http context) merged with public playbooks, deduplicated by ID. Same
-    /// definition as <c>ChatEndpoints.ListPlaybooksAsync</c> uses for the
-    /// <c>GET /api/ai/chat/playbooks</c> endpoint.
-    /// </summary>
-    /// <remarks>
-    /// Returns an alphabetically sorted (by Name) list so the rendered description is
-    /// deterministic across chat sessions (helps the LLM pattern-match the tool description
-    /// against earlier turns' descriptions). Sorting also ensures the NFR-10 truncation
-    /// strategy is reproducible — "first N alphabetically" is a stable choice.
-    /// </remarks>
-    private async Task<IReadOnlyList<PlaybookSummary>> LoadTenantAccessiblePlaybooksAsync(
-        IPlaybookService playbookService,
-        HttpContext? httpContext,
-        CancellationToken cancellationToken)
-    {
-        var seen = new HashSet<Guid>();
-        var playbooks = new List<PlaybookSummary>();
-        var query = new PlaybookQueryParameters { PageSize = 200 };
-
-        // 1. User-owned playbooks (when oid claim is available — standalone chat without
-        //    an authenticated user has no oid and gets the public-only list).
-        Guid? userId = null;
-        if (httpContext is not null)
-        {
-            var oid = httpContext.User?.FindFirst("oid")?.Value
-                ?? httpContext.User?.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
-            if (Guid.TryParse(oid, out var parsedUserId))
-            {
-                userId = parsedUserId;
-            }
-        }
-
-        if (userId.HasValue)
-        {
-            try
-            {
-                var userPlaybooks = await playbookService
-                    .ListUserPlaybooksAsync(userId.Value, query, cancellationToken)
-                    .ConfigureAwait(false);
-                foreach (var pb in userPlaybooks.Items)
-                {
-                    if (seen.Add(pb.Id))
-                    {
-                        playbooks.Add(pb);
-                    }
-                }
-            }
-            catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-            {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                // Match the ChatEndpoints handler's resilience pattern — log + continue with
-                // public-only. ADR-015: log exception type + userId only.
-                _logger.LogWarning(ex,
-                    "[D-A-14] Failed to load user playbooks for invoke_playbook description (userId={UserId} exceptionType={ExceptionType}); continuing with public-only",
-                    userId, ex.GetType().Name);
-            }
-        }
-
-        // 2. Public / shared playbooks (always queried regardless of user-id presence).
-        try
-        {
-            var publicPlaybooks = await playbookService
-                .ListPublicPlaybooksAsync(query, cancellationToken)
-                .ConfigureAwait(false);
-            foreach (var pb in publicPlaybooks.Items)
-            {
-                if (seen.Add(pb.Id))
-                {
-                    playbooks.Add(pb);
-                }
-            }
-        }
-        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            _logger.LogWarning(ex,
-                "[D-A-14] Failed to load public playbooks for invoke_playbook description (exceptionType={ExceptionType}); returning whatever subset loaded",
-                ex.GetType().Name);
-        }
-
-        // Alphabetical sort for deterministic rendering + reproducible NFR-10 truncation.
-        playbooks.Sort((a, b) => string.Compare(a.Name, b.Name, StringComparison.OrdinalIgnoreCase));
-        return playbooks;
-    }
-
-    /// <summary>
-    /// Renders the playbook list as a markdown-ish menu the LLM can consult when deciding
-    /// which <c>playbookId</c> to pass to <c>invoke_playbook</c>. Respects the NFR-10
-    /// budget (see <see cref="InvokePlaybookDescriptionBudgetChars"/>) — truncates with a
-    /// "...and N more" suffix when the rendered list would exceed the soft cap.
-    /// </summary>
-    /// <remarks>
-    /// Format:
-    /// <code>
-    /// Invoke any registered playbook by ID with parameters. Available playbooks for this tenant:
-    /// - {guid}: {name} — {short description}
-    /// - {guid}: {name} — {short description}
-    /// ...
-    /// Pass the playbookId field with one of the values above.
-    /// </code>
-    /// Per-entry description is truncated to <c>~120 chars</c> to keep the menu legible —
-    /// the full description is available via the playbook's own metadata when the LLM
-    /// invokes it.
-    /// </remarks>
-    internal static string RenderInvokePlaybookDescription(IReadOnlyList<PlaybookSummary> playbooks)
-    {
-        if (playbooks is null || playbooks.Count == 0)
-        {
-            return BuildEmptyPlaybookDescription();
-        }
-
-        const string header = "Invoke any registered playbook by ID with parameters. Available playbooks for this tenant:\n";
-        const string trailer = "\nPass the playbookId field with one of the values above. The 'parameters' object carries optional template-substitution variables the playbook's nodes consume.";
-
-        var sb = new System.Text.StringBuilder(header.Length + trailer.Length + playbooks.Count * 80);
-        sb.Append(header);
-
-        int includedCount = 0;
-        int truncatedCount = 0;
-        int currentLength = header.Length + trailer.Length;
-
-        foreach (var pb in playbooks)
-        {
-            var entry = FormatPlaybookEntry(pb);
-            // Reserve room for the suffix line in case we need to truncate later. The
-            // "...and N more" suffix is bounded by a short max length (under 80 chars even
-            // for very large remaining counts).
-            const int reservedForSuffix = 80;
-            if (currentLength + entry.Length + reservedForSuffix > InvokePlaybookDescriptionBudgetChars
-                && includedCount > 0)
-            {
-                truncatedCount = playbooks.Count - includedCount;
-                break;
-            }
-            sb.Append(entry);
-            currentLength += entry.Length;
-            includedCount++;
-        }
-
-        if (truncatedCount > 0)
-        {
-            sb.Append("- ...and ");
-            sb.Append(truncatedCount);
-            sb.Append(" more (request by name to discover their IDs).\n");
-        }
-
-        sb.Append(trailer);
-        return sb.ToString();
-    }
-
-    /// <summary>
-    /// Formats a single playbook as a menu line:
-    /// <c>"- {id}: {name} — {short description}\n"</c>. The short description is truncated
-    /// to ~120 chars to keep the rendered menu legible inside the NFR-10 budget.
-    /// </summary>
-    private static string FormatPlaybookEntry(PlaybookSummary pb)
-    {
-        const int shortDescriptionCap = 120;
-        var name = pb.Name ?? "(unnamed)";
-        var rawDescription = pb.Description ?? string.Empty;
-        // Collapse newlines so each entry is exactly one line — critical for LLM parsing.
-        var description = rawDescription
-            .Replace("\r", " ")
-            .Replace("\n", " ")
-            .Trim();
-        if (description.Length > shortDescriptionCap)
-        {
-            description = description.Substring(0, shortDescriptionCap - 1) + "…";
-        }
-
-        if (string.IsNullOrEmpty(description))
-        {
-            return $"- {pb.Id:D}: {name}\n";
-        }
-        return $"- {pb.Id:D}: {name} — {description}\n";
-    }
-
-    /// <summary>
-    /// Description for the zero-playbook case — used both when the tenant has no accessible
-    /// playbooks and as the safe fallback when <see cref="IPlaybookService"/> is unavailable
-    /// (AI feature disabled). The LLM still sees a coherent tool description; the
-    /// <see cref="Handlers.InvokePlaybookHandler"/> refuses on dispatch in this state.
-    /// </summary>
-    internal static string BuildEmptyPlaybookDescription() =>
-        "Invoke any registered playbook by ID with parameters. " +
-        "No playbooks currently available for this tenant. " +
-        "Use natural language to request analysis instead of calling this tool.";
 
     /// <summary>
     /// Factory-instantiates <see cref="DocumentContextService"/> and enriches the

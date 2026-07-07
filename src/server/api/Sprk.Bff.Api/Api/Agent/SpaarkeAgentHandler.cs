@@ -25,7 +25,7 @@ public class SpaarkeAgentHandler : ActivityHandler
     // TODO: Inject AgentTokenService when MCI-014 is implemented — provides OBO token exchange for agent-to-BFF calls.
     // TODO: Inject ChatSessionManager when agent message routing is wired — routes messages to existing chat service.
     // TODO: Inject PlaybookCatalogService when playbook listing is wired — returns available playbooks for the agent.
-    // TODO: Inject PlaybookExecutionEngine when playbook execution is wired — enqueues playbook runs.
+    // TODO: Inject the playbook orchestration facade when playbook execution is wired — enqueues playbook runs.
     // TODO: Inject HandoffUrlBuilder for generating deep-link URLs in Adaptive Card responses.
 
     /// <summary>
@@ -161,7 +161,7 @@ public class SpaarkeAgentHandler : ActivityHandler
 
             // TODO: Route invoke actions to appropriate BFF service handlers.
             // Known action verbs to support:
-            //   "run-playbook"    → PlaybookExecutionEngine.EnqueueAsync()
+            //   "run-playbook"    → playbook orchestration enqueue
             //   "view-document"   → Generate HandoffUrlBuilder deep link
             //   "search-documents"→ Forward to existing search service
             //   "open-workspace"  → Generate workspace deep link via HandoffUrlBuilder

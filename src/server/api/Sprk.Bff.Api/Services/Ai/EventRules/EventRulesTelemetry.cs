@@ -5,7 +5,7 @@ namespace Sprk.Bff.Api.Services.Ai.EventRules;
 /// <summary>
 /// Metrics for the Event entry path (NFR-09: the per-user daily budget is
 /// "enforced AND telemetered"; ADR-016 cost visibility). OpenTelemetry-compatible;
-/// pattern mirrors <see cref="Sprk.Bff.Api.Telemetry.R5SummarizeTelemetry"/>.
+/// pattern mirrors the canonical AI telemetry singletons (AiTelemetry / RagTelemetry).
 ///
 /// Locked instrument schema:
 ///

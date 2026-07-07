@@ -46,12 +46,17 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// <c>refine</c> reads <see cref="ChatInvocationContext.AnalysisId"/>.
 /// </para>
 /// <para>
-/// <strong>Identity note (audit F-1, G-P0 ruling 2026-07-05 accept-until-cutover)</strong>:
+/// <strong>Identity note (audit F-1; task-044 re-trace 2026-07-06)</strong>:
 /// <c>rerun</c> delegates to <see cref="IAnalysisOrchestrationService.ExecutePlaybookAsync"/>,
-/// whose engine persists results under application identity. That leg is pre-existing
-/// production behavior; its declared row (<c>permission_scope = app-only-engine</c>,
-/// <c>side_effect_class = write</c>) makes the reach explicit in the catalog. P3 task 044
-/// deletes/OBO-migrates the remaining app-only engine legs.
+/// whose engine persists results under application identity. Task 044 deleted the three
+/// F-1 legacy legs (the generic playbook dispatch, analysis-query, and working-document
+/// handlers); this is the LAST LLM-reachable app-only engine leg, retained because the
+/// re-run capability is live product surface and the engine is frozen (OBO-migrating the
+/// node executors is out of scope per spec §Out of Scope). The reach stays EXPLICIT in the
+/// catalog (<c>permission_scope = app-only-engine</c>); blast radius is bounded to the
+/// session's OWN playbook + document (both BFF-resolved from session context — the LLM
+/// supplies only optional instructions, never target ids). Escalated for a standing ruling
+/// in the task-044 report; candidate for the FR-P4-01 Track-B completion audit.
 /// </para>
 /// <para>
 /// <strong>ADR compliance</strong>: ADR-010 auto-discovered (zero manual DI); ADR-013 lives in
@@ -75,17 +80,20 @@ public sealed class AnalysisExecutionHandler : IToolHandler
     private readonly IAnalysisOrchestrationService _analysisService;
     private readonly IChatClient _chatClient;
     private readonly IHttpContextAccessor _httpContextAccessor;
+    private readonly IEngineOutputLedgerAdapter _engineOutputLedger;
     private readonly ILogger<AnalysisExecutionHandler> _logger;
 
     public AnalysisExecutionHandler(
         IAnalysisOrchestrationService analysisService,
         IChatClient chatClient,
         IHttpContextAccessor httpContextAccessor,
+        IEngineOutputLedgerAdapter engineOutputLedger,
         ILogger<AnalysisExecutionHandler> logger)
     {
         _analysisService = analysisService ?? throw new ArgumentNullException(nameof(analysisService));
         _chatClient = chatClient ?? throw new ArgumentNullException(nameof(chatClient));
         _httpContextAccessor = httpContextAccessor ?? throw new ArgumentNullException(nameof(httpContextAccessor));
+        _engineOutputLedger = engineOutputLedger ?? throw new ArgumentNullException(nameof(engineOutputLedger));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -319,8 +327,36 @@ public sealed class AnalysisExecutionHandler : IToolHandler
             return RerunError(tool, startedAt, $"Re-analysis failed: {ex.Message}");
         }
 
-        // Emit the document_replace SSE event with the full analysis output.
+        // ── E-2 engine-output→ledger adapter (ADR-040 / FR-P1-05; re-homed here by
+        // FR-P3-05 task 044 from the deleted generic playbook-dispatch leg) ─────────────
+        // At this exact point the frozen engine's aggregated run output is in hand and
+        // NOTHING has rendered (document_replace below + the LLM's assistant turn are the
+        // renders). The adapter writes the addressable SessionOutput ledger entry through
+        // the task-021 IOutputRouter write path FIRST — storage precedes rendering. A
+        // ledger-write failure propagates to ExecuteChatAsync's generic catch and fails
+        // the tool call: unstored output is never rendered (ADR-040 D2/D8). A null entry
+        // means no chat session was resolvable (record-context runs join the ledger at
+        // P3 FR-P3-08).
         var analysisOutput = outputBuilder.ToString();
+        string? ledgerKey = null;
+        if (!string.IsNullOrWhiteSpace(analysisOutput))
+        {
+            var ledgerEntry = await _engineOutputLedger
+                .RecordAsync(
+                    context.TenantId,
+                    context.ChatSessionId,
+                    context.PlaybookId.Value,
+                    new EngineRunOutput
+                    {
+                        RunId = analysisId,
+                        TextContent = analysisOutput,
+                    },
+                    cancellationToken)
+                .ConfigureAwait(false);
+            ledgerKey = ledgerEntry?.Key;
+        }
+
+        // Emit the document_replace SSE event with the full analysis output.
         if (!string.IsNullOrWhiteSpace(analysisOutput))
         {
             var replaceData = new ChatSseDocumentReplaceData(
@@ -351,7 +387,7 @@ public sealed class AnalysisExecutionHandler : IToolHandler
             HandlerId,
             tool.Id,
             tool.Name,
-            data: new AnalysisExecutionResult { Method = MethodRerun, Text = confirmation, AnalysisId = analysisId },
+            data: new AnalysisExecutionResult { Method = MethodRerun, Text = confirmation, AnalysisId = analysisId, LedgerKey = ledgerKey },
             summary: confirmation,
             confidence: 1.0,
             execution: new ToolExecutionMetadata
@@ -538,5 +574,13 @@ public sealed class AnalysisExecutionHandler : IToolHandler
         public string Method { get; set; } = string.Empty;
         public string Text { get; set; } = string.Empty;
         public Guid? AnalysisId { get; set; }
+
+        /// <summary>
+        /// Addressable session-ledger key of the stored rerun output
+        /// (<c>{bindingId}@t{n}</c> — E-2 adapter, ADR-040; re-homed by FR-P3-05 task 044).
+        /// Later turns reference the output by this key. Null for the refine method and
+        /// when no chat session was resolvable.
+        /// </summary>
+        public string? LedgerKey { get; set; }
     }
 }

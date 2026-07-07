@@ -33,7 +33,7 @@ namespace Sprk.Bff.Api.Services.Compose;
 /// <c>IPlaybookOrchestrationService</c>, or any other AI-internal type. When AI is needed
 /// for the Compose AI-action dispatch endpoint (task 024
 /// <c>POST /api/compose/action/{consumerType}</c>), consumers consume
-/// <c>IConsumerRoutingService</c> + <c>IInvokePlaybookAi</c> from
+/// <c>IConsumerRoutingService</c> + the since-deleted generic playbook facade from
 /// <c>Services/Ai/PublicContracts/</c> only. That dispatch path is part of the endpoint
 /// composition in task 024; this orchestration service is intentionally narrower (it owns
 /// the document-lifecycle orchestration, not the AI dispatch).

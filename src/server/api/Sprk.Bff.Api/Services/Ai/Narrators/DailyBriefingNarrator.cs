@@ -46,7 +46,7 @@ namespace Sprk.Bff.Api.Services.Ai.Narrators;
 /// <para>
 /// Unsealed (R7 Wave 12 post-T135 CI fix 2026-06-30 — PR #520) so
 /// <see cref="NullDailyBriefingNarrator"/> can subclass it for the compound-OFF kill-switch
-/// path (mirrors <see cref="Chat.NullSessionSummarizeOrchestrator"/> + ADR-032 §F.1).
+/// path (mirrors <see cref="Chat.NullSessionDispatchOrchestrator"/> + ADR-032 §F.1).
 /// </para>
 /// <para>
 /// FR-P0-06 (spaarke-ai-architecture-redesign-r1 task 007): first <see cref="ICodedWorkflow"/>
@@ -96,7 +96,7 @@ public class DailyBriefingNarrator : ICodedWorkflow
     /// (<see cref="AnalysisActionService"/> + <see cref="IOpenAiClient"/>) are absent. The
     /// Null override never reads the nulled fields — it throws
     /// <see cref="Sprk.Bff.Api.Configuration.FeatureDisabledException"/> before they are
-    /// dereferenced. Matches the canonical pattern in <see cref="Chat.SessionSummarizeOrchestrator"/>.
+    /// dereferenced. Matches the canonical pattern in <see cref="Chat.SessionDispatchOrchestrator"/>.
     /// </summary>
     protected DailyBriefingNarrator(ILogger<DailyBriefingNarrator> logger)
     {

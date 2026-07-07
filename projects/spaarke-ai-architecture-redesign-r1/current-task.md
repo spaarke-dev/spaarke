@@ -9,10 +9,20 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | 044 — engine-shell deletions (serial W-P3-B; deps 040 ✅ + 043 ✅) — dispatching after this wave-close commit |
-| **Step** | W-P3-A COMPLETE: 040 + 041 + 042 + 043 all ✅. G-P2 fix wave deployed @ c8ff248b5 (operator round-2 spot-check available). |
+| **Task** | W-P3-C: 045 (client consolidation: ConversationPane ≤300 + ONE SSE path) + 047 (work-product record persistence) — dispatching |
+| **Step** | 044 ✅ COMPLETE (engine shells + F-1 legs deleted, −11,849 lines). P3: 040–044 ✅. |
 | **Status** | autonomous execution |
-| **Next Action** | Commit 040+042 wave (pull --rebase), push, portfolio 40, dispatch 044 (SERIAL). Then W-P3-C (045 + 047 parallel) → 046 → gate-048 deploy + STOP for operator UAT. |
+| **Next Action** | On W-P3-C return: wave close, then 046 (widget layer; deps 045) → gate-048 deploy (BFF + SpaarkeAi) + STOP for operator UAT. |
+
+### 044 outcomes (Step 9.5 PASS ×2)
+- Deleted: PlaybookExecutionEngine (+iface), SessionSummarizeOrchestrator (+Null +tests; /summarize → SessionDispatchOrchestrator = 4th caller of THE seam; FR-04 interjection retired; /summarize now emits chips chunk), FileSummarizeService + DocumentProfileService (call sites absorbed onto ActionRunner primitives; summarize-file ENGINE FALLBACK deleted — row-without-Action = honest error; new NullActionResolver/NullActionRunner peers), F-1 legs InvokePlaybookHandler/AnalysisQueryHandler/WorkingDocumentHandler + IInvokePlaybookAi facade triangle + ~330 lines D-A-14 machinery (5 tool rows DEACTIVATED on spaarkedev1: 7389739e/8e33860b/d90f647e/3db0c084/ae580d84; catalog stays Healthy), orphaned R5SummarizeTelemetry.
+- E-2 adapter relocated: AnalysisExecutionHandler.RerunAnalysisAsync ledger-writes AFTER engine drain BEFORE render (EngineRunOutput DTO decouples from deleted facade); 047's record-context leg pre-pointed.
+- 🔔 RESIDUAL F-1 (standing ruling wanted at 048): analysis.rerun → app-only engine leg is the LAST LLM-reachable app-only write; ungated per operator G-P2 ruling; bounded (permission_scope=app-only-engine; BFF-resolved targets; reanalyze-gated; ledger-written). Recommended accept-with-note until engine retirement; FR-P4-01 re-verifies.
+- Frozen engine: diff-stat EMPTY (one comment-hit exception documented). Track-B additions: DocumentStreamEvent plumbing emitter-less; WorkingDocumentService kept (endpoint callers); engine-era summarize playbook JSONs.
+
+## Parallel Execution
+
+W-P3-C dispatching: 045 + 047 (parallel; deps 038 ✅).
 
 ### W-P3-A outcomes (040/042 — both Step 9.5 PASS; 041/043 in prior commit)
 - **040**: Binding table = THE routing surface. 8 consumers re-pointed; LinearConsumersOptions/WorkspaceOptions(+Validator)/InsightsPlaybookNameMapOptions DELETED grep-zero (src comments included); E-2 adapter reverse-resolves real Binding ids (GetBindingByPlaybookIdAsync, 5-min cache; degrade = playbookId identity for unregistered playbooks); insights-ask default+matter-health-single + insights-search rows seeded (f32a7931/f82a7931/f89fa738; named-row priority 400); universal-ingest@v1 NOT seeded (playbook absent on dev — honest error; seed instruction in infra mirror). W-1: live App Service key LinearConsumers__MaxOutputTokens__summarize_file=4000 → ActionRunner.MaxOutputTokensCeiling=4000 (delete the dead env keys at next hygiene pass: Workspace__*PlaybookId ×5, LinearConsumers__* ×2, Insights__Playbooks__Map__predict_matter_cost_v1).
@@ -101,6 +111,4 @@ Soft-slash deterministic invocation (FR-P2-05 criterion 2) is PARTIAL BY DESIGN:
 - Eval 46→55 cases / 20 families (+full-catalog from ConsumerTypes.All, compound, 5 injection); P2LoopInjectionEvalSuiteTests (16 live-component tests); eval gate 29/29.
 - **FOUND+FIXED real defect**: post-034 nothing gated loop-invoked typed-handler write tools → SideEffectGateAIFunction (declared-class wrap, fail-closed, suspends into the ONE gate, marker-before-render). Reject works end-to-end; typed-handler confirm-RESUME returns 422 until P3 FR-P3-03 lands it.
 
-## Parallel Execution
-
-(none — STOPPED at gate 038 for operator UAT)
+(older phase history above; the LIVE "## Parallel Execution" section is near the top of this file)

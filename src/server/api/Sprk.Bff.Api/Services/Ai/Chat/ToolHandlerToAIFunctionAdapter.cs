@@ -153,7 +153,7 @@ public sealed class ToolHandlerToAIFunctionAdapter : AIFunction
     /// Optional document-stream SSE writer delegate (R6 Wave 9 / ADR-033). When non-null, the
     /// adapter forwards it onto every per-invocation <see cref="ChatInvocationContext"/> via
     /// <see cref="ChatInvocationContext.DocumentStreamWriter"/>. Handlers that emit
-    /// <see cref="Models.Ai.Chat.DocumentStreamEvent"/> (currently <c>WorkingDocumentHandler</c>)
+    /// <see cref="Models.Ai.Chat.DocumentStreamEvent"/> (no current emitter post task 044)
     /// read the field from the context and emit Start → N×Token → End events directly during
     /// streaming. When null, the field stays null on the per-call context and handlers MUST
     /// degrade gracefully (e.g., return <see cref="ToolResult.Failure"/> with a clear
@@ -163,7 +163,7 @@ public sealed class ToolHandlerToAIFunctionAdapter : AIFunction
     /// Optional analysis id from the active chat session (R6 Wave 9 / ADR-033 Stage 4). When
     /// non-null, the adapter forwards it onto every per-invocation
     /// <see cref="ChatInvocationContext"/> via <see cref="ChatInvocationContext.AnalysisId"/>.
-    /// Currently consumed by <c>WorkingDocumentHandler</c> (fetch + write-back operations
+    /// Historically consumed by the deleted working-document handler family (fetch + write-back operations
     /// against <c>sprk_analysisoutput</c>). Sourced by <see cref="Chat.SprkChatAgentFactory"/>
     /// from <c>ChatContext.AnalysisMetadata["analysisId"]</c>. Null when the chat session is
     /// not bound to an analysis — handlers that require it MUST return
@@ -391,12 +391,12 @@ public sealed class ToolHandlerToAIFunctionAdapter : AIFunction
             RequestedToolName = _tool.Name,
             ToolArgumentsJson = argsJson,
             // ADR-033 (R6 Wave 9): forward the adapter-level document-stream writer onto
-            // the per-call context so handlers (currently WorkingDocumentHandler) can emit
+            // the per-call context so document-streaming handlers can emit
             // Start / Token / End events directly during streaming. Null when not wired —
             // handlers MUST check for null per ADR-033 §3.1.
             DocumentStreamWriter = _documentStreamWriter,
             // ADR-033 Stage 4 (R6 Wave 9): forward the adapter-level analysis id onto the
-            // per-call context. WorkingDocumentHandler reads it to fetch the current working
+            // per-call context. Document-persistence handlers read it to fetch the current working
             // document and to target write-back persistence. Null when standalone chat —
             // handlers that require it MUST return ToolResult.Failure with diagnostic.
             AnalysisId = _analysisId,

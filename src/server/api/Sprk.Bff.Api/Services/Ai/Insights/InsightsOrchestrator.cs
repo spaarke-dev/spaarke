@@ -16,7 +16,7 @@ namespace Sprk.Bff.Api.Services.Ai.Insights;
 /// <summary>
 /// Phase 1.5 Zone A implementation of <see cref="IInsightsAi"/> — orchestrates the
 /// synthesis path (<see cref="AnswerQuestionAsync"/> via D-P13 cache +
-/// <see cref="IPlaybookExecutionEngine"/>), the ingest path
+/// <see cref="IPlaybookOrchestrationService"/>), the ingest path
 /// (<see cref="RunIngestAsync"/> via the universal-ingest@v1 JPS playbook), and embedding
 /// generation (<see cref="EmbedTextAsync"/> via <see cref="IOpenAiClient"/>) for
 /// Zone B callers.
@@ -24,7 +24,7 @@ namespace Sprk.Bff.Api.Services.Ai.Insights;
 /// <remarks>
 /// <para>
 /// <b>Zone A placement</b>: lives under <c>Services/Ai/Insights/</c> and freely imports
-/// AI internals (<see cref="IPlaybookExecutionEngine"/>, <see cref="IOpenAiClient"/>,
+/// AI internals (<see cref="IOpenAiClient"/>,
 /// <see cref="IInsightsPlaybookExecutionCache"/>, <see cref="IPlaybookOrchestrationService"/>).
 /// Zone B callers receive <see cref="IInsightsAi"/> via DI and have no visibility into any
 /// of these types.
@@ -94,7 +94,7 @@ public sealed class InsightsOrchestrator : IInsightsAi
     private static readonly EventId IngestPlaybookAdapterMismatchEvent = new(8062, "InsightsRunIngestPlaybookAdapterMismatch");
     private static readonly EventId IngestPlaybookFailedEvent = new(8063, "InsightsRunIngestPlaybookFailed");
 
-    private readonly IPlaybookExecutionEngine _engine;
+    private readonly Microsoft.AspNetCore.Http.IHttpContextAccessor _httpContextAccessor;
     private readonly IInsightsPlaybookExecutionCache _cache;
     private readonly IOpenAiClient _openAi;
     private readonly IPlaybookOrchestrationService _playbookOrchestration;
@@ -105,7 +105,7 @@ public sealed class InsightsOrchestrator : IInsightsAi
     private readonly ILogger<InsightsOrchestrator> _logger;
 
     public InsightsOrchestrator(
-        IPlaybookExecutionEngine engine,
+        Microsoft.AspNetCore.Http.IHttpContextAccessor httpContextAccessor,
         IInsightsPlaybookExecutionCache cache,
         IOpenAiClient openAi,
         IPlaybookOrchestrationService playbookOrchestration,
@@ -115,7 +115,7 @@ public sealed class InsightsOrchestrator : IInsightsAi
         AssistantToolCallHandler assistantHandler,
         ILogger<InsightsOrchestrator> logger)
     {
-        _engine = engine ?? throw new ArgumentNullException(nameof(engine));
+        _httpContextAccessor = httpContextAccessor ?? throw new ArgumentNullException(nameof(httpContextAccessor));
         _cache = cache ?? throw new ArgumentNullException(nameof(cache));
         _openAi = openAi ?? throw new ArgumentNullException(nameof(openAi));
         _playbookOrchestration = playbookOrchestration ?? throw new ArgumentNullException(nameof(playbookOrchestration));
@@ -427,11 +427,14 @@ public sealed class InsightsOrchestrator : IInsightsAi
             TenantId: request.TenantId,
             Ttl: null); // Defer to InsightsPlaybookExecutionCache.DefaultTtl (D-P13: 5 min).
 
-        // Cache wraps the engine. On HIT the engine factory is never invoked.
-        // On MISS the cache invokes the factory which drives ExecuteBatchAsync and
-        // drains the stream looking for BOTH the ReturnInsightArtifactNode output (D-P12)
-        // and the DeclineToFindNode output (task 071). The result carries whichever path
-        // the playbook took.
+        // Cache wraps the frozen engine facade. On HIT the invocation factory is never
+        // invoked. On MISS the cache invokes the factory, which drives
+        // IPlaybookOrchestrationService.ExecuteAsync (FR-P3-05: the deleted engine shell's
+        // ExecuteBatchAsync was a pass-through to this exact call — request-scoped
+        // HttpContext resolved here instead of inside the shell) and drains the stream
+        // looking for BOTH the ReturnInsightArtifactNode output (D-P12) and the
+        // DeclineToFindNode output (task 071). The result carries whichever path the
+        // playbook took.
         bool factoryWasCalled = false;
 
         var runResult = await _cache.GetOrExecuteAsync(
@@ -439,7 +442,10 @@ public sealed class InsightsOrchestrator : IInsightsAi
             engineInvocation: ct =>
             {
                 factoryWasCalled = true;
-                return _engine.ExecuteBatchAsync(
+                var httpContext = _httpContextAccessor.HttpContext
+                    ?? throw new InvalidOperationException(
+                        "HTTP context is required for insights synthesis playbook execution.");
+                return _playbookOrchestration.ExecuteAsync(
                     new PlaybookRunRequest
                     {
                         PlaybookId = request.Question,
@@ -448,10 +454,11 @@ public sealed class InsightsOrchestrator : IInsightsAi
                         // facade. The synthesis playbook (D-P14) uses LiveFactNode +
                         // IndexRetrieveNode for cohort retrieval; it does NOT process
                         // ad-hoc DocumentIds. We pass an empty array to satisfy the
-                        // engine's required[] contract; the playbook ignores it.
+                        // orchestrator's required[] contract; the playbook ignores it.
                         DocumentIds = Array.Empty<Guid>(),
                         Parameters = enrichedParameters
                     },
+                    httpContext,
                     ct);
             },
             cancellationToken);
@@ -552,11 +559,11 @@ public sealed class InsightsOrchestrator : IInsightsAi
     /// → drain stream → find emission node output → project to <see cref="InsightsIngestResult"/>.
     /// </para>
     /// <para>
-    /// <b>Why ExecuteAppOnlyAsync, not IPlaybookExecutionEngine.ExecuteBatchAsync</b>: the
+    /// <b>Why ExecuteAppOnlyAsync, not the request-scoped ExecuteAsync overload</b>: the
     /// ingest path is invoked from a background <c>BackgroundService</c> (D-P8 SPE-upload
-    /// consumer / Service Bus). <see cref="IPlaybookExecutionEngine.ExecuteBatchAsync"/>
-    /// requires an <see cref="Microsoft.AspNetCore.Http.HttpContext"/> (per
-    /// <c>PlaybookExecutionEngine</c> line 91); app-only invocation explicitly avoids it.
+    /// consumer / Service Bus). <see cref="IPlaybookOrchestrationService.ExecuteAsync"/>
+    /// requires an <see cref="Microsoft.AspNetCore.Http.HttpContext"/>; app-only
+    /// invocation explicitly avoids it.
     /// </para>
     /// <para>
     /// <b>Failure handling</b> (post Wave C-G4 retirement): on playbook failure (engine

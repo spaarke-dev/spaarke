@@ -11,7 +11,7 @@ namespace Sprk.Bff.Api.Services.Ai.Narrators;
 /// <remarks>
 /// <para>
 /// P3 Fail-Fast pattern per ADR-030 + ADR-032 §F.1 — mirrors
-/// <see cref="Chat.NullSessionSummarizeOrchestrator"/>. The Daily Briefing endpoints
+/// <see cref="Chat.NullSessionDispatchOrchestrator"/>. The Daily Briefing endpoints
 /// (<c>POST /api/ai/daily-briefing/render</c> and <c>POST /api/ai/daily-briefing/narrate</c>,
 /// mapped unconditionally by <see cref="Infrastructure.DI.EndpointMappingExtensions"/>) inject
 /// <see cref="DailyBriefingNarrator"/> directly. Without a Null subclass registered on the

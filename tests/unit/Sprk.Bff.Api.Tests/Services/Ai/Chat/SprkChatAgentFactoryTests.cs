@@ -183,13 +183,13 @@ public class SprkChatAgentFactoryTests
 
     // ── R5 task 015 / R5 task 024 — REMOVED in R6 Wave 10 / task 023 (Pillar 3 cleanup) ──
     // The InvokeSummarizePlaybookTool + InvokeInsightsQueryTool bridges were deleted in
-    // favor of the generic InvokePlaybookHandler (R6 Pillar 3 / task 021). The factory no
+    // favor of the generic playbook dispatcher (R6 Pillar 3 / task 021; deleted by task 044). The factory no
     // longer registers `invoke_summarize_playbook` or `insights.query` AIFunctions; the
-    // generic `invoke_playbook` tool is surfaced via the data-driven block (FR-11) from the
+    // catalog capability tools are surfaced via the data-driven block (FR-11) from the
     // SYS-Invoke Playbook Dataverse seed row. Capability gating moves from C# constants
     // (PlaybookCapabilities.Summarize / .InsightsQuery) to the playbook-visibility lookup
-    // inside InvokePlaybookHandler.IsTenantVisibleAsync (per task 021). Test coverage for
-    // the generic dispatcher lives in InvokePlaybookHandlerTests; integration coverage for
+    // inside the dispatcher (per task 021; deleted by task 044). Test coverage for
+    // the generic dispatcher was deleted with it (task 044); integration coverage for
     // the data-driven block lives in SprkChatAgentFactoryDataDrivenToolsTests.
     //
     // Removed tests:
@@ -254,8 +254,8 @@ public class SprkChatAgentFactoryTests
         agent.Context.SystemPrompt.Should().Contain("schedule.docx");
         agent.Context.SystemPrompt.Should().Contain("file-001");
         agent.Context.SystemPrompt.Should().Contain("file-002");
-        agent.Context.SystemPrompt.Should().Contain("invoke_playbook",
-            because: "post-task-023 the suffix MUST name the generic invoke_playbook tool (the chat-summarize playbook ID is resolved at LLM call time)");
+        agent.Context.SystemPrompt.Should().Contain("fileIds argument",
+            because: "post-task-044 the suffix is tool-agnostic — it tells the LLM to pass the session file IDs via the capability tool's fileIds argument");
         agent.Context.SystemPrompt.Should().Contain("2 uploaded file",
             because: "the suffix announces the file count so the LLM can reason about cardinality");
     }
@@ -305,9 +305,9 @@ public class SprkChatAgentFactoryTests
             because: "the original base prompt must be preserved at the start (any additive directives follow it)");
         agent.Context.SystemPrompt.Should().NotContain("Session Files:");
         // Post-task-023: the legacy `invoke_summarize_playbook` tool name was deleted; the
-        // generic `invoke_playbook` is now the canonical name. With no uploaded files, the
+        // the manifest suffix is tool-agnostic (task 044). With no uploaded files, the
         // manifest suffix is absent — so neither name should appear.
-        agent.Context.SystemPrompt.Should().NotContain("invoke_playbook",
+        agent.Context.SystemPrompt.Should().NotContain("Session Files:",
             because: "the tool-name binding only appears via the manifest suffix; with no uploaded files there is no suffix");
     }
 

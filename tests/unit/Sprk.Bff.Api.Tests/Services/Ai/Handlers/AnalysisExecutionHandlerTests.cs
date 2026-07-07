@@ -36,6 +36,10 @@ public sealed class AnalysisExecutionHandlerTests : TypedToolHandlerTestFixture
     private readonly Mock<IAnalysisOrchestrationService> _analysisServiceMock = new();
     private readonly Mock<IChatClient> _chatClientMock = new();
     private readonly Mock<IHttpContextAccessor> _httpContextAccessorMock = new();
+    // Task 044: E-2 adapter re-homed onto the rerun leg (ledger write BEFORE document_replace).
+    // Loose mock returns null (no resolvable chat session) by default — the render still
+    // proceeds per the adapter's documented session-scope boundary.
+    private readonly Mock<Sprk.Bff.Api.Services.Ai.IEngineOutputLedgerAdapter> _engineOutputLedgerMock = new();
     private readonly List<ChatSseEvent> _capturedEvents = new();
 
     public AnalysisExecutionHandlerTests()
@@ -47,6 +51,7 @@ public sealed class AnalysisExecutionHandlerTests : TypedToolHandlerTestFixture
         _analysisServiceMock.Object,
         _chatClientMock.Object,
         _httpContextAccessorMock.Object,
+        _engineOutputLedgerMock.Object,
         CreateLogger<AnalysisExecutionHandler>());
 
     private static AnalysisTool BuildExecutionTool(string method) =>
@@ -242,6 +247,57 @@ public sealed class AnalysisExecutionHandlerTests : TypedToolHandlerTestFixture
         var replaceData = replaceEvents[0].Data as ChatSseDocumentReplaceData;
         replaceData!.Html.Should().Contain(analysisHtml);
         replaceData.Metadata.PlaybookId.Should().Be(TestPlaybookId.ToString());
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_Rerun_WritesLedgerEntry_BeforeDocumentReplaceRender()
+    {
+        // ADR-040 store-precedes-render — E-2 adapter re-homed onto the rerun leg (task 044).
+        const string analysisHtml = "<h1>Analysis Results</h1>";
+        SetupPlaybookExecutionReturns(
+            AnalysisStreamChunk.Metadata(TestAnalysisId, "test-doc.pdf"),
+            AnalysisStreamChunk.TextChunk(analysisHtml));
+        var ledgerWrittenBeforeReplace = false;
+        _engineOutputLedgerMock
+            .Setup(l => l.RecordAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), TestPlaybookId,
+                It.Is<Sprk.Bff.Api.Services.Ai.EngineRunOutput>(o =>
+                    o.RunId == TestAnalysisId && o.TextContent!.Contains(analysisHtml)),
+                It.IsAny<CancellationToken>()))
+            .Callback(() => ledgerWrittenBeforeReplace = !_capturedEvents.Any(e => e.Type == "document_replace"))
+            .ReturnsAsync((Sprk.Bff.Api.Models.Ai.Chat.SessionOutput?)null);
+        var handler = CreateHandler();
+
+        var result = await handler.ExecuteChatAsync(BuildRerunContext(), BuildExecutionTool("rerun"), CancellationToken.None);
+
+        result.Success.Should().BeTrue();
+        _engineOutputLedgerMock.Verify(l => l.RecordAsync(
+            It.IsAny<string>(), It.IsAny<Guid>(), TestPlaybookId,
+            It.IsAny<Sprk.Bff.Api.Services.Ai.EngineRunOutput>(),
+            It.IsAny<CancellationToken>()), Times.Once);
+        ledgerWrittenBeforeReplace.Should().BeTrue(
+            because: "the ledger write must precede the document_replace render (ADR-040 D2/D8)");
+    }
+
+    [Fact]
+    public async Task ExecuteChatAsync_Rerun_WhenLedgerWriteFails_FailsToolCall_AndNothingRenders()
+    {
+        SetupPlaybookExecutionReturns(
+            AnalysisStreamChunk.Metadata(TestAnalysisId, "test-doc.pdf"),
+            AnalysisStreamChunk.TextChunk("output"));
+        _engineOutputLedgerMock
+            .Setup(l => l.RecordAsync(
+                It.IsAny<string>(), It.IsAny<Guid>(), It.IsAny<Guid>(),
+                It.IsAny<Sprk.Bff.Api.Services.Ai.EngineRunOutput>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new InvalidOperationException("ledger store unavailable"));
+        var handler = CreateHandler();
+
+        var result = await handler.ExecuteChatAsync(BuildRerunContext(), BuildExecutionTool("rerun"), CancellationToken.None);
+
+        result.Success.Should().BeFalse(
+            because: "unstored output is never rendered — a ledger-write failure fails the tool call (ADR-040)");
+        _capturedEvents.Should().NotContain(e => e.Type == "document_replace");
     }
 
     [Fact]

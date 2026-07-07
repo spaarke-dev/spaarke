@@ -11,7 +11,7 @@ namespace Sprk.Bff.Api.Services.Ai.EventRules;
 /// </summary>
 /// <remarks>
 /// P3 Fail-Fast pattern per ADR-032 / CLAUDE.md §10 F.1 — canonical siblings:
-/// <see cref="Chat.NullSessionSummarizeOrchestrator"/>, <c>NullFileSummarizeService</c>.
+/// <see cref="Chat.NullSessionDispatchOrchestrator"/>.
 /// The document_uploaded event endpoint (mapped UNCONDITIONALLY in
 /// <c>ChatDocumentEndpoints</c>) injects <see cref="IEventRulesService"/>; without
 /// this peer, minimal-API parameter inference fails at host startup when the

@@ -479,7 +479,7 @@ public static class DailyBriefingEndpoints
         try
         {
             // FR-P3-04 HARD CUTOVER (NFR-08): the Binding decides — coded composite only.
-            // The R4 playbook-engine dispatch (IInvokePlaybookAi + result projection) and
+            // The R4 playbook-engine dispatch (the since-deleted generic facade + result projection) and
             // the R7 narrator feature flag were DELETED by task 043; there is no fallback.
             logger.LogInformation(
                 "Dispatching daily briefing narration via coded composite: Categories={CategoryCount}, PriorityItems={PriorityCount}, Channels={ChannelCount}",
@@ -540,7 +540,7 @@ public static class DailyBriefingEndpoints
     //
     // Prior implementations of the `/narrate` engine-default path
     // (the playbook-result → response projection helper, its serializer options, the
-    // IInvokePlaybookAi invocation + parameter serialization) and the R7
+    // generic-facade invocation + parameter serialization) and the R7
     // R7 narrator feature-flag branch previously lived here.
     // Dispatch is now decided by the Binding table only (ADR-039); execution runs
     // through DailyBriefingCompositeService → ICodedWorkflow (task-007 convention)

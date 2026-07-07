@@ -9,7 +9,7 @@ namespace Sprk.Bff.Api.Infrastructure.DI;
 /// <b>2026-06-04 audit Migration PR #1 — registrations RELOCATED</b>: per
 /// <c>bff-ai-architecture-audit-r1</c> W4 §4.5 + DR-003 (LATENT BUG #1 Option A
 /// remediation), the unconditional <c>IInsightsAi → InsightsOrchestrator</c> and
-/// <c>IPlaybookExecutionEngine → PlaybookExecutionEngine</c> registrations that used
+/// engine-shell registrations (deleted by FR-P3-05 task 044) that used
 /// to live here have been MOVED into <c>AnalysisServicesModule.AddPublicContractsFacade</c>,
 /// which only runs when the compound AI gate is ON
 /// (<c>Analysis:Enabled=true AND DocumentIntelligence:Enabled=true</c>). Symmetric Null

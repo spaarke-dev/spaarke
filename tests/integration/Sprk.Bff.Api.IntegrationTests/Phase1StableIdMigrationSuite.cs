@@ -53,19 +53,11 @@ namespace Sprk.Bff.Api.IntegrationTests;
 public class Phase1StableIdMigrationSuite
 {
     // ─────────────────────────────────────────────────────────────────────────
-    // Consumer 1 — SessionSummarizeOrchestrator (task 015 / FR-05 Pattern A)
+    // Consumer 1 — the summarize orchestrator shell was DELETED by
+    // ai-architecture-redesign-r1 task 044 (FR-P3-05): /summarize resolves its
+    // Action through the Binding catalog via the ONE dispatch seam — no playbook
+    // lookup exists on the path, so the stable-id concern no longer applies.
     // ─────────────────────────────────────────────────────────────────────────
-    [Fact]
-    public void Consumer01_SessionSummarizeOrchestrator_DependsOnPlaybookLookupService()
-    {
-        // ARRANGE / ACT
-        var type = typeof(SessionSummarizeOrchestrator);
-
-        // ASSERT — IPlaybookLookupService is a constructor dependency AND a field on the type.
-        AssertConsumerWiredToPlaybookLookupService(
-            type,
-            consumerLabel: "SessionSummarizeOrchestrator (task 015)");
-    }
 
     // ─────────────────────────────────────────────────────────────────────────
     // Consumer 2 — MatterPreFillService (task 016 / FR-02 Pattern A)
@@ -107,32 +99,29 @@ public class Phase1StableIdMigrationSuite
     // IPlaybookLookupService as a parameter (DI-injected per ASP.NET minimal API).
     // ─────────────────────────────────────────────────────────────────────────
     [Fact]
-    public void Consumer05_WorkspaceFileEndpoints_HandleSummarize_AcceptsPlaybookLookupService()
+    public void Consumer05_WorkspaceFileEndpoints_HandleSummarize_ExecutesOnActionPrimitives()
     {
-        // ARRANGE — HandleSummarize is private static; reflect on it.
+        // FR-P3-05 (ai-architecture-redesign-r1 task 044): summarize-file executes on the
+        // prompted executor — HandleSummarize composes IActionResolver + IActionRunner
+        // directly; the playbook lookup + engine fall-through were deleted (no playbook id
+        // resolution remains on the path, so the stable-id concern is closed structurally).
         var method = typeof(WorkspaceFileEndpoints).GetMethod(
             "HandleSummarize",
             BindingFlags.NonPublic | BindingFlags.Static);
 
-        // ASSERT — method exists AND has IPlaybookLookupService parameter.
         method.Should().NotBeNull(
-            "WorkspaceFileEndpoints.HandleSummarize must exist for the /summarize endpoint (task 019)");
+            "WorkspaceFileEndpoints.HandleSummarize must exist for the /summarize endpoint");
 
         var parameters = method!.GetParameters();
         parameters.Should().Contain(
+            p => p.ParameterType == typeof(Sprk.Bff.Api.Services.Ai.LinearConsumers.IActionResolver),
+            "HandleSummarize resolves the summarize-file Binding row's Action via IActionResolver (task 044)");
+        parameters.Should().Contain(
+            p => p.ParameterType == typeof(Sprk.Bff.Api.Services.Ai.LinearConsumers.IActionRunner),
+            "HandleSummarize executes via IActionRunner (task 044)");
+        parameters.Should().NotContain(
             p => p.ParameterType == typeof(IPlaybookLookupService),
-            "WorkspaceFileEndpoints.HandleSummarize must accept IPlaybookLookupService " +
-            "(task 019 Pattern A migration; resolves the routed playbook id via GetByIdAsync — " +
-            "routing-only per FR-P3-01)");
-
-        // ASSERT — RunSummarizePlaybookAsSSEAsync also accepts the lookup service (it owns the call).
-        var helperMethod = typeof(WorkspaceFileEndpoints).GetMethod(
-            "RunSummarizePlaybookAsSSEAsync",
-            BindingFlags.NonPublic | BindingFlags.Static);
-        helperMethod.Should().NotBeNull();
-        helperMethod!.GetParameters().Should().Contain(
-            p => p.ParameterType == typeof(IPlaybookLookupService),
-            "RunSummarizePlaybookAsSSEAsync owns the GetByIdAsync call after task 019");
+            "the playbook lookup was deleted from the summarize path (FR-P3-05 hard cutover)");
     }
 
     // ─────────────────────────────────────────────────────────────────────────

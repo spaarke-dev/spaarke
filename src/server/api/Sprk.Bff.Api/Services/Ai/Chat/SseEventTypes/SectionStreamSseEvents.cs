@@ -37,7 +37,7 @@ namespace Sprk.Bff.Api.Services.Ai.Chat.SseEventTypes;
 /// <b>Backward-compat invariant (FR-53 / project)</b>: these events are emitted ONLY when
 /// a <see cref="Nodes.NodeType.DeliverComposite"/> node executes. Existing schema-position
 /// playbooks (<see cref="Nodes.NodeType.Output"/> → <c>FieldDelta</c> via the
-/// <see cref="PlaybookExecutionEngine.ExecuteChatSummarizeAsync"/> stream) emit zero
+/// legacy engine-shell chat-summarize stream — deleted by FR-P3-05 task 044) emit zero
 /// <c>section_*</c> events and continue to use <c>FieldDelta</c> unchanged until migrated
 /// by FR-58 (task 118R). The two emission paths are mutually exclusive on a per-playbook
 /// basis.

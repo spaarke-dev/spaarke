@@ -37,7 +37,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
     private readonly IPlaybookService _playbookService;
     // DI-cycle break (2026-06-08): IToolHandlerRegistry is resolved lazily via IServiceProvider.
     // The auto-discovered IEnumerable<IToolHandler> backing IToolHandlerRegistry includes
-    // R6 handlers (AnalysisQueryHandler, WorkingDocumentHandler) that inject
+    // R6 typed handlers that inject
     // IAnalysisOrchestrationService — which previously injected IToolHandlerRegistry,
     // creating a cycle in the DI graph. Lazy resolution defers the dependency edge until
     // first use, after the container is fully built and no longer cycle-detecting.
@@ -79,7 +79,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         _logger = logger;
     }
 
-    // R7 Wave 4 task 042 (FR-11, 2026-06-28) — `ExecuteAnalysisAsync` and its legacy direct-invocation
+    // R7 Wave 4 task 042 (FR-11, 2026-06-28) — the legacy direct-invocation execute method and its
     // pipeline (raw OpenAI streaming for action-based, no-playbook analysis) were DELETED here per
     // spec Q6 (no transition shim). Sole production caller (AnalysisEndpoints.ExecuteAnalysis) was
     // migrated by task 041 to IPlaybookOrchestrationService.ExecuteAsync per ADR-013 Invariant 1.
@@ -514,7 +514,7 @@ public class AnalysisOrchestrationService : IAnalysisOrchestrationService
         [EnumeratorCancellation] CancellationToken cancellationToken)
     {
         // R4 hotfix (2026-06-26): empty DocumentIds is reachable from non-document
-        // dispatch paths (e.g. IInvokePlaybookAi facade used by /api/ai/daily-briefing/narrate
+        // dispatch paths (e.g. the since-deleted generic playbook facade used by /narrate
         // — task 031 Path A.5). The legacy-mode entry point is structurally document-centric
         // (loads the document via _documentLoader.GetDocumentAsync below), so empty
         // DocumentIds cannot be made to work here — it would have to be a node-based

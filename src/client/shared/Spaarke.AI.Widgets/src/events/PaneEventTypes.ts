@@ -949,7 +949,7 @@ export interface ContextPaneEvent {
    * `type === 'tool_call_started'` or `type === 'tool_call_completed'`.
    *
    * Format: the registered tool's `Name` field from `sprk_analysistool`
-   * (e.g. `'DocumentSearch'`, `'invoke_playbook'`). Short, enumerated
+   * (e.g. `'DocumentSearch'`, `'dataverse.create_record'`). Short, enumerated
    * identifier — NOT a free-form description, NOT the user's prompt that
    * triggered the call.
    *
@@ -1041,7 +1041,7 @@ export interface ContextPaneEvent {
    * `type === 'decision_made'`.
    *
    * MUST be a stable, machine-enumerated value (e.g.
-   * `'route:summarize'`, `'route:invoke_playbook'`, `'safety-block'`,
+   * `'route:summarize'`, `'route:capability'`, `'safety-block'`,
    * `'guardrail-redirect'`). MUST NOT be a free-form natural-language
    * sentence. The trace widget enumerates known values and renders them
    * with intent-aware icons.

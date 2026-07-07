@@ -35,14 +35,14 @@ namespace Sprk.Bff.Api.Tests.Api.Ai;
 /// endpoint now resolves the document-profile playbook through
 /// <see cref="IConsumerRoutingService.ResolveAsync"/> (the <c>sprk_playbookconsumer</c>
 /// Binding table — single routing surface per ADR-039) and takes the Linear
-/// <see cref="DocumentProfileService"/> branch when the client-submitted legacy
+/// endpoint-absorbed document-profile pipeline branch (task 044) when the client-submitted legacy
 /// <c>PlaybookId</c> equals the Binding row's <c>sprk_playbook</c>.
 /// </para>
 /// <para>
 /// <b>Hosting approach</b>: minimal in-process <see cref="WebApplication"/> mapping
 /// <c>MapAnalysisEndpoints</c>. Module-boundary doubles (ADR-038):
 /// <see cref="IConsumerRoutingService"/>, <see cref="IPlaybookOrchestrationService"/>,
-/// <see cref="IActionResolver"/> and friends. The <see cref="DocumentProfileService"/>,
+/// <see cref="IActionResolver"/> and friends. The document-profile pipeline,
 /// <see cref="AnalysisDocumentLoader"/> and <see cref="NotificationService"/> concretes are
 /// REAL instances over those doubles, so the dispatch decision is exercised through the
 /// production handler.
@@ -77,7 +77,7 @@ public class AnalysisEndpointsExecuteDispatchContractTests
         var body = await response.Content.ReadAsStringAsync();
         body.Should().Contain($"document-profile:{documentId}",
             "a PlaybookId equal to the Binding-routed document-profile playbook MUST dispatch " +
-            "the Linear DocumentProfileService branch (FR-P3-01 replaces the config reverse-lookup)");
+            "the Linear document-profile branch (FR-P3-01 replaces the config reverse-lookup)");
         body.Should().Contain("data: [DONE]",
             "the Linear branch preserves the client SSE terminator contract");
 
@@ -230,13 +230,13 @@ public sealed class AnalysisExecuteDispatchTestFixture : IAsyncLifetime, IDispos
             new Sprk.Bff.Api.Tests.Infrastructure.Cache.InMemoryTenantCache());
         builder.Services.AddSingleton<AnalysisDocumentLoader>();
 
-        // Real DocumentProfileService over mocked Linear primitives — the Linear-branch
+        // FR-P3-05 (task 044): the endpoint composes the executor primitives directly
+        // (the wrapper class was absorbed) — mocked Linear primitives; the Linear-branch
         // marker chunk ("document-profile:{id}") is emitted before any primitive is used.
         builder.Services.AddSingleton(ActionResolverMock.Object);
         builder.Services.AddSingleton(Mock.Of<IDocumentTextSource>());
         builder.Services.AddSingleton(Mock.Of<IActionRunner>());
         builder.Services.AddSingleton(Mock.Of<IPostUploadIndexingEnqueuer>());
-        builder.Services.AddSingleton<DocumentProfileService>();
 
         // Real NotificationService (fire-and-forget completion notification path).
         builder.Services.AddSingleton(Mock.Of<IGenericEntityService>());
@@ -294,7 +294,7 @@ public sealed class AnalysisExecuteDispatchTestFixture : IAsyncLifetime, IDispos
             .ReturnsAsync(DocumentProfilePlaybookId);
 
         // Linear branch: keep the pipeline short — action resolution fails fast, which the
-        // DocumentProfileService surfaces as an error chunk AFTER the branch-marker metadata
+        // the document-profile pipeline surfaces as an error chunk AFTER the branch-marker metadata
         // chunk (the dispatch decision is what these tests pin).
         ActionResolverMock
             .Setup(a => a.ResolveAsync(ConsumerTypes.DocumentProfile, It.IsAny<CancellationToken>()))

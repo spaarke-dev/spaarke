@@ -717,7 +717,7 @@ public static class ChatEndpoints
                 //      parameterMapping}.
                 //   2. The DeliverOutput node executor emits a `followups` SSE event alongside
                 //      the widget. SprkChat already has the chip-rendering infrastructure.
-                //   3. Followup click → invoke_playbook(playbookId, parameters) via existing
+                //   3. Followup click → capability dispatch (binding id + args) via existing
                 //      Pillar 3 dispatch. Click becomes a proper orchestrated playbook execution,
                 //      not a generic LLM chat turn. Aligns with Pillar 8 "card-as-intent".
                 //

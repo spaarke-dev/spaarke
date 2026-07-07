@@ -51,7 +51,9 @@ public class InsightsOrchestratorTests
     private static readonly Guid UniversalIngestPlaybookId =
         Guid.Parse("11111111-2222-3333-4444-555555555555");
 
-    private readonly Mock<IPlaybookExecutionEngine> _engineMock = new(MockBehavior.Strict);
+    // FR-P3-05 (task 044): the engine shell was deleted — the orchestrator invokes the
+    // frozen IPlaybookOrchestrationService directly with the request-scoped HttpContext.
+    private readonly Mock<Microsoft.AspNetCore.Http.IHttpContextAccessor> _httpContextAccessorMock = new();
     private readonly Mock<IInsightsPlaybookExecutionCache> _cacheMock = new(MockBehavior.Strict);
     private readonly Mock<IOpenAiClient> _openAiMock = new(MockBehavior.Strict);
     private readonly Mock<IPlaybookOrchestrationService> _playbookOrchestrationMock = new();
@@ -71,6 +73,12 @@ public class InsightsOrchestratorTests
 
     public InsightsOrchestratorTests()
     {
+        // Task 044: the orchestrator resolves the request-scoped HttpContext itself
+        // (the deleted engine shell used to do this) — supply one for the synthesis path.
+        _httpContextAccessorMock
+            .Setup(a => a.HttpContext)
+            .Returns(new Microsoft.AspNetCore.Http.DefaultHttpContext());
+
         _consumerRoutingMock
             .Setup(r => r.ResolveBindingAsync(
                 ConsumerTypes.InsightsAsk,
@@ -97,7 +105,7 @@ public class InsightsOrchestratorTests
 
     private InsightsOrchestrator CreateSut()
         => new(
-            _engineMock.Object,
+            _httpContextAccessorMock.Object,
             _cacheMock.Object,
             _openAiMock.Object,
             _playbookOrchestrationMock.Object,
@@ -134,90 +142,6 @@ public class InsightsOrchestratorTests
             TenantId = TenantId,
             Reasoning = "Synthesised from 14 comparable matters."
         };
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // Constructor + argument validation
-    // ─────────────────────────────────────────────────────────────────────────
-
-    [Fact]
-    public void Constructor_NullEngine_Throws()
-    {
-        Action act = () => new InsightsOrchestrator(
-            null!, _cacheMock.Object, _openAiMock.Object,
-            _playbookOrchestrationMock.Object, _ingestDocumentSourceMock.Object,
-            _consumerRoutingMock.Object, _ragServiceMock.Object, BuildAssistantHandler(), NullLogger<InsightsOrchestrator>.Instance);
-        act.Should().Throw<ArgumentNullException>().WithParameterName("engine");
-    }
-
-    [Fact]
-    public void Constructor_NullCache_Throws()
-    {
-        Action act = () => new InsightsOrchestrator(
-            _engineMock.Object, null!, _openAiMock.Object,
-            _playbookOrchestrationMock.Object, _ingestDocumentSourceMock.Object,
-            _consumerRoutingMock.Object, _ragServiceMock.Object, BuildAssistantHandler(), NullLogger<InsightsOrchestrator>.Instance);
-        act.Should().Throw<ArgumentNullException>().WithParameterName("cache");
-    }
-
-    [Fact]
-    public void Constructor_NullOpenAi_Throws()
-    {
-        Action act = () => new InsightsOrchestrator(
-            _engineMock.Object, _cacheMock.Object, null!,
-            _playbookOrchestrationMock.Object, _ingestDocumentSourceMock.Object,
-            _consumerRoutingMock.Object, _ragServiceMock.Object, BuildAssistantHandler(), NullLogger<InsightsOrchestrator>.Instance);
-        act.Should().Throw<ArgumentNullException>().WithParameterName("openAi");
-    }
-
-    [Fact]
-    public void Constructor_NullPlaybookOrchestration_Throws()
-    {
-        Action act = () => new InsightsOrchestrator(
-            _engineMock.Object, _cacheMock.Object, _openAiMock.Object,
-            null!, _ingestDocumentSourceMock.Object,
-            _consumerRoutingMock.Object, _ragServiceMock.Object, BuildAssistantHandler(), NullLogger<InsightsOrchestrator>.Instance);
-        act.Should().Throw<ArgumentNullException>().WithParameterName("playbookOrchestration");
-    }
-
-    [Fact]
-    public void Constructor_NullIngestDocumentSource_Throws()
-    {
-        Action act = () => new InsightsOrchestrator(
-            _engineMock.Object, _cacheMock.Object, _openAiMock.Object,
-            _playbookOrchestrationMock.Object, null!,
-            _consumerRoutingMock.Object, _ragServiceMock.Object, BuildAssistantHandler(), NullLogger<InsightsOrchestrator>.Instance);
-        act.Should().Throw<ArgumentNullException>().WithParameterName("ingestDocumentSource");
-    }
-
-    [Fact]
-    public void Constructor_NullRagService_Throws()
-    {
-        Action act = () => new InsightsOrchestrator(
-            _engineMock.Object, _cacheMock.Object, _openAiMock.Object,
-            _playbookOrchestrationMock.Object, _ingestDocumentSourceMock.Object,
-            _consumerRoutingMock.Object, null!, BuildAssistantHandler(), NullLogger<InsightsOrchestrator>.Instance);
-        act.Should().Throw<ArgumentNullException>().WithParameterName("ragService");
-    }
-
-    [Fact]
-    public void Constructor_NullAssistantHandler_Throws()
-    {
-        Action act = () => new InsightsOrchestrator(
-            _engineMock.Object, _cacheMock.Object, _openAiMock.Object,
-            _playbookOrchestrationMock.Object, _ingestDocumentSourceMock.Object,
-            _consumerRoutingMock.Object, _ragServiceMock.Object, null!, NullLogger<InsightsOrchestrator>.Instance);
-        act.Should().Throw<ArgumentNullException>().WithParameterName("assistantHandler");
-    }
-
-    [Fact]
-    public void Constructor_NullLogger_Throws()
-    {
-        Action act = () => new InsightsOrchestrator(
-            _engineMock.Object, _cacheMock.Object, _openAiMock.Object,
-            _playbookOrchestrationMock.Object, _ingestDocumentSourceMock.Object,
-            _consumerRoutingMock.Object, _ragServiceMock.Object, BuildAssistantHandler(), null!);
-        act.Should().Throw<ArgumentNullException>().WithParameterName("logger");
-    }
 
     // ─────────────────────────────────────────────────────────────────────────
     // AnswerQuestionAsync — happy path
@@ -268,7 +192,7 @@ public class InsightsOrchestratorTests
         result.CacheHit.Should().BeTrue("factory was not invoked");
         result.ProcessingTimeMs.Should().BeGreaterThanOrEqualTo(0);
 
-        _engineMock.Verify(e => e.ExecuteBatchAsync(It.IsAny<PlaybookRunRequest>(), It.IsAny<CancellationToken>()),
+        _playbookOrchestrationMock.Verify(o => o.ExecuteAsync(It.IsAny<PlaybookRunRequest>(), It.IsAny<Microsoft.AspNetCore.Http.HttpContext>(), It.IsAny<CancellationToken>()),
             Times.Never, "cache hit must not invoke the engine");
     }
 
@@ -288,10 +212,11 @@ public class InsightsOrchestratorTests
                     return InsightsEngineRunResult.FromArtifact(artifact);
                 });
 
-        _engineMock.Setup(e => e.ExecuteBatchAsync(
+        _playbookOrchestrationMock.Setup(o => o.ExecuteAsync(
                 It.IsAny<PlaybookRunRequest>(),
+                It.IsAny<Microsoft.AspNetCore.Http.HttpContext>(),
                 It.IsAny<CancellationToken>()))
-            .Returns<PlaybookRunRequest, CancellationToken>((req, ct) => SyntheticEngineStreamAsync(ct));
+            .Returns<PlaybookRunRequest, Microsoft.AspNetCore.Http.HttpContext, CancellationToken>((req, http, ct) => SyntheticEngineStreamAsync(ct));
 
         var sut = CreateSut();
         var req = MakeAgentRequest(new Dictionary<string, string> { ["matterType"] = "ip-licensing" });
@@ -301,10 +226,11 @@ public class InsightsOrchestratorTests
         result.Artifact.Should().BeSameAs(artifact);
         result.Decline.Should().BeNull();
         result.CacheHit.Should().BeFalse("the factory was invoked (cache miss)");
-        _engineMock.Verify(e => e.ExecuteBatchAsync(
+        _playbookOrchestrationMock.Verify(o => o.ExecuteAsync(
                 It.Is<PlaybookRunRequest>(r => r.PlaybookId == Question
                                             && r.DocumentIds.Length == 0
                                             && r.Parameters!.ContainsKey("matterType")),
+                It.IsAny<Microsoft.AspNetCore.Http.HttpContext>(),
                 It.IsAny<CancellationToken>()),
             Times.Once);
     }

@@ -15,7 +15,7 @@ namespace Sprk.Bff.Api.Services.Ai.Narrators;
 
 /// <summary>
 /// The Daily Briefing coded-composite dispatch boundary (FR-P3-04). Sibling of
-/// <see cref="Chat.SessionSummarizeOrchestrator"/> (the prompted executor's chat-summarize
+/// <see cref="Chat.SessionDispatchOrchestrator"/> (the prompted executor's chat-summarize
 /// boundary): resolves the briefing Binding via <see cref="IConsumerRoutingService"/>,
 /// executes the Binding's <c>coded</c> Action through the <see cref="ICodedWorkflowRegistry"/>
 /// class-ref convention, writes the session-ledger entries (Output + ToolChain) BEFORE any

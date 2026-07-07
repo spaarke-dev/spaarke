@@ -64,7 +64,7 @@ public static class ConsumerTypes
     public const string SummarizeFile = "summarize-file";
 
     /// <summary>
-    /// <c>SessionSummarizeOrchestrator</c> — chat-side summarize-document
+    /// the /summarize dispatch path — chat-side summarize-document
     /// flow (summarize-document-for-chat@v1 playbook).
     /// </summary>
     public const string ChatSummarize = "chat-summarize";
@@ -95,7 +95,7 @@ public static class ConsumerTypes
     public const string DailyBriefingNarrate = "daily-briefing-narrate";
 
     /// <summary>
-    /// <c>DocumentProfileService</c> — Document Upload / Profile Document
+    /// the AnalysisEndpoints document-profile pipeline — Document Upload / Profile Document
     /// linear consumer. R7 Wave 12 (2026-07-02) — migrated off the Playbook
     /// Engine per <c>docs/architecture/SPAARKE-LINEAR-AI-CONSUMER-ARCHITECTURE.md</c>.
     /// Routes via the <c>sprk_playbookconsumer</c> routing table

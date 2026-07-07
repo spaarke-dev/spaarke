@@ -83,7 +83,7 @@ internal sealed record BriefingItem
 /// path. The /api/ai/daily-briefing/render endpoint is mapped unconditionally; without a
 /// Null peer registered when Analysis:Enabled=false || DocumentIntelligence:Enabled=false,
 /// minimal-API parameter inference fails at host startup. Mirrors
-/// <see cref="Chat.NullSessionSummarizeOrchestrator"/> + ADR-032 §F.1.
+/// <see cref="Chat.NullSessionDispatchOrchestrator"/> + ADR-032 §F.1.
 /// </para>
 /// <para>
 /// FR-P0-06 (spaarke-ai-architecture-redesign-r1 task 007): first <see cref="ICodedWorkflow"/>

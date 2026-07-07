@@ -14,7 +14,7 @@ namespace Sprk.Bff.Api.Tests.Api.Ai;
 /// (spaarke-ai-architecture-redesign-r1 task 043, hard cutover per NFR-08).
 ///
 /// HandleNarrate is a thin wrapper over <see cref="DailyBriefingCompositeService"/> (the
-/// coded-composite dispatch boundary): the R4 playbook-engine path (IInvokePlaybookAi +
+/// coded-composite dispatch boundary): the R4 playbook-engine path (the since-deleted generic facade +
 /// StructuredData projection) and the R7 narrator parallel-run feature flag were DELETED —
 /// the Binding decides (ADR-039), and there is no fallback.
 ///

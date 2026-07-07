@@ -20,7 +20,7 @@ namespace Sprk.Bff.Api.Services.Ai.PublicContracts;
 /// <c>Services/Ai/PublicContracts/</c> so external CRUD-side callers
 /// (<c>MatterPreFillService</c>, <c>ProjectPreFillService</c>,
 /// <c>WorkspaceAiService</c>, <c>WorkspaceFileEndpoints</c>,
-/// <c>SessionSummarizeOrchestrator</c>, <c>AppOnlyAnalysisService</c>) can
+/// the summarize dispatch path, <c>AppOnlyAnalysisService</c>) can
 /// inject the routing decision without depending on any AI-internal
 /// orchestration, lookup, or Dataverse-internal type. The concrete impl in
 /// <c>ConsumerRoutingService</c> queries via <see cref="Spaarke.Dataverse.IGenericEntityService"/>

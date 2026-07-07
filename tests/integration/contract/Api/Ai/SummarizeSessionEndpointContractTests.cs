@@ -35,7 +35,7 @@ namespace Sprk.Bff.Api.Tests.Api.Ai;
 /// <para>
 /// <b>Hosting approach</b>: builds a minimal in-process <see cref="WebApplication"/>
 /// that maps ONLY this endpoint and exercises the REAL
-/// <see cref="SessionSummarizeOrchestrator"/> + REAL prompted executor
+/// <see cref="SessionDispatchOrchestrator"/> + REAL prompted executor
 /// (<see cref="ActionRunner"/> + <see cref="PromptSchemaRenderer"/>) against module-boundary
 /// test doubles (<see cref="IConsumerRoutingService"/>, <see cref="IScopeResolverService"/>,
 /// <see cref="ISessionFileTextSource"/>, <see cref="IOpenAiClient"/>) per ADR-038. The
@@ -244,7 +244,7 @@ public class SummarizeSessionEndpointContractTests : IClassFixture<SummarizeSess
         // Catalog resolution happens BEFORE the first chunk, so a FeatureDisabledException
         // thrown at the routing boundary escapes the orchestrator pre-stream — exactly the
         // documented ADR-032 P3 path the endpoint maps to a 503 ProblemDetails (the same
-        // shape NullSessionSummarizeOrchestrator produces when compound AI is OFF).
+        // shape NullSessionDispatchOrchestrator produces when compound AI is OFF).
         _fx.ConsumerRoutingMock
             .Setup(c => c.ResolveBindingAsync(
                 It.IsAny<string>(),
@@ -345,22 +345,22 @@ public class SummarizeSessionEndpointContractTests : IClassFixture<SummarizeSess
     {
         // ADR-028 fresh-token-per-request contract: the endpoint MUST NOT accept a string
         // bearer token via constructor injection or capture one into a closure. The
-        // orchestrator's constructor is the only token-shaped surface; verify it accepts
+        // dispatch seam's constructor is the only token-shaped surface; verify it accepts
         // no `string` parameter (tokens are resolved via DI inside its dependencies, NOT
         // passed in via parameters).
-        var ctor = typeof(SessionSummarizeOrchestrator)
+        var ctor = typeof(SessionDispatchOrchestrator)
             .GetConstructors()
-            .Single();
+            .Single(c => c.IsPublic);
         var parameters = ctor.GetParameters();
 
         parameters.Should().NotContain(
             p => p.ParameterType == typeof(string),
-            "ADR-028: orchestrator must not accept a bearer-token string parameter; tokens are " +
-            "resolved per-request via DI inside the orchestrator's dependencies");
+            "ADR-028: the dispatch seam must not accept a bearer-token string parameter; tokens are " +
+            "resolved per-request via DI inside its dependencies");
 
-        // Defense-in-depth: the SummarizeSessionFilesRequest contract carries tenantId +
-        // sessionId + fileIds + style + path + correlationId — but NO token field.
-        var requestProps = typeof(SummarizeSessionFilesRequest)
+        // Defense-in-depth: the SessionDispatchRequest contract carries tenantId +
+        // sessionId + bindingId + args + correlationId — but NO token field.
+        var requestProps = typeof(SessionDispatchRequest)
             .GetProperties()
             .Select(p => p.Name)
             .ToArray();
@@ -480,8 +480,17 @@ public sealed class SummarizeSessionEndpointTestFixture : IAsyncLifetime, IDispo
         builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.IOutputRouter,
                                    Sprk.Bff.Api.Services.Ai.OutputRouter>();
 
-        // Orchestrator itself — concrete (ADR-010); registered Scoped to mirror prod.
-        builder.Services.AddScoped<SessionSummarizeOrchestrator>();
+        // FR-P2-03 (task 032): the dispatch seam resolves pending elicitation gates —
+        // the REAL unified store over the test session manager + in-memory tenant cache.
+        builder.Services.AddSingleton(sp => new PendingPlanManager(
+            new Sprk.Bff.Api.Tests.Infrastructure.Cache.InMemoryTenantCache(),
+            Sessions,
+            sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<PendingPlanManager>>()));
+
+        // FR-P3-05 (task 044): /summarize converged onto the ONE dispatch seam — the
+        // endpoint resolves the chat-summarize Binding and delegates to the REAL
+        // SessionDispatchOrchestrator (concrete per ADR-010; Scoped mirrors prod).
+        builder.Services.AddScoped<SessionDispatchOrchestrator>();
 
         // Switch server to TestServer so we get an HttpClient that talks to this in-process app.
         builder.WebHost.UseTestServer();
@@ -529,6 +538,24 @@ public sealed class SummarizeSessionEndpointTestFixture : IAsyncLifetime, IDispo
                 It.IsAny<string?>(),
                 It.IsAny<IRoutingContext?>(),
                 It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Binding
+            {
+                BindingId = ChatSummarizeBindingId,
+                ConsumerType = ConsumerTypes.ChatSummarize,
+                ConsumerCode = "default",
+                Environment = "*",
+                ActionId = ChatSummarizeActionId,
+                ActionKind = ActionKind.Prompted,
+                Ucid = "UC-A-1",
+                Disposition = BindingDisposition.Informational,
+            });
+
+        // FR-P3-05 (task 044): the endpoint delegates to the dispatch seam, which re-loads
+        // the Binding BY ID — mirror the resolve-by-type default above.
+        ConsumerRoutingMock
+            .Setup(c => c.GetBindingByIdAsync(
+                ChatSummarizeBindingId,
                 It.IsAny<CancellationToken>()))
             .ReturnsAsync(new Binding
             {
@@ -602,7 +629,7 @@ public sealed class SummarizeSessionEndpointTestFixture : IAsyncLifetime, IDispo
 /// Subclass of <see cref="ChatSessionManager"/> that overrides the virtual
 /// <see cref="ChatSessionManager.GetSessionAsync(string, string, CancellationToken)"/> for
 /// in-process testing without Redis / Dataverse wiring. Matches the test-double pattern in
-/// <c>SessionSummarizeOrchestratorTests</c>.
+/// the dispatch-seam unit tests.
 /// </summary>
 public sealed class TestableChatSessionManager : ChatSessionManager
 {

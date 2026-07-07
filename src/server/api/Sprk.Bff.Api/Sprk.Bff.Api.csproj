@@ -144,7 +144,7 @@
   </ItemGroup>
 
   <!-- Insights Engine playbook node configs (.json) — loaded at runtime by the
-       PlaybookExecutionEngine. The Web SDK auto-includes .json as Content by default; we
+       the playbook execution path. The Web SDK auto-includes .json as Content by default; we
        Update to set CopyToOutputDirectory.
        Wave C-G4 (task 022) retired the on-disk Prompts/ directory (.txt + .schema.json).
        Prompts now live in sprk_analysisaction.sprk_systemprompt rows (per Wave C2 / 021).  -->

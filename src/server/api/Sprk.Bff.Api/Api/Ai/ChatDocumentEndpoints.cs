@@ -476,7 +476,7 @@ public static class ChatDocumentEndpoints
         //   - IndexSessionFileAsync writes chunks into the `spaarke-session-files` AI Search index
         //     (carries tenantId + sessionId per ADR-014 / R5 FR-09).
         //   - ChatSession.UploadedFiles gains a new ChatSessionFile entry so
-        //     SessionSummarizeOrchestrator (task 012) sees the file via
+        //     the summarize dispatch path (task 012) sees the file via
         //     session.UploadedFiles instead of declining.
         //   - UpdateSessionCacheAsync persists the manifest through Redis hot tier
         //     + fire-and-forget Cosmos warm tier (decision D-06).
@@ -496,7 +496,7 @@ public static class ChatDocumentEndpoints
             // reaching here without a pipeline indicates a configuration anomaly.
             logger.LogWarning(
                 "RagIndexingPipeline unavailable — skipping session-files indexing for DocumentId={DocumentId}, SessionId={SessionId}. " +
-                "Legacy Redis storage succeeded; SessionSummarizeOrchestrator will not see this file.",
+                "Legacy Redis storage succeeded; the summarize dispatch path will not see this file.",
                 documentId, sessionId);
         }
         else
@@ -614,7 +614,7 @@ public static class ChatDocumentEndpoints
                 // back-compat for any consumer still on the legacy path.
                 logger.LogError(ex,
                     "R5 session-files indexing OR manifest update failed for DocumentId={DocumentId}, SessionId={SessionId}. " +
-                    "Legacy Redis writes succeeded; SessionSummarizeOrchestrator will not see this file in UploadedFiles.",
+                    "Legacy Redis writes succeeded; the summarize dispatch path will not see this file in UploadedFiles.",
                     documentId, sessionId);
             }
         }

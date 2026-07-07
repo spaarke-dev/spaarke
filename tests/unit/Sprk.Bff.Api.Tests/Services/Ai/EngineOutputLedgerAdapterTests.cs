@@ -50,12 +50,7 @@ public class EngineOutputLedgerAdapterTests
         var result = BuildSuccessResult(
             text: "Matter health composite summary.",
             structuredJson: """{"healthScore":0.82,"riskFactors":["budget-overrun"]}""",
-            citations: new[]
-            {
-                new ToolResultCitation(ChunkId: "chunk-1", SourceName: "Brief.pdf", Excerpt: "verbatim excerpt MUST NOT leak"),
-                new ToolResultCitation(ChunkId: "chunk-2", SourceName: "Policy.pdf"),
-                new ToolResultCitation(ChunkId: "chunk-1", SourceName: "Brief.pdf"), // duplicate id
-            });
+            citationChunkIds: new[] { "chunk-1", "chunk-2", "chunk-1" /* duplicate id */ });
 
         var entry = await sut.RecordAsync(TenantId, SessionGuid, PlaybookId, result);
 
@@ -82,10 +77,10 @@ public class EngineOutputLedgerAdapterTests
         entry.Payload.GetProperty("structuredData").GetProperty("healthScore").GetDouble().Should().Be(0.82);
         entry.Payload.GetProperty("citationCount").GetInt32().Should().Be(3);
 
-        // sourceRefs: citation ids ONLY (NFR-07), de-duplicated — never excerpts.
+        // sourceRefs: citation ids ONLY (NFR-07), de-duplicated. (The EngineRunOutput
+        // contract carries chunk IDS only by construction since task 044 — excerpts can
+        // no longer reach the adapter at the type level.)
         entry.SourceRefs.Should().BeEquivalentTo(new[] { "chunk-1", "chunk-2" });
-        entry.Payload.GetRawText().Should().NotContain("verbatim excerpt",
-            "citation excerpts are content — the ledger payload carries the output + identifiers, sourceRefs carry ids");
     }
 
     [Fact]
@@ -153,26 +148,10 @@ public class EngineOutputLedgerAdapterTests
         sessionManager.PersistedSessions.Should().BeEmpty();
     }
 
-    // ─── Failed runs never enter the ledger (ADR-040: the ledger carries OUTPUTS) ──────────────
-
-    [Fact]
-    public async Task RecordAsync_FailedEngineRun_Throws_AndWritesNothing()
-    {
-        var sessionManager = new StubSessionManager(BuildSession());
-        var sut = CreateSut(sessionManager);
-        var failed = new PlaybookInvocationResult
-        {
-            RunId = Guid.NewGuid(),
-            Success = false,
-            ErrorMessage = "Node failed.",
-        };
-
-        var act = () => sut.RecordAsync(TenantId, SessionGuid, PlaybookId, failed);
-
-        await act.Should().ThrowAsync<ArgumentException>(
-            "the ledger carries capability outputs, not failure diagnostics");
-        sessionManager.PersistedSessions.Should().BeEmpty();
-    }
+    // ─── Failed runs never enter the ledger (ADR-040) ───────────────────────────────────────────
+    // Task 044: the success gate moved to the CALLER contract — EngineRunOutput carries
+    // successful outputs only by construction (AnalysisExecutionHandler records only after
+    // a successful engine drain and before any render).
 
     // ─── Round-trip: engine-origin entries survive the production serialization leg ────────────
 
@@ -275,10 +254,10 @@ public class EngineOutputLedgerAdapterTests
         LastActivity: DateTimeOffset.UtcNow,
         Messages: Array.Empty<ChatMessage>());
 
-    private static PlaybookInvocationResult BuildSuccessResult(
+    private static EngineRunOutput BuildSuccessResult(
         string? text = "Aggregated engine composite output.",
         string? structuredJson = null,
-        IReadOnlyList<ToolResultCitation>? citations = null)
+        IReadOnlyList<string>? citationChunkIds = null)
     {
         JsonElement? structured = null;
         if (structuredJson is not null)
@@ -287,15 +266,13 @@ public class EngineOutputLedgerAdapterTests
             structured = doc.RootElement.Clone();
         }
 
-        return new PlaybookInvocationResult
+        return new EngineRunOutput
         {
             RunId = Guid.NewGuid(),
-            Success = true,
             TextContent = text,
             StructuredData = structured,
-            Citations = citations ?? Array.Empty<ToolResultCitation>(),
+            CitationChunkIds = citationChunkIds ?? Array.Empty<string>(),
             Confidence = 0.9,
-            Duration = TimeSpan.FromMilliseconds(200),
         };
     }
 

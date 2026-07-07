@@ -186,7 +186,7 @@ export type DownloadBlobFn = (blob: Blob, filename: string) => void;
  * Reuses the existing modal infrastructure; no new BFF surface (publish-size
  * delta = 0 MB per ADR-029). Launch flow continues to route through the
  * `sprk_playbooklibrary` Code Page, which preserves Path A.5 routing
- * (`IConsumerRoutingService` → `IInvokePlaybookAi`) per ADR-013.
+ * (`IConsumerRoutingService` → the BFF playbook-invocation boundary) per ADR-013.
  *
  * Per task 093 audit Q6 (PRIMARY recommendation for chat surface): the
  * `/playbooks` hard slash reuses the closed-vocabulary Pillar 8 infrastructure
@@ -630,7 +630,7 @@ async function execPin(ctx: ExecutorContext): Promise<ExecutorResult> {
  *
  * Latency: <1ms (synchronous callback invocation; the modal's own load is
  * downstream of this executor). NO BFF call. NO Path A.5 bypass — the Library
- * modal preserves the existing `IConsumerRoutingService` → `IInvokePlaybookAi`
+ * modal preserves the existing `IConsumerRoutingService` → BFF playbook-invocation
  * launch path per ADR-013.
  *
  * Failure mode: if the host is running outside Dataverse (no Xrm.Navigation),

@@ -12,7 +12,7 @@ namespace Sprk.Bff.Api.Services.Ai.Chat;
 /// <remarks>
 /// <para>
 /// P3 Fail-Fast pattern per ADR-030 + ADR-032 §F.1 — mirrors
-/// <see cref="NullSessionSummarizeOrchestrator"/> exactly. The Click dispatch endpoint
+/// the canonical Null-subclass pattern exactly. The Click dispatch endpoint
 /// (<c>POST /api/ai/chat/sessions/{sessionId}/dispatch</c>, mapped unconditionally by
 /// <c>EndpointMappingExtensions</c>) injects <see cref="SessionDispatchOrchestrator"/>
 /// directly; without a Null subclass on the compound-OFF branch, minimal-API parameter

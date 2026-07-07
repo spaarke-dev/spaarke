@@ -6,6 +6,7 @@ using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Api.Filters;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.LinearConsumers;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 
 namespace Sprk.Bff.Api.Api.Workspace;
@@ -27,23 +28,18 @@ public static class WorkspaceFileEndpoints
 
     private const long MaxFileSizeBytes = 10 * 1024 * 1024; // 10 MB
 
-    // Summarize playbook — "Summarize New File(s)" playbook in Dataverse.
-    //
-    // FR-P3-01 hard cutover (ai-architecture-redesign-r1 task 040): the playbook is resolved
-    // EXCLUSIVELY via IConsumerRoutingService.ResolveAsync(ConsumerTypes.SummarizeFile,
-    // consumerCode: "default", context: new RoutingContext { MimeType = file.ContentType })
-    // against the sprk_playbookconsumer Binding routing table. The MimeType passed in
-    // RoutingContext lets future sprk_matchconditions JSON predicates route per content
-    // type (NDA PDF → specialized summarize playbook, etc.). The legacy typed-options
-    // config fallback (FR-1R-05/FR-1R-06 deprecation window) was DELETED per NFR-08.
-    // FR-04 / NFR-02 fail-fast preserved: when the routing table has no enabled row,
-    // throw InvalidOperationException so the SSE stream surfaces an error chunk.
-    // Hardening (code-review S-5): use the ConsumerTypes.SummarizeFile compile-time
-    // constant — never a literal string.
+    // Summarize execution — FR-P3-05 hard cutover (ai-architecture-redesign-r1 task 044):
+    // summarize-file executes EXCLUSIVELY on the prompted executor. IActionResolver
+    // resolves the summarize-file Binding row's Action (sprk_playbookconsumer →
+    // sprk_analysisaction, single routing surface per ADR-039) and IActionRunner renders
+    // the Action's JPS prompt + output schema. The former consumer-specific wrapper class
+    // and the Playbook Engine fall-through (dispatch when the row had no Action target)
+    // were DELETED per NFR-08 — a Binding row without an Action target is a catalog
+    // authoring error surfaced as an SSE error chunk, never an engine fallback.
     //
     // Historical: the prior hardcoded GUID fallback was removed in Phase 1
     // (chat-routing-redesign-r1 task 019); the config-key fallback surface was removed
-    // by FR-P3-01. Resolution now flows routing table → IPlaybookLookupService.GetByIdAsync.
+    // by FR-P3-01 (task 040); the engine fall-through + wrapper were removed by FR-P3-05.
 
     private static readonly JsonSerializerOptions JsonOptions = new()
     {
@@ -154,10 +150,8 @@ public static class WorkspaceFileEndpoints
     private static async Task HandleSummarize(
         IFormFileCollection files,
         ITextExtractor textExtractor,
-        IPlaybookOrchestrationService playbookService,
-        IPlaybookLookupService playbookLookup,
-        IConsumerRoutingService consumerRouting,
-        Sprk.Bff.Api.Services.Ai.LinearConsumers.FileSummarizeService fileSummarizeService,
+        IActionResolver actionResolver,
+        IActionRunner actionRunner,
         HttpContext httpContext,
         ILogger<Program> logger,
         CancellationToken ct)
@@ -216,35 +210,17 @@ public static class WorkspaceFileEndpoints
             await WriteSSEAsync(response, AnalysisStreamChunk.Progress("context_ready", "Preparing analysis..."), ct);
             await WriteSSEAsync(response, AnalysisStreamChunk.Progress("analyzing", "Analyzing..."), ct);
 
-            // R7 Wave 12 Phase C (2026-07-02) + Wave 12.3 (2026-07-02): Linear AI Consumer
-            // dispatch. When the File Summary consumer has sprk_action populated on its
-            // sprk_playbookconsumer routing row, route through FileSummarizeService
-            // (code-defined, no interpreter tax) rather than the Playbook Engine. Same SSE
-            // contract preserved — client sees the same result chunk shape. Fall-through
-            // preserves engine behavior when sprk_action is empty (per-consumer rollback).
-            var linearFileSummaryActionId = await consumerRouting
-                .ResolveActionAsync(ConsumerTypes.SummarizeFile, cancellationToken: ct)
-                .ConfigureAwait(false);
-            if (linearFileSummaryActionId.HasValue && linearFileSummaryActionId.Value != Guid.Empty)
+            // FR-P3-05 hard cutover (ai-architecture-redesign-r1 task 044): summarize-file
+            // executes EXCLUSIVELY on the prompted executor (IActionResolver resolves the
+            // summarize-file Binding row's Action; IActionRunner renders + runs it). The
+            // former wrapper class and the Playbook Engine fall-through (used when the row
+            // had no Action target) were DELETED per NFR-08 — a row without an Action
+            // target surfaces as an error chunk from the resolver, never an engine dispatch.
+            var displayName = files.FirstOrDefault()?.FileName ?? "combined-input";
+            await foreach (var chunk in ExecuteSummarizeActionAsync(
+                extractedText, displayName, actionResolver, actionRunner, httpContext, logger, ct))
             {
-                var displayName = files.FirstOrDefault()?.FileName ?? "combined-input";
-                await foreach (var chunk in fileSummarizeService.ExecuteAsync(
-                    extractedText, displayName, ConsumerTypes.SummarizeFile, httpContext, ct))
-                {
-                    await WriteSSEAsync(response, chunk, ct);
-                }
-            }
-            else
-            {
-                // FR-1R-04 — pass the first uploaded file's MIME type into the routing context so
-                // sprk_matchconditions JSON predicates can specialize (e.g., PDF vs DOCX). When the
-                // upload is empty or content type is null/whitespace, MimeType stays null and the
-                // default routing record matches.
-                var mimeType = files.FirstOrDefault(f => !string.IsNullOrWhiteSpace(f.ContentType))?.ContentType;
-
-                await RunSummarizePlaybookAsSSEAsync(
-                    extractedText, playbookService, playbookLookup, consumerRouting,
-                    mimeType, response, httpContext, logger, ct);
+                await WriteSSEAsync(response, chunk, ct);
             }
 
             await WriteSSEAsync(response, AnalysisStreamChunk.Progress("delivering", "Delivering results..."), ct);
@@ -276,141 +252,99 @@ public static class WorkspaceFileEndpoints
     }
 
     /// <summary>
-    /// Invokes the Summarize playbook and emits a single "result" SSE chunk with the structured output.
+    /// Executes summarize-file on the prompted executor and emits progress + a single
+    /// "result" SSE chunk with the structured output (FR-P3-05 wrapper absorption:
+    /// resolve the Binding row's Action via <see cref="IActionResolver"/>, run it via
+    /// <see cref="IActionRunner"/> — behavior preserved from the deleted wrapper class).
+    /// Resolution/LLM failures surface as error chunks so the stream never dies silently.
     /// </summary>
-    private static async Task RunSummarizePlaybookAsSSEAsync(
-        string documentText,
-        IPlaybookOrchestrationService playbookService,
-        IPlaybookLookupService playbookLookup,
-        IConsumerRoutingService consumerRouting,
-        string? mimeType,
-        HttpResponse response,
+    private static async IAsyncEnumerable<AnalysisStreamChunk> ExecuteSummarizeActionAsync(
+        string extractedText,
+        string fileName,
+        IActionResolver actionResolver,
+        IActionRunner actionRunner,
         HttpContext httpContext,
         ILogger logger,
-        CancellationToken ct)
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken ct)
     {
-        // Truncate to ~80KB to avoid excessive token usage
-        const int maxTextChars = 80_000;
-        if (documentText.Length > maxTextChars)
+        var tenantId = httpContext.User?.FindFirst("tid")?.Value
+            ?? httpContext.User?.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value;
+
+        var runContext = new LinearRunContext
         {
-            logger.LogDebug("Truncating combined text from {Original} to {Truncated} chars.", documentText.Length, maxTextChars);
-            documentText = documentText[..maxTextChars] + "\n\n[... content truncated ...]";
-        }
-
-        // FR-P3-01 hard cutover (ai-architecture-redesign-r1 task 040): the playbook is resolved
-        // EXCLUSIVELY via IConsumerRoutingService.ResolveAsync(ConsumerTypes.SummarizeFile)
-        // with the uploaded file's MIME type in the routing context so future
-        // sprk_matchconditions predicates can pick a MIME-specific playbook. The legacy
-        // typed-options config fallback was DELETED per NFR-08. FR-04 / NFR-02 fail-fast
-        // preserved: when the routing table has no enabled row, throw
-        // InvalidOperationException so the SSE stream surfaces an error chunk. Hardening
-        // (code-review S-5): use the ConsumerTypes.SummarizeFile compile-time constant —
-        // never a literal string.
-        var routedPlaybookId = await consumerRouting
-            .ResolveAsync(
-                ConsumerTypes.SummarizeFile,
-                consumerCode: "default",
-                context: new RoutingContext { MimeType = mimeType },
-                cancellationToken: ct)
-            .ConfigureAwait(false);
-
-        if (routedPlaybookId is null)
-        {
-            logger.LogError(
-                "Routing table has no enabled sprk_playbookconsumer row for consumerType " +
-                "'{ConsumerType}' (mimeType='{MimeType}'); seed the Binding row — no config " +
-                "fallback exists per FR-P3-01. CorrelationId={CorrelationId}",
-                ConsumerTypes.SummarizeFile, mimeType ?? "(none)", httpContext.TraceIdentifier);
-            throw new InvalidOperationException(
-                "No enabled sprk_playbookconsumer row resolves consumerType 'summarize-file'. " +
-                "/api/workspace/files/summarize cannot resolve its playbook — seed the Binding row " +
-                "(FR-P3-01: config fallback removed).");
-        }
-
-        string configuredPlaybookId = routedPlaybookId.Value.ToString();
-
-        var playbook = await playbookLookup
-            .GetByIdAsync(configuredPlaybookId, ct)
-            .ConfigureAwait(false);
-        var playbookId = playbook.Id;
-
-        logger.LogInformation("Invoking summarize playbook as SSE. PlaybookId={PlaybookId}, TextLength={TextLength}", playbookId, documentText.Length);
-
-        using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(ct);
-        timeoutCts.CancelAfter(TimeSpan.FromSeconds(60));
-
-        var request = new PlaybookRunRequest
-        {
-            PlaybookId = playbookId,
-            DocumentIds = [],
-            UserContext = documentText,
-            Document = new DocumentContext
-            {
-                DocumentId = Guid.NewGuid(),
-                Name = "Summarize upload",
-                ExtractedText = documentText,
-            },
-            Parameters = new Dictionary<string, string>
-            {
-                ["operation"] = "summarize",
-            }
+            ConsumerType = ConsumerTypes.SummarizeFile,
+            CorrelationId = httpContext.TraceIdentifier,
+            TenantId = tenantId,
         };
 
-        JsonElement? structuredOutput = null;
-        string? textOutput = null;
-
-        await foreach (var evt in playbookService.ExecuteAsync(request, httpContext, timeoutCts.Token))
+        yield return AnalysisStreamChunk.Progress("resolving_action", "Resolving action configuration…");
+        AnalysisAction? action = null;
+        string? resolveError = null;
+        try
         {
-            if (evt.Type == PlaybookEventType.NodeCompleted && evt.NodeOutput != null)
-            {
-                if (evt.NodeOutput.StructuredData.HasValue)
-                {
-                    structuredOutput = evt.NodeOutput.StructuredData.Value;
-                    var jsonStr = JsonSerializer.Serialize(structuredOutput.Value, JsonOptions);
-                    await WriteSSEAsync(response, AnalysisStreamChunk.Result(jsonStr), ct);
-                    logger.LogDebug("Emitted structured summarize result from node '{NodeName}'.", evt.NodeName);
-                }
-                else if (!string.IsNullOrWhiteSpace(evt.NodeOutput.TextContent))
-                {
-                    textOutput = evt.NodeOutput.TextContent;
-                }
-            }
-
-            if (evt.Type == PlaybookEventType.RunFailed)
-            {
-                logger.LogWarning("Summarize playbook failed. Error={Error}.", evt.Error);
-                throw new InvalidOperationException($"Summarize playbook failed: {evt.Error}");
-            }
+            action = await actionResolver.ResolveAsync(ConsumerTypes.SummarizeFile, ct);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (FeatureDisabledException)
+        {
+            // Kill-switch (ADR-032 P3): propagate so the endpoint's catch emits the
+            // canonical 503 / SSE-error-chunk pattern (parity with the deleted Null wrapper).
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex,
+                "Failed to resolve action for consumerType={ConsumerType}. CorrelationId={CorrelationId}",
+                ConsumerTypes.SummarizeFile, httpContext.TraceIdentifier);
+            resolveError = $"Failed to resolve action: {ex.Message}";
+        }
+        if (resolveError != null)
+        {
+            yield return AnalysisStreamChunk.FromError(resolveError);
+            yield break;
         }
 
-        // Fall back to text output if no structured data
-        if (!structuredOutput.HasValue && !string.IsNullOrWhiteSpace(textOutput))
+        var docText = new DocumentText
         {
-            var json = StripMarkdownCodeFences(textOutput.Trim());
-            string resultJson;
-            try
-            {
-                var element = JsonDocument.Parse(json).RootElement;
-                resultJson = JsonSerializer.Serialize(element, JsonOptions);
-            }
-            catch (JsonException)
-            {
-                resultJson = JsonSerializer.Serialize(new
-                {
-                    tldr = json.Length > 200 ? json[..200] + "..." : json,
-                    summary = json,
-                    shortSummary = json.Length > 200 ? json[..200] + "..." : json,
-                    confidence = 0.5
-                }, JsonOptions);
-            }
-            await WriteSSEAsync(response, AnalysisStreamChunk.Result(resultJson), ct);
+            DocumentId = null,
+            FileName = fileName,
+            ExtractedText = extractedText,
+        };
+
+        yield return AnalysisStreamChunk.Progress("calling_llm", "Analyzing document(s) with AI…");
+        JsonElement aiOutput = default;
+        string? llmError = null;
+        try
+        {
+            aiOutput = await actionRunner.RunAsync(action!, docText, runContext, ct);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (FeatureDisabledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex,
+                "LLM call failed for consumerType={ConsumerType}. CorrelationId={CorrelationId}",
+                ConsumerTypes.SummarizeFile, httpContext.TraceIdentifier);
+            llmError = $"AI analysis failed: {ex.Message}";
+        }
+        if (llmError != null)
+        {
+            yield return AnalysisStreamChunk.FromError(llmError);
+            yield break;
         }
 
-        if (!structuredOutput.HasValue && string.IsNullOrWhiteSpace(textOutput))
-        {
-            logger.LogWarning("Summarize playbook completed but produced no output.");
-            throw new InvalidOperationException("Summarize playbook completed but produced no output.");
-        }
+        // Emit the entire structured output as a single SSE `result` chunk —
+        // the client parses Content as JSON (contract unchanged from the wrapper).
+        yield return AnalysisStreamChunk.Result(aiOutput.GetRawText());
     }
 
     // =========================================================================
@@ -466,19 +400,6 @@ public static class WorkspaceFileEndpoints
         }
 
         return allExtractedText.ToString().Trim();
-    }
-
-    private static string StripMarkdownCodeFences(string text)
-    {
-        if (text.StartsWith("```json", StringComparison.OrdinalIgnoreCase))
-            text = text[7..].TrimStart();
-        else if (text.StartsWith("```"))
-            text = text[3..].TrimStart();
-
-        if (text.EndsWith("```"))
-            text = text[..^3].TrimEnd();
-
-        return text;
     }
 
     private static string ResolveUserId(HttpContext httpContext)

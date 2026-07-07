@@ -123,7 +123,7 @@ public record ChatInvocationContext : ToolInvocationContextBase
     /// Optional analysis id from the active chat session (R6 Wave 9 / ADR-033 Stage 4).
     /// Carries the deterministic <c>sprk_analysisoutput</c> row id when the chat session is
     /// bound to an active analysis. Read by chat-side handlers that fetch or persist
-    /// working-document content (currently <c>WorkingDocumentHandler</c>) via the existing
+    /// working-document content (no current consumer post task 044) via the existing
     /// <c>IAnalysisOrchestrationService</c> / <c>IWorkingDocumentService</c> surface.
     /// </summary>
     /// <remarks>
@@ -167,7 +167,7 @@ public record ChatInvocationContext : ToolInvocationContextBase
     /// <summary>
     /// Optional per-request writer for document-stream SSE side-channel events.
     /// Bound by ChatEndpoints when the active session/playbook is write-back-capable.
-    /// Handlers that emit DocumentStreamEvent (currently WorkingDocumentHandler) read this
+    /// Handlers that emit DocumentStreamEvent (no current emitter post task 044) read this
     /// field and emit directly during streaming. Null when document streaming is not wired
     /// for the current request — handlers MUST check for null and degrade gracefully.
     /// </summary>

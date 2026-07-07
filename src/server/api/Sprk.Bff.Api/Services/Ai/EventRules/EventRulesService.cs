@@ -127,7 +127,7 @@ public sealed class EventRulesService : IEventRulesService
         }
 
         // Session load — not-found surfaces as InvalidOperationException("... not found ...")
-        // which the endpoint maps to 404 (same contract as SessionSummarizeOrchestrator).
+        // which the endpoint maps to 404 (same contract as the dispatch seam).
         ChatSession? session = await _sessionManager
             .GetSessionAsync(request.TenantId, request.SessionId, cancellationToken)
             .ConfigureAwait(false);

@@ -19,24 +19,15 @@ namespace Sprk.Bff.Api.Services.Ai.Chat;
 /// all dependencies are resolved from the caller's scoped provider exactly as
 /// before the extraction.
 /// </para>
-/// <para>
-/// The dynamic invoke_playbook description building routes through the
-/// <c>_invokePlaybookDescriptionFactory</c> delegate (the D-A-14 tenant-menu
-/// rendering stays on the factory, which owns the playbook-listing dependencies).
-/// </para>
 /// </remarks>
 internal sealed class AgentToolCatalogProjector
 {
     private readonly ILogger _logger;
-    private readonly Func<IServiceProvider, string, HttpContext?, CancellationToken, Task<string>> _invokePlaybookDescriptionFactory;
 
     public AgentToolCatalogProjector(
-        ILogger logger,
-        Func<IServiceProvider, string, HttpContext?, CancellationToken, Task<string>> invokePlaybookDescriptionFactory)
+        ILogger logger)
     {
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
-        _invokePlaybookDescriptionFactory = invokePlaybookDescriptionFactory
-            ?? throw new ArgumentNullException(nameof(invokePlaybookDescriptionFactory));
     }
 
     /// <summary>
@@ -98,40 +89,35 @@ internal sealed class AgentToolCatalogProjector
 
         // ADR-033 (R6 Wave 9): hoisted document-stream SSE writer. Built ONCE per
         // ResolveToolsAsync call and passed to ToolHandlerToAIFunctionAdapter, which forwards
-        // it onto each per-call ChatInvocationContext.DocumentStreamWriter so the typed
-        // WorkingDocumentHandler can emit Start → N×Token → End events directly during
-        // streaming. The adapter receives the NULLABLE variant (null when httpContext is
-        // unavailable) per ADR-033 §3.1 — the typed handler checks for null and degrades
-        // gracefully via ToolResult.Failure with a clear "no stream writer wired" message.
+        // it onto each per-call ChatInvocationContext.DocumentStreamWriter so typed handlers
+        // can emit Start → N×Token → End events directly during streaming. The adapter
+        // receives the NULLABLE variant (null when httpContext is unavailable) per ADR-033
+        // §3.1 — consuming handlers check for null and degrade gracefully. NOTE (task 044):
+        // the working-document handler family — the last emitter — was deleted with the F-1
+        // legacy legs; the plumbing stays as loop infrastructure (Track-B orphan candidate
+        // for the FR-P4-01 completion audit if no P3/P4 handler adopts it).
         var documentStreamWriter = httpContext != null
             ? Api.Ai.ChatEndpoints.CreateDocumentStreamSseWriter(httpContext.Response)
             : null;
 
         // ADR-033 Stage 4 (R6 Wave 9): parse the analysis id string carried on the chat
-        // context's AnalysisMetadata into a Guid for the typed-handler path. The typed
-        // WorkingDocumentHandler / analysis-refinement handler read
-        // ChatInvocationContext.AnalysisId (Guid?) which we forward through the adapter
-        // constructor below. Null when standalone chat (no analysis bound) or when the
-        // string isn't a parseable Guid.
+        // context's AnalysisMetadata into a Guid for the typed-handler path. The
+        // analysis-execution handler reads ChatInvocationContext.AnalysisId (Guid?) which
+        // we forward through the adapter constructor below. Null when standalone chat
+        // (no analysis bound) or when the string isn't a parseable Guid.
         Guid? analysisIdGuid = Guid.TryParse(analysisId, out var parsedAnalysisId) ? parsedAnalysisId : null;
 
         // === Legacy hardcoded tool groups: ALL RETIRED (FR-P2-07 closes the set) ============
         // The pre-catalog hardcoded groups migrated to typed handlers + sprk_analysistool rows
         // across R6 Waves 7-9 and this project's P2; the FR-11 data-driven block below is now
-        // the ONLY tool source (ADR-039 closed catalog). Row map for the migrated families:
+        // the ONLY tool source (ADR-039 closed catalog). Row map for the surviving families:
         //   - Document search    → DocumentSearchHandler   (SYS-Document Search / SYS-Document Discovery)
-        //   - Analysis query     → AnalysisQueryHandler    (SYS-Analysis Query; method discriminator)
         //   - Knowledge retrieval→ KnowledgeRetrievalHandler (SYS-Knowledge Source Retrieval / SYS-Knowledge Base Search)
         //   - Text refinement    → TextRefinementHandler   (SYS-Text Refinement / SYS-Text Key Points / SYS-Text Summary; text.* tool ids)
-        //   - Working document   → WorkingDocumentHandler  (SYS-Working Document Edit / Append Section / Write Back;
-        //                          sprk_requiredcapability = "write_back"; gate fires on the row's DECLARED
-        //                          sprk_sideeffectclass via PendingPlanManager — never tool-name lists (ADR-039);
-        //                          FR-12 safety proven by WorkingDocumentHandlerTests)
         //   - Analysis execution → AnalysisExecutionHandler (SYS-Analysis Rerun / SYS-Analysis Refine; analysis.* tool
         //                          ids; sprk_requiredcapability = "reanalyze" preserves the task-079 capability gate;
-        //                          rerun declares side_effect_class = write; migrated by FR-P2-07 / task 036 as the
-        //                          last live group — session playbook/document ids + the SSE writer now flow through
-        //                          ChatInvocationContext.PlaybookId/DocumentId/SseWriter below)
+        //                          migrated by FR-P2-07 / task 036 as the last live group — session playbook/document
+        //                          ids + the SSE writer flow through ChatInvocationContext.PlaybookId/DocumentId/SseWriter)
         //   - Web search / code interpreter / legal research / citation verification →
         //                          WebSearchHandler / CodeInterpreterHandler / LegalResearchHandler /
         //                          VerifyCitationsHandler (capability-gated per row: "web_search",
@@ -139,91 +125,13 @@ internal sealed class AgentToolCatalogProjector
         //                          kill-switches remain at the underlying service registrations)
         // Citations + widget metadata are returned via ToolResult.Metadata and the adapter
         // performs the side effects (Wave 7b infrastructure).
-
-        // --- InvokeSummarizePlaybookTool ---
-        // REMOVED in R6 Wave 10 / task 023 (D-A-15, Pillar 3 cleanup): replaced by the
-        // generic InvokePlaybookHandler (Services/Ai/Handlers/InvokePlaybookHandler.cs)
-        // auto-discovered via ToolFrameworkExtensions.AddToolHandlersFromAssembly (ADR-010)
-        // and surfaced to the chat agent by the data-driven block below (FR-11) via one
-        // sprk_analysistool row:
-        //   - SYS-Invoke Playbook (INVOKE-PLAYBOOK) → InvokePlaybookHandler (single function,
-        //     no method discriminator). The LLM now calls invoke_playbook(playbookId,
-        //     parameters) with the chat-summarize playbook GUID instead of
-        //     invoke_summarize_playbook(fileIds, style).
         //
-        // Capability gate preservation:
-        //   The hardcoded `if (capabilities.Contains(PlaybookCapabilities.Summarize))` check
-        //   is REMOVED. The generic invoke_playbook tool is unconditionally available (per
-        //   the seed row's sprk_requiredcapability = null), but the per-playbook authorization
-        //   is enforced by InvokePlaybookHandler.IsTenantVisibleAsync — only playbooks the
-        //   tenant has access to via IPlaybookService can be dispatched. Per task 022's
-        //   dynamic invoke_playbook description (D-A-14), the LLM sees the tenant's
-        //   accessible playbook list rendered into the tool description at request time, so
-        //   it can correctly choose the chat-summarize playbook GUID without prior knowledge.
-        //
-        // Engine divergence (documented; intentional post R6 Hotfix Wave B-G9c3):
-        //   The two server-side entry points for chat-driven Summarize use DIFFERENT engine
-        //   methods and produce materially different output:
-        //
-        //   1. Direct endpoint: POST /api/ai/chat/sessions/{id}/summarize →
-        //      SessionSummarizeOrchestrator.SummarizeSessionFilesAsync →
-        //      IPlaybookExecutionEngine.ExecuteChatSummarizeAsync (R6 task 025). Uses
-        //      Temperature=0 (StreamStructuredCompletionAsync, OpenAiClient.cs line 816),
-        //      the SUM-CHAT@v1 sprk_systemprompt loaded from sprk_analysisaction, and the
-        //      DocumentSummary structured-output schema (tldr / summary / keywords /
-        //      entities). Streams token-by-token as FieldDelta AnalysisChunk events. Intended
-        //      for deterministic per-file summarization (e.g. the Document Profile context's
-        //      "Summarize this only" affordance via FilePreviewContextWidget).
-        //
-        //   2. Tool-call path (InvokePlaybookHandler): SprkChatAgent (LLM) calls
-        //      invoke_playbook(playbookId, parameters) → InvokePlaybookHandler.ExecuteChatAsync
-        //      → IInvokePlaybookAi.InvokePlaybookAsync → IPlaybookOrchestrationService.ExecuteAsync
-        //      (NOT ExecuteChatSummarizeAsync). Uses Temperature=0.3 (per-handler
-        //      GetStructuredCompletionRawAsync / NodeExecutionContext default), the
-        //      PromptSchemaRenderer-rendered prompts with template parameters
-        //      (`includeSections`, `usePlainLanguage`, etc.), and per-handler schemas. Non-
-        //      streaming whole-response delivery. Produces a richer, conversational output.
-        //
-        // Slash → NL rewire (R6 Hotfix Wave B-G9c3, 2026-06-10):
-        //   The previous version of this comment claimed "Both end at the same engine methods"
-        //   — that was documentation drift; the engine methods (ExecuteChatSummarizeAsync vs
-        //   ExecuteAsync) and resulting LLM outputs are genuinely different. To make the
-        //   Assistant chat experience consistent, the /summarize slash command in
-        //   ConversationPane.handleBeforeSendMessage is now suppressed from firing
-        //   the retired R5 client summarize orchestrator (which drove the direct
-        //   endpoint; deleted by ai-architecture-redesign-r1 task 023). Slash now flows purely
-        //   through SprkChatAgent → invoke_playbook → InvokePlaybookHandler →
-        //   IPlaybookOrchestrationService.ExecuteAsync, matching natural-language
-        //   "summarize this document" output. The direct endpoint
-        //   (/api/ai/chat/sessions/{id}/summarize → ExecuteChatSummarizeAsync) is still
-        //   exposed for the Document Profile context's "Summarize this only" per-file
-        //   affordance (FilePreviewContextWidget) and the R5 task 036 deterministic NL pattern
-        //   + button-id dispatches in the chat pane (where the operator-UX contract requires
-        //   the structured streaming widget).
-
-        // --- InvokeInsightsQueryTool ---
-        // REMOVED in R6 Wave 10 / task 023 (D-A-15, Pillar 3 cleanup): replaced by the
-        // generic InvokePlaybookHandler (Services/Ai/Handlers/InvokePlaybookHandler.cs)
-        // auto-discovered via ToolFrameworkExtensions.AddToolHandlersFromAssembly (ADR-010)
-        // and surfaced to the chat agent by the data-driven block below (FR-11) via the
-        // same single SYS-Invoke Playbook row used to replace InvokeSummarizePlaybookTool.
-        //
-        // FR-24 InsightsIntentClassifier preserved:
-        //   The InsightsIntentClassifier continues to handle playbook-vs-RAG routing
-        //   internally (per FR-24 + docs/guides/INSIGHTS-PLAYBOOK-VS-RAG-DECISION-TREE.md).
-        //   When the LLM invokes invoke_playbook with an insights-scoped playbook ID, the
-        //   orchestration layer's playbook engine dispatches through the same routing logic.
-        //   For entity-scoped analytical questions, the tenant publishes an "insights query"
-        //   playbook whose nodes invoke the IInsightsAi services (or the RAG fallback)
-        //   internally — the chat tool surface is now uniform.
-        //
-        // Capability gate preservation:
-        //   The hardcoded `if (capabilities.Contains(PlaybookCapabilities.InsightsQuery))`
-        //   check is REMOVED. Like Summarize above, per-playbook authorization is enforced
-        //   inside InvokePlaybookHandler.IsTenantVisibleAsync via IPlaybookService.
-        //   The Insights endpoint's own kill-switches (503 ai.insights.disabled /
-        //   ai.rag.disabled / ai.intent-classification.disabled) remain in force at the
-        //   downstream service boundary — unchanged by this deletion.
+        // FR-P3-05 / audit F-1 closure (task 044, 2026-07-06): the three app-only legacy
+        // tool-handler legs — the generic playbook dispatcher, the
+        // analysis-query family, and the working-document family — were DELETED with their
+        // catalog rows (grep-zero per NFR-08). The chat-summarize capability runs on the
+        // Binding catalog via the ONE dispatch seam (SessionDispatchOrchestrator); the
+        // /summarize direct endpoint converged onto the same seam.
 
         // NFR-13 unchanged: the automatic post-LLM CitationSafetyCheck middleware runs
         // unconditionally after every response regardless of whether VerifyCitationsHandler
@@ -430,45 +338,10 @@ internal sealed class AgentToolCatalogProjector
                         DocumentId = string.IsNullOrWhiteSpace(documentId) ? null : documentId
                     };
 
-                    // R6 Pillar 3 / task 022 (D-A-14) — dynamic invoke_playbook description.
-                    // For the generic InvokePlaybookHandler row, override the static seed-row
-                    // description with a tenant-specific menu of currently-accessible playbooks
-                    // so the LLM sees the actual playbook IDs + names at request time. This is
-                    // what makes the generic dispatcher safe to replace the specialized
-                    // InvokeSummarize / InvokeInsightsQuery bridges (task 023): the LLM no
-                    // longer has to "know" the IDs — they're in the tool description.
-                    //
-                    // ADR-014: cached per-tenant (5 min TTL) under
-                    //   r6:chat-tools:invoke-playbook-description:{tenantId}
-                    // ADR-015: telemetry emits count + tenantId + descriptionLengthChars only;
-                    //   NEVER playbook names above Debug.
-                    // NFR-10: ~1500 char soft cap; alphabetical truncation with "...and N more".
-                    // Detection: HandlerClass == "InvokePlaybookHandler" (matches the seed row's
-                    //   sprk_handlerclass; the canonical wiring discriminator).
+                    // FR-P3-05 (task 044): the D-A-14 dynamic tool-description override for the
+                    // deleted generic playbook dispatcher was removed with its handler — every
+                    // row now registers with its catalog-authored description verbatim.
                     var rowForAdapter = row;
-                    if (string.Equals(row.HandlerClass, nameof(Sprk.Bff.Api.Services.Ai.Handlers.InvokePlaybookHandler), StringComparison.Ordinal))
-                    {
-                        try
-                        {
-                            var dynamicDescription = await _invokePlaybookDescriptionFactory(
-                                scopedProvider, tenantId, httpContext, cancellationToken)
-                                .ConfigureAwait(false);
-                            rowForAdapter = row with { Description = dynamicDescription };
-                        }
-                        catch (OperationCanceledException) when (cancellationToken.IsCancellationRequested)
-                        {
-                            throw;
-                        }
-                        catch (Exception ex)
-                        {
-                            // Soft failure: keep the static seed-row description so the tool
-                            // still registers (the static text already documents the contract).
-                            // ADR-015: log type + tenant only; never playbook content.
-                            _logger.LogWarning(ex,
-                                "[D-A-14] Dynamic invoke_playbook description generation failed for tenant={TenantId} ({ExceptionType}); falling back to static seed-row description.",
-                                tenantId, ex.GetType().Name);
-                        }
-                    }
 
                     try
                     {
@@ -481,15 +354,10 @@ internal sealed class AgentToolCatalogProjector
                         //
                         // R6 Wave 9 (ADR-033): also forward the hoisted documentStreamWriter
                         // (null when httpContext is unavailable). The adapter sets it onto each
-                        // per-call ChatInvocationContext.DocumentStreamWriter so the typed
-                        // WorkingDocumentHandler can emit DocumentStreamEvent Start/Token/End
-                        // directly during streaming. Handlers that don't stream simply ignore
-                        // the context field; handlers that need it MUST null-check per
-                        // ADR-033 §3.1.
-                        //
-                        // Task 022 (D-A-14): `rowForAdapter` may be the original row OR a
-                        // `row with { Description = dynamicDescription }` copy when this is the
-                        // InvokePlaybookHandler row — same record, override description only.
+                        // per-call ChatInvocationContext.DocumentStreamWriter so typed handlers
+                        // can emit DocumentStreamEvent Start/Token/End directly during
+                        // streaming. Handlers that don't stream simply ignore the context
+                        // field; handlers that need it MUST null-check per ADR-033 §3.1.
                         var adapter = new ToolHandlerToAIFunctionAdapter(
                             rowForAdapter,
                             handler,
