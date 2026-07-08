@@ -1,0 +1,87 @@
+<task id="AIR2-069" project="spaarke-ai-architecture-redesign-r2">
+  <metadata>
+    <title>G-R2-B browser UAT script — operator-executed on spaarkedev1 (gate)</title>
+    <status>not-started</status>
+    <phase>M — G-R2-B Memory</phase>
+    <gate>G-R2-B (memory) — GATE</gate>
+    <estimated-effort>0.5 day</estimated-effort>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Authors + runs a browser UAT script over shipped memory features; no architectural authorship. Gate verification, not implementation.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>false</parallel-safe>
+    <goal-eligible>false</goal-eligible>
+    <tags>uat, gate, spaarkedev1, memory, browser-test, operator</tags>
+    <dependencies>050, 051, 052, 053, 054, 055, 056, 057, 060, 061, 062, 065 (all G-R2-B memory tasks)</dependencies>
+  </metadata>
+
+  <prompt>
+    Author + drive the G-R2-B (Memory) browser UAT script, operator-executed on spaarkedev1 (spec §Success Criteria G-R2-B). A passing curl or green test NEVER satisfies this gate — it is a browser-verified acceptance. The script must prove: opening the assistant on a record (any of matter/project/invoice/work-assignment/event/document) it ALREADY KNOWS user identity, host record (name/id/schema), earlier-in-conversation, record-scoped derived facts, and standing user preferences WITHOUT re-prompting; preferences stated once persist across sessions; the user can SEE + DELETE what's remembered; and memory writes are EXPLICIT-ONLY (no document-planted memory). Memory-poisoning eval families are DEFERRED to the governance project — do not gate on them here.
+  </prompt>
+
+  <role>Operator-facing QA author fluent in the SpaarkeAi assistant surface, the memory features shipped in this wave, and browser-based UAT on spaarkedev1.</role>
+
+  <goal>
+    A written, reproducible browser UAT script exists and is executed on spaarkedev1, covering every G-R2-B acceptance clause with pass/fail steps: multi-entity record awareness without re-prompting, cross-session preference persistence, the user-visible see/delete surface, and the explicit-only write floor (a document-planted "remember" attempt does NOT create memory). Results are recorded; the gate is marked pass only on a clean operator run.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/spaarke-ai-architecture-redesign-r2/spec.md</file>
+    <file purpose="plan">projects/spaarke-ai-architecture-redesign-r2/plan.md</file>
+    <file purpose="ui-test-skill">.claude/skills/ui-test/SKILL.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="project">Browser-UAT-gated on spaarkedev1 — a passing curl/green test never satisfies the gate (r1 rule verbatim).</constraint>
+    <constraint source="project">Cover all G-R2-B clauses: multi-entity awareness without re-prompting; cross-session preference persistence; see/delete surface; explicit-only writes (no document-planted memory).</constraint>
+    <constraint source="project">Memory-poisoning eval families are DEFERRED — do not gate on them.</constraint>
+    <constraint source="project">Operator-executed — the task authors the script + records the run; it does not auto-pass the gate.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>uat, browser-test, memory-features, gate-verification, spaarkedev1</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Assistant surface (UAT target)" location="src/solutions/SpaarkeAi/">SpaarkeAi assistant + memory see/delete surface — the UAT drives this on spaarkedev1.</pattern>
+      <pattern name="Memory service under test" location="src/server/api/Sprk.Bff.Api/Services/Ai/Memory/">The generalized memory service + explicit-only write floor the UAT exercises end-to-end.</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>G-R2-B is one of the three core gates. It is browser-UAT-verified: the operator opens the assistant on real records and confirms memory behavior, cross-session persistence, the see/delete surface, and the explicit-only floor. This closes the memory wave before hardening (G-R2-D).</background>
+    <dependencies>
+      <dependency task="050" status="required">Memory service + scopes.</dependency>
+      <dependency task="052" status="required">Governance see/delete surface.</dependency>
+      <dependency task="053" status="required">Binder (record awareness without re-prompting).</dependency>
+      <dependency task="057" status="required">Explicit-only write floor.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Sibling gate script G-R2-A is task 049; G-R2-D verification is task 079. Keep the script format consistent.</item>
+    </related-work>
+  </context>
+
+  <steps mode="directional">
+    <step order="0" name="Context">Load spec §Success Criteria G-R2-B; enumerate every acceptance clause into script steps.</step>
+    <step order="1" name="Author script">Write the step-by-step browser UAT: multi-entity record awareness (all six entity types) without re-prompting; cross-session preference persistence; see/delete surface; explicit-only write (document-planted attempt fails).</step>
+    <step order="2" name="Execute on spaarkedev1">Operator runs the script on spaarkedev1; record pass/fail per step with evidence.</step>
+    <step order="3" name="Verdict">Mark the gate pass only on a clean run; file any failure as a defect. Include the NEGATIVE clause below.</step>
+  </steps>
+
+  <tools>
+    <tool name="ui-test">Browser-based UAT driving on spaarkedev1</tool>
+    <tool name="git">Commit the UAT script + results on the project branch</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r2/notes/ (G-R2-B UAT script + recorded operator results)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A browser UAT script covers every G-R2-B clause and is executed on spaarkedev1 with recorded pass/fail per step.</criterion>
+    <criterion testable="true">Opening the assistant on each of the six record types (matter/project/invoice/work-assignment/event/document), it knows user identity + host record + earlier-in-conversation + record-scoped derived facts + standing preferences WITHOUT re-prompting.</criterion>
+    <criterion testable="true">A preference stated once persists across a NEW session; the user can see + delete what's remembered.</criterion>
+    <criterion testable="true">NEGATIVE: a document-planted "remember X" attempt does NOT create a memory fact (explicit-only floor verified in the browser).</criterion>
+    <criterion testable="true">The gate is marked pass ONLY on a clean operator run; memory-poisoning families are NOT gated here (deferred).</criterion>
+  </acceptance-criteria>
+</task>

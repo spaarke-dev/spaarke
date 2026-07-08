@@ -1,0 +1,90 @@
+<task id="AIR2-063" project="spaarke-ai-architecture-redesign-r2">
+  <metadata>
+    <title>Matter-level retrieval ACL verification spike — READ-ONLY (likely confirms PrivilegeFilterBuilder)</title>
+    <status>not-started</status>
+    <phase>M — G-R2-B Memory</phase>
+    <gate>G-R2-B (memory)</gate>
+    <estimated-effort>0.5 day</estimated-effort>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Bounded READ-ONLY verification spike over a known anchor (RagService.cs:1238 always appends PrivilegeFilterBuilder); the expected outcome CONFIRMS the control. No production code changes; escalates only if a genuine gap is found.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>true</parallel-safe>
+    <goal-eligible>false</goal-eligible>
+    <tags>bff-api, security, retrieval-acl, spike, read-only, ethical-wall</tags>
+    <dependencies>none (independent read-only spike)</dependencies>
+  </metadata>
+
+  <prompt>
+    Run a bounded READ-ONLY spike (FR-B-14): are user-level matter walls enforced in the AI Search filters at RETRIEVAL time (a load-bearing ethical-wall control) or only at history-sanitization? The anchor `RagService.cs:1238` always appends `PrivilegeFilterBuilder`, so the spike LIKELY CONFIRMS the control with no gap. If a genuine gap exists, it is security-sensitive and escalates as its own project (NOT core scope) via the pre-declared escalation path. Produce a written finding with file:line evidence — no production code changes.
+  </prompt>
+
+  <role>Senior .NET developer / security reviewer fluent in the Spaarke RAG retrieval path, ethical-wall / privilege filtering, and conversation-history sanitization.</role>
+
+  <goal>
+    A written verification finding establishes whether matter-level access walls are enforced at RETRIEVAL time in the AI Search filter (via `PrivilegeFilterBuilder`, always appended at `RagService.cs:1238`) versus only at history-sanitization. The finding cites file:line evidence and concludes CONFIRMS-control (expected) or IDENTIFIES-GAP. No production code is changed; a gap triggers the pre-declared security escalation rather than an in-scope fix.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/spaarke-ai-architecture-redesign-r2/spec.md</file>
+    <file purpose="plan">projects/spaarke-ai-architecture-redesign-r2/plan.md</file>
+    <file purpose="retrieval-impl">src/server/api/Sprk.Bff.Api/Services/Ai/RagService.cs</file>
+    <file purpose="privilege-filter">src/server/api/Sprk.Bff.Api/Services/Ai/Security/PrivilegeFilterBuilder.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="project">READ-ONLY spike — no production code changes; output is a written finding with file:line evidence.</constraint>
+    <constraint source="project">A genuine gap is security-sensitive and escalates as its OWN project (not core r2 scope) — do not attempt an in-scope fix.</constraint>
+    <constraint source="ADR-038">If a verification test is written, it is a KEEP-path integration test; no `Mock&lt;HttpMessageHandler&gt;`, no DI-registration tests.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai/retrieval-acl, ethical-wall, privilege-filter, history-sanitization, security-spike</topic>
+    <files>
+      <file>docs/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>docs/adr/ADR-015-ai-data-governance.md</file>
+    </files>
+    <patterns>
+      <pattern name="Retrieval-time privilege filter (verify here)" location="src/server/api/Sprk.Bff.Api/Services/Ai/RagService.cs:1238">PrivilegeFilterBuilder always appended to the AI Search filter at retrieval — the load-bearing control the spike confirms.</pattern>
+      <pattern name="Privilege filter builder" location="src/server/api/Sprk.Bff.Api/Services/Ai/Security/PrivilegeFilterBuilder.cs">The filter construction — verify it encodes user-level matter walls.</pattern>
+      <pattern name="History sanitization (the alternative site)" location="src/server/api/Sprk.Bff.Api/Services/Ai/Safety/CrossMatter/ConversationHistorySanitizer.cs">History-sanitization path — confirm walls are enforced at RETRIEVAL, not only here.</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>R22 asks whether ethical walls hold at retrieval or only at history-sanitization. Plan §3 notes retrieval ACL is "already enforced" (RagService.cs:1238 always appends PrivilegeFilterBuilder) so the spike LIKELY CONFIRMS. The escalation path is pre-declared because if the wall were only at sanitization, that would be a real ethical-wall gap warranting its own security project.</background>
+    <dependencies>
+      <dependency task="none" status="n/a">Independent read-only spike.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 061 (Semantic interface) must not weaken whatever this spike confirms about the ACL.</item>
+    </related-work>
+  </context>
+
+  <steps mode="directional">
+    <step order="0" name="Context">Load spec FR-B-14, RagService.cs:1238, PrivilegeFilterBuilder, ConversationHistorySanitizer.</step>
+    <step order="1" name="Trace retrieval">Confirm the privilege filter is unconditionally appended to the AI Search filter at retrieval; verify it encodes user-level matter walls.</step>
+    <step order="2" name="Contrast sanitization">Confirm walls are enforced at retrieval, not merely at history-sanitization.</step>
+    <step order="3" name="Finding">Write the finding (CONFIRMS-control or IDENTIFIES-GAP) with file:line evidence.</step>
+    <step order="4" name="Escalate-if-gap">If a gap is found, invoke the pre-declared security escalation (own project); do not fix in-scope.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Optional read-only verification test build/run</tool>
+    <tool name="git">Commit the finding note on the project branch</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r2/notes/ (retrieval-ACL verification finding with file:line evidence + CONFIRMS/GAP verdict)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A written finding states whether matter walls are enforced at RETRIEVAL time (PrivilegeFilterBuilder at RagService.cs:1238) with file:line evidence.</criterion>
+    <criterion testable="true">The finding contrasts retrieval-time vs history-sanitization enforcement and concludes CONFIRMS-control or IDENTIFIES-GAP.</criterion>
+    <criterion testable="true">No production code is changed (read-only spike).</criterion>
+    <criterion testable="true">NEGATIVE: if a gap is found, it is escalated as a separate security project — the spike does NOT attempt an in-scope fix (documented in the finding).</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If the spike finds matter walls are enforced ONLY at history-sanitization and NOT at retrieval (a real ethical-wall gap), STOP — this is security-sensitive (CLAUDE.md §6). Invoke the pre-declared escalation: file it as its own security project with the evidence; do not remediate within core r2 scope.</trigger>
+  </escalation>
+</task>

@@ -1,0 +1,108 @@
+<task id="AIR2-057" project="spaarke-ai-architecture-redesign-r2">
+  <metadata>
+    <title>memory.write as a governed side effect — Policy v2 confirm UX + EXPLICIT-ONLY floor</title>
+    <status>not-started</status>
+    <phase>M — G-R2-B Memory</phase>
+    <gate>G-R2-B (memory)</gate>
+    <estimated-effort>2 days</estimated-effort>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Introduces a side-effecting typed tool guarded by a security floor (explicit-only writes) that is the interim control for the DEFERRED memory-poisoning threat model; a defect here means document- or model-planted memory — a security regression. Wires into the Policy v2 gate engine + the triple-twin catalog.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>false</parallel-safe>
+    <goal-eligible>false</goal-eligible>
+    <tags>bff-api, memory, memory-write, policy-v2, security, adr-039, catalog-row</tags>
+    <dependencies>020 (triple-twin hoist — catalog-row source), 032 (Policy v2 gate engine), 050 (memory service), 051 (envelope)</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement `memory.write` as a governed side effect (FR-B-08): a typed tool with a declared `side_effect_class`, subject to Confirmation Policy v2 for the confirm-on-inferred-capture UX (explicit "remember X" ⇒ execute + ✅; model-inferred capture ⇒ lightweight confirm or queue-for-review). Enforce the IN-SCOPE SECURITY FLOOR: `memory.write` is EXPLICIT-ONLY — written only on a user instruction, NEVER model- or document-initiated. Reads surface provenance; users get the FR-B-03 view/delete surface. The FULL untrusted-origin ban + `sourceTrustLevel` enforcement are DEFERRED (owner ruling 2026-07-08) to the governance project — the explicit-only floor is the interim control. Author the `memory.*` catalog row THROUGH the task-020 triple-twin hoisted source (it's the first consumer).
+  </prompt>
+
+  <role>Senior .NET developer fluent in ADR-039 closed catalogs, the Policy v2 gate engine, the memory service, and side-effect governance in the Spaarke BFF.</role>
+
+  <goal>
+    A `memory.write` typed tool exists with a catalog-declared `side_effect_class`, authored through the triple-twin hoisted source. Policy v2 governs the confirm UX: an explicit "remember X" executes and returns ✅; a model-INFERRED capture is either lightly confirmed or queued for review — and a document- or model-initiated write with no user instruction is REFUSED at the explicit-only floor. Provenance is surfaced on read; the deferred full untrusted-origin ban is documented as out of scope with the explicit-only floor named as the interim control.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/spaarke-ai-architecture-redesign-r2/spec.md</file>
+    <file purpose="plan">projects/spaarke-ai-architecture-redesign-r2/plan.md</file>
+    <file purpose="policy-note">projects/spaarke-ai-architecture-redesign-r2/notes/policy-v2-origin-classification-decision-tree.md</file>
+    <file purpose="module-guidance">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    <file purpose="bff-governance">.claude/constraints/bff-extensions.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-039">`memory.write` risk is catalog-declared `side_effect_class` DATA, never runtime LLM judgment; no second intent mechanism. Catalog row authored through the task-020 triple-twin source.</constraint>
+    <constraint source="project">SECURITY FLOOR (binding, in-scope): `memory.write` is EXPLICIT-ONLY — user-instructed; never model- or document-initiated. This blocks document-planted memory cheaply.</constraint>
+    <constraint source="ADR-040">Confirmation state is a Gate-ledger property (a second ask is structurally impossible); store-before-render preserved.</constraint>
+    <constraint source="project">Full untrusted-origin ban + `sourceTrustLevel` enforcement are DEFERRED — do NOT implement; the explicit-only floor is the interim control (document the boundary).</constraint>
+    <constraint source="ADR-013">Consumed via PublicContracts; no AI-internal type leaks to CRUD.</constraint>
+    <constraint source="ADR-038">Gate/tool tests are KEEP-path integration tests; no `Mock&lt;HttpMessageHandler&gt;`, no DI-registration tests.</constraint>
+    <constraint source="bff-hygiene">Run bff-extensions.md checklist; unconditional service registration for any mapped endpoint; measure publish-size; no new HIGH CVE; state Placement Justification.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai/side-effect-gate, policy-v2, closed-catalogs, memory-write, explicit-only-floor</topic>
+    <files>
+      <file>docs/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>docs/adr/ADR-040-session-ledger.md</file>
+      <file>docs/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Policy v2 gate engine" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SideEffectGateAIFunction.cs:77">Task 032 Policy v2 gate stack — `memory.write` classifies + gates here (tier + origin overlay).</pattern>
+      <pattern name="Triple-twin catalog source" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/OpenAiFunctionSchemaValidator.cs:70">Task 020 hoisted single-source — author the `memory.*` catalog row through it (first consumer).</pattern>
+      <pattern name="Memory service (write target)" location="src/server/api/Sprk.Bff.Api/Services/Ai/Memory/MatterMemoryService.cs">Generalized service (task 050) is the write target; envelope provenance (task 051) recorded on write.</pattern>
+      <pattern name="Origin classifier" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ElicitationTurnRouter.cs:34">Deterministic origin behavior — the explicit-vs-inferred distinction rides the origin classification.</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>Memory writes are the poisoning attack surface. The full threat model (untrusted-origin ban, semantic-retrieval trust boundary, poisoning evals) is DEFERRED to a governance project; this task ships the cheap, high-value interim control — explicit-only writes — so document-planted memory is structurally blocked now. Policy v2 (task 032) supplies the tier/origin machinery; the triple-twin hoist (task 020) is the mandatory catalog-authoring path.</background>
+    <dependencies>
+      <dependency task="020" status="required">Triple-twin hoist — the `memory.*` catalog row must be authored through it.</dependency>
+      <dependency task="032" status="required">Policy v2 gate engine for the confirm UX + origin overlay.</dependency>
+      <dependency task="050" status="required">Memory service write target.</dependency>
+      <dependency task="051" status="required">Envelope provenance recorded on write.</dependency>
+    </dependencies>
+    <related-work>
+      <item>052 governs stored memory (retention/read/delete); this task governs WRITES. 069 UAT verifies "no document-planted memory."</item>
+    </related-work>
+  </context>
+
+  <steps mode="directional">
+    <step order="0" name="Context + governance">Load spec FR-B-08 + NFR-03, the policy-v2 note, ADR-039/040. Confirm the gate stack + triple-twin source + origin classifier.</step>
+    <step order="1" name="Catalog row via triple-twin">Author the `memory.write` catalog row (declared `side_effect_class`) THROUGH the task-020 hoisted source; validator-enforced parity across the three surfaces.</step>
+    <step order="2" name="Explicit-only floor">Enforce that `memory.write` executes ONLY on a user instruction; refuse model- or document-initiated writes at the floor.</step>
+    <step order="3" name="Policy v2 confirm UX">Explicit "remember X" ⇒ execute + ✅; model-inferred capture ⇒ lightweight confirm or queue-for-review (confirmation state as a Gate-ledger property).</step>
+    <step order="4" name="Provenance on write/read">Record envelope provenance (source + sessionId/turnId) on write; surface it on read.</step>
+    <step order="5" name="Tests">Explicit write executes; inferred write confirms/queues; document/model-initiated write REFUSED; provenance recorded. Include NEGATIVE below.</step>
+    <step order="6" name="Verify + governance">Build; run tests; measure publish-size; state Placement Justification + the deferred-ban boundary.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + run gate/tool integration tests</tool>
+    <tool name="git">Commit on the project branch</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ (memory.write typed tool + explicit-only floor + Policy v2 wiring)</output>
+    <output type="code">infra/dataverse/inputschemas/ + hoisted source (memory.* catalog row via task-020 single source)</output>
+    <output type="test">tests/integration/contract/ + tests/unit/Sprk.Bff.Api.Tests/ (explicit-only floor + confirm-UX tests)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`memory.write` is a typed tool with a catalog-declared `side_effect_class` authored through the task-020 triple-twin source (validator-enforced parity across all three surfaces).</criterion>
+    <criterion testable="true">An explicit "remember X" executes and returns ✅; a model-inferred capture is lightly confirmed OR queued for review (confirmation state is a Gate-ledger property).</criterion>
+    <criterion testable="true">A document- or model-initiated write with no user instruction is REFUSED at the explicit-only floor (asserted by a test).</criterion>
+    <criterion testable="true">Provenance (source + sessionId/turnId) is recorded on write and surfaced on read.</criterion>
+    <criterion testable="true">The deferred full untrusted-origin ban / `sourceTrustLevel` enforcement is NOT implemented; the explicit-only floor is documented as the interim control.</criterion>
+    <criterion testable="true">NEGATIVE: an attempt to write memory sourced from document content (no user instruction) is blocked — a test asserts no memory fact is persisted.</criterion>
+    <criterion testable="true">Publish-size delta measured + reported; no new HIGH CVE; Placement Justification stated.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>The explicit-only floor is a SECURITY control standing in for a deferred threat model (CLAUDE.md §6 security-sensitive). If enforcing explicit-only cannot cleanly distinguish user-instructed from model/document-initiated writes at the gate (i.e., the origin signal is insufficient to guarantee the floor), STOP and escalate — do not ship a floor that can be bypassed. Surface options + recommendation rather than weakening the control.</trigger>
+  </escalation>
+</task>

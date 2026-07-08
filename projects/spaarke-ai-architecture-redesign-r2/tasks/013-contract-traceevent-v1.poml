@@ -1,0 +1,101 @@
+<task id="AIR2-013" project="spaarke-ai-architecture-redesign-r2">
+  <metadata>
+    <title>Publish TraceEvent v1 contract (walking skeleton) — name the existing ledger ToolChain markers as a read contract</title>
+    <status>not-started</status>
+    <phase>A0 — Contract-first</phase>
+    <gate>G-R2-A (seam publication)</gate>
+    <estimated-effort>1 day</estimated-effort>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Read contract the decision-traceability view (FR-A1-09) + live plan narration bind to across a hard-refresh server read surface; naming the markers wrong forces a divergent client. Architectural blast radius, low code volume.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>true</parallel-safe>
+    <goal-eligible>false</goal-eligible>
+    <tags>bff-api, contract, seam, adr-040, trace-event, traceability</tags>
+    <dependencies>none (A0 front wave; publish early)</dependencies>
+  </metadata>
+
+  <prompt>
+    Publish the `TraceEvent v1` contract as a Phase-A0 walking skeleton (spec FR-A0-05, design D-F4). It largely NAMES the EXISTING session-ledger `ToolChain` markers (and the `Gate` markers) as a read contract — request → context slices used → tools selected → gate/approval path → outcome — so the decision-traceability view (FR-A1-09) and live plan narration bind to a stable shape rather than reaching into ledger internals. Do NOT invent new event types where a ledger marker already exists. Ship the contract WITH a thin producer (read projection), a thin consumer, and a contract test.
+  </prompt>
+
+  <role>Senior .NET developer fluent in the ADR-040 session ledger, the ToolChain/Gate entry types, and versioned read-projection contracts.</role>
+
+  <goal>
+    A versioned `TraceEvent v1` read contract under `Services/Ai/PublicContracts/` that projects the existing ledger `SessionToolChain` + `SessionGate` markers into a stable, ordered trace event stream (identifiers/counts only, NFR-07 — never content) with a version field, tolerant-reader rules, an example payload, and defined ordering/partial states. A thin producer projects a real ledger into TraceEvents; a thin consumer renders them as a trace; a contract test in `tests/integration/contract/` locks the shape and asserts no-content telemetry.</goal>
+
+  <inputs>
+    <file purpose="spec">projects/spaarke-ai-architecture-redesign-r2/spec.md</file>
+    <file purpose="plan">projects/spaarke-ai-architecture-redesign-r2/plan.md</file>
+    <file purpose="design">projects/spaarke-ai-architecture-redesign-r2/design.md</file>
+    <file purpose="module-guidance">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    <file purpose="bff-governance">.claude/constraints/bff-extensions.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-040">TraceEvent is a READ projection over the ledger — no parallel trace store; the ledger stays the source of truth.</constraint>
+    <constraint source="NFR-07">No-content telemetry — TraceEvents carry identifiers/counts only (tool names, entry ids, slice counts), NEVER prompt/response content.</constraint>
+    <constraint source="ADR-013">Consumers reach TraceEvent only via `Services/Ai/PublicContracts/`.</constraint>
+    <constraint source="ADR-038">Contract test is a KEEP-path integration test; no `Mock&lt;HttpMessageHandler&gt;`, no DI-registration tests.</constraint>
+    <constraint source="project">NAME existing ToolChain/Gate markers; introduce a NEW event type ONLY for the ContextEnvelope-fingerprint entry (FR-A1-09) — and justify it (CLAUDE.md §11). Tolerant-reader; version field; additive-only.</constraint>
+    <constraint source="bff-hygiene">Run the bff-extensions.md checklist; state Placement Justification; measure publish-size delta; no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai/session-ledger, tool-chain, traceability, no-content-telemetry, versioned-contracts</topic>
+    <files>
+      <file>docs/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Ledger ToolChain + Gate markers" location="src/server/api/Sprk.Bff.Api/Models/Ai/Chat/SessionLedgerEntries.cs:170">SessionToolChain markers (near :170) + SessionGate — the existing entries TraceEvent v1 names; do not duplicate.</pattern>
+      <pattern name="Trace widget consumer" location="src/client/shared/Spaarke.AI.Widgets/">ExecutionTraceWidget + executionTraceBuffer.ts — the client that consumes the trace read surface (FR-A1-09).</pattern>
+      <pattern name="Contract test home" location="tests/integration/contract/">Add the TraceEvent contract test here.</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>FR-A1-09 extends the ExecutionTraceWidget into a full decision-traceability view sourced from ledger ToolChain + Gate + a new ContextEnvelope-fingerprint entry, plus a server read surface so trace survives hard refresh. This A0 task freezes the READ shape first — mostly a naming exercise over existing markers — so the widget, the live plan narration, and the server read surface (task 038) all bind to a stable contract. NFR-07 forbids content in the trace.</background>
+    <dependencies>
+      <dependency task="none" status="n/a">Front A0 wave — no upstream.</dependency>
+    </dependencies>
+    <related-work>
+      <item>FR-A1-09 (task 038) builds the traceability view + server ToolChain read surface on TraceEvent v1.</item>
+      <item>FR-A0-01 (task 015) ContextEnvelope v1 defines the fingerprint whose entry TraceEvent references.</item>
+      <item>FR-A0-02 (task 011) OutcomeCard trace reference points at a TraceEvent stream.</item>
+    </related-work>
+  </context>
+
+  <steps mode="directional">
+    <step order="0" name="Context + governance">Load FR-A0-05, ADR-040, NFR-07, bff-extensions.md; enumerate the existing ToolChain/Gate markers via the anchor.</step>
+    <step order="1" name="Define the contract">Define `TraceEvent v1` read DTO under `Services/Ai/PublicContracts/` naming existing markers; add the fingerprint event type (justified); version field + tolerant-reader + ordering rules; identifiers/counts only.</step>
+    <step order="2" name="Reference producer">Wire a thin read projection from a real ledger into an ordered TraceEvent stream.</step>
+    <step order="3" name="Reference consumer">A thin consumer that renders the TraceEvent stream as a trace (client stub or server render sufficient).</step>
+    <step order="4" name="Contract test">Add a contract test asserting shape, version, ordering, tolerant-reader, and that NO content leaks (identifiers/counts only, NFR-07).</step>
+    <step order="5" name="Verify + governance">Build; run the contract test; measure publish-size delta; state Placement Justification + bff-extensions checklist.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + run the contract/integration test</tool>
+    <tool name="git">Commit on the project branch</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ (TraceEvent v1 read contract DTO)</output>
+    <output type="test">tests/integration/contract/ (TraceEvent contract test)</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r2/notes/ (contract doc: marker→TraceEvent mapping + versioning + example payload)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`TraceEvent v1` exists under `Services/Ai/PublicContracts/` (ADR-013) as a READ projection over ledger markers, with a version field + tolerant-reader rules; an unknown extra field is ignored (asserted by the test).</criterion>
+    <criterion testable="true">The contract NAMES the existing SessionToolChain + SessionGate markers (no duplicate event types); any new type (ContextEnvelope fingerprint) is justified per CLAUDE.md §11.</criterion>
+    <criterion testable="true">A thin producer projects a REAL ledger into an ordered TraceEvent stream and a thin consumer renders it — round-trip proven by the contract test.</criterion>
+    <criterion testable="true">The contract test asserts identifiers/counts only — NO prompt/response content appears in any TraceEvent (NFR-07).</criterion>
+    <criterion testable="true">The test uses no `Mock&lt;HttpMessageHandler&gt;` and no DI-registration assertions (ADR-038).</criterion>
+    <criterion testable="true">NEGATIVE: a TraceEvent carrying message content (not just an identifier/count) fails the no-content test assertion.</criterion>
+    <criterion testable="true">Publish-size delta measured + reported; no new HIGH CVE; Placement Justification stated.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If the existing ledger markers cannot be projected into a coherent request→context→tools→gate→outcome trace WITHOUT adding a parallel trace store (violating ADR-040's ledger-as-source-of-truth), STOP and surface it — the traceability view may need a different sourcing strategy before task 038.</trigger>
+  </escalation>
+</task>

@@ -1,0 +1,100 @@
+<task id="AIR2-090" project="spaarke-ai-architecture-redesign-r2">
+  <metadata>
+    <title>Project wrap-up — test-diet, README→Complete, lessons-learned, /defer the named deferrals</title>
+    <status>not-started</status>
+    <phase>Wrap-up</phase>
+    <gate>none (project close)</gate>
+    <estimated-effort>0.5 day</estimated-effort>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Prescribed close-out procedure (test-diet, status flips, deferral filing); mechanical + checklist-driven, no architectural judgment — but escalation guards the deferral-risk sign-off.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-safe>false</parallel-safe>
+    <goal-eligible>false</goal-eligible>
+    <tags>wrap-up, project-close, test-diet, deferrals, documentation</tags>
+    <dependencies>079 (G-R2-D verification green) + all prior gates (G-R2-A, G-R2-B)</dependencies>
+  </metadata>
+
+  <prompt>
+    Close the project. Per CLAUDE.md §7 project-close gate, run `/test-diet` BEFORE marking the project complete; flip the README to Complete; write `lessons-learned.md`; and `/defer` the named deferrals. This is the MANDATORY wrap-up and runs with prescriptive steps — execute them in order, do not improvise the close sequence.
+  </prompt>
+
+  <role>Project close-out engineer fluent in the Spaarke project-close protocol (`/test-diet`, `/defer`, TASK-INDEX + README status flips, lessons-learned).</role>
+
+  <goal>
+    The project is cleanly closed: `/test-diet` has reconciled R2's added/modified tests against the ADR-038 build-vs-maintain classifier (report emitted); the README status is Complete; `lessons-learned.md` exists; TASK-INDEX + current-task.md are reset; and every named deferral is filed via `/defer` into both `notes/defer-issues.md` and GitHub Issues.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/spaarke-ai-architecture-redesign-r2/spec.md</file>
+    <file purpose="plan">projects/spaarke-ai-architecture-redesign-r2/plan.md</file>
+    <file purpose="project-context">projects/spaarke-ai-architecture-redesign-r2/CLAUDE.md</file>
+    <file purpose="defer-tracking">projects/spaarke-ai-architecture-redesign-r2/notes/defer-issues.md</file>
+    <file purpose="task-index">projects/spaarke-ai-architecture-redesign-r2/tasks/TASK-INDEX.md</file>
+    <file purpose="testing-adr">docs/adr/ADR-038-testing-strategy.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="CLAUDE.md §7">Project-close gate — `/test-diet` runs BEFORE the project is marked complete; the wrap-up PR MUST cite the test-diet report or document the skip rationale.</constraint>
+    <constraint source="ADR-038">`/test-diet` classifies via the 17-ban build-vs-maintain classifier; MAINTAIN tests stay at their KEEP path, SCAFFOLDING tests are removed; the skill is read-only (emits `git rm`/`git mv` for reviewer).</constraint>
+    <constraint source="CLAUDE.md §11">Every `/defer` entry names a concrete failing behavior/contract; `push-to-github` blocks push on entries without GitHub URLs.</constraint>
+    <constraint source="project">The named deferrals MUST all be filed — including the memory hard-governance rules + the Insights-Engine→memory wiring, per spec Deferrals — not only the four in the project CLAUDE.md list.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>project-close, test-diet, defer-tracking, lessons-learned</topic>
+    <files>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Test-diet gate" location=".claude/skills/test-diet/">Project-close reconciliation; output `projects/spaarke-ai-architecture-redesign-r2/notes/test-diet-report.md`.</pattern>
+      <pattern name="Defer tracking" location=".claude/skills/project-defer-issue-tracking/">`/defer` files to notes/defer-issues.md + GitHub Issues; §11 concrete-failure rule applies.</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>R2 is closing after G-R2-D. Per the CLAUDE.md §7 project-close gate (added by ci-cd-unit-test-remediation-r1), `/test-diet` runs at Step 11 of the wrap-up before completion. The spec Deferrals list is broader than the project CLAUDE.md's four named deferrals — it adds the memory hard-governance rules (untrusted-origin ban, semantic trust boundary, litigation-hold, poisoning evals) and the Insights-Engine→memory wiring. All must be filed.</background>
+    <dependencies>
+      <dependency task="079" status="required">G-R2-D gate must be green before close.</dependency>
+      <dependency task="all-gates" status="required">G-R2-A + G-R2-B must be complete (ADR-041/042 Accepted at their gates).</dependency>
+    </dependencies>
+    <related-work>
+      <item>ADR-041 + ADR-042 Acceptance is verified at their own gates, not re-done here.</item>
+    </related-work>
+  </context>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Precondition">Confirm G-R2-A, G-R2-B, and G-R2-D (task 079) are all green. If any gate is not green, STOP — do not close.</step>
+    <step order="1" name="Run /test-diet">Invoke `/test-diet`; it reconciles R2's added/modified tests against the ADR-038 classifier and emits `notes/test-diet-report.md`. Apply the emitted `git rm`/`git mv` for SCAFFOLDING-class tests; keep MAINTAIN-class at their KEEP path.</step>
+    <step order="2" name="File deferrals">`/defer` each named deferral into notes/defer-issues.md + GitHub Issues, each with a concrete failing behavior (§11): (a) Work IQ/Foundry IQ researcher spike + runtime providers; (b) workspace-intelligence goal-tracking subsystem; (c) admin observability dashboards; (d) Spaarke-as-MCP-server outbound surface; (e) memory hard-governance rules — full untrusted-origin ban + `sourceTrustLevel` enforcement, semantic-retrieval↔memory trust boundary (FR-B-09), litigation-hold interaction, memory-poisoning eval families (FR-B-10); (f) Insights-Engine→Record-memory write wiring.</step>
+    <step order="3" name="Lessons-learned">Write `projects/spaarke-ai-architecture-redesign-r2/notes/lessons-learned.md` (what worked, what to change, reuse findings).</step>
+    <step order="4" name="Status flips">Flip the README status to Complete; set TASK-INDEX rows to ✅; reset current-task.md to "none (project complete)".</step>
+    <step order="5" name="Wrap-up PR">Open the wrap-up PR citing the test-diet report + the filed deferral issue URLs.</step>
+  </steps>
+
+  <tools>
+    <tool name="test-diet">Project-close test reconciliation</tool>
+    <tool name="defer">File deferrals to notes + GitHub Issues</tool>
+    <tool name="git">Commit + open the wrap-up PR</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r2/notes/test-diet-report.md (from /test-diet)</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r2/notes/lessons-learned.md</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r2/notes/defer-issues.md (all named deferrals filed, with GitHub URLs)</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r2/README.md (status → Complete) + tasks/TASK-INDEX.md (✅) + current-task.md (reset)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`/test-diet` ran BEFORE completion; `notes/test-diet-report.md` exists and the wrap-up PR cites it.</criterion>
+    <criterion testable="true">SCAFFOLDING-class tests are removed per the report; MAINTAIN-class tests remain at their KEEP path.</criterion>
+    <criterion testable="true">All SIX named deferral groups (a–f) are filed via `/defer` into notes/defer-issues.md AND GitHub Issues, each with a concrete failing behavior + a GitHub URL.</criterion>
+    <criterion testable="true">README status is Complete; TASK-INDEX rows are ✅; current-task.md is reset to "none (project complete)".</criterion>
+    <criterion testable="true">`lessons-learned.md` exists.</criterion>
+    <criterion testable="true">NEGATIVE: the project is NOT marked complete if any gate (G-R2-A/B/D) is not green OR `/test-diet` did not run — the close is blocked.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>The memory hard-governance deferral (group e) carries an operator-accepted risk (the explicit-only-write floor is only an interim control). Before filing it as deferred, confirm the operator still accepts that risk at close; if the risk posture changed, STOP and surface it rather than silently deferring.</trigger>
+  </escalation>
+</task>

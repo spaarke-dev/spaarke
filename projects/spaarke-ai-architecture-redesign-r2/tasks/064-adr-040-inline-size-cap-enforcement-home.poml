@@ -1,0 +1,96 @@
+<task id="AIR2-064" project="spaarke-ai-architecture-redesign-r2">
+  <metadata>
+    <title>ADR-040 inline size-cap enforcement home — CONTINGENT on task 001</title>
+    <status>not-started</status>
+    <phase>M — G-R2-B Memory</phase>
+    <gate>G-R2-B (memory)</gate>
+    <estimated-effort>1 day</estimated-effort>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Bounded hardening of an existing ledger constant (InlinePayloadCapBytes) once r1 P4-close ownership is confirmed; no new subsystem. Contingent — may reduce to a no-op if r1 already owns it.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-safe>true</parallel-safe>
+    <goal-eligible>false</goal-eligible>
+    <tags>bff-api, ledger, size-cap, adr-040, hardening, contingent</tags>
+    <dependencies>001 (r1 P4-close reconciliation — determines ownership)</dependencies>
+  </metadata>
+
+  <prompt>
+    Take r1's ruling on the ADR-040 inline size-cap (FR-B-15, backlog R5): this task is CONTINGENT on task 001's r1 P4-close reconciliation. If r2 owns it, give the inline payload size cap (`SessionLedgerEntries.cs:50` `InlinePayloadCapBytes = 128*1024`) a clear enforcement HOME as memory/ledger hardening in this gate — a single enforcement point with over-cap payloads spilled to reference (store-before-render preserved). If task 001 rules r1 already closed it, this reduces to a verified no-op with evidence.
+  </prompt>
+
+  <role>Senior .NET developer fluent in the ADR-040 session-ledger inline/reference payload model and the ledger entry types.</role>
+
+  <goal>
+    The ADR-040 inline size-cap has one clear enforcement home: payloads at/under `InlinePayloadCapBytes` inline; over-cap payloads spill to reference (never lossily truncated), with the cap enforced at a single point rather than scattered. If task 001 determines r1 already owns/closed this, the task is a documented verified no-op citing the r1 evidence.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/spaarke-ai-architecture-redesign-r2/spec.md</file>
+    <file purpose="plan">projects/spaarke-ai-architecture-redesign-r2/plan.md</file>
+    <file purpose="reconciliation">projects/spaarke-ai-architecture-redesign-r2/notes/</file>
+    <file purpose="module-guidance">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    <file purpose="bff-governance">.claude/constraints/bff-extensions.md</file>
+    <file purpose="ledger-model">src/server/api/Sprk.Bff.Api/Models/Ai/Chat/SessionLedgerEntries.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="project">CONTINGENT on task 001 — do not proceed with an enforcement change until 001 rules r2 owns it; a "r1-closed" ruling makes this a verified no-op.</constraint>
+    <constraint source="ADR-040">Over-cap payloads spill to reference, never lossily truncated; store-before-render preserved; no parallel cache.</constraint>
+    <constraint source="project">Single enforcement point for the cap — do not scatter the check.</constraint>
+    <constraint source="ADR-038">Cap-enforcement tests are KEEP-path; no `Mock&lt;HttpMessageHandler&gt;`, no DI-registration tests.</constraint>
+    <constraint source="bff-hygiene">Run bff-extensions.md checklist; measure publish-size; no new HIGH CVE; state Placement Justification.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai/session-ledger, inline-size-cap, payload-reference-spill, adr-040</topic>
+    <files>
+      <file>docs/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Inline payload cap constant" location="src/server/api/Sprk.Bff.Api/Models/Ai/Chat/SessionLedgerEntries.cs:50">InlinePayloadCapBytes = 128*1024 — the cap whose enforcement home this task establishes.</pattern>
+      <pattern name="Ledger provenance keying" location="src/server/api/Sprk.Bff.Api/Models/Ai/Chat/SessionLedgerEntries.cs:39">BuildOutputKey {bindingId}@t{n} — reference-spilled payloads key here.</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>R5 backlog: the inline size cap exists as a constant but its enforcement ownership was contingent on whether r1 P4 closed it. Task 001 reconciles r1 P4-close state; this task acts on that ruling — either hardening the enforcement in r2 or recording a verified no-op.</background>
+    <dependencies>
+      <dependency task="001" status="required">r1 P4-close reconciliation — determines whether r2 owns this row.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Sibling contingent rows 075/076 are also gated on task 001.</item>
+    </related-work>
+  </context>
+
+  <steps mode="directional">
+    <step order="0" name="Context + contingency check">Load spec FR-B-15 + task 001's reconciliation ruling. If r1 owns/closed it → record a verified no-op with evidence + STOP.</step>
+    <step order="1" name="Single enforcement home">If r2 owns it, route the inline/reference decision through one enforcement point against `InlinePayloadCapBytes`.</step>
+    <step order="2" name="Reference spill">Over-cap payloads spill to reference (keyed {bindingId}@t{n}); no lossy truncation.</step>
+    <step order="3" name="Tests">At-cap inlines; over-cap spills to reference; no truncation. Include NEGATIVE below.</step>
+    <step order="4" name="Verify + governance">Build; run tests; measure publish-size; state Placement Justification.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + run ledger cap tests</tool>
+    <tool name="git">Commit on the project branch</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Ai/Chat/ (single cap-enforcement home) — OR a verified no-op note</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (inline/reference cap tests, if r2 owns it)</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r2/notes/ (contingency ruling + evidence)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The contingency is resolved against task 001: either an enforcement home is added (r2 owns) OR a verified no-op is recorded with r1 evidence.</criterion>
+    <criterion testable="true">If r2 owns it: the cap is enforced at a SINGLE point; at-cap payloads inline, over-cap payloads spill to reference (asserted by tests).</criterion>
+    <criterion testable="true">Over-cap payloads are NEVER lossily truncated — they spill to reference keyed {bindingId}@t{n} (store-before-render preserved).</criterion>
+    <criterion testable="true">NEGATIVE: an over-cap payload does NOT inline (and is not truncated) — a test asserts it spills to reference.</criterion>
+    <criterion testable="true">Publish-size delta measured + reported; no new HIGH CVE; Placement Justification stated (or no-op documented).</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>The contingency ruling is a judgment boundary: if task 001's reconciliation is ambiguous about whether r1 closed R5 (CLAUDE.md §6 ambiguous requirements), STOP and surface the ambiguity with the r1 evidence rather than guessing ownership — a wrong call either duplicates r1 work or leaves the cap unenforced.</trigger>
+  </escalation>
+</task>
