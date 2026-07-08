@@ -9,10 +9,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | P4 finish: 050 + 054 agents RUNNING (background; will notify) + r2 design v0.2 agent RUNNING. Then 055 → 090 → PR ready → merge. |
-| **Step** | **048 ✅ CLOSED by operator** (6 UAT rounds, all findings fixed+deployed @ `229817ce8`). 48/51 done. Portfolio Tasks Completed = 48. |
-| **Status** | autonomous close-out; 3 background agents in flight |
-| **Next Action** | On 050+054 return: main-session verify (build + suite vs KNOWN list), flip TASK-INDEX rows, selective commit (avoid other agents' files), push (`git pull --rebase` first — CI bot pushes format commits), portfolio 50. Then dispatch 055 (publish/CVE baseline + **ADR-040 size-cap enforcement lands here** per ruling). Then 090 wrap-up. Then PR #551 ready → merge. |
+| **Task** | P4 finish: **055 agent RUNNING** (publish/CVE baseline + ADR-029 update + ADR-040 size-cap enforce). Then 090 → PR ready → merge. |
+| **Step** | **50/51 done.** 050 ✅ (`61680b96d`: audit 62 rows zero-survivors + 42-file builder delete + .claude fixes) · 054 ✅ (`cfc20ce55→c9eb3dd74`: metering 4 counters + KQL pack, live dev evidence) · r2 design v0.2 ✅ (`03f9a5bbc`). Portfolio = 50. |
+| **Status** | autonomous close-out; 1 background agent in flight (055) |
+| **Next Action** | On 055 return: verify build+suite vs KNOWN, apply any .claude ADR-029 twin edit (MAIN session), flip TASK-INDEX 055, commit+push (`git pull --rebase` first), portfolio 51. Then **090 wrap-up in MAIN session**: /test-diet (BINDING), /defer filings (r2 backlog + validator triple-twin + trace ledger-read + gate pre-suspend + doc-consolidation-v0.5-yardstick), doc-drift-audit, ADR A-3 .claude twin refreshes (033/034/010/016/018/038 + 039/040 status verify), FR-by-FR spec acceptance, G-M DEFERRAL amendment record, devops-project-archive, projects/INDEX.md. Then re-merge master → full suite → PR #551 ready (offer /code-review ultra ONCE) → merge → post-merge smoke. |
 
 ## In-flight background agents (post-compaction: their notifications re-invoke you)
 1. **task-050** — Track-B completion audit + accumulated candidates (briefing playbook orphan, embeddings index=DOCUMENT-ONLY for operator, DocumentStream, playbook_options leg, trace emitters, FieldDelta model, 4 legacy workspace-tab tools [Workspace layout variant of Send IS LIVE — keep], WorkingDocumentService, TL/KNW row dupes) + **task-053's deferred server leg** (AiPlaybookBuilderService + dead graph endpoints deletion). Output: notes/track-b-completion-audit.md.
