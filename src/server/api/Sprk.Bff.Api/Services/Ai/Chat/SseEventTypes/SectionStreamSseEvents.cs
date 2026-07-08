@@ -10,7 +10,7 @@ namespace Sprk.Bff.Api.Services.Ai.Chat.SseEventTypes;
 /// <para>
 /// <b>Why these three events</b>: the legacy single-action <c>Output</c> Node model couples
 /// (1) schema declaration on the Action, (2) field-position contracts in the schema,
-/// (3) a schema-aware widget renderer, and (4) a schema-aware <c>FieldDelta</c> streaming
+/// (3) a schema-aware widget renderer, and (4) a schema-aware field-delta streaming
 /// protocol. Adding a section requires touching 5 coordination points. The composite +
 /// per-section-event model collapses this to 2 coordination points (section name +
 /// section state). The three events form the lifecycle:
@@ -35,22 +35,13 @@ namespace Sprk.Bff.Api.Services.Ai.Chat.SseEventTypes;
 ///
 /// <para>
 /// <b>Backward-compat invariant (FR-53 / project)</b>: these events are emitted ONLY when
-/// a <see cref="Nodes.NodeType.DeliverComposite"/> node executes. Existing schema-position
-/// playbooks (<see cref="Nodes.NodeType.Output"/> → <c>FieldDelta</c> via the
-/// legacy engine-shell chat-summarize stream — deleted by FR-P3-05 task 044) emit zero
-/// <c>section_*</c> events and continue to use <c>FieldDelta</c> unchanged until migrated
-/// by FR-58 (task 118R). The two emission paths are mutually exclusive on a per-playbook
-/// basis.
-/// </para>
-///
-/// <para>
-/// <b>ADR-033 streaming preservation</b>: Path 3 chat-summarize streaming via
-/// <see cref="IOpenAiClient.StreamStructuredCompletionAsync"/> +
-/// <c>IncrementalJsonParser</c> + <c>FieldDelta</c> is UNCHANGED by these event types.
-/// The <c>FieldDelta</c> envelope (<see cref="Models.Ai.AnalysisChunk.Delta"/>) flows on
-/// a different SSE wire (the <c>/summarize</c> endpoint emits <c>AnalysisChunk</c> JSON);
-/// the section events flow on the chat SSE wire (<see cref="ChatEndpoints"/> emits
-/// <see cref="Api.Ai.ChatSseEvent"/> JSON). No event-type-name collision.
+/// a <see cref="Nodes.NodeType.DeliverComposite"/> node executes. The legacy
+/// schema-position streaming contract (<c>Models.Ai.FieldDelta</c> on the
+/// <c>AnalysisChunk</c> envelope) was DELETED 2026-07-07 (redesign-r1 task 050, per
+/// ADR-037 as amended — client dual-render removed at task 046; the engine-shell
+/// chat-summarize producer was deleted at FR-P3-05 task 044). Section-name-keyed
+/// events are the sole structured-streaming contract. (The frozen engine's internal
+/// <c>Streaming.FieldDeltaEvent</c> parser type is a distinct symbol, untouched.)
 /// </para>
 ///
 /// <para>

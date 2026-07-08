@@ -15,7 +15,7 @@ import type { EntityContext } from './entity-context';
 // Entity Context (re-exported from dedicated file)
 // ---------------------------------------------------------------------------
 
-export type { EntityContext, EntityType, EntityResolutionResult } from './entity-context';
+export type { EntityContext, EntityType } from './entity-context';
 
 // AiPaneEvent is declared in this file (index.ts) — no re-export needed; consumers
 // import from '@spaarke/ai-context' which re-exports everything via the package index.

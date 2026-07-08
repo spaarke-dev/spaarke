@@ -346,21 +346,17 @@ public class AuthorizationTestFixture : WebApplicationFactory<Program>
             services.AddSingleton(_ => new Mock<IRagService>(MockBehavior.Loose).Object);
             services.AddSingleton(_ => new Mock<SearchIndexClient>() { CallBase = false }.Object);
             services.AddScoped(_ => new Mock<IScopeResolverService>(MockBehavior.Loose).Object);
-            services.AddScoped<Sprk.Bff.Api.Services.Ai.Builder.BuilderScopeImporter>();
             services.AddScoped(_ => new Mock<IFileIndexingService>(MockBehavior.Loose).Object);
             services.AddSingleton(_ => new Mock<IKnowledgeDeploymentService>(MockBehavior.Loose).Object);
             services.AddScoped(_ => new Mock<IAnalysisOrchestrationService>(MockBehavior.Loose).Object);
             services.AddScoped(_ => new Mock<IAppOnlyAnalysisService>(MockBehavior.Loose).Object);
             services.AddScoped(_ => new Mock<IPlaybookService>(MockBehavior.Loose).Object);
             services.AddScoped(_ => new Mock<INodeService>(MockBehavior.Loose).Object);
-            services.AddScoped(_ => new Mock<IAiPlaybookBuilderService>(MockBehavior.Loose).Object);
-            services.AddScoped(_ => new Mock<Sprk.Bff.Api.Services.Ai.Builder.IBuilderAgentService>(MockBehavior.Loose).Object);
             services.AddScoped(_ => new Mock<IPlaybookOrchestrationService>(MockBehavior.Loose).Object);
             services.AddScoped(_ => new Mock<IPlaybookSharingService>(MockBehavior.Loose).Object);
             services.AddScoped(_ => new Mock<IScopeManagementService>(MockBehavior.Loose).Object);
             services.AddSingleton(_ => new Mock<Sprk.Bff.Api.Services.Ai.Visualization.IVisualizationService>(MockBehavior.Loose).Object);
             services.AddSingleton(_ => new Mock<IModelSelector>(MockBehavior.Loose).Object);
-            services.AddScoped(_ => new Mock<IEntityResolutionService>(MockBehavior.Loose).Object);
 
             // Semantic Search & Record Search - endpoints are always mapped but services
             // only register when Analysis:Enabled=true && DocumentIntelligence:Enabled=true

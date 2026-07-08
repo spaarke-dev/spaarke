@@ -119,10 +119,16 @@ public static class AnalysisServicesModule
                            Sprk.Bff.Api.Services.Ai.EventRules.EventPathUserState>();
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.EventRules.EventRulesTelemetry>();
 
+        // AiTelemetry — TRULY UNCONDITIONAL (moved out of the DocumentIntelligence gate by
+        // spaarke-ai-architecture-redesign-r1 task 054, FR-P4-05). It is a pure Meter wrapper
+        // with zero AI dependencies, consumed by unconditionally-mapped chat endpoints for the
+        // per-tenant metering counters — the §F.1 asymmetric-registration rule requires the
+        // unconditional registration (pattern precedent: EventRulesTelemetry above).
+        services.AddSingleton<Sprk.Bff.Api.Telemetry.AiTelemetry>();
+
         var documentIntelligenceEnabled = configuration.GetValue<bool>("DocumentIntelligence:Enabled");
         if (documentIntelligenceEnabled)
         {
-            services.AddSingleton<Sprk.Bff.Api.Telemetry.AiTelemetry>();
             services.AddSingleton<OpenAiClient>();
             services.AddSingleton<IOpenAiClient>(sp => sp.GetRequiredService<OpenAiClient>());
             services.AddSingleton<TextExtractorService>();
@@ -170,8 +176,11 @@ public static class AnalysisServicesModule
             services.AddLinearConsumers();
             Console.WriteLine("✓ Linear AI Consumer library enabled (gated under compound AI gate — FR-P0-05)");
 
-            AddBuilderServices(services);
-            AddTestingServices(services, configuration);
+            // AddBuilderServices + AddTestingServices removed 2026-07-07 (spaarke-ai-architecture-redesign-r1
+            // task 050, FR-P4-04 server leg): the AiPlaybookBuilder canvas/graph estate was deleted after
+            // task 053 removed its sole client caller. IModelSelector survives the estate (registered below)
+            // because ModelSelectorOptions remains a live config surface (ClauseAnalyzerHandler).
+            services.AddSingleton<IModelSelector, ModelSelector>();
             AddDeliveryServices(services);
             AddNodeExecutors(services);
             AddRagServices(services, configuration);
@@ -1062,32 +1071,7 @@ public static class AnalysisServicesModule
         services.AddScoped<IInsightsAi, InsightsOrchestrator>();
     }
 
-    private static void AddBuilderServices(IServiceCollection services)
-    {
-        services.AddScoped<IAiPlaybookBuilderService, AiPlaybookBuilderService>();
-        services.AddScoped<Sprk.Bff.Api.Services.Ai.Builder.BuilderToolExecutor>();
-        services.AddScoped<Sprk.Bff.Api.Services.Ai.Builder.IBuilderAgentService, Sprk.Bff.Api.Services.Ai.Builder.BuilderAgentService>();
-        services.AddScoped<Sprk.Bff.Api.Services.Ai.Builder.BuilderScopeImporter>();
-        services.AddSingleton<IModelSelector, ModelSelector>();
-        services.AddScoped<IEntityResolutionService, EntityResolutionService>();
-    }
 
-    private static void AddTestingServices(IServiceCollection services, IConfiguration configuration)
-    {
-        services.AddScoped<Sprk.Bff.Api.Services.Ai.Testing.IMockDataGenerator, Sprk.Bff.Api.Services.Ai.Testing.MockDataGenerator>();
-        services.AddScoped<Sprk.Bff.Api.Services.Ai.Testing.IMockTestExecutor, Sprk.Bff.Api.Services.Ai.Testing.MockTestExecutor>();
-
-        var storageConnectionString = configuration.GetConnectionString("BlobStorage")
-            ?? configuration["AzureStorage:ConnectionString"];
-        if (!string.IsNullOrEmpty(storageConnectionString))
-        {
-            services.AddSingleton(sp => new Azure.Storage.Blobs.BlobServiceClient(storageConnectionString));
-            services.AddSingleton<Sprk.Bff.Api.Services.Ai.Testing.ITempBlobStorageService, Sprk.Bff.Api.Services.Ai.Testing.TempBlobStorageService>();
-            services.AddScoped<Sprk.Bff.Api.Services.Ai.Testing.IQuickTestExecutor, Sprk.Bff.Api.Services.Ai.Testing.QuickTestExecutor>();
-        }
-
-        services.AddScoped<Sprk.Bff.Api.Services.Ai.Testing.IProductionTestExecutor, Sprk.Bff.Api.Services.Ai.Testing.ProductionTestExecutor>();
-    }
 
     private static void AddDeliveryServices(IServiceCollection services)
     {

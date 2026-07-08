@@ -268,8 +268,8 @@ The `sprk_analysisactiontype` lookup TABLE itself is preserved (FR-05) as decora
 ✅ Validation: All checks passed
 
 Next steps:
-1. Add to Seed-JpsActions.ps1 for deployment
-2. Deploy BFF API + seed Dataverse
+1. Create/update the `sprk_analysisaction` row (BA catalog editor in PlaybookBuilder, or Dataverse MCP `create_record`) — Seed-JpsActions.ps1 was RETIRED 2026-07-06 (ai-architecture-redesign-r1 task 051)
+2. Deploy BFF API if server changes accompany the Action
 3. Test end-to-end with a sample document
 ```
 

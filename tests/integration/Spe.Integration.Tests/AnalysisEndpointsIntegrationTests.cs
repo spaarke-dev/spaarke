@@ -729,14 +729,11 @@ public class AnalysisTestFixture : WebApplicationFactory<Program>
             services.AddSingleton(_ => new Mock<IRagService>(MockBehavior.Loose).Object);
             services.AddSingleton(_ => new Mock<SearchIndexClient>() { CallBase = false }.Object);
             services.AddScoped(_ => new Mock<IScopeResolverService>(MockBehavior.Loose).Object);
-            services.AddScoped<Sprk.Bff.Api.Services.Ai.Builder.BuilderScopeImporter>();
             services.AddScoped(_ => new Mock<IFileIndexingService>(MockBehavior.Loose).Object);
             services.AddSingleton(_ => new Mock<IKnowledgeDeploymentService>(MockBehavior.Loose).Object);
             services.AddScoped(_ => new Mock<IAppOnlyAnalysisService>(MockBehavior.Loose).Object);
             services.AddScoped(_ => new Mock<IPlaybookService>(MockBehavior.Loose).Object);
             services.AddScoped(_ => new Mock<INodeService>(MockBehavior.Loose).Object);
-            services.AddScoped(_ => new Mock<IAiPlaybookBuilderService>(MockBehavior.Loose).Object);
-            services.AddScoped(_ => new Mock<Sprk.Bff.Api.Services.Ai.Builder.IBuilderAgentService>(MockBehavior.Loose).Object);
             // R7 task 041 (FR-11) — scenario-aware mock for /api/ai/analysis/execute migration.
             // Replaces the previous loose mock that produced empty SSE streams. Drives the
             // same TestScenario enum the legacy MockAnalysisOrchestrationService used, so test
@@ -748,7 +745,6 @@ public class AnalysisTestFixture : WebApplicationFactory<Program>
             services.AddScoped(_ => new Mock<IScopeManagementService>(MockBehavior.Loose).Object);
             services.AddSingleton(_ => new Mock<Sprk.Bff.Api.Services.Ai.Visualization.IVisualizationService>(MockBehavior.Loose).Object);
             services.AddSingleton(_ => new Mock<IModelSelector>(MockBehavior.Loose).Object);
-            services.AddScoped(_ => new Mock<IEntityResolutionService>(MockBehavior.Loose).Object);
             services.AddScoped(_ => new Mock<ISemanticSearchService>(MockBehavior.Loose).Object);
             services.AddScoped(_ => new Mock<IRecordSearchService>(MockBehavior.Loose).Object);
 

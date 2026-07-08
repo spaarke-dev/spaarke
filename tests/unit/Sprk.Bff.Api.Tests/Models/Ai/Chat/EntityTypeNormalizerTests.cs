@@ -49,7 +49,7 @@ public class EntityTypeNormalizerTests
     public void Normalize_GivenAlreadyCanonicalName_ReturnsSameValue(string input)
     {
         // Idempotence: callers that have already normalized (or use canonical from
-        // useEntityResolver) get a stable identity result.
+        // the host-shell entity resolution) get a stable identity result.
         EntityTypeNormalizer.Normalize(input).Should().Be(input);
     }
 

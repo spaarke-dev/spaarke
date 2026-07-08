@@ -148,7 +148,9 @@ public static class EndpointMappingExtensions
         {
             app.MapAnalysisEndpoints();
             app.MapPlaybookEndpoints();
-            app.MapAiPlaybookBuilderEndpoints();
+            // MapAiPlaybookBuilderEndpoints removed 2026-07-07 (redesign-r1 task 050, FR-P4-04 server
+            // leg): /api/ai/playbook-builder/* had zero client callers after task 053 deleted the
+            // canvas estate; the BA catalog editor saves via Dataverse Web API directly.
             app.MapScopeEndpoints();
             app.MapNodeEndpoints();
             app.MapPlaybookRunEndpoints();
@@ -207,12 +209,13 @@ public static class EndpointMappingExtensions
             app.MapRecordMatchingAdminEndpoints();
         }
 
-        // Admin endpoints that depend on Analysis services (ReferenceIndexingService, BuilderScopeImporter)
+        // Admin endpoints that depend on Analysis services (ReferenceIndexingService).
+        // MapBuilderScopeAdminEndpoints removed 2026-07-07 (redesign-r1 task 050) with the
+        // AiPlaybookBuilder estate — builder-scope import had no surviving consumer.
         if (app.Configuration.GetValue<bool>("DocumentIntelligence:Enabled") &&
             app.Configuration.GetValue<bool>("Analysis:Enabled", true))
         {
             app.MapAdminKnowledgeEndpoints();
-            app.MapBuilderScopeAdminEndpoints();
         }
 
         app.MapWorkspaceEndpoints();

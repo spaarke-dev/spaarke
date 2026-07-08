@@ -138,11 +138,6 @@
     <ProjectReference Include="..\..\shared\Spaarke.Scheduling\Spaarke.Scheduling.csproj" />
   </ItemGroup>
 
-  <!-- Builder scope JSON files for AI Playbook Builder (Phase 4 Dataverse import) -->
-  <ItemGroup>
-    <Content Update="builder-scopes\**\*.json" CopyToOutputDirectory="PreserveNewest" />
-  </ItemGroup>
-
   <!-- Insights Engine playbook node configs (.json) — loaded at runtime by the
        the playbook execution path. The Web SDK auto-includes .json as Content by default; we
        Update to set CopyToOutputDirectory.

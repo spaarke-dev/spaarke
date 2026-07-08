@@ -152,7 +152,7 @@ export interface AiSessionContextValue {
   // ── Entity Context ────────────────────────────────────────────────────────
   /**
    * Resolved entity context (null while resolving or when no entity found).
-   * Provided via props (from useEntityResolver in the host shell) or null.
+   * Provided via props (resolved by the host shell) or null.
    */
   entityContext: EntityContext | null;
 
@@ -200,7 +200,7 @@ export interface AiSessionProviderProps {
   /** BFF API base URL (HOST only — resolved by resolveRuntimeConfig() in the shell) */
   bffBaseUrl: string;
   /**
-   * Entity context resolved by the host shell (via useEntityResolver).
+   * Entity context resolved by the host shell.
    *
    * Pass null when operating in entityless mode (e.g. generic assistant mode
    * without an entity record in scope). The provider fetches a context mapping

@@ -27,11 +27,10 @@ export type EntityType = 'matter' | 'project' | 'document' | 'account' | 'contac
  * Enables entity-scoped search, playbook discovery, and context mapping
  * without coupling AI components to any specific workspace.
  *
- * Resolved from URL parameters by useEntityResolver (standalone mode) or
+ * Resolved from URL parameters by the host shell (standalone mode) or
  * from the Xrm form context by the host workspace.
  *
  * @see IHostContext in @spaarke/ui-components SprkChat/types.ts
- * @see useEntityResolver — resolves this from URL params + Xrm frame walk
  */
 export interface EntityContext {
   /** Discriminated entity type (e.g., "matter", "project", "document") */
@@ -46,7 +45,7 @@ export interface EntityContext {
   pageType?: string;
 
   // ── Typed accessors for common entity ID fields ──────────────────────────
-  // These mirror the URL params resolved by useEntityResolver.
+  // These mirror the URL params resolved by the host shell.
   // When entityType is "matter", matterId === entityId (and projectId/documentId are undefined).
 
   /** Matter GUID (populated when entityType === "matter") */
@@ -57,19 +56,3 @@ export interface EntityContext {
   documentId?: string;
 }
 
-// ---------------------------------------------------------------------------
-// EntityResolutionResult
-// ---------------------------------------------------------------------------
-
-/**
- * Result returned by useEntityResolver.
- * Wraps EntityContext with loading/error state for async resolution scenarios.
- */
-export interface EntityResolutionResult {
-  /** Resolved entity context (null while loading or when resolution failed) */
-  entityContext: EntityContext | null;
-  /** Whether resolution is in progress */
-  isResolving: boolean;
-  /** Resolution error message (null on success) */
-  error: string | null;
-}
