@@ -38,7 +38,7 @@
 - MUST build ON ADR-039/040 (catalog rows, ledger entries/readers, gate policy, context assembly, client rendering — no new dispatch protocol / session cache / routing outside Bindings).
 - MUST make side effects deterministic; reads are free (D-F0(b)).
 - MUST store before render (ADR-040).
-- MUST use structured memory objects (not embeddings) for User/Workspace scopes.
+- MUST use structured memory objects (not embeddings) for User/Record scopes; partition memory by subject (`entityId`/`userId`), not `/tenantId`.
 - MUST publish seams FIRST (Phase A0) so Compose r2 is never blocked.
 - MUST sequence the triple-twin hoist (FR-A-01) BEFORE any catalog-row task.
 - MUST NOT let untrusted content originate a memory write.
@@ -62,16 +62,19 @@ Discovery (project-pipeline Step 2) confirmed the presumption-of-reuse and **shr
 | Session Ledger | REUSE `Models/Ai/Chat/SessionLedgerEntries.cs` (`SessionOutput`, `SessionToolChain`, `SessionGate`; `{bindingId}@t{n}` at `:39`; inline cap `:50`) | ContextEnvelope-fingerprint entry type |
 | Context primitives | GENERALIZE `Chat/ChatHistoryManager.cs:302` `BuildLedgerOutputsContext` + `SprkChatAgentFactory.cs:129` `BuildCurrentDateDirective` + `PlaybookChatContextProvider.cs:582` host-identity + `OrchestratorPromptBuilder.cs:44` | Context Binder + ContextEnvelope contract |
 | Directive layer | EXTEND `SprkChatAgentFactory.cs:65` honesty directive + `ToolResult.cs:326` `UserSummary` + `HandoffUrlBuilder.cs` link composition | D-F0 strategy meta-prompt block |
-| **Memory Service** ⚠️ | **EXTEND the EXISTING memory subsystem** — `Services/Ai/Memory/MatterMemoryService.cs:27` (Cosmos `memory` container `/tenantId`, 90-day, ETag, 500-token budget), `IMatterMemoryService`, `MemoryCompositionService`, `PinnedContextRepository`, `RecentlyDiscussedTracker`, `MemoryFact`/`MemoryFactType`, `PinnedMemoryEndpoints`, client `memory/*` + `PinnedMemoryListWidget` | five-scope model + 14-field envelope + user/workspace scopes + view/delete surface + write-as-side-effect |
-| Memory store | **EXTEND the existing Cosmos `memory` container** (scope extension) rather than a greenfield container — reconcile Q4 "new container" against this at FR-B-01 | scope keys, governance envelope fields |
+| **Memory Service** ⚠️ | **GENERALIZE the EXISTING memory subsystem** — `Services/Ai/Memory/MatterMemoryService.cs:27` (`MemoryFact` model, ETag/versioning, GDPR erasure, budget-serialization) + `MemoryCompositionService`, `PinnedContextRepository`, `RecentlyDiscussedTracker`, `PinnedMemoryEndpoints`, client `memory/*`. **`MatterMemory`→`RecordMemory`, generic `(entityType,entityId)`** (matters/projects/invoices/work-assignments/events/documents — NOT matter-only) | TWO scopes (Record + User); envelope fields; view/delete surface; explicit-only `memory.write` via Policy v2 |
+| Memory store | **NEW Cosmos container partitioned by SUBJECT** (`entityId`/`userId`, NOT `/tenantId` — dedicated-per-customer envs make `/tenantId` a single hot partition; key can't change in place) — **reuse the service CODE, not the container** (resolves Q4). Live-doc migration decided at task 050 | subject partition key; scope discriminator; owner/subject keying |
+| Insights persistence | Insights currently **TTL-cached, no durable store** (`Insights/InsightsPlaybookExecutionCache.cs`) → Record memory shaped as the future durable insight store (`source: insights-engine`) | envelope supports it; **wiring = follow-on** |
 | Trace surface | EXTEND `Spaarke.AI.Widgets/.../ExecutionTraceWidget.tsx` + `executionTraceBuffer.ts` (buffer `MAX=50`, mount-gap documented) + `Telemetry/ContextEventEmitter.cs` | **server ToolChain read surface (NOT FOUND — net-new, FR-A1-09)** + live plan narration |
 | OutcomeCard | build on `ToolResult.cs:326` `UserSummary` + `HandoffUrlBuilder.cs` server links | **OutcomeCard component (NOT FOUND — net-new)** + job-aware states |
 | Job status | REUSE `Services/Jobs/ServiceBusJobProcessor.cs` + `JobContract.cs:9` + `JobStatusService.cs` + `BatchJobStatusStore.cs` | `JobAwareCompletionState v1` projection (no new job model) |
-| Eval | EXTEND `tests/integration/contract/Eval/golden-utterances.json` + CI `eval-gate` (`sdap-ci.yml:225`) | resourcefulness + origin-classification + memory-poisoning families |
+| Eval | EXTEND `tests/integration/contract/Eval/golden-utterances.json` + CI `eval-gate` (`sdap-ci.yml:225`) | resourcefulness + origin-classification families (memory-poisoning deferred) |
 | Catalog governance | EXTEND `Chat/OpenAiFunctionSchemaValidator.cs:70` + `PublicContracts/RoutingConsumerTypeHealthCheck.cs:66` + `infra/dataverse/inputschemas/` | triple-twin single-source hoist |
 | Retrieval ACL (FR-B-14) | **already enforced** — `RagService.cs:1238` always appends `PrivilegeFilterBuilder`; history-sanitization at `Safety/CrossMatter/ConversationHistorySanitizer.cs` | spike CONFIRMS (likely no gap) |
 
-**Genuinely net-new** (per §11): OutcomeCard component + server trace-read surface; the five-scope framing + 14-field envelope + user/workspace scopes atop `MatterMemoryService`; the Context Binder + ContextEnvelope contract; the D-F0 doctrine block + three eval families; ADR-041/042.
+**Genuinely net-new** (per §11): OutcomeCard component + server trace-read surface; the Record/User two-scope model + generic `(entityType,entityId)` keying + subject-partitioned container + governance envelope atop `MatterMemoryService`; the Context Binder + ContextEnvelope contract; the D-F0 doctrine block + **two** eval families (resourcefulness + origin-classification — memory-poisoning deferred); ADR-041/042.
+
+> **Memory scope refinement (operator review 2026-07-08)**: five scopes → **two active** (Record + User); Record generalized off `sprk_matter` to any entity; User is one general per-user store (not per-matter); store re-partitioned by subject; **hard-governance rules DEFERRED** to a separate project behind an **explicit-only-write floor** (see spec FR-B-01/02/03/08/09/10 + Deferrals). Insights-Engine-as-consumer is the named direction; wiring is a follow-on.
 
 ---
 
@@ -118,19 +121,19 @@ Each: contract + thin reference producer + consumer + contract test in `tests/in
 - 049 **G-R2-A browser UAT** (operator, spaarkedev1)
 
 ### Wave M — G-R2-B Memory  *(FR-B-01..16)*  — gated by A0
-- 050 Memory Service five-scope model — **EXTEND `MatterMemoryService`** (reconcile Cosmos container reuse)
-- 051 MemoryItem 14-field governance envelope
-- 052 Memory governance (retention, review/delete surface, litigation-hold, audit, sensitivity)
+- 050 Memory Service — **generalize `MatterMemoryService`→`RecordMemory`** (generic `(entityType,entityId)`) + User scope; **NEW subject-partitioned Cosmos container** (reuse code, not container); decide live-doc migration
+- 051 Governance envelope on `MemoryFact` (scope, subject, provenance, sensitivity, expiration, deletionPolicy, retentionClass) + tolerant-reader migration defaults
+- 052 Memory governance (retention/expiration, user review/delete surface, record-auth-aligned read, audit, sensitivity) — *litigation-hold DEFERRED*
 - 053 Context Binder + ContextEnvelope assembly (generalize the 6 primitives; cache-stable)
 - 054 ContextEnvelope token budgets (fix against 002 measurement; breach-fails-eval)
 - 055 Caller-contact self-assignment resolution (claims→contact, server-side)
 - 056 Portfolio fresh-retrieval bias (Memory.Conversation retrieval policy)
-- 057 Memory writes as governed side effects + poisoning threat model *(after 020, 032)*
-- 058 Semantic-retrieval ↔ memory trust boundary
-- 059 Memory-poisoning eval families
+- 057 `memory.write` as a governed side effect — Policy v2 confirm UX + **explicit-only floor** (never model/document-initiated) *(after 020, 032)*
+- ~~058 Semantic-retrieval ↔ memory trust boundary~~ — **DEFERRED** (governance project)
+- ~~059 Memory-poisoning eval families~~ — **DEFERRED** (governance project)
 - 060 Organizational-scope provider interface (read-only inbound)
 - 061 Semantic-scope provider interface (over existing AI Search/SPE)
-- 062 Workspace-intelligence precursors (next-step chips + workspace memory)
+- 062 Workspace-intelligence precursors (next-step chips + record memory)
 - 063 Matter-level retrieval ACL verification spike (bounded; likely confirms `RagService.cs:1238`)
 - 064 ADR-040 inline size-cap enforcement home (contingent on 001)
 - 065 **ADR-042** authoring (Proposed→Accepted at G-R2-B)

@@ -13,7 +13,7 @@
 The **platform core** of the R2 AI redesign — refining R1's coarse-grained platform into a refined experience along two owner-prioritized axes, built strictly ON ADR-039 + ADR-040:
 
 1. **Judgment + friction** (G-R2-A) — a Resourcefulness Doctrine (verify → act → degrade gracefully → refuse-with-affordance), deterministic Confirmation Policy v2, first-class Completion UX (OutcomeCard, job-aware), UI-action truthfulness, decision traceability + live plan narration, progressive render.
-2. **Memory** (G-R2-B) — a five-scope Memory Service (extending the existing `MatterMemoryService`), a Context Binder assembling one governed `ContextEnvelope` per turn, memory-as-governed-side-effect with a poisoning threat model.
+2. **Memory** (G-R2-B) — a two-scope Memory Service (**Record** `(entityType,entityId)` + **User** `userId`, generalizing the existing `MatterMemoryService` onto a subject-partitioned container), a Context Binder assembling one governed `ContextEnvelope` per turn, and explicit-only governed memory writes. (Hard-governance rules — untrusted-origin ban, litigation-hold, poisoning evals — deferred to a separate project.)
 3. **Hardening** (G-R2-D) — publish-size, eval-gate, cross-satellite seam-fork verification, and the inherited backlog.
 
 Plus **seven contract-first seams** (Phase A0) the parallel **Compose r2** satellite consumes, and **ADR-041 + ADR-042** authored + promotion-gated.

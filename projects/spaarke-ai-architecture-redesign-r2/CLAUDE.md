@@ -76,7 +76,7 @@ Tasks with satisfied dependencies + non-overlapping files → ONE message with M
 - **Build ON ADR-039/040** — no second dispatch protocol, no parallel session cache, no routing outside Bindings.
 - **Determinism for side effects; reads are free** (D-F0(b)); D-F0 never weakens a gate/hard block.
 - **Store before render** (ADR-040).
-- **Structured memory objects, not embeddings** (User/Workspace scopes) — **EXTEND `MatterMemoryService`**, don't greenfield.
+- **Structured memory objects, not embeddings** — two scopes: **Record** (generic `(entityType,entityId)`) + **User** (per-user). **Generalize `MatterMemoryService`** (reuse code); **NEW container partitioned by SUBJECT** (`entityId`/`userId`, not `/tenantId`). `memory.write` is **explicit-only** (hard-governance rules deferred).
 - **Publish seams FIRST** (Phase A0) so Compose r2 is never blocked.
 - **Triple-twin hoist (task 020) BEFORE any catalog-row task.**
 - **Untrusted content can NEVER originate a memory write.**
@@ -88,7 +88,7 @@ Tasks with satisfied dependencies + non-overlapping files → ONE message with M
 
 - 2026-07-08 — Compose r1 kept separate (executed+closed, not absorbed); Compose r2 is a separate parallel project consuming core seams (already re-based). Core keeps FULL seam set. — operator
 - 2026-07-08 — Daily Briefing remediation → separate project (not core Wave 0). — operator
-- 2026-07-08 — Memory Service EXTENDS existing `MatterMemoryService`/Cosmos `memory` container (discovery finding); Q4 "new container" reconciled to scope-extension at FR-B-01. — pipeline discovery
+- 2026-07-08 — Memory refined (operator review): TWO active scopes — **Record** (generic `(entityType,entityId)`, generalizing `MatterMemoryService` off `sprk_matter`) + **User** (general per-user, not per-matter). **Reuse the service CODE**, NEW Cosmos container **partitioned by SUBJECT** (`entityId`/`userId`, not `/tenantId` — dedicated-per-customer envs). Record memory holds derived knowledge (not Dataverse duplicates); positioned as future Insights-Engine durable store (wiring = follow-on). `memory.write` **explicit-only**; hard-governance rules (untrusted-origin ban, semantic trust boundary, litigation-hold, poisoning evals) **DEFERRED** to a separate project. — operator
 - 2026-07-08 — Work IQ: provider interface in scope; researcher spike deferred. — operator
 
 ---

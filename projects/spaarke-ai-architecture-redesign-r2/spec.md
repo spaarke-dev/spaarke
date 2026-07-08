@@ -11,7 +11,7 @@
 
 ## Executive Summary
 
-R2-core refines R1's coarse-grained AI platform into a **refined experience** along two owner-prioritized axes: **judgment/friction** (a resourcefulness doctrine + deterministic confirmation policy + first-class completion UX + traceability) and **memory** (a five-scope Memory Service + a Context Binder that assembles one governed `ContextEnvelope` per turn). It builds strictly ON ADR-039 (grounded execution, closed catalogs) and ADR-040 (session ledger) — no second dispatch protocol, no parallel session cache. The Compose editor/document-lifecycle ships as the parallel **Compose r2** satellite consuming this core's seams; this project publishes those seams and enforces the document ingestion-parity invariant.
+R2-core refines R1's coarse-grained AI platform into a **refined experience** along two owner-prioritized axes: **judgment/friction** (a resourcefulness doctrine + deterministic confirmation policy + first-class completion UX + traceability) and **memory** (a Memory Service with two active scopes — **Record** `(entityType,entityId)` + **User** `userId` — over the ledger, plus a Context Binder that assembles one governed `ContextEnvelope` per turn). It builds strictly ON ADR-039 (grounded execution, closed catalogs) and ADR-040 (session ledger) — no second dispatch protocol, no parallel session cache. The Compose editor/document-lifecycle ships as the parallel **Compose r2** satellite consuming this core's seams; this project publishes those seams and enforces the document ingestion-parity invariant.
 
 **One-line mission** (design §2): *Copilot's judgment and transparency wrapped around Spaarke's execution and governance.*
 
@@ -33,9 +33,9 @@ R2-core refines R1's coarse-grained AI platform into a **refined experience** al
 - ADR-041 authoring (Judgment, Confirmation & Completion Policy)
 
 **Area 2 — Memory (gate G-R2-B):**
-- D-M1 Spaarke Memory Service (Conversation/User/Workspace/Organizational*/Semantic* scopes; Cosmos store for User+Workspace; structured objects with a 14-field governance envelope)
+- D-M1 Spaarke Memory Service — two active scopes: **Record** (generic `(entityType,entityId)` — matters/projects/invoices/work-assignments/events/documents; generalizes existing `MatterMemoryService`) + **User** (general per-user); Conversation stays the ledger; Organizational/Semantic interface-only. NEW Cosmos container **partitioned by subject** (`entityId`/`userId`, not `/tenantId`); structured objects with a governance envelope
 - D-M2 Context Binder + `ContextEnvelope` assembly (generalizes six R1 primitives; cache-stable; per-slice token budgets)
-- D-M3 memory writes as governed side effects + poisoning threat model + semantic-retrieval trust boundary
+- D-M3 memory writes as governed side effects (Policy v2 confirm UX + **explicit-only** floor); full poisoning threat model + semantic-retrieval trust boundary DEFERRED (governance project)
 - D-M4 workspace-intelligence precursors only (next-step chips + workspace-scope memory)
 - ADR-042 authoring (Memory Architecture & Governance)
 
@@ -114,27 +114,31 @@ Each FR ships the contract (with versioning + tolerant-reader rules, example pay
 
 ### Gate G-R2-B — Memory (Area 2)
 
-29. **FR-B-01 — Spaarke Memory Service (five scopes, one service)** [D-M1]: Conversation = read/query facade over the ledger (**no new store**); User + Workspace = new governed objects in a **new Cosmos container** (existing account); Organizational + Semantic = provider interfaces (implementation deferred/existing per FR-B-11/12). Storage: Cosmos for memory; Dataverse stays business records.
-30. **FR-B-02 — MemoryItem governance envelope (14 fields)** [D-M1]: `tenantId, scope, owner, subjectType/subjectId, source (+sessionId/turnId provenance ref), sourceTrustLevel, confidence, sensitivity, expiration, deletionPolicy, retentionClass, created, updated, createdBy`. Structured objects, NOT embeddings.
-31. **FR-B-03 — Memory governance** [D-M1 v0.3]: retention defaults + expiration per `retentionClass`; a **user-visible review/delete surface** for user-scope memory; workspace-scope review honoring matter/workspace authorization (ethical-wall alignment); deletion-propagation semantics; audit events on write/delete; **litigation-hold interaction** (a held matter's workspace memory is not user-deletable while held); `sensitivity` classification. Memory items are ADR-015 Tier 3 (user-owned, GDPR-erasable).
+29. **FR-B-01 — Spaarke Memory Service (TWO active scopes + ledger + interfaces)** [D-M1; refined 2026-07-08 per owner review — see Owner Clarifications]: the active memory scopes are **Record** and **User**; Conversation stays the ledger facade; Organizational + Semantic stay interface-only.
+    - **Record memory** — **generic entity scope keyed by `(entityType, entityId)`** (matters, projects, invoices, work assignments, events, documents — NOT matter-only). Holds **derived/synthesized** knowledge that is NOT already a Dataverse field (distilled conclusions, prior-analysis findings, cross-document synthesis, working notes) — the Binder reads live Dataverse fields directly (FR-B-04), so memory never duplicates them. **Generalizes the existing `Services/Ai/Memory/MatterMemoryService` (`MatterMemory`→`RecordMemory`)**: reuse the `MemoryFact` model + ETag/versioning + GDPR erasure + budget-serialization logic; generalize the matter-specific fact types + keying.
+    - **User memory** — ONE **general per-user** store keyed by `userId` (preferences, standing facts, drafting style) spanning everything; **NOT per-user-per-matter**.
+    - **Store** — a **NEW Cosmos container partitioned by SUBJECT** (`entityId` for record memory, `userId` for user memory), **NOT `/tenantId`** (deployments are customer-dedicated → one tenant per DB → `/tenantId` is a single hot logical partition against the 20 GB cap; subject-partitioning spreads naturally and loses nothing since isolation is the deployment boundary). Cosmos partition keys can't be changed in place, so this is a new container reusing the existing service code — "reuse the logic, not the container" (resolves Q4). Reconciled at task 050.
+    - **Insights direction (named, wiring deferred)**: the Insights Engine today computes insights on demand + TTL-caches them (`InsightsPlaybookExecutionCache`) with NO durable store. Record memory is shaped to become that durable store (a fact may carry `source: insights-engine`); **wiring the Insights Engine to write into it is a follow-on**, not core-r2 — the envelope must not preclude it.
+30. **FR-B-02 — MemoryFact / envelope (generic entity keying)** [D-M1]: extend the existing `MemoryFact` with governance fields — `scope` (record|user), `subjectType/subjectId` (or `userId`), `source (+sessionId/turnId provenance)`, `confidence`, `sensitivity`, `expiration`, `deletionPolicy`, `retentionClass`, `created/updated/createdBy` (reuse existing `Type/Key/Value/Source/ConfirmedByUser/Confidence/RecordedAt`). Structured objects, NOT embeddings. Live-doc migration: tolerant-reader defaults for existing facts. (`sourceTrustLevel` field may be present but its **enforcement is deferred** — see FR-B-08.)
+31. **FR-B-03 — Memory governance** [D-M1]: retention defaults + expiration per `retentionClass`; a **user-visible review/delete surface** for user memory; record-memory review honoring the record's authorization (read access to the record ⇒ read its memory); deletion-propagation semantics; audit events on write/delete; `sensitivity` classification. Memory items are ADR-015 Tier 3 (user-owned, GDPR-erasable). **DEFERRED (owner ruling 2026-07-08): litigation-hold interaction** → separate governance project.
 32. **FR-B-04 — Context Binder + ContextEnvelope assembly** [D-M2]: assemble ONE `ContextEnvelope` per turn; cache-stable (stable-prefix slices — identity, schema cards, environment facts, preferences — precede the volatile ledger tail). Generalize the SIX R1 primitives: `BuildLedgerOutputsContext` → Memory.Conversation (+ fresh-retrieval policy, FR-B-08); host-identity line → Business; host-record schema card + per-table write contracts + lookup metadata → Business (Dataverse metadata as first-class context, assembled once); `BuildCurrentDateDirective` → Environment facts; caller-contact resolution → User (FR-B-07); gate-outcome persistence → Memory.Conversation.
-33. **FR-B-05 — ContextEnvelope token budgets** [D-M2, F-2/Amendment 6]: per-slice budgets (Environment ≤50, User ≤300, Business ≤1,200, Workspace ≤600, Conversation ≤2,000; **envelope ceiling ≤4,200**) — **starting estimates fixed against FR-P0-02 measurement**. Rules: full document text never copied unless the invoked capability requires it; ledger entries travel as references; per-slice counts logged per turn (identifiers/counts only, NFR-07); **a budget breach fails the eval run**.
+33. **FR-B-05 — ContextEnvelope token budgets** [D-M2, F-2/Amendment 6]: per-slice budgets (Environment ≤50, User ≤300, Business ≤1,200, Record memory ≤600, Conversation ≤2,000; **envelope ceiling ≤4,200**) — **starting estimates fixed against FR-P0-02 measurement**. Rules: full document text never copied unless the invoked capability requires it; ledger entries travel as references; per-slice counts logged per turn (identifiers/counts only, NFR-07); **a budget breach fails the eval run**.
 34. **FR-B-06 — Caller-contact self-assignment resolution** [R17, D-M2 User slice]: deterministic server-side claims→contact resolution so "assign to me" stops being model guesswork.
 35. **FR-B-07 — Portfolio fresh-retrieval bias** [R18, D-M2]: portfolio-/aggregate-level questions bias to FRESH queries, never extrapolation from a prior turn's result (Memory.Conversation retrieval policy).
-36. **FR-B-08 — Memory writes are governed side effects + poisoning threat model** [D-M3]: a `memory.write` typed tool with declared `side_effect_class`, subject to Policy v2 (explicit "remember X" ⇒ execute+✅; model-inferred ⇒ lightweight confirm or queue-for-review). **Untrusted content (uploaded-doc text, tool results) can NEVER originate a memory write.** Reads surface provenance; users get the FR-B-03 view/delete surface.
-37. **FR-B-09 — Semantic-retrieval ↔ memory trust boundary** [D-M3, F-5]: retrieval results carry their own provenance class, are never implicitly promoted to User/Workspace memory; promotion requires an explicit Policy-v2-governed `memory.write` recording `source: semantic_retrieval` + originating index/doc ref; the Binder keeps memory slices and retrieval slices structurally separate (distinct slice keys).
-38. **FR-B-10 — Memory-poisoning eval families** [D-M3]: injection families where the vector is uploaded content AND where it is retrieved content; merge gate.
+36. **FR-B-08 — Memory writes are governed side effects (explicit-only floor)** [D-M3; refined 2026-07-08]: a `memory.write` typed tool with declared `side_effect_class`, subject to Policy v2 for the **confirm-on-inferred-capture UX** (explicit "remember X" ⇒ execute+✅; model-inferred ⇒ lightweight confirm or queue-for-review). **In-scope safety floor**: `memory.write` is **explicit-only** — written only on a user instruction, **never model- or document-initiated** — which blocks document-planted memory cheaply without the full threat model. Reads surface provenance; users get the FR-B-03 view/delete surface. **DEFERRED (owner ruling 2026-07-08): the full untrusted-origin ban + `sourceTrustLevel` enforcement** → separate governance project (the explicit-only floor is the interim control).
+37. ~~**FR-B-09 — Semantic-retrieval ↔ memory trust boundary**~~ — **DEFERRED (owner ruling 2026-07-08)** to a separate governance project (hard governance rule; not core-r2). The explicit-only-write floor (FR-B-08) is the interim control.
+38. ~~**FR-B-10 — Memory-poisoning eval families**~~ — **DEFERRED (owner ruling 2026-07-08)** with the governance rules above. (Resourcefulness + origin-classification eval families remain in scope; memory-poisoning families move to the governance project.)
 39. **FR-B-11 — Organizational-scope provider interface** [D-M1, F-7]: **read-only INBOUND** interface (Spaarke receives organizational context; Work IQ = named candidate provider). Interface ships; runtime integration + the researcher spike are **deferred** (owner ruling; see Deferrals). Outbound Spaarke-as-MCP-server is explicitly out.
 40. **FR-B-12 — Semantic-scope provider interface** [D-M1]: interface over the EXISTING Azure AI Search + SPE retrieval (implementation exists; honors the our-AI-Search-not-Dataverse-search ruling).
-41. **FR-B-13 — Workspace-intelligence precursors** [D-M4]: next-step chips on OutcomeCards (FR-A1-06) + workspace-scope memory items (FR-B-01). Full goal-tracking is a named deferral, NOT a subsystem here.
+41. **FR-B-13 — Workspace-intelligence precursors** [D-M4]: next-step chips on OutcomeCards (FR-A1-06) + record-scope memory items (FR-B-01). Full goal-tracking is a named deferral, NOT a subsystem here.
 42. **FR-B-14 — Matter-level retrieval ACL verification spike** [R22]: bounded read-only spike — are user-level matter walls enforced in the AI Search filters at RETRIEVAL time (load-bearing ethical-wall control) or only at history-sanitization? If a gap exists it escalates as security-sensitive (own project, not core scope). Escalation path pre-declared.
 43. **FR-B-15 — ADR-040 inline size-cap enforcement home** [R5]: take r1's ruling; if r2 owns it → memory/ledger hardening in this gate.
-44. **FR-B-16 — ADR-042 authoring** [D-M1+D-M3]: "Memory Architecture & Governance" — scopes, governance envelope, write policy, erasure semantics (ADR-015 Tier 3), the not-a-parallel-session-cache rule. Proposed at spec → Accepted at G-R2-B.
+44. **FR-B-16 — ADR-042 authoring** [D-M1+D-M3]: "Memory Architecture & Governance" — the two active scopes (Record `(entityType,entityId)` + User `userId`) + ledger + interfaces; **subject-partitioning rationale** (dedicated-env / no `/tenantId`); governance envelope; explicit-only write floor + the deferred hard-governance boundary; erasure semantics (ADR-015 Tier 3); the not-a-parallel-session-cache rule; the Insights-Engine-as-consumer direction. Proposed at spec → Accepted at G-R2-B.
 
 ### Gate G-R2-D — Hardening (Area 3)
 
 45. **FR-D-01 — Publish-size verification** [NFR-01]: per-BFF-touching-task `dotnet publish` measurement; report absolute + diff; ceiling **≤60 MB compressed**; escalation thresholds (≥+5 MB single-task, ≥55 MB cumulative, ≥60 MB HARD STOP). Baseline ~46.8 MB at r1 G-P3-close.
-46. **FR-D-02 — Eval-suite-green merge gate** [NFR-02]: golden-utterance + resourcefulness + origin-classification + memory-poisoning families all green as a CI merge gate; budget-breach-fails-eval (FR-B-05).
+46. **FR-D-02 — Eval-suite-green merge gate** [NFR-02]: golden-utterance + resourcefulness + origin-classification families all green as a CI merge gate; budget-breach-fails-eval (FR-B-05). (Memory-poisoning families deferred with FR-B-10.)
 47. **FR-D-03 — Cross-satellite seam-fork verification**: verify no satellite (Compose r2, Insights refurbish) forked an AI-internal seam; the core is the only project modifying `Services/Ai/` internals. Enforced via hot-path registry + `/conflict-check` + a grep/NetArchTest check.
 48. **FR-D-04 — Track-B hygiene sweep** [R9, R11]: `Task.Delay → TimeProvider` probes; `Refresh-ScopeModelIndex.ps1` drift + dead App Service env keys.
 49. **FR-D-05 — Audit-container partition re-key** [R21]: re-key the permanent audit container off bare `/tenantId` (hierarchical or time-bucketed) while small, to avoid the Cosmos 20 GB logical-partition cap. Cheap now.
@@ -147,10 +151,10 @@ Each FR ships the contract (with versioning + tolerant-reader rules, example pay
 
 - **NFR-01 — Publish size** ≤60 MB compressed, per-task verified (FR-D-01).
 - **NFR-02 — Eval-green merge gate** across all families (FR-D-02).
-- **NFR-03 — Untrusted-input posture** extends to memory writes (FR-B-08); OBO-everywhere unchanged.
+- **NFR-03 — Untrusted-input posture** — memory writes are explicit-only (FR-B-08 floor); OBO-everywhere unchanged. (Full untrusted-origin memory ban deferred to the governance project.)
 - **NFR-04 — Prompt-cache stability** for ContextEnvelope (stable prefix, budgeted slices; beyond-window recall stays tool-call per ADR-040).
 - **NFR-05 — Per-slice token budgets** with **breach-fails-eval** (FR-B-05).
-- **NFR-06 — Memory governance completeness** — all 14 envelope fields present; user review/delete surface shipped.
+- **NFR-06 — Memory governance completeness** — governance envelope fields present (retention/expiration/sensitivity/provenance/deletion); user review/delete surface shipped. (Litigation-hold + `sourceTrustLevel` enforcement deferred.)
 - **NFR-07 — No-content telemetry** — trace/fingerprint/budget logging carries identifiers/counts only, never content.
 - **NFR-08 — UI-action ack coverage** — every UI-claiming tool is ack-gated or fails honestly.
 - **NFR-09 — OutcomeCard coverage** — every side-effect path yields an OutcomeCard, including async job states.
@@ -181,11 +185,13 @@ Each FR ships the contract (with versioning + tolerant-reader rules, example pay
 - ✅ MUST build ON ADR-039/040 — every mechanism expressible as catalog rows, ledger entry types/readers, gate-engine policy, context assembly, or client rendering of stored entries.
 - ✅ MUST make side effects deterministic; initiative on reads is free (D-F0(b)).
 - ✅ MUST store before render (ADR-040).
-- ✅ MUST use structured memory objects, not embeddings, for User/Workspace scopes.
+- ✅ MUST use structured memory objects, not embeddings, for User/Record scopes.
+- ✅ MUST partition the memory container by SUBJECT (`entityId`/`userId`), never `/tenantId` (customer-dedicated deployments).
+- ✅ MUST key Record memory generically by `(entityType, entityId)` — not matter-only.
 - ✅ MUST publish seams FIRST (Phase A0) so Compose r2 is never blocked.
 - ✅ MUST sequence the triple-twin hoist (FR-A-01) BEFORE any catalog-row task.
 - ❌ MUST NOT create a second dispatch protocol, a parallel session cache, or routing config outside the Binding table.
-- ❌ MUST NOT let untrusted content originate a memory write.
+- ❌ MUST NOT let a memory write be model- or document-initiated — `memory.write` is **explicit-only** (user-instructed). [Interim floor; full untrusted-origin ban deferred to the governance project.]
 - ❌ MUST NOT weaken a gate or hard block via D-F0 — the degradation ladder operates BELOW the side-effect line.
 
 ### Existing Patterns to Follow
@@ -201,7 +207,7 @@ Each FR ships the contract (with versioning + tolerant-reader rules, example pay
 
 | ADR | Rule challenged | Conflict | Path | Rationale |
 |---|---|---|---|---|
-| ADR-040 | "No parallel session cache" | The Memory Service adds User/Workspace scopes above the session | **C — Comply** | Resolved by construction: Conversation scope = ledger facade; User/Workspace are a DIFFERENT concern (cross-session governed objects), not a session cache. State explicitly in code + ADR-042. |
+| ADR-040 | "No parallel session cache" | The Memory Service adds Record/User scopes above the session | **C — Comply** | Resolved by construction: Conversation scope = ledger facade; Record/User are a DIFFERENT concern (cross-session governed objects, subject-partitioned), not a session cache. State explicitly in code + ADR-042. |
 | ADR-040 | "Disposition is the only rendering contract" | The new `compose` disposition member | **C — Comply** | Extending the ENUM is the compliant move; the core owns the extension, Compose r2 consumes it. |
 | ADR-039 | "Closed catalogs; one intent mechanism" | Policy v2 risk tiers + memory-write side-effect class | **C — Comply** | Risk factors are catalog-declared DATA extending `side_effect_class` — NOT a runtime intent mechanism. Any model-judged risk classification would violate this; explicitly banned in FR-A1-03. |
 | D-F0(b) "reads always free" | ADR-039 budget-8 loop bound | (no tension) | **C — Comply** | The budget stays; the doctrine changes model WILLINGNESS within the budget, not the bound. |
@@ -215,7 +221,7 @@ Each FR ships the contract (with versioning + tolerant-reader rules, example pay
 Every gate is verified by an **operator-executed browser UAT script on spaarkedev1** (r1 rule verbatim — a passing curl or green test never satisfies a gate).
 
 1. [ ] **G-R2-A (Judgment + Friction)** — "create a follow-up task due Friday, assign it to me" → created with **no dialog** (explicit+complete Tier 2b), ✅ + clickable record chip + next-step chips. An ambiguous/inferred write confirms **exactly once, one modality**. A partially-blocked request → verify state, do what's possible, hand over the rest (extracted values + prepared content + working deep link, e.g. the doc block links the Document Upload page). Every claimed UI action backed by a real client event; failures render ❌ with the real reason; "how did you decide?" opens the traceability view with live plan narration; long outputs render progressively. *Verify by: the 10-scenario E2E band + browser script.*
-2. [ ] **G-R2-B (Memory)** — open the assistant on a matter and it already knows: user identity, host record (name/id/schema), earlier-in-conversation, workspace drafts/outputs, standing preferences — **without re-prompting**. Preferences stated once persist across sessions. User can see + delete what's remembered. A hostile document cannot write memory. *Verify by: browser script + memory-poisoning eval families.*
+2. [ ] **G-R2-B (Memory)** — open the assistant on a record (any of matter/project/invoice/work-assignment/event/document) and it already knows: user identity, host record (name/id/schema), earlier-in-conversation, record-scoped derived facts, standing user preferences — **without re-prompting**. Preferences stated once persist across sessions. User can see + delete what's remembered. Memory writes are explicit-only (no document-planted memory). *Verify by: browser script (memory-poisoning eval families deferred to the governance project).*
 3. [ ] **G-R2-D (Hardening)** — everything above is reliable, telemetered, eval-gated, publish-size verified, on a codebase not larger than r1 left it; cross-satellite verification confirms no forked AI-internal seam. *Verify by: CI merge-gate green + publish-size report + seam-fork check.*
 4. [ ] **ADR-041 + ADR-042** Accepted at their respective gates (promotion-gated like 039/040).
 5. [ ] **Contract-first** — all seven A0 contracts have a contract test; no A0-gated feature merged without it (NFR-11).
@@ -228,7 +234,7 @@ Every gate is verified by an **operator-executed browser UAT script on spaarkede
 
 - r1 P4 close (contingent §10 rows re-checked at FR-P0-01); if P4 slips, FR-P0-01 is the reconciliation task.
 - Existing R7 W12 LinearConsumers + Job Contract / `ServiceBusJobProcessor` (consumed by FR-A0-07).
-- New Cosmos container in the existing account (FR-B-01) — one new Azure dependency.
+- New Cosmos container in the existing account (FR-B-01), **partitioned by subject** (`entityId`/`userId`) — one new Azure dependency; reuses `MatterMemoryService` code, not its container.
 
 ### External / Cross-project
 
@@ -249,6 +255,11 @@ Every gate is verified by an **operator-executed browser UAT script on spaarkede
 | Work IQ | Interface + spike? | **Interface as FR; spike DEFERRED** | FR-B-11 ships interface; spike → Deferrals |
 | Compose↔core seams | Reconcile divergence? | **Core keeps FULL seam set**; Compose re-bases onto it (already done 2026-07-08) | FR-A0 seam set unchanged; NFR-12 |
 | Daily Briefing | In this spec? | **No — separate project**; notate only | Out of scope; no Briefing FRs |
+| Memory scope model | Five scopes, matter-centric? | **No — TWO active scopes**: Record (generic `(entityType,entityId)`) + User (general per-user, NOT per-matter). Generalize existing `MatterMemoryService` | FR-B-01/02 rewritten |
+| Memory partition key | `/tenantId`? | **No — partition by SUBJECT** (`entityId`/`userId`); dedicated-per-customer envs make `/tenantId` a single hot partition | FR-B-01; MUST rule added |
+| Stored record memory | Needed / expensive? | **Yes, and cheap** (small JSON, point-read). Holds derived knowledge (not Dataverse duplicates) | FR-B-01 |
+| Insights Engine | Memory as its source? | **Direction adopted; wiring DEFERRED** — Insights currently TTL-cached, no durable store; Record memory shaped to become it | FR-B-01 note; Deferrals |
+| Memory governance-security | In this project? | **No — DEFERRED**: untrusted-origin ban, semantic-retrieval trust boundary (FR-B-09), litigation-hold, memory-poisoning evals (FR-B-10). Interim = explicit-only writes | FR-B-08/09/10, FR-B-03 |
 
 ## Assumptions
 
@@ -268,11 +279,14 @@ Every gate is verified by an **operator-executed browser UAT script on spaarkede
 - **Workspace-intelligence goal-tracking subsystem** (D-M4 — precursors only in r2).
 - **Admin observability dashboards** (carried from r1).
 - **Spaarke-as-MCP-server outbound surface** (separate architectural seam).
+- **Memory hard-governance rules → separate governance project** (owner ruling 2026-07-08): full untrusted-origin ban + `sourceTrustLevel` enforcement (beyond the explicit-only floor), semantic-retrieval↔memory trust boundary (FR-B-09), litigation-hold interaction, memory-poisoning eval families (FR-B-10). *Risk noted: the explicit-only-write floor is the interim control; deferring the full ban is an accepted operator risk decision.*
+- **Insights-Engine → Record-memory write wiring** (direction adopted this project; wiring is a follow-on — Record memory's envelope must not preclude `source: insights-engine`).
 
 ## Unresolved Questions
 
 - [ ] **FR-P0-01 contingent rows** — resolve §10 rows 4/5/6/8/12 against actual r1 P4-close state at `/project-pipeline` time. Blocks: FR-D-06, FR-D-07, FR-B-15 final disposition.
-- [ ] **Cosmos container naming + partition strategy** — coordinate FR-B-01 with FR-D-05 (audit re-key) so both use a scalable partition key from day one. Blocks: FR-B-01 store implementation.
+- [ ] **Cosmos container naming + partition strategy** — FR-B-01 partitions by subject (`entityId`/`userId`); coordinate with FR-D-05 (audit re-key) so both adopt the subject/scalable-key pattern from day one. Blocks: FR-B-01 store implementation.
+- [ ] **`MatterMemory` live-doc migration** — existing `memory` container holds matter-keyed docs on dev; decide migrate-vs-fresh-container-and-leave-legacy at task 050 (partition key can't change in place). Blocks: FR-B-01/02 store cutover.
 
 ---
 
