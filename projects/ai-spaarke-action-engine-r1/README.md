@@ -1,8 +1,8 @@
 # AI Spaarke Action Engine R1
 
-> **Last Updated**: 2026-05-29
+> **Last Updated**: 2026-07-05
 >
-> **Status**: In Progress
+> **Status**: ⏸ **ON HOLD at Phase 0 — RE-BASED 2026-07-05** on [`spaarke-ai-architecture-redesign-r1`](../spaarke-ai-architecture-redesign-r1/) (Issue [#550](https://github.com/spaarke-dev/spaarke/issues/550)). The prior hold trigger ("holds at Phase 0 until R7 ships", Q14 2026-06-28) is superseded — R7 (#501) is closed/absorbed. **New resumption trigger**: after `spaarke-ai-architecture-redesign-r1` passes **gate G-P3** (Phase P3) AND owner directs resumption. R1 re-bases on the redesign's confirmation gate (task 031 / FR-P2-02) + Binding capability model (tasks 040-042 / FR-P3-01..03). **Read first at resumption**: [`notes/rebase-on-ai-redesign-r1-stub.md`](notes/rebase-on-ai-redesign-r1-stub.md).
 
 ## Overview
 

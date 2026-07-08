@@ -5,24 +5,25 @@ using FluentAssertions;
 using Microsoft.Extensions.AI;
 using Moq;
 using Sprk.Bff.Api.Api.Ai;
-using Sprk.Bff.Api.Services.Ai.Chat.Tools;
+using Sprk.Bff.Api.Services.Ai.Handlers;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Api.Ai;
 
 /// <summary>
 /// Tests for the POST /api/ai/chat/sessions/{sessionId}/refine endpoint
-/// and the underlying TextRefinementTools.BuildRefineMessages logic.
+/// and the underlying TextRefinementHandler.BuildRefineMessages logic (FR-P2-07: the
+/// prompt builder was hoisted from the deleted legacy chat-tool class onto the typed handler).
 ///
 /// Covers:
 /// - Endpoint existence and HTTP method support
 /// - Authentication/authorization enforcement (ADR-008)
 /// - Request model validation (ChatRefineRequest)
-/// - TextRefinementTools prompt construction (unit tests)
+/// - TextRefinementHandler refine-prompt construction (unit tests)
 /// - SSE content type and headers
 ///
 /// @see ChatEndpoints.RefineTextAsync
-/// @see TextRefinementTools.BuildRefineMessages
+/// @see TextRefinementHandler.BuildRefineMessages
 /// @see ADR-008 (endpoint filters for auth)
 /// </summary>
 public class ChatRefineEndpointTests : IClassFixture<CustomWebAppFactory>
@@ -151,7 +152,9 @@ public class ChatRefineRequestModelTests
 }
 
 /// <summary>
-/// Unit tests for TextRefinementTools.BuildRefineMessages prompt construction.
+/// Unit tests for TextRefinementHandler.BuildRefineMessages prompt construction — the
+/// shared refine-prompt builder used by both the TEXT-REFINE catalog tool and the
+/// streaming refine endpoint (hoisted from the deleted legacy chat-tool class, FR-P2-07).
 ///
 /// Verifies:
 /// - System prompt content (professional editor instruction)
@@ -160,19 +163,11 @@ public class ChatRefineRequestModelTests
 /// - Surrounding context is excluded when null
 /// - Argument validation for null/empty inputs
 ///
-/// @see TextRefinementTools.BuildRefineMessages
+/// @see TextRefinementHandler.BuildRefineMessages
 /// @see ChatEndpoints.RefineTextAsync (uses BuildRefineMessages for streaming)
 /// </summary>
-public class TextRefinementToolsTests
+public class TextRefinementPromptBuilderTests
 {
-    private readonly TextRefinementTools _sut;
-    private readonly Mock<IChatClient> _mockChatClient;
-
-    public TextRefinementToolsTests()
-    {
-        _mockChatClient = new Mock<IChatClient>();
-        _sut = new TextRefinementTools(_mockChatClient.Object);
-    }
 
     // =========================================================================
     // BuildRefineMessages — Prompt Construction
@@ -182,7 +177,7 @@ public class TextRefinementToolsTests
     public void BuildRefineMessages_ReturnsSystemAndUserMessages()
     {
         // Act
-        var messages = _sut.BuildRefineMessages("Some text to refine", "simplify this");
+        var messages = TextRefinementHandler.BuildRefineMessages("Some text to refine", "simplify this");
 
         // Assert
         messages.Should().HaveCount(2);
@@ -194,7 +189,7 @@ public class TextRefinementToolsTests
     public void BuildRefineMessages_SystemPrompt_ContainsEditorInstruction()
     {
         // Act
-        var messages = _sut.BuildRefineMessages("text", "instruction");
+        var messages = TextRefinementHandler.BuildRefineMessages("text", "instruction");
 
         // Assert
         var systemPrompt = messages[0].Text;
@@ -206,7 +201,7 @@ public class TextRefinementToolsTests
     public void BuildRefineMessages_UserPrompt_IncludesInstructionAndText()
     {
         // Act
-        var messages = _sut.BuildRefineMessages("The quick brown fox", "make formal");
+        var messages = TextRefinementHandler.BuildRefineMessages("The quick brown fox", "make formal");
 
         // Assert
         var userPrompt = messages[1].Text;
@@ -218,7 +213,7 @@ public class TextRefinementToolsTests
     public void BuildRefineMessages_WithoutContext_DoesNotIncludeSurroundingContext()
     {
         // Act
-        var messages = _sut.BuildRefineMessages("selected text", "simplify");
+        var messages = TextRefinementHandler.BuildRefineMessages("selected text", "simplify");
 
         // Assert
         var userPrompt = messages[1].Text;
@@ -232,7 +227,7 @@ public class TextRefinementToolsTests
         var context = "Paragraph before the selection. More context after.";
 
         // Act
-        var messages = _sut.BuildRefineMessages("selected text", "simplify", context);
+        var messages = TextRefinementHandler.BuildRefineMessages("selected text", "simplify", context);
 
         // Assert
         var userPrompt = messages[1].Text;
@@ -248,7 +243,7 @@ public class TextRefinementToolsTests
         var context = "Before paragraph. After paragraph.";
 
         // Act
-        var messages = _sut.BuildRefineMessages("target text", "expand", context);
+        var messages = TextRefinementHandler.BuildRefineMessages("target text", "expand", context);
 
         // Assert
         var userPrompt = messages[1].Text;
@@ -263,7 +258,7 @@ public class TextRefinementToolsTests
     public void BuildRefineMessages_NullText_ThrowsArgumentException()
     {
         // Act & Assert
-        var act = () => _sut.BuildRefineMessages(null!, "instruction");
+        var act = () => TextRefinementHandler.BuildRefineMessages(null!, "instruction");
         act.Should().Throw<ArgumentException>().WithParameterName("text");
     }
 
@@ -271,7 +266,7 @@ public class TextRefinementToolsTests
     public void BuildRefineMessages_EmptyText_ThrowsArgumentException()
     {
         // Act & Assert
-        var act = () => _sut.BuildRefineMessages("", "instruction");
+        var act = () => TextRefinementHandler.BuildRefineMessages("", "instruction");
         act.Should().Throw<ArgumentException>().WithParameterName("text");
     }
 
@@ -279,7 +274,7 @@ public class TextRefinementToolsTests
     public void BuildRefineMessages_WhitespaceText_ThrowsArgumentException()
     {
         // Act & Assert
-        var act = () => _sut.BuildRefineMessages("   ", "instruction");
+        var act = () => TextRefinementHandler.BuildRefineMessages("   ", "instruction");
         act.Should().Throw<ArgumentException>().WithParameterName("text");
     }
 
@@ -287,7 +282,7 @@ public class TextRefinementToolsTests
     public void BuildRefineMessages_NullInstruction_ThrowsArgumentException()
     {
         // Act & Assert
-        var act = () => _sut.BuildRefineMessages("text", null!);
+        var act = () => TextRefinementHandler.BuildRefineMessages("text", null!);
         act.Should().Throw<ArgumentException>().WithParameterName("instruction");
     }
 
@@ -295,7 +290,7 @@ public class TextRefinementToolsTests
     public void BuildRefineMessages_EmptyInstruction_ThrowsArgumentException()
     {
         // Act & Assert
-        var act = () => _sut.BuildRefineMessages("text", "");
+        var act = () => TextRefinementHandler.BuildRefineMessages("text", "");
         act.Should().Throw<ArgumentException>().WithParameterName("instruction");
     }
 
@@ -310,7 +305,7 @@ public class TextRefinementToolsTests
         var longText = new string('A', 5000);
 
         // Act
-        var messages = _sut.BuildRefineMessages(longText, "summarize");
+        var messages = TextRefinementHandler.BuildRefineMessages(longText, "summarize");
 
         // Assert
         var userPrompt = messages[1].Text;
@@ -324,7 +319,7 @@ public class TextRefinementToolsTests
         var htmlText = "<p>This is <strong>bold</strong> text with <em>emphasis</em>.</p>";
 
         // Act
-        var messages = _sut.BuildRefineMessages(htmlText, "simplify");
+        var messages = TextRefinementHandler.BuildRefineMessages(htmlText, "simplify");
 
         // Assert
         var userPrompt = messages[1].Text;
@@ -335,8 +330,8 @@ public class TextRefinementToolsTests
     public void BuildRefineMessages_NullSurroundingContext_TreatedAsAbsent()
     {
         // Act
-        var messagesWithNull = _sut.BuildRefineMessages("text", "instruction", null);
-        var messagesWithoutContext = _sut.BuildRefineMessages("text", "instruction");
+        var messagesWithNull = TextRefinementHandler.BuildRefineMessages("text", "instruction", null);
+        var messagesWithoutContext = TextRefinementHandler.BuildRefineMessages("text", "instruction");
 
         // Assert - both should produce the same user prompt
         messagesWithNull[1].Text.Should().Be(messagesWithoutContext[1].Text);
@@ -346,24 +341,13 @@ public class TextRefinementToolsTests
     public void BuildRefineMessages_EmptySurroundingContext_TreatedAsAbsent()
     {
         // Act
-        var messagesWithEmpty = _sut.BuildRefineMessages("text", "instruction", "");
-        var messagesWithoutContext = _sut.BuildRefineMessages("text", "instruction");
+        var messagesWithEmpty = TextRefinementHandler.BuildRefineMessages("text", "instruction", "");
+        var messagesWithoutContext = TextRefinementHandler.BuildRefineMessages("text", "instruction");
 
         // Assert - both should produce the same user prompt (empty string is whitespace-only)
         messagesWithEmpty[1].Text.Should().Be(messagesWithoutContext[1].Text);
     }
 
-    // =========================================================================
-    // Constructor Validation
-    // =========================================================================
-
-    [Fact]
-    public void Constructor_NullChatClient_ThrowsArgumentNullException()
-    {
-        // Act & Assert
-        var act = () => new TextRefinementTools(null!);
-        act.Should().Throw<ArgumentNullException>().WithParameterName("chatClient");
-    }
 }
 
 /// <summary>

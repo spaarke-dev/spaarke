@@ -147,12 +147,11 @@ public static class InsightsModule
         services.AddOptions<InsightsMirrorOptions>().BindConfiguration(InsightsMirrorOptions.SectionName);
         services.Replace(ServiceDescriptor.Singleton<IObservationMirror, DataverseObservationMirror>());
 
-        // Name → Guid resolution map for /api/insights/ask. Per-env config holds the
-        // env-specific Guids so callers can use stable canonical names like
-        // "predict-matter-cost@v1" without coupling to Dataverse Guid generation.
-        // See InsightsPlaybookNameMapOptions XML doc for config shape + rationale.
-        services.AddOptions<InsightsPlaybookNameMapOptions>()
-            .BindConfiguration(InsightsPlaybookNameMapOptions.SectionName);
+        // FR-P3-01 (spaarke-ai-architecture-redesign-r1 task 040): the former
+        // name → Guid config-map options class was deleted. Canonical
+        // playbook name resolution for /api/insights/ask now goes through the
+        // insights-ask sprk_playbookconsumer Binding rows via IConsumerRoutingService
+        // (ADR-039 single routing surface; registered in RoutingModule).
 
         return services;
     }

@@ -493,7 +493,7 @@ public class AnalysisToolDtoTests
     // block in SprkChatAgentFactory.ResolveTools() consults to skip tools whose
     // sprk_requiredcapability isn't in the current playbook's capability set.
     // Wave 7c (VerifyCitations) + Wave 8 (LegalResearch / WebSearch /
-    // CodeInterpreter) + Wave 9 (WorkingDocumentTools) populate this field on
+    // CodeInterpreter) + Wave 9 (WorkingDocument chat-tools) populate this field on
     // their migrated rows.
     // =========================================================================
 

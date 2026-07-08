@@ -269,3 +269,11 @@ If the playbook has chat-destination siblings (e.g., `summarize-document-for-cha
 - 118R queued (first playbook migration; proves the end-to-end path)
 
 After 118R lands, the architecture is production-ready. Subsequent workspace playbook authoring uses `DeliverComposite` by default. Chat-destination playbooks continue legacy.
+
+## Amendment 2026-07-05 (Path B per CLAUDE.md §6.5 — operator-approved)
+
+**Source**: `projects/spaarke-ai-code-audit-r1/ADR-REVIEW-VS-GREENFIELD.md` §2.2 (recommendation A-2), approved by the operator 2026-07-05 during the AI code audit / greenfield convergence review.
+
+1. **RESCINDED**: the rule immediately above ("Subsequent workspace playbook authoring uses `DeliverComposite` by default"). Per the OQ-2 resolution in `docs/architecture/SPAARKE-AI-ARCHITECTURE-AND-COMPONENT-DESIGN.md` §4.2.1 (2026-07-05), the playbook engine is a maintained-but-frozen representation: no new capability lands on it. New composite capabilities are authored as `coded` workflows (Wave-11 code-defined pattern) within the target Action + Binding model. The queued 118R migration is superseded — do not migrate `summarize-document-for-workspace@v1` onto `DeliverComposite`; it follows the target-architecture migration map instead.
+2. **RE-SCOPED**: this ADR's surviving binding content is the **section-name-keyed streaming contract** (`section_started` / `section_data` / `section_completed`, keyed by section NAME, never schema position) and the FE widget contract (`sections: Record<string, SectionState>`). These bind for ANY composite executor — coded workflow or frozen engine node. The `NodeType.DeliverComposite` / `ActionType 42` machinery is frozen with the engine (no removal, no extension).
+3. **Backward-compat invariants** (FieldDelta preservation, append-only option-set ordinals) remain in force while the frozen representation runs. Per the operator's 2026-07-05 direction that existing-customer continuity is not a constraint, the FieldDelta dual-render path in `StructuredOutputStreamWidget` MAY be deleted at migration cutover rather than maintained indefinitely.

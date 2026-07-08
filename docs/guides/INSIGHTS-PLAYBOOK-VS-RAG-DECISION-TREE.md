@@ -1,5 +1,7 @@
 # Playbook vs. RAG — Decision Tree for Insights Engine Consumption
 
+
+> **Terminology note (2026-07-07, spaarke-ai-architecture-redesign-r1 task 052)**: references to `PlaybookExecutionEngine` in this doc mean "the playbook engine" loosely. The literal class `PlaybookExecutionEngine` (a chat-summarize shell) was DELETED at redesign-r1 task 044; the engine that executes Insights playbooks is `PlaybookOrchestrationService` + the `INodeExecutor` registry, which is **FROZEN** (Insights family only per OQ-2/D11 — new capability must NOT be built as node-graph playbooks). Insights honesty primitives, `IInsightsAi`, and the `spaarke-insights-index` substrate are unchanged.
 > **Audience**: Developers + SMEs choosing how to answer a new Insights-shaped question.
 > **Last Updated**: 2026-06-03 (Phase 1.5 Wave E4, task 043).
 > **Companion to**: [`INSIGHTS-ENGINE-GUIDE.md`](./INSIGHTS-ENGINE-GUIDE.md) §2.2 (heuristic table) and §3 (playbook authoring procedure).
@@ -187,7 +189,7 @@ A question may start as RAG and evolve into a playbook as usage patterns stabili
    - If the playbook is the **canonical answer for a known practice area + document type**, register in [`InsightsActionRouter`](../../src/server/api/Sprk.Bff.Api/Services/Ai/Insights/) Layer 2 (Wave D4). The 2D taxonomy will dispatch to it automatically.
    - If the playbook answers an **explicit caller intent** (e.g., "predict cost"), expose via `IInsightsAi.RunPlaybookAsync(playbookId, ...)`. Update the Spaarke Assistant tool-call schema (Wave E3) if exposed there.
    - Update the [intent classifier](../../src/server/api/Sprk.Bff.Api/Services/Ai/Insights/) (Wave E2) training prompt to include the new playbook as a candidate route.
-5. **Deploy via `Deploy-Playbook.ps1`** — capture the playbook GUID; register in App Service config (`Insights__Playbooks__Map__<friendly_name_snake_case_v1>`) per §3.5 of the operator guide.
+5. **Deploy via `Deploy-Playbook.ps1`** — capture the playbook GUID; seed the `sprk_playbookconsumer` Binding row (consumerType `insights-ask`, `sprk_consumercode` = canonical name, `sprk_playbook` → the GUID) per §3.5 of the operator guide (FR-P3-01 replaced the former App Service config map).
 6. **Run a side-by-side eval** — measure playbook vs. RAG on the same query set; check `EvidenceSufficiency` rule fires correctly; verify `GroundingVerify` rejects ungrounded synthesis. Use Wave D7 synthetic fixtures + a golden subset of real production queries.
 7. **Cut over the caller** — change Spaarke Assistant tool-call or workflow integration to route the question through `/ask` (playbook) instead of `/search` (RAG). Keep RAG as the fallback for low-confidence intents (per the [intent classifier confidence threshold](./INSIGHTS-ENGINE-GUIDE.md#7a-intent-classifier-phase-15-wave-e2)).
 8. **Monitor**: emit `InsightArtifactType` distribution (Inference vs. Decline rate). A high Decline rate post-promotion means the evidence-sufficiency rule is too strict or the index is under-populated for that question class — tune the rule or extend ingest scope before declaring success.

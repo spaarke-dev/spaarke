@@ -8,6 +8,7 @@
  */
 import type { IUploadedFile } from '../FileUpload/fileUploadTypes';
 import type { ISummarizeResult } from './summarizeTypes';
+import { readSseStream, parseSseEvent } from '../../hooks/useSseStream';
 
 const LOG_PREFIX = '[SummarizeService]';
 
@@ -33,10 +34,11 @@ export interface StreamSummarizeCallbacks {
    * from these values; callers that still want the legacy numbered stepper
    * use `onProgress` above.
    *
-   * NOTE: New consumers should prefer the `useLinearRunProgress` hook directly
-   * (see `../../hooks/useLinearRunProgress.ts`). This callback exists so the
-   * existing Summarize wizard can adopt the shared presenter without a full
-   * hook-migration in the same PR.
+   * NOTE: the former `useLinearRunProgress` hook was deleted in task 045
+   * (dead hook body; its `LinearRunEvent` types remain at
+   * `../../hooks/useLinearRunProgress.ts`). New consumers build
+   * `LinearRunEvent[]` from this callback, with SSE consumption owned by the
+   * canonical `readSseStream` in `../../hooks/useSseStream.ts` (NFR-08).
    */
   onProgressEvent?: (step: string, message: string) => void;
 }
@@ -68,70 +70,50 @@ export async function streamSummarize(
 
   console.info(`${LOG_PREFIX} Sending ${files.length} file(s) to ${url} (SSE)`);
 
-  const response = await fetchFn(url, {
-    method: 'POST',
-    body: formData,
-    signal,
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text().catch(() => 'Unknown error');
-    console.error(`${LOG_PREFIX} BFF returned ${response.status}: ${errorText}`);
-    throw new Error(`Summarize failed (${response.status}): ${errorText}`);
-  }
-
-  if (!response.body) {
-    throw new Error('Response body is not readable');
-  }
-
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
+  // task 045 (FR-P3-06, NFR-08): the canonical readSseStream owns the multipart
+  // POST (FormData pass-through — no Content-Type header, browser sets the
+  // boundary) + reader/buffer/`data:`-parse machinery; the wizard's
+  // authenticatedFetch is supplied as fetchImpl (it owns auth per ADR-028).
+  // Per-chunk handling preserved verbatim: progress → callbacks, result →
+  // rawResult capture, error → throw. The server's `data: [DONE]` terminator
+  // parses to null in parseSseEvent and is skipped (pre-consolidation code
+  // skipped it explicitly).
   let rawResult: unknown = null;
 
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
+  await readSseStream({
+    url,
+    body: formData,
+    fetchImpl: (fetchUrl, init) => fetchFn(fetchUrl, init),
+    signal,
+    mapHttpError: async response => {
+      const errorText = await response.text().catch(() => 'Unknown error');
+      console.error(`${LOG_PREFIX} BFF returned ${response.status}: ${errorText}`);
+      return new Error(`Summarize failed (${response.status}): ${errorText}`);
+    },
+    onLine: (line: string) => {
+      const chunk = parseSseEvent(line) as unknown as {
+        type?: string;
+        step?: string;
+        content?: string;
+        error?: string;
+        done?: boolean;
+      } | null;
+      if (!chunk) return;
 
-      buffer += decoder.decode(value, { stream: true });
-      const events = buffer.split('\n\n');
-      buffer = events.pop() ?? '';
-
-      for (const event of events) {
-        for (const line of event.split('\n')) {
-          const trimmed = line.trim();
-          if (!trimmed.startsWith('data:')) continue;
-          const jsonStr = trimmed.slice(5).trim();
-          if (!jsonStr || jsonStr === '[DONE]') continue;
-
-          let chunk: { type?: string; step?: string; content?: string; error?: string; done?: boolean };
-          try {
-            chunk = JSON.parse(jsonStr);
-          } catch {
-            continue;
-          }
-
-          if (chunk.type === 'progress' && chunk.step) {
-            callbacks.onProgress?.(chunk.step);
-            callbacks.onProgressEvent?.(chunk.step, chunk.content ?? '');
-          } else if (chunk.type === 'result' && chunk.content) {
-            try {
-              rawResult = JSON.parse(chunk.content);
-            } catch {
-              console.warn(`${LOG_PREFIX} Failed to parse result content as JSON`);
-            }
-          } else if (chunk.type === 'error') {
-            throw new Error(chunk.error ?? chunk.content ?? 'Summarization failed');
-          } else if (chunk.done) {
-            break;
-          }
+      if (chunk.type === 'progress' && chunk.step) {
+        callbacks.onProgress?.(chunk.step);
+        callbacks.onProgressEvent?.(chunk.step, chunk.content ?? '');
+      } else if (chunk.type === 'result' && chunk.content) {
+        try {
+          rawResult = JSON.parse(chunk.content);
+        } catch {
+          console.warn(`${LOG_PREFIX} Failed to parse result content as JSON`);
         }
+      } else if (chunk.type === 'error') {
+        throw new Error(chunk.error ?? chunk.content ?? 'Summarization failed');
       }
-    }
-  } finally {
-    reader.releaseLock();
-  }
+    },
+  });
 
   if (!rawResult) {
     throw new Error('Summarize stream ended without a result');
@@ -143,7 +125,7 @@ export async function streamSummarize(
 }
 
 // ---------------------------------------------------------------------------
-// Result normalization (shared by both streamSummarize and runSummarize)
+// Result normalization
 // ---------------------------------------------------------------------------
 
 function normalizeResult(raw: unknown): ISummarizeResult {
@@ -266,50 +248,6 @@ function normalizeResult(raw: unknown): ISummarizeResult {
   return result as ISummarizeResult;
 }
 
-// ---------------------------------------------------------------------------
-// Legacy REST entry point (kept for backward compat — BFF now streams SSE)
-// ---------------------------------------------------------------------------
-
-/**
- * @deprecated Use streamSummarize instead. This REST endpoint no longer exists on the BFF.
- */
-export async function runSummarize(
-  files: IUploadedFile[],
-  signal?: AbortSignal,
-  authenticatedFetch?: AuthenticatedFetchFn,
-  bffBaseUrl?: string
-): Promise<ISummarizeResult> {
-  const baseUrl = bffBaseUrl ?? '';
-  const url = `${baseUrl}/api/workspace/files/summarize`;
-  if (!authenticatedFetch) {
-    throw new Error(`${LOG_PREFIX} authenticatedFetch is required — unauthenticated BFF calls are not permitted.`);
-  }
-  const fetchFn = authenticatedFetch;
-
-  const formData = new FormData();
-  for (const f of files) {
-    formData.append('files', f.file, f.name);
-  }
-
-  console.info(`${LOG_PREFIX} Sending ${files.length} file(s) to ${url}`);
-
-  const response = await fetchFn(url, {
-    method: 'POST',
-    body: formData,
-    signal,
-  });
-
-  if (!response.ok) {
-    const errorText = await response.text().catch(() => 'Unknown error');
-    console.error(`${LOG_PREFIX} BFF returned ${response.status}: ${errorText}`);
-    throw new Error(`Summarize failed (${response.status}): ${errorText}`);
-  }
-
-  const json = await response.json();
-  console.info(`${LOG_PREFIX} Raw response:`, JSON.stringify(json).substring(0, 500));
-
-  // The BFF returns { result: <playbook output> }
-  const normalized = normalizeResult(json.result);
-  console.info(`${LOG_PREFIX} Summary received, confidence=${normalized?.confidence}`);
-  return normalized;
-}
+// task 045 (FR-P3-06, NFR-08 hard cutover): the @deprecated `runSummarize`
+// REST entry point was DELETED — its comment said the REST endpoint no longer
+// exists on the BFF, and a repo grep found zero non-test importers.

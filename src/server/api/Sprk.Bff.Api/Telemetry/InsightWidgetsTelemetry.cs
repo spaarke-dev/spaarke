@@ -13,10 +13,10 @@ namespace Sprk.Bff.Api.Telemetry;
 /// - Meter name: <c>Sprk.Bff.Api.InsightWidgets</c> for OpenTelemetry configuration (wired in
 ///   <c>TelemetryModule.AddTelemetryModule</c>). Resolved per project Q-U8 evidence:
 ///   matches all 9 existing BFF meters' <c>Sprk.Bff.Api.&lt;Feature&gt;</c> convention
-///   (see <see cref="R5SummarizeTelemetry.MeterName"/>:49, <see cref="InsightsCacheMetrics"/>:33).
+///   (see <see cref="InsightsCacheMetrics"/>:33 for the precedent).
 ///   NOT <c>Spaarke.InsightWidgets</c> — that earlier spec wording was superseded.
 /// - Singleton lifetime (per <c>AnalysisServicesModule</c>). Unconditional registration mirrors
-///   <see cref="R5SummarizeTelemetry"/>: telemetry surface is harmless when unused (zero events
+///   the deleted R5 summarize telemetry singleton: telemetry surface is harmless when unused (zero events
 ///   emitted) and sidesteps the asymmetric-registration anti-pattern (root CLAUDE.md §10 F.1).
 ///
 /// Locked event schema (downstream contract for spec NFR-06 + task 066 KQL verification —
@@ -56,7 +56,7 @@ public sealed class InsightWidgetsTelemetry : IDisposable
     /// <summary>Meter name for OpenTelemetry registration. Stable downstream contract per Q-U8.</summary>
     public const string MeterName = "Sprk.Bff.Api.InsightWidgets";
 
-    /// <summary>Static <see cref="ActivitySource"/> for distributed tracing (matches R5SummarizeTelemetry / RagTelemetry precedent).</summary>
+    /// <summary>Static <see cref="ActivitySource"/> for distributed tracing (matches the RagTelemetry precedent).</summary>
     public static readonly ActivitySource ActivitySource = new(MeterName, "1.0.0");
 
     // Cardinality enforcement — invalid input throws ArgumentException at the call site so
@@ -130,7 +130,7 @@ public sealed class InsightWidgetsTelemetry : IDisposable
     /// </param>
     /// <param name="durationMs">End-to-end duration in milliseconds (recorded on the duration histogram).</param>
     /// <param name="tenantId">
-    /// Optional tenant identifier — low-cardinality dimension per <c>R5SummarizeTelemetry</c> +
+    /// Optional tenant identifier — low-cardinality dimension per the AI-telemetry +
     /// <c>RagTelemetry</c> precedent (ADR-014). Pass <c>null</c> to omit the dimension. Never pass
     /// matter GUIDs, user IDs, correlation IDs, or any free-form text — those are high-cardinality
     /// and prohibited by ADR-015. The matter GUID (subject) belongs on the <see cref="Activity"/>
@@ -189,7 +189,7 @@ public sealed class InsightWidgetsTelemetry : IDisposable
 
     /// <summary>
     /// Start a new <see cref="Activity"/> for distributed tracing of an InsightSummaryCard
-    /// invocation. Mirrors the <see cref="R5SummarizeTelemetry.StartActivity"/> pattern.
+    /// invocation. Mirrors the canonical AI StartActivity pattern.
     /// </summary>
     /// <param name="operationName">Logical operation name (e.g., <c>InsightSummaryCard.Invoke</c>).</param>
     /// <param name="tenantId">Optional tenant id to set as an Activity tag (low-cardinality dimension per ADR-014).</param>

@@ -1,30 +1,36 @@
 /**
- * @spaarke/ai-widgets — Context Widget Registrations
+ * @spaarke/ai-widgets — register-context-widgets
  *
- * Secondary aggregation file for context pane widget registrations. Shell
- * entry points that consume @spaarke/ai-widgets via the barrel (index.ts)
- * do NOT need to import this file — the barrel handles registration as a
- * side effect. Import this file only in entry points that import widgets
- * individually without going through the barrel.
+ * THE single context-widget registration module (ai-architecture-redesign-r1
+ * task 046 / FR-P3-07 — registry dedupe per OVERLAY-MATRIX C3).
+ *
+ * Before task 046 the package carried TWO drifted registration modules
+ * (`src/registry/register-context-widgets.ts` for the shell context widgets +
+ * `src/widgets/context/register-context-widgets.ts` for the six R1 source
+ * widgets) PLUS inline `registerContextWidget()` calls in the barrel
+ * (`src/index.ts`). This module is now the ONE registration source consumed by
+ * both mount paths:
+ *
+ *   - the dashboard wrapper path (`LegalWorkspaceApp` and other barrel
+ *     consumers — `src/index.ts` imports this module once as a side effect),
+ *   - the direct widget wrapper path (shell entry points that import widgets
+ *     individually without the barrel import this module explicitly).
  *
  * Registration pattern:
- * - Each call to registerContextWidget() is lazy: the factory is a dynamic
- *   import() that is NOT invoked until resolveContextWidget() is first called
- *   for that type. This keeps the initial bundle small.
- * - The type string is the server-driven key: the BFF sends this string in
- *   the widget payload and the ContextPaneController uses it to resolve the
- *   correct component.
- * - The registry silently ignores duplicate registrations (first wins), so
- *   importing this module alongside the barrel is safe but redundant.
+ *   - Each registration is lazy: the factory is a dynamic import() that is NOT
+ *     invoked until resolveContextWidget() is first called for that type.
+ *   - Every call is isolated via safeRegister so a synchronous throw from one
+ *     registration cannot skip those that follow (brittleness Phase B.5).
+ *   - The registry silently ignores duplicate registrations (first wins), so
+ *     importing this module from multiple entry points is safe.
  *
  * Adding a new context widget:
- * 1. Create the widget component in src/widgets/context/
- * 2. Add a registerContextWidget() call in index.ts (inline, matching the
- *    progress-tracker and playbook-gallery patterns already present).
- * 3. Mirror the call here for shell entry points that bypass the barrel.
- * 4. Ensure the type string matches the value sent by the BFF.
+ *   1. Create the widget component in src/widgets/context/
+ *   2. Add ONE safeRegisterContext() call below (this file only — do NOT add
+ *      inline registrations to index.ts or a second registration module).
+ *   3. Ensure the type string matches the value the BFF sends.
  *
- * Task: AIPU2-086
+ * Tasks: AIPU2-081 + AIPU2-086 (origins) → merged by task 046.
  */
 
 import { registerContextWidget } from './ContextWidgetRegistry';
@@ -35,14 +41,17 @@ import type { ContextWidgetComponent } from '../types/widget-types';
 // Isolate each registration so a synchronous throw from one call (factory-
 // expression evaluation failure, malformed registration object) does not skip
 // the registrations that follow. See safeRegister docblock + the same pattern
-// in `register-workspace-widgets.ts`.
+// in `../widgets/workspace/register-workspace-widgets.ts`.
 function safeRegisterContext(...args: Parameters<typeof registerContextWidget>): void {
   safeRegister('ContextWidget', args[0], () => registerContextWidget(...args));
 }
 
+// ===========================================================================
+// Shell context widgets (Context-pane stage widgets)
+// ===========================================================================
+
 // ---------------------------------------------------------------------------
-// progress-tracker
-// (also registered inline in index.ts — duplicate is safe, first wins)
+// progress-tracker — workflow step progress (loading / analysis stages)
 // ---------------------------------------------------------------------------
 
 safeRegisterContext('progress-tracker', {
@@ -52,26 +61,41 @@ safeRegisterContext('progress-tracker', {
 // ---------------------------------------------------------------------------
 // playbook-gallery
 //
-// Widget type: 'playbook-gallery'
 // Stage:       Welcome / playbook-selection (before any conversation turn)
 // Dispatches:  playbook_change → 'conversation' PaneEventBus channel
-// (also registered inline in index.ts — duplicate is safe, first wins)
 // ---------------------------------------------------------------------------
 
 safeRegisterContext('playbook-gallery', {
   factory: () =>
     // Type-erasure cast: ContextWidgetComponent<unknown> at registry vs widget's
     // typed default (ContextWidgetComponent<PlaybookGalleryData>) — registry
-    // boundary variance, see ../index.ts for the same pattern.
+    // boundary variance; the widget receives its typed data at render time.
     import('../widgets/context/PlaybookGalleryWidget').then(m => ({
       default: m.default as unknown as ContextWidgetComponent,
     })),
 });
 
 // ---------------------------------------------------------------------------
+// get-started-cards
+//
+// Stage:       Welcome (FR-18). Registered for discoverability + symmetry —
+//              GetStartedCardsWidget's props (`onCardClick`, `className`) are
+//              NOT the standard ContextWidgetProps shape; hosts that need to
+//              wire `onCardClick` import the named export directly (this is
+//              what ContextPaneController does for the welcome stage).
+// ---------------------------------------------------------------------------
+
+safeRegisterContext('get-started-cards', {
+  factory: () =>
+    import('../widgets/context/GetStartedCardsWidget').then(m => ({
+      // Intentional cast: prop-shape divergence documented above.
+      default: m.GetStartedCardsWidget as unknown as ContextWidgetComponent,
+    })),
+});
+
+// ---------------------------------------------------------------------------
 // entity-info
 //
-// Widget type: 'entity-info'
 // Stage:       entity-info (loading and early active-chat stages)
 // Purpose:     Displays entity detail (display name, status, client, owner,
 //              key dates, budget, custom fields) in the Context pane so users
@@ -82,7 +106,6 @@ safeRegisterContext('playbook-gallery', {
 
 safeRegisterContext('entity-info', {
   factory: () =>
-    // Type-erasure cast: registry boundary variance (see playbook-gallery above).
     import('../widgets/context/EntityInfoWidget').then(m => ({
       default: m.default as unknown as ContextWidgetComponent,
     })),
@@ -91,18 +114,15 @@ safeRegisterContext('entity-info', {
 // ---------------------------------------------------------------------------
 // findings
 //
-// Widget type: 'findings'
 // Stage:       sources-citations (after analysis completes)
 // Purpose:     Displays structured analysis findings — key items, risk levels,
 //              and citation links. Citation clicks dispatch context_highlight
 //              to the 'context' PaneEventBus channel so the active
 //              DocumentViewer scrolls to / highlights the cited passage.
-// (also registered inline in index.ts — duplicate is safe, first wins)
 // ---------------------------------------------------------------------------
 
 safeRegisterContext('findings', {
   factory: () =>
-    // Type-erasure cast: registry boundary variance (see playbook-gallery above).
     import('../widgets/context/FindingsWidget').then(m => ({
       default: m.default as unknown as ContextWidgetComponent,
     })),
@@ -111,51 +131,41 @@ safeRegisterContext('findings', {
 // ---------------------------------------------------------------------------
 // file-preview (R5 task 018 / D2-09)
 //
-// Widget type: 'file-preview'
 // Stage:       chat-driven Summarize vertical slice (Context-pane mount,
 //              non-modal)
 // Purpose:     Inline preview of files uploaded into the active chat session
 //              (`ChatSession.UploadedFiles`; spec NFR-02 hard-cap = 20).
 //              Wraps the extracted `RichFilePreview` renderer (task 013 /
-//              D2-08) instead of rebuilding iframe/metadata/menu UI (R5
-//              CLAUDE.md §3.1 reuse mandate).
-// Dispatches:  `context.file_selected` on the `context` channel when the
-//              user picks a different file from the multi-file list
-//              (additive ADR-030 event type added by task 016 / D2-06).
-//              Also dispatches `workspace.widget_load` for the
-//              `toggleWorkspace` per-file action so a file can be pinned
-//              into the Workspace pane as a `document-viewer` tab.
+//              D2-08) instead of rebuilding iframe/metadata/menu UI.
+// Dispatches:  `context.file_selected` on the `context` channel; also
+//              `workspace.widget_load` for the `toggleWorkspace` per-file
+//              action so a file can be pinned into the Workspace pane.
 // ---------------------------------------------------------------------------
 
 safeRegisterContext('file-preview', {
   factory: () =>
-    // Type-erasure cast: registry boundary variance (see playbook-gallery above).
     import('../widgets/context/FilePreviewContextWidget').then(m => ({
       default: m.default as unknown as ContextWidgetComponent,
     })),
 });
 
 // ---------------------------------------------------------------------------
-// execution-trace (R6 task 062 / D-C-15)
+// execution-trace (task 046 / FR-P3-07 — ADR-040 ledger bridge)
 //
-// Widget type: 'execution-trace'
-// Stage:       Active-chat (Context-pane primary widget when no entity is
-//              selected and trace events are flowing). Subscribes to the six
-//              `context.*` trace event types added by R6 task 059 (D-C-12):
-//              tool_call_started, tool_call_completed, knowledge_retrieved,
-//              playbook_node_executing, playbook_node_completed, decision_made.
-// Purpose:     Renders a Claude-Code-like ordered timeline of the chat agent's
-//              deterministic activity. Per ADR-015 BINDING: renders only the
-//              typed enumerated fields (tool name + decision + timestamp +
-//              numeric metrics) — NEVER user-message text or document content.
-// Channel:     Subscribes to the existing `context` PaneEventBus channel —
-//              NO new channel introduced (per ADR-030 + NFR-05).
-// (also registered inline in index.ts — duplicate is safe, first wins)
+// Stage:       Active-chat (Context-pane primary widget when trace data is
+//              flowing). Subscribes to the `context.tool_chain` event — each
+//              event carries one PERSISTED session-ledger ToolChain segment
+//              (storage precedes rendering, ADR-040).
+// Purpose:     Renders a Claude-Code-like ordered timeline of the agent's
+//              tool activity from the session ledger. Per NFR-07 / ADR-015
+//              BINDING: renders identifiers / redacted filter summaries /
+//              counts / durations ONLY — never user or document content.
+// Channel:     Existing `context` PaneEventBus channel — NO new channel
+//              (ADR-030 + NFR-05).
 // ---------------------------------------------------------------------------
 
 safeRegisterContext('execution-trace', {
   factory: () =>
-    // Type-erasure cast: registry boundary variance (see playbook-gallery above).
     import('../widgets/context/ExecutionTraceWidget').then(m => ({
       default: m.default as unknown as ContextWidgetComponent,
     })),
@@ -164,32 +174,82 @@ safeRegisterContext('execution-trace', {
 // ---------------------------------------------------------------------------
 // pinned-memory-list (R6 task 070 / D-C-24 + D-C-25, Pillar 7 — Q7 expansion)
 //
-// Widget type: 'pinned-memory-list'
 // Stage:       Active-chat (Context-pane primary widget when the user opens
 //              the Pinned Memory pane). Loads the caller's pinned items via
 //              `GET /api/memory/pins` and surfaces create / edit / delete CRUD.
-// Purpose:     Visualises + manages cross-session pinned memory items (user-
-//              preference / system-rule / matter-fact). Items are composed
-//              into the chat-agent system prompt per R6 task 067 memory
-//              composition, so creating / editing / deleting a pin here
-//              affects every subsequent chat session for the caller.
-// Standards:   ADR-008 + ADR-016 (auth + ai-context rate limit on BFF side),
-//              ADR-012 (Fluent v9 + shared lib), ADR-013 (HTTP-only BFF
-//              consumption), ADR-015 (title / content text NEVER logged in
-//              any telemetry; counts only), ADR-021 (zero hardcoded colours;
-//              semantic tokens only), ADR-028 (function-based auth surface).
+// Standards:   ADR-008 + ADR-016 (auth + rate limit on BFF side), ADR-012,
+//              ADR-013 (HTTP-only BFF consumption), ADR-015 (title / content
+//              text NEVER logged), ADR-021 (semantic tokens only), ADR-028.
 // ---------------------------------------------------------------------------
 
 safeRegisterContext('pinned-memory-list', {
   factory: () =>
-    // Type-erasure cast: registry boundary variance (see playbook-gallery above).
     import('../widgets/context/PinnedMemoryListWidget').then(m => ({
       default: m.default as unknown as ContextWidgetComponent,
     })),
 });
 
+// ===========================================================================
+// R1 source widgets (server-driven `context_update` targets — AIPU2-081)
+//
+// Widget type strings MUST match the SourceWidgetType enum values from
+// @spaarke/ai-outputs; the server sends these strings in `context_update`
+// events and ContextPaneController resolves the matching component.
+//
+// Citation highlighting behaviour per widget:
+//   - DocumentViewer  → queries [data-citation-id] overlay elements; debug
+//                       trace for embedded PDF/iframe viewers.
+//   - LegalLibrary    → scrolls blockquote excerpt into view.
+//   - Citation        → scrolls matching <li data-citation-id="..."> into view.
+//   - WebSource       → no-op (cross-origin iframe).
+//   - ImageViewer     → no-op (single image, no addressable sub-regions).
+//   - CodeViewer      → no-op (future: may map via selectionRef line range).
+// ===========================================================================
+
+safeRegisterContext('DocumentViewer', {
+  factory: () =>
+    import('../widgets/context/DocumentViewerContextWidget') as Promise<{
+      default: ContextWidgetComponent;
+    }>,
+});
+
+safeRegisterContext('WebSource', {
+  factory: () =>
+    import('../widgets/context/WebSourceContextWidget') as Promise<{
+      default: ContextWidgetComponent;
+    }>,
+});
+
+safeRegisterContext('LegalLibrary', {
+  factory: () =>
+    import('../widgets/context/LegalLibraryContextWidget') as Promise<{
+      default: ContextWidgetComponent;
+    }>,
+});
+
+safeRegisterContext('Citation', {
+  factory: () =>
+    import('../widgets/context/CitationContextWidget') as Promise<{
+      default: ContextWidgetComponent;
+    }>,
+});
+
+safeRegisterContext('ImageViewer', {
+  factory: () =>
+    import('../widgets/context/ImageViewerContextWidget') as Promise<{
+      default: ContextWidgetComponent;
+    }>,
+});
+
+safeRegisterContext('CodeViewer', {
+  factory: () =>
+    import('../widgets/context/CodeViewerContextWidget') as Promise<{
+      default: ContextWidgetComponent;
+    }>,
+});
+
 // ---------------------------------------------------------------------------
-// Public registration function (called from shell entry points)
+// Public registration function (called from entry points)
 // ---------------------------------------------------------------------------
 
 /**
@@ -199,10 +259,10 @@ safeRegisterContext('pinned-memory-list', {
  * side effects when this module is imported. The function exists so that
  * callers can use a named import that makes the side-effect intent explicit:
  *
- *   import { registerContextWidgets } from './registry/register-context-widgets';
+ *   import { registerContextWidgets } from '@spaarke/ai-widgets';
  *   registerContextWidgets(); // reads as: "ensure context widgets are registered"
  *
- * The function body is intentionally empty — the registrations already ran.
+ * Idempotent — the registry ignores duplicate registrations (first wins).
  */
 export function registerContextWidgets(): void {
   // All registrations execute at module evaluation time (top-level side effects above).

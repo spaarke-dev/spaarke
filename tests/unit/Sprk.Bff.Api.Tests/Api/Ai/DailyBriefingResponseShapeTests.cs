@@ -3,18 +3,17 @@ using System.Text.Json.Serialization;
 using FluentAssertions;
 using Microsoft.AspNetCore.Http;
 using Microsoft.AspNetCore.Http.HttpResults;
-using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
-using Moq;
 using Sprk.Bff.Api.Api.Ai;
-using Sprk.Bff.Api.Services.Ai.PublicContracts;
+using Sprk.Bff.Api.Services.Ai.Narrators;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Api.Ai;
 
 /// <summary>
 /// Backward-compatibility tests for the /api/ai/daily-briefing/narrate
-/// response shape (R4 task 032 — FR-12 / AC-12b).
+/// response shape (R4 task 032 — FR-12 / AC-12b; invocation path updated by
+/// spaarke-ai-architecture-redesign-r1 task 043 to the coded-composite dispatch).
 ///
 /// Locks in the JSON contract consumed by <c>useBriefingNarration.ts</c> in
 /// <c>@spaarke/daily-briefing-components</c>. The widget reads:
@@ -28,6 +27,12 @@ namespace Sprk.Bff.Api.Tests.Api.Ai;
 /// The frozen R3 sample at
 /// <c>projects/spaarke-daily-update-service-r4/notes/samples/narrate-response-r3.json</c>
 /// is the load-bearing golden fixture. Drift here is a widget-parser break.
+///
+/// Task-043 note: the endpoint no longer projects playbook StructuredData — the coded
+/// workflow (DailyBriefingNarrator) produces <see cref="DailyBriefingNarrateResponse"/>
+/// directly (including the categoryCount/priorityItemCount re-injection, which moved
+/// into the narrator's NarrateAsync). These tests drive HandleNarrate through the
+/// composite seam and assert the SAME widget-consumable JSON contract as before.
 /// </summary>
 [Trait("status", "task-032-r4")]
 public sealed class DailyBriefingResponseShapeTests
@@ -44,28 +49,18 @@ public sealed class DailyBriefingResponseShapeTests
 
     private static async Task<DailyBriefingNarrateResponse> InvokeHandleNarrateAndReadResponseAsync(
         DailyBriefingNarrateRequest request,
-        IConsumerRoutingService routing,
-        IInvokePlaybookAi invokePlaybookAi)
+        DailyBriefingCompositeService composite)
     {
         var method = typeof(DailyBriefingEndpoints)
             .GetMethod("HandleNarrate",
                 System.Reflection.BindingFlags.NonPublic | System.Reflection.BindingFlags.Static)
             ?? throw new InvalidOperationException("HandleNarrate not found via reflection");
 
-        // R7 Wave 11 T116 narrator spike: HandleNarrate signature gained two parameters
-        // (IConfiguration, DailyBriefingNarrator). These tests verify the playbook-engine
-        // path (default with feature flag off), so pass an empty IConfiguration (flag
-        // absent → defaults to false) and null narrator (never invoked when flag off).
-        var emptyConfig = new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build();
-
         var task = (Task<IResult>)method.Invoke(null, new object?[]
         {
             request,
             NullLoggerFactory.Instance,
-            routing,
-            invokePlaybookAi,
-            emptyConfig,
-            null,  // narrator — never accessed when feature flag is off
+            composite,
             new DefaultHttpContext(),
             CancellationToken.None
         })!;
@@ -109,39 +104,28 @@ public sealed class DailyBriefingResponseShapeTests
         ]
     };
 
-    private static Mock<IConsumerRoutingService> BuildRoutingMock(Guid resolvedPlaybookId)
-    {
-        var mock = new Mock<IConsumerRoutingService>(MockBehavior.Strict);
-        mock.Setup(r => r.ResolveAsync(
-                It.IsAny<string>(),
-                It.IsAny<string?>(),
-                It.IsAny<IRoutingContext?>(),
-                It.IsAny<string?>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(resolvedPlaybookId);
-        return mock;
-    }
-
-    private static Mock<IInvokePlaybookAi> BuildInvokeMockFromJson(string structuredJson)
-    {
-        using var doc = JsonDocument.Parse(structuredJson);
-        var result = new PlaybookInvocationResult
+    /// <summary>
+    /// Builds a stub composite that mirrors the narrator's terminal behavior: parse the
+    /// workflow's structured output into the response DTO, re-inject the request's
+    /// category/priority counts (the narrator's NarrateAsync contract), stamp
+    /// generatedAtUtc.
+    /// </summary>
+    private static DailyBriefingCompositeService BuildCompositeReturning(string structuredJson)
+        => new StubComposite((request) =>
         {
-            RunId = Guid.NewGuid(),
-            Success = true,
-            StructuredData = doc.RootElement.Clone()
-        };
-        var mock = new Mock<IInvokePlaybookAi>(MockBehavior.Strict);
-        mock.Setup(i => i.InvokePlaybookAsync(
-                It.IsAny<Guid>(),
-                It.IsAny<IReadOnlyDictionary<string, string>?>(),
-                It.IsAny<PlaybookInvocationContext>(),
-                It.IsAny<CancellationToken>(),
-                It.IsAny<string?>(),
-                It.IsAny<Sprk.Bff.Api.Services.Ai.DocumentContext?>()))
-            .ReturnsAsync(result);
-        return mock;
-    }
+            var parsed = JsonSerializer.Deserialize<DailyBriefingNarrateResponse>(
+                structuredJson,
+                new JsonSerializerOptions { PropertyNameCaseInsensitive = true })!;
+            return parsed with
+            {
+                Tldr = parsed.Tldr with
+                {
+                    CategoryCount = request.Categories.Length,
+                    PriorityItemCount = request.PriorityItems.Length
+                },
+                GeneratedAtUtc = DateTimeOffset.UtcNow
+            };
+        });
 
     private static string LoadFrozenR3Sample()
     {
@@ -173,10 +157,9 @@ public sealed class DailyBriefingResponseShapeTests
     [Fact]
     public async Task HandleNarrate_ResponseShape_MatchesDailyBriefingNarrateResponse()
     {
-        // Arrange — playbook returns the canonical structured shape.
+        // Arrange — the coded workflow returns the canonical structured shape.
         var request = BuildNonEmptyRequest();
-        var routing = BuildRoutingMock(Guid.NewGuid());
-        var invokePlaybookAi = BuildInvokeMockFromJson("""
+        var composite = BuildCompositeReturning("""
             {
               "tldr": {
                 "summary": "Sum.",
@@ -201,8 +184,7 @@ public sealed class DailyBriefingResponseShapeTests
             """);
 
         // Act
-        var response = await InvokeHandleNarrateAndReadResponseAsync(
-            request, routing.Object, invokePlaybookAi.Object);
+        var response = await InvokeHandleNarrateAndReadResponseAsync(request, composite);
 
         // Assert — every field consumed by the widget parser is populated.
         response.Tldr.Should().NotBeNull();
@@ -231,8 +213,7 @@ public sealed class DailyBriefingResponseShapeTests
     {
         // Arrange
         var request = BuildNonEmptyRequest();
-        var routing = BuildRoutingMock(Guid.NewGuid());
-        var invokePlaybookAi = BuildInvokeMockFromJson("""
+        var composite = BuildCompositeReturning("""
             {
               "tldr": { "summary": "s", "keyTakeaways": ["k1"], "topAction": "t" },
               "channelNarratives": [
@@ -252,8 +233,7 @@ public sealed class DailyBriefingResponseShapeTests
             }
             """);
 
-        var response = await InvokeHandleNarrateAndReadResponseAsync(
-            request, routing.Object, invokePlaybookAi.Object);
+        var response = await InvokeHandleNarrateAndReadResponseAsync(request, composite);
 
         // Act — serialize with the same options Minimal API uses to write the
         // response body. The widget's `parseNotificationData` reads camelCase
@@ -295,19 +275,18 @@ public sealed class DailyBriefingResponseShapeTests
     public async Task HandleNarrate_ResponseShape_FrozenR3Sample()
     {
         // Arrange — load the frozen golden sample and feed it back to the
-        // endpoint as the playbook's structured output. The response we get
-        // out MUST round-trip into the same widget-consumable shape.
+        // endpoint as the coded workflow's output. The response we get out
+        // MUST round-trip into the same widget-consumable shape.
         var sampleJson = LoadFrozenR3Sample();
         using var sampleDoc = JsonDocument.Parse(sampleJson);
         var sampleRoot = sampleDoc.RootElement;
 
         var request = BuildNonEmptyRequest();
-        var routing = BuildRoutingMock(Guid.NewGuid());
 
-        // The frozen sample's tldr+channelNarratives subtree IS the playbook's
-        // structured output (the endpoint re-injects category/priority counts
-        // from the request + stamps generatedAtUtc).
-        var playbookOutput = new
+        // The frozen sample's tldr+channelNarratives subtree IS the workflow's
+        // output (the narrator re-injects category/priority counts from the
+        // request + stamps generatedAtUtc — the stub composite mirrors that).
+        var workflowOutput = new
         {
             tldr = new
             {
@@ -318,16 +297,15 @@ public sealed class DailyBriefingResponseShapeTests
             },
             channelNarratives = sampleRoot.GetProperty("channelNarratives")
         };
-        var playbookJson = JsonSerializer.Serialize(playbookOutput, WidgetSerializerOptions);
-        var invokePlaybookAi = BuildInvokeMockFromJson(playbookJson);
+        var workflowJson = JsonSerializer.Serialize(workflowOutput, WidgetSerializerOptions);
+        var composite = BuildCompositeReturning(workflowJson);
 
         // Act
-        var response = await InvokeHandleNarrateAndReadResponseAsync(
-            request, routing.Object, invokePlaybookAi.Object);
+        var response = await InvokeHandleNarrateAndReadResponseAsync(request, composite);
 
         // Serialize the response and assert structural overlap with the frozen
         // sample. We DO NOT diff `categoryCount`/`priorityItemCount`/`generatedAtUtc`
-        // because the endpoint re-derives those from the request + UtcNow —
+        // because the pipeline re-derives those from the request + UtcNow —
         // their per-call values are correctly NOT identical to the sample.
         var responseJson = JsonSerializer.Serialize(response, WidgetSerializerOptions);
         using var responseDoc = JsonDocument.Parse(responseJson);
@@ -389,5 +367,22 @@ public sealed class DailyBriefingResponseShapeTests
             .Should().Be(request.Categories.Length);
         responseRoot.GetProperty("tldr").GetProperty("priorityItemCount").GetInt32()
             .Should().Be(request.PriorityItems.Length);
+    }
+
+    // ── Stub composite over the protected-ctor + virtual production shape ──────
+
+    private sealed class StubComposite : DailyBriefingCompositeService
+    {
+        private readonly Func<DailyBriefingNarrateRequest, DailyBriefingNarrateResponse> _narrate;
+
+        public StubComposite(Func<DailyBriefingNarrateRequest, DailyBriefingNarrateResponse> narrate)
+            : base(NullLogger<DailyBriefingCompositeService>.Instance)
+        {
+            _narrate = narrate;
+        }
+
+        public override Task<DailyBriefingNarrateResponse> NarrateAsync(
+            DailyBriefingNarrateRequest request, string tenantId, CancellationToken cancellationToken)
+            => Task.FromResult(_narrate(request));
     }
 }

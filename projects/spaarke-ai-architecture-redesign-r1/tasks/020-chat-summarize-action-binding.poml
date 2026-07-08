@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="spaarke-ai-architecture-redesign-r1">
+  <metadata>
+    <title>chat-summarize as Action + Binding rows; SummarizeSessionEndpoint delegates; SessionSummarizeOrchestrator dual-path dissolves</title>
+    <phase>Phase P1: First Capability End-to-End</phase>
+    <status>not-started</status>
+    <estimated-hours>10</estimated-hours>
+    <tags>bff-api, catalog, jps, prompted-executor</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <parallel-group>W-P1-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>014</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement FR-P1-01: migrate the `chat-summarize` capability onto the closed catalogs. Author the SUM-CHAT@v1 JPS (prompt + input/output schemas) using the jps-action-create and jps-validate skills, create the `sprk_analysisaction` Action row (`kind: prompted`) and the `sprk_playbookconsumer` Binding row on spaarkedev1, and execute the capability via the prompted executor (`ActionRunner` + `PromptSchemaRenderer`). `SummarizeSessionEndpoint` becomes a thin delegate to the catalog-driven executor, and the `SessionSummarizeOrchestrator` dual-path code dissolves — deleted, not shimmed, per the hard-cutover doctrine. This is the first capability proving that a catalog row a business analyst authors replaces an engineering-owned dispatch path. Acceptance per spec: summarize runs via catalog rows; the orchestrator dual-path code is deleted with grep-zero shown.
+  </prompt>
+
+  <role>
+    Senior .NET developer familiar with the Sprk.Bff.Api AI pipeline, the LinearConsumers prompted executor, JPS authoring, and Dataverse catalog rows.
+  </role>
+
+  <goal>
+    `chat-summarize` executes end-to-end via the SUM-CHAT@v1 Action row + Binding row through ActionRunner/PromptSchemaRenderer (test-proven); `SummarizeSessionEndpoint` delegates; `SessionSummarizeOrchestrator` dual-path code is deleted with grep-zero output shown; builds and eval suite green.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-architecture-redesign-r1/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-architecture-redesign-r1/plan.md</file>
+    <file purpose="project-context">projects/spaarke-ai-architecture-redesign-r1/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md</file>
+    <file purpose="current-endpoint">src/server/api/Sprk.Bff.Api/Api/Ai/</file>
+    <file purpose="orchestrator-to-dissolve">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SessionSummarizeOrchestrator.cs</file>
+    <file purpose="prompted-executor">src/server/api/Sprk.Bff.Api/Services/Ai/LinearConsumers/ActionRunner.cs</file>
+    <file purpose="jps-skill">.claude/skills/jps-action-create/SKILL.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-039">MUST route the invocation through Event / Click / Text only; MUST NOT add a second intent-detection mechanism; MUST NOT add routing config outside the Binding table (`sprk_playbookconsumer`); both catalogs stay closed.</constraint>
+    <constraint source="ADR-040">MUST write the summarize output to the session ledger BEFORE rendering (task 021 delivers the universal write; this task must not introduce render-before-store paths).</constraint>
+    <constraint source="NFR-08">Hard cutover: NO compat shims, NO parallel-run. The SessionSummarizeOrchestrator dual-path deletion MUST be grep-zero-proven with SHOWN output in the transcript.</constraint>
+    <constraint source="ADR-029">BFF-touching task: run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`, report absolute compressed size + diff vs baseline; expect net reduction; a delta of +2 MB or more requires justification.</constraint>
+    <constraint source="NFR-02">Eval suite green is a MERGE GATE from P1; this catalog change MUST add/update eval cases for the summarize utterance family (NFR-06).</constraint>
+    <constraint source="project">Use the jps-action-create and jps-validate skills for SUM-CHAT@v1 — do not hand-write the JPS JSON without validation.</constraint>
+    <constraint source="ADR-013 (amended 2026-07-05)">Capability invocation is the canonical facade verb; PublicContracts boundary unchanged — no AI internals injected into CRUD code.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai-catalog, jps, prompted-executor, bff-api</topic>
+    <files>
+      <file>docs/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>docs/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/OVERLAY-MATRIX.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-MIGRATION-MAP.md</file>
+    </files>
+    <patterns>
+      <pattern name="Prompted executor" location="src/server/api/Sprk.Bff.Api/Services/Ai/LinearConsumers/ActionRunner.cs">Canonical execution path for `kind: prompted` Action rows — extend, do not fork.</pattern>
+      <pattern name="Prompt schema rendering" location="src/server/api/Sprk.Bff.Api/Services/Ai/PromptSchemaRenderer.cs">Renders JPS schemas into the LLM prompt (Layer 2 `## Input` section per the Playbook-LLM-Output pattern).</pattern>
+      <pattern name="Binding resolution" location="src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IConsumerRoutingService.cs">Binding contract returned by ConsumerRoutingService (extended in task 004).</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      P0 delivered the ledger model, catalog schema extensions, and the full Binding contract dark. P1 lights the first capability. chat-summarize is chosen because it currently runs through a dual-path orchestrator (SessionSummarizeOrchestrator) — dissolving it proves the catalog path can replace an accreted dispatch mechanism outright.
+    </background>
+    <dependencies>
+      <dependency task="014" status="pending">G-P0 gate passed: schema deployed to spaarkedev1, ledger round-trip green, ADR-040 Accepted.</dependency>
+    </dependencies>
+    <related-work>
+      <item>OVERLAY-MATRIX.md rows for SessionSummarizeOrchestrator / SummarizeSessionEndpoint (the per-component HOW).</item>
+      <item>R7 FR-31 consumer-wiring guide: docs/guides/ai-guide-consumer-wiring.md (migration case study for chat-summarize).</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context check + load knowledge">
+      Verify context usage below 70%. Load spec FR-P1-01, OVERLAY-MATRIX rows for the summarize slot, ADR-039/040, and bff-extensions.md. Confirm task 014 (G-P0) is complete in TASK-INDEX.md.
+    </step>
+    <step order="1" name="Author SUM-CHAT@v1 JPS">
+      Invoke jps-action-create to generate the SUM-CHAT@v1 JPS (instruction, output fields, scopes, template params, examples) for chat-session summarization. Validate with jps-validate (schema + render test).
+    </step>
+    <step order="2" name="Create catalog rows on spaarkedev1">
+      Create the `sprk_analysisaction` row (`sprk_kind = prompted`, SUM-CHAT@v1 input/output schemas, model tier) and the `sprk_playbookconsumer` Binding row (ucid, disposition, surfaces, chip transitions) per the P0-03 column contract. Verify ConsumerRoutingService resolves the Binding.
+    </step>
+    <step order="3" name="Delegate the endpoint through the prompted executor">
+      Rewire `SummarizeSessionEndpoint` to resolve the Binding and execute via ActionRunner + PromptSchemaRenderer. No routing logic remains in the endpoint beyond binding resolution.
+    </step>
+    <step order="4" name="Dissolve SessionSummarizeOrchestrator dual-path">
+      Delete the dual-path code (`SessionSummarizeOrchestrator`, its Null peer if orphaned, and DI registrations that exist only for it). Re-point any remaining callers. Run grep for `SessionSummarizeOrchestrator` and SHOW zero hits outside git history in the transcript.
+    </step>
+    <step order="5" name="Tests + eval cases">
+      Update/add unit tests in tests/unit/Sprk.Bff.Api.Tests for the delegated endpoint + executor path; add/update golden-utterance eval cases for the summarize family in tests/integration/contract per NFR-02/NFR-06.
+    </step>
+    <step order="6" name="Build + publish-size verification">
+      `dotnet build` green (shown). Run the ADR-029 publish-size verification and report size + delta vs the current baseline (expect reduction from the orchestrator deletion).
+    </step>
+    <step order="7" name="Update tracking">
+      Update TASK-INDEX.md (020 → ✅ on pass), task POML status, and current-task.md per the completion protocol.
+    </step>
+    <step order="9.5" name="Quality gates">
+      Step 9.5 quality gates: run code-review + adr-check; resolve Critical findings per CLAUDE.md §6.5 before completion.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build, test, publish-size verification</tool>
+    <tool name="jps-action-create">SUM-CHAT@v1 JPS authoring</tool>
+    <tool name="jps-validate">JPS schema + render validation</tool>
+    <tool name="dataverse-mcp">Create/verify catalog rows on spaarkedev1</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="jps">SUM-CHAT@v1 JPS definition (location per jps-action-create convention)</output>
+    <output type="data">sprk_analysisaction + sprk_playbookconsumer rows on spaarkedev1 (ids recorded in task notes)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/ (SummarizeSessionEndpoint delegation)</output>
+    <output type="code-deleted">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SessionSummarizeOrchestrator.cs (+ NullSessionSummarizeOrchestrator.cs if orphaned)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ + tests/integration/contract/ (summarize eval cases)</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">chat-summarize executes via the catalog: an Action row (kind prompted, SUM-CHAT@v1) + Binding row resolve and run through ActionRunner + PromptSchemaRenderer (test output shown).</criterion>
+    <criterion testable="true">SummarizeSessionEndpoint delegates to the prompted executor; no summarize-specific orchestration logic remains in the endpoint.</criterion>
+    <criterion testable="true">SessionSummarizeOrchestrator dual-path code is deleted; grep for the symbol returns zero hits outside git history, with output SHOWN in the transcript (NFR-08).</criterion>
+    <criterion testable="true">SUM-CHAT@v1 passes jps-validate; summarize-family eval cases added/updated and the eval suite is green (NFR-02/NFR-06).</criterion>
+    <criterion testable="true">dotnet build green; ADR-029 publish size reported with delta vs baseline.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

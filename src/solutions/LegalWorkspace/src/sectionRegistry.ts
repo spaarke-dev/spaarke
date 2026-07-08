@@ -83,8 +83,9 @@ import { composeEditorRegistration } from "./sections/composeEditor.registration
 export interface LegalWorkspaceSectionRegistryOptions {
   /**
    * Daily Briefing customization. Currently exposes the notification-context
-   * loader — used by SpaarkeAi to flow `loadSpaarkeAiNotificationContext` into
-   * the BFF `/narrate` envelope so the embedded copy renders real bullets.
+   * loader seam. (The former SpaarkeAi loader call site was deleted by
+   * Track-B batch 2, task 071 — the option is @deprecated and ignored by
+   * the daily-briefing factory; see dailyBriefing.registration.ts.)
    *
    * Standalone consumers omit this → empty-payload contract preserved
    * (BFF returns empty bullets → empty-state UI). FR-25 / NFR-10.

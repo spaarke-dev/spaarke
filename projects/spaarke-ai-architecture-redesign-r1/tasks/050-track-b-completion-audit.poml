@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="050" project="spaarke-ai-architecture-redesign-r1">
+  <metadata>
+    <title>Track-B completion audit — every §9 + overlay-DEL item deleted or keep-with-reason</title>
+    <phase>Phase P4: Sweep + Hardening + Graduation</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <tags>audit, cleanup</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <parallel-group>W-P4-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>048, 070, 071, 072, 073</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement FR-P4-01: the Track-B completion audit — the deadwood gate for the whole project. Every item in the inventory §9 dead-code register AND every overlay-matrix DEL-verdict item must end this task either grep-verified deleted (with the grep output SHOWN in the audit table) or carrying a written keep-with-reason. This reconciles not just the four Track-B batches (070-073) but also the phase-coupled retirements landed by P1-P3 tasks (dispatcher stack, Chat/Tools, engine shells, config keys, client modules). The G-P4 gate criterion is ZERO unexplained survivors. Output is an audit table at `notes/track-b-completion-audit.md`.
+  </prompt>
+
+  <role>
+    Auditor-mode developer: systematic, evidence-first, allergic to "probably deleted". Cross-references the §9 register, the migration map, the overlay matrix DEL verdicts, and the four batch evidence files against the live tree with grep.
+  </role>
+
+  <goal>
+    `notes/track-b-completion-audit.md` exists containing one row per inventory-§9 item + per overlay-DEL item, each row showing grep-verified-deleted evidence or a written keep-with-reason; zero unexplained survivors remain.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-architecture-redesign-r1/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-architecture-redesign-r1/plan.md</file>
+    <file purpose="project-context">projects/spaarke-ai-architecture-redesign-r1/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md</file>
+    <file purpose="deadwood-register">projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-CODE-INVENTORY.md</file>
+    <file purpose="del-verdicts">projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/OVERLAY-MATRIX.md</file>
+    <file purpose="batch-evidence">projects/spaarke-ai-architecture-redesign-r1/notes/track-b/ (batch-1..4 evidence files)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="NFR-08">Every deleted-item row must SHOW grep output (zero hits outside git history) — assertions without shown evidence do not count.</constraint>
+    <constraint source="FR-P4-01">Zero unexplained survivors: any §9/overlay-DEL item still present without a written keep-with-reason FAILS this task — either delete it now (if trivially dependency-free) or write the reason.</constraint>
+    <constraint source="project">This is an AUDIT task — new deletions discovered here should be small remainders only; anything non-trivial found alive gets a keep-with-reason + escalation, not an improvised deletion of live code.</constraint>
+    <constraint source="CLAUDE.md §3 Sub-Agent Write Boundary">If any surviving item lives under `.claude/` paths, its deletion runs in the MAIN session — sub-agents only report it.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>track-b, audit, deadwood</topic>
+    <files>
+      <file>projects/spaarke-ai-architecture-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/plan.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-MIGRATION-MAP.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-CODE-INVENTORY.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/OVERLAY-MATRIX.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Track B ran continuously from P0 (batches 070-073) and phase-coupled retirements landed inside P1-P3 tasks (023, 025, 031, 034, 035, 036, 040, 043, 044, 045, 046). This audit is the single reconciliation point proving the operator's "ALL dead debt" cleanup mandate was fulfilled — the G-P4 success criterion "Track-B audit zero unexplained survivors" reads directly off this table.
+    </background>
+    <dependencies>
+      <dependency task="048" status="pending">G-P3 gate passed — all phase-coupled retirements landed</dependency>
+      <dependency task="070" status="pending">Batch 1 evidence available</dependency>
+      <dependency task="071" status="pending">Batch 2 evidence available</dependency>
+      <dependency task="072" status="pending">Batch 3 evidence available</dependency>
+      <dependency task="073" status="pending">Batch 4 evidence available</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 090 G-P4 sweep cites this audit table as gate evidence</item>
+      <item>Task 052 documentation refresh depends on this audit (doc references to deleted items)</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context check">
+      Check context usage. If &gt; 70%, create handoff summary and request new chat. Load inputs; read inventory §9 in full and extract every overlay-matrix DEL verdict into a working checklist.
+    </step>
+    <step order="1" name="Build the master item list">
+      Merge into one deduplicated list: every §9 register entry (Server / Client shared / SpaarkeAi page / PCF / Manifest-scripts incl. the §5.4 stale list) + every overlay-matrix DEL item + the phase-coupled retirement symbols from spec FR-P1-04/06, FR-P2-02/05/06/07, FR-P3-01/04/05/06/07. Note which task was responsible for each.
+    </step>
+    <step order="2" name="Grep-verify each item">
+      For every item: run grep across src/, tests/, scripts/, docs/, config; capture the output. Classify: DELETED (zero hits outside git history + audit notes) / SURVIVOR. Batch evidence files may be cited but each row still gets a fresh grep at audit time.
+    </step>
+    <step order="3" name="Resolve survivors">
+      For each survivor: if trivially dependency-free remainder → delete now, re-grep, show output, build-verify. Otherwise write a keep-with-reason (concrete reason: live consumer, deferred-by-design to named follow-on, intentional same-name distinct symbol). Zero rows may remain unexplained.
+    </step>
+    <step order="4" name="Build verification">
+      If any remainder deletions were made in step 3: `dotnet build src/server/api/Sprk.Bff.Api/` + `npm run build:prod` for touched surfaces, output shown.
+    </step>
+    <step order="5" name="Write the audit table + close">
+      Write `projects/spaarke-ai-architecture-redesign-r1/notes/track-b-completion-audit.md`: columns Item / Source (§9 | overlay-DEL | phase-FR) / Responsible task / Status (deleted | keep-with-reason) / Evidence (grep output shown or reason text). Summary line: total items, deleted count, keep count, unexplained = 0. Update TASK-INDEX.md (050 → ✅).
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build verification for remainder deletions</tool>
+    <tool name="npm">Client build verification for remainder deletions</tool>
+    <tool name="git">History checks (deletions preserved)</tool>
+  </tools>
+
+  <outputs>
+    <output type="report">projects/spaarke-ai-architecture-redesign-r1/notes/track-b-completion-audit.md (the audit table)</output>
+    <output type="code">Remainder deletions only, if any survivors are trivially dead</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Audit table exists in project notes covering every inventory-§9 item AND every overlay-DEL item (FR-P4-01).</criterion>
+    <criterion testable="true">Every deleted row shows grep-verified evidence (output shown); every surviving row carries a written keep-with-reason.</criterion>
+    <criterion testable="true">Zero unexplained survivors (G-P4 criterion).</criterion>
+    <criterion testable="true">Builds green if any remainder deletions were made; TASK-INDEX updated.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

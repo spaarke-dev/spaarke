@@ -1,0 +1,71 @@
+{
+  "_comment_top": "spaarke-ai-architecture-redesign-r1 task 008 (FR-P0-07 read half) — seed row for the dataverse.describe read tool. GA-MCP-contract-frozen per ADR-039: sprk_toolid local segment equals the GA Dataverse MCP tool name 'describe' (research note notes/audit-inputs/research-dataverse-mcp-2026-07.md; Learn ms.date 2026-06-05). Argument shape mirrors GA describe(path, scope?).",
+  "_comment_routing": "Runtime invocation routes to DataverseDescribeHandler via sprk_handlerclass. Auto-discovered by ToolFrameworkExtensions.AddToolHandlersFromAssembly (ADR-010). The P2 agent loop projects the LLM-facing function name from sprk_toolid ('dataverse.describe'); sprk_name keeps the SYS- display convention required by the seed script's safety filter.",
+  "_comment_obo": "spec MUST rule (task-012 audit): execution goes exclusively through IDataverseUserClient — the caller's bearer token OBO-exchanged for the Dataverse resource. Results respect the calling user's security roles + row-level security. NO app-only Dataverse path is reachable from the handler.",
+  "_comment_side_effect": "sprk_sideeffectclass = 100000000 (Read) — drives the ONE confirmation gate (ADR-039): read tools never require confirmation. The handler is structurally read-only (GET-only paths).",
+  "_comment_scope_deviation": "GA MCP 'describe' also serves skills/ and scopes/ paths (Business Skills — an MCP-server feature). The native transport returns a structured error for those segments; a future transport swap (task-010 spike) gains them with no contract change. 'scope' argument is accepted-but-unfiltered with a warning.",
+  "_comment_consumption": "Read by scripts/Seed-TypedHandlers.ps1. Idempotent — UPSERT by sprk_handlerclass + sprk_toolcode with sprk_name 'SYS-%' filter.",
+  "sprk_name": "SYS-Dataverse Describe",
+  "sprk_toolcode": "DATAVERSE-DESCRIBE",
+  "sprk_toolid": "dataverse.describe",
+  "sprk_namespace": "dataverse",
+  "sprk_sideeffectclass": 100000000,
+  "sprk_permissionscope": "dataverse-user-context",
+  "sprk_budgetclass": "light",
+  "sprk_description": "Describes Dataverse structure and records under the calling user's permissions (read-only). Path forms: 'tables/' lists all tables; 'tables/{logicalName}' returns the table schema with column logical names and types; 'tables/{logicalName}/records/{guid}' returns one full record. Use this FIRST to discover table and column logical names before calling dataverse.read_query, and to read full record details for paths returned by dataverse.search_data. Results respect the current user's Dataverse security roles and row-level security. Spaarke entity map (use these logical names): 'matter'/'case'/'deal' = sprk_matter (key columns sprk_mattername, sprk_matternumber, sprk_matterdescription, statuscode; lookups sprk_practicearea, sprk_mattertype, sprk_assignedattorney1 to contact, sprk_externalaccount to account). 'project'/'workstream' = sprk_project (sprk_projectname, sprk_projectnumber). 'document'/'contract'/'file' = sprk_document (sprk_documentname, sprk_filename, sprk_documenttype, sprk_filesummary; lookups sprk_matter, sprk_project). People = contact; client companies = account; law firms/vendors = sprk_organization.",
+  "sprk_handlerclass": "DataverseDescribeHandler",
+  "sprk_availableincontexts": 100000001,
+  "_comment_availableincontexts": "100000001 = Chat only — dataverse.* tools exist for the agent loop (P2), not playbook nodes.",
+  "sprk_jsonschema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "dataverse.describe Request",
+    "description": "Argument shape frozen against the GA Dataverse MCP describe(path, scope?) tool.",
+    "type": "object",
+    "required": ["path"],
+    "properties": {
+      "path": {
+        "type": "string",
+        "minLength": 1,
+        "description": "Filesystem-style describe path: 'tables/' (list tables), 'tables/{logicalName}' (table schema), or 'tables/{logicalName}/records/{guid}' (full record)."
+      },
+      "scope": {
+        "type": "string",
+        "description": "Optional scope filter (GA MCP compatibility). Not implemented by the native transport — acknowledged with a warning; result is unfiltered."
+      }
+    },
+    "additionalProperties": false
+  },
+  "sprk_outputschema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "dataverse.describe Result",
+    "type": "object",
+    "required": ["tool", "path", "kind"],
+    "properties": {
+      "tool": { "const": "dataverse.describe" },
+      "path": { "type": "string" },
+      "kind": { "type": "string", "enum": ["table_list", "table_schema", "record"] },
+      "tables": { "type": "array", "items": { "type": "object" } },
+      "table": { "type": "object" },
+      "columns": { "type": "array", "items": { "type": "object" } },
+      "entity": { "type": "string" },
+      "recordId": { "type": "string" },
+      "fields": { "type": "object" },
+      "count": { "type": "integer" },
+      "columnCount": { "type": "integer" },
+      "citations": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "path": { "type": "string", "description": "tables/{logicalName}/records/{guid} — replayable via dataverse.describe" },
+            "entity": { "type": "string" },
+            "recordId": { "type": "string" }
+          }
+        }
+      }
+    }
+  },
+  "sprk_configuration": {
+    "_comment": "No method-discriminator dispatch — single LLM-facing function. Reserved for per-environment defaults (e.g. table-list cap)."
+  }
+}

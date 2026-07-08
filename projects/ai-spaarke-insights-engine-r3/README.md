@@ -1,6 +1,6 @@
 # Spaarke Insights Engine — Phase 2 (r3)
 
-> **Status**: ⏸ **PAUSED** as of 2026-06-10 — pending R6 ship + owner direction to resume.
+> **Status**: ⏸ **PAUSED** as of 2026-06-10. **Resumption trigger re-pointed 2026-07-05** (was "R6 ships Pillars 3+5+6"; R6 → R7 → redesign supersession chain): resumes after `spaarke-ai-architecture-redesign-r1` (Issue #550) passes **gate G-P3** (Phase P3 — Insights `ask`/`search` become Binding rows per FR-P3-01; engine-output→ledger adapter ships at P1 FR-P1-05) AND owner directs resumption AND widgets-r1 reaches first proof-point.
 > **Pause context + resumption plan**: [`notes/pre-design-context-2026-06-10.md`](notes/pre-design-context-2026-06-10.md) — READ THIS FIRST if picking up r3 at any point in the future.
 > **Predecessor**: [`ai-spaarke-insights-engine-r2`](../ai-spaarke-insights-engine-r2/) (Phase 1.5 — ✅ Complete; 14/15 SCs met; PRs #330, #334, #336, #337, #339)
 > **Predecessor wrap-up**: [`r2/notes/lessons-learned.md`](../ai-spaarke-insights-engine-r2/notes/lessons-learned.md), [`r2/PHASE-2-OUTLINE.md`](../ai-spaarke-insights-engine-r2/PHASE-2-OUTLINE.md)

@@ -54,9 +54,10 @@
 
 .PARAMETER Indexes
     Optional subset filter — comma-separated short keys from the catalog:
-    `files-index, records-index, rag-references, insights-index,
-    session-files, invoices-index, playbook-embeddings`. Default: deploy
-    all 7.
+    `files-index, discovery-index, records-index, rag-references,
+    insights-index, session-files, invoices-index`. Default: deploy all.
+    (The playbook-embeddings entry was retired by spaarke-ai-architecture-
+    redesign-r1 task 035 / FR-P2-06 with the dispatcher stack.)
 
 .PARAMETER DryRun
     Plan-only mode. Lists each index that would be deployed + invariants
@@ -258,15 +259,6 @@ $Catalog = @(
             VectorFields             = @('contentVector')
             RequiredFilterableFields = @('tenantId', 'invoiceId', 'matterId', 'projectId')
         }
-    },
-    @{
-        Key        = 'playbook-embeddings'
-        Name       = 'spaarke-playbook-embeddings'
-        SchemaFile = 'infrastructure/ai-search/spaarke-playbook-embeddings.json'
-        Invariants = @{
-            VectorFields             = @('contentVector3072')
-            RequiredFilterableFields = @()  # Playbook embeddings is global (no tenantId); playbook ID is the key
-        }
     }
 )
 
@@ -277,7 +269,7 @@ if ($Indexes) {
     $selected = ($Indexes -split ',') | ForEach-Object { $_.Trim().ToLower() }
     $Catalog = $Catalog | Where-Object { $selected -contains $_.Key.ToLower() }
     if (-not $Catalog -or $Catalog.Count -eq 0) {
-        Write-Error "No catalog entries matched -Indexes '$Indexes'. Valid keys: files-index, discovery-index, records-index, rag-references, insights-index, session-files, invoices-index, playbook-embeddings"
+        Write-Error "No catalog entries matched -Indexes '$Indexes'. Valid keys: files-index, discovery-index, records-index, rag-references, insights-index, session-files, invoices-index"
         exit 3
     }
 }

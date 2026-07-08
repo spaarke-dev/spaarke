@@ -69,8 +69,8 @@ export const TELEMETRY_EVENT_DAILY_BRIEFING_429 = 'spaarke-ai-error.daily-briefi
 /**
  * Shape of the request body posted to BFF `/narrate`. Preserved here only as
  * the parameter type of `loadNotificationContext` for backward compat with
- * call sites that still type that option (e.g., SpaarkeAi's
- * `loadSpaarkeAiNotificationContext` and `buildNarrationRequest`). The new
+ * call sites that still type that option. (SpaarkeAi's loader — the last
+ * such call site — was deleted by Track-B batch 2, task 071.) The new
  * `DailyBriefingApp` does NOT consume this — it builds its own narrate
  * request internally via `useBriefingNarration`.
  *

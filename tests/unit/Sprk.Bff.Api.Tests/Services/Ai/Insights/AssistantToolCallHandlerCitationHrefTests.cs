@@ -4,12 +4,12 @@ using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Logging.Abstractions;
 using Microsoft.Extensions.Options;
 using Moq;
-using Sprk.Bff.Api.Api.Insights;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Models.Ai.PublicContracts;
 using Sprk.Bff.Api.Models.Insights;
 using Sprk.Bff.Api.Services.Ai.Insights;
 using Sprk.Bff.Api.Services.Ai.Insights.Routing;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Ai.Insights;
@@ -52,14 +52,29 @@ public class AssistantToolCallHandlerCitationHrefTests
     private const string Subject = "matter:M-2024-0001";
 
     private readonly Mock<IInsightsIntentClassifier> _classifierMock = new(MockBehavior.Strict);
-    private readonly TestOptionsMonitor<InsightsPlaybookNameMapOptions> _playbookNameMap =
-        new(new InsightsPlaybookNameMapOptions
-        {
-            Map = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase)
+
+    // FR-P3-01: the insights-ask Binding rows replaced the config name map. forceMode:
+    // "playbook" with no classifier hint resolves the 'default' row — the mock returns
+    // it, shaped like the seeded spaarkedev1 catalog row.
+    private readonly Mock<IConsumerRoutingService> _consumerRoutingMock = new();
+
+    public AssistantToolCallHandlerCitationHrefTests()
+    {
+        _consumerRoutingMock
+            .Setup(r => r.ResolveBindingAsync(
+                ConsumerTypes.InsightsAsk,
+                "default",
+                It.IsAny<IRoutingContext?>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Binding
             {
-                ["predict-matter-cost@v1"] = Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
-            }
-        });
+                BindingId = Guid.Parse("f32a7931-8079-f111-ab0e-7ced8ddc4cc6"),
+                ConsumerType = ConsumerTypes.InsightsAsk,
+                ConsumerCode = "default",
+                PlaybookId = Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee")
+            });
+    }
 
     // ─────────────────────────────────────────────────────────────────────────
     // Pure helper tests (no handler instantiation required)
@@ -348,9 +363,8 @@ public class AssistantToolCallHandlerCitationHrefTests
         var options = new AssistantCitationHrefOptions { BffBaseUrl = bffBaseUrl };
         return new AssistantToolCallHandler(
             _classifierMock.Object,
-            _playbookNameMap,
+            _consumerRoutingMock.Object,
             new TestOptionsMonitor<AssistantCitationHrefOptions>(options),
-            new ConfigurationBuilder().Build(),
             NullLogger<AssistantToolCallHandler>.Instance);
     }
 

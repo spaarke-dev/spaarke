@@ -49,7 +49,7 @@ import { SprkChatTypingIndicator } from './SprkChatTypingIndicator';
 import { SprkChatUploadZone } from './SprkChatUploadZone';
 import type { UploadedDocument } from './SprkChatUploadZone';
 import type { InlineAiAction, InlineActionBroadcastEvent } from '../InlineAiToolbar/inlineAiToolbar.types';
-import { useSseStream, parseSseEvent } from '../../hooks/useSseStream';
+import { useSseStream, parseSseEvent, readSseStream } from '../../hooks/useSseStream';
 import { useChatSession } from './hooks/useChatSession';
 import { useChatPlaybooks } from './hooks/useChatPlaybooks';
 import { useSelectionListener } from './hooks/useSelectionListener';
@@ -60,7 +60,12 @@ import { useChatFileAttachment } from './hooks/useChatFileAttachment';
 import type { ISprkChatInputHandle } from './types';
 import { Toaster, useToastController, useId, Toast, ToastTitle, ToastBody } from '@fluentui/react-components';
 import { ActionConfirmationDialog } from './ActionConfirmationDialog';
-import { openCodePageDialog, navigateToTarget, dispatchConfirmedAction } from './hooks/useActionHandlers';
+import {
+  openCodePageDialog,
+  navigateToTarget,
+  dispatchConfirmedAction,
+  rejectPendingAction,
+} from './hooks/useActionHandlers';
 import type { IPendingAction, IChatSseEventData } from './types';
 
 // ---------------------------------------------------------------------------
@@ -95,28 +100,29 @@ const INLINE_ACTION_CHANNEL = 'sprk-inline-action';
 const DOCUMENT_INSERT_CHANNEL = 'sprk-document-insert';
 
 // ---------------------------------------------------------------------------
-// Auth helpers (Auth v2)
+// SSE HTTP-error helper (task 045 / FR-P3-06)
 // ---------------------------------------------------------------------------
 
 /**
- * Extract the JWT `tid` (tenant ID) claim from a Bearer token, used to attach
- * the `X-Tenant-Id` header on SSE/XHR code paths that bypass `authenticatedFetch`
- * (which would set this header internally).
+ * HTTP-status-carrying error for the `readSseStream` `mapHttpError` seam.
+ * The plan-approve stream needs per-status handling (409 already-approved,
+ * 404 expired, generic non-OK) AFTER the canonical primitive throws — this
+ * class carries the status + body text so the catch block can preserve the
+ * exact pre-consolidation user-facing messages.
  *
- * For JSON API calls, prefer `authenticatedFetch` — this helper is only used
- * for SSE streams (plan-approve, editor-refine) where we manage the fetch
- * directly to consume the ReadableStream body.
- *
- * Returns `null` on any parse failure; the caller silently omits the header.
+ * (The former `extractTidFromToken` helper was deleted in task 045: both SSE
+ * code paths now delegate token attachment + X-Tenant-Id derivation to the
+ * canonical `readSseStream` in hooks/useSseStream.ts — NFR-08.)
  */
-function extractTidFromToken(token: string): string | null {
-  try {
-    const parts = token.split('.');
-    if (parts.length !== 3) return null;
-    const payload = JSON.parse(atob(parts[1])) as { tid?: string };
-    return payload.tid ?? null;
-  } catch {
-    return null;
+class SseHttpError extends Error {
+  public readonly status: number;
+  public readonly bodyText: string;
+
+  constructor(status: number, bodyText: string) {
+    super(`HTTP ${status}: ${bodyText}`);
+    this.name = 'SseHttpError';
+    this.status = status;
+    this.bodyText = bodyText;
   }
 }
 
@@ -316,8 +322,19 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   authenticatedFetch,
   getAccessToken,
   onSessionCreated,
+  onSessionStale,
   onPlaybookChange,
   className,
+  // ai-architecture-redesign-r1 G-P1 round-2 (2026-07-06) — host content slot
+  // rendered above the input zone (e.g. the Click-path next-step chip strip).
+  aboveInputSlot,
+  // ai-architecture-redesign-r1 G-P2 round-1 finding 1 (2026-07-06) — host content
+  // slot rendered at the END of the transcript, beneath the last assistant message
+  // (the consumer chips moved here from aboveInputSlot).
+  transcriptFooterSlot,
+  // G-P2 round-1 finding 2 (2026-07-06) — Insert affordance is opt-in per host;
+  // only hosts with an insert target (AnalysisWorkspace editor) enable it.
+  enableInsertToEditor = false,
   documents = [],
   playbooks = [],
   predefinedPrompts = [],
@@ -349,6 +366,8 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   onOpenLibraryModal,
   // R6 Pillar 6c / task 095 — trace bridge: context_event SSE forwarding to host.
   onContextEvent: onContextEventProp,
+  // FR-P2-03 task 032 — capture_mode: modal wizard escape forwarding to host.
+  onElicitationModal: onElicitationModalProp,
 }) => {
   const styles = useStyles();
   const messageListRef = React.useRef<HTMLDivElement>(null);
@@ -399,6 +418,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
     isLoading: isSessionLoading,
     error: sessionError,
     createSession,
+    resumeSession,
     loadHistory,
     switchContext,
     addMessage,
@@ -438,6 +458,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
     setOnPaneEvent,
     setOnPlaybookOptions,
     setOnContextEvent,
+    setOnElicitationModal,
   } = sseStream;
 
   // Track current streaming state
@@ -715,7 +736,11 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
 
   /**
    * Confirm the pending action (user clicked Confirm in ActionConfirmationDialog).
-   * Dispatches the action to the BFF and shows success/error toast.
+   * Dispatches the action to the BFF; the confirmed result renders as an assistant
+   * message IN THE TRANSCRIPT (FR-P3-03 / task 042 — the G-P2 UAT finding-6 lesson:
+   * a transient toast reads as "nothing happened"; the completion message must live
+   * where the conversation lives). The server executed the suspended invocation and
+   * ledger-wrote the outcome BEFORE this response (ADR-040 render-follows-store).
    */
   const handleActionConfirm = React.useCallback(
     async (action: IPendingAction) => {
@@ -724,53 +749,96 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
         const result = await dispatchConfirmedAction(action, apiBaseUrl, authenticatedFetch);
 
         if (result.success) {
-          dispatchToast(
-            React.createElement(
-              Toast,
-              null,
-              React.createElement(ToastTitle, null, 'Action Completed'),
-              React.createElement(ToastBody, null, result.message)
-            ),
-            { intent: 'success', timeout: 5000 }
-          );
+          // G-P3 UAT round-4 R4-3 (2026-07-07): confirmed executions carry a
+          // server-composed MDA deep link to the created record — render it as a
+          // clickable markdown link (the transcript renderer opens links in a new
+          // tab). The server persists the matching durable copy with the same link.
+          const recordLink = result.recordUrl ? ` [Open record](${result.recordUrl})` : '';
+          addMessage({
+            role: 'Assistant',
+            content: `✅ ${result.message}${recordLink}`,
+            timestamp: new Date().toISOString(),
+          });
+        } else if (result.errorCode === 'gate.no-binding-target') {
+          // G-P2 UAT round-1 finding 6 (2026-07-06), narrowed by FR-P3-03 (task 042):
+          // typed-handler confirms now EXECUTE server-side; this branch remains only
+          // for invocations with no resolvable execution target (tool row not
+          // chat-available / handler missing / compound AI off) — the server records
+          // the approval and closes the gate `confirmed-unexecutable`. Render an
+          // HONEST assistant message in the transcript. No fabricated success.
+          addMessage({
+            role: 'Assistant',
+            content:
+              `Got it — "${action.actionName}" is recorded and approved, but this ` +
+              'action cannot be executed from chat in this environment. Nothing was ' +
+              'created or modified.',
+            timestamp: new Date().toISOString(),
+          });
         } else {
-          dispatchToast(
-            React.createElement(
-              Toast,
-              null,
-              React.createElement(ToastTitle, null, 'Action Failed'),
-              React.createElement(ToastBody, null, result.message)
-            ),
-            { intent: 'error', timeout: 8000 }
-          );
+          // G-P3 UAT round-2 R2-A (2026-07-07): a failed confirm previously rendered
+          // ONLY a transient error toast — the operator saw "nothing happened" while
+          // the server had returned a 502 with the real failure reason (three
+          // dataverse.create_record confirms failed silently this way). Apply the same
+          // G-P2 finding-6 lesson as the success branch: the outcome must live where
+          // the conversation lives. The server persists the matching transcript
+          // message for the next turn's model; this local message covers the live view.
+          addMessage({
+            role: 'Assistant',
+            content: `❌ ${result.message} Nothing was created or modified by this confirmation.`,
+            timestamp: new Date().toISOString(),
+          });
         }
       } finally {
         setIsConfirmingAction(false);
         setPendingAction(null);
       }
     },
-    [apiBaseUrl, authenticatedFetch, dispatchToast]
+    [apiBaseUrl, authenticatedFetch, addMessage]
   );
 
   /**
    * Cancel the pending action (user clicked Cancel in ActionConfirmationDialog).
-   * Clears the dialog without executing.
+   * Rejects the gate server-side (FR-P2-03 / task 032: the `rejected` Gate marker
+   * lands in the session ledger — ADR-040 append-only correlation) and clears the
+   * dialog. Rejection failures are logged, never blocking the dialog close.
    */
   const handleActionCancel = React.useCallback(() => {
+    const action = pendingAction;
     setPendingAction(null);
-  }, []);
+    if (!action) return;
 
-  // Initialize session on mount
+    rejectPendingAction(action, apiBaseUrl, authenticatedFetch)
+      .then(result => {
+        if (!result.success) {
+          console.warn('[SprkChat] gate reject failed:', result.message);
+        }
+      })
+      .catch((err: unknown) => {
+        console.warn('[SprkChat] gate reject failed:', err);
+      });
+  }, [pendingAction, apiBaseUrl, authenticatedFetch]);
+
+  // Initialize session on mount.
+  //
+  // R7 Wave 12.3 Phase 12.3a UAT fix (2026-07-03) — this effect PREVIOUSLY called
+  // `createSession()` in BOTH branches, so a host-provided `initialSessionId` was
+  // ignored and every mount created a fresh server session. That caused a
+  // desynchronization with sibling widgets (uploads, playbook picker) that read the
+  // host's persisted `chatSessionId`: files uploaded to session A were invisible to
+  // the message send that hit newly-created session B.
+  //
+  // New behavior:
+  //   1. If `initialSessionId` is provided, RESUME it (seed local state, no POST).
+  //      Then `loadHistory()` — if the server returns 404, the session is stale
+  //      (Redis TTL expired, cleaned up, etc.), so we call `onSessionStale` so the
+  //      host can clear its persisted id, and then create fresh.
+  //   2. If `initialSessionId` is null/undefined, create a new session (same as before).
   React.useEffect(() => {
     const initSession = async () => {
       if (initialSessionId) {
-        // Resume existing session
-        const newSession = await createSession(documentId, playbookId, hostContext);
-        if (newSession) {
-          // loadHistory needs the session to be set first - handled by useChatSession
-        }
+        resumeSession(initialSessionId);
+        // Note: history load runs from the effect below once `session` is set.
       } else {
-        // Create new session
         const newSession = await createSession(documentId, playbookId, hostContext);
         if (newSession && onSessionCreated) {
           onSessionCreated(newSession);
@@ -782,11 +850,33 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, []);
 
-  // Load history when session is available
+  // Load history + stale-session fallback for the resumed-session path.
+  //
+  // Fires once `session` becomes non-null AND `initialSessionId` was provided (i.e.,
+  // we resumed rather than created). If the server returns 404 for the history endpoint,
+  // the resumed session id is stale — notify the host (`onSessionStale`) so it can clear
+  // its persisted id, then create a fresh session and emit `onSessionCreated` so parallel
+  // widgets pick up the new id.
   React.useEffect(() => {
-    if (session && initialSessionId) {
-      loadHistory();
-    }
+    if (!session || !initialSessionId) return;
+    if (session.sessionId !== initialSessionId) return; // avoid firing again after a fresh create replaced the resumed session
+
+    let cancelled = false;
+    (async () => {
+      const result = await loadHistory();
+      if (cancelled) return;
+      if (result.staleSession) {
+        console.warn('[SprkChat] resumed session', initialSessionId, 'is stale on server — creating fresh');
+        if (onSessionStale) onSessionStale(initialSessionId);
+        const fresh = await createSession(documentId, playbookId, hostContext);
+        if (!cancelled && fresh && onSessionCreated) {
+          onSessionCreated(fresh);
+        }
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [session?.sessionId]);
 
@@ -954,7 +1044,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
   //
   // Forwards output_pane / source_pane / source_highlight events from the BFF
   // stream to the onPaneEventProp callback provided by ChatPanel.tsx.
-  // ChatPanel receives it from StandaloneAiContext so OutputPanel and SourcePanel
+  // ChatPanel receives it from the host AI session context so OutputPanel and SourcePanel
   // can subscribe and render the correct widget type from the SSE payload.
   //
   // Uses the same synchronous callback ref pattern as the document stream handler
@@ -1008,6 +1098,32 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
     };
   }, [onPlaybookOptionsProp, setOnPlaybookOptions]);
 
+  // ── FR-P2-03 task 032: register elicitation_modal callback ────────────────
+  //
+  // Forwards the SSE `elicitation_modal` payload (capture_mode: modal wizard
+  // escape) to the host. The host opens its wizard for the missing declared
+  // fields and completes via dispatchConsumer(bindingId, { slots }) — the
+  // server resolves the pending elicitation gate at the dispatch seam.
+  // Synchronous callback-ref pattern — mirrors setOnPlaybookOptions.
+  React.useEffect(() => {
+    if (!onElicitationModalProp) {
+      setOnElicitationModal(null);
+      return;
+    }
+
+    setOnElicitationModal(payload => {
+      try {
+        onElicitationModalProp(payload);
+      } catch (err) {
+        console.error('[SprkChat] Failed to forward elicitation_modal SSE event:', err);
+      }
+    });
+
+    return () => {
+      setOnElicitationModal(null);
+    };
+  }, [onElicitationModalProp, setOnElicitationModal]);
+
   // R6 Pillar 6c / task 095 — wire `onContextEvent` prop into the SSE pipeline.
   // Synchronous callback-ref pattern — mirrors the setOnPlaybookOptions useEffect
   // above. The host (typically ConversationPane) forwards each context_event
@@ -1035,12 +1151,16 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
     };
   }, [onContextEventProp, setOnContextEvent]);
 
-  // Auto-scroll to bottom on new messages
+  // Auto-scroll to bottom on new messages.
+  // transcriptFooterSlot is a dependency (G-P2 finding 1): consumer chips arrive
+  // AFTER the assistant message finalizes (chips SSE event → host state change), so
+  // the scroll must re-anchor when the slot's node changes for the chips to land
+  // visible. Hosts memoize the slot node so unrelated re-renders don't retrigger.
   React.useEffect(() => {
     if (messageListRef.current) {
       messageListRef.current.scrollTop = messageListRef.current.scrollHeight;
     }
-  }, [messages, streamedContent]);
+  }, [messages, streamedContent, transcriptFooterSlot]);
 
   // R6 task 097b / TIER-C — fire onMessagesChange whenever the messages array
   // changes so hosts (ConversationPane / future "summarize conversation"
@@ -1314,125 +1434,55 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
       addMessage(executionMessage);
 
       const runApprovalStream = async () => {
+        let accumulated = '';
         try {
-          // Auth v2 (D-AUTH-7): fresh token per stream open. We use raw fetch (not
-          // authenticatedFetch) because we need the ReadableStream body for SSE;
-          // attach the Bearer + X-Tenant-Id manually after re-acquiring the token.
-          const token = await getAccessToken();
-          const tenantId = extractTidFromToken(token);
-          const response = await fetch(approveUrl, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${token}`,
-              ...(tenantId ? { 'X-Tenant-Id': tenantId } : {}),
-            },
-            body: JSON.stringify({ planId: planIdToApprove }),
+          // task 045 (FR-P3-06, NFR-08): the canonical readSseStream owns the
+          // fetch + reader + buffer machinery (fresh token per open, X-Tenant-Id
+          // derivation, remainder-buffer delivery). Per-event handling preserved
+          // verbatim; HTTP-status branches preserved via SseHttpError below.
+          await readSseStream({
+            url: approveUrl,
+            body: { planId: planIdToApprove },
+            getAccessToken,
             signal: controller.signal,
-          });
-
-          if (response.status === 409) {
-            // Double-click or already approved — update message to reflect this
-            updateLastMessage('This plan was already approved or has expired. Please send a new message.');
-            return;
-          }
-
-          if (response.status === 404) {
-            updateLastMessage('Plan not found. It may have expired (30-minute limit). Please resend your request.');
-            return;
-          }
-
-          if (!response.ok) {
-            const errorText = await response.text();
-            updateLastMessage(`Plan approval failed (${response.status}): ${errorText}`);
-            return;
-          }
-
-          if (!response.body) {
-            updateLastMessage('Plan approval response body is empty.');
-            return;
-          }
-
-          const reader = response.body.getReader();
-          const decoder = new TextDecoder();
-          let buffer = '';
-          let accumulated = '';
-
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-
-            buffer += decoder.decode(value, { stream: true });
-            const parts = buffer.split('\n\n');
-            buffer = parts.pop() || '';
-
-            for (const part of parts) {
-              const lines = part.split('\n');
-              for (const line of lines) {
-                const event = parseSseEvent(line);
-                if (!event) continue;
-
-                if (event.type === 'plan_step_start' && event.data?.stepId) {
-                  // Update the plan preview card to show this step as running.
-                  // Uses function updater to avoid stale closure on `messages`.
-                  const stepId = event.data.stepId;
-                  updateMessageMetadataAt(messageIndex, current => ({
-                    ...current,
-                    responseType: 'plan_preview',
-                    plan:
-                      current?.plan?.map(s => (s.id === stepId ? { ...s, status: 'running' as const } : s)) ??
-                      current?.plan,
-                  }));
-                } else if (event.type === 'token' && event.content) {
-                  accumulated += event.content;
-                  updateLastMessage(accumulated);
-                } else if (event.type === 'plan_step_complete' && event.data?.stepId) {
-                  const stepId = event.data.stepId;
-                  const stepStatus = event.data.status === 'failed' ? 'failed' : 'completed';
-                  const stepResult = event.data.result ?? undefined;
-                  // Update the plan step status on the plan preview card.
-                  // Uses function updater to avoid stale closure on `messages`.
-                  updateMessageMetadataAt(messageIndex, current => ({
-                    ...current,
-                    responseType: 'plan_preview',
-                    plan:
-                      current?.plan?.map(s =>
-                        s.id === stepId ? { ...s, status: stepStatus as 'completed' | 'failed', result: stepResult } : s
-                      ) ?? current?.plan,
-                  }));
-                } else if (event.type === 'done') {
-                  if (accumulated.length === 0) {
-                    updateLastMessage('Plan executed successfully.');
-                  }
-                  console.debug('[SprkChat] Plan approval stream complete — planId:', planIdToApprove);
-                } else if (event.type === 'error') {
-                  // Mark all non-completed steps as 'failed' (ErrorCircle icon)
-                  updateMessageMetadataAt(messageIndex, current => ({
-                    ...current,
-                    responseType: 'plan_preview',
-                    plan:
-                      current?.plan?.map(s => (s.status === 'completed' ? s : { ...s, status: 'failed' as const })) ??
-                      current?.plan,
-                  }));
-                  updateLastMessage(`Plan execution error: ${event.content ?? 'Unknown error'}`);
-                }
-              }
-            }
-          }
-
-          // Process any remaining buffer
-          if (buffer.trim()) {
-            const lines = buffer.split('\n');
-            for (const line of lines) {
+            mapHttpError: async response => new SseHttpError(response.status, await response.text().catch(() => '')),
+            onLine: (line: string) => {
               const event = parseSseEvent(line);
-              if (!event) continue;
-              if (event.type === 'token' && event.content) {
+              if (!event) return;
+
+              if (event.type === 'plan_step_start' && event.data?.stepId) {
+                // Update the plan preview card to show this step as running.
+                // Uses function updater to avoid stale closure on `messages`.
+                const stepId = event.data.stepId;
+                updateMessageMetadataAt(messageIndex, current => ({
+                  ...current,
+                  responseType: 'plan_preview',
+                  plan:
+                    current?.plan?.map(s => (s.id === stepId ? { ...s, status: 'running' as const } : s)) ??
+                    current?.plan,
+                }));
+              } else if (event.type === 'token' && event.content) {
                 accumulated += event.content;
                 updateLastMessage(accumulated);
+              } else if (event.type === 'plan_step_complete' && event.data?.stepId) {
+                const stepId = event.data.stepId;
+                const stepStatus = event.data.status === 'failed' ? 'failed' : 'completed';
+                const stepResult = event.data.result ?? undefined;
+                // Update the plan step status on the plan preview card.
+                // Uses function updater to avoid stale closure on `messages`.
+                updateMessageMetadataAt(messageIndex, current => ({
+                  ...current,
+                  responseType: 'plan_preview',
+                  plan:
+                    current?.plan?.map(s =>
+                      s.id === stepId ? { ...s, status: stepStatus as 'completed' | 'failed', result: stepResult } : s
+                    ) ?? current?.plan,
+                }));
               } else if (event.type === 'done') {
                 if (accumulated.length === 0) {
                   updateLastMessage('Plan executed successfully.');
                 }
+                console.debug('[SprkChat] Plan approval stream complete — planId:', planIdToApprove);
               } else if (event.type === 'error') {
                 // Mark all non-completed steps as 'failed' (ErrorCircle icon)
                 updateMessageMetadataAt(messageIndex, current => ({
@@ -1444,11 +1494,31 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
                 }));
                 updateLastMessage(`Plan execution error: ${event.content ?? 'Unknown error'}`);
               }
-            }
-          }
+            },
+          });
         } catch (err: unknown) {
           if (err instanceof DOMException && err.name === 'AbortError') {
             // Cancelled (component unmount or new plan approval started) — not an error
+            return;
+          }
+          if (err instanceof SseHttpError) {
+            // HTTP-status branches (pre-consolidation behavior: message only,
+            // no step-failure marking).
+            if (err.status === 409) {
+              // Double-click or already approved — update message to reflect this
+              updateLastMessage('This plan was already approved or has expired. Please send a new message.');
+              return;
+            }
+            if (err.status === 404) {
+              updateLastMessage('Plan not found. It may have expired (30-minute limit). Please resend your request.');
+              return;
+            }
+            updateLastMessage(`Plan approval failed (${err.status}): ${err.bodyText}`);
+            return;
+          }
+          if (err instanceof Error && err.message === 'Response body is empty') {
+            // readSseStream's empty-body throw — pre-consolidation early return.
+            updateLastMessage('Plan approval response body is empty.');
             return;
           }
           const errorMsg = err instanceof Error ? err.message : 'Unknown plan approval error';
@@ -1897,92 +1967,37 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
             operationType: 'diff',
           });
 
-          // Auth v2 (D-AUTH-7): fresh token per stream open. Raw fetch is required
-          // here for the ReadableStream body (SSE); authenticatedFetch cannot be used.
-          const token = await getAccessToken();
-          const tenantId = extractTidFromToken(token);
+          // task 045 (FR-P3-06, NFR-08): the canonical readSseStream owns the
+          // fetch + reader + buffer machinery (Auth v2 fresh token per open +
+          // X-Tenant-Id derivation). Per-event handling preserved verbatim.
           const baseUrl = apiBaseUrl.replace(/\/+$/, '');
           const refineUrl = `${baseUrl}/api/ai/chat/sessions/${session.sessionId}/refine`;
 
-          const response = await fetch(refineUrl, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${token}`,
-              ...(tenantId ? { 'X-Tenant-Id': tenantId } : {}),
-            },
-            body: JSON.stringify({
+          await readSseStream({
+            url: refineUrl,
+            body: {
               selectedText,
               instruction,
               // TRACKED: GitHub #234 - PH-112-A: surroundingContext not yet available
               surroundingContext: null,
-            }),
+            },
+            getAccessToken,
             signal: controller.signal,
-          });
-
-          if (!response.ok) {
-            const errorText = await response.text();
-            throw new Error(`Refine request failed (${response.status}): ${errorText}`);
-          }
-
-          if (!response.body) {
-            throw new Error('Response body is empty');
-          }
-
-          const reader = response.body.getReader();
-          const decoder = new TextDecoder();
-          let buffer = '';
-
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) break;
-
-            buffer += decoder.decode(value, { stream: true });
-
-            // Parse SSE events separated by double newlines
-            const parts = buffer.split('\n\n');
-            buffer = parts.pop() || '';
-
-            for (const part of parts) {
-              const lines = part.split('\n');
-              for (const line of lines) {
-                const event = parseSseEvent(line);
-                if (!event) continue;
-
-                if (event.type === 'token' && event.content) {
-                  // Route token through bridge for Analysis Workspace consumption
-                  bridge.emit('document_stream_token', {
-                    operationId,
-                    token: event.content,
-                    index: tokenIndex++,
-                  });
-                } else if (event.type === 'done') {
-                  // Stream completed successfully
-                  bridge.emit('document_stream_end', {
-                    operationId,
-                    cancelled: false,
-                    totalTokens: tokenIndex,
-                  });
-                } else if (event.type === 'error') {
-                  throw new Error(event.content || 'Refinement stream error');
-                }
-              }
-            }
-          }
-
-          // Process any remaining buffer
-          if (buffer.trim()) {
-            const lines = buffer.split('\n');
-            for (const line of lines) {
+            mapHttpError: async response =>
+              new Error(`Refine request failed (${response.status}): ${await response.text()}`),
+            onLine: (line: string) => {
               const event = parseSseEvent(line);
-              if (!event) continue;
+              if (!event) return;
+
               if (event.type === 'token' && event.content) {
+                // Route token through bridge for Analysis Workspace consumption
                 bridge.emit('document_stream_token', {
                   operationId,
                   token: event.content,
                   index: tokenIndex++,
                 });
               } else if (event.type === 'done') {
+                // Stream completed successfully
                 bridge.emit('document_stream_end', {
                   operationId,
                   cancelled: false,
@@ -1991,8 +2006,8 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
               } else if (event.type === 'error') {
                 throw new Error(event.content || 'Refinement stream error');
               }
-            }
-          }
+            },
+          });
 
           // Update the chat status message
           if (tokenIndex === 0) {
@@ -2204,7 +2219,7 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
     [switchContext, documentId, hostContext, onPlaybookChange]
   );
 
-  // ── FR-08 (task 025): SprkChatExportWord handlers removed ────────────────
+  // ── FR-08 (task 025): Word-export handlers removed ───────────────────────
   // The "Open in Word" affordance was removed from the input toolbar per FR-08.
   // No other code paths consumed handleExportWordError / handleExportWordSuccess.
 
@@ -2335,12 +2350,17 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
             message: effectiveMessage,
             isStreaming: isStreaming && isLastAssistant,
             citations: messageCitations,
-            // Phase 2D: wire Insert button on all completed assistant messages.
+            // Phase 2D: wire Insert button on completed assistant messages.
             // SprkChat dispatches document_insert BroadcastChannel event.
             // Only pass onInsert for assistant messages to prevent button showing on user messages.
-            ...(msg.role === 'Assistant' && {
-              onInsert: handleInsert,
-            }),
+            // G-P2 UAT round-1 finding 2 (2026-07-06): prop-gated — only hosts that
+            // declare an insert target (enableInsertToEditor, e.g. AnalysisWorkspace's
+            // Lexical editor) get the affordance; hosts without one (SpaarkeAi
+            // conversation pane) must not render a button that does nothing.
+            ...(enableInsertToEditor &&
+              msg.role === 'Assistant' && {
+                onInsert: handleInsert,
+              }),
             ...(isPlanPreview && {
               onProceed: () => handlePlanProceed(index),
               onCancel: () => handlePlanCancel(index),
@@ -2369,6 +2389,14 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
 
         {/* Typing indicator — visible between typing_start and first token arrival */}
         {isTyping && !streamedContent && <SprkChatTypingIndicator />}
+
+        {/* Host slot — content rendered at the END of the transcript, directly
+            beneath the last assistant message and INSIDE the scrollable message
+            list (e.g. the Click-path next-step consumer chips — G-P2 UAT round-1
+            finding 1, 2026-07-06). Pure layout seam: no styling, no behavior.
+            The auto-scroll effect below keys on this node so fresh chips land
+            visible at the transcript's bottom edge. */}
+        {transcriptFooterSlot}
 
         {/* Follow-up suggestions shown after the latest assistant response */}
         {suggestions.length > 0 && (
@@ -2432,6 +2460,11 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
         </div>
       )}
 
+      {/* Host slot — content the embedding host renders directly above the
+          input zone (e.g. the Click-path next-step consumer chips, G-P1
+          round-2 2026-07-06). Pure layout seam: no styling, no behavior. */}
+      {aboveInputSlot}
+
       {/*
         FR-08 + FR-09 (task 025): Input zone restructure.
 
@@ -2444,9 +2477,10 @@ export const SprkChat: React.FC<ISprkChatProps> = ({
              button hidden via `hideSlashButton`; the strip-mounted button
              above triggers the slash menu via the imperative handle).
 
-        The previous "Open in Word" SprkChatExportWord button has been removed
-        entirely (FR-08). Consumer survey 2026-05-20: no external consumer of
-        SprkChatExportWord found; barrel export removed from index.ts.
+        The previous "Open in Word" export button has been removed entirely
+        (FR-08). Consumer survey 2026-05-20 found no external consumer; the
+        component file itself was deleted in Track-B batch 3
+        (ai-architecture-redesign-r1).
 
         FR-06: Input remains editable on cold load (handleSend guards `!session`).
       */}

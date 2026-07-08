@@ -73,7 +73,7 @@ function Root() {
    * Code Page is the modal wrapper (target:2, 85%×85%). Once opened in browse
    * mode, the Library Code Page lists every playbook + consumer mapping
    * (PlaybookCardGrid consumer-chip extension from task 094) and launches
-   * through Path A.5 (`IConsumerRoutingService` → `IInvokePlaybookAi`) per
+   * through Path A.5 (`IConsumerRoutingService` → the BFF playbook-invocation boundary) per
    * ADR-013 — no new BFF surface, no direct AnalysisOrchestrationService
    * bypass.
    *

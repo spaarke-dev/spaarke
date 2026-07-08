@@ -48,6 +48,7 @@ import { sendCommunication } from '../../services/communicationApi';
 import type { ICommunicationAssociation, SendCommunicationOptions } from '../../services/communicationApi';
 import type { AuthenticatedFetchFn } from '../../services/EntityCreationService';
 import type { IDataService } from '../../types/serviceInterfaces';
+import { readSseStream, parseSseEvent } from '../../hooks/useSseStream';
 
 // ---------------------------------------------------------------------------
 // Public types
@@ -161,10 +162,11 @@ const _SUMMARY_PREVIEW_CHAR_CAP = 600;
  * retired (zero production callers expected post-migration).
  *
  * The constant lives at module scope (not in shared config) because:
- *   1. The wizard is a context-agnostic shared library component; no
- *      backend `WorkspaceOptions:SummarizePlaybookId` value is plumbed
- *      through to consumers (PCF and code-page hosts inject only auth +
- *      bffBaseUrl, not playbook configuration).
+ *   1. The wizard is a context-agnostic shared library component; the backend
+ *      resolves its playbook via the `sprk_playbookconsumer` Binding row for
+ *      consumerType 'summarize-file' (FR-P3-01 — no config fallback), and no
+ *      playbook configuration is plumbed through to consumers (PCF and
+ *      code-page hosts inject only auth + bffBaseUrl).
  *   2. The playbook ID is immutable per Q1 (2026-06-22) — the
  *      `sprk_playbookid` column mirrors the row's primary key and is portable
  *      across environments by convention.
@@ -673,68 +675,64 @@ export const DocumentEmailWizard: React.FC<IDocumentEmailWizardProps> = ({
       const playbook = await playbookRes.json();
       const playbookId = playbook.playbookId || playbook.id;
 
-      // 2) Execute analysis with ALL documents in one call
+      // 2) + 3) Execute analysis with ALL documents in one call and consume the
+      // SSE stream. task 045 (FR-P3-06, NFR-08): the canonical readSseStream +
+      // parseSseEvent own the fetch/reader/buffer/`data:`-parse machinery; the
+      // wizard's authenticatedFetch is supplied as fetchImpl (it owns auth per
+      // ADR-028). Per-chunk handling preserved verbatim.
       const execUrl = `${bffBaseUrl ?? ''}/api/ai/analysis/execute`;
-      const execRes = await authenticatedFetch(execUrl, {
-        method: 'POST',
-        headers: {
-          'Content-Type': 'application/json',
-          Accept: 'text/event-stream',
-        },
-        body: JSON.stringify({
+      let accumulated = '';
+      // Set once the terminal done chunk is seen — subsequent lines are skipped
+      // (pre-consolidation behavior returned out of the read loop).
+      let finished = false;
+      await readSseStream({
+        url: execUrl,
+        body: {
           documentIds: kept.map(d => d.documentId),
           playbookId,
           actionId: null,
           additionalContext: null,
-        }),
+        },
+        fetchImpl: (url, init) =>
+          authenticatedFetch(url, {
+            ...init,
+            headers: {
+              ...(init.headers as Record<string, string>),
+              Accept: 'text/event-stream',
+            },
+          }),
         signal: abort.signal,
-      });
-      if (!execRes.ok) {
-        const errText = await execRes.text().catch(() => '');
-        throw new Error(errText || `Analysis failed (HTTP ${execRes.status})`);
-      }
-      if (!execRes.body) {
-        throw new Error('Analysis response body not readable');
-      }
-
-      // 3) Read SSE stream and accumulate the summary text
-      const reader = execRes.body.getReader();
-      const decoder = new TextDecoder();
-      let buffer = '';
-      let accumulated = '';
-      while (true) {
-        const { done, value } = await reader.read();
-        if (done) break;
-        buffer += decoder.decode(value, { stream: true });
-        const events = buffer.split('\n\n');
-        buffer = events.pop() ?? '';
-        for (const event of events) {
-          for (const line of event.split('\n')) {
-            const trimmed = line.trim();
-            if (!trimmed.startsWith('data:')) continue;
-            const json = trimmed.slice(5).trim();
-            if (!json || json === '[DONE]') continue;
-            let chunk: { type?: string; content?: string; error?: string; done?: boolean } = {};
-            try {
-              chunk = JSON.parse(json);
-            } catch {
-              continue;
-            }
-            if (chunk.type === 'error' || chunk.error) {
-              throw new Error(chunk.error ?? 'Analysis returned an error');
-            }
-            if (chunk.type === 'chunk' || chunk.content) {
-              accumulated += chunk.content ?? '';
-              setCombinedSummary(accumulated);
-            }
-            if (chunk.type === 'done' || chunk.done) {
-              setSummaryStatus('done');
-              return;
-            }
+        mapHttpError: async res => {
+          const errText = await res.text().catch(() => '');
+          return new Error(errText || `Analysis failed (HTTP ${res.status})`);
+        },
+        onLine: (line: string) => {
+          if (finished) return;
+          // Server chunks always carry a string `type` (AnalysisStreamChunk);
+          // the `data: [DONE]` terminator parses to null and is skipped.
+          const chunk = parseSseEvent(line) as unknown as {
+            type?: string;
+            content?: string;
+            error?: string;
+            done?: boolean;
+          } | null;
+          if (!chunk) return;
+          if (chunk.type === 'error' || chunk.error) {
+            throw new Error(chunk.error ?? 'Analysis returned an error');
           }
-        }
+          if (chunk.type === 'chunk' || chunk.content) {
+            accumulated += chunk.content ?? '';
+            setCombinedSummary(accumulated);
+          }
+          if (chunk.type === 'done' || chunk.done) {
+            finished = true;
+            setSummaryStatus('done');
+          }
+        },
+      });
+      if (!finished) {
+        setSummaryStatus('done');
       }
-      setSummaryStatus('done');
     } catch (err) {
       if (err instanceof Error && err.name === 'AbortError') return;
       const msg = err instanceof Error ? err.message : 'Failed to generate summary';

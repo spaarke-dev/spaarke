@@ -1,22 +1,19 @@
 using FluentAssertions;
 using Microsoft.Extensions.Logging.Abstractions;
 using Moq;
-using Sprk.Bff.Api.Services.Ai.Chat.Tools;
 using Sprk.Bff.Api.Services.Ai.Safety.Citations;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Ai.Safety;
 
 /// <summary>
-/// Unit tests for <see cref="VerifyCitationsTool"/> and <see cref="CitationSafetyCheck"/>.
+/// Unit tests for <see cref="CitationSafetyCheck"/> (the unconditional post-LLM auto-check).
+///
+/// NOTE (FR-P2-07, task 036): the explicit-invocation legacy chat-tool tests that used to
+/// live in this file were deleted with the legacy class; the explicit LLM-invokable path is
+/// covered by <c>VerifyCitationsHandlerTests</c> (typed handler, SYS-Citation Verification row).
 ///
 /// Test matrix:
-///   VerifyCitationsTool (explicit invocation mode):
-///     1. Returns JSON with verified/unverified citations when text contains citations
-///     2. Returns "no citations found" message when text contains no citations
-///     3. Delegates to ICitationVerificationService.VerifyAllAsync
-///     4. FormatReport produces correct markdown with verified, unverified, and error sections
-///
 ///   CitationSafetyCheck (auto-check mode):
 ///     5. CheckResponseAsync returns annotation with citations when response contains citations
 ///     6. CheckResponseAsync returns empty annotation when response contains no citations
@@ -96,124 +93,6 @@ public class VerifyCitationsTests
             errorCitation, "InternalIndex", "Connection timeout", 100.0);
 
         return new CitationVerificationReport([verified], [unverified], [error]);
-    }
-
-    // =========================================================================
-    // VerifyCitationsTool tests
-    // =========================================================================
-
-    [Fact]
-    public async Task VerifyCitationsAsync_TextWithCitations_ReturnsJsonWithCitationArray()
-    {
-        // Arrange
-        var serviceMock = BuildServiceMock(BuildReportWithVerifiedCitation());
-        var sut = new VerifyCitationsTool(serviceMock.Object, NullLogger.Instance);
-
-        // Act
-        var result = await sut.VerifyCitationsAsync("See Rasul v. Bush, 542 U.S. 296.", CancellationToken.None);
-
-        // Assert
-        result.Should().NotBeNullOrWhiteSpace();
-        result.Should().Contain("citations");
-        result.Should().Contain("542 U.S. 296");
-        result.Should().Contain("isVerified");
-    }
-
-    [Fact]
-    public async Task VerifyCitationsAsync_TextWithCitations_IsVerifiedTrue_ForVerifiedCitation()
-    {
-        // Arrange
-        var report = BuildReportWithVerifiedCitation();
-        var serviceMock = BuildServiceMock(report);
-        var sut = new VerifyCitationsTool(serviceMock.Object, NullLogger.Instance);
-
-        // Act
-        var json = await sut.VerifyCitationsAsync("542 U.S. 296", CancellationToken.None);
-
-        // Assert: the JSON must include isVerified:true for the verified citation
-        json.Should().Contain("\"isVerified\":true");
-    }
-
-    [Fact]
-    public async Task VerifyCitationsAsync_TextWithNoCitations_ReturnsNoCitationsMessage()
-    {
-        // Arrange
-        var serviceMock = BuildServiceMock(BuildEmptyReport());
-        var sut = new VerifyCitationsTool(serviceMock.Object, NullLogger.Instance);
-
-        // Act
-        var result = await sut.VerifyCitationsAsync("No citations here, just plain text.", CancellationToken.None);
-
-        // Assert
-        result.Should().Contain("No legal citations were found");
-    }
-
-    [Fact]
-    public async Task VerifyCitationsAsync_DelegatesTo_ICitationVerificationService()
-    {
-        // Arrange
-        const string inputText = "See 542 U.S. 296 for details.";
-        var serviceMock = BuildServiceMock(BuildEmptyReport());
-        var sut = new VerifyCitationsTool(serviceMock.Object, NullLogger.Instance);
-
-        // Act
-        _ = await sut.VerifyCitationsAsync(inputText, CancellationToken.None);
-
-        // Assert: VerifyAllAsync was called with the exact input text
-        serviceMock.Verify(
-            s => s.VerifyAllAsync(inputText, It.IsAny<CancellationToken>()),
-            Times.Once);
-    }
-
-    [Fact]
-    public async Task VerifyCitationsAsync_MixedReport_IncludesVerifiedAndUnverifiedEntries()
-    {
-        // Arrange
-        var serviceMock = BuildServiceMock(BuildMixedReport());
-        var sut = new VerifyCitationsTool(serviceMock.Object, NullLogger.Instance);
-
-        // Act
-        var json = await sut.VerifyCitationsAsync("some text", CancellationToken.None);
-
-        // Assert: JSON contains all three citations.
-        // Note: System.Text.Json default JavaScriptEncoder escapes non-ASCII characters such as
-        // U+00A7 (§) to the Unicode escape sequence §. Assert against the escaped form
-        // to match the serializer output.
-        json.Should().Contain("542 U.S. 296");
-        json.Should().Contain("35 U.S.C. \\u00A7 101");
-        json.Should().Contain("US9123456");
-    }
-
-    // =========================================================================
-    // VerifyCitationsTool.FormatReport tests
-    // =========================================================================
-
-    [Fact]
-    public void FormatReport_EmptyReport_ReturnsNoCitationsMessage()
-    {
-        var result = VerifyCitationsTool.FormatReport(BuildEmptyReport());
-
-        result.Should().Contain("No legal citations were found");
-    }
-
-    [Fact]
-    public void FormatReport_VerifiedCitations_IncludesCheckmarkAndSourceUrl()
-    {
-        var result = VerifyCitationsTool.FormatReport(BuildReportWithVerifiedCitation());
-
-        result.Should().Contain("Verified Citations");
-        result.Should().Contain("542 U.S. 296");
-        result.Should().Contain("https://supreme.justia.com");
-    }
-
-    [Fact]
-    public void FormatReport_MixedReport_IncludesAllThreeSections()
-    {
-        var result = VerifyCitationsTool.FormatReport(BuildMixedReport());
-
-        result.Should().Contain("Verified Citations");
-        result.Should().Contain("Unverified Citations");
-        result.Should().Contain("Verification Errors");
     }
 
     // =========================================================================

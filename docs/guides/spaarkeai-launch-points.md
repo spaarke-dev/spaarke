@@ -1,6 +1,6 @@
 # SpaarkeAi Launch Points
 
-> **Last Updated**: 2026-05-16
+> **Last Updated**: 2026-07-07 (known-gap note added to Launch Point 2 — matter form ribbon registration missing, G-P3 UAT)
 > **Status**: Current
 > **Web Resource**: `sprk_spaarkeai`
 
@@ -16,7 +16,7 @@ All launch points use the same query parameter contract. All parameters are opti
 |-----------|------|-------------|
 | `entityLogicalName` | string | Dataverse logical name of the entity (e.g. `sprk_matter`, `contact`) |
 | `entityId` | GUID string | Record GUID. Braces are stripped if present (`{abc-123}` → `abc-123`). |
-| `matterId` | GUID string | Shorthand matter GUID — used by the M365 Copilot handoff action. When present, `StandaloneAiProvider` resolves entity context using this ID as the matter record GUID without requiring `entityLogicalName`. |
+| `matterId` | GUID string | Shorthand matter GUID — used by the M365 Copilot handoff action. When present, the SpaarkeAi shell (`main.tsx` → `ThreePaneShell`; the former `StandaloneAiProvider` was deleted 2026-07 by ai-architecture-redesign-r1) resolves entity context using this ID as the matter record GUID without requiring `entityLogicalName`. |
 
 When no parameters are passed, the AI opens in general (unscoped) mode.
 
@@ -52,9 +52,11 @@ When no parameters are passed, the AI opens in general (unscoped) mode.
 
 ## Launch Point 2: Entity Form Command Bar Button
 
+> ⚠️ **KNOWN GAP (found during G-P3 UAT, 2026-07-07)**: the **matter main form's EntityFormLaunch ribbon button registration is MISSING** — the launch point below is documented and the `sprk_spaarkeai_entityformlaunch` web resource + `EntityFormLaunch.ts` script exist, but the ribbon command is **not registered/wired on the matter form**, so no "Open SpaarkeAi" button appears there. Registration is outstanding, tracked in project `spaarke-ai-architecture-redesign-r1` G-P3 follow-ups. Until it lands, open SpaarkeAi for a matter via the deep-link URL (Launch Point 3) or the workspace command bar (Launch Point 1).
+
 **Trigger**: Command bar on any Dataverse entity form where the button has been added (e.g. Matter form, Contact form, Document form).
 
-**Behaviour**: Opens SpaarkeAi as a **modal dialog** (`target: 2`, 90% × 90%) pre-seeded with the currently open record's `entityLogicalName` and `entityId`. The `StandaloneAiProvider` resolves playbooks, tools, and quick actions scoped to the entity type and record.
+**Behaviour**: Opens SpaarkeAi as a **modal dialog** (`target: 2`, 90% × 90%) pre-seeded with the currently open record's `entityLogicalName` and `entityId`. The SpaarkeAi shell (`ThreePaneShell` + `AiSessionProvider`) resolves playbooks, tools, and quick actions scoped to the entity type and record.
 
 **Ribbon Script**: `sprk_spaarkeai_entityformlaunch` web resource
 **Function**: `Sprk.SpaarkeAi.EntityFormLaunch.openFromEntityForm(primaryControl)`
@@ -141,7 +143,7 @@ const entityId = searchParams.get("entityId") ?? dataParams.get("entityId");
 
 **Trigger**: The Spaarke Declarative Agent in M365 Copilot invokes a handoff action when a user's request requires deep analysis that is better handled in the full SpaarkeAi workspace.
 
-**Behaviour**: The Declarative Agent constructs a deep-link URL using the `matterId` parameter shorthand. Unlike `entityLogicalName` + `entityId`, `matterId` is a purpose-built parameter for the Copilot handoff scenario — it signals to `StandaloneAiProvider` that the session should be scoped to a specific matter without requiring the caller to know Dataverse logical names.
+**Behaviour**: The Declarative Agent constructs a deep-link URL using the `matterId` parameter shorthand. Unlike `entityLogicalName` + `entityId`, `matterId` is a purpose-built parameter for the Copilot handoff scenario — it signals to the SpaarkeAi shell that the session should be scoped to a specific matter without requiring the caller to know Dataverse logical names.
 
 **URL format**:
 
@@ -186,7 +188,7 @@ https://spaarkedev1.crm.dynamics.com/WebResources/sprk_spaarkeai?matterId=3fa85f
 
 **How SpaarkeAi handles matterId**:
 
-When `StandaloneAiProvider` detects a `matterId` parameter (passed from `main.tsx` via the `entityContext` prop), it:
+When the SpaarkeAi shell (`ThreePaneShell`; formerly `StandaloneAiProvider`, deleted 2026-07 by ai-architecture-redesign-r1) detects a `matterId` parameter (passed from `main.tsx` via the `entityContext` prop), it:
 1. Sets `entityContext.entityType = "sprk_matter"`
 2. Sets `entityContext.entityId = matterId`
 3. Requests scoped playbooks and tools from the BFF `/api/ai/chat/context-mappings/standalone` endpoint using the resolved matter context
@@ -210,7 +212,7 @@ entityId          = queryString["entityId"]          ?? dataString["entityId"]
 matterId          = queryString["matterId"]           ?? dataString["matterId"]
 ```
 
-All resolved values are passed as props to the `<App />` component, which forwards them to `StandaloneAiProvider`.
+All resolved values are passed as props to the `<App />` component, which forwards them to `ThreePaneShell` as the entity context.
 
 ---
 
@@ -234,7 +236,7 @@ All resolved values are passed as props to the `<App />` component, which forwar
 | `src/solutions/SpaarkeAi/src/ribbon/EntityFormLaunch.ts` | Entity form ribbon script (invocation only) |
 | `src/solutions/SpaarkeAi/src/ribbon/xrm-globals.d.ts` | Minimal ambient Xrm type declarations |
 | `src/solutions/SpaarkeAi/src/main.tsx` | URL parameter parsing and App bootstrap |
-| `src/client/shared/Spaarke.AI.Context/src/providers/StandaloneAiProvider.tsx` | Entity context resolution from URL params |
+| `src/solutions/SpaarkeAi/src/components/shell/ThreePaneShell.tsx` | Entity context assembly (formerly `StandaloneAiProvider.tsx`, deleted 2026-07 by ai-architecture-redesign-r1) |
 
 ---
 

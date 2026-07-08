@@ -34,24 +34,19 @@ public static class AuthorizationModule
             .AddMicrosoftIdentityWebApi(configuration.GetSection("AzureAd"));
 
         // Named API key authentication schemes (task AUTHV2-045).
-        // Replaces ad-hoc header validation on /api/admin/builder-scopes/import and
-        // /api/ai/rag/enqueue-indexing. Each scheme binds to its own configuration key so
-        // the keys can be rotated independently and blast-radius is isolated per consumer.
+        // Replaces ad-hoc header validation on /api/ai/rag/enqueue-indexing. Each scheme binds
+        // to its own configuration key so keys rotate independently with per-consumer blast radius.
         //
         // Endpoints opt-in via .RequireAuthorization(policyName); the policy below specifies
         // the scheme so the JwtBearer default doesn't have to be unset to use these.
         //
         // Configuration keys (Key Vault references in production):
-        //   - BuilderAdmin:ApiKey  → admin scope import CLI/script access
-        //   - Rag:ApiKey           → RAG bulk indexing webhook access
+        //   - Rag:ApiKey → RAG bulk indexing webhook access
+        //
+        // The BuilderAdminApiKey scheme (BuilderAdmin:ApiKey config) was REMOVED 2026-07-07
+        // (redesign-r1 task 050) together with its sole consumer, the /api/admin/builder-scopes/*
+        // endpoints — an orphaned ambient API-key scheme is attack surface with no caller.
         services.AddAuthentication()
-            .AddScheme<ApiKeyAuthenticationOptions, ApiKeyAuthenticationHandler>(
-                AuthSchemes.BuilderAdminApiKey,
-                options =>
-                {
-                    options.ConfigKey = "BuilderAdmin:ApiKey";
-                    options.IdentityName = "builder-admin-api-key";
-                })
             .AddScheme<ApiKeyAuthenticationOptions, ApiKeyAuthenticationHandler>(
                 AuthSchemes.RagApiKey,
                 options =>
@@ -212,28 +207,11 @@ public static class AuthorizationModule
             // Each policy is bound to a single auth scheme so the matching ApiKey handler runs
             // even when JwtBearer is the default. RequireAuthenticatedUser enforces a 401 when
             // the API key is missing or invalid (instead of silently falling back to JwtBearer).
-            options.AddPolicy(AuthPolicies.BuilderAdminApiKey, p =>
-            {
-                p.AuthenticationSchemes = new[] { AuthSchemes.BuilderAdminApiKey };
-                p.RequireAuthenticatedUser();
-            });
+            // BuilderAdminApiKey + BuilderAdminOrOAuth policies removed 2026-07-07 (redesign-r1
+            // task 050) with the builder-scope admin endpoints.
             options.AddPolicy(AuthPolicies.RagApiKey, p =>
             {
                 p.AuthenticationSchemes = new[] { AuthSchemes.RagApiKey };
-                p.RequireAuthenticatedUser();
-            });
-
-            // Composite policy: BuilderAdmin endpoints accept EITHER OAuth bearer (Azure AD) OR
-            // the BuilderAdmin API key. Preserves prior dual-auth behavior while delegating the
-            // API key validation to the named scheme. Useful for endpoints that need to support
-            // both interactive (Dataverse/PCF) and automation (CLI/script) callers.
-            options.AddPolicy(AuthPolicies.BuilderAdminOrOAuth, p =>
-            {
-                p.AuthenticationSchemes = new[]
-                {
-                    JwtBearerDefaults.AuthenticationScheme,
-                    AuthSchemes.BuilderAdminApiKey,
-                };
                 p.RequireAuthenticatedUser();
             });
 

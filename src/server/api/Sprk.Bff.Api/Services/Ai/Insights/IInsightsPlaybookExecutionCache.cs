@@ -4,7 +4,7 @@ namespace Sprk.Bff.Api.Services.Ai.Insights;
 
 /// <summary>
 /// Cache abstraction for Insights-mode playbook execution results (D-P13).
-/// Implementations wrap <see cref="IPlaybookExecutionEngine"/> invocations with a
+/// Implementations wrap frozen-engine (<see cref="IPlaybookOrchestrationService"/>) invocations with a
 /// distributed cache keyed on <c>(playbookId, subject, parameters, accessibleScopeHash)</c>.
 /// </summary>
 /// <remarks>

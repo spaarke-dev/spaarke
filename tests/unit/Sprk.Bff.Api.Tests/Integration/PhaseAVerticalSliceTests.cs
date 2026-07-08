@@ -30,10 +30,8 @@ namespace Sprk.Bff.Api.Tests.Integration;
 /// <list type="bullet">
 /// <item><c>Pillar1_PersonaScopeResolver_Resolvable</c> — Pillar 1 (persona-as-scope; FR-01/02/03)</item>
 /// <item><c>Pillar2_ToolHandlerRegistry_ContainsR6MigratedHandlers</c> — Pillar 2 (tool registry + 10 Q9 chat-tool migrations + 8 typed Wave 1-2 handlers; FR-06..09, FR-13..20)</item>
-/// <item><c>Pillar3_InvokePlaybookHandler_AndFacade_BothResolvable</c> — Pillar 3 (generic invoke_playbook; FR-21..23)</item>
-/// <item><c>Pillar3_FactoryBoundary_HandlerInjectsFacadeNotAiInternals</c> — Pillar 3 (ADR-013 facade boundary)</item>
-/// <item><c>Pillar4_PlaybookExecutionEngine_ExposesExecuteChatSummarizeAsync</c> — Pillar 4 (chat /summarize routes through engine; FR-26)</item>
-/// <item><c>Pillar4_SessionSummarizeOrchestrator_DependsOnEngine_NotAlternateKey</c> — Pillar 4 (no alternate-key bypass)</item>
+/// <item>Pillar 3 (generic playbook dispatcher) + Pillar 4 (engine-shell /summarize) tests were
+/// DELETED by ai-architecture-redesign-r1 task 044 with their subjects (FR-P3-05 / audit F-1 closure).</item>
 /// <item><c>NFR01_ChatAgentFactory_Resolvable_ConversationalPrimacyEntry</c> — NFR-01 (conversational primacy)</item>
 /// <item><c>NFR08_NodeExecutorRegistry_ExposesProductionExecutors</c> — NFR-08 (11 node executors unchanged)</item>
 /// <item><c>NFR13_SafetyPipeline_AllFiveMiddlewaresRegistered</c> — NFR-13 (PromptShield + Groundedness + Citations + Privilege + Cross-matter)</item>
@@ -77,7 +75,7 @@ public class PhaseAVerticalSliceTests : IClassFixture<WorkspaceTestFixture>
     //
     // Pillar 2 introduces IToolHandlerRegistry backed by IEnumerable<IToolHandler> (auto-
     // discovered). The R6 migrations land here: 8 typed Wave 1-2 handlers + 10 Q9 chat-tool
-    // migrations + 1 generic InvokePlaybookHandler = at least 19 registered handlers.
+    // migrations (post task-044 deletions) — the surviving handler set below.
     // =========================================================================
 
     [Fact]
@@ -88,7 +86,7 @@ public class PhaseAVerticalSliceTests : IClassFixture<WorkspaceTestFixture>
         // picked up by AddToolHandlersFromAssembly, without requiring full DI instantiation
         // (which would fail in tests where optional handler dependencies — e.g.,
         // LegalResearchHandler's BingGroundingOptions — aren't fully wired in the test fixture).
-        var bffAssembly = typeof(InvokePlaybookHandler).Assembly;
+        var bffAssembly = typeof(TextRefinementHandler).Assembly;
         var handlerImpls = bffAssembly
             .GetTypes()
             .Where(t => typeof(IToolHandler).IsAssignableFrom(t) && !t.IsInterface && !t.IsAbstract)
@@ -112,18 +110,16 @@ public class PhaseAVerticalSliceTests : IClassFixture<WorkspaceTestFixture>
             nameof(ClauseAnalyzerHandler),
             nameof(RiskDetectorHandler),
             nameof(InvoiceExtractionToolHandler),
-            // Wave 7 + 7c + 8 + 9 (10 Q9 chat-tool migrations)
-            nameof(AnalysisQueryHandler),
+            // Wave 7 + 7c + 8 (surviving Q9 chat-tool migrations; the analysis-query,
+            // working-document, and generic playbook-dispatch handlers were DELETED by
+            // ai-architecture-redesign-r1 task 044 — FR-P3-05 / audit F-1 closure)
             nameof(TextRefinementHandler),
             nameof(KnowledgeRetrievalHandler),
             nameof(VerifyCitationsHandler),
             nameof(DocumentSearchHandler),
             nameof(WebSearchHandler),
             nameof(CodeInterpreterHandler),
-            nameof(LegalResearchHandler),
-            nameof(WorkingDocumentHandler),
-            // Pillar 3 (task 021 generic dispatcher)
-            nameof(InvokePlaybookHandler)
+            nameof(LegalResearchHandler)
         };
 
         foreach (var handlerId in requiredR6HandlerIds)
@@ -142,103 +138,6 @@ public class PhaseAVerticalSliceTests : IClassFixture<WorkspaceTestFixture>
             17,
             "Pillar 2: at least the 18 R6 handlers are registered; legacy handlers add to the count");
     }
-
-    // =========================================================================
-    // PILLAR 3 — Generic invoke_playbook + IInvokePlaybookAi facade (FR-21..23)
-    //
-    // Pillar 3 introduces:
-    //   - IInvokePlaybookAi facade in Services/Ai/PublicContracts/ (task 020)
-    //   - InvokePlaybookHandler that consumes the facade (task 021)
-    //   - Dynamic playbook list in tool description (task 022)
-    //   - Deletion of specialized bridge tools (task 023)
-    // =========================================================================
-
-    [Fact]
-    public void Pillar3_InvokePlaybookHandler_AndFacade_BothResolvable()
-    {
-        // Arrange
-        using var scope = _fixture.Services.CreateScope();
-
-        // Act — resolve the facade directly via DI (proves PublicContracts registration)
-        var facade = scope.ServiceProvider.GetService<IInvokePlaybookAi>();
-
-        // Reflection-based handler existence check (avoids DI instantiation cascade — see
-        // Pillar 2 test rationale for why we use reflection here).
-        var bffAssembly = typeof(InvokePlaybookHandler).Assembly;
-        var invokePlaybookType = bffAssembly.GetType(typeof(InvokePlaybookHandler).FullName!);
-
-        // Assert
-        invokePlaybookType.Should().NotBeNull(
-            "Pillar 3 (FR-22): InvokePlaybookHandler must exist in the BFF assembly so the " +
-            "data-driven block's AddToolHandlersFromAssembly registration picks it up");
-        invokePlaybookType!.GetInterfaces().Should().Contain(
-            typeof(IToolHandler),
-            "InvokePlaybookHandler must implement IToolHandler to participate in the registry");
-
-        facade.Should().NotBeNull(
-            "Pillar 3 (Q11 / ADR-013): IInvokePlaybookAi facade must be registered in PublicContracts " +
-            "so the handler can consume it without injecting AI-internal types");
-    }
-
-    [Fact]
-    public void Pillar3_FactoryBoundary_HandlerInjectsFacadeNotAiInternals()
-    {
-        // Reflection-level boundary assertion: the InvokePlaybookHandler's constructor MUST
-        // NOT name any of the AI-internal types that ADR-013 prohibits CRUD-side code from
-        // injecting directly. Per the post-DI-cycle-break (2026-06-08) refactor, the handler
-        // takes IServiceProvider + IPlaybookService + IHttpContextAccessor + IMemoryCache +
-        // ILogger; the facade is resolved lazily so the *constructor* parameter list does
-        // NOT mention IInvokePlaybookAi directly (it's resolved on first use).
-        var ctor = typeof(InvokePlaybookHandler).GetConstructors().Single();
-        var parameterTypeNames = ctor.GetParameters().Select(p => p.ParameterType.FullName).ToList();
-
-        // Forbidden: AI-internal types must NOT appear in the ctor signature
-        parameterTypeNames.Should().NotContain(
-            "Sprk.Bff.Api.Services.Ai.IOpenAiClient",
-            "ADR-013: chat-tool handler must not inject IOpenAiClient");
-        parameterTypeNames.Should().NotContain(
-            "Sprk.Bff.Api.Services.Ai.IPlaybookOrchestrationService",
-            "ADR-013: chat-tool handler must not inject IPlaybookOrchestrationService");
-        parameterTypeNames.Should().NotContain(
-            "Sprk.Bff.Api.Services.Ai.IAnalysisOrchestrationService",
-            "ADR-013: chat-tool handler must not inject IAnalysisOrchestrationService");
-        parameterTypeNames.Should().NotContain(
-            "Sprk.Bff.Api.Services.Ai.IPlaybookExecutionEngine",
-            "ADR-013: chat-tool handler must not inject IPlaybookExecutionEngine");
-    }
-
-    // =========================================================================
-    // PILLAR 4 — Chat /summarize routes through PlaybookExecutionEngine (FR-26)
-    //
-    // Pillar 4 (tasks 024 + 025) fixes the FK chain summarize-document-for-chat → SUM-CHAT
-    // and refactors SessionSummarizeOrchestrator into a thin pass-through that invokes
-    // IPlaybookExecutionEngine.ExecuteChatSummarizeAsync (new method). NO alternate-key
-    // lookup remains in the chat /summarize path.
-    // =========================================================================
-
-    [Fact]
-    public void Pillar4_PlaybookExecutionEngine_ExposesExecuteChatSummarizeAsync()
-    {
-        // Reflection-level assertion: the engine interface MUST expose the new method that
-        // task 025 added per the "ADRs Are Defaults" Option A directive. The method's
-        // existence is the binding contract.
-        var engineType = typeof(IPlaybookExecutionEngine);
-        var method = engineType.GetMethod("ExecuteChatSummarizeAsync");
-
-        method.Should().NotBeNull(
-            "Pillar 4 (task 025 / Option A): IPlaybookExecutionEngine must expose " +
-            "ExecuteChatSummarizeAsync — the additive method introduced to route the chat " +
-            "/summarize flow through the engine without an alternate-key bypass");
-
-        // Verify the return shape is IAsyncEnumerable<AnalysisChunk> (preserves the
-        // pre-refactor byte-equivalence for the streaming-JSON-delta UX)
-        method!.ReturnType.IsGenericType.Should().BeTrue();
-        method.ReturnType.GetGenericTypeDefinition().Name.Should().Contain(
-            "IAsyncEnumerable",
-            "Pillar 4: ExecuteChatSummarizeAsync must return IAsyncEnumerable<AnalysisChunk> " +
-            "to preserve the field-delta streaming UX from the pre-task-025 code path");
-    }
-
 
     // =========================================================================
     // NFR-01 — Conversational primacy
@@ -336,83 +235,20 @@ public class PhaseAVerticalSliceTests : IClassFixture<WorkspaceTestFixture>
     }
 
     // =========================================================================
-    // ADR-013 / ADR-015 — Boundary + telemetry hygiene
-    //
-    // The PublicContracts facade boundary is what prevents AI-internal types from leaking
-    // into CRUD-side code. Validate that the boundary holds for IInvokePlaybookAi
-    // (task 020's contract).
+    // ADR-013 boundary — the generic playbook-facade surface test was DELETED by
+    // ai-architecture-redesign-r1 task 044 with the facade itself (FR-P3-05 / F-1
+    // closure). The remaining PublicContracts facades are covered by NetArchTest
+    // ADR-013 rules + their own contract tests.
     // =========================================================================
-
-    [Fact]
-    public void ADR013_InvokePlaybookAiFacade_DoesNotExposeAiInternalTypesInSurface()
-    {
-        // Reflection-level boundary check: IInvokePlaybookAi's public surface must NOT name
-        // any AI-internal type. The facade's surface is the binding contract between
-        // CRUD-side consumers (chat tool, M365 Copilot adapter, future R7+ consumers) and
-        // the AI-internal orchestration layer.
-        //
-        // ADR-013 amendment (spaarkeai-compose-r1 task 095 widening; formally filed by
-        // task 102 per CLAUDE.md §6.5 Path B): the facade MAY expose
-        // `Sprk.Bff.Api.Services.Ai.DocumentContext` as an optional parameter type.
-        // DocumentContext is a pure data record (Guid + strings only) — NOT an
-        // orchestration engine type — and reusing it prevents duplication with the
-        // DTO that Compose's dispatch path already populates. See task 095 POML +
-        // IInvokePlaybookAi.cs "Phase 2 consumer" section +
-        // `.claude/adr/ADR-013-bff-ai-extraction.md` amendment section (2026-07-01).
-        var facadeType = typeof(IInvokePlaybookAi);
-        var publicMethods = facadeType.GetMethods(BindingFlags.Public | BindingFlags.Instance);
-
-        // Explicit allow-list for types that live in `Services.Ai` for historical reasons
-        // but ARE part of the facade's binding public surface (ADR-013 amendments).
-        var amendmentAllowedTypes = new HashSet<string>
-        {
-            typeof(Sprk.Bff.Api.Services.Ai.DocumentContext).FullName!,
-        };
-
-        foreach (var method in publicMethods)
-        {
-            var allTypes = method.GetParameters()
-                .Select(p => p.ParameterType)
-                .Concat(new[] { method.ReturnType })
-                .SelectMany(FlattenType)
-                .Where(t => t != null && t.Namespace?.StartsWith("Sprk.Bff.Api.Services.Ai") == true)
-                .ToList();
-
-            foreach (var t in allTypes)
-            {
-                if (amendmentAllowedTypes.Contains(t!.FullName!))
-                {
-                    continue; // ADR-013 amendment 2026-07-01 (tasks 095 / 102) permits this type.
-                }
-
-                t.Namespace.Should().NotBe(
-                    "Sprk.Bff.Api.Services.Ai",
-                    $"ADR-013: IInvokePlaybookAi.{method.Name} must NOT expose the AI-internal " +
-                    $"type '{t.FullName}'; only PublicContracts-namespace types are permitted in " +
-                    "the facade's surface (unless explicitly listed as an ADR amendment allowance)");
-            }
-        }
-
-        static IEnumerable<Type?> FlattenType(Type t)
-        {
-            yield return t;
-            if (t.IsGenericType)
-            {
-                foreach (var arg in t.GetGenericArguments())
-                    foreach (var inner in FlattenType(arg))
-                        yield return inner;
-            }
-        }
-    }
 
     // =========================================================================
     // FK chain (Pillar 4 + task 024 evidence)
     //
     // The data-side fix patched summarize-document-for-chat@v1 → SUM-CHAT@v1. The chain
     // is in Spaarke Dev Dataverse; we can't reach it from an in-process test fixture. The
-    // structural-level guarantee is enforced by Pillar4_SessionSummarizeOrchestrator_DependsOnEngine_NotAlternateKey:
-    // since the orchestrator no longer takes the alternate-key Dataverse deps, the chain
-    // MUST be valid at runtime or the engine will fail explicitly (a clean error, not a
-    // silent fallback). Documented here for traceability.
+    // structural-level guarantee moved with the architecture: since FR-P3-05 (task 044)
+    // the /summarize path resolves its Action through the Binding catalog (the ONE dispatch
+    // seam) — no alternate-key Dataverse lookup exists on the path. Documented here for
+    // traceability.
     // =========================================================================
 }

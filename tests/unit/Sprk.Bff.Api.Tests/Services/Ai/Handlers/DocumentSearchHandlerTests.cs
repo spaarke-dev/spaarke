@@ -15,7 +15,7 @@ namespace Sprk.Bff.Api.Tests.Services.Ai.Handlers;
 
 /// <summary>
 /// Unit tests for <see cref="DocumentSearchHandler"/> (R6 Wave 8 — replaces the legacy
-/// hardcoded <c>DocumentSearchTools</c> class previously registered on
+/// hardcoded <c>DocumentSearch chat-tools</c> class previously registered on
 /// <see cref="Chat.SprkChatAgentFactory"/>).
 /// </summary>
 /// <remarks>
@@ -476,7 +476,7 @@ public sealed class DocumentSearchHandlerTests : TypedToolHandlerTestFixture
         await handler.ExecuteChatAsync(ctx, tool, CancellationToken.None);
 
         capturedOptions!.TopK.Should().Be(10,
-            because: "SearchDiscovery default topK is 10 (matches legacy DocumentSearchTools)");
+            because: "SearchDiscovery default topK is 10 (matches legacy DocumentSearch chat-tools)");
     }
 
     // ═════════════════════════════════════════════════════════════════════════════

@@ -32,7 +32,6 @@ public sealed class ProjectPreFillService
     private readonly IPlaybookLookupService _playbookLookup;
     private readonly IConsumerRoutingService _consumerRouting;
     private readonly IWorkspacePrefillAi? _prefillAi;
-    private readonly WorkspaceOptions _workspaceOptions;
     private readonly SharePointEmbeddedOptions _speOptions;
     private readonly ILogger<ProjectPreFillService> _logger;
 
@@ -42,25 +41,22 @@ public sealed class ProjectPreFillService
     private readonly IActionResolver? _linearActionResolver;
     private readonly IActionRunner? _linearActionRunner;
 
-    // FR-1R-05 routing-table resolution (chat-routing-redesign-r1 task 028c / Pattern A):
-    // Phase 1R replaces the prior WorkspaceOptions.ProjectPreFillPlaybookId env-var
-    // binding with the sprk_playbookconsumer Dataverse routing table queried through
-    // IConsumerRoutingService.ResolveAsync(ConsumerTypes.ProjectPreFill, ...). The
-    // env-var value remains readable as a deprecation-window fallback (FR-1R-06):
-    // when ResolveAsync returns null we fall through to the legacy
-    // _workspaceOptions.ProjectPreFillPlaybookId read so existing config keeps working
-    // while admins migrate to the table. Hardening (code-review S-5): use the
+    // FR-P3-01 hard cutover (ai-architecture-redesign-r1 task 040): the sprk_playbookconsumer
+    // Binding routing table — queried through
+    // IConsumerRoutingService.ResolveAsync(ConsumerTypes.ProjectPreFill, ...) — is the ONLY
+    // playbook-resolution source. The legacy typed-options config fallback (FR-1R-05/FR-1R-06
+    // deprecation window) was DELETED per NFR-08: no shims, no deprecation windows. When
+    // routing returns null the service fails cleanly with an empty response — the operator
+    // must seed the Binding row. Hardening (code-review S-5): use the
     // ConsumerTypes.ProjectPreFill compile-time constant — never a literal string.
     //
     // FR-05 (chat-routing-redesign-r1 task 017 / Pattern A — historical): the prior
     // hardcoded "Create New Project Pre-Fill" playbook GUID
-    // (fc343e9c-3460-f111-ab0b-7c1e521b425f) was already removed in Phase 1; this
-    // task 028c migration only changes the routing-resolution step (env var →
-    // sprk_playbookconsumer table) ahead of IPlaybookLookupService.GetByIdAsync.
+    // (fc343e9c-3460-f111-ab0b-7c1e521b425f) was removed in Phase 1.
     //
     // NFR-07 BINDING preserved: pre-fill flow signature, 45s timeout, useAiPrefill
     // consumer contract, and $choices output shape are unchanged — only the
-    // internal playbook-ID lookup mechanism has been migrated.
+    // internal playbook-ID resolution mechanism has changed.
 
     // Reuse same file constraints as MatterPreFillService
     private static readonly HashSet<string> AllowedExtensions =
@@ -87,7 +83,6 @@ public sealed class ProjectPreFillService
         ITextExtractor textExtractor,
         IPlaybookLookupService playbookLookup,
         IConsumerRoutingService consumerRouting,
-        IOptions<WorkspaceOptions> workspaceOptions,
         IOptions<SharePointEmbeddedOptions> speOptions,
         ILogger<ProjectPreFillService> logger,
         IWorkspacePrefillAi? prefillAi = null,
@@ -98,7 +93,6 @@ public sealed class ProjectPreFillService
         _textExtractor = textExtractor ?? throw new ArgumentNullException(nameof(textExtractor));
         _playbookLookup = playbookLookup ?? throw new ArgumentNullException(nameof(playbookLookup));
         _consumerRouting = consumerRouting ?? throw new ArgumentNullException(nameof(consumerRouting));
-        _workspaceOptions = (workspaceOptions ?? throw new ArgumentNullException(nameof(workspaceOptions))).Value;
         _speOptions = (speOptions ?? throw new ArgumentNullException(nameof(speOptions))).Value;
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
         _prefillAi = prefillAi; // Nullable: AI feature flags may be disabled. RequireAi() throws at use site.
@@ -380,15 +374,12 @@ public sealed class ProjectPreFillService
             documentText = documentText[..maxTextChars] + "\n\n[... content truncated ...]";
         }
 
-        // FR-1R-05 routing-table resolution (chat-routing-redesign-r1 task 028c / Pattern A):
-        // Primary lookup is now IConsumerRoutingService.ResolveAsync(ConsumerTypes.ProjectPreFill)
-        // which queries sprk_playbookconsumer with 5-min TTL (ADR-014). When the table has no
-        // matching row, ResolveAsync returns null and we fall back to the legacy
-        // WorkspaceOptions.ProjectPreFillPlaybookId env-var (typed-options per ADR-018) for
-        // the FR-1R-06 deprecation window — preserving every pre-task-028c behavior so admins
-        // can migrate to the table without breaking existing deployments. Hardening
-        // (code-review S-5): use the ConsumerTypes.ProjectPreFill compile-time constant —
-        // never a literal string.
+        // FR-P3-01 hard cutover (ai-architecture-redesign-r1 task 040): the playbook is resolved
+        // EXCLUSIVELY via IConsumerRoutingService.ResolveAsync(ConsumerTypes.ProjectPreFill),
+        // which queries sprk_playbookconsumer with 5-min TTL (ADR-014). The legacy typed-options
+        // config fallback was DELETED per NFR-08 — routing null is a clean, terminal miss.
+        // Hardening (code-review S-5): use the ConsumerTypes.ProjectPreFill compile-time
+        // constant — never a literal string.
         //
         // NFR-07 BINDING preserved: the 45s timeout below, useAiPrefill consumer contract, and
         // $choices output schema are unchanged — only the internal routing mechanism has been
@@ -397,23 +388,17 @@ public sealed class ProjectPreFillService
             .ResolveAsync(ConsumerTypes.ProjectPreFill, cancellationToken: cancellationToken)
             .ConfigureAwait(false);
 
-        string? configuredPlaybookId = routedPlaybookId?.ToString();
-        if (string.IsNullOrWhiteSpace(configuredPlaybookId))
-        {
-            // Fallback to legacy env var during the FR-1R-06 deprecation window.
-            configuredPlaybookId = _workspaceOptions.ProjectPreFillPlaybookId;
-        }
-
-        if (string.IsNullOrWhiteSpace(configuredPlaybookId))
+        if (routedPlaybookId is null)
         {
             _logger.LogError(
-                "Project pre-fill playbook is not configured. Neither sprk_playbookconsumer " +
-                "(consumerType='{ConsumerType}') nor Workspace:ProjectPreFillPlaybookId returned " +
-                "a playbook id. RequestId={RequestId}. Configure the routing table or set the " +
-                "per-environment env var as a fallback.",
+                "Routing table has no enabled sprk_playbookconsumer row for consumerType " +
+                "'{ConsumerType}'; seed the row — no config fallback exists per FR-P3-01. " +
+                "RequestId={RequestId}",
                 ConsumerTypes.ProjectPreFill, requestId);
             return ProjectPreFillResponse.Empty();
         }
+
+        string configuredPlaybookId = routedPlaybookId.Value.ToString();
 
         Guid playbookId;
         try

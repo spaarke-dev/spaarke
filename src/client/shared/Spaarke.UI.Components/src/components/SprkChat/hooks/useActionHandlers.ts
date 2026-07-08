@@ -9,7 +9,7 @@
  * - **Change Mode** (category: "settings", id: "change_mode"): Toggles write mode
  *   between "stream" and "diff", persists to localStorage.
  * - **Re-analyze** (category: "actions", id: "reanalyze"): Sends a chat message
- *   processed by server-side AnalysisExecutionTools.
+ *   processed by the server-side analysis-execution handler.
  * - **Summarize** (category: "actions", id: "summarize"): Sends a chat message.
  * - **Search** (category: "search"): Focuses input with search prefix.
  *
@@ -171,7 +171,7 @@ const handleChangeMode = (currentMode: WriteMode, setWriteMode: (mode: WriteMode
  * Re-analyze handler.
  *
  * Sends a "Rerun analysis" chat message via the existing sendMessage flow.
- * The server-side AnalysisExecutionTools (task 078) handles the message through
+ * The server-side analysis-execution handler (task 078 lineage) handles the message through
  * the chat pipeline with progress tracking, document_replace SSE events, and
  * undo stack management.
  */
@@ -311,51 +311,160 @@ export function navigateToTarget(payload: INavigatePayload): void {
 }
 
 /**
- * Dispatches a confirmed action to the BFF API.
+ * Builds the unified-gate resolution URL (FR-P2-03 / task 032). `actionId` IS the
+ * gate id — server-side suspensions (PendingPlanManager) surface their GateId as
+ * the `action_confirmation` event's actionId (task 034 wires the loop-boundary
+ * emitter to this contract).
+ */
+function buildGateResolveUrl(apiBaseUrl: string, sessionId: string, gateId: string): string {
+  return (
+    `${apiBaseUrl}/api/ai/chat/sessions/${encodeURIComponent(sessionId)}` +
+    `/gates/${encodeURIComponent(gateId)}/resolve`
+  );
+}
+
+/**
+ * Result of a gate-resolve POST. `errorCode` carries the server's stable ADR-019
+ * machine code on failures so callers can branch on SPECIFIC outcomes — added for
+ * G-P2 UAT round-1 finding 6 (2026-07-06): `gate.no-binding-target` (typed-handler
+ * confirm has no execution seam until FR-P3-03) must render an honest transcript
+ * message, not a generic failure toast.
+ */
+export interface IGateResolveOutcome {
+  success: boolean;
+  message: string;
+  /** Stable server errorCode (ADR-019) on failure; undefined on success. */
+  errorCode?: string;
+  /**
+   * Server-composed MDA deep link to the created/updated record (G-P3 UAT round-4
+   * R4-3, 2026-07-07; additive). Present only on confirmed typed-handler executions
+   * that reported a record. Rendered as a markdown "[Open record](…)" link in the
+   * local ✅ transcript message (the server persists the matching durable copy).
+   */
+  recordUrl?: string;
+  /** Created/updated record's table logical name (additive, R4-3). */
+  recordEntityLogicalName?: string;
+  /** Created/updated record's GUID (additive, R4-3). */
+  recordId?: string;
+}
+
+/** Shared POST to the gate-resolve endpoint. */
+async function resolveGate(
+  pendingAction: IPendingAction,
+  apiBaseUrl: string,
+  authenticatedFetch: (url: string, init?: RequestInit) => Promise<Response>,
+  approved: boolean
+): Promise<IGateResolveOutcome> {
+  try {
+    const response = await authenticatedFetch(
+      buildGateResolveUrl(apiBaseUrl, pendingAction.sessionId, pendingAction.actionId),
+      {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ approved }),
+      }
+    );
+
+    if (response.status === 409) {
+      return {
+        success: false,
+        errorCode: 'gate.not-pending',
+        message: `${pendingAction.actionName} was already resolved or has expired. Please retry the request in chat.`,
+      };
+    }
+
+    if (!response.ok) {
+      let errorCode = 'gate.resolve-failed';
+      let detail: string | undefined;
+      try {
+        const problem = (await response.json()) as { errorCode?: string; detail?: string };
+        if (problem && typeof problem.errorCode === 'string') {
+          errorCode = problem.errorCode;
+        }
+        // G-P3 UAT round-2 R2-A (2026-07-07): the ProblemDetails `detail` carries the
+        // handler's REAL failure reason (e.g. the write-mapper's instructive validation
+        // message). Surfacing it lets the user (and, via the server-persisted transcript
+        // message, the next turn's model) understand and correct the failure instead of
+        // seeing a generic code.
+        if (problem && typeof problem.detail === 'string' && problem.detail.length > 0) {
+          detail = problem.detail;
+        }
+      } catch {
+        // Non-JSON body — keep the fallback code (ADR-019: stable codes only surface).
+      }
+      return {
+        success: false,
+        errorCode,
+        message: detail
+          ? `${pendingAction.actionName} failed: ${detail}`
+          : `${pendingAction.actionName} could not be ${approved ? 'dispatched' : 'cancelled'} (${errorCode}).`,
+      };
+    }
+
+    const result = (await response.json()) as {
+      status?: string;
+      summary?: string | null;
+      recordUrl?: string | null;
+      recordEntityLogicalName?: string | null;
+      recordId?: string | null;
+    };
+    return approved
+      ? {
+          success: true,
+          message: result.summary
+            ? `${pendingAction.actionName} completed. ${result.summary}`
+            : `${pendingAction.actionName} completed.`,
+          // R4-3 (2026-07-07): additive record-link fields — undefined when absent.
+          recordUrl: typeof result.recordUrl === 'string' && result.recordUrl.length > 0 ? result.recordUrl : undefined,
+          recordEntityLogicalName:
+            typeof result.recordEntityLogicalName === 'string' && result.recordEntityLogicalName.length > 0
+              ? result.recordEntityLogicalName
+              : undefined,
+          recordId: typeof result.recordId === 'string' && result.recordId.length > 0 ? result.recordId : undefined,
+        }
+      : { success: true, message: `${pendingAction.actionName} was cancelled.` };
+  } catch (err: unknown) {
+    const message = err instanceof Error ? err.message : 'Network error';
+    return {
+      success: false,
+      message: `${pendingAction.actionName} could not be ${approved ? 'dispatched' : 'cancelled'}: ${message}`,
+    };
+  }
+}
+
+/**
+ * Resolves a confirmed action after the user clicks Confirm in the
+ * ActionConfirmationDialog — the presentation leg of the ONE Confirmation Gate.
  *
- * Called after the user clicks Confirm in the ActionConfirmationDialog.
- * Sends POST /api/ai/chat/sessions/{sessionId}/actions/{actionId}/confirm.
+ * D12 / FR-P2-02 → FR-P2-03 (spaarke-ai-architecture-redesign-r1 tasks 031/032):
+ * the deleted R2-052 per-action confirm endpoint is replaced by the unified-gate
+ * resolution route `POST /api/ai/chat/sessions/{sessionId}/gates/{gateId}/resolve`
+ * (BFF `PendingPlanManager` resume + ledger Gate marker per ADR-040; Binding-backed
+ * invocations execute via the ONE dispatch seam). `pendingAction.actionId` carries
+ * the gate id.
  *
- * Auth v2 (D-AUTH-1): takes `authenticatedFetch` instead of an `accessToken: string`
- * snapshot. The fetch function handles fresh-token attachment + X-Tenant-Id internally.
+ * Auth v2 (D-AUTH-1) signature preserved for export compatibility.
  */
 export async function dispatchConfirmedAction(
   pendingAction: IPendingAction,
   apiBaseUrl: string,
   authenticatedFetch: (url: string, init?: RequestInit) => Promise<Response>
-): Promise<{ success: boolean; message: string }> {
-  const baseUrl = apiBaseUrl.replace(/\/+$/, '');
-  const url = `${baseUrl}/api/ai/chat/sessions/${pendingAction.sessionId}/actions/${pendingAction.actionId}/confirm`;
+): Promise<IGateResolveOutcome> {
+  return resolveGate(pendingAction, apiBaseUrl, authenticatedFetch, true);
+}
 
-  try {
-    const response = await authenticatedFetch(url, {
-      method: 'POST',
-      headers: {
-        'Content-Type': 'application/json',
-      },
-      body: JSON.stringify({
-        actionId: pendingAction.actionId,
-        parameters: pendingAction.parameters,
-      }),
-    });
-
-    if (!response.ok) {
-      const errorText = await response.text();
-      return {
-        success: false,
-        message: `Action failed (${response.status}): ${errorText}`,
-      };
-    }
-
-    const result = await response.json().catch(() => ({}));
-    return {
-      success: true,
-      message: result.message || `${pendingAction.actionName} completed successfully.`,
-    };
-  } catch (err: unknown) {
-    const message = err instanceof Error ? err.message : 'Unknown error';
-    return { success: false, message: `Action dispatch failed: ${message}` };
-  }
+/**
+ * Rejects a pending action after the user clicks Cancel in the
+ * ActionConfirmationDialog — writes the `rejected` Gate resolution marker
+ * server-side (ADR-040 append-only correlation) instead of silently dropping
+ * the suspension client-side.
+ */
+export async function rejectPendingAction(
+  pendingAction: IPendingAction,
+  apiBaseUrl: string,
+  authenticatedFetch: (url: string, init?: RequestInit) => Promise<Response>
+): Promise<IGateResolveOutcome> {
+  return resolveGate(pendingAction, apiBaseUrl, authenticatedFetch, false);
 }
 
 // ─────────────────────────────────────────────────────────────────────────────

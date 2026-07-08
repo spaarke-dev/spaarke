@@ -415,13 +415,10 @@ public class KnowledgeBaseTestFixture : WebApplicationFactory<Program>
             // Background workers depend on conditionally-registered services (disabled in test mode).
             services.RemoveAll<Microsoft.Extensions.Hosting.IHostedService>();
 
-            // Register stub IScopeResolverService so BuilderScopeImporter can be resolved from DI.
-            // BuilderScopeAdminEndpoints.MapPost(..., ImportFromJson) depends on BuilderScopeImporter
             // as a DI parameter. When Analysis:Enabled=false, IScopeResolverService is not registered
             // by Program.cs, causing parameter inference to fail ("importer | Body (Inferred)").
             // A Loose mock satisfies the dependency without any real Dataverse calls.
             services.AddScoped(_ => new Moq.Mock<Sprk.Bff.Api.Services.Ai.IScopeResolverService>(Moq.MockBehavior.Loose).Object);
-            services.AddScoped<Sprk.Bff.Api.Services.Ai.Builder.BuilderScopeImporter>();
 
             // ---------------------------------------------------------------
             // Stub all conditionally-registered services (registered by Program.cs only
@@ -436,14 +433,11 @@ public class KnowledgeBaseTestFixture : WebApplicationFactory<Program>
             services.AddScoped(_ => new Moq.Mock<Sprk.Bff.Api.Services.Ai.IAppOnlyAnalysisService>(Moq.MockBehavior.Loose).Object);
             services.AddScoped(_ => new Moq.Mock<Sprk.Bff.Api.Services.Ai.IPlaybookService>(Moq.MockBehavior.Loose).Object);
             services.AddScoped(_ => new Moq.Mock<Sprk.Bff.Api.Services.Ai.INodeService>(Moq.MockBehavior.Loose).Object);
-            services.AddScoped(_ => new Moq.Mock<Sprk.Bff.Api.Services.Ai.IAiPlaybookBuilderService>(Moq.MockBehavior.Loose).Object);
-            services.AddScoped(_ => new Moq.Mock<Sprk.Bff.Api.Services.Ai.Builder.IBuilderAgentService>(Moq.MockBehavior.Loose).Object);
             services.AddScoped(_ => new Moq.Mock<Sprk.Bff.Api.Services.Ai.IPlaybookOrchestrationService>(Moq.MockBehavior.Loose).Object);
             services.AddScoped(_ => new Moq.Mock<Sprk.Bff.Api.Services.Ai.IPlaybookSharingService>(Moq.MockBehavior.Loose).Object);
             services.AddScoped(_ => new Moq.Mock<Sprk.Bff.Api.Services.Ai.IScopeManagementService>(Moq.MockBehavior.Loose).Object);
             services.AddSingleton(_ => new Moq.Mock<Sprk.Bff.Api.Services.Ai.Visualization.IVisualizationService>(Moq.MockBehavior.Loose).Object);
             services.AddSingleton(_ => new Moq.Mock<Sprk.Bff.Api.Services.Ai.IModelSelector>(Moq.MockBehavior.Loose).Object);
-            services.AddScoped(_ => new Moq.Mock<Sprk.Bff.Api.Services.Ai.IEntityResolutionService>(Moq.MockBehavior.Loose).Object);
 
             // Semantic Search & Record Search - endpoints are always mapped but services
             // only register when Analysis:Enabled=true && DocumentIntelligence:Enabled=true
@@ -507,7 +501,7 @@ public class KnowledgeBaseTestFixture : WebApplicationFactory<Program>
             {
                 var chatClient = sp.GetRequiredService<IChatClient>();
                 var logger = NullLogger<SprkChatAgentFactory>.Instance;
-                return new SprkChatAgentFactory(chatClient, chatClient, sp, logger);
+                return new SprkChatAgentFactory(chatClient, sp, logger);
             });
             services.AddScoped(sp =>
             {

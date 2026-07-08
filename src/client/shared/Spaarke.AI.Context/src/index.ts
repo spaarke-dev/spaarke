@@ -17,5 +17,6 @@ export * from './hooks';
 // Services
 export * from './services';
 
-// Providers
-export * from './providers';
+// Providers barrel removed 2026-07-07 (redesign-r1 task 050): the R1 standalone
+// provider trio was deleted in Track-B batch 3 and the orphaned useEntityResolver
+// hook was removed by the Track-B completion audit — the directory emptied out.

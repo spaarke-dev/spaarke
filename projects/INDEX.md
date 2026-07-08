@@ -46,11 +46,12 @@ Status legend:
 
 | Project | Branch | Worktree Path | BFF | SpaarkeAi | CI Workflows | Skill Directives | Last Commit | Status |
 |---|---|---|---|---|---|---|---|---|
+| `spaarke-ai-architecture-redesign-r1` | `work/spaarke-ai-architecture-redesign-r1` | `C:/code_files/spaarke-wt-spaarke-ai-architecture-redesign-r1` | Y | Y | Y | Y | 2026-07-08 | **COMPLETE 2026-07-08 pending PR #551 merge** — 51/51 tasks + 090 wrap-up; ADR-039/040 Accepted; dispatcher stack + engine shells + builder surface DELETED (Track-B audit zero unexplained survivors); absorbed+closed `spaarke-ai-platform-unification-r7`; G-M deferred post-r2 (#555); deferrals #552–#557; successor `spaarke-ai-architecture-redesign-r2` (design v0.2, worktree TBD at /project-pipeline) |
 | `spaarke-dataset-grid-framework-r2` | `work/spaarke-dataset-grid-framework-r2` | `C:/code_files/spaarke-wt-spaarke-dataset-grid-framework-r2` | Y | Y | N | Y | 2026-07-02 | **Code complete pending PR #537 merge + deploy regression (2026-07-02); DEF-002 follow-on flipped BFF hot-path N→Y** |
 | `record-header-and-notepad-r1` | `work/record-header-and-notepad-r1` | `C:/code_files/spaarke-wt-record-header-and-notepad-r1` | N | N | N | N | 2026-07-03 | **Code complete (33/36 tasks, 237 tests); env-dependent tasks 025/039/040 pending owner deploy + QA** |
 | `ai-spaarke-ai-workspace-UI-r2` | `work/ai-spaarke-ai-workspace-UI-r2` | `C:/code_files/spaarke-wt-ai-spaarke-ai-workspace-UI-r2` | N | Y | N | N | 2026-07-01 | **Complete pending PR #530 merge (2026-07-01)** |
 | `spaarkeai-compose-r1` | `work/spaarkeai-compose-r1` | `C:/code_files/spaarke-wt-spaarkeai-compose-r1` | Y | Y | N | N | 2026-06-30 | Active |
-| `spaarke-ai-platform-unification-r7` | `work/spaarke-ai-platform-unification-r7` | `C:/code_files/spaarke-wt-spaarke-ai-platform-unification-r7` | Y | N | N | Y | 2026-06-28 | Active |
+| `spaarke-ai-platform-unification-r7` | `work/spaarke-ai-platform-unification-r7` | `C:/code_files/spaarke-wt-spaarke-ai-platform-unification-r7` | Y | N | N | Y | 2026-07-05 | **CLOSED / RE-SCOPED 2026-07-05** — Issue #501 closed; remaining waves absorbed by `spaarke-ai-architecture-redesign-r1` (#550) or dropped per `projects/spaarke-ai-platform-unification-r7/notes/close-out-absorbed-by-ai-architecture-redesign-r1.md`; branch disposition = redesign-r1 task 025 (FR-P1-06); archive row after task 025 |
 | `spaarke-redis-cache-remediation-r2` | `work/spaarke-redis-cache-remediation-r2` | `C:/code_files/spaarke-wt-spaarke-redis-cache-remediation-r2` | Y | N | Y | N | 2026-06-26 | Active |
 | `spaarke-redis-cache-remediation-r1` | `work/spaarke-redis-cache-remediation-r1` | `C:/code_files/spaarke-wt-spaarke-redis-cache-remediation-r1` | Y | N | N | N | 2026-06-26 | Active |
 | `spaarke-daily-update-service-r4` | `work/spaarke-daily-update-service-r4` | `C:/code_files/spaarke-wt-spaarke-daily-update-service-r4` | Y | Y | N | N | 2026-06-26 | Active |
@@ -70,7 +71,7 @@ Status legend:
 | `email-communication-solution-r3` | `work/email-communication-solution-r3` | `C:/code_files/spaarke-wt-email-communication-solution-r3` | Y | N | N | N | 2026-06-05 | Recent |
 | `ai-spaarke-action-engine-r1` | `work/ai-spaarke-action-engine-r1` | `C:/code_files/spaarke-wt-ai-spaarke-action-engine-r1` | Y | Y | N | N | 2026-05-30 | Recent |
 
-**Count**: 23 active worktrees (`spaarke-dataset-grid-framework-r2` + `record-header-and-notepad-r1` both added 2026-07-02 by `project-pipeline` — the latter is hot-path=N across all four surfaces, no coordination required; `ai-spaarke-ai-workspace-UI-r2` added 2026-07-01 by `project-pipeline`; `spaarkeai-compose-r1` added 2026-06-29 by `project-pipeline`; R7 added 2026-06-28 by `project-pipeline`; R2 added 2026-06-26 by `project-pipeline`; exceeds spec's 5-6 estimate; this reflects current portfolio reality post-2026-05-20 ramp — flagged for spec refinement in `ci-cd-unit-test-remediation-r1` Phase 1 task `010`).
+**Count**: 24 active worktrees (`spaarke-ai-architecture-redesign-r1` added 2026-07-05 by `project-pipeline` — hot-path BFF=Y/SpaarkeAi=Y/Skills=Y; it formally closes `spaarke-ai-platform-unification-r7`, whose row should be archived when task 013/025 complete; `spaarke-dataset-grid-framework-r2` + `record-header-and-notepad-r1` both added 2026-07-02 by `project-pipeline` — the latter is hot-path=N across all four surfaces, no coordination required; `ai-spaarke-ai-workspace-UI-r2` added 2026-07-01 by `project-pipeline`; `spaarkeai-compose-r1` added 2026-06-29 by `project-pipeline`; R7 added 2026-06-28 by `project-pipeline`; R2 added 2026-06-26 by `project-pipeline`; exceeds spec's 5-6 estimate; this reflects current portfolio reality post-2026-05-20 ramp — flagged for spec refinement in `ci-cd-unit-test-remediation-r1` Phase 1 task `010`).
 
 ---
 
@@ -80,8 +81,9 @@ This section surfaces where parallel projects collide on the same hot-path surfa
 
 ### BFF (`src/server/api/Sprk.Bff.Api/**`)
 
-**15 active projects touch BFF.** This is the single most-contested hot-path and the reason `.claude/constraints/bff-extensions.md` exists. Projects:
+**16 active projects touch BFF.** This is the single most-contested hot-path and the reason `.claude/constraints/bff-extensions.md` exists. Projects:
 
+- `spaarke-ai-architecture-redesign-r1` (**broadest AI touch**: `Services/Ai/**` executor/loop/gate/router/tools/ledger + `Models/Ai/Chat` + endpoints + DI; DELETES the dispatcher stack (PlaybookDispatcher, IntentReranker, CandidateSelector, CompoundIntentDetector) at P2 and engine shells at P3; absorbs+closes `spaarke-ai-platform-unification-r7`; supersedes `spaarke-ai-platform-chat-routing-redesign-r1`'s dispatch scope — coordinate any AI-dispatch PR with this project first)
 - `spaarkeai-compose-r1` (Compose drafting workspace: 7 new `/api/compose/` endpoints, 3 new `Services/Compose/*` services, `ConsumerTypes.ComposeSummarize` constant; ChatSession reuse + PublicContracts facade per refined ADR-013)
 - `spaarke-ai-platform-unification-r7` (AiCompletionNodeExecutor + PlaybookOrchestrationService dispatch refactor + ActionType→ExecutorType enum rename + new executor-config-schemas endpoint — foundational dispatch reform)
 - `spaarke-redis-cache-remediation-r2` (Theme A: `MetricsDistributedCache`, `TenantCache`, `CacheMetrics`, `Program.cs` — closure of R1 senior-review items DEF-007/008/009)
@@ -105,8 +107,9 @@ This section surfaces where parallel projects collide on the same hot-path surfa
 
 ### SpaarkeAi (`src/solutions/SpaarkeAi/**`)
 
-**10 active projects touch SpaarkeAi.** Concentrated in the AI/widget portfolio:
+**11 active projects touch SpaarkeAi.** Concentrated in the AI/widget portfolio:
 
+- `spaarke-ai-architecture-redesign-r1` (P1/P3: ConversationPane decomposition, one `dispatchConsumer` helper, widget-registry dedupe, ExecutionTraceWidget, FieldDelta deletion — any chat-surface or widget-registry PR should merge-order against this project)
 - `spaarke-dataset-grid-framework-r2` (FR-10 shared-package extraction: removes SpaarkeAi's `@spaarke/legal-workspace` source alias in vite.config.ts; adds file: dependency on new `@spaarke/legal-workspace` shared package. Merge-order coordination with `spaarkeai-compose-r1` required — Compose adds a section-registry entry that FR-10 must accommodate.)
 - `spaarkeai-compose-r1` (Compose workspace layout: new `sprk_workspacelayout` row + `components/compose/*` React surface + section-registry entry; reuses Pattern D from Calendar)
 - `spaarke-daily-update-service-r4` (widget enhancements)
@@ -123,7 +126,7 @@ This section surfaces where parallel projects collide on the same hot-path surfa
 
 ### CI Workflows (`.github/workflows/**`)
 
-**2 active projects touch CI workflows in scope**: `ci-cd-unit-test-remediation-r1` (modifies existing workflows) and `spaarke-redis-cache-remediation-r2` (adds NEW `.github/workflows/redis-key-rotation.yml` — no existing-file conflict).
+**3 active projects touch CI workflows in scope**: `ci-cd-unit-test-remediation-r1` (modifies existing workflows), `spaarke-redis-cache-remediation-r2` (adds NEW `.github/workflows/redis-key-rotation.yml` — no existing-file conflict), and `spaarke-ai-architecture-redesign-r1` (adds ONE self-contained `eval-gate` job to `sdap-ci.yml` — zero existing lines modified; task 026, NFR-02 merge gate; coordinate with ci-cd-unit-test-remediation-r1 before restructuring that file).
 
 `spaarke-devops-project-tracking-r1` design notes a Phase-5 polish workflow but explicitly out of r1 acceptance (D-22). No conflict.
 
@@ -131,15 +134,17 @@ This section surfaces where parallel projects collide on the same hot-path surfa
 
 ### Skill Directives (`.claude/skills/**`, `.claude/constraints/**`)
 
-**5 active projects touch skill directives**:
+**6 active projects touch skill directives**:
+
+- `spaarke-ai-architecture-redesign-r1` — P4 refreshes jps-* skill guidance + PlaybookBuilder-related directives after canvas de-scope; also `.claude/catalogs/scope-model-index.json` at P4 (main-session-only per Sub-Agent Write Boundary). Sequences AFTER R7 Wave 7 jps-* rewrites are cancelled by R7's close-out (task 013).
 
 - `spaarke-dataset-grid-framework-r2` — FR-09 adds dual-deploy warning section to `.claude/skills/code-page-deploy/SKILL.md` (single skill; no `INDEX.md` touch). Sequential-only per CLAUDE.md §3 sub-agent write boundary.
 - `ci-cd-unit-test-remediation-r1` — modifies `task-execute`, `project-pipeline`, `conflict-check` SKILL.md (Phase 1 Stream C)
 - `spaarke-devops-project-tracking-r1` — 9 new `/devops-*` skills + 9 hooked existing skills (this is the project's core deliverable)
 - `customer-provisioning-orchestration-r1` — new skill + scripts for provisioning orchestration (`/master-deploy` extension)
-- `spaarke-ai-platform-unification-r7` — REWRITES `jps-action-create`, `jps-playbook-design`, `jps-playbook-audit`, `jps-validate` + MINOR UPDATE `jps-scope-refresh` (Wave 7, FR-32/FR-33; node-first dispatch model)
+- ~~`spaarke-ai-platform-unification-r7` — REWRITES `jps-action-create`, `jps-playbook-design`, `jps-playbook-audit`, `jps-validate` + MINOR UPDATE `jps-scope-refresh` (Wave 7, FR-32/FR-33; node-first dispatch model)~~ **CANCELLED 2026-07-05** — R7 closed; jps-* skill work absorbed by `spaarke-ai-architecture-redesign-r1` P4 (re-based on the Action/Binding catalog model, not node-first dispatch)
 
-**Coordination action**: Four projects serialize PRs touching `.claude/skills/INDEX.md`. Recommended order: `devops-project-tracking-r1` first (owns skill registry concept), then `ci-cd-unit-test-remediation-r1` (modifies existing skills), then `customer-provisioning-orchestration-r1` (adds new skills), then `spaarke-ai-platform-unification-r7` Wave 7 (rewrites jps-* skill bodies after R7's dispatch reform lands). R7 Wave 7 is sequential within itself (Sub-Agent Write Boundary per CLAUDE.md §3).
+**Coordination action**: Four projects serialize PRs touching `.claude/skills/INDEX.md`. Recommended order: `devops-project-tracking-r1` first (owns skill registry concept), then `ci-cd-unit-test-remediation-r1` (modifies existing skills), then `customer-provisioning-orchestration-r1` (adds new skills), then `spaarke-ai-architecture-redesign-r1` P4 (jps-* skill refresh — took over the slot formerly held by R7 Wave 7, which was cancelled at R7 close 2026-07-05; main-session-only per Sub-Agent Write Boundary CLAUDE.md §3).
 
 ---
 

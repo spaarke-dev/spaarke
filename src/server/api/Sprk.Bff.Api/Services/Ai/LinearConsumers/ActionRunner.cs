@@ -1,5 +1,4 @@
 using System.Text.Json;
-using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Services.Ai.Schemas;
 
 namespace Sprk.Bff.Api.Services.Ai.LinearConsumers;
@@ -23,20 +22,34 @@ public sealed class ActionRunner : IActionRunner
 {
     private readonly IOpenAiClient _openAi;
     private readonly PromptSchemaRenderer _promptRenderer;
-    private readonly IOptions<LinearConsumersOptions> _options;
     private readonly ILogger<ActionRunner> _logger;
 
     private const string PlaceholderExtractedText = "{{document.extractedText}}";
 
+    /// <summary>
+    /// Output-token ceiling for prompted-executor structured completions.
+    /// </summary>
+    /// <remarks>
+    /// FR-P3-01 / task 040 Step 9.5 W-1: the deleted per-consumer
+    /// <c>LinearConsumers:MaxOutputTokens</c> config map was LIVE in the deployed dev
+    /// environment (<c>LinearConsumers__MaxOutputTokens__summarize_file = 4000</c>,
+    /// verified 2026-07-06) because SUM-CHAT@v1 emits up to ~2500 output tokens — far
+    /// above the 500-token DocumentIntelligence default that a <c>null</c> cap falls
+    /// back to. A structured output truncated mid-JSON is a parse failure, so the
+    /// prompted executor pins the SAME deterministic ceiling for every Action instead
+    /// of a per-consumer config surface (ADR-039: no config routing/tuning side
+    /// channels; actual output length — and therefore cost — is bounded by each
+    /// Action's constrained-decoding output schema, not by this ceiling).
+    /// </remarks>
+    internal const int MaxOutputTokensCeiling = 4000;
+
     public ActionRunner(
         IOpenAiClient openAi,
         PromptSchemaRenderer promptRenderer,
-        IOptions<LinearConsumersOptions> options,
         ILogger<ActionRunner> logger)
     {
         _openAi = openAi;
         _promptRenderer = promptRenderer;
-        _options = options;
         _logger = logger;
     }
 
@@ -70,22 +83,22 @@ public sealed class ActionRunner : IActionRunner
         var schemaName = SanitizeSchemaName(action.Name);
         var temperature = (float?)action.Temperature;
 
-        _options.Value.TryGetModelDeployment(context.ConsumerType, out var modelDeployment);
-        var hasMaxTokens = _options.Value.TryGetMaxOutputTokens(context.ConsumerType, out var maxTokens);
-        int? maxOutputTokens = hasMaxTokens ? maxTokens : null;
-
         _logger.LogInformation(
-            "Linear run: consumer={ConsumerType} action={ActionName} promptLen={PromptLen} model={Model} temp={Temperature} maxTokens={MaxTokens}",
-            context.ConsumerType, action.Name, prompt.Length,
-            modelDeployment ?? "(default)", temperature,
-            maxOutputTokens?.ToString() ?? "(default)");
+            "Linear run: consumer={ConsumerType} action={ActionName} promptLen={PromptLen} temp={Temperature}",
+            context.ConsumerType, action.Name, prompt.Length, temperature);
 
+        // FR-P3-01 (task 040): the per-consumer ModelDeployments/MaxOutputTokens config
+        // maps were retired with the LinearConsumers appsettings block. Model intent lives
+        // on the catalog (Binding.EffectiveModelTier / Action model tier); tier→deployment
+        // mapping is a deferred enhancement per ADR-016 — the platform default deployment
+        // applies. The output cap is the fixed executor ceiling (see
+        // MaxOutputTokensCeiling remarks — replaces the live per-consumer env override).
         var rawJson = await _openAi.GetStructuredCompletionRawAsync(
             prompt,
             jsonSchema,
             schemaName,
-            model: modelDeployment,
-            maxOutputTokens: maxOutputTokens,
+            model: null,
+            maxOutputTokens: MaxOutputTokensCeiling,
             temperature: temperature,
             cancellationToken: cancellationToken);
 

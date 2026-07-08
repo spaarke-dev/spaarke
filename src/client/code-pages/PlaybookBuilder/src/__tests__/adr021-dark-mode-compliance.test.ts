@@ -14,12 +14,15 @@
  * one-time browser-based dark/light screenshot capture described in 089c POML).
  * Static scan + commit-time gate beats one-time visual check.
  *
- * SCOPE: 5 files touched by Wave 8 tasks 080-088:
- *   - NodePalette.tsx (FR-22 categorized executor palette)
- *   - nodes/UnknownNode.tsx (FR-27 unknown-executor warning state)
- *   - properties/ExecutorTypeSelector.tsx (Action tab executor picker)
- *   - properties/NodePropertiesDialog.tsx (FR-24 Action tab promotion)
- *   - properties/TypedConfigForm.tsx (FR-23 schema-driven typed-config renderer)
+ * SCOPE (retargeted by spaarke-ai-architecture-redesign-r1 task 053 / FR-P4-04
+ * — the Wave 8 canvas surface this test previously scanned was deleted in the
+ * PlaybookBuilder de-scope): the 6 BA catalog-editor components:
+ *   - catalog/CatalogEditorShell.tsx (two-tab Actions/Bindings shell)
+ *   - catalog/ActionEditorForm.tsx (sprk_analysisaction authoring)
+ *   - catalog/BindingEditorForm.tsx (sprk_playbookconsumer authoring)
+ *   - catalog/ChipTransitionsEditor.tsx (sprk_chiptransitions structured editor)
+ *   - catalog/OnEventBindingsEditor.tsx (sprk_oneventbindings structured editor)
+ *   - catalog/JsonField.tsx (validated JSON column field)
  *
  * METHODOLOGY: Mock-free, no DOM, no React render. Pure regex scan of file
  * contents. Excludes comments (// and /* * /), JSDoc, HTML entities (&#NNNN;),
@@ -50,15 +53,16 @@ const REPO_ROOT = path.resolve(__dirname, '..', '..', '..', '..', '..', '..');
 const PB_ROOT = path.join(REPO_ROOT, 'src', 'client', 'code-pages', 'PlaybookBuilder', 'src', 'components');
 
 /**
- * Wave 8 touched files (relative to src/client/code-pages/PlaybookBuilder/src/components).
- * Sourced from git log over Wave 8 task PRs.
+ * BA catalog-editor surface (relative to
+ * src/client/code-pages/PlaybookBuilder/src/components) — task 053 / FR-P4-04.
  */
-const WAVE_8_FILES: readonly string[] = [
-  'NodePalette.tsx',
-  path.join('nodes', 'UnknownNode.tsx'),
-  path.join('properties', 'ExecutorTypeSelector.tsx'),
-  path.join('properties', 'NodePropertiesDialog.tsx'),
-  path.join('properties', 'TypedConfigForm.tsx'),
+const CATALOG_EDITOR_FILES: readonly string[] = [
+  path.join('catalog', 'CatalogEditorShell.tsx'),
+  path.join('catalog', 'ActionEditorForm.tsx'),
+  path.join('catalog', 'BindingEditorForm.tsx'),
+  path.join('catalog', 'ChipTransitionsEditor.tsx'),
+  path.join('catalog', 'OnEventBindingsEditor.tsx'),
+  path.join('catalog', 'JsonField.tsx'),
 ];
 
 /**
@@ -208,42 +212,25 @@ function scanFileForHardcodedColors(filePath: string): Finding[] {
   return findings;
 }
 
-describe('ADR-021 dark-mode semantic-token compliance — Wave 8 PlaybookBuilder UI', () => {
+describe('ADR-021 dark-mode semantic-token compliance — BA catalog editor (FR-P4-04)', () => {
   // Pre-resolve absolute file paths so failure messages are clear.
-  const absoluteFilePaths = WAVE_8_FILES.map(rel => path.join(PB_ROOT, rel));
+  const absoluteFilePaths = CATALOG_EDITOR_FILES.map(rel => path.join(PB_ROOT, rel));
 
-  it('all 5 Wave 8 component files exist on disk (sanity)', () => {
+  it('all 6 catalog-editor component files exist on disk (sanity)', () => {
     for (const abs of absoluteFilePaths) {
       expect(fs.existsSync(abs)).toBe(true);
     }
   });
 
-  it('NodePalette.tsx uses ONLY semantic tokens (no hardcoded color)', () => {
-    const findings = scanFileForHardcodedColors(absoluteFilePaths[0]);
-    expect(findings).toEqual([]);
-  });
+  it.each(CATALOG_EDITOR_FILES.map((rel, i) => [rel, i] as const))(
+    '%s uses ONLY semantic tokens (no hardcoded color)',
+    (_rel, index) => {
+      const findings = scanFileForHardcodedColors(absoluteFilePaths[index]);
+      expect(findings).toEqual([]);
+    }
+  );
 
-  it('UnknownNode.tsx uses ONLY semantic tokens (no hardcoded color in warning state)', () => {
-    const findings = scanFileForHardcodedColors(absoluteFilePaths[1]);
-    expect(findings).toEqual([]);
-  });
-
-  it('ExecutorTypeSelector.tsx uses ONLY semantic tokens (Action tab picker)', () => {
-    const findings = scanFileForHardcodedColors(absoluteFilePaths[2]);
-    expect(findings).toEqual([]);
-  });
-
-  it('NodePropertiesDialog.tsx uses ONLY semantic tokens (Action tab structure)', () => {
-    const findings = scanFileForHardcodedColors(absoluteFilePaths[3]);
-    expect(findings).toEqual([]);
-  });
-
-  it('TypedConfigForm.tsx uses ONLY semantic tokens (schema-driven renderer)', () => {
-    const findings = scanFileForHardcodedColors(absoluteFilePaths[4]);
-    expect(findings).toEqual([]);
-  });
-
-  it('Wave 8 surface in aggregate: zero hardcoded color findings across all 5 files', () => {
+  it('catalog-editor surface in aggregate: zero hardcoded color findings across all 6 files', () => {
     const allFindings: Finding[] = [];
     for (const abs of absoluteFilePaths) {
       allFindings.push(...scanFileForHardcodedColors(abs));
@@ -254,7 +241,7 @@ describe('ADR-021 dark-mode semantic-token compliance — Wave 8 PlaybookBuilder
         .map(f => `  ${path.relative(REPO_ROOT, f.file)}:${f.lineNumber}  [${f.pattern}] ${f.matched}\n      ${f.line}`)
         .join('\n');
       throw new Error(
-        `ADR-021 violation — ${allFindings.length} hardcoded color reference(s) in Wave 8 UI surface:\n${report}\n\n` +
+        `ADR-021 violation — ${allFindings.length} hardcoded color reference(s) in the catalog-editor surface:\n${report}\n\n` +
           `Fix: replace each hardcoded value with the corresponding semantic token from ` +
           `\`tokens.colorXxx*\` (\`@fluentui/react-components\`). See docs/adr/ADR-021-dark-mode-semantic-tokens.md.`
       );

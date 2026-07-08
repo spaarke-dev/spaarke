@@ -2,7 +2,7 @@
 
 > **Status**: Accepted
 > **Domain**: BFF API Deployment / Packaging
-> **Last Updated**: 2026-05-26
+> **Last Updated**: 2026-07-08 (baseline re-measured by `spaarke-ai-architecture-redesign-r1` task 055)
 > **Source project**: `sdap-bff-api-remediation-fix` Phase 4 (Outcome A + Outcome B), 2026-05-25
 
 ---
@@ -35,7 +35,7 @@ The `Sprk.Bff.Api` publish output MUST be **framework-dependent linux-x64**, MUS
   <PackageReference Include="System.Security.Cryptography.Xml" Version="8.0.3" />
   ```
   Patches GHSA-37gx-xxp4-5rgx + GHSA-w3x6-4m5h-cxqf (both HIGH); same-major bump; surgical scope.
-- **MUST** stay within the documented publish-size baseline: compressed zip ≤ 50 MB (current measured 45.65 MB; ceiling = baseline + 10%) and uncompressed ≤ 150 MB. Phase 5 measured 45.65 MB compressed / 139 MB uncompressed / 279 files / 268 `deps.json` entries.
+- **MUST** stay within the documented publish-size thresholds: **≤60 MB compressed HARD STOP; ≥55 MB architecture review** (NFR-01, root CLAUDE.md §10) and uncompressed ≤ 150 MB. Current baseline (2026-07-08, task 055): **49.63 MB compressed incl. PDBs** (Compress-Archive Optimal, deploy lineage; 45.87 MB excl. PDBs) / 143.75 MB uncompressed / 247 files. State the PDB convention when reporting a measurement. History: 72.9 (2026-05-19 drift) → 45.65 (Phase 5 close 2026-05-26) → 46.87 (redesign-r1 G-P0, master drift) → 49.63.
 - **MUST** verify HIGH-severity vulnerability scan after any package change:
   ```
   dotnet list package --vulnerable --include-transitive
@@ -58,7 +58,7 @@ The BFF publish package grew from ~60 MB to 75.2 MB compressed between 2026-03 a
 
 Framework-dependent Linux-x64 publish is the maximum-leverage rule: it eliminates 10 RIDs at once. Sourcemap exclusion is a smaller win (~1 MB) but addresses a production hygiene + IP-exposure concern. The transitive override pattern is documented because it is genuinely the right tool when major version bumps of the parent identity stack are out of scope — and it is a surgical alternative that does not preclude a later full IdentityModel bump if other work requires it.
 
-The publish-size baseline ceiling is documented here for CI to enforce (FR-C5; the `Deploy-BffApi.ps1` hard-fail size guard is the implementation; CI workflow guard is a follow-up). This ADR records the canonical baseline (45.65 MB compressed at Phase 5 close) and the +10% ceiling that the guard MUST honor.
+The publish-size baseline is documented here for CI to enforce (FR-C5; CI workflow guard is a follow-up). This ADR records the canonical baseline (49.63 MB compressed incl. PDBs, 2026-07-08) governed by NFR-01's thresholds (60 hard stop / 55 review). **Guard-drift note (task 055)**: `Deploy-BffApi.ps1` only WARNS above 100 MB — the previously documented 50 MB hard-fail guard never existed as described; reconcile the script when next touched.
 
 ---
 
@@ -71,8 +71,8 @@ How to confirm any of these rules is currently honored:
 | Linux-x64 only | `find publish/runtimes -type d` | Returns empty (no `runtimes/` directory) |
 | No sourcemaps in publish | `find publish/wwwroot -name "*.js.map" \| wc -l` | Returns `0` |
 | No HIGH transitive CVE for SCC.Xml | `dotnet list package --vulnerable --include-transitive \| grep "System.Security.Cryptography.Xml"` | Returns no output |
-| Compressed publish size | `scripts/Deploy-BffApi.ps1` package-size line | ≤ 50 MB (45.65 MB current; ceiling 50 MB) |
-| Uncompressed publish size | `du -sm deploy/api-publish/` | ≤ 150 MB (139 MB current) |
+| Compressed publish size | `scripts/Deploy-BffApi.ps1` package-size line | ≤ 60 MB hard stop / ≥ 55 MB review (49.63 MB current incl. PDBs) |
+| Uncompressed publish size | `du -sm deploy/api-publish/` | ≤ 150 MB (143.75 MB current) |
 | csproj has all four rules | `grep -E "RuntimeIdentifier\|SelfContained\|wwwroot.*js\.map\|System\.Security\.Cryptography\.Xml" Sprk.Bff.Api.csproj` | Returns ≥ 4 matching lines |
 
 ---

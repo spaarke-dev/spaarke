@@ -310,12 +310,17 @@ public class InsightsAssistantEndpointContractTests : IClassFixture<InsightsAssi
     [Fact]
     public async Task Post_DefaultPlaybookUnconfigured_Returns503WithSpecificErrorCode()
     {
-        // Arrange — handler couldn't resolve default playbook Guid for forceMode=playbook.
+        // Arrange — handler couldn't resolve the default insights-ask Binding row for
+        // forceMode=playbook (FR-P3-01: catalog rows replaced the config map). The
+        // endpoint maps InvalidOperationException messages carrying the "Default
+        // playbook" token to 503 errorCode ai.assistant-default-playbook.unconfigured.
         _fixture.InsightsAiMock.Reset();
         _fixture.InsightsAiMock
             .Setup(s => s.AssistantQueryAsync(It.IsAny<AssistantQueryFacadeRequest>(), It.IsAny<CancellationToken>()))
             .ThrowsAsync(new InvalidOperationException(
-                "Default playbook 'predict-matter-cost@v1' is not configured in 'Insights:Playbooks:Map'."));
+                "Default playbook resolution failed: no enabled sprk_playbookconsumer Binding row " +
+                "(consumerType 'insights-ask', sprk_consumercode 'default') with a sprk_playbook target " +
+                "exists in this environment."));
 
         var client = _fixture.CreateAuthenticatedTenantClient();
         var request = new { query = "q", subject = SampleMatterSubject, forceMode = "playbook" };

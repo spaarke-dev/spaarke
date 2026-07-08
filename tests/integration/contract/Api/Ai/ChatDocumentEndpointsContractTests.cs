@@ -1,5 +1,6 @@
 using System.Net;
 using System.Net.Http.Headers;
+using System.Net.Http.Json;
 using System.Security.Claims;
 using System.Text;
 using System.Text.Encodings.Web;
@@ -259,6 +260,63 @@ public class ChatDocumentEndpointsContractTests : IClassFixture<ChatDocumentEndp
             "back-compat: metadata cache write (resource=doc-upload-meta) must still happen");
     }
 
+    // ─────────────────────────────────────────────────────────────────────────
+    // FR-P1-03 (task 022) — Event-path route contracts
+    // ─────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task FireDocumentUploadedEvent_WhenAiFeatureDisabled_Returns503WithStableErrorCode()
+    {
+        // The fixture registers the PRODUCTION NullEventRulesService (the compound-OFF DI
+        // branch) — this is the endpoint's kill-switch contract: pre-stream probe catches
+        // FeatureDisabledException and emits the canonical 503 (ADR-018/ADR-019), never a
+        // dead SSE stream.
+        _fx.Reset();
+        var client = _fx.CreateAuthenticatedClient();
+
+        var response = await client.PostAsJsonAsync(
+            $"/api/ai/chat/sessions/{TestSessionId}/events/document-uploaded",
+            new { fileIds = new[] { "file-1" }, typedCommand = (string?)null });
+
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable);
+        var body = await response.Content.ReadAsStringAsync();
+        body.Should().Contain("ai.event-rules.disabled",
+            "clients switch on the stable errorCode to render feature-disabled UX");
+    }
+
+    [Fact]
+    public async Task FireDocumentUploadedEvent_InvalidSessionIdFormat_Returns400ProblemDetails()
+    {
+        _fx.Reset();
+        var client = _fx.CreateAuthenticatedClient();
+
+        var response = await client.PostAsJsonAsync(
+            "/api/ai/chat/sessions/not-a-guid/events/document-uploaded",
+            new { fileIds = new[] { "file-1" } });
+
+        response.StatusCode.Should().Be(HttpStatusCode.BadRequest);
+        (await response.Content.ReadAsStringAsync()).Should().Contain("sessionId.invalid");
+    }
+
+    [Fact]
+    public async Task EventRulesOptOut_GetPutGet_RoundTripsPerUserPreference()
+    {
+        _fx.Reset();
+        var client = _fx.CreateAuthenticatedClient();
+
+        var initial = await client.GetAsync("/api/ai/chat/event-rules/opt-out");
+        initial.StatusCode.Should().Be(HttpStatusCode.OK);
+        (await initial.Content.ReadAsStringAsync()).Should().Contain("\"optedOut\":false",
+            "auto-run is the product default");
+
+        var put = await client.PutAsJsonAsync("/api/ai/chat/event-rules/opt-out", new { optedOut = true });
+        put.StatusCode.Should().Be(HttpStatusCode.OK);
+
+        var after = await client.GetAsync("/api/ai/chat/event-rules/opt-out");
+        (await after.Content.ReadAsStringAsync()).Should().Contain("\"optedOut\":true",
+            "the FR-P1-03 opt-out bound persists per user (real EventPathUserState over the fixture cache)");
+    }
+
     // ─── Helpers ───────────────────────────────────────────────────────────────
 
     private static ChatSession BuildSession(string sessionId, IReadOnlyList<ChatSessionFile>? uploadedFiles)
@@ -338,6 +396,9 @@ public sealed class ChatDocumentEndpointsTestFixture : IAsyncLifetime, IDisposab
                 System.Threading.RateLimiting.RateLimitPartition.GetNoLimiter("ai-upload-test"));
             opt.AddPolicy("ai-persist", _ =>
                 System.Threading.RateLimiting.RateLimitPartition.GetNoLimiter("ai-persist-test"));
+            // FR-P1-03 (task 022) — the document_uploaded event route shares the ai-context policy.
+            opt.AddPolicy("ai-context", _ =>
+                System.Threading.RateLimiting.RateLimitPartition.GetNoLimiter("ai-context-test"));
         });
 
         builder.Services.AddProblemDetails();
@@ -388,6 +449,20 @@ public sealed class ChatDocumentEndpointsTestFixture : IAsyncLifetime, IDisposab
         // UploadPipelineTelemetryTests.cs.
         builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.Telemetry.IContextEventEmitter>(_ =>
             Moq.Mock.Of<Sprk.Bff.Api.Services.Ai.Telemetry.IContextEventEmitter>());
+
+        // FR-P1-03 (ai-architecture-redesign-r1 task 022) — the Event-path routes added to
+        // MapChatDocumentEndpoints inject two new services:
+        //  - IEventRulesService: register the PRODUCTION Null-Object peer (the compound-OFF
+        //    registration) so the fixture exercises the endpoint's real 503 feature-disabled
+        //    contract without wiring the full AI graph.
+        //  - IEventPathUserState: the REAL implementation over the fixture's recording
+        //    ITenantCache — the opt-out roundtrip contract tests exercise it end-to-end.
+        builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.EventRules.IEventRulesService,
+            Sprk.Bff.Api.Services.Ai.EventRules.NullEventRulesService>();
+        builder.Services.AddSingleton<IOptions<Sprk.Bff.Api.Services.Ai.EventRules.EventRulesOptions>>(
+            Options.Create(new Sprk.Bff.Api.Services.Ai.EventRules.EventRulesOptions()));
+        builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.EventRules.IEventPathUserState,
+            Sprk.Bff.Api.Services.Ai.EventRules.EventPathUserState>();
 
         builder.WebHost.UseTestServer();
         _app = builder.Build();

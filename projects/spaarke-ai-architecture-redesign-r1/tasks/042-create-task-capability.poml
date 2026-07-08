@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="042" project="spaarke-ai-architecture-redesign-r1">
+  <metadata>
+    <title>create-task capability — prompted Action → dataverse.create of sprk_event (type=task) under the conversational-confirm gate, carrying ledger refs</title>
+    <phase>Phase P3: Consumer + Client Consolidation</phase>
+    <status>not-started</status>
+    <estimated-hours>8</estimated-hours>
+    <tags>bff-api, capability, dataverse</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <parallel-group>W-P3-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>038</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement FR-P3-03: the `create-task` capability as a Prompted Action (authored via `jps-action-create`) whose write-shape is the EXISTING `dataverse.create` typed handler from task 009 — no new tool handler is built. The Action extracts task fields (title, due date, regarding record) from the conversation and creates a `sprk_event (type=task)` record under the conversational-confirm gate policy: the loop presents the proposed record, the user confirms in-conversation, then the write executes via the unified pending store. The created record MUST carry ledger references to its provenance — the source document and the source analysis output (`{bindingId}@t{n}`) from the session ledger. Acceptance is spec walkthrough steps 10-14 passing in the browser (a follow-up task created from a prior summary, with elicitation of any missing required args per FR-P2-03). This is the second half of the composition proof: analysis output → confirmed Dataverse write in one conversation.
+  </prompt>
+
+  <role>
+    Senior .NET developer familiar with the agent-turn loop, the dataverse.* typed handler contracts, JPS Action authoring, and the conversational-confirm gate semantics from Phase P2.
+  </role>
+
+  <goal>
+    A catalog-authored `create-task` Prompted Action + Binding that creates `sprk_event (type=task)` via the existing `dataverse.create` handler under conversational confirm, with source-document + source-analysis ledger refs persisted on the record, proven by tests and by walkthrough steps 10-14 in the browser at G-P3.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-architecture-redesign-r1/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-architecture-redesign-r1/plan.md</file>
+    <file purpose="project-context">projects/spaarke-ai-architecture-redesign-r1/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md</file>
+    <file purpose="per-component-verdicts">projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/OVERLAY-MATRIX.md</file>
+    <file purpose="jps-skill">.claude/skills/jps-action-create/SKILL.md</file>
+    <file purpose="data-model">docs/data-model/ (sprk_event schema)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-039">Capability lands as closed-catalog rows only (Action + Binding); MUST reuse the existing `dataverse.create` handler — MUST NOT add a new tool or routing config outside the Binding table; output grounded in ledger refs.</constraint>
+    <constraint source="ADR-040">The create-task execution writes SessionOutput + ToolChain ledger entries BEFORE any rendering; the created record's provenance fields reference ledger entries (`{bindingId}@t{n}`).</constraint>
+    <constraint source="FR-P2-02 / FR-P2-03">Gating via declared `side_effect_class` through THE one pending store (conversational-confirm presentation); missing required args produce a loop-native clarifying turn — no second elicitation mechanism.</constraint>
+    <constraint source="spec-MUST">`dataverse.create` runs user-OBO — the record is created in the user's security context; no app-only Dataverse path.</constraint>
+    <constraint source="ADR-013-amended-2026-07-05">Capability invocation is the canonical facade verb; PublicContracts boundary unchanged.</constraint>
+    <constraint source="ADR-029 / NFR-01">BFF-touching task: publish-size + delta reported; &gt;=+2 MB needs justification.</constraint>
+    <constraint source="NFR-02 / NFR-06">Golden-utterance eval cases added for create-task (incl. confirm-gate-fires + injection case: hostile document text must not trigger an ungated create); eval green is the merge gate.</constraint>
+    <constraint source="NFR-08">Hard cutover doctrine: any superseded ad-hoc task-creation path found in scope is deleted with shown grep-zero, not shimmed.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>jps-actions, dataverse-tools, confirmation-gate, session-ledger</topic>
+    <files>
+      <file>docs/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>docs/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/OVERLAY-MATRIX.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-MIGRATION-MAP.md</file>
+    </files>
+    <patterns>
+      <pattern name="Prompted executor" location="src/server/api/Sprk.Bff.Api/Services/Ai/LinearConsumers/">
+        ActionRunner + PromptSchemaRenderer execute the create-task Action from its JPS prompt + input/output schemas.
+      </pattern>
+      <pattern name="Tool framework" location="src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/">
+        The task-009 `dataverse.create` typed handler is the write-shape — reused, not rebuilt.
+      </pattern>
+      <pattern name="Gate store" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PendingPlanManager.cs">
+        Unified pending store; conversational-confirm is a gate PRESENTATION mode, not a second store.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      create-task closes the flagship-journey loop: after analysis and drafting, the user says "create a follow-up task to send this by Friday" and gets a real `sprk_event (type=task)` row with traceable provenance to the document and analysis that motivated it. Spaarke To Do surfaces (`docs/architecture/spaarke-todo-architecture.md`) then pick the record up with zero extra wiring.
+    </background>
+    <dependencies>
+      <dependency task="038" status="pending">G-P2 gate passed — loop, elicitation, unified gate, and dataverse.* handlers live.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 009 — dataverse.* WRITE handlers (create_record contract this Action invokes)</item>
+      <item>Task 032 — loop-native elicitation (missing due-date/title args produce a clarifying turn)</item>
+      <item>Task 041 — draft-correspondence (sibling proving capability, same wave)</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context check + load knowledge">
+      Verify context &lt; 70%. Load spec FR-P3-03 + walkthrough steps 10-14 semantics (FR-P2-03), the sprk_event schema, and the task-009 dataverse.create contract.
+    </step>
+    <step order="1" name="Author the JPS Action">
+      Invoke `jps-action-create` for create-task: instruction, input schema (title, due date, regarding, description), output schema mapping to `sprk_event (type=task)` attributes including ledger-ref provenance fields. Validate with `jps-validate`; create the `sprk_analysisaction` row (`kind: prompted`) on spaarkedev1.
+    </step>
+    <step order="2" name="Wire the Binding + gate policy">
+      Author the `sprk_playbookconsumer` Binding row with conversational-confirm gate policy (risk + capture_mode per the FR-P0-03 contract). Verify the flow suspends into the unified pending store and the confirm presentation renders the proposed record.
+    </step>
+    <step order="3" name="Ledger provenance">
+      Implement/verify the mapping that stamps the created record with source-document + source-analysis ledger refs (`{bindingId}@t{n}`) resolved from the session ledger; execution writes SessionOutput + ToolChain before rendering the confirmation result.
+    </step>
+    <step order="4" name="Tests + eval cases">
+      Tests: create flows through `dataverse.create` under user-OBO; gate suspends/resumes; record carries both ledger refs; missing-args yields a clarifying turn. Eval cases: "create a follow-up task..." utterance family + hostile-document injection case proving no ungated create.
+    </step>
+    <step order="5" name="Verify">
+      dotnet build + tests + eval suite green (shown). Publish-size delta reported per ADR-029.
+    </step>
+    <step order="6" name="Step 9.5 quality gates">
+      Run code-review + adr-check (FULL rigor). Update TASK-INDEX.md; reset current-task.md.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build, test, publish-size verification</tool>
+    <tool name="jps-action-create">Author the create-task JPS Action</tool>
+    <tool name="jps-validate">Validate the JPS JSON + rendering</tool>
+    <tool name="dataverse-mcp">Author Action/Binding rows; verify created sprk_event records on spaarkedev1</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="data">sprk_analysisaction (create-task, prompted) + sprk_playbookconsumer Binding rows on spaarkedev1</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/** (ledger-ref provenance mapping; no new tool handler)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/** (gate + provenance + OBO tests)</output>
+    <output type="test">tests/integration/contract/** (create-task eval cases incl. injection)</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">create-task executes as a catalog Prompted Action whose write goes through the existing `dataverse.create` typed handler creating `sprk_event (type=task)` — no new tool handler, no routing outside the Binding table.</criterion>
+    <criterion testable="true">The write executes only after conversational confirm through the ONE pending store, driven by declared side_effect_class (test-proven suspend/resume).</criterion>
+    <criterion testable="true">The created record carries ledger refs to the source document AND the source analysis output (test-proven).</criterion>
+    <criterion testable="true">Walkthrough steps 10-14 pass in the browser (verified at gate task 048).</criterion>
+    <criterion testable="true">Eval cases (incl. hostile-document injection with no ungated side effect) green; publish-size delta reported; Step 9.5 code-review + adr-check passed.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

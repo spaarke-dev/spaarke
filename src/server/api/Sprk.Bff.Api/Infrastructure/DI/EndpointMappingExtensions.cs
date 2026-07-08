@@ -1,3 +1,4 @@
+using Microsoft.AspNetCore.Diagnostics.HealthChecks;
 using Spaarke.Dataverse;
 using Sprk.Bff.Api.Api;
 using Sprk.Bff.Api.Api.Admin;
@@ -41,7 +42,21 @@ public static class EndpointMappingExtensions
         // Anonymous client config endpoint — MSAL bootstrap fallback for direct URL access (AIPU-091)
         app.MapMsalConfigEndpoints();
 
-        app.MapHealthChecks("/healthz").AllowAnonymous();
+        // /healthz is the App Service LIVENESS probe — it must not fail on catalog
+        // drift (an unseeded catalog would recycle instances forever). The FR-P0-04
+        // reconciliation check (tag "catalog") is exposed on its own endpoint below;
+        // drift additionally logs at Error on startup via the hosted service.
+        app.MapHealthChecks("/healthz", new HealthCheckOptions
+        {
+            Predicate = registration => !registration.Tags.Contains("catalog")
+        }).AllowAnonymous();
+
+        // FR-P0-04 catalog-reconciliation probe: Unhealthy on constants↔rows drift or
+        // tool↔handler bijection violation. Verified green at gate task 014 after seeding.
+        app.MapHealthChecks("/healthz/catalog", new HealthCheckOptions
+        {
+            Predicate = registration => registration.Tags.Contains("catalog")
+        }).AllowAnonymous();
 
         app.MapGet("/healthz/dataverse", TestDataverseConnectionAsync);
         app.MapGet("/healthz/dataverse/crud", TestDataverseCrudOperationsAsync);
@@ -133,8 +148,9 @@ public static class EndpointMappingExtensions
         {
             app.MapAnalysisEndpoints();
             app.MapPlaybookEndpoints();
-            app.MapPlaybookEmbeddingEndpoints();
-            app.MapAiPlaybookBuilderEndpoints();
+            // MapAiPlaybookBuilderEndpoints removed 2026-07-07 (redesign-r1 task 050, FR-P4-04 server
+            // leg): /api/ai/playbook-builder/* had zero client callers after task 053 deleted the
+            // canvas estate; the BA catalog editor saves via Dataverse Web API directly.
             app.MapScopeEndpoints();
             app.MapNodeEndpoints();
             app.MapPlaybookRunEndpoints();
@@ -150,13 +166,22 @@ public static class EndpointMappingExtensions
         app.MapFeedbackEndpoints();
         app.MapChatEndpoints();
 
-        // R5 task 014 (D2-04) — direct entry point for the chat-driven Summarize vertical
-        // slice. Maps POST /api/ai/chat/sessions/{sessionId}/summarize and delegates to
-        // SessionSummarizeOrchestrator (task 012). UNCONDITIONAL mapping per R5 §3.2 — the
-        // orchestrator is also registered unconditionally in AnalysisServicesModule.cs
-        // (asymmetric-registration rule R5 §10 F.1 satisfied). Sibling agent-tool path
-        // (task 015) converges on the same orchestrator.
+        // FR-P1-01 (ai-architecture-redesign-r1 task 020) — catalog-driven chat-summarize.
+        // Maps POST /api/ai/chat/sessions/{sessionId}/summarize and delegates to
+        // the ONE dispatch seam (task 044), which resolves the chat-summarize Binding row and
+        // executes the SUM-CHAT@v1 prompted Action via ActionRunner + PromptSchemaRenderer.
+        // UNCONDITIONAL mapping — the orchestrator has a Null-Object mirror registered on
+        // the compound-OFF branch (asymmetric-registration rule §10 F.1 satisfied).
         app.MapSummarizeSessionEndpoint();
+
+        // FR-P1-04 (ai-architecture-redesign-r1 task 023b) — the Click entry path.
+        // Maps POST /api/ai/chat/sessions/{sessionId}/dispatch and delegates to
+        // SessionDispatchOrchestrator, which resolves the chip's binding_id against the
+        // Binding table (ADR-039 — the id IS the routing decision) and executes the
+        // prompted Action with the ADR-040 ledger write before render.
+        // UNCONDITIONAL mapping — NullSessionDispatchOrchestrator mirror registered on
+        // the compound-OFF branch (asymmetric-registration rule §10 F.1 satisfied).
+        app.MapDispatchSessionEndpoint();
 
         try { app.MapChatDocumentEndpoints(); }
         catch (Exception ex)
@@ -184,12 +209,13 @@ public static class EndpointMappingExtensions
             app.MapRecordMatchingAdminEndpoints();
         }
 
-        // Admin endpoints that depend on Analysis services (ReferenceIndexingService, BuilderScopeImporter)
+        // Admin endpoints that depend on Analysis services (ReferenceIndexingService).
+        // MapBuilderScopeAdminEndpoints removed 2026-07-07 (redesign-r1 task 050) with the
+        // AiPlaybookBuilder estate — builder-scope import had no surviving consumer.
         if (app.Configuration.GetValue<bool>("DocumentIntelligence:Enabled") &&
             app.Configuration.GetValue<bool>("Analysis:Enabled", true))
         {
             app.MapAdminKnowledgeEndpoints();
-            app.MapBuilderScopeAdminEndpoints();
         }
 
         app.MapWorkspaceEndpoints();

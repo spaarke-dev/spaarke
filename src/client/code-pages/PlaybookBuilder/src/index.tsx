@@ -1,10 +1,12 @@
 /**
  * PlaybookBuilder -- React 19 Code Page Entry Point
  *
- * Opened via Xrm.Navigation.navigateTo from the playbook form:
+ * FR-P4-04 de-scope: this page is the BA catalog authoring surface (Action +
+ * Binding rows over the two closed catalogs). The graph/canvas authoring it
+ * previously hosted is retired (ratified OQ-2; the engine is frozen). It is
+ * opened standalone or via Xrm.Navigation.navigateTo:
  *   Xrm.Navigation.navigateTo(
- *     { pageType: "webresource", webresourceName: "sprk_playbookbuilder",
- *       data: "playbookId=..." },
+ *     { pageType: "webresource", webresourceName: "sprk_playbookbuilder" },
  *     { target: 2, width: { value: 95, unit: "%" }, height: { value: 95, unit: "%" } }
  *   )
  *
@@ -32,46 +34,10 @@ import { resolveCodePageTheme, setupCodePageThemeListener } from '@spaarke/ui-co
 import { App } from './App';
 
 // ---------------------------------------------------------------------------
-// Parse URL parameters
-// ---------------------------------------------------------------------------
-
-const rawUrlParams = new URLSearchParams(window.location.search);
-const dataEnvelope = rawUrlParams.get('data');
-const appParams = dataEnvelope ? new URLSearchParams(decodeURIComponent(dataEnvelope)) : rawUrlParams;
-
-function resolvePlaybookId(): string {
-  // 1. Explicit URL parameter (navigateTo data envelope)
-  const explicit = appParams.get('playbookId');
-  if (explicit) return explicit.replace(/[{}]/g, '').toLowerCase();
-
-  // 2. Dataverse ?id= parameter
-  const dvId = rawUrlParams.get('id');
-  if (dvId) return dvId.replace(/[{}]/g, '').toLowerCase();
-
-  // 3. Embedded web resource on form — get record ID from parent Xrm context
-  try {
-    /* eslint-disable @typescript-eslint/no-explicit-any */
-    const xrm = (window as any).parent?.Xrm;
-    const formContext = xrm?.Page;
-    if (formContext?.data?.entity) {
-      const entityId = formContext.data.entity.getId();
-      if (entityId) return entityId.replace(/[{}]/g, '').toLowerCase();
-    }
-    /* eslint-enable @typescript-eslint/no-explicit-any */
-  } catch {
-    // Cross-origin or Xrm not available — continue
-  }
-
-  return '';
-}
-
-const playbookId = resolvePlaybookId();
-
-// ---------------------------------------------------------------------------
 // ThemeRoot -- wrapper that uses useThemeDetection hook
 // ---------------------------------------------------------------------------
 
-function ThemeRoot({ apiBaseUrl }: { apiBaseUrl: string }): JSX.Element {
+function ThemeRoot(): JSX.Element {
   const [theme, setTheme] = useState(resolveCodePageTheme);
 
   useEffect(() => {
@@ -87,7 +53,7 @@ function ThemeRoot({ apiBaseUrl }: { apiBaseUrl: string }): JSX.Element {
 
   return (
     <FluentProvider theme={theme} style={{ height: '100%' }}>
-      <App playbookId={playbookId} apiBaseUrl={apiBaseUrl} />
+      <App />
     </FluentProvider>
   );
 }
@@ -107,14 +73,13 @@ async function bootstrap(): Promise<void> {
 
   // Resolve BFF URL + MSAL client ID from Dataverse Environment Variables at runtime
   const runtimeConfig = await resolveRuntimeConfig();
-  const apiBaseUrl = runtimeConfig.bffBaseUrl;
 
   // Set window globals so @spaarke/auth resolveConfig() can pick them up
   // when initAuth() is called later during authentication
   window.__SPAARKE_MSAL_CLIENT_ID__ = runtimeConfig.msalClientId;
   window.__SPAARKE_BFF_BASE_URL__ = runtimeConfig.bffBaseUrl;
 
-  createRoot(container).render(<ThemeRoot apiBaseUrl={apiBaseUrl} />);
+  createRoot(container).render(<ThemeRoot />);
 }
 
 bootstrap();

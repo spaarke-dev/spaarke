@@ -10,7 +10,7 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 
 /// <summary>
 /// Chat-side typed handler that searches the public web via Azure Bing Web Search v7 API
-/// (R6 Wave 8). Replaces the legacy hardcoded <c>WebSearchTools</c> class previously
+/// (R6 Wave 8). Replaces the legacy hardcoded <c>WebSearch chat-tools</c> class previously
 /// instantiated in <c>SprkChatAgentFactory.ResolveTools</c>.
 /// </summary>
 /// <remarks>
@@ -102,7 +102,7 @@ public sealed class WebSearchHandler : IToolHandler
 
     /// <summary>
     /// Named HttpClient registration name for Bing Web Search API. Preserved from the
-    /// legacy <c>WebSearchTools.HttpClientName</c> so the existing typed HttpClient
+    /// legacy <c>WebSearch chat-tools.HttpClientName</c> so the existing typed HttpClient
     /// registration continues to work without DI changes.
     /// </summary>
     public const string HttpClientName = "BingWebSearch";
@@ -110,19 +110,19 @@ public sealed class WebSearchHandler : IToolHandler
     /// <summary>
     /// Bounds concurrent Bing API calls to max 2 per ADR-016. Static across all
     /// <see cref="WebSearchHandler"/> instances (handler is DI-scoped; the semaphore is
-    /// process-wide — same shape as the legacy <c>WebSearchTools.s_bingConcurrencyGate</c>).
+    /// process-wide — same shape as the legacy <c>WebSearch chat-tools.s_bingConcurrencyGate</c>).
     /// </summary>
     private static readonly SemaphoreSlim s_bingConcurrencyGate = new(2, 2);
 
     /// <summary>
     /// Timeout for acquiring the concurrency semaphore before falling back to mock results.
-    /// Preserved from legacy <c>WebSearchTools.s_semaphoreTimeout</c>.
+    /// Preserved from legacy <c>WebSearch chat-tools.s_semaphoreTimeout</c>.
     /// </summary>
     private static readonly TimeSpan s_semaphoreTimeout = TimeSpan.FromSeconds(10);
 
     /// <summary>
     /// Timeout for individual Bing API HTTP requests. Preserved from legacy
-    /// <c>WebSearchTools.s_httpTimeout</c>.
+    /// <c>WebSearch chat-tools.s_httpTimeout</c>.
     /// </summary>
     private static readonly TimeSpan s_httpTimeout = TimeSpan.FromSeconds(5);
 
@@ -475,7 +475,7 @@ public sealed class WebSearchHandler : IToolHandler
 
     /// <summary>
     /// Applies scope search guidance to the query by prepending guidance terms — preserves
-    /// the verbatim behavior of <c>WebSearchTools.ApplyScopeGuidance</c>.
+    /// the verbatim behavior of <c>WebSearch chat-tools.ApplyScopeGuidance</c>.
     /// </summary>
     internal static string ApplyScopeGuidance(string query, string? scopeSearchGuidance)
     {
@@ -605,7 +605,7 @@ public sealed class WebSearchHandler : IToolHandler
 
     /// <summary>
     /// Formats search results into an AI-readable text block with inline [N] markers.
-    /// Preserves the legacy <c>WebSearchTools.FormatResults</c> shape so the LLM sees the
+    /// Preserves the legacy <c>WebSearch chat-tools.FormatResults</c> shape so the LLM sees the
     /// same text format it expects.
     /// </summary>
     private static string FormatResults(IReadOnlyList<WebSearchResult> results, string? degradationNote)
@@ -640,7 +640,7 @@ public sealed class WebSearchHandler : IToolHandler
     /// <summary>
     /// Generates mock search results for development and testing. Used when Bing API key
     /// is not configured or when concurrency limit is reached. Preserved verbatim from
-    /// legacy <c>WebSearchTools.GenerateMockResults</c>.
+    /// legacy <c>WebSearch chat-tools.GenerateMockResults</c>.
     /// </summary>
     internal static List<WebSearchResult> GenerateMockResults(int count)
     {

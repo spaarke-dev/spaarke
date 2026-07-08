@@ -81,18 +81,20 @@ Constraints on the pattern:
 
 ### 4. Publish-Size Baseline Ratchet (FR-A4 / FR-A5 / FR-C5)
 
-The Phase 5 measured publish baseline is the documented ceiling for future CI guards:
+**Current baseline (measured 2026-07-08 by `spaarke-ai-architecture-redesign-r1` task 055, project close)** — downstream projects diff against THIS row. Measurement method: fresh `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/` + PowerShell `Compress-Archive -CompressionLevel Optimal` over `deploy/api-publish/*` **including the 4 PDBs** (the same content `Deploy-BffApi.ps1` ships); sizes in MiB (`bytes / 1MB` in PowerShell):
 
-| Metric | Measured (Phase 5 close, 2026-05-25) | Documented ceiling |
+| Metric | Measured (2026-07-08) | Governing threshold |
 |---|---:|---:|
-| Compressed publish (`.zip`) | **45.65 MB** | 50 MB (baseline + 10%) |
-| Uncompressed publish (`du -sm deploy/api-publish/`) | **139 MB** | 150 MB |
-| File count | **279** | informational only |
-| `Sprk.Bff.Api.deps.json` entries | **268** | informational; baseline for reflection-load probe |
-| Runtime native binaries (`publish/runtimes/`) | **0** (entire tree eliminated) | 0 (binding) |
-| HIGH-severity transitive CVEs in scope | **0** (Kiota HIGH explicitly accepted-risk pending Graph SDK 6.x upgrade) | 0 (excluding documented accepted-risk packages) |
+| Compressed publish (`.zip`, incl. PDBs — deploy lineage) | **49.63 MB** | ≤60 MB HARD STOP; ≥55 MB architecture review (NFR-01, root CLAUDE.md §10) |
+| Compressed publish excl. PDBs (source-hygiene lineage) | **45.87 MB** | informational (PDBs compress to ~3.76 MB) |
+| Uncompressed publish | **143.75 MB** | 150 MB |
+| File count | **247** | informational only |
+| Runtime native binaries (`publish/runtimes/`) | **0** | 0 (binding) |
+| HIGH-severity transitive CVEs in scope | **0 new** (Kiota HIGH GHSA-7j59-v9qr-6fq9 remains the sole finding — explicitly accepted-risk pending Graph SDK 6.x upgrade) | 0 (excluding documented accepted-risk packages) |
 
-The `Deploy-BffApi.ps1` hard-fail size guard implementation (project task 070) reads the 50 MB ceiling. A CI workflow guard (FR-C5) is a planned follow-up; this ADR documents the baseline for that future guard to consume.
+Baseline history: 72.9 MB (2026-05-19 trigger) → **45.65 MB** (Phase 5 close, 2026-05-25/26) → 46.87 MB (project-start actual at `spaarke-ai-architecture-redesign-r1` G-P0 deploy, 2026-07-05 — accumulated master drift from intervening projects) → **49.63 MB** (2026-07-08, this baseline). The redesign project's Track-B deletions (dispatcher stack, engine shells, 42 PlaybookBuilder server files, canvas estate) reduced file count 279 → 247 and shrank `wwwroot/`, but net NEW capability (agent loop, gate/elicitation machinery, email + work_product disposition legs, widget layer, eval suite, per-tenant metering) grew `Sprk.Bff.Api.dll` (~10 MB) and its PDB (~4.9 MB) beyond the deletions — the compressed delta vs the 2026-05-26 baseline is +3.98 MB, of which +1.22 MB predates the project (master drift). No package additions drove the growth.
+
+**Guard-drift note (recorded 2026-07-08, task 055)**: this ADR previously stated `Deploy-BffApi.ps1` has a "hard-fail size guard reading the 50 MB ceiling". The script as shipped only WARNS above 100 MB (line ~264). The former 50 MB documented ceiling is also now below the measured baseline; the governing thresholds are NFR-01's (60 hard stop / 55 review). A future CI workflow guard (FR-C5) should read this table's current baseline and the NFR-01 thresholds, and the script guard should be reconciled when next touched.
 
 ## Consequences
 

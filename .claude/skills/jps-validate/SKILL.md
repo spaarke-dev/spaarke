@@ -176,13 +176,13 @@ LEGACY-DRIFT FAIL conditions (any of these = validator FAIL with LEGACY-* rule i
   - LEGACY-DH: Node config carries a dispatch hint that is NOT `sprk_executortype` (e.g., a custom `dispatchTo` field) — author is reaching for the old model
 ```
 
-### Step 7.7: Typed Config-Schema Check (BINDING per spec FR-16; Wave 3 endpoint)
+### Step 7.7: Typed Config-Schema Check (BINDING per spec FR-16; source-code schemas)
 
-For each node, fetch the executor's typed config schema from the BFF endpoint and validate the node's `sprk_configjson` against it. This catches authoring errors before Deploy-Playbook.ps1 sees them.
+For each node, read the executor's typed config schema from its `INodeExecutor.GetConfigSchema()` implementation in source (`src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/`) and validate the node's `sprk_configjson` against it. This catches authoring errors before Deploy-Playbook.ps1 sees them. (The former `GET /api/ai/playbook-builder/executor-config-schemas` endpoint was DELETED 2026-07-07 by ai-architecture-redesign-r1 task 050 with the AI-assisted builder surface.)
 
 ```
-  ✅/❌ R7-V-05: GET /api/ai/playbook-builder/executor-config-schemas (Wave 3 task 033)
-    — Returns 33 schemas (one per ExecutorType value)
+  ✅/❌ R7-V-05: INodeExecutor.GetConfigSchema() implementations readable in source
+    — One schema per ExecutorType value (33)
     — Each schema declares fields[].name, type, required, default, description
 
   ✅/❌ R7-V-06: node.sprk_configjson conforms to its executorType's schema
@@ -243,7 +243,8 @@ Generate validation report.
 
 {IF all passed}
 ✅ JPS is valid and ready for deployment!
-  Seed to Dataverse: scripts/Seed-JpsActions.ps1
+  Create the row via Dataverse MCP create_record + mirror in infra/dataverse/
+  (Seed-JpsActions.ps1 RETIRED 2026-07-07 — see scripts/README.md)
 ```
 
 ---
@@ -329,7 +330,7 @@ User: "check this JPS: { \"instruction\": { \"role\": \"analyst\" } }"
 **After R7** (Invariants 1-3):
 - `PlaybookOrchestrationService.ExecuteNodeAsync` reads `node.sprk_executortype` (Choice) once. Single hop. No ladder.
 - The 33 executor types catalog in `sprk_playbookexecutortype` global Choice mirrors the C# `ExecutorType` enum (Wave 2 task 022 rename from the legacy `ActionType` name).
-- Each executor declares its own typed config schema via `INodeExecutor.GetConfigSchema()` (Wave 3 FR-16 + tasks 030-036). The BFF endpoint `GET /api/ai/playbook-builder/executor-config-schemas` returns all 33.
+- Each executor declares its own typed config schema via `INodeExecutor.GetConfigSchema()` (Wave 3 FR-16 + tasks 030-036). Schemas are read from source; the former BFF endpoint serving them was deleted 2026-07-07 (ai-architecture-redesign-r1 task 050).
 - Action is a reusable prompt template for prompt-driven executors only. Pure executors don't reference an Action.
 
 **This validator's load-bearing job** under R7:
@@ -348,7 +349,7 @@ User: "check this JPS: { \"instruction\": { \"role\": \"analyst\" } }"
 - spec.md FR-32 — this skill's rewrite
 - `ExecutorType.cs` — C# enum (renamed in Wave 2 task 022)
 - `PlaybookOrchestrationService.ExecuteNodeAsync` — runtime source of truth (Wave 2 task 024)
-- `GET /api/ai/playbook-builder/executor-config-schemas` — BFF endpoint serving the 33 schemas (Wave 3 task 033)
+- `INodeExecutor.GetConfigSchema()` implementations (`Services/Ai/Nodes/`) — source of the 33 schemas (endpoint retired 2026-07-07, ai-architecture-redesign-r1 task 050)
 
 ---
 

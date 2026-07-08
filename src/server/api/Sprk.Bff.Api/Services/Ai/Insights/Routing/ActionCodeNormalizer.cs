@@ -26,7 +26,7 @@ namespace Sprk.Bff.Api.Services.Ai.Insights.Routing;
 /// <b>Lookup-boundary placement</b>: applied inside
 /// <c>InsightsActionRouter.LoadActionByCodeAsync</c> (the only call site that
 /// performs an alternate-key lookup against <c>sprk_actioncode</c> in the BFF).
-/// <c>PlaybookExecutionEngine.ResolveActionConfigViaFkChainAsync</c> uses FK
+/// the deleted engine shell (FR-P3-05 task 044) used FK
 /// resolution (not alternate-key) per the FR-26 invariant, so no normalization
 /// is needed there.
 /// </para>

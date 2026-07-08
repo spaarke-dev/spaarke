@@ -7,7 +7,7 @@
     spaarke-ai-platform-unification-r7 — Wave 4 schema cleanup.
 
     After R7 collapses dispatch to single-hop `node.sprk_executortype`
-    (Wave 2 tasks 024-028) and deletes `ExecuteAnalysisAsync` (Wave 4 task
+    (Wave 2 tasks 024-028) and deletes the legacy direct-invocation execute method (Wave 4 task
     042), the `sprk_actiontypeid` lookup from `sprk_analysisaction` to
     `sprk_analysisactiontype` has no runtime reader. Per FR-03, drop the
     field. The `sprk_analysisactiontype` lookup TABLE itself is preserved

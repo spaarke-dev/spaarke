@@ -21,9 +21,11 @@
  *
  * NFR-11 binding: when no slash is detected, parse() returns
  * `{ command: null, references: [], rawText, isHardSlash: false, isSoftSlash: false }`
- * so the downstream `handleBeforeSendMessage` path in `ConversationPane.tsx`
- * can fall through to the existing `CapabilityRouter` natural-language path
- * UNCHANGED. The parser is non-blocking and side-effect-free.
+ * so the downstream `handleDecorateOutboundBody` path in `useCommandRouting.ts`
+ * passes the utterance through UNCHANGED (references resolved if present) into
+ * the agent-turn loop (`SprkChatAgent` — the ADR-039 Text path; the R2
+ * `CapabilityRouter` this originally fell through to was deleted 2026-07 by
+ * ai-architecture-redesign-r1). The parser is non-blocking and side-effect-free.
  *
  * NFR-01 binding: parser does NOT interrupt the LLM's conversational ability.
  * It only classifies; it does not block.
@@ -116,7 +118,9 @@ export interface Reference {
  *   - `references[]` may be empty; never null
  *
  * The `null` command on no-slash input is THE NFR-11 contract — downstream
- * code MUST fall through to the existing `CapabilityRouter` path.
+ * code MUST pass the utterance through unchanged to the agent-turn loop
+ * (`SprkChatAgent`; the R2 `CapabilityRouter` was deleted 2026-07 by
+ * ai-architecture-redesign-r1).
  */
 export interface Intent {
   command: SlashCommand | null;
@@ -181,8 +185,8 @@ const REFERENCE_TOKEN_RE = /([#@])([A-Za-z0-9][A-Za-z0-9._\-]*)/g;
  *   3. If input has no leading slash, references are still extracted from
  *      the body (so natural-language `"Tell me about @opposing-counsel"`
  *      surfaces the entity reference for downstream context priming, even
- *      though command=null and the existing CapabilityRouter handles
- *      routing).
+ *      though command=null and the agent-turn loop (`SprkChatAgent`)
+ *      handles routing).
  *
  * Pure / synchronous / no side effects. Safe to call on every keystroke.
  *
@@ -231,7 +235,7 @@ export function parse(rawText: string): Intent {
     }
     // else: unrecognized slash → command stays null → NFR-11 passthrough.
     // The literal text (including the unrecognized `/foobar`) flows to the
-    // existing CapabilityRouter via the unchanged downstream path.
+    // agent-turn loop (SprkChatAgent) via the unchanged downstream path.
   }
 
   // ── Step 2: extract references from the full input ──────────────────────

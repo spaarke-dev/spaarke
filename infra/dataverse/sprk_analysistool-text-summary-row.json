@@ -5,6 +5,12 @@
   "_comment_consumption": "Read by scripts/Seed-TypedHandlers.ps1. Idempotent — script queries by sprk_handlerclass + sprk_name 'SYS-%' filter; UPSERTs.",
   "sprk_name": "SYS-Text Summary",
   "sprk_toolcode": "TEXT-SUMMARY",
+  "_comment_toolid": "FR-P2-07 (task 036) re-namespacing: namespaced tool id per the FR-P0-03 tool contract (text.* family). Pure LLM transform — no data access (side_effect_class = Pure, permission_scope = none); one focused single-turn LLM call (budget_class = standard).",
+  "sprk_toolid": "text.summary",
+  "sprk_namespace": "text",
+  "sprk_sideeffectclass": 100000003,
+  "sprk_permissionscope": "none",
+  "sprk_budgetclass": "standard",
   "sprk_description": "Generate a concise summary of a text passage in the requested format (bullet | paragraph | tldr). Use when the user needs a quick overview of lengthy content — a paragraph summary, a TL;DR, or a structured bullet-point summary.",
   "sprk_handlerclass": "TextRefinementHandler",
   "sprk_availableincontexts": 100000002,
@@ -14,7 +20,9 @@
     "title": "TextRefinementHandler.GenerateSummary Request",
     "description": "Argument shape for chat-driven invocation of the summary method. The 'text' field carries the content to summarise; optional 'format' selects the output style.",
     "type": "object",
-    "required": ["text"],
+    "required": [
+      "text"
+    ],
     "properties": {
       "text": {
         "type": "string",
@@ -23,7 +31,11 @@
       },
       "format": {
         "type": "string",
-        "enum": ["bullet", "paragraph", "tldr"],
+        "enum": [
+          "bullet",
+          "paragraph",
+          "tldr"
+        ],
         "description": "Desired output format: 'bullet' (default) — bullet list; 'paragraph' — single concise paragraph; 'tldr' — 1-2 sentence TL;DR."
       }
     },

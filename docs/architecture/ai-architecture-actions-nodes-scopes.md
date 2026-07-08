@@ -1,6 +1,8 @@
 # AI Architecture — Actions, Nodes, Scopes & the Config-Bag Boundary
 
-> **Last reviewed**: 2026-06-26
+> **⚠️ SCOPE NOTE (2026-07-07, spaarke-ai-architecture-redesign-r1 task 052)**: the node/playbook config homes below apply to the **FROZEN engine only** (Insights family; no new capability lands on the node graph per OQ-2/D11). For the shipped platform, capability config lives on **Action** (`sprk_analysisaction`: kind, input schema, model tier — see [`docs/data-model/sprk_analysisaction.md`](../data-model/sprk_analysisaction.md)) and **Binding** (`sprk_playbookconsumer`: tool description, disposition, chips, risk, capture mode, on-event — see [`docs/data-model/sprk-playbookconsumer.md`](../data-model/sprk-playbookconsumer.md)); routing config outside the Binding table is forbidden. The Action-vs-Node-vs-Playbook decision tree below remains valid when maintaining existing Insights playbooks.
+>
+> **Last reviewed**: 2026-06-26 (content) · 2026-07-07 (scope note only)
 > **Authored by**: canonical-truth loop step 3 (spaarke-daily-update-service-r4)
 > **Status**: Canonical. **Binding** for every project that adds a new column, JSON field, scope, action, or node-config knob to the playbook surface. Companion to `.claude/constraints/bff-extensions.md` §G.
 > **Scope**: The "where does this config live?" decision tree. Action-intrinsic behaviour vs playbook header metadata vs per-node runtime config vs playbook-level resource scope. Anti-patterns that conflate the four.
@@ -215,7 +217,7 @@ R4 adds `EntityNameValidator = 141` to the ActionType enum (`INodeExecutor.cs:25
 1. New ActionType integers should slot into the appropriate cluster (don't scatter).
 2. Reserve gaps within clusters for future expansion (don't fill consecutively unless the new ActionType is conceptually adjacent).
 3. Update `INodeExecutor.cs` enum + `NodeExecutorRegistry` registration + Deploy-Playbook.ps1 reference in the same PR.
-4. New ActionType requires a corresponding `sprk_actiontype` Dataverse row deployed via `Seed-JpsActions.ps1`.
+4. New ActionType requires a corresponding `sprk_actiontype` Dataverse row, created directly via the `jps-action-create` skill / Dataverse MCP (`Seed-JpsActions.ps1` RETIRED 2026-07, ai-architecture-redesign-r1).
 
 The policy is not yet binding — capture in this doc so it's not lost between R4 and R5.
 

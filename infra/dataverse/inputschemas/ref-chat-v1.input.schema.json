@@ -1,0 +1,17 @@
+{
+  "$comment": "Mirror of sprk_analysisaction.sprk_inputschema for REF-CHAT@v1 on spaarkedev1 (already valid JSON Schema at the G-P3 UAT round-1 catalog survey, 2026-07-07 — mirrored for the H4 regression net). CI-validated against the OpenAI function-parameters subset by CatalogInputSchemaContractTests.",
+  "actionCode": "REF-CHAT@v1",
+  "actionId": "8d337be2-3d79-f111-ab0e-7ced8ddc4cc6",
+  "environment": "spaarkedev1",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "unsupported_request": {
+        "type": "string",
+        "description": "Short neutral label (10 words or fewer) of what the user asked for, e.g. 'document translation'. Do not copy the user's message verbatim."
+      }
+    },
+    "required": ["unsupported_request"],
+    "additionalProperties": false
+  }
+}

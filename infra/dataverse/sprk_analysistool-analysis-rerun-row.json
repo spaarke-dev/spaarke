@@ -1,0 +1,47 @@
+{
+  "_comment_top": "spaarke-ai-architecture-redesign-r1 task 036 (FR-P2-07) — seed row for the AnalysisExecutionHandler 'rerun' method: the typed-handler migration of the last live legacy chat-tool capability (analysis re-execution).",
+  "_comment_routing": "Runtime invocation routes to AnalysisExecutionHandler via sprk_handlerclass; sprk_configuration.method = 'rerun' selects the re-execution pipeline. Session playbook/document ids reach the handler through ChatInvocationContext.PlaybookId/DocumentId (set by AgentToolCatalogProjector); progress + document_replace SSE events emit through ChatInvocationContext.SseWriter (ADR-033 side-channel principle).",
+  "_comment_side_effect": "sprk_sideeffectclass = 100000000 (Read) — OPERATOR RULING 2026-07-06 (G-P2 UAT round-1 fix wave, Path-A-style declaration change): an explicit user re-run request executes immediately without the confirmation gate. Rationale: the re-run regenerates the session's OWN analysis output (a new sprk_analysisoutput version of work the user is looking at, with client undo) — it never mutates tenant records the user hasn't seen. The gate remains for record-writes (dataverse.create_record/update_record/delete_record stay Write). Original task-036 declaration was Write; changed here + on spaarkedev1 row 2b09dfb5-5679-f111-ab0e-7ced8ddc4cc6.",
+  "_comment_identity": "Audit F-1 (notes/user-obo-audit.md; G-P0 ruling 2026-07-05 accept-until-cutover): the engine leg (IAnalysisOrchestrationService.ExecutePlaybookAsync) persists under application identity. sprk_permissionscope = 'app-only-engine' declares that reach explicitly; P3 task 044 deletes/OBO-migrates the remaining app-only engine legs.",
+  "_comment_capability_gate": "sprk_requiredcapability = 'reanalyze' preserves the pre-migration capability gate (task-079 lineage): only playbooks declaring 'reanalyze' expose re-execution; standalone chat (CoreCapabilities) never sees it.",
+  "_comment_consumption": "Read by scripts/Seed-TypedHandlers.ps1. Idempotent — UPSERT by sprk_toolcode with sprk_name 'SYS-%' safety filter.",
+  "sprk_name": "SYS-Analysis Rerun",
+  "sprk_toolcode": "ANALYSIS-RERUN",
+  "sprk_toolid": "analysis.rerun",
+  "sprk_namespace": "analysis",
+  "sprk_sideeffectclass": 100000000,
+  "sprk_permissionscope": "app-only-engine",
+  "sprk_budgetclass": "heavy",
+  "sprk_requiredcapability": "reanalyze",
+  "sprk_description": "Re-run the session's analysis playbook from scratch against the active document, optionally with additional instructions or focus areas. Use when the user asks to re-run, redo, or re-execute the analysis (e.g. 'rerun the analysis with more focus on financial risks'). Streams per-stage progress and replaces the document pane content with the new analysis on completion; the previous version is preserved in the client undo stack. Requires a session bound to a playbook and an active document.",
+  "sprk_handlerclass": "AnalysisExecutionHandler",
+  "sprk_availableincontexts": 100000001,
+  "_comment_availableincontexts": "100000001 = Chat only — the playbook engine must never re-enter itself via a playbook-orchestrated tool node.",
+  "sprk_jsonschema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "analysis.rerun Request",
+    "description": "Argument shape for chat-driven analysis re-execution. The playbook and document are taken from the session context — the LLM supplies only optional additional instructions.",
+    "type": "object",
+    "properties": {
+      "additionalInstructions": {
+        "type": "string",
+        "description": "Optional additional instructions or focus areas appended to the playbook's default instructions for the re-run."
+      }
+    },
+    "additionalProperties": false
+  },
+  "sprk_outputschema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "analysis.rerun Result",
+    "type": "object",
+    "properties": {
+      "method": { "const": "rerun" },
+      "text": { "type": "string", "description": "Confirmation summary for the agent's conversation context." },
+      "analysisId": { "type": "string", "description": "The new sprk_analysisoutput record id produced by the re-run." }
+    }
+  },
+  "sprk_configuration": {
+    "_comment": "method = 'rerun' is the dispatch discriminator. Sibling row ANALYSIS-REFINE exposes the refine method.",
+    "method": "rerun"
+  }
+}

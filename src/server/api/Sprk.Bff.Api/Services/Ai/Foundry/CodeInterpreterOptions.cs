@@ -3,7 +3,7 @@ using System.ComponentModel.DataAnnotations;
 namespace Sprk.Bff.Api.Services.Ai.Foundry;
 
 /// <summary>
-/// Configuration options for <see cref="CodeInterpreterBridge"/> and <see cref="Chat.Tools.CodeInterpreterTools"/>.
+/// Configuration options for <see cref="CodeInterpreterBridge"/> and the <c>CodeInterpreterHandler</c>.
 ///
 /// Bound from appsettings section <c>CodeInterpreter</c> in Program.cs / ConfigurationModule.cs.
 ///
@@ -12,7 +12,7 @@ namespace Sprk.Bff.Api.Services.Ai.Foundry;
 ///          instead of throwing an exception, so the AI model can gracefully inform the user.
 ///
 /// ADR-016: Concurrency gate — <see cref="MaxConcurrency"/> controls the <see cref="System.Threading.SemaphoreSlim"/>
-///          in <see cref="Chat.Tools.CodeInterpreterTools"/>. Calls that cannot acquire within
+///          in the <c>CodeInterpreterHandler</c>. Calls that cannot acquire within
 ///          <see cref="SandboxTimeoutSeconds"/> receive a 429-equivalent rejection string.
 ///
 /// ADR-015: Data governance — only caller-supplied data excerpts are forwarded to the sandbox.
@@ -24,7 +24,7 @@ public sealed class CodeInterpreterOptions
     public const string SectionName = "CodeInterpreter";
 
     /// <summary>
-    /// Kill switch (ADR-018). When <c>false</c>, <see cref="Chat.Tools.CodeInterpreterTools"/>
+    /// Kill switch (ADR-018). When <c>false</c>, the <c>CodeInterpreterHandler</c>
     /// returns a graceful unavailability string on every call rather than invoking the sandbox.
     /// Default: <c>false</c> (opt-in — must be explicitly enabled in configuration).
     /// </summary>
@@ -34,7 +34,7 @@ public sealed class CodeInterpreterOptions
     /// <summary>
     /// Maximum number of concurrent Code Interpreter sandbox invocations per BFF instance (ADR-016).
     /// Enforced via a static <see cref="System.Threading.SemaphoreSlim"/> in
-    /// <see cref="Chat.Tools.CodeInterpreterTools"/>. Requests that cannot acquire the semaphore
+    /// the <c>CodeInterpreterHandler</c>. Requests that cannot acquire the semaphore
     /// within <see cref="SandboxTimeoutSeconds"/> return a 429-equivalent user-readable message.
     /// Default: 2 concurrent sandbox calls.
     /// </summary>

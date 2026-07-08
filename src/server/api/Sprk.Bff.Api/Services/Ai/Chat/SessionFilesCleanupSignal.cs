@@ -9,8 +9,7 @@ namespace Sprk.Bff.Api.Services.Ai.Chat;
 /// </summary>
 /// <remarks>
 /// <para>
-/// Mirrors the canonical channel-signal pattern in
-/// <c>Sprk.Bff.Api.Services.Ai.PlaybookEmbedding.PlaybookIndexingService</c>:
+/// Canonical channel-signal pattern:
 /// producers call <see cref="SignalSessionEnded"/> (fire-and-forget);
 /// the background service drains via <see cref="Reader"/>. The reader-side
 /// is internal-by-design — only the hosted-service in this same assembly

@@ -113,18 +113,19 @@ public class PlaybookChatContextProviderEntityNameLazyFetchTests
 
         // Assert — enrichment fires using the fetched name
         context.SystemPrompt.Should()
-            .Contain("Context: You are assisting with matter record 'Smith v. Jones'.");
+            .Contain("Context: This chat is hosted on the matter record 'Smith v. Jones'");
         context.SystemPrompt.Should()
             .Contain("The user is viewing the main form view.");
     }
 
     /// <summary>
     /// Soft-fail invariant: when the Dataverse retrieve throws (outage / 404 / network),
-    /// enrichment is skipped (pre-T151 guard behaviour preserved) and the chat request
-    /// still succeeds with a non-enriched prompt. Chat request MUST NOT fail.
+    /// the chat request still succeeds. Since the G-P3 UAT round-1 H7 fix (2026-07-07)
+    /// the failure degrades to the ID-ONLY identity block — the loop is never left
+    /// blind to its host record just because the display name was unfetchable.
     /// </summary>
     [Fact]
-    public async Task GetContextAsync_MissingEntityName_LazyFetchFails_SkipsEnrichmentAndContinues()
+    public async Task GetContextAsync_MissingEntityName_LazyFetchFails_IdOnlyIdentityBlockAndContinues()
     {
         // Arrange — Dataverse throws on retrieve
         _dataverseServiceMock
@@ -148,9 +149,9 @@ public class PlaybookChatContextProviderEntityNameLazyFetchTests
             TestDocumentId, TestTenantId, TestPlaybookId, hostContext,
             cancellationToken: CancellationToken.None);
 
-        // Assert — chat request succeeded; enrichment skipped (no "Context: You are assisting" marker);
-        // base prompt still intact
-        context.SystemPrompt.Should().NotContain("Context: You are assisting with");
+        // Assert — chat request succeeded; H7 id-only identity block present; base prompt intact
+        context.SystemPrompt.Should().Contain(
+            $"Context: This chat is hosted on the matter record with id {TestMatterIdString}.");
         context.SystemPrompt.Should().Contain(BaseSystemPrompt);
     }
 
@@ -231,7 +232,7 @@ public class PlaybookChatContextProviderEntityNameLazyFetchTests
 
         // Assert — enrichment used the client-supplied name; Dataverse was NOT consulted
         context.SystemPrompt.Should()
-            .Contain("Context: You are assisting with matter record 'Client-Supplied Name'.");
+            .Contain("Context: This chat is hosted on the matter record 'Client-Supplied Name'");
         _dataverseServiceMock.Verify(
             d => d.RetrieveAsync(
                 It.IsAny<string>(),
@@ -244,10 +245,12 @@ public class PlaybookChatContextProviderEntityNameLazyFetchTests
 
     /// <summary>
     /// Boundary case: EntityId is not a parseable GUID. Lazy-fetch SHOULD return null
-    /// (no Dataverse call); enrichment is skipped; chat request succeeds.
+    /// (no Dataverse call). Since the G-P3 H7 fix the identity block still renders in
+    /// its id-only form (the id is whatever the client bound — deterministic pass-through);
+    /// chat request succeeds.
     /// </summary>
     [Fact]
-    public async Task GetContextAsync_MissingEntityName_InvalidGuidId_SkipsLazyFetchAndEnrichment()
+    public async Task GetContextAsync_MissingEntityName_InvalidGuidId_SkipsLazyFetchButKeepsIdentityBlock()
     {
         // Arrange — non-GUID EntityId
         var hostContext = new ChatHostContext(
@@ -263,7 +266,7 @@ public class PlaybookChatContextProviderEntityNameLazyFetchTests
             TestDocumentId, TestTenantId, TestPlaybookId, hostContext,
             cancellationToken: CancellationToken.None);
 
-        // Assert — no Dataverse call attempted; enrichment skipped
+        // Assert — no Dataverse call attempted; H7 id-only identity block still present
         _dataverseServiceMock.Verify(
             d => d.RetrieveAsync(
                 It.IsAny<string>(),
@@ -271,7 +274,8 @@ public class PlaybookChatContextProviderEntityNameLazyFetchTests
                 It.IsAny<string[]>(),
                 It.IsAny<CancellationToken>()),
             Times.Never);
-        context.SystemPrompt.Should().NotContain("Context: You are assisting with");
+        context.SystemPrompt.Should().Contain(
+            "Context: This chat is hosted on the matter record with id not-a-guid.");
         context.SystemPrompt.Should().Contain(BaseSystemPrompt);
     }
 
@@ -312,7 +316,7 @@ public class PlaybookChatContextProviderEntityNameLazyFetchTests
 
         // Assert — full enrichment fires: T151 lazy-fetches the name, T152 defaults the page type
         context.SystemPrompt.Should()
-            .Contain("Context: You are assisting with matter record 'Smith v. Jones'.");
+            .Contain("Context: This chat is hosted on the matter record 'Smith v. Jones'");
         context.SystemPrompt.Should()
             .Contain("The user is viewing the main form view.",
                 "T152 default PageType 'entityrecord' → 'main form view'");
@@ -355,7 +359,7 @@ public class PlaybookChatContextProviderEntityNameLazyFetchTests
 
         // Assert — enrichment fires; EntityType in the prompt is the post-T150 canonical form
         context.SystemPrompt.Should()
-            .Contain("Context: You are assisting with matter record 'Smith v. Jones'.");
+            .Contain("Context: This chat is hosted on the matter record 'Smith v. Jones'");
     }
 
     #region Setup helpers

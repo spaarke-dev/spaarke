@@ -699,8 +699,8 @@ public class AnalysisTestFixture : WebApplicationFactory<Program>
             // deleted the legacy direct-invocation path). The MockAnalysisOrchestrationService
             // registration below is retained because IAnalysisOrchestrationService is still
             // consumed by other endpoints/handlers (ContinueAnalysis, ResumeAnalysis, GetAnalysis,
-            // ExportAnalysis, SaveWorkingDocument, ExecutePlaybook, plus AnalysisQueryHandler /
-            // WorkingDocumentHandler). The scenario-driving mock for the migrated
+            // ExportAnalysis, SaveWorkingDocument, ExecutePlaybook, plus the (since-deleted, task 044)
+            // analysis-query/working-document handlers). The scenario-driving mock for the migrated
             // /api/ai/analysis/execute endpoint is MockPlaybookOrchestrationService below.
             services.RemoveAll<IAnalysisOrchestrationService>();
             services.AddScoped<IAnalysisOrchestrationService>(sp =>
@@ -729,14 +729,11 @@ public class AnalysisTestFixture : WebApplicationFactory<Program>
             services.AddSingleton(_ => new Mock<IRagService>(MockBehavior.Loose).Object);
             services.AddSingleton(_ => new Mock<SearchIndexClient>() { CallBase = false }.Object);
             services.AddScoped(_ => new Mock<IScopeResolverService>(MockBehavior.Loose).Object);
-            services.AddScoped<Sprk.Bff.Api.Services.Ai.Builder.BuilderScopeImporter>();
             services.AddScoped(_ => new Mock<IFileIndexingService>(MockBehavior.Loose).Object);
             services.AddSingleton(_ => new Mock<IKnowledgeDeploymentService>(MockBehavior.Loose).Object);
             services.AddScoped(_ => new Mock<IAppOnlyAnalysisService>(MockBehavior.Loose).Object);
             services.AddScoped(_ => new Mock<IPlaybookService>(MockBehavior.Loose).Object);
             services.AddScoped(_ => new Mock<INodeService>(MockBehavior.Loose).Object);
-            services.AddScoped(_ => new Mock<IAiPlaybookBuilderService>(MockBehavior.Loose).Object);
-            services.AddScoped(_ => new Mock<Sprk.Bff.Api.Services.Ai.Builder.IBuilderAgentService>(MockBehavior.Loose).Object);
             // R7 task 041 (FR-11) — scenario-aware mock for /api/ai/analysis/execute migration.
             // Replaces the previous loose mock that produced empty SSE streams. Drives the
             // same TestScenario enum the legacy MockAnalysisOrchestrationService used, so test
@@ -748,7 +745,6 @@ public class AnalysisTestFixture : WebApplicationFactory<Program>
             services.AddScoped(_ => new Mock<IScopeManagementService>(MockBehavior.Loose).Object);
             services.AddSingleton(_ => new Mock<Sprk.Bff.Api.Services.Ai.Visualization.IVisualizationService>(MockBehavior.Loose).Object);
             services.AddSingleton(_ => new Mock<IModelSelector>(MockBehavior.Loose).Object);
-            services.AddScoped(_ => new Mock<IEntityResolutionService>(MockBehavior.Loose).Object);
             services.AddScoped(_ => new Mock<ISemanticSearchService>(MockBehavior.Loose).Object);
             services.AddScoped(_ => new Mock<IRecordSearchService>(MockBehavior.Loose).Object);
 
@@ -774,7 +770,7 @@ public class AnalysisTestFixture : WebApplicationFactory<Program>
             {
                 var chatClient = sp.GetRequiredService<IChatClient>();
                 var logger = NullLogger<SprkChatAgentFactory>.Instance;
-                return new SprkChatAgentFactory(chatClient, chatClient, sp, logger);
+                return new SprkChatAgentFactory(chatClient, sp, logger);
             });
             services.AddScoped(sp =>
             {
@@ -863,7 +859,7 @@ internal class MockAnalysisOrchestrationService : IAnalysisOrchestrationService
         _authorizationTracker = authorizationTracker;
     }
 
-    // R7 Wave 4 task 042 (FR-11, 2026-06-28) — `ExecuteAnalysisAsync` was removed from
+    // R7 Wave 4 task 042 (FR-11, 2026-06-28) — the legacy direct-invocation execute method was removed from
     // IAnalysisOrchestrationService. Scenario-driven mocking for the migrated
     // /api/ai/analysis/execute endpoint now happens via MockPlaybookOrchestrationService below
     // (the endpoint dispatches IPlaybookOrchestrationService.ExecuteAsync per task 041 migration).

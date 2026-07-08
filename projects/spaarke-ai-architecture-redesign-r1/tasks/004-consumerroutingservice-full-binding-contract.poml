@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="004" project="spaarke-ai-architecture-redesign-r1">
+  <metadata>
+    <title>ConsumerRoutingService returns the full Binding contract</title>
+    <phase>Phase P0: Foundations</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <tags>bff-api, routing</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <parallel-group>W-P0-B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>003</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement the code half of FR-P0-03: extend `ConsumerRoutingService` (Services/Ai/PublicContracts/) so it reads and returns the FULL Binding contract from `sprk_playbookconsumer` — including the new task-003 columns `sprk_ucid`, `sprk_tooldescription`, `sprk_disposition`, `sprk_chiptransitions`, `sprk_risk`, `sprk_capturemode`, `sprk_oneventbindings`, `sprk_surfaces`, and the model override — plus the Action-side fields (`sprk_kind`, `sprk_workflowclass`, `sprk_inputschema`, `sprk_modeltier`) needed by executors. The Binding table is THE single routing surface (spec MUST NOT: no routing config outside it); every later phase (Event Rules at P1, loop tool-projection and side_effect_class gating at P2, consumer migration at P3) consumes this contract, so the shape returned here is load-bearing for the whole redesign. This is a contract extension — existing routing callers must keep working unchanged.
+  </prompt>
+
+  <role>
+    Senior .NET developer familiar with the Sprk.Bff.Api PublicContracts facade, Dataverse Web API queries from the BFF, and designing stable DTO contracts consumed across phases.
+  </role>
+
+  <goal>
+    ConsumerRoutingService resolves a consumer/binding id to a full Binding contract DTO carrying every new catalog column; a contract test proves all fields populate from a seeded spaarkedev1 row; existing routing call-sites compile and behave unchanged.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-architecture-redesign-r1/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-architecture-redesign-r1/plan.md</file>
+    <file purpose="project-context">projects/spaarke-ai-architecture-redesign-r1/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md</file>
+    <file purpose="target">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ConsumerRoutingService.cs</file>
+    <file purpose="column-dictionary">projects/spaarke-ai-architecture-redesign-r1/notes/schema-p0-column-dictionary.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-039">Both catalogs are closed; the Binding contract returned here is the ONLY routing contract. MUST NOT add routing config outside the Binding table.</constraint>
+    <constraint source="ADR-013 (amended 2026-07-05)">Capability invocation is the canonical facade verb; the extended contract stays inside Services/Ai/PublicContracts/ — CRUD consumers never see AI internals.</constraint>
+    <constraint source="ADR-029 / NFR-01">Verify publish-size impact per ADR-029/NFR-01; expect net change reported in task notes.</constraint>
+    <constraint source="project">Backward compatible: existing ConsumerRoutingService callers must not break; new fields are additive to the returned contract.</constraint>
+    <constraint source="ADR-038">Contract-shaped tests; no banned mock patterns.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff-api/routing, dataverse-catalogs</topic>
+    <files>
+      <file>docs/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/OVERLAY-MATRIX.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-MIGRATION-MAP.md</file>
+    </files>
+    <patterns>
+      <pattern name="Routing service (target)" location="src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ConsumerRoutingService.cs">
+        The service to extend; study its current query shape, caching, and the contract it returns before adding fields.
+      </pattern>
+      <pattern name="Prompted executor (downstream consumer)" location="src/server/api/Sprk.Bff.Api/Services/Ai/LinearConsumers/">
+        ActionRunner + PromptSchemaRenderer will consume kind/inputschema/modeltier from this contract at P1 — align field naming.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      FR-P0-03's acceptance is two-sided: columns deployed (task 003) AND ConsumerRoutingService returning the full Binding contract (this task). Task 005's boot reconciliation verifies constants ↔ rows against this same contract.
+    </background>
+    <dependencies>
+      <dependency task="003" status="not-started">Catalog columns must exist on spaarkedev1 before the service can read them.</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0" name="Context check">
+      Check context usage; handoff if &gt; 70%. Verify task 003 ✅ and read the column dictionary. Load ADR-039 + bff-extensions.md.
+    </step>
+    <step order="1" name="Study current contract">
+      Read ConsumerRoutingService.cs and every call-site (grep for the interface); document the current returned shape and caching behavior.
+    </step>
+    <step order="2" name="Extend the Binding contract DTO">
+      Add the new Binding fields (ucid, tooldescription, disposition, chiptransitions, risk, capturemode, oneventbindings, surfaces, model override) and Action fields (kind, workflowclass, inputschema, modeltier) to the contract records, with typed enums matching the option sets and parsed JSON for structured columns.
+    </step>
+    <step order="3" name="Extend the query + mapping">
+      Widen the Dataverse query column set and map every new column; handle null/legacy rows gracefully (pre-backfill rows must not throw).
+    </step>
+    <step order="4" name="Test">
+      Add tests proving (a) a fully-populated row maps every field; (b) a legacy row with null new columns resolves without error; (c) existing routing behavior is unchanged.
+    </step>
+    <step order="5" name="Build + publish-size">
+      dotnet build + full test suite green; publish-size delta reported per ADR-029.
+    </step>
+    <step order="6" name="Verify + quality gates">
+      Check acceptance criteria. Step 9.5 quality gates: code-review + adr-check. Update TASK-INDEX.md.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build, test, publish-size verification</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ConsumerRoutingService.cs (extended)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ (Binding contract DTO extensions)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (full-contract mapping tests)</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">ConsumerRoutingService returns the full Binding contract including all task-003 columns (mapping test shown).</criterion>
+    <criterion testable="true">Legacy rows with null new columns resolve without error.</criterion>
+    <criterion testable="true">Existing routing call-sites compile and existing tests pass unchanged.</criterion>
+    <criterion testable="true">dotnet build green; publish-size delta reported per ADR-029.</criterion>
+    <criterion testable="true">Step 9.5 quality gates (code-review + adr-check) passed.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

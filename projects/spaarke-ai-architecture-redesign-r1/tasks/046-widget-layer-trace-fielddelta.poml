@@ -1,0 +1,141 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="046" project="spaarke-ai-architecture-redesign-r1">
+  <metadata>
+    <title>Widget layer — dedupe register-context-widgets; ExecutionTraceWidget renders ledger ToolChains; legacy FieldDelta dual-render path DELETED at last-playbook cutover</title>
+    <phase>Phase P3: Consumer + Client Consolidation</phase>
+    <status>not-started</status>
+    <estimated-hours>8</estimated-hours>
+    <tags>frontend, widgets, spaarkeai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <parallel-group>W-P3-D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>045</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement FR-P3-07, the widget-layer consolidation that rides on task 045's client cleanup. Three deliverables: (1) dedupe the two `register-context-widgets.ts` modules into a single registration module consumed by both mount paths; (2) implement the `ExecutionTraceWidget` bridge so the widget renders real ledger `ToolChain` entries (the ADR-040 tool-chain records persisted by the P2 loop) instead of any legacy trace source; (3) DELETE the legacy `FieldDelta` dual-render path — this is the last-playbook cutover moment, and the amended ADR-037 (2026-07-05) explicitly makes FieldDelta deletable at cutover. Acceptance: the trace widget shows a real chain from a live session, and FieldDelta is grep-zero in the widget layer with output SHOWN (NFR-08). Browser verification is required: the trace widget renders a real chain, and dark mode is correct.
+  </prompt>
+
+  <role>
+    Senior React/TypeScript developer familiar with the SpaarkeAi widget registries, `@spaarke/ai-widgets`, the PaneEventBus contract, and the ADR-037 streaming/render contracts.
+  </role>
+
+  <goal>
+    One `register-context-widgets` module client-wide; ExecutionTraceWidget renders ledger ToolChain entries end-to-end; the FieldDelta dual-render path is deleted with shown grep-zero in the widget layer; builds green and browser-verified including dark mode.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-architecture-redesign-r1/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-architecture-redesign-r1/plan.md</file>
+    <file purpose="project-context">projects/spaarke-ai-architecture-redesign-r1/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md</file>
+    <file purpose="per-component-verdicts">projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/OVERLAY-MATRIX.md</file>
+    <file purpose="adr-037-amended">docs/adr/ (ADR-037 amended 2026-07-05 — FieldDelta deletable at cutover)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-037-amended-2026-07-05">Section-name-keyed streaming is the binding contract; the FieldDelta dual-render path is DELETABLE at the last-playbook cutover — this task IS that cutover. Verify no live playbook still emits FieldDelta before deleting (escalate if one does).</constraint>
+    <constraint source="ADR-040">ExecutionTraceWidget renders from persisted ledger ToolChain entries (identifiers/filters/counts only per NFR-07) — storage precedes rendering; the widget MUST NOT synthesize trace data client-side.</constraint>
+    <constraint source="ADR-039">Widget invocations remain Binding-addressed (binding ids from task 045); no routing or intent logic in the widget layer.</constraint>
+    <constraint source="NFR-08">Hard cutover: FieldDelta path + the duplicate register-context-widgets module deleted with grep-zero output SHOWN; no dual-render fallback retained.</constraint>
+    <constraint source="ADR-013-amended-2026-07-05">Client consumes BFF capability-invocation/ledger read surfaces only; PublicContracts boundary unchanged.</constraint>
+    <constraint source="ADR-021">Dark mode verified — Fluent v9 tokens only.</constraint>
+    <constraint source="project">Client build via `npm run build:prod` per root CLAUDE.md §12.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>widget-registries, execution-trace, fielddelta-cutover, spaarkeai</topic>
+    <files>
+      <file>docs/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>docs/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/OVERLAY-MATRIX.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-MIGRATION-MAP.md</file>
+      <file>docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+    </files>
+    <patterns>
+      <pattern name="Widget registries" location="src/solutions/SpaarkeAi/src/ + src/client/shared/">
+        The two register-context-widgets.ts modules to be deduped into one registration source consumed by both mount paths (dashboard wrapper + direct widget wrapper).
+      </pattern>
+      <pattern name="StructuredOutputStreamWidget" location="src/client/shared/Spaarke.AI.Widgets/">
+        The canonical stream-rendering widget shape; ExecutionTraceWidget bridge follows its conventions.
+      </pattern>
+      <pattern name="PaneEventBus" location="src/client/shared/Spaarke.UI.Components/src/">
+        Widget event contract — trace updates arrive via the bus from the consolidated dispatch path.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      The widget layer is the last client surface with pre-redesign duplication: two registration modules drifted apart, the trace widget reads a legacy source, and FieldDelta survives only as a dual-render fallback for playbooks that have now all cut over (tasks 040/043/044 removed the last emitters). Amended ADR-037 pre-authorizes the FieldDelta deletion at exactly this point.
+    </background>
+    <dependencies>
+      <dependency task="045" status="pending">Client consolidation — one SSE path + binding-addressed widgets is the substrate this task builds on.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 021 — universal ledger write + OutputRouter (produces the ToolChain entries the trace widget renders)</item>
+      <item>Task 030 — ToolChain ledger persistence in the loop</item>
+      <item>FR-P4-01 — Track-B audit re-verifies the FieldDelta deletion</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context check + load knowledge">
+      Verify context &lt; 70%. Load spec FR-P3-07, amended ADR-037, OVERLAY-MATRIX widget verdicts. Grep-locate both register-context-widgets.ts files, all FieldDelta references, and the current ExecutionTraceWidget data source.
+    </step>
+    <step order="1" name="Verify cutover precondition">
+      Confirm no live playbook/Binding still emits FieldDelta (server-side check against the catalog + streaming contract). If any does, STOP and escalate — the deletion is only authorized at last-playbook cutover.
+    </step>
+    <step order="2" name="Dedupe widget registration">
+      Merge the two register-context-widgets.ts modules into one shared registration module; re-point both mount paths (dashboard wrapper + direct widget wrapper); delete the duplicate.
+    </step>
+    <step order="3" name="ExecutionTraceWidget bridge">
+      Implement the bridge so the widget renders ledger ToolChain entries (tool id, args summary, status, timing — identifiers/counts only per NFR-07) received via the consolidated dispatch/event path.
+    </step>
+    <step order="4" name="Delete FieldDelta dual-render path">
+      Remove the legacy FieldDelta render branch, types, and event handling from the widget layer. Run and SHOW grep-zero for FieldDelta in the widget layer (and for the deleted duplicate registration module).
+    </step>
+    <step order="5" name="Build + browser verification">
+      `npm run build:prod` green for touched packages. Execute the &lt;ui-tests&gt; below on spaarkedev1.
+    </step>
+    <step order="6" name="Step 9.5 quality gates">
+      Run code-review + adr-check (FULL rigor). Update TASK-INDEX.md; reset current-task.md.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Client builds (`npm run build:prod`) + tests</tool>
+    <tool name="ui-test">Browser-based UI verification via Chrome integration</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <ui-tests>
+    <ui-test name="trace-widget-real-chain">Run a capability that invokes tools (e.g., a text-path turn with dataverse.read); open ExecutionTraceWidget; verify it renders the REAL ToolChain from the session ledger (tool names, order, statuses matching the actual run).</ui-test>
+    <ui-test name="widgets-still-mount">Verify context widgets mount correctly from the single deduped registration module on both mount paths (dashboard + direct widget).</ui-test>
+    <ui-test name="dark-mode">Verify ExecutionTraceWidget and affected widgets render correctly in dark theme (ADR-021).</ui-test>
+    <ui-test name="console-clean">Browser console error-free during the above flows.</ui-test>
+  </ui-tests>
+
+  <outputs>
+    <output type="code">Single register-context-widgets.ts (duplicate deleted); both mount paths re-pointed</output>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/** — ExecutionTraceWidget ledger-ToolChain bridge</output>
+    <output type="code">Widget layer — FieldDelta dual-render path deleted</output>
+    <output type="test">Widget unit tests (registration + trace bridge)</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Exactly one register-context-widgets module client-wide (grep shown); both mount paths consume it.</criterion>
+    <criterion testable="true">ExecutionTraceWidget shows a real ToolChain from the session ledger in the browser (ui-test evidence).</criterion>
+    <criterion testable="true">FieldDelta grep-zero in the widget layer (output SHOWN, NFR-08) — deleted at last-playbook cutover per amended ADR-037, with the precondition check documented.</criterion>
+    <criterion testable="true">npm run build:prod green; dark mode verified; console error-free.</criterion>
+    <criterion testable="true">Step 9.5 code-review + adr-check passed.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

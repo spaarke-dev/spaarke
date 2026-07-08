@@ -119,7 +119,7 @@ export interface IAnalysisChatContextResponse {
   commands?: ICommandEntry[];
   /**
    * Scope-level search guidance from sprk_searchGuidance on the active scope(s).
-   * Used by WebSearchTools for scope-guided web search (FR-10).
+   * Used by the server-side WebSearchHandler for scope-guided web search (FR-10).
    */
   searchGuidance?: string;
   /**

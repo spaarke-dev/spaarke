@@ -13,34 +13,29 @@ namespace Sprk.Bff.Api.Tests.Services.Ai;
 
 /// <summary>
 /// Unit tests for <see cref="AppOnlyAnalysisService"/> playbook resolution after the
-/// FR-1R-05 routing-table migration (chat-routing-redesign-r1 task 028d).
+/// FR-P3-01 hard cutover (spaarke-ai-architecture-redesign-r1 task 040).
 ///
 /// <para>
-/// The previously-existing 2 Pattern B execution-path consts at lines :46 and :1068
-/// (flagged by task 027 exit-gate evidence as <c>const string DocumentProfilePlaybookId</c>
-/// and <c>const string EmailAnalysisPlaybookId</c>) were retired into
-/// <c>private static readonly Guid Fallback*PlaybookId</c> graceful-degrade fallbacks.
-/// Primary resolution for the email-analysis path now flows through
-/// <see cref="IConsumerRoutingService.ResolveAsync"/> with
-/// <see cref="ConsumerTypes.EmailAnalysis"/>; the typed-options/const path is reached only
-/// when the routing table returns null (deprecation-window safety per FR-1R-06).
+/// The FR-1R-05 graceful-degrade fallback GUIDs (<c>FallbackDocumentProfilePlaybookId</c> /
+/// <c>FallbackEmailAnalysisPlaybookId</c>) were DELETED. Both well-known playbook names
+/// ("Document Profile", "Email Analysis") now resolve exclusively through
+/// <see cref="IConsumerRoutingService.ResolveAsync"/> against the <c>sprk_playbookconsumer</c>
+/// Binding table; a null routing result is a hard <see cref="InvalidOperationException"/>
+/// (single routing surface per ADR-039 / NFR-08 — no shims, no fallback).
 /// </para>
 ///
 /// <para>
 /// These tests target the private <c>ResolvePlaybookAsync</c> method via reflection — the
 /// single resolution point in the service (both <c>AnalyzeDocumentAsync</c> and
-/// <c>ExecutePlaybookAnalysisAsync</c> delegate to it). Reflection is the cleanest seam
-/// because the public methods drag in the full Dataverse/SPE/text-extraction pipeline.
+/// <c>ExecutePlaybookAnalysisAsync</c> delegate to it). Reflection is the pre-existing seam
+/// (kept from the 028d suite) because the public methods drag in the full
+/// Dataverse/SPE/text-extraction pipeline.
 /// </para>
 /// </summary>
 public class AppOnlyAnalysisServiceResolveTests
 {
     private const string EmailAnalysisPlaybookName = "Email Analysis";
     private const string DocumentProfilePlaybookName = "Document Profile";
-    private static readonly Guid FallbackEmailAnalysisGuid =
-        Guid.Parse("bc71facf-6af1-f011-8406-7ced8d1dc988");
-    private static readonly Guid FallbackDocumentProfileGuid =
-        Guid.Parse("18cf3cc8-02ec-f011-8406-7c1e520aa4df");
 
     private readonly Mock<IPlaybookLookupService> _playbookLookupMock = new();
     private readonly Mock<IPlaybookService> _playbookServiceMock = new();
@@ -63,7 +58,7 @@ public class AppOnlyAnalysisServiceResolveTests
             logger: Mock.Of<ILogger<AppOnlyAnalysisService>>());
     }
 
-    private static Task<PlaybookResponse> InvokeResolvePlaybookAsync(
+    private static async Task<PlaybookResponse> InvokeResolvePlaybookAsync(
         AppOnlyAnalysisService sut,
         string playbookName,
         CancellationToken ct = default)
@@ -73,43 +68,57 @@ public class AppOnlyAnalysisServiceResolveTests
             BindingFlags.NonPublic | BindingFlags.Instance);
         method.Should().NotBeNull("ResolvePlaybookAsync is the single resolution point and " +
             "MUST remain a private method on AppOnlyAnalysisService");
-        return (Task<PlaybookResponse>)method!.Invoke(sut, new object?[] { playbookName, ct })!;
+        try
+        {
+            return await (Task<PlaybookResponse>)method!.Invoke(sut, new object?[] { playbookName, ct })!;
+        }
+        catch (TargetInvocationException tie) when (tie.InnerException is not null)
+        {
+            // Unwrap so tests can assert on the service's own exception type.
+            throw tie.InnerException;
+        }
     }
 
-    // ─── (a) FR-1R-05 happy path — routing-table returns Guid → use it ───────────────────────
-
-    [Fact]
-    public async Task ResolvePlaybook_EmailAnalysis_RoutingTableReturnsId_UsesRoutingTableGuid()
+    private void SetupRouting(string consumerType, Guid? result)
     {
-        // Arrange: IConsumerRoutingService returns a non-null Guid for ConsumerTypes.EmailAnalysis
-        var routedGuid = Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
         _consumerRoutingMock
             .Setup(c => c.ResolveAsync(
-                ConsumerTypes.EmailAnalysis,
+                consumerType,
                 It.IsAny<string?>(),
                 It.IsAny<IRoutingContext?>(),
                 It.IsAny<string?>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync(routedGuid);
+            .ReturnsAsync(result);
+    }
+
+    private void SetupLookup(Guid playbookId, string name)
+    {
         _playbookLookupMock
-            .Setup(p => p.GetByIdAsync(routedGuid.ToString(), It.IsAny<CancellationToken>()))
+            .Setup(p => p.GetByIdAsync(playbookId.ToString(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new PlaybookResponse
             {
-                Id = routedGuid,
-                Name = EmailAnalysisPlaybookName,
+                Id = playbookId,
+                Name = name,
                 PlaybookCode = string.Empty,
                 IsActive = true,
             });
+    }
+
+    // ─── (a) FR-P3-01 happy path — routing table resolves → routed GUID used ────────────────
+
+    [Fact]
+    public async Task ResolvePlaybook_EmailAnalysis_RoutingResolves_UsesRoutedGuid()
+    {
+        var routedGuid = Guid.Parse("aaaaaaaa-bbbb-cccc-dddd-eeeeeeeeeeee");
+        SetupRouting(ConsumerTypes.EmailAnalysis, routedGuid);
+        SetupLookup(routedGuid, EmailAnalysisPlaybookName);
 
         var sut = CreateSut();
 
-        // Act
         var result = await InvokeResolvePlaybookAsync(sut, EmailAnalysisPlaybookName);
 
-        // Assert
         result.Id.Should().Be(routedGuid,
-            "FR-1R-05 — routing-table GUID MUST be forwarded to IPlaybookLookupService when " +
-            "IConsumerRoutingService returns a non-null value");
+            "FR-P3-01 — the Binding-routed GUID MUST be forwarded to IPlaybookLookupService");
         _consumerRoutingMock.Verify(
             c => c.ResolveAsync(
                 ConsumerTypes.EmailAnalysis,
@@ -118,140 +127,103 @@ public class AppOnlyAnalysisServiceResolveTests
                 It.IsAny<string?>(),
                 It.IsAny<CancellationToken>()),
             Times.Once,
-            "FR-1R-05 hardening (code-review S-5) — consumer type MUST be ConsumerTypes.EmailAnalysis " +
-            "(compile-time typo defense), NOT the literal string");
+            "consumer type MUST be the ConsumerTypes.EmailAnalysis constant " +
+            "(compile-time typo defense, code-review S-5), NOT a literal string");
         _playbookLookupMock.Verify(
             p => p.GetByIdAsync(routedGuid.ToString(), It.IsAny<CancellationToken>()),
             Times.Once,
-            "FR-1R-05 — the routing-table GUID is resolved into a PlaybookResponse via the " +
-            "existing IPlaybookLookupService (single-cache discipline; no duplicate cache layer)");
-        _playbookLookupMock.Verify(
-            p => p.GetByIdAsync(FallbackEmailAnalysisGuid.ToString(), It.IsAny<CancellationToken>()),
-            Times.Never,
-            "FR-1R-05 — fallback const MUST NOT be consulted when routing-table returns a non-null Guid");
-    }
-
-    // ─── (b) FR-1R-05 graceful-degrade — routing-table returns null → fallback const ─────────
-
-    [Fact]
-    public async Task ResolvePlaybook_EmailAnalysis_RoutingTableReturnsNull_FallsBackToConstGuid()
-    {
-        // Arrange: IConsumerRoutingService returns null → orchestrator falls back to the
-        // Fallback*PlaybookId const-equivalent (private static readonly Guid).
-        _consumerRoutingMock
-            .Setup(c => c.ResolveAsync(
-                ConsumerTypes.EmailAnalysis,
-                It.IsAny<string?>(),
-                It.IsAny<IRoutingContext?>(),
-                It.IsAny<string?>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Guid?)null);
-        _playbookLookupMock
-            .Setup(p => p.GetByIdAsync(FallbackEmailAnalysisGuid.ToString(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new PlaybookResponse
-            {
-                Id = FallbackEmailAnalysisGuid,
-                Name = EmailAnalysisPlaybookName,
-                PlaybookCode = string.Empty,
-                IsActive = true,
-            });
-
-        var sut = CreateSut();
-
-        // Act
-        var result = await InvokeResolvePlaybookAsync(sut, EmailAnalysisPlaybookName);
-
-        // Assert
-        result.Id.Should().Be(FallbackEmailAnalysisGuid,
-            "FR-1R-05 graceful-degrade — null from IConsumerRoutingService MUST trigger fallback to the " +
-            "FallbackEmailAnalysisPlaybookId const (preserves pre-028d behavior verbatim for the " +
-            "FR-1R-06 deprecation window)");
-        _playbookLookupMock.Verify(
-            p => p.GetByIdAsync(FallbackEmailAnalysisGuid.ToString(), It.IsAny<CancellationToken>()),
-            Times.Once,
-            "FR-1R-05 graceful-degrade — the const fallback resolves through the same IPlaybookLookupService");
+            "the routed GUID is materialized via the existing IPlaybookLookupService " +
+            "(single-cache discipline; no duplicate cache layer)");
         _playbookServiceMock.Verify(
             p => p.GetByNameAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Never,
-            "FR-03 — well-known names MUST NOT fall through to the legacy by-name path");
+            "well-known names MUST NOT fall through to the legacy by-name path");
     }
 
-    // ─── (c) FR-1R-05 defensive edge — empty Guid routes like null ───────────────────────────
-
     [Fact]
-    public async Task ResolvePlaybook_EmailAnalysis_RoutingTableReturnsEmptyGuid_FallsBackToConstGuid()
+    public async Task ResolvePlaybook_DocumentProfile_RoutingResolves_UsesRoutedGuid()
     {
-        // Arrange: routing service returns Guid.Empty (defensive sentinel — semantically no-match)
-        _consumerRoutingMock
-            .Setup(c => c.ResolveAsync(
-                ConsumerTypes.EmailAnalysis,
-                It.IsAny<string?>(),
-                It.IsAny<IRoutingContext?>(),
-                It.IsAny<string?>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Guid?)null); // ResolveAsync impl returns null in this case; verify
-                                        // behavior is consistent — the contract is "null on no match".
-        _playbookLookupMock
-            .Setup(p => p.GetByIdAsync(FallbackEmailAnalysisGuid.ToString(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new PlaybookResponse
-            {
-                Id = FallbackEmailAnalysisGuid,
-                Name = EmailAnalysisPlaybookName,
-                PlaybookCode = string.Empty,
-                IsActive = true,
-            });
+        // FR-P3-01: Document Profile now routes through the Binding table too — the FR-1R-05
+        // "no ConsumerTypes entry yet" carve-out (which read a hardcoded fallback GUID) is gone.
+        var routedGuid = Guid.Parse("18cf3cc8-02ec-f011-8406-7c1e520aa4df");
+        SetupRouting(ConsumerTypes.DocumentProfile, routedGuid);
+        SetupLookup(routedGuid, DocumentProfilePlaybookName);
 
         var sut = CreateSut();
 
-        // Act
-        var result = await InvokeResolvePlaybookAsync(sut, EmailAnalysisPlaybookName);
-
-        // Assert
-        result.Id.Should().Be(FallbackEmailAnalysisGuid,
-            "FR-1R-05 — null-equivalent (no-match) MUST trigger fallback to the const Guid path");
-    }
-
-    // ─── (d) Document Profile path — uses fallback const directly (no FR-1R-05 route yet) ────
-
-    [Fact]
-    public async Task ResolvePlaybook_DocumentProfile_UsesFallbackConstDirectly()
-    {
-        // Document Profile does NOT have a ConsumerTypes entry yet (planned post-028e). The
-        // resolver MUST NOT consult IConsumerRoutingService for this name; it goes directly
-        // to the Fallback*PlaybookId path. Pinning this preserves the AnalyzeDocumentAsync
-        // contract (ProfileSummaryWorker, AppOnlyDocumentAnalysisJobHandler) verbatim.
-        _playbookLookupMock
-            .Setup(p => p.GetByIdAsync(FallbackDocumentProfileGuid.ToString(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new PlaybookResponse
-            {
-                Id = FallbackDocumentProfileGuid,
-                Name = DocumentProfilePlaybookName,
-                PlaybookCode = string.Empty,
-                IsActive = true,
-            });
-
-        var sut = CreateSut();
-
-        // Act
         var result = await InvokeResolvePlaybookAsync(sut, DocumentProfilePlaybookName);
 
-        // Assert
-        result.Id.Should().Be(FallbackDocumentProfileGuid,
-            "FR-1R-05 partial migration — Document Profile path remains on the FR-03 stable-ID " +
-            "const until the post-028e routing-record + ConsumerTypes constant introduction");
+        result.Id.Should().Be(routedGuid,
+            "FR-P3-01 — 'Document Profile' resolves via ResolveAsync(ConsumerTypes.DocumentProfile), " +
+            "not via a hardcoded stable-ID const");
         _consumerRoutingMock.Verify(
             c => c.ResolveAsync(
-                It.IsAny<string>(),
+                ConsumerTypes.DocumentProfile,
                 It.IsAny<string?>(),
                 It.IsAny<IRoutingContext?>(),
                 It.IsAny<string?>(),
                 It.IsAny<CancellationToken>()),
-            Times.Never,
-            "FR-1R-05 — Document Profile path does NOT consult IConsumerRoutingService yet " +
-            "(no ConsumerTypes entry; planned post-028e)");
+            Times.Once);
+        _playbookLookupMock.Verify(
+            p => p.GetByIdAsync(routedGuid.ToString(), It.IsAny<CancellationToken>()),
+            Times.Once);
     }
 
-    // ─── (e) Custom playbook name → legacy by-name path (unchanged by 028d) ──────────────────
+    // ─── (b) FR-P3-01 hard cutover — routing null → InvalidOperationException ───────────────
+
+    [Fact]
+    public async Task ResolvePlaybook_EmailAnalysis_RoutingReturnsNull_ThrowsInvalidOperation()
+    {
+        SetupRouting(ConsumerTypes.EmailAnalysis, null);
+
+        var sut = CreateSut();
+
+        var act = () => InvokeResolvePlaybookAsync(sut, EmailAnalysisPlaybookName);
+
+        var ex = await act.Should().ThrowAsync<InvalidOperationException>(
+            "FR-P3-01 hard cutover — a missing Binding row is a hard error, not a graceful " +
+            "degrade to a hardcoded GUID");
+        ex.Which.Message.Should().Contain("email-analysis")
+            .And.Contain("sprk_playbookconsumer");
+        _playbookLookupMock.Verify(
+            p => p.GetByIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never,
+            "no playbook lookup may occur when routing does not resolve — the fallback GUID is gone");
+    }
+
+    [Fact]
+    public async Task ResolvePlaybook_DocumentProfile_RoutingReturnsNull_ThrowsInvalidOperation()
+    {
+        SetupRouting(ConsumerTypes.DocumentProfile, null);
+
+        var sut = CreateSut();
+
+        var act = () => InvokeResolvePlaybookAsync(sut, DocumentProfilePlaybookName);
+
+        var ex = await act.Should().ThrowAsync<InvalidOperationException>();
+        ex.Which.Message.Should().Contain("document-profile")
+            .And.Contain("sprk_playbookconsumer");
+        _playbookLookupMock.Verify(
+            p => p.GetByIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
+    }
+
+    // ─── (c) Defensive edge — Guid.Empty from routing treated as no-match ───────────────────
+
+    [Fact]
+    public async Task ResolvePlaybook_EmailAnalysis_RoutingReturnsEmptyGuid_ThrowsInvalidOperation()
+    {
+        SetupRouting(ConsumerTypes.EmailAnalysis, Guid.Empty);
+
+        var sut = CreateSut();
+
+        var act = () => InvokeResolvePlaybookAsync(sut, EmailAnalysisPlaybookName);
+
+        await act.Should().ThrowAsync<InvalidOperationException>(
+            "Guid.Empty is a no-match sentinel and MUST be treated like null (hard error)");
+    }
+
+    // ─── (d) Custom playbook name → legacy by-name path (unchanged) ─────────────────────────
 
     [Fact]
     public async Task ResolvePlaybook_CustomName_UsesLegacyByNamePath()
@@ -272,13 +244,10 @@ public class AppOnlyAnalysisServiceResolveTests
 
         var sut = CreateSut();
 
-        // Act
         var result = await InvokeResolvePlaybookAsync(sut, customName);
 
-        // Assert
         result.Id.Should().Be(customGuid,
-            "FR-03 — custom names fall through to the legacy IPlaybookService.GetByNameAsync path " +
-            "(unchanged by 028d)");
+            "FR-03 — custom names fall through to the legacy IPlaybookService.GetByNameAsync path");
         _consumerRoutingMock.Verify(
             c => c.ResolveAsync(
                 It.IsAny<string>(),
@@ -287,9 +256,6 @@ public class AppOnlyAnalysisServiceResolveTests
                 It.IsAny<string?>(),
                 It.IsAny<CancellationToken>()),
             Times.Never,
-            "FR-1R-05 — routing service is consulted ONLY for well-known names mapped to ConsumerTypes constants");
+            "the routing service is consulted ONLY for well-known names mapped to ConsumerTypes constants");
     }
-
-    // ─── (f) Service surface invariant — hardcoded const stable-IDs removed ──────────────────
-
 }

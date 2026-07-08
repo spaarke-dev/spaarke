@@ -1052,9 +1052,9 @@ For full `$choices` documentation and supported prefixes, see [JPS-AUTHORING-GUI
 | **Project Endpoint** | `POST /api/workspace/projects/pre-fill` |
 | **Matter Service** | `MatterPreFillService` (scoped) |
 | **Project Service** | `ProjectPreFillService` (scoped) |
-| **Matter Config Key** | `Workspace:PreFillPlaybookId` |
-| **Project Config Key** | `Workspace:ProjectPreFillPlaybookId` |
-| **Default Matter Playbook GUID** | `18cf3cc8-02ec-f011-8406-7c1e520aa4df` |
+| **Matter Routing** | `sprk_playbookconsumer` row, consumerType `matter-pre-fill` (FR-P3-01 deleted the `Workspace:*PlaybookId` config keys) |
+| **Project Routing** | `sprk_playbookconsumer` row, consumerType `project-pre-fill` |
+| **Dev Matter Binding row** | `e5f37faa-2c70-f111-ab0e-7ced8ddc4cc6` → playbook `2d660cad-d418-f111-8343-7ced8d1dc988` |
 | **Timeout** | 45s (BFF), 60s (frontend) |
 | **Rate Limit** | 10 req/min per user (`ai-stream` policy) |
 
@@ -1094,36 +1094,19 @@ After creating playbook records in Dataverse:
 
 1. **Note the GUIDs** of the created playbook records
 
-2. **Update BFF Configuration**:
-   ```json
-   {
-     "Workspace": {
-       "PreFillPlaybookId": "18cf3cc8-02ec-f011-8406-7c1e520aa4df",
-       "ProjectPreFillPlaybookId": "<NEW-GUID-HERE>"
-     }
-   }
-   ```
+2. **Seed/update the Binding row** (FR-P3-01, spaarke-ai-architecture-redesign-r1 task 040 — the former `Workspace:*PlaybookId` config keys and their Azure CLI appsettings were DELETED; routing is Dataverse-only): create or update the enabled `sprk_playbookconsumer` row with `sprk_consumertype = matter-pre-fill` (or `project-pre-fill`), `sprk_playbook` lookup → the new playbook GUID, `sprk_environment = *`, `sprk_priority = 500`. Takes effect within the 5-minute routing cache TTL — no App Service change, no redeploy.
 
-3. **Or set via Azure CLI**:
-   ```bash
-   az webapp config appsettings set \
-     -g spe-infrastructure-westus2 \
-     -n spe-api-dev-67e2xz \
-     --settings Workspace__ProjectPreFillPlaybookId=<NEW-GUID-HERE>
-   ```
-   Note: Use `__` (double underscore) for nested config keys in environment variables.
-
-4. **Ensure JPS has $choices** on the playbook's Action `sprk_systemprompt`:
+3. **Ensure JPS has $choices** on the playbook's Action `sprk_systemprompt`:
    - `matterTypeName` / `projectTypeName` field: `"$choices": "lookup:sprk_mattertype_ref.sprk_mattertypename"`
    - `practiceAreaName` field: `"$choices": "lookup:sprk_practicearea_ref.sprk_practiceareaname"`
    - `structuredOutput: true` must be enabled
 
-5. **Deploy BFF API** after code changes:
+4. **Deploy BFF API** after code changes:
    ```powershell
    .\scripts\Deploy-BffApi.ps1
    ```
 
-6. **Verify endpoint responds** (expect 401 = route registered, needs auth):
+5. **Verify endpoint responds** (expect 401 = route registered, needs auth):
    ```bash
    curl -s -o /dev/null -w "%{http_code}" \
      https://spe-api-dev-67e2xz.azurewebsites.net/api/workspace/projects/pre-fill

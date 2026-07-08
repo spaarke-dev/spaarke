@@ -12,7 +12,7 @@ namespace Sprk.Bff.Api.Api.Agent;
 ///
 /// This service is a THIN ORCHESTRATOR — it delegates to existing BFF services:
 ///   - <see cref="ChatContextMappingService"/> for resolving available playbooks per document type
-///   - <see cref="IPlaybookExecutionEngine"/> / <see cref="IPlaybookOrchestrationService"/> for execution
+///   - <see cref="IPlaybookOrchestrationService"/> for execution
 ///   - <see cref="AdaptiveCardFormatterService"/> for Adaptive Card rendering
 ///   - <see cref="HandoffUrlBuilder"/> for deep-link generation
 ///
@@ -46,9 +46,9 @@ public sealed class PlaybookInvocationService
     // Used by InvokePlaybook for executing playbooks (both inline and async).
     // private readonly IPlaybookOrchestrationService _playbookOrchestration;
 
-    // TODO: Inject IPlaybookExecutionEngine when wiring is complete (MCI-023).
+    // TODO: Inject IPlaybookOrchestrationService when wiring is complete (MCI-023).
     // Used by DetermineExecutionStrategy to check playbook metadata (node count, estimated duration).
-    // private readonly IPlaybookExecutionEngine _executionEngine;
+    // private readonly IPlaybookOrchestrationService _executionEngine;
 
     // TODO: Inject Azure AI Search client or existing search service for document search (MCI-024).
     // Used by SearchAndResolvePlaybooks to search documents by query text.

@@ -1,11 +1,6 @@
 import { makeStyles, tokens, Spinner, Text } from '@fluentui/react-components';
 import { useAuth } from './hooks/useAuth';
-import { BuilderLayout } from './components/BuilderLayout';
-
-interface AppProps {
-  playbookId: string;
-  apiBaseUrl: string;
-}
+import { CatalogEditorShell } from './components/catalog/CatalogEditorShell';
 
 const useStyles = makeStyles({
   loading: {
@@ -28,7 +23,11 @@ const useStyles = makeStyles({
   },
 });
 
-export function App({ playbookId, apiBaseUrl }: AppProps): JSX.Element {
+/**
+ * PlaybookBuilder after the FR-P4-04 de-scope: the BA catalog authoring
+ * surface (Actions + Bindings). The graph canvas is gone (ratified OQ-2).
+ */
+export function App(): JSX.Element {
   const styles = useStyles();
   const auth = useAuth();
 
@@ -52,5 +51,5 @@ export function App({ playbookId, apiBaseUrl }: AppProps): JSX.Element {
     );
   }
 
-  return <BuilderLayout playbookId={playbookId} apiBaseUrl={apiBaseUrl} />;
+  return <CatalogEditorShell />;
 }

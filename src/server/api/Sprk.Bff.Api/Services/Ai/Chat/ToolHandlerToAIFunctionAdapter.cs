@@ -153,7 +153,7 @@ public sealed class ToolHandlerToAIFunctionAdapter : AIFunction
     /// Optional document-stream SSE writer delegate (R6 Wave 9 / ADR-033). When non-null, the
     /// adapter forwards it onto every per-invocation <see cref="ChatInvocationContext"/> via
     /// <see cref="ChatInvocationContext.DocumentStreamWriter"/>. Handlers that emit
-    /// <see cref="Models.Ai.Chat.DocumentStreamEvent"/> (currently <c>WorkingDocumentHandler</c>)
+    /// <see cref="Models.Ai.Chat.DocumentStreamEvent"/> (no current emitter post task 044)
     /// read the field from the context and emit Start → N×Token → End events directly during
     /// streaming. When null, the field stays null on the per-call context and handlers MUST
     /// degrade gracefully (e.g., return <see cref="ToolResult.Failure"/> with a clear
@@ -163,7 +163,7 @@ public sealed class ToolHandlerToAIFunctionAdapter : AIFunction
     /// Optional analysis id from the active chat session (R6 Wave 9 / ADR-033 Stage 4). When
     /// non-null, the adapter forwards it onto every per-invocation
     /// <see cref="ChatInvocationContext"/> via <see cref="ChatInvocationContext.AnalysisId"/>.
-    /// Currently consumed by <c>WorkingDocumentHandler</c> (fetch + write-back operations
+    /// Historically consumed by the deleted working-document handler family (fetch + write-back operations
     /// against <c>sprk_analysisoutput</c>). Sourced by <see cref="Chat.SprkChatAgentFactory"/>
     /// from <c>ChatContext.AnalysisMetadata["analysisId"]</c>. Null when the chat session is
     /// not bound to an analysis — handlers that require it MUST return
@@ -277,6 +277,21 @@ public sealed class ToolHandlerToAIFunctionAdapter : AIFunction
         // materially better UX than LLM-invocation-time silent failures.
         ValidateAgainstMetaSchema(tool, _jsonSchema);
 
+        // G-P3 UAT round-1 H1 (2026-07-07): the Draft 2020-12 meta-schema above does NOT
+        // enforce OpenAI's stricter function-parameters subset (e.g. a type=array schema
+        // without 'items' is VALID JSON Schema but Azure OpenAI rejects the WHOLE request —
+        // invalid_function_parameters fails every tool in the turn, not just this one).
+        // Same pragmatic validator as the Binding capability projection; throwing
+        // ArgumentException here lands in the projector's per-row catch, excluding ONLY
+        // this tool while the rest of the catalog still projects.
+        if (OpenAiFunctionSchemaValidator.FindFirstError(tool.JsonSchema) is { } openAiSchemaError)
+        {
+            throw new ArgumentException(
+                $"[invalid-tool-schema] AnalysisTool '{tool.Name}' (id {tool.Id}) JsonSchema would fail " +
+                $"OpenAI function-parameters validation (and 400 the whole turn): {openAiSchemaError}",
+                nameof(tool));
+        }
+
         // FR-09 / D-A-09: defensive guard — task 009 added a default ValidateChat impl that
         // refuses chat invocation. Constructing the adapter for a handler that hasn't opted
         // in would expose a tool to the LLM that returns "not supported" on every call.
@@ -287,7 +302,7 @@ public sealed class ToolHandlerToAIFunctionAdapter : AIFunction
                 $"[FR-10] Handler '{handler.HandlerId}' does not declare InvocationContextKind.Chat " +
                 $"(reports {supported}). Refusing to expose to LLM. Override " +
                 $"IToolHandler.SupportedInvocationContexts and implement ValidateChat/ExecuteChatAsync " +
-                $"to opt in (see TemplateHandler.cs).");
+                $"to opt in (see Services/Ai/Handlers/HandlerRegistrationConventions.md).");
         }
     }
 
@@ -328,6 +343,15 @@ public sealed class ToolHandlerToAIFunctionAdapter : AIFunction
         // Replace each run of invalid characters with a single underscore.
         return InvalidToolNameChars.Replace(raw.Trim(), "_");
     }
+
+    /// <summary>
+    /// The wrapped <c>sprk_analysistool</c> catalog row (FR-P2-02, task 037): exposes the
+    /// row's DECLARED metadata — notably <see cref="AnalysisTool.SideEffectClass"/> — so
+    /// <see cref="SprkChatAgentFactory"/> can apply the ONE confirmation gate
+    /// (<see cref="SideEffectGateAIFunction"/>) by declaration, never by tool-name list
+    /// (ADR-039).
+    /// </summary>
+    public AnalysisTool Tool => _tool;
 
     /// <inheritdoc />
     /// <remarks>
@@ -382,15 +406,21 @@ public sealed class ToolHandlerToAIFunctionAdapter : AIFunction
             RequestedToolName = _tool.Name,
             ToolArgumentsJson = argsJson,
             // ADR-033 (R6 Wave 9): forward the adapter-level document-stream writer onto
-            // the per-call context so handlers (currently WorkingDocumentHandler) can emit
+            // the per-call context so document-streaming handlers can emit
             // Start / Token / End events directly during streaming. Null when not wired —
             // handlers MUST check for null per ADR-033 §3.1.
             DocumentStreamWriter = _documentStreamWriter,
             // ADR-033 Stage 4 (R6 Wave 9): forward the adapter-level analysis id onto the
-            // per-call context. WorkingDocumentHandler reads it to fetch the current working
+            // per-call context. Document-persistence handlers read it to fetch the current working
             // document and to target write-back persistence. Null when standalone chat —
             // handlers that require it MUST return ToolResult.Failure with diagnostic.
-            AnalysisId = _analysisId
+            AnalysisId = _analysisId,
+            // FR-P2-07 (task 036): forward the adapter-level chat SSE writer onto the
+            // per-call context so long-running handlers (AnalysisExecutionHandler rerun)
+            // can emit progress / document_replace events DURING execution — the
+            // post-execution widget metadata path cannot interleave with execution.
+            // Null when the SSE pipe is not wired; handlers skip emission silently.
+            SseWriter = _sseWriter
         };
 
         using var activity = ActivitySource.StartActivity("chat-tool.invoke");

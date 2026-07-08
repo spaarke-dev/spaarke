@@ -43,9 +43,9 @@ import type { WorkspacePaneEvent, ConversationPaneEvent } from "@spaarke/ai-widg
 // auto-install (R5 task 038) was removed. Each summarize invocation now
 // dispatches its own `workspace.widget_load` carrying the structured-
 // output-stream widget type + SUMMARIZE_SCHEMA + a per-run correlationId.
-// Those symbols are no longer needed at this site; consumers
-// (executeSummarizeIntent.ts + FilePreviewContextWidget.dispatchSummarizeOnly)
-// own them now.
+// Those symbols are no longer needed at this site; capability dispatchers
+// (the shared dispatchConsumer helper via its `workspaceTarget` arg +
+// FilePreviewContextWidget.dispatchSummarizeOnly) own them now.
 import { buildBffApiUrl } from "@spaarke/auth";
 import { usePaneCollapseContext, useComposeLaunch } from "../shell/ThreePaneShell";
 import { WorkspaceTabManager } from "./WorkspaceTabManager";
@@ -288,10 +288,33 @@ export function WorkspacePane(): React.JSX.Element {
   // Guard: restoreFromPersistence() itself no-ops if a non-Home tab is
   // already open, so an in-flight session won't be clobbered if the user
   // opens a tab during the restore window.
+  //
+  // G-P3 UAT round-3 R3-3 (2026-07-07): `tabRestoreSettled` sequences the
+  // auto-install-default and pin auto-open effects AFTER this restore. Before
+  // this gate existed, the auto-install effect's `addTab` routinely landed
+  // FIRST on refresh (its layouts fetch resolves faster than restore's
+  // GET + widget resolution), which (a) made restoreFromPersistence's
+  // hasNonHomeTab guard silently no-op — dropping every persisted tab — and
+  // (b) fired the debounced PATCH write-through, OVERWRITING the server
+  // store with only the fresh default tab (App Insights: SaveTabs
+  // tabCount=2 at 16:48:10Z → refresh GET 16:49:05Z → SaveTabs tabCount=1
+  // at 16:49:07Z with a freshly-numbered wstab-1-workspace id). Chat-opened
+  // (workspace_open_tab bridge) and menu-opened tabs were BOTH persisted
+  // correctly — the loss happened entirely on the restore path.
   // ---------------------------------------------------------------------------
 
+  const [tabRestoreSettled, setTabRestoreSettled] = React.useState(false);
+
   React.useEffect(() => {
-    if (!chatSessionId || !bffBaseUrl || !isAuthenticated) return;
+    if (!bffBaseUrl || !isAuthenticated) return;
+    if (!chatSessionId) {
+      // No chat session ⇒ nothing was ever persisted for it — unblock the
+      // auto-install/pin effects instead of deadlocking them. If a session id
+      // appears later this effect re-runs and restore proceeds (its manager-
+      // level guard still protects any tabs opened in the meantime).
+      setTabRestoreSettled(true);
+      return;
+    }
 
     let cancelled = false;
     (async () => {
@@ -333,6 +356,10 @@ export function WorkspacePane(): React.JSX.Element {
           message: err instanceof Error ? err.message : String(err),
         });
         // Degrade gracefully — workspace continues with Home-only state.
+      } finally {
+        // R3-3: settle on EVERY terminal path (success, 404, error) so the
+        // auto-install-default + pin auto-open effects below can proceed.
+        if (!cancelled) setTabRestoreSettled(true);
       }
     })();
 
@@ -409,6 +436,11 @@ export function WorkspacePane(): React.JSX.Element {
   const autoInstalledDefaultRef = React.useRef<boolean>(false);
   React.useEffect(() => {
     if (!isAuthenticated) return;
+    // R3-3 (2026-07-07): wait for the NFR-09 tab restore to settle so the
+    // `alreadyOpen` check below sees the RESTORED tabs. Without this gate the
+    // default-tab addTab raced restore, no-op'd it (hasNonHomeTab guard) and
+    // its write-through overwrote the persisted store — refresh lost every tab.
+    if (!tabRestoreSettled) return;
     if (autoInstalledDefaultRef.current) return; // run once per mount
     if (!layoutForAutoInstall) return; // wait for the layout to resolve, or stay empty if null
 
@@ -466,10 +498,11 @@ export function WorkspacePane(): React.JSX.Element {
     return () => {
       window.clearTimeout(timerId);
     };
-    // Run once when both auth AND layoutForAutoInstall are ready; the ref
-    // guard prevents re-runs on subsequent dependency changes (e.g. refetch).
+    // Run once when auth AND the tab restore AND layoutForAutoInstall are
+    // ready; the ref guard prevents re-runs on subsequent dependency changes
+    // (e.g. refetch).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAuthenticated, layoutForAutoInstall]);
+  }, [isAuthenticated, tabRestoreSettled, layoutForAutoInstall]);
 
   // ---------------------------------------------------------------------------
   // Auto-open pinned workspaces — task 092 / round 5 / task 101 fix
@@ -513,6 +546,10 @@ export function WorkspacePane(): React.JSX.Element {
   React.useEffect(() => {
     if (!isAuthenticated) return;
     if (layouts.length === 0) return; // wait for layouts to load before pruning
+    // R3-3 (2026-07-07): same sequencing gate as the auto-install-default
+    // effect — the duplicate guard below must see the RESTORED tabs or the
+    // pin auto-open re-stacks (and its write-through clobbers) them.
+    if (!tabRestoreSettled) return;
     if (autoOpenedPinsRef.current) return; // run once per mount
     autoOpenedPinsRef.current = true;
 
@@ -573,8 +610,10 @@ export function WorkspacePane(): React.JSX.Element {
     // guard above enforces this. `layouts` is in deps so the effect re-runs
     // once after the initial empty array is replaced with the loaded list
     // (the early-return guard at top blocks the first empty-array invocation).
+    // `tabRestoreSettled` is in deps so the effect re-runs once restore
+    // completes (R3-3 sequencing gate above).
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [isAuthenticated, layouts]);
+  }, [isAuthenticated, layouts, tabRestoreSettled]);
 
   // ---------------------------------------------------------------------------
   // R6 Hotfix Wave B-G9c2 (B7 + B8) — DEFERRED Summary-tab install + per-run
@@ -592,8 +631,9 @@ export function WorkspacePane(): React.JSX.Element {
   //       because all runs shared `streamId = chatSessionId`. File A's summary
   //       was lost when file B was summarized.
   //
-  // The fix shifts BOTH responsibilities to `executeSummarizeIntent` (in
-  // ConversationPane's summarize-intent dispatcher):
+  // The fix shifts BOTH responsibilities to the invoking dispatcher (today
+  // the shared `dispatchConsumer` helper's `workspaceTarget` arg; formerly
+  // the retired R5 per-capability summarize orchestrator):
   //
   //   - Each run generates a UNIQUE `streamId` (no reuse of `chatSessionId`).
   //   - The run synchronously emits `workspace.widget_load` with the structured-
@@ -783,7 +823,7 @@ export function WorkspacePane(): React.JSX.Element {
       // R5 task 038 — Manual override for the Summary tab auto-focus.
       //
       // When the user manually clicks a tab OTHER THAN Summary, set the
-      // override flag so subsequent `field_delta` / `streaming_complete`
+      // override flag so subsequent `section_*` / `streaming_complete`
       // events in the current stream cycle do NOT pull focus back to
       // Summary. The override is reset on the NEXT `streaming_started`
       // event (so the next stream can again auto-focus) AND on

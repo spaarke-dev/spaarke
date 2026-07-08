@@ -130,6 +130,11 @@ export const ChatPanel = memo(function ChatPanel(): JSX.Element {
         bridge={null}
         onDocumentStreamEvent={handleDocumentStreamEvent}
         initialMessages={chatHistory}
+        // G-P2 UAT round-1 finding 2 (2026-07-06): the Insert affordance is now
+        // opt-in per host (default hidden). AnalysisWorkspace IS the host with an
+        // insert target — the Lexical editor listens on the sprk-document-insert
+        // BroadcastChannel (useDocumentInsert) — so it declares the capability.
+        enableInsertToEditor
       />
     </div>
   );

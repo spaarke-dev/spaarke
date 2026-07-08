@@ -119,4 +119,55 @@ public class StoredSession
     /// </summary>
     [JsonPropertyName("uploadedFiles")]
     public List<StoredUploadedFile> UploadedFiles { get; set; } = [];
+
+    // =========================================================================
+    // Document references (ADR-040 / FR-P0-01 Cosmos file-reference fix)
+    //
+    // ADR-040 MUST: document references survive warm-store restore. Prior to
+    // FR-P0-01 the ChatSessionManager Cosmos mapping dropped DocumentId,
+    // AdditionalDocumentIds, and the UploadedFiles manifest on both the persist
+    // and restore directions (the audited P2 violation). These fields carry
+    // them; older documents deserialize cleanly (additive per ADR-015).
+    // =========================================================================
+
+    /// <summary>
+    /// SPE document ID for document-context sessions (mirrors
+    /// <c>ChatSession.DocumentId</c>). Null for knowledge-only sessions and for
+    /// documents that pre-date this field.
+    /// </summary>
+    [JsonPropertyName("documentId")]
+    public string? DocumentId { get; set; }
+
+    /// <summary>
+    /// Additional document IDs (max 5) pinned to the conversation (mirrors
+    /// <c>ChatSession.AdditionalDocumentIds</c>). Empty for sessions with no
+    /// pinned documents or documents that pre-date this field.
+    /// </summary>
+    [JsonPropertyName("additionalDocumentIds")]
+    public List<string> AdditionalDocumentIds { get; set; } = [];
+
+    // =========================================================================
+    // Session ledger (ADR-040 / FR-P0-01) — Cosmos shapes of the typed entries.
+    //
+    // DARK at P0: persisted + restored, zero production readers. All four
+    // default to empty lists so older Cosmos documents deserialize cleanly
+    // (additive schema evolution per ADR-015; partition key unchanged).
+    // Tier 3 user-owned / GDPR-erased with the session document.
+    // =========================================================================
+
+    /// <summary>Capability outputs, addressable by <c>{bindingId}@t{n}</c> key (ADR-040).</summary>
+    [JsonPropertyName("outputs")]
+    public List<StoredSessionOutput> Outputs { get; set; } = [];
+
+    /// <summary>Per-turn tool-call audit chains (identifiers/filters/counts only — NFR-07).</summary>
+    [JsonPropertyName("toolChains")]
+    public List<StoredToolChain> ToolChains { get; set; } = [];
+
+    /// <summary>Widget user-action events.</summary>
+    [JsonPropertyName("widgetEvents")]
+    public List<StoredWidgetEvent> WidgetEvents { get; set; } = [];
+
+    /// <summary>Pending-confirmation / elicitation gate markers.</summary>
+    [JsonPropertyName("gates")]
+    public List<StoredGate> Gates { get; set; } = [];
 }

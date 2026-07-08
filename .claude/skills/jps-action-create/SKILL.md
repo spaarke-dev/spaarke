@@ -169,6 +169,14 @@ Run validation checks:
 - [ ] At least 1 example provided
 - [ ] Metadata has description and tags
 
+**If the Action row also carries a `sprk_inputschema` (loop-projectable capabilities — Bindings with a tool description):** the value MUST be valid JSON Schema in the OpenAI function-parameters subset (G-P3 UAT 2026-07-07 — ONE invalid schema 400s EVERY loop turn until the projection-time validator excludes it):
+- [ ] Root is `"type": "object"` with `properties`
+- [ ] `required` is an ARRAY OF STRINGS at object level ONLY — property-level `"required": true|false` is **BANNED** (this exact mistake caused the outage; OpenAI: "True is not of type 'array'")
+- [ ] Every `"type": "array"` property has `items`
+- [ ] Custom keywords `elicitation_prompt` / `ledger_resolution` are allowed (ignored by OpenAI, read by the elicitation machinery)
+- [ ] Legacy `{"args":[...]}` format is RETIRED (normalized 2026-07-07) — do not author it
+- [ ] Author the mirror in `infra/dataverse/inputschemas/` FIRST — `CatalogInputSchemaContractTests` validates every mirror in CI (server twin: `OpenAiFunctionSchemaValidator`)
+
 ### Step 5: Save
 
 ```
@@ -182,7 +190,7 @@ ACTION-NAME convention:
 
 ### Step 5.5: Post-Deploy Verification (BINDING per canonical-truth loop 2026-06-26; updated for R7 schema cleanup 2026-06-29)
 
-After the Action row is seeded to Dataverse via `Seed-JpsActions.ps1`, **verify with Dataverse MCP `read_query`** that the row landed with the right columns. The actionCode is the canonical alternate key — every playbook node will FK-resolve to this Action via actionCode → Guid at deploy time (see [`ai-guide-playbook-deploy-recipe.md`](../../../docs/guides/ai-guide-playbook-deploy-recipe.md) §3 step 3).
+After the Action row is created in Dataverse (via Dataverse MCP `create_record` — `Seed-JpsActions.ps1` was RETIRED 2026-07-07 by ai-architecture-redesign-r1 task 051; see `scripts/README.md` for the replacement flow: author the JPS + `infra/dataverse/` mirrors first, create the row via MCP, verify), **verify with Dataverse MCP `read_query`** that the row landed with the right columns. The actionCode is the canonical alternate key — every playbook node will FK-resolve to this Action via actionCode → Guid at deploy time (see [`ai-guide-playbook-deploy-recipe.md`](../../../docs/guides/ai-guide-playbook-deploy-recipe.md) §3 step 3).
 
 ```
 mcp__dataverse__read_query against sprk_analysisaction
@@ -196,12 +204,12 @@ EXPECT sprk_outputschemajson non-empty IF structuredOutput=true in JPS.
 
 The `_sprk_actiontypeid_value` lookup and `sprk_executoractiontype` INT columns were dropped from `sprk_analysisaction` in R7 Wave 4 (tasks 043+044, 2026-06-29) — do NOT include them in your select projection; the request will 400 (column does not exist).
 
-If the row is missing or missing required columns, re-run `Seed-JpsActions.ps1` — do NOT manually patch.
+If the row is missing or missing required columns, re-create it via MCP `create_record`/`update_record` from the repo mirrors — keep mirrors and env in sync (task-051 round-trip discipline).
 
 ### Step 6: Offer Next Steps
 
 Ask user:
-- Add this action to `scripts/Seed-JpsActions.ps1` mapping? (for deployment)
+- Mirror the row JSON into `infra/dataverse/` (+ `inputschemas/` if loop-projectable)? (round-trip discipline)
 - Create a playbook that uses this action? (invoke `jps-playbook-design`)
 - Validate the JPS with a render test? (invoke `jps-validate`)
 
@@ -260,8 +268,8 @@ The `sprk_analysisactiontype` lookup TABLE itself is preserved (FR-05) as decora
 ✅ Validation: All checks passed
 
 Next steps:
-1. Add to Seed-JpsActions.ps1 for deployment
-2. Deploy BFF API + seed Dataverse
+1. Create/update the `sprk_analysisaction` row (BA catalog editor in PlaybookBuilder, or Dataverse MCP `create_record`) — Seed-JpsActions.ps1 was RETIRED 2026-07-06 (ai-architecture-redesign-r1 task 051)
+2. Deploy BFF API if server changes accompany the Action
 3. Test end-to-end with a sample document
 ```
 

@@ -53,30 +53,15 @@ public sealed class NullSprkChatAgentFactory : SprkChatAgentFactory
         string? latestUserMessage = null,
         IReadOnlyList<string>? previousTurnToolNames = null,
         IReadOnlyList<ChatSessionFile>? uploadedFiles = null,
-        CancellationToken cancellationToken = default,
-        string? intentHint = null)
-    {
-        LogDisabled(nameof(CreateAgentAsync));
-        throw new FeatureDisabledException(ErrorCode, DetailMessage);
-    }
-
-    public override Task<PlaybookDispatcher> CreatePlaybookDispatcherAsync(
-        string tenantId,
         CancellationToken cancellationToken = default)
     {
-        LogDisabled(nameof(CreatePlaybookDispatcherAsync));
+        LogDisabled(nameof(CreateAgentAsync));
         throw new FeatureDisabledException(ErrorCode, DetailMessage);
     }
 
     public override DynamicCommandResolver CreateCommandResolver()
     {
         LogDisabled(nameof(CreateCommandResolver));
-        throw new FeatureDisabledException(ErrorCode, DetailMessage);
-    }
-
-    public override PlaybookOutputHandler CreatePlaybookOutputHandler()
-    {
-        LogDisabled(nameof(CreatePlaybookOutputHandler));
         throw new FeatureDisabledException(ErrorCode, DetailMessage);
     }
 

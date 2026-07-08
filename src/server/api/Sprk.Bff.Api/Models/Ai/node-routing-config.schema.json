@@ -22,7 +22,7 @@
   },
   "allOf": [
     {
-      "$comment": "Conditional-required rule: when destination=workspace, widgetType MUST be a non-empty string. Implemented as if/then per Draft 2020-12 idiom. This rule is also enforced in C# by NodeRoutingConfig.Validate() (see Models/Ai/NodeRoutingConfig.cs) — the C# validation is the authoritative check at runtime; this JSON Schema is for write-time tooling (Playbook Builder AI Assistant — Services/Ai/Builder/BuilderToolDefinitions.cs).",
+      "$comment": "Conditional-required rule: when destination=workspace, widgetType MUST be a non-empty string. Implemented as if/then per Draft 2020-12 idiom. This rule is also enforced in C# by NodeRoutingConfig.Validate() (see Models/Ai/NodeRoutingConfig.cs) — the C# validation is the authoritative check at runtime; this JSON Schema is for write-time tooling (the former Playbook Builder AI Assistant was removed 2026-07-07, redesign-r1 task 050; schema retained for authoring-time validation).",
       "if": {
         "properties": {
           "destination": { "const": "workspace" }

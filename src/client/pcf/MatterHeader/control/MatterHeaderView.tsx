@@ -26,11 +26,19 @@
  *  - Sparkle popover: sparkle icon + copy button + updated empty state text
  *  - TextareaField: `maxLines={10}` default; auto-grow past that
  *
+ * v1.0.20 (2026-07-07) — AI Summary field fix: sparkle popover now reads
+ *  `sprk_mattersummary` instead of `sprk_recordsummary`. Live Dataverse data
+ *  confirmed `sprk_recordsummary` is populated on ZERO Matter records (the
+ *  "external service" `record-header-and-notepad-r1` task 001 assumed would
+ *  write it was never built), while `sprk_mattersummary` is actively written
+ *  by an AI document-analysis action and holds real narrative summaries.
+ *  The popover was silently empty for every Matter in production.
+ *
  * Field payload (verified via Dataverse MCP):
  *   sprk_matternumber (span 1, required), sprk_mattername (span 2),
  *   _sprk_mattertype_value → editable LookupField (span 1),
  *   _sprk_practicearea_value → editable LookupField (span 1),
- *   sprk_matterdescription (span 3), sprk_recordsummary (sparkle popover body).
+ *   sprk_matterdescription (span 3), sprk_mattersummary (sparkle popover body).
  *
  * Theming: platform-library Fluent v9 auto-applies host theme (control-type="virtual").
  *
@@ -72,7 +80,7 @@ const FIELDS = [
   '_sprk_mattertype_value',
   '_sprk_practicearea_value',
   'sprk_matterdescription',
-  'sprk_recordsummary',
+  'sprk_mattersummary',
 ];
 
 // Lookup metadata. `refEntity` is the target entity's logical name (used for
@@ -168,19 +176,17 @@ export const MatterHeaderView: React.FC<IMatterHeaderViewProps> = ({ recordId, t
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const xrmPage = getXrmPage() as any;
     if (!xrmPage?.getAttribute) {
-      // eslint-disable-next-line no-console
       console.warn('[MatterHeader] Xrm.Page unavailable — text save skipped', fieldName);
       throw new Error('Form buffer unavailable');
     }
     const attr = xrmPage.getAttribute(fieldName);
     if (!attr) {
-      // eslint-disable-next-line no-console
       console.warn('[MatterHeader] attribute not on form', fieldName);
       throw new Error(`Field '${fieldName}' not on form`);
     }
     attr.setValue(newValue);
     setPendingText(prev => ({ ...prev, [fieldName]: newValue }));
-    // eslint-disable-next-line no-console
+
     console.info('[MatterHeader] staged text edit', { field: fieldName, dirty: !!attr.getIsDirty?.() });
   }, []);
 
@@ -201,7 +207,7 @@ export const MatterHeaderView: React.FC<IMatterHeaderViewProps> = ({ recordId, t
     const odata =
       `?$select=${meta.refIdField},${meta.refNameField}` + filterClause + `&$orderby=${meta.refNameField} asc&$top=10`;
     const result = await xrm.WebApi.retrieveMultipleRecords(meta.refEntity, odata);
-    return (result.entities as Array<Record<string, unknown>>).map(e => ({
+    return (result.entities as Record<string, unknown>[]).map(e => ({
       id: e[meta.refIdField] as string,
       name: e[meta.refNameField] as string,
     }));
@@ -212,13 +218,11 @@ export const MatterHeaderView: React.FC<IMatterHeaderViewProps> = ({ recordId, t
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const xrmPage = getXrmPage() as any;
     if (!xrmPage?.getAttribute) {
-      // eslint-disable-next-line no-console
       console.warn('[MatterHeader] Xrm.Page unavailable — lookup save skipped', key);
       return;
     }
     const attr = xrmPage.getAttribute(key);
     if (!attr) {
-      // eslint-disable-next-line no-console
       console.warn('[MatterHeader] lookup attribute not on form', key);
       return;
     }
@@ -226,7 +230,7 @@ export const MatterHeaderView: React.FC<IMatterHeaderViewProps> = ({ recordId, t
     const nextValue = item ? [{ id: item.id, name: item.name, entityType: meta.refEntity }] : null;
     attr.setValue(nextValue);
     setPendingLookup(prev => ({ ...prev, [key]: item }));
-    // eslint-disable-next-line no-console
+
     console.info('[MatterHeader] staged lookup edit', { field: key, item, dirty: !!attr.getIsDirty?.() });
   }, []);
 
@@ -266,10 +270,10 @@ export const MatterHeaderView: React.FC<IMatterHeaderViewProps> = ({ recordId, t
   // webpack resolution, see v1.0.4 + v1.0.10 build regressions).
   const fetchSparkleSummary = React.useCallback(
     async (): Promise<{ summary: string | null; tldr: string | null }> => ({
-      summary: (values?.sprk_recordsummary ?? null) as string | null,
+      summary: (values?.sprk_mattersummary ?? null) as string | null,
       tldr: null,
     }),
-    [values?.sprk_recordsummary]
+    [values?.sprk_mattersummary]
   );
 
   const toolbarPropsWithSparkle = {

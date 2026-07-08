@@ -14,8 +14,8 @@
     uses `IGenericEntityService.RetrieveByAlternateKeyAsync` on `sprk_analysisaction`
     keyed by `sprk_actioncode = "SUM-CHAT@v1"` because the playbook → node → action FK
     chain has a NULL `sprk_actionid` on the node row. This script populates that FK so
-    task 025 can refactor `SessionSummarizeOrchestrator` to invoke
-    `PlaybookExecutionEngine.ExecuteAsync(playbookId)` instead.
+    task 025 could refactor the summarize orchestrator (since deleted, task 044) to invoke
+    the engine execute path instead (that shell was deleted by FR-P3-05 task 044).
 
 .NOTES
     Idempotency contract:
@@ -159,4 +159,4 @@ Write-Host "  playbook  : $playbookId  ($PlaybookName)"
 Write-Host "  node      : $nodeId  ($($verifyResp.sprk_name))"
 Write-Host "  action    : $actionId  ($ActionCode)"
 Write-Host ""
-Write-Host "Task 025 (SessionSummarizeOrchestrator refactor) is now unblocked." -ForegroundColor Green
+Write-Host "Task 025 (summarize orchestrator refactor; component since deleted by task 044) is now unblocked." -ForegroundColor Green

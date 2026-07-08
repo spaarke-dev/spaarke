@@ -271,7 +271,7 @@ VALIDATE (live — Dataverse cross-check):
     QUERY Dataverse to verify the record exists:
       - Actions:   sprk_analysisactions?$filter=sprk_actioncode eq '{code}'&$top=1
       - Skills:    sprk_analysisskills?$filter=sprk_skillcode eq '{code}'&$top=1
-      - Knowledge: sprk_analysisknowledges?$filter=sprk_externalid eq '{code}'&$top=1
+      - Knowledge: sprk_analysisknowledges?$filter=sprk_knowledgecode eq '{code}'&$top=1  (column renamed from sprk_externalid — task 051 2026-07-07)
       - Tools:     sprk_analysistools?$filter=sprk_toolcode eq '{code}'&$top=1
 
     IF record not found:
@@ -291,7 +291,7 @@ VALIDATE (live — Dataverse cross-check):
 
        Options:
        1. Remove missing references from definition and deploy
-       2. Seed missing records first (run Seed-JpsActions.ps1 or create manually)
+       2. Seed missing records first (Dataverse MCP create_record + infra/dataverse/ mirror — Seed-JpsActions.ps1 RETIRED 2026-07-07, see scripts/README.md)
        3. Abort deployment"
 
     USE AskUserQuestion to let user decide

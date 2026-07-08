@@ -25,7 +25,7 @@ namespace Sprk.Bff.Api.Tests.Api.Ai;
 /// - Retry-After headers are included in 429 responses
 /// - Content-Type: application/problem+json on rate limit error responses
 /// - All R2 AI rate limiting policies (ai-stream, ai-upload, ai-export, ai-persist,
-///   ai-context, ai-indexing, ai-batch) are registered and functional
+///   ai-context, ai-batch) are registered and functional
 /// - Policies are per-user (partitioned by 'oid' claim) and independent of each other
 ///
 /// Strategy: We create a minimal test host that registers ONLY the RateLimitingModule
@@ -107,9 +107,6 @@ public class RateLimitingContractTests : IAsyncLifetime
 
                         endpoints.MapGet("/test/ai-context", okHandler)
                             .RequireRateLimiting("ai-context");
-
-                        endpoints.MapPost("/test/ai-indexing", okHandler)
-                            .RequireRateLimiting("ai-indexing");
 
                         endpoints.MapGet("/test/ai-batch", okHandler)
                             .RequireRateLimiting("ai-batch");
@@ -276,7 +273,6 @@ public class RateLimitingContractTests : IAsyncLifetime
     [InlineData("ai-export", "POST", "Word export (ChatWordExportEndpoints)")]
     [InlineData("ai-persist", "POST", "SPE persistence (ChatDocumentEndpoints persist)")]
     [InlineData("ai-context", "GET", "Analysis chat context (AnalysisChatContextEndpoints)")]
-    [InlineData("ai-indexing", "POST", "Playbook embedding indexing (PlaybookEmbeddingEndpoints)")]
     [InlineData("ai-batch", "GET", "Background AI operations (RAG, search, knowledge base)")]
     public async Task R2AiEndpoint_HasRateLimitingPolicy(
         string policyName, string httpMethod, string endpointDescription)
@@ -300,7 +296,6 @@ public class RateLimitingContractTests : IAsyncLifetime
     [InlineData("ai-upload", "POST", 3)]
     [InlineData("ai-export", "POST", 3)]
     [InlineData("ai-persist", "POST", 3)]
-    [InlineData("ai-indexing", "POST", 3)]
     [InlineData("ai-context", "GET", 3)]
     [InlineData("ai-batch", "GET", 3)]
     public async Task Policy_AllowsMultipleRequestsWithinLimit(

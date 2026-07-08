@@ -131,9 +131,9 @@ public class AnalysisOrchestrationServiceTests
 
     private static ResolvedScopes CreateEmptyScopes() => new([], [], []);
 
-    // R7 Wave 4 task 042 (FR-11, 2026-06-28) — the `#region ExecuteAnalysisAsync Tests` block
+    // R7 Wave 4 task 042 (FR-11, 2026-06-28) — the legacy direct-invocation execute test region
     // (6 tests, ~196 LOC) was DELETED here per ADR-038 §7 build-vs-maintain criteria: the
-    // production method `AnalysisOrchestrationService.ExecuteAnalysisAsync` was deleted in the
+    // legacy direct-invocation production method was deleted in the
     // same task, so the tests cannot defend any contract. Replacement coverage for the migrated
     // endpoint lives in `tests/integration/Spe.Integration.Tests/AnalysisEndpointsIntegrationTests.cs`
     // (which now exercises `IPlaybookOrchestrationService.ExecuteAsync` via the migrated

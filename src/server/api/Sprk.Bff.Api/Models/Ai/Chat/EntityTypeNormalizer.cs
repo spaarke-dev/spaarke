@@ -9,7 +9,7 @@ namespace Sprk.Bff.Api.Models.Ai.Chat;
 /// SpaarkeAi clients launched from Power Apps pass the raw Dataverse logical name
 /// (e.g. <c>sprk_matter</c>, <c>sprk_project</c>, <c>sprk_invoice</c>) as the chat
 /// host context EntityType, because the client reads URL params directly without
-/// invoking <c>useEntityResolver</c>. Multiple BFF surfaces — entity-enrichment in
+/// resolving entity context in the host shell. Multiple BFF surfaces — entity-enrichment in
 /// the system prompt, matter-memory injection, parent-entity-scoped RAG search —
 /// however operate on the canonical short form (<c>matter</c>, <c>project</c>,
 /// <c>invoice</c>, <c>account</c>, <c>contact</c>) used by the document-index
@@ -32,7 +32,7 @@ namespace Sprk.Bff.Api.Models.Ai.Chat;
 /// </para>
 /// <para>
 /// <b>Out of scope</b>: <see cref="Sprk.Bff.Api.Services.Ai.Chat.StandaloneChatContextProvider"/>
-/// and <see cref="Sprk.Bff.Api.Services.Ai.Chat.Tools.DataverseQueryTools"/> still
+/// still
 /// operate on raw logical names (a different bounded context — pre-session probe
 /// and tool-allow-listing). Audit 120 disposition §A: minimum-touch — normalize
 /// at the chat-session boundary only.

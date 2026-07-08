@@ -31,20 +31,20 @@ public static class TelemetryModule
                 metrics.AddMeter("Sprk.Bff.Api.AiCapabilities");
                 // AI Latency meter (AIPU2-066): TTFT, TBT, TTLT, prompt tokens, routing latency
                 metrics.AddMeter(Sprk.Bff.Api.Telemetry.AiLatencyTelemetry.MeterName);
-                // R5 Summarize meter (D1-08 task 008): r5.summarize.invocation + r5.session_files.index_size
-                // Stable downstream contract for Phase 3 D3-03 dashboards.
-                metrics.AddMeter(Sprk.Bff.Api.Telemetry.R5SummarizeTelemetry.MeterName);
                 // Insights Engine Widgets r1 meter (project ai-spaarke-insights-engine-widgets-r1 task 050):
                 // widget.insightcard.invoked + widget.insightcard.duration with bounded dimensions per NFR-06.
                 metrics.AddMeter(Sprk.Bff.Api.Telemetry.InsightWidgetsTelemetry.MeterName);
+                // Event Rules meter (FR-P1-03 / NFR-09 "enforced AND telemetered") — registration
+                // added by spaarke-ai-architecture-redesign-r1 task 054 (FR-P4-05): the meter existed
+                // since task 022 but was never AddMeter'd, so eventpath.execution /
+                // eventpath.bound_denial were silently dropped from the App Insights export.
+                metrics.AddMeter(Sprk.Bff.Api.Services.Ai.EventRules.EventRulesTelemetry.MeterName);
             })
             .WithTracing(tracing =>
             {
                 tracing.AddSource("Sprk.Bff.Api.Ai");
                 tracing.AddSource("Sprk.Bff.Api.Rag");
                 tracing.AddSource("Sprk.Bff.Api.Finance");
-                // R5 Summarize ActivitySource (D1-08 task 008): distributed-trace spans for Summarize-for-Chat invocations.
-                tracing.AddSource(Sprk.Bff.Api.Telemetry.R5SummarizeTelemetry.MeterName);
                 // Insights Engine Widgets r1 ActivitySource (task 050): distributed-trace spans for
                 // InsightSummaryCard invocations through /api/insights/ask.
                 tracing.AddSource(Sprk.Bff.Api.Telemetry.InsightWidgetsTelemetry.MeterName);

@@ -1,0 +1,31 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "DRAFT-CORR@v1 draft-correspondence output (sprk_analysisaction.sprk_outputschemajson mirror)",
+  "description": "Constrained-decoding contract for the draft-correspondence proving capability (FR-P3-02). Property declaration order (subject -> body -> recipients_suggestion -> cited_refs) is the streaming emission order. The drafted correspondence is a SessionOutput ledger entry rendered for review (ADR-040 render-follows-store); the companion email.draft typed tool (side_effect_class=communicate, confirmation-gated) materializes the user-approved draft as a Spaarke sprk_communication DRAFT record (Communication service; NOT Outlook; DRAFT-ONLY - send stays user-initiated).",
+  "type": "object",
+  "properties": {
+    "subject": {
+      "type": "string",
+      "maxLength": 140,
+      "description": "Concise, specific subject line for the correspondence."
+    },
+    "body": {
+      "type": "string",
+      "maxLength": 6000,
+      "description": "Complete professional correspondence body (plain text): salutation, purposeful paragraphs grounded in the source documents, requested action, closing with '[Your name]' placeholder."
+    },
+    "recipients_suggestion": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Email addresses found in the source text that plausibly identify the intended recipient(s), best-guess first; empty when none are present. Never invented."
+    },
+    "cited_refs": {
+      "type": "array",
+      "items": { "type": "string" },
+      "minItems": 1,
+      "description": "The source references the draft drew from (file names; session output references when the request names them). An uncited draft is invalid (ADR-039 grounded outputs)."
+    }
+  },
+  "required": ["subject", "body", "recipients_suggestion", "cited_refs"],
+  "additionalProperties": false
+}

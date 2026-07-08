@@ -85,8 +85,13 @@ export class ScopeConfigEditor implements ComponentFramework.ReactControl<IInput
     // Detect entity type from form context
     const entityLogicalName = this._getEntityLogicalName(context);
 
+    // Bound-column logical name — drives the per-column Binding/schema
+    // variants (task 053 / FR-P4-04).
+    const boundAttributeName = this._getBoundAttributeName(context);
+
     const appElement = React.createElement(ScopeConfigEditorApp, {
       entityLogicalName,
+      boundAttributeName,
       fieldValue,
       apiBaseUrl,
       apiBaseUrlError: this._apiBaseUrlError,
@@ -159,6 +164,24 @@ export class ScopeConfigEditor implements ComponentFramework.ReactControl<IInput
       // Not on a form context — ignore
     }
     return '';
+  }
+
+  /**
+   * Logical name of the column the control is bound to (fieldValue).
+   * Bound-property metadata exposes attributes.LogicalName on forms; ''
+   * when unavailable (e.g. test harness).
+   */
+  private _getBoundAttributeName(context: ComponentFramework.Context<IInputs>): string {
+    try {
+      const attributes = (
+        context.parameters.fieldValue as unknown as {
+          attributes?: { LogicalName?: string };
+        }
+      )?.attributes;
+      return attributes?.LogicalName?.toLowerCase() ?? '';
+    } catch {
+      return '';
+    }
   }
 
   /**

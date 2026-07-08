@@ -215,7 +215,11 @@ export type ChatSseEventType =
   | 'context_event'
   // chat-routing-redesign-r1 task 117a/117b — file-aware playbook routing
   // surfaces top-N candidates + an Open Library CTA inline in the chat.
-  | 'playbook_options';
+  | 'playbook_options'
+  // FR-P2-03 task 032 — capture_mode: modal wizard escape for a suspended
+  // capability invocation with missing required args (pending elicitation
+  // Gate marker precedes this event — ADR-040).
+  | 'elicitation_modal';
 
 /** A parsed SSE event from the stream, matching ChatSseEvent from the server. */
 export interface IChatSseEvent {
@@ -327,7 +331,10 @@ export interface IChatSseEventData {
   // (ExecutionTraceWidget) can render in real time.
 
   /**
-   * Trace event sub-type. Matches the six R6 task 059 / 063 discriminants.
+   * Trace event sub-type. Matches the six R6 task 059 / 063 discriminants,
+   * plus `tool_chain` (ai-architecture-redesign-r1 task 046 / FR-P3-07 — a
+   * session-ledger ToolChain segment persisted by the BFF; ADR-040 storage-
+   * precedes-rendering) and the `consumer_chips` client-tolerance leg.
    * Present on 'context_event' SSE events ONLY.
    */
   contextEventType?:
@@ -336,7 +343,10 @@ export interface IChatSseEventData {
     | 'knowledge_retrieved'
     | 'playbook_node_executing'
     | 'playbook_node_completed'
-    | 'decision_made';
+    | 'decision_made'
+    | 'tool_chain'
+    | 'consumer_chips'
+    | 'workspace_open_tab';
 
   /** ISO-8601 UTC timestamp of the trace event. Present on 'context_event'. */
   contextTimestamp?: string;
@@ -379,6 +389,76 @@ export interface IChatSseEventData {
 
   /** Capability name (decision_made). */
   contextCapabilityName?: string;
+
+  // ── tool_chain fields (ai-architecture-redesign-r1 task 046 / FR-P3-07) ──
+  //
+  // The PERSISTED session-ledger ToolChain segment (ADR-040: the BFF appends
+  // the segment to the ledger, THEN emits this frame). NFR-07 / ADR-015
+  // binding: identifiers / redacted filter summaries / counts / durations
+  // ONLY — argsSummary is redacted at recording time server-side; citation
+  // ids stay in the ledger (a count rides the wire).
+
+  /** 1-based session turn of the persisted ToolChain segment (tool_chain). */
+  contextTurn?: number;
+
+  /** The persisted ledger segment's ordered tool calls (tool_chain). */
+  contextToolChainCalls?: ReadonlyArray<{
+    toolId?: string;
+    argsSummary?: string;
+    resultCount?: number;
+    citationCount?: number;
+    durationMs?: number;
+  }>;
+
+  // ── workspace_open_tab fields (ai-architecture-redesign-r1 G-P3 UAT round-2 R2-D) ──
+  //
+  // Server-initiated LIVE workspace tab open (SendWorkspaceArtifactHandler,
+  // widgetType 'Workspace' — e.g. the Compose layout). The host bridge
+  // dispatches PaneEventBus `workspace.widget_load` with these fields — the
+  // same mechanism the Workspaces menu uses. ADR-015: registry key + tab
+  // title + identifiers only.
+
+  /** Client workspace-widget registry key (workspace_open_tab), e.g. 'workspace'. */
+  contextWidgetType?: string;
+
+  /** Tab display title (workspace_open_tab). */
+  contextDisplayName?: string;
+
+  /** Server-generated tab correlation id (workspace_open_tab). */
+  contextTabId?: string;
+
+  /** JSON-serialized widgetData for the tab's widget (workspace_open_tab). */
+  contextWidgetDataJson?: string;
+
+  // ── consumer_chips fields (ai-architecture-redesign-r1 task 023 / FR-P1-04) ──
+  //
+  // Next-step chips sourced from a Binding row's `sprk_chiptransitions` (D4 /
+  // ADR-039). RESOLVED at task 023b: the SHIPPED server chip contract is the
+  // task-022 Event stream's top-level `chips` ChatSseEvent
+  // (`data: {sourceBindingId, chips: EventChip[]}` with EventChip =
+  // `{targetBindingId, label, args?}`) — the server does NOT emit
+  // `consumer_chips` context events (single-wire-shape decision; EventChip
+  // also rides inside event_confirmation/event_notice payloads). This
+  // `contextChips` leg remains as client-side tolerance only. Hosts parse ANY
+  // chip payload via `parseConsumerChips` (services/dispatchConsumer.ts, which
+  // accepts both spellings) and dispatch clicks through the ONE
+  // `dispatchConsumer(bindingId, args)` helper.
+  //
+  // ADR-015: chip labels + binding ids are maker-authored configuration
+  // content (Tier 1 safe) — no user content on this event.
+
+  /**
+   * Chip transitions from the just-completed Binding. Present when
+   * `contextEventType === 'consumer_chips'`. Entries follow the Binding
+   * column's authored JSON shape (`target_binding_id`, `chip_label`,
+   * optional `prefill_slots`, optional `requires_attachments`).
+   */
+  contextChips?: ReadonlyArray<{
+    target_binding_id?: string;
+    chip_label?: string;
+    prefill_slots?: Record<string, unknown>;
+    requires_attachments?: boolean;
+  }>;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -388,7 +468,7 @@ export interface IChatSseEventData {
 /**
  * A single playbook candidate surfaced in a `playbook_options` SSE event.
  * Mirrors the BFF `PlaybookOptionCandidate` record in
- * `Sprk.Bff.Api.Services.Ai.Chat.SseEventTypes.PlaybookOptionsSseEvent`.
+ * the retired BFF options SSE event type (deleted in task 035 / FR-P2-06).
  *
  * ADR-015: All fields are tier-1 safe — admin-facing display name + opaque IDs +
  * controlled-vocabulary reason. No user message content, no file content.
@@ -413,10 +493,9 @@ export interface IPlaybookOptionCandidate {
 }
 
 /**
- * Payload for the `playbook_options` SSE event emitted by the BFF after
- * file-aware classification. Locked by spec FR-49.
- *
- * @see `Sprk.Bff.Api.Services.Ai.Chat.SseEventTypes.PlaybookOptionsSseEventData`
+ * Payload for the legacy `playbook_options` SSE event. The BFF stopped emitting
+ * this event at the FR-P2-05/06 hard cutover (ai-architecture-redesign-r1 tasks
+ * 034/035); the client handler surface is P3 FR-P3-06 consolidation scope.
  */
 export interface IPlaybookOptionsPayload {
   /**
@@ -434,13 +513,59 @@ export interface IPlaybookOptionsPayload {
    * MIME types, sizes, or content (ADR-015 tier-1).
    */
   sessionAttachmentIds: string[];
-  /** Whether the upstream `IIntentRerankerService` was invoked to refine the list. */
+  /** Whether the upstream (retired) rerank service was invoked to refine the list. */
   rerankInvoked: boolean;
   /**
    * Controlled-vocabulary tag explaining the rerank outcome. `null`/absent when
    * `rerankInvoked` is `false`.
    */
   rerankReason?: string | null;
+}
+
+/**
+ * One missing input field on an `elicitation_modal` SSE event (FR-P2-03,
+ * spaarke-ai-architecture-redesign-r1 task 032). Name/prompt/type come from the
+ * Binding's DECLARED input schema (`sprk_inputschema`) — the wizard must render
+ * these fields verbatim, never invent its own (ADR-039 grounded outputs).
+ *
+ * @see `Sprk.Bff.Api.Api.Ai.ChatSseElicitationFieldData`
+ */
+export interface IElicitationModalField {
+  /** Declared schema field name. */
+  name: string;
+  /** Maker-authored elicitation prompt (`elicitation_prompt` ?? `description`); null when undeclared. */
+  prompt?: string | null;
+  /** Declared JSON-schema type token, when present. */
+  type?: string | null;
+}
+
+/**
+ * Payload for the `elicitation_modal` SSE event (FR-P2-03): a capability
+ * invocation is suspended awaiting missing required inputs, and its Binding
+ * declares `capture_mode: modal` — the wizard surface collects the fields
+ * instead of conversational Q&A.
+ *
+ * Host contract: render a form/wizard for `missingFields` (pre-filling
+ * `providedArgs`), then complete by invoking the ONE client dispatch helper —
+ * `dispatchConsumer(bindingId, { slots: completedArgs })` — which executes the
+ * Binding and resolves the pending elicitation gate server-side (the P3 matter
+ * pre-fill wizard builds on this contract).
+ *
+ * @see `Sprk.Bff.Api.Api.Ai.ChatSseElicitationModalData`
+ */
+export interface IElicitationModalPayload {
+  /** Pending elicitation gate id (session-ledger correlation key). */
+  gateId: string;
+  /** Target Binding row GUID — the ONLY routing datum (ADR-039). */
+  bindingId: string;
+  /** Stable consumer-type code (presentation fallback title). */
+  consumerType: string;
+  /** The Binding's maker-authored tool description, when present. */
+  title?: string | null;
+  /** Declared required fields still missing. */
+  missingFields: IElicitationModalField[];
+  /** Arguments already supplied (wizard pre-fill); null/absent when none. */
+  providedArgs?: Record<string, unknown> | null;
 }
 
 /**
@@ -611,6 +736,21 @@ export interface ISprkChatProps {
   /** Callback fired when a new session is created */
   onSessionCreated?: (session: IChatSession) => void;
   /**
+   * Callback fired when the host-provided `sessionId` (via `initialSessionId`)
+   * is no longer valid on the server (Redis TTL expired, session cleaned up).
+   *
+   * The host SHOULD clear its persisted session state (e.g., localStorage /
+   * sessionStorage) when this fires. SprkChat will automatically create a
+   * fresh session and call `onSessionCreated` with the new session id
+   * immediately after, so downstream widgets (uploads, playbook picker, etc.)
+   * pick up the new id via the normal `onSessionCreated` flow.
+   *
+   * R7 Wave 12.3 Phase 12.3a UAT fix (2026-07-03) — prevents mismatched
+   * session IDs between chat and parallel widgets (uploads etc.) when a
+   * previously-persisted session has been cleaned up server-side.
+   */
+  onSessionStale?: (staleSessionId: string) => void;
+  /**
    * Callback fired when the user switches playbooks via the context selector
    * or playbook chips. Allows the host to update its own state and persist
    * the choice (e.g., to sessionStorage).
@@ -618,6 +758,43 @@ export interface ISprkChatProps {
   onPlaybookChange?: (playbookId: string) => void;
   /** Optional CSS class name applied to the root element */
   className?: string;
+  /**
+   * Host-provided content rendered directly ABOVE the input zone (below the
+   * message transcript). Layout slot only — SprkChat applies no styling and
+   * attaches no behavior; the host owns the slot's content and interactions.
+   *
+   * Added for the Click-path next-step chip strip (ai-architecture-redesign-r1
+   * G-P1 UAT round-2, 2026-07-06): suggested-next-step affordances belong at
+   * the conversation's leading edge (above the composer), not above the
+   * transcript. Renders nothing when omitted/null.
+   */
+  aboveInputSlot?: React.ReactNode;
+  /**
+   * Host-provided content rendered at the END of the message transcript, INSIDE
+   * the scrollable message list — directly beneath the last assistant message.
+   * Pure layout seam like `aboveInputSlot`: SprkChat applies no styling and
+   * attaches no behavior; the host owns the slot's content and interactions.
+   *
+   * Added for the Click-path next-step consumer chips (ai-architecture-redesign-r1
+   * G-P2 UAT round-1 finding 1, 2026-07-06): the operator ruled the chips belong
+   * inline in the conversation flow (beneath the "Classified…" entry), not in the
+   * strip above the composer. Renders nothing when omitted/null.
+   *
+   * Auto-scroll: SprkChat re-anchors the transcript to the bottom when this node's
+   * identity changes, so freshly arrived chips land visible. Hosts SHOULD memoize
+   * the node (React.useMemo keyed on the slot's actual data) so unrelated host
+   * re-renders don't force a scroll-to-bottom.
+   */
+  transcriptFooterSlot?: React.ReactNode;
+  /**
+   * Whether assistant messages offer the "Insert" (insert-into-editor) affordance.
+   * The affordance dispatches an IDocumentInsertEvent on the `sprk-document-insert`
+   * BroadcastChannel — meaningful ONLY in hosts with an insert target listening
+   * (AnalysisWorkspace's Lexical editor via useDocumentInsert). Defaults to FALSE:
+   * hosts without an insert target (e.g. the SpaarkeAi conversation pane) must not
+   * show a button that does nothing (G-P2 UAT round-1 finding 2, 2026-07-06).
+   */
+  enableInsertToEditor?: boolean;
   /** Available documents for context switching */
   documents?: IDocumentOption[];
   /** Available playbooks for context switching */
@@ -668,7 +845,7 @@ export interface ISprkChatProps {
    * Callback fired for AI pane-routing SSE events (output_pane / source_pane / source_highlight).
    *
    * When provided, SprkChat forwards pane-routing events from the BFF stream to this callback.
-   * OutputPanel and SourcePanel subscribe (via StandaloneAiContext) to receive events and render
+   * OutputPanel and SourcePanel subscribe (via the host AI session context) to receive events and render
    * the correct widget type with the event's payload.
    *
    * Uses the same synchronous callback ref pattern as onDocumentStreamEvent — events are
@@ -693,6 +870,21 @@ export interface ISprkChatProps {
    * defeats the point.
    */
   onPlaybookOptions?: ((payload: IPlaybookOptionsPayload) => void) | null;
+
+  /**
+   * Callback fired for `elicitation_modal` SSE events (FR-P2-03,
+   * spaarke-ai-architecture-redesign-r1 task 032 — capture_mode: modal escape).
+   *
+   * The host opens its wizard/form surface for the payload's `missingFields`
+   * (pre-filling `providedArgs`) and completes by invoking
+   * `dispatchConsumer(payload.bindingId, { slots })` — the server resolves the
+   * pending elicitation gate at the dispatch seam. When omitted, the event is
+   * logged and dropped (the assistant's chat notice still tells the user a form
+   * was intended; conversational elicitation resumes on their next reply).
+   *
+   * Synchronous callback-ref pattern (same as onPlaybookOptions).
+   */
+  onElicitationModal?: ((payload: IElicitationModalPayload) => void) | null;
 
   /**
    * Callback fired when the user clicks a candidate playbook link button rendered
@@ -912,7 +1104,7 @@ export interface ISprkChatProps {
    * The host receives the base outbound body (`{ message, documentId, attachments? }`)
    * and MAY return:
    *   - the body unchanged (no decoration);
-   *   - a NEW body with additional fields (e.g. `intentHint`, `resolvedReferences`);
+   *   - a NEW body with additional fields (e.g. `resolvedReferences`);
    *   - `null` to CANCEL the BFF send (hard-slash commands like `/clear`, `/help`,
    *     `/export` are dispatched client-side and produce no LLM round-trip).
    *
@@ -1529,7 +1721,7 @@ export interface IUseSseStreamResult {
    * Invoked from the fetch loop whenever an event whose top-level `event` field
    * is "output_pane", "source_pane", or "source_highlight" is received from the BFF.
    *
-   * OutputPanel and SourcePanel subscribe via StandaloneAiContext to receive these
+   * OutputPanel and SourcePanel subscribe via the host AI session context to receive these
    * events and render the appropriate widget type with the event's payload.
    * Pass null to unregister.
    */
@@ -1564,6 +1756,16 @@ export interface IUseSseStreamResult {
    * decisionId, outcome, durationMs, etc.) — no user content.
    */
   setOnContextEvent: (handler: ((data: IChatSseEventData) => void) | null) => void;
+
+  /**
+   * FR-P2-03 (task 032) — register/unregister a synchronous callback for
+   * `elicitation_modal` SSE forwarding (capture_mode: modal wizard escape).
+   *
+   * Same callback-ref pattern as setOnPlaybookOptions. SprkChat wires this to
+   * its `onElicitationModal` prop; the host opens the wizard and completes via
+   * `dispatchConsumer(bindingId, { slots })`. Pass `null` to unregister.
+   */
+  setOnElicitationModal: (handler: ((payload: IElicitationModalPayload) => void) | null) => void;
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -1725,8 +1927,24 @@ export interface IUseChatSessionResult {
   error: Error | null;
   /** Create a new session */
   createSession: (documentId?: string, playbookId?: string, hostContext?: IHostContext) => Promise<IChatSession | null>;
-  /** Load message history for the current session */
-  loadHistory: () => Promise<void>;
+  /**
+   * Resume an EXISTING server-side session by seeding local state with its ID.
+   * Does NOT contact the server — callers should invoke `loadHistory()` afterwards.
+   * When the server-side session is stale (Redis TTL expired), `loadHistory` reports
+   * `staleSession: true` so the host can clear its persisted ID + create fresh.
+   *
+   * R7 Wave 12.3 Phase 12.3a UAT fix (2026-07-03) — pairs with SprkChat's
+   * `initialSessionId` prop to avoid the double-session bug where uploads and messages
+   * used mismatched session IDs.
+   */
+  resumeSession: (sessionId: string) => void;
+  /**
+   * Load message history for the current session.
+   * Returns `{ ok: true }` on success (may be empty history).
+   * Returns `{ ok: false, staleSession: true }` when server responds 404 — host should
+   * clear its persisted session ID and call `createSession()`.
+   */
+  loadHistory: () => Promise<{ ok: boolean; staleSession?: boolean }>;
   /** Switch document/playbook context (optionally with additional document IDs) */
   switchContext: (
     documentId?: string,

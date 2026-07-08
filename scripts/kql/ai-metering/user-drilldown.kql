@@ -1,0 +1,22 @@
+// user-drilldown.kql — NFR-05 per-user drill-down
+// Purpose: per-user usage within each tenant (top consumers first). Optionally pin
+//          a single tenant by uncommenting the tenant filter.
+// Expected columns: tenantId, userId, turns, toolCalls, tokensIn, tokensOut, capabilityInvocations
+let window = 7d;
+// let targetTenant = "<tenant-guid>";
+customMetrics
+| where timestamp > ago(window)
+| where name in ("ai.metering.turns", "ai.metering.tool_calls",
+                 "ai.metering.tokens", "ai.metering.capability_invocations")
+| extend tenantId = tostring(customDimensions["tenant.id"]),
+         userId   = tostring(customDimensions["user.id"]),
+         tokenType = tostring(customDimensions["token.type"])
+// | where tenantId == targetTenant
+| summarize
+    turns                 = sumif(valueSum, name == "ai.metering.turns"),
+    toolCalls             = sumif(valueSum, name == "ai.metering.tool_calls"),
+    tokensIn              = sumif(valueSum, name == "ai.metering.tokens" and tokenType == "input"),
+    tokensOut             = sumif(valueSum, name == "ai.metering.tokens" and tokenType == "output"),
+    capabilityInvocations = sumif(valueSum, name == "ai.metering.capability_invocations")
+    by tenantId, userId
+| order by tenantId asc, tokensIn + tokensOut desc

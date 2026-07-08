@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="047" project="spaarke-ai-architecture-redesign-r1">
+  <metadata>
+    <title>Work-product record persistence — generalize the widgets-r1 topic-registry pattern to Binding-declared persistence of outputs to host Dataverse records</title>
+    <phase>Phase P3: Consumer + Client Consolidation</phase>
+    <status>not-started</status>
+    <estimated-hours>10</estimated-hours>
+    <tags>bff-api, widgets, persistence</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <parallel-group>W-P3-C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>038</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement FR-P3-08: generalize the widgets-r1 topic-registry pattern (`InsightSummaryCard` + `sprk_aitopicregistry`) into platform-level, Binding-declared persistence of capability outputs to host Dataverse records. Today only the Insights widgets persist their work product to a record; after this task, ANY capability whose Binding declares a work-product persistence disposition has its output envelope written to the host record (e.g., a matter summary persisted onto the matter) by the `OutputRouter` — no per-capability persistence code. The persistence declaration lives on the Binding row (disposition + target mapping), keeping the Binding table the single routing/behavior surface per ADR-039; writes run user-OBO through the existing Dataverse access path; the ledger `SessionOutput` remains the source the persisted envelope is derived from (ADR-040: storage precedes any downstream routing). Acceptance: a `work_product` capability persists its envelope to the host record, proven by a test AND observed in UAT at gate 048.
+  </prompt>
+
+  <role>
+    Senior .NET developer familiar with the OutputRouter/disposition contract, the widgets-r1 topic-registry pattern, Dataverse Web API under OBO, and the Binding catalog column contract from FR-P0-03.
+  </role>
+
+  <goal>
+    A generalized work-product persistence path: Binding rows declare persistence (disposition + host-record target mapping); OutputRouter persists the output envelope from the ledger to the host Dataverse record under user-OBO; at least one work_product capability exercises it end-to-end with test + UAT evidence.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-architecture-redesign-r1/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-architecture-redesign-r1/plan.md</file>
+    <file purpose="project-context">projects/spaarke-ai-architecture-redesign-r1/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md</file>
+    <file purpose="per-component-verdicts">projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/OVERLAY-MATRIX.md</file>
+    <file purpose="reference-pattern">ai-spaarke-insights-engine-widgets-r1 topic-registry implementation (InsightSummaryCard + sprk_aitopicregistry)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-039">Persistence is DECLARED on the Binding row — MUST NOT add persistence routing config outside the Binding table; MUST NOT hand-code per-capability persistence branches (that is the anti-pattern this task deletes the need for).</constraint>
+    <constraint source="ADR-040">The persisted envelope derives from the ledger `SessionOutput` (storage precedes rendering AND persistence); disposition is the only routing contract — work_product is a disposition the OutputRouter handles.</constraint>
+    <constraint source="spec-MUST">Record writes run user-OBO (user's security context decides what can be persisted where); no app-only Dataverse path reachable from AI.</constraint>
+    <constraint source="FR-P2-02">If a work-product persistence write is side-effect-classed as gated, it flows through THE one pending store — no bypass.</constraint>
+    <constraint source="ADR-013-amended-2026-07-05">Capability invocation facade verb; PublicContracts boundary unchanged — persistence internals do not leak to CRUD code.</constraint>
+    <constraint source="spec-out-of-scope">"Capability" stays vocabulary, not schema: MUST NOT create new manifest tables — reuse `sprk_aitopicregistry`/existing columns + the FR-P0-03 Binding columns (e.g., disposition) for the declaration.</constraint>
+    <constraint source="ADR-029 / NFR-01">BFF-touching task: publish-size + delta reported.</constraint>
+    <constraint source="NFR-02 / NFR-06">Eval/contract cases added for the work_product disposition (schema-conformance of the persisted envelope).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>output-routing, record-persistence, topic-registry, dataverse-obo</topic>
+    <files>
+      <file>docs/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>docs/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/OVERLAY-MATRIX.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-MIGRATION-MAP.md</file>
+    </files>
+    <patterns>
+      <pattern name="widgets-r1 topic-registry" location="InsightSummaryCard + sprk_aitopicregistry (ai-spaarke-insights-engine-widgets-r1)">
+        The proven record-persisted-output pattern being GENERALIZED — study its envelope shape, idempotency, and host-record binding before designing the declaration.
+      </pattern>
+      <pattern name="OutputRouter" location="src/server/api/Sprk.Bff.Api/Services/Ai/">
+        Task-021 disposition router — work_product persistence lands as a disposition handler here, not a new service (CLAUDE.md §11 extension-over-new).
+      </pattern>
+      <pattern name="Dataverse access under OBO" location="src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/">
+        The task-008/009 BFF-OBO Web API path — reuse for the persistence write.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      The composition story needs outputs that OUTLIVE the session: a matter summary belongs on the matter record, not just in chat history. widgets-r1 proved the pattern for Insights; this task promotes it to a platform capability so a BA can declare "persist this capability's output to the host record" as Binding data — feeding the G-M maker gate's zero-deploy promise.
+    </background>
+    <dependencies>
+      <dependency task="038" status="pending">G-P2 gate passed — OutputRouter, ledger, unified gate, and dataverse handlers live.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 021 — OutputRouter disposition routing (extension point)</item>
+      <item>Task 040 — Binding rows for the consumers whose outputs may persist (e.g., document-profile)</item>
+      <item>ai-spaarke-insights-engine-widgets-r1 — source pattern</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context check + load knowledge">
+      Verify context &lt; 70%. Load spec FR-P3-08, the OVERLAY-MATRIX verdict, the widgets-r1 topic-registry implementation, and the OutputRouter + FR-P0-03 Binding column contract.
+    </step>
+    <step order="1" name="Design the Binding declaration">
+      Define how a Binding declares work-product persistence using EXISTING columns (disposition + target mapping; sprk_aitopicregistry reuse) — no new manifest tables. Document the envelope schema derived from SessionOutput.
+    </step>
+    <step order="2" name="Implement the OutputRouter work_product handler">
+      Add the work_product disposition handler in OutputRouter: read the SessionOutput envelope from the ledger, resolve the host record from session/host context, write under user-OBO (idempotent per {bindingId}@t{n} — repeated routing must not duplicate).
+    </step>
+    <step order="3" name="Exercise with a real capability">
+      Declare persistence on at least one Binding (e.g., document-profile or matter summary per OVERLAY-MATRIX) and verify the envelope lands on the host record on spaarkedev1.
+    </step>
+    <step order="4" name="Tests + contract cases">
+      Unit/integration tests: declaration parsing, envelope derivation, OBO write, idempotency, gate flow if side-effect-classed. Add contract/eval case asserting persisted-envelope schema conformance.
+    </step>
+    <step order="5" name="Verify">
+      dotnet build + tests + eval suite green (shown); publish-size delta reported per ADR-029. Record the UAT step for gate 048 (persisted work product visible on the host record in the UI).
+    </step>
+    <step order="6" name="Step 9.5 quality gates">
+      Run code-review + adr-check (FULL rigor). Update TASK-INDEX.md; reset current-task.md.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build, test, publish-size verification</tool>
+    <tool name="dataverse-mcp">Declare persistence on Binding rows; verify persisted envelopes on spaarkedev1</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/** — OutputRouter work_product disposition handler + envelope derivation</output>
+    <output type="data">Binding row(s) on spaarkedev1 declaring work-product persistence (existing columns; no new tables)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/** (persistence, idempotency, OBO tests)</output>
+    <output type="test">tests/integration/contract/** (persisted-envelope schema-conformance case)</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A work_product capability persists its envelope to the host Dataverse record — proven by test AND observed in UAT (gate task 048).</criterion>
+    <criterion testable="true">Persistence is declared entirely on the Binding row (no per-capability persistence code; no routing config outside the Binding table; no new manifest tables).</criterion>
+    <criterion testable="true">The persisted envelope derives from the ledger SessionOutput and the write runs user-OBO; repeated routing is idempotent (test-proven).</criterion>
+    <criterion testable="true">dotnet build + tests + eval suite green; publish-size delta reported (ADR-029).</criterion>
+    <criterion testable="true">Step 9.5 code-review + adr-check passed.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

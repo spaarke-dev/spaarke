@@ -269,14 +269,14 @@ safeRegisterWidget(
 
 // ---------------------------------------------------------------------------
 // 8. redline-viewer — Document Comparison (task AIPU2-085)
-//    Category: document — side-by-side section diff from CompareDocumentsTool.
+//    Category: document — side-by-side section diff from the retired compare-documents chat tool.
 //    allowMultiple=true — each comparison pair can occupy a separate tab.
 // ---------------------------------------------------------------------------
 
 registerWorkspaceWidget(
   /**
    * Type string MUST match the widgetType value sent by the server-side
-   * CompareDocumentsTool (task AIPU2-042). The AI router emits
+   * the retired compare-documents chat tool (task AIPU2-042). The AI router emits
    * `{ widgetType: "redline-viewer", data: DocumentDiff }` after a comparison.
    */
   'redline-viewer',

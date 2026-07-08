@@ -51,8 +51,7 @@ export interface ILegalWorkspaceAppProps {
    * the default `SECTION_REGISTRY` is used (standalone LegalWorkspace behavior).
    * Embedding consumers (SpaarkeAi) pass a registry built via
    * `createLegalWorkspaceSectionRegistry({...})` to inject per-widget
-   * customization (e.g. SpaarkeAi's `loadSpaarkeAiNotificationContext` for
-   * Daily Briefing).
+   * customization.
    *
    * Replaces the R2 task 002 module-mutation slot pattern — see
    * `projects/spaarke-daily-update-service-r2/notes/option-d-registry-as-composition.md`.
