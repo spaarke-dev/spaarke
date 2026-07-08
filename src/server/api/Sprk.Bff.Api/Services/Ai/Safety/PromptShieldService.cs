@@ -1,6 +1,5 @@
 using System.Diagnostics;
 using System.Net;
-using System.Net.Http.Headers;
 using System.Text;
 using System.Text.Json;
 using System.Text.Json.Serialization;
@@ -18,6 +17,12 @@ namespace Sprk.Bff.Api.Services.Ai.Safety;
 ///   - HTTP 5xx (server err) → log warning, return <see cref="PromptShieldResult.FailOpen"/>
 ///   - Timeout (&gt;100ms)   → log warning, return <see cref="PromptShieldResult.FailOpen"/>
 ///   - Network error         → log warning, return <see cref="PromptShieldResult.FailOpen"/>
+///   - Auth failure          → log warning, return <see cref="PromptShieldResult.FailOpen"/>
+///
+/// Auth is attached by <see cref="ContentSafetyAuthHandler"/> on the named HttpClient
+/// (managed-identity bearer or API key — assessment rec 3). Every scan outcome is counted
+/// on the <c>ai.safety.shield_evaluations</c> counter (<see cref="AiTelemetry"/>) so the
+/// fail-open rate is observable (assessment rec 2a).
 ///
 /// ADR-015: prompt content and document text are NEVER logged.
 /// Only identifiers (document count, user message character count), outcome, and timing are logged.
@@ -39,19 +44,19 @@ public sealed class PromptShieldService : IPromptShieldService
     private static readonly JsonSerializerOptions SerializerOptions = new(JsonSerializerDefaults.Web);
 
     private readonly IHttpClientFactory _httpClientFactory;
-    private readonly IConfiguration _configuration;
     private readonly PromptShieldTelemetry _telemetry;
+    private readonly AiTelemetry _aiTelemetry;
     private readonly ILogger<PromptShieldService> _logger;
 
     public PromptShieldService(
         IHttpClientFactory httpClientFactory,
-        IConfiguration configuration,
         PromptShieldTelemetry telemetry,
+        AiTelemetry aiTelemetry,
         ILogger<PromptShieldService> logger)
     {
         _httpClientFactory = httpClientFactory;
-        _configuration = configuration;
         _telemetry = telemetry;
+        _aiTelemetry = aiTelemetry;
         _logger = logger;
     }
 
@@ -80,6 +85,15 @@ public sealed class PromptShieldService : IPromptShieldService
                 request.Documents?.Count ?? 0, latencyMs);
 
             _telemetry.RecordScan(result, latencyMs);
+
+            // Shield-coverage counter (assessment rec 2a): CallApiAsync returns FailedOpen
+            // results for 429 / 5xx / unparseable responses without throwing, so classify
+            // from the result — not just the exception paths below.
+            _aiTelemetry.RecordShieldEvaluation(
+                result.IsBlocked ? AiTelemetry.ShieldOutcomeBlocked
+                : result.FailedOpen ? AiTelemetry.ShieldOutcomeFailedOpenError
+                : AiTelemetry.ShieldOutcomeCompleted);
+
             return result;
         }
         catch (OperationCanceledException) when (timeoutCts.IsCancellationRequested && !ct.IsCancellationRequested)
@@ -93,6 +107,7 @@ public sealed class PromptShieldService : IPromptShieldService
                 latencyMs, CallTimeout.TotalMilliseconds, request.Documents?.Count ?? 0);
 
             _telemetry.RecordFailOpen("timeout", latencyMs);
+            _aiTelemetry.RecordShieldEvaluation(AiTelemetry.ShieldOutcomeFailedOpenTimeout);
             return PromptShieldResult.FailOpen(latencyMs);
         }
         catch (Exception ex)
@@ -106,6 +121,7 @@ public sealed class PromptShieldService : IPromptShieldService
                 latencyMs, request.Documents?.Count ?? 0);
 
             _telemetry.RecordFailOpen("error", latencyMs);
+            _aiTelemetry.RecordShieldEvaluation(AiTelemetry.ShieldOutcomeFailedOpenError);
             return PromptShieldResult.FailOpen(latencyMs);
         }
     }
@@ -118,20 +134,14 @@ public sealed class PromptShieldService : IPromptShieldService
     {
         var client = _httpClientFactory.CreateClient(HttpClientName);
 
-        // Read API key at call time (supports Key Vault dynamic secret rotation).
-        var apiKey = _configuration["AiSafety:ContentSafety:ApiKey"];
-        if (string.IsNullOrEmpty(apiKey))
-        {
-            _logger.LogWarning(
-                "PromptShield: AiSafety:ContentSafety:ApiKey is not configured. Failing open.");
-            return PromptShieldResult.FailOpen(0);
-        }
-
+        // Auth (managed-identity bearer OR Ocp-Apim-Subscription-Key) is attached by
+        // ContentSafetyAuthHandler on the named client pipeline (assessment rec 3).
+        // The handler reads configuration at call time (Key Vault rotation still works);
+        // auth failures throw and land in ScanAsync's fail-open catch.
         var requestBody = BuildRequestBody(request);
         var requestUrl = $"{ApiPath}?api-version={ApiVersion}";
 
         using var httpRequest = new HttpRequestMessage(HttpMethod.Post, requestUrl);
-        httpRequest.Headers.Add("Ocp-Apim-Subscription-Key", apiKey);
         httpRequest.Content = new StringContent(
             JsonSerializer.Serialize(requestBody, SerializerOptions),
             Encoding.UTF8,

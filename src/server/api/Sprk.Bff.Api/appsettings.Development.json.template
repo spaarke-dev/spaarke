@@ -1,6 +1,17 @@
 {
   "_comment": "Development-only overrides. Copy to appsettings.Development.json (gitignored) for local use; CI/CD does not consume this template. R3 task 012 (2026-06-21) adds the 'Membership' section per design.md Part 1 § Configuration shape. R3 task 081 (2026-06-22) adds the 'Membership:EventPublisher' subsection (FR-2P2.6 + Q2 fire-and-forget publisher); Enabled=false until operator deploys Service Bus topic per task 071 runbook. R3 task 084 (2026-06-22) adds the 'Membership:JunctionUpdater' subsection (FR-2P2.4 subscription consumer); Enabled=false until same operator-deploy gate completes.",
 
+  "AiSafety": {
+    "_ContentSafety_comment": "Local-dev auth for the Content Safety perimeter (PromptShield + Groundedness). EITHER paste the resource key into ApiKey (never commit the copied file) OR leave ApiKey empty and run 'az login' — ContentSafetyAuthHandler falls back to DefaultAzureCredential (managed-identity cascade, assessment rec 3) when the key is absent or ManagedIdentity:Enabled=true. Your az-login identity needs the 'Cognitive Services User' role on the Content Safety resource for the bearer path to work; if neither auth source is available the shield fails open (logged warning + ai.safety.shield_evaluations outcome=failed_open_error).",
+    "ContentSafety": {
+      "Endpoint": "https://spaarke-contentsafety-dev.cognitiveservices.azure.com/",
+      "ApiKey": "",
+      "ManagedIdentity": {
+        "Enabled": false
+      }
+    }
+  },
+
   "Membership": {
     "IncludedIdentityTables": [
       { "Table": "systemuser",         "IdentityType": "SystemUser" },
