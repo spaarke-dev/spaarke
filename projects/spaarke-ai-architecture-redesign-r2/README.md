@@ -1,5 +1,6 @@
 # Spaarke AI Architecture Redesign R2 (Core)
 
+> **Portfolio**: Project Issue [#581](https://github.com/spaarke-dev/spaarke/issues/581) · Epic [#421](https://github.com/spaarke-dev/spaarke/issues/421) · [Board (Project #2)](https://github.com/users/spaarke-dev/projects/2)
 > **Status**: Planning → Ready for Tasks
 > **Last Updated**: 2026-07-08
 > **Parent epic**: #421 SPAARKE AI
