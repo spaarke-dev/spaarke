@@ -13,7 +13,7 @@
 | 3 | Latency (NFR-04) | No numeric TTFB recorded at gates 027/038/048; structural evidence = prompt-cache-stable tool projection (SHA-256 fingerprint, task 030) + operator-observed streaming responsiveness across 7 browser-UAT round findings files | ✅ (qualitative — stated honestly) |
 | 4 | Budgets (NFR-09) | Per-turn tool budget 8 enforced in-loop (`AgentTurnContract` + `BudgetedAIFunction`); live `tool-budget-consumption.kql` shows cap=8, 0 denials; event daily budget observed at **1/50 (2 %)** | ✅ |
 | 5 | Track-B zero unexplained survivors | `notes/track-b-completion-audit.md`: **62 rows — 44 grep-verified deleted, 15 Dataverse rows retired, 9 keep-with-reason, 5 operator-decision (O-1..O-5); 0 unexplained** | ✅ |
-| 6 | Publish size "reduced" | `notes/publish-size-cve-report.md`: **49.63 MB** incl. PDBs vs 45.65 MB (2026-05-26) = **+3.98 MB — NOT reduced in absolute terms**; ceiling ≤60 MB comfortably met (5.37 MB headroom); zero NuGet additions | ⚠️ **AMBER — OPERATOR SIGN-OFF REQUIRED** |
+| 6 | Publish size "reduced" | `notes/publish-size-cve-report.md`: **49.63 MB** incl. PDBs vs 45.65 MB (2026-05-26) = **+3.98 MB — NOT reduced in absolute terms**; ceiling ≤60 MB comfortably met (5.37 MB headroom); zero NuGet additions | ✅ **ACCEPTED by operator 2026-07-08** (growth = priced-in capability; ceiling honored) |
 | 7 | Reliability | Full BFF suite **7,447 passed / 4 failed** — all 4 on the KNOWN pre-existing list; zero new failures; branch deployed healthy to `spaarke-bff-dev` and exercised live on all three entry paths | ✅ |
 
 ---
@@ -98,7 +98,7 @@ Source: [`notes/publish-size-cve-report.md`](publish-size-cve-report.md) (task 0
 - **Named reduction levers if a number is still wanted**: PDB exclusion from the deploy package (**−3.76 MB**, debugging trade-off) and the deferred Graph SDK 6.x upgrade (shrinks the 41 MB `Microsoft.Graph.dll`).
 - ADR-029 baseline reset to 49.63 MB so downstream diffs are honest.
 
-**⚠️ OPERATOR SIGN-OFF REQUIRED** — recommendation: **accept** — the growth is priced-in P1–P3 capability, hygiene rules held (zero NuGet adds, deletions landed, no new CVEs), and the binding ≤60 MB ceiling is honored with 5.37 MB headroom.
+**✅ SIGNED OFF — operator ACCEPTED 2026-07-08** (per recommendation) — the growth is priced-in P1–P3 capability, hygiene rules held (zero NuGet adds, deletions landed, no new CVEs), and the binding ≤60 MB ceiling is honored with 5.37 MB headroom.
 
 ## 7. Reliability
 
@@ -110,9 +110,9 @@ Source: [`notes/publish-size-cve-report.md`](publish-size-cve-report.md) (task 0
 
 ## Gate disposition
 
-**G-P4 = GREEN on items 1–5 and 7. Item 6 (publish size) = AMBER pending operator sign-off.**
+**G-P4 = GREEN on ALL items. Item 6 (publish size) ACCEPTED by operator 2026-07-08 — gate CLOSED.**
 
 - Reliable ✅ (7,447/4-known suite; both surfaces live on dev) · Telemetered ✅ (NFR-05 rollups verified against live App Insights; NFR-09 budgets enforced and observable) · Track-B ✅ (62 rows, 0 unexplained survivors; O-1..O-5 registered for r2) · Eval ✅ (35/35) · Latency ✅ qualitative (stated honestly; numeric SLO = r2 with the 054 substrate).
-- **Open sign-off**: publish size grew +3.98 MB vs the 2026-05-26 baseline instead of shrinking. Recommendation to operator: **accept** — growth is priced-in P1–P3 capability with hygiene rules held and the 60 MB ceiling honored (5.37 MB headroom); reduction levers (PDB exclusion −3.76 MB, Graph SDK 6.x) remain available if a reduction number is required.
+- **Sign-off (CLOSED 2026-07-08, operator: accept)**: publish size grew +3.98 MB vs the 2026-05-26 baseline instead of shrinking. Recommendation to operator: **accept** — growth is priced-in P1–P3 capability with hygiene rules held and the 60 MB ceiling honored (5.37 MB headroom); reduction levers (PDB exclusion −3.76 MB, Graph SDK 6.x) remain available if a reduction number is required.
 
 *Assembled by task 090 step 1 from: fresh eval run + `task-054-metering-evidence.md` · `task-030-agent-turn-loop-notes.md` · `task-037-eval-full-catalog-injection-notes.md` · `track-b-completion-audit.md` · `publish-size-cve-report.md` · `g-p0-evidence.md` · `g-p1/g-p2/g-p3` UAT round findings · `task-053-ui-test-evidence.md`.*
