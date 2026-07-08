@@ -23,6 +23,11 @@ If you're not sure whether to add an entry, add one. Too granular is better than
 
 ## [Unreleased]
 
+### Changed (2026-07-08 spaarke-ai-architecture-redesign-r1 — tasks 050/055 close-out sync)
+- Root [`CLAUDE.md`](../CLAUDE.md) §10 item 4 — publish-size baseline 45.65 MB (2026-05-26) → **49.63 MB incl. PDBs** (task 055 re-measurement 2026-07-08; PDB-convention reporting note added). Same update mirrored in [`.claude/adr/ADR-029`](adr/ADR-029-bff-publish-hygiene.md) (baseline + NFR-01 thresholds replace the stale 50 MB ceiling + nonexistent script hard-fail guard) and [`.claude/constraints/azure-deployment.md`](constraints/azure-deployment.md) (two baseline lines).
+- [`.claude/adr/ADR-040`](adr/ADR-040-session-ledger.md) — inline payload cap MUST upgraded from "cap (pointer beyond cap)" to **enforce-at-cap 128 KB with deterministic truncation marker** (`SessionLedger.CapInlinePayload`, task 055; disposition legs fail loud on truncated payloads).
+- [`.claude/constraints/bff-extensions.md`](constraints/bff-extensions.md) + `jps-validate` SKILL.md — three references to the deleted `GET /api/ai/playbook-builder/executor-config-schemas` endpoint re-pointed at `INodeExecutor.GetConfigSchema()` source implementations (`Services/Ai/Nodes/`); `jps-action-create` output-format "Add to Seed-JpsActions.ps1" step replaced with BA-editor/MCP row creation (task 050 builder-surface deletion).
+
 ### Changed (2026-07-07 spaarke-ai-architecture-redesign-r1 — task 051/052 procedure-surface sync)
 - Root [`CLAUDE.md`](../CLAUDE.md) §17 — "Wiring a new consumer" row retitled to "Wiring a new capability (Action + Binding)" matching the task-052 rewrite of `ai-guide-consumer-wiring.md`.
 - [`.claude/catalogs/scope-model-index.json`](catalogs/scope-model-index.json) — regenerated against spaarkedev1 by task 051 (60 Actions / 31 Skills / 31 Knowledge / 40 Tools; entries now carry deployed GUIDs + kind/tier/side-effect metadata).

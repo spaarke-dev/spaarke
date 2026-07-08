@@ -468,6 +468,19 @@ public sealed class TypedHandlerResumeExecutor
             var turn = (session.Outputs is { Count: > 0 } ? session.Outputs.Max(o => o.Turn) : 0) + 1;
             var payload = result.Data
                 ?? JsonSerializer.SerializeToElement(new { summary = result.Summary ?? string.Empty });
+
+            // ADR-040 inline size-cap ENFORCEMENT (task 055) — same rule as OutputRouter:
+            // over-cap payloads store a deterministic truncation marker, never raw bulk.
+            var capped = SessionLedger.CapInlinePayload(payload.Clone());
+            if (capped.Truncated)
+            {
+                // NFR-07: sizes + identifiers only.
+                _logger.LogWarning(
+                    "[FR-P3-03][gate-resume] ledger output payload was {PayloadBytes} bytes (> cap {CapBytes}) — " +
+                    "stored as a truncation marker (ADR-040) — gateId={GateId} session={SessionId}",
+                    capped.OriginalBytes, SessionLedger.InlinePayloadCapBytes, invocation.GateId, invocation.SessionId);
+            }
+
             var entry = new SessionOutput
             {
                 Key = SessionLedger.BuildOutputKey("loop", turn),
@@ -475,7 +488,7 @@ public sealed class TypedHandlerResumeExecutor
                 UcId = invocation.ToolId,
                 Turn = turn,
                 Disposition = "record",
-                Payload = payload.Clone(),
+                Payload = capped.Payload,
                 SourceRefs = citations is { Count: > 0 } ? citations : null,
                 CreatedAt = DateTimeOffset.UtcNow,
             };

@@ -98,21 +98,20 @@ public sealed record RoutedOutput
 /// turn, tenant, session, payload SIZE) — never payload content.
 /// </para>
 /// <para>
-/// <b>Inline payload size cap (ADR-040)</b>: payloads exceeding
-/// <see cref="InlinePayloadWarnBytes"/> log a Warning (size only) so oversized entries are
-/// observable. The blob/SPE-pointer OFFLOAD for over-cap inline payloads remains DEFERRED:
-/// task 047 (FR-P3-08) landed the work_product leg, whose envelope persists to the host
-/// Dataverse record (a durable out-of-session copy), but the inline ledger payload is not
-/// yet pointer-swapped — the POML did not prescribe the offload and building an
-/// unprescribed storage path would be scope creep (CLAUDE.md §11). Escalated at task 047
-/// for an operator ruling on where the offload lands (P4 hardening / Track B).
+/// <b>Inline payload size cap (ADR-040 — ENFORCED)</b>: payloads exceeding
+/// <see cref="SessionLedger.InlinePayloadCapBytes"/> are deterministically replaced by a
+/// truncation marker (<see cref="SessionLedger.CapInlinePayload"/>) BEFORE the ledger
+/// write, plus a Warning log (sizes only — NFR-07). Promoted from the task-021 warn-only
+/// threshold by task 055 per the operator ruling of 2026-07-07 (deferred from tasks
+/// 021/047). Consequence for structured dispositions: a truncated payload no longer
+/// carries the <c>email</c> / work_product envelope, so those legs fail LOUDLY on the
+/// stored marker — deterministic, never a silent partial delivery. Capabilities MUST
+/// keep routed payloads under the cap. The blob/SPE-pointer offload remains the designed
+/// upgrade path (marker becomes pointer; content stops being lossy).
 /// </para>
 /// </remarks>
 public sealed class OutputRouter : IOutputRouter
 {
-    /// <summary>Observability threshold for inline ledger payloads (see class remarks).</summary>
-    internal const int InlinePayloadWarnBytes = 128 * 1024;
-
     private readonly ChatSessionManager _sessionManager;
     private readonly ILogger<OutputRouter> _logger;
     private readonly IEmailDispositionSender? _emailSender;
@@ -157,6 +156,13 @@ public sealed class OutputRouter : IOutputRouter
         // ── 1. Allocate the addressable key {bindingId}@t{n} (ADR-040) ──────────────────
         var turn = (session.Outputs is { Count: > 0 } ? session.Outputs.Max(o => o.Turn) : 0) + 1;
         var bindingId = binding.BindingId.ToString();
+
+        // ADR-040 inline size-cap ENFORCEMENT (task 055, operator ruling 2026-07-07):
+        // over-cap payloads are deterministically replaced by a truncation marker BEFORE
+        // the ledger write. Clone detaches from any caller-owned JsonDocument lifetime.
+        var capped = SessionLedger.CapInlinePayload(output.Clone());
+        var payloadBytes = capped.OriginalBytes;
+
         var entry = new SessionOutput
         {
             Key = SessionLedger.BuildOutputKey(bindingId, turn),
@@ -166,19 +172,19 @@ public sealed class OutputRouter : IOutputRouter
             UcId = binding.Ucid ?? binding.ConsumerType,
             Turn = turn,
             Disposition = binding.Disposition.ToLedgerValue(),
-            // Clone detaches the payload from any caller-owned JsonDocument lifetime.
-            Payload = output.Clone(),
+            Payload = capped.Payload,
             SourceRefs = sourceRefs is { Count: > 0 } ? sourceRefs : null,
             CreatedAt = DateTimeOffset.UtcNow,
         };
 
-        var payloadBytes = entry.Payload.GetRawText().Length;
-        if (payloadBytes > InlinePayloadWarnBytes)
+        if (capped.Truncated)
         {
+            // NFR-07: sizes + identifiers only — never payload content.
             _logger.LogWarning(
-                "Ledger output {Key} inline payload is {PayloadBytes} bytes (> {WarnBytes}). " +
-                "Blob/SPE pointer offload lands with the work_product leg (P3) — see ADR-040 size-cap rule.",
-                entry.Key, payloadBytes, InlinePayloadWarnBytes);
+                "Ledger output {Key} inline payload was {PayloadBytes} bytes (> cap {CapBytes}) — " +
+                "stored as a truncation marker (ADR-040 inline size-cap enforcement, task 055). " +
+                "Blob/SPE pointer offload is the designed upgrade path.",
+                entry.Key, payloadBytes, SessionLedger.InlinePayloadCapBytes);
         }
 
         // ── 2. STORE — the universal ledger write, BEFORE any rendering (ADR-040 D2/D8).

@@ -1,3 +1,4 @@
+using System.Text;
 using System.Text.Json;
 
 namespace Sprk.Bff.Api.Models.Ai.Chat;
@@ -36,7 +37,82 @@ public static class SessionLedger
     /// use the reserved binding id <c>"loop"</c>).
     /// </summary>
     public static string BuildOutputKey(string bindingId, int turn) => $"{bindingId}@t{turn}";
+
+    /// <summary>
+    /// ADR-040 inline payload cap (UTF-8 bytes of the payload's raw JSON text). Payloads
+    /// over this cap are ENFORCED at write time — replaced by a deterministic truncation
+    /// marker via <see cref="CapInlinePayload"/> (operator ruling 2026-07-07, promoted
+    /// from the task-021 warn-only threshold by task 055 of
+    /// <c>spaarke-ai-architecture-redesign-r1</c>). The blob/SPE-pointer offload remains
+    /// the designed upgrade path: when it lands, the marker becomes a pointer and the
+    /// content stops being lossy.
+    /// </summary>
+    public const int InlinePayloadCapBytes = 128 * 1024;
+
+    /// <summary>
+    /// Max characters of the original raw JSON text preserved in the truncation marker's
+    /// <c>preview</c> field. 16K chars ≤ 64 KB UTF-8 worst case, keeping the marker itself
+    /// comfortably under <see cref="InlinePayloadCapBytes"/>.
+    /// </summary>
+    public const int TruncationPreviewChars = 16 * 1024;
+
+    /// <summary>Sentinel property marking a payload as an over-cap truncation marker.</summary>
+    public const string TruncationMarkerProperty = "$truncated";
+
+    /// <summary>
+    /// True when <paramref name="payload"/> is a truncation marker produced by
+    /// <see cref="CapInlinePayload"/> (readers use this to distinguish a lossy marker
+    /// from capability output — e.g. <c>ledger_resolution</c> resolving a truncated
+    /// entry should fail loudly rather than feed the preview to a capability).
+    /// </summary>
+    public static bool IsTruncationMarker(JsonElement payload) =>
+        payload.ValueKind == JsonValueKind.Object
+        && payload.TryGetProperty(TruncationMarkerProperty, out var flag)
+        && flag.ValueKind == JsonValueKind.True;
+
+    /// <summary>
+    /// Enforces the ADR-040 inline payload size cap at the ledger write seam. Under-cap
+    /// payloads pass through untouched. Over-cap payloads are deterministically replaced
+    /// by a truncation marker object:
+    /// <c>{ "$truncated": true, "original_bytes": n, "cap_bytes": n, "preview": "…" }</c>.
+    /// The marker is valid JSON, addressable like any entry payload, and carries the
+    /// first <see cref="TruncationPreviewChars"/> characters of the original raw text
+    /// (ledger content is Tier 3 — the preview is stored, never logged, per NFR-07).
+    /// </summary>
+    /// <param name="payload">The payload to store (caller supplies a detached/cloned element).</param>
+    /// <returns>The payload to write, the ORIGINAL payload's UTF-8 byte size, and whether truncation occurred.</returns>
+    public static CappedLedgerPayload CapInlinePayload(JsonElement payload)
+    {
+        var rawText = payload.GetRawText();
+        var originalBytes = Encoding.UTF8.GetByteCount(rawText);
+        if (originalBytes <= InlinePayloadCapBytes)
+        {
+            return new CappedLedgerPayload(payload, originalBytes, Truncated: false);
+        }
+
+        var previewLength = Math.Min(TruncationPreviewChars, rawText.Length);
+        if (previewLength > 0 && char.IsHighSurrogate(rawText[previewLength - 1]))
+        {
+            previewLength--; // never split a surrogate pair at the preview boundary
+        }
+
+        var marker = JsonSerializer.SerializeToElement(new Dictionary<string, object>
+        {
+            [TruncationMarkerProperty] = true,
+            ["original_bytes"] = originalBytes,
+            ["cap_bytes"] = InlinePayloadCapBytes,
+            ["preview"] = rawText[..previewLength],
+        });
+        return new CappedLedgerPayload(marker, originalBytes, Truncated: true);
+    }
 }
+
+/// <summary>
+/// Result of <see cref="SessionLedger.CapInlinePayload"/>: the payload to store (original
+/// or truncation marker), the original payload's UTF-8 byte size (for identifier-only
+/// logging per NFR-07), and whether the cap fired.
+/// </summary>
+public readonly record struct CappedLedgerPayload(JsonElement Payload, int OriginalBytes, bool Truncated);
 
 /// <summary>
 /// A single capability output — the P4 composition carrier (canonical design §5.2, T-01).
@@ -68,7 +144,9 @@ public sealed record SessionOutput
 
     /// <summary>
     /// Schema-validated output payload. Inline payloads are size-capped per ADR-040 —
-    /// beyond the cap the payload holds a blob/SPE pointer, not the content.
+    /// beyond <see cref="SessionLedger.InlinePayloadCapBytes"/> the payload holds a
+    /// deterministic truncation marker (see <see cref="SessionLedger.CapInlinePayload"/>;
+    /// blob/SPE pointer offload is the designed upgrade path), not the content.
     /// </summary>
     public required JsonElement Payload { get; init; }
 

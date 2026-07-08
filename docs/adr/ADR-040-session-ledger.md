@@ -25,6 +25,18 @@ Every AI session has an **append-only, addressable, typed ledger** — the only 
 
 Core rules (full binding surface in the concise version): **storage precedes rendering** — universal ledger write before any surface sees the output (D2/D8); **reads are by reference** — Action input schemas declare `ledger_resolution`s, no capability reads screen state (P10); **disposition is the only rendering contract**; append-only within a session; inline payloads size-capped with blob pointers; entry classes mapped to ADR-015 tiers (ledger = Tier 3 user-owned/GDPR-erasable; ToolChain = Tier-2-compatible metadata); document references survive warm-store restore (fixes the audited Cosmos mapping that dropped the file manifest); work-product outputs additionally persist to the host Dataverse record when the Binding declares it (the shipped widgets-r1 pattern).
 
+### Inline size-cap enforcement (amended 2026-07-08, task 055 per operator ruling 2026-07-07)
+
+The size-cap rule is **ENFORCED at the ledger write seam**, not merely observed. Cap: **128 KB (`SessionLedger.InlinePayloadCapBytes`, UTF-8 bytes of the payload's raw JSON text; inclusive — enforcement fires strictly above the cap)**. Task 021 originally shipped a warn-only threshold and deferred the blob/SPE-pointer offload (building an unprescribed storage path would have been scope creep); the task-047 escalation was ruled by the operator on 2026-07-07: enforce inline at P4, keep the pointer offload as the designed upgrade path.
+
+Enforced behavior (`SessionLedger.CapInlinePayload`, applied by BOTH Output writers — `OutputRouter` and the gate-resume writer in `TypedHandlerResumeExecutor`):
+
+- Over-cap payloads are deterministically replaced BEFORE the ledger write by a truncation marker: `{ "$truncated": true, "original_bytes": n, "cap_bytes": 131072, "preview": "<first 16K chars of raw text>" }`. The entry is still written, still addressable — truncation never drops the storage-precedes-rendering write.
+- A Warning is logged with sizes and identifiers only (NFR-07); the preview lives in the ledger (Tier 3), never in logs.
+- Structured dispositions (`email`, `work_product`) fail LOUDLY on a truncated payload — the envelope is gone from the stored marker, so delivery/persistence throws rather than delivering from pre-store state. Capabilities MUST keep routed payloads under the cap.
+- Readers distinguish markers via `SessionLedger.IsTruncationMarker`; a `ledger_resolution` that resolves to a marker must fail loudly rather than feed the lossy preview to a capability.
+- When the blob/SPE-pointer offload lands, the marker becomes a pointer and the content stops being lossy; the enforcement seam and cap constant are unchanged by that upgrade.
+
 Memory model: in-turn context = digest + last-N turns + referenced entries; beyond-window recall is a tool call (`session.recall`, `memory.*` over existing pins) — memory scales by retrieval, not by prompt growth.
 
 ## Alternatives considered

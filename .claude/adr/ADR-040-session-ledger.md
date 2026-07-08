@@ -34,7 +34,11 @@ not where.
   surface/screen state.
 - **MUST** treat `disposition` (informational | work_product | overlay | email
   | record | notification) as the ONLY rendering contract.
-- **MUST** cap inline payload size (blob/SPE pointer beyond the cap).
+- **MUST** enforce the inline payload cap at the write seam (128 KB —
+  `SessionLedger.CapInlinePayload`, task 055 2026-07-08; over-cap payloads
+  store a deterministic truncation marker `{"$truncated":true,...}`;
+  disposition legs fail loud on truncated payloads — never partial delivery;
+  blob/SPE pointer offload is the upgrade path).
 - **MUST** map entry classes to ADR-015 tiers: ledger = Tier 3 (user-owned,
   GDPR-erasable, tenant-partitioned); ToolChain entries carry
   identifiers/filters/counts only (Tier-2-compatible — never verbatim content).

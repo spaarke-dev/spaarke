@@ -91,6 +91,75 @@ public class OutputRouterTests
         routed.Entry.Key.Should().Be(SessionLedger.BuildOutputKey(BindingId.ToString(), 6));
     }
 
+    // ─── Inline size-cap ENFORCEMENT (ADR-040, task 055 — operator ruling 2026-07-07) ─────────
+    // Promoted from the task-021 warn-only threshold: over-cap payloads are deterministically
+    // replaced by a truncation marker BEFORE the ledger write. KEEP rationale: pins the
+    // enforcement boundary (at-cap passes verbatim, over-cap truncates) and the marker shape
+    // that ledger_resolution readers + the future blob/SPE-pointer offload build on.
+
+    [Fact]
+    public async Task RouteAsync_PayloadAtCapBoundary_StoresPayloadVerbatim()
+    {
+        // Exactly InlinePayloadCapBytes UTF-8 bytes — the cap is inclusive; enforcement fires
+        // strictly ABOVE it. ASCII payload, so chars == bytes.
+        var json = BuildAsciiPayloadOfExactSize(SessionLedger.InlinePayloadCapBytes);
+
+        var routed = await CreateSut().RouteAsync(BuildSession(), BuildBinding(), ParseJson(json));
+
+        SessionLedger.IsTruncationMarker(routed.Entry.Payload).Should().BeFalse(
+            "an at-cap payload is stored verbatim — the cap is inclusive");
+        routed.Entry.Payload.GetRawText().Should().Be(json);
+    }
+
+    [Fact]
+    public async Task RouteAsync_PayloadOverCap_StoresDeterministicTruncationMarker()
+    {
+        var json = BuildAsciiPayloadOfExactSize(SessionLedger.InlinePayloadCapBytes + 1);
+
+        var routed = await CreateSut().RouteAsync(BuildSession(), BuildBinding(), ParseJson(json));
+
+        // The STORED entry (the one persisted before return) carries the marker, not the bulk.
+        var stored = _sessionManager.PersistedSessions.Should().ContainSingle()
+            .Which.Outputs!.Single();
+        stored.Should().BeSameAs(routed.Entry);
+        SessionLedger.IsTruncationMarker(stored.Payload).Should().BeTrue();
+        stored.Payload.GetProperty("original_bytes").GetInt32()
+            .Should().Be(SessionLedger.InlinePayloadCapBytes + 1);
+        stored.Payload.GetProperty("cap_bytes").GetInt32()
+            .Should().Be(SessionLedger.InlinePayloadCapBytes);
+        stored.Payload.GetProperty("preview").GetString()
+            .Should().Be(json[..SessionLedger.TruncationPreviewChars],
+                "the marker preserves a deterministic prefix of the original raw text");
+
+        // The enforcement point: what actually persists is bounded by the cap.
+        System.Text.Encoding.UTF8.GetByteCount(stored.Payload.GetRawText())
+            .Should().BeLessThanOrEqualTo(SessionLedger.InlinePayloadCapBytes);
+
+        // The entry stays addressable — truncation never drops the ledger write.
+        stored.Key.Should().Be(SessionLedger.BuildOutputKey(BindingId.ToString(), 1));
+    }
+
+    [Fact]
+    public async Task RouteAsync_EmailDisposition_OverCapPayload_StoresMarkerThenFailsLoud_NeverDeliversPartial()
+    {
+        // A truncated payload no longer carries the email envelope — the leg must fail
+        // LOUDLY on the stored marker (deterministic), never deliver from pre-store state.
+        var binding = BuildBinding() with { Disposition = BindingDisposition.Email };
+        var sender = new RecordingEmailSender(_sessionManager);
+        var oversized = "{\"email\":{\"to\":[\"u@x.com\"],\"subject\":\"s\",\"htmlBody\":\""
+            + new string('b', SessionLedger.InlinePayloadCapBytes) + "\"}}";
+
+        var act = () => new OutputRouter(_sessionManager, Mock.Of<ILogger<OutputRouter>>(), sender)
+            .RouteAsync(BuildSession(), binding, ParseJson(oversized));
+
+        (await act.Should().ThrowAsync<InvalidOperationException>())
+            .Which.Message.Should().Contain("email");
+        var stored = _sessionManager.PersistedSessions.Should().ContainSingle(
+            "storage precedes the failed delivery").Which.Outputs!.Single();
+        SessionLedger.IsTruncationMarker(stored.Payload).Should().BeTrue();
+        sender.Sent.Should().BeEmpty("no partial/pre-store delivery ever happens");
+    }
+
     // ─── Ledger vocabulary mapping ──────────────────────────────────────────────────────────────
 
     [Fact]
@@ -285,6 +354,16 @@ public class OutputRouterTests
     {
         using var doc = JsonDocument.Parse(json);
         return doc.RootElement.Clone();
+    }
+
+    /// <summary>
+    /// Builds an ASCII JSON object whose raw text is EXACTLY <paramref name="totalBytes"/>
+    /// UTF-8 bytes (ASCII ⇒ chars == bytes), for exercising the ADR-040 cap boundary.
+    /// </summary>
+    private static string BuildAsciiPayloadOfExactSize(int totalBytes)
+    {
+        const string envelope = """{"data":""}"""; // 11 chars of JSON scaffolding
+        return $$"""{"data":"{{new string('a', totalBytes - envelope.Length)}}"}""";
     }
 
     /// <summary>
