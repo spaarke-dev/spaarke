@@ -98,8 +98,8 @@ describe('DocumentComposeLaunch.openInCompose', () => {
       retrieveRecord: jest.fn().mockResolvedValue({
         sprk_documentid: 'doc-guid-1',
         sprk_graphitemid: '01DRIVEITEM',
-        sprk_driveid: 'b!XYZ',
-        sprk_displayname: 'Acme MSA.docx',
+        sprk_graphdriveid: 'b!XYZ',
+        sprk_filename: 'Acme MSA.docx',
       }),
     });
 
@@ -121,8 +121,10 @@ describe('DocumentComposeLaunch.openInCompose', () => {
       retrieveRecord: jest.fn().mockResolvedValue({
         sprk_documentid: 'doc-guid-1',
         sprk_graphitemid: undefined,
+        sprk_graphdriveid: 'b!XYZ',
       }),
     });
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
 
     await openInCompose(makeFormContext('doc-guid-1') as unknown as Xrm.FormContext);
 
@@ -131,6 +133,32 @@ describe('DocumentComposeLaunch.openInCompose', () => {
       entityId: 'doc-guid-1',
       sprkDocumentId: 'doc-guid-1',
     });
+    warnSpy.mockRestore();
+  });
+
+  test('issue #572 Defect 1: NULL sprk_graphdriveid (half-provisioned) routes to the empty-state picker, NOT the editor', async () => {
+    installXrmMock({
+      retrieveRecord: jest.fn().mockResolvedValue({
+        sprk_documentid: 'doc-guid-1',
+        sprk_graphitemid: '01DRIVEITEM',
+        sprk_graphdriveid: null,
+        sprk_filename: 'Half Provisioned.docx',
+      }),
+    });
+    const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+    await openInCompose(makeFormContext('doc-guid-1') as unknown as Xrm.FormContext);
+
+    // Empty-state params only — no speDriveItemId/speDriveId keys, so the
+    // Compose surface opens on the Browse/Search picker instead of dying
+    // with "SPE drive id and tenant id are required".
+    expect(mockOpenSpaarkeAiCompose).toHaveBeenCalledTimes(1);
+    expect(mockOpenSpaarkeAiCompose).toHaveBeenCalledWith({
+      entityLogicalName: 'sprk_document',
+      entityId: 'doc-guid-1',
+      sprkDocumentId: 'doc-guid-1',
+    });
+    warnSpy.mockRestore();
   });
 
   test('WebApi failure: opens Compose with sprkDocumentId only (graceful fallback, no throw)', async () => {

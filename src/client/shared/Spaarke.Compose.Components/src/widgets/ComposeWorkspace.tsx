@@ -219,10 +219,17 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   // -------------------------------------------------------------------------
   // Kick off initial load if initialDocumentRef supplied
   // -------------------------------------------------------------------------
+  // Issue #572 (belt-and-braces to the ribbon guard): a documentRef WITHOUT a
+  // drive id means the document is only half-provisioned in SPE — the BFF Load
+  // endpoint cannot fetch it. Stay in the 'empty' state (Browse/Search picker)
+  // with an informational banner instead of dispatching a hard load error.
+  const missingDrivePointer = Boolean(initialDocumentRef?.speDriveItemId) && !driveId;
+
   React.useEffect(() => {
     if (!initialDocumentRef) return;
     if (state.status !== 'empty' && state.status !== 'error') return;
     if (!initialDocumentRef.speDriveItemId) return;
+    if (!driveId) return; // half-provisioned — honest empty state, not an error
 
     dispatch({
       kind: 'requestLoad',
@@ -230,7 +237,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       sessionId: initialSessionId ?? '',
     });
     // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [initialDocumentRef?.speDriveItemId]);
+  }, [initialDocumentRef?.speDriveItemId, driveId]);
 
   // -------------------------------------------------------------------------
   // BFF Load — GET /api/compose/documents/{speId}?driveId&tenantId&documentRecordId&displayName
@@ -245,12 +252,21 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       });
       return;
     }
-    if (!driveId || !tenantId) {
+    if (!tenantId) {
+      // Truly misconfigured host — tenant id is a static host-config value.
       dispatch({
         kind: 'loadFailed',
-        errorMessage:
-          'SPE drive id and tenant id are required to load Compose documents. ' + 'Check the host configuration.',
+        errorMessage: 'Tenant id is required to load Compose documents. Check the host configuration.',
       });
+      return;
+    }
+    if (!driveId) {
+      // Half-provisioned document (missing SPE drive pointer) — not a host
+      // misconfiguration. Route back to the empty state; the informational
+      // banner below explains the situation. (Normally unreachable — the
+      // initial-load effect gates requestLoad on driveId — but defensive for
+      // any other dispatch path.)
+      dispatch({ kind: 'reset' });
       return;
     }
 
@@ -590,7 +606,25 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     >
       {/* Empty state — Path A/B picker */}
       {state.status === 'empty' ? (
-        <ComposeEmptyState onBrowseRequested={handleBrowseRequested} onSearchRequested={handleSearchRequested} />
+        <>
+          {missingDrivePointer ? (
+            <div
+              className={styles.bannerStack}
+              data-testid="compose-workspace-missing-drive-pointer"
+              role="status"
+              aria-live="polite"
+            >
+              <MessageBar intent="info">
+                <MessageBarBody>
+                  <MessageBarTitle>Document not fully provisioned</MessageBarTitle>
+                  {"This document isn't fully provisioned in SharePoint Embedded (missing drive pointer) — " +
+                    'pick another document or re-upload this one.'}
+                </MessageBarBody>
+              </MessageBar>
+            </div>
+          ) : null}
+          <ComposeEmptyState onBrowseRequested={handleBrowseRequested} onSearchRequested={handleSearchRequested} />
+        </>
       ) : null}
 
       {/* Loading spinner */}
