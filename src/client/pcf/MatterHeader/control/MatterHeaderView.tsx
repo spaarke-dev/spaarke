@@ -176,19 +176,17 @@ export const MatterHeaderView: React.FC<IMatterHeaderViewProps> = ({ recordId, t
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const xrmPage = getXrmPage() as any;
     if (!xrmPage?.getAttribute) {
-       
       console.warn('[MatterHeader] Xrm.Page unavailable — text save skipped', fieldName);
       throw new Error('Form buffer unavailable');
     }
     const attr = xrmPage.getAttribute(fieldName);
     if (!attr) {
-       
       console.warn('[MatterHeader] attribute not on form', fieldName);
       throw new Error(`Field '${fieldName}' not on form`);
     }
     attr.setValue(newValue);
     setPendingText(prev => ({ ...prev, [fieldName]: newValue }));
-     
+
     console.info('[MatterHeader] staged text edit', { field: fieldName, dirty: !!attr.getIsDirty?.() });
   }, []);
 
@@ -220,13 +218,11 @@ export const MatterHeaderView: React.FC<IMatterHeaderViewProps> = ({ recordId, t
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const xrmPage = getXrmPage() as any;
     if (!xrmPage?.getAttribute) {
-       
       console.warn('[MatterHeader] Xrm.Page unavailable — lookup save skipped', key);
       return;
     }
     const attr = xrmPage.getAttribute(key);
     if (!attr) {
-       
       console.warn('[MatterHeader] lookup attribute not on form', key);
       return;
     }
@@ -234,7 +230,7 @@ export const MatterHeaderView: React.FC<IMatterHeaderViewProps> = ({ recordId, t
     const nextValue = item ? [{ id: item.id, name: item.name, entityType: meta.refEntity }] : null;
     attr.setValue(nextValue);
     setPendingLookup(prev => ({ ...prev, [key]: item }));
-     
+
     console.info('[MatterHeader] staged lookup edit', { field: key, item, dirty: !!attr.getIsDirty?.() });
   }, []);
 
