@@ -36,10 +36,12 @@
  *
  * SPE drive-item id field on `sprk_document`:
  *   The canonical field is `sprk_graphitemid` — the SPE drive-item id assigned
- *   by Graph when the file is uploaded. The drive id field is `sprk_driveid`
- *   (optional; the BFF Load endpoint can also resolve it from the container).
- *   These names are used in the WebApi retrieve call below; if the schema
- *   evolves they MUST be updated here.
+ *   by Graph when the file is uploaded. The drive id field is
+ *   `sprk_graphdriveid`. BOTH are required to load a document in the Compose
+ *   editor (issue #572 Defect 1: half-provisioned records with a NULL drive id
+ *   must route to the empty-state picker, not the editor). These names are
+ *   used in the WebApi retrieve call below; if the schema evolves they MUST
+ *   be updated here.
  *
  * @see ADR-006 — Ribbon scripts must be invocation-only (no business logic)
  * @see ADR-028 — Spaarke Auth v2 (no manual token handling at the launch boundary)
@@ -128,13 +130,19 @@ export async function openInCompose(
     const speDriveId = record[FIELD_DRIVE_ID] as string | undefined;
     const speFileName = record[FIELD_DISPLAY_NAME] as string | undefined;
 
-    if (!speDriveItemId) {
-      // No SPE drive-item id — the document hasn't been promoted to SPE yet.
-      // Open Compose in empty-state with the Dataverse record id so post-Save
-      // promotion can still link back to the open record (ChatSession binding).
+    if (!speDriveItemId || !speDriveId) {
+      // Half-/un-provisioned document — the SPE pointer is incomplete. The
+      // editor requires BOTH the drive-item id AND the drive id to load
+      // (issue #572 Defect 1: guarding only on sprk_graphitemid let records
+      // with a NULL sprk_graphdriveid through, and the editor died with
+      // "SPE drive id and tenant id are required"). Open Compose in
+      // empty-state (Browse / Search picker) with the Dataverse record id so
+      // post-Save promotion can still link back to the open record
+      // (ChatSession binding) — a working affordance, not an error.
       console.warn(
-        "[DocumentComposeLaunch] sprk_graphitemid is missing on record",
+        "[DocumentComposeLaunch] Incomplete SPE pointer on record",
         normalizedDocumentId,
+        `(sprk_graphitemid=${speDriveItemId ?? "null"}, sprk_graphdriveid=${speDriveId ?? "null"})`,
         "— opening Compose in empty state.",
       );
       openSpaarkeAiCompose({
@@ -150,7 +158,7 @@ export async function openInCompose(
       entityId: normalizedDocumentId,
       sprkDocumentId: normalizedDocumentId,
       speDriveItemId,
-      speDriveId: speDriveId ?? undefined,
+      speDriveId,
       speFileName: speFileName ?? undefined,
     });
   } catch (err) {
