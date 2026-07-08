@@ -240,10 +240,12 @@ const theme = isDarkMode ? webDarkTheme : webLightTheme;
 
 ## Related Files
 
-- [AiAssistantModal.tsx](../../src/client/pcf/PlaybookBuilderHost/control/components/AiAssistant/AiAssistantModal.tsx)
-- [ChatHistory.tsx](../../src/client/pcf/PlaybookBuilderHost/control/components/AiAssistant/ChatHistory.tsx)
-- [ErrorDisplay.tsx](../../src/client/pcf/PlaybookBuilderHost/control/components/AiAssistant/ErrorDisplay.tsx)
-- [TypingIndicator.tsx](../../src/client/pcf/PlaybookBuilderHost/control/components/AiAssistant/TypingIndicator.tsx)
+The reference implementation lived in the `PlaybookBuilderHost` PCF, which was deleted 2026-07 by ai-architecture-redesign-r1 (paths retained for history; the theming pattern above still applies to any Fluent v9 surface):
+
+- `src/client/pcf/PlaybookBuilderHost/control/components/AiAssistant/AiAssistantModal.tsx`
+- `src/client/pcf/PlaybookBuilderHost/control/components/AiAssistant/ChatHistory.tsx`
+- `src/client/pcf/PlaybookBuilderHost/control/components/AiAssistant/ErrorDisplay.tsx`
+- `src/client/pcf/PlaybookBuilderHost/control/components/AiAssistant/TypingIndicator.tsx`
 
 ## References
 

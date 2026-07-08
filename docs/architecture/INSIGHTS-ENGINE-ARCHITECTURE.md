@@ -2223,7 +2223,7 @@ This requires the production metrics infrastructure to be running and the corpus
 - [`Sprk.Bff.Api/Infrastructure/DI/AiModule.cs`](../../src/server/api/Sprk.Bff.Api/Infrastructure/DI/AiModule.cs) — `IChatClient` + tool framework + registration audit
 - [`Sprk.Bff.Api/Services/RecordMatching/DataverseIndexSyncService.cs`](../../src/server/api/Sprk.Bff.Api/Services/RecordMatching/DataverseIndexSyncService.cs) — existing Dataverse → AI Search sync (template for Track B Functions)
 - [`Sprk.Bff.Api/Services/Ai/ReferenceIndexingService.cs`](../../src/server/api/Sprk.Bff.Api/Services/Ai/ReferenceIndexingService.cs) — existing idempotent indexer pattern (template for InsightArtifact indexing)
-- [`Sprk.Bff.Api/Services/Ai/PlaybookExecutionEngine.cs`](../../src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookExecutionEngine.cs) — JPS playbook execution (used by closure-extraction)
+- `Sprk.Bff.Api/Services/Ai/PlaybookExecutionEngine.cs` *(deleted 2026-07, ai-architecture-redesign-r1 task 044 — see terminology note at top)* — the Insights playbook engine is [`Sprk.Bff.Api/Services/Ai/PlaybookOrchestrationService.cs`](../../src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookOrchestrationService.cs) + the `INodeExecutor` registry
 - [`Sprk.Bff.Api/Services/Ai/Nodes/DeliverToIndexNodeExecutor.cs`](../../src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/DeliverToIndexNodeExecutor.cs) — terminal node for closure-extraction playbook
 
 ---

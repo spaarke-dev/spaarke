@@ -217,7 +217,7 @@ R4 adds `EntityNameValidator = 141` to the ActionType enum (`INodeExecutor.cs:25
 1. New ActionType integers should slot into the appropriate cluster (don't scatter).
 2. Reserve gaps within clusters for future expansion (don't fill consecutively unless the new ActionType is conceptually adjacent).
 3. Update `INodeExecutor.cs` enum + `NodeExecutorRegistry` registration + Deploy-Playbook.ps1 reference in the same PR.
-4. New ActionType requires a corresponding `sprk_actiontype` Dataverse row deployed via `Seed-JpsActions.ps1`.
+4. New ActionType requires a corresponding `sprk_actiontype` Dataverse row, created directly via the `jps-action-create` skill / Dataverse MCP (`Seed-JpsActions.ps1` RETIRED 2026-07, ai-architecture-redesign-r1).
 
 The policy is not yet binding — capture in this doc so it's not lost between R4 and R5.
 

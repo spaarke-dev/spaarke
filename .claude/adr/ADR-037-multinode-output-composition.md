@@ -21,6 +21,15 @@
 >    representation; per the operator's 2026-07-05 no-continuity-concern
 >    direction, the FieldDelta dual-render path may be DELETED at migration
 >    cutover rather than maintained indefinitely.
+>
+> **✂️ Cutover executed 2026-07-08** (`spaarke-ai-architecture-redesign-r1`
+> tasks 044/050): the `AnalysisChunk.FieldDelta` server model + `FromDelta` +
+> its test file are DELETED (grep-zero shown in
+> `projects/spaarke-ai-architecture-redesign-r1/notes/track-b-completion-audit.md`).
+> The frozen engine's `Streaming.FieldDeltaEvent` type remains untouched. The
+> "MUST preserve FieldDelta" / "MUST NOT delete until migrated" rules below are
+> therefore DISCHARGED — retained in this file for history only; the binding
+> content is the section-name-keyed streaming + widget contract.
 > Full rationale: `projects/spaarke-ai-code-audit-r1/ADR-REVIEW-VS-GREENFIELD.md` §2.2.
 > **Source project**: `chat-routing-redesign-r1` Wave 5-C (Phase 5R FR-52 through FR-55)
 > **Cross-references**: extends [ADR-033](ADR-033-streaming-chat-tool-side-channel.md) (preserves Path 3 streaming invariant); reinforces [ADR-013](ADR-013-ai-architecture.md) (playbook execution stays in `Services/Ai/`); reinforces [ADR-015](ADR-015-ai-data-governance.md) (section names are deterministic identifiers; content NOT logged separately from SSE payload); reinforces [ADR-021](ADR-021-fluent-design-system.md) (FE widget uses Fluent v9 semantic tokens).

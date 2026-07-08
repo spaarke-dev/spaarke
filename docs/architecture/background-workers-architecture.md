@@ -10,7 +10,7 @@
 
 ## Overview
 
-The SDAP BFF API hosts 17 background workers that run as .NET `BackgroundService` or `IHostedService` implementations within the single API process. Per ADR-001, all background processing uses this pattern — no Azure Functions. Workers fall into four categories: Service Bus queue processors, periodic timer services, event-driven channel consumers, and startup-only services.
+The SDAP BFF API hosts 15 background workers that run as .NET `BackgroundService` or `IHostedService` implementations within the single API process. Per ADR-001, all background processing uses this pattern — no Azure Functions. Workers fall into four categories: Service Bus queue processors, periodic timer services, event-driven channel consumers, and startup-only services.
 
 This architecture keeps operational complexity low (single deployment unit) while providing durable async processing, scheduled maintenance, and real-time event handling.
 
@@ -53,22 +53,22 @@ These workers execute on a recurring schedule using `PeriodicTimer` or delay-unt
 | TodoGenerationService | `src/server/api/Sprk.Bff.Api/Services/Workspace/TodoGenerationService.cs` | 24 hours | PeriodicTimer; scans for deadline-approaching and budget-alert conditions, creates to-do records |
 | SpeDashboardSyncService | `src/server/api/Sprk.Bff.Api/Services/SpeAdmin/SpeDashboardSyncService.cs` | 15 minutes (default) | PeriodicTimer + on-demand Channel trigger; syncs SPE container metrics to Redis cache |
 
-### Event-Driven Channel Consumers (2)
+### Event-Driven Channel Consumers (1)
 
 These workers read from in-memory `Channel<T>` instances, processing items as they arrive.
 
 | Component | Path | Trigger |
 |-----------|------|---------|
 | BulkOperationService | `src/server/api/Sprk.Bff.Api/Services/SpeAdmin/BulkOperationService.cs` | Channel enqueue from bulk operation endpoints; processes delete/permission operations with per-item progress |
-| PlaybookIndexingBackgroundService | `src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookEmbedding/PlaybookIndexingBackgroundService.cs` | Channel enqueue from trigger endpoint; indexes playbook embeddings; exposes static Instance accessor (ADR-010) |
 
-### One-Time Migration Services (2)
+*(PlaybookIndexingBackgroundService — the second channel consumer — was deleted 2026-07 with the PlaybookEmbedding subsystem by ai-architecture-redesign-r1.)*
+
+### One-Time Migration Services (1)
 
 These workers run once at startup (if enabled) and then exit.
 
 | Component | Path | Purpose |
 |-----------|------|---------|
-| DocumentVectorBackfillService | `src/server/api/Sprk.Bff.Api/Services/Jobs/DocumentVectorBackfillService.cs` | Backfills `documentVector` by averaging chunk `contentVector` values; opt-in via `DocumentVectorBackfill:Enabled` |
 | EmbeddingMigrationService | `src/server/api/Sprk.Bff.Api/Services/Jobs/EmbeddingMigrationService.cs` | Migrates embeddings from 1536 to 3072 dimensions (text-embedding-3-large); opt-in via `EmbeddingMigration:Enabled`; supports resume via `ResumeFromDocumentId` |
 
 ### Startup Validation (1)
@@ -98,11 +98,11 @@ These workers run once at startup (if enabled) and then exit.
 - Pattern: Calculate delay from now to next midnight UTC, `await Task.Delay(delay, ct)`, then execute
 
 **Channel consumer** (for event-driven processing):
-- Used by: BulkOperationService, PlaybookIndexingBackgroundService
+- Used by: BulkOperationService
 - Pattern: `await foreach (var item in channel.Reader.ReadAllAsync(ct)) { ... }`
 
 **Run-once** (for migrations):
-- Used by: DocumentVectorBackfillService, EmbeddingMigrationService
+- Used by: EmbeddingMigrationService
 - Pattern: Check `Enabled` flag, execute migration, then exit `ExecuteAsync()`
 
 ## Integration Points
@@ -127,7 +127,6 @@ These workers run once at startup (if enabled) and then exit.
 | Queue isolation by domain | Separate queues for shared jobs, communication, and Office pipeline | DI failure isolation; independent scaling | ADR-004 |
 | PeriodicTimer over Timer/CronJob | .NET 6+ PeriodicTimer | No timer drift, cancellation-aware, simpler than cron | ADR-001 |
 | Channel for in-process events | System.Threading.Channels | Back-pressure-free FIFO with minimal allocation; no external dependency | ADR-010 |
-| Static accessor for PlaybookIndexingService | `PlaybookIndexingBackgroundService.Instance` | Avoids adding DI registration; trigger endpoint accesses via static | ADR-010 |
 
 ## Constraints
 
@@ -137,7 +136,7 @@ These workers run once at startup (if enabled) and then exit.
 - **MUST**: Catch exceptions per-cycle in periodic services — never let a single failure crash the loop
 - **MUST**: Handle `OperationCanceledException` gracefully for clean shutdown
 - **MUST NOT**: Block `ExecuteAsync` with synchronous operations — all work must be async
-- **MUST NOT**: Enable migration services (DocumentVectorBackfill, EmbeddingMigration) in production without explicit configuration review
+- **MUST NOT**: Enable migration services (EmbeddingMigration) in production without explicit configuration review
 
 ## Known Pitfalls
 

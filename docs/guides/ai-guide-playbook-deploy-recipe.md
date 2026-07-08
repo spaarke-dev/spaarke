@@ -33,8 +33,9 @@ The script accepts a JSON file shaped roughly as follows (1069-line full grammar
 
   "actions": [
     /* Optional: inline Action definitions to upsert BEFORE the playbook.
-       More commonly, Actions are deployed separately via Seed-JpsActions.ps1
-       and referenced by code from playbook.scopes.actions[]. */
+       More commonly, Actions are authored directly in Dataverse (jps-action-create
+       skill / Dataverse MCP row creation; Seed-JpsActions.ps1 RETIRED 2026-07,
+       ai-architecture-redesign-r1) and referenced by code from playbook.scopes.actions[]. */
   ],
 
   "playbook": {                                  // REQUIRED
@@ -155,7 +156,7 @@ Each step throws on failure. There is **no rollback**. A failure at step 8 (afte
 
 Before running `Deploy-Playbook.ps1`:
 
-1. **Scope rows must already exist** — Action, Skill, Knowledge, Tool rows are read-only at deploy. They must be seeded via `Seed-JpsActions.ps1` and equivalents BEFORE this script runs. Step 3 resolution fails loudly if any referenced code is not found.
+1. **Scope rows must already exist** — Action, Skill, Knowledge, Tool rows are read-only at deploy. They must be created BEFORE this script runs — via the `jps-action-create` skill / Dataverse MCP row creation (`Seed-JpsActions.ps1` RETIRED 2026-07, ai-architecture-redesign-r1; see `scripts/README.md`). Step 3 resolution fails loudly if any referenced code is not found.
 2. **Model deployments must exist** — if any node references `model: "gpt-4o-mini"` etc., the corresponding `sprk_aimodeldeployments` row must exist.
 3. **Dataverse environment is the right one** — the script uses the connected Power Platform CLI auth profile. Verify with `pac auth list`. **You can deploy to the wrong env if your default profile is wrong.**
 4. **The repo JSON file targets the correct entities** — R4 binding: tasks → `sprk_event`, emails → `sprk_communication`, not OOB `task`/`email`. See `ai-architecture-playbook-runtime.md` §10 (G12).
@@ -221,7 +222,7 @@ If `Deploy-Playbook.ps1` exits 1 with `Lint A: node '<name>' has unknown executo
 
 The deployment dependency order is:
 
-1. **Action rows** via `Seed-JpsActions.ps1` (or sibling scripts) — must exist before any referencing playbook is deployed.
+1. **Action rows** — authored via the `jps-action-create` skill / Dataverse MCP row creation (`Seed-JpsActions.ps1` RETIRED 2026-07, ai-architecture-redesign-r1) — must exist before any referencing playbook is deployed.
 2. **Playbook rows + nodes + N:N scopes + canvas** via `Deploy-Playbook.ps1` — references the Action rows by code.
 3. **Consumer rows** (`sprk_playbookconsumer`) — references the Playbook row by FK. After the playbook row exists, add a routing row.
 4. **Refresh the scope catalog** — `jps-scope-refresh` to update `.claude/catalogs/scope-model-index.json` for AI-tooling consistency.
@@ -247,6 +248,6 @@ For internal teams: the canonical input files live at `projects/spaarke-daily-up
 | How a consumer surface looks up + dispatches the playbook after deploy | `ai-architecture-playbook-consumer-routing.md` |
 | JPS schema for `sprk_systemprompt`, structured output, `$choices` | `ai-guide-jps-authoring.md` |
 | Maker UI procedure (build a playbook in the visual canvas instead) | `PLAYBOOK-AUTHOR-GUIDE.md` |
-| Action row deploy (`Seed-JpsActions.ps1`) | `.claude/skills/jps-action-create/SKILL.md` |
+| Action row authoring (`Seed-JpsActions.ps1` RETIRED 2026-07) | `.claude/skills/jps-action-create/SKILL.md` |
 | Playbook design + scope selection | `.claude/skills/jps-playbook-design/SKILL.md` |
 | Deployed-vs-repo reconciliation audit | `.claude/skills/jps-playbook-audit/SKILL.md` |

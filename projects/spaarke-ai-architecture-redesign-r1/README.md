@@ -2,7 +2,7 @@
 
 > **Portfolio**: [Project #550](https://github.com/spaarke-dev/spaarke/issues/550) · Parent Epic [#421 SPAARKE AI](https://github.com/spaarke-dev/spaarke/issues/421) · Board [Project #2](https://github.com/users/spaarke-dev/projects/2)
 > **Created**: 2026-07-05 · **Target**: 2026-08-15
-> **Status**: Initialized via `/project-pipeline` 2026-07-05 — spec ratified, tasks generated; execution starts at task 001
+> **Status**: **COMPLETE** 2026-07-08 — 51/51 tasks + 090 wrap-up. Gates: G-P0..G-P3 PASSED (browser UAT, 6 rounds at G-P3); G-P4 GREEN with publish-size AMBER pending operator sign-off ([`notes/g-p4-evidence.md`](notes/g-p4-evidence.md)); G-M **DEFERRED-WITH-EVIDENCE** post-r2 by operator ruling ([`notes/g-m-evidence.md`](notes/g-m-evidence.md), issue [#555](https://github.com/spaarke-dev/spaarke/issues/555)). ADR-039/040 Accepted. Deferrals: [#552–#557](notes/defer-issues.md). Lessons: [`notes/lessons-learned.md`](notes/lessons-learned.md). Successor: [`../spaarke-ai-architecture-redesign-r2/design.md`](../spaarke-ai-architecture-redesign-r2/design.md) (v0.2)
 
 ## What this project delivers (the one-liner)
 

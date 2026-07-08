@@ -141,6 +141,8 @@ public sealed record DocumentText(
 
 Every Linear consumer service follows this outline. Deviations should be explained inline as comments.
 
+> The `DocumentProfileService` shown below is illustrative — the literal class was deleted 2026-07 by ai-architecture-redesign-r1 (Linear-consumer wrappers retired; prompted execution now runs via `LinearConsumers/ActionRunner` per ADR-039). The shape remains the reference pattern this doc describes.
+
 ```csharp
 public sealed class DocumentProfileService(
     IActionResolver actions,

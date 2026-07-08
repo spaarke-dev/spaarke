@@ -3,7 +3,8 @@
   <metadata>
     <title>Project wrap-up — G-P4 NFR sweep + G-M maker gate + /test-diet + deferrals + graduation</title>
     <phase>Phase P4: Sweep + Hardening + Graduation</phase>
-    <status>not-started</status>
+    <status>completed</status>
+    <notes>Completed 2026-07-08. G-P4 GREEN (publish-size AMBER, operator sign-off requested — notes/g-p4-evidence.md). G-M DEFERRED-WITH-EVIDENCE per operator ruling 2026-07-07 (notes/g-m-evidence.md; live walkthrough = issue #555). /test-diet PASSED (126 files: 124 maintain / 0 scaffolding / 2 ambiguous — notes/test-diet-report.md). Six /defer filings #552–#557. ADR-039/040 Accepted verified; ADR-037 twin discharge annotation. Doc-drift register (audit §10) fully fixed. FR/NFR reconciliation: zero uncovered requirements (notes/fr-acceptance-reconciliation.md). Lessons-learned + README/CLAUDE.md/INDEX close-out done.</notes>
     <estimated-hours>8</estimated-hours>
     <tags>wrap-up, gate, uat</tags>
     <rigor-hint>STANDARD</rigor-hint>

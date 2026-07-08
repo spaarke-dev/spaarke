@@ -1062,7 +1062,7 @@ cd tests/e2e && npx playwright test --project=edge specs/universal-dataset-grid/
 
 **Playwright configuration**: `tests/e2e/config/playwright.config.ts` (Edge primary, 60s timeout, Power Apps URLs)
 
-**PCF controls in the codebase**: AIMetadataExtractor, AssociationResolver, DocumentRelationshipViewer, DrillThroughWorkspace, EmailProcessingMonitor, RelatedDocumentCount, ScopeConfigEditor, SemanticSearchControl, SpaarkeGridCustomizer, ThemeEnforcer, UniversalDatasetGrid, UniversalQuickCreate, UpdateRelatedButton, VisualHost
+**PCF controls in the codebase**: AssociationResolver, DocumentRelationshipViewer, EmailProcessingMonitor, RelatedDocumentCount, ScopeConfigEditor, SemanticSearchControl, SpaarkeGridCustomizer, ThemeEnforcer, UniversalDatasetGrid, UniversalQuickCreate, UpdateRelatedButton, VisualHost (AIMetadataExtractor and DrillThroughWorkspace deleted 2026-07, ai-architecture-redesign-r1)
 
 **ADR constraints validated**: ADR-006 (PCF over webresources), ADR-012 (shared component library), ADR-021 (Fluent UI v9, dark mode), ADR-022 (PCF uses React 16 platform libraries)
 

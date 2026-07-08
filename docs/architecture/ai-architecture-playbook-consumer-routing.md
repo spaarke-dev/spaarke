@@ -246,7 +246,7 @@ Source: [`ConsumerTypes.cs`](../../src/server/api/Sprk.Bff.Api/Services/Ai/Publi
 | `ConsumerTypes.ProjectPreFill` | `project-pre-fill` | `ProjectPreFillService` | Pre-fills new Project form from uploaded docs | chat-routing-redesign-r1 Phase 1R |
 | `ConsumerTypes.AiSummary` | `ai-summary` | `WorkspaceAiService` | Generates workspace tile AI summary (Document Profile playbook) | chat-routing-redesign-r1 Phase 1R |
 | `ConsumerTypes.SummarizeFile` | `summarize-file` | `WorkspaceFileEndpoints` | File summarization behind the Workspace summarize button | chat-routing-redesign-r1 Phase 1R |
-| `ConsumerTypes.ChatSummarize` | `chat-summarize` | `SessionSummarizeOrchestrator` | **The canonical chat `/summarize` flow** — what end users see when they type `/summarize` or "summarize this" | chat-routing-redesign-r1 Phase 1R |
+| `ConsumerTypes.ChatSummarize` | `chat-summarize` | `SessionSummarizeOrchestrator` *(deleted 2026-07, ai-architecture-redesign-r1 — `/summarize` now enters the `SprkChatAgent` agent-turn loop per ADR-039)* | Was the canonical chat `/summarize` flow — what end users saw when they typed `/summarize` or "summarize this" | chat-routing-redesign-r1 Phase 1R |
 | `ConsumerTypes.EmailAnalysis` | `email-analysis` | `AppOnlyAnalysisService` | Email analysis pipeline (Path C app-only execution context — see §8) | chat-routing-redesign-r1 Phase 1R |
 | `ConsumerTypes.DailyBriefingNarrate` | `daily-briefing-narrate` | `DailyBriefingEndpoints.HandleNarrate` | Daily-briefing narration dispatch | spaarke-daily-update-service-r4 FR-12 (task-031) |
 
@@ -384,7 +384,7 @@ Today's pattern. One `sprk_consumertype` value (e.g., `chat-summarize`) with mul
 | `chat-summarize` | `employment` | summarize-employment-agreement@v1 |
 | `chat-summarize` | `real-estate-lease` | summarize-real-estate-lease@v1 |
 
-The consumer surface (`SessionSummarizeOrchestrator`) calls `ResolveAsync(ChatSummarize, code: detectedArea, ...)`. The dispatcher's vector match passes `detectedArea` (or `IRoutingContext.DocumentType` after classification). **One consumer call → one playbook, but the consumer surface has access to N playbook variants.** This is the P1-summarize-document-v1 design.
+The consumer surface (`SessionSummarizeOrchestrator`, deleted 2026-07 by ai-architecture-redesign-r1) called `ResolveAsync(ChatSummarize, code: detectedArea, ...)`. The dispatcher's vector match passes `detectedArea` (or `IRoutingContext.DocumentType` after classification). **One consumer call → one playbook, but the consumer surface has access to N playbook variants.** This is the P1-summarize-document-v1 design.
 
 #### Mechanism B — Composition playbook (one consumer → one playbook that internally calls others)
 

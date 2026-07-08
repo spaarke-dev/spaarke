@@ -201,7 +201,7 @@
 
 | # | Task | FR | Rigor | Deps | Status |
 |---|---|---|---|---|---|
-| 090 | Wrap-up: **G-M maker gate** + `/test-diet` + `/defer` filings + graduation | FR-P4-07 | STANDARD | all | 🔲 |
+| 090 | Wrap-up ✅ 2026-07-08: **G-P4 GREEN** (`notes/g-p4-evidence.md` — eval 35/35 fresh, live metering rollups, budgets, Track-B zero-survivors, 7447P/4F all-KNOWN; publish-size AMBER +3.98 MB pending operator sign-off, recommend accept); **G-M DEFERRED-WITH-EVIDENCE** per operator ruling 2026-07-07 (`notes/g-m-evidence.md`, walkthrough = #555); **/test-diet BINDING gate PASSED** (`notes/test-diet-report.md` — 126 files: 124 MAINTAIN / 0 scaffolding / 2 AMBIGUOUS; 77 already reconciled by deletion); **/defer ×6 filed #552–#557** (`notes/defer-issues.md`); ADR-039/040 verified Accepted both copies + ADR-037 twin FieldDelta-discharge annotation; audit §10 doc-drift register items 1–11 ALL FIXED (10 by wrap-up agent, verified re-grep; 11 main-session); FR/NFR reconciliation `notes/fr-acceptance-reconciliation.md` (zero uncovered requirements, 6 ruled flags); lessons-learned written; README/CLAUDE.md/projects-INDEX rows → COMPLETE | FR-P4-07 | STANDARD | all | ✅ |
 
 ---
 

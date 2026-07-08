@@ -149,7 +149,7 @@ In R2, the `ConversationPane` component replaces the direct SprkChat mounting us
 | Responsibility | R1 | R2 |
 |---------------|----|----|
 | Chat host | ChatPanel mounts SprkChat directly | ConversationPane wraps SprkChat with tab bar, playbook header, selection chip |
-| Session state | `useStandaloneAi()` (StandaloneAiProvider) | `useAiSession()` (AiSessionProvider) |
+| Session state | `useStandaloneAi()` (StandaloneAiProvider — deleted 2026-07, ai-architecture-redesign-r1) | `useAiSession()` (AiSessionProvider) |
 | SSE event routing | Single-subscriber ref (`streaming?.onPaneEvent`) | `PaneEventBus` multi-subscriber channels via `streaming.onPaneEvent` |
 | Playbook selection | In-SprkChat only | PlaybookGalleryWidget dispatches `playbook-selected` on conversation channel |
 | Text selection refinement | Not supported | `selection_changed` event on workspace channel drives "Refine this?" chip |
