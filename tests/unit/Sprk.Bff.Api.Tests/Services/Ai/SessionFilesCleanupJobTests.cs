@@ -76,10 +76,20 @@ public class SessionFilesCleanupJobTests
     // Factory
     // -------------------------------------------------------------------------
 
+    /// <summary>
+    /// Non-empty instance prefix so tests exercise the on-wire key shape
+    /// StackExchangeRedisCache actually writes (issue #559 regression).
+    /// </summary>
+    private const string RedisInstancePrefix = "spaarke:";
+
+    private static readonly IOptions<Sprk.Bff.Api.Configuration.RedisOptions> RedisOptionsValue =
+        Options.Create(new Sprk.Bff.Api.Configuration.RedisOptions { InstanceName = RedisInstancePrefix });
+
     private SessionFilesCleanupJob CreateJob(IServiceProvider services) =>
         new SessionFilesCleanupJob(
             services,
             _options,
+            RedisOptionsValue,
             _signal,
             _loggerMock.Object);
 
@@ -396,11 +406,13 @@ public class SessionFilesCleanupJobTests
         //
         // Key format is owned by ChatSessionManager.BuildCacheKey (centralised as
         // tenant:{tenantId}:session:{sessionId}:v1 by spaarke-redis-cache-remediation-r1
-        // FR-05, commit 8b2cdb676). The test uses the helper rather than a hardcoded
-        // literal so the liveness probe and the writer can never drift apart in the mock —
-        // a mismatch here previously made BOTH sessions look orphaned (2 deletes).
-        var activeSessionKey = (RedisKey)ChatSessionManager.BuildCacheKey(TenantA, SessionId1);
-        var orphanSessionKey = (RedisKey)ChatSessionManager.BuildCacheKey(TenantA, SessionId2);
+        // FR-05, commit 8b2cdb676) PLUS the StackExchangeRedisCache InstanceName prefix
+        // the writer applies on the wire (issue #559). The test derives keys from the
+        // job's own BuildProbeKey so probe and writer conventions can never drift apart
+        // in the mock — an unprefixed probe previously made BOTH sessions look orphaned.
+        var probeKeyJob = CreateJob(BuildScopedServices());
+        var activeSessionKey = (RedisKey)probeKeyJob.BuildProbeKey(TenantA, SessionId1);
+        var orphanSessionKey = (RedisKey)probeKeyJob.BuildProbeKey(TenantA, SessionId2);
         var indexedDocs = new List<SearchResult<SessionFilesCleanupRef>>
         {
             SearchModelFactory.SearchResult(
@@ -463,6 +475,28 @@ public class SessionFilesCleanupJobTests
             It.Is<RedisKey>(k => k == orphanSessionKey),
             It.IsAny<CommandFlags>()),
             Times.Once);
+    }
+
+    // -------------------------------------------------------------------------
+    // Test 6b: probe key convention (issue #559 regression)
+    // -------------------------------------------------------------------------
+
+    [Fact]
+    public void BuildProbeKey_PrependsRedisInstanceName_ToWriterCacheKey()
+    {
+        // The writer path is ITenantCache → StackExchangeRedisCache, which prepends
+        // RedisOptions.InstanceName to ChatSessionManager.BuildCacheKey on the wire.
+        // The raw-Redis liveness probe MUST produce that exact on-wire key — an
+        // unprefixed probe classifies every LIVE session as an orphan and evicts its
+        // files (issue #559).
+        var job = CreateJob(BuildScopedServices());
+
+        var probeKey = job.BuildProbeKey(TenantA, SessionId1);
+
+        probeKey.Should().Be(
+            RedisInstancePrefix + ChatSessionManager.BuildCacheKey(TenantA, SessionId1),
+            "the probe must read the same on-wire key StackExchangeRedisCache writes (InstanceName + cache key)");
+        probeKey.Should().StartWith(RedisInstancePrefix);
     }
 
     // -------------------------------------------------------------------------

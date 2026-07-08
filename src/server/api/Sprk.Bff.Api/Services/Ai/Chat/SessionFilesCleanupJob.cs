@@ -20,7 +20,8 @@ namespace Sprk.Bff.Api.Services.Ai.Chat;
 ///   <see cref="SessionFilesCleanupOptions.IntervalHours"/> (default 6h).
 ///   The scheduled pass enumerates indexed session IDs (via facet query),
 ///   joins against the active Redis session-key set
-///   (<c>chat:session:{tenantId}:{sessionId}</c>), and evicts every
+///   (<c>{InstanceName}tenant:{tenantId}:session:{sessionId}:v1</c> — see
+///   <see cref="BuildProbeKey"/>), and evicts every
 ///   <c>sessionId</c> NOT present in the active set.</item>
 ///   <item><b>On-session-end (immediate)</b> — a
 ///   <see cref="System.Threading.Channels.Channel{T}"/> owned by
@@ -76,6 +77,7 @@ public sealed class SessionFilesCleanupJob : BackgroundService
     private readonly IServiceProvider _serviceProvider;
     private readonly SessionFilesCleanupOptions _options;
     private readonly SessionFilesCleanupSignal _signal;
+    private readonly string _redisInstancePrefix;
     private readonly ILogger<SessionFilesCleanupJob> _logger;
 
     /// <summary>
@@ -100,11 +102,18 @@ public sealed class SessionFilesCleanupJob : BackgroundService
     public SessionFilesCleanupJob(
         IServiceProvider serviceProvider,
         IOptions<SessionFilesCleanupOptions> options,
+        IOptions<Configuration.RedisOptions> redisOptions,
         SessionFilesCleanupSignal signal,
         ILogger<SessionFilesCleanupJob> logger)
     {
         _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
         _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
+        // Sessions are WRITTEN via ITenantCache → StackExchangeRedisCache, which
+        // prepends RedisOptions.InstanceName to every key ON THE WIRE. The active-set
+        // probe below reads raw Redis (IConnectionMultiplexer), so it must apply the
+        // same prefix or every live session looks orphaned and gets its files evicted
+        // (issue #559).
+        _redisInstancePrefix = redisOptions?.Value?.InstanceName ?? string.Empty;
         _signal = signal ?? throw new ArgumentNullException(nameof(signal));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -205,7 +214,7 @@ public sealed class SessionFilesCleanupJob : BackgroundService
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Active-session source-of-truth: Redis <c>chat:session:{tenantId}:{sessionId}</c>
+    /// Active-session source-of-truth: Redis <c>{InstanceName}tenant:{tenantId}:session:{sessionId}:v1</c>
     /// key pattern (set by <see cref="ChatSessionManager.CreateSessionAsync"/>;
     /// removed by <see cref="ChatSessionManager.DeleteSessionAsync"/> or
     /// 24h sliding-TTL expiry). The scheduled pass catches the implicit
@@ -521,7 +530,9 @@ public sealed class SessionFilesCleanupJob : BackgroundService
 
     /// <summary>
     /// For a tenant, returns the subset of <paramref name="candidateSessionIds"/>
-    /// whose Redis keys (<c>chat:session:{tenantId}:{sessionId}</c>) still exist.
+    /// whose Redis keys (<c>{InstanceName}tenant:{tenantId}:session:{sessionId}:v1</c> —
+    /// <see cref="ChatSessionManager.BuildCacheKey"/> with the
+    /// <c>StackExchangeRedisCache</c> instance prefix applied) still exist.
     /// Uses <see cref="IDatabase.KeyExistsAsync(RedisKey, CommandFlags)"/>
     /// per session — bounded per-tenant scan, no Redis SCAN pattern needed.
     /// </summary>
@@ -550,7 +561,7 @@ public sealed class SessionFilesCleanupJob : BackgroundService
                 break;
             }
 
-            var redisKey = ChatSessionManager.BuildCacheKey(tenantId, sessionId);
+            var redisKey = BuildProbeKey(tenantId, sessionId);
             var exists = await db.KeyExistsAsync(redisKey);
             if (exists)
             {
@@ -561,6 +572,15 @@ public sealed class SessionFilesCleanupJob : BackgroundService
 
         return active;
     }
+
+    /// <summary>
+    /// The exact on-wire Redis key for a session: <see cref="ChatSessionManager.BuildCacheKey"/>
+    /// prefixed with the configured <c>RedisOptions.InstanceName</c> — the same simple
+    /// concatenation <c>StackExchangeRedisCache</c> performs when the session is written.
+    /// Internal so tests pin the convention (issue #559 regression).
+    /// </summary>
+    internal string BuildProbeKey(string tenantId, string sessionId) =>
+        _redisInstancePrefix + ChatSessionManager.BuildCacheKey(tenantId, sessionId);
 
     /// <summary>
     /// Escapes a string for use in an OData filter expression (single-quote doubling).
