@@ -6,8 +6,19 @@
 > **Project ID**: `spaarkeai-compose-r2`
 > **R2 Theme**: **The differentiation layer activates.** R1 shipped the workspace foundation; R2 makes it AI-native and Word-interoperable. Compose now does the work the foundation was built for.
 > **Owner**: Ralph Schroeder
-> **Last updated**: 2026-06-29
+> **Last updated**: 2026-07-03 (revised for R7 W12 LinearConsumers + R1 AI dispatch retirement)
 > **R1 reference**: [`../spaarkeai-compose-r1/design.md`](../spaarkeai-compose-r1/design.md) + [`../spaarkeai-compose-r1/spec.md`](../spaarkeai-compose-r1/spec.md)
+> **Platform reference**: [`docs/architecture/AI-ARCHITECTURE.md`](../../docs/architecture/AI-ARCHITECTURE.md) (redesign-r1 canonical output — the 4-tier platform R2 consumes)
+>
+> ### Revision log
+>
+> **2026-07-03** — Design revised to reflect two platform changes landed after the original 2026-06-29 draft:
+> 1. **R7 W12 LinearConsumers merged to master** (`Services/Ai/LinearConsumers/` — `IActionResolver` + `IActionRunner` + `IDocumentTextSource` + `sprk_analysisaction` table). This is now the canonical single-shot document-scoped AI action path, superseding `IConsumerRoutingService` + `sprk_playbookconsumer` + `POST /api/compose/action/{consumerType}` for one-shot actions.
+> 2. **Compose R1 AI dispatch retired** (PR #544, 2026-07-02). Deleted: `ComposeEndpoints.DispatchAction` endpoint (~700 LOC); `IDocxTextExtractor` (R7 `ITextExtractor` covers `.docx`); `ComposeDocumentService` (superseded by `SpeFileStore.DownloadFileAsUserAsync` + new `ReplaceFileContentAsUserAsync`); `ComposeSessionService` (rebind logic inlined into `ComposeService`); `ConsumerTypes.ComposeSummarize` constant.
+>
+> Consequence: R2's three inline-toolbar actions (Explain / Compare / Draft Alternative) dispatch through the **Assistant pane via PaneEventBus → chat → LinearConsumer**, not via a new Compose-specific BFF endpoint. Every reference to `IConsumerRoutingService`, `IInvokePlaybookAi` (for one-shot doc actions), `sprk_playbookconsumer`, `POST /api/compose/action/*`, or `ConsumerTypes.*` in the AI-dispatch context has been re-scoped in this revision.
+>
+> Non-AI Word-native work (§6.2 DOCX shuttle, §12 push/pull-annotations endpoints, §8 session memory) is unaffected.
 
 This document leads with **user features** — what users actually do — and then maps each feature to the technical architecture, the three-pane choreography, and the playbook/consumer-routing resources that power it. Design follows from value, not the other way around.
 
@@ -74,13 +85,13 @@ Per adeu's "tool descriptions ARE the prompt" insight, the same descriptions tha
 **User story**: User selects a clause they don't fully understand. **Inline AI toolbar appears near the selection** (per §2.0); user clicks "Explain". Assistant returns a plain-language explanation with relevant legal context.
 
 **Three-pane choreography**:
-- **Workspace**: Selection highlighted; persistent annotation marker added (clickable to replay explanation); inline toolbar dismisses after click
-- **Assistant**: Streams explanation; offers follow-up actions ("Compare to playbook?", "Draft alternative?")
+- **Workspace**: Selection highlighted; persistent annotation marker added (clickable to replay explanation); inline toolbar dismisses after click. **Toolbar click dispatches a PaneEventBus event** to the Assistant pane with `{actionKey, selection, jpsScopePayload}`.
+- **Assistant**: Consumes the PaneEventBus event; runs the linear-consumer action through R7 W12's `IActionResolver` + `IActionRunner` + `IDocumentTextSource` path; streams the response into the Assistant's chat surface as an assistant message; offers follow-up actions ("Compare to playbook?", "Draft alternative?")
 - **Context**: **Sources surfaced (per §2.0 provenance pattern)** — related precedent clauses from matter; relevant golden references from `spaarke-rag-references` index; click-to-navigate to source
 
-**Playbook**: `compose-explain-clause` — NEW playbook (R2 deliverable)
+**AnalysisAction row**: `compose-explain-clause` — NEW `sprk_analysisaction` record (R2 deliverable; carries SystemPrompt + OutputSchemaJson + Temperature + ModelDeploymentId)
 **JPS scope**: `compose-selection` (defined in R1)
-**Consumer type**: `compose-explain-clause` (new entry in [`ConsumerTypes.cs`](../../src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ConsumerTypes.cs))
+**Dispatch path**: PaneEventBus (`conversation` channel, discriminant `compose_action_request`) → Assistant pane → `IActionResolver.ResolveAsync("compose-explain-clause")` → `IActionRunner.RunAsync(action, documentText, context)` → streaming assistant message. **NO Compose-specific BFF endpoint** — dispatch goes through the Assistant, same code path as any other chat-driven linear consumer.
 
 **Why it matters**: Lowest-effort AI action; universal use; demonstrates Workspace → Assistant flow cleanly.
 
@@ -91,15 +102,15 @@ Per adeu's "tool descriptions ARE the prompt" insight, the same descriptions tha
 **User story**: User selects a clause (e.g., indemnification, governing law). **Inline AI toolbar appears** (per §2.0); user clicks "Compare to playbook". Assistant compares the selection against firm/matter playbook clauses; Context pane lights up with matches, deviations, and risk scores.
 
 **Three-pane choreography**:
-- **Workspace**: Selection highlighted; risk-level annotation marker added; inline toolbar dismisses after click
-- **Assistant**: Streams analysis; offers "Replace with standard?" or "Negotiate this?" follow-ups
+- **Workspace**: Selection highlighted; risk-level annotation marker added; inline toolbar dismisses after click. **Toolbar click dispatches a PaneEventBus event** with `{actionKey="compose-compare-to-playbook", selection, matterId}`.
+- **Assistant**: Consumes the PaneEventBus event; dispatches through the linear-consumer path; streams analysis into chat surface; offers "Replace with standard?" or "Negotiate this?" follow-ups
 - **Context**: **Lights up with full source attribution (per §2.0)** — exact playbook entry that matched (click to navigate); clause text comparison side-by-side; deviation summary; risk score with rationale; relevant golden references; prior negotiation history if available — all clickable sources
 
-**Playbook**: `compose-compare-to-playbook` — NEW playbook (R2 deliverable)
+**AnalysisAction row**: `compose-compare-to-playbook` — NEW `sprk_analysisaction` record (R2 deliverable)
 **JPS scope**: `compose-selection` + matter context (existing)
-**Consumer type**: `compose-compare-to-playbook`
+**Dispatch path**: PaneEventBus → Assistant → LinearConsumer (same as §2.1)
 **Resources hooked into**:
-- Matter playbook library (existing `sprk_analysisplaybook` entity)
+- Matter playbook library (existing `sprk_analysisplaybook` entity — read as reference data by the action's LLM invocation, NOT as a routing target)
 - Context pane section: new `compose-playbook-comparison` registration (Context-pane component registry)
 - Optional: precedent doc retrieval (R3+ — defer)
 
@@ -112,13 +123,13 @@ Per adeu's "tool descriptions ARE the prompt" insight, the same descriptions tha
 **User story**: User selects clause text. **Inline AI toolbar appears** (per §2.0); user clicks "Draft alternative". Assistant proposes alternative language; the suggestion appears in Workspace as a pending track-change (highlighted insertion + deletion). User accepts (becomes part of doc state) or rejects (suggestion disappears).
 
 **Three-pane choreography**:
-- **Workspace**: Selection becomes a pending **insertion/deletion pair** rendered as track-change marks; inline toolbar dismisses; accept/reject mini-controls appear inline near the suggestion
-- **Assistant**: Streams alternative text with rationale; offers "Refine further?" follow-up
+- **Workspace**: Selection becomes a pending **insertion/deletion pair** rendered as track-change marks; inline toolbar dismisses; accept/reject mini-controls appear inline near the suggestion. Toolbar click dispatches PaneEventBus event to Assistant.
+- **Assistant**: Consumes event; dispatches through LinearConsumer path; streams alternative text with rationale; on completion, dispatches an **Assistant → Workspace** PaneEventBus event with the structured edit payload (see §6.1) so the Workspace can render the pending track-change; offers "Refine further?" follow-up
 - **Context**: **Full source attribution (per §2.0)** — exact playbook clause that informed the draft; golden references / precedent matters cited; LLM rationale trace; all clickable + citable (drag a source into the doc as an inline citation if accepting)
 
-**Playbook**: `compose-draft-alternative` — NEW playbook (R2 deliverable)
+**AnalysisAction row**: `compose-draft-alternative` — NEW `sprk_analysisaction` record (R2 deliverable). OutputSchemaJson enforces the structured edit-payload shape (`target_text` / `new_text` / `comment` per adeu Pattern §6.1) so the LLM's response is directly consumable by the Workspace edit applicator.
 **JPS scope**: `compose-selection` (defined in R1)
-**Consumer type**: `compose-draft-alternative`
+**Dispatch path**: PaneEventBus → Assistant → LinearConsumer → PaneEventBus (Assistant → Workspace edit-payload)
 **Critical UX detail**: Suggestion is **pending** — not auto-applied. User explicitly accepts. Aligns with adeu's pattern: LLM proposes, user controls.
 
 **Why it matters**: Demonstrates the full Workspace ↔ Assistant ↔ Workspace round-trip. Provenance trail is Spaarke-unique.
@@ -212,13 +223,15 @@ R1 wired the six coordinated flows with stub receivers. R2 fills them with real 
 | Flow | R1 status | R2 activates |
 |---|---|---|
 | **Workspace → Context** | Wire only | Selection → Context surfaces playbook matches, precedent, prior negotiation history; all entries source-attributed (per §2.0 provenance) |
-| **Workspace → Assistant** | Wire only | Selection → **inline AI toolbar appears** (per §2.0); offers contextual playbook actions (Explain, Compare, Draft) |
+| **Workspace → Assistant** | Wire only | Selection → **inline AI toolbar appears** (per §2.0); click dispatches PaneEventBus `compose_action_request` on `conversation` channel with `{actionKey, selection, jpsScopePayload}`. Assistant consumes + routes to R7 LinearConsumer path. NO Compose-specific BFF endpoint. |
 | **Context → Workspace** | Wire only | Drag precedent clause / golden reference from Context → drops into editor as inline citation; click on Context entry navigates Workspace |
 | **Context → Assistant** | Wire only | "Use this precedent" → Assistant takes Context entry as input to next action |
-| **Assistant → Workspace** | Wire only | AI draft inserts into editor as pending track-change **with provenance link** (clickable to source per §2.0) |
-| **Assistant → Context** | Wire only | AI-derived insight persists to session memory; surfaces in Context **with full source attribution** (playbook entry, golden reference, precedent — clickable) |
+| **Assistant → Workspace** | Wire only | AI draft (from `compose-draft-alternative` action's structured edit-payload output — §2.3) inserts into editor as pending track-change **with provenance link** (clickable to source per §2.0). Dispatched via PaneEventBus `compose_edit_apply_request` on `workspace` channel. |
+| **Assistant → Context** | Wire only | AI-derived insight persists to session memory; surfaces in Context **with full source attribution** (AnalysisAction row, playbook entry, golden reference, precedent — clickable) |
 
 **Binding architectural rule**: every R2 feature lights up at least two of these six flows. Features that don't are flagged for redesign — three-pane is the differentiator, not an optional layer.
+
+**AI-dispatch invariant (added in this revision)**: no R2 feature introduces a new Compose-specific AI dispatch endpoint. All AI actions flow: **Workspace toolbar → PaneEventBus → Assistant pane → R7 LinearConsumer (`IActionResolver` + `IActionRunner`)**. This preserves the "Assistant is the single AI-response surface" principle and avoids reintroducing the parallel path retired in Compose R1 PR #544.
 
 ---
 
@@ -240,14 +253,14 @@ R1 wired the six coordinated flows with stub receivers. R2 fills them with real 
 |---|---|
 | TipTap OOB editor shell with three-pane mount | + Custom marks: `insertion`, `deletion`, `commentAnchor` (R2 schema additions) |
 | `ChatSession` binding via `DocumentId` | + Rich payload: anchored annotations, action log, derived-insight pointers |
-| Two JPS scopes: `compose-selection`, `compose-document` | + Three new playbook actions consuming those scopes |
-| One consumer type wired E2E: `compose-summarize` → Document Summary | + 3 new consumer types: `compose-explain-clause`, `compose-compare-to-playbook`, `compose-draft-alternative` |
+| Two JPS scopes: `compose-selection`, `compose-document` | + Three new AnalysisAction rows consuming those scopes (in R7 LinearConsumers path) |
+| ~~One consumer type wired E2E: `compose-summarize` → Document Summary~~ **Retired in PR #544** (Compose R1 AI dispatch removed) | + 3 new `sprk_analysisaction` rows: `compose-explain-clause`, `compose-compare-to-playbook`, `compose-draft-alternative` — consumed via R7 LinearConsumer path through the Assistant pane |
 | Open-in-Word handoff via existing `/api/documents/{id}/open-links` | + Push-to-Word annotation infrastructure (NEW BFF service) |
-| SPE plumbing (load, save, promote-on-Save) | + SPE webhook subscription + delta query for return-from-Word detection |
-| Three-pane coordination wire-only | + Activated flows per §3 |
+| SPE plumbing (load, save, promote-on-Save) — `ComposeService` reworked in PR #544 to inject `SpeFileStore` directly; added `SpeFileStore.ReplaceFileContentAsUserAsync` for item-based content replacement | + SPE webhook subscription + delta query for return-from-Word detection |
+| Three-pane coordination wire-only | + Activated flows per §3 (PaneEventBus discriminants `compose_action_request` + `compose_edit_apply_request` added by R2) |
 | Modal entry, single-session lock, etc. | + Conflict UX banner for return-from-Word edits |
 
-R2 does NOT redo any R1 work. R2 layers on top.
+R2 does NOT redo any R1 work. R2 layers on top. **R2 also does NOT re-introduce** any component retired by PR #544 — no Compose-specific AI dispatch endpoint, no `IDocxTextExtractor` (use R7 `IDocumentTextSource` + `ITextExtractor`), no `sprk_playbookconsumer` rows for Compose actions (use `sprk_analysisaction` rows).
 
 ---
 
@@ -310,26 +323,85 @@ R2's risk and effort are concentrated in two distinct phases with different valu
 
 ---
 
-## 7. Playbook + Consumer-Routing Expansion
+## 7. AI Action Authoring — R7 W12 LinearConsumers Path
 
-R2 introduces three new Compose-specific consumer types, each linked to a dedicated playbook. Following the R1 pattern (one wired E2E in R1 — `compose-summarize` → Document Summary playbook), R2 expands to four total active consumer types.
+R2's AI actions are one-shot, document-scoped, single-LLM-call actions — the exact shape R7 W12's **LinearConsumers** architecture was built for. R2 authors **`sprk_analysisaction` rows** consumed by `IActionResolver` + `IActionRunner`; NOT `sprk_playbookconsumer` rows or new playbooks.
 
-| Consumer Type | Playbook | New or Existing? | JPS Scope Consumed |
+### Why LinearConsumers, not Playbooks?
+
+R7 W12 introduced LinearConsumers (`Services/Ai/LinearConsumers/`) as the canonical path for one-shot AI actions on a document — one LLM call, no orchestration graph, no multi-node workflow. The three R2 actions (Explain / Compare / Draft) each fit this shape exactly: take a selection, invoke an LLM, return structured output. Using a playbook here would add nothing but overhead.
+
+Full-workflow playbooks (multi-node orchestration) remain the right tool for the Daily Briefing / Insight Engine / matter-summary shapes documented in [`SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md`](../../docs/architecture/SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md). Compose R2's actions are not that shape.
+
+### R2 Action Roster
+
+| Action Key | AnalysisAction row | JPS Scope Consumed | Output Schema Shape |
 |---|---|---|---|
-| `compose-summarize` (R1) | Document Summary (id `47686eb1-9916-f111-8343-7c1e520aa4df`) | Existing playbook (R1 reused) | `compose-document` |
-| **`compose-explain-clause`** (R2) | `Compose Explain Clause` — NEW playbook | NEW | `compose-selection` |
-| **`compose-compare-to-playbook`** (R2) | `Compose Playbook Comparison` — NEW playbook | NEW | `compose-selection` + matter context |
-| **`compose-draft-alternative`** (R2) | `Compose Draft Alternative` — NEW playbook | NEW | `compose-selection` |
+| ~~`compose-summarize`~~ | ~~R1 wired E2E~~ **RETIRED PR #544** — the R1 dispatch endpoint is gone. Future summarize functionality flows through the Assistant chat surface (user asks "summarize this document" — chat agent invokes an existing Document Summary tool). | — | — |
+| **`compose-explain-clause`** (R2) | NEW `sprk_analysisaction` record — plain-language explanation of a clause | `compose-selection` | `{explanation: string, keyConcepts: string[], relatedPlaybookIds: string[]}` |
+| **`compose-compare-to-playbook`** (R2) | NEW `sprk_analysisaction` record — matches selection to matter/firm playbook clauses | `compose-selection` + matter context | `{matches: [{playbookEntryId, clauseText, deviations, riskScore, rationale}], overallRisk: string}` |
+| **`compose-draft-alternative`** (R2) | NEW `sprk_analysisaction` record — proposes structured edit payload (adeu Pattern §6.1) | `compose-selection` | `{target_text, new_text, match_mode: "strict"\|"first"\|"all", rationale, sources: [{type, id, snippet}]}` |
 
-**R2 playbook-authoring deliverables**:
-- 3 new `sprk_analysisplaybook` records (NEW playbooks designed + deployed)
-- 3 new `sprk_playbookconsumer` rows (linking consumer types to playbooks)
-- 3 new constants in [`ConsumerTypes.cs`](../../src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ConsumerTypes.cs)
-- 1 expanded BFF endpoint: `POST /api/compose/action/{consumerType}` (R1 wired the smoke test; R2 extends to all four consumer types)
+### R2 Action-Authoring Deliverables
 
-**Playbook authoring approach**: use [`jps-playbook-design`](../../.claude/skills/jps-playbook-design/SKILL.md) skill for each new playbook. Verify via [`jps-validate`](../../.claude/skills/jps-validate/SKILL.md). Audit existing patterns via [`jps-playbook-audit`](../../.claude/skills/jps-playbook-audit/SKILL.md).
+- **3 new `sprk_analysisaction` records** deployed to Dataverse (each carries `sprk_systemprompt`, `sprk_outputschemajson`, `sprk_temperature`, `sprk_modeldeploymentid`)
+- **No new `sprk_playbookconsumer` rows** — that table belongs to the legacy `IConsumerRoutingService` path (still supported for existing consumers like Daily Briefing narrate, but Compose R2 doesn't add to it)
+- **No new `ConsumerTypes.cs` constants** — action keys are string identifiers on AnalysisAction rows, not compile-time constants in the BFF. This aligns with R7 W12's "configuration-driven consumer" pattern.
+- **No new BFF endpoint** — dispatch flows through the Assistant pane's existing chat pipeline (see §7.2 below)
+- **Rich JPS scope descriptions** — per adeu Pattern "tool descriptions ARE the prompt", each scope's description field carries behavioral guidance for the LLM (recovery paths + critical gotchas + example inputs/outputs)
 
-**Tool-description discipline** (per adeu Pattern "tool descriptions ARE the prompt"): each new playbook's JPS scope `description` field is treated as LLM behavioral guidance, not metadata. Includes recovery paths and critical gotchas.
+### 7.2 Dispatch Mechanism — PaneEventBus → Assistant → LinearConsumer
+
+The Compose toolbar dispatches an AI-action request via PaneEventBus; the Assistant pane consumes it and invokes the LinearConsumer path. **This is the load-bearing architectural decision of R2's AI surface** — it eliminates the parallel dispatch path that Compose R1 tried to build (retired PR #544).
+
+**Sequence**:
+
+```
+User clicks "Explain" in Compose toolbar (BubbleMenu)
+    ↓
+ComposeToolbar dispatches PaneEventBus event on `conversation` channel:
+    { type: 'compose_action_request',
+      actionKey: 'compose-explain-clause',
+      selection: {...},
+      jpsScopePayload: {...},
+      documentContext: { documentId, driveId, tenantId },
+      correlationId: '...' }
+    ↓
+Assistant pane's ConversationPane subscribes to this event
+    ↓
+ConversationPane invokes IActionResolver.ResolveAsync(actionKey)
+    → returns AnalysisAction { SystemPrompt, OutputSchemaJson, Temperature, ModelDeploymentId }
+    ↓
+ConversationPane invokes IActionRunner.RunAsync(action, documentText, context)
+    where documentText comes from IDocumentTextSource.ExtractFromDocumentIdAsync(documentId)
+    ↓
+IActionRunner returns JsonElement (validated against OutputSchemaJson)
+    ↓
+ConversationPane renders the response as an assistant chat message
+    ↓ (for Draft Alternative only)
+ConversationPane emits a second PaneEventBus event on `workspace` channel:
+    { type: 'compose_edit_apply_request',
+      editPayload: { target_text, new_text, ... },
+      correlationId: '...' }
+    ↓
+Compose Workspace consumes this event and renders the pending track-change
+```
+
+**Endpoint surface**: **ZERO new Compose endpoints for AI dispatch.** The dispatch happens client-side via the existing `IActionRunner` server call — likely surfaced through the existing chat SSE endpoint or a small addition to it (Open Item — see §15).
+
+### 7.3 R2 Playbook-Authoring — What's NOT in Scope
+
+Distinct from AnalysisAction authoring:
+
+- R2 does NOT author new `sprk_analysisplaybook` records for Compose actions. Playbooks are multi-node orchestrations; Compose actions are single-LLM-call.
+- R2 does NOT add to the legacy consumer-routing table.
+- R2 DOES read the existing playbook library (`sprk_analysisplaybook` matter/firm playbooks) as **reference data** in the `compose-compare-to-playbook` action — the LLM's prompt includes the matter's playbook entries as context. That's data consumption, not routing configuration.
+
+### 7.4 Authoring Skills
+
+- **AnalysisAction authoring**: use [`jps-action-create`](../../.claude/skills/jps-action-create/SKILL.md) skill for each new action (skill exists; supersedes `jps-playbook-design` for the linear-action case)
+- **Validation**: [`jps-validate`](../../.claude/skills/jps-validate/SKILL.md)
+- **Scope description discipline** (per adeu Pattern "tool descriptions ARE the prompt"): each JPS scope's `description` field is treated as LLM behavioral guidance, not metadata. Includes recovery paths and critical gotchas.
 
 ---
 
@@ -402,11 +474,15 @@ Every external/cross-cutting resource R2 depends on, mapped to where it's used:
 | **SPE Webhook subscriptions** | Graph API (NEW R2) | `drives/{containerId}/root` subscriptions with renewal cron (<4230 min) |
 | **SPE Delta query** | Graph API (NEW R2) | Enumerate changed driveItems on webhook fire |
 | **`ChatSession` three-tier** | Existing (R1) | Session memory persistence; rich payload in R2 |
-| **`IConsumerRoutingService`** | Existing (R1) | Dispatches Compose consumer types to playbooks |
-| **`IInvokePlaybookAi`** | Existing (R1) | Non-streaming playbook execution facade |
+| **`IActionResolver`** | R7 W12 (2026-07-02) | Resolves R2 action keys (`compose-explain-clause` etc.) to `sprk_analysisaction` rows |
+| **`IActionRunner`** | R7 W12 (2026-07-02) | Executes resolved AnalysisAction against extracted document text; returns structured JSON |
+| **`IDocumentTextSource`** | R7 W12 (2026-07-02) | Extracts document text (supports `.docx` via R7 `ITextExtractor` — no Compose-specific extractor needed) |
+| ~~`IConsumerRoutingService`~~ | Existing (legacy) | **NOT used by R2 Compose actions.** Still used by other consumers (Daily Briefing narrate etc.); R2 stays on the LinearConsumer path. |
+| ~~`IInvokePlaybookAi`~~ | Existing (widened facade retained per ADR-013 Path B) | **NOT used by R2 Compose actions.** Facade signature still present as no-harm additive; reserved for future non-linear playbook consumers. |
 | **JPS scope catalog** | Existing | `compose-selection`, `compose-document` (R1); descriptions enriched in R2 per "prompt = description" pattern |
-| **`sprk_playbookconsumer` table** | Existing (R1) | New rows for R2 consumer types |
-| **`sprk_analysisplaybook` table** | Existing | New playbook records for R2 (3 new) |
+| **`sprk_analysisaction` table** | Existing (R7 W12 canonical) | **3 new rows for R2 actions** (see §7) |
+| ~~`sprk_playbookconsumer` table~~ | Existing (legacy) | **R2 adds NO rows here.** R1's `compose-summarize` row is orphaned by PR #544; R7 team owns cleanup decision. |
+| **`sprk_analysisplaybook` table** | Existing | R2 adds NO new playbook records. Existing matter/firm playbook entries are **read as reference data** by the `compose-compare-to-playbook` action, not routed to. |
 | **TipTap ProseMirror** | UI | Custom marks for insertion/deletion/commentAnchor |
 | **TipTap `BubbleMenu` extension** | UI (OSS/MIT — ships with TipTap core) | **Inline AI toolbar** on selection (per §2.0); buttons for Explain / Compare / Draft / More |
 | **`spaarke-rag-references` AI Search index** | Existing | **Golden references** source for Context-pane provenance (per §2.0); use existing `add-reference-to-index` skill to maintain |
@@ -430,11 +506,14 @@ Anticipated conflicts between R2's design and existing ADR rules. Surfaced at de
 | **R1 non-goal "Tracked changes round-trip — never"** | R1 spec.md (not an ADR; project-level non-goal) | **Path B — R1 spec amendment** | Competitive necessity surfaced post-R1; without Word-native track changes, Compose cannot replace Word add-in workflows. R1 spec.md should be amended to "deferred to R2" rather than "never." |
 | **R1 non-goal "Comments stored as `<w:comment>` — never"** | R1 spec.md | **Path B — R1 spec amendment** | Same as above — over-pruned at R1; needed for parity. R2 ships it. |
 | **Embedded license fees** | Portfolio policy (planned but not yet codified — see CLAUDE.md update we'll do separately) | **Path C — Comply** | R2 uses ONLY MIT-licensed runtime dependencies (Open XML SDK, OpenXmlPowerTools, TipTap OSS). Zero commercial license fees. Verified per §9. |
-| **ADR-013 AI facade discipline (refined 2026-05-20)** | ADR-013 (refined) | **Path C — Comply** | R2 consumes AI through `IConsumerRoutingService` + `IInvokePlaybookAi` facades only. No direct injection of `IOpenAiClient` etc. into Compose CRUD code. |
+| **ADR-013 AI facade discipline (refined 2026-05-20)** | ADR-013 (refined) | **Path C — Comply** | R2 consumes AI through R7 W12 LinearConsumers facades (`IActionResolver`, `IActionRunner`, `IDocumentTextSource`) — all resident in `Services/Ai/LinearConsumers/`. No direct injection of `IOpenAiClient` / `IPlaybookService` into Compose CRUD code. The legacy `IConsumerRoutingService` + `IInvokePlaybookAi` facades are not used by R2 Compose actions (see §7 for why LinearConsumers is preferred for one-shot document actions). |
+| **CLAUDE.md §11 "no parallel dispatchers"** (implicit from R1 cleanup outcome) | CLAUDE.md §11 + Compose R1 PR #544 lessons-learned | **Path C — Comply** | R2 MUST NOT re-introduce a Compose-specific AI dispatch endpoint. All AI actions flow through the Assistant pane via PaneEventBus → `IActionResolver`/`IActionRunner`. This is the load-bearing architectural constraint of R2's AI surface; violating it undoes the R1 cleanup. |
 
-**No new ADR tensions discovered.** R1 spec amendments are non-ADR Path B work; the licensing concern resolves cleanly with our editor + DOCX library choices.
+**No new ADR tensions discovered.** R1 spec amendments are non-ADR Path B work; the licensing concern resolves cleanly with our editor + DOCX library choices; the "no parallel dispatcher" constraint is Path C compliance with an existing lesson.
 
-**Action**: file R1 spec.md amendment as part of R2 closeout (or earlier).
+**Actions**:
+- File R1 spec.md amendment as part of R2 closeout (or earlier) — for the two Word-native non-goals.
+- Reference PR #544 lessons-learned in R2 code review guidance so reviewers reject any re-introduction of a Compose-specific AI dispatch endpoint.
 
 ---
 
@@ -465,49 +544,74 @@ All R2 endpoints belong in `Sprk.Bff.Api`. No new microservice. No Dataverse plu
 | Assistant pane | `ConversationPane` (R1) | + New playbook integrations + coordination-prompt response formatter |
 | Context pane | `@spaarke/legal-workspace` panes | + New section: `compose-playbook-comparison` |
 | Auth | `@spaarke/auth` (R1) | — |
-| BFF | `Sprk.Bff.Api` (R1) | + `Services/Compose/` directory; new endpoints (§12) |
+| BFF | `Sprk.Bff.Api` (R1) | + `Services/Compose/` directory (extends existing R1 `ComposeService` + `StaleCheckoutSweeperHostedService`); new endpoints (§12) — none for AI dispatch |
 | ChatSession persistence | Three-tier (R1) | + Rich payload schema (R2) |
-| Consumer routing | `IConsumerRoutingService` (R1) | + 3 new `ConsumerTypes` constants |
-| Playbook execution | `IInvokePlaybookAi` (R1) | — |
-| DOCX engine | NET-NEW: Open XML SDK 3.x + Codeuctivity.OpenXmlPowerTools | NEW (R2) — both MIT |
+| SPE facade | `SpeFileStore` + `ISpeFileOperations` (extended in PR #544 with `ReplaceFileContentAsUserAsync`) | Reused by R2's DOCX writer (annotation apply → save via `ReplaceFileContentAsUserAsync`) |
+| AI action resolution | `IActionResolver` (R7 W12) | + 3 new `sprk_analysisaction` rows |
+| AI action execution | `IActionRunner` (R7 W12) | — (reused verbatim) |
+| Document text extraction | `IDocumentTextSource` + `ITextExtractor` (R7 W12) | — (reused; supports `.docx` via Document Intelligence) |
+| DOCX engine (annotation writer/reader) | NET-NEW: Open XML SDK 3.x + Codeuctivity.OpenXmlPowerTools | NEW (R2) — both MIT. Distinct from `ITextExtractor`: this SDK is for **writing** track changes / comments back into DOCX, whereas `ITextExtractor` is for **extracting plain text** as LLM input. |
 | Open-in-Word | `useDocumentActions` shared lib (R1 extracted to `@spaarke/document-operations`) | — |
 | SPE access | Existing Graph + R1 plumbing | + Webhook subscriptions + delta query handler |
 | JPS scopes | `compose-selection`, `compose-document` (R1) | + Enriched `description` fields per "prompt = description" pattern |
-| Playbook authoring | `jps-playbook-design` / `jps-validate` / `jps-playbook-audit` skills (existing) | — |
+| AnalysisAction authoring | `jps-action-create` / `jps-validate` skills (existing) | Author 3 new `sprk_analysisaction` rows |
+| Playbook authoring | `jps-playbook-design` / `jps-playbook-audit` skills (existing) | NOT used by R2 Compose actions (see §7 — R2 uses AnalysisActions, not Playbooks) |
 | LLM editing patterns | adopt from adeu (reference only, NOT code dependency) | NEW (R2) — `ComposeEditValidator`, `ComposeEditBatch`, `ComposeEditTransaction` in BFF |
 
 ---
 
 ## 12. BFF Surface (R2)
 
+### 12.1 AI dispatch — ZERO new Compose endpoints
+
+R2 introduces **no new Compose-specific AI dispatch endpoint**. AI actions dispatch through the Assistant pane via PaneEventBus → R7 LinearConsumer path (see §7.2). The `POST /api/compose/action/{consumerType}` endpoint that this design document previously planned to extend was **retired in Compose R1 PR #544** (2026-07-02) as part of the parallel-dispatcher cleanup; R2 does NOT restore it.
+
+Server-side, the LinearConsumer path may surface through the existing chat SSE endpoint or a small new "direct action invocation" chat endpoint — **this is Open Item #7 (§15)** and resolves in Spike 0.
+
+### 12.2 Word-native annotation endpoints (NEW in R2)
+
 | Endpoint | Purpose |
 |---|---|
-| `POST /api/compose/action/{consumerType}` | Extended to handle `compose-explain-clause`, `compose-compare-to-playbook`, `compose-draft-alternative` (R1 already handles `compose-summarize`) |
-| `POST /api/compose/document/{spe-id}/push-annotations` | **NEW** — applies pending Compose annotations to DOCX as `<w:comment>` and `<w:ins>`/`<w:del>`; saves to SPE with `If-Match` |
-| `POST /api/compose/document/{spe-id}/pull-annotations` | **NEW** — parses incoming DOCX from SPE; extracts annotations; returns structured annotation payload to Compose UI for re-anchoring |
+| `POST /api/compose/document/{spe-id}/push-annotations` | **NEW** — applies pending Compose annotations to DOCX as `<w:comment>` and `<w:ins>`/`<w:del>` via Open XML SDK; saves to SPE via `SpeFileStore.ReplaceFileContentAsUserAsync` (added in PR #544) with `If-Match` etag |
+| `POST /api/compose/document/{spe-id}/pull-annotations` | **NEW** — parses incoming DOCX from SPE via Open XML SDK; extracts annotations; returns structured annotation payload to Compose UI for re-anchoring |
 | `POST /api/compose/webhooks/spe-doc-changed` | **NEW** — SPE webhook receiver; enqueues delta query and downstream re-anchor work |
 | `POST /api/compose/document/{spe-id}/check-changes` | **NEW** — explicit poll variant (in case webhook fails or for testing); BFF compares stored etag vs current SPE etag |
-| `POST /api/compose/edit-batch/validate` | **NEW** — validates LLM-proposed edit batch against current document state (ambiguity check, match_mode); returns structured errors with recovery paths |
+| `POST /api/compose/edit-batch/validate` | **NEW** — validates LLM-proposed edit batch against current document state (ambiguity check, match_mode per adeu Pattern §6.1); returns structured errors with recovery paths. Called by the Assistant pane BEFORE dispatching an Assistant → Workspace edit-apply event, so the client can present recovery UX if validation fails. |
 | `GET /api/compose/session/{matter-id}/{thread-id}/derived-insights` | **NEW** — extended ChatSession query returning derived insights for Context pane rendering |
 
-**Reuse from R1**:
+### 12.3 Reuse from R1 (post-cleanup)
+
 - `GET /api/documents/{id}/open-links` — open-in-Word (existing endpoint, no R2 changes)
-- `POST /api/compose/document/upload` — Assistant upload path (existing)
-- `GET /api/compose/document/{spe-id}` — load DOCX (existing)
-- `PUT /api/compose/document/{spe-id}` — save DOCX (extended in R2 to apply annotations before save)
-- SPE checkout/checkin endpoints (existing)
+- `GET /api/compose/documents/{documentSpeId}` — load DOCX (existing R1; unchanged by PR #544)
+- `POST /api/compose/documents/{documentSpeId}/save` — save DOCX (existing R1; internally uses `SpeFileStore.ReplaceFileContentAsUserAsync` post PR #544; **R2 extends only the Compose-side annotation-apply orchestration, NOT the endpoint contract**)
+- `POST /api/compose/documents/{documentSpeId}/promote` — first-save promotion (existing R1)
+- `POST /api/compose/documents/{documentId}/checkout` + `/checkin` — Phase-5 stubs from R1 (return 501; callers use `/api/documents/{id}/checkout` from `DocumentCheckoutService`)
+- `POST /api/compose/document/{documentId}/heartbeat` — checkout heartbeat (existing R1)
+
+### 12.4 Explicitly retired (do NOT restore in R2)
+
+| Retired surface | Retired in | Rationale |
+|---|---|---|
+| `POST /api/compose/action/{consumerType}` | PR #544 | Superseded by Assistant-pane → R7 LinearConsumer dispatch |
+| `POST /api/compose/upload` (R2-reserved stub) | Existing R1 stub, unchanged | Compose upload continues to route through the Assistant upload pipeline |
 
 ---
 
 ## 13. Spike Plan
 
-Phase 1 (LLM patterns) + Phase 2 (DOCX shuttle) spikes + benchmark integration. ~3 days total.
+Phase 0 (dispatch mechanism) + Phase 1 (LLM patterns) + Phase 2 (DOCX shuttle) spikes + benchmark integration. ~4 days total.
+
+### Phase 0 spike — Dispatch mechanism (BLOCKER for Phase 1)
+
+| # | Spike | Days | Decision unlocked |
+|---|---|---|---|
+| 0 | **Toolbar → Assistant → LinearConsumer dispatch path**: prototype the client-side flow — Compose toolbar dispatches `compose_action_request` on PaneEventBus; Assistant subscribes; Assistant invokes `IActionResolver` + `IActionRunner` via what server endpoint (existing chat SSE with a direct-action-invocation param? new small `/api/ai/action/execute` endpoint? extend `/api/ai/analysis/execute` from R7's LinearConsumer wiring?). Pick one; document why the other paths were rejected. | 0.5 | The load-bearing R2 architectural decision. Everything else builds on this. |
 
 ### Phase 1 spikes — LLM patterns (priority)
 
 | # | Spike | Days | Decision unlocked |
 |---|---|---|---|
-| 1 | Author one R2 playbook (e.g., `compose-explain-clause`) with adeu-style behavioral prompts; verify LLM produces structured payloads reliably | 0.5 | Prompt-pattern validation; JPS scope description format |
+| 1 | Author one R2 AnalysisAction row (e.g., `compose-explain-clause`) with adeu-style behavioral prompts + structured OutputSchemaJson; verify `IActionRunner` returns validated JSON reliably | 0.5 | Prompt-pattern validation; JPS scope description format; AnalysisAction schema shape |
 | 2 | Implement `IComposeEditValidator` with `match_mode` + structured ambiguity errors; test against 5 representative LLM-proposed edits | 0.5 | Validator design + error UX |
 | 3 | Implement `ComposeEditBatch` 4-phase pipeline + snapshot rollback; verify atomicity on intentionally-failing batch | 0.5 | Atomic-transaction model |
 | 4 | Build `SemanticAppendixGenerator` for `compose-document` scope; measure LLM hallucination delta with vs without appendix | 0.5 | Hallucination-reduction validation |
@@ -526,7 +630,7 @@ Phase 1 (LLM patterns) + Phase 2 (DOCX shuttle) spikes + benchmark integration. 
 |---|---|---|---|
 | 8 | Wrap BFF endpoints as MCP server stub; integrate `dealfluence/docx-benchmark` (AGPL — used externally only) as benchmark harness; measure baseline | 0.5 | Quality regression gate |
 
-**Total spikes: 8 × half-day = 4 days.**
+**Total spikes: 9 × half-day = 4.5 days.**
 
 ---
 
@@ -543,8 +647,12 @@ Phase 1 (LLM patterns) + Phase 2 (DOCX shuttle) spikes + benchmark integration. 
 | **Editor in-memory format** | ProseMirror state with custom marks (`insertion`, `deletion`, `commentAnchor`) |
 | **Anchoring strategy** | Hybrid — TipTap span IDs (R1) for in-editor stability; content-match + paragraph hint (R2 addition) for drift resistance through Word round-trip |
 | **Phase priority** | Phase 1 (LLM patterns) > Phase 2 (DOCX shuttle) — Phase 1 is where adeu's lessons-learned are most valuable; Phase 2 is largely Microsoft-documented |
-| **Three new R2 playbooks** | `Compose Explain Clause`, `Compose Playbook Comparison`, `Compose Draft Alternative` (all new) |
+| **Three new R2 AnalysisAction rows** | `compose-explain-clause`, `compose-compare-to-playbook`, `compose-draft-alternative` — deployed to `sprk_analysisaction` table (NOT `sprk_analysisplaybook` — R2 uses R7 W12 LinearConsumers, not multi-node playbooks; see §7) |
 | **AI actions in R2** | 3 (Explain, Compare, Draft Alternative); Document Q&A is stretch goal |
+| **AI dispatch path** | R7 W12 LinearConsumers (`IActionResolver` + `IActionRunner` + `IDocumentTextSource`) — NOT legacy `IConsumerRoutingService` + `IInvokePlaybookAi`. Rationale: LinearConsumers is R7's canonical single-shot document-action path; matches R2's action shape exactly; legacy path is retained only for existing playbook-driven consumers. |
+| **Consumer routing (legacy)** | R2 does NOT add to `sprk_playbookconsumer` or `ConsumerTypes.cs`. R1's `compose-summarize` row is orphaned by PR #544; R7 team owns the cleanup decision. |
+| **AI dispatch endpoint** | ZERO new Compose-specific endpoint. Dispatch goes through Assistant pane → LinearConsumer path. Spike 0 selects the specific server surface (existing chat SSE vs new `/api/ai/action/execute` vs extending `/api/ai/analysis/execute`). |
+| **DOCX text extraction** | R7 W12 `IDocumentTextSource` + `ITextExtractor` — NOT a Compose-specific extractor. R1's `IDocxTextExtractor` was retired in PR #544 as redundant with R7 platform coverage. |
 | **Word-native annotations** | YES in R2 (amends R1 non-goals; competitive necessity) |
 | **Round-trip from Word** | YES in R2 (annotation re-anchoring + conflict UX banner) |
 | **Memory richness** | Rich `ChatSession` payload (anchored annotations, action log, derived insights) — extends R1 binding |
@@ -558,9 +666,16 @@ These need user decision or further investigation before `spec.md`:
 1. **Document Q&A stretch goal**: include in R2 scope, or pure R3+ deferral? (Depends on whether semantic retrieval over document content is in R2 budget.)
 2. **Defined-terms surface**: include as Context pane addition in R2 (parity feature with Legora), or R3 deferral?
 3. **Action log retention policy**: how long does the action log persist in Cosmos / Dataverse? Same TTL as ChatSession (90 days warm, indefinite cold)?
-4. **`compose-summarize-word-changes` playbook** for return-from-Word: include as R2 deliverable, or just show diff?
+4. **`compose-summarize-word-changes` action** for return-from-Word: include as R2 deliverable (NEW `sprk_analysisaction` row `compose-summarize-word-changes`), or just show diff?
 5. **Anchored-annotation re-anchoring confidence threshold**: at what fuzzy-match confidence do we flag an annotation as "needs review" vs auto-anchor? (Spike #6 informs.)
-6. **Multiple-action concurrency**: if user invokes "Compare to playbook" and "Draft alternative" rapidly, do they queue serially or run in parallel? Design implication for `ConversationPane`.
+6. **Multiple-action concurrency**: if user invokes "Compare to playbook" and "Draft alternative" rapidly, do they queue serially or run in parallel in the Assistant pane? Design implication for `ConversationPane`.
+7. **[NEW] Server-side dispatch surface for LinearConsumer invocation** (Spike 0 unlock — see §13 Phase 0): pick ONE of:
+    - (A) Reuse existing chat SSE endpoint with a direct-action-invocation payload param
+    - (B) New small `POST /api/ai/action/execute` endpoint dedicated to Compose-toolbar-triggered actions
+    - (C) Extend R7's existing `/api/ai/analysis/execute` LinearConsumer wiring
+   Each has trade-offs on: contract coupling, discoverability by future MCP/agent consumers, streaming semantics, and observability. Resolves in Spike 0.
+8. **[NEW] R7 coordination — `sprk_playbookconsumer` `compose-summarize` row cleanup**: R1 deployed this row to Dataverse; PR #544 removed the BFF code that consumed it. Should R7 delete it, migrate its `Document Summary` playbook binding to an `sprk_analysisaction` `document-summarize` row (LinearConsumer path), or leave it orphaned? Coordinate with R7 team.
+9. **[NEW] AnalysisAction row deployment mechanism**: R2's 3 new AnalysisAction rows need a deployment path. R7 W12 likely has a script or seeding pattern — identify + reuse (do NOT invent a new deployment mechanism).
 
 ---
 
