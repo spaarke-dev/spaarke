@@ -121,7 +121,9 @@ useEffect(() => {
 
 **If the PCF imports from `@spaarke/ui-components/dist/...`, you MUST compile the shared library BEFORE the PCF build.** The PCF webpack bundles pre-compiled JS from the shared lib's `dist/` folder — NOT the `.tsx` source files. If `dist/` is stale, the PCF bundle will contain OLD code regardless of how many times you rebuild.
 
-**Step 0 — Compile shared lib `dist/`:**
+**Automated guard (added 2026-07-07, `spaarke-matter-ui-enhancement-r1`)**: the 9 PCFs that import deep `dist/*` subpaths (`MatterHeader`, `EmailProcessingMonitor`, `RegardingResolver`, `RelatedDocumentCount`, `AssociationResolver`, `ScopeConfigEditor`, `DocumentRelationshipViewer`, `SemanticSearchControl`, `VisualHost`) each wire `src/client/shared/Spaarke.UI.Components/scripts/ensure-dist-fresh.js` as a `prebuild`/`prebuild:prod` npm script. It compares the newest `src/` mtime against the newest `dist/` mtime and rebuilds automatically (via `npm run build` in the shared lib) if stale — no-op when fresh. This closes the gap that let `dist/` sit ~4 weeks stale in production (missing the entire `RecordHeader` component) before it was caught. The manual Step 0 below is now a fallback for PCFs NOT yet on this convention, or for direct `tsc` invocation when you only want to compile specific changed files. **Any NEW PCF added to this deep-import list MUST add the same `prebuild`/`prebuild:prod` wiring** (see any of the 9 `package.json`s above for the exact line).
+
+**Step 0 (fallback/manual) — Compile shared lib `dist/`:**
 
 ```bash
 cd src/client/shared/Spaarke.UI.Components

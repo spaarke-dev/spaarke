@@ -3,7 +3,9 @@
   "version": "1.0.0",
   "description": "MatterHeader PCF - compact 5-field summary card + 3-action toolbar for sprk_matter records. Part of record-header-and-notepad-r1.",
   "scripts": {
+    "prebuild": "node ../../shared/Spaarke.UI.Components/scripts/ensure-dist-fresh.js",
     "build": "pcf-scripts build",
+    "prebuild:prod": "node ../../shared/Spaarke.UI.Components/scripts/ensure-dist-fresh.js",
     "build:prod": "pcf-scripts build --buildMode production",
     "clean": "pcf-scripts clean",
     "lint": "pcf-scripts lint",
