@@ -805,6 +805,12 @@ PARALLEL EXECUTION REQUIREMENTS:
   - All tasks in a group must have dependencies satisfied
   - Tasks must NOT modify the same files (check <relevant-files> and <parallel-safe>)
   - Each task agent uses its own task-execute invocation with full context loading
+  - **MODEL TIER (added 2026-07-08 for Sonnet-5 execution)**: dispatch each task's subagent with
+    `model = <model-tier>` from its POML (default `sonnet` @ effort `xhigh`; `opus`/`fable` for the
+    high-power tasks flagged by task-create Step 3.5.5b). This keeps the expensive top tier scoped to
+    the minority of tasks that need it while the bulk of execution runs on Sonnet 5. Planning phases
+    of THIS skill (Steps 0–3: resource discovery + artifact generation + task decomposition) run on
+    the operator's session model — recommend Opus 4.8 / Fable 5 there per the Effort guidance above.
   - Track parallel tasks in current-task.md "Parallel Execution" section
   - If a parallel task fails, continue other tasks in the group — report failure at group end
   - **MAX CONCURRENCY: 6 agents per wave** (hard limit — API overload guard, tune only with evidence)
