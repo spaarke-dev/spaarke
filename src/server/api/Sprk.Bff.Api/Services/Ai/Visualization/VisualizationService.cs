@@ -997,9 +997,14 @@ public class VisualizationService : IVisualizationService
                     }
                 }
             },
+            // NOTE: documentVector3072 is deliberately NOT selected here — the
+            // related-results path only needs metadata + the similarity score;
+            // returning a 3072-float vector per hit is dead payload. The source-
+            // document read (GetSourceDocumentAsync) DOES select it because the
+            // KNN query needs the source vector.
             Select = { "id", "documentId", "speFileId", "fileName", "fileType",
                        "documentType", "tenantId", "createdAt", "updatedAt",
-                       "documentVector3072", "metadata", "tags" }
+                       "metadata", "tags" }
         };
 
         // Build filter: tenant isolation + exclude source document + optional document types
