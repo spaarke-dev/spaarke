@@ -413,7 +413,7 @@ public static class SseEventSchemaValidator
 /// <summary>
 /// SSE event type string constants for R2 events introduced in the AI Platform Unification R2 project.
 ///
-/// R1 event types (token, done, error, citations, suggestions, plan_preview, etc.) remain in
+/// R1 event types (token, done, error, citations, suggestions, etc.) remain in
 /// ChatEndpoints.cs. This class covers only the net-new R2 types defined in FR-801.
 ///
 /// See: infrastructure/contracts/sse-events/manifest.json

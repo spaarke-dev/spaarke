@@ -73,7 +73,7 @@
         infra/dataverse/outputschemas/sum-chat-v1.schema.json
 
     Consumer code (read-only reference; this script does NOT modify):
-        src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookExecutionEngine.cs:474-500
+        the engine-shell FK-chain resolver (deleted by FR-P3-05 task 044)
         (ResolveActionConfigViaFkChainAsync — feeds sprk_outputschemajson to
          _openAiClient.StreamStructuredCompletionAsync as the Structured Outputs schema).
         src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/StructuredOutputStreamWidget.tsx
@@ -486,7 +486,7 @@ function Main {
 
     $canonicalRaw = Get-Content -Raw -Path $SchemaFile -Encoding UTF8
     # Normalize: parse + re-serialize compact so we send the exact same bytes that the
-    # consumer (PlaybookExecutionEngine -> Azure OpenAI Structured Outputs) receives.
+    # consumer (the playbook execution path -> Azure OpenAI Structured Outputs) receives.
     try {
         $canonicalParsed = $canonicalRaw | ConvertFrom-Json -ErrorAction Stop
     }

@@ -10,11 +10,12 @@ namespace Sprk.Bff.Api.Services.Ai.LinearConsumers;
 /// </summary>
 /// <remarks>
 /// <para>
-/// R7 Wave 12.3 (2026-07-02) — replaces the earlier
-/// <see cref="LinearConsumersOptions.ActionIds"/> config-map lookup. The routing
-/// table is the single canonical routing surface for every consumer (Linear +
-/// legacy playbook); config-based routing is retired to eliminate per-env drift,
-/// silent fallback on missing App Settings, and dual routing surfaces.
+/// R7 Wave 12.3 (2026-07-02) — replaces the earlier config-map (App Settings)
+/// lookup that lived on the linear-consumers options class (options class fully
+/// removed by FR-P3-01, task 040). The routing table is the single canonical
+/// routing surface for every consumer (Linear + legacy playbook); config-based
+/// routing is retired to eliminate per-env drift, silent fallback on missing
+/// App Settings, and dual routing surfaces.
 /// </para>
 /// <para>
 /// <b>Adding a new Linear consumer</b>: seed one <c>sprk_playbookconsumer</c>

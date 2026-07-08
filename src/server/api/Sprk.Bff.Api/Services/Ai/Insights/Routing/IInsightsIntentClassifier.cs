@@ -88,10 +88,11 @@ public sealed record IntentClassificationContext(
 /// route to <see cref="IntentPath.Rag"/> regardless of this field (the field carries the
 /// classifier's hint for observability/tuning, but threshold safety takes precedence).</param>
 /// <param name="PlaybookId">Suggested playbook canonical name when <see cref="Path"/> is
-/// <see cref="IntentPath.Playbook"/> (e.g., <c>"predict-matter-cost@v1"</c>). Null on the
+/// <see cref="IntentPath.Playbook"/> (e.g., <c>"matter-health-single"</c>). Null on the
 /// RAG path. The classifier returns the name; the dispatcher resolves the name → Guid via
-/// <c>InsightsPlaybookNameMapOptions</c> the same way the <c>/api/insights/ask</c>
-/// endpoint does.</param>
+/// the <c>insights-ask</c> <c>sprk_playbookconsumer</c> Binding rows
+/// (<c>IConsumerRoutingService.ResolveBindingAsync</c>, FR-P3-01) the same way the
+/// <c>/api/insights/ask</c> endpoint does.</param>
 /// <param name="Confidence">Classifier's 0.0–1.0 confidence in the decision. Below the
 /// threshold (see <see cref="BelowThreshold"/>), callers fall back to RAG.</param>
 /// <param name="BelowThreshold">True when <see cref="Confidence"/> &lt; the configured

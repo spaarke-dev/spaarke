@@ -130,32 +130,25 @@ export interface WorkspacePaneEvent {
    *                              pane coordination)
    * - `streaming_started`      — a structured-output streaming run has begun; downstream widgets
    *                              (e.g. StructuredOutputStreamWidget, R5 task 017 / D2-07) mount and
-   *                              prepare to receive field deltas. Carries `streamId` so multiple
+   *                              prepare to receive section events. Carries `streamId` so multiple
    *                              concurrent streams can be disambiguated (R5 D2-06 / spec NFR-09).
-   * - `field_delta`            — a single delta in an in-flight structured-output stream; carries
-   *                              `streamId`, `fieldPath` (JSON path of the target field),
-   *                              `fieldContent` (the delta content) and monotonic `sequence`.
-   *                              Subscribed by StructuredOutputStreamWidget to progressively
-   *                              render the output as it streams (R5 D2-06 / spec NFR-09).
    * - `streaming_complete`     — the structured-output stream has finished; carries `streamId`
    *                              and `completionStatus` (`'complete' | 'declined' | 'empty'`) so
    *                              the widget can finalise its rendering or show a terminal state
    *                              (R5 D2-06 / spec NFR-09).
    *
-   * ── Phase 5R Wave 5-C composite section events (FR-54 / task 114a + 114b) ──
+   * ── Section-keyed streaming events (FR-54 / task 114a + 114b) ──────────────
    *
-   * The three discriminants below carry per-section streaming for the composite
-   * Output Node pattern (NodeType.DeliverComposite, FR-52 / task 114R). Section
-   * events are keyed by section NAME (not schema position) — coordination point
-   * count drops from 5 (schema-on-action + schema-aware widget) to 2 (section
-   * name + section state).
+   * The three discriminants below carry per-section streaming, keyed by section
+   * NAME (not schema position) — coordination point count drops from 5
+   * (schema-on-action + schema-aware widget) to 2 (section name + section state).
    *
-   * Backward-compat invariant (FR-54): widgets that receive `FieldDelta` events
-   * (unmigrated schema-position playbooks) continue to render via the legacy
-   * `streaming_started` / `field_delta` / `streaming_complete` path UNCHANGED.
-   * A single widget instance MAY receive EITHER set of events but never both
-   * for the same stream — the BFF emits one or the other based on whether the
-   * playbook contains a `NodeType.DeliverComposite` node (per task 114a guard).
+   * Section-name-keyed streaming is THE binding render contract (ADR-037 as
+   * amended 2026-07-05). The legacy per-field-delta dual-render path was
+   * DELETED at the last-playbook cutover by ai-architecture-redesign-r1 task
+   * 046 (FR-P3-07): that discriminant and its path/content/sequence fields no
+   * longer exist on this union, and the ONE client dispatch helper
+   * (`dispatchConsumer`) emits section events only.
    *
    * - `section_started`        — a composite section has begun streaming; carries
    *                              `sectionName`, `streamId`, optional `displayLabel`,
@@ -173,11 +166,11 @@ export interface WorkspacePaneEvent {
    *                              trust model). Subscribers mark section 'completed'.
    *
    * ADR-015 BINDING: section events carry the Action's structured output text/data
-   * (already allowed per existing FieldDelta contract). No file binaries.
+   * (Tier-3 allowed — same status the retired per-field streaming contract had).
+   * No file binaries.
    * ADR-021: widget consuming these uses Fluent v9 semantic tokens — dark-mode safe.
-   * ADR-030 additive-types rule: unknown event types ignored by existing subscribers
-   * (workspace channel) — no breakage to FieldDelta consumers when these events
-   * appear alongside.
+   * ADR-030 additive-types rule: unknown event types are ignored by existing
+   * subscribers (workspace channel).
    *
    * ── R6 Pillar 6c reverse-flow events (FR-38 / D-C-13 / task 060) ──────────
    *
@@ -236,7 +229,6 @@ export interface WorkspacePaneEvent {
     | 'session_reset'
     | 'active_widget_changed'
     | 'streaming_started'
-    | 'field_delta'
     | 'streaming_complete'
     | 'section_started'
     | 'section_data'
@@ -341,53 +333,29 @@ export interface WorkspacePaneEvent {
    */
   fieldValue?: unknown;
 
-  // ── streaming fields ──────────────────────────────────────────────────────
+  // ── streaming lifecycle fields ────────────────────────────────────────────
   //
-  // Carried by the three R5 structured-output streaming discriminants:
-  // `streaming_started`, `field_delta`, `streaming_complete`. All four fields
-  // are optional on the base type so existing subscribers (which never touch
-  // them) remain type-safe. Subscribers that handle the streaming events MUST
-  // narrow on `event.type` before accessing these fields.
+  // Carried by the two stream-lifecycle discriminants: `streaming_started` and
+  // `streaming_complete`. Optional on the base type so existing subscribers
+  // (which never touch them) remain type-safe. Subscribers that handle the
+  // streaming events MUST narrow on `event.type` before accessing these fields.
   //
   // Added by R5 task 016 (D2-06) per spec NFR-09 + ADR-030 additive-types rule.
+  // The legacy per-field-delta discriminant (with its path/content/sequence
+  // fields) was DELETED at the last-playbook cutover per amended ADR-037
+  // (ai-architecture-redesign-r1 task 046 / FR-P3-07) — section events carry
+  // all in-flight content now.
 
   /**
-   * Stable identifier correlating the three lifecycle events of a single
-   * structured-output stream (`streaming_started` → `field_delta` (N) →
+   * Stable identifier correlating the lifecycle events of a single
+   * structured-output stream (`streaming_started` → `section_*` (N) →
    * `streaming_complete`). Required when
-   * `type === 'streaming_started' | 'field_delta' | 'streaming_complete'`.
-   * Subscribers use this to disambiguate concurrent streams when more than
-   * one structured-output run is in flight in the same session.
+   * `type === 'streaming_started' | 'streaming_complete'` and on all three
+   * section discriminants. Subscribers use this to disambiguate concurrent
+   * streams when more than one structured-output run is in flight in the
+   * same session.
    */
   streamId?: string;
-
-  /**
-   * JSON path of the field receiving the delta within the structured-output
-   * schema (e.g. `"summary"`, `"parties[0].name"`, `"keyTerms"`).
-   * Required when `type === 'field_delta'`. Subscribers route the delta to
-   * the correct UI element in the progressively-rendered output.
-   */
-  fieldPath?: string;
-
-  /**
-   * The delta content for a `field_delta` event. Strings are appended in
-   * `sequence` order to build the final field value. Required when
-   * `type === 'field_delta'`.
-   *
-   * Typed as `string` (NOT `unknown`) because field deltas are token-stream
-   * fragments produced by the BFF SSE `FieldDelta` variant of `AnalysisChunk`
-   * (R5 task 005 / D1-05). Non-string structured deltas use `widgetData` on
-   * a different discriminant, not this field.
-   */
-  fieldContent?: string;
-
-  /**
-   * Monotonically-increasing sequence number for `field_delta` events within
-   * a single stream (keyed by `streamId`). Subscribers MUST order deltas by
-   * `sequence` before concatenation; out-of-order arrival is possible under
-   * heavy load. Required when `type === 'field_delta'`.
-   */
-  sequence?: number;
 
   /**
    * Terminal status of a structured-output stream.
@@ -414,13 +382,12 @@ export interface WorkspacePaneEvent {
   // Added by Phase 5R Wave 5-C task 114b (FE consumer half) mirroring the BFF
   // contract finalised by task 114a (CompositeOutputPayload / CompositeSectionResult
   // from DeliverCompositeNodeExecutor). Reuses `streamId` from the streaming
-  // block above so a section stream and a legacy FieldDelta stream can be
-  // disambiguated by the same correlation field.
+  // block above as the stream correlation field.
   //
   // ADR-015 BINDING: section name + display label are configuration metadata
   // (Tier 1 safe). Content text + structured data carry the Action's structured
-  // output — same Tier-3 status as the existing FieldDelta contract; NOT raw
-  // user message content. NO file binaries on any section discriminant.
+  // output — Tier-3 allowed; NOT raw user message content. NO file binaries on
+  // any section discriminant.
 
   /**
    * Stable section identifier for the composite output pattern. Required on all
@@ -481,12 +448,12 @@ export interface WorkspacePaneEvent {
    * onto `SectionState.accumulatedText`. When absent and `structuredData` is
    * present, only the structured data merges.
    *
-   * Distinct from `fieldContent` on the legacy FieldDelta path: `contentDelta`
-   * is keyed by section NAME not field path, and applies to an entire section's
-   * text body (the Action's `TextContent` output).
+   * `contentDelta` is keyed by section NAME (not schema field path) and
+   * applies to an entire section's text body (the Action's `TextContent`
+   * output).
    *
    * ADR-015 binding: text content carries Action structured output (Tier 3
-   * allowed, same status as FieldDelta). NOT raw user message content.
+   * allowed). NOT raw user message content.
    */
   contentDelta?: string;
 
@@ -813,6 +780,22 @@ export interface ContextPaneEvent {
    *                                `decisionReason` (machine summary, NOT
    *                                user text), `timestamp`, `sessionId`,
    *                                `correlationId?`.
+   *
+   * ── Session-ledger ToolChain event (ADR-040 / FR-P3-07 / task 046) ─────────
+   *
+   * - `tool_chain`               — a ToolChain segment was PERSISTED to the
+   *                                session ledger (ADR-040 storage-precedes-
+   *                                rendering: the BFF emits this frame only
+   *                                AFTER the ledger append succeeds). Carries
+   *                                `turn` + `toolChainCalls` — each call is
+   *                                the persisted `SessionToolCall` record
+   *                                projected as identifiers / filters /
+   *                                counts / durations ONLY (NFR-07; citation
+   *                                ids stay in the ledger, a COUNT rides the
+   *                                event). Consumed by ExecutionTraceWidget,
+   *                                which renders the ledger records verbatim
+   *                                and NEVER synthesizes trace data
+   *                                client-side.
    */
   type:
     | 'context_update'
@@ -825,7 +808,8 @@ export interface ContextPaneEvent {
     | 'knowledge_retrieved'
     | 'playbook_node_executing'
     | 'playbook_node_completed'
-    | 'decision_made';
+    | 'decision_made'
+    | 'tool_chain';
 
   /** Classifies the context payload (e.g. `"document"`, `"email"`, `"clause"`). */
   contextType?: string;
@@ -949,7 +933,7 @@ export interface ContextPaneEvent {
    * `type === 'tool_call_started'` or `type === 'tool_call_completed'`.
    *
    * Format: the registered tool's `Name` field from `sprk_analysistool`
-   * (e.g. `'DocumentSearch'`, `'invoke_playbook'`). Short, enumerated
+   * (e.g. `'DocumentSearch'`, `'dataverse.create_record'`). Short, enumerated
    * identifier — NOT a free-form description, NOT the user's prompt that
    * triggered the call.
    *
@@ -1041,7 +1025,7 @@ export interface ContextPaneEvent {
    * `type === 'decision_made'`.
    *
    * MUST be a stable, machine-enumerated value (e.g.
-   * `'route:summarize'`, `'route:invoke_playbook'`, `'safety-block'`,
+   * `'route:summarize'`, `'route:capability'`, `'safety-block'`,
    * `'guardrail-redirect'`). MUST NOT be a free-form natural-language
    * sentence. The trace widget enumerates known values and renders them
    * with intent-aware icons.
@@ -1074,6 +1058,53 @@ export interface ContextPaneEvent {
    * MUST NOT pass user text here.
    */
   decisionReason?: string;
+
+  // ── tool_chain fields (ADR-040 ledger bridge — task 046 / FR-P3-07) ──────
+  //
+  // Carried by the `tool_chain` discriminant ONLY. Both fields mirror the
+  // PERSISTED session-ledger `SessionToolChain` record (BFF
+  // `Models/Ai/Chat/SessionLedgerEntries.cs`) — the BFF emits this event
+  // strictly AFTER the ledger append (storage precedes rendering, ADR-040).
+  //
+  // NFR-07 / ADR-015 binding: `TraceToolCallSummary` is structurally
+  // constrained to identifiers / redacted filter summaries / counts /
+  // durations. There is NO `unknown` / `any` / `object` member — user
+  // content cannot ride this event by construction.
+
+  /**
+   * 1-based session turn the persisted ToolChain segment belongs to.
+   * Required when `type === 'tool_chain'`.
+   */
+  turn?: number;
+
+  /**
+   * The persisted ledger segment's ordered tool calls. Required when
+   * `type === 'tool_chain'`. Each entry is the ledger `SessionToolCall`
+   * record projected onto the wire (identifiers/filters/counts only).
+   */
+  toolChainCalls?: ReadonlyArray<TraceToolCallSummary>;
+}
+
+/**
+ * One persisted session-ledger tool call (ADR-040 `SessionToolCall`) as carried
+ * on the `context.tool_chain` event (task 046 / FR-P3-07).
+ *
+ * NFR-07 / ADR-015 BINDING: identifiers / filters / counts / durations ONLY.
+ * `argsSummary` is produced server-side by `AgentTurnContract.SummarizeArguments`
+ * with by-name + by-shape redaction — free text arrives as `<redacted:len>`
+ * length markers, never verbatim.
+ */
+export interface TraceToolCallSummary {
+  /** Namespaced tool id (`sprk_analysistool` row / handler id). */
+  toolId: string;
+  /** NFR-07-safe identifier/filter summary (e.g. `"matterId=…; top=5"`). */
+  argsSummary?: string;
+  /** Number of results the tool returned, when countable. */
+  resultCount?: number;
+  /** Count of citation ids the call emitted (ids stay in the ledger). */
+  citationCount?: number;
+  /** Wall-clock duration of the call in milliseconds. */
+  durationMs?: number;
 }
 
 // ---------------------------------------------------------------------------

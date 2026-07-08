@@ -84,7 +84,7 @@ public static class ConfigurationModule
 
         // Code Interpreter options (AIPU-070) — gated on CodeInterpreter:Enabled kill switch (ADR-018).
         // Validation deferred (no ValidateOnStart) so the app starts cleanly when disabled.
-        // CodeInterpreterTools checks Enabled before every sandbox invocation.
+        // CodeInterpreterHandler checks Enabled before every sandbox invocation.
         services
             .AddOptions<Sprk.Bff.Api.Services.Ai.Foundry.CodeInterpreterOptions>()
             .Bind(configuration.GetSection(Sprk.Bff.Api.Services.Ai.Foundry.CodeInterpreterOptions.SectionName))
@@ -102,15 +102,12 @@ public static class ConfigurationModule
             .Bind(configuration.GetSection(Sprk.Bff.Api.Services.Ai.Foundry.BingGroundingOptions.SectionName))
             .ValidateDataAnnotations();
 
-        // Workspace options — pre-fill / AI summary playbook IDs used by MatterPreFillService,
-        // ProjectPreFillService, and WorkspaceAiService. All properties are nullable with code-side
-        // fallbacks to hardcoded defaults, so validation is deferred (no ValidateOnStart) and the
-        // app starts cleanly when the "Workspace" section is absent.
-        services
-            .AddOptions<WorkspaceOptions>()
-            .Bind(configuration.GetSection(WorkspaceOptions.SectionName))
-            .ValidateDataAnnotations()
-            .ValidateOnStart();
+        // FR-P3-01 (ai-architecture-redesign-r1 task 040): the Workspace typed-options binding (and its
+        // deprecation-warning validator) was DELETED with the hard cutover to the
+        // sprk_playbookconsumer Binding routing table — no code reads the "Workspace"
+        // configuration section anymore. Playbook resolution for matter-pre-fill,
+        // project-pre-fill, ai-summary, and summarize-file flows exclusively through
+        // IConsumerRoutingService (see Infrastructure/DI/RoutingModule.cs).
 
         // SharePoint Embedded options — StagingContainerId used by pre-fill services (matter/project)
         // for staged file uploads. Nullable with code-side fallback (in-memory text extraction when
@@ -121,37 +118,13 @@ public static class ConfigurationModule
             .ValidateDataAnnotations()
             .ValidateOnStart();
 
-        // PlaybookSelector options (chat-routing-redesign-r1 task 113R / FR-47) —
-        // confidence thresholds + delta margin + max-N for the file-aware top-N
-        // candidate selector. All properties have spec-defined defaults so binding
-        // succeeds when the "PlaybookSelector" section is absent. ValidateOnStart
-        // is wired so misconfigured ranges (e.g., ConfidenceThreshold > 1.0 from
-        // env-var typo) fail fast at app start rather than at first selection call.
-        services
-            .AddOptions<PlaybookSelectorOptions>()
-            .Bind(configuration.GetSection(PlaybookSelectorOptions.SectionName))
-            .ValidateDataAnnotations()
-            .ValidateOnStart();
-
-        // IntentReranker options (chat-routing-redesign-r1 task 111R / FR-46) —
-        // hybrid LLM intent reranker tuning knobs (model deployment, FR-46 timeout
-        // budget, sampling temperature). All properties have spec-defined defaults
-        // so binding succeeds when the "IntentReranker" section is absent.
-        // ValidateOnStart fails fast on misconfigured ranges (e.g., negative timeout
-        // or out-of-range temperature) at app start rather than at first rerank call.
-        services
-            .AddOptions<IntentRerankerOptions>()
-            .Bind(configuration.GetSection(IntentRerankerOptions.SectionName))
-            .ValidateDataAnnotations()
-            .ValidateOnStart();
+        // FR-P2-06 (task 035): the FR-46/FR-47 classifier-stack option bindings
+        // (candidate-selector thresholds + reranker tuning knobs) were DELETED with
+        // the dispatcher stack — no code reads their configuration sections anymore.
 
         // Custom validation for conditional requirements
         services.AddSingleton<IValidateOptions<GraphOptions>, GraphOptionsValidator>();
         services.AddSingleton<IValidateOptions<DocumentIntelligenceOptions>, DocumentIntelligenceOptionsValidator>();
-        // Phase 1R FR-1R-06: deprecation warning when any Workspace__*PlaybookId env var
-        // is set (routing now lives in sprk_playbookconsumer Dataverse table; env vars
-        // are graceful-degrade fallback only during the deprecation window).
-        services.AddSingleton<IValidateOptions<WorkspaceOptions>, WorkspaceOptionsValidator>();
 
         // Startup health check to validate configuration
         services.AddHostedService<StartupValidationService>();

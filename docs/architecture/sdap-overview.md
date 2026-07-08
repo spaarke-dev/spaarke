@@ -284,7 +284,6 @@ All async work runs through Azure Service Bus with a single `ServiceBusJobProces
 | `ProfileSummaryJobHandler` | Matter profile aggregation | Scheduled |
 | `RagIndexingJobHandler` | Single document indexing | Knowledge source upload |
 | `SpendSnapshotGenerationJobHandler` | Financial snapshot generation | Scheduled |
-| `DocumentVectorBackfillService` | Embedding migration/backfill (not a job handler) | On-demand |
 
 ---
 

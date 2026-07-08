@@ -738,7 +738,19 @@ export class WorkspaceTabManager {
     for (const { t, Component } of resolutions) {
       if (Component == null) continue; // skip unresolvable widgets
       // Bump _nextSeq so any subsequent addTab() generates a non-colliding id.
-      this._nextSeq++;
+      // G-P3 UAT round-3 R3-3 follow-on (2026-07-07): restored tabs KEEP their
+      // original `wstab-{seq}-{type}` ids, which may carry seq numbers HIGHER
+      // than the restored-tab count (tabs closed before the save). A simple
+      // per-tab increment left _nextSeq below those seqs, so the next addTab()
+      // minted a DUPLICATE id (e.g. restored 'wstab-2-workspace' + fresh
+      // 'wstab-2-workspace' → React key collision; close/activate then act on
+      // the wrong tab). Advance _nextSeq past the restored id's own seq.
+      const seqMatch = /^wstab-(\d+)-/.exec(t.id);
+      if (seqMatch) {
+        this._nextSeq = Math.max(this._nextSeq, parseInt(seqMatch[1], 10));
+      } else {
+        this._nextSeq++;
+      }
       restoredTabs.push({
         id: t.id,
         kind: "widget",

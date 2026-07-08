@@ -25,6 +25,14 @@ const config: Config = {
     // gap pre-fix.)
     '^@spaarke/ai-widgets/(.*)$': '<rootDir>/../../client/shared/Spaarke.AI.Widgets/src/$1',
     '^@spaarke/ui-components$': '<rootDir>/../../client/shared/Spaarke.UI.Components/src/index.ts',
+    // Deep-import twin of the exact mapping above (mirrors the ai-widgets
+    // pair). Unblocks suites that requireActual('@spaarke/ai-widgets') —
+    // its barrel reaches CreateMatterWizardWidget which deep-imports
+    // `@spaarke/ui-components/components/CreateMatterWizard`; without this
+    // mapping the suite dies at module load (pre-existing failure noted in
+    // ai-architecture-redesign-r1 task 023; fixed here for the Click-path
+    // ConversationPane tests).
+    '^@spaarke/ui-components/(.*)$': '<rootDir>/../../client/shared/Spaarke.UI.Components/src/$1',
     '^@spaarke/auth$': '<rootDir>/../../client/shared/Spaarke.AI.Widgets/src/__mocks__/@spaarke/auth.ts',
     // spaarkeai-compose-r1 task 043: `useDocumentActions` hook lives in
     // @spaarke/document-operations (extracted from SemanticSearch in task 031).

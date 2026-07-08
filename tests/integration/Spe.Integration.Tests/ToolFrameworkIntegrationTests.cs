@@ -305,14 +305,13 @@ public class ToolFrameworkIntegrationTests : IClassFixture<IntegrationTestFixtur
         // empty document" premise no longer holds; it applies only to the
         // document-analyzer family that ORIGINALLY motivated the test.
         // Skip handlers whose Validate doesn't gate on document content:
-        //   - producer-side (creates/edits the doc): WorkingDocumentHandler
         //   - chat-only (queries/searches; no input doc): LegalResearch,
         //     DocumentSearch, WebSearch, CodeInterpreter, KnowledgeRetrieval,
-        //     VerifyCitations, AnalysisQuery
+        //     VerifyCitations. (The producer-side working-document family and the
+        //     analysis-query family were deleted by ai-architecture-redesign-r1
+        //     task 044 — FR-P3-05 / audit F-1 closure.)
         var skipHandlerIds = new HashSet<string>(StringComparer.OrdinalIgnoreCase)
         {
-            // Producer-side (creates / edits a working doc)
-            "WorkingDocumentHandler",
             // Chat-only (queries / searches; no input doc)
             "LegalResearchHandler",
             "DocumentSearchHandler",
@@ -320,7 +319,6 @@ public class ToolFrameworkIntegrationTests : IClassFixture<IntegrationTestFixtur
             "CodeInterpreterHandler",
             "KnowledgeRetrievalHandler",
             "VerifyCitationsHandler",
-            "AnalysisQueryHandler",
             // Calculator / comparator handlers (operate on tool.Configuration
             // operands, NOT on context.Document.ExtractedText). Empty document
             // context is by design VALID — these handlers' Validate gates on

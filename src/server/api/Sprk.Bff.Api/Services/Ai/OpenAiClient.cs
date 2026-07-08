@@ -46,6 +46,7 @@ public class OpenAiClient : IOpenAiClient
     private readonly ILogger<OpenAiClient> _logger;
     private readonly ICircuitBreakerRegistry? _circuitRegistry;
     private readonly ResiliencePipeline _circuitBreaker;
+    private readonly Sprk.Bff.Api.Telemetry.AiTelemetry? _aiTelemetry;
 
     // Circuit breaker configuration (Task 072)
     private const int FailureThreshold = 5;       // Open after 5 failures
@@ -56,11 +57,13 @@ public class OpenAiClient : IOpenAiClient
     public OpenAiClient(
         IOptions<DocumentIntelligenceOptions> options,
         ILogger<OpenAiClient> logger,
-        ICircuitBreakerRegistry? circuitRegistry = null)
+        ICircuitBreakerRegistry? circuitRegistry = null,
+        Sprk.Bff.Api.Telemetry.AiTelemetry? aiTelemetry = null)
     {
         _options = options.Value;
         _logger = logger;
         _circuitRegistry = circuitRegistry;
+        _aiTelemetry = aiTelemetry;
 
         var endpoint = new Uri(_options.OpenAiEndpoint);
         var credential = new AzureKeyCredential(_options.OpenAiKey);
@@ -547,6 +550,7 @@ public class OpenAiClient : IOpenAiClient
             }, cancellationToken);
 
             var completion = response.Value;
+            RecordExecutorTokenUsage(completion, deploymentName);
 
             // Check if the model wants to call tools
             if (completion.FinishReason == ChatFinishReason.ToolCalls && completion.ToolCalls.Count > 0)
@@ -587,6 +591,31 @@ public class OpenAiClient : IOpenAiClient
             _logger.LogError(ex, "Failed to get chat completion with tools. Model={Model}", deploymentName);
             throw;
         }
+    }
+
+    /// <summary>
+    /// Record the model-reported token usage of an executor-path completion into the
+    /// per-tenant metering counter (FR-P4-05 / NFR-05, spaarke-ai-architecture-redesign-r1
+    /// task 054). Tenant/user/entry-path attribution comes from the ambient
+    /// <see cref="Telemetry.AiMeteringContext"/> scope set at the entry seams (Event /
+    /// Click / Text / coded). Counts only — never content (NFR-07 / ADR-015). No-op when
+    /// telemetry is not injected (tests) or usage is absent.
+    /// </summary>
+    private void RecordExecutorTokenUsage(ChatCompletion completion, string deploymentName)
+    {
+        var usage = completion?.Usage;
+        if (usage is null || _aiTelemetry is null)
+        {
+            return;
+        }
+
+        _aiTelemetry.RecordMeteredTokens(
+            tenantId: null,   // resolved from AiMeteringContext.Current
+            userId: null,
+            inputTokens: usage.InputTokenCount,
+            outputTokens: usage.OutputTokenCount,
+            source: "executor",
+            model: deploymentName);
     }
 
     /// <summary>
@@ -641,6 +670,7 @@ public class OpenAiClient : IOpenAiClient
                 return await chatClient.CompleteChatAsync(messageList, chatOptions, ct);
             }, cancellationToken);
 
+            RecordExecutorTokenUsage(response.Value, deploymentName);
             var content = response.Value.Content.FirstOrDefault()?.Text;
 
             if (string.IsNullOrEmpty(content))
@@ -748,6 +778,7 @@ public class OpenAiClient : IOpenAiClient
                 return await chatClient.CompleteChatAsync(messages, chatOptions, ct);
             }, cancellationToken);
 
+            RecordExecutorTokenUsage(response.Value, deploymentName);
             var content = response.Value.Content.FirstOrDefault()?.Text;
 
             if (string.IsNullOrEmpty(content))

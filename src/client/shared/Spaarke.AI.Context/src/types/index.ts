@@ -15,7 +15,7 @@ import type { EntityContext } from './entity-context';
 // Entity Context (re-exported from dedicated file)
 // ---------------------------------------------------------------------------
 
-export type { EntityContext, EntityType, EntityResolutionResult } from './entity-context';
+export type { EntityContext, EntityType } from './entity-context';
 
 // AiPaneEvent is declared in this file (index.ts) — no re-export needed; consumers
 // import from '@spaarke/ai-context' which re-exports everything via the package index.
@@ -99,7 +99,7 @@ export interface StreamingCallbacks {
   /**
    * Called when an AI pane-routing SSE event arrives (output_pane / source_pane / source_highlight).
    * Invoked synchronously from the SprkChat SSE fetch loop.
-   * OutputPanel and SourcePanel subscribe via useStandaloneAi() to receive these events.
+   * OutputPanel and SourcePanel subscribe via the AI session context to receive these events.
    * Optional — when absent, pane events are silently dropped.
    */
   onPaneEvent?: (event: AiPaneEvent) => void;
@@ -124,19 +124,10 @@ export interface AiAuthContext {
 }
 
 // ---------------------------------------------------------------------------
-// Standalone Chat Context (re-exported from dedicated file)
+// Standalone Chat Context types were deleted (Track-B batch 3,
+// ai-architecture-redesign-r1) — superseded by AiSessionProvider state in
+// @spaarke/ai-widgets.
 // ---------------------------------------------------------------------------
-
-export type {
-  StandaloneAiContextValue,
-  StandaloneAiProviderProps,
-  StandaloneContextMapping,
-} from './standalone-context';
-export {
-  STANDALONE_SESSION_KEY_PREFIX,
-  STANDALONE_CHAT_SESSION_KEY,
-  STANDALONE_PLAYBOOK_KEY,
-} from './standalone-context';
 
 // ---------------------------------------------------------------------------
 // Analysis Context (for AnalysisWorkspace — with analysis record)

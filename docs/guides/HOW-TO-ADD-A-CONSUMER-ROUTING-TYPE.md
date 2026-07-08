@@ -1,5 +1,7 @@
 # How to Add a Consumer Routing Type
 
+> **⚠️ SUPERSEDED for new AI capabilities (2026-07-07, spaarke-ai-architecture-redesign-r1 task 052)**: `IInvokePlaybookAi` — the Path A.5 facade this guide dispatches through — was **DELETED** (task 044); `sprk_playbookconsumer` is now the **Binding table**, the single routing surface for all AI capability invocation ([schema](../data-model/sprk-playbookconsumer.md)). To ship a new AI capability, follow [`ai-guide-consumer-wiring.md`](ai-guide-consumer-wiring.md) (Action + Binding as catalog data — usually zero new code). This guide remains relevant ONLY for wiring a new code-side consumer surface that resolves a Binding via `IConsumerRoutingService` (constants + boot parity check); ignore every `IInvokePlaybookAi` step.
+>
 > **Audience**: BFF developers, AI platform engineers, Action Engine authors
 > **Pre-req reading**: [`docs/architecture/ai-architecture-playbook-consumer-routing.md`](../architecture/ai-architecture-playbook-consumer-routing.md) (especially §1 Triangle + §2 Why this was created)
 > **When to use this guide**: You are adding a NEW consumer surface (BFF service, endpoint, Agent type, widget dispatch path) that needs to invoke a playbook via Dataverse-driven routing

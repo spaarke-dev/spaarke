@@ -622,7 +622,7 @@ The standard deploy path is the `Deploy-Playbook.ps1` script + a JSON definition
 .\scripts\Deploy-Playbook.ps1 -DefinitionFile "my-playbook.json"
 ```
 
-The definition file's per-node `sprk_executortype` field is the source of truth — it maps 1:1 to the `node.sprk_executortype` column at runtime. For end-to-end JPS Action authoring (including the `Seed-JpsActions.ps1` flow), see the [`jps-action-create`](../../.claude/skills/jps-action-create/SKILL.md) skill.
+The definition file's per-node `sprk_executortype` field is the source of truth — it maps 1:1 to the `node.sprk_executortype` column at runtime. For end-to-end JPS Action authoring, see the [`jps-action-create`](../../.claude/skills/jps-action-create/SKILL.md) skill (the `Seed-JpsActions.ps1` flow was RETIRED 2026-07 by ai-architecture-redesign-r1 — rows are now created directly via the skill / Dataverse MCP).
 
 ---
 
@@ -1214,7 +1214,7 @@ All paths relative to `src/server/api/Sprk.Bff.Api/`:
 | `Services/Ai/PromptSchemaOverrideMerger.cs` | Static override merge logic with `__replace` directive |
 | `Services/Ai/Nodes/AiAnalysisNodeExecutor.cs` | Pipeline orchestration per node |
 | `Services/Ai/Handlers/GenericAnalysisHandler.cs` | Default JPS-consuming handler |
-| `scripts/Seed-JpsActions.ps1` | Dataverse seeding script for JPS definitions |
+| `scripts/Seed-JpsActions.ps1` | RETIRED 2026-07 (ai-architecture-redesign-r1) — former Dataverse seeding script for JPS definitions; Actions are now authored via the `jps-action-create` skill / Dataverse MCP (see `scripts/README.md`) |
 
 ---
 

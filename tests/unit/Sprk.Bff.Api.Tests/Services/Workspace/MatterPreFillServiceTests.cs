@@ -1,9 +1,5 @@
 using System.Reflection;
 using FluentAssertions;
-using Microsoft.Extensions.Logging;
-using Microsoft.Extensions.Options;
-using Moq;
-using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Workspace;
@@ -12,23 +8,21 @@ using Xunit;
 namespace Sprk.Bff.Api.Tests.Services.Workspace;
 
 /// <summary>
-/// Unit tests for <see cref="MatterPreFillService"/> — focused on the FR-05 / Pattern A
-/// stable-ID migration landed by chat-routing-redesign-r1 task 016.
+/// Unit tests for <see cref="MatterPreFillService"/> — focused on the FR-P3-01 hard-cutover
+/// routing contract (ai-architecture-redesign-r1 task 040).
 ///
 /// <para>
-/// Test scope is intentionally narrow on the migration invariants (mirrors the canonical
-/// reflection-based tests in <c>SessionSummarizeOrchestratorTests</c> for task 015):
+/// Test scope is intentionally narrow on the routing invariants (mirrors the canonical
+/// reflection/source-text tests established by chat-routing-redesign-r1 tasks 016/028c):
 /// </para>
 /// <list type="bullet">
-///   <item>The hardcoded <c>2d660cad-d418-f111-8343-7ced8d1dc988</c> Guid constant is
-///         removed from the service surface (FR-05 task 016).</item>
-///   <item>The constructor injects <see cref="IPlaybookLookupService"/> and
-///         <see cref="IOptions{TOptions}"/> of <see cref="WorkspaceOptions"/>
-///         (Pattern A typed-options + stable-ID lookup).</item>
-///   <item>Fail-fast on missing config — when
-///         <see cref="WorkspaceOptions.MatterPreFillPlaybookId"/> is empty, the service
-///         MUST NOT call <see cref="IPlaybookLookupService.GetByIdAsync"/> and MUST
-///         return an empty pre-fill response with a CONFIG_MISSING reason code.</item>
+///   <item>The constructor injects <see cref="IConsumerRoutingService"/> — the ONLY
+///         playbook-resolution source per FR-P3-01 — plus <see cref="IPlaybookLookupService"/>
+///         for the downstream record load.</item>
+///   <item>The legacy typed-options config surface (WorkspaceOptions) is GONE from the
+///         constructor and the service body (FR-P3-01 / NFR-08: no shims, no deprecation
+///         windows).</item>
+///   <item>Routing null yields the clean ROUTING_MISSING empty response — no fallback.</item>
 ///   <item>The 45-second timeout invariant (NFR-07 binding) remains in the source —
 ///         pinned by a textual contract check.</item>
 /// </list>
@@ -39,28 +33,21 @@ namespace Sprk.Bff.Api.Tests.Services.Workspace;
 /// here: <see cref="Sprk.Bff.Api.Infrastructure.Graph.SpeFileStore"/> is a concrete
 /// non-virtual facade that cannot be cleanly mocked without a wider refactor, and the
 /// NFR-07-binding pre-fill flow is exercised end-to-end by existing integration tests.
-/// The Pattern A migration only touches the playbook-ID lookup mechanism — these
-/// reflection / fail-fast tests pin the exact migration contract.
+/// Playbook resolution happens inside a private method behind that facade, so the routing
+/// contract is pinned via constructor reflection + source-text invariants (established
+/// pattern in this file since task 016).
 /// </para>
 /// </summary>
 public class MatterPreFillServiceTests
 {
-    // FR-05 task 016 (chat-routing-redesign-r1): canonical DEV-environment GUID for the
-    // "Create New Matter Pre-Fill" playbook (the sprk_playbookid alt-key value, mirroring
-    // its sprk_analysisplaybookid PK per task 014 backfill plan).
-    private const string ConfiguredMatterPreFillPlaybookId = "2d660cad-d418-f111-8343-7ced8d1dc988";
-
-    // ─── (a) FR-05 task 016 — hardcoded GUID constant removed ─────────────────────────────
-
-
-    // ─── (b) FR-05 task 016 — IPlaybookLookupService is a constructor parameter ───────────
+    // ─── (a) FR-P3-01 — IConsumerRoutingService is the ONLY resolution source ────────────
 
     [Fact]
     public void MatterPreFillService_Constructor_RequiresPlaybookLookupService()
     {
-        // The Pattern A migration MUST inject IPlaybookLookupService directly via the
-        // constructor (ADR-010 DI minimalism). Reflection assert: the parameter exists
-        // and the type is correct.
+        // Pattern A — IPlaybookLookupService MUST be a constructor dependency: routing
+        // resolves WHICH playbook (consumer → playbookId), the lookup service then loads
+        // the playbook record itself (1-hour caching per ADR-014).
         var ctor = typeof(MatterPreFillService)
             .GetConstructors(BindingFlags.Public | BindingFlags.Instance)
             .Single();
@@ -68,112 +55,86 @@ public class MatterPreFillServiceTests
         var parameters = ctor.GetParameters();
         parameters.Should().Contain(p => p.ParameterType == typeof(IPlaybookLookupService),
             "Pattern A migration — IPlaybookLookupService MUST be a constructor dependency " +
-            "for stable-ID playbook resolution (mirrors SessionSummarizeOrchestrator task 015)");
+            "for stable-ID playbook resolution");
     }
 
     [Fact]
-    public void MatterPreFillService_Constructor_RequiresWorkspaceOptions()
+    public void MatterPreFillService_Constructor_RequiresConsumerRoutingService_FRP301()
     {
-        // The Pattern A migration MUST consume WorkspaceOptions via IOptions<T> (ADR-018
-        // typed options — no raw IConfiguration[] indexer). Reflection assert: the
-        // IOptions<WorkspaceOptions> parameter exists.
-        var ctor = typeof(MatterPreFillService)
-            .GetConstructors(BindingFlags.Public | BindingFlags.Instance)
-            .Single();
-
-        var parameters = ctor.GetParameters();
-        parameters.Should().Contain(p => p.ParameterType == typeof(IOptions<WorkspaceOptions>),
-            "ADR-018 typed-options — WorkspaceOptions MUST be consumed via IOptions<T>");
-    }
-
-    // ─── (c) Fail-fast on null IPlaybookLookupService ─────────────────────────────────────
-
-    [Fact]
-    public void Constructor_NullPlaybookLookup_ThrowsArgumentNullException()
-    {
-        // ADR-010 fail-fast on missing DI dependency — the constructor MUST throw
-        // ArgumentNullException when IPlaybookLookupService is null.
-        var act = () => new MatterPreFillService(
-            speFileStore: null!,
-            textExtractor: null!,
-            playbookLookup: null!,
-            consumerRouting: Mock.Of<IConsumerRoutingService>(),
-            workspaceOptions: Options.Create(new WorkspaceOptions()),
-            speOptions: Options.Create(new SharePointEmbeddedOptions()),
-            logger: Mock.Of<ILogger<MatterPreFillService>>());
-
-        // The first null-check that fires is speFileStore; cascade through to playbook.
-        // We just verify ArgumentNullException surfaces — the order is incidental.
-        act.Should().Throw<ArgumentNullException>();
-    }
-
-    [Fact]
-    public void Constructor_NullPlaybookLookup_ThrowsArgumentNullException_NamedParam()
-    {
-        // Pin the parameter name to playbookLookup specifically (cascade through earlier
-        // non-null params). This protects the migration contract: future refactors that
-        // reorder ctor params must update the test.
-        var act = () => new MatterPreFillService(
-            speFileStore: Mock.Of<Sprk.Bff.Api.Infrastructure.Graph.SpeFileStore>(),
-            textExtractor: Mock.Of<ITextExtractor>(),
-            playbookLookup: null!,
-            consumerRouting: Mock.Of<IConsumerRoutingService>(),
-            workspaceOptions: Options.Create(new WorkspaceOptions()),
-            speOptions: Options.Create(new SharePointEmbeddedOptions()),
-            logger: Mock.Of<ILogger<MatterPreFillService>>());
-
-        // SpeFileStore lacks a parameterless ctor so Mock.Of can't synthesize it — that
-        // throws first. Either way the ctor refuses construction when AI dependencies
-        // are missing, which is the safety property we care about (fail-fast).
-        act.Should().Throw<Exception>(
-            "ctor must refuse to construct with missing AI dependencies (fail-fast)");
-    }
-
-    // ─── (g) FR-1R-05 task 028c — IConsumerRoutingService is a constructor parameter ────────
-
-    [Fact]
-    public void MatterPreFillService_Constructor_RequiresConsumerRoutingService_FR1R05()
-    {
-        // FR-1R-05 task 028c — the Pattern A migration to the sprk_playbookconsumer routing
-        // table MUST inject IConsumerRoutingService directly via the constructor (ADR-010
-        // DI minimalism). The constant ConsumerTypes.MatterPreFill (compile-time typo defense
-        // per code-review S-5) is passed at the call site.
+        // FR-P3-01 — the sprk_playbookconsumer Binding routing table is the ONLY
+        // playbook-resolution source, so IConsumerRoutingService MUST be a constructor
+        // dependency (ADR-010 DI minimalism). The constant ConsumerTypes.MatterPreFill
+        // (compile-time typo defense per code-review S-5) is passed at the call site.
         var ctor = typeof(MatterPreFillService)
             .GetConstructors(BindingFlags.Public | BindingFlags.Instance)
             .Single();
 
         var parameters = ctor.GetParameters();
         parameters.Should().Contain(p => p.ParameterType == typeof(IConsumerRoutingService),
-            "FR-1R-05 task 028c — IConsumerRoutingService MUST be a constructor dependency " +
+            "FR-P3-01 — IConsumerRoutingService MUST be a constructor dependency " +
             "for sprk_playbookconsumer routing-table resolution");
     }
 
     [Fact]
-    public void MatterPreFillService_Source_CallsConsumerRoutingResolveAsync_FR1R05()
+    public void MatterPreFillService_Constructor_HasNoWorkspaceOptionsDependency_FRP301()
     {
-        // FR-1R-05 task 028c: the service body MUST call IConsumerRoutingService.ResolveAsync
-        // with the ConsumerTypes.MatterPreFill compile-time constant (NOT a literal string —
-        // code-review S-5 hardening). The env-var fallback MUST remain readable during the
-        // FR-1R-06 deprecation window.
+        // FR-P3-01 hard cutover — the WorkspaceOptions typed-options fallback surface was
+        // DELETED (NFR-08: no shims). The constructor MUST NOT carry any WorkspaceOptions
+        // dependency; routing is the only source.
+        var ctor = typeof(MatterPreFillService)
+            .GetConstructors(BindingFlags.Public | BindingFlags.Instance)
+            .Single();
+
+        ctor.GetParameters().Should().NotContain(
+            p => p.ParameterType.FullName!.Contains("WorkspaceOptions"),
+            "FR-P3-01 — the WorkspaceOptions config fallback was deleted; " +
+            "the routing table is the ONLY playbook-resolution source");
+    }
+
+    // ─── (b) Source-text invariants — routing-only resolution ─────────────────────────────
+
+    [Fact]
+    public void MatterPreFillService_Source_ResolvesViaConsumerRoutingOnly_FRP301()
+    {
+        // The service body MUST call IConsumerRoutingService.ResolveAsync with the
+        // ConsumerTypes.MatterPreFill compile-time constant (NOT a literal string —
+        // code-review S-5 hardening), and MUST NOT read any config fallback (FR-P3-01).
         var source = File.ReadAllText(LocateMatterPreFillServiceSource());
         source.Should().Contain("_consumerRouting",
-            "FR-1R-05 task 028c — service MUST hold an IConsumerRoutingService field");
+            "service MUST hold an IConsumerRoutingService field");
         source.Should().Contain("ConsumerTypes.MatterPreFill",
             "code-review S-5 — service MUST use the ConsumerTypes.MatterPreFill constant, " +
             "not a literal string");
         source.Should().Contain(".ResolveAsync(",
-            "FR-1R-05 — service MUST call IConsumerRoutingService.ResolveAsync");
-        source.Should().Contain("_workspaceOptions.MatterPreFillPlaybookId",
-            "FR-1R-06 — env-var fallback MUST remain readable during the deprecation window");
+            "service MUST call IConsumerRoutingService.ResolveAsync");
+        source.Should().NotContain("_workspaceOptions",
+            "FR-P3-01 — the WorkspaceOptions field was deleted with the config fallback");
+        source.Should().NotContain("MatterPreFillPlaybookId",
+            "FR-P3-01 — no reference to the deleted config property may remain, " +
+            "comments included (NFR-08 hard cutover)");
     }
 
-    // ─── (d) NFR-07 binding — 45s timeout invariant pinned in source ─────────────────────
+    [Fact]
+    public void MatterPreFillService_Source_RoutingNull_YieldsRoutingMissingResponse_FRP301()
+    {
+        // FR-P3-01 clean-error contract: when the routing table has no enabled
+        // sprk_playbookconsumer row, the service returns an empty pre-fill response with
+        // the ROUTING_MISSING reason code — no config fallback, no exception.
+        var source = File.ReadAllText(LocateMatterPreFillServiceSource());
+        source.Should().Contain(
+            "ROUTING_MISSING: no enabled sprk_playbookconsumer row for consumerType 'matter-pre-fill'",
+            "FR-P3-01 — routing null MUST surface the clean ROUTING_MISSING reason code");
+        source.Should().NotContain("CONFIG_MISSING",
+            "FR-P3-01 — the CONFIG_MISSING reason code died with the config fallback");
+    }
+
+    // ─── (c) NFR-07 binding — 45s timeout invariant pinned in source ─────────────────────
 
     [Fact]
     public void MatterPreFillService_PreservesFortyFiveSecondTimeout_NFR07()
     {
         // NFR-07 BINDING: the pre-fill flow's 45-second timeout MUST NOT change. The
-        // migration only touches the internal playbook-ID lookup mechanism. We pin the
+        // cutover only touches the internal playbook-ID resolution mechanism. We pin the
         // textual contract by reading the source file and asserting the timeout literal
         // is present. This is intentionally brittle — any change to the timeout MUST
         // be a deliberate, reviewed action that updates this test alongside the source.
@@ -183,37 +144,26 @@ public class MatterPreFillServiceTests
             "NFR-07 BINDING — pre-fill flow 45s timeout invariant MUST be preserved");
     }
 
-    // ─── (e) NFR-07 binding — public AnalyzeFilesAsync signature unchanged ───────────────
-
-
-    // ─── (f) Source-text invariants — migration uses IPlaybookLookupService.GetByIdAsync ─
+    // ─── (d) Source-text invariants — downstream lookup via IPlaybookLookupService ───────
 
     [Fact]
     public void MatterPreFillService_Source_CallsPlaybookLookupGetByIdAsync()
     {
-        // FR-05 task 016: the service body MUST call IPlaybookLookupService.GetByIdAsync
-        // with WorkspaceOptions.MatterPreFillPlaybookId. Source-text check pins the
-        // migration shape (mirrors the SessionSummarizeOrchestrator approach).
+        // The routed GUID MUST still flow through IPlaybookLookupService.GetByIdAsync so
+        // 1-hour playbook caching (ADR-014) and stable-ID semantics are preserved.
         var source = File.ReadAllText(LocateMatterPreFillServiceSource());
         source.Should().Contain("_playbookLookup",
-            "FR-05 task 016 — service MUST hold an IPlaybookLookupService field");
+            "service MUST hold an IPlaybookLookupService field");
         source.Should().Contain(".GetByIdAsync(",
-            "FR-05 task 016 — service MUST call IPlaybookLookupService.GetByIdAsync");
-        source.Should().Contain("_workspaceOptions.MatterPreFillPlaybookId",
-            "Pattern A — service MUST read the per-env stable-ID value from " +
-            "WorkspaceOptions.MatterPreFillPlaybookId (pre-seated by task 013)");
+            "service MUST call IPlaybookLookupService.GetByIdAsync with the routed id");
     }
 
     [Fact]
     public void MatterPreFillService_Source_DoesNotContainHardcodedMatterPreFillGuid()
     {
-        // FR-05 task 016 acceptance: the hardcoded 2d660cad-... GUID MUST NOT appear in
-        // the service source code (only in XML doc / migration-history comments that
-        // reference it as removed). We verify it does not appear OUTSIDE comments.
+        // FR-05 task 016 acceptance (still binding): the hardcoded 2d660cad-... GUID MUST
+        // NOT appear in executable code (migration-history comments are allowed).
         var source = File.ReadAllText(LocateMatterPreFillServiceSource());
-
-        // The GUID can only appear inside comment blocks (// or /// migration history).
-        // Easiest check: ensure no `Guid.Parse("2d660cad...")` or executable literal.
         source.Should().NotContain("Guid.Parse(\"2d660cad-d418-f111-8343-7ced8d1dc988\")",
             "FR-05 task 016 — hardcoded 'Create New Matter Pre-Fill' GUID MUST be removed " +
             "from executable code (migration history comments are allowed)");

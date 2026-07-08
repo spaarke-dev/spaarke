@@ -257,7 +257,7 @@ DO NOT collapse fixture-config gaps into "upstream cluster fix subsumes it" — 
 - ✅ **MUST dispatch from `sprk_playbooknode.sprk_executortype`** (Choice; required on every node post-FR-19 backfill). `PlaybookOrchestrationService.ExecuteNodeAsync` reads this single-hop and routes to the matching `INodeExecutor` registration.
 - ✅ **MUST read prompt content from Action via `sprk_playbooknode.sprk_actionid`** when the executor is prompt-driven (AiAnalysis / AiCompletion / AiEmbedding). Action FK is OPTIONAL at schema level, REQUIRED at executor `Validate()` for prompt-driven executors. Pure executors (Condition, Start, ReturnResponse, EntityNameValidator, UpdateRecord, SendEmail, etc.) MUST leave Action FK NULL.
 - ✅ **MUST use the `Services/Ai/PublicContracts/` facade** for any CRUD code that needs AI capability (per ADR-013).
-- ✅ **MUST declare `GetConfigSchema()`** on every new `INodeExecutor` (per FR-16 + Wave 3 tasks 030-036); the schema is served by `GET /api/ai/playbook-builder/executor-config-schemas` for canvas-renderer consumption.
+- ✅ **MUST declare `GetConfigSchema()`** on every new `INodeExecutor` (per FR-16 + Wave 3 tasks 030-036); the schema is declared in code and consumed at authoring/validation time. (The former `GET /api/ai/playbook-builder/executor-config-schemas` endpoint was DELETED 2026-07-07 by ai-architecture-redesign-r1 task 050 with the AI-assisted builder surface — validate against the `INodeExecutor.GetConfigSchema()` implementations in source instead.)
 
 **Binding MUST NOT rules** (R7 dispatch anti-patterns):
 

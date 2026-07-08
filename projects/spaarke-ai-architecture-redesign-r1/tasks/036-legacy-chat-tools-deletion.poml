@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="036" project="spaarke-ai-architecture-redesign-r1">
+  <metadata>
+    <title>Legacy Chat/Tools/* deletion — AnalysisExecutionTools + TextRefinementTools migrate to typed handlers first</title>
+    <phase>Phase P2: Text-Path Hard Cutover</phase>
+    <status>not-started</status>
+    <estimated-hours>8</estimated-hours>
+    <tags>bff-api, deletion, tools</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <parallel-group>W-P2-D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>034</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement FR-P2-07: retire the legacy Chat/Tools/* tool surface. Order matters — MIGRATE FIRST, THEN DELETE: (1) migrate the two live capabilities, AnalysisExecutionTools and TextRefinementTools, to typed handlers under Services/Ai/Handlers/ following the existing handler framework (IToolHandler + ToolHandlerToAIFunctionAdapter + sprk_analysistool discovery); (2) re-namespace the handler ids per the tool contract (the namespaced toolid convention from FR-P0-03, e.g. analysis.* / text.*, consistent with the dataverse.* handlers from P0); (3) DELETE the entire src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/ directory — every remaining *Tools.cs file in it is superseded by typed handlers or dead. Acceptance: the directory is removed, the two migrated capabilities are covered by handler tests, and grep-zero is SHOWN for the deleted types.
+  </prompt>
+
+  <role>
+    Senior .NET developer expert in the Spaarke tool-handler framework (Services/Ai/Handlers/, ToolHandlerToAIFunctionAdapter, sprk_analysistool catalog discovery) and safe migrate-then-delete refactors.
+  </role>
+
+  <goal>
+    AnalysisExecutionTools + TextRefinementTools live on as typed handlers with re-namespaced ids and tests; the Chat/Tools/ directory no longer exists; grep-zero shown; build + tests green; publish-size reduction reported.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-architecture-redesign-r1/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-architecture-redesign-r1/plan.md</file>
+    <file purpose="project-context">projects/spaarke-ai-architecture-redesign-r1/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md</file>
+    <file purpose="migrate-source">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/AnalysisExecutionTools.cs</file>
+    <file purpose="migrate-source">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/TextRefinementTools.cs</file>
+    <file purpose="handler-framework">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/ (target framework + HandlerRegistrationConventions.md)</file>
+    <file purpose="adapter">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ToolHandlerToAIFunctionAdapter.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-039">Closed tool catalog — migrated handlers register via sprk_analysistool rows with declared side_effect_class/permission_scope/budget_class; MUST NOT gate by tool-name lists; MUST NOT add a second intent-detection mechanism; grounded outputs (citation duty carries over to the migrated read paths).</constraint>
+    <constraint source="ADR-040">Migrated handler invocations persist through the ToolChain ledger contract from task 030 (ledger before render).</constraint>
+    <constraint source="NFR-08">Hard-cutover doctrine: MIGRATE THEN DELETE in this one task — no transition period where both surfaces are live; Chat/Tools/ removal verified grep-zero with SHOWN output; no compat shims or type-forwarders.</constraint>
+    <constraint source="FR-P0-04">Boot reconciliation must stay green: tool row to handler bijection holds after re-namespacing (health check proves it).</constraint>
+    <constraint source="ADR-029">BFF deletion task: publish-size reported with the REDUCTION vs prior baseline.</constraint>
+    <constraint source="NFR-02">Eval suite green is the merge gate; update eval cases that exercised the two migrated capabilities under their new handler ids.</constraint>
+    <constraint source="NFR-09">Migrated handlers respect the per-turn tool budget + ADR-016 telemetry via the loop contract.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff-api, tool-handlers, migration, deletion</topic>
+    <files>
+      <file>docs/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>docs/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/OVERLAY-MATRIX.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-MIGRATION-MAP.md</file>
+    </files>
+    <patterns>
+      <pattern name="Tool handler framework (target)" location="src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/">
+        The typed-handler shape to migrate INTO — mirror an existing handler (e.g. AnalysisQueryHandler) + HandlerRegistrationConventions.md; assembly-scan discovery, catalog-row declaration.
+      </pattern>
+      <pattern name="SprkChatAgent stack" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgent.cs">
+        Consumes handlers via ToolHandlerToAIFunctionAdapter and the 030 capability projection — the migrated handlers surface through it automatically.
+      </pattern>
+      <pattern name="Gate store" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PendingPlanManager.cs">
+        If a migrated capability is side-effecting, it gates via declared side_effect_class through the unified store — never a name list.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Chat/Tools/* is the pre-catalog tool surface: ad-hoc *Tools.cs classes wired directly into the agent, most already superseded by typed handlers (WebSearchHandler vs WebSearchTools, DocumentSearchHandler vs DocumentSearchTools, etc.). Two capabilities still live only there. After migration, the whole directory is deadwood and falls under the hard-cutover doctrine.
+    </background>
+    <dependencies>
+      <dependency task="034" status="pending">Chat NL hard cutover complete — all traffic on the loop + typed-handler projection before the legacy tool surface is removed.</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0" name="Context check + load knowledge">
+      Verify context below 70%. Load the handler framework conventions, overlay-matrix rows for Chat/Tools, and inventory every file in Services/Ai/Chat/Tools/ with its superseding handler (or dead status).
+    </step>
+    <step order="1" name="Migrate AnalysisExecutionTools to a typed handler">
+      Port capability logic to a handler under Services/Ai/Handlers/ per the framework; declare its sprk_analysistool row (namespaced toolid, side_effect_class, permission_scope, budget_class); add handler tests.
+    </step>
+    <step order="2" name="Migrate TextRefinementTools to a typed handler">
+      Same shape: typed handler + catalog row + tests.
+    </step>
+    <step order="3" name="Re-namespace handler ids per the tool contract">
+      Apply the namespaced toolid convention consistently to the migrated (and any renamed) handler ids; update catalog rows + eval cases; verify the FR-P0-04 tool-handler bijection health check passes.
+    </step>
+    <step order="4" name="Delete Chat/Tools/ directory">
+      Remove src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/ entirely, plus DI/adapter references to the removed *Tools classes and their tests. No shims.
+    </step>
+    <step order="5" name="Grep-zero verification (SHOWN)">
+      Grep for each deleted *Tools type name (AnalysisExecutionTools, TextRefinementTools, WorkingDocumentTools, WebSearchTools, DataverseQueryTools, etc.) across src/, tests/, scripts/ — SHOW zero-hit output per symbol outside git history.
+    </step>
+    <step order="6" name="Build + tests + publish size">
+      dotnet build + full test suite (incl. eval) green with output shown; dotnet publish -c Release; report the size REDUCTION per ADR-029.
+    </step>
+    <step order="7" name="Step 9.5 quality gates">
+      Run code-review + adr-check. Resolve findings per CLAUDE.md section 6.5. Update TASK-INDEX.md and current-task.md.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build, test, publish Sprk.Bff.Api</tool>
+    <tool name="git">Version control (deletions preserved in history)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/ (two new typed handlers, re-namespaced ids)</output>
+    <output type="code">Deleted: src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/ (entire directory)</output>
+    <output type="data">sprk_analysistool rows for the two migrated handlers (spaarkedev1)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Handlers/ (handler tests for both migrations)</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md (status update)</output>
+    <output type="report">Task notes: migration inventory + per-symbol grep-zero output + publish-size reduction</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/ directory is removed (grep-zero for deleted *Tools types SHOWN, outside git history).</criterion>
+    <criterion testable="true">Typed handlers cover the two migrated capabilities (AnalysisExecution + TextRefinement) with passing handler tests.</criterion>
+    <criterion testable="true">Handler ids re-namespaced per the tool contract; FR-P0-04 tool-handler bijection health check green.</criterion>
+    <criterion testable="true">dotnet build + full test suite incl. eval green (output shown).</criterion>
+    <criterion testable="true">Publish-size REDUCTION reported per ADR-029.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

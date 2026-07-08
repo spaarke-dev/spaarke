@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="026" project="spaarke-ai-architecture-redesign-r1">
+  <metadata>
+    <title>Eval suite UC-A-1 utterance family green; ADR-039 status → Accepted (docs/adr + .claude/adr twins)</title>
+    <phase>Phase P1: First Capability End-to-End</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <tags>testing, eval-suite, adr</tags>
+    <rigor-hint>TEST-MODIFYING</rigor-hint>
+    <parallel-group>W-P1-D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>020, 021, 022, 023, 024, 025</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement FR-P1-07: bring the golden-utterance eval suite's UC-A-1 utterance family (the upload/summarize family, incl. phrasing variants and typos of "summarize") to green against the P1 implementation, verify the suite's merge-gate wiring is active (NFR-02: eval failure blocks merge from P1 onward), and promote ADR-039 (Grounded Execution &amp; Closed Catalogs) from Proposed to Accepted in BOTH copies — `docs/adr/ADR-039-grounded-execution-closed-catalogs.md` and its `.claude/adr/` concise twin — with a citation of the P1 evidence (catalog-routed summarize live, dispatch dual-path deleted, UC-A-1 green in CI). The Accepted flip is the formal ratification that the one-dispatch-protocol / two-closed-catalogs contract is now the enforced state of the codebase, not a proposal.
+  </prompt>
+
+  <role>
+    Test engineer / ADR steward familiar with the tests/integration/contract eval-suite scaffold (task 011), CI merge-gate wiring, and Spaarke's dual ADR copies (docs/adr full + .claude/adr concise).
+  </role>
+
+  <goal>
+    UC-A-1 utterance family green in CI (run output shown); merge-gate wiring verified active; ADR-039 status = Accepted in both docs/adr and .claude/adr copies with P1 evidence cited.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-architecture-redesign-r1/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-architecture-redesign-r1/plan.md</file>
+    <file purpose="project-context">projects/spaarke-ai-architecture-redesign-r1/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md</file>
+    <file purpose="eval-scaffold">tests/integration/contract/ (task 011 scaffold + ~30 seed utterances)</file>
+    <file purpose="adr-full">docs/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+    <file purpose="adr-concise-twin">.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="root-CLAUDE.md §3 — Sub-Agent Write Boundary">The `.claude/adr/ADR-039-...md` edit MUST run in the MAIN session — sub-agents launched via the Agent tool CANNOT write to `.claude/` paths. If this task executes inside a wave sub-agent, it edits the docs/adr copy, returns the exact edit for the twin as structured text, and the main session applies it. Do NOT mark this task complete until BOTH copies read Accepted.</constraint>
+    <constraint source="NFR-02">Eval suite green is a MERGE GATE from P1 onward — this task VERIFIES the blocking wiring (a failing eval case must fail CI), not just a local green run.</constraint>
+    <constraint source="ADR-039">The ADR being accepted is the contract under test: UC-A-1 cases MUST exercise routing through Event/Click/Text only (no legacy dispatcher reachable) and typo-tolerant "summarize" matching via the loop/catalog, not via any regex intent mechanism.</constraint>
+    <constraint source="ADR-038 / TEST-MODIFYING">This task modifies tests/** — code-review + adr-check run UNCONDITIONALLY at Step 9.5. Eval cases live at the KEEP path tests/integration/contract/; no banned test patterns (Mock&lt;HttpMessageHandler&gt;, DI-registration tests, ctor null-checks).</constraint>
+    <constraint source="NFR-06">UC-A-1 cases include schema-conformance + citation-integrity assertions where applicable — a prompt edit that degrades summarize output must fail CI, not UAT.</constraint>
+    <constraint source="NFR-08">No compat shims are exercised by the eval cases; cases target the catalog path exclusively.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>eval-suite, adr-governance, testing</topic>
+    <files>
+      <file>docs/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>docs/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/OVERLAY-MATRIX.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-MIGRATION-MAP.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Eval scaffold" location="tests/integration/contract/">Task-011 golden-utterance scaffold — extend its case format; do not fork a second harness.</pattern>
+      <pattern name="ADR status flip precedent" location="docs/adr/">Prior Proposed→Accepted flips (status header + acceptance note with evidence citation) — mirror the ADR-040 flip performed at task 014.</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Spec §3 UC triggers seeded ~30 utterances at P0; UC-A-1 is the first family required green because it is the G-P1 behavior ("any phrasing/typo of summarize works"). ADR-039 acceptance is scheduled here — after the first capability proves the contract end-to-end and before P2 builds the text-path loop on top of it.
+    </background>
+    <dependencies>
+      <dependency task="020" status="pending">chat-summarize on catalog rows.</dependency>
+      <dependency task="021" status="pending">Universal ledger write + OutputRouter.</dependency>
+      <dependency task="022" status="pending">Event path (upload rule).</dependency>
+      <dependency task="023" status="pending">Click path (dispatchConsumer).</dependency>
+      <dependency task="024" status="pending">Engine-output ledger adapter.</dependency>
+      <dependency task="025" status="pending">r7 branch closed (no stray dispatch surface for cases to hit).</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 014 performed the equivalent ADR-040 flip at G-P0 — reuse its format and citation style.</item>
+      <item>FR-P2-08 grows the suite to full catalog families + refusal + injection at P2.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context check + load knowledge">
+      Verify context usage below 70%. Confirm tasks 020-025 complete in TASK-INDEX.md. Load the eval scaffold, the UC-A-1 seed utterances, and both ADR-039 copies.
+    </step>
+    <step order="1" name="Extend UC-A-1 cases">
+      Review/extend the UC-A-1 utterance family: canonical phrasings, paraphrases, and typos of "summarize" (Event-path upload cases + Click-path chip cases + typed-command cases), with schema-conformance and citation-integrity assertions per NFR-06.
+    </step>
+    <step order="2" name="Run to green">
+      Run the suite against the P1 stack; fix eval-case defects (or file precise findings against tasks 020-024 if the implementation is at fault — do not weaken assertions to pass). SHOW the green run output in the transcript.
+    </step>
+    <step order="3" name="Verify the merge gate">
+      Verify NFR-02 wiring: demonstrate (e.g., with a deliberately failing scratch case, then removed) or cite the CI configuration proving that an eval failure blocks merge from P1 onward. SHOW the evidence.
+    </step>
+    <step order="4" name="Flip ADR-039 to Accepted">
+      Edit docs/adr/ADR-039-grounded-execution-closed-catalogs.md: status Proposed → Accepted, with an acceptance note citing the P1 evidence (task ids, UC-A-1 CI run, dual-path deletion greps). Apply the SAME flip to .claude/adr/ADR-039-grounded-execution-closed-catalogs.md — in the MAIN SESSION per the Sub-Agent Write Boundary (if running as a sub-agent, return the exact twin edit as text for the main session to apply, and do not report the task complete until it lands).
+    </step>
+    <step order="5" name="CI + consistency check">
+      Full test + eval suite green in CI (shown). Verify both ADR copies agree (status, date, citation). Update .claude/CHANGELOG.md is NOT required unless CLAUDE.md was touched — confirm no other .claude edits leaked.
+    </step>
+    <step order="6" name="Update tracking">
+      Update TASK-INDEX.md, POML status, current-task.md per completion protocol.
+    </step>
+    <step order="9.5" name="Quality gates">
+      Step 9.5 quality gates: code-review + adr-check run UNCONDITIONALLY (TEST-MODIFYING override); resolve Critical findings per CLAUDE.md §6.5 before completion.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Run the eval suite + full test suite</tool>
+    <tool name="gh">Cite/inspect CI merge-gate wiring</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/integration/contract/ (UC-A-1 utterance family cases, green)</output>
+    <output type="docs">docs/adr/ADR-039-grounded-execution-closed-catalogs.md (status → Accepted with citation)</output>
+    <output type="docs">.claude/adr/ADR-039-grounded-execution-closed-catalogs.md (twin flip — MAIN SESSION edit)</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The UC-A-1 utterance family (phrasings + typos of "summarize" across Event/Click/typed paths) is green in CI, run output SHOWN in the transcript.</criterion>
+    <criterion testable="true">Eval-failure-blocks-merge wiring is verified with shown evidence (NFR-02 active from P1).</criterion>
+    <criterion testable="true">ADR-039 status is Accepted in docs/adr/ADR-039-grounded-execution-closed-catalogs.md with a citation of the P1 evidence.</criterion>
+    <criterion testable="true">The .claude/adr/ ADR-039 twin matches (status, date, citation), edited in the main session per the Sub-Agent Write Boundary.</criterion>
+    <criterion testable="true">UC-A-1 cases include schema-conformance + citation-integrity assertions (NFR-06); no ADR-038 banned test patterns introduced.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

@@ -1,11 +1,12 @@
 # ADR-013: AI Architecture (Concise)
 
-> **Status**: Accepted (amended 2026-07-01)
+> **Status**: Accepted (amended 2026-07-05)
 > **Domain**: AI/ML Integration
-> **Last Updated**: 2026-07-01 (amendment: document-context invocation on `IInvokePlaybookAi` facade)
+> **Last Updated**: 2026-07-05 (amendment: capability invocation replaces playbook invocation as the canonical facade verb)
 > **Updated By**:
 > - 2026-05-20 refinement — refined per [`docs/assessments/bff-ai-extraction-assessment-2026-05-20.md`](../../docs/assessments/bff-ai-extraction-assessment-2026-05-20.md); categorical "no separate AI microservice" rule replaced with technical criteria; direct CRUD→AI injection prohibited (must use `Services/Ai/PublicContracts/` facades).
-> - **2026-07-01 amendment (Path B per CLAUDE.md §6.5)** — `IInvokePlaybookAi` facade widened with optional `userContext` + `document` parameters (defaults preserve existing callers). Motivating consumer: `spaarkeai-compose-r1`. See [`docs/adr/ADR-013-ai-architecture.md`](../../docs/adr/ADR-013-ai-architecture.md) §"Amendment 2026-07-01" for the full rationale; the boundary against direct CRUD→AI-internal injection is UNCHANGED.
+> - 2026-07-01 amendment (Path B per CLAUDE.md §6.5) — `IInvokePlaybookAi` facade widened with optional `userContext` + `document` parameters. Motivating consumer: `spaarkeai-compose-r1`.
+> - **2026-07-05 amendment (Path B per CLAUDE.md §6.5 — operator-approved, `spaarke-ai-code-audit-r1` ADR review A-1)** — the canonical invocation verb becomes **capability invocation** (`invoke(bindingId, args)` per the Action + Binding model, canonical AI architecture doc v0.4 §6). `IInvokePlaybookAi` is grandfathered as a legacy shim over capability invocation and retires with its callers per the migration map. ALL boundary rules (BFF-hosted criteria, PublicContracts facade discipline, no direct CRUD→AI injection) carry over UNCHANGED — this amendment corrects the VERB the boundary protects, not the boundary. The stale architecture-map appendix is replaced by a pointer to the canonical doc. Rationale: the playbook-shaped canon steered every compliant consumer toward playbook-centricity (see `projects/spaarke-ai-code-audit-r1/ADR-REVIEW-VS-GREENFIELD.md` §2.1).
 
 ---
 
@@ -41,8 +42,8 @@ Workloads meeting all four:
 - **MUST** use RagSearchOptions boolean filters for knowledge source scoping
 - **MUST** keep new AI synthesis/chat/orchestration in BFF unless ALL four exception criteria above are met
 - **MUST** route external CRUD-side AI consumers (Finance, Workspace, Jobs, etc.) through documented facade types in `Services/Ai/PublicContracts/` — do not inject `IOpenAiClient`, `IPlaybookService`, or other AI-internal types directly into CRUD code
-- **MUST** use the optional `userContext` + `document` parameters on `IInvokePlaybookAi.InvokePlaybookAsync` when dispatching a playbook against a specific source document (per the 2026-07-01 amendment). Do NOT create a bypass path around the facade to reach `IPlaybookOrchestrationService` for document-context invocation — the facade already supports it.
-- **MUST** update the reflection guard test (`PhaseAVerticalSliceTests.ADR013_InvokePlaybookAiFacade_DoesNotExposeAiInternalTypesInSurface`) with a NAMED allow-list entry + citation when adding NEW types to the facade surface. Silent bypass is forbidden per CLAUDE.md §6.5.
+- **MUST** treat **capability invocation** (`invoke(bindingId, args)`) as the canonical facade verb for new consumers (2026-07-05 amendment). `IInvokePlaybookAi` remains valid ONLY for existing callers during migration — do NOT wire new consumers to it, and do NOT create bypass paths around the facade to reach `IPlaybookOrchestrationService` or the capability executor directly.
+- **MUST** update the reflection guard test (`PhaseAVerticalSliceTests.ADR013_InvokePlaybookAiFacade_DoesNotExposeAiInternalTypesInSurface`) with a NAMED allow-list entry + citation when adding NEW types to the facade surface; the guard follows the capability-invocation facade as it lands. Silent bypass is forbidden per CLAUDE.md §6.5.
 
 ### ❌ MUST NOT
 
@@ -56,35 +57,14 @@ Workloads meeting all four:
 
 ## Architecture Overview
 
-```
-Sprk.Bff.Api/
-├── Api/Ai/
-│   ├── ChatEndpoints.cs                  ← /api/ai/chat/* (sessions, messages, playbooks)
-│   ├── DocumentIntelligenceEndpoints.cs  ← /api/ai/document-intelligence/*
-│   ├── AnalysisEndpoints.cs              ← /api/ai/analysis/*
-│   └── RecordMatchEndpoints.cs           ← record matching
-├── Models/Ai/Chat/
-│   ├── ChatSession.cs                    ← session record with HostContext
-│   ├── ChatContext.cs                    ← context + ChatKnowledgeScope
-│   └── ChatHostContext.cs                ← entity-aware host context
-├── Services/Ai/
-│   ├── PublicContracts/                  ← NEW (per sdap-bff-api-remediation-fix Outcome E)
-│   │   └── IBffAiPublicContracts.cs      ← facade for external CRUD consumers
-│   ├── IRagService.cs / RagService.cs    ← RAG search with boolean filter logic
-│   ├── DocumentIntelligenceService.cs    ← summarization/extraction
-│   ├── AnalysisOrchestrationService.cs   ← orchestration + SSE
-│   ├── TextExtractorService.cs           ← text extraction
-│   ├── Jobs/                             ← AI-coupled job handlers (moved from Services/Jobs/)
-│   └── Chat/
-│       ├── ChatSessionManager.cs          ← session lifecycle
-│       ├── IChatContextProvider.cs        ← context resolution interface
-│       ├── PlaybookChatContextProvider.cs ← playbook-driven context + entity scope
-│       ├── SprkChatAgentFactory.cs        ← agent construction
-│       └── Tools/
-│           ├── DocumentSearchTools.cs     ← entity-scoped search
-│           └── KnowledgeRetrievalTools.cs ← knowledge source-scoped retrieval
-└── Services/Jobs/                        ← FRAMEWORK ONLY (dispatcher); AI-coupled handlers moved to Services/Ai/Jobs/
-```
+The component architecture lives in the canonical doc — do NOT rely on a
+snapshot here (the pre-2026-07-05 appendix had rotted: it listed dead
+`Chat/Tools/*` classes and the retiring `AnalysisOrchestrationService`).
+
+**Canonical**: [`docs/architecture/SPAARKE-AI-ARCHITECTURE-AND-COMPONENT-DESIGN.md`](../../docs/architecture/SPAARKE-AI-ARCHITECTURE-AND-COMPONENT-DESIGN.md)
+§4 (three entry paths, session ledger, execution shapes) + §5 (target
+components T-01..T-14 with Fulfilled-by mappings). Per-component migration
+state: `projects/spaarke-ai-code-audit-r1/OVERLAY-MATRIX.md`.
 
 ---
 

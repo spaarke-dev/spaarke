@@ -670,3 +670,18 @@ The BFF forwards these into `PlaybookRunRequest.UserContext` + `.Document`; down
 - [AI Constraints](../../.claude/constraints/ai.md) - MUST/MUST NOT rules
 
 **When to load this full ADR**: Historical context, deployment models, resource requirements, security considerations.
+
+## Amendment 2026-07-05 (Path B per CLAUDE.md §6.5 — operator-approved)
+
+**Source**: `projects/spaarke-ai-code-audit-r1/ADR-REVIEW-VS-GREENFIELD.md` §2.1 (recommendation A-1), approved by the operator 2026-07-05 during the AI code audit / greenfield convergence.
+
+**What changes — the canonical verb, not the boundary:**
+
+1. The canonical invocation surface for AI capabilities becomes **capability invocation** — `invoke(bindingId, args)` against the Action + Binding catalog (`docs/architecture/SPAARKE-AI-ARCHITECTURE-AND-COMPONENT-DESIGN.md` v0.4 §6). New consumers MUST NOT be wired to `IInvokePlaybookAi`.
+2. `IInvokePlaybookAi` (including the 2026-07-01 document-context widening) is **grandfathered as a legacy shim** over capability invocation. It retires with its callers per `SPAARKE-AI-MIGRATION-MAP.md`; the 2026-07-01 amendment's parameters carry into the capability-invocation contract as ordinary args.
+3. The reflection guard test follows the capability-invocation facade surface as it lands.
+4. The concise version's embedded architecture map is replaced with a pointer to the canonical doc — ADRs carry constraints; architecture maps rot (the removed appendix listed dead `Chat/Tools/*` classes and the retiring `AnalysisOrchestrationService`).
+
+**What does NOT change** (carried verbatim): BFF-hosted-by-default with the four extraction criteria; the `Services/Ai/PublicContracts/` facade discipline; the prohibition on direct CRUD→AI-internal injection; the decision table for service-boundary questions.
+
+**Why**: the audit found the playbook-shaped canon steered every compliant consumer toward playbook-centricity — the facade protected the right boundary while hardcoding the wrong verb. Each amendment (including 2026-07-01, four days before the strategic pivot) deepened the pattern being retired. Encoding the verb-neutral principle prevents recurrence; the companion principle-level ADR-039 (Grounded Execution & Closed Catalogs) governs what may be invoked at all.

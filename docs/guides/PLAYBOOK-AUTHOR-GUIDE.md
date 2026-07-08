@@ -1,5 +1,7 @@
 # Playbook Author Guide
 
+
+> **⛔ FROZEN ENGINE (2026-07-07, spaarke-ai-architecture-redesign-r1 task 052)**: playbook authoring on the node-graph engine applies to the **Insights family only** — the engine is frozen (OQ-2/D11); no NEW capability may be built as a node-graph playbook. New AI capabilities are authored as Action + Binding catalog rows ([`ai-guide-consumer-wiring.md`](ai-guide-consumer-wiring.md)). Also note `IInvokePlaybookAi` (mentioned in §"Executing") was deleted; engine dispatch for surviving consumers routes through Binding rows. The PlaybookBuilder canvas is being de-scoped to a BA Action/Binding editor (FR-P4-04, in flight).
 > **Status**: Updated for R7 (2026-06-28) — node-first dispatch model. R3 content (LookupUserMembership, Handlebars helpers, Builder UI safety affordances) preserved verbatim and remains current.
 > **Audience**: Spaarke makers + operators + AI engineers authoring multi-node playbooks in PlaybookBuilder. Plain-language guide — assumes you know your way around Power Apps but NOT around .NET or React internals.
 >

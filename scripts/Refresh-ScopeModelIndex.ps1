@@ -28,11 +28,21 @@
 
 .NOTES
     Entities queried:
-      - sprk_analysisactions   (Actions)
+      - sprk_analysisactions   (Actions — incl. sprk_kind / sprk_modeltier, ai-architecture-redesign-r1 FR-P0-03)
       - sprk_analysisskills    (Skills)
-      - sprk_analysisknowledges (Knowledge)
-      - sprk_analysistools     (Tools)
+      - sprk_analysisknowledges (Knowledge — code column is sprk_knowledgecode; the legacy
+                                 sprk_externalid column no longer exists on the entity. Rows
+                                 without a knowledge code fall back to sprk_name as the code.)
+      - sprk_analysistools     (Tools — incl. sprk_toolid / sprk_sideeffectclass)
     API version: v9.2
+
+    Repaired 2026-07-07 (ai-architecture-redesign-r1 task 051, FR-P4-02):
+      - FIXED 400 on the knowledge query: $select still referenced sprk_externalid,
+        which was removed from sprk_analysisknowledge (replaced by sprk_knowledgecode).
+      - Entries now carry the deployed row GUID ("id") so the index is verifiable
+        against the live environment, plus kind/modelTier (actions) and
+        toolId/sideEffectClass (tools) per the post-redesign closed-catalog taxonomy
+        (ADR-039).
 
     Prerequisites:
       - Azure CLI installed and authenticated (az login)
@@ -105,6 +115,7 @@ function Get-DataverseHeaders {
         'Content-Type'     = 'application/json; charset=utf-8'
         'OData-MaxVersion' = '4.0'
         'OData-Version'    = '4.0'
+        'Prefer'           = 'odata.include-annotations="OData.Community.Display.V1.FormattedValue"'
     }
 }
 
@@ -172,6 +183,39 @@ $DefaultModelSelectionRules = @(
 )
 
 # ---------------------------------------------------------------------------
+# Choice-value label maps (mirror the Dataverse global choices; verified live 2026-07-07)
+# ---------------------------------------------------------------------------
+function Get-KindLabel {
+    param($Value)
+    switch ($Value) {
+        100000000 { 'Prompted' }
+        100000001 { 'Coded' }
+        default   { $null }
+    }
+}
+
+function Get-ModelTierLabel {
+    param($Value)
+    switch ($Value) {
+        100000000 { 'Fast' }
+        100000001 { 'Standard' }
+        100000002 { 'Reasoning' }
+        default   { $null }
+    }
+}
+
+function Get-SideEffectClassLabel {
+    param($Value)
+    switch ($Value) {
+        100000000 { 'Read' }
+        100000001 { 'Write' }
+        100000002 { 'Communicate' }
+        100000003 { 'Pure' }
+        default   { $null }
+    }
+}
+
+# ---------------------------------------------------------------------------
 # Curated field preservation helpers
 # ---------------------------------------------------------------------------
 function Get-ExistingIndex {
@@ -217,7 +261,7 @@ Write-Host 'Querying Dataverse...' -ForegroundColor White
 
 $dvActions = Invoke-DataverseQuery `
     -EntitySet 'sprk_analysisactions' `
-    -Select 'sprk_analysisactionid,sprk_name,sprk_actioncode,sprk_description' `
+    -Select 'sprk_analysisactionid,sprk_name,sprk_actioncode,sprk_description,sprk_kind,sprk_modeltier,sprk_workflowclass' `
     -Headers $headers
 Write-Host "  Actions    : $($dvActions.Count) records" -ForegroundColor Gray
 
@@ -229,13 +273,13 @@ Write-Host "  Skills     : $($dvSkills.Count) records" -ForegroundColor Gray
 
 $dvKnowledge = Invoke-DataverseQuery `
     -EntitySet 'sprk_analysisknowledges' `
-    -Select 'sprk_analysisknowledgeid,sprk_name,sprk_externalid,sprk_description' `
+    -Select 'sprk_analysisknowledgeid,sprk_name,sprk_knowledgecode,sprk_description,sprk_knowledgedeliverytype' `
     -Headers $headers
 Write-Host "  Knowledge  : $($dvKnowledge.Count) records" -ForegroundColor Gray
 
 $dvTools = Invoke-DataverseQuery `
     -EntitySet 'sprk_analysistools' `
-    -Select 'sprk_analysistoolid,sprk_name,sprk_toolcode,sprk_description,sprk_handlerclass' `
+    -Select 'sprk_analysistoolid,sprk_name,sprk_toolcode,sprk_toolid,sprk_description,sprk_handlerclass,sprk_sideeffectclass' `
     -Headers $headers
 Write-Host "  Tools      : $($dvTools.Count) records" -ForegroundColor Gray
 
@@ -253,7 +297,11 @@ foreach ($rec in $dvActions) {
     $ex = Find-ExistingEntry -Collection ($existing.actions) -Code $code
     $entry = [ordered]@{
         code          = $code
+        id            = $rec.sprk_analysisactionid
         name          = $rec.sprk_name
+        kind          = Get-KindLabel $rec.sprk_kind
+        modelTier     = Get-ModelTierLabel $rec.sprk_modeltier
+        workflowClass = if ($rec.sprk_workflowclass) { $rec.sprk_workflowclass } else { $null }
         description   = if ($rec.sprk_description) { $rec.sprk_description } else { '' }
         documentTypes = if ($ex -and $ex.documentTypes) { @($ex.documentTypes) } else { @() }
         tags          = if ($ex -and $ex.tags) { @($ex.tags) } else { @() }
@@ -275,6 +323,7 @@ foreach ($rec in $dvSkills) {
     $ex = Find-ExistingEntry -Collection ($existing.skills) -Code $code
     $entry = [ordered]@{
         code              = $code
+        id                = $rec.sprk_analysisskillid
         name              = $rec.sprk_name
         description       = if ($rec.sprk_description) { $rec.sprk_description } else { '' }
         compatibleActions = if ($ex -and $ex.compatibleActions) { @($ex.compatibleActions) } else { @() }
@@ -293,14 +342,18 @@ foreach ($rec in $dvSkills) {
 # Knowledge
 $knowledge = @()
 foreach ($rec in $dvKnowledge) {
-    $code = $rec.sprk_externalid
+    # sprk_knowledgecode replaced the retired sprk_externalid; rows without a code
+    # (legacy RAG-index rows) fall back to sprk_name so every entry stays addressable.
+    $code = if ($rec.sprk_knowledgecode) { $rec.sprk_knowledgecode } else { $rec.sprk_name }
     $ex = Find-ExistingEntry -Collection ($existing.knowledge) -Code $code
     $entry = [ordered]@{
-        code        = $code
-        name        = $rec.sprk_name
-        description = if ($rec.sprk_description) { $rec.sprk_description } else { '' }
-        contentType = if ($ex -and $ex.contentType) { $ex.contentType } else { 'Reference' }
-        tags        = if ($ex -and $ex.tags) { @($ex.tags) } else { @() }
+        code         = $code
+        id           = $rec.sprk_analysisknowledgeid
+        name         = $rec.sprk_name
+        deliveryType = $rec.'sprk_knowledgedeliverytype@OData.Community.Display.V1.FormattedValue'
+        description  = if ($rec.sprk_description) { $rec.sprk_description } else { '' }
+        contentType  = if ($ex -and $ex.contentType) { $ex.contentType } else { 'Reference' }
+        tags         = if ($ex -and $ex.tags) { @($ex.tags) } else { @() }
     }
 
     if ($ex) {
@@ -318,11 +371,14 @@ foreach ($rec in $dvTools) {
     $code = $rec.sprk_toolcode
     $ex = Find-ExistingEntry -Collection ($existing.tools) -Code $code
     $entry = [ordered]@{
-        code        = $code
-        name        = $rec.sprk_name
-        handler     = if ($rec.sprk_handlerclass) { $rec.sprk_handlerclass } else { '' }
-        description = if ($rec.sprk_description) { $rec.sprk_description } else { '' }
-        tags        = if ($ex -and $ex.tags) { @($ex.tags) } else { @() }
+        code            = $code
+        id              = $rec.sprk_analysistoolid
+        toolId          = if ($rec.sprk_toolid) { $rec.sprk_toolid } else { $null }
+        name            = $rec.sprk_name
+        handler         = if ($rec.sprk_handlerclass) { $rec.sprk_handlerclass } else { '' }
+        sideEffectClass = Get-SideEffectClassLabel $rec.sprk_sideeffectclass
+        description     = if ($rec.sprk_description) { $rec.sprk_description } else { '' }
+        tags            = if ($ex -and $ex.tags) { @($ex.tags) } else { @() }
     }
 
     if ($ex) {
@@ -338,7 +394,7 @@ foreach ($rec in $dvTools) {
 if ($existing) {
     $dvActionCodes   = $dvActions   | ForEach-Object { $_.sprk_actioncode }
     $dvSkillCodes    = $dvSkills    | ForEach-Object { $_.sprk_skillcode }
-    $dvKnowledgeCodes = $dvKnowledge | ForEach-Object { $_.sprk_externalid }
+    $dvKnowledgeCodes = $dvKnowledge | ForEach-Object { if ($_.sprk_knowledgecode) { $_.sprk_knowledgecode } else { $_.sprk_name } }
     $dvToolCodes     = $dvTools     | ForEach-Object { $_.sprk_toolcode }
 
     if ($existing.actions)   { $removed += ($existing.actions   | Where-Object { $_.code -notin $dvActionCodes }).Count }

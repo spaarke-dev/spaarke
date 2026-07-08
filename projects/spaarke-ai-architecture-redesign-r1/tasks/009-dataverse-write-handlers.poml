@@ -1,0 +1,123 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="009" project="spaarke-ai-architecture-redesign-r1">
+  <metadata>
+    <title>dataverse.* WRITE handlers (create_record, update_record, delete_record) over BFF-OBO</title>
+    <phase>Phase P0: Foundations</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <tags>bff-api, tools, dataverse, obo</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <parallel-group>W-P0-B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>003, 008</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement the write half of FR-P0-07: three typed tool handlers — `dataverse.create_record`, `dataverse.update_record`, `dataverse.delete_record` — on the shared dataverse.* plumbing built by task 008, executing over the BFF's user-OBO Dataverse Web API path with contracts mirroring the GA Dataverse MCP tool surface. These are SIDE-EFFECT tools: their sprk_analysistool rows declare `sprk_sideeffectclass` write values so the P2 Confirmation Gate (FR-P2-02) can suspend/resume them by declared class — never by tool-name list. At P0 they land dark (no loop invokes them yet); P3's create-task capability (FR-P3-03) is the first production consumer via dataverse.create of sprk_event(type=task).
+  </prompt>
+
+  <role>
+    Senior .NET developer familiar with the Sprk.Bff.Api tool-handler framework, Dataverse Web API mutations, OBO token flows, and side-effect classification for gating.
+  </role>
+
+  <goal>
+    Three write handlers registered with sprk_analysistool rows carrying correct sprk_sideeffectclass values, contracts frozen against the GA MCP list, executing user-OBO only, with handler tests under a test user's security context proving writes respect the user's privileges.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-architecture-redesign-r1/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-architecture-redesign-r1/plan.md</file>
+    <file purpose="project-context">projects/spaarke-ai-architecture-redesign-r1/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md</file>
+    <file purpose="mcp-research">projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/research-dataverse-mcp-2026-07.md</file>
+    <file purpose="shared-plumbing">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/ (task 008 dataverse.* base)</file>
+    <file purpose="column-dictionary">projects/spaarke-ai-architecture-redesign-r1/notes/schema-p0-column-dictionary.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec-MUST">MUST run user-OBO for ALL Dataverse tool access; a write the user lacks privileges for MUST fail with the user's own access error — never escalate via app identity.</constraint>
+    <constraint source="spec-MUST-NOT">MUST NOT gate by tool-name lists — gating readiness comes from declared sprk_sideeffectclass on the tool rows; get the classification right here.</constraint>
+    <constraint source="ADR-039">Contracts frozen against the GA Dataverse MCP list (create_record, update_record, delete_record); swap-ready regardless of the task-010 spike.</constraint>
+    <constraint source="NFR-07">Telemetry carries identifiers/filters/counts only; never log record content.</constraint>
+    <constraint source="ADR-029 / NFR-01">Verify publish-size impact per ADR-029/NFR-01; expect net change reported in task notes.</constraint>
+    <constraint source="project">Reuse task 008's shared plumbing — do not duplicate client acquisition/validation/envelope code.</constraint>
+    <constraint source="ADR-038">Handler tests exercise a test user's security context; no banned mock patterns.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff-api/tools, dataverse, obo, side-effects</topic>
+    <files>
+      <file>docs/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/OVERLAY-MATRIX.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-MIGRATION-MAP.md</file>
+    </files>
+    <patterns>
+      <pattern name="Tool framework + task-008 read handlers" location="src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/">
+        The shared dataverse.* base from task 008 (OBO client, validation, envelope) is the foundation; write handlers add mutation + side-effect declaration only.
+      </pattern>
+      <pattern name="Gate store (future consumer)" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PendingPlanManager.cs">
+        P2 generalizes this into THE pending store that suspends/resumes these write tools by side_effect_class — no gating logic belongs in the handlers themselves.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Writes complete the dataverse.* namespace. They land dark at P0; the confirmation gate that fronts them arrives at P2 (FR-P2-02), driven purely by the side-effect class declared on these tool rows.
+    </background>
+    <dependencies>
+      <dependency task="003" status="not-started">sprk_analysistool columns (esp. sprk_sideeffectclass) required for the tool rows.</dependency>
+      <dependency task="008" status="not-started">Shared dataverse.* plumbing (OBO client acquisition, validation, result envelope).</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0" name="Context check">
+      Check context usage; handoff if &gt; 70%. Verify tasks 003 + 008 ✅. Freeze the GA MCP write-tool contracts from the research note.
+    </step>
+    <step order="1" name="Review shared plumbing">
+      Read task 008's dataverse.* base; confirm reuse points and identify what mutation support (Create/Update/Delete over OBO Web API) must be added.
+    </step>
+    <step order="2" name="Implement the three handlers">
+      dataverse.create_record, dataverse.update_record, dataverse.delete_record with GA-MCP-mirrored contracts; results return created/affected record identifiers for ledger referencing.
+    </step>
+    <step order="3" name="Register tool rows with side-effect classes">
+      Seed sprk_analysistool rows with sprk_namespace=dataverse, correct sprk_sideeffectclass write values, sprk_permissionscope, sprk_budgetclass; confirm the task-005 bijection health check passes.
+    </step>
+    <step order="4" name="Test under user context">
+      Tests under a test user's security context: successful create/update/delete within the user's privileges; privilege-denied write surfaces the user's access error (no app-identity fallback); contract-shape assertions against frozen GA names.
+    </step>
+    <step order="5" name="Build + publish-size">
+      dotnet build + full test suite green; publish-size delta reported per ADR-029.
+    </step>
+    <step order="6" name="Verify + quality gates">
+      Check acceptance criteria. Step 9.5 quality gates: code-review + adr-check. Update TASK-INDEX.md.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build, test, publish-size verification</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/ (DataverseCreateRecordHandler, DataverseUpdateRecordHandler, DataverseDeleteRecordHandler)</output>
+    <output type="schema">spaarkedev1: sprk_analysistool rows for the three write tools (with sprk_sideeffectclass)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (write-handler tests under test-user security context)</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Handler tests pass under a test user's security context, including a privilege-denied write surfacing the user's own access error.</criterion>
+    <criterion testable="true">Tool names + contracts frozen against the GA Dataverse MCP list (citation shown).</criterion>
+    <criterion testable="true">sprk_analysistool rows declare write sprk_sideeffectclass values; tool↔handler bijection health check passes.</criterion>
+    <criterion testable="true">All three handlers execute user-OBO only (no app-only path reachable — evidence for task 012).</criterion>
+    <criterion testable="true">dotnet build green; publish-size delta reported per ADR-029; Step 9.5 quality gates (code-review + adr-check) passed.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

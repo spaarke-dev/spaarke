@@ -1,7 +1,7 @@
 # Current Task State — spaarke-ai-platform-unification-r7
 
-> **Last Updated**: 2026-07-02 (Phase A done + Phase B code shipped, awaiting deploy + smoke)
-> **Recovery**: Read "Quick Recovery" section first
+> **Last Updated**: 2026-07-05 (Fable 5 session — audit Step 1 COMPLETE)
+> **Recovery**: read Quick Recovery, then `projects/spaarke-ai-code-audit-r1/SPAARKE-AI-CODE-INVENTORY.md`
 
 ---
 
@@ -9,119 +9,55 @@
 
 | Field | Value |
 |-------|-------|
-| **Session** | Wave 12 Linear AI Consumer migration — Doc Upload path built. |
-| **Status** | **Phase A DONE** (bandaids reverted). **Phase B code DONE** (Linear primitives + DocumentProfileService + endpoint dispatch + DI wiring, build clean). **Awaiting**: unit tests → deploy → operator smoke. |
-| **Branch** | `work/spaarke-ai-platform-unification-r7` — HEAD is `c2d26986d` (feat: Linear AI Consumer library + Document Profile migration). |
-| **Local commits ahead of origin** | **5** (4 reverts + Phase B feature commit). NOT YET PUSHED. |
-| **Worktree** | `c:/code_files/spaarke-wt-spaarke-ai-platform-unification-r7/` |
-| **Next Action** | Decide: (a) add unit tests + deploy tonight; OR (b) skip unit tests, deploy now, operator smokes end-to-end. Task plan says B15/B16 (unit tests) → B17 (deploy) → B18 (smoke). |
+| **Session** | Fable 5 session executed **Steps 1 AND 2 of the 3-step code audit** (operator-directed 2026-07-05). Step 1: `projects/spaarke-ai-code-audit-r1/` + **`SPAARKE-AI-CODE-INVENTORY.md` v1.0** (7 parallel Explore agents). Step 2: **canonical doc §4-7 drafted → v0.3**, designed against the inventory. |
+| **Branch** | `work/spaarke-ai-platform-unification-r7` |
+| **Canonical design doc** | `docs/architecture/SPAARKE-AI-ARCHITECTURE-AND-COMPONENT-DESIGN.md` **v0.3** — §4 (five layers, 3 execution shapes), §5 (21-component map K/E/N/R + O-1..O-24 resolution), §6 (extend sprk_playbookconsumer + sprk_analysistool, no new tables, single-routing-surface rule), §7 (L0-L4 protocol, ten-mechanism disposition table, P1-P10 replay). §8 roadmap deferred to Step 3. |
+| **Next Action** | **All 3 audit steps + convergence COMPLETE.** Canonical doc = **v0.4 CONVERGED TARGET** (all OQs resolved, D1-D12 ratified as amended, E-1..E-5 ruled). Next: **spin up the implementation project** — `/design-to-spec` over canonical v0.4 + `SPAARKE-AI-MIGRATION-MAP.md` (P0-P4 phases) → `/project-pipeline` (working name `spaarke-ai-target-architecture-r1`; hot-path BFF=Y SpaarkeAi=Y; FULL rigor). Also pending: portfolio registration type for the audit project; Action Engine R1 re-based spec. |
+| **Decision state (final)** | OQ-1 loop-as-dispatcher (no classifier stack; dispatcher TL→DEL at P2) · OQ-2 engine frozen, coded workflows for new composites, no maker graphs ever · OQ-3 loop-native elicitation · OQ-4/D10 native handlers w/ GA-MCP contracts + OBO spike · E-1/2/3 accepted, E-4/5 rejected · TL = sequencing+rebuild-cost only, HARD cutovers (customer continuity explicitly not a constraint) · ADR-037+ADR-013 amendments APPLIED · ADR-039/040 Proposed (Accepted at P1/P0). |
+| **Artifacts (all in `projects/spaarke-ai-code-audit-r1/` unless noted)** | `SPAARKE-AI-CODE-INVENTORY.md` v1.0 · `GREENFIELD-CONCEPTUAL-DESIGN.md` v0.2 (incl. §9 Q&A) · `OVERLAY-MATRIX.md` v1.0 (approved) · `ADR-REVIEW-VS-GREENFIELD.md` v1.1 (approved) · `SPAARKE-AI-MIGRATION-MAP.md` v1.0 · canonical doc v0.4 (`docs/architecture/`) · ADR-039/040 (`.claude/adr/` + `docs/adr/`) · notes/ (7 auditor reports + MCP research + engine-projects synthesis + worktree scan). |
 
 ---
 
-## Three companion docs (READ IN THIS ORDER)
+## What the audit found (headlines — full detail in the inventory)
 
-1. **Architecture** — [`docs/architecture/SPAARKE-LINEAR-AI-CONSUMER-ARCHITECTURE.md`](../../docs/architecture/SPAARKE-LINEAR-AI-CONSUMER-ARCHITECTURE.md)
-2. **Work spec** — [`notes/wave12-linear-consumer-migration.md`](notes/wave12-linear-consumer-migration.md)
-3. **Task plan** — [`notes/wave12-linear-consumer-tasks.md`](notes/wave12-linear-consumer-tasks.md) — Phase A + B core marked complete.
+1. **Dispatch drift is 10 mechanisms, not 4** — nine live in master's chat path (CompoundIntentDetector,
+   PlaybookDispatcher 2-stage, LLM tool loop, SoftSlashRouter intentHint, AgentServiceRoutingMiddleware,
+   IntentRerankerService, PlaybookCandidateSelector, ConsumerRoutingService, InvokePlaybookHandler)
+   + r7's unmerged regex as #10. None reads session-graph state.
+2. **Playbook routing truth split across 4 config surfaces** (sprk_playbookconsumer table, LinearConsumers
+   appsettings, Workspace.*PlaybookId appsettings, Insights.Playbooks.Map) + consumer-count disagreement
+   across doc(7)/seed(6-7)/ConsumerTypes.cs(8).
+3. **~24 duplicate/overlap pairs** (two orchestration engines, dual summarize paths ×3 levels, 3 cross-pane
+   mechanisms, 3 duplicated chat hooks, 2 client summarize impls + Compose's third orchestrator, ...).
+4. **Dead-code register**: DirectOpenAiAgent/ISprkAgent cluster, ~14-file SpaarkeAi Insights renderer
+   cluster, 5 dead PCF dirs, R1 registries/providers, Pillar-6b affordance trio, legacy Chat/Tools.
+5. **Manifest docs largely stale** — live R7 vocabulary = executorMetadata.ts (33 executors) +
+   R7-refreshed guides + sprk-playbookconsumer.md; 2026-02 ERD docs actively misleading; scope catalog
+   4 months stale in 2 divergent copies; multinode playbook blocked on sprk_nodetype option-set gap.
+6. **Target-model presence** (Appendix B): M6 widgets mostly exist; session store exists but no
+   addressable outputs (M1 gap); Layer 0 / slot-fill (M5) / L4 refusal / runtime Dataverse MCP tools
+   absent; Tool framework (typed handlers + sprk_analysistool) is the Tool-catalog embryo.
+7. **Worktrees**: 17/24 fully merged — the debt lives in master. Only r7 has a substantive AI delta
+   (keep/retire verified in notes/agent-findings-r7-delta.md, incl. 4 items the prior handoff missed:
+   debug log, no-revert-path for NL branch, ADR-028 bare-fetch divergence, empty-attachments guard).
 
----
+## Artifacts written this session (all in `projects/spaarke-ai-code-audit-r1/`)
 
-## Phase A summary (bandaids reverted)
+- `SPAARKE-AI-CODE-INVENTORY.md` — **the Step 1 deliverable** (categories §1-7, overlap register §8, dead-code register §9, caveats §10, worktree appendix A, target scorecard appendix B)
+- `README.md`, `spec.md` — project charter + classification rubric/FRs
+- `notes/worktree-delta-scan.md` — 24-worktree pre-scan
+- `notes/agent-findings-{r7-delta,bff-chat,bff-orchestration,spaarkeai-codepage,client-shared,manifest-schema,peripheral}.md` — 7 auditor reports
 
-Reverts executed in **reverse chronological order** (safer than plan-listed order because A1–A3 replaced each other on the same `GetEntitySetNameAsync` function):
+## Constraints for next session
 
-- `a648dedce` — Revert `15511117b` (nested-JSON skip)
-- `1332a5a02` — Revert `1909b4432` (heuristic pluralization)
-- `06040244e` — Revert `2021028da` ($filter form)
-- `42a83ff7c` — Revert `4facf26ef` (accessor form)
+- Audit is READ-ONLY — no code/schema/deploy changes were made; none should be made until Step 3 dispositions are approved.
+- Do NOT ship more tactical dispatch patches before §7 lands (standing rule from 2026-07-04 pivot).
+- Design principles locked in the canonical doc v0.2.6 (D1-D6, three write-shapes, Layer 0 default, two catalogs) — don't re-litigate.
+- Environment: `spaarkedev1` Dataverse; `spaarke-bff-dev` App Service — unchanged this session.
 
-Build after reverts: 0 errors, 19 pre-existing warnings.
+## Prior session context (Wave 12.3 + doc history)
 
-## Phase B core summary (Linear AI Consumer library shipped)
-
-Single commit `c2d26986d` — 17 files changed, 967 insertions.
-
-New folder: `src/server/api/Sprk.Bff.Api/Services/Ai/LinearConsumers/`
-
-Primitives:
-- `LinearRunContext.cs`, `DocumentText.cs` — records
-- `IActionResolver` + `ActionResolver.cs` — config-driven (`LinearConsumersOptions.ActionIds` maps consumerType → ActionId; delegates to `IScopeResolverService.GetActionAsync`)
-- `IDocumentTextSource` + `DocumentTextSource.cs` — composes `AnalysisDocumentLoader` (SPE + OBO) + `ITextExtractor` (direct-file)
-- `IActionRunner` + `ActionRunner.cs` — wraps `IOpenAiClient.GetStructuredCompletionRawAsync` with a single `{{document.extractedText}}` placeholder binding
-
-Consumer service:
-- `DocumentProfileService.cs` — emits `AnalysisStreamChunk` SSE events; reuses existing `DocumentProfileFieldMapper` + `DocumentTypeMapper` (Choice coercion); persists via `IDocumentDataverseService.UpdateDocumentFieldsAsync` (typed SDK path — no metadata calls); enqueues RAG indexing via `IPostUploadIndexingEnqueuer.EnqueueIfApplicableAsync` (OBO path)
-
-DI + wiring:
-- `LinearConsumersModule.cs` + `LinearConsumersOptions.cs`
-- `Program.cs` — `AddLinearConsumers(builder.Configuration)` after `AddAnalysisServicesModule`
-- `AnalysisEndpoints.ExecuteAnalysis` — dispatches by playbookId: if match in `LinearConsumersOptions.PlaybookIds`, routes to `DocumentProfileService`; otherwise falls through to Playbook Engine (preserves engine for Chat / Insights / Daily Briefing)
-- `ConsumerTypes.DocumentProfile` — new constant `document-profile`
-
-Config:
-- `appsettings.template.json` — new `LinearConsumers` section with:
-  - `ActionIds["document-profile"]` = `bb356968-ebe9-f011-8406-7ced8d1dc988`
-  - `PlaybookIds["document-profile"]` = `18cf3cc8-02ec-f011-8406-7c1e520aa4df`
-
-Build: 0 errors. dotnet test not yet run.
-
----
-
-## What's left for Phase B (B14–B19)
-
-| Task | Status | Notes |
-|---|---|---|
-| B14 build | ✅ 0 errors | |
-| B15 unit tests | ⏸️ NOT DONE | `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/LinearConsumers/DocumentProfileServiceTests.cs` — happy path / Action-not-configured / LLM-fails |
-| B16 `dotnet test` | ⏸️ NOT DONE | |
-| B17 deploy BFF | ⏸️ NOT DONE | `pwsh scripts/Deploy-BffApi.ps1` — needs operator approval (visible to UAT users) |
-| B18 operator smoke | ⏸️ NOT DONE | Document Upload wizard end-to-end |
-| B19 commit + push | Partial — commit done as `c2d26986d`; **push NOT DONE** | 5 commits ahead of origin |
-
----
-
-## Deferred / follow-up items
-
-- Playbook-to-code compilation for remaining engine consumers (Chat, Insight Engine, summarize Assistant) — hits when we UAT summarize Assistant.
-- Daily Briefing narrator formal refactor to shared Linear primitives — deferred to a follow-on cleanup pass. Do NOT touch during this migration.
-- R5 Doc 06 Choice-field coercion pattern — DocumentProfileService reuses `DocumentTypeMapper.ToDataverseValue` today; may want dynamic metadata-cache lookup later.
-- Phases C-G of task plan (File Summarize, Prefills, data cleanup, coexistence check, docs wrap-up) — sequential after Doc Upload passes UAT.
-
-## Rollback for Phase B
-
-If Phase B causes regressions:
-- Revert `c2d26986d` — removes the whole Linear consumer library + endpoint dispatch + Program.cs wiring in one shot
-- Then either revert the four Phase A reverts (to restore bandaids) OR leave them reverted (base is R7 pre-bandaid state)
-- Cost: Doc Upload UAT blocks; operator falls back to whatever worked pre-Wave-12
-
----
-
-## Design decisions taken during Phase B (may need review)
-
-1. **Revert order deviation** — plan listed A1→A4 (oldest first) but I did A4→A1 (newest first) because A1-A3 replaced each other on the same function; reverting oldest-first would have conflicted. Same end state. Documented inline in the task plan checklist.
-2. **`IActionResolver` = config-driven** rather than routing-table-driven — chose `LinearConsumersOptions.ActionIds` (IOptions map) over the plan's suggested `IConsumerRoutingService` → `IScopeResolverService.GetActionAsync` chain because (a) routing table returns playbookId not actionId — still need indirection to get to ActionId, and (b) config-driven is simpler for tonight's velocity. Can promote to routing-driven later without churning consumer service code (still calls `IActionResolver.ResolveAsync`).
-3. **`IDocumentDataverseService.UpdateProfileAsync` was NOT added** — the existing `UpdateDocumentFieldsAsync(string, Dictionary<string, object?>, ct)` already serves the exact need (typed field map → SDK-based write, no metadata calls). Plan called for a new typed method; deemed unnecessary.
-4. **Endpoint dispatch happens BEFORE DocumentContext pre-load** for the Linear path — avoids double-loading text since `DocumentTextSource.ExtractFromDocumentIdAsync` inside `DocumentProfileService` does the load itself. Engine path retains the pre-load unchanged.
-5. **`IPostUploadIndexingEnqueuer.EnqueueIfApplicableAsync`** (OBO path) is used instead of the app-only path, because Doc Upload files were written by the user via OBO — MI cannot read them without a container-type app-registration (see SPE writer-identity rule in `PostUploadIndexingEnqueuer.cs`).
-
-## Commits from this session
-
-- Phase A reverts: `a648dedce`, `1332a5a02`, `06040244e`, `42a83ff7c` (4 commits, reverse chronological)
-- Phase B feature: `c2d26986d`
-
-All 5 are **LOCAL ONLY** — not pushed to origin yet. Task B19 will push after B15-B18 complete.
-
----
-
-## Reference
-
-- Architecture: [`docs/architecture/SPAARKE-LINEAR-AI-CONSUMER-ARCHITECTURE.md`](../../docs/architecture/SPAARKE-LINEAR-AI-CONSUMER-ARCHITECTURE.md)
-- Work spec: [`notes/wave12-linear-consumer-migration.md`](notes/wave12-linear-consumer-migration.md)
-- Task plan: [`notes/wave12-linear-consumer-tasks.md`](notes/wave12-linear-consumer-tasks.md)
-- Historical doc-processing architecture: [`docs/architecture/sdap-document-processing-architecture.md`](../../docs/architecture/sdap-document-processing-architecture.md)
-- Companion pattern (Playbook Engine + Daily Briefing narrator model): [`docs/architecture/SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md`](../../docs/architecture/SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md)
-- Wizard integration: [`docs/guides/DOCUMENT-UPLOAD-WIZARD-INTEGRATION-GUIDE.md`](../../docs/guides/DOCUMENT-UPLOAD-WIZARD-INTEGRATION-GUIDE.md)
-
----
-
-*End of current-task.md. Recovery point: Phase B core code shipped (commit `c2d26986d`), build clean, awaiting deploy/smoke decision from operator.*
+Preserved in git history of this file (commit `997c3d717` version) and in
+`projects/spaarke-ai-platform-unification-r7/notes/summarize-flow-2026-07-03.md` +
+`notes/r7-close-plan-2026-07-03.md`. The Wave 12.3 keep/retire framing is now superseded by the
+audit's verified version in `projects/spaarke-ai-code-audit-r1/notes/agent-findings-r7-delta.md`.

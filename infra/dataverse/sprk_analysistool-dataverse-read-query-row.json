@@ -1,0 +1,67 @@
+{
+  "_comment_top": "spaarke-ai-architecture-redesign-r1 task 008 (FR-P0-07 read half) — seed row for the dataverse.read_query read tool. GA-MCP-contract-frozen per ADR-039: sprk_toolid local segment equals the GA Dataverse MCP tool name 'read_query'; the single required argument is 'querytext' exactly as GA (research note notes/audit-inputs/research-dataverse-mcp-2026-07.md; Learn ms.date 2026-06-05).",
+  "_comment_routing": "Runtime invocation routes to DataverseReadQueryHandler via sprk_handlerclass. Auto-discovered (ADR-010). P2 loop projects the LLM-facing function name from sprk_toolid.",
+  "_comment_obo": "spec MUST rule (task-012 audit): the query executes through IDataverseUserClient under the calling user's OBO token — the user's security roles + row-level security filter every row. NO app-only path.",
+  "_comment_side_effect": "sprk_sideeffectclass = 100000000 (Read). Read-only is enforced mechanically: DataverseSqlQueryTranslator only parses SELECT; INSERT/UPDATE/DELETE/MERGE/DDL are rejected with a redirect to the dataverse write tools.",
+  "_comment_dialect": "Native transport translates the GA read_query SQL dialect to OData. Single-table core supported (SELECT [TOP n] explicit-columns FROM table [WHERE column-to-literal predicates with AND/OR/parens, LIKE, IS NULL] [ORDER BY]). GA-unsupported features (subqueries, HAVING, DISTINCT, UNION, OFFSET, CAST/CONVERT, WITH) rejected with GA-matching messages. TDS-only GA features (JOIN, GROUP BY, aggregates, GETDATE) rejected with clear reformulation guidance — swap to MCP transport later lifts these without a contract change.",
+  "_comment_grounding": "ADR-039 grounding: the table's primary id column is auto-added to the selection; every row carries '@citation.path' = tables/{t}/records/{id} and adapter-level citation metadata.",
+  "_comment_consumption": "Read by scripts/Seed-TypedHandlers.ps1. Idempotent — UPSERT by sprk_handlerclass + sprk_toolcode with sprk_name 'SYS-%' filter.",
+  "sprk_name": "SYS-Dataverse Read Query",
+  "sprk_toolcode": "DATAVERSE-READ-QUERY",
+  "sprk_toolid": "dataverse.read_query",
+  "sprk_namespace": "dataverse",
+  "sprk_sideeffectclass": 100000000,
+  "sprk_permissionscope": "dataverse-user-context",
+  "sprk_budgetclass": "standard",
+  "sprk_description": "Executes a read-only SQL SELECT against Dataverse under the calling user's permissions and returns rows with record-id citations. Use dataverse.describe FIRST to get the table's column logical names and types, then construct a query that strictly follows the supported dialect: SELECT [TOP n] explicit column list FROM one table [WHERE simple column-to-literal predicates combined with AND/OR] [ORDER BY column ASC|DESC]. NOT supported: SELECT *, JOIN, GROUP BY, aggregates (COUNT/SUM/AVG/MIN/MAX), subqueries, DISTINCT, HAVING, UNION, OFFSET, GETDATE(). For distributions/aggregations (counts by category), SELECT the category column across rows (TOP up to 200) and aggregate the values YOURSELF from the result. LOOKUP columns (e.g. sprk_practicearea on sprk_matter) ARE selectable and return the referenced record's GUID — query the referenced table (e.g. sprk_practicearea_ref) to map GUIDs to display names. Choice columns return numeric option values — map them to labels via dataverse.describe. Default row cap 50 (TOP max 200). Results respect the current user's Dataverse security roles and row-level security. Spaarke entity map (use these logical names): 'matter'/'case'/'deal' = sprk_matter (key columns sprk_mattername, sprk_matternumber, sprk_matterdescription, statuscode; lookups sprk_practicearea to sprk_practicearea_ref, sprk_mattertype to sprk_mattertype_ref, sprk_assignedattorney1 to contact, sprk_externalaccount to account). 'project'/'workstream' = sprk_project (sprk_projectname, sprk_projectnumber). 'document'/'contract'/'file' = sprk_document (sprk_documentname, sprk_filename, sprk_documenttype, sprk_filesummary; lookups sprk_matter, sprk_project). People = contact; client companies = account; law firms/vendors = sprk_organization.",
+  "sprk_handlerclass": "DataverseReadQueryHandler",
+  "sprk_availableincontexts": 100000001,
+  "_comment_availableincontexts": "100000001 = Chat only — dataverse.* tools exist for the agent loop (P2), not playbook nodes.",
+  "sprk_jsonschema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "dataverse.read_query Request",
+    "description": "Argument shape frozen against the GA Dataverse MCP read_query(querytext) tool.",
+    "type": "object",
+    "required": ["querytext"],
+    "properties": {
+      "querytext": {
+        "type": "string",
+        "minLength": 1,
+        "description": "The SELECT SQL query to execute. Use dataverse.describe to locate the table schema and column logical names with their data types first; ensure the query follows the supported dialect and correct data types."
+      }
+    },
+    "additionalProperties": false
+  },
+  "sprk_outputschema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "dataverse.read_query Result",
+    "type": "object",
+    "required": ["tool", "entity", "rows", "rowCount"],
+    "properties": {
+      "tool": { "const": "dataverse.read_query" },
+      "entity": { "type": "string", "description": "Table logical name queried." },
+      "columns": { "type": "array", "items": { "type": "string" } },
+      "rows": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "description": "Selected columns plus '@citation.path' (tables/{t}/records/{id}) and the primary id column."
+        }
+      },
+      "rowCount": { "type": "integer" },
+      "citations": {
+        "type": "array",
+        "items": {
+          "type": "object",
+          "properties": {
+            "path": { "type": "string" },
+            "entity": { "type": "string" }
+          }
+        }
+      }
+    }
+  },
+  "sprk_configuration": {
+    "_comment": "No method-discriminator dispatch — single LLM-facing function. Reserved for per-environment row caps."
+  }
+}

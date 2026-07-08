@@ -1,0 +1,17 @@
+{
+  "$comment": "Mirror of sprk_analysisaction.sprk_inputschema for CLS-CHAT@v1 on spaarkedev1. Normalized from the legacy {\"args\":[...]} format by the G-P3 UAT round-1 fix wave (H2, 2026-07-07). CI-validated against the OpenAI function-parameters subset by CatalogInputSchemaContractTests (H4). Property-level \"required\": true is FORBIDDEN; use the object-level required array.",
+  "actionCode": "CLS-CHAT@v1",
+  "actionId": "186fd4cf-db78-f111-ab0e-7ced8ddc4cc6",
+  "environment": "spaarkedev1",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "fileId": {
+        "type": "string",
+        "description": "Optional id of the uploaded file to classify. The Event path supplies the just-uploaded file (bulk uploads classify the top-1 file only per the FR-P1-03 bulk bound).",
+        "elicitation_prompt": "Which uploaded file should I classify?",
+        "ledger_resolution": "session.uploadedFiles — the Event path supplies the just-uploaded file (bulk uploads classify the top-1 file only per the FR-P1-03 bulk bound)"
+      }
+    }
+  }
+}

@@ -1,0 +1,134 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="031" project="spaarke-ai-architecture-redesign-r1">
+  <metadata>
+    <title>Confirmation Gate unification (D12) — PendingPlanManager becomes THE pending store; second store deleted</title>
+    <phase>Phase P2: Text-Path Hard Cutover</phase>
+    <status>not-started</status>
+    <estimated-hours>10</estimated-hours>
+    <tags>bff-api, gate, d12</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <parallel-group>W-P2-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>027</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement FR-P2-02 (design decision D12): unify side-effect confirmation behind ONE gate. Generalize the PendingPlanManager store into THE pending store for all suspended side-effecting invocations; DELETE the second store behind the /actions/{id}/confirm endpoint. The FR-48 must-click confirmation becomes a presentation of this gate, not a separate mechanism. Gating decisions are driven by the tool's declared side_effect_class plus the Binding row's risk column — the hardcoded tool-name lists that currently decide what needs confirmation are DELETED. Write tools suspend into the store and resume through it after user confirmation; Gate entries land in the session ledger (ADR-040).
+  </prompt>
+
+  <role>
+    Senior .NET developer expert in the Sprk.Bff.Api AI chat stack, Redis-backed session state, and the Spaarke confirmation-gate flows.
+  </role>
+
+  <goal>
+    Exactly one pending store exists (grep-proven with shown output); write tools suspend/resume through it; gating is declared-metadata-driven (side_effect_class + risk); the /actions/{id}/confirm second store and all hardcoded tool-name gating lists are deleted.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-architecture-redesign-r1/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-architecture-redesign-r1/plan.md</file>
+    <file purpose="project-context">projects/spaarke-ai-architecture-redesign-r1/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md</file>
+    <file purpose="gate-store">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PendingPlanManager.cs</file>
+    <file purpose="gate-store-null-peer">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/NullPendingPlanManager.cs</file>
+    <file purpose="second-store-endpoints">src/server/api/Sprk.Bff.Api/Api/Ai/ (locate the /actions/{id}/confirm surface + its backing store)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-039">ONE dispatch protocol; MUST NOT gate by tool-name lists — gating is driven by declared side_effect_class + Binding risk. MUST NOT add a second intent-detection mechanism anywhere.</constraint>
+    <constraint source="ADR-040">Gate ledger entries are written before any gate UI renders; suspended/resumed invocations are addressable in the ledger.</constraint>
+    <constraint source="spec-MUST">MUST gate side effects via the ONE gate by declared side_effect_class — no parallel confirmation mechanism survives this task.</constraint>
+    <constraint source="NFR-08">Hard cutover: the /actions/{id}/confirm second store is DELETED in this task (no compat shim, no parallel-run); deletion verified grep-zero with SHOWN output.</constraint>
+    <constraint source="ADR-032">PendingPlanManager keeps its Null-Object peer (NullPendingPlanManager) consistent with the generalized interface.</constraint>
+    <constraint source="ADR-029">BFF-touching task: report publish-size + diff; this task deletes code — report the reduction.</constraint>
+    <constraint source="NFR-02">Eval suite green is a merge gate; update eval/confirmation cases affected by the unified gate.</constraint>
+    <constraint source="NFR-09">Gate outcomes (suspended/confirmed/rejected) telemetered per ADR-016.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff-api, confirmation-gate, side-effects, session-ledger</topic>
+    <files>
+      <file>docs/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>docs/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/OVERLAY-MATRIX.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-MIGRATION-MAP.md</file>
+    </files>
+    <patterns>
+      <pattern name="Gate store to generalize" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PendingPlanManager.cs">
+        The existing pending-plan store — generalize this into THE pending store; do not build a new one alongside it.
+      </pattern>
+      <pattern name="SprkChatAgent stack" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgent.cs">
+        The loop (task 030, same wave) suspends write tools through the gate — coordinate the suspend/resume interface with task 030's loop contract.
+      </pattern>
+      <pattern name="Tool handler framework" location="src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/">
+        Handlers declare side_effect_class via sprk_analysistool rows (FR-P0-03 columns) — the gate reads declarations, never tool names.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      The estate accreted two confirmation stores: PendingPlanManager (chat plan confirmations) and a second store behind /actions/{id}/confirm, plus hardcoded tool-name lists deciding what needs confirmation. D12 ratified ONE gate keyed on declared metadata. This is the last line of the NFR-03 prompt-injection defense — but not the only one.
+    </background>
+    <dependencies>
+      <dependency task="027" status="pending">G-P1 browser gate passed; catalog columns (sprk_sideeffectclass, sprk_risk) deployed and served by ConsumerRoutingService (FR-P0-03).</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0" name="Context check + load knowledge">
+      Verify context below 70%. Load ADR-039/ADR-040, bff-extensions.md, OVERLAY-MATRIX.md gate rows; read PendingPlanManager, the /actions/{id}/confirm endpoint and its backing store, and every call-site of both.
+    </step>
+    <step order="1" name="Inventory both stores + all gating call-sites">
+      Grep for hardcoded tool-name gating lists and both store surfaces; produce the delete/migrate inventory in task notes before changing code.
+    </step>
+    <step order="2" name="Generalize PendingPlanManager">
+      Generalize the store contract (suspend any side-effecting invocation with side_effect_class + risk + args identifiers; resume/reject with TTL) and update NullPendingPlanManager to match (ADR-032).
+    </step>
+    <step order="3" name="Metadata-driven gating">
+      Wire gating decisions from side_effect_class + Binding risk (catalog columns); DELETE the hardcoded tool-name lists; FR-48 must-click becomes a presentation mode of this gate.
+    </step>
+    <step order="4" name="Delete the second store">
+      Migrate /actions/{id}/confirm consumers onto the unified store, then DELETE the second store (and the endpoint if fully superseded); grep-zero with shown output.
+    </step>
+    <step order="5" name="Ledger Gate entries + telemetry">
+      Write ledger Gate entries (ADR-040) for suspend/confirm/reject transitions before any gate rendering; emit gate telemetry per ADR-016.
+    </step>
+    <step order="6" name="Tests + build">
+      Update/add tests in tests/unit/Sprk.Bff.Api.Tests/ proving suspend/resume through the one store and metadata-driven gating; full build + tests green with output shown.
+    </step>
+    <step order="7" name="Publish-size verification">
+      dotnet publish -c Release; report compressed size + diff — this deletion task reports the reduction.
+    </step>
+    <step order="8" name="Step 9.5 quality gates">
+      Run code-review + adr-check. Resolve findings per CLAUDE.md section 6.5. Update TASK-INDEX.md and current-task.md.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build, test, publish Sprk.Bff.Api</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PendingPlanManager.cs (generalized) + NullPendingPlanManager.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/ (second confirm store deleted; endpoint migrated or removed)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/ (unified gate tests)</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md (status update)</output>
+    <output type="report">Task notes: delete inventory + grep-zero output + publish-size reduction</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">ONE store: grep for the /actions/{id}/confirm second store returns zero hits outside git history — output SHOWN.</criterion>
+    <criterion testable="true">Write tools suspend and resume through the unified store (test-proven).</criterion>
+    <criterion testable="true">Gating is driven by side_effect_class + Binding risk; hardcoded tool-name gating lists deleted (grep shown).</criterion>
+    <criterion testable="true">FR-48 must-click renders as a presentation of the unified gate; ledger Gate entries written before gate rendering.</criterion>
+    <criterion testable="true">Build + tests green; publish-size reduction reported per ADR-029.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

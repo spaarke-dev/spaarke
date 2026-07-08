@@ -286,6 +286,119 @@ public class ChatSessionManager
         FireAndForgetCosmosPersist(session);
     }
 
+    /// <summary>
+    /// Appends one <see cref="SessionToolChain"/> ledger entry to the session and
+    /// persists through the existing 3-tier pipeline (FR-P2-01 step 5 / ADR-040:
+    /// the text-turn tool chain is ledger-written BEFORE the turn's output renders).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// The session is RE-FETCHED before appending so concurrent ledger writes made
+    /// during the same turn (e.g. capability dispatch appending an Output entry via
+    /// <see cref="Sprk.Bff.Api.Services.Ai.OutputRouter"/>) are not clobbered by a
+    /// stale snapshot held by the caller. Append-only: existing entries are never
+    /// mutated (ADR-040).
+    /// </para>
+    /// <para>
+    /// <b>NFR-07</b>: the entry carries identifiers/filters/counts only (enforced at
+    /// construction by <see cref="AgentTurnContract"/>); this method logs counts +
+    /// identifiers only. Ledger entries are Tier 3 — erased with the session.
+    /// </para>
+    /// </remarks>
+    /// <returns>The updated session carrying the appended entry (null when the session no longer exists).</returns>
+    public virtual async Task<ChatSession?> AppendToolChainAsync(
+        string tenantId,
+        string sessionId,
+        SessionToolChain entry,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentNullException.ThrowIfNull(entry);
+
+        var session = await GetSessionAsync(tenantId, sessionId, ct).ConfigureAwait(false);
+        if (session is null)
+        {
+            _logger.LogWarning(
+                "AppendToolChainAsync: session not found — tenant={TenantId} session={SessionId}; ToolChain entry dropped.",
+                tenantId, sessionId);
+            return null;
+        }
+
+        var appended = new List<SessionToolChain>(session.ToolChains ?? Array.Empty<SessionToolChain>()) { entry };
+        var updated = session with { ToolChains = appended };
+        await UpdateSessionCacheAsync(updated, ct).ConfigureAwait(false);
+
+        _logger.LogInformation(
+            "Ledger ToolChain stored: turn={Turn} calls={CallCount} tenant={TenantId} session={SessionId}",
+            entry.Turn, entry.Calls.Count, tenantId, sessionId);
+
+        return updated;
+    }
+
+    /// <summary>
+    /// Appends one <see cref="SessionGate"/> ledger entry to the session and persists
+    /// through the existing 3-tier pipeline (FR-P2-02 / ADR-040: gate markers are
+    /// ledger-written BEFORE any gate UI renders; resolutions are NEW entries with the
+    /// same <see cref="SessionGate.GateId"/> — append-only).
+    /// </summary>
+    /// <remarks>
+    /// <para>
+    /// Mirrors <see cref="AppendToolChainAsync"/>: the session is RE-FETCHED before
+    /// appending so concurrent ledger writes in the same turn are not clobbered by a
+    /// stale caller snapshot. Written exclusively via <see cref="PendingPlanManager"/> —
+    /// the ONE confirmation gate (D12) — so every gate transition flows through one
+    /// append implementation.
+    /// </para>
+    /// <para>
+    /// Turn allocation: when <paramref name="entry"/>.Turn is not positive, the next
+    /// per-session gate ordinal (<c>max(existing Gates[].Turn, 0) + 1</c>) is allocated —
+    /// the same monotonic-ordinal scheme <see cref="Sprk.Bff.Api.Services.Ai.OutputRouter"/>
+    /// documents for Output entries. Resolution entries SHOULD pass the pending entry's
+    /// turn so the pending/resolved pair correlates.
+    /// </para>
+    /// <para><b>NFR-07</b>: gate entries and these logs carry identifiers only.</para>
+    /// </remarks>
+    /// <returns>
+    /// The updated session and the stored entry (with allocated turn), or null when the
+    /// session no longer exists (entry dropped, warning logged).
+    /// </returns>
+    public virtual async Task<(ChatSession Session, SessionGate Entry)?> AppendGateAsync(
+        string tenantId,
+        string sessionId,
+        SessionGate entry,
+        CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrWhiteSpace(tenantId);
+        ArgumentException.ThrowIfNullOrWhiteSpace(sessionId);
+        ArgumentNullException.ThrowIfNull(entry);
+
+        var session = await GetSessionAsync(tenantId, sessionId, ct).ConfigureAwait(false);
+        if (session is null)
+        {
+            _logger.LogWarning(
+                "AppendGateAsync: session not found — tenant={TenantId} session={SessionId}; Gate entry dropped.",
+                tenantId, sessionId);
+            return null;
+        }
+
+        var stored = entry.Turn > 0
+            ? entry
+            : entry with { Turn = (session.Gates is { Count: > 0 } ? session.Gates.Max(g => g.Turn) : 0) + 1 };
+
+        var appended = new List<SessionGate>(session.Gates ?? Array.Empty<SessionGate>()) { stored };
+        var updated = session with { Gates = appended };
+        await UpdateSessionCacheAsync(updated, ct).ConfigureAwait(false);
+
+        _logger.LogInformation(
+            "Ledger Gate stored: gateId={GateId} kind={Kind} status={Status} turn={Turn} " +
+            "sideEffectClass={SideEffectClass} bindingId={BindingId} tenant={TenantId} session={SessionId}",
+            stored.GateId, stored.Kind, stored.Status, stored.Turn,
+            stored.SideEffectClass, stored.BindingId, tenantId, sessionId);
+
+        return (updated, stored);
+    }
+
     // === Private helpers ===
 
     /// <summary>
@@ -331,7 +444,14 @@ public class ChatSessionManager
 
     /// <summary>
     /// Maps a <see cref="ChatSession"/> (hot Redis model) to a <see cref="StoredSession"/>
-    /// (Cosmos DB warm document). Preserves all message content and metadata.
+    /// (Cosmos DB warm document). Preserves all message content and metadata, document
+    /// references (DocumentId, AdditionalDocumentIds, UploadedFiles manifest), and the
+    /// typed session-ledger collections (Outputs, ToolChains, WidgetEvents, Gates).
+    ///
+    /// ADR-040 / FR-P0-01: prior to the ledger work this mapper dropped DocumentId, the
+    /// pinned AdditionalDocumentIds, and the UploadedFiles manifest — every write-through
+    /// clobbered the Cosmos document's file references (the audited P2 violation).
+    /// Document references now round-trip through the warm store in both directions.
     ///
     /// Content is permitted at ADR-015 Tier 3 (user-owned work history, Cosmos warm store).
     /// </summary>
@@ -361,7 +481,20 @@ public class ChatSessionManager
             Messages = messages,
             WidgetStates = [],
             CreatedAt = session.CreatedAt,
-            LastActivity = session.LastActivity
+            LastActivity = session.LastActivity,
+
+            // Document references (ADR-040 fix — file refs survive the warm store)
+            DocumentId = session.DocumentId,
+            AdditionalDocumentIds = session.AdditionalDocumentIds?.ToList() ?? [],
+            UploadedFiles = session.UploadedFiles is { Count: > 0 }
+                ? SessionPersistenceService.MapToStored(session.UploadedFiles)
+                : [],
+
+            // Session ledger (ADR-040 / FR-P0-01 — persisted DARK at P0, zero readers)
+            Outputs = SessionPersistenceService.MapOutputsToStored(session.Outputs),
+            ToolChains = SessionPersistenceService.MapToolChainsToStored(session.ToolChains),
+            WidgetEvents = SessionPersistenceService.MapWidgetEventsToStored(session.WidgetEvents),
+            Gates = SessionPersistenceService.MapGatesToStored(session.Gates)
         };
     }
 
@@ -369,9 +502,12 @@ public class ChatSessionManager
     /// Maps a <see cref="StoredSession"/> (Cosmos warm document) back to a <see cref="ChatSession"/>
     /// (hot Redis model) for Cosmos-fallback scenarios.
     ///
-    /// Message content round-trips faithfully. Fields present only on <see cref="StoredSession"/>
-    /// (widget states, entity refs, summary) have no equivalent on <see cref="ChatSession"/> and
-    /// are discarded — they remain in Cosmos and are accessible via <see cref="ISessionPersistenceService"/>.
+    /// Message content, document references (DocumentId, AdditionalDocumentIds, the
+    /// UploadedFiles manifest — ADR-040: document references MUST survive warm-store
+    /// restore), and the typed session-ledger collections all round-trip faithfully.
+    /// Fields present only on <see cref="StoredSession"/> (widget states, entity refs,
+    /// summary, tabs) have no equivalent on <see cref="ChatSession"/> and are not mapped —
+    /// they remain in Cosmos and are accessible via <see cref="ISessionPersistenceService"/>.
     /// </summary>
     private static ChatSession MapStoredSessionToChatSession(StoredSession stored)
     {
@@ -402,10 +538,27 @@ public class ChatSessionManager
         return new ChatSession(
             SessionId: stored.SessionId,
             TenantId: stored.TenantId,
-            DocumentId: null,          // Not stored in Cosmos — Dataverse is authoritative for document associations
+            // ADR-040 fix: document references now persist to (and restore from) Cosmos.
+            // Older warm documents that pre-date the fields restore as null/empty —
+            // Dataverse remains the cold-tier authority for those sessions.
+            DocumentId: stored.DocumentId,
             PlaybookId: stored.PlaybookId,
             CreatedAt: stored.CreatedAt,
             LastActivity: stored.LastActivity,
-            Messages: messages);
+            Messages: messages,
+            AdditionalDocumentIds: stored.AdditionalDocumentIds is { Count: > 0 }
+                ? stored.AdditionalDocumentIds
+                : null,
+            UploadedFiles: stored.UploadedFiles is { Count: > 0 }
+                ? SessionPersistenceService.MapFromStored(stored.UploadedFiles)
+                : null)
+        {
+            // Session ledger (ADR-040 / FR-P0-01 — restored DARK at P0, zero readers).
+            // Empty stored lists map to null ("no ledger entries yet").
+            Outputs = SessionPersistenceService.MapOutputsFromStored(stored.Outputs),
+            ToolChains = SessionPersistenceService.MapToolChainsFromStored(stored.ToolChains),
+            WidgetEvents = SessionPersistenceService.MapWidgetEventsFromStored(stored.WidgetEvents),
+            Gates = SessionPersistenceService.MapGatesFromStored(stored.Gates)
+        };
     }
 }

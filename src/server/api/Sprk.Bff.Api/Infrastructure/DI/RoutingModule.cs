@@ -1,3 +1,4 @@
+using Microsoft.Extensions.Diagnostics.HealthChecks;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 
 namespace Sprk.Bff.Api.Infrastructure.DI;
@@ -54,7 +55,7 @@ public static class RoutingModule
     /// <returns>The service collection for chaining.</returns>
     public static IServiceCollection AddRoutingModule(this IServiceCollection services)
     {
-        // UNCONDITIONAL (2 / 15 — well under ADR-010 module cap):
+        // UNCONDITIONAL (3 / 15 — well under ADR-010 module cap):
         //   1. AddScoped<IConsumerRoutingService, ConsumerRoutingService>
         //      — consumer→playbook routing facade (Phase 1R FR-1R-02).
         //      No feature flag — routing is always-on; Dataverse errors
@@ -63,14 +64,28 @@ public static class RoutingModule
         services.AddScoped<IConsumerRoutingService, ConsumerRoutingService>();
 
         //   2. AddHostedService<RoutingConsumerTypeHealthCheck>
-        //      — Phase 1R S-5C startup health check (per 2026-06-24 code
-        //      review): diffs ConsumerTypes.All vs Dataverse distinct
-        //      sprk_consumertype values at app start. Emits operator WARN
-        //      on mismatch (admin typo on Dataverse side, or missing seed
-        //      record). Fail-soft: Dataverse outage during startup logs
-        //      info and continues — health check is a deploy-time
-        //      diagnostic, NOT a runtime dependency.
+        //      — startup log surface for the ADR-039 boot reconciliation
+        //      (originally Phase 1R S-5C, extended by
+        //      spaarke-ai-architecture-redesign-r1 task 005 / FR-P0-04):
+        //      reconciles ConsumerTypes.All vs Binding rows AND the
+        //      sprk_analysistool row <-> registered-handler bijection at app
+        //      start. Drift logs at Error. Fail-soft on transient Dataverse
+        //      errors: the hosted service never blocks host startup.
         services.AddHostedService<RoutingConsumerTypeHealthCheck>();
+
+        //   3. Health-check pipeline registration (FR-P0-04, ADR-039): the
+        //      same class doubles as an IHealthCheck surfaced at /healthz
+        //      (mapped in EndpointMappingExtensions). Catalog drift =>
+        //      Unhealthy — the deploy gate that makes closed-catalog drift
+        //      impossible to ship silently. Never false-fails: compound AI
+        //      gate OFF => Healthy-with-description; ToolFramework OFF =>
+        //      bijection dimension skipped; transient Dataverse error =>
+        //      Degraded.
+        services.AddHealthChecks()
+            .AddCheck<RoutingConsumerTypeHealthCheck>(
+                "ai-catalog-reconciliation",
+                failureStatus: HealthStatus.Unhealthy,
+                tags: new[] { "ai", "catalog", "startup" });
 
         return services;
     }

@@ -650,6 +650,34 @@ describe("WorkspaceTabManager — restoreFromPersistence (NFR-09)", () => {
     }
   });
 
+  it("restoreFromPersistence_restoredIdsWithHighSeq_neverCollideWithSubsequentAddTab", async () => {
+    // G-P3 UAT round-3 R3-3 follow-on (2026-07-07): restored tabs keep their
+    // original `wstab-{seq}-{type}` ids, whose seq can exceed the restored-tab
+    // COUNT (earlier tabs were closed before the save). The old per-tab
+    // increment left _nextSeq below the restored seq, so the next addTab()
+    // minted a DUPLICATE id (React key collision; close/activate acted on the
+    // wrong tab). _nextSeq must advance past the highest restored seq.
+    const mgr = makeManager();
+    const snap: WorkspaceTabPersistenceSnapshot = {
+      tabs: [
+        {
+          id: "wstab-2-workspace",
+          widgetType: "workspace",
+          widgetData: { layoutId: "layout-compose" },
+          displayName: "Compose",
+        },
+      ],
+      activeTabId: "wstab-2-workspace",
+    };
+
+    await mgr.restoreFromPersistence(snap, makeResolveAll());
+    const newId = mgr.addTab("workspace", { layoutId: "layout-default" }, "Daily Briefing");
+
+    expect(newId).not.toBe("wstab-2-workspace");
+    const ids = mgr.getSnapshot().tabs.map((t) => t.id);
+    expect(new Set(ids).size).toBe(ids.length); // all ids unique
+  });
+
   it("restoreFromPersistence_managerWithExistingNonHomeTabs_noOps", async () => {
     const mgr = makeManager();
     const existingId = mgr.addTab("existing-widget", { v: 1 }, "Existing");

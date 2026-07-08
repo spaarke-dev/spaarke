@@ -137,36 +137,9 @@ public sealed class NullPlaybookService : IPlaybookService
         throw new FeatureDisabledException(ErrorCode, DetailMessage);
     }
 
-    /// <summary>
-    /// chat-routing-redesign-r1 FR-13 (task 034 follow-up — Gap 1): tenant-wide active
-    /// playbook enumeration. Null-Object behavior: yield no rows (degrade gracefully
-    /// rather than throw — the nightly drift job is a background scheduled task that
-    /// MUST NOT crash when AI is disabled; instead it should run, find zero rows, and
-    /// emit telemetry with scannedCount=0).
-    /// </summary>
-    public async IAsyncEnumerable<PlaybookResponse> ListAllActivePlaybooksAsync(
-        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken = default)
-    {
-        LogDisabled(nameof(ListAllActivePlaybooksAsync));
-        await Task.CompletedTask;
-        yield break;
-    }
-
-    /// <summary>
-    /// chat-routing-redesign-r1 FR-13 (task 034 follow-up — Gap 3): tracking-field write.
-    /// Null-Object behavior: no-op (background indexing writes MUST NOT crash when AI is
-    /// disabled; the row simply isn't updated).
-    /// </summary>
-    public Task UpdateIndexStatusAsync(
-        Guid playbookId,
-        int statusCode,
-        string? indexHash,
-        string? lastError,
-        CancellationToken cancellationToken = default)
-    {
-        LogDisabled(nameof(UpdateIndexStatusAsync));
-        return Task.CompletedTask;
-    }
+    // FR-P2-06 (task 035): the FR-13 Null-Object members (drift-scan enumerator +
+    // index-state writer) were DELETED with the interface members and the
+    // playbook-embeddings index jobs that called them.
 
     private void LogDisabled(string method)
     {

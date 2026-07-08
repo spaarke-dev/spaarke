@@ -1,0 +1,25 @@
+// event-daily-budget.kql — NFR-09 per-user daily Event-path budget (consumed vs cap)
+// Purpose: per user per day, how much of the daily Event-path execution budget was
+//          consumed vs the configured cap (budget.cap rides every event-path record),
+//          plus the tenants' bound-denial counts (daily-cap hits) from the EventRules meter.
+// Expected columns (part 1): day, tenantId, userId, executionsToday, cap, pctOfCap
+// Expected columns (part 2): day, event, reason, denials
+let window = 7d;
+customMetrics
+| where timestamp > ago(window) and name == "ai.metering.capability_invocations"
+| extend entryPath = tostring(customDimensions["entry.path"])
+| where entryPath == "event"
+| extend tenantId = tostring(customDimensions["tenant.id"]),
+         userId   = tostring(customDimensions["user.id"]),
+         cap      = toint(customDimensions["budget.cap"])
+| summarize executionsToday = sum(valueSum), cap = max(cap) by day = bin(timestamp, 1d), tenantId, userId
+| extend pctOfCap = iif(cap > 0, round(100.0 * executionsToday / cap, 1), real(null))
+| order by day desc, pctOfCap desc
+
+// -- Part 2: bound denials incl. daily-cap hits (meter Sprk.Bff.Api.EventRules;
+//    no user dims by design — the per-user consumption view is part 1) ---------
+// customMetrics
+// | where timestamp > ago(7d) and name == "eventpath.bound_denial"
+// | extend event = tostring(customDimensions["event"]), reason = tostring(customDimensions["reason"])
+// | summarize denials = sum(valueSum) by day = bin(timestamp, 1d), event, reason
+// | order by day desc

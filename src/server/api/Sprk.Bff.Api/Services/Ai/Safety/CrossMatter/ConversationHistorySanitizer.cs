@@ -10,7 +10,7 @@ namespace Sprk.Bff.Api.Services.Ai.Safety.CrossMatter;
 /// AI-generated assistant conclusions and all user messages are always retained.
 ///
 /// Retrieval messages are identified by the <see cref="RetrievalContentMarker"/> prefix
-/// embedded in the content by the BFF's DocumentSearchTools and KnowledgeRetrievalTools
+/// embedded in the content by the BFF's DocumentSearchHandler and KnowledgeRetrievalHandler
 /// when they store search results in the conversation history.
 ///
 /// ADR-015: document content MUST NOT appear in Tier 1 app logs.  This service only logs
@@ -21,7 +21,7 @@ namespace Sprk.Bff.Api.Services.Ai.Safety.CrossMatter;
 public sealed class ConversationHistorySanitizer : IConversationHistorySanitizer
 {
     /// <summary>
-    /// Prefix embedded by <c>DocumentSearchTools</c> and <c>KnowledgeRetrievalTools</c> in
+    /// Prefix embedded by <c>DocumentSearchHandler</c> and <c>KnowledgeRetrievalHandler</c> in
     /// System-role messages that carry retrieved document passages.
     ///
     /// Format: <c>__retrieval_result__\n{passage text}</c>

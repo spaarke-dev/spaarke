@@ -10,8 +10,6 @@
     "Sprk.Bff.Api.Tests.Services.ScorecardCalculatorPerformanceTests.Performance_AllAreas_CompletesWithin500ms",
     "Sprk.Bff.Api.Tests.Services.ScorecardCalculatorPerformanceTests.Performance_LargeDataset_CompletesWithin500ms",
     "Sprk.Bff.Api.Tests.Services.ScorecardCalculatorPerformanceTests.Performance_BatchQuery_SingleRoundTrip",
-    "Sprk.Bff.Api.Tests.Services.Ai.Chat.PlaybookDispatcherIntegrationTests.DispatchCompletes_WithinTwoSeconds_WithMockServices",
-    "Sprk.Bff.Api.Tests.Services.Ai.Chat.Tools.CompareDocumentsToolTests.CompareDocumentsAsync_FetchesBothDocumentsInParallel",
     "Sprk.Bff.Api.Tests.Services.Ai.ScopeResolverServiceTests.SearchScopesAsync_PerformanceUnder1Second_ForTypicalQuery"
   ],
   "ConcurrencySensitive": [

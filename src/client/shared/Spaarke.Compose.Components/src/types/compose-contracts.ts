@@ -43,7 +43,7 @@
  *     state (selection span, focused clause, artifact type) is PAYLOAD ONLY,
  *     consumed and discarded.
  *  3. Per refined ADR-013 (2026-05-20): the BFF AI dispatch path is
- *     `IConsumerRoutingService` + `IInvokePlaybookAi`. Frontend payloads that
+ *     `IConsumerRoutingService` + the BFF playbook-invocation boundary. Frontend payloads that
  *     trigger AI dispatch carry the JPS scope name (`compose-selection` /
  *     `compose-document`) so the BFF facade can resolve the playbook.
  *     Frontend never speaks directly to AI internals (`IOpenAiClient`,

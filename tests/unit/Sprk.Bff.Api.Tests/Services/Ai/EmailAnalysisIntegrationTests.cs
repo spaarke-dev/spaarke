@@ -19,9 +19,11 @@ namespace Sprk.Bff.Api.Tests.Services.Ai;
 /// </summary>
 public class EmailAnalysisIntegrationTests
 {
-    // chat-routing-redesign-r1 task 020 (FR-03 Pattern B): well-known playbooks resolve
-    // via IPlaybookLookupService.GetByIdAsync(stableId) — these mirror the consts inside
-    // AppOnlyAnalysisService so the fixture can stub the lookup deterministically.
+    // FR-P3-01 (spaarke-ai-architecture-redesign-r1 task 040): "Email Analysis" resolves
+    // exclusively via IConsumerRoutingService.ResolveAsync(ConsumerTypes.EmailAnalysis)
+    // against the sprk_playbookconsumer Binding table, then materializes through
+    // IPlaybookLookupService.GetByIdAsync(routedGuid). This GUID is what the fixture's
+    // routing mock returns (mirrors the seeded spaarkedev1 Binding row).
     private const string EmailAnalysisPlaybookId = "bc71facf-6af1-f011-8406-7ced8d1dc988";
 
     private readonly Mock<IDataverseService> _dataverseServiceMock;
@@ -204,8 +206,19 @@ public class EmailAnalysisIntegrationTests
                 };
             });
 
-        // Setup playbook lookup — FR-03 Pattern B (task 020): "Email Analysis" resolves via
-        // IPlaybookLookupService.GetByIdAsync(stableId) instead of IPlaybookService.GetByNameAsync.
+        // Setup routing + playbook lookup — FR-P3-01: "Email Analysis" resolves via the
+        // Binding table (IConsumerRoutingService.ResolveAsync) then materializes through
+        // IPlaybookLookupService.GetByIdAsync(routedGuid). Without the routing setup the
+        // service throws InvalidOperationException (hard cutover — no fallback GUID).
+        _consumerRoutingMock
+            .Setup(x => x.ResolveAsync(
+                Sprk.Bff.Api.Services.Ai.PublicContracts.ConsumerTypes.EmailAnalysis,
+                It.IsAny<string?>(),
+                It.IsAny<Sprk.Bff.Api.Services.Ai.PublicContracts.IRoutingContext?>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Guid.Parse(EmailAnalysisPlaybookId));
+
         var playbook = CreateEmailAnalysisPlaybook();
         _playbookLookupMock
             .Setup(x => x.GetByIdAsync(EmailAnalysisPlaybookId, It.IsAny<CancellationToken>()))
@@ -528,8 +541,16 @@ public class EmailAnalysisIntegrationTests
             .Setup(x => x.ExtractAsync(It.IsAny<Stream>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(new TextExtractionResult { Success = true, Text = "text" });
 
-        // FR-03 Pattern B (task 020): "Email Analysis" resolves via stable-ID lookup —
-        // simulate playbook-not-found at the new resolution path.
+        // FR-P3-01: routing resolves (Binding row exists) but the playbook lookup fails —
+        // simulate playbook-not-found at the materialization step.
+        _consumerRoutingMock
+            .Setup(x => x.ResolveAsync(
+                Sprk.Bff.Api.Services.Ai.PublicContracts.ConsumerTypes.EmailAnalysis,
+                It.IsAny<string?>(),
+                It.IsAny<Sprk.Bff.Api.Services.Ai.PublicContracts.IRoutingContext?>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(Guid.Parse(EmailAnalysisPlaybookId));
         _playbookLookupMock
             .Setup(x => x.GetByIdAsync(EmailAnalysisPlaybookId, It.IsAny<CancellationToken>()))
             .ThrowsAsync(new KeyNotFoundException("Playbook not found"));
@@ -544,6 +565,53 @@ public class EmailAnalysisIntegrationTests
         // Assert
         result.IsSuccess.Should().BeFalse();
         result.ErrorMessage.Should().Contain("Playbook");
+    }
+
+    [Fact]
+    public async Task AnalyzeEmailAsync_NoBindingRowResolves_ReturnsFailedResult()
+    {
+        // FR-P3-01 hard cutover: when NO sprk_playbookconsumer Binding row resolves
+        // 'email-analysis' (routing mock defaults to null), the analysis fails hard —
+        // there is no hardcoded fallback playbook GUID anymore.
+        var emailId = Guid.NewGuid();
+        var mainDocument = CreateEmailDocument(emailId: emailId);
+
+        _dataverseServiceMock
+            .Setup(x => x.GetDocumentByEmailLookupAsync(emailId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(mainDocument);
+
+        _dataverseServiceMock
+            .Setup(x => x.GetDocumentsByParentAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new List<DocumentEntity>());
+
+        _textExtractorMock
+            .Setup(x => x.IsSupported(It.IsAny<string>()))
+            .Returns(true);
+
+        _speFileOperationsMock
+            .Setup(x => x.DownloadFileAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new MemoryStream(System.Text.Encoding.UTF8.GetBytes("test")));
+
+        _textExtractorMock
+            .Setup(x => x.ExtractAsync(It.IsAny<Stream>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new TextExtractionResult { Success = true, Text = "text" });
+
+        _dataverseServiceMock
+            .Setup(x => x.UpdateDocumentAsync(It.IsAny<string>(), It.IsAny<UpdateDocumentRequest>(), It.IsAny<CancellationToken>()))
+            .Returns(Task.CompletedTask);
+
+        // NOTE: _consumerRoutingMock deliberately NOT set up → ResolveAsync returns null.
+
+        // Act
+        var result = await _service.AnalyzeEmailAsync(emailId);
+
+        // Assert
+        result.IsSuccess.Should().BeFalse();
+        result.ErrorMessage.Should().Contain("Playbook");
+        _playbookLookupMock.Verify(
+            x => x.GetByIdAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never,
+            "FR-P3-01 — no playbook lookup may occur when the Binding table does not resolve");
     }
 
     [Fact(Skip = "Requires fully mocked playbook orchestration - IsSuccess returns false without complete pipeline setup")]

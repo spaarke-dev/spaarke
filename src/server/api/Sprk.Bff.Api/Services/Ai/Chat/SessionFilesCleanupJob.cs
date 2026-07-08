@@ -66,7 +66,7 @@ namespace Sprk.Bff.Api.Services.Ai.Chat;
 ///   <item>ADR-014: tenant + session predicates always present on delete filter.</item>
 ///   <item>ADR-018: no new feature flag — kill-switch inherits compound gate.</item>
 ///   <item>R5 CLAUDE.md §3.1: mirrors the
-///     <c>PlaybookIndexingBackgroundService</c> + <c>ScheduledRagIndexingService</c>
+///     <c>ScheduledRagIndexingService</c> hosted-service
 ///     patterns — no parallel job framework.</item>
 /// </list>
 /// </para>

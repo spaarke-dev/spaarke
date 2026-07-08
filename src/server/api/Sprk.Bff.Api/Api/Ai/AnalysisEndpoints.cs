@@ -220,7 +220,7 @@ public static class AnalysisEndpoints
     /// <para>
     /// <b>R7 Wave 4 (FR-11)</b>: This endpoint dispatches the canonical
     /// <c>IPlaybookOrchestrationService.ExecuteAsync</c> facade per ADR-013 Invariant 1
-    /// ("IInvokePlaybookAi triangle is the canonical AI invocation surface"). Task 041 migrated
+    /// (the facade triangle was the canonical AI invocation surface). Task 041 migrated
     /// this endpoint from the legacy direct-invocation path; task 042 deleted the legacy
     /// pipeline entirely (see <c>notes/spikes/executeanalysisasync-caller-audit.md</c>).
     /// </para>
@@ -244,8 +244,12 @@ public static class AnalysisEndpoints
         IPlaybookOrchestrationService playbookOrchestrationService,
         AnalysisDocumentLoader documentLoader,
         IOptions<AnalysisOptions> options,
-        IOptions<LinearConsumersOptions> linearOptions,
-        DocumentProfileService documentProfileService,
+        IConsumerRoutingService consumerRouting,
+        IActionResolver actionResolver,
+        IDocumentTextSource documentTextSource,
+        IActionRunner actionRunner,
+        IDocumentDataverseService documentDataverseService,
+        IPostUploadIndexingEnqueuer indexingEnqueuer,
         NotificationService notificationService,
         IGenericEntityService entityService,
         HttpContext context,
@@ -299,23 +303,24 @@ public static class AnalysisEndpoints
             string.Join(",", request.DocumentIds), request.ActionId, request.PlaybookId, context.TraceIdentifier);
 
         // R7 Wave 12 (2026-07-02): Linear AI Consumer dispatch. When the incoming
-        // playbookId matches a configured LinearConsumers entry (e.g., the Document
-        // Profile playbook), route through the code-defined DocumentProfileService
-        // rather than the Playbook Engine — same client SSE contract, no
-        // interpreter tax. Fall-through preserves engine dispatch for all other
-        // consumers (Chat / Insight Engine / etc.). See
-        // docs/architecture/SPAARKE-LINEAR-AI-CONSUMER-ARCHITECTURE.md.
-        var consumerTypeForLinear = linearOptions.Value.GetConsumerTypeForPlaybookId(request.PlaybookId.Value);
-        logger.LogInformation(
-            "[LinearDispatch] PlaybookId={PlaybookId} LinearMapSize={MapSize} PlaybookMapKeys=[{Keys}] PlaybookMapValues=[{Values}] MatchedConsumer={Consumer} ConsumerTypesDocumentProfile={ExpectedConsumer}",
-            request.PlaybookId.Value,
-            linearOptions.Value.PlaybookIds.Count,
-            string.Join(",", linearOptions.Value.PlaybookIds.Keys),
-            string.Join(",", linearOptions.Value.PlaybookIds.Values.Select(v => v.ToString())),
-            consumerTypeForLinear ?? "(none)",
-            ConsumerTypes.DocumentProfile);
+        // playbookId is the Document Profile playbook, route through the prompted-executor
+        // document-profile pipeline below rather than the Playbook Engine — same client SSE
+        // contract, no interpreter tax. Fall-through preserves engine dispatch for all
+        // other consumers (Chat / Insight Engine / etc.). See
+        // docs/architecture/SPAARKE-LINEAR-AI-CONSUMER-ARCHITECTURE.md. FR-P3-05
+        // (task 044): the consumer-specific wrapper class was absorbed into this endpoint —
+        // the pipeline composes the executor primitives directly.
+        //
+        // FR-P3-01 (spaarke-ai-architecture-redesign-r1 task 040): the LinearConsumers
+        // config reverse-lookup was replaced by a compare against the document-profile
+        // Binding row's sprk_playbook (single routing surface, ADR-039 / NFR-08). Clients
+        // still submit the legacy playbookId; ResolveAsync is cached ~5 min, so the
+        // per-request call is fine.
+        var documentProfilePlaybookId = await consumerRouting.ResolveAsync(
+            ConsumerTypes.DocumentProfile, cancellationToken: cancellationToken);
 
-        if (string.Equals(consumerTypeForLinear, ConsumerTypes.DocumentProfile, StringComparison.OrdinalIgnoreCase))
+        if (documentProfilePlaybookId.HasValue &&
+            documentProfilePlaybookId.Value == request.PlaybookId.Value)
         {
             if (request.DocumentIds.Length != 1)
             {
@@ -329,8 +334,10 @@ public static class AnalysisEndpoints
 
             try
             {
-                await foreach (var chunk in documentProfileService.ExecuteAsync(
-                    request.DocumentIds[0], context, parentEntity: null, cancellationToken))
+                await foreach (var chunk in ExecuteDocumentProfilePipelineAsync(
+                    request.DocumentIds[0], context, parentEntity: null,
+                    actionResolver, documentTextSource, actionRunner,
+                    documentDataverseService, indexingEnqueuer, logger, cancellationToken))
                 {
                     await WriteSSEAsync(response, chunk, cancellationToken);
                 }
@@ -875,6 +882,336 @@ public static class AnalysisEndpoints
 
         await response.WriteAsync(sseData, cancellationToken);
         await response.Body.FlushAsync(cancellationToken);
+    }
+
+    // =========================================================================
+    // Document Profile pipeline (FR-P3-05 wrapper absorption — task 044)
+    // =========================================================================
+
+    /// <summary>
+    /// Executes the Document Profile flow on the prompted executor: resolve the
+    /// document-profile Binding row's Action, extract the document text (SPE download +
+    /// Redis ETag cache), run the LLM via the Action's prompt + schema, persist the
+    /// mapped fields via the SDK-based document service, and enqueue RAG indexing
+    /// (best-effort). Behavior preserved verbatim from the deleted wrapper class;
+    /// emits <see cref="AnalysisStreamChunk"/> events so the endpoint writes SSE
+    /// identically to the engine path.
+    /// </summary>
+    private static async IAsyncEnumerable<AnalysisStreamChunk> ExecuteDocumentProfilePipelineAsync(
+        Guid documentId,
+        HttpContext httpContext,
+        ParentEntityContext? parentEntity,
+        IActionResolver actionResolver,
+        IDocumentTextSource textSource,
+        IActionRunner actionRunner,
+        IDocumentDataverseService documentService,
+        IPostUploadIndexingEnqueuer indexingEnqueuer,
+        ILogger logger,
+        [System.Runtime.CompilerServices.EnumeratorCancellation] CancellationToken cancellationToken)
+    {
+        yield return AnalysisStreamChunk.Metadata(documentId, $"document-profile:{documentId}");
+
+        // Build the per-request context. TenantId is required for RAG indexing —
+        // resolve it from the caller's JWT (same claim path AnalysisDocumentLoader uses).
+        var tenantId = httpContext.User?.FindFirst("tid")?.Value
+            ?? httpContext.User?.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value;
+
+        var runContext = new LinearRunContext
+        {
+            ConsumerType = ConsumerTypes.DocumentProfile,
+            CorrelationId = httpContext.TraceIdentifier,
+            TenantId = tenantId,
+        };
+
+        // Step 1: Resolve the Action row (SystemPrompt + OutputSchemaJson + Temperature).
+        yield return AnalysisStreamChunk.Progress("resolving_action", "Resolving action configuration…");
+        AnalysisAction? action = null;
+        string? actionError = null;
+        try
+        {
+            action = await actionResolver.ResolveAsync(ConsumerTypes.DocumentProfile, cancellationToken);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to resolve Document Profile action");
+            actionError = $"Failed to resolve action: {ex.Message}";
+        }
+        if (actionError != null)
+        {
+            yield return AnalysisStreamChunk.FromError(actionError);
+            yield break;
+        }
+
+        // Step 2: Extract document text (SPE download + text extraction with Redis ETag cache).
+        yield return AnalysisStreamChunk.Progress("extracting_text", "Extracting document text…");
+        DocumentText? docText = null;
+        string? textError = null;
+        try
+        {
+            docText = await textSource.ExtractFromDocumentIdAsync(documentId, httpContext, cancellationToken);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to extract text for document {DocumentId}", documentId);
+            textError = $"Failed to extract document text: {ex.Message}";
+        }
+        if (textError != null)
+        {
+            yield return AnalysisStreamChunk.FromError(textError);
+            yield break;
+        }
+        if (string.IsNullOrWhiteSpace(docText!.ExtractedText))
+        {
+            logger.LogWarning("Document {DocumentId} has no extractable text; skipping profile", documentId);
+            yield return AnalysisStreamChunk.FromError("Document has no extractable text.");
+            yield break;
+        }
+
+        // Step 3: Run the LLM via the Action's prompt + schema.
+        yield return AnalysisStreamChunk.Progress("calling_llm", "Analyzing document with AI…");
+        JsonElement aiOutput = default;
+        string? llmError = null;
+        try
+        {
+            aiOutput = await actionRunner.RunAsync(action!, docText, runContext, cancellationToken);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "LLM call failed for document {DocumentId}", documentId);
+            llmError = $"AI analysis failed: {ex.Message}";
+        }
+        if (llmError != null)
+        {
+            yield return AnalysisStreamChunk.FromError(llmError);
+            yield break;
+        }
+
+        // Emit the summary text as a chunk so the client's summary display area renders
+        // the actual content (matches the engine path's streaming-tokens behavior).
+        // Prefer sprk_filesummary; fall back to sprk_filetldr.
+        if (TryGetStringProperty(aiOutput, "sprk_filesummary", out var summaryText)
+            || TryGetStringProperty(aiOutput, "sprk_filetldr", out summaryText))
+        {
+            if (!string.IsNullOrWhiteSpace(summaryText))
+            {
+                yield return AnalysisStreamChunk.TextChunk(summaryText);
+            }
+        }
+
+        // Step 4: Build Dataverse field mapping directly from the AI output (the output
+        // schema uses sprk_* property names natively — typed Choice coercion for
+        // sprk_documenttype + a computed search profile).
+        var fields = BuildDocumentProfileFields(aiOutput, docText.FileName, parentEntity, logger);
+
+        // sprk_filetype is deterministic (comes from the file extension) — don't ask the
+        // LLM for it. Column is 10 chars; extension without leading dot, upper-cased.
+        var extension = Path.GetExtension(docText.FileName)?.TrimStart('.').ToUpperInvariant();
+        if (!string.IsNullOrWhiteSpace(extension))
+        {
+            fields["sprk_filetype"] = extension.Length > 10 ? extension[..10] : extension;
+        }
+
+        logger.LogInformation(
+            "Document {DocumentId} profile — mapped {FieldCount} fields for update: {Fields}",
+            documentId, fields.Count, string.Join(",", fields.Keys));
+
+        // Step 5: Persist via the SDK-based document service (no PATCH construction).
+        yield return AnalysisStreamChunk.Progress("updating_record", "Updating document record…");
+        string? updateError = null;
+        try
+        {
+            await documentService.UpdateDocumentFieldsAsync(documentId.ToString(), fields, cancellationToken);
+            logger.LogInformation(
+                "Updated document {DocumentId} with {FieldCount} profile fields",
+                documentId, fields.Count);
+        }
+        catch (OperationCanceledException) { throw; }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Failed to update document {DocumentId} with profile fields", documentId);
+            updateError = $"Failed to update document record: {ex.Message}";
+        }
+        if (updateError != null)
+        {
+            yield return AnalysisStreamChunk.FromError(updateError);
+            yield break;
+        }
+
+        // Step 6: Enqueue RAG indexing (best-effort — failure is logged but non-fatal).
+        yield return AnalysisStreamChunk.Progress("enqueuing_indexing", "Queuing document for search indexing…");
+        await TryEnqueueDocumentProfileIndexingAsync(
+            documentId, docText, tenantId, parentEntity, indexingEnqueuer, httpContext, logger, cancellationToken);
+
+        // Terminator — clients look for Type="done" then [DONE] SSE terminator to close.
+        yield return AnalysisStreamChunk.Completed(
+            documentId,
+            new TokenUsage(Input: 0, Output: 0));
+    }
+
+    private static async Task<bool> TryEnqueueDocumentProfileIndexingAsync(
+        Guid documentId,
+        DocumentText docText,
+        string? tenantId,
+        ParentEntityContext? parentEntity,
+        IPostUploadIndexingEnqueuer indexingEnqueuer,
+        HttpContext httpContext,
+        ILogger logger,
+        CancellationToken cancellationToken)
+    {
+        if (string.IsNullOrEmpty(docText.GraphDriveId) || string.IsNullOrEmpty(docText.GraphItemId))
+        {
+            logger.LogInformation(
+                "Skipping RAG indexing for document {DocumentId}: missing SPE identifiers", documentId);
+            return false;
+        }
+
+        if (string.IsNullOrWhiteSpace(tenantId))
+        {
+            logger.LogWarning(
+                "Skipping RAG indexing for document {DocumentId}: no tenantId in caller claims", documentId);
+            return false;
+        }
+
+        var request = new PostUploadIndexingRequest(
+            TenantId: tenantId,
+            DriveId: docText.GraphDriveId,
+            ItemId: docText.GraphItemId,
+            FileName: docText.FileName,
+            FileSizeBytes: null,
+            ContentType: null,
+            DocumentId: documentId.ToString(),
+            ParentEntity: parentEntity,
+            SearchIndexName: null,
+            Source: "LinearDocumentProfile",
+            CorrelationId: httpContext.TraceIdentifier);
+
+        try
+        {
+            var result = await indexingEnqueuer.EnqueueIfApplicableAsync(request, httpContext, cancellationToken);
+            return result.JobSubmitted;
+        }
+        catch (Exception ex)
+        {
+            logger.LogWarning(ex, "RAG indexing enqueue threw for document {DocumentId}", documentId);
+            return false;
+        }
+    }
+
+    /// <summary>
+    /// Case-insensitive top-level string property accessor for the AI structured
+    /// output. Returns false when the property is absent or not a string.
+    /// </summary>
+    private static bool TryGetStringProperty(JsonElement root, string propertyName, out string? value)
+    {
+        value = null;
+        if (root.ValueKind != JsonValueKind.Object) return false;
+
+        foreach (var prop in root.EnumerateObject())
+        {
+            if (prop.Name.Equals(propertyName, StringComparison.OrdinalIgnoreCase)
+                && prop.Value.ValueKind == JsonValueKind.String)
+            {
+                value = prop.Value.GetString();
+                return true;
+            }
+        }
+        return false;
+    }
+
+    /// <summary>
+    /// Directly maps the AI structured output (whose top-level property names are the
+    /// target sprk_document field names per the Action's <c>sprk_outputschemajson</c>)
+    /// into a Dataverse-ready field dictionary. Special handling:
+    /// <c>sprk_documenttype</c> → Choice coercion via <see cref="DocumentTypeMapper"/>;
+    /// arrays/objects → JSON blobs; <c>sprk_searchprofile</c> computed via
+    /// <see cref="DocumentProfileFieldMapper.BuildSearchProfile"/>.
+    /// </summary>
+    private static Dictionary<string, object?> BuildDocumentProfileFields(
+        JsonElement root,
+        string fileName,
+        ParentEntityContext? parentEntity,
+        ILogger logger)
+    {
+        var fields = new Dictionary<string, object?>(StringComparer.OrdinalIgnoreCase);
+        if (root.ValueKind != JsonValueKind.Object) return fields;
+
+        // Sibling dict of stringified outputs used for BuildSearchProfile below.
+        var stringOutputs = new Dictionary<string, string>(StringComparer.OrdinalIgnoreCase);
+
+        foreach (var prop in root.EnumerateObject())
+        {
+            var name = prop.Name;
+            var kind = prop.Value.ValueKind;
+
+            switch (kind)
+            {
+                case JsonValueKind.Null:
+                case JsonValueKind.Undefined:
+                    continue;
+
+                case JsonValueKind.String:
+                    {
+                        var stringValue = prop.Value.GetString();
+                        if (string.IsNullOrWhiteSpace(stringValue)) continue;
+
+                        if (name.Equals("sprk_documenttype", StringComparison.OrdinalIgnoreCase))
+                        {
+                            var optionValue = DocumentTypeMapper.ToDataverseValue(stringValue);
+                            if (optionValue.HasValue)
+                            {
+                                // Dataverse SDK Choice/OptionSet attributes require OptionSetValue,
+                                // not a raw int. R5 Doc 06 Choice-field coercion pattern.
+                                fields[name] = new OptionSetValue(optionValue.Value);
+                                stringOutputs[name] = stringValue;
+                            }
+                            else
+                            {
+                                logger.LogWarning(
+                                    "Could not coerce documentType='{DocType}' to a Dataverse Choice value; dropping the field",
+                                    stringValue);
+                            }
+                        }
+                        else
+                        {
+                            fields[name] = stringValue;
+                            stringOutputs[name] = stringValue;
+                        }
+                        break;
+                    }
+
+                case JsonValueKind.Array:
+                case JsonValueKind.Object:
+                    {
+                        var jsonBlob = prop.Value.GetRawText();
+                        fields[name] = jsonBlob;
+                        stringOutputs[name] = jsonBlob;
+                        break;
+                    }
+
+                default:
+                    {
+                        var raw = prop.Value.GetRawText();
+                        fields[name] = raw;
+                        stringOutputs[name] = raw;
+                        break;
+                    }
+            }
+        }
+
+        var searchProfile = DocumentProfileFieldMapper.BuildSearchProfile(
+            stringOutputs,
+            parentEntityName: parentEntity?.EntityName,
+            parentEntityType: parentEntity?.EntityType,
+            fileName: fileName);
+        if (!string.IsNullOrWhiteSpace(searchProfile))
+        {
+            fields["sprk_searchprofile"] = searchProfile;
+        }
+
+        return fields;
     }
 }
 

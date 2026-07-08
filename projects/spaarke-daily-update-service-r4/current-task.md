@@ -100,7 +100,7 @@ All 6 nodes now have proper executors:
 
 | Item | Owner | Scope | ETA |
 |---|---|---|---|
-| `/narrate` end-to-end JWT verification | User | R4 graduation gate | Awaiting retest |
+| `/narrate` end-to-end JWT verification | User | R4 graduation gate — **re-pointed 2026-07-05**: resolves at `spaarke-ai-architecture-redesign-r1` **Phase P3, FR-P3-04 / gate G-P3** (Daily Briefing as first `coded` composite Action; Issue #550). Formerly R7 W10 T101 (FR-15) — R7 closed/absorbed per its `notes/close-out-absorbed-by-ai-architecture-redesign-r1.md`; R7 W11 T118 already operator-verified the live-render path in spaarkedev1 | Retest at redesign-r1 G-P3 browser UAT |
 | Summarize-document 500 — DI binding bug | Owner decision | NOT R4 (chat-routing-redesign-r1 follow-on) | 3 fix options in `notes/uat/chat-summarize-500-diagnosis.md` |
 | PB-016/018/019 membership-scope re-deploy | Owner approval | R4 spec deliverable (but not blocking graduation) | Repo JSON corrected; deploy needs approval |
 | Deploy-Playbook.ps1 actionCode lint hardening | R5 tech debt | Platform | New backlog item |

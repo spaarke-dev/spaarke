@@ -1,4 +1,6 @@
 using System.Diagnostics;
+using System.Runtime.ExceptionServices;
+using System.Security.Claims;
 using System.Text;
 using System.Text.Json;
 using Microsoft.Extensions.DependencyInjection;
@@ -10,6 +12,7 @@ using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
+using Sprk.Bff.Api.Services.Ai.EventRules;
 using Sprk.Bff.Api.Services.Ai.Telemetry;
 
 namespace Sprk.Bff.Api.Api.Ai;
@@ -132,6 +135,45 @@ public static class ChatDocumentEndpoints
             .ProducesProblem(422)
             .ProducesProblem(429)
             .ProducesProblem(500);
+
+        // POST /api/ai/chat/sessions/{sessionId}/events/document-uploaded — the Event entry
+        // path emission point (FR-P1-03, ai-architecture-redesign-r1 task 022). The client
+        // signals batch completion here (per-file 202s above can't see batch boundaries or
+        // typed-command context); the SERVER owns every routing + bounds decision.
+        group.MapPost("/sessions/{sessionId}/events/document-uploaded", FireDocumentUploadedEventAsync)
+            .AddAiAuthorizationFilter()
+            .RequireRateLimiting("ai-context")
+            .WithName("FireDocumentUploadedEvent")
+            .WithSummary("Fire the document_uploaded event rule for a completed upload batch (Event path, FR-P1-03)")
+            .WithDescription(
+                "Resolves the document_uploaded event rule from sprk_playbookconsumer.sprk_oneventbindings " +
+                "(classify(1) → summarize(2)) and streams ChatSseEvent SSE items: event_classification, " +
+                "event_output / event_confirmation (M4 policy), chips, done — or a graceful event_notice when a " +
+                "FR-P1-03 bound (daily cap, opt-out, explicit-command supersede) or the empty-attachments " +
+                "precondition denies the run. Every output is ledger-written before it renders (ADR-040).")
+            .Produces(StatusCodes.Status200OK, contentType: "text/event-stream")
+            .ProducesProblem(400)
+            .ProducesProblem(401)
+            .ProducesProblem(403)
+            .ProducesProblem(404)
+            .ProducesProblem(429)
+            .ProducesProblem(500)
+            .ProducesProblem(503);
+
+        // GET/PUT /api/ai/chat/event-rules/opt-out — the per-user Event-path opt-out
+        // (FR-P1-03 bound b). Preference routes: token auth only (no AI resource filter);
+        // backed by IEventPathUserState (unconditionally registered — no AI dependency).
+        group.MapGet("/event-rules/opt-out", GetEventRulesOptOutAsync)
+            .WithName("GetEventRulesOptOut")
+            .WithSummary("Read the caller's Event-path auto-analysis opt-out state")
+            .Produces<EventRulesOptOutResponse>(200)
+            .ProducesProblem(401);
+        group.MapPut("/event-rules/opt-out", SetEventRulesOptOutAsync)
+            .WithName("SetEventRulesOptOut")
+            .WithSummary("Set the caller's Event-path auto-analysis opt-out state")
+            .Produces<EventRulesOptOutResponse>(200)
+            .ProducesProblem(400)
+            .ProducesProblem(401);
 
         return app;
     }
@@ -434,7 +476,7 @@ public static class ChatDocumentEndpoints
         //   - IndexSessionFileAsync writes chunks into the `spaarke-session-files` AI Search index
         //     (carries tenantId + sessionId per ADR-014 / R5 FR-09).
         //   - ChatSession.UploadedFiles gains a new ChatSessionFile entry so
-        //     SessionSummarizeOrchestrator (task 012) sees the file via
+        //     the summarize dispatch path (task 012) sees the file via
         //     session.UploadedFiles instead of declining.
         //   - UpdateSessionCacheAsync persists the manifest through Redis hot tier
         //     + fire-and-forget Cosmos warm tier (decision D-06).
@@ -454,7 +496,7 @@ public static class ChatDocumentEndpoints
             // reaching here without a pipeline indicates a configuration anomaly.
             logger.LogWarning(
                 "RagIndexingPipeline unavailable — skipping session-files indexing for DocumentId={DocumentId}, SessionId={SessionId}. " +
-                "Legacy Redis storage succeeded; SessionSummarizeOrchestrator will not see this file.",
+                "Legacy Redis storage succeeded; the summarize dispatch path will not see this file.",
                 documentId, sessionId);
         }
         else
@@ -521,13 +563,22 @@ public static class ChatDocumentEndpoints
                 };
 
                 // Build the ChatSessionFile manifest entry (six fields per ChatSession.cs §134).
+                //
+                // R7 Wave 12.3 Phase 12.3a UAT fix (2026-07-03): also persist ExtractedText
+                // (the same text just fed into the RAG indexing pipeline). This closes the
+                // Azure AI Search index-catchup race that caused "session files contained no
+                // text to summarize" errors when users typed "summarize this document" within
+                // seconds of upload. SessionFileTextSource reads this directly — no RAG hop.
                 var newFile = new ChatSessionFile(
                     FileId: documentId,
                     FileName: filename,
                     ContentType: sessionFileContentType,
                     SizeBytes: file.Length,
                     SearchDocumentIdsCsv: searchDocumentIdsCsv,
-                    UploadedAt: DateTimeOffset.UtcNow);
+                    UploadedAt: DateTimeOffset.UtcNow)
+                {
+                    ExtractedText = extractionResult.Text,
+                };
 
                 // Append to UploadedFiles (immutable record — use `with` expression).
                 var updatedFiles = (session.UploadedFiles ?? Array.Empty<ChatSessionFile>())
@@ -563,7 +614,7 @@ public static class ChatDocumentEndpoints
                 // back-compat for any consumer still on the legacy path.
                 logger.LogError(ex,
                     "R5 session-files indexing OR manifest update failed for DocumentId={DocumentId}, SessionId={SessionId}. " +
-                    "Legacy Redis writes succeeded; SessionSummarizeOrchestrator will not see this file in UploadedFiles.",
+                    "Legacy Redis writes succeeded; the summarize dispatch path will not see this file in UploadedFiles.",
                     documentId, sessionId);
             }
         }
@@ -825,6 +876,270 @@ public static class ChatDocumentEndpoints
     }
 
     // =========================================================================
+    // Event path (FR-P1-03, ai-architecture-redesign-r1 task 022)
+    // =========================================================================
+
+    /// <summary>
+    /// Handler for <c>POST /api/ai/chat/sessions/{sessionId}/events/document-uploaded</c>.
+    /// Thin SSE writer over <see cref="IEventRulesService.FireAsync"/> — no routing or
+    /// bounds logic lives here (ADR-039: the Binding table routes; the Event Rules
+    /// service enforces bounds server-side regardless of what the client sends).
+    /// SSE probe-then-stream pattern mirrors <see cref="SummarizeSessionEndpoint"/>.
+    /// </summary>
+    private static async Task FireDocumentUploadedEventAsync(
+        string sessionId,
+        [Microsoft.AspNetCore.Mvc.FromBody] DocumentUploadedEventRequest? body,
+        HttpContext httpContext,
+        IEventRulesService eventRules,
+        ILoggerFactory loggerFactory)
+    {
+        var logger = loggerFactory.CreateLogger("Sprk.Bff.Api.Api.Ai.ChatDocumentEndpoints");
+        var cancellationToken = httpContext.RequestAborted;
+        var response = httpContext.Response;
+        var correlationId = httpContext.TraceIdentifier;
+
+        // ─── Pre-stream validation (ProblemDetails, ADR-019) ────────────────────────
+        if (string.IsNullOrWhiteSpace(sessionId) || !Guid.TryParse(sessionId, out _))
+        {
+            await WriteEventProblemAsync(response, 400, "Bad Request",
+                "'sessionId' must be a valid GUID.", "sessionId.invalid", correlationId, cancellationToken);
+            return;
+        }
+
+        var tenantId = GetTenantIdClaim(httpContext);
+        if (string.IsNullOrWhiteSpace(tenantId))
+        {
+            await WriteEventProblemAsync(response, 401, "Unauthorized",
+                "Tenant identity ('tid' claim) not found in authentication token.",
+                "auth.tid-missing", correlationId, cancellationToken);
+            return;
+        }
+
+        var userOid = GetUserOidClaim(httpContext);
+        if (string.IsNullOrWhiteSpace(userOid))
+        {
+            await WriteEventProblemAsync(response, 401, "Unauthorized",
+                "User identity ('oid' claim) not found in authentication token.",
+                "auth.oid-missing", correlationId, cancellationToken);
+            return;
+        }
+
+        var request = new SurfaceEventRequest(
+            EventName: SurfaceEventNames.DocumentUploaded,
+            TenantId: tenantId,
+            SessionId: sessionId,
+            UserOid: userOid,
+            FileIds: body?.FileIds,
+            TypedCommand: body?.TypedCommand,
+            CorrelationId: correlationId);
+
+        logger.LogInformation(
+            "[EVENT-RULES] document_uploaded fired. tenant={TenantId} session={SessionId} oid={Oid} " +
+            "fileIds={FileIdCount} typedCommand={HasTypedCommand} correlationId={CorrelationId}",
+            tenantId, sessionId, userOid, body?.FileIds?.Count ?? 0,
+            !string.IsNullOrWhiteSpace(body?.TypedCommand), correlationId);
+
+        // ─── Probe the first item BEFORE setting SSE headers (early-failure → ProblemDetails)
+        IAsyncEnumerator<ChatSseEvent>? enumerator = null;
+        var hasFirst = false;
+        ChatSseEvent first = default!;
+        ExceptionDispatchInfo? earlyFailure = null;
+        try
+        {
+            enumerator = eventRules.FireAsync(request, cancellationToken).GetAsyncEnumerator(cancellationToken);
+            hasFirst = await enumerator.MoveNextAsync().ConfigureAwait(false);
+            if (hasFirst)
+            {
+                first = enumerator.Current;
+            }
+        }
+        catch (OperationCanceledException)
+        {
+            if (enumerator is not null)
+            {
+                try { await enumerator.DisposeAsync().ConfigureAwait(false); } catch { /* cleanup-tail */ }
+            }
+            return;
+        }
+        catch (Exception ex)
+        {
+            earlyFailure = ExceptionDispatchInfo.Capture(ex);
+        }
+
+        if (earlyFailure is not null)
+        {
+            if (enumerator is not null)
+            {
+                try { await enumerator.DisposeAsync().ConfigureAwait(false); } catch { /* cleanup-tail */ }
+            }
+
+            switch (earlyFailure.SourceException)
+            {
+                case FeatureDisabledException fde:
+                    logger.LogDebug(
+                        "[EVENT-RULES] Feature disabled. errorCode={ErrorCode} tenant={TenantId} session={SessionId}",
+                        fde.ErrorCode, tenantId, sessionId);
+                    await fde.AsFeatureDisabled503().ExecuteAsync(httpContext);
+                    return;
+                case InvalidOperationException ioe when ioe.Message.Contains("not found", StringComparison.OrdinalIgnoreCase):
+                    await WriteEventProblemAsync(response, 404, "Not Found",
+                        "The chat session was not found.", "event-rules.session-not-found",
+                        correlationId, cancellationToken);
+                    return;
+                case ArgumentException:
+                    logger.LogWarning(earlyFailure.SourceException,
+                        "[EVENT-RULES] Request validation failed tenant={TenantId} session={SessionId}",
+                        tenantId, sessionId);
+                    await WriteEventProblemAsync(response, 400, "Bad Request",
+                        "document_uploaded event request validation failed.",
+                        "event-rules.invalid-request", correlationId, cancellationToken);
+                    return;
+                default:
+                    logger.LogError(earlyFailure.SourceException,
+                        "[EVENT-RULES] Event rule failed (pre-stream) tenant={TenantId} session={SessionId}",
+                        tenantId, sessionId);
+                    await WriteEventProblemAsync(response, 500, "Internal Server Error",
+                        "Failed to start the event stream. See server logs for details.",
+                        "event-rules.internal-error", correlationId, cancellationToken);
+                    return;
+            }
+        }
+
+        // ─── SSE headers + stream (matches SummarizeSessionEndpoint / ChatEndpoints) ──
+        response.ContentType = "text/event-stream";
+        response.Headers.CacheControl = "no-cache";
+        response.Headers.Connection = "keep-alive";
+        response.Headers["X-Accel-Buffering"] = "no";
+
+        try
+        {
+            if (hasFirst)
+            {
+                await WriteEventSseAsync(response, first, cancellationToken);
+            }
+            while (enumerator is not null)
+            {
+                bool moveNext;
+                try
+                {
+                    moveNext = await enumerator.MoveNextAsync().ConfigureAwait(false);
+                }
+                catch (OperationCanceledException)
+                {
+                    break;
+                }
+                catch (Exception ex)
+                {
+                    // Never let the SSE stream die without a terminal marker.
+                    logger.LogError(ex,
+                        "[EVENT-RULES] Mid-stream exception tenant={TenantId} session={SessionId}",
+                        tenantId, sessionId);
+                    try
+                    {
+                        await WriteEventSseAsync(response,
+                            new ChatSseEvent("error", "The automatic analysis stream was interrupted."),
+                            CancellationToken.None);
+                    }
+                    catch { /* response may be unwritable */ }
+                    break;
+                }
+
+                if (!moveNext) break;
+                await WriteEventSseAsync(response, enumerator.Current, cancellationToken);
+            }
+        }
+        finally
+        {
+            if (enumerator is not null)
+            {
+                try { await enumerator.DisposeAsync().ConfigureAwait(false); } catch { /* cleanup-tail */ }
+            }
+        }
+    }
+
+    /// <summary>GET handler — the caller's Event-path opt-out state.</summary>
+    private static async Task<IResult> GetEventRulesOptOutAsync(
+        HttpContext httpContext,
+        IEventPathUserState userState)
+    {
+        var tenantId = GetTenantIdClaim(httpContext);
+        var userOid = GetUserOidClaim(httpContext);
+        if (string.IsNullOrWhiteSpace(tenantId) || string.IsNullOrWhiteSpace(userOid))
+        {
+            return Results.Problem(statusCode: 401, title: "Unauthorized",
+                detail: "Tenant or user identity not found in token claims");
+        }
+
+        var optedOut = await userState.IsOptedOutAsync(tenantId, userOid, httpContext.RequestAborted);
+        return Results.Ok(new EventRulesOptOutResponse(optedOut));
+    }
+
+    /// <summary>PUT handler — sets the caller's Event-path opt-out state.</summary>
+    private static async Task<IResult> SetEventRulesOptOutAsync(
+        [Microsoft.AspNetCore.Mvc.FromBody] EventRulesOptOutRequest? body,
+        HttpContext httpContext,
+        IEventPathUserState userState)
+    {
+        if (body is null)
+        {
+            return Results.Problem(statusCode: 400, title: "Bad Request",
+                detail: "Request body { optedOut: boolean } is required.");
+        }
+
+        var tenantId = GetTenantIdClaim(httpContext);
+        var userOid = GetUserOidClaim(httpContext);
+        if (string.IsNullOrWhiteSpace(tenantId) || string.IsNullOrWhiteSpace(userOid))
+        {
+            return Results.Problem(statusCode: 401, title: "Unauthorized",
+                detail: "Tenant or user identity not found in token claims");
+        }
+
+        await userState.SetOptOutAsync(tenantId, userOid, body.OptedOut, httpContext.RequestAborted);
+        return Results.Ok(new EventRulesOptOutResponse(body.OptedOut));
+    }
+
+    /// <summary>Tenant claim extraction — same dual-form pattern as UploadDocumentAsync.</summary>
+    private static string? GetTenantIdClaim(HttpContext httpContext) =>
+        httpContext.User.FindFirst("tid")?.Value
+        ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value
+        ?? httpContext.Request.Headers["X-Tenant-Id"].FirstOrDefault();
+
+    /// <summary>User oid claim extraction — same dual-form pattern as SummarizeSessionEndpoint.</summary>
+    private static string? GetUserOidClaim(HttpContext httpContext) =>
+        httpContext.User.FindFirst("oid")?.Value
+        ?? httpContext.User.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value
+        ?? httpContext.User.FindFirst(ClaimTypes.NameIdentifier)?.Value;
+
+    /// <summary>SSE frame writer — <c>data: {json}\n\n</c>, camelCase (chat wire format).</summary>
+    private static async Task WriteEventSseAsync(
+        HttpResponse response, ChatSseEvent sseEvent, CancellationToken cancellationToken)
+    {
+        var json = JsonSerializer.Serialize(sseEvent, EventSseJsonOptions);
+        await response.WriteAsync($"data: {json}\n\n", cancellationToken).ConfigureAwait(false);
+        await response.Body.FlushAsync(cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>Pre-stream ProblemDetails writer (ADR-019: stable errorCode + correlationId).</summary>
+    private static async Task WriteEventProblemAsync(
+        HttpResponse response, int statusCode, string title, string detail,
+        string errorCode, string correlationId, CancellationToken cancellationToken)
+    {
+        response.StatusCode = statusCode;
+        response.ContentType = "application/problem+json";
+        var json = JsonSerializer.Serialize(
+            new { title, status = statusCode, detail, errorCode, correlationId },
+            EventSseJsonOptions);
+        await response.WriteAsync(json, cancellationToken).ConfigureAwait(false);
+    }
+
+    /// <summary>CamelCase + omit-null options for the event SSE wire format.</summary>
+    private static readonly JsonSerializerOptions EventSseJsonOptions = new()
+    {
+        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
+        DefaultIgnoreCondition = System.Text.Json.Serialization.JsonIgnoreCondition.WhenWritingNull
+    };
+
+    // =========================================================================
     // Private Helpers
     // =========================================================================
 
@@ -861,3 +1176,27 @@ internal record UploadedDocumentMetadata(
     string Filename,
     int TokenEstimate,
     bool WasTruncated);
+
+/// <summary>
+/// Request body for <c>POST /api/ai/chat/sessions/{sessionId}/events/document-uploaded</c>
+/// (FR-P1-03 Event path).
+/// </summary>
+/// <param name="FileIds">
+/// The just-completed upload batch (session-file document ids, in upload order —
+/// the first is the deterministic "top-1" for the bulk bound). Null/empty falls
+/// back to the full session manifest.
+/// </param>
+/// <param name="TypedCommand">
+/// Command text the user typed alongside the upload, if any. Non-empty triggers
+/// the explicit-command supersede bound: the rule does not fire (the Text path
+/// handles the command separately).
+/// </param>
+public sealed record DocumentUploadedEventRequest(
+    IReadOnlyList<string>? FileIds = null,
+    string? TypedCommand = null);
+
+/// <summary>Request body for <c>PUT /api/ai/chat/event-rules/opt-out</c>.</summary>
+public sealed record EventRulesOptOutRequest(bool OptedOut);
+
+/// <summary>Response body for the Event-path opt-out routes.</summary>
+public sealed record EventRulesOptOutResponse(bool OptedOut);

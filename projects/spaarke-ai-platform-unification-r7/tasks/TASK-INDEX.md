@@ -1,6 +1,9 @@
 # Task Index — Spaarke AI Platform Unification R7
 
-> **Last Updated**: 2026-06-30 (Wave 12 added — MVP Completion: Daily Briefing 6-entity + Wizards + Assistant↔Workspace)
+> ## 🛑 PROJECT CLOSED / RE-SCOPED 2026-07-05
+> R7 is closed. Remaining tasks below (056, 068, 070-075, 087, 089, 089d, 101, 090-wrap-up, 116/117/119, 124, 136, 145, 154) are ABSORBED by `spaarke-ai-architecture-redesign-r1` (Issue #550) or DROPPED — per-item disposition: [`../notes/close-out-absorbed-by-ai-architecture-redesign-r1.md`](../notes/close-out-absorbed-by-ai-architecture-redesign-r1.md). Do NOT execute R7 tasks.
+
+> **Last Updated**: 2026-07-05 (close-out banner; prior content-update 2026-06-30 — Wave 12 added: Daily Briefing 6-entity + Wizards + Assistant↔Workspace)
 > **Source plan**: [`../plan.md`](../plan.md)
 > **Source spec**: [`../spec.md`](../spec.md)
 > **Wave 12 plan**: [`../notes/wave12-mvp-completion-plan.md`](../notes/wave12-mvp-completion-plan.md)

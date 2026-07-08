@@ -459,8 +459,7 @@ The `contact` entity (Dataverse built-in) is referenced by several entities for 
 
 | Document | Path |
 |---|---|
-| AI Analysis ERD (DBML format) | `docs/data-model/sprk_ERD-ai-analysis-entities.md` |
-| AI Analysis Entities (full fields) | `docs/data-model/sprk_ai-analysis-related-entities.md` |
+| AI Analysis ERD + entity docs | Deleted 2026-07-05 (stale 2026-02 snapshots showed dropped `sprk_actiontypeid`); replacements authored by `spaarke-ai-architecture-redesign-r1` task 052 |
 | Event Entities (full fields) | `docs/data-model/sprk_event-related-tables.md` |
 | Financial Entities (full fields) | `docs/data-model/sprk_financial-related-entities.md` |
 | Matter Entities (full fields) | `docs/data-model/sprk_matter-related-tables.md` |

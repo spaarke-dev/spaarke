@@ -84,7 +84,7 @@ Some chat tools are intentionally restricted to playbooks that opt-in via the `s
 | LegalResearch | `legal_research` | Bing Grounding cost + governance scope (ADR-015) |
 | WebSearch | `web_search` | External egress — only playbooks with explicit web-search permission |
 | CodeInterpreter | `code_interpreter` | Sandbox code execution — explicit data-governance opt-in (ADR-018) |
-| WorkingDocumentTools (write_back) | `write_back` | Mutating tool — limited to playbooks that target the active document |
+| WorkingDocument chat-tools (write_back) | `write_back` | Mutating tool — limited to playbooks that target the active document |
 
 **Contract** (R6 Wave 7b infrastructure):
 
@@ -176,7 +176,7 @@ public sealed class GenericAnalysisHandler : IStreamingAnalysisToolHandler // ex
 - ✅ Telemetry emits handler name + outcome + timestamp + IDs ONLY (ADR-015 compliant)
 - ✅ Error handling: `OperationCanceledException` → `Cancelled`; other exceptions → `InternalError` with the message
 
-**See also**: `Services/Ai/Handlers/TemplateHandler.cs` for a minimal copy-and-modify template.
+**See also**: any small production handler (e.g. `DateExtractorHandler.cs`) as a copy-and-modify starting point. (The former `TemplateHandler.cs` reference implementation was deleted by `spaarke-ai-architecture-redesign-r1` task 030: it auto-registered into the handler registry with no `sprk_analysistool` row, which the FR-P2-01 catalog-projection cutover now reports as Unhealthy drift — every registered handler MUST have a catalog row or be deleted.)
 
 ---
 

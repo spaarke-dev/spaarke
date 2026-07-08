@@ -1,0 +1,14 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "REF-CHAT@v1 honest-refusal output (sprk_analysisaction.sprk_outputschemajson mirror)",
+  "description": "Constrained-decoding contract for the tenant's no_match_handler refusal capability (FR-P2-04 / ADR-039 grounded-execution clause (d)). The single `refusal` string is the complete user-facing refusal message rendered verbatim by the agent-turn loop; RefusalCapabilityTool.ExtractRefusalText reads exactly this field from the stored ledger entry (render follows store, ADR-040).",
+  "type": "object",
+  "properties": {
+    "refusal": {
+      "type": "string",
+      "description": "The complete user-facing refusal message: acknowledges the request, states it is unavailable, lists what the assistant CAN do (the JPS-authored capability list only). One short paragraph."
+    }
+  },
+  "required": ["refusal"],
+  "additionalProperties": false
+}

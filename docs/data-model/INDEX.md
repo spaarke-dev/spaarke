@@ -39,10 +39,14 @@ This directory contains authoritative documentation for Dataverse entity schemas
 
 ### Entity Documentation — AI Analysis
 
+> The 2026-02 ERD docs (`sprk_ERD-ai-analysis-entities.md`, `sprk_ai-analysis-related-entities.md`) were **deleted 2026-07-05** (stale snapshots showed pre-R7 schema) and replaced by the four live-schema docs below per FR-P4-03 (`spaarke-ai-architecture-redesign-r1` task 052).
+
 | Document | Description | Last Updated | Last Reviewed | Status |
 |----------|-------------|--------------|---------------|--------|
-| [sprk_ERD-ai-analysis-entities.md](sprk_ERD-ai-analysis-entities.md) | AI analysis entity ERD | 2026-02-13 | — | — |
-| [sprk_ai-analysis-related-entities.md](sprk_ai-analysis-related-entities.md) | AI analysis related entities | 2026-02-13 | — | — |
+| **[sprk_analysisaction.md](sprk_analysisaction.md)** | Action (execution unit): `prompted`/`coded` kinds, `sprk_inputschema` JSON contract (OpenAI function-parameters; object-level `required` array ONLY), model tiers | 2026-07-07 | 2026-07-07 | Current |
+| **[sprk-playbookconsumer.md](sprk-playbookconsumer.md)** | Binding (invocation unit) — THE single routing surface (ADR-039): resolution algorithm, dispositions + Output Router legs, `sprk_tooldescription` intent surface, chips, event bindings, live rows | 2026-07-07 | 2026-07-07 | Current |
+| **[sprk_analysistool.md](sprk_analysistool.md)** | Closed tool catalog: namespaced `sprk_toolid`, row↔handler bijection health check, `side_effect_class` confirmation gate, seed mirrors | 2026-07-07 | 2026-07-07 | Current |
+| **[sprk_playbooknode.md](sprk_playbooknode.md)** | FROZEN playbook-engine node table (Insights family only; no new capability — new composites are `coded` workflows) | 2026-07-07 | 2026-07-07 | Frozen engine (as-is) |
 
 ### Entity Documentation — Matter / Event
 

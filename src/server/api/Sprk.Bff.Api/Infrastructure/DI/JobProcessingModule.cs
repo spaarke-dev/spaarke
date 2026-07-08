@@ -65,10 +65,6 @@ public static class JobProcessingModule
         services.AddHostedService<Sprk.Bff.Api.Services.Jobs.ServiceBusJobProcessor>();
 
         // Background hosted services
-        services.Configure<Sprk.Bff.Api.Services.Jobs.DocumentVectorBackfillOptions>(
-            configuration.GetSection(Sprk.Bff.Api.Services.Jobs.DocumentVectorBackfillOptions.SectionName));
-        services.AddHostedService<Sprk.Bff.Api.Services.Jobs.DocumentVectorBackfillService>();
-
         services.Configure<Sprk.Bff.Api.Services.Ai.Jobs.EmbeddingMigrationOptions>(
             configuration.GetSection(Sprk.Bff.Api.Services.Ai.Jobs.EmbeddingMigrationOptions.SectionName));
         services.AddHostedService<Sprk.Bff.Api.Services.Ai.Jobs.EmbeddingMigrationService>();

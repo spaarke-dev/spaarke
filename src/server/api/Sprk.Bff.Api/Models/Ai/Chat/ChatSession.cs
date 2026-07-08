@@ -61,9 +61,10 @@ namespace Sprk.Bff.Api.Models.Ai.Chat;
 ///     <c>IHostedService</c> (R5 task 007) — does NOT wait for the scheduled sweep.
 ///
 /// Persistence: rides the existing triple-tier flow (Redis hot via
-/// <see cref="System.Text.Json.JsonSerializer"/>; Cosmos warm intentionally drops the
-/// manifest per the aggressive cleanup-on-session-end contract; Dataverse cold-tier
-/// audit intentionally omits the manifest for the same reason).
+/// <see cref="System.Text.Json.JsonSerializer"/>; Cosmos warm carries the manifest as
+/// <c>StoredSession.UploadedFiles</c> and it is restored on Cosmos fallback — the prior
+/// mapping that dropped file references on restore was a P2 violation fixed per ADR-040
+/// / FR-P0-01; Dataverse cold-tier audit intentionally omits the manifest).
 ///
 /// Default: <c>null</c> for backward compatibility — pre-R5 sessions, persisted records,
 /// and call sites omitting the parameter are semantically equivalent to "no files
@@ -89,6 +90,49 @@ public record ChatSession(
     /// (R5 endpoint task own the error mapping per ADR-019).
     /// </summary>
     public const int MaxUploadedFiles = 20;
+
+    // =========================================================================
+    // Session ledger (ADR-040 / FR-P0-01) — append-only typed entries.
+    //
+    // DARK LANDING (P0): these collections are persisted through the Redis +
+    // Cosmos pipeline but have ZERO production readers. Writers arrive at P1
+    // (FR-P1-02 universal ledger-write-before-render); ToolChain writers at P2;
+    // ledger-referencing capability inputs at P3. Do NOT add readers before the
+    // corresponding phase lands.
+    //
+    // All four default to null so pre-ledger Redis/Cosmos payloads (and call
+    // sites that never touch the ledger) deserialize/construct cleanly — null is
+    // semantically identical to "no ledger entries yet" (same convention as
+    // UploadedFiles / AdditionalDocumentIds).
+    //
+    // Governance: Tier 3 user-owned, GDPR-erasable with the session (ADR-015 /
+    // NFR-07). ToolChains carry identifiers/filters/counts only — never content.
+    // =========================================================================
+
+    /// <summary>
+    /// Capability outputs, addressable by <see cref="SessionOutput.Key"/>
+    /// (<c>{bindingId}@t{n}</c> — build via <see cref="SessionLedger.BuildOutputKey"/>).
+    /// Append-only; the composition carrier for cross-capability references (ADR-040).
+    /// </summary>
+    public IReadOnlyList<SessionOutput>? Outputs { get; init; }
+
+    /// <summary>
+    /// Per-turn tool-call audit chains (identifiers/filters/counts/citations only —
+    /// never verbatim content, per NFR-07). Append-only.
+    /// </summary>
+    public IReadOnlyList<SessionToolChain>? ToolChains { get; init; }
+
+    /// <summary>
+    /// Widget user-actions (selection, highlight, edit) recorded as consumable
+    /// session events. Append-only.
+    /// </summary>
+    public IReadOnlyList<SessionWidgetEvent>? WidgetEvents { get; init; }
+
+    /// <summary>
+    /// Pending-confirmation and in-flight-elicitation markers. Append-only —
+    /// resolutions are new entries correlated by <see cref="SessionGate.GateId"/>.
+    /// </summary>
+    public IReadOnlyList<SessionGate>? Gates { get; init; }
 }
 
 /// <summary>
@@ -149,6 +193,28 @@ public record ChatSessionFile(
     DateTimeOffset UploadedAt)
 {
     /// <summary>
+    /// Full extracted text of the uploaded file (added R7 Wave 12.3 Phase 12.3a UAT fix
+    /// 2026-07-03). At upload time <c>ChatDocumentEndpoints</c> parses the file via
+    /// <c>IDocumentTextExtractor</c> to feed the RAG indexing pipeline; that same text is
+    /// now persisted here so <c>SessionFileTextSource</c> can read it directly for the
+    /// chat-summarize Linear consumer without paying the Azure AI Search index-catchup
+    /// race.
+    /// <para>
+    /// Pattern mirrors the workspace-file summarize path
+    /// (<c>WorkspaceFileEndpoints.ExecuteFileSummarizeAsync</c>) which has read text
+    /// directly since inception. Prior chat-summarize paths (playbook engine + my initial
+    /// Linear implementation) went through RAG and hit the race whenever a user typed
+    /// "summarize this document" within a few seconds of upload.
+    /// </para>
+    /// <para>
+    /// Null on pre-persistence session files (older Redis / Cosmos payloads deserialize
+    /// cleanly). <c>SessionFileTextSource</c> falls back to RAG when null so existing
+    /// sessions do not break mid-flight.
+    /// </para>
+    /// </summary>
+    public string? ExtractedText { get; init; }
+
+    /// <summary>
     /// Precomputed 1-paragraph summary produced by <c>FileSummarizationService</c>
     /// (gpt-4o-mini, chat-routing-redesign-r1 task 068). Marked "NOT authoritative"
     /// by <c>TrustFrameInstructionInjector</c> in the static-prefix trust frame —
@@ -160,16 +226,21 @@ public record ChatSessionFile(
     public string? SummaryText { get; init; }
 
     /// <summary>
-    /// Document type label produced by <c>FileClassificationService</c>
-    /// (chat-routing-redesign-r1 task 067). Examples: "NDA", "patent", "invoice",
-    /// "contract", "memo". Null until classification completes.
+    /// Document type label. Populated by the Event path's classify member
+    /// (<c>EventRulesService</c> — the <c>document_uploaded → chat-classify(1)</c>
+    /// rule, FR-P1-03 / spaarke-ai-architecture-redesign-r1 task 022; field
+    /// originally added for chat-routing-redesign-r1 task 067, whose
+    /// <c>FileClassificationService</c> never shipped). Examples: "nda", "patent",
+    /// "invoice", "contract", "memo". Null until classification completes.
     /// </summary>
     public string? ClassifiedDocType { get; init; }
 
     /// <summary>
     /// Classifier confidence in <see cref="ClassifiedDocType"/> on the closed interval [0, 1].
-    /// Null until classification completes. Downstream consumers SHOULD treat values
-    /// below ~0.6 as "unclassified" per architecture §6.1 trust-frame rules.
+    /// Null until classification completes. The Event path's M4 policy gates on this value
+    /// (below <c>EventRules:ClassifyConfidenceThreshold</c> ⇒ confirmation turn before
+    /// auto-summarize — FR-P1-03); downstream trust-frame consumers SHOULD treat values
+    /// below ~0.6 as "unclassified" per architecture §6.1 rules.
     /// </summary>
     public double? ClassifiedConfidence { get; init; }
 

@@ -8,7 +8,7 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// <summary>
 /// Chat- and playbook-invocable typed handler that explicitly verifies legal citations
 /// against authoritative sources (R6 Wave 7c). Replaces the legacy hardcoded
-/// <c>VerifyCitationsTool</c> class previously instantiated in
+/// <c>VerifyCitations chat-tool</c> class previously instantiated in
 /// <c>SprkChatAgentFactory.ResolveTools</c>.
 /// </summary>
 /// <remarks>
@@ -463,7 +463,7 @@ public sealed class VerifyCitationsHandler : IToolHandler
 
     /// <summary>
     /// Structured output payload returned in <see cref="ToolResult.Data"/>. Mirrors the legacy
-    /// <c>VerifyCitationsTool</c> output shape for behavioural parity: the LLM sees the same
+    /// <c>VerifyCitations chat-tool</c> output shape for behavioural parity: the LLM sees the same
     /// per-citation structure it expects from the today-hardcoded tool.
     /// </summary>
     public sealed class VerifyCitationsPayload
@@ -495,7 +495,7 @@ public sealed class VerifyCitationsHandler : IToolHandler
 
     /// <summary>
     /// A single citation entry in the verification report. Field shape matches the legacy
-    /// <c>VerifyCitationsTool</c> serialization so existing LLM-side prompts continue to read
+    /// <c>VerifyCitations chat-tool</c> serialization so existing LLM-side prompts continue to read
     /// the same property names.
     /// </summary>
     public sealed class VerifyCitationsEntry

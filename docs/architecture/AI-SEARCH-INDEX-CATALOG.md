@@ -32,7 +32,7 @@ Spaarke applies a **two-tier naming policy** that distinguishes top-level Azure 
 | Tier | Pattern | Env-suffix? | Reason | Examples |
 |---|---|---|---|---|
 | **Top-level Azure resources** (have global DNS, exist independently) | `spaarke-{component}-{type}-{env}` | ✅ Yes (env-suffixed) | Required for global DNS uniqueness; visible in cost reports, RBAC scopes, RG listings | `spaarke-search-dev`, `spaarke-bff-redis-dev`, `spaarke-bff-prod`, `sprk-platform-prod-kv` |
-| **Sub-resources** (scoped inside a top-level; env is implicit in parent) | `spaarke-{content}-{type}` | ❌ No (env-agnostic) | Code stays portable across environments; same name in dev / prod / demo; aligns with Spaarke's documented "build once, deploy anywhere" architecture (`SPAARKE-DEPLOYMENT-GUIDE.md:81`) | `spaarke-records-index`, `spaarke-playbook-embeddings`, `spaarke-rag-references` |
+| **Sub-resources** (scoped inside a top-level; env is implicit in parent) | `spaarke-{content}-{type}` | ❌ No (env-agnostic) | Code stays portable across environments; same name in dev / prod / demo; aligns with Spaarke's documented "build once, deploy anywhere" architecture (`SPAARKE-DEPLOYMENT-GUIDE.md:81`) | `spaarke-records-index`, `spaarke-rag-references`, `spaarke-session-files` |
 
 ### Why env-agnostic index names
 
@@ -49,9 +49,9 @@ Decision confirmed 2026-06-25 after explicit owner question. Rationale:
 | Prefix | `spaarke-` (mandatory) | — |
 | Content | Singular OR plural noun for the conceptual category (plural when the index holds a collection-of-things and that reads naturally) | `records`, `rag`, `insights`, `session`, `files`, `invoices`, `playbook` |
 | Type | `index`, `references`, `embeddings`, `files` | — |
-| Full name | hyphenated, lowercase | `spaarke-records-index`, `spaarke-rag-references`, `spaarke-playbook-embeddings` |
+| Full name | hyphenated, lowercase | `spaarke-records-index`, `spaarke-rag-references`, `spaarke-session-files` |
 
-**Files index settled as plural** (`spaarke-files-index`, not `spaarke-file-index`) — matches code default in `AiSearchOptions.cs:19` and naming convention examples (`spaarke-rag-references`, `spaarke-playbook-embeddings`).
+**Files index settled as plural** (`spaarke-files-index`, not `spaarke-file-index`) — matches code default in `AiSearchOptions.cs:19` and naming convention examples (`spaarke-rag-references`, `spaarke-session-files`).
 
 ### Forbidden patterns
 
@@ -149,7 +149,9 @@ Rolling back to 1536-dim would require: (a) re-deploying the OpenAI `text-embedd
 
 ---
 
-## 4. Active Index Catalog (8 indexes)
+## 4. Active Index Catalog (7 indexes)
+
+> `spaarke-playbook-embeddings` (former #7) was RETIRED by `spaarke-ai-architecture-redesign-r1` task 035 / FR-P2-06 — the dispatcher stack it fed was deleted (ADR-039: the agent-turn loop dispatches from projected Bindings, no vector classifier). Schema file, indexing jobs, trigger endpoint, and ingestion script are deleted from the repo; delete the live Azure index during the P4 sweep.
 
 | # | Canonical name | Purpose | Schema file | Scope (filter dimensions) | Ingestion source | Consumers (services + endpoints) | Post-deploy invariants |
 |---|---|---|---|---|---|---|---|
@@ -160,7 +162,6 @@ Rolling back to 1536-dim would require: (a) re-deploying the OpenAI `text-embedd
 | 4 | **spaarke-insights-index** | Derived intelligence (Observations + Precedents) | `infrastructure/ai-search/spaarke-insights-index.json` (consolidated from `infra/insights/schemas/spaarke-insights-index.index.json` per FR-11) | `tenantId` + `scope.{matterId, entityType, entityId}` + `artifactType` | `ObservationIndexUpserter`, `PrecedentProjectionSync` | `Api/Insights/InsightsSearchEndpoint`, `InsightsAssistantEndpoint`, `IndexRetrieveNode` | Key field present; vector field is 3072-dim HNSW cosine; `tenantId` + scope fields filterable; `artifactType` filterable + facetable |
 | 5 | **spaarke-session-files** | Chat session uploads (transient) — ADR-014 strict isolation per session | `infrastructure/ai-search/spaarke-session-files.json` | `tenantId` + `sessionId` (strict pair-filter required on every query) | `FileIndexingService`, `PostUploadIndexingEnqueuer`; cleanup: `SessionFilesCleanupJob` | `RecallSessionFileHandler`, `RagService` T2, `R5SummarizeTelemetry` | Key field present; `tenantId` AND `sessionId` BOTH filterable (canonical invariant per `deploy-session-files-index.ps1` lines 209-215); `contentVector3072` + `documentVector3072` are 3072-dim HNSW cosine |
 | 6 | **spaarke-invoices-index** *(renamed from `spaarke-invoices-dev` per FR-10)* | Invoice semantic search (Financial Intelligence MVP) | `infrastructure/ai-search/spaarke-invoices-index.json` (renamed from `invoice-index-schema.json` per FR-10) | `tenantId` + `invoiceId` + `matterId` + `projectId` | `InvoiceIndexingJobHandler` | `IInvoiceAi` facade, Financial Intelligence R1 endpoints | Key field present; index `name` field MUST be `spaarke-invoices-index` (NOT `spaarke-invoices-dev`); vector field is 3072-dim HNSW cosine; `tenantId` + scope IDs filterable |
-| 7 | **spaarke-playbook-embeddings** *(renamed from `playbook-embeddings` per FR-10)* | Playbook dispatch vectors | `infrastructure/ai-search/spaarke-playbook-embeddings.json` (renamed from `playbook-embeddings.json` per FR-10) | global (NO `tenantId` — shared playbook catalog) | `Index-ExistingPlaybooks.ps1`, `PlaybookEmbeddingService`, `PlaybookIndexingBackgroundService` | `PlaybookDispatcher`, `Api/Ai/PlaybookEmbeddingEndpoints`, `PlaybookIndexDriftDetectionJob` | Key field present; index `name` field MUST be `spaarke-playbook-embeddings` (with `spaarke-` prefix); vector field is 3072-dim HNSW cosine; playbook ID + version filterable |
 
 ### Index restoration matrix (dev rebuild — `spaarke-ai-azure-setup-dev-r1` Phase 5)
 
@@ -173,7 +174,6 @@ Rolling back to 1536-dim would require: (a) re-deploying the OpenAI `text-embedd
 | 4 | `spaarke-insights-index` | Schema + Precedent data | `PrecedentProjectionSync`; Observations re-projected | Observation history loss accepted; re-project from event history |
 | 5 | `spaarke-session-files` | Schema only | n/a | Sessions are transient by design |
 | 6 | `spaarke-invoices-index` | Schema only | (deferred) | Was empty pre-deletion; MVP not in active testing |
-| 7 | `spaarke-playbook-embeddings` | Schema + data | `Index-ExistingPlaybooks.ps1` | Playbook catalog |
 
 ### Deploy procedure
 

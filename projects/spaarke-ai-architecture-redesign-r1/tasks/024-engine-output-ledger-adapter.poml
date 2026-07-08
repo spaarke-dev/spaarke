@@ -1,0 +1,125 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="024" project="spaarke-ai-architecture-redesign-r1">
+  <metadata>
+    <title>Engine-output → ledger adapter (E-2): frozen Insights composite outputs write SessionOutput entries</title>
+    <phase>Phase P1: First Capability End-to-End</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <tags>bff-api, insights, ledger</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <parallel-group>W-P1-C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>021</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement FR-P1-05: build the engine-output→ledger adapter — accepted exception E-2 in the ratified design. The Insights engine (`PlaybookOrchestrationService` + nodes) is FROZEN: no new capability lands on it and it is not re-migrated, but its composite outputs must still become addressable session state. This adapter takes the frozen engine's composite outputs and writes them as `SessionOutput` ledger entries (keyed `{bindingId}@t{n}` per the task-021 contract) so that later conversation turns can reference an insights result exactly like any catalog-capability output. The adapter is a boundary shim on OUR side of the freeze line — the frozen engine itself is untouched. Acceptance per spec: an insights run produces an addressable ledger output.
+  </prompt>
+
+  <role>
+    Senior .NET developer familiar with the Sprk.Bff.Api Insights pipeline (PlaybookOrchestrationService, composite outputs, ADR-037 section-keyed streaming) and the ChatSession ledger model.
+  </role>
+
+  <goal>
+    An adapter that converts frozen-engine composite outputs into ledger SessionOutput entries via the task-021 write path, test-proven with an insights run producing an addressable output; zero modifications inside the frozen engine.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-architecture-redesign-r1/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-architecture-redesign-r1/plan.md</file>
+    <file purpose="project-context">projects/spaarke-ai-architecture-redesign-r1/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md</file>
+    <file purpose="frozen-engine">src/server/api/Sprk.Bff.Api/Services/Ai/ (PlaybookOrchestrationService + Nodes/ — READ ONLY)</file>
+    <file purpose="ledger-write-path">src/server/api/Sprk.Bff.Api/Services/Ai/OutputRouter.cs (task 021)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-040">Engine outputs MUST land in the ledger as addressable SessionOutput entries BEFORE rendering, same contract as every other output; disposition remains the only rendering contract.</constraint>
+    <constraint source="ADR-039">MUST NOT land new capability on the frozen engine; the adapter adapts outputs at the boundary — it MUST NOT modify PlaybookOrchestrationService or its nodes; MUST NOT introduce routing config outside the Binding table or any second intent mechanism.</constraint>
+    <constraint source="ADR-037 (amended 2026-07-05)">The section-name-keyed streaming contract binds composite executors; DeliverComposite is frozen — the adapter consumes the composite output shape, it does not alter the streaming contract.</constraint>
+    <constraint source="NFR-07">SessionOutput entries from engine runs are ADR-015 Tier 3; any chain/telemetry records carry identifiers/filters/counts only; no content in logs.</constraint>
+    <constraint source="ADR-029">BFF-touching task: publish-size verification with size + delta reported.</constraint>
+    <constraint source="NFR-02">Eval suite green is a merge gate from P1; keep it green.</constraint>
+    <constraint source="NFR-08">If any interim engine-output plumbing is replaced, its retirement is grep-zero-proven with SHOWN output; no compat shims.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>insights-engine, session-ledger, adapter-boundary</topic>
+    <files>
+      <file>docs/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>docs/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/OVERLAY-MATRIX.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-MIGRATION-MAP.md</file>
+    </files>
+    <patterns>
+      <pattern name="Output routing / ledger write" location="src/server/api/Sprk.Bff.Api/Services/Ai/OutputRouter.cs">Task-021 seam — the adapter feeds engine outputs into this write path rather than writing the ledger directly.</pattern>
+      <pattern name="Ledger model" location="src/server/api/Sprk.Bff.Api/Models/Ai/Chat/">Typed SessionOutput records (task 001).</pattern>
+      <pattern name="Composite output shape" location="src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/">Frozen-engine node output/streaming contracts (ADR-037) — consume, do not modify.</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      E-2 is one of the three accepted exceptions in the ratified design (E-1/2/3 accepted; E-4/E-5 rejected — see OVERLAY-MATRIX). Without this adapter, insights runs would be the one output class invisible to the ledger, breaking session composition ("draft a letter based on that matter summary") for exactly the highest-value composite outputs. The freeze line is absolute: adapter on our side, engine untouched.
+    </background>
+    <dependencies>
+      <dependency task="021" status="pending">OutputRouter + universal ledger write — the adapter's target seam.</dependency>
+    </dependencies>
+    <related-work>
+      <item>FR-P3-05 later deletes engine SHELLS (PlaybookExecutionEngine etc.) while leaving PlaybookOrchestrationService + nodes frozen — this adapter must sit on the surviving frozen surface, not a P3 delete target.</item>
+      <item>insights-engine-r3 resumption triggers re-pointed at this project (task 013).</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context check + load knowledge">
+      Verify context usage below 70%. Load spec FR-P1-05, the OVERLAY-MATRIX E-2 exception contract, the frozen-engine output shape, and the task-021 OutputRouter contract. Confirm task 021 complete. Verify the chosen attach point survives FR-P3-05 deletions (attach to the frozen surface, not to PlaybookExecutionEngine).
+    </step>
+    <step order="1" name="Map the composite output shape">
+      Identify where frozen-engine composite outputs surface at the boundary (post-DeliverComposite, section-keyed per ADR-037) and define the mapping composite output → SessionOutput (key allocation, file refs, section payload references).
+    </step>
+    <step order="2" name="Implement the adapter">
+      Implement the engine-output→ledger adapter as a boundary service feeding the task-021 write path. No engine files modified. Answer the CLAUDE.md §11 justification (new surface; cost-of-doing-nothing = insights outputs are unaddressable, breaking G-P2 session memory over insights results).
+    </step>
+    <step order="3" name="Wire an insights run">
+      Wire the adapter into the insights execution flow so a real run produces the ledger entry, verifying render still follows store.
+    </step>
+    <step order="4" name="Tests">
+      Add tests: an insights composite run produces an addressable SessionOutput (key format, retrievability); engine directory diff is empty (frozen surface untouched); Redis → Cosmos round-trip holds for engine-origin entries.
+    </step>
+    <step order="5" name="Build + publish-size verification">
+      dotnet build + tests green (shown). ADR-029 publish-size verification: report size + delta vs baseline.
+    </step>
+    <step order="6" name="Update tracking">
+      Update TASK-INDEX.md, POML status, current-task.md per completion protocol.
+    </step>
+    <step order="9.5" name="Quality gates">
+      Step 9.5 quality gates: run code-review + adr-check; resolve Critical findings per CLAUDE.md §6.5 before completion.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build, test, publish-size verification</tool>
+    <tool name="git">Version control (verify frozen-engine diff is empty)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ (engine-output→ledger adapter, new boundary service + DI registration)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/ (insights-run ledger addressability tests)</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">An insights run produces an addressable SessionOutput ledger entry keyed {bindingId}@t{n} (test output shown).</criterion>
+    <criterion testable="true">The frozen engine (PlaybookOrchestrationService + nodes) is untouched — git diff scope for those files is empty (shown).</criterion>
+    <criterion testable="true">Engine-origin ledger entries flow through the task-021 write path (write-before-render ordering holds) and survive the Redis → Cosmos round-trip.</criterion>
+    <criterion testable="true">NFR-07 compliance: no content in logs; telemetry carries identifiers only.</criterion>
+    <criterion testable="true">dotnet build + tests + eval suite green; ADR-029 publish size reported with delta vs baseline.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

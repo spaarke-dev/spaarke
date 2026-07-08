@@ -8,7 +8,7 @@ using Sprk.Bff.Api.Telemetry;
 namespace Sprk.Bff.Api.Services.Ai.Insights;
 
 /// <summary>
-/// Redis-backed cache wrapping <see cref="IPlaybookExecutionEngine.ExecuteBatchAsync"/>
+/// Redis-backed cache wrapping <see cref="IPlaybookOrchestrationService.ExecuteAsync"/>
 /// for Insights-mode playbooks (D-P13, SPEC §3.1). Returns the cached
 /// <see cref="InsightArtifact"/> when an identical
 /// <c>(playbookId, subject, parameters, accessibleScopeHash)</c> tuple is presented within
@@ -18,7 +18,7 @@ namespace Sprk.Bff.Api.Services.Ai.Insights;
 /// <remarks>
 /// <para>
 /// <b>Why this lives in Zone A</b> (per SPEC §3.5): this class imports
-/// <see cref="IPlaybookExecutionEngine"/> via the engine factory delegate (Zone A internal),
+/// <see cref="IPlaybookOrchestrationService"/> via the engine factory delegate (Zone A internal),
 /// and references <see cref="PlaybookStreamEvent"/> + <see cref="NodeOutput"/>. The
 /// <see cref="InsightArtifact"/> it returns is a Zone B POCO, so Zone B consumers
 /// (D-P15 endpoint, D-P11 review surface) never have to import this class — they go

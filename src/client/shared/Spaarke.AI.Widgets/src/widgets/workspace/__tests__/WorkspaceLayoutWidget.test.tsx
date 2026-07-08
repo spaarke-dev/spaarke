@@ -153,6 +153,40 @@ describe('WorkspaceLayoutWidget (C-4 renderer seam)', () => {
     expect(typeof props.webApi.retrieveMultipleRecords).toBe('function');
   });
 
+  it('forwards a compose pre-seed as opaque launchData and omits launchData without one (G-P3 round-4 R4-2)', () => {
+    installXrm();
+
+    const StubRenderer = jest.fn().mockReturnValue(<div data-testid="stub-renderer" />);
+    setDefaultWorkspaceRenderer(StubRenderer as unknown as WorkspaceRenderer);
+
+    const compose = {
+      sprkDocumentId: 'd0c00000-1111-2222-3333-444444444444',
+      speDriveItemId: '01ITEMID',
+      speDriveId: 'b!driveId',
+      fileName: 'NDA - Acme.docx',
+    };
+
+    const { unmount } = render(
+      <WorkspaceLayoutWidget
+        data={{ layoutId: 'layout-compose', layoutName: 'Compose', compose }}
+        widgetType="workspace"
+      />
+    );
+
+    // The widget stays compose-agnostic: the seed rides launchData VERBATIM for the
+    // host's renderer wrapper (SpaarkeAi main.tsx) to translate into ComposeLaunchContext.
+    expect(StubRenderer).toHaveBeenCalledTimes(1);
+    expect(StubRenderer.mock.calls[0][0].launchData).toEqual({ compose });
+    unmount();
+
+    // Without a seed, launchData is omitted entirely (no empty-object noise).
+    StubRenderer.mockClear();
+    render(
+      <WorkspaceLayoutWidget data={{ layoutId: 'layout-abc', layoutName: 'Test Layout' }} widgetType="workspace" />
+    );
+    expect(StubRenderer.mock.calls[0][0].launchData).toBeUndefined();
+  });
+
   it('uses the injected renderer prop in preference to the registered default', () => {
     installXrm();
 

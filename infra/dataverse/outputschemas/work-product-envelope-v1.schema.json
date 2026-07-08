@@ -1,0 +1,58 @@
+{
+  "$schema": "http://json-schema.org/draft-07/schema#",
+  "title": "work-product-envelope v1 — the record-persisted work_product envelope (FR-P3-08, spaarke-ai-architecture-redesign-r1 task 047)",
+  "description": "The envelope OutputRouter's work_product disposition leg persists onto the session's host Dataverse record (registry-declared sprk_targetfield, serialized as a JSON string). Derived VERBATIM from the stored session-ledger SessionOutput (ADR-040: storage precedes persistence; the ledger is the source, the record copy is a projection). Generalizes the widgets-r1 FR-14 envelope: schemaVersion + generatedAt kept; topic-specific members replaced by the ledger identity + the schema-validated capability payload. Producer: TopicRegistryWorkProductPersister (WorkProductEnvelope.FromStoredEntry). Contract pinned by tests/integration/contract/Api/Ai/WorkProductEnvelopePersistenceContractTests.cs (NFR-06).",
+  "type": "object",
+  "additionalProperties": false,
+  "required": [
+    "schemaVersion",
+    "ledgerKey",
+    "bindingId",
+    "ucId",
+    "turn",
+    "disposition",
+    "generatedAt",
+    "payload"
+  ],
+  "properties": {
+    "schemaVersion": {
+      "type": "string",
+      "const": "1.0",
+      "description": "Envelope schema version — literal string per the widgets-r1 convention (never an int)."
+    },
+    "ledgerKey": {
+      "type": "string",
+      "description": "Addressable session-ledger key ({bindingId}@t{n}) — ties the record copy back to its ledger source."
+    },
+    "bindingId": {
+      "type": "string",
+      "description": "The sprk_playbookconsumer (Binding) row id that produced the output."
+    },
+    "ucId": {
+      "type": "string",
+      "description": "Stable use-case vocabulary id (canonical design §3)."
+    },
+    "turn": {
+      "type": "integer",
+      "description": "Session turn ordinal the output was produced on."
+    },
+    "disposition": {
+      "type": "string",
+      "const": "work_product",
+      "description": "Ledger disposition vocabulary value — always work_product on this leg."
+    },
+    "generatedAt": {
+      "type": "string",
+      "format": "date-time",
+      "description": "UTC timestamp the output was written to the session ledger."
+    },
+    "sourceRefs": {
+      "type": "array",
+      "items": { "type": "string" },
+      "description": "Citations / document ids / ledger keys the output was grounded on (identifiers only, NFR-07). Omitted when none."
+    },
+    "payload": {
+      "description": "The schema-validated capability output — the stored ledger payload, verbatim (shape owned by the capability's Action output schema, e.g. SUM-CHAT@v1)."
+    }
+  }
+}

@@ -182,6 +182,19 @@ export interface WorkspaceRendererProps {
    * Defaults to `false` (standalone mode).
    */
   embedded?: boolean;
+
+  /**
+   * Optional per-launch payload forwarded VERBATIM from the tab's `widgetData`
+   * (G-P3 UAT round-4 R4-2, 2026-07-07 — Compose document pre-seed).
+   *
+   * This package stays compose-agnostic: the shape is opaque here. The HOST's
+   * registered renderer wrapper (e.g. SpaarkeAi `main.tsx`) interprets known
+   * keys — today `launchData.compose` ({ sprkDocumentId, speDriveItemId,
+   * speDriveId, fileName }) is translated into a `ComposeLaunchContext`
+   * provider so the embedded Compose section opens loaded instead of empty.
+   * Renderers/hosts that don't recognize the payload MUST ignore it.
+   */
+  launchData?: Record<string, unknown>;
 }
 
 // ---------------------------------------------------------------------------

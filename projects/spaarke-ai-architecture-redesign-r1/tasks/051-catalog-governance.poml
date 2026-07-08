@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="051" project="spaarke-ai-architecture-redesign-r1">
+  <metadata>
+    <title>Catalog governance — single refreshed scope-model-index; seed regenerated; sprk_nodetype gap ruled</title>
+    <phase>Phase P4: Sweep + Hardening + Graduation</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <tags>catalog, scripts, governance</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <parallel-group>W-P4-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>048</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement FR-P4-02: catalog governance. Three deliverables: (1) ONE refreshed `scope-model-index.json` at `.claude/catalogs/` — regenerated from the live spaarkedev1 catalog (the `docs/ai-knowledge/catalogs/` twin was deleted by Track-B batch 4; verify it stayed dead) so the index finally matches deployed GUIDs and the post-redesign taxonomy; (2) `Seed-PlaybookConsumers.ps1` regenerated FROM the Binding table so it round-trips — running the seed against a clean env reproduces the table that generated it; (3) the `sprk_nodetype` option-set gap (`DeliverComposite=100000004` missing, blocking `summarize-document-for-workspace-v1-multinode.json`) resolved or explicitly documented as accepted for the frozen engine. Acceptance per spec: one catalog copy; seed round-trips.
+  </prompt>
+
+  <role>
+    Platform-governance developer fluent in the JPS catalog tooling (`jps-scope-refresh`), Dataverse Web API queries against `sprk_playbookconsumer`/`sprk_analysisaction`/`sprk_analysistool`, and PowerShell seed-script authoring.
+  </role>
+
+  <goal>
+    Exactly one `scope-model-index.json` exists (at `.claude/catalogs/`, freshly regenerated, matching deployed GUIDs); `Seed-PlaybookConsumers.ps1` is regenerated from the Binding table and proven to round-trip; the `sprk_nodetype` gap has a resolved-or-documented ruling.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-architecture-redesign-r1/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-architecture-redesign-r1/plan.md</file>
+    <file purpose="project-context">projects/spaarke-ai-architecture-redesign-r1/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md</file>
+    <file purpose="stale-surface">projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-CODE-INVENTORY.md</file>
+    <file purpose="catalog">.claude/catalogs/scope-model-index.json</file>
+    <file purpose="seed-script">scripts/Seed-PlaybookConsumers.ps1</file>
+    <file purpose="blocked-playbook">infra/dataverse/playbooks/summarize-document-for-workspace-v1-multinode.json</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="CLAUDE.md §3 Sub-Agent Write Boundary">`.claude/catalogs/` writes MUST run in the MAIN session — sub-agents cannot write `.claude/` paths. If this task is dispatched to a sub-agent, the agent prepares the regenerated JSON content in project notes and the main session applies it; an Edit denial on `.claude/...` is the boundary working correctly.</constraint>
+    <constraint source="FR-P4-02">Single-copy rule: after this task exactly ONE scope-model-index.json exists in the repo. Verify the docs/ai-knowledge twin (deleted by task 073) has not resurfaced — grep shown.</constraint>
+    <constraint source="spec-MUST">MUST NOT add routing config outside the Binding table — the seed script is a projection OF the table, never a second source of truth; regeneration direction is table → script.</constraint>
+    <constraint source="spec-MUST">MUST NOT land new capability on the frozen engine — the sprk_nodetype ruling documents or unblocks the FROZEN engine's existing playbook only; it does not extend engine scope.</constraint>
+    <constraint source="ADR-039">Both catalogs are closed — the refreshed index reflects deployed rows exactly; no speculative entries.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>jps-catalog, dataverse-seeds, governance</topic>
+    <files>
+      <file>projects/spaarke-ai-architecture-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/plan.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-MIGRATION-MAP.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-CODE-INVENTORY.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/OVERLAY-MATRIX.md</file>
+      <file>.claude/skills/jps-scope-refresh/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="Scope/model index refresh" location=".claude/skills/jps-scope-refresh/SKILL.md">
+        The existing refresh mechanism (unrun ~4 months per inventory §5.4) — reuse/repair it rather than writing a parallel generator (CLAUDE.md §11).
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Inventory §5.4 found the catalog surface actively misleading: two divergent scope-model-index copies (ACT-001 meaning different things), seed data on the abandoned R4 taxonomy, and the authoritative multinode playbook blocked-undeployed on a missing `sprk_nodetype` option value. After P0-P3 the Binding table (`sprk_playbookconsumer` + extended columns) is the single routing surface — governance artifacts must now be projections of it.
+    </background>
+    <dependencies>
+      <dependency task="048" status="pending">G-P3 passed — Binding table is complete and canonical (all consumers migrated)</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 073 (Track-B batch 4) deleted the docs/ai-knowledge catalog twin + stale R4 seeds</item>
+      <item>Task 052 documents the extended tables the refreshed catalog reflects</item>
+      <item>Task 003 (FR-P0-03) deployed the schema columns this catalog now carries</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context check">
+      Check context usage. If &gt; 70%, create handoff summary and request new chat. Load inputs; read inventory §5.4; confirm main-session execution for the `.claude/catalogs/` write (or plan the notes-handoff pattern).
+    </step>
+    <step order="1" name="Verify single-copy state">
+      Grep/glob for `scope-model-index` repo-wide; show output proving only `.claude/catalogs/scope-model-index.json` remains (twin deleted by 073 and not resurfaced).
+    </step>
+    <step order="2" name="Refresh the index">
+      Run/repair the `jps-scope-refresh` mechanism against spaarkedev1 to regenerate `.claude/catalogs/scope-model-index.json` from live rows (scopes, models, actions incl. new `sprk_kind`/`sprk_modeltier` columns). Spot-check ≥3 entries against deployed GUIDs via Dataverse query — output shown. MAIN SESSION applies the write.
+    </step>
+    <step order="3" name="Regenerate Seed-PlaybookConsumers.ps1 from the table">
+      Query the full `sprk_playbookconsumer` Binding table (all extended columns from FR-P0-03); regenerate `scripts/Seed-PlaybookConsumers.ps1` as a faithful projection of it.
+    </step>
+    <step order="4" name="Prove the round-trip">
+      Round-trip proof: parse the regenerated script's rows and diff against a fresh table export — zero semantic drift (field-by-field comparison output shown). Document the round-trip method in the script header.
+    </step>
+    <step order="5" name="Rule the sprk_nodetype gap">
+      Investigate the `sprk_nodetype` option set on spaarkedev1 vs `summarize-document-for-workspace-v1-multinode.json` (`DeliverComposite=100000004`). Either add the missing option value (frozen-engine maintenance, not new capability) and verify the playbook deploys, OR document the accepted gap + rationale in `notes/catalog-governance.md`.
+    </step>
+    <step order="6" name="Verify + close">
+      Check acceptance criteria; write `notes/catalog-governance.md` summarizing all three deliverables + evidence. Update TASK-INDEX.md (051 → ✅).
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="pwsh">Seed script regeneration + round-trip proof</tool>
+    <tool name="dataverse-mcp">Query live catalog rows on spaarkedev1</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">.claude/catalogs/scope-model-index.json (refreshed — MAIN session write)</output>
+    <output type="code">scripts/Seed-PlaybookConsumers.ps1 (regenerated from the Binding table)</output>
+    <output type="report">projects/spaarke-ai-architecture-redesign-r1/notes/catalog-governance.md (evidence + sprk_nodetype ruling)</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Exactly one catalog copy exists repo-wide (grep/glob output shown); it is freshly regenerated and matches deployed GUIDs (spot-check evidence shown) (FR-P4-02).</criterion>
+    <criterion testable="true">Seed-PlaybookConsumers.ps1 is regenerated from the Binding table and round-trips (diff evidence shown).</criterion>
+    <criterion testable="true">The sprk_nodetype option-set gap is resolved (playbook deploys) OR documented with rationale in notes/catalog-governance.md.</criterion>
+    <criterion testable="true">All .claude/catalogs/ writes were made in the main session; TASK-INDEX updated.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

@@ -1010,10 +1010,8 @@ dotnet test tests/integration/Spe.Integration.Tests/ --filter "FullyQualifiedNam
 
 **Key test areas** (under `tests/unit/Sprk.Bff.Api.Tests/Services/Ai/`):
 - `AnalysisOrchestrationServiceTests.cs` -- core AI orchestration
-- `PlaybookExecutionEngineTests.cs` -- playbook engine execution
-- `PlaybookOrchestrationServiceTests.cs` -- playbook scheduling and dispatch
-- `Chat/` -- chat agent, context resolution, session management, streaming, middleware
-- `Chat/Tools/` -- tool handler tests (document search, web search, working document, analysis execution)
+- `PlaybookOrchestrationServiceTests.cs` -- frozen playbook engine scheduling and dispatch (Insights family; `PlaybookExecutionEngineTests.cs` was deleted with its subject at redesign-r1 task 044)
+- `Chat/` -- chat agent, agent-turn loop, confirmation gate, elicitation, context resolution, session management, streaming, middleware (legacy `Chat/Tools/` deleted at task 036; typed tool-handler tests live under `Handlers/`)
 - `Nodes/` -- execution graph node executors (AI analysis, condition, email, task, notification, record update)
 - `Tools/` -- Dataverse update tool, communication tool handlers
 - `Rag*.cs` -- RAG indexing pipeline, query builder, service
@@ -1064,7 +1062,7 @@ cd tests/e2e && npx playwright test --project=edge specs/universal-dataset-grid/
 
 **Playwright configuration**: `tests/e2e/config/playwright.config.ts` (Edge primary, 60s timeout, Power Apps URLs)
 
-**PCF controls in the codebase**: AIMetadataExtractor, AssociationResolver, DocumentRelationshipViewer, DrillThroughWorkspace, EmailProcessingMonitor, RelatedDocumentCount, ScopeConfigEditor, SemanticSearchControl, SpaarkeGridCustomizer, ThemeEnforcer, UniversalDatasetGrid, UniversalQuickCreate, UpdateRelatedButton, VisualHost
+**PCF controls in the codebase**: AssociationResolver, DocumentRelationshipViewer, EmailProcessingMonitor, RelatedDocumentCount, ScopeConfigEditor, SemanticSearchControl, SpaarkeGridCustomizer, ThemeEnforcer, UniversalDatasetGrid, UniversalQuickCreate, UpdateRelatedButton, VisualHost (AIMetadataExtractor and DrillThroughWorkspace deleted 2026-07, ai-architecture-redesign-r1)
 
 **ADR constraints validated**: ADR-006 (PCF over webresources), ADR-012 (shared component library), ADR-021 (Fluent UI v9, dark mode), ADR-022 (PCF uses React 16 platform libraries)
 

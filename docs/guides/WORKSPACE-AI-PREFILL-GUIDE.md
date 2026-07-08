@@ -159,8 +159,9 @@ Receive multipart/form-data files
     │   • Skips unsupported types gracefully
     │
     ├─ [Invoke Playbook] IPlaybookOrchestrationService.ExecuteAsync()
-    │   • Playbook ID: configurable (Workspace:PreFillPlaybookId)
-    │   • Default: 18cf3cc8-02ec-f011-8406-7c1e520aa4df
+    │   • Playbook ID: resolved via sprk_playbookconsumer Binding row
+    │     (consumerType 'matter-pre-fill' / 'project-pre-fill'; FR-P3-01
+    │     deleted the Workspace:*PlaybookId config keys — no fallback)
     │   • UserContext: extracted text
     │   • Parameters: { entity_type: "matter", extraction_mode: "pre-fill" }
     │   • Timeout: 45 seconds
@@ -308,7 +309,7 @@ IPlaybookOrchestrationService.ExecuteAsync()
 
 | Setting | Config Key | Default Value |
 |---------|-----------|---------------|
-| Playbook ID | `Workspace:PreFillPlaybookId` | `18cf3cc8-02ec-f011-8406-7c1e520aa4df` |
+| Playbook ID | *(none — FR-P3-01)* resolved via `sprk_playbookconsumer` Binding row, consumerType `matter-pre-fill` / `project-pre-fill` (dev rows: `e5f37faa-2c70-f111-ab0e-7ced8ddc4cc6`, `ab7ac1c5-2c70-f111-ab0e-7ced8ddc4cc6`) | per-environment Binding row |
 | Staging Container | `SharePointEmbedded:StagingContainerId` | Environment-specific |
 | Text Limit | Hardcoded | 80KB (~20K tokens) |
 | Execution Timeout | Hardcoded | 45 seconds |

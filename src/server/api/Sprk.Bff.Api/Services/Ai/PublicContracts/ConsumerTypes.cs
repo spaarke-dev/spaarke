@@ -64,10 +64,18 @@ public static class ConsumerTypes
     public const string SummarizeFile = "summarize-file";
 
     /// <summary>
-    /// <c>SessionSummarizeOrchestrator</c> — chat-side summarize-document
+    /// the /summarize dispatch path — chat-side summarize-document
     /// flow (summarize-document-for-chat@v1 playbook).
     /// </summary>
     public const string ChatSummarize = "chat-summarize";
+
+    /// <summary>
+    /// <c>EventRulesService</c> — document_uploaded event-rule member order 1
+    /// (UC-A-7 Layer-0 classification; CLS-CHAT@v1 prompted Action). Added by
+    /// spaarke-ai-architecture-redesign-r1 task 022 (FR-P1-03); the Binding row's
+    /// <c>sprk_oneventbindings</c> carries <c>[{"event":"document_uploaded","order":1}]</c>.
+    /// </summary>
+    public const string ChatClassify = "chat-classify";
 
     /// <summary>
     /// <c>AppOnlyAnalysisService</c> — email analysis pipeline (Email
@@ -76,25 +84,107 @@ public static class ConsumerTypes
     public const string EmailAnalysis = "email-analysis";
 
     /// <summary>
-    /// <c>DailyBriefingEndpoints.HandleNarrate</c> — daily-briefing narration
-    /// dispatch (spaarke-daily-update-service-r4 FR-12 Path A.5; routes to
-    /// the <c>DAILY-BRIEFING-NARRATE</c> playbook GUID via
-    /// <see cref="IConsumerRoutingService"/>).
+    /// <c>DailyBriefingCompositeService</c> — the Daily Briefing coded composite
+    /// (FR-P3-04, spaarke-ai-architecture-redesign-r1 task 043; the platform's FIRST
+    /// full <c>coded</c> Action). Two Binding rows: <c>default</c> (informational —
+    /// widget render via /render + /narrate) and <c>email</c> (email disposition —
+    /// Communication-service delivery via /email; scheduled trigger declared in
+    /// <c>sprk_oneventbindings</c>). Resolves the Action's <c>sprk_workflowclass</c>
+    /// through <see cref="IConsumerRoutingService.ResolveBindingAsync"/>.
     /// </summary>
     public const string DailyBriefingNarrate = "daily-briefing-narrate";
 
     /// <summary>
-    /// <c>DocumentProfileService</c> — Document Upload / Profile Document
+    /// the AnalysisEndpoints document-profile pipeline — Document Upload / Profile Document
     /// linear consumer. R7 Wave 12 (2026-07-02) — migrated off the Playbook
     /// Engine per <c>docs/architecture/SPAARKE-LINEAR-AI-CONSUMER-ARCHITECTURE.md</c>.
-    /// Routes via <see cref="LinearConsumers.LinearConsumersOptions.ActionIds"/>
-    /// rather than the routing table; the corresponding entry in
-    /// <see cref="LinearConsumers.LinearConsumersOptions.PlaybookIds"/> is
-    /// used by <c>AnalysisEndpoints.ExecuteAnalysis</c> to dispatch when the
-    /// incoming request's <c>PlaybookId</c> matches (preserving the client
-    /// contract during migration).
+    /// Routes via the <c>sprk_playbookconsumer</c> routing table
+    /// (Wave 12.3 retired the config-map lookup). FR-P3-01 (task 040) deleted
+    /// the <c>LinearConsumers:PlaybookIds</c> reverse-lookup config too:
+    /// <c>AnalysisEndpoints.ExecuteAnalysis</c> now detects a Document Profile
+    /// dispatch by comparing the incoming legacy <c>PlaybookId</c> against this
+    /// Binding row's <c>sprk_playbook</c> lookup (preserving the client
+    /// contract with the Binding table as the only routing surface).
     /// </summary>
     public const string DocumentProfile = "document-profile";
+
+    /// <summary>
+    /// <c>ComposeSummarize</c> — Compose drafting-workspace summarize flow
+    /// (spaarkeai-compose-r1; `ConsumerTypes.ComposeSummarize` in that
+    /// project's branch). Constant added here 2026-07-05 by
+    /// spaarke-ai-architecture-redesign-r1 gate 014: the Binding row exists on
+    /// spaarkedev1 and the FR-P0-04 boot reconciliation requires constants ↔
+    /// rows parity. Identical declaration expected from the compose-r1 merge.
+    /// </summary>
+    public const string ComposeSummarize = "compose-summarize";
+
+    /// <summary>
+    /// The per-tenant honest-refusal capability (FR-P2-04 / ADR-039 grounded-execution
+    /// clause (d); canonical doc §3.10.7.2 Layer 4). When the agent-turn loop matches
+    /// nothing in the closed catalog and cannot ground a cited ad-hoc answer, it
+    /// invokes THIS Binding — the refusal template is catalog data (the Binding's
+    /// REF-CHAT@v1 prompted Action), never hardcoded copy. Projected into the loop
+    /// as <c>RefusalCapabilityTool</c>; emits <c>dispatch_refused</c> telemetry
+    /// (the refusal-backlog product signal). Added by
+    /// spaarke-ai-architecture-redesign-r1 task 033.
+    /// </summary>
+    public const string NoMatchHandler = "no_match_handler";
+
+    /// <summary>
+    /// The draft-correspondence proving capability (FR-P3-02 / spec §Owner
+    /// Clarifications): a prompted Action (DRAFT-CORR@v1) that composes professional
+    /// correspondence grounded in the session's documents and ledger outputs, projected
+    /// into the agent loop as <c>capability_draft-correspondence</c>. The companion
+    /// <c>email.draft</c> typed tool (declared <c>side_effect_class: communicate</c> —
+    /// confirmation-gated) materializes the reviewed draft as a Spaarke
+    /// <c>sprk_communication</c> DRAFT record in the Communication (Email) service —
+    /// NOT an Outlook draft; sending stays user-initiated there (DRAFT-ONLY; FR-P4-07
+    /// defers assistant-initiated send). Added by spaarke-ai-architecture-redesign-r1
+    /// task 041.
+    /// </summary>
+    public const string DraftCorrespondence = "draft-correspondence";
+
+    /// <summary>
+    /// The Insights Engine playbook-path catalog (FR-P3-01,
+    /// spaarke-ai-architecture-redesign-r1 task 040). Replaces the deleted
+    /// Insights playbook-name appsettings map (+ its default-name config
+    /// key — both retired at the cutover): the canonical playbook name
+    /// (e.g. <c>matter-health-single</c>, <c>universal-ingest@v1</c>) is the
+    /// Binding row's <c>sprk_consumercode</c>; the per-environment
+    /// <c>sprk_analysisplaybook</c> GUID is its <c>sprk_playbook</c> lookup.
+    /// Readers (<c>InsightEndpoints</c>, <c>AssistantToolCallHandler</c>,
+    /// <c>InsightsOrchestrator</c>, <c>TopicRegistryTtlLookup</c>) resolve via
+    /// <see cref="IConsumerRoutingService.ResolveBindingAsync"/> with EXACT
+    /// consumer-code matching (the default-row fallback is rejected so unknown
+    /// canonical names still fail clean). The <c>default</c> row is the
+    /// Assistant-path default when the classifier supplies no hint.
+    /// </summary>
+    public const string InsightsAsk = "insights-ask";
+
+    /// <summary>
+    /// The Insights Engine RAG search surface (FR-P3-01, task 040 — catalog
+    /// registration). <c>POST /api/insights/search</c> wraps <c>IRagService</c>
+    /// directly (no engine target), so no code resolves this Binding today; the
+    /// row exists for FR-P0-04 constants ↔ rows parity and anchors the later
+    /// loop-side insights capability projection.
+    /// </summary>
+    public const string InsightsSearch = "insights-search";
+
+    /// <summary>
+    /// The create-task capability (FR-P3-03 / UC-H-1, canonical walkthrough steps
+    /// 10-14): a prompted Action (CREATE-TASK@v1) that drafts a well-formed follow-up
+    /// task proposal grounded in the session's documents and ledger outputs, projected
+    /// into the agent loop as <c>capability_create-task</c>. The Action's input schema
+    /// declares <c>due_date</c> + <c>assign_to</c> REQUIRED, so missing values produce
+    /// the FR-P2-03 loop-native clarifying turn. The WRITE leg is the EXISTING
+    /// <c>dataverse.create_record</c> typed handler (declared
+    /// <c>side_effect_class: write</c> — confirmation-gated; executed on confirm by
+    /// <c>TypedHandlerResumeExecutor</c>) creating <c>sprk_event</c> with
+    /// <c>sprk_eventtype_ref = Task</c>, carrying provenance refs (source document +
+    /// source analysis <c>{bindingId}@t{n}</c>) per the Binding's tool description.
+    /// Added by spaarke-ai-architecture-redesign-r1 task 042.
+    /// </summary>
+    public const string CreateTask = "create-task";
 
     /// <summary>
     /// Read-only list of all consumer-type constants. Intended for startup
@@ -108,8 +198,15 @@ public static class ConsumerTypes
         AiSummary,
         SummarizeFile,
         ChatSummarize,
+        ChatClassify,
         EmailAnalysis,
         DailyBriefingNarrate,
         DocumentProfile,
+        ComposeSummarize,
+        NoMatchHandler,
+        DraftCorrespondence,
+        InsightsAsk,
+        InsightsSearch,
+        CreateTask,
     };
 }

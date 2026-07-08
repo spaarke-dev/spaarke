@@ -114,7 +114,7 @@ public class PlaybookChatContextProviderEnrichmentIntegrationTests
 
         // 4. Entity enrichment block
         prompt.Should().Contain(
-            "Context: You are assisting with matter record 'Acme Corp v. Globex Industries'.",
+            "Context: This chat is hosted on the matter record 'Acme Corp v. Globex Industries'",
             "entity enrichment must be present");
         prompt.Should().Contain(
             "The user is viewing the main form view.",
@@ -124,7 +124,7 @@ public class PlaybookChatContextProviderEnrichmentIntegrationTests
         var baseIdx = prompt.IndexOf(BaseSystemPrompt, StringComparison.Ordinal);
         var knowledgeIdx = prompt.IndexOf("## Reference Materials", StringComparison.Ordinal);
         var skillIdx = prompt.IndexOf("## Specialized Instructions", StringComparison.Ordinal);
-        var enrichmentIdx = prompt.IndexOf("Context: You are assisting with", StringComparison.Ordinal);
+        var enrichmentIdx = prompt.IndexOf("Context: This chat is hosted on", StringComparison.Ordinal);
 
         baseIdx.Should().BeLessThan(knowledgeIdx, "base prompt should precede knowledge section");
         knowledgeIdx.Should().BeLessThan(skillIdx, "knowledge section should precede skill section");
@@ -154,7 +154,7 @@ public class PlaybookChatContextProviderEnrichmentIntegrationTests
 
         // Assert — entity type and name in enrichment block
         context.SystemPrompt.Should().Contain(
-            "Context: You are assisting with project record 'Solar Panel Installation Phase 2'.");
+            "Context: This chat is hosted on the project record 'Solar Panel Installation Phase 2'");
         context.SystemPrompt.Should().Contain(
             "The user is viewing the list view.");
     }
@@ -188,7 +188,7 @@ public class PlaybookChatContextProviderEnrichmentIntegrationTests
 
         // Assert — enrichment block still appended
         context.SystemPrompt.Should().Contain(
-            "Context: You are assisting with invoice record 'INV-2026-0042'.",
+            "Context: This chat is hosted on the invoice record 'INV-2026-0042'",
             "enrichment must work in generic mode");
         context.SystemPrompt.Should().Contain(
             "The user is viewing the main form view.");
@@ -339,7 +339,7 @@ public class PlaybookChatContextProviderEnrichmentIntegrationTests
         context.SystemPrompt.Should().Contain("You are an AI assistant",
             "should fall back to default system prompt");
         context.SystemPrompt.Should().Contain(
-            "Context: You are assisting with contact record 'Jane Smith'.",
+            "Context: This chat is hosted on the contact record 'Jane Smith'",
             "enrichment should still be appended after default prompt");
     }
 
@@ -372,7 +372,7 @@ public class PlaybookChatContextProviderEnrichmentIntegrationTests
         context.SystemPrompt.Should().Contain(BaseSystemPrompt);
         context.SystemPrompt.Should().Contain("## Reference Materials");
         context.SystemPrompt.Should().Contain("Industry Guide");
-        context.SystemPrompt.Should().NotContain("Context: You are assisting with",
+        context.SystemPrompt.Should().NotContain("Context: This chat is hosted on",
             "no enrichment when host context is null");
     }
 
@@ -403,7 +403,7 @@ public class PlaybookChatContextProviderEnrichmentIntegrationTests
 
         // Assert — enrichment is present despite document service failure
         context.SystemPrompt.Should().Contain(
-            "Context: You are assisting with matter record 'Resilience Test Corp'.");
+            "Context: This chat is hosted on the matter record 'Resilience Test Corp'");
         context.SystemPrompt.Should().Contain(
             "The user is viewing the workspace view.");
 

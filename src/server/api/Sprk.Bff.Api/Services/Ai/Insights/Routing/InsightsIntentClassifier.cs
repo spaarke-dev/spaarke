@@ -346,9 +346,10 @@ public sealed class InsightsIntentClassifier : IInsightsIntentClassifier
 
     /// <summary>
     /// Normalize the playbookId returned by the LLM. Trims whitespace; returns null for
-    /// empty/whitespace. The dispatcher (future E3) resolves the canonical name → Guid
-    /// via <c>InsightsPlaybookNameMapOptions</c>; this method does NOT validate against
-    /// the catalog because the catalog binding lives outside Zone A.
+    /// empty/whitespace. The dispatcher resolves the canonical name → Guid via the
+    /// <c>insights-ask</c> <c>sprk_playbookconsumer</c> Binding rows
+    /// (<c>IConsumerRoutingService.ResolveBindingAsync</c>, FR-P3-01); this method does
+    /// NOT validate against the catalog because the catalog binding lives outside Zone A.
     /// </summary>
     private static string? NormalizePlaybookId(string? raw)
     {

@@ -2,7 +2,7 @@
 
 > **Purpose**: End-to-end reference for the SpaarkeAi three-pane shell as it stands after Round 13 (Calendar widget polish + all-panes-collapsed empty state + 25/50/25 pane fracs). Documents the cold-load → widget render data flow, component boundaries, auth path, BFF surface, and storage contract.
 >
-> **Last reviewed**: 2026-06-18 (project `spaarke-daily-update-service-r2` task 063 / SC14). Daily Briefing section factory migrated to Pattern D dual-use via the new `@spaarke/daily-briefing-components` shared lib with `loadNotificationContext` factory option seam (§3.5). Previous review: 2026-05-22 (Task 123, Round 13).
+> **Last reviewed**: 2026-07-07 (project `spaarke-ai-architecture-redesign-r1` task 052 / FR-P4-03). Added §2.6 assistant-opened layout tabs (`workspace_open_tab`), §2.3 tab-persistence restore sequencing (G-P3 round-3 fix), and §3.6 Visible-to-assistant contract. Previous review: 2026-06-18 (`spaarke-daily-update-service-r2` task 063 / SC14 — Daily Briefing Pattern D dual-use via `@spaarke/daily-briefing-components`, §3.5).
 >
 > **R4 update (2026-05-26)**: The standalone LegalWorkspace code page (`sprk_corporateworkspace` web resource) has been **retired** per operator decision OC-R4-05. LegalWorkspace components, `LegalWorkspaceApp`, and all shared libraries remain in active use — SpaarkeAi is now the only host. See [`LEGALWORKSPACE-RETIREMENT.md`](./LEGALWORKSPACE-RETIREMENT.md) for the retirement decision, consumer audit, and migration guidance.
 
@@ -70,7 +70,9 @@ On mount the WorkspacePane:
    - **Default workspace auto-install** (Wave 2b / Task 109): dispatches `widget_load` for `activeLayout` from the BFF's 4-step cascade (per-user default → Dataverse system default → hard-coded system default → null).
    - **Pinned workspaces auto-open** (Task 101): reads `localStorage["spaarke:workspace:pinned-list"]` and dispatches `widget_load` for each pinned layout NOT already present.
 
-Both effects use `setTimeout(fn, 0)` because `usePaneEvent('workspace', ...)` registers its subscription via a downstream `useEffect`; without the macrotask deferral the dispatch lands on a zero-subscriber channel. See `WorkspacePane.tsx:340-540` block comments for the rationale.
+Both effects use `setTimeout(fn, 0)` because `usePaneEvent('workspace', ...)` registers its subscription via a downstream `useEffect`; without the macrotask deferral the dispatch lands on a zero-subscriber channel. See `WorkspacePane.tsx` block comments for the rationale.
+
+**Restore sequencing (G-P3 round-3 fix, `spaarke-ai-architecture-redesign-r1` 2026-07-07)**: the two auto-open effects additionally gate on a `tabRestoreSettled` state that the restore effect settles on EVERY terminal path (success / 404 / error / no-session). Without the gate, the default-layout `addTab` raced the async restore, silently no-op'ing `restoreFromPersistence` (its `hasNonHomeTab` guard saw the fresh default tab) and then OVERWRITING the server tab store via the debounced write-through — persisted tabs were lost on refresh. Companion fix in `WorkspaceTabManager.restoreFromPersistence`: restored tabs keep their original `wstab-{seq}-{type}` ids, and `_nextSeq` advances past each restored id's seq so the next `addTab()` never mints a duplicate id. **Persistence semantics**: restore ONCE on mount (`GET /api/ai/chat/sessions/{id}/tabs`), then debounced (~200 ms) write-through of the full tab set (`PATCH` same route) on every tab mutation — the client tab store is authoritative; assistant-opened tabs (§2.6) persist through the identical channel and survive refresh.
 
 ### 2.4 Tab dispatch + widget resolution
 
@@ -104,6 +106,17 @@ event.type === 'widget_load' && !event.tabId
 
 `WorkspaceShell` then renders sections per the layout's `rows` and `sections` arrays. Each section is materialized by its registered factory (e.g. `quickSummary.registration.ts → factory(context) → ContentSectionConfig`).
 
+### 2.6 Assistant-opened layout tabs (`workspace_open_tab`) — G-P3, 2026-07-07
+
+Workspace layout tabs are now **assistant-drivable**: a chat utterance like "open the Compose workspace" opens the same layout tab the Workspaces menu would. The chain (added by `spaarke-ai-architecture-redesign-r1` G-P3 round 2, fix R2-D):
+
+1. The agent loop invokes the `send_workspace_artifact` tool with `widgetType: 'Workspace'` and `widgetData: { layoutName: 'Compose' }` (or `layoutId`).
+2. `SendWorkspaceArtifactHandler` (BFF) resolves the layout by name/id via `WorkspaceLayoutService.GetLayoutsAsync` (hard-coded + Dataverse-system + user layouts, under the calling user). An unknown name returns an honest error LISTING the available layout names — never a fabricated success.
+3. The handler emits a `workspace_open_tab` frame on the EXISTING `context_event` SSE channel (`ContextSseEventDto` additive fields: `ContextWidgetType`, `ContextDisplayName`, `ContextTabId`, `ContextWidgetDataJson`; ADR-030 additive — old clients ignore the discriminant). **Fail-honest**: no SSE writer ⇒ error result ("the tab was NOT opened").
+4. The SpaarkeAi client bridge `useContextEventBridge` maps the frame to PaneEventBus `workspace.widget_load { widgetType: 'workspace', widgetData: { layoutId, layoutName }, displayName }` — byte-compatible with the Workspaces-menu path. `WorkspacePane`'s existing subscriber adds + AUTO-ACTIVATES the tab; the client write-through persists it (§2.3), so it survives refresh.
+
+There is deliberately NO `IWorkspaceStateService` write for layout tabs — the client's own tab persistence (`GET`/`PATCH /api/ai/chat/sessions/{id}/tabs`) is the store. The four legacy artifact variants of `send_workspace_artifact` (Summary / DocumentViewer / Dashboard / Table) and the `SYS-Get/Update/Close Workspace Tab` tools still write the orphaned `IWorkspaceStateService` store, which no post-046 client renders (their widget types have no keys in `register-workspace-widgets.ts`) — their result text says so honestly; a re-point-or-retire verdict is owed at FR-P4-01.
+
 ---
 
 ## 3. Component model
@@ -125,9 +138,11 @@ The **`'workspace'` widget type** (registration #16, lines 542-566 of `register-
 
 | File | Role |
 |---|---|
-| `WorkspaceTabManager.ts` | Plain TS class — tab state + FIFO eviction at `MAX_WORKSPACE_TABS = 8` + persistence snapshots |
+| `WorkspaceTabManager.ts` | Plain TS class — tab state + FIFO eviction at `MAX_WORKSPACE_TABS = 8` + persistence snapshots; `restoreFromPersistence` preserves restored tab ids AND advances `_nextSeq` past them (id-collision fix, G-P3 round 3) |
 | `WorkspaceTabManagerComponent.tsx` | Renders tab strip + active widget; left/right scroll arrows; close affordance (Task 107) |
 | `WorkspacePaneMenu.tsx` | PaneHeader rightSlot — "Switch Workspace" dropdown; pin toggles; "+ New Workspace" wizard launch; Manage workspaces (Task 093) |
+| `AddToAssistantToggle.tsx` | Per-tab "Visible to assistant" Switch (§3.6) — flips `visibleToAssistant`, dispatches `workspace.tab_edited` (field names only) |
+| `useContextEventBridge.ts` (`components/conversation/`) | Bridges server `context_event` SSE frames onto PaneEventBus — incl. `workspace_open_tab` → `workspace.widget_load` (§2.6) |
 
 ### 3.3 PaneEventBus contract
 
@@ -135,7 +150,7 @@ The **`'workspace'` widget type** (registration #16, lines 542-566 of `register-
 
 | Channel | Event types | Dispatchers | Subscribers |
 |---|---|---|---|
-| `workspace` | `widget_load`, `widget_update`, `widget_action`, `tab_change`, `tab_count_change`, `selection_changed`, `tabs_clear`, `wizard_step`, `entity_resolved`, `session_reset`, `active_widget_changed` | `WorkspacePaneMenu`, `WorkspacePane` (resolve ack), `AiSessionProvider` (SSE → bus), session restore | `WorkspacePane`, `ShellStageManager`, `ContextPaneController` (for `tab_change`) |
+| `workspace` | `widget_load`, `widget_update`, `widget_action`, `tab_change`, `tab_count_change`, `tab_edited`, `selection_changed`, `tabs_clear`, `wizard_step`, `entity_resolved`, `session_reset`, `active_widget_changed` | `WorkspacePaneMenu`, `WorkspacePane` (resolve ack), `AiSessionProvider` (SSE → bus), `useContextEventBridge` (`workspace_open_tab` → `widget_load`, §2.6), `AddToAssistantToggle` (`tab_edited`), session restore | `WorkspacePane`, `ShellStageManager`, `ContextPaneController` (for `tab_change`) |
 | `context` | `context_update`, `context_highlight`, `stage_change` | `AiSessionProvider`, `ContextPaneController` | `ContextPaneController`, citation-highlight viewers |
 | `conversation` | `suggestion`, `playbook_change`, `playbook-selected`, `refine_request`, `first_message` | `ConversationPane`, `PlaybookGalleryWidget` | `WorkspacePane` (seed default widgets), `ShellStageManager` (Stage 1→2) |
 | `safety` | `safety_annotation`, `capability_change` | `AiSessionProvider` (SSE → bus) | (consumers TBD) |
@@ -165,6 +180,12 @@ LegalWorkspace defines its sections in `src/sections/*.registration.ts`. Each `S
 Current 6 registrations: `get-started`, `quick-summary`, `latest-updates`, `todo`, `documents`, `daily-briefing`. The `daily-briefing` factory was hoisted to `@spaarke/ui-components/components/WorkspaceShell/sections/dailyBriefing/` in Task 069 as a `createDailyBriefingRegistration` factory; the LegalWorkspace-local file is now a re-export shim (Task 086).
 
 **R2 update (project `spaarke-daily-update-service-r2`, 2026-06-18)**: Daily Briefing migrated to Pattern D dual-use via a new dedicated shared lib `@spaarke/daily-briefing-components` (per Calendar + Smart Todo precedent — see [`SPAARKEAI-COMPONENT-MODEL.md`](./SPAARKEAI-COMPONENT-MODEL.md) §7). The new package owns `DailyBriefingApp` (top-level composer), three split data hooks (`useBriefingNotifications`, `useBriefingPreferences`, `useBriefingActions` — per R2 FR-06), action + narration hooks, services, types, and utils. The standalone code page (`sprk_dailyupdate`) and the LegalWorkspace section registration shim both mount `<DailyBriefingApp />` from the new package, satisfying the "one component, two consumers" dual-use trait. The previous `@spaarke/ui-components/components/WorkspaceShell/sections/dailyBriefing/` factory is retired in R2 in favor of the LW-local shim consuming the new package directly. The shim wires the host-side data source via the new `loadNotificationContext?: () => Promise<NarrateRequest | null>` factory option seam (R2 FR-01): SpaarkeAi injects a resolver so workspace-pane bullets populate from the active context; the standalone code page omits the option and renders the empty-payload contract.
+
+### 3.6 Visible-to-assistant (per-tab visibility contract — R6 Pillar 9)
+
+Each workspace tab carries a `visibleToAssistant: boolean` (`WorkspaceTab` in `@spaarke/ai-widgets/types`). Privacy defaults: **agent-created tabs default `true`; user-created tabs default `false`**. The user flips it per tab via the `AddToAssistantToggle` Fluent Switch (`src/solutions/SpaarkeAi/src/components/workspace/AddToAssistantToggle.tsx` — controlled component; dispatches a `workspace.tab_edited` PaneEventBus event carrying `tabId` + `editedFields: ['visibleToAssistant']` — field NAMES only, per ADR-015).
+
+Effect: only tabs with `visibleToAssistant === true` enter the agent's per-turn prompt snapshot — `SprkChatAgentFactory` filters on the flag when building workspace-tab context, and each widget type contributes its `SerializedWidgetState` shape (e.g. Summary: `{ widgetType, summary, tldr, hasUserEdits }`; DocumentViewer: filename/MIME/selection; Table: rowCount/sort/filter/selection — see `@spaarke/ai-widgets/types/SerializedWidgetState.ts`). Hidden tabs contribute nothing. Assistant-opened layout tabs (§2.6) are agent-created and therefore visible by default.
 
 ---
 
@@ -345,4 +366,5 @@ The overlay is contained entirely inside `ThreePaneLayout`; no SpaarkeAi-side ch
 - **2026-05-22 (task 123)**: refreshed through R13. Added Calendar widget (task 115) as 6th system layout + its distinct "shared-lib widget + thin LW shim" architecture, `@spaarke/events-components` shared lib (task 114), pane-width fracs precedence chain (task 117), all-panes-collapsed overlay UX + `resetToFracDefaults()` recovery (task 119), `spaarke:calendar:collapsed` localStorage key (task 116), QuickSummary 6-card expansion (task 110). Calendar widget polish history (tasks 116/118/120/121/122) is captured in the componentization audit and the build-a-widget guide; this file references the architectural surface only.
 - **2026-05-26 (R4 task 010 / W-1)**: cross-linked to new authoritative two-wrapper architecture doc `SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md` (R4 DR-01). This doc remains the cold-load → render pipeline reference; the new doc establishes the mental model (surfaces / wrappers / mount sources / dual-use / LegalWorkspace-as-engine) that future widget authors apply on top of this pipeline.
 - **2026-06-07 (project `spaarke-multi-container-multi-index-r1` task 061 / FR-DOC-02)**: added §6.3 "Per-BU container + index routing" describing record-scoped storage + search routing (containers + AI Search indexes selected per record at create time via the 5 parent-record create wizards + DocumentUploadWizard), BFF allow-list validation (`400 INDEX_NOT_ALLOWED`), and INV-3 coexistence model. Cross-linked to design.md §3 invariants + the new operator runbook.
+- **2026-07-07 (project `spaarke-ai-architecture-redesign-r1` task 052 / FR-P4-03)**: added §2.6 assistant-opened layout tabs — the `send_workspace_artifact(widgetType:'Workspace')` → `workspace_open_tab` SSE frame → `useContextEventBridge` → `workspace.widget_load` chain (G-P3 round-2 fix R2-D), incl. the honest unknown-layout error and the orphaned `IWorkspaceStateService` legacy-variant note (FR-P4-01 verdict pending); documented tab-persistence restore sequencing in §2.3 (`tabRestoreSettled` gate + `_nextSeq` id-collision fix, G-P3 round-3 fix R3-3) and the restore-once + debounced-write-through contract; added §3.6 Visible-to-assistant (Pillar 9 `visibleToAssistant` flag, `AddToAssistantToggle`, `SprkChatAgentFactory` prompt-snapshot filter, `SerializedWidgetState` shapes); PaneEventBus workspace-channel table gained `tab_edited` + the bridge dispatcher.
 - **2026-06-18 (project `spaarke-daily-update-service-r2` task 063 / SC14)**: refreshed §3.5 "Section factories (LegalWorkspace-local)" to record the Daily Briefing migration to Pattern D dual-use via the new `@spaarke/daily-briefing-components` shared lib (R2 task 010 hoist) with the `loadNotificationContext` factory option seam (R2 FR-01). The previous `@spaarke/ui-components/components/WorkspaceShell/sections/dailyBriefing/` factory (Task 069 / 086) is retired in R2 in favor of the LW-local shim consuming the new package directly. Cross-linked to [`SPAARKEAI-COMPONENT-MODEL.md`](./SPAARKEAI-COMPONENT-MODEL.md) §7 and [`../guides/BUILD-A-NEW-WORKSPACE-WIDGET.md`](../guides/BUILD-A-NEW-WORKSPACE-WIDGET.md) §1.1.

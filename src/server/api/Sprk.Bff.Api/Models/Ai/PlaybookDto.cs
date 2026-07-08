@@ -101,9 +101,9 @@ public record PlaybookResponse
     /// <summary>
     /// Raw JSON content from the Dataverse <c>sprk_jps_matching_metadata</c> Memo column
     /// (added by chat-routing-redesign-r1 task 031). Null when the playbook has not been
-    /// backfilled with JPS matching metadata. Consumed by
-    /// <c>PlaybookEmbeddingService.ComposeContentText</c> (FR-10) and the validation gate
-    /// (FR-12).
+    /// backfilled with JPS matching metadata. (The FR-10/FR-12 embeddings consumers were
+    /// deleted by spaarke-ai-architecture-redesign-r1 task 035 / FR-P2-06; the column
+    /// remains maker-authored metadata.)
     /// </summary>
     public string? JpsMatchingMetadata { get; init; }
 
@@ -124,10 +124,9 @@ public record PlaybookResponse
 
     /// <summary>
     /// SHA-256 hex digest of the canonical embed-input string (chat-routing-redesign-r1 FR-13).
-    /// Written by <see cref="Sprk.Bff.Api.Services.Ai.PlaybookEmbedding.PlaybookEmbeddingService"/>
-    /// at successful index time and recomputed nightly by
-    /// <see cref="Sprk.Bff.Api.Services.Ai.PlaybookEmbedding.PlaybookIndexDriftDetectionJob"/>
-    /// to detect content drift. Null until the playbook has been successfully indexed.
+    /// Historical: the FR-13 index/drift writers were deleted by
+    /// spaarke-ai-architecture-redesign-r1 task 035 / FR-P2-06 with the playbook-embeddings
+    /// jobs; the Dataverse column persists whatever the last writer stored.
     /// </summary>
     public string? IndexHash { get; init; }
 

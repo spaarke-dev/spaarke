@@ -10,7 +10,7 @@
     under the LogicalName `sprk_outputschemajson` (note the trailing `json`). That column is
     structurally identical to the planned column (Memo, RequiredLevel=None) with a more
     generous MaxLength (1,048,576 / ~1 MB) than the planned 100 KB cap. It is in active
-    production use by `PlaybookExecutionEngine.cs` for Structured Outputs JSON Schema
+    production use by the playbook execution path for Structured Outputs JSON Schema
     binding to Azure OpenAI Structured Outputs streaming.
 
     Per the autonomous-decision applied at task 030 (Option A, "ADRs are defaults"), this
@@ -61,7 +61,7 @@
                     reshape.
 
     Consumer code (read-only reference; this script does NOT modify):
-        src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookExecutionEngine.cs:474-500
+        the engine-shell FK-chain resolver (deleted by FR-P3-05 task 044)
         (ResolveActionConfigViaFkChainAsync reads sprk_outputschemajson and feeds it to
          _openAiClient.StreamStructuredCompletionAsync as the Structured Outputs schema).
 #>

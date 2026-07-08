@@ -104,6 +104,55 @@ describe('SprkChat', () => {
       const root = screen.getByTestId('sprkchat-root');
       expect(root.className).toContain('my-custom-class');
     });
+
+    // G-P2 UAT round-1 finding 1 (2026-07-06): transcriptFooterSlot renders the
+    // host's node at the END of the transcript, INSIDE the scrollable message list
+    // (the consumer chips moved here from aboveInputSlot).
+    it('should render transcriptFooterSlot content inside the message list', async () => {
+      await act(async () => {
+        renderWithProviders(
+          <SprkChat {...defaultProps} transcriptFooterSlot={<div data-testid="footer-slot-content">chips here</div>} />
+        );
+      });
+
+      const slotContent = screen.getByTestId('footer-slot-content');
+      expect(slotContent).toBeInTheDocument();
+      expect(screen.getByTestId('chat-message-list')).toContainElement(slotContent);
+    });
+  });
+
+  // G-P2 UAT round-1 finding 2 (2026-07-06): the Insert (insert-into-editor)
+  // affordance is prop-gated — hidden unless the host declares an insert target.
+  describe('Insert affordance gating (enableInsertToEditor)', () => {
+    const assistantHistory = [
+      {
+        role: 'Assistant' as const,
+        content: 'Here is a summary of the document.',
+        timestamp: '2026-07-06T10:00:00Z',
+      },
+    ];
+
+    it('should NOT show the Insert button by default (host has no insert target)', async () => {
+      await act(async () => {
+        renderWithProviders(<SprkChat {...defaultProps} initialMessages={assistantHistory} />);
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText('Here is a summary of the document.')).toBeInTheDocument();
+      });
+      expect(screen.queryByTitle('Insert into editor')).not.toBeInTheDocument();
+    });
+
+    it('should show the Insert button when the host opts in via enableInsertToEditor', async () => {
+      await act(async () => {
+        renderWithProviders(<SprkChat {...defaultProps} initialMessages={assistantHistory} enableInsertToEditor />);
+      });
+
+      await waitFor(() => {
+        expect(screen.getByText('Here is a summary of the document.')).toBeInTheDocument();
+      });
+      expect(screen.getByTitle('Insert into editor')).toBeInTheDocument();
+    });
   });
 
   describe('Session Initialization', () => {

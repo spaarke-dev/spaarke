@@ -1,12 +1,12 @@
 /**
  * AiSessionProvider — React context provider for multi-pane AI sessions (R2)
  *
- * Replaces R1's StandaloneAiProvider / StandaloneAiContext with a design that
+ * Replaces the R1 standalone provider (deleted in Track-B batch 3) with a design that
  * routes SSE pane events to the typed PaneEventBus instead of a single-subscriber
  * ref. Multiple panes (WorkspacePane, ContextPaneController, etc.) can subscribe
  * to their channel independently — every subscriber receives every event.
  *
- * Key differences from R1 StandaloneAiProvider:
+ * Key differences from the R1 standalone provider:
  *  - NO `subscribePaneEvents` / single-subscriber ref. Panes use usePaneEvent().
  *  - `onPaneEvent` callback routes SSE events to PaneEventBus channels:
  *      output_pane      → 'workspace' channel  (WorkspacePaneEvent widget_load/widget_update)
@@ -34,7 +34,7 @@
  *   </AiSessionProvider>
  * </PaneEventBusProvider>
  *
- * @see StandaloneAiContext.tsx in Spaarke.AI.Context — R1 provider being replaced
+ * (The replaced R1 provider in Spaarke.AI.Context was deleted in Track-B batch 3.)
  * @see PaneEventBus.ts — multi-subscriber typed bus
  * @see usePaneEvent — hook for pane components to subscribe to channels
  * @see useDispatchPaneEvent — hook used internally to route SSE events
@@ -132,6 +132,16 @@ export interface AiSessionContextValue {
   chatSessionId: string | null;
   /** Set the chat session ID — called when SprkChat creates a new session */
   setChatSessionId: (sessionId: string) => void;
+  /**
+   * Clear the chat session id from React state AND persisted storage. Called by
+   * SprkChat's `onSessionStale` when the server reports the persisted id no
+   * longer exists (Redis TTL expired, server cleanup, environment rebuild).
+   * Fresh session creation is then driven by SprkChat's own createSession path
+   * and lands back in state via `setChatSessionId` from `onSessionCreated`.
+   *
+   * R7 Wave 12.3 Phase 12.3a UAT fix (2026-07-03).
+   */
+  clearChatSession: () => void;
 
   // ── Playbook State (persisted to localStorage — R4 task 031) ─────────────
   /** Active playbook ID governing session behaviour */
@@ -142,7 +152,7 @@ export interface AiSessionContextValue {
   // ── Entity Context ────────────────────────────────────────────────────────
   /**
    * Resolved entity context (null while resolving or when no entity found).
-   * Provided via props (from useEntityResolver in the host shell) or null.
+   * Provided via props (resolved by the host shell) or null.
    */
   entityContext: EntityContext | null;
 
@@ -190,7 +200,7 @@ export interface AiSessionProviderProps {
   /** BFF API base URL (HOST only — resolved by resolveRuntimeConfig() in the shell) */
   bffBaseUrl: string;
   /**
-   * Entity context resolved by the host shell (via useEntityResolver).
+   * Entity context resolved by the host shell.
    *
    * Pass null when operating in entityless mode (e.g. generic assistant mode
    * without an entity record in scope). The provider fetches a context mapping
@@ -253,6 +263,26 @@ function writeSession(key: string, value: string): void {
     localStorage.setItem(key, value);
   } catch {
     /* localStorage may be unavailable in some Dataverse webresource contexts */
+  }
+}
+
+/**
+ * Remove a session key from BOTH localStorage AND sessionStorage. Used by
+ * `clearChatSession` when SprkChat reports a stale session (R7 Wave 12.3 Phase 12.3a
+ * UAT fix 2026-07-03). Deletes from both stores to close the pre-R4 sessionStorage
+ * migration path — if we only removed from localStorage, a stale value could remain
+ * in sessionStorage and be picked up by another migration on next mount.
+ */
+function removeSession(key: string): void {
+  try {
+    localStorage.removeItem(key);
+  } catch {
+    /* localStorage may be unavailable in some Dataverse webresource contexts */
+  }
+  try {
+    sessionStorage.removeItem(key);
+  } catch {
+    /* sessionStorage may be unavailable in some Dataverse webresource contexts */
   }
 }
 
@@ -386,6 +416,11 @@ export function AiSessionProvider({
   const setChatSessionId = useCallback((sessionId: string): void => {
     setChatSessionIdState(sessionId);
     writeSession(AI_SESSION_CHAT_SESSION_KEY, sessionId);
+  }, []);
+
+  const clearChatSession = useCallback((): void => {
+    setChatSessionIdState(null);
+    removeSession(AI_SESSION_CHAT_SESSION_KEY);
   }, []);
 
   // ── Playbook State (persisted to localStorage — R4 task 031) ───────────
@@ -550,6 +585,7 @@ export function AiSessionProvider({
       // Session
       chatSessionId,
       setChatSessionId,
+      clearChatSession,
 
       // Playbook
       playbookId,
@@ -580,6 +616,7 @@ export function AiSessionProvider({
       bffBaseUrl,
       chatSessionId,
       setChatSessionId,
+      clearChatSession,
       playbookId,
       setPlaybookId,
       entityContext,

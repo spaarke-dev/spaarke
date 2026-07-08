@@ -93,12 +93,6 @@ public class SafetyPipelineMiddlewareTests
                 yield return update;
             }
         }
-
-        public Task<IReadOnlyList<FunctionCallContent>> DetectToolCallsAsync(
-            string message,
-            IReadOnlyList<AiChatMessage> history,
-            CancellationToken cancellationToken)
-            => Task.FromResult<IReadOnlyList<FunctionCallContent>>([]);
     }
 
     // -------------------------------------------------------------------------

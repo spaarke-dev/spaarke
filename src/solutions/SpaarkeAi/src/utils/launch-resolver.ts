@@ -48,7 +48,7 @@ export interface SpaarkeAiLaunchParams {
   entityId?: string;
   /**
    * Matter GUID shorthand used by the M365 Copilot Declarative Agent handoff action.
-   * When present, StandaloneAiProvider resolves entity context using this ID as the
+   * When present, the AI session provider resolves entity context using this ID as the
    * matter record GUID without requiring an Xrm form context.
    */
   matterId?: string;

@@ -68,7 +68,8 @@ public class AnalysisToolService : DataverseHttpServiceBase
             IsImmutable = false,
             AvailableInContexts = MapAvailableInContexts(entity.AvailableInContexts),
             JsonSchema = MapJsonSchema(entity.JsonSchema, entity.Id, Logger),
-            RequiredCapability = MapRequiredCapability(entity.RequiredCapability)
+            RequiredCapability = MapRequiredCapability(entity.RequiredCapability),
+            SideEffectClass = MapSideEffectClass(entity.SideEffectClass)
         };
 
         var mappingSource = !string.IsNullOrEmpty(entity.HandlerClass) ? "HandlerClass" : "GenericAnalysisHandler (fallback)";
@@ -81,7 +82,13 @@ public class AnalysisToolService : DataverseHttpServiceBase
     /// <summary>
     /// List all available tools with pagination.
     /// </summary>
-    public async Task<ScopeListResult<AnalysisTool>> ListToolsAsync(
+    /// <remarks>
+    /// <c>virtual</c> (task 042, FR-P3-03): permits a test-double subclass stubbing the
+    /// Dataverse catalog read at the module boundary (ADR-038) for the typed-handler
+    /// confirm-resume tests — same convention as <c>ChatSessionManager</c> /
+    /// <c>PendingPlanManager</c> virtuals.
+    /// </remarks>
+    public virtual async Task<ScopeListResult<AnalysisTool>> ListToolsAsync(
         ScopeListOptions options,
         CancellationToken cancellationToken)
     {
@@ -98,7 +105,7 @@ public class AnalysisToolService : DataverseHttpServiceBase
 
         var query = BuildODataQuery(
             options,
-            selectFields: "sprk_analysistoolid,sprk_name,sprk_description,sprk_handlerclass,sprk_configuration,sprk_availableincontexts,sprk_jsonschema,sprk_requiredcapability",
+            selectFields: "sprk_analysistoolid,sprk_name,sprk_description,sprk_handlerclass,sprk_configuration,sprk_availableincontexts,sprk_jsonschema,sprk_requiredcapability,sprk_sideeffectclass",
             expandClause: "sprk_ToolTypeId($select=sprk_name)",
             nameFieldPath: "sprk_name",
             categoryFieldPath: null,
@@ -141,7 +148,8 @@ public class AnalysisToolService : DataverseHttpServiceBase
                 IsImmutable = false,
                 AvailableInContexts = MapAvailableInContexts(entity.AvailableInContexts),
                 JsonSchema = MapJsonSchema(entity.JsonSchema, entity.Id, Logger),
-                RequiredCapability = MapRequiredCapability(entity.RequiredCapability)
+                RequiredCapability = MapRequiredCapability(entity.RequiredCapability),
+                SideEffectClass = MapSideEffectClass(entity.SideEffectClass)
             };
         }).ToArray();
 
@@ -421,6 +429,25 @@ public class AnalysisToolService : DataverseHttpServiceBase
     }
 
     /// <summary>
+    /// Map nullable raw Dataverse <c>sprk_sideeffectclass</c> option value to the DTO's
+    /// <see cref="AnalysisTool.SideEffectClass"/> (ADR-039 / D12 — the declared metadata
+    /// driving the ONE confirmation gate). Legacy rows (null) and unknown future option
+    /// values map to <c>null</c> ("no declared side effect") per the FR-P0-03
+    /// legacy-row-tolerance rule — mapping never throws.
+    /// </summary>
+    internal static ToolSideEffectClass? MapSideEffectClass(int? rawValue)
+    {
+        return rawValue switch
+        {
+            (int)ToolSideEffectClass.Read => ToolSideEffectClass.Read,
+            (int)ToolSideEffectClass.Write => ToolSideEffectClass.Write,
+            (int)ToolSideEffectClass.Communicate => ToolSideEffectClass.Communicate,
+            (int)ToolSideEffectClass.Pure => ToolSideEffectClass.Pure,
+            _ => null
+        };
+    }
+
+    /// <summary>
     /// Map nullable raw Dataverse <c>sprk_jsonschema</c> Memo value to the DTO's
     /// <see cref="AnalysisTool.JsonSchema"/> string. Validates that the value parses
     /// as JSON (the DTO contract per FR-08 / task D-A-08) — malformed JSON is logged
@@ -621,6 +648,15 @@ public class AnalysisToolService : DataverseHttpServiceBase
         /// </summary>
         [JsonPropertyName("sprk_requiredcapability")]
         public string? RequiredCapability { get; set; }
+
+        /// <summary>
+        /// Declared side-effect class option value (<c>sprk_sideeffectclass</c>,
+        /// task-003 catalog column): 100000000=Read, 100000001=Write,
+        /// 100000002=Communicate, 100000003=Pure. Nullable — legacy rows created
+        /// before the schema extension carry null (FR-P0-03 tolerance).
+        /// </summary>
+        [JsonPropertyName("sprk_sideeffectclass")]
+        public int? SideEffectClass { get; set; }
     }
 
     internal class ToolTypeReference

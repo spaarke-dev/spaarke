@@ -1,17 +1,17 @@
 using System.Runtime.CompilerServices;
 using System.Text.Json;
 using FluentAssertions;
+using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Logging.Abstractions;
-using Microsoft.Extensions.Options;
 using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Moq;
 using Spaarke.Dataverse;
-using Sprk.Bff.Api.Api.Insights;
 using Sprk.Bff.Api.Infrastructure.Cache;
 using Sprk.Bff.Api.Models.Insights;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Insights;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Ai.Insights;
@@ -82,12 +82,32 @@ public class CacheTtlPerTopicTests
         yield return PlaybookStreamEvent.RunCompleted(runId, pid, new PlaybookRunMetrics());
     }
 
-    private static IOptionsMonitor<InsightsPlaybookNameMapOptions> CreateNameMap(
-        Dictionary<string, Guid> map)
+    /// <summary>
+    /// Build the <see cref="IServiceScopeFactory"/> the lookup uses to resolve the Scoped
+    /// <see cref="IConsumerRoutingService"/> per reverse lookup (FR-P3-01 — the insights-ask
+    /// Binding rows replaced the deleted config name map). The stub reverse-maps a playbook
+    /// Guid to its canonical name (the Binding row's ConsumerCode) from the supplied map.
+    /// </summary>
+    private static IServiceScopeFactory CreateScopeFactory(Dictionary<string, Guid> nameMap)
     {
-        var options = new InsightsPlaybookNameMapOptions { Map = map };
-        return Mock.Of<IOptionsMonitor<InsightsPlaybookNameMapOptions>>(m =>
-            m.CurrentValue == options);
+        var routing = new Mock<IConsumerRoutingService>();
+        routing
+            .Setup(r => r.GetBindingByPlaybookIdAsync(
+                It.IsAny<Guid>(), It.IsAny<string?>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Guid playbookId, string? _, CancellationToken _) =>
+                nameMap.Where(kvp => kvp.Value == playbookId)
+                    .Select(kvp => (Binding?)new Binding
+                    {
+                        BindingId = Guid.NewGuid(),
+                        ConsumerType = ConsumerTypes.InsightsAsk,
+                        ConsumerCode = kvp.Key,
+                        PlaybookId = playbookId
+                    })
+                    .FirstOrDefault());
+
+        var services = new ServiceCollection();
+        services.AddScoped(_ => routing.Object);
+        return services.BuildServiceProvider().GetRequiredService<IServiceScopeFactory>();
     }
 
     /// <summary>
@@ -126,7 +146,7 @@ public class CacheTtlPerTopicTests
 
         return new TopicRegistryTtlLookup(
             _dataverseMock.Object,
-            CreateNameMap(nameMap),
+            CreateScopeFactory(nameMap),
             NullLogger<TopicRegistryTtlLookup>.Instance,
             timeProvider: null,
             refreshInterval: TimeSpan.FromMinutes(5));
@@ -211,9 +231,10 @@ public class CacheTtlPerTopicTests
     [Fact]
     public async Task GetOrExecuteAsync_DefaultTtlApplied_WhenPlaybookNotRegistered()
     {
-        // Defensive: a Guid that is not registered in InsightsPlaybookNameMapOptions
-        // (advanced direct-Guid path per InsightEndpoints contract) cannot be reverse-
-        // mapped to a registry row → falls back to DefaultTtl.
+        // Defensive: a Guid no enabled insights-ask Binding row targets (advanced
+        // direct-Guid path per InsightEndpoints contract) cannot be reverse-mapped to a
+        // registry row → falls back to DefaultTtl. (FR-P3-01: reverse lookup is
+        // IConsumerRoutingService.GetBindingByPlaybookIdAsync.)
 
         _cacheMock
             .Setup(c => c.GetAsync<InsightArtifact>(
@@ -358,7 +379,7 @@ public class CacheTtlPerTopicTests
         };
         var lookup = new TopicRegistryTtlLookup(
             _dataverseMock.Object,
-            CreateNameMap(nameMap),
+            CreateScopeFactory(nameMap),
             NullLogger<TopicRegistryTtlLookup>.Instance);
 
         var sut = CreateSut(lookup);
@@ -401,7 +422,7 @@ public class CacheTtlPerTopicTests
         };
         var lookup = new TopicRegistryTtlLookup(
             _dataverseMock.Object,
-            CreateNameMap(nameMap),
+            CreateScopeFactory(nameMap),
             NullLogger<TopicRegistryTtlLookup>.Instance);
 
         await lookup.TryGetTtlForPlaybookNameAsync(MatterHealthCanonicalName);

@@ -10,7 +10,7 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// <summary>
 /// Chat- and playbook-invocable typed handler that runs caller-supplied data excerpts
 /// through the Azure AI Foundry Code Interpreter sandbox (R6 Wave 8). Replaces the legacy
-/// hardcoded <c>CodeInterpreterTools</c> class previously instantiated in
+/// hardcoded <c>CodeInterpreter chat-tools</c> class previously instantiated in
 /// <c>SprkChatAgentFactory.ResolveTools</c>.
 /// </summary>
 /// <remarks>
@@ -61,7 +61,7 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// </para>
 /// <para>
 /// <strong>Invocation contexts</strong>: <see cref="InvocationContextKind.Chat"/>. The legacy
-/// <c>CodeInterpreterTools</c> was registered only for chat; playbook nodes do not invoke
+/// <c>CodeInterpreter chat-tools</c> was registered only for chat; playbook nodes do not invoke
 /// the sandbox today (the playbook path runs through the 11 production node executors per
 /// NFR-08, none of which are Code Interpreter). Set to <c>Chat</c> only so the playbook
 /// dispatch path does not accidentally expose the sandbox to playbook orchestration.
@@ -72,7 +72,7 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// <list type="bullet">
 /// <item><strong>ADR-010</strong>: auto-discovered; ZERO manual DI line. The handler's
 /// dependencies (<see cref="CodeInterpreterBridge"/> + <see cref="CodeInterpreterOptions"/>)
-/// are already registered for the legacy <c>CodeInterpreterTools</c>; no new DI registrations
+/// are already registered for the legacy <c>CodeInterpreter chat-tools</c>; no new DI registrations
 /// are required.</item>
 /// <item><strong>ADR-013</strong>: lives under <c>Services/Ai/Handlers/</c>; CRUD-side code
 /// never injects this handler.</item>
@@ -86,7 +86,7 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// handler does NOT auto-fetch any external resources.</item>
 /// <item><strong>ADR-016</strong>: rate-limiting is enforced inside this handler via a static
 /// <see cref="SemaphoreSlim"/> bounded by <see cref="CodeInterpreterOptions.MaxConcurrency"/>
-/// (preserves the pre-Wave-8 behavior — the legacy <c>CodeInterpreterTools</c> owned this
+/// (preserves the pre-Wave-8 behavior — the legacy <c>CodeInterpreter chat-tools</c> owned this
 /// gate and the bridge does not re-check). The gate is initialised lazily on first
 /// construction and re-used across all handler instances (handlers are scoped per request).</item>
 /// <item><strong>ADR-018</strong>: kill switch — <see cref="CodeInterpreterOptions.Enabled"/>
@@ -119,7 +119,7 @@ public class CodeInterpreterHandler : IToolHandler
     /// <summary>
     /// Static concurrency gate (ADR-016) — bounds sandbox calls across all
     /// <see cref="CodeInterpreterHandler"/> instances. Mirrors the legacy
-    /// <c>CodeInterpreterTools.s_concurrencyGate</c> design: the gate is shared
+    /// <c>CodeInterpreter chat-tools.s_concurrencyGate</c> design: the gate is shared
     /// across all handler instances in the same BFF process so the limit holds
     /// across concurrent chat sessions.
     /// </summary>
@@ -175,7 +175,7 @@ public class CodeInterpreterHandler : IToolHandler
 
     /// <inheritdoc />
     /// <remarks>
-    /// Chat-only. The legacy <c>CodeInterpreterTools</c> was registered exclusively for chat; the
+    /// Chat-only. The legacy <c>CodeInterpreter chat-tools</c> was registered exclusively for chat; the
     /// 11 production node executors (NFR-08) do not include a Code Interpreter executor, so
     /// playbook orchestration has no call path into this handler today.
     /// </remarks>
@@ -279,7 +279,7 @@ public class CodeInterpreterHandler : IToolHandler
 
             // ADR-018: Kill switch — return a successful ToolResult carrying a user-readable
             // unavailability message so the AI model can gracefully inform the user. No bridge
-            // call. No exception. Matches the legacy CodeInterpreterTools behavior.
+            // call. No exception. Matches the legacy CodeInterpreter chat-tools behavior.
             if (!_options.Enabled)
             {
                 _logger.LogDebug(
@@ -471,7 +471,7 @@ public class CodeInterpreterHandler : IToolHandler
         CancellationToken cancellationToken)
     {
         // Normalise + validate chart type — fall back to "bar" on unsupported value
-        // (preserves legacy CodeInterpreterTools forgiveness).
+        // (preserves legacy CodeInterpreter chat-tools forgiveness).
         var normalizedChartType = chartType.Trim().ToLowerInvariant();
         if (!SupportedChartTypes.Contains(normalizedChartType))
         {
@@ -585,7 +585,7 @@ public class CodeInterpreterHandler : IToolHandler
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
-    // Prompt builders (preserved verbatim from legacy CodeInterpreterTools)
+    // Prompt builders (preserved verbatim from legacy CodeInterpreter chat-tools)
     // ─────────────────────────────────────────────────────────────────────────────
 
     private static string BuildAnalysisPrompt(string data, string question)
@@ -622,7 +622,7 @@ public class CodeInterpreterHandler : IToolHandler
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
-    // Result formatting (preserved verbatim from legacy CodeInterpreterTools so the
+    // Result formatting (preserved verbatim from legacy CodeInterpreter chat-tools so the
     // chat agent renders unchanged output)
     // ─────────────────────────────────────────────────────────────────────────────
 
