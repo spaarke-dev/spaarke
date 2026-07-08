@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="SRFR-080" project="set-regarding-and-field-mapping-resolver-r1">
+  <metadata>
+    <title>Build + deploy RegardingResolver v1.3.0 to spaarkedev1 UAT</title>
+    <status>complete</status>
+    <estimated-effort>2h</estimated-effort>
+    <actual-effort>~15min</actual-effort>
+    <assigned>AI Agent</assigned>
+    <started>2026-07-02</started>
+    <completed>2026-07-02</completed>
+    <rigor>STANDARD</rigor>
+    <parallel-safe>true</parallel-safe>
+    <parallel-group>F</parallel-group>
+    <tags>deploy,pcf,regarding-resolver,wave-8</tags>
+    <depends-on>SRFR-033</depends-on>
+    <wave>8</wave>
+  </metadata>
+
+  <prompt><![CDATA[
+Build a production bundle of RegardingResolver v1.3.0 (Wave 3 output) and deploy
+it to the spaarkedev1 UAT environment via the standard 7-step PCF deployment
+workflow documented in `src/client/pcf/CLAUDE.md`. Order: `npm run build:prod`
+(NOT `npm run build` per FAILURE-MODES.md AP-1) — version-verify all 4 locations
+match v1.3.0 — pack solution — import — republish Custom Page if applicable —
+hard-refresh + verify footer — log deployment.
+
+The primary success signal is the footer version rendered by the deployed
+control in the spaarkedev1 Spaarke app; secondary signals are the solution list
+version and absence of console errors on a record with the control bound.
+  ]]></prompt>
+
+  <role>PCF release engineer familiar with the Spaarke `pcf-deploy` skill, PAC CLI, `npm run build:prod`, PCF version alignment across ControlManifest, footer, solution.xml, and Solution Control Manifest.</role>
+
+  <goal><![CDATA[
+RegardingResolver v1.3.0 is deployed to spaarkedev1. All 4 version locations
+report v1.3.0. The rendered UI footer in the Spaarke app shows v1.3.0. There
+are no console errors on a `sprk_todo` (or `sprk_communication`) record that
+binds the control. Deployment is logged in
+`notes/wave-8-deploy-log.md` (append if the log already exists from a
+sibling Wave-8 task).
+  ]]></goal>
+
+  <inputs>
+    <file purpose="spec">projects/set-regarding-and-field-mapping-resolver-r1/spec.md</file>
+    <file purpose="plan">projects/set-regarding-and-field-mapping-resolver-r1/plan.md</file>
+    <file purpose="pcf-claude">src/client/pcf/CLAUDE.md</file>
+    <file purpose="skill">.claude/skills/pcf-deploy/SKILL.md</file>
+    <file purpose="guide">docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+    <file purpose="failure-modes">.claude/FAILURE-MODES.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="FAILURE-MODES.md AP-1">Use `npm run build:prod` — NOT `npm run build`. This is a well-known Spaarke PCF deployment failure mode.</constraint>
+    <constraint source="spec FR-A6">Target version is v1.3.0 (baseline v1.2.0).</constraint>
+    <constraint source="pcf-deploy skill">All 4 version locations (ControlManifest.Input.xml, footer/version.ts, solution.xml, Solution Control Manifest) MUST agree on v1.3.0. Any mismatch = HALT.</constraint>
+    <constraint source="pcf-deploy skill">Deploy via solution zip round-trip (`pac solution pack` → `pac solution import --force-overwrite --publish-changes`). Do NOT hand-edit the solution zip.</constraint>
+    <constraint source="project">Do not deploy if the source at HEAD differs from the Wave 3 (SRFR-033) buildable output — validate the git status is clean for the RegardingResolver source tree.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>pcf/deployment</topic>
+    <files>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>.claude/skills/pcf-deploy/SKILL.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+      <file>.claude/FAILURE-MODES.md</file>
+    </files>
+    <patterns>
+      <pattern name="7-step PCF deploy" location="src/client/pcf/CLAUDE.md">
+        Build:prod → version-verify → pack → import → republish Custom Page →
+        hard-refresh → verify footer. Footer verification is the load-bearing
+        success signal.
+      </pattern>
+      <pattern name="Version alignment" location=".claude/skills/pcf-deploy/SKILL.md">
+        All 4 version locations must agree. Grep or eye-check each before pack.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Wave 3 (SRFR-030..033) shipped RegardingResolver v1.3.0 buildable. This
+      task carries it across the deploy boundary into spaarkedev1 UAT so
+      Wave 8 UAT scenarios (SRFR-084) can validate the streamlined 2-row
+      layout end-to-end.
+    </background>
+    <dependencies>
+      <dependency task="SRFR-033" status="pending">
+        RegardingResolver v1.3.0 is buildable; unit tests pass; version bumped
+        across all 4 locations.
+      </dependency>
+    </dependencies>
+    <related-work>
+      <item>SRFR-081 deploys AssociationResolver v1.2.0 in parallel with this task.</item>
+      <item>SRFR-082 deploys the two webresources + ribbon customizations in parallel.</item>
+      <item>SRFR-084 UAT depends on this task passing.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check">Verify context &lt; 60%. Read `src/client/pcf/CLAUDE.md` Deployment Workflow section + `.claude/FAILURE-MODES.md#AP-1`.</step>
+    <step order="1" name="Precondition Check">Verify git status clean for `src/client/pcf/RegardingResolver/`. Confirm SRFR-033 is ✅ in TASK-INDEX.md. Confirm authenticated to spaarkedev1 via `pac org who`.</step>
+    <step order="2" name="Build:prod">In `src/client/pcf/RegardingResolver/`, run `npm run build:prod`. Confirm bundle emitted to the expected output folder. Do NOT run `npm run build`.</step>
+    <step order="3" name="Version Verify">Confirm all 4 locations report v1.3.0: (a) ControlManifest.Input.xml `version` attribute, (b) footer/version string in built bundle, (c) solution.xml `Version` element, (d) Solution Control Manifest version. Halt if any mismatch.</step>
+    <step order="4" name="Pack">`pac solution pack --zipfile Solution_RegardingResolver_v1.3.0.zip --folder &lt;extracted-path&gt;` per repo convention.</step>
+    <step order="5" name="Import">`pac solution import --path Solution_RegardingResolver_v1.3.0.zip --force-overwrite --publish-changes`. Capture the import log.</step>
+    <step order="6" name="Custom Page Republish">If RegardingResolver is embedded in a Custom Page, open Power Apps maker → open the Custom Page → click Publish. Then run `pac solution publish-all` to publish any dependent artifacts.</step>
+    <step order="7" name="Hard-Refresh Verify">In spaarkedev1 Spaarke app, hard-refresh (Ctrl+F5) a form that binds RegardingResolver. Confirm footer displays v1.3.0. Confirm no console errors.</step>
+    <step order="8" name="Log Deployment">Append to `notes/wave-8-deploy-log.md`: artifact name, version, target env, import log summary, footer verification, timestamp.</step>
+    <step order="9" name="Update Task Status">Update TASK-INDEX.md 🔲 → ✅ for SRFR-080. Reset current-task.md for the next parallel Wave-8 task.</step>
+  </steps>
+
+  <tools>
+    <tool name="Bash">Run npm and pac CLI commands</tool>
+    <tool name="Read">Read version files + skill docs</tool>
+    <tool name="Write">Append to notes/wave-8-deploy-log.md</tool>
+  </tools>
+
+  <outputs>
+    <output type="deploy">RegardingResolver v1.3.0 deployed to spaarkedev1</output>
+    <output type="notes" ephemeral="true">projects/set-regarding-and-field-mapping-resolver-r1/notes/wave-8-deploy-log.md</output>
+    <output type="docs">projects/set-regarding-and-field-mapping-resolver-r1/tasks/TASK-INDEX.md (🔲 → ✅ for SRFR-080)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`pac solution list` (or Web API `solutions` query) reports RegardingResolver v1.3.0 in spaarkedev1.</criterion>
+    <criterion testable="true">Rendered UI footer in the spaarkedev1 Spaarke app shows v1.3.0.</criterion>
+    <criterion testable="true">No console errors on a record binding the control (verify via browser DevTools after hard-refresh).</criterion>
+    <criterion testable="true">`notes/wave-8-deploy-log.md` records this deploy with import-log summary + timestamp.</criterion>
+    <criterion testable="true">Build command used was `npm run build:prod` (grep the shell history or task notes to confirm).</criterion>
+  </acceptance-criteria>
+</task>

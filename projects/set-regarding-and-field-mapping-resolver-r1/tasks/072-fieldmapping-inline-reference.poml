@@ -1,0 +1,135 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="SRFR-072" project="set-regarding-and-field-mapping-resolver-r1">
+  <metadata>
+    <title>Update stale FieldMappingHandler.ts:10 inline reference to point at Appendix A</title>
+    <status>completed</status>
+    <estimated-effort>1h</estimated-effort>
+    <actual-effort>~10min (idempotent — SRFR-022 already applied the change)</actual-effort>
+    <assigned>AI Agent</assigned>
+    <started>2026-07-02</started>
+    <completed>2026-07-02</completed>
+    <rigor>MINIMAL</rigor>
+    <parallel-safe>true</parallel-safe>
+    <parallel-group>E</parallel-group>
+    <tags>docs,refactor,wave-7</tags>
+    <depends-on></depends-on>
+    <wave>7</wave>
+  </metadata>
+
+  <prompt><![CDATA[
+Resolve the stale docstring reference at `FieldMappingHandler.ts:10` that
+currently points at a non-existent "spec.md Field Mapping Framework section".
+This is FR-B1-01 from spec.md.
+
+If task SRFR-022 has already landed, the handler lives at
+`src/client/shared/Spaarke.UI.Components/src/services/FieldMappingHandler.ts`.
+If not, the handler is still at its pre-move location under the
+AssociationResolver PCF. Update the reference in place regardless of location.
+
+New docstring reference:
+  "See `projects/set-regarding-and-field-mapping-resolver-r1/spec.md#appendix-a-field-mapping-subsystem-spec` for the subsystem contract."
+  (If Appendix A has been promoted into `docs/architecture/…` by execution
+   time, prefer the promoted path.)
+
+Additionally, add a short "Field Mapping subsystem" pointer entry to
+`docs/architecture/README.md` (if that catalog file exists) so future
+maintainers can find the Appendix A contract from a repo-level index.
+
+No behavior change. Docstring / documentation only.
+  ]]></prompt>
+
+  <role>Documentation maintainer familiar with docstring conventions in TypeScript service files and repo-level architecture catalog authoring.</role>
+
+  <goal><![CDATA[
+`FieldMappingHandler.ts` line ~10 no longer references the non-existent
+"spec.md Field Mapping Framework section". The updated docstring cites
+`projects/set-regarding-and-field-mapping-resolver-r1/spec.md` Appendix A
+(or its promoted `docs/architecture/…` location if promoted). `docs/architecture/README.md`
+carries a "Field Mapping subsystem" pointer entry (if the catalog exists).
+Grep confirms zero remaining hits of the stale phrase across `src/`.
+  ]]></goal>
+
+  <inputs>
+    <file purpose="spec">projects/set-regarding-and-field-mapping-resolver-r1/spec.md</file>
+    <file purpose="plan">projects/set-regarding-and-field-mapping-resolver-r1/plan.md</file>
+    <file purpose="project-claude">projects/set-regarding-and-field-mapping-resolver-r1/CLAUDE.md</file>
+    <file purpose="target-primary">src/client/shared/Spaarke.UI.Components/src/services/FieldMappingHandler.ts</file>
+    <file purpose="target-fallback">src/client/pcf/AssociationResolver/handlers/FieldMappingHandler.ts</file>
+    <file purpose="architecture-catalog">docs/architecture/README.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-B1-01">Resolve the stale inline reference. New reference must cite Appendix A (or its promoted location).</constraint>
+    <constraint source="project">Docstring-only change. NO behavior change. NO signature change. NO test change.</constraint>
+    <constraint source="project">Handle both file locations gracefully: if SRFR-022 relocated the handler, update the new location; otherwise update the pre-move location.</constraint>
+    <constraint source="project">Do NOT proactively promote Appendix A into `docs/architecture/` as part of this task — that is a separate follow-on decision. Just update the reference to what exists today.</constraint>
+    <constraint source="project">If `docs/architecture/README.md` exists AND currently lists subsystem docs, add a "Field Mapping subsystem" pointer entry; otherwise skip that step.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>docs/architecture/pointer-conventions</topic>
+    <files>
+      <file>projects/set-regarding-and-field-mapping-resolver-r1/spec.md</file>
+      <file>docs/architecture/README.md</file>
+    </files>
+    <patterns>
+      <pattern name="Repo-level architecture pointer entry" location="docs/architecture/README.md">
+        Existing subsystem docs are listed under a bulleted or table format with
+        short one-line descriptions. Match the surrounding format when adding
+        the "Field Mapping subsystem" entry.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      `FieldMappingHandler.ts:10` carries a docstring reference to a section
+      title that no longer exists in the project spec. The actual contract for
+      the Field Mapping subsystem now lives in `spec.md` Appendix A (added by
+      this project's spec authoring wave). This task fixes the stale reference
+      so future maintainers can navigate from the code to the contract.
+    </background>
+    <dependencies>
+      <dependency task="SRFR-022" status="optional">
+        SRFR-022 relocates `FieldMappingHandler.ts` to `@spaarke/ui-components`.
+        If it has landed, this task updates the new location. If not, this task
+        updates the pre-move location. Either ordering works.
+      </dependency>
+    </dependencies>
+    <related-work>
+      <item>SRFR-071 amends ADR-024 for the 5-field write — separate scope, complementary docs update.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check">Verify context &lt; 60%. Read spec.md FR-B1-01 and Appendix A.</step>
+    <step order="1" name="Locate Handler">Search for `FieldMappingHandler.ts` under both possible locations (shared lib + AssociationResolver). Use whichever exists.</step>
+    <step order="2" name="Read Existing Docstring">Read the file from line 1 to line ~30. Locate the stale reference (expected phrase: `"spec.md Field Mapping Framework section"` or similar).</step>
+    <step order="3" name="Update Docstring">Replace the stale line with: `"See `projects/set-regarding-and-field-mapping-resolver-r1/spec.md#appendix-a-field-mapping-subsystem-spec` for the subsystem contract."` — adjust the anchor if the actual heading slug differs. If Appendix A has been promoted into `docs/architecture/` by execution time, prefer the promoted path.</step>
+    <step order="4" name="Check for Additional Stale References">Run `grep -RE "spec.md Field Mapping Framework section" src/` and confirm zero remaining hits after the edit. If additional occurrences exist (unlikely), update each in place.</step>
+    <step order="5" name="Optional — Add Repo-Level Pointer">If `docs/architecture/README.md` exists AND currently enumerates subsystem docs, add a "Field Mapping subsystem" pointer entry citing spec.md Appendix A. If the file doesn't exist or doesn't carry such an index, skip this step and note the skip in the completion report.</step>
+    <step order="6" name="Grep Verification">Run `grep -R "spec.md Field Mapping Framework section" src/` — MUST return zero hits. Run `grep -R "appendix-a-field-mapping-subsystem-spec" src/` — MUST return at least 1 hit.</step>
+    <step order="7" name="Update Task Status">Update TASK-INDEX.md 🔲 → ✅ for SRFR-072. Reset current-task.md for next task.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read `FieldMappingHandler.ts` + docs/architecture/README.md</tool>
+    <tool name="Edit">Update the docstring reference; optional catalog pointer</tool>
+    <tool name="Grep">Confirm stale phrase is gone; new anchor is present</tool>
+    <tool name="Glob">Locate `FieldMappingHandler.ts` regardless of SRFR-022 status</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">FieldMappingHandler.ts (docstring only)</output>
+    <output type="docs">docs/architecture/README.md (optional pointer entry, if catalog exists)</output>
+    <output type="docs">projects/set-regarding-and-field-mapping-resolver-r1/tasks/TASK-INDEX.md (🔲 → ✅ for SRFR-072)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`grep -R "spec.md Field Mapping Framework section" src/` returns zero hits (stale phrase resolved).</criterion>
+    <criterion testable="true">`FieldMappingHandler.ts` docstring at line ~10 cites spec.md Appendix A (or its promoted `docs/architecture/` location if promoted by execution time).</criterion>
+    <criterion testable="true">If `docs/architecture/README.md` exists and enumerates subsystem docs, a "Field Mapping subsystem" pointer entry is added; if not, the skip is noted in the completion report.</criterion>
+    <criterion testable="true">No behavior change — no function signature, import, or export is modified. `git diff` shows docstring lines only.</criterion>
+    <criterion testable="true">Handler location handled correctly regardless of SRFR-022 status (shared lib OR pre-move PCF location).</criterion>
+  </acceptance-criteria>
+</task>

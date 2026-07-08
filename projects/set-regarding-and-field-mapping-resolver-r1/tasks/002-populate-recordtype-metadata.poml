@@ -1,0 +1,233 @@
+<task id="SRFR-002" project="set-regarding-and-field-mapping-resolver-r1">
+  <metadata>
+    <title>SRFR-001-expanded Wave 0 data-fix: sprk_mappingtype add + typo-lookup recreates + populate 13 catalog rows + Contact catalog fix</title>
+    <status>complete</status>
+    <estimated-effort>5h (revised up from 2h per D-2/D-4/D-5/D-6)</estimated-effort>
+    <actual-effort>~1.5h (MCP-assisted)</actual-effort>
+    <assigned>AI Agent (Claude Opus 4.7)</assigned>
+    <started>2026-07-02</started>
+    <completed>2026-07-02</completed>
+    <notes>All 4 workstreams + owner-decision expansion (W1a) completed. See notes/wave-0-metadata-population.log. Surfaced D-8 (3 missing target-number fields), D-9 (Billing Analysis table doesn't exist), D-10 (sprk_communication uses sprk_regardingperson not sprk_regardingcontact — deferred to Wave 5), D-11 (MCP naming underscore convention). 12 catalog rows active post-execution (was 13).</notes>
+    <rigor>STANDARD</rigor>
+    <parallel-safe>false</parallel-safe>
+    <depends-on>SRFR-001</depends-on>
+    <tags>data-entry, dataverse, metadata, schema, wave-0</tags>
+    <notes>Owner decisions on divergences 2026-07-02: D-2 accept (add sprk_mappingtype), D-4 accept (recreate typo'd lookups), D-5 accept (populate ALL 13), D-6 accept (fix catalog to OOB contact), D-7 accept (13 rows).</notes>
+  </metadata>
+
+  <prompt>
+    Wave 0 data-fix task, substantially expanded from original scope (FR-A4-02 only)
+    per owner decisions on SRFR-001 divergences D-2/D-4/D-5/D-6/D-7 (2026-07-02).
+    Original scope was "populate sprk_regardingrecordnumberfield for 10 non-Matter
+    entities" — now includes 4 additional workstreams:
+
+    W1 (D-2): Add sprk_mappingtype Choice field to sprk_fieldmappingrule (Copy=0,
+             Default=1, Concat=2, Template=3) per spec §A.2.2 revised + §A.3a.
+    W2 (D-4): Remove + recreate 3 typo'd lookup fields on HOST entities that
+             sprk_recordtype_ref.sprk_regardingfield references but that don't exist
+             correctly:
+             - sprk_egardingproject → sprk_regardingproject (host: sprk_todo, sprk_communication, wherever the lookup exists)
+             - sprk_regarrdingbudget → sprk_regardingbudget
+             - sprk_regardingbillinganaysis → sprk_regardingbillinganalysis
+    W3 (D-5 + D-7): Populate sprk_regardingrecordnumberfield for ALL 13 catalog
+             rows (including Matter which was NOT populated despite owner's
+             2026-07-02 assumption).
+    W4 (D-6): Fix the catalog row for Contact — currently has
+             sprk_recordlogicalname = "sprk_contact" (non-existent table); should
+             be "contact" (OOB).
+
+    Every field-existence claim MUST be verified via EntityDefinitions API BEFORE
+    writing the catalog value. Idempotent (safely re-runnable).
+  </prompt>
+
+  <role>
+    Dataverse maker + metadata engineer. Comfortable with EntityDefinitions Web API
+    queries for pre-write field existence verification, and with either
+    `/dataverse-create-schema` or the Dataverse MCP `update_record` tool for the
+    writes. Careful about idempotency — this data-entry task must be safely re-runnable.
+  </role>
+
+  <goal>
+    Four Wave-0 data-fix workstreams executed idempotently:
+    (W1) `sprk_fieldmappingrule` gains a `sprk_mappingtype` Choice field with
+    options Copy(0), Default(1), Concat(2), Template(3) per spec §A.3a.
+    (W2) Three typo'd lookup fields are removed from host entities and
+    replaced with correctly-named lookup fields (`sprk_regardingproject`,
+    `sprk_regardingbudget`, `sprk_regardingbillinganalysis`); the catalog
+    values are updated to reflect the corrected names.
+    (W3) All 13 `sprk_recordtype_ref` rows including Matter have
+    `sprk_regardingrecordnumberfield` populated with a verified field name
+    (or intentional-null for OOB `contact` if graceful-blank preferred per NFR-06).
+    (W4) The catalog row for "Person" is corrected from `sprk_contact`
+    (non-existent) to `contact` (OOB).
+    Every named field is verified via EntityDefinitions before write.
+    Log at `notes/wave-0-metadata-population.log`.
+  </goal>
+
+  <inputs>
+    <file purpose="dependency-output">projects/set-regarding-and-field-mapping-resolver-r1/notes/wave-0-discovery.md</file>
+    <file purpose="project-spec">projects/set-regarding-and-field-mapping-resolver-r1/spec.md</file>
+    <file purpose="project-plan">projects/set-regarding-and-field-mapping-resolver-r1/plan.md</file>
+    <file purpose="project-claude">projects/set-regarding-and-field-mapping-resolver-r1/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec-Appendix-A-§A.2.2">W1 add: `sprk_mappingtype` MUST be a Choice column on `sprk_fieldmappingrule` with exactly 4 options: Copy=0, Default=1, Concat=2, Template=3. No description strings required.</constraint>
+    <constraint source="SRFR-001-D-4">W2 lookup recreates: the target-record navigation properties on the recreated correctly-named lookups MUST match the recordtype-ref conventions (e.g., `sprk_regardingproject` targets `sprk_project`). Any existing DATA in the typo'd fields (Web API count check first) → migrate to the new field before delete; if zero rows have data, safe to delete-recreate directly.</constraint>
+    <constraint source="SRFR-001-D-5">W3: all 13 catalog rows (including Matter, To Do, Billing Analysis) must have `sprk_regardingrecordnumberfield` populated OR intentionally-null with logged rationale. Matter's null state contradicts owner's 2026-07-02 assumption — task must populate it, mapping value `sprk_matternumber`.</constraint>
+    <constraint source="SRFR-001-D-6">W4: fix `sprk_recordlogicalname` on the "Person" catalog row from `sprk_contact` to `contact`. This is OOB. Owner confirmed 2026-07-02.</constraint>
+    <constraint source="EntityDefinitions">Every named field (post-recreates in W2, and in W3 mappings) MUST be verified via `EntityDefinitions('X')/Attributes(logicalName)?$select=LogicalName` before the catalog value is written. Non-existent field name = hard halt.</constraint>
+    <constraint source="project">Idempotency — re-running must be safe. Upsert semantics; skip-if-already-set logic. Log every action.</constraint>
+    <constraint source="spec-NFR-06">For OOB `contact` (post-W4 fix), if no natural business-key text field is confirmed by owner, leave `sprk_regardingrecordnumberfield` null with logged intent "graceful-blank per NFR-06".</constraint>
+    <constraint source="CLAUDE.md-§11">No NEW columns on OOB entities (contact, account) beyond the schema additions already scoped in Wave 1 task 010. W3 population uses EXISTING fields only.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>dataverse/metadata-write</topic>
+    <files>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>.claude/skills/dataverse-mcp-usage/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="entity-metadata-existence-check" location=".claude/skills/dataverse-create-schema/SKILL.md">
+        Before writing a field name into `sprk_regardingrecordnumberfield`, verify the
+        named field exists on the target entity by querying
+        `EntityDefinitions('X')/Attributes(logicalName)?$select=LogicalName`. A 404 or
+        empty response means the field doesn't exist — do NOT write; escalate.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      This task is the second half of Wave 0. It converts spec §Owner Clarification Q-05
+      ("only Matter is populated") into the data state that FR-A4-01's data-driven
+      resolver code needs at runtime. Without this task, Wave 2 task 020's
+      `PolymorphicResolverService.applyResolverFields()` extension would ship
+      code that reads null field names for 10 of 11 entities — a hidden runtime
+      degradation.
+    </background>
+    <dependencies>
+      <dependency task="SRFR-001" status="not-started">
+        Provides Q-06 recommendation for Contact + Account (graceful-blank OR specific
+        field name). SRFR-002 cannot start until SRFR-001 completes.
+      </dependency>
+    </dependencies>
+    <related-work>
+      <item>Wave 1 task 010 (add `sprk_regardingrecordnumber` column to 10 entities) does NOT depend on this task, but Wave 2 task 020 (extend `applyResolverFields`) DOES — the resolver reads this metadata at runtime.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check">
+      Confirm context &lt; 60%. If &gt; 60%, run `context-handoff`.
+    </step>
+    <step order="1" name="Load SRFR-001 output + spec">
+      Read `notes/wave-0-discovery.md` D-2 through D-7 sections. Read spec.md Appendix A §A.2 (revised), §A.3a (new mapping-type semantics).
+    </step>
+
+    <!-- W1 — Add sprk_mappingtype field to Dataverse (D-2) -->
+    <step order="2" name="W1: Verify sprk_mappingtype doesn't already exist">
+      Query `EntityDefinitions('sprk_fieldmappingrule')/Attributes?$filter=LogicalName eq 'sprk_mappingtype'&amp;$select=LogicalName`. If exists, skip W1 with log entry "already present — skip".
+    </step>
+    <step order="3" name="W1: Create sprk_mappingtype Choice column">
+      Via `/dataverse-create-schema` OR Web API POST to `EntityDefinitions('sprk_fieldmappingrule')/Attributes` with a PicklistAttributeMetadata payload:
+      - SchemaName: `sprk_MappingType`
+      - LogicalName: `sprk_mappingtype`
+      - DisplayName: "Mapping Type"
+      - OptionSet: local, 4 options — Copy=0, Default=1, Concat=2, Template=3 (labels match values)
+      - RequiredLevel: None
+      Log the creation.
+    </step>
+
+    <!-- W2 — Recreate typo'd lookup fields on host entities (D-4) -->
+    <step order="4" name="W2: Locate typo'd lookups on host entities">
+      For each typo pair (bad → good):
+      - `sprk_egardingproject` → `sprk_regardingproject`
+      - `sprk_regarrdingbudget` → `sprk_regardingbudget`
+      - `sprk_regardingbillinganaysis` → `sprk_regardingbillinganalysis`
+      For each bad name, query `EntityDefinitions` across all host entities that could plausibly have it — the primary hosts are `sprk_todo` and `sprk_communication`. Enumerate every entity that has the typo'd lookup.
+    </step>
+    <step order="5" name="W2: Data-loss check">
+      For each located typo'd lookup, run `retrieveMultipleRecords` on the host entity filtering `{typo-field} ne null` to count records with data. Report to log. If any host has data, migrate before delete (write correct-name lookup value on same records).
+    </step>
+    <step order="6" name="W2: Create correctly-named lookup, migrate data, delete typo">
+      For each host: (a) create the correctly-named lookup (target: matching `sprk_project` / `sprk_budget` / `sprk_billinganalysis`) via `EntityDefinitions('host')/OneToManyRelationships` metadata write; (b) if migration is needed, PATCH each affected record from bad→good; (c) delete the typo'd lookup only after verifying zero non-null values remain. Log each step.
+    </step>
+    <step order="7" name="W2: Update catalog values for the corrected names">
+      Update `sprk_recordtype_ref.sprk_regardingfield` for Project (`sprk_regardingproject`), Budget (`sprk_regardingbudget`), Billing Analysis (`sprk_regardingbillinganalysis`). Verify via Web API immediately after.
+    </step>
+
+    <!-- W3 — Populate sprk_regardingrecordnumberfield for all 13 rows (D-5, D-7) -->
+    <step order="8" name="W3: Enumerate all 13 catalog rows">
+      Query `sprk_recordtype_refs?$select=sprk_recordtypename,sprk_recordlogicalname,sprk_regardingrecordnumberfield`. Confirm state (expected: all 13 null per SRFR-001 D-5). Note GUID for each row.
+    </step>
+    <step order="9" name="W3: Verify field existence for each mapping">
+      For each (entity → recordnumber-field) pair, run `EntityDefinitions('X')/Attributes(fieldname)?$select=LogicalName`. Mappings:
+      - `sprk_matter` → `sprk_matternumber`
+      - `sprk_project` → `sprk_projectnumber`
+      - `sprk_invoice` → `sprk_invoicenumber`
+      - `sprk_event` → `sprk_eventnumber`
+      - `sprk_analysis` → `sprk_analysisnumber`
+      - `sprk_organization` → `sprk_organizationnumber`
+      - `sprk_document` → `sprk_documentnumber`
+      - `sprk_workassignment` → `sprk_workassignmentnumber`
+      - `sprk_budget` → `sprk_budgetnumber`
+      - `sprk_billinganalysis` → `sprk_billinganalysisnumber`
+      - `sprk_todo` → (host entity; use `sprk_todonumber` if exists, else intentional-null)
+      - `contact` → intentional-null per NFR-06 (no natural business-key)
+      - `account` → `accountnumber` (OOB — verified in SRFR-001 to exist as NVARCHAR 20)
+      Any 404 for a required mapping → HALT and escalate; do not fabricate names.
+    </step>
+    <step order="10" name="W3: Write catalog values">
+      For each verified pair, PATCH `sprk_recordtype_ref` row via `mcp__dataverse__update_record` setting `sprk_regardingrecordnumberfield`. Skip-if-already-set. Log each op. For intentional-null cases (contact, sprk_todo if no field), leave null with logged "intentional-null per NFR-06 graceful-blank".
+    </step>
+
+    <!-- W4 — Fix Person catalog row: sprk_contact → contact (D-6) -->
+    <step order="11" name="W4: Fix Person catalog row logicalname">
+      Locate the Person row (`sprk_recordtypename = 'Person'` — GUID captured earlier). PATCH `sprk_recordlogicalname` from `sprk_contact` to `contact`. Log.
+    </step>
+
+    <!-- Post-write verification and reporting -->
+    <step order="12" name="Post-write verification">
+      Re-query the 13 catalog rows + the `sprk_fieldmappingrule` metadata. Confirm: (a) `sprk_mappingtype` exists with 4 options; (b) 3 typo'd lookups gone; 3 correctly-named lookups present; catalog values updated; (c) all 13 rows have either populated or intentional-null `sprk_regardingrecordnumberfield`; (d) Person row's logicalname is `contact`. Snapshot in log.
+    </step>
+    <step order="13" name="Compose log file">
+      Write `notes/wave-0-metadata-population.log` covering all 4 workstreams. Cap ~250 lines.
+    </step>
+    <step order="14" name="Update TASK-INDEX + current-task">
+      Mark SRFR-002 complete in TASK-INDEX.md; advance current-task.md to SRFR-010.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Read SRFR-001 output + spec docs</tool>
+    <tool name="Bash">Web API queries via curl / PowerShell (fallback if MCP unavailable)</tool>
+    <tool name="mcp__dataverse__read_query">Enumerate current sprk_recordtype_ref state; run EntityDefinitions attribute existence check</tool>
+    <tool name="mcp__dataverse__update_record">Upsert `sprk_regardingrecordnumberfield` on each of the 10 rows</tool>
+    <tool name="mcp__dataverse__describe">Alternative to EntityDefinitions for attribute enumeration</tool>
+  </tools>
+
+  <outputs>
+    <output type="dataverse-schema">New `sprk_mappingtype` Choice attribute on `sprk_fieldmappingrule` (W1)</output>
+    <output type="dataverse-schema">3 typo'd lookup fields deleted, 3 correctly-named lookups created on host entities (W2)</output>
+    <output type="dataverse-data">All 13 `sprk_recordtype_ref` rows populated per mapping (or intentional-null with logged rationale) (W3)</output>
+    <output type="dataverse-data">Person catalog row `sprk_recordlogicalname` = `contact` (W4)</output>
+    <output type="notes" ephemeral="false">projects/set-regarding-and-field-mapping-resolver-r1/notes/wave-0-metadata-population.log — 4-workstream execution log</output>
+    <output type="docs">projects/set-regarding-and-field-mapping-resolver-r1/tasks/TASK-INDEX.md (status update)</output>
+    <output type="docs">projects/set-regarding-and-field-mapping-resolver-r1/current-task.md (advance to SRFR-010)</output>
+    <output type="report">Completion report summarizing all 4 workstreams' actions</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">W1: `EntityDefinitions('sprk_fieldmappingrule')/Attributes?$filter=LogicalName eq 'sprk_mappingtype'` returns a Picklist attribute with 4 options (Copy=0, Default=1, Concat=2, Template=3).</criterion>
+    <criterion testable="true">W2: `grep`-equivalent Web API check confirms NONE of the 3 typo'd lookup fields (`sprk_egardingproject`, `sprk_regarrdingbudget`, `sprk_regardingbillinganaysis`) remain on any host entity.</criterion>
+    <criterion testable="true">W2: `sprk_recordtype_ref` rows for Project, Budget, Billing Analysis show correct `sprk_regardingfield` values (`sprk_regardingproject`, `sprk_regardingbudget`, `sprk_regardingbillinganalysis`).</criterion>
+    <criterion testable="true">W3: Web API query `sprk_recordtype_refs?$select=sprk_recordtypename,sprk_recordlogicalname,sprk_regardingrecordnumberfield` returns all 13 rows, of which at least 10 have non-null values matching the mapping. Any null values MUST have logged `intentional-null` rationale.</criterion>
+    <criterion testable="true">W3: Every non-null `sprk_regardingrecordnumberfield` references an EXISTING field on its target entity, verified via EntityDefinitions in the log.</criterion>
+    <criterion testable="true">W4: Person catalog row's `sprk_recordlogicalname` equals `contact` (not `sprk_contact`).</criterion>
+    <criterion testable="true">Log file `notes/wave-0-metadata-population.log` records each update attempt with target entity, target field name, verification result, write result (or skip reason).</criterion>
+    <criterion testable="true">Task is idempotent — re-running yields "skip — already set correctly" for all 10 rows.</criterion>
+    <criterion testable="true">TASK-INDEX.md status for SRFR-002 flipped from 🔲 to ✅; current-task.md advanced to the first Wave 1 task.</criterion>
+  </acceptance-criteria>
+</task>

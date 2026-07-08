@@ -1,0 +1,94 @@
+<?xml version="1.0" encoding="utf-8"?>
+<!--
+  Project Ribbons — Push Updates Button
+  Version: 1.0.0
+
+  Adds "Push Updates" button to the sprk_project entity form command bar.
+  Button is enabled only when the current Project is source of at least one
+  active sprk_fieldmappingprofile record.
+
+  Calls: Spaarke.FieldMapping.Push.pushUpdates(primaryControl)
+  Enable rule: Spaarke.FieldMapping.Push.hasSourceProfile(primaryControl)
+  Web Resource: sprk_fieldmapping_push (v1.0.0, from SRFR-061)
+
+  Project: set-regarding-and-field-mapping-resolver-r1
+  Task: SRFR-062 (FR-B3-01 — Q-07 finding: Project is a source entity for
+  the "Project to Event" active profile)
+-->
+<RibbonDiffXml xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <CustomActions>
+    <!-- Add "Push Updates" button to Project form command bar (Actions group) -->
+    <CustomAction Id="sprk.project.fieldmapping.push.CustomAction"
+                  Location="Mscrm.Form.sprk_project.MainTab.Actions.Controls._children"
+                  Sequence="20">
+      <CommandUIDefinition>
+        <Button Id="sprk.project.fieldmapping.push.Button"
+                Command="sprk.project.fieldmapping.push.Command"
+                LabelText="$LocLabels:sprk.project.fieldmapping.push.LabelText"
+                Alt="$LocLabels:sprk.project.fieldmapping.push.Alt"
+                ToolTipTitle="$LocLabels:sprk.project.fieldmapping.push.ToolTipTitle"
+                ToolTipDescription="$LocLabels:sprk.project.fieldmapping.push.ToolTipDescription"
+                TemplateAlias="o1"
+                ModernImage="Sync" />
+      </CommandUIDefinition>
+    </CustomAction>
+  </CustomActions>
+
+  <Templates>
+    <RibbonTemplates Id="Mscrm.Templates"></RibbonTemplates>
+  </Templates>
+
+  <CommandDefinitions>
+    <!-- Push Updates command — calls pushUpdates on the sprk_fieldmapping_push webresource -->
+    <CommandDefinition Id="sprk.project.fieldmapping.push.Command">
+      <EnableRules>
+        <EnableRule Id="sprk.project.fieldmapping.push.hasSourceProfile.EnableRule" />
+      </EnableRules>
+      <DisplayRules />
+      <Actions>
+        <JavaScriptFunction Library="$webresource:sprk_fieldmapping_push"
+                            FunctionName="Spaarke.FieldMapping.Push.pushUpdates">
+          <CrmParameter Value="PrimaryControl" />
+        </JavaScriptFunction>
+      </Actions>
+    </CommandDefinition>
+  </CommandDefinitions>
+
+  <RuleDefinitions>
+    <TabDisplayRules />
+    <DisplayRules />
+    <EnableRules>
+      <!-- Enable only when the Project is source of at least one active sprk_fieldmappingprofile -->
+      <EnableRule Id="sprk.project.fieldmapping.push.hasSourceProfile.EnableRule">
+        <CustomRule Library="$webresource:sprk_fieldmapping_push"
+                    FunctionName="Spaarke.FieldMapping.Push.hasSourceProfile"
+                    Default="false">
+          <CrmParameter Value="PrimaryControl" />
+        </CustomRule>
+      </EnableRule>
+    </EnableRules>
+  </RuleDefinitions>
+
+  <LocLabels>
+    <LocLabel Id="sprk.project.fieldmapping.push.LabelText">
+      <Titles>
+        <Title description="Push Updates" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.project.fieldmapping.push.Alt">
+      <Titles>
+        <Title description="Push Updates to Related Records" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.project.fieldmapping.push.ToolTipTitle">
+      <Titles>
+        <Title description="Push Updates to Related Records" languagecode="1033" />
+      </Titles>
+    </LocLabel>
+    <LocLabel Id="sprk.project.fieldmapping.push.ToolTipDescription">
+      <Titles>
+        <Title description="Cascade field updates from this Project to related records defined by active field-mapping profiles." languagecode="1033" />
+      </Titles>
+    </LocLabel>
+  </LocLabels>
+</RibbonDiffXml>

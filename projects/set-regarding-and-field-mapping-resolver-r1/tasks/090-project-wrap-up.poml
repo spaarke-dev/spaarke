@@ -1,0 +1,153 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="SRFR-090" project="set-regarding-and-field-mapping-resolver-r1">
+  <metadata>
+    <title>Project wrap-up — /test-diet, lessons-learned, follow-on Idea Issue, README status Complete</title>
+    <status>not-started</status>
+    <estimated-effort>2h</estimated-effort>
+    <actual-effort></actual-effort>
+    <assigned>AI Agent</assigned>
+    <started></started>
+    <completed></completed>
+    <rigor>STANDARD</rigor>
+    <parallel-safe>false</parallel-safe>
+    <parallel-group></parallel-group>
+    <tags>wrap-up,wave-9</tags>
+    <depends-on>SRFR-084</depends-on>
+    <wave>9</wave>
+  </metadata>
+
+  <prompt><![CDATA[
+Project wrap-up per CLAUDE.md §7. Four deliverables:
+
+1. Run `/test-diet` — MANDATORY per project-close gate. Reconciles tests
+   added/modified during the project against ADR-038's 6 KEEP path categories
+   (MAINTAIN) vs the 17-ban scaffolding classifier (SCAFFOLDING). Skill is
+   read-only; it emits git rm / git mv commands for the reviewer.
+   Output: `notes/test-diet-report.md`.
+
+2. Author `notes/lessons-learned.md` with four subheadings:
+   - What went well
+   - What was harder than expected
+   - Reusable techniques
+   - Recommendations for admin-cascade-batch-job-r1 follow-on
+
+3. Run `/devops-idea-create` to open the follow-on Idea Issue for
+   `admin-cascade-batch-job-r1`. Title:
+   "[Idea]: admin-cascade-batch-job-r1 — batch cascade service for >500 children".
+   Body links back to spec FR-B3b-01. Record Issue # in lessons-learned.md.
+
+4. Update README.md portfolio pointer: Status → Complete; add follow-on link.
+   Update TASK-INDEX.md (090 → ✅) and current-task.md (status: none, project
+   complete). Author wrap-up PR description citing notes/test-diet-report.md.
+  ]]></prompt>
+
+  <role>Project close-out engineer familiar with CLAUDE.md §7 project-close gate, `/test-diet`, `/devops-idea-create`, portfolio-tracking hygiene, and Spaarke commit / PR conventions.</role>
+
+  <goal><![CDATA[
+Project set-regarding-and-field-mapping-resolver-r1 is marked complete:
+- `notes/test-diet-report.md` exists (from /test-diet run).
+- `notes/lessons-learned.md` exists with all four subheadings populated.
+- GitHub Idea Issue for admin-cascade-batch-job-r1 is created and its # is
+  recorded in lessons-learned.md and linked from README.md.
+- README.md portfolio pointer block shows Status: Complete + follow-on link.
+- TASK-INDEX.md reflects all tasks ✅; current-task.md status is "none".
+- Wrap-up PR opened with a description citing notes/test-diet-report.md.
+  ]]></goal>
+
+  <inputs>
+    <file purpose="spec">projects/set-regarding-and-field-mapping-resolver-r1/spec.md</file>
+    <file purpose="plan">projects/set-regarding-and-field-mapping-resolver-r1/plan.md</file>
+    <file purpose="root-claude">CLAUDE.md</file>
+    <file purpose="skill">.claude/skills/test-diet/SKILL.md</file>
+    <file purpose="skill">.claude/skills/devops-idea-create/SKILL.md</file>
+    <file purpose="uat-results">projects/set-regarding-and-field-mapping-resolver-r1/notes/uat-results.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="CLAUDE.md §7">`/test-diet` is MANDATORY. Skipping requires documented rationale in the wrap-up PR description. Recommend do not skip.</constraint>
+    <constraint source="CLAUDE.md §7">Wrap-up PR description MUST cite notes/test-diet-report.md (either link or excerpt).</constraint>
+    <constraint source="ADR-038">/test-diet is read-only — it emits git rm / git mv commands but does NOT execute them. Reviewer applies commands manually. Do NOT auto-execute the emitted commands from this task; that is a follow-up reviewer action.</constraint>
+    <constraint source="spec FR-B3b-01">Idea Issue title must reference the follow-on project name exactly: `admin-cascade-batch-job-r1`. Body must link back to this project's spec FR-B3b-01.</constraint>
+    <constraint source="project">Do not open the wrap-up PR if any UAT scenario (SRFR-084) is FAIL and lacks a filed defect Issue.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>project/wrap-up</topic>
+    <files>
+      <file>.claude/skills/test-diet/SKILL.md</file>
+      <file>.claude/skills/devops-idea-create/SKILL.md</file>
+      <file>CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Test-diet gate" location=".claude/skills/test-diet/SKILL.md">
+        Runs at project close; classifies tests added/modified during the
+        project as MAINTAIN (keep at KEEP path) vs SCAFFOLDING (delete) vs
+        AMBIGUOUS (reviewer judgment). Read-only.
+      </pattern>
+      <pattern name="Follow-on Idea creation" location=".claude/skills/devops-idea-create/SKILL.md">
+        Captures a follow-on story as a GitHub Issue with type=Idea + label
+        backlog. No local folder / worktree created.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Per spec Owner Clarification Q-01, the admin batch-cascade service
+      (FR-B3b-01) was deferred to a follow-on project. This wrap-up task
+      creates the tracking Issue so the follow-on survives R1 close-out.
+      Additionally, CLAUDE.md §7 mandates /test-diet at project close to
+      reconcile tests added during the project against ADR-038 KEEP paths.
+    </background>
+    <dependencies>
+      <dependency task="SRFR-084" status="pending">
+        UAT clean OR every FAIL has a filed defect Issue. Do not wrap up if
+        this is not true.
+      </dependency>
+    </dependencies>
+    <related-work>
+      <item>Portfolio: Project #536; Epic #535 ENTITY FUNCTIONALITY.</item>
+      <item>Follow-on: admin-cascade-batch-job-r1 (Idea Issue created here).</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check">Verify context &lt; 60%. Read CLAUDE.md §7 + .claude/skills/test-diet/SKILL.md + .claude/skills/devops-idea-create/SKILL.md.</step>
+    <step order="1" name="Precondition Check">Verify SRFR-084 ✅ AND (all UAT scenarios PASS OR every FAIL has a defect Issue #). Read notes/uat-results.md to confirm.</step>
+    <step order="2" name="Run /test-diet">Invoke `/test-diet` skill. It will inspect tests added/modified during the project against ADR-038 §7 classifier and emit notes/test-diet-report.md with git rm / git mv commands for the reviewer. Do NOT auto-execute the emitted commands.</step>
+    <step order="3" name="Author Lessons Learned">Write notes/lessons-learned.md with four sections. Draw on this project's wave outcomes: Q-02/Q-03 investigation-before-refactor discipline (kept scope tight); /ribbon-edit as the canonical ribbon deploy skill (avoided manual XML surgery); shared-lib delegation early (workstream C landed before A/B consumers so both PCFs migrated cleanly). Call out any wave that ran over estimate.</step>
+    <step order="4" name="Open Follow-on Idea Issue">Invoke `/devops-idea-create` with title "[Idea]: admin-cascade-batch-job-r1 — batch cascade service for >500 children" and body containing: purpose (batch service for parent→children pushes exceeding the 500-child interactive cap), source (spec FR-B3b-01 of this project), acceptance-shape (BFF service OR Foundry-agent OR admin CLI; decision matrix in follow-on's design phase), and blocking dependencies (none). Capture the returned Issue #.</step>
+    <step order="5" name="Update README">Update README.md portfolio pointer block: Status → Complete; append "Follow-on: [Idea Issue #NNN](https://github.com/spaarke-dev/spaarke/issues/NNN)" using the captured Issue #.</step>
+    <step order="6" name="Update Task Registry">In TASK-INDEX.md, mark SRFR-090 🔲 → ✅. In current-task.md, set status to "none — project complete".</step>
+    <step order="7" name="Cross-Link Lessons">In notes/lessons-learned.md, add the Idea Issue # to the "Recommendations for admin-cascade-batch-job-r1 follow-on" section as a bidirectional link.</step>
+    <step order="8" name="Author Wrap-up PR">Draft the wrap-up PR description. MUST cite notes/test-diet-report.md (embed a summary or link). Include: workstream outcomes, deploy artifacts + versions, UAT summary, follow-on Idea Issue link, /test-diet reviewer TODO list.</step>
+    <step order="9" name="Verify Wrap-up Complete">Confirm: notes/test-diet-report.md exists; notes/lessons-learned.md exists with all four subheadings; Idea Issue linked; README shows Status: Complete; TASK-INDEX.md all ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="Skill">/test-diet, /devops-idea-create, /context-handoff</tool>
+    <tool name="Read">Read spec, CLAUDE.md, skill docs, UAT results</tool>
+    <tool name="Write">Write notes/lessons-learned.md; update README.md, TASK-INDEX.md, current-task.md</tool>
+    <tool name="Edit">Edit README.md portfolio pointer block; edit TASK-INDEX.md status marks</tool>
+    <tool name="Bash">Git status + PR-open commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="notes" ephemeral="true">projects/set-regarding-and-field-mapping-resolver-r1/notes/test-diet-report.md</output>
+    <output type="notes" ephemeral="true">projects/set-regarding-and-field-mapping-resolver-r1/notes/lessons-learned.md</output>
+    <output type="issues">GitHub Idea Issue for admin-cascade-batch-job-r1</output>
+    <output type="docs">projects/set-regarding-and-field-mapping-resolver-r1/README.md (Status: Complete + follow-on link)</output>
+    <output type="docs">projects/set-regarding-and-field-mapping-resolver-r1/tasks/TASK-INDEX.md (all ✅ incl. SRFR-090)</output>
+    <output type="docs">projects/set-regarding-and-field-mapping-resolver-r1/current-task.md (status: none — project complete)</output>
+    <output type="pr">Wrap-up PR opened, description cites notes/test-diet-report.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`notes/test-diet-report.md` exists (from /test-diet run).</criterion>
+    <criterion testable="true">`notes/lessons-learned.md` exists with all four subheadings populated (What went well, What was harder than expected, Reusable techniques, Recommendations for follow-on).</criterion>
+    <criterion testable="true">GitHub Idea Issue for `admin-cascade-batch-job-r1` created; Issue # recorded in notes/lessons-learned.md AND linked from README.md.</criterion>
+    <criterion testable="true">README.md portfolio pointer block shows Status: Complete.</criterion>
+    <criterion testable="true">Wrap-up PR description cites notes/test-diet-report.md (link or excerpt).</criterion>
+    <criterion testable="true">All prior tasks (SRFR-001 through SRFR-084) plus SRFR-090 show ✅ in TASK-INDEX.md; current-task.md status is "none — project complete".</criterion>
+  </acceptance-criteria>
+</task>

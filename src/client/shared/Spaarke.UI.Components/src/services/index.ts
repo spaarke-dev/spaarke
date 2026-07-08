@@ -78,12 +78,30 @@ export type {
   IGridFeatures,
   GridConfigViewType,
 } from './ConfigurationService';
-export { resolveRecordType, buildRecordUrl, findNavProp, applyResolverFields } from './PolymorphicResolverService';
+export {
+  resolveRecordType,
+  buildRecordUrl,
+  findNavProp,
+  applyResolverFields,
+  // FR-A4-01 / FR-C1-01 additions (set-regarding-and-field-mapping-resolver-r1):
+  resolveRecordNumberFieldName,
+  _resetRecordNumberFieldCacheForTests,
+  // SRFR-052 (2026-07-06) — display-name resolution via
+  // `sprk_recordtype_ref.sprk_recorddisplaynamefield`. Fixes owner UAT bug
+  // where picker returned Matter's `sprk_matternumber` (its Primary Name)
+  // as the display name; resolver now queries the target for the catalog-
+  // nominated display-name column (e.g., `sprk_mattername`, `name`, `fullname`).
+  resolveRecordDisplayNameFieldName,
+  _resetDisplayNameFieldCacheForTests,
+} from './PolymorphicResolverService';
 export type {
   IPolymorphicWebApi,
   IRecordTypeRef,
   INavPropEntry,
   IResolverFieldValues,
+  // FR-A4-01 / FR-C1-01 additions:
+  IApplyResolverFieldsOptions,
+  IApplyResolverFieldsResult,
 } from './PolymorphicResolverService';
 
 // TodoRegardingUpdateBuilder — FR-13 helper for sprk_todo regarding edits.
@@ -155,3 +173,13 @@ export type {
   SelectionChangedPayload,
   ContextChangedPayload,
 } from './SprkChatBridge';
+
+// FieldMappingHandler — regarding-selection field-mapping integration surface.
+// Relocated from AssociationResolver PCF for symmetry with PolymorphicResolverService
+// (spec FR-C1b-01, project set-regarding-and-field-mapping-resolver-r1, task 022).
+// Public surface = handler class + factory + application result + config.
+// The handler's internal SyncMode / IFieldMappingProfile / IFieldMappingRule / IMappingResult
+// shapes are intentionally NOT re-exported — those names are already exported from
+// types/FieldMappingTypes.ts with different (configuration-time) shapes.
+export { FieldMappingHandler, createFieldMappingHandler } from './FieldMappingHandler';
+export type { IFieldMappingHandlerConfig, IFieldMappingApplicationResult } from './FieldMappingHandler';

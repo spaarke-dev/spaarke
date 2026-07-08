@@ -1,0 +1,148 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="SRFR-070" project="set-regarding-and-field-mapping-resolver-r1">
+  <metadata>
+    <title>OOB Dataverse mapping audit — script + report (FR-B6-01)</title>
+    <status>completed</status>
+    <estimated-effort>4h</estimated-effort>
+    <actual-effort>~1h</actual-effort>
+    <assigned>AI Agent</assigned>
+    <started>2026-07-02</started>
+    <completed>2026-07-02</completed>
+    <rigor>STANDARD</rigor>
+    <parallel-safe>true</parallel-safe>
+    <parallel-group>E</parallel-group>
+    <tags>audit,dataverse,wave-7</tags>
+    <depends-on></depends-on>
+    <wave>7</wave>
+  </metadata>
+
+  <prompt><![CDATA[
+One-shot audit script + human-readable report enumerating overlaps between
+active `sprk_fieldmappingprofile` records and OOB Dataverse attribute-mappings
+on the same source→target 1:N relationships.
+
+Report-only. No auto-deletion, no schema mutations. Output is a Markdown table
+with recommendations for manual review. This is FR-B6-01 and enforces the
+anti-pattern policy documented in spec.md Appendix A §A.6.
+
+The script:
+  1. Queries all active `sprk_fieldmappingprofile` records via Web API.
+  2. For each profile's (sourceEntity, targetEntity) pair, queries metadata
+     for the corresponding 1:N `RelationshipDefinitions` (ReferencedEntity =
+     sourceEntity, ReferencingEntity = targetEntity).
+  3. For each relationship, retrieves the OOB `AttributeMappings` (via
+     `EntityMap` inspection).
+  4. Flags any OOB mapping whose source-field or target-field appears in the
+     profile's `sprk_fieldmappingrules` collection (potential collision).
+  5. Writes a Markdown report with a table and a recommendation section.
+
+Language: match the repo's existing `scripts/` style. Inspect the `scripts/`
+directory to pick PowerShell, JS, or Python per convention. Do NOT introduce a
+new scripting language.
+  ]]></prompt>
+
+  <role>Dataverse metadata engineer familiar with `EntityDefinitions`, `RelationshipDefinitions`, `EntityMap` + `AttributeMap` metadata APIs, Web API queries, and cross-referencing OOB behavior against custom configuration.</role>
+
+  <goal><![CDATA[
+A script at
+`projects/set-regarding-and-field-mapping-resolver-r1/scripts/audit-oob-mappings.{ps1|js|py}`
+runs cleanly against spaarkedev1, enumerates all active
+`sprk_fieldmappingprofile` records, cross-references their (source, target)
+pairs against OOB Dataverse `AttributeMappings`, and writes a report at
+`projects/set-regarding-and-field-mapping-resolver-r1/notes/oob-mapping-audit.md`.
+The report includes: date, environment name, total profile-count reviewed, a
+table listing every OOB mapping on any (source, target) pair that also has a
+profile, and a recommendation section identifying which OOB mappings to
+review. No OOB mappings are modified.
+  ]]></goal>
+
+  <inputs>
+    <file purpose="spec">projects/set-regarding-and-field-mapping-resolver-r1/spec.md</file>
+    <file purpose="plan">projects/set-regarding-and-field-mapping-resolver-r1/plan.md</file>
+    <file purpose="project-claude">projects/set-regarding-and-field-mapping-resolver-r1/CLAUDE.md</file>
+    <file purpose="skill">.claude/skills/dataverse-mcp-usage/SKILL.md</file>
+    <file purpose="policy">projects/set-regarding-and-field-mapping-resolver-r1/spec.md (Appendix A §A.6)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-B6-01">Report-only. NO auto-deletion, NO schema mutations, NO modifications to OOB `EntityMap` or `AttributeMap` records.</constraint>
+    <constraint source="spec Appendix A §A.6">Policy: OOB mappings are the anti-pattern this subsystem replaces; the audit surfaces overlap for MANUAL admin remediation, not automated cleanup.</constraint>
+    <constraint source="repo pattern">Script language matches existing `scripts/` convention (PowerShell, JS, or Python). Do NOT introduce a new language.</constraint>
+    <constraint source="project">Script MUST be idempotent — running twice produces the same report.</constraint>
+    <constraint source="project">Report MUST include explicit "none found" language if there are no overlaps (don't produce an empty table with no explanation).</constraint>
+    <constraint source="project">Environment target read from an environment variable or `.env` (default spaarkedev1). Do NOT hardcode a URL.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>dataverse/metadata-api</topic>
+    <files>
+      <file>.claude/skills/dataverse-mcp-usage/SKILL.md</file>
+      <file>projects/set-regarding-and-field-mapping-resolver-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Query RelationshipDefinitions for a source-target pair" location="Dataverse Web API metadata docs">
+        `GET /api/data/v9.2/RelationshipDefinitions?$filter=SchemaName ne null and Microsoft.Dynamics.CRM.OneToManyRelationshipMetadata/ReferencedEntity eq 'sprk_matter' and Microsoft.Dynamics.CRM.OneToManyRelationshipMetadata/ReferencingEntity eq 'sprk_event'` — returns the 1:N relationship metadata.
+      </pattern>
+      <pattern name="Query AttributeMappings via EntityMap" location="Dataverse Web API metadata docs">
+        `EntityMap` records carry `SourceEntityName` + `TargetEntityName`. Their child `AttributeMap` records carry `SourceAttributeName` + `TargetAttributeName`. Query: `GET /api/data/v9.2/entitymaps?$filter=sourceentityname eq 'X' and targetentityname eq 'Y'&amp;$expand=entitymap_attributemap`.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Spec Appendix A §A.6 documents that OOB attribute-mappings are the
+      anti-pattern this project's Field Mapping subsystem replaces. Silently
+      running both together produces double-writes and unpredictable results.
+      This audit surfaces the overlap for administrator remediation without
+      touching OOB records — the audit is REPORT-ONLY per Owner Clarification
+      B6.
+    </background>
+    <dependencies>
+      <dependency task="SRFR-060" status="future">
+        Requires at least one active `sprk_fieldmappingprofile` record to exist
+        for the audit to produce meaningful output. If Wave 6 profiles have not
+        yet been authored, the report shows "no profiles found" and completes
+        successfully.
+      </dependency>
+    </dependencies>
+    <related-work>
+      <item>Follow-on `admin-cascade-batch-job-r1` Idea Issue (Wave 9) may re-run this audit as part of a broader admin dashboard.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check">Verify context &lt; 60%. Read spec.md FR-B6-01 and Appendix A §A.6.</step>
+    <step order="1" name="Inspect scripts/ convention">Read the repo `scripts/` directory to determine the dominant script language (PowerShell / JS / Python). Match that language for this audit script.</step>
+    <step order="2" name="Author Script Skeleton">Create `projects/set-regarding-and-field-mapping-resolver-r1/scripts/audit-oob-mappings.{ext}` with a docstring header describing purpose, usage, and expected output path. Read environment target from env var; default to spaarkedev1.</step>
+    <step order="3" name="Query Active Profiles">Add a query for all active `sprk_fieldmappingprofile` records: `?$filter=statecode eq 0&amp;$select=sprk_fieldmappingprofileid,sprk_name,sprk_sourceentity,sprk_targetentity&amp;$expand=sprk_fieldmappingprofile_fieldmappingrules($select=sprk_sourcefield,sprk_targetfield)`.</step>
+    <step order="4" name="For Each Pair, Query OOB Mappings">For each unique (sourceEntity, targetEntity) pair, query `entitymaps` filtered by sourceentityname + targetentityname, expanding `entitymap_attributemap`. Collect all OOB mapping tuples (source-field, target-field, EntityMap ID, AttributeMap ID).</step>
+    <step order="5" name="Detect Collisions">For each OOB mapping, check if its source-field OR target-field appears in the corresponding profile's rule set. Flag as "collision" (yes/no).</step>
+    <step order="6" name="Author Report">Write `projects/set-regarding-and-field-mapping-resolver-r1/notes/oob-mapping-audit.md`. Header: date, environment name, profile-count reviewed. Body: Markdown table with columns (source entity, target entity, OOB relationship name, OOB mapping source-field, OOB mapping target-field, Profile rule collision Y/N). Footer: "Recommendation" section listing which OOB mappings admins should review for deletion.</step>
+    <step order="7" name="Handle Empty Cases">If no active profiles OR no OOB mappings on the surveyed pairs, the report explicitly states "No profiles found" or "No OOB mappings detected on the surveyed pairs" — do NOT emit an empty table.</step>
+    <step order="8" name="Idempotency Test">Run the script twice. Confirm identical report output (byte-for-byte, modulo the date header).</step>
+    <step order="9" name="Update Task Status">Update TASK-INDEX.md 🔲 → ✅ for SRFR-070. Reset current-task.md for next task.</step>
+  </steps>
+
+  <tools>
+    <tool name="Bash">Run PowerShell / node / python script against Dataverse Web API</tool>
+    <tool name="mcp__dataverse__read_query">Optional — for exploratory queries during script authoring</tool>
+    <tool name="Read">Inspect `scripts/` convention, spec.md Appendix A §A.6</tool>
+    <tool name="Write">Author the script + the report</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">projects/set-regarding-and-field-mapping-resolver-r1/scripts/audit-oob-mappings.{ps1|js|py}</output>
+    <output type="notes" ephemeral="false">projects/set-regarding-and-field-mapping-resolver-r1/notes/oob-mapping-audit.md</output>
+    <output type="docs">projects/set-regarding-and-field-mapping-resolver-r1/tasks/TASK-INDEX.md (🔲 → ✅ for SRFR-070)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Script exists at `projects/set-regarding-and-field-mapping-resolver-r1/scripts/audit-oob-mappings.{ext}` and runs cleanly against spaarkedev1 (exit code 0).</criterion>
+    <criterion testable="true">Report exists at `projects/set-regarding-and-field-mapping-resolver-r1/notes/oob-mapping-audit.md` with date, environment, profile-count, and either a populated table OR explicit "none found" language.</criterion>
+    <criterion testable="true">No OOB `EntityMap` or `AttributeMap` records were modified (audit-only) — confirm by re-querying the same records post-run.</criterion>
+    <criterion testable="true">Script language matches the existing `scripts/` convention.</criterion>
+    <criterion testable="true">Script is idempotent — two runs produce identical report output (modulo date header).</criterion>
+    <criterion testable="true">Report includes a "Recommendation" section identifying which OOB mappings to review manually.</criterion>
+  </acceptance-criteria>
+</task>

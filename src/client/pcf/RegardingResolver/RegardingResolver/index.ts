@@ -29,7 +29,7 @@ import * as React from 'react';
 import { IInputs, IOutputs } from './generated/ManifestTypes';
 import { RegardingResolverHost } from './RegardingResolverHost';
 
-const CONTROL_VERSION = '1.2.0';
+const CONTROL_VERSION = '1.4.6';
 
 export class RegardingResolver implements ComponentFramework.ReactControl<IInputs, IOutputs> {
   private notifyOutputChanged: () => void = () => undefined;
@@ -39,6 +39,17 @@ export class RegardingResolver implements ComponentFramework.ReactControl<IInput
    * the latest value when notifyOutputChanged() fires.
    */
   private _regardingRecordType: ComponentFramework.LookupValue[] | undefined;
+
+  /**
+   * Bound field values (v1.3 layout — FR-A1-02). These are READ-ONLY from the
+   * PCF's perspective: the underlying columns are written by
+   * `PolymorphicResolverService.applyResolverFields` via `Xrm.WebApi.updateRecord`,
+   * NOT by PCF outputs. We surface them here as pass-through so the framework
+   * preserves the current field value and re-renders after the resolver write
+   * lands on the next `updateView` cycle.
+   */
+  private _regardingRecordNumberField: string | undefined;
+  private _regardingRecordNameField: string | undefined;
 
   constructor() {
     this.handleRecordTypeChanged = this.handleRecordTypeChanged.bind(this);
@@ -53,6 +64,14 @@ export class RegardingResolver implements ComponentFramework.ReactControl<IInput
   }
 
   public updateView(context: ComponentFramework.Context<IInputs>): React.ReactElement {
+    // Read pass-through bound values on every updateView so the raw is current
+    // if the framework has re-materialized the record after applyResolverFields'
+    // Xrm.WebApi.updateRecord side effect.
+    const numberRaw = context.parameters.regardingRecordNumberField?.raw;
+    const nameRaw = context.parameters.regardingRecordNameField?.raw;
+    this._regardingRecordNumberField = typeof numberRaw === 'string' ? numberRaw : undefined;
+    this._regardingRecordNameField = typeof nameRaw === 'string' ? nameRaw : undefined;
+
     return React.createElement(RegardingResolverHost, {
       context,
       onRecordTypeChanged: this.handleRecordTypeChanged,
@@ -61,8 +80,16 @@ export class RegardingResolver implements ComponentFramework.ReactControl<IInput
   }
 
   public getOutputs(): IOutputs {
+    // regardingRecordNumberField and regardingRecordNameField are bound as
+    // pass-through: applyResolverFields writes them via Xrm.WebApi.updateRecord
+    // on UPDATE-mode forms; on CREATE forms they ride the __sprk_regarding_pending__
+    // bridge (SRFR-032 wires the recordNumber population). We echo whatever the
+    // framework last handed us so we don't accidentally clobber the underlying
+    // value with `undefined`.
     return {
       regardingRecordType: this._regardingRecordType,
+      regardingRecordNumberField: this._regardingRecordNumberField,
+      regardingRecordNameField: this._regardingRecordNameField,
     };
   }
 

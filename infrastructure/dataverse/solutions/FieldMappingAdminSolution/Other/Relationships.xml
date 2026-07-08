@@ -1,0 +1,18 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<EntityRelationships xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <EntityRelationship Name="business_unit_sprk_fieldmappingprofile" />
+  <EntityRelationship Name="business_unit_sprk_fieldmappingrule" />
+  <EntityRelationship Name="lk_sprk_fieldmappingprofile_createdby" />
+  <EntityRelationship Name="lk_sprk_fieldmappingprofile_modifiedby" />
+  <EntityRelationship Name="lk_sprk_fieldmappingrule_createdby" />
+  <EntityRelationship Name="lk_sprk_fieldmappingrule_modifiedby" />
+  <EntityRelationship Name="owner_sprk_fieldmappingprofile" />
+  <EntityRelationship Name="owner_sprk_fieldmappingrule" />
+  <EntityRelationship Name="sprk_fieldmappingprofile_SourceRecordType_n1" />
+  <EntityRelationship Name="sprk_fieldmappingprofile_TargetRecordType_n1" />
+  <EntityRelationship Name="sprk_fieldmappingrule_FieldMappingProfile_n1" />
+  <EntityRelationship Name="team_sprk_fieldmappingprofile" />
+  <EntityRelationship Name="team_sprk_fieldmappingrule" />
+  <EntityRelationship Name="user_sprk_fieldmappingprofile" />
+  <EntityRelationship Name="user_sprk_fieldmappingrule" />
+</EntityRelationships>
