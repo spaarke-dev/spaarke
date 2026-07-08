@@ -1,6 +1,6 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <manifest>
-  <control namespace="Spaarke.Controls" constructor="RegardingResolver" version="1.4.5" display-name-key="Regarding Resolver" description-key="Virtual PCF: polymorphic parent picker for any child entity in an N:1 polymorphic relationship. Writes 5 resolver fields + entity-specific lookup via applyResolverFields (ADR-024) with subgrid auto-detect (SRFR-045). Designed for sprk_todo, sprk_event, sprk_invoice, sprk_communication, sprk_kpiassessment child forms. Bind to the child sprk_regardingrecordtype hidden lookup." control-type="virtual">
+  <control namespace="Spaarke.Controls" constructor="RegardingResolver" version="1.4.6" display-name-key="Regarding Resolver" description-key="Virtual PCF: polymorphic parent picker for any child entity in an N:1 polymorphic relationship. Writes 5 resolver fields + entity-specific lookup via applyResolverFields (ADR-024) with subgrid auto-detect (SRFR-045). Designed for sprk_todo, sprk_event, sprk_invoice, sprk_communication, sprk_kpiassessment child forms. Bind to the child sprk_regardingrecordtype hidden lookup." control-type="virtual">
     <external-service-usage enabled="false">
     </external-service-usage>
     <!-- Bound lookup property — the resolver's "discriminator" field on the host entity (sprk_regardingrecordtype) -->
