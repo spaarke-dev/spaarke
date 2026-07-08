@@ -212,6 +212,7 @@ import {
   buildRecordUrl,
   resolveRecordType,
   resolveRecordDisplayNameFieldName,
+  resolveRecordNumberFieldName,
   type IPolymorphicPickerWebApi,
   type ITodoRegardingTargetCatalogEntry,
   type PolymorphicPickerProps,
@@ -243,7 +244,7 @@ import {
 // in index.ts and the manifest attributes on every release (SRFR-033).
 // ---------------------------------------------------------------------------
 
-const BUILD_DATE = '2026-07-06';
+const BUILD_DATE = '2026-07-08';
 
 // ---------------------------------------------------------------------------
 // Styles
@@ -895,28 +896,161 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
       const hostRecordId = getHostRecordId();
       const isCreateMode = !hostRecordId;
 
+      console.log(
+        '[RegardingResolver auto-detect] fired',
+        {
+          hostEntity,
+          hostRecordId: hostRecordId ?? '(none — CREATE mode)',
+          detected: {
+            entityType: detected.entityType,
+            recordId: detected.recordId,
+            recordName: detected.recordName,
+            lookupAttribute: detected.lookupAttribute,
+          },
+          mode: isCreateMode ? 'CREATE' : 'UPDATE',
+        }
+      );
+
       try {
         if (isCreateMode) {
-          // CREATE mode: no host record id yet — write to form attributes
-          // via setValue so the fields ride the INSERT transaction. Do NOT
-          // call applyResolverFields' updateRecord path (there's no record
-          // to update).
-          const recordType = await resolveRecordType(writeCtx.webApi, detected.entityType);
+          // ============================================================
+          // v1.4.6 (SRFR-057) — Two-phase CREATE-mode auto-detect writes
+          // ============================================================
+          //
+          // Root cause of v1.4.5 UAT bug: the previous implementation
+          // gated ALL setValue calls behind three sequential `await`
+          // calls (resolveRecordType, resolveRecordDisplayNameFieldName,
+          // retrieveMultipleRecords). If the user hit Save before all
+          // awaits resolved (or if any await threw), NONE of the fields
+          // fired. Screenshot from 2026-07-08 UAT confirmed: subgrid
+          // "+ New" created an Event where `_sprk_regardingproject_value`
+          // was populated (by Dataverse relationship mapping) but all 5
+          // resolver fields were NULL.
+          //
+          // Two-phase fix:
+          //
+          //   Phase 1 (immediate / synchronous): write the 3 always-known
+          //   fields — `sprk_regardingrecordid`, `sprk_regardingrecordname`
+          //   (using detected.recordName as the baseline; may be the
+          //   parent's Primary Name which for sprk_matter/sprk_project is
+          //   the number, but it's SOMETHING — better than blank), and
+          //   `sprk_regardingrecordurl` (buildRecordUrl is synchronous).
+          //   Populate `selectedTarget` React state + the SRFR-040
+          //   presave bridge. This runs BEFORE any await so a fast-save
+          //   still captures 3-of-5 fields with reasonable defaults.
+          //
+          //   Phase 2 (async catch-up): resolve `sprk_regardingrecordtype`
+          //   (as soon as resolveRecordType returns — writes as its own
+          //   micro-step), then in parallel resolve display-name AND
+          //   record-number. When those come back, RE-write recordname
+          //   if it differs (polish) and write recordnumber if resolved.
+          //   Also update the presave bridge with the polished values.
+          //
+          // Key invariant: users who save quickly get all 5 fields with
+          // reasonable defaults; the display-name refinement is a
+          // "polish" that happens if the user is still on the form.
+          // ============================================================
 
-          // v1.4.5 (SRFR-054): resolve the target's actual display-name field
-          // (from sprk_recordtype_ref.sprk_recorddisplaynamefield) and query
-          // the parent record for that value. Auto-detect's pre-populated
-          // Xrm.LookupValue.name = the parent's PRIMARY NAME column, which
-          // for sprk_matter/sprk_project is the NUMBER, not the human name.
-          // Without this async resolution the auto-detect CREATE path bypasses
-          // the SRFR-052 display-name fix that already works in UPDATE mode.
-          let resolvedDisplayName = detected.recordName;
+          // --- Phase 1: immediate, synchronous writes ---
+          const recordUrl = buildRecordUrl(detected.entityType, detected.recordId);
+
+          console.log('[RegardingResolver auto-detect] Phase 1 begin', {
+            field: 'sprk_regardingrecordid',
+            value: detected.recordId,
+          });
+          setFormTextValue('sprk_regardingrecordid', detected.recordId);
+
+          console.log('[RegardingResolver auto-detect] Phase 1', {
+            field: 'sprk_regardingrecordname',
+            value: detected.recordName,
+            note: 'baseline value — may be refined in Phase 2',
+          });
+          setFormTextValue('sprk_regardingrecordname', detected.recordName);
+
+          console.log('[RegardingResolver auto-detect] Phase 1', {
+            field: 'sprk_regardingrecordurl',
+            value: recordUrl,
+          });
+          setFormTextValue('sprk_regardingrecordurl', recordUrl);
+
+          // Populate selectedTarget so Row 2 hyperlink works immediately
+          // (even before Phase 2 completes).
+          setSelectedTarget({
+            entityType: detected.entityType,
+            recordId: detected.recordId,
+            recordName: detected.recordName,
+          });
+
+          // Populate SRFR-040 presave bridge with baseline values. Phase 2
+          // will re-write this global with polished values if resolution
+          // completes before the user saves.
+          (
+            window as unknown as {
+              __sprk_regarding_pending__?: Record<string, unknown>;
+            }
+          ).__sprk_regarding_pending__ = {
+            hostEntity,
+            entityType: detected.entityType,
+            entitySet: undefined,
+            lookupAttribute: detected.lookupAttribute,
+            recordId: detected.recordId,
+            recordName: detected.recordName,
+            recordUrl,
+            recordNumber: null,
+          };
+
+          console.log('[RegardingResolver auto-detect] Phase 1 complete', {
+            wrote: ['sprk_regardingrecordid', 'sprk_regardingrecordname', 'sprk_regardingrecordurl'],
+            selectedTarget: 'populated',
+            __sprk_regarding_pending__: 'populated with baseline values',
+          });
+
+          // --- Phase 2a: resolveRecordType + write recordtype lookup ---
+          // Run this on its own so it fires as soon as resolveRecordType
+          // returns — independent of display-name / record-number
+          // resolution latency.
           try {
-            const displayField = await resolveRecordDisplayNameFieldName(
-              writeCtx.webApi,
-              detected.entityType
+            const recordType = await resolveRecordType(writeCtx.webApi, detected.entityType);
+            if (recordType) {
+              console.log('[RegardingResolver auto-detect] Phase 2a', {
+                field: 'sprk_regardingrecordtype',
+                recordType,
+              });
+              setFormLookupValue(
+                'sprk_regardingrecordtype',
+                'sprk_recordtype_ref',
+                recordType.id,
+                recordType.name
+              );
+              // Notify PCF class so the bound lookup output tracks
+              onRecordTypeChanged({
+                id: recordType.id,
+                name: recordType.name,
+                entityType: 'sprk_recordtype_ref',
+              });
+            } else {
+              console.warn(
+                '[RegardingResolver auto-detect] Phase 2a: resolveRecordType returned null — sprk_regardingrecordtype left blank (NFR-06 graceful-blank)'
+              );
+            }
+          } catch (rtErr) {
+            console.warn(
+              '[RegardingResolver auto-detect] Phase 2a: resolveRecordType failed:',
+              rtErr
             );
-            if (displayField) {
+          }
+
+          // --- Phase 2b: async display-name resolution (polish) ---
+          // Fire in parallel with record-number resolution below. If this
+          // completes and yields a different value than detected.recordName,
+          // RE-write sprk_regardingrecordname AND update the bridge.
+          const displayNamePromise = (async (): Promise<string | null> => {
+            try {
+              const displayField = await resolveRecordDisplayNameFieldName(
+                writeCtx.webApi,
+                detected.entityType
+              );
+              if (!displayField) return null;
               const primaryIdAttr = `${detected.entityType}id`;
               const query =
                 `?$filter=${primaryIdAttr} eq ${detected.recordId}` +
@@ -928,53 +1062,101 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
               );
               const raw = result.entities?.[0]?.[displayField];
               if (typeof raw === 'string' && raw.trim().length > 0) {
-                resolvedDisplayName = raw.trim();
+                return raw.trim();
               }
+              return null;
+            } catch (err) {
+              console.warn(
+                '[RegardingResolver auto-detect] Phase 2b: display-name resolution failed; keeping baseline (NFR-06 graceful-blank):',
+                err
+              );
+              return null;
             }
-          } catch (err) {
-            // NFR-06 graceful-blank: fall back to detected.recordName on any error.
-            console.warn(
-              '[RegardingResolver] Auto-detect display-name resolution failed; falling back to picker-provided name:',
-              err
-            );
-          }
+          })();
 
-          // Write the 4 always-known fields immediately.
-          setFormTextValue('sprk_regardingrecordid', detected.recordId);
-          setFormTextValue('sprk_regardingrecordname', resolvedDisplayName);
-          setFormTextValue(
-            'sprk_regardingrecordurl',
-            buildRecordUrl(detected.entityType, detected.recordId)
-          );
-          if (recordType) {
-            setFormLookupValue(
-              'sprk_regardingrecordtype',
-              'sprk_recordtype_ref',
-              recordType.id,
-              recordType.name
-            );
-            // Notify PCF class so the bound lookup output tracks
-            onRecordTypeChanged({
-              id: recordType.id,
-              name: recordType.name,
-              entityType: 'sprk_recordtype_ref',
+          // --- Phase 2c: async record-number resolution (polish) ---
+          // If the target entity's catalog nominates a record-number field
+          // AND that field has a value, write it to
+          // `sprk_regardingrecordnumber` AND update the bridge so the
+          // presave webresource still writes it on save.
+          const recordNumberPromise = (async (): Promise<string | null> => {
+            try {
+              const numberField = await resolveRecordNumberFieldName(
+                writeCtx.webApi,
+                detected.entityType
+              );
+              if (!numberField) return null;
+              const primaryIdAttr = `${detected.entityType}id`;
+              const query =
+                `?$filter=${primaryIdAttr} eq ${detected.recordId}` +
+                `&$select=${numberField}&$top=1`;
+              const result = await writeCtx.webApi.retrieveMultipleRecords(
+                detected.entityType,
+                query,
+                1
+              );
+              const raw = result.entities?.[0]?.[numberField];
+              if (typeof raw === 'string' && raw.trim().length > 0) {
+                return raw.trim();
+              }
+              if (typeof raw === 'number') {
+                return String(raw);
+              }
+              return null;
+            } catch (err) {
+              console.warn(
+                '[RegardingResolver auto-detect] Phase 2c: record-number resolution failed; keeping baseline null (NFR-06 graceful-blank):',
+                err
+              );
+              return null;
+            }
+          })();
+
+          const [resolvedDisplayName, resolvedRecordNumber] = await Promise.all([
+            displayNamePromise,
+            recordNumberPromise,
+          ]);
+
+          console.log('[RegardingResolver auto-detect] Phase 2 async catch-up complete', {
+            resolvedDisplayName: resolvedDisplayName ?? '(none — kept baseline)',
+            resolvedRecordNumber: resolvedRecordNumber ?? '(none — kept null)',
+          });
+
+          // Refine recordname if resolved to a different value.
+          if (
+            typeof resolvedDisplayName === 'string' &&
+            resolvedDisplayName.length > 0 &&
+            resolvedDisplayName !== detected.recordName
+          ) {
+            console.log('[RegardingResolver auto-detect] Phase 2 re-write', {
+              field: 'sprk_regardingrecordname',
+              from: detected.recordName,
+              to: resolvedDisplayName,
+              note: 'display-name polish over baseline',
+            });
+            setFormTextValue('sprk_regardingrecordname', resolvedDisplayName);
+            // Also refine selectedTarget so Row 2 label reflects the polish.
+            setSelectedTarget({
+              entityType: detected.entityType,
+              recordId: detected.recordId,
+              recordName: resolvedDisplayName,
             });
           }
 
-          // Populate selectedTarget so Row 2 hyperlink works immediately.
-          // v1.4.5 (SRFR-054): use the resolved display-name for consistency
-          // with the form-attribute write above.
-          setSelectedTarget({
-            entityType: detected.entityType,
-            recordId: detected.recordId,
-            recordName: resolvedDisplayName,
-          });
+          // Write record-number if resolved.
+          if (
+            typeof resolvedRecordNumber === 'string' &&
+            resolvedRecordNumber.length > 0
+          ) {
+            console.log('[RegardingResolver auto-detect] Phase 2 write', {
+              field: 'sprk_regardingrecordnumber',
+              value: resolvedRecordNumber,
+            });
+            setFormTextValue('sprk_regardingrecordnumber', resolvedRecordNumber);
+          }
 
-          // Populate SRFR-040 presave bridge fallback. The presave
-          // webresource will stage sprk_regardingrecordnumber on save.
-          // v1.4.5 (SRFR-054): recordName in the bridge must be the resolved
-          // display-name — the presave webresource reads pending.recordName
-          // and writes it as sprk_regardingrecordname on the form buffer.
+          // Refresh the presave bridge with the polished values (in case
+          // the user is still on the form). Idempotent — safe to overwrite.
           (
             window as unknown as {
               __sprk_regarding_pending__?: Record<string, unknown>;
@@ -985,9 +1167,9 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
             entitySet: undefined,
             lookupAttribute: detected.lookupAttribute,
             recordId: detected.recordId,
-            recordName: resolvedDisplayName,
-            recordUrl: buildRecordUrl(detected.entityType, detected.recordId),
-            recordNumber: null,
+            recordName: resolvedDisplayName ?? detected.recordName,
+            recordUrl,
+            recordNumber: resolvedRecordNumber,
           };
         } else {
           // UPDATE mode: host record exists — use applyRegardingSelection

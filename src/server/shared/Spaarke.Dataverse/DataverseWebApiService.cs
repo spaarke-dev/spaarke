@@ -1529,14 +1529,86 @@ public class DataverseWebApiService : IDataverseService
     // ========================================
     // Field Mapping Operations (Events and Workflow Automation R1)
     // ========================================
+    //
+    // SRFR-056 (2026-07-08): sprk_fieldmappingprofile has NEVER had sprk_sourceentity,
+    // sprk_targetentity, or sprk_isactive columns. The actual schema uses lookups to
+    // sprk_recordtype_ref catalog + statecode:
+    //
+    //   sprk_sourcerecordtype  LOOKUP → sprk_recordtype_ref  (raw: _sprk_sourcerecordtype_value)
+    //   sprk_targetrecordtype  LOOKUP → sprk_recordtype_ref  (raw: _sprk_targetrecordtype_value)
+    //   statecode              STATE   (0=Active, 1=Inactive)
+    //
+    // sprk_recordtype_ref maps GUIDs to Dataverse entity logical names via sprk_recordlogicalname.
+    // Profile queries use a two-step lookup: (1) resolve logical names -> GUIDs, (2) filter profile
+    // by the resolved GUIDs. The prior code queried non-existent columns and returned 500 in prod
+    // once auth (SRFR-053) started allowing requests through.
+
+    /// <summary>
+    /// Two-step helper: resolves entity logical names to sprk_recordtype_ref GUIDs.
+    /// </summary>
+    /// <param name="logicalNames">Distinct entity logical names to look up (e.g. "sprk_matter").</param>
+    /// <returns>Dictionary from logical name to record-type-ref GUID. Names not found are omitted.</returns>
+    private async Task<Dictionary<string, Guid>> LookupRecordTypeIdsAsync(
+        IEnumerable<string> logicalNames,
+        CancellationToken ct = default)
+    {
+        var distinctNames = logicalNames
+            .Where(n => !string.IsNullOrWhiteSpace(n))
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToArray();
+
+        if (distinctNames.Length == 0)
+            return new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
+
+        // Build OData filter: sprk_recordlogicalname eq 'x' or sprk_recordlogicalname eq 'y' ...
+        // Each value is single-quote-wrapped (escape internal apostrophes per OData rules).
+        var orClauses = string.Join(
+            " or ",
+            distinctNames.Select(n => $"sprk_recordlogicalname eq '{n.Replace("'", "''")}'"));
+
+        var url =
+            $"sprk_recordtype_refs?" +
+            $"$select=sprk_recordtype_refid,sprk_recordlogicalname&" +
+            $"$filter={orClauses}";
+
+        var response = await SendGetAsync(url, ct);
+        response.EnsureSuccessStatusCode();
+
+        var data = await response.Content.ReadFromJsonAsync<ODataCollectionResponse>(cancellationToken: ct);
+        var map = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase);
+        if (data == null) return map;
+
+        foreach (var row in data.Value)
+        {
+            if (!row.TryGetValue("sprk_recordlogicalname", out var nameEl) || nameEl.ValueKind == JsonValueKind.Null)
+                continue;
+            if (!row.TryGetValue("sprk_recordtype_refid", out var idEl) || idEl.ValueKind == JsonValueKind.Null)
+                continue;
+
+            var name = nameEl.GetString();
+            var idStr = idEl.GetString();
+            if (name is null || idStr is null || !Guid.TryParse(idStr, out var id))
+                continue;
+
+            map[name] = id;
+        }
+
+        return map;
+    }
 
     public async Task<FieldMappingProfileEntity[]> QueryFieldMappingProfilesAsync(CancellationToken ct = default)
     {
+        // Return all active profiles. This method has no source/target filter; the caller
+        // (GetProfilesAsync in FieldMappingEndpoints) applies client-side filtering.
+        // We must resolve source/target lookup GUIDs back to logical names so the DTO
+        // SourceEntity/TargetEntity fields are populated (client-side filter depends on this).
+        var url =
+            "sprk_fieldmappingprofiles?" +
+            "$filter=statecode eq 0&" +
+            "$select=sprk_fieldmappingprofileid,sprk_name,_sprk_sourcerecordtype_value,_sprk_targetrecordtype_value,sprk_capabilitymode,sprk_defaultvalue,sprk_description,statecode&" +
+            "$orderby=sprk_name asc";
 
-
-        var url = "sprk_fieldmappingprofiles?$filter=sprk_isactive eq true&$select=sprk_fieldmappingprofileid,sprk_name,sprk_sourceentity,sprk_targetentity,sprk_mappingdirection,sprk_syncmode,sprk_isactive,sprk_description&$orderby=sprk_name asc";
-
-        _logger.LogDebug("Querying field mapping profiles");
+        _logger.LogDebug("Querying field mapping profiles (statecode=0)");
 
         try
         {
@@ -1544,10 +1616,26 @@ public class DataverseWebApiService : IDataverseService
             response.EnsureSuccessStatusCode();
 
             var data = await response.Content.ReadFromJsonAsync<ODataCollectionResponse>(cancellationToken: ct);
-            if (data == null)
+            if (data == null || data.Value.Count == 0)
                 return Array.Empty<FieldMappingProfileEntity>();
 
-            return data.Value.Select(MapToFieldMappingProfileEntity).ToArray();
+            // Collect all referenced record-type-ref GUIDs across profiles, then reverse-lookup.
+            var refIds = new HashSet<Guid>();
+            foreach (var row in data.Value)
+            {
+                if (row.TryGetValue("_sprk_sourcerecordtype_value", out var s) && s.ValueKind != JsonValueKind.Null &&
+                    Guid.TryParse(s.GetString(), out var sId))
+                    refIds.Add(sId);
+                if (row.TryGetValue("_sprk_targetrecordtype_value", out var t) && t.ValueKind != JsonValueKind.Null &&
+                    Guid.TryParse(t.GetString(), out var tId))
+                    refIds.Add(tId);
+            }
+
+            var idToName = await GetRecordTypeNamesByIdsAsync(refIds, ct);
+
+            return data.Value
+                .Select(row => MapToFieldMappingProfileEntity(row, idToName))
+                .ToArray();
         }
         catch (Exception ex)
         {
@@ -1561,14 +1649,27 @@ public class DataverseWebApiService : IDataverseService
         string targetEntity,
         CancellationToken ct = default)
     {
-
-
-        var url = $"sprk_fieldmappingprofiles?$filter=sprk_sourceentity eq '{sourceEntity}' and sprk_targetentity eq '{targetEntity}' and sprk_isactive eq true&$select=sprk_fieldmappingprofileid,sprk_name,sprk_sourceentity,sprk_targetentity,sprk_mappingdirection,sprk_syncmode,sprk_isactive,sprk_description";
-
         _logger.LogDebug("Getting field mapping profile: {Source} -> {Target}", sourceEntity, targetEntity);
 
         try
         {
+            // Step 1: resolve source + target logical names -> record-type-ref GUIDs.
+            var idMap = await LookupRecordTypeIdsAsync(new[] { sourceEntity, targetEntity }, ct);
+            if (!idMap.TryGetValue(sourceEntity, out var sourceRefId) ||
+                !idMap.TryGetValue(targetEntity, out var targetRefId))
+            {
+                _logger.LogDebug(
+                    "Record-type-ref catalog entry not found for source={Source} or target={Target}; no profile can match",
+                    sourceEntity, targetEntity);
+                return null;
+            }
+
+            // Step 2: query the profile filtered by resolved lookup GUIDs.
+            var url =
+                $"sprk_fieldmappingprofiles?" +
+                $"$filter=_sprk_sourcerecordtype_value eq {sourceRefId} and _sprk_targetrecordtype_value eq {targetRefId} and statecode eq 0&" +
+                $"$select=sprk_fieldmappingprofileid,sprk_name,_sprk_sourcerecordtype_value,_sprk_targetrecordtype_value,sprk_capabilitymode,sprk_defaultvalue,sprk_description,statecode";
+
             var response = await SendGetAsync(url, ct);
             response.EnsureSuccessStatusCode();
 
@@ -1576,9 +1677,16 @@ public class DataverseWebApiService : IDataverseService
             if (data == null || data.Value.Count == 0)
                 return null;
 
-            var profile = MapToFieldMappingProfileEntity(data.Value[0]);
+            // We already have the two names; construct the id->name map so the mapper populates them.
+            var idToName = new Dictionary<Guid, string>
+            {
+                [sourceRefId] = sourceEntity,
+                [targetRefId] = targetEntity
+            };
 
-            // Load rules for this profile
+            var profile = MapToFieldMappingProfileEntity(data.Value[0], idToName);
+
+            // Load rules for this profile (separate 1:N call).
             profile.Rules = (await GetFieldMappingRulesAsync(profile.Id, true, ct)).ToList();
 
             return profile;
@@ -1588,6 +1696,53 @@ public class DataverseWebApiService : IDataverseService
             _logger.LogError(ex, "Error getting field mapping profile for {Source} -> {Target}", sourceEntity, targetEntity);
             throw;
         }
+    }
+
+    /// <summary>
+    /// Reverse-lookup helper: fetches sprk_recordlogicalname values for a set of ref GUIDs.
+    /// Used by QueryFieldMappingProfilesAsync to populate SourceEntity/TargetEntity on DTOs.
+    /// </summary>
+    private async Task<Dictionary<Guid, string>> GetRecordTypeNamesByIdsAsync(
+        IEnumerable<Guid> ids,
+        CancellationToken ct = default)
+    {
+        var distinctIds = ids.Where(g => g != Guid.Empty).Distinct().ToArray();
+        var map = new Dictionary<Guid, string>();
+        if (distinctIds.Length == 0)
+            return map;
+
+        var orClauses = string.Join(
+            " or ",
+            distinctIds.Select(id => $"sprk_recordtype_refid eq {id}"));
+
+        var url =
+            $"sprk_recordtype_refs?" +
+            $"$select=sprk_recordtype_refid,sprk_recordlogicalname&" +
+            $"$filter={orClauses}";
+
+        var response = await SendGetAsync(url, ct);
+        response.EnsureSuccessStatusCode();
+
+        var data = await response.Content.ReadFromJsonAsync<ODataCollectionResponse>(cancellationToken: ct);
+        if (data == null)
+            return map;
+
+        foreach (var row in data.Value)
+        {
+            if (!row.TryGetValue("sprk_recordtype_refid", out var idEl) || idEl.ValueKind == JsonValueKind.Null)
+                continue;
+            if (!row.TryGetValue("sprk_recordlogicalname", out var nameEl) || nameEl.ValueKind == JsonValueKind.Null)
+                continue;
+
+            var idStr = idEl.GetString();
+            var name = nameEl.GetString();
+            if (idStr is null || name is null || !Guid.TryParse(idStr, out var id))
+                continue;
+
+            map[id] = name;
+        }
+
+        return map;
     }
 
     public async Task<FieldMappingRuleEntity[]> GetFieldMappingRulesAsync(
@@ -1865,15 +2020,28 @@ public class DataverseWebApiService : IDataverseService
 
         try
         {
-            // Use $expand to include related field mapping rules in a single request.
+            // Step 1: resolve source + target logical names -> record-type-ref GUIDs (SRFR-056).
+            var idMap = await LookupRecordTypeIdsAsync(new[] { sourceEntity, targetEntity }, ct);
+            if (!idMap.TryGetValue(sourceEntity, out var sourceRefId) ||
+                !idMap.TryGetValue(targetEntity, out var targetRefId))
+            {
+                _logger.LogDebug(
+                    "Record-type-ref catalog entry not found for source={Source} or target={Target}; no profile can match",
+                    sourceEntity, targetEntity);
+                return null;
+            }
+
+            // Step 2: query profile + expand rules in one round-trip filtered by resolved GUIDs.
             // sprk_fieldmappingprofile_fieldmappingrule is the 1:N navigation property name.
             var ruleSelect = "$select=sprk_fieldmappingruleid,sprk_name,_sprk_fieldmappingprofile_value,sprk_sourcefield,sprk_sourcefieldtype,sprk_targetfield,sprk_targetfieldtype,sprk_compatibilitymode,sprk_isrequired,sprk_defaultvalue,sprk_iscascadingsource,sprk_executionorder,sprk_isactive";
             var ruleFilter = activeRulesOnly ? ";$filter=sprk_isactive eq true" : "";
             var ruleOrderBy = ";$orderby=sprk_executionorder asc";
 
-            var url = $"sprk_fieldmappingprofiles?$filter=sprk_sourceentity eq '{sourceEntity}' and sprk_targetentity eq '{targetEntity}' and sprk_isactive eq true" +
-                      $"&$select=sprk_fieldmappingprofileid,sprk_name,sprk_sourceentity,sprk_targetentity,sprk_mappingdirection,sprk_syncmode,sprk_isactive,sprk_description" +
-                      $"&$expand=sprk_fieldmappingprofile_fieldmappingrule({ruleSelect}{ruleFilter}{ruleOrderBy})";
+            var url =
+                $"sprk_fieldmappingprofiles?" +
+                $"$filter=_sprk_sourcerecordtype_value eq {sourceRefId} and _sprk_targetrecordtype_value eq {targetRefId} and statecode eq 0" +
+                $"&$select=sprk_fieldmappingprofileid,sprk_name,_sprk_sourcerecordtype_value,_sprk_targetrecordtype_value,sprk_capabilitymode,sprk_defaultvalue,sprk_description,statecode" +
+                $"&$expand=sprk_fieldmappingprofile_fieldmappingrule({ruleSelect}{ruleFilter}{ruleOrderBy})";
 
             var response = await SendGetAsync(url, ct);
             response.EnsureSuccessStatusCode();
@@ -1882,7 +2050,14 @@ public class DataverseWebApiService : IDataverseService
             if (data == null || data.Value.Count == 0)
                 return null;
 
-            var profile = MapToFieldMappingProfileEntity(data.Value[0]);
+            // Populate reverse-lookup map so the mapper writes source/target logical names on the DTO.
+            var idToName = new Dictionary<Guid, string>
+            {
+                [sourceRefId] = sourceEntity,
+                [targetRefId] = targetEntity
+            };
+
+            var profile = MapToFieldMappingProfileEntity(data.Value[0], idToName);
 
             // Extract expanded rules from the response
             if (data.Value[0].TryGetValue("sprk_fieldmappingprofile_fieldmappingrule", out var rulesElement)
@@ -2029,21 +2204,55 @@ public class DataverseWebApiService : IDataverseService
         };
     }
 
-    private FieldMappingProfileEntity MapToFieldMappingProfileEntity(Dictionary<string, JsonElement> data)
+    /// <summary>
+    /// Maps a Dataverse sprk_fieldmappingprofile row into the entity DTO.
+    /// The Dataverse schema uses lookups to sprk_recordtype_ref for source/target instead of
+    /// plain text columns. The <paramref name="recordTypeIdToLogicalName"/> map allows the caller
+    /// to populate SourceEntity/TargetEntity with the human-readable logical names required by
+    /// consumers. If the map is missing an entry, the string is left empty.
+    ///
+    /// Legacy fields (sprk_mappingdirection, sprk_syncmode, sprk_isactive) do NOT exist on the
+    /// deployed entity — they are always defaulted (MappingDirection=0=ParentToChild,
+    /// SyncMode=0=OneTime, IsActive derived from statecode).
+    /// </summary>
+    private FieldMappingProfileEntity MapToFieldMappingProfileEntity(
+        Dictionary<string, JsonElement> data,
+        IReadOnlyDictionary<Guid, string>? recordTypeIdToLogicalName = null)
     {
+        // Read the raw lookup GUID values (OData exposes them as _<fieldname>_value).
+        Guid? sourceRefId = data.TryGetValue("_sprk_sourcerecordtype_value", out var srcVal) && srcVal.ValueKind != JsonValueKind.Null
+            ? Guid.Parse(srcVal.GetString()!) : null;
+        Guid? targetRefId = data.TryGetValue("_sprk_targetrecordtype_value", out var tgtVal) && tgtVal.ValueKind != JsonValueKind.Null
+            ? Guid.Parse(tgtVal.GetString()!) : null;
+
+        string sourceEntity = string.Empty;
+        string targetEntity = string.Empty;
+        if (recordTypeIdToLogicalName != null)
+        {
+            if (sourceRefId.HasValue && recordTypeIdToLogicalName.TryGetValue(sourceRefId.Value, out var s))
+                sourceEntity = s;
+            if (targetRefId.HasValue && recordTypeIdToLogicalName.TryGetValue(targetRefId.Value, out var t))
+                targetEntity = t;
+        }
+
+        // statecode: 0=Active, 1=Inactive on Dataverse convention.
+        var isActive = data.TryGetValue("statecode", out var state) && state.ValueKind != JsonValueKind.Null
+            && state.GetInt32() == 0;
+
         return new FieldMappingProfileEntity
         {
             Id = data.TryGetValue("sprk_fieldmappingprofileid", out var id) && id.ValueKind != JsonValueKind.Null
                 ? Guid.Parse(id.GetString()!) : Guid.Empty,
             Name = data.TryGetValue("sprk_name", out var name) && name.ValueKind != JsonValueKind.Null
                 ? name.GetString()! : string.Empty,
-            SourceEntity = data.TryGetValue("sprk_sourceentity", out var src) && src.ValueKind != JsonValueKind.Null
-                ? src.GetString()! : string.Empty,
-            TargetEntity = data.TryGetValue("sprk_targetentity", out var tgt) && tgt.ValueKind != JsonValueKind.Null
-                ? tgt.GetString()! : string.Empty,
-            MappingDirection = data.TryGetValue("sprk_mappingdirection", out var dir) ? dir.GetInt32() : 0,
-            SyncMode = data.TryGetValue("sprk_syncmode", out var mode) ? mode.GetInt32() : 0,
-            IsActive = data.TryGetValue("sprk_isactive", out var active) && active.GetBoolean(),
+            SourceEntity = sourceEntity,
+            TargetEntity = targetEntity,
+            // MappingDirection + SyncMode do not exist on the deployed entity; default to
+            // ParentToChild + OneTime. If future schema adds these back, this mapper is where
+            // to re-hydrate them.
+            MappingDirection = 0,
+            SyncMode = 0,
+            IsActive = isActive,
             Description = data.TryGetValue("sprk_description", out var desc) && desc.ValueKind != JsonValueKind.Null
                 ? desc.GetString() : null
         };

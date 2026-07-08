@@ -26,6 +26,11 @@ import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 
 const mockApplyResolverFields = jest.fn().mockResolvedValue({ recordNumber: null, recordNumberSourceField: null });
 const mockResolveRecordType = jest.fn().mockResolvedValue({ id: 'rt-guid', name: 'Matter' });
+// SRFR-057 v1.4.6 — Phase 2 async catch-up mocks. Default: return null so
+// tests that don't care about polish keep baseline (detected.recordName).
+// Tests that want to assert the polish path override with mockResolvedValueOnce.
+const mockResolveRecordDisplayNameFieldName = jest.fn().mockResolvedValue(null);
+const mockResolveRecordNumberFieldName = jest.fn().mockResolvedValue(null);
 const mockPolymorphicPicker = jest.fn();
 
 jest.mock('@spaarke/ui-components', () => {
@@ -96,6 +101,8 @@ jest.mock('@spaarke/ui-components', () => {
     TODO_REGARDING_CATALOG,
     applyResolverFields: mockApplyResolverFields,
     resolveRecordType: mockResolveRecordType,
+    resolveRecordDisplayNameFieldName: mockResolveRecordDisplayNameFieldName,
+    resolveRecordNumberFieldName: mockResolveRecordNumberFieldName,
     buildRecordUrl: (entityType: string, id: string) => `https://test/main.aspx?etn=${entityType}&id=${id}`,
     // PolymorphicPicker mock — records catalog + onSelect + title so tests
     // can trigger onSelect programmatically and inspect the props received.
@@ -176,6 +183,10 @@ const renderWithProvider = (ui: React.ReactElement): ReturnType<typeof render> =
 beforeEach(() => {
   mockApplyResolverFields.mockClear();
   mockResolveRecordType.mockClear();
+  mockResolveRecordDisplayNameFieldName.mockClear();
+  mockResolveRecordDisplayNameFieldName.mockResolvedValue(null);
+  mockResolveRecordNumberFieldName.mockClear();
+  mockResolveRecordNumberFieldName.mockResolvedValue(null);
   mockPolymorphicPicker.mockClear();
   // Clean the CREATE-mode bridge global between tests.
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -1983,6 +1994,234 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
 
         // Picker still renders (empty starting state).
         expect(screen.getByTestId('regarding-resolver-root')).toBeInTheDocument();
+      } finally {
+        restore();
+      }
+    });
+  });
+
+  // ---------------------------------------------------------------------------
+  // SRFR-057 — v1.4.6 two-phase auto-detect writes
+  //
+  // Root-cause fix for v1.4.5 UAT bug: user-save race caused NONE of the 5
+  // resolver fields to be written when the user clicked Save before any
+  // await settled. Two-phase refactor:
+  //
+  //   Phase 1 (immediate/sync) — writes 3 always-known fields
+  //     (sprk_regardingrecordid, sprk_regardingrecordname,
+  //     sprk_regardingrecordurl) + selectedTarget + presave bridge
+  //     BEFORE any await. Fast-save now captures reasonable defaults.
+  //
+  //   Phase 2 (async catch-up) — resolves recordtype, display-name,
+  //     record-number in parallel. Re-writes recordname if resolved to a
+  //     different value than baseline. Writes recordnumber if resolved.
+  //     Updates presave bridge with polished values.
+  // ---------------------------------------------------------------------------
+  describe('SRFR-057 — v1.4.6 two-phase auto-detect writes', () => {
+    /**
+     * Build an Xrm.Page mock in CREATE mode with a pre-populated
+     * sprk_regardingmatter lookup. Similar to buildCreateModeXrmWithPrePopulated
+     * above but exposed at the describe scope so this test block can reuse it.
+     */
+    const buildXrmCreateModeMatterPrePopulated = (): {
+      attrCalls: Record<string, unknown[]>;
+      restore: () => void;
+    } => {
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      const w = window as any;
+      const originalXrm = w.Xrm;
+      const attrCalls: Record<string, unknown[]> = {};
+      const attrs: Record<
+        string,
+        { getValue: () => unknown; setValue: (v: unknown) => void }
+      > = {};
+
+      attrs.sprk_regardingmatter = {
+        getValue: () => [
+          {
+            id: '{cccccccc-cccc-cccc-cccc-cccccccccccc}',
+            name: 'MAT-001',
+            entityType: 'sprk_matter',
+          },
+        ],
+        setValue: () => undefined,
+      };
+
+      [
+        'sprk_regardingrecordid',
+        'sprk_regardingrecordname',
+        'sprk_regardingrecordurl',
+        'sprk_regardingrecordtype',
+        'sprk_regardingrecordnumber',
+      ].forEach(f => {
+        attrs[f] = {
+          getValue: () => null,
+          setValue: (v: unknown) => {
+            if (!attrCalls[f]) attrCalls[f] = [];
+            attrCalls[f].push(v);
+          },
+        };
+      });
+
+      w.Xrm = {
+        Page: {
+          // eslint-disable-next-line @typescript-eslint/no-explicit-any
+          getAttribute: (name: string) => attrs[name] ?? null,
+          data: { entity: { getId: () => '' } },
+          ui: { getFormType: () => 1 },
+        },
+      };
+
+      return {
+        attrCalls,
+        restore: () => {
+          if (originalXrm === undefined) delete w.Xrm;
+          else w.Xrm = originalXrm;
+        },
+      };
+    };
+
+    test('Auto-detect CREATE mode: sync writes fire immediately even if async resolution rejects (user-save race guard)', async () => {
+      // Simulate the v1.4.5 UAT failure scenario: user creates via subgrid
+      // "+ New" and the async retrieveMultipleRecords call is slow / times out
+      // out. Phase 1 sync writes MUST still fire so at minimum the 3
+      // always-known fields (recordid, recordname baseline, recordurl) are
+      // populated when the user saves.
+
+      // Make Phase 2 retrieveMultipleRecords reject (network timeout).
+      const rejectingWebApi = jest
+        .fn()
+        .mockRejectedValue(new Error('Network timeout — presave race'));
+
+      const { attrCalls, restore } = buildXrmCreateModeMatterPrePopulated();
+      const { context } = buildContext();
+      // Override webAPI.retrieveMultipleRecords with the rejecting mock.
+      (context as unknown as {
+        webAPI: { retrieveMultipleRecords: jest.Mock };
+      }).webAPI.retrieveMultipleRecords = rejectingWebApi;
+
+      // Also make display-name / record-number resolvers return a truthy field
+      // so Phase 2 progresses to the (rejecting) retrieveMultipleRecords call.
+      mockResolveRecordDisplayNameFieldName.mockResolvedValueOnce('sprk_mattername');
+      mockResolveRecordNumberFieldName.mockResolvedValueOnce('sprk_matternumber');
+
+      const warnSpy = jest.spyOn(console, 'warn').mockImplementation(() => undefined);
+
+      try {
+        renderWithProvider(
+          <RegardingResolverApp
+            context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
+            readOnly={false}
+            onRecordTypeChanged={() => undefined}
+            version="1.4.6"
+          />
+        );
+
+        // Phase 1 sync writes: assert BEFORE waiting for Phase 2 to settle.
+        // The setValue calls happen synchronously inside the effect (React 18
+        // schedules the effect microtask; the sync writes fire before the
+        // first `await` inside runAutoDetect).
+        await waitFor(() => {
+          expect(attrCalls.sprk_regardingrecordid).toBeDefined();
+        });
+        // BASELINE recordname is detected.recordName ('MAT-001') — the value
+        // Xrm.LookupValue.name gave us. Phase 2 would polish this to the
+        // sprk_mattername value BUT retrieveMultipleRecords rejects, so the
+        // baseline is preserved (graceful-blank per NFR-06).
+        expect(attrCalls.sprk_regardingrecordid?.[0]).toBe(
+          'cccccccc-cccc-cccc-cccc-cccccccccccc'
+        );
+        expect(attrCalls.sprk_regardingrecordname?.[0]).toBe('MAT-001');
+        expect(typeof attrCalls.sprk_regardingrecordurl?.[0]).toBe('string');
+        expect(String(attrCalls.sprk_regardingrecordurl?.[0])).toContain('sprk_matter');
+
+        // selectedTarget populated on Phase 1 (Row 2 hyperlink works
+        // immediately).
+        // Baseline check: presave bridge populated with baseline values.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const seam = (window as any).__sprk_regarding_pending__;
+        expect(seam).toBeDefined();
+        expect(seam.entityType).toBe('sprk_matter');
+        expect(seam.recordName).toBe('MAT-001');
+        expect(seam.recordNumber).toBeNull();
+        expect(seam.lookupAttribute).toBe('sprk_regardingmatter');
+
+        // Wait for the Phase 2 async catch-up to settle. Phase 2b + 2c
+        // retrieveMultipleRecords both reject → warns logged; NO throw
+        // propagates to the host form.
+        await waitFor(() => {
+          expect(warnSpy.mock.calls.some(call =>
+            String(call[0]).includes('display-name resolution failed')
+          )).toBe(true);
+        });
+        await waitFor(() => {
+          expect(warnSpy.mock.calls.some(call =>
+            String(call[0]).includes('record-number resolution failed')
+          )).toBe(true);
+        });
+
+        // recordname NOT re-written after Phase 2 (baseline preserved).
+        // The setValue array should have exactly one entry (Phase 1 baseline).
+        expect(attrCalls.sprk_regardingrecordname?.length).toBe(1);
+        expect(attrCalls.sprk_regardingrecordname?.[0]).toBe('MAT-001');
+
+        // sprk_regardingrecordnumber NOT written (resolution rejected).
+        expect(attrCalls.sprk_regardingrecordnumber).toBeUndefined();
+      } finally {
+        warnSpy.mockRestore();
+        restore();
+      }
+    });
+
+    test('Auto-detect CREATE mode Phase 2 polish: display-name refinement re-writes recordname when resolved to a different value', async () => {
+      // Happy path for the polish: display-name resolution succeeds and
+      // yields a different value than detected.recordName. Assert that
+      // sprk_regardingrecordname was written TWICE — once at Phase 1 (baseline)
+      // and once at Phase 2 (polish).
+
+      const { attrCalls, restore } = buildXrmCreateModeMatterPrePopulated();
+      const { context } = buildContext();
+
+      // Return the display-name field name → the fetcher will read this from
+      // the target record.
+      mockResolveRecordDisplayNameFieldName.mockResolvedValueOnce('sprk_mattername');
+      // Return the number field for Phase 2c but the retrieve will return
+      // undefined for both since the mock only responds once per test.
+      mockResolveRecordNumberFieldName.mockResolvedValueOnce(null);
+
+      // Mock retrieveMultipleRecords to return the polished display-name.
+      // First call = Phase 2b (display-name query). Only Phase 2b runs since
+      // resolveRecordNumberFieldName returns null and short-circuits Phase 2c.
+      (context as unknown as {
+        webAPI: { retrieveMultipleRecords: jest.Mock };
+      }).webAPI.retrieveMultipleRecords = jest.fn().mockResolvedValueOnce({
+        entities: [{ sprk_mattername: 'Smith v. Jones (Polished)' }],
+      });
+
+      try {
+        renderWithProvider(
+          <RegardingResolverApp
+            context={context as unknown as Parameters<typeof RegardingResolverApp>[0]['context']}
+            readOnly={false}
+            onRecordTypeChanged={() => undefined}
+            version="1.4.6"
+          />
+        );
+
+        // Wait for Phase 2 polish to land.
+        await waitFor(() => {
+          expect(attrCalls.sprk_regardingrecordname?.length).toBe(2);
+        });
+
+        // Phase 1 baseline (detected.recordName = 'MAT-001')
+        expect(attrCalls.sprk_regardingrecordname?.[0]).toBe('MAT-001');
+        // Phase 2 polish (resolved display-name)
+        expect(attrCalls.sprk_regardingrecordname?.[1]).toBe('Smith v. Jones (Polished)');
+
+        // Presave bridge reflects polished value.
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const seam = (window as any).__sprk_regarding_pending__;
+        expect(seam.recordName).toBe('Smith v. Jones (Polished)');
       } finally {
         restore();
       }
