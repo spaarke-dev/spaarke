@@ -15,6 +15,7 @@ All dimensions are identifiers/counts ONLY — never prompt text, document text,
 | `ai.metering.tokens` | {token} | ChatEndpoints (loop streaming usage) + OpenAiClient (executor structured completions) | `tenant.id`, `user.id`, `token.type` (`input`/`output`), `source` (`loop`/`executor`), `entry.path`, `ai.model` |
 | `ai.metering.capability_invocations` | {invocation} | SessionDispatchOrchestrator (click/text), EventRulesService (event), DailyBriefingCompositeService (coded) | `tenant.id`, `user.id`, `entry.path` (`text`/`click`/`event`/`coded`), `capability` (Binding ucid/consumer-type), `outcome` (`success`/`failed`), `budget.cap` (event path only) |
 | `eventpath.execution` / `eventpath.bound_denial` | {execution}/{denial} | EventRulesService (meter `Sprk.Bff.Api.EventRules`; export registration fixed by task 054) | `event`, `ucid`, `outcome` / `event`, `reason` (no user dims by design — the per-user view lives on `ai.metering.capability_invocations`) |
+| `ai.safety.shield_evaluations` | {evaluation} | PromptShieldService — one per `ScanAsync`, whatever the outcome (AI-ARCHITECTURE assessment rec 2a) | `tenant.id`, `outcome` (`completed`/`blocked`/`failed_open_timeout`/`failed_open_error`) — `failed_open_*` / total = shield fail-open rate |
 
 Attribution plumbing: entry seams begin an `AiMeteringContext` (AsyncLocal) scope; token usage observed deep in `OpenAiClient` inherits tenant/user/entry-path from that scope.
 
@@ -37,6 +38,7 @@ Or paste any `.kql` file into the App Insights **Logs** blade. Each file's heade
 | `event-daily-budget.kql` | NFR-09 per-user daily Event-path budget: consumed-vs-cap per user per day + bound denials |
 | `tokens-by-model.kql` | Token spend per tenant per model/deployment per entry path |
 | `capability-usage.kql` | Capability invocations by entry path / capability / outcome (includes dispatch_refused context) |
+| `shield-coverage.kql` | Prompt Shield fail-open rate over time + per-tenant (assessment rec 2a; watch after MI auth flips) |
 
 ## Notes
 

@@ -62,6 +62,9 @@ public class AiTelemetry : IDisposable
     private readonly Counter<long> _meteredTokens;
     private readonly Counter<long> _meteredCapabilityInvocations;
 
+    // Shield-coverage counter (AI-ARCHITECTURE assessment rec 2a, work/safety-perimeter-hygiene)
+    private readonly Counter<long> _shieldEvaluations;
+
     // Meter name for OpenTelemetry
     private const string MeterName = "Sprk.Bff.Api.Ai";
 
@@ -132,6 +135,18 @@ public class AiTelemetry : IDisposable
                          "(text/click/event/coded), dimensioned per tenant/user/capability/outcome. " +
                          "Event-path records carry budget.cap so the NFR-09 per-user daily budget " +
                          "is queryable as consumed-vs-cap.");
+
+        // === Shield-Coverage Counter (AI-ARCHITECTURE assessment rec 2a) ===
+        // The PromptShield perimeter fails OPEN on timeout/429/5xx/network error, so the
+        // fail-open RATE is the operational safety-coverage signal. Rides the same
+        // Sprk.Bff.Api.Ai meter (and KQL pack) as the task-054 metering counters.
+        _shieldEvaluations = _meter.CreateCounter<long>(
+            name: "ai.safety.shield_evaluations",
+            unit: "{evaluation}",
+            description: "Prompt Shield evaluations by outcome (completed | blocked | " +
+                         "failed_open_timeout | failed_open_error), dimensioned per tenant. " +
+                         "failed_open_* / total = the shield fail-open rate " +
+                         "(scripts/kql/ai-metering/shield-coverage.kql).");
 
         // === Summarization Metrics ===
         _summarizeRequests = _meter.CreateCounter<long>(
@@ -288,6 +303,57 @@ public class AiTelemetry : IDisposable
 
         _invalidToolSchema.Add(1, tags);
     }
+
+    #region Shield Coverage (assessment rec 2a)
+
+    /// <summary>Shield evaluation outcome: the Content Safety API answered and no attack was detected.</summary>
+    public const string ShieldOutcomeCompleted = "completed";
+
+    /// <summary>Shield evaluation outcome: the Content Safety API detected an attack and the turn was hard-blocked.</summary>
+    public const string ShieldOutcomeBlocked = "blocked";
+
+    /// <summary>Shield evaluation outcome: the 100ms hard deadline elapsed and the request proceeded unshielded.</summary>
+    public const string ShieldOutcomeFailedOpenTimeout = "failed_open_timeout";
+
+    /// <summary>Shield evaluation outcome: 429/5xx/network/auth/parse failure and the request proceeded unshielded.</summary>
+    public const string ShieldOutcomeFailedOpenError = "failed_open_error";
+
+    /// <summary>
+    /// Record one Prompt Shield evaluation outcome (AI-ARCHITECTURE assessment rec 2a).
+    /// Emitted by <see cref="Services.Ai.Safety.PromptShieldService"/> at the shield call
+    /// site — one increment per <c>ScanAsync</c>, whatever the outcome, so
+    /// <c>failed_open_* / total</c> is the fail-open rate.
+    /// </summary>
+    /// <remarks>
+    /// Lands in App Insights as <c>customMetrics | where name == "ai.safety.shield_evaluations"</c>
+    /// (queried by <c>scripts/kql/ai-metering/shield-coverage.kql</c>). Dimensions are BOUNDED
+    /// (NFR-07 / ADR-015 — identifiers/counts only, never prompt or document content):
+    /// <c>outcome</c> ∈ { <see cref="ShieldOutcomeCompleted"/>, <see cref="ShieldOutcomeBlocked"/>,
+    /// <see cref="ShieldOutcomeFailedOpenTimeout"/>, <see cref="ShieldOutcomeFailedOpenError"/> }
+    /// plus optional <c>tenant.id</c> (opaque AAD GUID). When <paramref name="tenantId"/> is
+    /// null the tenant falls back to the ambient <see cref="AiMeteringContext"/> scope set at
+    /// the entry seams (same attribution plumbing as <see cref="RecordMeteredTokens"/>);
+    /// no scope = dimension omitted, never a sentinel.
+    /// </remarks>
+    /// <param name="outcome">One of the <c>ShieldOutcome*</c> constants.</param>
+    /// <param name="tenantId">Opaque tenant id, or null to use <see cref="AiMeteringContext.Current"/>.</param>
+    public void RecordShieldEvaluation(string outcome, string? tenantId = null)
+    {
+        tenantId ??= AiMeteringContext.Current?.TenantId;
+
+        var tags = new TagList
+        {
+            { "outcome", outcome },
+        };
+        if (!string.IsNullOrEmpty(tenantId))
+        {
+            tags.Add("tenant.id", tenantId);
+        }
+
+        _shieldEvaluations.Add(1, tags);
+    }
+
+    #endregion
 
     #region Per-Tenant Metering (FR-P4-05 / NFR-05)
 

@@ -1,0 +1,148 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="SRFR-060" project="set-regarding-and-field-mapping-resolver-r1">
+  <metadata>
+    <title>Native MDA form for sprk_fieldmappingprofile with editable sprk_fieldmappingrules subgrid</title>
+    <status>complete</status>
+    <estimated-effort>4h</estimated-effort>
+    <actual-effort>~1h</actual-effort>
+    <assigned>AI Agent</assigned>
+    <started>2026-07-02</started>
+    <completed>2026-07-02</completed>
+    <rigor>STANDARD</rigor>
+    <parallel-safe>true</parallel-safe>
+    <parallel-group>D</parallel-group>
+    <tags>dataverse,mda-form,field-mapping,wave-6</tags>
+    <depends-on>SRFR-020</depends-on>
+    <wave>6</wave>
+  </metadata>
+
+  <prompt><![CDATA[
+Author a native model-driven-app (MDA) main form for `sprk_fieldmappingprofile`
+with an editable subgrid for the child `sprk_fieldmappingrules` entity. This is
+the MVP authoring UX per FR-B2-01 — NO custom PCF, NO Code Page, NO Fluent v9
+wrapper. Admins create/edit profiles + rules end-to-end via the native form.
+
+The parent form MUST expose the REAL profile fields per spec Appendix A §A.2.1
+revised 2026-07-02 (Wave 0 SRFR-001 divergence D-1):
+sprk_name, sprk_sourcerecordtype (LOOKUP to sprk_recordtype_ref),
+sprk_targetrecordtype (LOOKUP to sprk_recordtype_ref), sprk_compatibilitymode
+(Choice Strict/Resolve), sprk_description, statecode.
+
+MUST embed a truly editable subgrid of `sprk_fieldmappingrules` (collection;
+table is singular `sprk_fieldmappingrule`) with columns per spec §A.2.2 revised:
+sprk_sourcefield, sprk_targetfield, sprk_sourcefieldtype (Choice), sprk_targetfieldtype
+(Choice), sprk_mappingtype (Choice Copy/Default/Concat/Template — added to Dataverse
+by SRFR-002 W1), sprk_defaultvalue, sprk_executionorder, sprk_mappingdirection
+(Choice), sprk_syncmode (Choice One-time/Manual Refresh — PER-RULE), sprk_compatibilitymode,
+sprk_iscascadingsource (Bit), sprk_isrequired (Bit). The subgrid must not be read-only. Deploy via the standard
+Dataverse solution round-trip (unpack → edit → repack → import).
+
+Success = an admin creates a Matter → Event profile end-to-end via the form
+alone, and adds/edits/reorders rules via the subgrid.
+  ]]></prompt>
+
+  <role>Dataverse solution author familiar with model-driven-app main-form authoring, FormXml editing, editable subgrid configuration, and solution round-trip via `pac solution` + Web API metadata APIs.</role>
+
+  <goal><![CDATA[
+A `sprk_fieldmappingprofile` main form exists and is deployed to spaarkedev1
+carrying the five profile identity columns and an editable subgrid of
+`sprk_fieldmappingrules`. Solution artifacts (FormXml or packed solution zip)
+are stored under `infrastructure/dataverse/` (or the repo's canonical solution
+folder) and the deploy is recorded in `notes/mda-form-notes.md` with a
+screenshot or import log. UAT: an admin creates a Matter → Event profile
+end-to-end via the form alone; adds, edits, and reorders rules via the
+subgrid without leaving the form.
+  ]]></goal>
+
+  <inputs>
+    <file purpose="spec">projects/set-regarding-and-field-mapping-resolver-r1/spec.md</file>
+    <file purpose="plan">projects/set-regarding-and-field-mapping-resolver-r1/plan.md</file>
+    <file purpose="project-claude">projects/set-regarding-and-field-mapping-resolver-r1/CLAUDE.md</file>
+    <file purpose="skill">.claude/skills/dataverse-create-schema/SKILL.md</file>
+    <file purpose="skill">.claude/skills/dataverse-deploy/SKILL.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-B2-01">MVP authoring UX is a native MDA form + editable subgrid — no custom PCF, no Code Page, no Fluent v9 wrapper.</constraint>
+    <constraint source="spec FR-B2-01">Subgrid MUST be truly editable (not read-only). Verify via the FormXml `IsUserView` / editable-grid control flag.</constraint>
+    <constraint source="repo pattern">Publisher prefix `sprk_`. Solution namespace follows the existing repo convention in `infrastructure/dataverse/`.</constraint>
+    <constraint source="repo pattern">Deploy via the standard solution round-trip (`pac solution unpack` → edit FormXml → `pac solution pack` → `pac solution import`). Do NOT hand-edit a solution zip.</constraint>
+    <constraint source="project">This task is FORM-only. Schema for `sprk_fieldmappingprofile` and `sprk_fieldmappingrules` is a Wave 0/1 prerequisite (assumed present).</constraint>
+    <constraint source="project">No behavior change to any downstream consumer — the form is additive.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>dataverse/mda-forms</topic>
+    <files>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+      <file>.claude/skills/dataverse-deploy/SKILL.md</file>
+      <file>projects/set-regarding-and-field-mapping-resolver-r1/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Editable subgrid on main form" location="Dataverse maker portal / FormXml">
+        Add a subgrid control referencing the child entity relationship
+        (`sprk_fieldmappingprofile_fieldmappingrules` or equivalent) with the
+        editable-grid control enabled. Columns sprk_sourcefield, sprk_targetfield,
+        sprk_mappingtype, sprk_defaultvalue, sprk_executionorder in that order.
+      </pattern>
+      <pattern name="Solution round-trip deploy" location=".claude/skills/dataverse-deploy/SKILL.md">
+        Use `pac solution unpack` / `pack` / `import` — never modify a solution zip
+        by hand. Import log is the audit trail.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Spec Owner Clarification (B2) confirmed MVP UX = native MDA form + editable
+      subgrid, deferring any custom UI to a follow-on iteration. The form is the
+      admin's authoring surface for the Field Mapping subsystem shipped by this
+      project; without it, admins cannot create profiles end-to-end.
+    </background>
+    <dependencies>
+      <dependency task="SRFR-020" status="pending">
+        Shared-lib schema for `sprk_fieldmappingprofile` and
+        `sprk_fieldmappingrules` is stable (columns + relationship in place).
+      </dependency>
+    </dependencies>
+    <related-work>
+      <item>SRFR-061 authors the Push webresource that this form indirectly enables (once profiles exist, ribbon button becomes usable on parent forms).</item>
+      <item>SRFR-083 (Wave 8) deploys the packed solution to UAT.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check">Verify context &lt; 60%. Read spec.md FR-B2-01 and Appendix A §A.2 (data model).</step>
+    <step order="1" name="Confirm Schema Present">Query Dataverse metadata to confirm `sprk_fieldmappingprofile` and `sprk_fieldmappingrules` entities exist with the columns spec'd in Appendix A §A.2. If any are missing, halt and escalate (Wave 0/1 prerequisite gap).</step>
+    <step order="2" name="Author Main Form">Create a `Main` form for `sprk_fieldmappingprofile` with a header section carrying sprk_name (required), a body section carrying sprk_sourceentity, sprk_targetentity, sprk_syncmode, and a footer strip carrying statecode. Use either the Maker portal (then export) or direct FormXml authoring.</step>
+    <step order="3" name="Add Editable Subgrid">Add a subgrid control below the body fields, bound to the profile → rules 1:N relationship, with view columns sprk_sourcefield, sprk_targetfield, sprk_mappingtype, sprk_defaultvalue, sprk_executionorder. Enable the editable-grid control (NOT the read-only default).</step>
+    <step order="4" name="Set Form as Default">Set the new form as the default main form for `sprk_fieldmappingprofile` (form order + security roles).</step>
+    <step order="5" name="Export + Repack">Export the solution containing the form via `pac solution export`; unpack via `pac solution unpack --allowDelete` into `infrastructure/dataverse/` (or the repo's canonical folder). Verify FormXml diff is minimal and contains the editable-subgrid control flag.</step>
+    <step order="6" name="Deploy to spaarkedev1">Re-pack + import the solution to spaarkedev1 via `pac solution import`. Capture the import log.</step>
+    <step order="7" name="UAT Smoke">In spaarkedev1, create one Matter → Event profile end-to-end via the form: fill name/source/target/syncmode, save, then add 2 rules via the subgrid, reorder via sprk_executionorder, save. Confirm all values persist.</step>
+    <step order="8" name="Document">Write `projects/set-regarding-and-field-mapping-resolver-r1/notes/mda-form-notes.md` with: FormXml path, solution zip path, import log summary, UAT confirmation (screenshot or textual observation).</step>
+    <step order="9" name="Update Task Status">Update TASK-INDEX.md 🔲 → ✅ for SRFR-060. Reset current-task.md for next task.</step>
+  </steps>
+
+  <tools>
+    <tool name="Bash">Run `pac solution export/unpack/pack/import` and Web API metadata queries</tool>
+    <tool name="Read">Read spec, plan, skill definitions</tool>
+    <tool name="Write">Write notes/mda-form-notes.md</tool>
+    <tool name="Edit">Adjust FormXml if hand-editing is needed after unpack</tool>
+  </tools>
+
+  <outputs>
+    <output type="artifact">Form artifacts (unpacked FormXml + solution zip) under `infrastructure/dataverse/` (or the repo's canonical solution folder)</output>
+    <output type="notes" ephemeral="true">projects/set-regarding-and-field-mapping-resolver-r1/notes/mda-form-notes.md</output>
+    <output type="docs">projects/set-regarding-and-field-mapping-resolver-r1/tasks/TASK-INDEX.md (🔲 → ✅ for SRFR-060)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Main form for `sprk_fieldmappingprofile` is deployed to spaarkedev1 and set as the default form.</criterion>
+    <criterion testable="true">Form carries the five identity columns: sprk_name, sprk_sourceentity, sprk_targetentity, sprk_syncmode, statecode.</criterion>
+    <criterion testable="true">Form embeds an EDITABLE subgrid of `sprk_fieldmappingrules` with columns sprk_sourcefield, sprk_targetfield, sprk_mappingtype, sprk_defaultvalue, sprk_executionorder (verified by inspecting FormXml editable-grid control flag).</criterion>
+    <criterion testable="true">UAT smoke passes: an admin creates a Matter → Event profile end-to-end via the form alone; adds and reorders rules via the subgrid.</criterion>
+    <criterion testable="true">Solution zip + FormXml artifacts are stored in the repo (path recorded in notes/mda-form-notes.md).</criterion>
+    <criterion testable="true">Import log confirms zero errors during deploy.</criterion>
+  </acceptance-criteria>
+</task>

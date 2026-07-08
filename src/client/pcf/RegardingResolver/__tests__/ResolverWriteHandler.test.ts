@@ -100,16 +100,24 @@ jest.mock('@spaarke/ui-components', () => {
         parentEntitySet: string,
         parentRecordId: string,
         parentRecordName: string,
-        _entityLookupHint?: string
+        _entityLookupHint?: string,
+        _options?: unknown
       ) => {
         // Mirror the real service's behavior at the payload level: set the
-        // chosen entity-specific @odata.bind + 4 resolver fields.
+        // chosen entity-specific @odata.bind + resolver text/url fields.
         const cleanId = parentRecordId.replace(/[{}]/g, '').toLowerCase();
         entity[`mock_${parentEntityLogicalName}@odata.bind`] = `/${parentEntitySet}(${cleanId})`;
         entity['sprk_regardingrecordid'] = cleanId;
         entity['sprk_regardingrecordname'] = parentRecordName;
         entity['sprk_regardingrecordurl'] = `https://example.com/${parentEntityLogicalName}/${cleanId}`;
+        entity['sprk_regardingrecordnumber'] = `MOCK-${parentEntityLogicalName.toUpperCase()}-001`;
         entity['mock_recordtype@odata.bind'] = `/sprk_recordtype_refs(rt-${parentEntityLogicalName})`;
+        // SRFR-020 return shape: forwarded by ResolverWriteHandler on
+        // IResolverWriteResult.recordNumber (SRFR-032 propagation).
+        return {
+          recordNumber: `MOCK-${parentEntityLogicalName.toUpperCase()}-001`,
+          recordNumberSourceField: `${parentEntityLogicalName}_number`,
+        };
       }
     ),
   };
@@ -134,9 +142,76 @@ describe('ResolverWriteHandler', () => {
 
     mockUpdateRecord = jest.fn().mockResolvedValue({ id: 'ok' });
     mockRetrieveMultipleRecords = jest.fn().mockResolvedValue({ entities: [] });
+    // v1.4.1 (SRFR-048): tests must return nav-props matching the host entity's
+    // actual schema. Default: sprk_todo has all 11 lookups. Individual tests
+    // override this to model narrower hosts (sprk_event, sprk_invoice, etc.)
+    // which only carry a subset of parent lookups.
     mockFetch = jest.fn().mockResolvedValue({
       ok: true,
-      json: async () => ({ value: [] }),
+      json: async () => ({
+        value: [
+          {
+            ReferencingAttribute: 'sprk_regardingmatter',
+            ReferencingEntityNavigationPropertyName: 'sprk_RegardingMatter',
+            ReferencedEntity: 'sprk_matter',
+          },
+          {
+            ReferencingAttribute: 'sprk_regardingproject',
+            ReferencingEntityNavigationPropertyName: 'sprk_RegardingProject',
+            ReferencedEntity: 'sprk_project',
+          },
+          {
+            ReferencingAttribute: 'sprk_regardingevent',
+            ReferencingEntityNavigationPropertyName: 'sprk_RegardingEvent',
+            ReferencedEntity: 'sprk_event',
+          },
+          {
+            ReferencingAttribute: 'sprk_regardingcommunication',
+            ReferencingEntityNavigationPropertyName: 'sprk_RegardingCommunication',
+            ReferencedEntity: 'sprk_communication',
+          },
+          {
+            ReferencingAttribute: 'sprk_regardingworkassignment',
+            ReferencingEntityNavigationPropertyName: 'sprk_RegardingWorkAssignment',
+            ReferencedEntity: 'sprk_workassignment',
+          },
+          {
+            ReferencingAttribute: 'sprk_regardinginvoice',
+            ReferencingEntityNavigationPropertyName: 'sprk_RegardingInvoice',
+            ReferencedEntity: 'sprk_invoice',
+          },
+          {
+            ReferencingAttribute: 'sprk_regardingbudget',
+            ReferencingEntityNavigationPropertyName: 'sprk_RegardingBudget',
+            ReferencedEntity: 'sprk_budget',
+          },
+          {
+            ReferencingAttribute: 'sprk_regardinganalysis',
+            ReferencingEntityNavigationPropertyName: 'sprk_RegardingAnalysis',
+            ReferencedEntity: 'sprk_analysis',
+          },
+          {
+            ReferencingAttribute: 'sprk_regardingorganization',
+            ReferencingEntityNavigationPropertyName: 'sprk_RegardingOrganization',
+            ReferencedEntity: 'sprk_organization',
+          },
+          {
+            ReferencingAttribute: 'sprk_regardingcontact',
+            ReferencingEntityNavigationPropertyName: 'sprk_RegardingContact',
+            ReferencedEntity: 'contact',
+          },
+          {
+            ReferencingAttribute: 'sprk_regardingdocument',
+            ReferencingEntityNavigationPropertyName: 'sprk_RegardingDocument',
+            ReferencedEntity: 'sprk_document',
+          },
+          {
+            ReferencingAttribute: 'sprk_regardingrecordtype',
+            ReferencingEntityNavigationPropertyName: 'sprk_RegardingRecordType',
+            ReferencedEntity: 'sprk_recordtype_ref',
+          },
+        ],
+      }),
     });
   });
 
@@ -237,6 +312,79 @@ describe('ResolverWriteHandler', () => {
     const cleared = Object.entries(payload).filter(([k, v]) => k.endsWith('@odata.bind') && v === null);
     // 10 OTHER entity-specific lookups should be nulled (catalog has 11 entries; chose 1, so 10 are cleared).
     expect(cleared.length).toBeGreaterThanOrEqual(10);
+  });
+
+  // -------------------------------------------------------------------------
+  // SRFR-048 v1.4.1 — nav-prop-limited clear (only null lookups that exist on host)
+  // -------------------------------------------------------------------------
+
+  test('SRFR-048 — narrower host (sprk_event) only nulls lookups that exist on that entity', async () => {
+    // sprk_event carries only Matter/Project/Invoice/WorkAssignment lookups.
+    // Attempting to null sprk_regardingcommunication / sprk_regardingorganization /
+    // etc. would fail Dataverse validation (v1.4.0 failure mode).
+    const narrowerFetch = jest.fn().mockResolvedValue({
+      ok: true,
+      json: async () => ({
+        value: [
+          {
+            ReferencingAttribute: 'sprk_regardingmatter',
+            ReferencingEntityNavigationPropertyName: 'sprk_RegardingMatter',
+            ReferencedEntity: 'sprk_matter',
+          },
+          {
+            ReferencingAttribute: 'sprk_regardingproject',
+            ReferencingEntityNavigationPropertyName: 'sprk_RegardingProject',
+            ReferencedEntity: 'sprk_project',
+          },
+          {
+            ReferencingAttribute: 'sprk_regardinginvoice',
+            ReferencingEntityNavigationPropertyName: 'sprk_RegardingInvoice',
+            ReferencedEntity: 'sprk_invoice',
+          },
+          {
+            ReferencingAttribute: 'sprk_regardingworkassignment',
+            ReferencingEntityNavigationPropertyName: 'sprk_RegardingWorkAssignment',
+            ReferencedEntity: 'sprk_workassignment',
+          },
+          {
+            ReferencingAttribute: 'sprk_regardingrecordtype',
+            ReferencingEntityNavigationPropertyName: 'sprk_RegardingRecordType',
+            ReferencedEntity: 'sprk_recordtype_ref',
+          },
+        ],
+      }),
+    });
+
+    const result = await applyRegardingSelection(
+      {
+        webApi: { retrieveMultipleRecords: mockRetrieveMultipleRecords, updateRecord: mockUpdateRecord },
+        hostEntity: 'sprk_event',
+        hostRecordId: '55555555-5555-5555-5555-555555555555',
+      },
+      { entityType: 'sprk_matter', recordId: '33333333-3333-3333-3333-333333333333', recordName: 'X' },
+      undefined,
+      narrowerFetch as unknown as typeof fetch
+    );
+
+    expect(result.success).toBe(true);
+    const [, , payload] = mockUpdateRecord.mock.calls[0];
+    const nulledKeys = Object.entries(payload)
+      .filter(([k, v]) => k.endsWith('@odata.bind') && v === null)
+      .map(([k]) => k);
+
+    // Must NOT contain any lookup that doesn't exist on sprk_event.
+    expect(nulledKeys.some(k => k.includes('sprk_RegardingCommunication'))).toBe(false);
+    expect(nulledKeys.some(k => k.includes('sprk_RegardingOrganization'))).toBe(false);
+    expect(nulledKeys.some(k => k.includes('sprk_RegardingContact'))).toBe(false);
+    expect(nulledKeys.some(k => k.includes('sprk_RegardingBudget'))).toBe(false);
+    expect(nulledKeys.some(k => k.includes('sprk_RegardingAnalysis'))).toBe(false);
+    expect(nulledKeys.some(k => k.includes('sprk_RegardingDocument'))).toBe(false);
+    expect(nulledKeys.some(k => k.includes('sprk_RegardingEvent'))).toBe(false); // event isn't a parent of itself
+
+    // Must include the OTHER 3 lookups that DO exist on sprk_event (not Matter — that's the chosen one).
+    expect(nulledKeys.some(k => k.includes('sprk_RegardingProject'))).toBe(true);
+    expect(nulledKeys.some(k => k.includes('sprk_RegardingInvoice'))).toBe(true);
+    expect(nulledKeys.some(k => k.includes('sprk_RegardingWorkAssignment'))).toBe(true);
   });
 
   // -------------------------------------------------------------------------
@@ -394,5 +542,87 @@ describe('ResolverWriteHandler', () => {
 
     const result = await discoverHostNavProps('sprk_communication', fetchSpy as unknown as typeof fetch);
     expect(result).toEqual([]);
+  });
+
+  // -------------------------------------------------------------------------
+  // SRFR-032 / FR-A5-04 — recordNumber forwarded on IResolverWriteResult
+  // -------------------------------------------------------------------------
+
+  test('SRFR-032 — successful UPDATE result forwards recordNumber from applyResolverFields', async () => {
+    const result = await applyRegardingSelection(
+      {
+        webApi: { retrieveMultipleRecords: mockRetrieveMultipleRecords, updateRecord: mockUpdateRecord },
+        hostEntity: 'sprk_todo',
+        hostRecordId: '22222222-2222-2222-2222-222222222222',
+      },
+      { entityType: 'sprk_matter', recordId: '33333333-3333-3333-3333-333333333333', recordName: 'X' },
+      undefined,
+      mockFetch as unknown as typeof fetch
+    );
+
+    expect(result.success).toBe(true);
+    // The mock returns `MOCK-<ENTITY>-001`; forwarded verbatim.
+    expect(result.recordNumber).toBe('MOCK-SPRK_MATTER-001');
+  });
+
+  test('SRFR-032 — CREATE-mode result also forwards recordNumber (no updateRecord call)', async () => {
+    const result = await applyRegardingSelection(
+      {
+        webApi: { retrieveMultipleRecords: mockRetrieveMultipleRecords, updateRecord: mockUpdateRecord },
+        hostEntity: 'sprk_todo',
+        hostRecordId: undefined,
+      },
+      { entityType: 'sprk_project', recordId: '55555555-5555-5555-5555-555555555555', recordName: 'X' },
+      undefined,
+      mockFetch as unknown as typeof fetch
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.recordNumber).toBe('MOCK-SPRK_PROJECT-001');
+    expect(mockUpdateRecord).not.toHaveBeenCalled();
+  });
+
+  test('SRFR-032 — graceful-blank: shared service null propagates as null on result', async () => {
+    // Override the mock once to simulate the NFR-06 graceful-blank case
+    // (Contact/Account intentional-null per Q-06, or metadata missing).
+    applyResolverFieldsMock.mockImplementationOnce(async () => ({
+      recordNumber: null,
+      recordNumberSourceField: null,
+    }));
+
+    const result = await applyRegardingSelection(
+      {
+        webApi: { retrieveMultipleRecords: mockRetrieveMultipleRecords, updateRecord: mockUpdateRecord },
+        hostEntity: 'sprk_todo',
+        hostRecordId: undefined,
+      },
+      { entityType: 'contact', recordId: '66666666-6666-6666-6666-666666666666', recordName: 'Jane Doe' },
+      undefined,
+      mockFetch as unknown as typeof fetch
+    );
+
+    expect(result.success).toBe(true);
+    expect(result.recordNumber).toBeNull();
+  });
+
+  test('SRFR-032 — updateRecord failure still surfaces recordNumber for diagnostics', async () => {
+    mockUpdateRecord.mockRejectedValueOnce(new Error('403 forbidden'));
+
+    const result = await applyRegardingSelection(
+      {
+        webApi: { retrieveMultipleRecords: mockRetrieveMultipleRecords, updateRecord: mockUpdateRecord },
+        hostEntity: 'sprk_todo',
+        hostRecordId: '22222222-2222-2222-2222-222222222222',
+      },
+      { entityType: 'sprk_matter', recordId: '33333333-3333-3333-3333-333333333333', recordName: 'X' },
+      undefined,
+      mockFetch as unknown as typeof fetch
+    );
+
+    expect(result.success).toBe(false);
+    expect(result.error).toMatch(/403 forbidden/);
+    // Even on failure, the resolved recordNumber is available on the result
+    // (the shared service ran to completion; only updateRecord failed).
+    expect(result.recordNumber).toBe('MOCK-SPRK_MATTER-001');
   });
 });

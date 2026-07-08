@@ -1,0 +1,251 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="SRFR-038" project="set-regarding-and-field-mapping-resolver-r1">
+  <metadata>
+    <title>sprk_todo main form fix — make Regarding Record Number + Regarding Record Name cells visible with top-aligned labels (fix SRFR-036 regression)</title>
+    <status>completed</status>
+    <estimated-effort>45min</estimated-effort>
+    <actual-effort>~25min</actual-effort>
+    <assigned>AI Agent</assigned>
+    <started>2026-07-03</started>
+    <completed>2026-07-03</completed>
+    <rigor>STANDARD</rigor>
+    <parallel-safe>true</parallel-safe>
+    <parallel-group>—</parallel-group>
+    <tags>form-config,formxml,sprk-todo,dataverse-deploy,wave-3-followon,post-v1.3.2,fix</tags>
+    <depends-on>SRFR-036</depends-on>
+    <wave>3</wave>
+  </metadata>
+
+  <prompt><![CDATA[
+Post-SRFR-036 owner feedback follow-on. After hard-refresh of the
+`sprk_todo` main form on spaarkedev1, the Regarding Record Number
++ Regarding Record Name row that SRFR-036 configured is NOT rendering:
+
+  - Only the record-number field cell shows (empty) — the record-name
+    cell is missing from the visible layout.
+  - The fields also render without OOB-standard labels above the field.
+
+Root cause (confirmed via `SELECT formxml FROM systemform WHERE formid
+= 'eca59df4-1364-f111-ab0c-7ced8ddc4cc6'`): the SRFR-036 row-2 cell
+substitution preserved the original cell shells (including their
+`visible="false"` attribute) from the OLD row-2 baseline. The
+resulting cells for `sprk_regardingrecordnumber` and
+`sprk_regardingrecordname` both carry `visible="false"` in the
+current live FormXml — which is why the fields don't render even
+though the section is `visible="true"`.
+
+Deliverables:
+  1. Patch sprk_todo FormXml to change the two visible-cell attributes
+     from `visible="false"` to `visible="true"` on:
+       * `sprk_regardingrecordnumber` cell (cell id `{9588438e-3d20-...}`)
+       * `sprk_regardingrecordname` cell (cell id `{428bc1c1-b3ee-...}`)
+     Preserve every other cell in the section:
+       * `sprk_regardingrecordurl` stays `visible="false"` (persistence
+         preserved — SRFR-036 relocation is unchanged).
+       * All other hidden regarding-* fields (rows 4-7) unchanged.
+     Preserve `disabled="true"` on both fields (read-only display —
+     RegardingResolver PCF is the writer).
+     Preserve `<events>` + `<formLibraries>` block (companion
+     webresource OnLoad handler still registered).
+
+  2. Labels — the section already carries `celllabelposition="Top"` +
+     `celllabelalignment="Left"` attributes at the section level;
+     these inherit to child cells. Neither of the two cells carries
+     `showlabel="false"`, and both already have `<labels><label
+     description="..." /></labels>` sub-elements. Once `visible="true"`
+     is set, labels will render top-aligned above each field by
+     default (OOB behavior, matches TRACKING section on the same form).
+     NO additional label attribute changes required — the SRFR-036
+     substitution had cells configured correctly EXCEPT for the
+     inherited `visible="false"`.
+
+  3. Deploy the FormXml patch to spaarkedev1 via direct
+     `systemforms(<formid>) PATCH` (mirrors SRFR-036 deploy pattern).
+     Then publish sprk_todo entity.
+
+Constraints:
+  - ADR-006: form config only, no PCF code changes.
+  - Preserve SRFR-036 companion webresource registration.
+  - Preserve `sprk_regardingrecordurl` field's hidden state (used for
+    resolver writes).
+  - Preserve existing sprk_todo form behavior (other sections unchanged).
+  - No PCF binding changes (RegardingResolver PCF continues to bind
+    on `sprk_regardingrecordtype`).
+  - Idempotent: script detects if fix has already been applied.
+
+Step 9.5 quality gates: SKIPPED per STANDARD rigor + user directive
+(form config, not code).
+
+Coordination: SRFR-037 is running in parallel bumping RegardingResolver
+PCF to v1.3.3 (title font weight + top padding). Different files, no
+collision.
+  ]]></prompt>
+
+  <role>Dataverse FormXml surgery + systemform PATCH developer
+  familiar with MDA main-form section/row/cell layout, cell-level
+  visibility inheritance from section attributes (`celllabelposition`,
+  `celllabelalignment`), and direct Web API systemform PATCH + PublishXml
+  deploy pattern (mirrors SRFR-036 deploy script).</role>
+
+  <goal><![CDATA[
+Owner-visible outcome: on the sprk_todo main form (after hard-refresh),
+BELOW the RegardingResolver PCF, a single row renders BOTH fields
+side-by-side with OOB-standard top-aligned labels:
+
+  Row layout (single row, 3-column visual layout via colspan):
+    +-----------------------------+-----------------------------------------+
+    | Regarding Record Number     | Regarding Record Name                   |
+    | [record-number-here]        | [record-name-here]                      |
+    | (colspan=1 = 1/3 width)     | (colspan=2 = 2/3 width)                 |
+    +-----------------------------+-----------------------------------------+
+
+Both fields visible, both read-only (grey background), both showing
+labels ABOVE the field left-aligned per OOB standard. Companion
+webresource `sprk_regardingrecordnumber_hyperlink` continues to
+overlay a clickable hyperlink onto the record-number field on form
+OnLoad (SRFR-036 registration preserved).
+  ]]></goal>
+
+  <inputs>
+    <file purpose="prior-log">projects/set-regarding-and-field-mapping-resolver-r1/notes/task-036-sprk-todo-form-config.log</file>
+    <file purpose="prior-task">projects/set-regarding-and-field-mapping-resolver-r1/tasks/036-sprk-todo-form-config.poml</file>
+    <file purpose="deploy-script-pattern">scripts/Deploy-WebResourceInline.ps1</file>
+    <file purpose="prior-deploy-script">c:/tmp/deploy-sprktodo-form-036.ps1</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-006">Form config only, no PCF code changes. Additive fix to SRFR-036 row layout — restore visibility on two cells that were unintentionally left with `visible="false"` (inherited from OLD row shells).</constraint>
+    <constraint source="project">Preserve `<events>` + `<formLibraries>` block. Companion webresource OnLoad handler MUST remain registered.</constraint>
+    <constraint source="project">Preserve `sprk_regardingrecordurl` cell (id `{5150dabe-3d35-...}`) as `visible="false"` — persistence preserved for PCF writes.</constraint>
+    <constraint source="project">Preserve `disabled="true"` on both new-shape fields — read-only display, RegardingResolver PCF is the writer.</constraint>
+    <constraint source="project">Idempotent: script detects if both cells are already `visible="true"`, skips FormXml modification.</constraint>
+    <constraint source="project">STANDARD rigor: Step 9.5 (code-review + adr-check) skipped per user directive.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Dataverse FormXml cell visibility inheritance + label positioning</topic>
+    <files>
+      <file>c:/tmp/sprk_todo_form_pretty.xml</file>
+    </files>
+    <patterns>
+      <pattern name="Cell-level visibility overrides section-level visibility" location="c:/tmp/sprk_todo_form_pretty.xml lines 96-113 (Kanban section reference)">
+        A section with `visible="false"` at the SECTION level hides
+        the entire section. But when a section is `visible="true"`,
+        individual cells may still be `visible="false"` — cells
+        require `visible="true"` (or omitted attribute) to render.
+        Reference: line 96 (kanban section visible=false, cells
+        visible=true) vs line 138 (regarding section visible=true,
+        cells visible=false = current bug).
+      </pattern>
+      <pattern name="Label position inheritance from section attributes" location="c:/tmp/sprk_todo_form_pretty.xml line 138 + line 122">
+        Cells inherit `celllabelposition` (Top | Left) +
+        `celllabelalignment` (Left | Right) from the parent section.
+        The REGARDING section already carries `celllabelposition="Top"
+        celllabelalignment="Left"` — matches OOB standard. No cell-level
+        attributes needed. Reference: TRACKING section (line 122) uses
+        same section-level defaults + no cell-level overrides = OOB
+        top-aligned labels rendered.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      SRFR-036 shipped the row layout + hyperlink companion webresource
+      registration on 2026-07-03. Owner hard-refreshed the form the same
+      day and reported:
+
+        (1) "Regarding Record Number field is visible below the PCF
+             (an empty field cell) but the Regarding Record Name field
+             is NOT visible."
+        (2) "Fields render without labels above them — OOB standard is
+             label-above-field, left-aligned."
+
+      Investigation via direct FormXml fetch (see c:/tmp/sprk_todo_form.xml,
+      pretty-printed at c:/tmp/sprk_todo_form_pretty.xml) confirms both
+      cells carry `visible="false"` at the cell level. The SRFR-036
+      cell-substitution script preserved the OLD cell shell's `visible`
+      attribute — a subtle preservation bug from the FormXml surgery
+      approach.
+
+      Fix is minimal: change `visible="false"` to `visible="true"` on
+      exactly two cell attributes. Labels will inherit the section's
+      `celllabelposition="Top"` automatically once cells render.
+    </background>
+    <dependencies>
+      <dependency task="SRFR-036" status="completed">FormXml row layout + webresource events block deployed. This task patches only the two `visible` attributes.</dependency>
+    </dependencies>
+    <related-work>
+      <item>SRFR-037 (RegardingResolver PCF v1.3.3 polish) is running in parallel — different surface (PCF code vs FormXml). No collision.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check">Confirm context &lt; 60%. Confirm current sprk_todo FormXml has been fetched to c:/tmp/sprk_todo_form.xml (18894 chars post-SRFR-036) and pretty-printed for inspection.</step>
+    <step order="1" name="Confirm root cause">Grep pretty-printed FormXml for `visible` attributes in the REGARDING section (id 4bf1f576-...). Verify:
+      - sprk_regardingrecordnumber cell (id 9588438e-...) carries `visible="false"` (line 152 area) — SHOULD be visible=true.
+      - sprk_regardingrecordname cell (id 428bc1c1-...) carries `visible="false"` (line 158 area) — SHOULD be visible=true.
+      - sprk_regardingrecordurl cell (id 5150dabe-...) carries `visible="false"` (line 166 area) — CORRECT, preserve.
+      - Section itself carries `celllabelposition="Top" celllabelalignment="Left"` — labels will inherit correctly once cells render.</step>
+    <step order="2" name="Author deploy script">Create `c:/tmp/deploy-sprktodo-form-038-labels.ps1`. Mirror SRFR-036 script style (Get-Token, Invoke-Dv helpers, direct systemform PATCH + PublishXml). Idempotent: check if BOTH target cells already have `visible="true"`, skip if so. Otherwise:
+      - Replace exact substring `id="{9588438e-3d20-44b9-b8e7-5c2fba328ccb}" locklevel="0" colspan="1" rowspan="1" visible="false"` → same with `visible="true"`.
+      - Replace exact substring `id="{428bc1c1-b3ee-4f97-abcf-1dbec6a5b0d3}" locklevel="0" colspan="2" rowspan="1" visible="false"` → same with `visible="true"`.
+      - PATCH `systemforms(eca59df4-1364-f111-ab0c-7ced8ddc4cc6)` with the updated formxml.
+      - POST `PublishXml` for sprk_todo entity.</step>
+    <step order="3" name="Dry-run + deploy">Run script with `-DryRun` first to preview the char-delta. Then run without dry-run to apply + publish.</step>
+    <step order="4" name="Verify">
+      Re-fetch formxml (rerun c:/tmp/fetch-sprktodo-form.ps1). Grep for:
+      - `id="{9588438e-3d20-44b9-b8e7-5c2fba328ccb}" ... visible="true"` — should match (record-number visible).
+      - `id="{428bc1c1-b3ee-4f97-abcf-1dbec6a5b0d3}" ... visible="true"` — should match (record-name visible).
+      - `id="{5150dabe-3d35-45e8-8f24-24fe96cc6293}" ... visible="false"` — should still match (URL stays hidden).
+      - `libraryName="sprk_regardingrecordnumber_hyperlink"` — should still match (events block preserved).
+      - Verify formxml char count: expected +8 chars per replaced attribute (5-char change: "false" → "true" but preserving surrounding whitespace) = ~+0 chars net actually (both "false" and "true" are the same replacement scope; delta is only the length difference of the token). Actual delta: len("true")=4, len("false")=5 → -1 char per replacement → -2 chars total. Expect formxml to shrink from 18894 → 18892 chars.
+    </step>
+    <step order="5" name="Log + TASK-INDEX update">Write session log to `projects/set-regarding-and-field-mapping-resolver-r1/notes/task-038-sprk-todo-form-labels.log`. Add SRFR-038 row to TASK-INDEX.md under Wave 3 as post-SRFR-036 fix.</step>
+    <step order="6" name="Update task status">Mark SRFR-038 completed. Reset current-task.md.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Load prior SRFR-036 log + deploy script as reference</tool>
+    <tool name="Write">Author POML + deploy script + log</tool>
+    <tool name="Edit">TASK-INDEX.md, current-task.md, POML status update</tool>
+    <tool name="Bash">Execute pwsh deploy script via bash</tool>
+    <tool name="Grep">Verify FormXml before + after PATCH</tool>
+  </tools>
+
+  <outputs>
+    <output type="artifact">c:/tmp/deploy-sprktodo-form-038-labels.ps1 (temporary deploy script)</output>
+    <output type="artifact">Modified sprk_todo main form (formid eca59df4-1364-f111-ab0c-7ced8ddc4cc6) with visible=true on both record-number + record-name cells; PublishXml executed</output>
+    <output type="notes">projects/set-regarding-and-field-mapping-resolver-r1/notes/task-038-sprk-todo-form-labels.log</output>
+    <output type="docs">projects/set-regarding-and-field-mapping-resolver-r1/tasks/TASK-INDEX.md updated with SRFR-038 row</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Post-deploy FormXml grep confirms `sprk_regardingrecordnumber` cell (id 9588438e-...) carries `visible="true"`.</criterion>
+    <criterion testable="true">Post-deploy FormXml grep confirms `sprk_regardingrecordname` cell (id 428bc1c1-...) carries `visible="true"`.</criterion>
+    <criterion testable="true">`sprk_regardingrecordurl` cell (id 5150dabe-...) still carries `visible="false"` (persistence preserved).</criterion>
+    <criterion testable="true">Both cells still carry `disabled="true"` on their `<control>` sub-element (read-only preserved).</criterion>
+    <criterion testable="true">FormXml still contains `libraryName="sprk_regardingrecordnumber_hyperlink"` in `<events>` block (SRFR-036 registration preserved).</criterion>
+    <criterion testable="true">Publish log shows no errors.</criterion>
+    <criterion testable="true">`notes/task-038-sprk-todo-form-labels.log` written with deploy outcomes.</criterion>
+    <criterion testable="true">TASK-INDEX.md contains SRFR-038 row under Wave 3.</criterion>
+  </acceptance-criteria>
+
+  <notes><![CDATA[
+Follow-on to SRFR-036 correcting a subtle FormXml cell-attribute
+inheritance bug. Root cause: SRFR-036 cell-substitution script
+preserved the OLD cell shells (with their `visible="false"` attribute
+inherited from the OOB baseline), so the NEW row's cells rendered
+inside a visible section but were themselves hidden.
+
+Owner should hard-refresh the sprk_todo form after this deploys and
+verify:
+  1. Below the RegardingResolver PCF, a single row shows BOTH fields
+     side-by-side: "Regarding Record Number" (left, 1/3 width) +
+     "Regarding Record Name" (right, 2/3 width).
+  2. Each field has an OOB-standard label ABOVE it, left-aligned.
+  3. Both fields are visually grey (read-only), non-editable.
+  4. Clicking the record-number displays a hyperlink (via SRFR-036
+     companion webresource) that opens the target regarding record.
+  ]]></notes>
+</task>

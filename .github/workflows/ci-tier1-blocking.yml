@@ -221,7 +221,7 @@ jobs:
 
   # --------------------------------------------------------------------------
   # Job 2 — arch-tests (MUST-NOT subset only)
-  # Budget: <30s. Runs the 6 load-bearing NetArchTest MUST-NOT facts via xUnit
+  # Budget: <30s. Runs the 7 load-bearing NetArchTest MUST-NOT facts via xUnit
   # FullyQualifiedName filter. The remaining ~15 ArchTests (existence checks,
   # ceiling heuristics, source-scan exemptions like
   # KnownPluginViolationCountShouldNotIncrease, OptionsPatternShouldBeUsedForConfiguration,
@@ -237,6 +237,9 @@ jobs:
   #   - ADR-007 EndpointsShouldNotReferenceGraphSdk        — Graph seam (endpoints)
   #   - ADR-009 MemoryCacheShouldNotBeSingleton            — Redis-first caching
   #   - ADR-009 NoHybridCachingLibraries                   — bans hybrid cache libs
+  #   - ADR-013 CrudCodeMustNotDependOnAiInternalTypes     — AI facade boundary (FR-C6;
+  #     documented AI-API-surface exceptions grandfathered in the test itself per
+  #     projects/sdap-bff-api-remediation-fix/EXECUTION-LOG.md tasks 050/053)
   # --------------------------------------------------------------------------
   arch-tests:
     name: Arch Tests (MUST-NOT subset)
@@ -277,7 +280,7 @@ jobs:
           dotnet test tests/Spaarke.ArchTests/Spaarke.ArchTests.csproj \
             -c Debug \
             --no-build \
-            --filter "FullyQualifiedName=Spaarke.ArchTests.ADR001_MinimalApiTests.NoAzureFunctionsPackages|FullyQualifiedName=Spaarke.ArchTests.ADR002_PluginTests.EndpointsShouldNotReferencePluginInterfaces|FullyQualifiedName=Spaarke.ArchTests.ADR007_GraphIsolationTests.ControllersShouldNotReferenceGraphSdk|FullyQualifiedName=Spaarke.ArchTests.ADR007_GraphIsolationTests.EndpointsShouldNotReferenceGraphSdk|FullyQualifiedName=Spaarke.ArchTests.ADR009_CachingTests.MemoryCacheShouldNotBeSingleton|FullyQualifiedName=Spaarke.ArchTests.ADR009_CachingTests.NoHybridCachingLibraries" \
+            --filter "FullyQualifiedName=Spaarke.ArchTests.ADR001_MinimalApiTests.NoAzureFunctionsPackages|FullyQualifiedName=Spaarke.ArchTests.ADR002_PluginTests.EndpointsShouldNotReferencePluginInterfaces|FullyQualifiedName=Spaarke.ArchTests.ADR007_GraphIsolationTests.ControllersShouldNotReferenceGraphSdk|FullyQualifiedName=Spaarke.ArchTests.ADR007_GraphIsolationTests.EndpointsShouldNotReferenceGraphSdk|FullyQualifiedName=Spaarke.ArchTests.ADR009_CachingTests.MemoryCacheShouldNotBeSingleton|FullyQualifiedName=Spaarke.ArchTests.ADR009_CachingTests.NoHybridCachingLibraries|FullyQualifiedName=Spaarke.ArchTests.ADR013_AiBoundaryTests.CrudCodeMustNotDependOnAiInternalTypes" \
             --logger "trx;LogFileName=arch-must-not.trx" \
             --results-directory ./TestResults
         shell: bash

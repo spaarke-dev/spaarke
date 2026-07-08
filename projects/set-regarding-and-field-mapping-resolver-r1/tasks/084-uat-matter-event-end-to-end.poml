@@ -1,0 +1,147 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="SRFR-084" project="set-regarding-and-field-mapping-resolver-r1">
+  <metadata>
+    <title>UAT — Matter→Event field-mapping cascade + RegardingResolver v1.3.0 + AssociationResolver v1.2.0 end-to-end in spaarkedev1</title>
+    <status>not-started</status>
+    <estimated-effort>3h</estimated-effort>
+    <actual-effort></actual-effort>
+    <assigned>AI Agent</assigned>
+    <started></started>
+    <completed></completed>
+    <rigor>STANDARD</rigor>
+    <parallel-safe>false</parallel-safe>
+    <parallel-group></parallel-group>
+    <tags>uat,integration-test,wave-8</tags>
+    <depends-on>SRFR-080,SRFR-081,SRFR-082,SRFR-083</depends-on>
+    <wave>8</wave>
+  </metadata>
+
+  <prompt><![CDATA[
+Execute three end-to-end UAT scenarios in spaarkedev1 covering the three
+workstreams:
+
+Scenario 1 — Field Mapping cascade (workstream B):
+  Create Matter→Event profile (syncmode ManualRefresh, active), add 2 rules
+  (sprk_mattername→sprk_eventtitle, sprk_matternumber→sprk_eventmatternumber,
+  both Copy). Create a Matter with 3 child Events. Change the Matter's
+  sprk_mattername. Click "Push Updates" ribbon button on the Matter form,
+  confirm the dialog, observe the toast. Verify via Web API that all 3 Events
+  received the updated field values, and the toast reports
+  "Updated 3 of 3 records across 1 target entity. 0 skipped, 0 errors."
+
+Scenario 2 — RegardingResolver v1.3.0 UI (workstream A):
+  Open a sprk_todo main form. Verify 2-row layout with toolbar icon. Click
+  toolbar icon → menu shows 11 entities. Select Matter → OOB lookup opens →
+  pick a Matter. Verify all 5 regarding fields written. Click record-number
+  hyperlink → verify modal opens (target: 2, 80%×80%).
+
+Scenario 3 — AssociationResolver v1.2.0 delegation (workstream C):
+  Open a Matter main form. Confirm AssociationResolver renders with the shared
+  PolymorphicPicker. Select a related record → verify all 5 denormalized fields
+  written identically to RegardingResolver. Confirm
+  `grep -RE "ENTITY_LOOKUP_CONFIGS\b" src/client/pcf/AssociationResolver`
+  returns zero (dev-side sanity check).
+
+Document each scenario's result in `notes/uat-results.md`. Any failures →
+file follow-up defect via `/project-defer-issue-tracking`.
+  ]]></prompt>
+
+  <role>UAT test engineer familiar with the Spaarke app in spaarkedev1, browser-based UI testing via `/ui-test`, Web API verification via `pac` or REST client, and defect-filing via `/project-defer-issue-tracking`.</role>
+
+  <goal><![CDATA[
+Three UAT scenarios executed in spaarkedev1. Each is documented in
+`notes/uat-results.md` as PASS or FAIL with evidence (screenshots or
+observation notes + Web API query results). Any FAIL triggers a defect
+Issue via `/project-defer-issue-tracking`. Scenario 1 is the load-bearing
+end-to-end validation of workstream B; scenarios 2 and 3 validate the
+UI/refactor deliverables of workstreams A and C.
+  ]]></goal>
+
+  <inputs>
+    <file purpose="spec">projects/set-regarding-and-field-mapping-resolver-r1/spec.md</file>
+    <file purpose="plan">projects/set-regarding-and-field-mapping-resolver-r1/plan.md</file>
+    <file purpose="skill">.claude/skills/ui-test/SKILL.md</file>
+    <file purpose="skill">.claude/skills/project-defer-issue-tracking/SKILL.md</file>
+    <file purpose="procedure">docs/procedures/testing-and-code-quality.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="project">UAT env = spaarkedev1. All 3 scenarios MUST be executed. Any failure logged + defect filed.</constraint>
+    <constraint source="spec FR-B3-03">Scenario 1 toast wording MUST match spec: "Updated X of Y records across N target entity(ies). Z skipped, W errors." Verify verbatim.</constraint>
+    <constraint source="spec FR-A2-01">Scenario 2 modal MUST open with target: 2, width 80%, height 80%. Any other target = FAIL.</constraint>
+    <constraint source="spec FR-B4-01">Scenario 3 dev-side check: ENTITY_LOOKUP_CONFIGS grep returns zero. Non-zero = FAIL (indicates SRFR-053 regression).</constraint>
+    <constraint source="project">Do NOT auto-fix defects during UAT. File the defect and continue the remaining scenarios. This preserves an honest UAT record.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>uat/browser-testing</topic>
+    <files>
+      <file>.claude/skills/ui-test/SKILL.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+    </files>
+    <patterns>
+      <pattern name="Browser-based UI test" location=".claude/skills/ui-test/SKILL.md">
+        Use `/ui-test` for Chrome-driven inspection of the Spaarke app; capture
+        DOM state + console output as evidence.
+      </pattern>
+      <pattern name="Defect handoff" location=".claude/skills/project-defer-issue-tracking/SKILL.md">
+        Any UAT failure → file a defect Issue with reproduction steps + expected
+        vs actual + severity.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Wave 8 deploys (SRFR-080..083) have carried all project artifacts into
+      spaarkedev1. This UAT task is the final confidence check before Wave 9
+      wrap-up. It exercises the load-bearing user journeys across all three
+      workstreams.
+    </background>
+    <dependencies>
+      <dependency task="SRFR-080" status="pending">RegardingResolver v1.3.0 deployed.</dependency>
+      <dependency task="SRFR-081" status="pending">AssociationResolver v1.2.0 deployed.</dependency>
+      <dependency task="SRFR-082" status="pending">Webresources + ribbon deployed.</dependency>
+      <dependency task="SRFR-083" status="pending">Profile MDA form deployed.</dependency>
+    </dependencies>
+    <related-work>
+      <item>SRFR-090 wrap-up gates on UAT clean OR documented defects with follow-up plan.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check">Verify context &lt; 60%. Read `.claude/skills/ui-test/SKILL.md` + `docs/procedures/testing-and-code-quality.md` §UAT.</step>
+    <step order="1" name="Precondition Check">Verify all four Wave-8 deploy tasks (080-083) are ✅ in TASK-INDEX.md. Confirm `pac org who` targets spaarkedev1.</step>
+    <step order="2" name="Scenario 1 Setup">In spaarkedev1 Spaarke app, navigate to sprk_fieldmappingprofile. Create Matter→Event profile: sprk_sourceentity=sprk_matter, sprk_targetentity=sprk_event, sprk_syncmode=ManualRefresh, statecode=Active. Add 2 rules via subgrid: sprk_mattername→sprk_eventtitle (Copy), sprk_matternumber→sprk_eventmatternumber (Copy). Save.</step>
+    <step order="3" name="Scenario 1 Data">Create 1 Matter record. Create 3 child Event records referencing the Matter. Note baseline field values.</step>
+    <step order="4" name="Scenario 1 Push">Change Matter's sprk_mattername. Click "Push Updates to Related Records" ribbon button. Confirm dialog appears; click Continue. Observe toast.</step>
+    <step order="5" name="Scenario 1 Verify">Query Web API for the 3 Event records; confirm sprk_eventtitle updated to new Matter name. Verify toast wording matches spec verbatim: "Updated 3 of 3 records across 1 target entity. 0 skipped, 0 errors." Record PASS/FAIL in notes/uat-results.md.</step>
+    <step order="6" name="Scenario 2 Layout">Open a sprk_todo main form (new record). Verify RegardingResolver renders 2-row layout: Row 1 title + toolbar icon; Row 2 number-hyperlink + name. Click toolbar icon; verify dropdown shows 11 entities from sprk_recordtype_ref.</step>
+    <step order="7" name="Scenario 2 Selection + Modal">Select Matter from dropdown → OOB lookup opens → pick a Matter. Verify Web API shows all 5 regarding fields populated on the sprk_todo record after save. Click the record-number hyperlink → verify modal opens (DevTools: target:2, dimensions 80×80). Record PASS/FAIL.</step>
+    <step order="8" name="Scenario 3 Delegation">Open a Matter main form. Confirm AssociationResolver renders using PolymorphicPicker (verify by DOM inspection — should be the shared component's marker class/data-attr). Select a related record. Query Web API; verify all 5 denormalized fields populated identically to a RegardingResolver-driven write.</step>
+    <step order="9" name="Scenario 3 Dev Sanity">Run `grep -RE "ENTITY_LOOKUP_CONFIGS\b" src/client/pcf/AssociationResolver` locally; confirm zero hits (retirement holds). Record PASS/FAIL.</step>
+    <step order="10" name="File Defects">For each FAIL, invoke `/project-defer-issue-tracking` with reproduction steps + expected/actual + severity. Reference the defect Issue # in notes/uat-results.md.</step>
+    <step order="11" name="Document">Write `notes/uat-results.md` with three scenario sections: precondition state, steps executed, evidence (Web API responses + observations), PASS/FAIL, defect Issue # (if any), timestamp.</step>
+    <step order="12" name="Update Task Status">Update TASK-INDEX.md 🔲 → ✅ for SRFR-084. Reset current-task.md for SRFR-090.</step>
+  </steps>
+
+  <tools>
+    <tool name="Bash">Run pac CLI + Web API queries + local grep</tool>
+    <tool name="Read">Read skill docs + spec</tool>
+    <tool name="Write">Author notes/uat-results.md</tool>
+  </tools>
+
+  <outputs>
+    <output type="notes" ephemeral="true">projects/set-regarding-and-field-mapping-resolver-r1/notes/uat-results.md</output>
+    <output type="issues">GitHub defect Issue(s) filed via /project-defer-issue-tracking for any FAIL scenarios</output>
+    <output type="docs">projects/set-regarding-and-field-mapping-resolver-r1/tasks/TASK-INDEX.md (🔲 → ✅ for SRFR-084)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Scenario 1 executed; Web API confirms 3 child Events updated with new sprk_mattername; toast wording matches spec verbatim.</criterion>
+    <criterion testable="true">Scenario 2 executed; 2-row layout confirmed; all 5 regarding fields written; modal opens with target:2, 80%×80%.</criterion>
+    <criterion testable="true">Scenario 3 executed; AssociationResolver delegates via PolymorphicResolverService with 5-field write parity; ENTITY_LOOKUP_CONFIGS grep returns zero.</criterion>
+    <criterion testable="true">notes/uat-results.md exists with three scenario sections + PASS/FAIL + evidence.</criterion>
+    <criterion testable="true">Every FAIL has a corresponding defect Issue filed via /project-defer-issue-tracking (Issue # referenced in the notes).</criterion>
+  </acceptance-criteria>
+</task>

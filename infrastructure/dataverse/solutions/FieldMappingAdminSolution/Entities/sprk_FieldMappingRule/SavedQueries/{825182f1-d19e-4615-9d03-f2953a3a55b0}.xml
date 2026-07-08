@@ -1,0 +1,59 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<savedqueries xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <savedquery>
+    <IsCustomizable>1</IsCustomizable>
+    <CanBeDeleted>0</CanBeDeleted>
+    <isquickfindquery>0</isquickfindquery>
+    <isprivate>0</isprivate>
+    <isdefault>1</isdefault>
+    <savedqueryid>{825182f1-d19e-4615-9d03-f2953a3a55b0}</savedqueryid>
+    <layoutxml>
+      <grid name="resultset" jump="sprk_name" select="1" icon="1" preview="1">
+        <row name="result" id="sprk_fieldmappingruleid">
+          <cell name="sprk_executionorder" width="80" />
+          <cell name="sprk_sourcefield" width="140" />
+          <cell name="sprk_sourcefieldtype" width="110" />
+          <cell name="sprk_targetfield" width="140" />
+          <cell name="sprk_targetfieldtype" width="110" />
+          <cell name="sprk_mapping_type" width="110" />
+          <cell name="sprk_mappingdirection" width="130" />
+          <cell name="sprk_syncmode" width="120" />
+          <cell name="sprk_defaultvalue" width="110" />
+          <cell name="sprk_compatibilitymode" width="110" />
+          <cell name="sprk_iscascadingsource" width="90" />
+          <cell name="sprk_isrequired" width="80" />
+          <cell name="sprk_name" width="150" />
+        </row>
+      </grid>
+    </layoutxml>
+    <querytype>0</querytype>
+    <fetchxml>
+      <fetch version="1.0" mapping="logical">
+        <entity name="sprk_fieldmappingrule">
+          <attribute name="sprk_fieldmappingruleid" />
+          <attribute name="sprk_name" />
+          <attribute name="sprk_sourcefield" />
+          <attribute name="sprk_sourcefieldtype" />
+          <attribute name="sprk_targetfield" />
+          <attribute name="sprk_targetfieldtype" />
+          <attribute name="sprk_mapping_type" />
+          <attribute name="sprk_mappingdirection" />
+          <attribute name="sprk_syncmode" />
+          <attribute name="sprk_defaultvalue" />
+          <attribute name="sprk_executionorder" />
+          <attribute name="sprk_compatibilitymode" />
+          <attribute name="sprk_iscascadingsource" />
+          <attribute name="sprk_isrequired" />
+          <order attribute="sprk_executionorder" descending="false" />
+          <filter type="and">
+            <condition attribute="statecode" operator="eq" value="0" />
+          </filter>
+        </entity>
+      </fetch>
+    </fetchxml>
+    <IntroducedVersion>1.0</IntroducedVersion>
+    <LocalizedNames>
+      <LocalizedName description="Active Field Mapping Rules" languagecode="1033" />
+    </LocalizedNames>
+  </savedquery>
+</savedqueries>

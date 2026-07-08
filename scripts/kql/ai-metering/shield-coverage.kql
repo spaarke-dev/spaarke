@@ -1,0 +1,34 @@
+// shield-coverage.kql — Prompt Shield fail-open rate over time (assessment rec 2a)
+// Purpose: the shield fails OPEN on timeout/429/5xx/network/auth error, so coverage
+//          is only as good as the fail-open rate is low. Hourly trend of evaluations
+//          by outcome + the fail-open rate; watch this after flipping
+//          AiSafety:ContentSafety:ManagedIdentity:Enabled (an RBAC gap shows up here
+//          as a failed_open_error spike, not as a 5xx on the chat endpoint).
+// Counter:  ai.safety.shield_evaluations (meter Sprk.Bff.Api.Ai, AiTelemetry.cs)
+//           outcome ∈ completed | blocked | failed_open_timeout | failed_open_error
+// Expected columns (part 1): timestamp (1h bin), evaluations, completed, blocked,
+//                            failedOpenTimeout, failedOpenError, failOpenRate
+// Expected columns (part 2): tenantId, evaluations, failedOpen, failOpenRate
+let window = 7d;
+customMetrics
+| where timestamp > ago(window) and name == "ai.safety.shield_evaluations"
+| extend outcome = tostring(customDimensions["outcome"])
+| summarize evaluations       = sum(valueSum),
+            completed         = sumif(valueSum, outcome == "completed"),
+            blocked           = sumif(valueSum, outcome == "blocked"),
+            failedOpenTimeout = sumif(valueSum, outcome == "failed_open_timeout"),
+            failedOpenError   = sumif(valueSum, outcome == "failed_open_error")
+  by bin(timestamp, 1h)
+| extend failOpenRate = round(todouble(failedOpenTimeout + failedOpenError) / todouble(evaluations), 4)
+| order by timestamp asc
+
+// -- Part 2: per-tenant fail-open rate (which tenants ride unshielded?) --
+// customMetrics
+// | where timestamp > ago(7d) and name == "ai.safety.shield_evaluations"
+// | extend outcome  = tostring(customDimensions["outcome"]),
+//          tenantId = tostring(customDimensions["tenant.id"])
+// | summarize evaluations = sum(valueSum),
+//             failedOpen  = sumif(valueSum, outcome startswith "failed_open")
+//   by tenantId
+// | extend failOpenRate = round(todouble(failedOpen) / todouble(evaluations), 4)
+// | order by failOpenRate desc

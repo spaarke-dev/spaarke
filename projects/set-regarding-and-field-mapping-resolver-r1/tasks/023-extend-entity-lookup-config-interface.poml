@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="SRFR-023" project="set-regarding-and-field-mapping-resolver-r1">
+  <metadata>
+    <title>Extend EntityLookupConfig interface with regardingRecordNumberField property</title>
+    <status>completed</status>
+    <estimated-effort>1h</estimated-effort>
+    <actual-effort>~30min</actual-effort>
+    <assigned>AI Agent</assigned>
+    <started>2026-07-02</started>
+    <completed>2026-07-02</completed>
+    <rigor>FULL</rigor>
+    <parallel-safe>true</parallel-safe>
+    <parallel-group>A</parallel-group>
+    <tags>shared-lib,interface,refactor,wave-2</tags>
+    <depends-on></depends-on>
+    <wave>2</wave>
+  </metadata>
+
+  <prompt><![CDATA[
+The `EntityLookupConfig` interface (currently declared at
+`src/client/pcf/AssociationResolver/handlers/RecordSelectionHandler.ts:37`) is
+consumed by callers that need to pass through the metadata value from
+`sprk_recordtype_ref.sprk_regardingrecordnumberfield`. Task SRFR-022 relocates
+the surrounding `FieldMappingHandler` into `@spaarke/ui-components`; the
+`EntityLookupConfig` interface itself will move as part of that migration OR
+in this task (whichever lands first).
+
+This task adds one optional property: `regardingRecordNumberField?: string`.
+It is the source-field name on the target entity from
+`sprk_recordtype_ref.sprk_regardingrecordnumberfield`. Task SRFR-020
+(PolymorphicResolverService extension) and task SRFR-050 (AssociationResolver
+dynamic config loader) will populate + consume this property. This is the
+interface portion of FR-B4-01.
+  ]]></prompt>
+
+  <role>TypeScript interface engineer familiar with the Spaarke shared component library, backward-compatible interface extension, and the ADR-012 public-surface boundary.</role>
+
+  <goal><![CDATA[
+`EntityLookupConfig` carries the new optional property
+`regardingRecordNumberField?: string` at its canonical location. If the
+interface has already moved into `@spaarke/ui-components` (task 022 landed
+first), it is exported from `src/index.ts`; if not, it remains in-place and
+gets picked up by task 022 in the same release. All existing callers still
+compile without modification because the addition is a non-breaking optional
+property.
+  ]]></goal>
+
+  <inputs>
+    <file purpose="spec">projects/set-regarding-and-field-mapping-resolver-r1/spec.md</file>
+    <file purpose="plan">projects/set-regarding-and-field-mapping-resolver-r1/plan.md</file>
+    <file purpose="project-claude">projects/set-regarding-and-field-mapping-resolver-r1/CLAUDE.md</file>
+    <file purpose="source-if-not-yet-moved">src/client/pcf/AssociationResolver/handlers/RecordSelectionHandler.ts</file>
+    <file purpose="destination-if-moved">src/client/shared/Spaarke.UI.Components/src/services/</file>
+    <file purpose="public-surface">src/client/shared/Spaarke.UI.Components/src/index.ts</file>
+    <file purpose="consumer">src/client/pcf/AssociationResolver/AssociationResolverApp.tsx</file>
+    <file purpose="adr">.claude/adr/ADR-012-shared-component-library.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-012">Shared type MUST be exported via the public surface path (`src/index.ts`) when it resides in the shared lib. No subpath imports.</constraint>
+    <constraint source="spec FR-B4-01">Interface addition is OPTIONAL — `regardingRecordNumberField?: string`. MUST NOT break existing callers.</constraint>
+    <constraint source="project">Type name unchanged (`EntityLookupConfig`).</constraint>
+    <constraint source="project">Property name is `regardingRecordNumberField` (camelCase, matching TypeScript convention). It carries the LOGICAL name of the source field on the target entity (e.g., `sprk_matternumber`).</constraint>
+    <constraint source="project">Backward-compatible extension only. No renamed properties, no removed properties.</constraint>
+    <constraint source="project">TypeScript strict mode preserved. No `any`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>shared-lib/interface-extension</topic>
+    <files>
+      <file>.claude/adr/ADR-012-shared-component-library.md</file>
+    </files>
+    <patterns>
+      <pattern name="Non-breaking optional extension" location=".claude/adr/ADR-012-shared-component-library.md">
+        Adding an optional property (`?:`) is safe for existing callers because absence
+        satisfies the type. New callers gain the ability to pass the value; old callers
+        continue to compile and behave unchanged.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      The Field Mapping subsystem uses `EntityLookupConfig` to describe per-entity lookup
+      behavior in the AssociationResolver. With FR-A4-01 introducing data-driven record-number
+      resolution (task 020), the config shape needs an optional slot to carry the source-field
+      name discovered from `sprk_recordtype_ref.sprk_regardingrecordnumberfield`. This task is
+      a minimal, focused interface addition. It coordinates with task 022 (relocation) and 020
+      (consumer) so the whole change lands in the `@spaarke/ui-components` minor release per A-05.
+    </background>
+    <dependencies></dependencies>
+    <related-work>
+      <item>Task SRFR-022 relocates the surrounding FieldMappingHandler + likely this interface.</item>
+      <item>Task SRFR-020 consumes the property when writing the 5-field payload.</item>
+      <item>Task SRFR-050 (Wave 5) populates the property via dynamic config loader over `sprk_recordtype_ref`.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check">Verify context &lt; 60%. Read spec.md FR-B4-01. Read the current `EntityLookupConfig` declaration.</step>
+    <step order="1" name="Locate the Interface">Grep to determine whether task 022 has already landed. If interface is in `@spaarke/ui-components/src/services/`, extend there. Otherwise extend in `src/client/pcf/AssociationResolver/handlers/RecordSelectionHandler.ts:37`.</step>
+    <step order="2" name="Add Optional Property">Add `regardingRecordNumberField?: string;` with a JSDoc comment stating: "Source-field logical name on the target entity, from sprk_recordtype_ref.sprk_regardingrecordnumberfield. When set, the resolver reads this field on the target record and writes to the host's sprk_regardingrecordnumber column."</step>
+    <step order="3" name="Update Public Surface (if applicable)">If interface resides in the shared lib, ensure `EntityLookupConfig` is exported from `src/client/shared/Spaarke.UI.Components/src/index.ts`. If already exported, no-op.</step>
+    <step order="4" name="Verify Backward Compat">Compile `AssociationResolverApp.tsx` and confirm the file at `src/client/pcf/AssociationResolver/AssociationResolverApp.tsx:44` (the current import site) still compiles unchanged.</step>
+    <step order="5" name="Verify Presence">Run `grep -R "regardingRecordNumberField" src/client/shared/Spaarke.UI.Components` (or in the PCF path if not yet moved) and confirm the interface definition appears.</step>
+    <step order="6" name="Build">Run `npm run build` in the package(s) containing the interface. Fix any TS strict errors.</step>
+    <step order="7" name="Step 9.5 Quality Gate">Invoke `/code-review` and `/adr-check` on the changed file. Confirm ADR-012 public-surface rules satisfied.</step>
+    <step order="8" name="Update Task Status">Update TASK-INDEX.md 🔲 → ✅ for SRFR-023. Reset current-task.md for next task.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Load the current interface + consumer file</tool>
+    <tool name="Grep">Locate the interface + confirm presence after change</tool>
+    <tool name="Edit">Add the optional property + optional `src/index.ts` export</tool>
+    <tool name="Bash">Run `npm run build` in the affected package</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">Extended `EntityLookupConfig` interface (path depends on whether task 022 landed first)</output>
+    <output type="code" conditional="if-in-shared-lib">src/client/shared/Spaarke.UI.Components/src/index.ts (public export confirmed)</output>
+    <output type="docs">projects/set-regarding-and-field-mapping-resolver-r1/tasks/TASK-INDEX.md (🔲 → ✅ for SRFR-023)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`EntityLookupConfig` interface has new optional property `regardingRecordNumberField?: string`.</criterion>
+    <criterion testable="true">Existing `AssociationResolverApp.tsx` compiles unchanged (backward-compat verified).</criterion>
+    <criterion testable="true">`grep -R "regardingRecordNumberField" src/client/shared/Spaarke.UI.Components` returns at least the interface definition (when interface resides in shared lib).</criterion>
+    <criterion testable="true">No breaking change: `RecordSelectionHandler.ts` (or its new location) still compiles.</criterion>
+    <criterion testable="true">TypeScript strict mode passes with zero errors.</criterion>
+    <criterion testable="true">When in shared lib, `EntityLookupConfig` is exported from `src/index.ts`.</criterion>
+    <criterion testable="true">`/code-review` and `/adr-check` pass at Step 9.5.</criterion>
+  </acceptance-criteria>
+</task>
