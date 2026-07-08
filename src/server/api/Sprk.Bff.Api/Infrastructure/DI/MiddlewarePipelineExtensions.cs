@@ -20,16 +20,10 @@ public static class MiddlewarePipelineExtensions
         app.UseCors();
         app.UseMiddleware<Sprk.Bff.Api.Api.SecurityHeadersMiddleware>();
 
-        // Static Files - Serve playbook-builder SPA from wwwroot
-        app.UseStaticFiles();
-        var nestedWwwroot = Path.Combine(app.Environment.ContentRootPath, "wwwroot");
-        if (Directory.Exists(nestedWwwroot))
-        {
-            app.UseStaticFiles(new StaticFileOptions
-            {
-                FileProvider = new Microsoft.Extensions.FileProviders.PhysicalFileProvider(nestedWwwroot)
-            });
-        }
+        // NOTE (2026-07-08): static-file serving removed — the BFF no longer hosts any
+        // wwwroot content. The former /playbook-builder SPA (legacy canvas builder) was
+        // deleted; PlaybookBuilder ships as the sprk_playbookbuilder Dataverse web
+        // resource (Deploy-PlaybookBuilder.ps1).
 
         // Global Exception Handler - RFC 7807 Problem Details
         app.UseExceptionHandler(exceptionHandlerApp =>
