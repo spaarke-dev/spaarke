@@ -259,7 +259,8 @@ Every gate is verified by an **operator-executed browser UAT script on spaarkede
 - **Tier 2c preview UX**: r2 minimum is preview/confirm; the full preview surface is revisited post-G-R2-A.
 - **Exact ≥90% eval thresholds**: the eval-family notes set floors + shape; concrete integers ratified during FR-A1-02/FR-A1-04.
 - **Progressive render mechanism** (FR-A1-10): section-keyed streaming preferred; client-reveal fallback — chosen at implementation time.
-- **Wave/`/goal` structure**: pre-authored `/goal` conditions per wave IF the r1 pilot is judged proven at r1 close (`notes/goal-feature-evaluation.md`); `/goal` never wraps a gate.
+- **Wave/`/goal` structure**: pre-authored `/goal` conditions per wave IF the r1 pilot is judged proven at r1 close (`notes/goal-feature-evaluation.md`); `/goal` never wraps a gate. Governed at plan/task time by the merged **CLAUDE.md §8.5** (Sonnet-5 execution model tiering + `/goal` wave-loop eligibility: machine-verifiable end-state, ≥3 low-ambiguity tasks, never security/deploy/irreversible).
+- **Execution model tiering (plan-time, not spec-time)**: per CLAUDE.md §8.5, `task-create` assigns each task a `<model-tier>` (sonnet default; opus/fable for high-blast-radius / architectural / ADR-migration / security work) + `<effort>`. Expect this project's **contract, gate-engine, memory-governance, and ADR-041/042 tasks to tier UP to opus/fable**; mechanical/catalog-row/test-repair tasks stay sonnet. Assigned by `/project-pipeline`, not here.
 
 ## Deferrals (filed via `/defer` at close)
 
@@ -285,4 +286,4 @@ Memory Service, Context Binder, Completion Engine, gate-policy extension, and th
 
 ---
 
-*AI-optimized specification. Original design: `design.md` v0.4. Pre-spec inputs: `notes/d-f0-eval-family-spec.md`, `notes/policy-v2-origin-classification-decision-tree.md`.*
+*AI-optimized specification. Original design: `design.md` v0.4. Pre-spec inputs: `notes/d-f0-eval-family-spec.md`, `notes/policy-v2-origin-classification-decision-tree.md`. Validated 2026-07-08 against merged procedures (CLAUDE.md §8.5 Sonnet-5 tiering + `/goal`; AIP layer retired) — no requirements change; plan-time execution-tiering note added to Assumptions.*
