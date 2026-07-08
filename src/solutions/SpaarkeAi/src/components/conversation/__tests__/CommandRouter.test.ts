@@ -100,7 +100,7 @@ describe('parse — soft slashes (FR-50)', () => {
 });
 
 // ---------------------------------------------------------------------------
-// Case insensitivity (matches intentMatcher convention)
+// Case insensitivity (slash triggers are matched case-insensitively)
 // ---------------------------------------------------------------------------
 
 describe('parse — case insensitivity', () => {

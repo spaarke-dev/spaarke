@@ -52,6 +52,9 @@ public sealed class AgentCostControlMiddleware : ISprkChatAgent
     /// <inheritdoc />
     public CitationContext? Citations => _inner.Citations;
 
+    /// <summary>Delegates the FR-P2-01 agent-turn contract to the inner agent (loop-contract state passes through the middleware pipeline).</summary>
+    public AgentTurnContract? TurnContract => _inner.TurnContract;
+
     /// <summary>
     /// Current cumulative token count for this session.
     /// Exposed for testing and monitoring.
@@ -101,16 +104,4 @@ public sealed class AgentCostControlMiddleware : ISprkChatAgent
             "ChatAgent cost control: added ~{EstimatedTokens} tokens, sessionTotal={SessionTokenCount}/{MaxTokenBudget}",
             estimatedTokens, _sessionTokenCount, _maxTokenBudget);
     }
-
-    /// <inheritdoc />
-    /// <remarks>
-    /// Pass-through to the inner agent. Detection calls are not counted against the token budget
-    /// because they use the raw client (not function-invocation-enabled) and are used for
-    /// plan gating, not content generation.
-    /// </remarks>
-    public Task<IReadOnlyList<FunctionCallContent>> DetectToolCallsAsync(
-        string message,
-        IReadOnlyList<AiChatMessage> history,
-        CancellationToken cancellationToken)
-        => _inner.DetectToolCallsAsync(message, history, cancellationToken);
 }

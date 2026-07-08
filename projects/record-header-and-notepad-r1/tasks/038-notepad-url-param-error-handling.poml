@@ -1,0 +1,87 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="038" project="record-header-and-notepad-r1">
+  <metadata>
+    <title>Verify URL-param error handling (FR-13)</title>
+    <phase>3: Notepad</phase>
+    <status>completed</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>037</dependencies>
+    <blocks>039</blocks>
+    <tags>react, typescript, fluent-ui</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Verification + minor UX polish for error state</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>Verify FR-13 URL-param error handling in NotepadShell: missing regardingEntity or regardingId renders Fluent v9 MessageBar with error text and a Close button that dismisses the modal (via window.parent.postMessage or window.close). Refine copy per U-01 unresolved question.</prompt>
+
+  <role>Spaarke platform developer. Fluent v9 + Xrm.Navigation modal-close conventions.</role>
+
+  <goal>MessageBar renders with error on missing params; Close button dismisses cleanly; documented in notes/.</goal>
+
+  <context>
+    <background>Spec FR-13 error path. NotepadShell early-returns MessageBar when useLaunchContext returns valid=false. U-01 flagged unclear close mechanism.</background>
+    <relevant-files>
+      <file>src/solutions/Notepad/src/components/NotepadShell.tsx</file>
+      <file>src/solutions/Notepad/src/components/__tests__/NotepadShell.test.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">FR-13 error path.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/record-header-and-notepad-r1/spec.md</file>
+      <file>projects/record-header-and-notepad-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-021-fluent-ui-design-system.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">In NotepadShell, if useLaunchContext returns valid=false: return &lt;MessageBar intent="error"&gt;{launchContext.error}&lt;/MessageBar&gt; with a Close button.</step>
+    <step order="2">Close button handler: try window.close() first; if that fails, send postMessage to window.parent with a "notepad-close" event; else no-op.</step>
+    <step order="3">Add test case: missing regardingId → MessageBar renders; click on Close invokes window.close (mocked).</step>
+    <step order="4">Run tests.</step>
+    <step order="5">Update TASK-INDEX.md: mark 038 ✅.</step>
+    <step order="6">Document U-01 resolution in notes/close-mechanism.md.</step>
+  </steps>
+
+  <tools><tool name="npm">Build + test</tool></tools>
+
+  <outputs>
+    <output type="code">src/solutions/Notepad/src/components/NotepadShell.tsx</output>
+    <output type="docs">projects/record-header-and-notepad-r1/notes/close-mechanism.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given URL missing regardingId, NotepadShell renders MessageBar with error text.</criterion>
+    <criterion testable="true">Close button attempts window.close; on failure, attempts postMessage; never throws.</criterion>
+  </acceptance-criteria>
+
+  <notes>Xrm.Navigation.navigateTo-opened webresources typically respond to window.close(); test in dev environment during task 039 QA.
+
+  ---
+  ## Completion notes (2026-07-03)
+
+  Implemented:
+  - `NotepadErrorBanner` component in NotepadShell.tsx (Fluent v9 MessageBar + Close button; icon-in-containerAction slot + labeled button); intent="error" for invalid-launch/repo-error, intent="warning" for unsupported entity.
+  - `handleNotepadClose()` with two-strategy sequence: window.close() → postMessage({type:"notepad-close"}, "*"). Both wrapped in try/catch (defensive).
+  - Three error-state early-returns in NotepadShell now render NotepadErrorBanner instead of placeholder divs. data-testid + data-error-state hooks preserved.
+  - Fixed pre-existing jest.config.cjs typo: `setupFilesAfterEach` → `setupFilesAfterEnv` (correct Jest config key; the wrong key silently no-op'd the jest.setup.cjs, which was loading matchMedia + ResizeObserver polyfills). All 102 tests still pass after fix.
+  - Notes: `projects/record-header-and-notepad-r1/notes/close-mechanism.md` documenting U-01 resolution.
+
+  Tests: 21 NotepadShell tests (was 16; +5 net new for MessageBar rendering + Close-button behavior). Full Notepad suite: 102/102 (was 97).
+
+  Findings:
+  - Fluent v9 MessageBar renders as `role="group"` (not `role="alert"`); tests assert on role="group" to confirm shell mount.
+  - `role="alert"` mapping requires MessageBar.politeness="assertive" prop (default is polite → group). Kept default for our error banners since they are already visually prominent and non-transient.
+  - MessageBarActions.containerAction slot correctly rendered dismiss icon; click behavior verified separately from the labeled Close button.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files first. Follow task-execute skill.</protocol>
+  </execution>
+</task>

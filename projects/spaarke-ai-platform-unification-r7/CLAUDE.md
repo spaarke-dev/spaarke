@@ -7,10 +7,11 @@
 
 ## Project Status
 
-- **Phase**: Planning → Wave 1 ready to start
-- **Last Updated**: 2026-06-28
-- **Current Task**: Not started (Wave 1 task 001 queued)
-- **Next Action**: Run `task-execute` for task `001-audit-aianalysis-aicompletion-patterns.poml`
+- **Phase**: **CLOSED / RE-SCOPED** (2026-07-05) — do NOT execute further R7 tasks or close-plan phases
+- **Last Updated**: 2026-07-05
+- **Current Task**: none — project closed; remaining scope absorbed by [`spaarke-ai-architecture-redesign-r1`](../spaarke-ai-architecture-redesign-r1/) (Issue #550)
+- **Next Action**: work continues in `spaarke-ai-architecture-redesign-r1`; r7 branch disposition is redesign-r1 task 025 (FR-P1-06)
+- **CANONICAL CLOSE-OUT DOC** (read first): [`notes/close-out-absorbed-by-ai-architecture-redesign-r1.md`](notes/close-out-absorbed-by-ai-architecture-redesign-r1.md) — per-wave absorbed/dropped disposition map. The former close plan [`notes/r7-close-plan-2026-07-03.md`](notes/r7-close-plan-2026-07-03.md) is HISTORICAL — its phases 12.3a–G are absorbed or dropped per that map.
 
 ---
 

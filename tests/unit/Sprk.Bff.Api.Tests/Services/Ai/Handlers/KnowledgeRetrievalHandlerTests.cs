@@ -13,7 +13,7 @@ namespace Sprk.Bff.Api.Tests.Services.Ai.Handlers;
 
 /// <summary>
 /// Unit tests for <see cref="KnowledgeRetrievalHandler"/> (R6 Wave 7c — replaces the legacy
-/// hardcoded <c>KnowledgeRetrievalTools</c> class previously registered on
+/// hardcoded <c>KnowledgeRetrieval chat-tools</c> class previously registered on
 /// <see cref="Chat.SprkChatAgentFactory"/>).
 /// </summary>
 /// <remarks>

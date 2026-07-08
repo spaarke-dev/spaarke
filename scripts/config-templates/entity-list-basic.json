@@ -1,0 +1,17 @@
+{
+  "$comment": "Minimum-viable DataGrid configuration template. Use this as the starting point for any new sprk_gridconfiguration record. REPLACE <savedquery-id> with the target savedquery GUID; optionally set display.title (defaults to the savedquery name). Everything else is optional and covered by framework defaults. See docs/guides/DATAGRID-FRAMEWORK-CONFIGURATION-GUIDE.md.",
+  "_version": "1.0",
+  "source": {
+    "type": "savedquery",
+    "savedQueryId": "<savedquery-id>"
+  },
+  "display": {
+    "title": "<friendly-grid-title>"
+  },
+  "rowOpen": {
+    "type": "formDialog"
+  },
+  "behavior": {
+    "pageSize": 25
+  }
+}

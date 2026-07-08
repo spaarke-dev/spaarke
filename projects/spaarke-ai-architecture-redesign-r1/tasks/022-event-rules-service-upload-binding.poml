@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="022" project="spaarke-ai-architecture-redesign-r1">
+  <metadata>
+    <title>Event Rules service (thin) + document_uploaded → [classify(1), summarize(2)] binding with bounds</title>
+    <phase>Phase P1: First Capability End-to-End</phase>
+    <status>not-started</status>
+    <estimated-hours>12</estimated-hours>
+    <tags>bff-api, event-path</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <parallel-group>W-P1-C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>021</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement FR-P1-03: stand up the Event entry path — a THIN Event Rules service that maps surface events to ordered capability invocations via `sprk_oneventbindings` on the Binding table, and wire the first rule: `document_uploaded → [classify(1), summarize(2)]`. The rule carries the spec-mandated bounds: a per-user daily cost cap (NFR-09 / ADR-016), a per-user opt-out, bulk-upload behavior of top-1 auto-run plus a "summarize all?" chip, and explicit-command supersede (a typed command at upload time suppresses the event rule). Classification confidence follows the M4 policy (per the overlay matrix / migration map). This delivers the G-P1 headline behavior: a user uploads a file, types nothing, and sees classification + summary + chips. Every event-triggered execution flows through the task-021 OutputRouter, so outputs land in the ledger before rendering.
+  </prompt>
+
+  <role>
+    Senior .NET developer familiar with the Sprk.Bff.Api chat/upload pipeline, SSE streaming, Binding-table routing, and AI budget enforcement (ADR-016).
+  </role>
+
+  <goal>
+    A thin Event Rules service resolving `document_uploaded` to the ordered [classify, summarize] Binding invocations with all four bounds enforced and test-proven; upload-with-no-typed-command yields classification + summary + chips end-to-end on the dev stack.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-architecture-redesign-r1/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-architecture-redesign-r1/plan.md</file>
+    <file purpose="project-context">projects/spaarke-ai-architecture-redesign-r1/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md</file>
+    <file purpose="upload-pipeline">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ (attachment/upload flow)</file>
+    <file purpose="binding-contract">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IConsumerRoutingService.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-039">The Event path is one of the ONLY three entry paths (Event / Click / Text). Event rules live in `sprk_oneventbindings` on the Binding table — MUST NOT add routing config outside the Binding table (no appsettings rule maps, no code-level event tables); MUST NOT add a second intent-detection mechanism (the event rule is declarative data, not inference).</constraint>
+    <constraint source="ADR-040">Both classify and summarize outputs MUST be written to the ledger BEFORE rendering — all executions flow through OutputRouter (task 021).</constraint>
+    <constraint source="NFR-09 / ADR-016">Per-user daily Event-path budget MUST be enforced AND telemetered; cap-exceeded yields a graceful, rendered notice, not a silent drop.</constraint>
+    <constraint source="project">Explicit-command supersede: a typed command accompanying the upload suppresses the event rule (the Text path wins). The r7 empty-attachments guard becomes an Event/Click precondition here (coordinated with task 025) — the rule does not fire with zero attachments.</constraint>
+    <constraint source="NFR-04">Latency budget: upload → first summary token ≤5s p50 / ≤10s p95 — verified at gate 027; do not introduce serial waits that break it (classify(1) then summarize(2) is the mandated order, but start streaming as early as the contract allows).</constraint>
+    <constraint source="NFR-08">Hard cutover: any legacy upload-side auto-analysis path this replaces is deleted with grep-zero SHOWN; no compat shims.</constraint>
+    <constraint source="ADR-029">BFF-touching task: publish-size verification with size + delta reported.</constraint>
+    <constraint source="NFR-02">Eval suite green is a merge gate; add event-path cases.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>event-path, binding-table, ai-budgets, bff-api</topic>
+    <files>
+      <file>docs/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>docs/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/OVERLAY-MATRIX.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-MIGRATION-MAP.md</file>
+    </files>
+    <patterns>
+      <pattern name="Prompted executor" location="src/server/api/Sprk.Bff.Api/Services/Ai/LinearConsumers/ActionRunner.cs">classify + summarize execute as catalog rows through this path.</pattern>
+      <pattern name="Output routing" location="src/server/api/Sprk.Bff.Api/Services/Ai/OutputRouter.cs">Task-021 seam — every event-triggered output goes through it.</pattern>
+      <pattern name="Binding resolution" location="src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IConsumerRoutingService.cs">`sprk_oneventbindings` arrives on the full Binding contract from task 004.</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      The Event path is the "types nothing" half of the assistant promise. Keeping the service THIN is a design invariant: it resolves event → ordered bindings and enforces bounds; it contains zero capability logic. Bounds exist because auto-run capabilities spend money on behalf of users who did not ask (cost cap), may be unwanted (opt-out), and can multiply on bulk upload (top-1 + chip).
+    </background>
+    <dependencies>
+      <dependency task="021" status="pending">OutputRouter + universal ledger write — the render path for event-triggered outputs.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 025 drops the r7 empty-attachments guard from dispatch and re-homes it as this path's precondition.</item>
+      <item>Task 023 renders the chips this rule emits (chips carry binding_id).</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context check + load knowledge">
+      Verify context usage below 70%. Load spec FR-P1-03, the M4 classify-confidence policy from OVERLAY-MATRIX/migration map, ADR-016 budget rules, and the upload pipeline code. Confirm task 021 complete.
+    </step>
+    <step order="1" name="Design the thin Event Rules service">
+      Define `IEventRulesService`: input = surface event (`document_uploaded`) + session context; output = ordered Binding invocations from `sprk_oneventbindings`. Answer the CLAUDE.md §11 three-question justification (new surface). No capability logic inside the service.
+    </step>
+    <step order="2" name="Seed the binding rule">
+      Populate `sprk_oneventbindings` for `document_uploaded → [classify(1), summarize(2)]` on the classify + summarize Binding rows on spaarkedev1 (summarize row from task 020).
+    </step>
+    <step order="3" name="Implement bounds">
+      Implement the four bounds: (a) per-user daily cost cap with ADR-016 telemetry + graceful cap notice; (b) per-user opt-out; (c) bulk upload = auto-run top-1 + emit "summarize all?" chip; (d) explicit-command supersede. Add the empty-attachments precondition (rule does not fire with zero attachments).
+    </step>
+    <step order="4" name="Wire the upload flow">
+      Hook the upload pipeline to the Event Rules service; execute classify(1) then summarize(2) via ActionRunner through OutputRouter; apply the M4 classify-confidence policy; emit chips per the Binding's chip transitions. Delete any legacy upload auto-analysis path replaced here (grep-zero shown).
+    </step>
+    <step order="5" name="Tests + eval cases">
+      Unit/integration tests: rule resolution order, each of the four bounds, empty-attachments precondition, M4 policy branches, ledger-before-render via OutputRouter. Add event-path eval cases to tests/integration/contract.
+    </step>
+    <step order="6" name="Build + publish-size verification">
+      dotnet build + tests green (shown). ADR-029 publish-size verification: report size + delta vs baseline.
+    </step>
+    <step order="7" name="Update tracking">
+      Update TASK-INDEX.md, POML status, current-task.md per completion protocol.
+    </step>
+    <step order="9.5" name="Quality gates">
+      Step 9.5 quality gates: run code-review + adr-check; resolve Critical findings per CLAUDE.md §6.5 before completion.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build, test, publish-size verification</tool>
+    <tool name="dataverse-mcp">Seed sprk_oneventbindings rows on spaarkedev1</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/EventRules/ (IEventRulesService + implementation + Null peer if gated)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ (upload flow hook)</output>
+    <output type="data">sprk_oneventbindings values on the classify + summarize Binding rows (spaarkedev1)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/ + tests/integration/contract/ (event-path cases)</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Upload with no typed command yields classification + summary + chips in the UI (integration evidence; final browser confirmation at gate 027).</criterion>
+    <criterion testable="true">The document_uploaded rule resolves from sprk_oneventbindings on the Binding table only; grep confirms no event-routing config in appsettings or code (shown).</criterion>
+    <criterion testable="true">All four bounds are test-proven: daily cost cap (with telemetry), opt-out, bulk top-1 + "summarize all?" chip, explicit-command supersede; plus the empty-attachments precondition.</criterion>
+    <criterion testable="true">Classify-confidence M4 policy branches are test-covered; both outputs land in the ledger before rendering (OutputRouter ordering holds).</criterion>
+    <criterion testable="true">dotnet build + tests + eval suite green; ADR-029 publish size reported with delta vs baseline.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

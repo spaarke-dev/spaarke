@@ -31,7 +31,7 @@
  *  - Speak to SPE directly (host pane supplies bytes via prop / receives via
  *    serialize callback; SPE plumbing lives in `ComposeDocumentService`).
  *  - Dispatch AI actions directly. Per refined ADR-013 (2026-05-20), AI dispatch
- *    flows through `IConsumerRoutingService` + `IInvokePlaybookAi` via
+ *    flows through `IConsumerRoutingService` + the BFF playbook-invocation boundary via
  *    `POST /api/compose/action/{consumerType}` (W3-024). The editor emits
  *    `compose_selection_offer` on the `conversation` channel; the
  *    ConversationPane (or sibling toolbar) is the dispatcher.

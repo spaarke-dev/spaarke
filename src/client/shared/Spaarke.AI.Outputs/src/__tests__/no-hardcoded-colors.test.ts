@@ -19,9 +19,8 @@
  *   - Comments that mention colors (for documentation)
  *   - The string "colorBrand..." or "colorNeutral..." — these are Fluent token names
  *   - Test files (this file itself)
- *   - The SERIES_COLORS_CSS constant in ChartWidget uses var(--colorXxx) CSS variables
- *     which resolve to Fluent design tokens at runtime — these are token references,
- *     not hard-coded colors.
+ *   - var(--colorXxx) CSS variable references resolve to Fluent design tokens
+ *     at runtime — these are token references, not hard-coded colors.
  *
  * IMPORTANT: If a widget fails this scan, a FINDING comment is added to that
  * widget's test file. The production widget source must NOT be modified in
@@ -79,8 +78,8 @@ const SAFE_LINE_PATTERNS = [
   // CSS custom property references: var(--colorXxx) — these are Fluent token CSS vars
   // The var() will not contain a literal hex color; the match would be in the var name itself.
   // We exclude lines where the hex-looking text is only inside a var(--color...) reference.
-  // Note: ChartWidget uses "var(--colorBrandForeground1)" — the var name contains no hex digits,
-  // so this pattern is for completeness.
+  // Note: widgets use "var(--colorBrandForeground1)"-style token references — the var
+  // name contains no hex digits, so this pattern is for completeness.
 ];
 
 // ---------------------------------------------------------------------------

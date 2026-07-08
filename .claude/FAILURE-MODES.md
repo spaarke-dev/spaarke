@@ -24,6 +24,7 @@ The distinction matters because the fix is different. Anti-patterns require *unl
 - [AP-2: Optional field in BFF contract that two clients drift apart on (orphan RAG chunks)](#ap-2-optional-field-in-bff-contract-that-two-clients-drift-apart-on)
 - [AP-3: GUID case mismatch between Xrm and Web API clients (case-sensitive AI Search filters)](#ap-3-guid-case-mismatch-between-xrm-and-web-api-clients)
 - [AP-4: Silent dev/demo deployed-bundle drift causing /api-prefix bug](#ap-4-silent-devdemo-deployed-bundle-drift-causing-api-prefix-bug)
+- [AP-5: AbortController in a useEffect whose deps include your own state transition](#ap-5-abortcontroller-in-a-useeffect-whose-deps-include-your-own-state-transition)
 
 ### Gotchas
 - [G-1: Settings-file schema malformation silently disables permission rules + hooks](#g-1-settings-file-schema-malformation-silently-disables-permission-rules--hooks)
@@ -35,6 +36,8 @@ The distinction matters because the fix is different. Anti-patterns require *unl
 - [G-7: Git Bash MSYS path mangling on Azure resource IDs](#g-7-git-bash-msys-path-mangling-on-azure-resource-ids)
 - [G-8: SPE container creation requires confidential client; canonical scripts use public client](#g-8-spe-container-creation-requires-confidential-client-canonical-scripts-use-public-client)
 - [G-9: BFF AI Search has TWO index-name settings — `AiSearch:KnowledgeIndexName` (read) and `Analysis:SharedIndexName` (write)](#g-9-bff-ai-search-has-two-index-name-settings)
+- [G-10: HTML5 DnD `dragEnter` fires on ancestors when preview extends beyond pointer](#g-10-html5-dnd-dragenter-fires-on-ancestors-when-preview-extends-beyond-pointer)
+- [G-11: `Xrm.Navigation.navigateTo({ target: 2 })` opens a separate window — cross-window signaling requires sessionStorage, not `window.*`](#g-11-xrmnavigationnavigateto-target-2-opens-a-separate-window--cross-window-signaling-requires-sessionstorage-not-window)
 
 ---
 
@@ -421,6 +424,141 @@ Affected code paths:
 - Short-term: always flip both. Any future env-provisioning runbook section that flips index names must include both.
 
 **Evidence**: 2026-05-28 chat — Phase 3 of `projects/spaarke-ai-assistant-new-resources-r1/`. First flip left `sprk_searchindexname` writing to `spaarke-knowledge-index-v2`; second flip (including `Analysis__SharedIndexName`) fixed it.
+
+---
+
+### AP-5: AbortController in a useEffect whose deps include your own state transition
+
+**Title**: A React `useEffect` that (a) starts a fetch with an `AbortController`, (b) dispatches its own `idle → loading` state transition, AND (c) has that state field in its dependency array — will abort its own in-flight fetch on the very next render. Idle-guard skips the restart. Fetch is stuck forever.
+
+**Date**: 2026-07-03 (spaarke-dataset-grid-framework-r2 UAT §2.5)
+
+**Classification**: Anti-pattern — the code LOOKS correct (deps-exhaustive, guarded, cleanup wired) but the interaction between "status is a dep" and "cleanup aborts controller" is silently wrong.
+
+**What happened**: `ArrangeStep.tsx` had one useEffect with deps `[entityName, configState.status, savedQueriesState.status, authenticatedFetch]` that (1) dispatched configs → "loading", (2) kicked off both configs + savedqueries fetches with the same `AbortController`, and (3) returned `() => controller.abort()` as cleanup. Sequence:
+1. Effect fires on mount → controller1 → both fetches dispatched with `controller1.signal`.
+2. React re-renders (configs status "idle" → "loading" and savedqueries "idle" → "loading" batched).
+3. Deps changed → cleanup fires → `controller1.abort()` → **both in-flight fetches cancelled mid-flight**.
+4. Effect body re-runs. Guards `if (X.status !== "idle") return` skip both re-dispatches.
+5. Both requests forever `"canceled"` in DevTools Network tab, status blank, response body "Failed to load response data".
+6. UI: Available Views dropdown shows "loading" spinner or empty forever. No console errors.
+
+**Root cause**: The exhaustive-deps rule is right in principle (any value read inside the effect should be listed), but when the effect DISPATCHES the state transition itself, listing that state creates a self-reference loop where cleanup is triggered by the state change you just made. AbortController cleanup then destroys the work you just started.
+
+**Fix** (applied to `ArrangeStep.tsx:1130-1256`):
+1. **Split into two useEffects** — one per fetch, each with its own AbortController. When configs completes, only its own effect's cleanup fires; savedqueries fetch continues undisturbed.
+2. **Remove status from deps** — deps are now `[entityName, authenticatedFetch]` only. The idle-guard reads status from CLOSURE (which decides whether to START a fetch). Status transitions no longer trigger cleanup. Cleanup fires only on unmount or entity change — the correct times to abort a stale fetch.
+3. **Use functional setState** (`onPickerCacheChange(prev => ...)`) to avoid the secondary race where the two effects' "loading" dispatches clobber each other.
+
+Full annotated fix comment at `src/solutions/WorkspaceLayoutWizard/src/steps/ArrangeStep.tsx:1130-1174` explains the failure sequence.
+
+**Prevention**:
+- Whenever a useEffect (a) uses AbortController, (b) dispatches its own state transition, and (c) reads that state — **remove the state from deps** and read it from closure via a guard. Add an `eslint-disable-next-line react-hooks/exhaustive-deps` comment WITH a paragraph explaining why status is excluded.
+- Never share one AbortController across multiple independent async operations in the same effect — split into separate effects with independent controllers.
+- Diagnostic signature in DevTools Network tab: request shows `(canceled)`, status blank, response tab says "Failed to load response data" — indicates the fetch was aborted mid-flight, not that the endpoint rejected it. If you see this on a request that fires and never resolves, the caller has this AP-5 bug.
+
+**Evidence**: commit `08bd41182` (initial round-1 attempt with counter); commit `803c77ace` (correct round-2 fix). `projects/spaarke-dataset-grid-framework-r2/notes/lessons-learned.md` UAT addendum §"first §5.5/5.6/3.3 fixes were wrong".
+
+**Cross-references**:
+- Skill: any skill that reviews React `useEffect` code should cross-check for this pattern.
+- Related canonical React docs: [React docs — "You Might Not Need an Effect"](https://react.dev/learn/you-might-not-need-an-effect) — the broader principle is that state changes shouldn't trigger effects that fight against them.
+
+---
+
+### G-10: HTML5 DnD `dragEnter` fires on ancestors when preview extends beyond pointer
+
+**Title**: Counter-based `dragEnter` / `dragLeave` pairing (increment on enter, decrement on leave, `isDragOver = counter > 0`) is a widely-cited pattern for HTML5 drag-drop — but it does NOT solve the case where the drag preview image extends beyond the pointer position and `dragEnter` fires on ancestor elements the pointer isn't actually inside. The correct approach is to hit-test the pointer coordinates against `getBoundingClientRect()` on every `dragOver`.
+
+**Date**: 2026-07-03 (spaarke-dataset-grid-framework-r2 UAT §5.5)
+
+**Classification**: Gotcha — the platform behavior is subtle and most tutorials teach the wrong pattern.
+
+**What happened**: `ArrangeStep.tsx` `GridSlot` had a `dragOver`/`dragLeave` handler that set `isDragOver` on `dragOver`. User reported: "the row activates when the drag-block is too far away — I see the drop indicator light up on Row 3 while My Documents is at the bottom of the screen." First fix attempt was counter-based (dragEnter increments, dragLeave decrements). Still broke — because `dragEnter` was ALREADY firing on rows the pointer wasn't inside, just because the drag preview visually overlapped them.
+
+**Root cause**: HTML5 DnD events fire based on complex compositing calculations that include the drag-preview element, not just pointer position. When a drag preview is large (like a section card ~200px × ~40px), the browser can fire `dragEnter` on elements the preview overlaps even when the pointer's `clientX/Y` is nowhere near them. Counter pairing doesn't help because the enter fires legitimately (from the browser's perspective).
+
+**Fix** (applied to `ArrangeStep.tsx:698-742`):
+```typescript
+const handleDragOver = React.useCallback((e: React.DragEvent) => {
+  e.preventDefault();
+  e.dataTransfer.dropEffect = "move";
+  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+  const inside =
+    e.clientX >= rect.left && e.clientX <= rect.right &&
+    e.clientY >= rect.top  && e.clientY <= rect.bottom;
+  setIsDragOver((prev) => (prev === inside ? prev : inside));
+}, []);
+
+const handleDragLeave = React.useCallback(() => {
+  setIsDragOver(false);
+}, []);
+
+const handleDrop = React.useCallback((e: React.DragEvent) => {
+  e.preventDefault();
+  setIsDragOver(false);
+  // Re-hit-test on drop — reject stray ancestor-dispatched drops.
+  const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+  const inside = /* same check */;
+  if (!inside) return;
+  const sectionId = e.dataTransfer.getData("text/plain");
+  if (sectionId) onDrop(slotId, sectionId);
+}, [slotId, onDrop]);
+```
+
+Hit-testing on every `dragOver` guarantees `isDragOver` is true iff the pointer is literally inside the drop target's rect. The `dragLeave` handler still fires on rapid movement (belt-and-suspenders correctness). Drop event is also hit-tested to reject stray ancestor-dispatched drops.
+
+**Prevention**:
+- For any HTML5 DnD drop target where visual state depends on pointer position, hit-test `e.clientX/Y` against `e.currentTarget.getBoundingClientRect()` on `dragOver`. Do NOT rely on counter-based `dragEnter`/`dragLeave` alone.
+- If a user reports "drop indicator activates on wrong element" or "activates far from pointer" — suspect the ancestor-dispatch behavior; go straight to hit-testing.
+
+**Evidence**: commit `708f18bb7` (round-1 counter attempt); commit `803c77ace` (correct hit-test fix). `projects/spaarke-dataset-grid-framework-r2/notes/lessons-learned.md` §"first §5.5 fix was wrong".
+
+**Cross-references**:
+- Any drag-drop UI in `src/client/**` (compose editor drop zones, workspace tab reordering, todo-list drag reordering) should audit for this same pattern.
+
+---
+
+### G-11: `Xrm.Navigation.navigateTo({ target: 2 })` opens a separate window — cross-window signaling requires sessionStorage, not `window.*`
+
+**Title**: A wizard opened via `Xrm.Navigation.navigateTo({ pageType: "webresource", ... }, { target: 2 })` runs in a **separate window** from the opener. `window.__dialogResult` (or any `window.*` global) written in the wizard's `handleFinish` cannot be read by the opener when the `navigateTo` Promise resolves.
+
+**Date**: 2026-07-03 (spaarke-dataset-grid-framework-r2 UAT §3.3)
+
+**Classification**: Gotcha — the `navigateTo` docs describe it as "opening a dialog", which suggests same-window overlay semantics. It's actually a separate window (`window.open` under the hood).
+
+**What happened**: `WorkspaceLayoutWizard/App.tsx` `handleFinish` wrote `(window as any).__dialogResult = { confirmed: true, layoutId }` on successful save. `SpaarkeAi/WorkspacePaneMenu.tsx` `handleCreateWorkspace` awaited the `navigateTo` Promise, then read `window.__dialogResult` to auto-open the new workspace as a tab. Result: `dialogResult` was always `undefined` — the SpaarkeAi shell's `window` object was different from the wizard's `window` object. New workspace saved successfully but never opened.
+
+**Root cause**: `Xrm.Navigation.navigateTo({ ... }, { target: 2 })` uses browser `window.open` semantics internally. The two windows share the same origin (both hosted as web resources) but are distinct execution contexts with distinct `window` objects. `window.*` globals do NOT cross the boundary.
+
+**Fix** (applied to `App.tsx:717-731` + `WorkspacePaneMenu.tsx:571-597`):
+Use `sessionStorage` as a shared per-origin per-tab-set bridge, with a timestamp-gated max age to prevent stale-result reuse:
+
+```typescript
+// In the wizard (writer side, after save)
+window.sessionStorage?.setItem(
+  "spaarke:workspace-wizard:last-result",
+  JSON.stringify({ confirmed: true, layoutId, at: Date.now() })
+);
+
+// In the opener (reader side, after navigateTo Promise resolves)
+const raw = window.sessionStorage?.getItem("spaarke:workspace-wizard:last-result");
+if (!raw) return null;
+const parsed = JSON.parse(raw);
+if (Date.now() - parsed.at > 60_000) return null; // stale — ignore
+// consume: remove immediately so re-cancel doesn't re-fire
+window.sessionStorage?.removeItem("spaarke:workspace-wizard:last-result");
+```
+
+Full pattern documented at [`.claude/patterns/ui/navigateto-popup-result-bridge.md`](patterns/ui/navigateto-popup-result-bridge.md).
+
+**Prevention**:
+- Any wizard opened via `Xrm.Navigation.navigateTo` with `target: 2` that needs to signal a result back to its opener MUST use sessionStorage (or localStorage or `postMessage`), NOT `window.*` globals.
+- The pattern is generic: same-origin cross-window ↔ pick a storage / messaging primitive; do NOT assume `window` state propagates.
+
+**Evidence**: commit `708f18bb7` (round-1 `window.__dialogResult` attempt); commit `803c77ace` (correct sessionStorage bridge). `projects/spaarke-dataset-grid-framework-r2/notes/lessons-learned.md` §"first §3.3 fix was wrong".
+
+**Cross-references**:
+- Every Spaarke wizard: `CreateEventWizard`, `CreateMatterWizard`, `CreateProjectWizard`, `WorkspaceLayoutWizard`, `DocumentUploadWizard`, `PlaybookLibrary`, `AllDocuments`, `SummarizeFilesWizard`, `FindSimilar`, `CreateTodoWizard`, `CreateWorkAssignmentWizard`. If any of them uses `target: 2` and returns a result to its opener, audit for this same pattern.
 
 ---
 

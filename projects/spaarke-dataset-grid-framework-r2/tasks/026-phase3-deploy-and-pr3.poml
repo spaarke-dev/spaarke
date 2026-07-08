@@ -1,0 +1,97 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="026" project="spaarke-dataset-grid-framework-r2">
+  <metadata>
+    <title>Phase 3 close: build + deploy + regression + PR 3</title>
+    <phase>3: Shared Package Extraction + Documentation</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>022,023,024,025</dependencies>
+    <blocks>090</blocks>
+    <tags>deploy, code-page-deploy, legal-workspace, spaarkeai, workspace-layout-wizard, regression, pr</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Deployment task; integration + regression on Dashboard II identity check</rigor-reason>
+    <parallel-group>Wave 13</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Build shared lib + new shared package + all consumers. Deploy to spaarkedev1. Regression-verify Dashboard II renders IDENTICALLY pre/post extraction (this is the core FR-10 acceptance). Commit + push + open PR 3 with FR-09 + FR-10.
+  </prompt>
+
+  <role>
+    SPAARKE deployment operator + regression tester. Final validation of FR-10 shared-package extraction.
+  </role>
+
+  <goal>
+    PR 3 open with FR-09 + FR-10. All 4 packages deployed. Dashboard II renders identically pre/post — proves the extraction is a pure refactor (no behavior change).
+  </goal>
+
+  <context>
+    <background>
+      Final PR of R2. If Dashboard II diverges pre/post, FR-10 extraction has broken something — roll back and investigate.
+    </background>
+    <relevant-files>
+      <file>scripts/Build-AllClientComponents.ps1</file>
+      <file>scripts/Deploy-AllDataGridConsumers.ps1</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Dashboard II MUST render identically pre/post. This is the acceptance gate for FR-10.</constraint>
+    <constraint source="project">Verify SpaarkeAi's vite.config.ts has no `@spaarke/legal-workspace` source aliases (grep confirms).</constraint>
+    <constraint source="project">Verify both LegalWorkspace + SpaarkeAi rebuilds pick up changes via shared package (the whole point of FR-10).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-dataset-grid-framework-r2/CLAUDE.md</file>
+      <file>projects/spaarke-dataset-grid-framework-r2/spec.md</file>
+      <file>projects/spaarke-dataset-grid-framework-r2/plan.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Confirm 022, 023, 024, 025 all ✅.</step>
+    <step order="2">Build via `Build-AllClientComponents.ps1` + Vite bundles. All succeed.</step>
+    <step order="3">Deploy via `/code-page-deploy` — LegalWorkspace + SpaarkeAi + WorkspaceLayoutWizard.</step>
+    <step order="4">**Core regression**: Open Dashboard II in LegalWorkspace + SpaarkeAi. Compare rendering side-by-side. MUST BE IDENTICAL — no visual diffs, no console errors, no timing differences.</step>
+    <step order="5">Regression on wizard: reopen a published layout in WorkspaceLayoutWizard — loads correctly, saves correctly.</step>
+    <step order="6">Grep verification: `grep '@spaarke/legal-workspace' src/solutions/SpaarkeAi/vite.config.ts` returns 0 matches. `grep '@spaarke/legal-workspace' src/solutions/SpaarkeAi/package.json` returns 1 match (the file: dependency).</step>
+    <step order="7">Confirm SKILL.md + widget-authoring guide contain FR-09 warning.</step>
+    <step order="8">Invoke `/push-to-github`. Commit: `feat(datagrid-framework): PR 3 — shared package extraction + dual-deploy warning (FR-09, FR-10)`. Push.</step>
+    <step order="9">Open PR 3 with body citing FRs 09/10 + Dashboard II identity evidence.</step>
+    <step order="10">Wait for CI. Fix any failures.</step>
+    <step order="11">Update TASK-INDEX.md: 026 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="powershell">Build</tool>
+    <tool name="Skill">code-page-deploy, push-to-github</tool>
+    <tool name="gh">Open PR</tool>
+  </tools>
+
+  <outputs>
+    <output type="deploy">3 code pages + 1 new shared package deployed</output>
+    <output type="pr">GitHub PR (PR 3) opened</output>
+    <output type="report">notes/phase3-regression-report.md (side-by-side Dashboard II comparison)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All builds + deploys succeed.</criterion>
+    <criterion testable="true">Dashboard II renders identically in LegalWorkspace + SpaarkeAi.</criterion>
+    <criterion testable="true">SpaarkeAi vite.config.ts has no `@spaarke/legal-workspace` source aliases.</criterion>
+    <criterion testable="true">FR-09 warning present in skill + guide.</criterion>
+    <criterion testable="true">PR 3 opened; CI green.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    - This is the last PR of R2. Task 090 (wrap-up) waits for this to merge.
+    - Coordinate merge order with `spaarkeai-compose-r1` before starting Phase 3 (task 020) — cited in plan.md § 8 risk register R3.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge. STANDARD rigor. Skill delegation for deploy + push.</protocol>
+  </execution>
+</task>

@@ -31,6 +31,17 @@ public static class ToolFrameworkExtensions
         // Register lookup choices resolver (scoped: caches per-request, needs IScopeResolverService)
         services.AddScoped<LookupChoicesResolver>();
 
+        // spaarke-ai-architecture-redesign-r1 task 008 (FR-P0-07) — user-OBO Dataverse Web API
+        // boundary for the dataverse.* tool namespace (Describe / ReadQuery / SearchData read
+        // handlers; task-009 write handlers reuse it). Registered HERE, symmetric with the
+        // handler assembly scan below, because the assembly scan unconditionally registers the
+        // Dataverse* handlers whose constructors require IDataverseUserClient — registering the
+        // dependency anywhere else would recreate the asymmetric-registration anti-pattern
+        // (CLAUDE.md §10 F.1). Typed HttpClient per the AnalysisToolService sibling precedent.
+        // The implementation is user-OBO ONLY (fail-closed; no app-only fallback) per the
+        // spec MUST rule audited by task 012.
+        services.AddHttpClient<Handlers.Dataverse.IDataverseUserClient, Handlers.Dataverse.DataverseUserClient>();
+
         // Discover and register all tool handlers from this assembly
         services.AddToolHandlersFromAssembly(Assembly.GetExecutingAssembly());
 
@@ -58,6 +69,10 @@ public static class ToolFrameworkExtensions
 
         // Register lookup choices resolver (scoped: caches per-request, needs IScopeResolverService)
         services.AddScoped<LookupChoicesResolver>();
+
+        // Task 008 (FR-P0-07) — same registration as the primary overload so both entry points
+        // produce a resolvable handler graph (Dataverse* handlers ctor-require this client).
+        services.AddHttpClient<Handlers.Dataverse.IDataverseUserClient, Handlers.Dataverse.DataverseUserClient>();
 
         // Discover and register all tool handlers from this assembly
         services.AddToolHandlersFromAssembly(Assembly.GetExecutingAssembly());

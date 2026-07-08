@@ -1,0 +1,133 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="040" project="spaarke-ai-architecture-redesign-r1">
+  <metadata>
+    <title>Remaining consumers as Bindings — delete the three routing-appsettings blocks (single routing surface)</title>
+    <phase>Phase P3: Consumer + Client Consolidation</phase>
+    <status>not-started</status>
+    <estimated-hours>10</estimated-hours>
+    <tags>bff-api, catalog, routing</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <parallel-group>W-P3-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>038</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement FR-P3-01: migrate every remaining config-routed consumer onto the Binding table (`sprk_playbookconsumer`) so the Binding catalog becomes the SINGLE routing surface. The consumers in scope are `document-profile`, `matter-pre-fill`, `project-pre-fill`, workspace `summarize-file`, `email-analysis`, and Insights `ask`/`search`. Each becomes a Binding row (with its Action row where one does not yet exist) resolved via `ConsumerRoutingService`, exactly as chat-summarize was migrated in task 020. Then DELETE the `LinearConsumers`, `Workspace.*PlaybookId`, and `Insights.Playbooks.Map` appsettings blocks plus the code that reads them — this is the single-routing-surface rule from ADR-039, enforced as a hard cutover. Acceptance is that all listed routes resolve via the Binding table and grep returns zero hits for the three config keys, with the grep output SHOWN (NFR-08). Consult `notes/audit-inputs/OVERLAY-MATRIX.md` for the per-consumer verdict and `SPAARKE-AI-MIGRATION-MAP.md` for sequencing detail.
+  </prompt>
+
+  <role>
+    Senior .NET developer familiar with the Sprk.Bff.Api Minimal API stack, the ConsumerRoutingService/Binding catalog contract, and Dataverse-backed configuration catalogs.
+  </role>
+
+  <goal>
+    All seven listed consumer routes resolve exclusively via `sprk_playbookconsumer` Binding rows through `ConsumerRoutingService`; the `LinearConsumers`, `Workspace.*PlaybookId`, and `Insights.Playbooks.Map` appsettings blocks and their reader code are deleted with shown grep-zero output; builds and the eval suite are green.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-architecture-redesign-r1/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-architecture-redesign-r1/plan.md</file>
+    <file purpose="project-context">projects/spaarke-ai-architecture-redesign-r1/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md</file>
+    <file purpose="per-component-verdicts">projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/OVERLAY-MATRIX.md</file>
+    <file purpose="migration-sequencing">projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-MIGRATION-MAP.md</file>
+    <file purpose="reference-migration">projects/spaarke-ai-architecture-redesign-r1/tasks/020-chat-summarize-action-binding.poml</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-039">MUST route every AI invocation through Event / Click / Text over the two closed catalogs; MUST NOT add routing config outside the Binding table (`sprk_playbookconsumer`); MUST NOT add a second intent-detection mechanism.</constraint>
+    <constraint source="ADR-040">Every execution MUST write its output + tool chain to the session ledger BEFORE rendering; disposition is the only rendering contract.</constraint>
+    <constraint source="ADR-013-amended-2026-07-05">Capability invocation is the canonical facade verb; CRUD code consumes AI via `Services/Ai/PublicContracts/` only — the PublicContracts boundary is unchanged.</constraint>
+    <constraint source="NFR-08">Hard cutover: no parallel-run, no compat shims. Retirement of the three config keys MUST be grep-zero-verified with the grep output SHOWN in the transcript.</constraint>
+    <constraint source="ADR-029 / NFR-01">BFF-touching task: run `dotnet publish -c Release` and report publish size + delta (net reduction expected; &gt;=+2 MB delta needs justification).</constraint>
+    <constraint source="NFR-02 / NFR-06">Eval suite green is a merge gate; every catalog change in this task adds-or-updates golden-utterance eval cases in `tests/integration/contract/`.</constraint>
+    <constraint source="CLAUDE.md-s10">Load `.claude/constraints/bff-extensions.md` before changing DI/registrations; update tests in `tests/unit/Sprk.Bff.Api.Tests/` for modified services.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai-routing, binding-catalog, bff-api, hard-cutover</topic>
+    <files>
+      <file>docs/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>docs/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/OVERLAY-MATRIX.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-MIGRATION-MAP.md</file>
+    </files>
+    <patterns>
+      <pattern name="Prompted executor" location="src/server/api/Sprk.Bff.Api/Services/Ai/LinearConsumers/">
+        ActionRunner + PromptSchemaRenderer — the executor every migrated Binding resolves to; task 020 (chat-summarize) is the reference migration.
+      </pattern>
+      <pattern name="Binding contract resolution" location="src/server/api/Sprk.Bff.Api/Services/Ai/">
+        `ConsumerRoutingService` returns the full Binding contract (task 004); every consumer route in this task resolves through it — no side channels.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Phase P2 hard-cut the text path onto the loop; P3 finishes the consolidation by moving the remaining Click/Event consumers off appsettings routing. After this task, the Binding table is the ONLY place a route can be declared — the precondition for the G-M maker gate (a BA authors a capability with zero deploys).
+    </background>
+    <dependencies>
+      <dependency task="038" status="pending">G-P2 gate passed (text-path hard cutover deployed + browser-UAT'd).</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 020 — chat-summarize Action+Binding migration (the pattern this task repeats x7)</item>
+      <item>Task 024 — engine-output→ledger adapter (Insights ask/search outputs already land in the ledger)</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context check + load knowledge">
+      Verify context &lt; 70%. Load spec FR-P3-01, OVERLAY-MATRIX.md verdicts for the seven consumers, `.claude/constraints/bff-extensions.md`, and the task-020 migration as reference.
+    </step>
+    <step order="1" name="Inventory current routing">
+      Grep `appsettings*.json` + `Services/Ai/**` for `LinearConsumers`, `Workspace.*PlaybookId` (e.g. `Workspace:SummarizeFilePlaybookId`), and `Insights.Playbooks.Map` readers. Map each consumer → current playbook id, input shape, surface(s), disposition.
+    </step>
+    <step order="2" name="Author Action + Binding rows">
+      For each of document-profile, matter-pre-fill, project-pre-fill, workspace summarize-file, email-analysis, Insights ask, Insights search: create/verify the `sprk_analysisaction` row and author the `sprk_playbookconsumer` Binding row on spaarkedev1 (ucid, surfaces, disposition, risk, capture mode) per the FR-P0-03 column contract.
+    </step>
+    <step order="3" name="Re-point resolution code">
+      Re-point each consumer's resolution path onto `ConsumerRoutingService` Binding lookup; delete the config-reader code paths (options classes, direct `IConfiguration` reads) for the three blocks.
+    </step>
+    <step order="4" name="Delete the config blocks">
+      Remove `LinearConsumers`, `Workspace.*PlaybookId`, and `Insights.Playbooks.Map` blocks from all appsettings files. Run and SHOW grep-zero output for the three keys across `src/**` and config files.
+    </step>
+    <step order="5" name="Tests + eval cases">
+      Update `tests/unit/Sprk.Bff.Api.Tests/` routing tests to prove each route resolves via the Binding table; add/update golden-utterance eval cases for the migrated capabilities in `tests/integration/contract/`.
+    </step>
+    <step order="6" name="Verify">
+      `dotnet build` + full test suite + eval suite green (output shown). Run `dotnet publish -c Release` and report publish size + delta per ADR-029.
+    </step>
+    <step order="7" name="Step 9.5 quality gates">
+      Run code-review + adr-check (FULL rigor). Resolve findings per CLAUDE.md §6.5. Update TASK-INDEX.md and reset current-task.md.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build, test, publish-size verification</tool>
+    <tool name="dataverse-mcp">Author/verify Binding + Action rows on spaarkedev1</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="data">sprk_analysisaction + sprk_playbookconsumer rows on spaarkedev1 (7 consumers)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/** (resolution re-point; config-reader deletion)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/appsettings.json (+ variants) — three routing blocks deleted</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/** (routing resolution tests)</output>
+    <output type="test">tests/integration/contract/** (eval cases for migrated capabilities)</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All routes for document-profile, matter-pre-fill, project-pre-fill, workspace summarize-file, email-analysis, and Insights ask/search resolve via the Binding table (`sprk_playbookconsumer`).</criterion>
+    <criterion testable="true">Grep-zero for `LinearConsumers`, `Workspace.*PlaybookId`, and `Insights.Playbooks.Map` config keys across src/** and appsettings — grep output SHOWN in transcript (NFR-08).</criterion>
+    <criterion testable="true">dotnet build + unit tests + golden-utterance eval suite green; eval cases added/updated for each migrated capability (NFR-02/NFR-06).</criterion>
+    <criterion testable="true">Publish size + delta reported per ADR-029 (net-reduction expectation; justification if &gt;=+2 MB).</criterion>
+    <criterion testable="true">Step 9.5 code-review + adr-check passed.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

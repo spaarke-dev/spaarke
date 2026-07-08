@@ -55,7 +55,14 @@ import {
   type DataGridParentContext,
 } from '../../hooks/useDataGridContext';
 import { dataGridTokens } from './tokens';
-import { resolveConfig, type DataGridOverrides, type ResolvedConfig, type ResolvedColumn } from './configResolution';
+import {
+  resolveConfig,
+  resolveEffectiveAvailableViews,
+  resolveEffectivePageSize,
+  type DataGridOverrides,
+  type ResolvedConfig,
+  type ResolvedColumn,
+} from './configResolution';
 import { useLazyLoad } from './useLazyLoad';
 import { overlayParentContextFilter, overlayHostFilters, type HostFilterCondition } from './fetchXmlOverlay';
 import { CommandBar as DataGridCommandBar } from './commandBar/CommandBar';
@@ -149,6 +156,40 @@ export interface DataGridProps {
 
   /** OPTIONAL — escape-hatch overrides for column renderers, badge map, filter chip allowlist. */
   overrides?: DataGridOverrides;
+
+  /**
+   * OPTIONAL — spaarke-dataset-grid-framework-r2 FR-03 (DEF-005c, 2026-07-02).
+   *
+   * Per-instance `pageSize` override supplied by the host (typically a
+   * LegalWorkspace section factory forwarding
+   * `SectionInstance.overrides.pageSize`). Participates in the three-tier
+   * precedence chain via `configResolution.resolveEffectivePageSize`:
+   *
+   *   1. this prop (highest — per-placement)
+   *   2. resolved config record's `behavior.pageSize`
+   *   3. framework default (25, per FR-07)
+   *
+   * A value of 0 / negative / non-finite is treated as "unset" and falls
+   * through to the next tier. Omit or pass `undefined` for the standard
+   * config-driven behavior.
+   */
+  pageSize?: number;
+
+  /**
+   * OPTIONAL — spaarke-dataset-grid-framework-r2 FR-03 (DEF-005c, 2026-07-02).
+   *
+   * Per-instance savedquery allowlist override supplied by the host (typically
+   * a LegalWorkspace section factory forwarding
+   * `SectionInstance.overrides.availableViews`). When set (non-empty), REPLACES
+   * (does not intersect with) the config-level
+   * `SourceSavedQuery.availableViews` (FR-05) via
+   * `configResolution.resolveEffectiveAvailableViews`.
+   *
+   * Empty array is treated as "no filter" (falls through to config-level
+   * allowlist) — mirrors `filterAvailableViews` empty-array semantics and
+   * avoids the empty-picker footgun.
+   */
+  availableViewsAllowlist?: string[];
 
   /**
    * OPTIONAL — active Fluent v9 theme. Passed to inner CommandBar so dialog portals
@@ -667,6 +708,8 @@ export const DataGrid: React.FC<DataGridProps> = props => {
     onRecordAction: _onRecordAction,
     onCommandInvoke,
     overrides,
+    pageSize: pageSizeOverride,
+    availableViewsAllowlist: availableViewsAllowlistOverride,
     theme = webLightTheme,
     onBack,
     className,
@@ -739,11 +782,28 @@ export const DataGrid: React.FC<DataGridProps> = props => {
         }
         // Fetch metadata + sibling saved views in parallel. View list is best-effort;
         // on failure we fall back to a single-view ViewSelector (just the active view).
-        const [entityMetadata, availableViews] = await Promise.all([
+        const [entityMetadata, siblingViews] = await Promise.all([
           dataverseClient.retrieveEntityMetadata(entityName),
           dataverseClient.retrieveSavedQueriesForEntity(entityName).catch(() => [] as SavedQuerySummary[]),
         ]);
         if (cancelled || !isMountedRef.current) return;
+        // FR-05 (spaarke-dataset-grid-framework-r2): if the config record uses
+        // a `savedquery` source with a non-empty `availableViews` allowlist,
+        // restrict the picker to those sibling views. Absent / empty array
+        // preserves current behavior (all siblings show).
+        //
+        // FR-03 (DEF-005c, 2026-07-02): the per-instance
+        // `availableViewsAllowlist` prop (typically forwarded by a
+        // LegalWorkspace section factory from
+        // `SectionInstance.overrides.availableViews`) REPLACES the config-level
+        // allowlist when set — see `resolveEffectiveAvailableViews`.
+        const configLevelAllowlist =
+          configRecord?.source?.type === 'savedquery' ? configRecord.source.availableViews : undefined;
+        const availableViews = resolveEffectiveAvailableViews(
+          siblingViews,
+          configLevelAllowlist,
+          availableViewsAllowlistOverride
+        );
         setLoadState({
           configRecord,
           savedQuery,
@@ -768,7 +828,16 @@ export const DataGrid: React.FC<DataGridProps> = props => {
     return () => {
       cancelled = true;
     };
-  }, [dataverseClient, configId, refreshCounter, activeSavedQueryId]);
+  }, [
+    dataverseClient,
+    configId,
+    refreshCounter,
+    activeSavedQueryId,
+    // DEF-005c: re-run allowlist filter when the per-instance override changes
+    // (rare — factories typically compute this once — but keeps the closure
+    // referentially correct).
+    availableViewsAllowlistOverride,
+  ]);
 
   // Once we have metadata, resolve the full configuration.
   const resolved: ResolvedConfig | null = React.useMemo(() => {
@@ -844,7 +913,19 @@ export const DataGrid: React.FC<DataGridProps> = props => {
     chipState,
   ]);
   const entityNameForLoad = resolved?.entityName ?? '';
-  const pageSize = resolved?.behavior.pageSize ?? 100;
+  // FR-07 (spaarke-dataset-grid-framework-r2, task 003): framework default 25.
+  // Workspace-embedded widgets are the dominant use case; drill-through /
+  // full-page consumers explicitly override to 50 or 100 via
+  // `sprk_configjson.behavior.pageSize`. The authoritative default lives in
+  // `configResolution.ts` (`FRAMEWORK_DEFAULT_BEHAVIOR.pageSize`).
+  //
+  // FR-03 (DEF-005c, 2026-07-02): the per-instance `pageSize` prop (typically
+  // forwarded by a LegalWorkspace section factory from
+  // `SectionInstance.overrides.pageSize`) takes highest precedence via
+  // `resolveEffectivePageSize`. Note: `resolveEffectivePageSize` returns the
+  // framework default (25) internally, so the `?? 25` guard is redundant here —
+  // preserved as belt-and-suspenders against the pre-resolution render path.
+  const pageSize = resolveEffectivePageSize(pageSizeOverride, resolved?.behavior.pageSize) ?? 25;
 
   const {
     records,
@@ -1228,11 +1309,20 @@ export const DataGrid: React.FC<DataGridProps> = props => {
         : [];
   const currentViewId =
     activeSavedQueryId ??
-    (loadState.savedQuery
-      ? // Match the active savedQuery against availableViews by name; the savedQuery
-        // result doesn't carry its own id field.
-        (loadState.availableViews.find(v => v.name === loadState.savedQuery?.name)?.id ?? '__active__')
-      : '');
+    // R2 UAT §5.1 (2026-07-03): when availableViews is restricted to a single
+    // view (via SectionInstance.overrides.availableViews or config-level
+    // allowlist), force currentViewId to that view's id. Otherwise the
+    // name-match against the initially-loaded default savedQuery may fail
+    // (default may not be in the allowlist) → currentViewId falls back to
+    // '__active__' → ViewSelector's `views.find(id === '__active__')` returns
+    // undefined → activeLabel is '' → blank view picker in the toolbar.
+    (loadState.availableViews.length === 1
+      ? loadState.availableViews[0].id
+      : loadState.savedQuery
+        ? // Match the active savedQuery against availableViews by name; the savedQuery
+          // result doesn't carry its own id field.
+          (loadState.availableViews.find(v => v.name === loadState.savedQuery?.name)?.id ?? '__active__')
+        : '');
 
   return (
     <DataGridContextProvider value={contextValue}>

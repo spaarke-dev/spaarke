@@ -68,6 +68,11 @@ export * from './AiFieldTag';
 // AiProgressStepper - Multi-step progress indicator for AI analysis operations
 export * from './AiProgressStepper';
 
+// LinearRunProgress - Presenter for Linear AI Consumer SSE progress events
+// (paired with the `useLinearRunProgress` hook). Wave 12 R7 — shared substrate
+// for Document Upload + Summarize + Context-pane consumers.
+export * from './LinearRunProgress';
+
 // InlineAiToolbar - Floating AI action toolbar that appears on text selection
 export * from './InlineAiToolbar';
 
@@ -158,3 +163,12 @@ export * from './OrientationToggle';
 // backed by Xrm.Utility.lookupObjects. Extracted from RegardingResolver + AssociationResolver
 // per set-regarding-and-field-mapping-resolver-r1 FR-C2-01 + FR-A1-03 (Wave 2 task 021).
 export * from './PolymorphicPicker';
+
+// HeaderToolbar - Icon-slot toolbar for record-header composition
+// (record-header-and-notepad-r1 FR-01, task 002)
+export * from './HeaderToolbar';
+
+// RecordHeader - Card chrome (RecordHeaderShell), grid primitive (FieldGrid),
+// and four field renderers (TextField, LookupField, OptionSetField, TextareaField)
+// (record-header-and-notepad-r1 FR-02/03/04, tasks 003–008)
+export * from './RecordHeader';

@@ -198,12 +198,20 @@ export const WizardShell = React.forwardRef<IWizardShellHandle, IWizardShellProp
     // (DocumentRelationshipViewer etc.) render unchanged.
     maxWidth = '95vw',
     height = '70vh',
+    initialStepId,
   } = props;
 
   const styles = useStyles();
 
   // ── Navigation state via reducer ───────────────────────────────────────
-  const [shellState, dispatch] = React.useReducer(wizardShellReducer, stepConfigs, buildInitialShellState);
+  // R2 UAT §3.1 (2026-07-03): pass `initialStepId` through the lazy-init
+  // arg so the wizard opens at the operator-requested step (edit-mode flows).
+  // `useReducer`'s third arg is invoked ONCE on mount; changing `initialStepId`
+  // later has no effect (consumers use the imperative handle to jump instead).
+  const initArgRef = React.useRef({ stepConfigs, initialStepId });
+  const [shellState, dispatch] = React.useReducer(wizardShellReducer, initArgRef.current, arg =>
+    buildInitialShellState(arg.stepConfigs, arg.initialStepId)
+  );
 
   // ── Step config lookup map ─────────────────────────────────────────────
   const configMapRef = React.useRef<Map<string, IWizardStepConfig>>(new Map());

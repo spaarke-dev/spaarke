@@ -32,6 +32,9 @@ import {
   buildTodoItemsQuery,
   buildDismissedTodoQuery,
 } from './queryHelpers';
+// DEF-11 Part 2 (2026-07-04, record-header-and-notepad-r1): openTodos launch
+// filter (R4 FR-34 consumer wiring).
+import type { ITodoRegardingFilter } from './queryHelpers';
 
 // ---------------------------------------------------------------------------
 // statuscode + statecode constants for sprk_todo (per task 009 customization)
@@ -426,9 +429,20 @@ export class DataverseService {
    *
    * @param userId - The GUID of the current user
    */
-  /** UAT 2026-06-19: param renamed userId → contactId (assigned-to migrated to Contact lookup). */
-  async getActiveTodos(contactId: string): Promise<IResult<ITodo[]>> {
-    const query = buildTodoItemsQuery(contactId);
+  /**
+   * UAT 2026-06-19: param renamed userId → contactId (assigned-to migrated to Contact lookup).
+   *
+   * DEF-11 Part 2 (2026-07-04, record-header-and-notepad-r1): optional
+   * `regardingFilter` — when the SmartTodo Code Page is launched via the R4
+   * FR-34 openTodos contract (e.g., from MatterHeader's checkmark), scope
+   * results to the specified parent record. See `buildTodoItemsQuery` for the
+   * exact OData shape.
+   */
+  async getActiveTodos(
+    contactId: string,
+    regardingFilter?: ITodoRegardingFilter,
+  ): Promise<IResult<ITodo[]>> {
+    const query = buildTodoItemsQuery(contactId, regardingFilter);
     return tryCatch(async () => {
       const result = await this._webApi.retrieveMultipleRecords('sprk_todo', query);
       return toTypedArray<ITodo>(mapTodoFormattedValues(result.entities));

@@ -1,0 +1,120 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="072" project="spaarke-ai-architecture-redesign-r1">
+  <metadata>
+    <title>Track-B batch 3 — Dead PCF dirs + R1 client registries/providers/cross-pane</title>
+    <phase>Track B: Continuous Deadwood Sweep</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <tags>cleanup, deletion, track-b, pcf</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <parallel-group>W-P0-C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+
+  <prompt>
+    Execute Track-B batch 3 of FR-TB-01: delete the five dead PCF directories and the R1-era client-shared deadwood (registries, providers, cross-pane mechanisms) from inventory §9. The PCF dirs are empty or source-less orphaned build artifacts; the client-shared items are superseded — AI.Outputs' R1 registries lost to the canonical R2 registries in `Spaarke.AI.Widgets`, and the CustomEvent/BroadcastChannel cross-pane mechanisms lost to `PaneEventBus`. This batch rides alongside wave W-P0-C. Per NFR-08, every deletion is grep-zero-verified with SHOWN output and builds proven green; evidence lands in `notes/track-b/batch-3-evidence.md`.
+  </prompt>
+
+  <role>
+    Frontend developer familiar with the Spaarke client estate — PCF control layout under `src/client/pcf/`, the shared packages (`Spaarke.UI.Components`, AI.Context, AI.Outputs, `Spaarke.AI.Widgets`) — and careful about package export barrels when deleting modules.
+  </role>
+
+  <goal>
+    Every batch-3 item below is deleted (or recorded keep-with-reason if found live), grep-zero shown per deleted symbol, `npm run build:prod` green for every touched client package with shown output, TASK-INDEX updated, and `notes/track-b/batch-3-evidence.md` written.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-architecture-redesign-r1/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-architecture-redesign-r1/plan.md</file>
+    <file purpose="project-context">projects/spaarke-ai-architecture-redesign-r1/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md</file>
+    <file purpose="deadwood-register">projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-CODE-INVENTORY.md</file>
+    <file purpose="delete-list">projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-MIGRATION-MAP.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="project">Do not modify files outside the batch list; deadwood only — if a batch item turns out to be live, STOP and record keep-with-reason instead of deleting.</constraint>
+    <constraint source="NFR-08">Every retirement verified grep-zero with SHOWN output; no compat shims retained.</constraint>
+    <constraint source="project">The canonical R2 registries (`WorkspaceWidgetRegistry` / `ContextWidgetRegistry` in Spaarke.AI.Widgets) and `PaneEventBus` are LIVE — only the AI.Outputs R1 `output-registry`/`source-registry` and the superseded cross-pane mechanisms delete. Verify names precisely before deleting.</constraint>
+    <constraint source="project">When deleting exported modules, update the package barrel (index.ts) exports in the same change so builds stay green.</constraint>
+    <constraint source="ADR-038">Deleted tests of dead components are SCAFFOLDING class — record in the evidence file for task-090 /test-diet reconciliation.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>pcf, client-shared/dead-code-removal, track-b</topic>
+    <files>
+      <file>projects/spaarke-ai-architecture-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/plan.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-MIGRATION-MAP.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-CODE-INVENTORY.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/OVERLAY-MATRIX.md</file>
+      <file>docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Batch contents (inventory §9 "Client shared" + "PCF" + migration-map start-now list):
+      (1) five dead PCF dirs — `AIMetadataExtractor` (empty), `AnalysisWorkspace`, `AnalysisBuilder`, `PlaybookBuilderHost`, `DrillThroughWorkspace` (source-less orphaned build artifacts) under `src/client/pcf/`;
+      (2) `StandaloneAiProvider` + `useStandaloneAi` (AI.Context);
+      (3) AI.Outputs R1 `output-registry` + `source-registry` (dead — canonical registries live in Spaarke.AI.Widgets);
+      (4) the 4 unregistered AI.Outputs widgets: Chart, DataTable, Timeline, DocumentCompare;
+      (5) AI.Outputs `cross-pane/` (CustomEvent mechanism, superseded by PaneEventBus);
+      (6) `SprkChatExportWord`;
+      (7) `SprkChatBridge` (BroadcastChannel, @deprecated, superseded by PaneEventBus).
+    </background>
+    <dependencies>
+      <dependency task="none" status="complete">No dependencies — rides wave W-P0-C.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 050 (FR-P4-01) completion audit consumes this batch's evidence file</item>
+      <item>Task 046 (FR-P3-07) dedupes the two register-context-widgets modules — separate scope; do not touch here</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context check">
+      Check context usage. If &gt; 70%, create handoff summary and request new chat. Load inputs; read inventory §9 (Client shared + PCF) and §6 (registry liveness verdicts).
+    </step>
+    <step order="1" name="Read and confirm the batch list">
+      Locate every item via Glob/Grep with exact paths; confirm the five PCF dirs are source-less/empty and each client-shared item has zero live importers. Distinguish the dead AI.Outputs R1 registries from the live Spaarke.AI.Widgets registries by path. Any live item → keep-with-reason.
+    </step>
+    <step order="2" name="Delete the batch">
+      Delete the five PCF directories and the confirmed-dead client-shared modules + their tests; update package barrels/exports so nothing dangles.
+    </step>
+    <step order="3" name="Grep-zero verification (SHOWN)">
+      For each deleted symbol (`AIMetadataExtractor`, `AnalysisWorkspace` (PCF), `AnalysisBuilder`, `PlaybookBuilderHost`, `DrillThroughWorkspace`, `StandaloneAiProvider`, `useStandaloneAi`, `output-registry`, `source-registry`, the four widget names, `cross-pane`, `SprkChatExportWord`, `SprkChatBridge`): grep across src/ and SHOW zero-hit output; note intentional same-name survivors (e.g., live code-page `AnalysisWorkspace` directories vs the dead PCF dir) explicitly with paths.
+    </step>
+    <step order="4" name="Build verification (SHOWN)">
+      Run `npm run build:prod` for every touched package/solution (AI.Context, AI.Outputs, shared UI lib as applicable); show green output. Run touched-surface tests.
+    </step>
+    <step order="5" name="Evidence + close">
+      Write `projects/spaarke-ai-architecture-redesign-r1/notes/track-b/batch-3-evidence.md` (item table: deleted-path / grep output / keep-with-reason). Update TASK-INDEX.md (072 → ✅). Report completion.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="npm">build:prod + tests for touched client packages</tool>
+    <tool name="git">Version control (deletions preserved in history)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/ (5 dead control dirs removed)</output>
+    <output type="code">src/client/shared/ (AI.Context + AI.Outputs deadwood removed, barrels updated)</output>
+    <output type="report">projects/spaarke-ai-architecture-redesign-r1/notes/track-b/batch-3-evidence.md</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Per-batch grep-zero for every deleted symbol outside git history, with output SHOWN (FR-TB-01 / NFR-08).</criterion>
+    <criterion testable="true">npm run build:prod green for every touched client package with output shown.</criterion>
+    <criterion testable="true">Live registries (Spaarke.AI.Widgets) and PaneEventBus untouched; any live-found batch item recorded keep-with-reason.</criterion>
+    <criterion testable="true">notes/track-b/batch-3-evidence.md exists with the per-item evidence table; TASK-INDEX updated.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

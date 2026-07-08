@@ -113,54 +113,8 @@ export function mockContractComparisonProps() {
   };
 }
 
-/** Minimal valid props for TimelineWidget */
-export function mockTimelineProps() {
-  return {
-    data: {
-      events: [
-        {
-          id: 'e1',
-          date: '2024-01-15',
-          label: 'Contract Signed',
-          isMilestone: true,
-        },
-        {
-          id: 'e2',
-          date: '2024-03-01',
-          label: 'First Review',
-          description: 'Initial review by legal team',
-        },
-      ],
-    },
-    isLoading: false,
-  };
-}
-
-/** Minimal valid props for DocumentCompareWidget */
-export function mockDocumentCompareProps() {
-  return {
-    data: {
-      leftLabel: 'Version 1',
-      rightLabel: 'Version 2',
-      lines: [
-        {
-          id: 'l1',
-          leftText: 'The Buyer agrees to pay...',
-          rightText: 'The Purchaser agrees to pay...',
-          changeType: 'changed' as const,
-        },
-        {
-          id: 'l2',
-          leftText: 'on or before the due date.',
-          rightText: 'on or before the due date.',
-          changeType: 'unchanged' as const,
-        },
-      ],
-      viewMode: 'side-by-side' as const,
-    },
-    isLoading: false,
-  };
-}
+// (Timeline / DocumentCompare / Chart / DataTable mock factories removed in
+// Track-B batch 3, ai-architecture-redesign-r1 — the widgets were deleted.)
 
 /** Minimal valid props for StatusSummaryWidget */
 export function mockStatusSummaryProps() {
@@ -216,45 +170,6 @@ export function mockActionPlanProps() {
       steps: [
         { id: 'step-1', label: 'Review redlines', completed: false },
         { id: 'step-2', label: 'Send to client', completed: false },
-      ],
-    },
-    isLoading: false,
-  };
-}
-
-/** Minimal valid props for ChartWidget */
-export function mockChartProps() {
-  return {
-    data: {
-      chartType: 'bar' as const,
-      title: 'Matter Costs',
-      xLabel: 'Month',
-      yLabel: 'USD',
-      series: [
-        {
-          name: 'Legal Fees',
-          points: [
-            { x: 'Jan', y: 5000 },
-            { x: 'Feb', y: 7200 },
-          ],
-        },
-      ],
-    },
-    isLoading: false,
-  };
-}
-
-/** Minimal valid props for DataTableWidget */
-export function mockDataTableProps() {
-  return {
-    data: {
-      columns: [
-        { key: 'name', label: 'Name', sortable: true },
-        { key: 'amount', label: 'Amount', sortable: true },
-      ],
-      rows: [
-        { name: 'Legal Fees', amount: 50000 },
-        { name: 'Disbursements', amount: 12000 },
       ],
     },
     isLoading: false,

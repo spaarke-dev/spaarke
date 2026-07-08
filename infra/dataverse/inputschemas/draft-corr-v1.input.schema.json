@@ -1,0 +1,17 @@
+{
+  "$comment": "Mirror of sprk_analysisaction.sprk_inputschema for DRAFT-CORR@v1 on spaarkedev1 (already valid JSON Schema at the G-P3 UAT round-1 catalog survey, 2026-07-07 — mirrored for the H4 regression net). CI-validated against the OpenAI function-parameters subset by CatalogInputSchemaContractTests.",
+  "actionCode": "DRAFT-CORR@v1",
+  "actionId": "4b8b50f4-6a79-f111-ab0e-7ced8ddc4cc6",
+  "environment": "spaarkedev1",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "fileIds": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Optional subset of session file ids to draft from. Omit to draft from all session files."
+      }
+    },
+    "additionalProperties": false
+  }
+}

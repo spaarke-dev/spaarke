@@ -1,8 +1,10 @@
 # AI Architecture — Playbook Runtime
 
-> **Last reviewed**: 2026-06-26
+> **⛔ FROZEN ENGINE (2026-07-07, spaarke-ai-architecture-redesign-r1 task 052)**: this doc describes the node-graph playbook engine, which is **FROZEN** per the 2026-07 redesign (OQ-2/D11 — Insights family only; no new capability may be built on it; new composites are `coded` `ICodedWorkflow` workflows). Since the 2026-06-26 review, the redesign DELETED several components this doc references: `PlaybookExecutionEngine` (§C/§10 — deleted task 044), `SessionSummarizeOrchestrator`, `InvokePlaybookAi`/`IInvokePlaybookAi` (facade triangle — deleted 044), the `/narrate` engine path (Daily Briefing is now the coded `DailyBriefingCompositeService`, task 043), and the LinearConsumers/Workspace/Insights appsettings routing maps (task 040 — routing is Binding-table-only). `PlaybookOrchestrationService`, the node executors, and the scope/data services remain live for Insights, untouched. Read [`SPAARKE-AI-ARCHITECTURE-AND-COMPONENT-DESIGN.md`](SPAARKE-AI-ARCHITECTURE-AND-COMPONENT-DESIGN.md) for the shipped platform architecture; treat file:line references below as 2026-06-26 vintage.
+>
+> **Last reviewed**: 2026-06-26 (content) · 2026-07-07 (frozen-status banner only)
 > **Authored by**: canonical-truth loop step 3 (spaarke-daily-update-service-r4)
-> **Status**: Canonical. Supersedes runtime sections of `playbook-architecture.md` (now a redirect) and the Tool Handler / Scope Resolution / Known Pitfalls sections of `AI-ARCHITECTURE.md` (now stripped).
+> **Status**: Frozen-engine reference. Supersedes runtime sections of `playbook-architecture.md` (now a redirect) and the Tool Handler / Scope Resolution / Known Pitfalls sections of `AI-ARCHITECTURE.md` (now stripped).
 > **Scope**: The load-bearing runtime contract for how BFF executes Spaarke playbooks — dispatch shapes, mode detection, action lookup, config-column ownership, scope semantics, empty-payload behaviour, the two parallel orchestrators, and the Legacy-mode log catalog.
 > **NOT in scope**: JPS schema reference (see `ai-guide-jps-authoring.md`), maker recipes (see `ai-guide-playbook-author.md`), consumer dispatch (see `ai-architecture-playbook-consumer-routing.md`), config-bag boundaries (see `ai-architecture-actions-nodes-scopes.md`), deploy procedure (see `ai-guide-playbook-deploy-recipe.md`).
 

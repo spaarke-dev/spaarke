@@ -1,0 +1,23 @@
+{
+  "$comment": "Mirror of sprk_analysisaction.sprk_inputschema for SUM-CHAT@v1 on spaarkedev1. Normalized from the legacy {\"args\":[...]} format by the G-P3 UAT round-1 fix wave (H2, 2026-07-07) — the legacy format projected an effectively-empty permissive schema to the LLM (every member an unknown keyword). CI-validated against the OpenAI function-parameters subset by CatalogInputSchemaContractTests (H4). Custom keywords elicitation_prompt / ledger_resolution are maker metadata (unknown keywords, OpenAI-tolerated). Property-level \"required\": true is FORBIDDEN (invalid JSON Schema — 400-fails the whole request); use the object-level required array.",
+  "actionCode": "SUM-CHAT@v1",
+  "actionId": "eeb05bfd-1260-f111-ab0b-70a8a59455f4",
+  "environment": "spaarkedev1",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "fileIds": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Optional subset of session file ids to summarize. Omit to use ALL files in the chat-session manifest (FR-08); hard cap 20 per NFR-02.",
+        "elicitation_prompt": "Which uploaded file(s) should I summarize?",
+        "ledger_resolution": "session.uploadedFiles — omitted fileIds default to ALL files in the chat-session manifest (FR-08); hard cap 20 per NFR-02"
+      },
+      "styleHint": {
+        "type": "string",
+        "description": "Optional free-form style token from the user's utterance (e.g. executive, detailed, bullet-points).",
+        "ledger_resolution": "none — free-form style token from the user's utterance"
+      }
+    }
+  }
+}

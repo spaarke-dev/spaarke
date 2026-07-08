@@ -1,0 +1,18 @@
+// tokens-by-model.kql — token spend per tenant per model per entry path
+// Purpose: cost attribution — which tenants spend which tokens on which
+//          model/deployment, split by entry path (text/click/event/coded) and
+//          source (loop vs executor).
+// Expected columns: tenantId, model, entryPath, source, tokensIn, tokensOut
+let window = 7d;
+customMetrics
+| where timestamp > ago(window) and name == "ai.metering.tokens"
+| extend tenantId  = tostring(customDimensions["tenant.id"]),
+         model     = tostring(customDimensions["ai.model"]),
+         entryPath = tostring(customDimensions["entry.path"]),
+         source    = tostring(customDimensions["source"]),
+         tokenType = tostring(customDimensions["token.type"])
+| summarize
+    tokensIn  = sumif(valueSum, tokenType == "input"),
+    tokensOut = sumif(valueSum, tokenType == "output")
+    by tenantId, model, entryPath, source
+| order by tenantId asc, tokensIn + tokensOut desc

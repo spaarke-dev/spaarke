@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="039" project="record-header-and-notepad-r1">
+  <metadata>
+    <title>Vite build + deploy as sprk_notepad_page webresource</title>
+    <phase>3: Notepad</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>038</dependencies>
+    <blocks>040, 041</blocks>
+    <tags>deploy, dataverse, frontend</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Build + deploy operation against real environment</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>Build Notepad via `npm run build`; register the built HTML bundle as sprk_notepad_page webresource in the dev Dataverse environment via `/code-page-deploy` skill. Verify launch works with a real regardingEntity + regardingId URL.</prompt>
+
+  <role>Spaarke platform developer. Vite + code-page-deploy skill experienced.</role>
+
+  <goal>sprk_notepad_page webresource deployed to dev; Notepad renders when navigated to with valid URL params.</goal>
+
+  <context>
+    <background>End of Notepad functional build. Deploys the SPA. Downstream tasks 040 + 041 will use this deployment for launch tests.</background>
+    <relevant-files>
+      <file>src/solutions/Notepad/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">Webresource name MUST be sprk_notepad_page (matches SMARTTODO_WEBRESOURCE_NAME convention + toolbarLaunchDefaults constant).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/record-header-and-notepad-r1/spec.md</file>
+      <file>projects/record-header-and-notepad-r1/CLAUDE.md</file>
+      <file>.claude/skills/code-page-deploy/SKILL.md</file>
+      <file>docs/guides/PCF-DEPLOYMENT-GUIDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Run `npm run build` in src/solutions/Notepad/; verify dist/ produced.</step>
+    <step order="2">Invoke /code-page-deploy skill to register dist/index.html as sprk_notepad_page webresource in dev environment.</step>
+    <step order="3">Manually navigate to the webresource URL with test regardingEntity + regardingId; verify Notepad renders (top bar + editor).</step>
+    <step order="4">Test with URL missing regardingId; verify MessageBar renders.</step>
+    <step order="5">Test create + save + list switch round trip against a real sprk_matter record.</step>
+    <step order="6">Update TASK-INDEX.md: mark 039 ✅.</step>
+    <step order="7">Document deviations in notes/.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">build</tool>
+    <tool name="terminal">Shell + PAC CLI</tool>
+  </tools>
+
+  <outputs>
+    <output type="config">Dataverse webresource: sprk_notepad_page (deployed)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Notepad renders when the webresource URL is opened with valid params in a browser.</criterion>
+    <criterion testable="true">MessageBar renders when the webresource URL is opened without required params.</criterion>
+    <criterion testable="true">Create + save + list switch works against a real Matter record.</criterion>
+  </acceptance-criteria>
+
+  <notes>Bundle size: measure and document, though not strictly gated by NFR-04 (that's per-PCF).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files first. Follow task-execute skill.</protocol>
+  </execution>
+</task>

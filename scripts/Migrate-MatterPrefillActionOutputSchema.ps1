@@ -553,7 +553,7 @@ function Main {
 
     $canonicalRaw = Get-Content -Raw -Path $SchemaFile -Encoding UTF8
     # Normalize: parse + re-serialize compact so we send the exact same bytes that the
-    # consumer (PlaybookExecutionEngine -> Azure OpenAI Structured Outputs) receives.
+    # consumer (the playbook execution path -> Azure OpenAI Structured Outputs) receives.
     try {
         $canonicalParsed = $canonicalRaw | ConvertFrom-Json -ErrorAction Stop
     }

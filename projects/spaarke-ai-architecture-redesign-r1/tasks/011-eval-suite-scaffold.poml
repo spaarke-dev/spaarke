@@ -1,0 +1,124 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="spaarke-ai-architecture-redesign-r1">
+  <metadata>
+    <title>Golden-utterance eval-suite scaffold + ~30 seed utterances</title>
+    <phase>Phase P0: Foundations</phase>
+    <status>not-started</status>
+    <estimated-hours>8</estimated-hours>
+    <tags>testing, eval-suite, integration-test</tags>
+    <rigor-hint>TEST-MODIFYING</rigor-hint>
+    <parallel-group>W-P0-C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement FR-P0-09: scaffold the golden-utterance eval suite at `tests/integration/contract/` seeded with approximately 30 utterances derived from the canonical doc's §3 UC triggers (classify, summarize, pre-fill, document-profile, email-analysis, ask/search, draft, create-task families). The suite is the project's quality spine: from P1 onward a green run is a MERGE GATE (NFR-02), every catalog/prompt change must add or update eval cases (NFR-06), and P2 extends it with refusal/compound/prompt-injection families (FR-P2-08). At P0 the deliverable is the harness + seed cases running in CI with the merge-blocking wiring prepared (activated at P1 per spec). Per root CLAUDE.md §8 this task carries the TEST-MODIFYING override: code-review + adr-check run UNCONDITIONALLY at Step 9.5.
+  </prompt>
+
+  <role>
+    Test engineer familiar with the Sprk.Bff.Api integration-test infrastructure, ADR-038's integration-heavy pyramid, and building data-driven eval harnesses (utterance → expected routing/outcome assertions).
+  </role>
+
+  <goal>
+    A runnable eval harness at tests/integration/contract/ with ~30 seed utterance cases, executing in CI, with documented merge-gate wiring ready to activate at P1.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-architecture-redesign-r1/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-architecture-redesign-r1/plan.md</file>
+    <file purpose="project-context">projects/spaarke-ai-architecture-redesign-r1/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md</file>
+    <file purpose="uc-triggers">docs/architecture/SPAARKE-AI-ARCHITECTURE-AND-COMPONENT-DESIGN.md</file>
+    <file purpose="test-standards">docs/standards/TEST-ARCHITECTURE.md</file>
+    <file purpose="ci">.github/workflows/sdap-ci.yml</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="root-CLAUDE.md §8">TEST-MODIFYING override: code-review + adr-check at Step 9.5 UNCONDITIONALLY (task modifies tests/** with testing/integration-test tags).</constraint>
+    <constraint source="ADR-038">Eval suite is KEEP-class at tests/integration/contract/ (plan §2); follow the integration-heavy pyramid; banned patterns (Mock&lt;HttpMessageHandler&gt;, DI-registration tests, ctor null-check tests) apply.</constraint>
+    <constraint source="NFR-02">Suite must be CI-runnable now; merge-gate enforcement is WIRED here and ACTIVATED from P1 (task 026) — document the activation switch.</constraint>
+    <constraint source="NFR-06">Case format must support per-capability schema-conformance + citation-integrity assertions (P2+ families extend it) — design the case schema accordingly.</constraint>
+    <constraint source="project">~30 seed utterances from §3 UC triggers covering the proving-capability families; each case names its UC id for traceability.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>testing/eval-suite, integration-contract</topic>
+    <files>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/OVERLAY-MATRIX.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-MIGRATION-MAP.md</file>
+    </files>
+    <patterns>
+      <pattern name="Existing integration tests" location="tests/">
+        Follow the existing integration-test project conventions (fixtures, config contracts per docs/procedures/test-fixture-contracts.md) when scaffolding the new contract suite.
+      </pattern>
+      <pattern name="Routing surface under eval" location="src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ConsumerRoutingService.cs">
+        P0 assertions target routing/contract resolution; loop-outcome assertions arrive with the P2 loop.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      NFR-02 makes eval green a merge gate from P1; building the harness at P0 means the first capability (chat-summarize, task 020) lands with its eval family already runnable.
+    </background>
+    <dependencies>
+      <dependency task="none" status="complete">Independent — Wave W-P0-C. (Utterance→binding assertions deepen as later tasks land; the scaffold does not wait for them.)</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 026 (FR-P1-07) turns the suite into an active merge gate and greens the UC-A-1 family</item>
+      <item>Task 037 (FR-P2-08) adds refusal + compound + prompt-injection families</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context check">
+      Check context usage; handoff if &gt; 70%. Read canonical doc §3 UC triggers and TEST-ARCHITECTURE.md; inventory the existing tests/ project layout and CI workflow.
+    </step>
+    <step order="1" name="Design the case schema">
+      Define the golden-utterance case format (utterance, UC id, expected binding/capability, expected outcome class, optional schema-conformance + citation assertions for later phases) as data files + a runner.
+    </step>
+    <step order="2" name="Scaffold the suite">
+      Create tests/integration/contract/ project/harness wired into the solution + `dotnet test`; runner discovers case files and executes assertions against the routing surface available at P0.
+    </step>
+    <step order="3" name="Author ~30 seed utterances">
+      Derive ~30 cases from §3 UC triggers across the proving families (classify, summarize incl. typo variants, pre-fill, document-profile, email-analysis, ask/search, draft-correspondence, create-task); tag each with its UC id.
+    </step>
+    <step order="4" name="Wire CI">
+      Ensure the suite runs in CI (sdap-ci.yml or equivalent); prepare the merge-blocking configuration and document how task 026 activates it at P1.
+    </step>
+    <step order="5" name="Run + evidence">
+      Execute the suite locally + in CI; show run output. Cases asserting not-yet-built behavior are explicitly marked pending-by-design with their activating task noted (not silently skipped).
+    </step>
+    <step order="6" name="Verify + quality gates">
+      Check acceptance criteria. Step 9.5 quality gates: code-review + adr-check (UNCONDITIONAL — TEST-MODIFYING). Update TASK-INDEX.md.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Test harness build + run</tool>
+    <tool name="gh">CI run verification</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/integration/contract/ (harness + runner + ~30 seed utterance cases)</output>
+    <output type="ci">.github/workflows/ (suite wired into CI; merge-gate activation documented)</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Eval suite runs in CI (run output shown).</criterion>
+    <criterion testable="true">~30 seed utterances present, each traceable to a §3 UC trigger id.</criterion>
+    <criterion testable="true">Merge-gate wiring exists with documented P1 activation (failure blocks merge — wired from P1 per spec).</criterion>
+    <criterion testable="true">Case schema supports schema-conformance + citation-integrity assertions for later phases (NFR-06).</criterion>
+    <criterion testable="true">Step 9.5 quality gates (code-review + adr-check) passed unconditionally per TEST-MODIFYING override.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

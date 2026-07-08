@@ -4,9 +4,9 @@
  * All 6 source pane widget components and their data types.
  * Added by Wave 2 task 022.
  *
- * NOTE: These widgets are lazily loaded via the source registry (source-registry.ts).
- * Direct imports from this barrel are primarily for consumers that need the
- * data types or want to use a widget without the registry abstraction.
+ * NOTE: Consumers import these widgets directly from this barrel (the R1 lazy
+ * registry was deleted in Track-B batch 3, ai-architecture-redesign-r1 — the
+ * canonical widget registries live in @spaarke/ai-widgets).
  */
 
 // DocumentViewerWidget — SPE document preview via iframe / object

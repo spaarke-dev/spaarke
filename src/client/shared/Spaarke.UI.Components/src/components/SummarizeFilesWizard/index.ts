@@ -13,7 +13,7 @@ export { SummaryNextStepsStep } from './SummaryNextStepsStep';
 export { SummarizeSendEmailStep } from './SummarizeSendEmailStep';
 export { SummarizeCreateProjectStep } from './SummarizeCreateProjectStep';
 export { SummarizeAnalysisStep } from './SummarizeAnalysisStep';
-export { streamSummarize, runSummarize } from './summarizeService';
+export { streamSummarize } from './summarizeService';
 export { buildSummaryEmailSubject, buildSummaryEmailBody } from './SummarizeSendEmailStep';
 
 export type { ISummarizeFilesDialogProps } from './SummarizeFilesDialog';

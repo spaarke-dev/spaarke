@@ -35,15 +35,30 @@ import type {
 } from "@spaarke/ui-components";
 import { resolveTheme, setupThemeListener } from "./providers/ThemeProvider";
 import { TemplateStep, SectionStep, ArrangeStep, buildInitialAssignments } from "./steps";
-import type { SectionCatalogItem, SlotAssignments } from "./steps";
+import type { SectionCatalogItem, SlotAssignments, SectionInstance } from "./steps";
 import type { WizardMode } from "./main";
 
-/** Parsed LayoutJson row — mirrors the BFF LayoutJsonRow shape for sectionsJson parsing. */
+/**
+ * Parsed LayoutJson row — mirrors the BFF LayoutJsonRow shape for sectionsJson parsing.
+ *
+ * FR-03 (task 013): `sections` widened to `Array<string | SectionInstance>` so
+ * the wizard can round-trip either bare-string entries (back-compat with every
+ * pre-R2 published `sprk_workspacelayout` record) or `SectionInstance` objects
+ * carrying per-placement overrides. The "empty → bare string" invariant is
+ * enforced in `buildSectionsJson` — a slot with no advanced overrides always
+ * serializes as a bare string.
+ */
 interface LayoutJsonRow {
   id: string;
   columns: string;
   columnsSmall?: string;
-  sections: string[];
+  sections: Array<string | SectionInstance>;
+  /**
+   * Optional row-level height ceiling (any CSS length, e.g. `'80vh'`, `'640px'`).
+   * Added by FR-02 (task 010 schema half + task 011 wizard-UI half). When
+   * omitted, framework preserves current behavior (row grows to fit sections).
+   */
+  rowHeight?: string;
 }
 
 /** Parsed LayoutJson — mirrors the BFF LayoutJson shape for sectionsJson parsing. */
@@ -75,6 +90,23 @@ interface AppProps {
    * so callers get compile-time safety.
    */
   templateFilter?: readonly LayoutTemplateId[];
+  /**
+   * Optional step id to open the wizard at (parsed from `startAtStep` URL
+   * param by `main.tsx`). Accepts one of the STEP_ constants defined below.
+   *
+   * When absent:
+   *   - `mode === "edit"` OR `mode === "saveAs"` → auto-jump to Arrange Sections
+   *     (§3.1 UX: prior steps are pre-populated so the operator should land on
+   *     the working step).
+   *   - `mode === "create"` → open at Choose Layout (first step).
+   *
+   * When present, overrides the mode-based default. Used by the SpaarkeAi
+   * gear-icon flow (§4.1) which opens the edit wizard at Choose Layout instead
+   * of Arrange Sections so the operator can swap templates.
+   *
+   * @since R2 UAT §3.1 + §4.1 (2026-07-03)
+   */
+  startAtStep?: string;
 }
 
 // ---------------------------------------------------------------------------
@@ -104,15 +136,14 @@ const SECTION_CATALOG: SectionCatalogItem[] = SECTION_METADATA_CATALOG.map(
 );
 
 /**
- * Default section IDs — all registered sections selected by default.
- *
- * NOTE: pre-R4 this set was hardcoded to 5 IDs and was used as the initial
- * `selectedSectionIds` state for the create flow. With 7 sections now in the
- * catalog, the wizard's small-template flows may select MORE than the
- * available slots; the existing `selectedCount > slotCount` warning in
- * `SectionStep` already covers that UX. No additional change needed.
+ * Default section IDs — R2 UAT §5.2 (2026-07-03): create flow starts with
+ * NOTHING selected. Operator explicitly picks the sections they want (or clicks
+ * Select All in SectionStep for the pre-R2 behavior). Prevents accidentally
+ * shipping a workspace with more sections than intended when the operator
+ * only wanted 2-3 widgets. saveAs/edit flows still preserve their prior
+ * selection via parseSectionsJson.
  */
-const DEFAULT_SECTION_IDS = new Set(SECTION_CATALOG.map((s) => s.id));
+const DEFAULT_SECTION_IDS = new Set<string>();
 
 // ---------------------------------------------------------------------------
 // Step IDs (stable string keys for WizardShell)
@@ -130,27 +161,87 @@ const STEP_REVIEW_SAVE = "review-save";
  * Parse sectionsJson from the source layout into:
  * - a Set of selected section IDs
  * - a SlotAssignments Map (slot key -> section ID)
+ * - a rowHeights Map (row.id -> CSS length; FR-02 / task 011)
+ * - a sectionInstances Map (slot key -> SectionInstance; FR-03 / task 013)
+ *
+ * FR-03 (task 013): section entries may be bare strings OR SectionInstance
+ * objects. Bare-string entries widen to `{ id }` in `sectionInstances`;
+ * SectionInstance entries with ANY override field set (configIdOverride,
+ * label, overrides.pageSize, overrides.availableViews) are stored verbatim
+ * so the wizard can pre-populate the Advanced panel during edit/saveAs.
+ * Entries with NO override fields are NOT stored — save-time will re-emit
+ * them as bare strings (back-compat).
  */
 function parseSectionsJson(
   json: string,
-): { sectionIds: Set<string>; assignments: SlotAssignments } {
+): {
+  sectionIds: Set<string>;
+  assignments: SlotAssignments;
+  rowHeights: Map<string, string>;
+  sectionInstances: Map<string, SectionInstance>;
+} {
   const sectionIds = new Set<string>();
   const assignments: SlotAssignments = new Map();
+  // FR-02 (task 011): pre-populate row-height overrides when editing an
+  // existing layout so the wizard round-trips the saved value. Keyed by
+  // row.id, matching the template row IDs from `LAYOUT_TEMPLATES`.
+  const rowHeights = new Map<string, string>();
+  // FR-03 (task 013): pre-populate per-slot SectionInstance overrides. Keyed
+  // by the same slotKey (`${row.id}:${col}`) used for `assignments`. Only
+  // slots whose serialized entry had a non-empty override survive the "empty
+  // → bare string" invariant — those are the ones we surface in the wizard
+  // Advanced panel.
+  const sectionInstances = new Map<string, SectionInstance>();
   try {
     const parsed = JSON.parse(json) as LayoutJson;
     for (const row of parsed.rows) {
+      if (typeof row.rowHeight === "string" && row.rowHeight.length > 0) {
+        rowHeights.set(row.id, row.rowHeight);
+      }
       for (let col = 0; col < row.sections.length; col++) {
-        const sectionId = row.sections[col];
-        if (sectionId) {
-          sectionIds.add(sectionId);
-          assignments.set(`${row.id}:${col}`, sectionId);
+        const rawEntry = row.sections[col];
+        if (!rawEntry) continue;
+
+        // Normalize bare-string entries to { id } at the parse boundary.
+        const instance: SectionInstance =
+          typeof rawEntry === "string" ? { id: rawEntry } : rawEntry;
+        const sectionId = instance.id;
+        if (!sectionId) continue;
+
+        sectionIds.add(sectionId);
+        const slotKey = `${row.id}:${col}`;
+        assignments.set(slotKey, sectionId);
+
+        // Only record the instance if it has AT LEAST ONE meaningful override.
+        // Otherwise the "empty → bare string" invariant covers it at emit time.
+        if (hasAnyOverride(instance)) {
+          sectionInstances.set(slotKey, instance);
         }
       }
     }
   } catch (err) {
     console.warn("[WorkspaceLayoutWizard] Failed to parse sectionsJson:", err);
   }
-  return { sectionIds, assignments };
+  return { sectionIds, assignments, rowHeights, sectionInstances };
+}
+
+/**
+ * True when a SectionInstance has any field set that would prevent it from
+ * being emitted as a bare string. Mirrors the emit-time logic in
+ * `buildSectionsJson` (FR-03 / task 013).
+ *
+ * Empty-string label + undefined arrays + undefined pageSize all → "no
+ * override" (safe to emit as bare string).
+ */
+function hasAnyOverride(instance: SectionInstance): boolean {
+  if (instance.configIdOverride && instance.configIdOverride.length > 0) return true;
+  if (instance.label && instance.label.length > 0) return true;
+  const o = instance.overrides;
+  if (o) {
+    if (typeof o.pageSize === "number" && Number.isFinite(o.pageSize)) return true;
+    if (Array.isArray(o.availableViews) && o.availableViews.length > 0) return true;
+  }
+  return false;
 }
 
 // ---------------------------------------------------------------------------
@@ -260,27 +351,92 @@ function writePinToStartForLayout(
  * Build the sectionsJson string from current wizard state.
  * Transforms slot assignments (Map<slotKey, sectionId>) into the LayoutJson
  * format expected by the BFF API: { schemaVersion: 1, rows: [{ id, sections }] }
+ *
+ * FR-03 (task 013): section entries now emit as EITHER a bare string
+ * ("empty → bare string" back-compat invariant) OR a `SectionInstance` object
+ * carrying per-placement overrides. The emit rule is:
+ *
+ *   - No entry in `sectionInstances` for the slot → bare string (or "" for empty slot)
+ *   - Entry present but `hasAnyOverride(instance)` false → bare string
+ *   - Entry present AND has at least one override field → SectionInstance object
+ *     (with only the set fields; empty fields are omitted, not written as
+ *     empty string / undefined, so the JSON stays clean)
+ *
+ * This preserves back-compat with every pre-R2 published `sprk_workspacelayout`
+ * record: existing rows continue to serialize identically, only newly-set
+ * override slots switch to the object shape.
  */
-function buildSectionsJson(
+export function buildSectionsJson(
   templateId: LayoutTemplateId,
   assignments: SlotAssignments,
   scope: "my" | "all" = "my",
+  rowHeights: Map<string, string> = new Map(),
+  sectionInstances: Map<string, SectionInstance> = new Map(),
 ): string {
   const template = getLayoutTemplate(templateId);
   if (!template) return JSON.stringify({ schemaVersion: 1, rows: [], scope });
 
   const rows: LayoutJsonRow[] = template.rows.map((row) => {
-    const sections: string[] = [];
+    const sections: Array<string | SectionInstance> = [];
     for (let col = 0; col < row.slotCount; col++) {
-      const sectionId = assignments.get(`${row.id}:${col}`);
-      sections.push(sectionId ?? "");
+      const slotKey = `${row.id}:${col}`;
+      const sectionId = assignments.get(slotKey);
+
+      if (!sectionId) {
+        // Empty slot — emit "" per task 091 tolerance behavior.
+        sections.push("");
+        continue;
+      }
+
+      // FR-03 (task 013): emit SectionInstance object when advanced overrides
+      // are set; otherwise bare string (back-compat invariant).
+      const instance = sectionInstances.get(slotKey);
+      if (instance && hasAnyOverride(instance)) {
+        // Rebuild a minimal instance with only the SET fields, so the JSON
+        // doesn't contain undefined/empty leftovers. `id` always mirrors the
+        // slot assignment (defensive — the map should already agree, but the
+        // assignment is the source of truth).
+        const emit: SectionInstance = { id: sectionId };
+        if (instance.configIdOverride && instance.configIdOverride.length > 0) {
+          emit.configIdOverride = instance.configIdOverride;
+        }
+        if (instance.label && instance.label.length > 0) {
+          emit.label = instance.label;
+        }
+        const o = instance.overrides;
+        if (o) {
+          const overrides: SectionInstance["overrides"] = {};
+          let hasAny = false;
+          if (typeof o.pageSize === "number" && Number.isFinite(o.pageSize)) {
+            overrides.pageSize = o.pageSize;
+            hasAny = true;
+          }
+          if (Array.isArray(o.availableViews) && o.availableViews.length > 0) {
+            overrides.availableViews = [...o.availableViews];
+            hasAny = true;
+          }
+          if (hasAny) emit.overrides = overrides;
+        }
+        sections.push(emit);
+      } else {
+        sections.push(sectionId);
+      }
     }
-    return {
+    // FR-02 (task 011): emit `rowHeight` only when the operator picked a
+    // non-default value. The "Auto (default)" preset intentionally OMITS the
+    // field so back-compat consumers (framework, LegalWorkspace) see the same
+    // shape they did pre-R2.
+    const rowHeight = rowHeights.get(row.id);
+    const rowJson: LayoutJsonRow = {
       id: row.id,
       columns: row.gridTemplateColumns,
       columnsSmall: row.gridTemplateColumnsSmall,
       sections,
     };
+    if (rowHeight && rowHeight.trim().length > 0) {
+      rowJson.rowHeight = rowHeight.trim();
+    }
+    return rowJson;
   });
 
   return JSON.stringify({ schemaVersion: 1, rows, scope } satisfies LayoutJson);
@@ -290,17 +446,19 @@ function buildSectionsJson(
 // App Component
 // ---------------------------------------------------------------------------
 
-export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sectionsJson, sourceName, authenticatedFetch, templateFilter }) => {
+export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sectionsJson, sourceName, authenticatedFetch, templateFilter, startAtStep }) => {
   // ---------------------------------------------------------------------------
   // SaveAs pre-population: parse source layout data once at mount time
   // ---------------------------------------------------------------------------
   const saveAsData = React.useMemo(() => {
     if (mode !== "saveAs" || !sectionsJson) return null;
-    const { sectionIds, assignments } = parseSectionsJson(sectionsJson);
+    const { sectionIds, assignments, rowHeights, sectionInstances } = parseSectionsJson(sectionsJson);
     return {
       templateId: (layoutTemplateId ?? null) as LayoutTemplateId | null,
       sectionIds,
       assignments,
+      rowHeights,
+      sectionInstances,
       name: sourceName ? `${sourceName} (copy)` : "",
     };
   }, [mode, layoutTemplateId, sectionsJson, sourceName]);
@@ -327,8 +485,101 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
   scopeRef.current = scope;
   const [sectionAssignments, setSectionAssignments] =
     React.useState<SlotAssignments>(saveAsData?.assignments ?? new Map());
+  // FR-02 (task 011): per-row height overrides keyed by row.id (matching
+  // template row IDs from `LAYOUT_TEMPLATES`). Empty map means every row uses
+  // the framework default (grow to fit sections). Set via the row-settings
+  // dropdown in `ArrangeStep`. Emitted into `LayoutJsonRow.rowHeight` by
+  // `buildSectionsJson` only when non-empty; the "Auto (default)" preset does
+  // NOT populate the map, preserving back-compat JSON output.
+  const [rowHeights, setRowHeights] = React.useState<Map<string, string>>(
+    () => saveAsData?.rowHeights ?? new Map(),
+  );
+  // FR-03 (task 013): per-slot SectionInstance overrides keyed by
+  // `${row.id}:${col}` (matching `sectionAssignments`). Populated by the
+  // "Advanced" accordion in ArrangeStep — each of the 4 fields (configId,
+  // label, pageSize, availableViews) writes into the entry for its slot.
+  // Empty map means every placed section serializes as a bare string
+  // (back-compat with every pre-R2 published `sprk_workspacelayout` record).
+  // Slots whose entry has no override fields set are omitted from serialization
+  // by `buildSectionsJson` via the `hasAnyOverride` check.
+  const [sectionInstances, setSectionInstances] = React.useState<Map<string, SectionInstance>>(
+    () => saveAsData?.sectionInstances ?? new Map(),
+  );
 
   const wizardRef = React.useRef<IWizardShellHandle>(null);
+
+  // R2 UAT §3.1 fix follow-up (2026-07-03): fetch the layout on mount when
+  // `mode === "edit"` and populate wizard state from it. Prior wizard code
+  // was designed for the SaveAs flow (state pre-populated via URL params) and
+  // for Create (start empty); the Edit flow was never wired to LOAD the
+  // existing layout — mode=edit only sent layoutId + templateFilter, then the
+  // wizard opened empty. Root cause of "screen is blank" report.
+  //
+  // Populates: workspaceName, selectedTemplateId, selectedSectionIds,
+  // sectionAssignments, rowHeights, sectionInstances, isDefault.
+  const [isLoadingLayout, setIsLoadingLayout] = React.useState<boolean>(
+    mode === "edit" && !!layoutId,
+  );
+  const [loadLayoutError, setLoadLayoutError] = React.useState<string | null>(null);
+
+  React.useEffect(() => {
+    if (mode !== "edit" || !layoutId) return;
+    let cancelled = false;
+    void (async () => {
+      try {
+        const res = await authenticatedFetch(
+          `/api/workspace/layouts/${encodeURIComponent(layoutId)}`,
+        );
+        if (cancelled) return;
+        if (!res.ok) {
+          throw new Error(`Failed to load workspace layout (HTTP ${res.status})`);
+        }
+        // eslint-disable-next-line @typescript-eslint/no-explicit-any
+        const layout = (await res.json()) as any;
+        if (cancelled) return;
+        // Field-name flexibility: BFF may camelCase or PascalCase.
+        const layoutName = layout?.name ?? layout?.Name ?? "";
+        const templateId = (layout?.layoutTemplateId ?? layout?.LayoutTemplateId ?? null) as LayoutTemplateId | null;
+        const sectionsJsonStr = layout?.sectionsJson ?? layout?.SectionsJson ?? null;
+        const layoutIsDefault = Boolean(layout?.isDefault ?? layout?.IsDefault ?? false);
+        setWorkspaceName(layoutName);
+        setIsDefault(layoutIsDefault);
+        if (templateId) setSelectedTemplateId(templateId);
+        if (sectionsJsonStr && typeof sectionsJsonStr === "string") {
+          const parsed = parseSectionsJson(sectionsJsonStr);
+          setSelectedSectionIds(parsed.sectionIds);
+          setSectionAssignments(parsed.assignments);
+          setRowHeights(parsed.rowHeights);
+          setSectionInstances(parsed.sectionInstances);
+        }
+        setIsLoadingLayout(false);
+      } catch (err: unknown) {
+        if (cancelled) return;
+        const msg = err instanceof Error ? err.message : String(err);
+        console.error("[WorkspaceLayoutWizard] Failed to load layout for edit:", msg);
+        setLoadLayoutError(msg);
+        setIsLoadingLayout(false);
+      }
+    })();
+    return () => { cancelled = true; };
+  }, [mode, layoutId, authenticatedFetch]);
+
+  // 2026-07-03 (R2-followup-1 §3.1): edit mode should skip Choose Layout +
+  // Select Components and land on Arrange Sections directly, since the user is
+  // MODIFYING an existing layout, not building fresh. selectedTemplateId +
+  // selectedSectionIds are pre-populated from parseSectionsJson so canAdvance()
+  // returns true for both intermediate steps.
+  //
+  // R2 UAT §3.1 (2026-07-03): the prior implementation attempted to jump twice
+  // via `wizardRef.current?.nextStep()` inside a `requestAnimationFrame`. That
+  // relied on `canAdvance()` returning true after the async fetch settled — a
+  // race we could never reliably win on first mount. Replaced with the
+  // `WizardShell.initialStepId` prop which sets the target step atomically in
+  // the reducer's lazy-init callback (single source of truth, no timing
+  // dependency).
+  //
+  // Gear icon variant (§4.1) opens at Choose Layout via URL param, which is
+  // handled by `resolvedInitialStepId` below.
 
   /** Derive slot count from the selected template. */
   const slotCount = React.useMemo(() => {
@@ -364,18 +615,20 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
 
   /**
    * Auto-initialize slot assignments when entering the Review & Save step.
-   * Watches the wizard shell state to detect when we arrive at step index 2
-   * with an empty assignments map, then populates default assignments.
+   *
+   * R2 UAT §5.4 (2026-07-03): DISABLED for create/saveAs flows. Operators
+   * explicitly drag sections into slots — the wizard no longer pre-populates
+   * assignments on step entry. Edit flows preserve prior assignments via
+   * parseSectionsJson (`sectionAssignments` starts already populated), so this
+   * effect never fired for edit anyway.
+   *
+   * Kept as a no-op effect for the historical prevStepRef tracking pattern in
+   * case future logic needs step-transition detection.
    */
   const prevStepRef = React.useRef<number>(-1);
   React.useEffect(() => {
     const currentIndex = wizardRef.current?.state.currentStepIndex ?? -1;
-    const wasOnDifferentStep = prevStepRef.current !== currentIndex;
     prevStepRef.current = currentIndex;
-
-    if (wasOnDifferentStep && currentIndex === 2 && selectedTemplateId && sectionAssignments.size === 0) {
-      setSectionAssignments(buildInitialAssignments(selectedTemplateId, selectedSections));
-    }
   });
 
   // ---------------------------------------------------------------------------
@@ -425,7 +678,13 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
     const body = {
       name: workspaceName.trim(),
       layoutTemplateId: selectedTemplateId,
-      sectionsJson: buildSectionsJson(selectedTemplateId, sectionAssignments, scopeRef.current),
+      sectionsJson: buildSectionsJson(
+        selectedTemplateId,
+        sectionAssignments,
+        scopeRef.current,
+        rowHeights,
+        sectionInstances,
+      ),
       isDefault,
     };
 
@@ -485,7 +744,19 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
 
       // Set dialog result for parent to read
       // eslint-disable-next-line @typescript-eslint/no-explicit-any
+      // R2 UAT §3.3 fix follow-up (2026-07-03): also write to sessionStorage
+      // because the wizard opens as a popup (navigateTo target:2) whose
+      // `window` is separate from the SpaarkeAi host — cross-window
+      // `window.__dialogResult` doesn't survive. sessionStorage IS shared
+      // per-origin per-tab-set, so the host can read the same value.
+      // eslint-disable-next-line @typescript-eslint/no-explicit-any
       (window as any).__dialogResult = { confirmed: true, layoutId: savedId, pinToStart };
+      try {
+        window.sessionStorage?.setItem(
+          "spaarke:workspace-wizard:last-result",
+          JSON.stringify({ confirmed: true, layoutId: savedId, pinToStart, at: Date.now() }),
+        );
+      } catch { /* storage may be disabled */ }
 
       // Return success config — WizardShell displays the success screen
       return {
@@ -532,7 +803,7 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
         throw new Error(apiErr.message ?? "Failed to save workspace layout. Please try again.");
       }
     }
-  }, [mode, layoutId, selectedTemplateId, sectionAssignments, workspaceName, isDefault, pinToStart, authenticatedFetch]);
+  }, [mode, layoutId, selectedTemplateId, sectionAssignments, workspaceName, isDefault, pinToStart, rowHeights, sectionInstances, authenticatedFetch]);
 
   // ---------------------------------------------------------------------------
   // WizardShell step configurations
@@ -569,6 +840,7 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
             selectedIds={selectedSectionIds}
             slotCount={slotCount}
             onToggle={handleSectionToggle}
+            onSelectAll={setSelectedSectionIds}
             scope={scope}
             onScopeChange={setScope}
           />
@@ -587,10 +859,15 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
               workspaceName={workspaceName}
               isDefault={isDefault}
               pinToStart={pinToStart}
+              rowHeights={rowHeights}
+              sectionInstances={sectionInstances}
               onAssignmentsChange={setSectionAssignments}
               onNameChange={setWorkspaceName}
               onDefaultChange={setIsDefault}
               onPinToStartChange={setPinToStart}
+              onRowHeightsChange={setRowHeights}
+              onSectionInstancesChange={setSectionInstances}
+              authenticatedFetch={authenticatedFetch}
             />
           ) : null,
       },
@@ -605,14 +882,62 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
       workspaceName,
       isDefault,
       pinToStart,
+      rowHeights,
+      sectionInstances,
       scope,
       templateFilter,
     ],
   );
 
   // ---------------------------------------------------------------------------
+  // Resolved initial step id — passed to WizardShell.initialStepId. Captured
+  // ONCE on mount (WizardShell's reducer lazy-init only runs on first render).
+  // Order of precedence:
+  //   1. Explicit `startAtStep` URL param (used by SpaarkeAi gear-icon flow to
+  //      force Choose Layout for edit).
+  //   2. `mode === "edit"` OR `mode === "saveAs"` → Arrange Sections directly.
+  //   3. Default (create) → Choose Layout (first step; equivalent to leaving
+  //      `initialStepId` undefined).
+  // ---------------------------------------------------------------------------
+  const initialStepIdRef = React.useRef<string | undefined>(
+    (() => {
+      if (startAtStep === STEP_CHOOSE_LAYOUT || startAtStep === STEP_CONFIGURE_SECTIONS || startAtStep === STEP_REVIEW_SAVE) {
+        return startAtStep;
+      }
+      if (mode === "edit" || mode === "saveAs") {
+        return STEP_REVIEW_SAVE;
+      }
+      return undefined;
+    })(),
+  );
+
+  // ---------------------------------------------------------------------------
   // Render
   // ---------------------------------------------------------------------------
+
+  // R2 UAT §3.1 follow-up (2026-07-03): show a loading indicator while the
+  // edit-mode layout fetch is in flight. Prevents the wizard from opening
+  // at Arrange Sections with empty state (which rendered as a blank screen
+  // because ArrangeStep returns null when the template isn't set yet).
+  if (isLoadingLayout) {
+    return (
+      <FluentProvider theme={theme} style={{ height: "100%" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%" }}>
+          <span>Loading workspace…</span>
+        </div>
+      </FluentProvider>
+    );
+  }
+
+  if (loadLayoutError) {
+    return (
+      <FluentProvider theme={theme} style={{ height: "100%" }}>
+        <div style={{ display: "flex", alignItems: "center", justifyContent: "center", height: "100%", flexDirection: "column", gap: "8px" }}>
+          <span style={{ color: tokens.colorPaletteRedForeground1 }}>Could not load workspace: {loadLayoutError}</span>
+        </div>
+      </FluentProvider>
+    );
+  }
 
   return (
     <FluentProvider theme={theme} style={{ height: "100%" }}>
@@ -623,6 +948,7 @@ export const App: React.FC<AppProps> = ({ mode, layoutId, layoutTemplateId, sect
         hideTitle={true}
         ariaLabel={wizardTitle}
         steps={steps}
+        initialStepId={initialStepIdRef.current}
         onClose={() => {
           (window as any).__dialogResult = { confirmed: false };
           // Close the navigateTo dialog by clicking the platform's close button

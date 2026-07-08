@@ -25,6 +25,92 @@ import type {
 // Layout JSON shape (stored in sprk_sectionsjson Dataverse column)
 // ---------------------------------------------------------------------------
 
+/**
+ * Per-instance override shape for a section placed in a layout row.
+ *
+ * Spec: FR-03 (spaarke-dataset-grid-framework-r2, task 012, 2026-07-02).
+ *
+ * Rationale: the same section registration (e.g., `communications`) can appear
+ * in different dashboards with different labels ("Email" vs "Communications"),
+ * different config records (`configIdOverride` for the alt grid), different
+ * pageSizes, or restricted view pickers. Previously the only way to vary these
+ * was to author a whole new registration + config record. `SectionInstance` lets
+ * a single registration participate in multiple layouts with per-placement
+ * customization.
+ *
+ * All fields except `id` are optional. When omitted, framework/registration/
+ * config-record defaults apply — matching pre-FR-03 behavior.
+ *
+ * Wire-through:
+ * - `configIdOverride` — surfaced to the section factory via
+ *   `SectionFactoryContext.sectionInstance`. The factory reads it (if it embeds
+ *   a `<DataGrid />`) to pick an alternate `configId`.
+ * - `label` — overwrites `SectionConfig.title` post-factory. Underlying
+ *   metadata (`SectionMetadata.label`) unchanged.
+ * - `overrides.pageSize` — surfaced via `SectionFactoryContext.sectionInstance`.
+ *   Factories forward it to the `<DataGrid />` grid `behavior.pageSize` fallback
+ *   chain (see `configResolution.resolveEffectivePageSize`).
+ * - `overrides.availableViews` — surfaced via
+ *   `SectionFactoryContext.sectionInstance`. Factories forward it to the
+ *   `<DataGrid />` availableViews chain (see
+ *   `configResolution.resolveEffectiveAvailableViews`). REPLACES config-level
+ *   `SourceSavedQuery.availableViews` (FR-05) when both are set.
+ */
+export interface SectionInstance {
+  /** Registration ID (matches `SectionRegistration.id` — same as the bare-string form). */
+  id: string;
+  /**
+   * When set, the section's `<DataGrid />` uses this `configId` in place of the
+   * registration's baked-in default. Enables one registration to render different
+   * `sprk_gridconfiguration` records per placement.
+   */
+  configIdOverride?: string;
+  /**
+   * When set, the section header title is rendered as this string. The underlying
+   * `SectionMetadata.label` remains unchanged (wizard picker still shows the
+   * registration label). Folds design Issue 6 (per-instance rename).
+   */
+  label?: string;
+  /**
+   * Per-instance DataGrid behavior overrides. Highest precedence; overrides the
+   * config record's `behavior.pageSize` and `SourceSavedQuery.availableViews`.
+   */
+  overrides?: {
+    /**
+     * Effective `pageSize` for this section instance's grid. Highest precedence:
+     * SectionInstance.overrides.pageSize > config record's `behavior.pageSize` >
+     * framework default (25, per FR-07).
+     */
+    pageSize?: number;
+    /**
+     * Effective savedquery allowlist for this section instance's ViewSelector.
+     * Highest precedence: SectionInstance.overrides.availableViews REPLACES
+     * config-level `SourceSavedQuery.availableViews` (FR-05) when both are set.
+     */
+    availableViews?: string[];
+  };
+}
+
+/**
+ * Normalize a `LayoutJsonRow.sections` entry into a `SectionInstance`.
+ *
+ * Bare-string entries (the pre-FR-03 shape used by every published layout as of
+ * 2026-07-02) are widened into `{ id: entry }`. Object entries are returned
+ * verbatim. Enables `buildDynamicWorkspaceConfig` and consumers to treat both
+ * shapes uniformly without repeated conditional logic.
+ *
+ * Spec: FR-03 (spaarke-dataset-grid-framework-r2, task 012).
+ *
+ * @param entry - A bare section-id string OR a `SectionInstance` object.
+ * @returns Normalized `SectionInstance`. Never mutates the input.
+ */
+export function normalizeSection(entry: string | SectionInstance): SectionInstance {
+  if (typeof entry === 'string') {
+    return { id: entry };
+  }
+  return entry;
+}
+
 /** A single row in the persisted layout JSON. */
 export interface LayoutJsonRow {
   /** Stable row identifier (e.g., "row-1"). */
@@ -33,8 +119,36 @@ export interface LayoutJsonRow {
   columns: string;
   /** Responsive override at max-width 767px. Defaults to "1fr" if omitted. */
   columnsSmall?: string;
-  /** Ordered section IDs assigned to this row's slots. */
-  sections: string[];
+  /**
+   * Ordered section entries assigned to this row's slots.
+   *
+   * Two shapes accepted (widened by FR-03, task 012):
+   *   - Bare string `"communications"` — treated as `{ id: "communications" }`.
+   *     Preserves back-compat with every published `sprk_workspacelayout`
+   *     record predating FR-03.
+   *   - `SectionInstance` object with per-placement overrides (label, configId,
+   *     behavior). See `SectionInstance`.
+   *
+   * Normalization is handled by `normalizeSection` at the read boundary so that
+   * downstream code always sees `SectionInstance`.
+   */
+  sections: Array<string | SectionInstance>;
+  /**
+   * Optional. When set, this row is clamped to the height (accepts any CSS length:
+   * '480px', '80vh', '100vh'). Sections respect this ceiling regardless of their
+   * `contentSizing`.
+   *
+   * Spec: FR-02 (spaarke-dataset-grid-framework-r2). Applied by the framework as
+   * `maxHeight` + `overflow: hidden` on the row wrapper. When both `rowHeight`
+   * (row-level) AND `contentSizing: 'clamped'` (section-level) are set, the row's
+   * ceiling wins — the row wrapper's `maxHeight` provides the constraint and the
+   * section's own `defaultHeight` still applies to its inner card, but the row's
+   * `overflow: hidden` prevents any over-constraint on the outer wrapper.
+   *
+   * Omitted `rowHeight` preserves current behavior (row grows to fit sections;
+   * sections apply their own `contentSizing` per FR-01).
+   */
+  readonly rowHeight?: string;
 }
 
 /** Record ownership scope for workspace queries. */
@@ -145,31 +259,112 @@ export function buildDynamicWorkspaceConfig(
   for (const jsonRow of layoutJson.rows) {
     const resolvedSectionIds: string[] = [];
 
-    for (const sectionId of jsonRow.sections) {
+    for (const rawEntry of jsonRow.sections) {
       // Task 091 fix 1 — tolerate empty / falsy slot IDs silently.
       // The wizard now allows saving layouts with empty slots (operator
       // removed a section via the X button). Empty slots serialize as ""
-      // in sectionsJson; we skip them without a console warning.
-      if (!sectionId) {
+      // in sectionsJson; we skip them without a console warning. Applies
+      // equally to `SectionInstance` objects with an empty `id`.
+      if (!rawEntry) {
         continue;
       }
 
-      const registration = findRegistration(sectionId, registry);
+      // FR-03 (task 012): normalize bare-string entries into SectionInstance
+      // at the read boundary. Downstream code always sees the object shape.
+      const instance = normalizeSection(rawEntry);
+
+      if (!instance.id) {
+        continue;
+      }
+
+      const registration = findRegistration(instance.id, registry);
 
       if (!registration) {
-        console.warn(`Unknown section ID: ${sectionId}, skipping`);
+        console.warn(`Unknown section ID: ${instance.id}, skipping`);
         continue;
       }
 
-      // Call the factory to produce the SectionConfig
-      const sectionConfig = registration.factory(effectiveContext);
+      // FR-03 (task 012): make per-instance overrides visible to the factory
+      // via a per-section-augmented SectionFactoryContext. Factories that
+      // embed a `<DataGrid />` read `context.sectionInstance` to:
+      //   - swap `configId` (configIdOverride)
+      //   - forward per-instance `overrides.pageSize` / `overrides.availableViews`
+      // Factories that don't consume `sectionInstance` (get-started, quick-summary,
+      // etc.) simply ignore the extra field — additive, back-compat-safe.
+      const perSectionContext: SectionFactoryContext = {
+        ...effectiveContext,
+        sectionInstance: instance,
+      };
 
-      // Apply defaultHeight from registration if factory didn't set minHeight
-      if (registration.defaultHeight && !sectionConfig.style?.minHeight) {
-        sectionConfig.style = {
-          ...sectionConfig.style,
-          minHeight: registration.defaultHeight,
-        };
+      // Call the factory to produce the SectionConfig
+      const sectionConfig = registration.factory(perSectionContext);
+
+      // FR-03 (task 012): apply `SectionInstance.label` as a title override on
+      // the returned SectionConfig. `SectionMetadata.label` is unchanged (the
+      // wizard picker still shows the registration label). Empty-string labels
+      // are treated as "no override" — same policy as the wizard save contract.
+      if (instance.label && instance.label.length > 0) {
+        sectionConfig.title = instance.label;
+      }
+
+      // Apply defaultHeight from registration based on contentSizing intent.
+      //
+      // Spec ref: FR-01 (spaarke-dataset-grid-framework-r2). Sections declare
+      // whether their `defaultHeight` should be a FLOOR (`'grow'`, default) or a
+      // CEILING (`'clamped'`). The framework then applies the correct CSS key.
+      //
+      // - `'clamped'` (dense grids etc.) → `max-height` + `overflow: hidden` +
+      //   `display: flex`. The SectionPanel becomes a fixed-size viewport and the
+      //   widget must supply its own inner scroll surface (see
+      //   `.claude/patterns/ui/embedded-widget-sizing.md`).
+      // - `'grow'` or omitted (back-compat with existing sections) → `min-height`.
+      //   The section grows to fit intrinsic content. This preserves current
+      //   behavior for every registration that does not set `contentSizing`.
+      //
+      // In both branches, operator-set styles (`style.minHeight` or `style.maxHeight`
+      // supplied by the factory) are NOT overwritten — this preserves the existing
+      // "factory wins" contract.
+      //
+      // R2 UAT §5.6 fix (2026-07-03 round 2): when the ROW has an operator-set
+      // rowHeight, apply that height LITERALLY to the section card — not via
+      // `100%` which depends on the row's grid track being sized correctly by
+      // the browser. Direct value avoids the flex/grid chain propagation
+      // subtleties that were causing the DataGrid inside to stay at its
+      // registration `defaultHeight` regardless of the row's actual height.
+      //
+      // Semantics: row-height wins over section-defaultHeight (operator intent
+      // > registration hint). Overrides any registration.defaultHeight.
+      if (jsonRow.rowHeight) {
+        // Force `flex: 1` on the widget root chain to fill, but ALSO set the
+        // outer card's explicit height so the whole subtree has a determinate
+        // parent height. Factory-supplied maxHeight/height wins if present.
+        if (!sectionConfig.style?.maxHeight && !sectionConfig.style?.height) {
+          sectionConfig.style = {
+            ...sectionConfig.style,
+            height: jsonRow.rowHeight,
+            maxHeight: jsonRow.rowHeight,
+            minHeight: jsonRow.rowHeight,
+            overflow: 'hidden',
+            display: 'flex',
+            flexDirection: 'column',
+          };
+        }
+      } else if (registration.defaultHeight) {
+        if (registration.contentSizing === 'clamped') {
+          if (!sectionConfig.style?.maxHeight) {
+            sectionConfig.style = {
+              ...sectionConfig.style,
+              maxHeight: registration.defaultHeight,
+              overflow: 'hidden',
+              display: 'flex',
+            };
+          }
+        } else if (!sectionConfig.style?.minHeight) {
+          sectionConfig.style = {
+            ...sectionConfig.style,
+            minHeight: registration.defaultHeight,
+          };
+        }
       }
 
       allSections.push(sectionConfig);
@@ -185,6 +380,16 @@ export function buildDynamicWorkspaceConfig(
     // columns can hold, we need to handle overflow
     const templateSlotCount = countSlots(jsonRow.columns);
 
+    // FR-02: propagate optional row-level `rowHeight` as `maxHeight` +
+    // `overflow: 'hidden'` on the row wrapper. When both `rowHeight` (row-level)
+    // AND `contentSizing: 'clamped'` (section-level) are set, the row's ceiling
+    // wins — the section's `defaultHeight` still applies to its inner card, but
+    // the row's `overflow: hidden` prevents any over-constraint on the outer
+    // wrapper.
+    const rowHeightStyle = jsonRow.rowHeight
+      ? { maxHeight: jsonRow.rowHeight, overflow: 'hidden' as const }
+      : undefined;
+
     if (resolvedSectionIds.length <= templateSlotCount) {
       // Normal case: sections fit within the row's column template
       rows.push({
@@ -192,6 +397,7 @@ export function buildDynamicWorkspaceConfig(
         sectionIds: resolvedSectionIds,
         gridTemplateColumns: jsonRow.columns,
         gridTemplateColumnsSmall: jsonRow.columnsSmall,
+        ...(rowHeightStyle ?? {}),
       });
     } else {
       // Overflow: more sections than template slots — split into the
@@ -202,15 +408,19 @@ export function buildDynamicWorkspaceConfig(
         sectionIds: firstBatch,
         gridTemplateColumns: jsonRow.columns,
         gridTemplateColumnsSmall: jsonRow.columnsSmall,
+        ...(rowHeightStyle ?? {}),
       });
 
-      // Remaining sections go into auto-appended single-column rows
+      // Remaining sections go into auto-appended single-column rows.
+      // The row-level `rowHeight` ceiling also applies to each overflow row —
+      // if operator set a height ceiling, every derived row honors it.
       const overflow = resolvedSectionIds.slice(templateSlotCount);
       for (let i = 0; i < overflow.length; i++) {
         rows.push({
           id: `${jsonRow.id}-overflow-${i + 1}`,
           sectionIds: [overflow[i]],
           gridTemplateColumns: '1fr',
+          ...(rowHeightStyle ?? {}),
         });
       }
     }

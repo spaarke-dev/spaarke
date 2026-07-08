@@ -70,6 +70,13 @@ interface DataParams {
    * so an unknown value is a no-op (visually equivalent to absence).
    */
   templateFilter: readonly LayoutTemplateId[] | undefined;
+  /**
+   * Optional step id to open the wizard at (R2 UAT §3.1 + §4.1). Accepts
+   * "choose-layout" | "configure-sections" | "review-save". When absent,
+   * App.tsx defaults to review-save for edit/saveAs and to first step for
+   * create. Used by SpaarkeAi gear-icon flow to force Choose Layout on edit.
+   */
+  startAtStep: string | null;
 }
 
 /**
@@ -123,7 +130,11 @@ function parseDataParams(): DataParams {
           .filter((s) => s.length > 0) as readonly LayoutTemplateId[])
       : undefined;
 
-  return { mode, layoutId, layoutTemplateId, sectionsJson, sourceName, templateFilter };
+  // startAtStep — R2 UAT §3.1 + §4.1 (2026-07-03). Passed through as opaque
+  // string; App.tsx validates against its STEP_ constants.
+  const startAtStep = parsed.get("startAtStep") || null;
+
+  return { mode, layoutId, layoutTemplateId, sectionsJson, sourceName, templateFilter, startAtStep };
 }
 
 /**
@@ -188,6 +199,7 @@ function Root() {
       sourceName={dataParams.sourceName}
       authenticatedFetch={authenticatedFetch}
       templateFilter={dataParams.templateFilter}
+      startAtStep={dataParams.startAtStep ?? undefined}
     />
   );
 }

@@ -1,5 +1,4 @@
 using System.Text;
-using System.Text.Json;
 using System.Text.Json.Serialization;
 using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Errors;
@@ -50,21 +49,36 @@ public static class DailyBriefingEndpoints
             .ProducesProblem(503);
 
         // POST /api/ai/daily-briefing/render — Single-call live briefing render.
-        // R7 Wave 11 T118 narrator spike (2026-06-30): bypasses the appnotification
-        // dependency by running live Dataverse queries via DailyBriefingCollector,
-        // then narrating via DailyBriefingNarrator. No request body — discovers the
-        // user from the OBO token and resolves their systemuserid to drive queries.
-        // POC scope: sprk_event only, 4 channels (Tasks Due Soon / Overdue /
-        // Recent Matter Activity / My Recent Updates).
+        // FR-P3-04 (spaarke-ai-architecture-redesign-r1 task 043): dispatches as the FIRST
+        // full `coded` composite Action — DailyBriefingCompositeService resolves the Binding
+        // (daily-briefing-narrate/default), executes the Binding's coded workflow via the
+        // ICodedWorkflow registry, writes the session-ledger entries BEFORE rendering
+        // (ADR-040), then returns the renderable response. No request body — discovers the
+        // user from the OBO token and resolves their systemuserid to drive collector queries.
         group.MapPost("/render", HandleRender)
             .RequireRateLimiting("ai-batch")
             .WithName("RenderDailyBriefing")
-            .WithSummary("Render full Daily Briefing from live Dataverse queries (no appnotification dependency)")
+            .WithSummary("Render full Daily Briefing via the coded composite Action (live Dataverse queries)")
             .WithDescription(
-                "Runs live FetchXML queries against Dataverse for the calling user's events " +
-                "(tasks due soon, overdue, recent matter activity, your recent updates), " +
-                "builds the NarrateRequest payload, then narrates via Azure OpenAI. " +
+                "Runs live FetchXML queries against Dataverse for the calling user's events, " +
+                "then executes the catalog-resolved coded briefing workflow (Binding decides — ADR-039). " +
                 "Returns the same DailyBriefingNarrateResponse shape as /narrate.")
+            .Produces<DailyBriefingNarrateResponse>(StatusCodes.Status200OK)
+            .ProducesProblem(401)
+            .ProducesProblem(429)
+            .ProducesProblem(500)
+            .ProducesProblem(503);
+
+        // POST /api/ai/daily-briefing/email — Email delivery leg (FR-P3-04 / UC-D-1).
+        // Executes the SAME coded composite via the `email` Binding (consumerCode=email,
+        // disposition=email): collect → narrate → ledger write → Communication-service
+        // delivery to the calling user (SendMode.User OBO). The scheduled trigger is
+        // declared on the Binding row's sprk_oneventbindings (briefing_scheduled); the
+        // scheduler invokes THIS route per user at the per-user time.
+        group.MapPost("/email", HandleEmail)
+            .RequireRateLimiting("ai-batch")
+            .WithName("EmailDailyBriefing")
+            .WithSummary("Render and email the Daily Briefing to the calling user via the coded composite Action")
             .Produces<DailyBriefingNarrateResponse>(StatusCodes.Status200OK)
             .ProducesProblem(401)
             .ProducesProblem(429)
@@ -75,36 +89,169 @@ public static class DailyBriefingEndpoints
     }
 
     /// <summary>
-    /// R7 Wave 11 T118 narrator spike (2026-06-30): live-query render path.
-    /// Resolves the caller's systemuserid from the OBO token's AAD oid claim,
-    /// runs the collector to populate the request payload, then hands off to the
-    /// existing narrator. No body required — the briefing is self-contained.
+    /// FR-P3-04 (task 043): live-query render path via the coded composite. Resolves the
+    /// caller's systemuserid from the OBO token's AAD oid claim, then delegates to
+    /// <see cref="Sprk.Bff.Api.Services.Ai.Narrators.DailyBriefingCompositeService.RenderAsync"/>
+    /// (Binding-resolved coded workflow; ledger write-before-render per ADR-040).
+    /// No body required — the briefing is self-contained.
     /// </summary>
     private static async Task<IResult> HandleRender(
         ILoggerFactory loggerFactory,
-        Sprk.Bff.Api.Services.Ai.Narrators.DailyBriefingCollector collector,
-        Sprk.Bff.Api.Services.Ai.Narrators.DailyBriefingNarrator narrator,
+        Sprk.Bff.Api.Services.Ai.Narrators.DailyBriefingCompositeService composite,
         Spaarke.Dataverse.IGenericEntityService entityService,
         HttpContext httpContext,
         CancellationToken cancellationToken)
     {
         var logger = loggerFactory.CreateLogger("DailyBriefingEndpoints");
 
-        // Resolve the caller's Dataverse systemuserid from their AAD oid claim.
-        // The "oid" claim on the OBO token is the Azure AD object id; Dataverse's
-        // systemuser table stores it in azureactivedirectoryobjectid.
-        var aadOid = httpContext.User?.FindFirst("oid")?.Value
-                  ?? httpContext.User?.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
-        if (string.IsNullOrEmpty(aadOid))
+        var identity = await ResolveSystemUserIdAsync(entityService, httpContext, logger, "render", cancellationToken)
+            .ConfigureAwait(false);
+        if (identity.Failure is not null)
         {
-            logger.LogWarning("Daily briefing render: token has no AAD oid claim; cannot resolve systemuserid");
-            return Results.Problem(
-                statusCode: 401,
-                title: "Unauthorized",
-                detail: "Caller AAD object id (oid claim) is required.");
+            return identity.Failure;
         }
 
-        Guid systemUserId;
+        try
+        {
+            var response = await composite.RenderAsync(
+                identity.SystemUserId, GetTenantId(httpContext), cancellationToken).ConfigureAwait(false);
+            return TypedResults.Ok(response);
+        }
+        catch (FeatureDisabledException ex)
+        {
+            logger.LogDebug(
+                "Daily briefing render called while AI feature disabled. ErrorCode={ErrorCode}", ex.ErrorCode);
+            return ex.AsFeatureDisabled503();
+        }
+        catch (Sprk.Bff.Api.Services.Ai.Narrators.DailyBriefingDispatchUnconfiguredException ex)
+        {
+            logger.LogWarning(ex, "Daily briefing render dispatch unconfigured.");
+            return Results.Problem(statusCode: 503, title: "Service Unavailable", detail: ex.Message);
+        }
+        catch (OpenAiCircuitBrokenException ex)
+        {
+            logger.LogWarning(
+                "OpenAI circuit breaker open for daily briefing render. RetryAfter={RetryAfter}s",
+                ex.RetryAfter.TotalSeconds);
+            return ProblemDetailsHelper.AiUnavailable(
+                "AI briefing service is temporarily unavailable.", httpContext.TraceIdentifier);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Daily briefing render failed for systemuserid {SystemUserId}", identity.SystemUserId);
+            return Results.Problem(
+                statusCode: 500,
+                title: "Internal Server Error",
+                detail: "Failed to render daily briefing.");
+        }
+    }
+
+    /// <summary>
+    /// FR-P3-04 (task 043) email leg: executes the coded composite via the <c>email</c>
+    /// Binding and delivers the briefing to the calling user through the Communication
+    /// (Email) service (OutputRouter email disposition — store precedes send, ADR-040).
+    /// </summary>
+    private static async Task<IResult> HandleEmail(
+        ILoggerFactory loggerFactory,
+        Sprk.Bff.Api.Services.Ai.Narrators.DailyBriefingCompositeService composite,
+        Spaarke.Dataverse.IGenericEntityService entityService,
+        HttpContext httpContext,
+        CancellationToken cancellationToken)
+    {
+        var logger = loggerFactory.CreateLogger("DailyBriefingEndpoints");
+
+        var identity = await ResolveSystemUserIdAsync(entityService, httpContext, logger, "email", cancellationToken)
+            .ConfigureAwait(false);
+        if (identity.Failure is not null)
+        {
+            return identity.Failure;
+        }
+
+        // Recipient = the acting user (same claim cascade the Communication service uses
+        // for its SendMode.User sender resolution).
+        var recipientEmail = httpContext.User?.FindFirst(System.Security.Claims.ClaimTypes.Email)?.Value
+            ?? httpContext.User?.FindFirst("preferred_username")?.Value
+            ?? httpContext.User?.FindFirst("email")?.Value
+            ?? httpContext.User?.FindFirst("upn")?.Value
+            ?? httpContext.User?.FindFirst(System.Security.Claims.ClaimTypes.Upn)?.Value
+            ?? httpContext.User?.FindFirst("unique_name")?.Value;
+        if (string.IsNullOrWhiteSpace(recipientEmail))
+        {
+            return Results.Problem(
+                statusCode: 400,
+                title: "Bad Request",
+                detail: "Could not resolve the caller's email address from authentication claims.");
+        }
+
+        try
+        {
+            var response = await composite.EmailAsync(
+                identity.SystemUserId, GetTenantId(httpContext), recipientEmail, cancellationToken).ConfigureAwait(false);
+            return TypedResults.Ok(response);
+        }
+        catch (FeatureDisabledException ex)
+        {
+            logger.LogDebug(
+                "Daily briefing email called while AI feature disabled. ErrorCode={ErrorCode}", ex.ErrorCode);
+            return ex.AsFeatureDisabled503();
+        }
+        catch (Sprk.Bff.Api.Services.Ai.Narrators.DailyBriefingDispatchUnconfiguredException ex)
+        {
+            logger.LogWarning(ex, "Daily briefing email dispatch unconfigured.");
+            return Results.Problem(statusCode: 503, title: "Service Unavailable", detail: ex.Message);
+        }
+        catch (OpenAiCircuitBrokenException ex)
+        {
+            logger.LogWarning(
+                "OpenAI circuit breaker open for daily briefing email. RetryAfter={RetryAfter}s",
+                ex.RetryAfter.TotalSeconds);
+            return ProblemDetailsHelper.AiUnavailable(
+                "AI briefing service is temporarily unavailable.", httpContext.TraceIdentifier);
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            logger.LogError(ex, "Daily briefing email failed for systemuserid {SystemUserId}", identity.SystemUserId);
+            return Results.Problem(
+                statusCode: 500,
+                title: "Internal Server Error",
+                detail: "Failed to email daily briefing.");
+        }
+    }
+
+    /// <summary>
+    /// Shared caller-identity resolution for the /render and /email legs: AAD oid claim →
+    /// Dataverse <c>systemuser.azureactivedirectoryobjectid</c> lookup. Returns either the
+    /// resolved systemuserid or a ready-to-return ProblemDetails failure.
+    /// </summary>
+    private static async Task<(Guid SystemUserId, IResult? Failure)> ResolveSystemUserIdAsync(
+        Spaarke.Dataverse.IGenericEntityService entityService,
+        HttpContext httpContext,
+        ILogger logger,
+        string leg,
+        CancellationToken cancellationToken)
+    {
+        var aadOidRaw = httpContext.User?.FindFirst("oid")?.Value
+                     ?? httpContext.User?.FindFirst("http://schemas.microsoft.com/identity/claims/objectidentifier")?.Value;
+        // Defense-in-depth (task-043 review): the oid claim is interpolated into FetchXML —
+        // require a well-formed GUID even though AAD token validation guarantees it in practice.
+        if (string.IsNullOrEmpty(aadOidRaw) || !Guid.TryParse(aadOidRaw, out var aadOidGuid))
+        {
+            logger.LogWarning("Daily briefing {Leg}: token has no valid AAD oid claim; cannot resolve systemuserid", leg);
+            return (Guid.Empty, Results.Problem(
+                statusCode: 401,
+                title: "Unauthorized",
+                detail: "Caller AAD object id (oid claim) is required."));
+        }
+        var aadOid = aadOidGuid.ToString("D");
+
         try
         {
             var lookupFxml = $@"
@@ -122,69 +269,29 @@ public static class DailyBriefingEndpoints
                 new Microsoft.Xrm.Sdk.Query.FetchExpression(lookupFxml), cancellationToken).ConfigureAwait(false);
             if (lookup.Entities.Count == 0)
             {
-                logger.LogWarning("Daily briefing render: no systemuser found for AAD oid {AadOid}", aadOid);
-                return Results.Problem(
+                logger.LogWarning("Daily briefing {Leg}: no systemuser found for AAD oid {AadOid}", leg, aadOid);
+                return (Guid.Empty, Results.Problem(
                     statusCode: 403,
                     title: "Forbidden",
-                    detail: "Caller is not a Dataverse user in this environment.");
+                    detail: "Caller is not a Dataverse user in this environment."));
             }
-            systemUserId = lookup.Entities[0].GetAttributeValue<Guid>("systemuserid");
+            return (lookup.Entities[0].GetAttributeValue<Guid>("systemuserid"), null);
         }
         catch (Exception ex)
         {
-            logger.LogError(ex, "Daily briefing render: systemuser lookup failed for AAD oid {AadOid}", aadOid);
-            return Results.Problem(
+            logger.LogError(ex, "Daily briefing {Leg}: systemuser lookup failed for AAD oid {AadOid}", leg, aadOid);
+            return (Guid.Empty, Results.Problem(
                 statusCode: 500,
                 title: "Internal Server Error",
-                detail: "Failed to resolve caller identity.");
-        }
-
-        try
-        {
-            // R7 W12 feedback item 9 (2026-07-01): fan out the daily-briefing collect
-            // AND the high-priority scan in parallel — they hit disjoint Dataverse
-            // queries and combined latency stays close to the slower of the two.
-            var payloadTask = collector.CollectAsync(systemUserId, cancellationToken);
-            var highPriorityTask = collector.CollectHighPriorityAsync(systemUserId, cancellationToken);
-            await Task.WhenAll(payloadTask, highPriorityTask).ConfigureAwait(false);
-            var payload = await payloadTask.ConfigureAwait(false);
-            var highPriorityItems = await highPriorityTask.ConfigureAwait(false);
-
-            if (payload.Channels.Length == 0 && payload.PriorityItems.Length == 0 && payload.Categories.Length == 0)
-            {
-                logger.LogInformation(
-                    "Daily briefing render: no notable channel items for systemuserid={SystemUserId} — returning narrative-empty response (highPriorityItems={HighPriorityCount})",
-                    systemUserId, highPriorityItems.Length);
-                // High-priority items STILL surface even when channel narrations are empty
-                // — operator wants flagged items visible regardless of channel content.
-                return TypedResults.Ok(new DailyBriefingNarrateResponse
-                {
-                    Tldr = new TldrResult { Summary = string.Empty, KeyTakeaways = [], TopAction = string.Empty },
-                    ChannelNarratives = [],
-                    GeneratedAtUtc = DateTimeOffset.UtcNow,
-                    HighPriorityItems = highPriorityItems,
-                });
-            }
-
-            var response = await narrator.NarrateAsync(payload, cancellationToken).ConfigureAwait(false);
-            // Attach high-priority items via record `with` — narrator is unaware of this
-            // field (bypasses LLM per operator design decision — high priority is a
-            // structured list, not narrative content).
-            return TypedResults.Ok(response with { HighPriorityItems = highPriorityItems });
-        }
-        catch (OperationCanceledException)
-        {
-            throw;
-        }
-        catch (Exception ex)
-        {
-            logger.LogError(ex, "Daily briefing render failed for systemuserid {SystemUserId}", systemUserId);
-            return Results.Problem(
-                statusCode: 500,
-                title: "Internal Server Error",
-                detail: "Failed to render daily briefing.");
+                detail: "Failed to resolve caller identity."));
         }
     }
+
+    /// <summary>Tenant id from the caller's token (empty when absent — dev tolerance).</summary>
+    private static string GetTenantId(HttpContext httpContext) =>
+        httpContext.User?.FindFirst("tid")?.Value
+        ?? httpContext.User?.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value
+        ?? string.Empty;
 
     /// <summary>
     /// Generate a prioritized briefing summary from structured notification data.
@@ -318,14 +425,13 @@ public static class DailyBriefingEndpoints
 
     /// <summary>
     /// Generate a narrative briefing with TL;DR and per-channel narrative bullets.
-    /// R4 FR-12 / task 031 (Path A.5): the body of this endpoint is a thin dispatch
-    /// wrapper that resolves the <c>DAILY-BRIEFING-NARRATE</c> playbook via
-    /// <see cref="IConsumerRoutingService"/> and invokes it via the
-    /// <see cref="IInvokePlaybookAi"/> facade. No inline LLM prompt strings remain
-    /// in this method or its helpers — all prompt content lives in the playbook +
-    /// associated Action rows (BRIEF-NARRATE-TLDR / BRIEF-NARRATE-CHANNEL /
-    /// BRIEF-VALIDATE-ENTITY-NAMES). See <c>projects/spaarke-daily-update-service-r4/
-    /// notes/decisions/030-dispatch-path.md</c> for the path decision.
+    /// FR-P3-04 (spaarke-ai-architecture-redesign-r1 task 043) HARD CUTOVER: the R4
+    /// playbook-engine dispatch AND the R7 narrator parallel-run feature flag are
+    /// DELETED (NFR-08). Dispatch is decided by the Binding table
+    /// only (ADR-039): <see cref="Sprk.Bff.Api.Services.Ai.Narrators.DailyBriefingCompositeService"/>
+    /// resolves <c>daily-briefing-narrate/default</c> and executes its coded workflow,
+    /// writing the ledger entries before this endpoint renders (ADR-040). All prompt
+    /// content stays hot-editable in the BRIEF-NARRATE-* Action rows.
     /// </summary>
     /// <remarks>
     /// Response shape (<see cref="DailyBriefingNarrateResponse"/>) is preserved for
@@ -335,10 +441,7 @@ public static class DailyBriefingEndpoints
     private static async Task<IResult> HandleNarrate(
         DailyBriefingNarrateRequest request,
         ILoggerFactory loggerFactory,
-        IConsumerRoutingService routing,
-        IInvokePlaybookAi invokePlaybookAi,
-        IConfiguration configuration,
-        Sprk.Bff.Api.Services.Ai.Narrators.DailyBriefingNarrator narrator,
+        Sprk.Bff.Api.Services.Ai.Narrators.DailyBriefingCompositeService composite,
         HttpContext httpContext,
         CancellationToken cancellationToken)
     {
@@ -373,146 +476,38 @@ public static class DailyBriefingEndpoints
             });
         }
 
-        // R7 Wave 11 T116 narrator spike (2026-06-30) — feature-flag branch.
-        // When Features:NarrateUseCodeBasedNarrator=true, bypass the playbook engine
-        // and execute /narrate via DailyBriefingNarrator (direct C# calls). Flag off
-        // (default) preserves existing playbook-engine path. Plan:
-        //   projects/spaarke-ai-platform-unification-r7/notes/spikes/narrator-spike-plan.md
-        var useCodeNarrator = configuration.GetValue<bool>(
-            "Features:NarrateUseCodeBasedNarrator", defaultValue: false);
-
-        if (useCodeNarrator)
-        {
-            logger.LogInformation(
-                "Dispatching daily briefing narration via CODE-BASED narrator (spike): Categories={CategoryCount}, PriorityItems={PriorityCount}, Channels={ChannelCount}",
-                request.Categories.Length, request.PriorityItems.Length, request.Channels.Length);
-
-            try
-            {
-                var response = await narrator.NarrateAsync(request, cancellationToken).ConfigureAwait(false);
-                return TypedResults.Ok(response);
-            }
-            catch (OperationCanceledException)
-            {
-                throw;
-            }
-            catch (Exception ex)
-            {
-                logger.LogError(ex,
-                    "Code-based narrator failed for /narrate (spike). Falling through to playbook-engine path.");
-                // Fall through to the playbook path below for resilience during the spike.
-            }
-        }
-
-        logger.LogInformation(
-            "Dispatching daily briefing narration via PLAYBOOK ENGINE: Categories={CategoryCount}, PriorityItems={PriorityCount}, Channels={ChannelCount}",
-            request.Categories.Length, request.PriorityItems.Length, request.Channels.Length);
-
         try
         {
-            // 1. Resolve playbook GUID via the canonical sprk_playbookconsumer routing
-            //    facade. Uses the ConsumerTypes.DailyBriefingNarrate compile-time constant
-            //    (hardening per chat-routing-redesign-r1 code-review S-5 — never a literal
-            //    string). Path A.5 binding per task 030 decision.
-            var playbookId = await routing.ResolveAsync(
-                ConsumerTypes.DailyBriefingNarrate,
-                consumerCode: "default",
-                context: null,
-                environment: null,
-                cancellationToken).ConfigureAwait(false);
+            // FR-P3-04 HARD CUTOVER (NFR-08): the Binding decides — coded composite only.
+            // The R4 playbook-engine dispatch (the since-deleted generic facade + result projection) and
+            // the R7 narrator feature flag were DELETED by task 043; there is no fallback.
+            logger.LogInformation(
+                "Dispatching daily briefing narration via coded composite: Categories={CategoryCount}, PriorityItems={PriorityCount}, Channels={ChannelCount}",
+                request.Categories.Length, request.PriorityItems.Length, request.Channels.Length);
 
-            // Service-availability fail-fast (analogous to the prior briefingAi-null 503):
-            // no sprk_playbookconsumer row → dispatch is unconfigured for this environment.
-            if (playbookId is null)
-            {
-                logger.LogWarning(
-                    "No sprk_playbookconsumer row matched for {ConsumerType} — daily briefing dispatch unconfigured.",
-                    ConsumerTypes.DailyBriefingNarrate);
-
-                return Results.Problem(
-                    statusCode: 503,
-                    title: "Service Unavailable",
-                    detail: "Daily briefing dispatch is unconfigured. Ensure a sprk_playbookconsumer row exists for 'daily-briefing-narrate'.");
-            }
-
-            // 2. Serialize the structured request payload into the IInvokePlaybookAi
-            //    parameter dictionary. The facade's parameter contract is
-            //    IReadOnlyDictionary<string,string> (template substitution); the
-            //    playbook's Start node binds {{json start}} and {{start.*}} from these
-            //    parameter entries. We serialize the full request as one JSON-string
-            //    parameter keyed "briefingPayload" plus convenience scalars for
-            //    template-condition checks.
-            var serializedPayload = JsonSerializer.Serialize(request, NarrateSerializerOptions);
-            var parameters = new Dictionary<string, string>(StringComparer.Ordinal)
-            {
-                ["briefingPayload"] = serializedPayload,
-                ["totalNotificationCount"] = request.TotalNotificationCount.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                ["categoryCount"] = request.Categories.Length.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                ["priorityItemCount"] = request.PriorityItems.Length.ToString(System.Globalization.CultureInfo.InvariantCulture),
-                ["channelCount"] = request.Channels.Length.ToString(System.Globalization.CultureInfo.InvariantCulture)
-            };
-
-            var tenantId =
-                httpContext.User?.FindFirst("tid")?.Value
-                ?? httpContext.User?.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value
-                ?? string.Empty;
-
-            var invocationContext = new PlaybookInvocationContext
-            {
-                TenantId = tenantId,
-                HttpContext = httpContext,
-                CorrelationId = httpContext.TraceIdentifier
-            };
-
-            // 3. Invoke the playbook via the existing IInvokePlaybookAi facade.
-            //    The facade aggregates the orchestration SSE stream into a single
-            //    PlaybookInvocationResult — non-streaming, single typed result.
-            var playbookResult = await invokePlaybookAi.InvokePlaybookAsync(
-                playbookId.Value,
-                parameters,
-                invocationContext,
-                cancellationToken).ConfigureAwait(false);
-
-            if (!playbookResult.Success)
-            {
-                logger.LogWarning(
-                    "Daily briefing narrate playbook reported failure. PlaybookId={PlaybookId}, RunId={RunId}, ErrorCode={ErrorCode}, Error={ErrorMessage}",
-                    playbookId.Value,
-                    playbookResult.RunId,
-                    playbookResult.ErrorCode,
-                    playbookResult.ErrorMessage);
-
-                return ProblemDetailsHelper.AiUnavailable(
-                    playbookResult.ErrorMessage ?? "AI briefing service is temporarily unavailable.",
-                    httpContext.TraceIdentifier);
-            }
-
-            // 4. Project the playbook result into the existing DailyBriefingNarrateResponse
-            //    contract. The playbook's ReturnResponse node binds tldr/channelNarratives
-            //    into StructuredData (per repo source-of-truth daily-briefing-narrate.json
-            //    "responseBinding"). When StructuredData parsing fails (e.g., model drift),
-            //    fall back to a TL;DR-only response carrying TextContent — graceful
-            //    degradation rather than 500.
-            var response = ProjectPlaybookResultToNarrateResponse(
-                playbookResult,
-                request,
-                logger);
-
-            logger.LogDebug(
-                "Daily briefing narration dispatched: RunId={RunId}, PlaybookId={PlaybookId}, Channels={ChannelCount}",
-                playbookResult.RunId,
-                playbookId.Value,
-                response.ChannelNarratives.Length);
+            var response = await composite.NarrateAsync(
+                request, GetTenantId(httpContext), cancellationToken).ConfigureAwait(false);
 
             return TypedResults.Ok(response);
         }
         catch (FeatureDisabledException ex)
         {
-            // P3 Fail-Fast (ADR-032 / NullInvokePlaybookAi): AI kill-switch is OFF.
+            // P3 Fail-Fast (ADR-032 Null-Object peers): AI kill-switch is OFF.
             logger.LogDebug(
                 "Daily briefing narrate called while AI feature disabled. ErrorCode={ErrorCode}",
                 ex.ErrorCode);
             return ex.AsFeatureDisabled503();
+        }
+        catch (Sprk.Bff.Api.Services.Ai.Narrators.DailyBriefingDispatchUnconfiguredException ex)
+        {
+            // Service-availability fail-fast: no Binding row → dispatch unconfigured.
+            logger.LogWarning(
+                "No sprk_playbookconsumer row matched for {ConsumerType} — daily briefing dispatch unconfigured.",
+                ConsumerTypes.DailyBriefingNarrate);
+            return Results.Problem(
+                statusCode: 503,
+                title: "Service Unavailable",
+                detail: ex.Message);
         }
         catch (OpenAiCircuitBrokenException ex)
         {
@@ -540,106 +535,17 @@ public static class DailyBriefingEndpoints
         }
     }
 
-    /// <summary>
-    /// Cached JSON serializer options for the IInvokePlaybookAi parameter payload.
-    /// camelCase property naming matches the playbook node graph's template references
-    /// ({{start.categories}}, {{start.channels}}, etc.).
-    /// </summary>
-    private static readonly JsonSerializerOptions NarrateSerializerOptions = new()
-    {
-        PropertyNamingPolicy = JsonNamingPolicy.CamelCase,
-        DefaultIgnoreCondition = JsonIgnoreCondition.Never
-    };
-
-    /// <summary>
-    /// Project the playbook invocation result into the
-    /// <see cref="DailyBriefingNarrateResponse"/> shape consumed by the widget parser.
-    /// Reads the playbook's terminal StructuredData (per ReturnResponse node binding);
-    /// falls back to a TL;DR-only response when StructuredData is absent or malformed
-    /// (graceful degradation per FR-16).
-    /// </summary>
-    internal static DailyBriefingNarrateResponse ProjectPlaybookResultToNarrateResponse(
-        PlaybookInvocationResult playbookResult,
-        DailyBriefingNarrateRequest request,
-        ILogger logger)
-    {
-        var generatedAtUtc = DateTimeOffset.UtcNow;
-        var tldr = new TldrResult
-        {
-            Summary = string.Empty,
-            KeyTakeaways = [],
-            TopAction = string.Empty,
-            CategoryCount = request.Categories.Length,
-            PriorityItemCount = request.PriorityItems.Length
-        };
-        ChannelNarrationResult[] channelNarratives = [];
-
-        if (playbookResult.StructuredData is JsonElement data && data.ValueKind == JsonValueKind.Object)
-        {
-            try
-            {
-                if (data.TryGetProperty("tldr", out var tldrElement) && tldrElement.ValueKind == JsonValueKind.Object)
-                {
-                    var deserializedTldr = tldrElement.Deserialize<TldrResult>(NarrateSerializerOptions);
-                    if (deserializedTldr is not null)
-                    {
-                        tldr = deserializedTldr with
-                        {
-                            CategoryCount = request.Categories.Length,
-                            PriorityItemCount = request.PriorityItems.Length
-                        };
-                    }
-                }
-
-                if (data.TryGetProperty("channelNarratives", out var channelsElement) && channelsElement.ValueKind == JsonValueKind.Array)
-                {
-                    channelNarratives = channelsElement.Deserialize<ChannelNarrationResult[]>(NarrateSerializerOptions)
-                        ?? [];
-                }
-            }
-            catch (JsonException ex)
-            {
-                logger.LogWarning(
-                    ex,
-                    "Failed to deserialize StructuredData fields from playbook result. Falling back to TextContent-only TL;DR. RunId={RunId}",
-                    playbookResult.RunId);
-            }
-        }
-        else if (!string.IsNullOrWhiteSpace(playbookResult.TextContent))
-        {
-            // Fallback path: playbook returned TextContent but no StructuredData.
-            // Treat as a raw TL;DR summary — preserves response contract without
-            // hallucinated bullets / topAction.
-            tldr = tldr with { Summary = playbookResult.TextContent!.Trim() };
-        }
-
-        return new DailyBriefingNarrateResponse
-        {
-            Tldr = tldr,
-            ChannelNarratives = channelNarratives,
-            GeneratedAtUtc = generatedAtUtc
-        };
-    }
-
     // ────────────────────────────────────────────────────────────────
-    // R4 task 031 (FR-12 Path A.5): inline LLM-prompt helpers REMOVED.
+    // FR-P3-04 (task 043): playbook-engine dispatch REMOVED.
     //
-    // Prior implementations of `BuildNarrateTldrPrompt`, `BuildChannelNarrationPrompt`,
-    // `ParseTldrResponse`, `ParseChannelBullets`, `BuildAllowedRegardingIdSet`,
-    // `ValidateBulletPrimaryEntityIds`, `GetTldrAsync`, `GetChannelNarrationAsync`,
-    // and the inner `TldrJsonPayload` DTO previously lived here.
-    //
-    // ALL prompt construction + entity-name validation now lives in the playbook
-    // (`DAILY-BRIEFING-NARRATE`) + its Action rows:
-    //   - BRIEF-NARRATE-TLDR     (TL;DR prompt + JSON shape)
-    //   - BRIEF-NARRATE-CHANNEL  (per-channel narration prompt + JSON shape)
-    //   - BRIEF-VALIDATE-ENTITY-NAMES (post-LLM scrub of hallucinated names)
-    //
-    // The endpoint is now a thin dispatch wrapper — see HandleNarrate above.
-    // Removing these helpers also removes the `IBriefingAi` parameter from
-    // HandleNarrate; the Summarize endpoint above continues to inject
-    // `IBriefingAi?` for the prioritized-briefing-summary path (not affected by
-    // R4 FR-12 / task 031).
+    // Prior implementations of the `/narrate` engine-default path
+    // (the playbook-result → response projection helper, its serializer options, the
+    // generic-facade invocation + parameter serialization) and the R7
+    // R7 narrator feature-flag branch previously lived here.
+    // Dispatch is now decided by the Binding table only (ADR-039); execution runs
+    // through DailyBriefingCompositeService → ICodedWorkflow (task-007 convention)
+    // → IOutputRouter (ledger write-before-render, ADR-040). Prompt content stays
+    // hot-editable in the BRIEF-NARRATE-* Action rows read by DailyBriefingNarrator.
     // ────────────────────────────────────────────────────────────────
 }
 

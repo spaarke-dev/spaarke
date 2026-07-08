@@ -1,0 +1,118 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="073" project="spaarke-ai-architecture-redesign-r1">
+  <metadata>
+    <title>Track-B batch 4 — Stale catalogs/seeds/docs/scripts + dependency-free remainder</title>
+    <phase>Track B: Continuous Deadwood Sweep</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <tags>cleanup, deletion, track-b, docs, scripts</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <parallel-group>W-P1-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+
+  <prompt>
+    Execute Track-B batch 4 of FR-TB-01: delete the stale/actively-misleading catalog, seed, doc, and script surface from inventory §5.4/§9 plus the remainder of the migration map's dependency-free delete list. The 2026-02 ERD docs still show `sprk_actiontypeid` which R7 dropped (misleading); the `docs/ai-knowledge/catalogs/` twin diverges from the `.claude/catalogs/` copy; the R4-taxonomy seed JSONs and `Seed-JpsActions.ps1` are superseded/broken. Two §9 items flagged "(verify)" close here with a verify-first ruling. This batch rides alongside wave W-P1-A. Per NFR-08, every deletion is grep/glob-verified with SHOWN output; evidence lands in `notes/track-b/batch-4-evidence.md`.
+  </prompt>
+
+  <role>
+    Developer comfortable across docs, PowerShell scripts, seed data, and BFF services — rigorous about verifying a "probably dead" item's liveness before deleting and documenting keep-with-reason rulings.
+  </role>
+
+  <goal>
+    Every batch-4 item below is deleted (or recorded keep-with-reason), grep/glob-zero shown per deleted item, builds green for any touched code surface, TASK-INDEX updated, and `notes/track-b/batch-4-evidence.md` written.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-architecture-redesign-r1/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-architecture-redesign-r1/plan.md</file>
+    <file purpose="project-context">projects/spaarke-ai-architecture-redesign-r1/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md</file>
+    <file purpose="deadwood-register">projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-CODE-INVENTORY.md</file>
+    <file purpose="delete-list">projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-MIGRATION-MAP.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="project">Do not modify files outside the batch list; deadwood only — if a batch item turns out to be live, STOP and record keep-with-reason instead of deleting.</constraint>
+    <constraint source="NFR-08">Every retirement verified grep/glob-zero with SHOWN output; no compat shims retained.</constraint>
+    <constraint source="CLAUDE.md §3 Sub-Agent Write Boundary">The KEPT catalog copy is `.claude/catalogs/scope-model-index.json` — do NOT delete or modify it here (task 051 refreshes it in the MAIN session). This batch deletes only the `docs/ai-knowledge/catalogs/` twin. If any `.claude/catalogs/` deletion emerges as necessary, it MUST run in the main session — a sub-agent Edit denial on that path is the boundary working, not a bug.</constraint>
+    <constraint source="project">The 2026-02 ERD docs delete NOW (actively misleading); their replacements are authored at P4 by task 052 (FR-P4-03). The gap in between is accepted per the migration map ("replacements authored in P4").</constraint>
+    <constraint source="project">Verify-first items: `FallbackScopeCatalog`/`FallbackPrompts` and `LoadKnowledgeNodeExecutor` are §9-flagged "(verify)"/placeholder — grep for consumers first; if wired (e.g., to the frozen engine), record keep-with-reason and leave for the task-050 audit.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>catalogs, seed-data, docs-hygiene, track-b</topic>
+    <files>
+      <file>projects/spaarke-ai-architecture-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/plan.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-MIGRATION-MAP.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-CODE-INVENTORY.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/OVERLAY-MATRIX.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Batch contents (inventory §5.4 + §9 remainder + migration-map start-now list):
+      (1) `docs/ai-knowledge/catalogs/` twin of `scope-model-index.json` — divergent taxonomy vs seed data, generated 2026-03-05 (the kept `.claude/catalogs/` copy is refreshed by task 051);
+      (2) `scripts/seed-data/actions.json` + `scripts/seed-data/playbooks.json` (2026-01 R4 taxonomy, superseded);
+      (3) `scripts/Seed-JpsActions.ps1` (sources from project-notes dirs, likely broken);
+      (4) 2026-02 ERD docs: `docs/data-model/sprk_ERD-ai-analysis-entities.md` + `docs/data-model/sprk_ai-analysis-related-entities.md` (show dropped `sprk_actiontypeid`; misleading — replacements authored by task 052 at P4);
+      (5) verify-first remainder from §9: `FallbackScopeCatalog`/`FallbackPrompts` (flagged "(verify)") and `LoadKnowledgeNodeExecutor` (R4 placeholder) — delete if grep proves dead, else keep-with-reason.
+    </background>
+    <dependencies>
+      <dependency task="none" status="complete">No dependencies — rides wave W-P1-A.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 051 (FR-P4-02) refreshes the single kept `.claude/catalogs/scope-model-index.json` and regenerates Seed-PlaybookConsumers.ps1 — this batch clears the stale twins first</item>
+      <item>Task 052 (FR-P4-03) authors the replacement data-model docs for the deleted ERDs</item>
+      <item>Task 050 (FR-P4-01) completion audit consumes this batch's evidence file</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context check">
+      Check context usage. If &gt; 70%, create handoff summary and request new chat. Load inputs; read inventory §5.4 (stale manifest surface) and §9, plus the migration map Track-B list.
+    </step>
+    <step order="1" name="Read and confirm the batch list">
+      Glob/Grep exact paths for all five item groups. For the verify-first items (FallbackScopeCatalog/FallbackPrompts, LoadKnowledgeNodeExecutor): enumerate every consumer; rule delete vs keep-with-reason with evidence. Confirm no script or doc references the seed JSONs / Seed-JpsActions.ps1 in live tooling.
+    </step>
+    <step order="2" name="Delete the batch">
+      Delete the confirmed items: docs/ai-knowledge/catalogs/ twin, the two R4 seed JSONs, Seed-JpsActions.ps1, the two 2026-02 ERD docs, and any verify-first item ruled dead. Remove dangling references (e.g., docs/data-model/INDEX.md links to the deleted ERDs may be left for task 052's full INDEX reconcile — note the choice in evidence).
+    </step>
+    <step order="3" name="Grep-zero verification (SHOWN)">
+      For each deleted file/symbol (`scope-model-index` under docs/ai-knowledge, `Seed-JpsActions`, `sprk_ERD-ai-analysis-entities`, `sprk_ai-analysis-related-entities`, seed-data JSON paths, plus any deleted verify-first symbol): grep/glob across the repo and SHOW zero-hit output outside git history and outside this project's audit notes (audit-input citations are expected survivors — note them).
+    </step>
+    <step order="4" name="Build verification (SHOWN)">
+      If any code surface was touched (verify-first deletions): run `dotnet build src/server/api/Sprk.Bff.Api/` and show green output. Docs/scripts-only deletions: state that no build surface was touched and show the git status delta instead.
+    </step>
+    <step order="5" name="Evidence + close">
+      Write `projects/spaarke-ai-architecture-redesign-r1/notes/track-b/batch-4-evidence.md` (item table: deleted-path / grep output / keep-with-reason incl. the verify-first rulings). Update TASK-INDEX.md (073 → ✅). Report completion.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build verification if code touched</tool>
+    <tool name="git">Version control (deletions preserved in history)</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">docs/ai-knowledge/catalogs/ (twin deleted) · docs/data-model/ (2 ERD docs deleted)</output>
+    <output type="code">scripts/seed-data/ + scripts/Seed-JpsActions.ps1 (deleted); Services/Ai verify-first deletions if ruled dead</output>
+    <output type="report">projects/spaarke-ai-architecture-redesign-r1/notes/track-b/batch-4-evidence.md</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Per-batch grep-zero for every deleted item outside git history, with output SHOWN (FR-TB-01 / NFR-08).</criterion>
+    <criterion testable="true">Builds green for any touched code surface with output shown (or explicit no-code-touched statement with git delta).</criterion>
+    <criterion testable="true">`.claude/catalogs/scope-model-index.json` is untouched by this task; only the docs/ai-knowledge twin is deleted.</criterion>
+    <criterion testable="true">Verify-first items (FallbackScopeCatalog/FallbackPrompts, LoadKnowledgeNodeExecutor) each carry a delete-with-evidence or keep-with-reason ruling in the evidence file.</criterion>
+    <criterion testable="true">notes/track-b/batch-4-evidence.md exists with the per-item evidence table; TASK-INDEX updated.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

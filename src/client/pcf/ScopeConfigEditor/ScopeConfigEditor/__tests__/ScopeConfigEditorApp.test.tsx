@@ -70,7 +70,11 @@ describe('ScopeConfigEditorApp — entity routing', () => {
   });
 
   it('renders ActionEditor for sprk_analysisaction regardless of case', () => {
-    renderWithProvider(<ScopeConfigEditorApp {...makeDefaultProps('SPRK_SYSTEMPROMPT')} />);
+    // Pre-existing fixture bug fixed by task 053: this test passed
+    // 'SPRK_SYSTEMPROMPT' (a column name, not an entity), which routes to the
+    // unknown-entity warning. The intent — case-insensitive entity routing —
+    // needs the correctly-named entity in upper case.
+    renderWithProvider(<ScopeConfigEditorApp {...makeDefaultProps('SPRK_ANALYSISACTION')} />);
 
     // Should still find ActionEditor (entityLogicalName is lowercased)
     expect(screen.getByLabelText(/system prompt editor/i)).toBeInTheDocument();
@@ -118,6 +122,43 @@ describe('ScopeConfigEditorApp — entity routing', () => {
     });
   });
 
+  // ── Task 053 / FR-P4-04: Binding variant + validated Action schema columns ──
+
+  it('renders BindingConfigEditor for sprk_playbookconsumer entity', () => {
+    renderWithProvider(
+      <ScopeConfigEditorApp {...makeDefaultProps('sprk_playbookconsumer')} boundAttributeName="sprk_chiptransitions" />
+    );
+
+    expect(screen.getByTestId('binding-config-editor')).toBeInTheDocument();
+    expect(screen.getByText(/chip transitions/i)).toBeInTheDocument();
+  });
+
+  it('routes sprk_analysisaction + sprk_inputschema binding to the validated SchemaJsonEditor', () => {
+    renderWithProvider(
+      <ScopeConfigEditorApp {...makeDefaultProps('sprk_analysisaction')} boundAttributeName="sprk_inputschema" />
+    );
+
+    expect(screen.getByTestId('schema-json-editor')).toBeInTheDocument();
+    expect(screen.queryByLabelText(/system prompt editor/i)).not.toBeInTheDocument();
+  });
+
+  it('routes sprk_analysisaction + sprk_outputschemajson binding to the validated SchemaJsonEditor', () => {
+    renderWithProvider(
+      <ScopeConfigEditorApp {...makeDefaultProps('sprk_analysisaction')} boundAttributeName="sprk_outputschemajson" />
+    );
+
+    expect(screen.getByTestId('schema-json-editor')).toBeInTheDocument();
+  });
+
+  it('sprk_analysisaction WITHOUT a schema-column binding still renders the ActionEditor (back-compat)', () => {
+    renderWithProvider(
+      <ScopeConfigEditorApp {...makeDefaultProps('sprk_analysisaction')} boundAttributeName="sprk_systemprompt" />
+    );
+
+    expect(screen.getByLabelText(/system prompt editor/i)).toBeInTheDocument();
+    expect(screen.queryByTestId('schema-json-editor')).not.toBeInTheDocument();
+  });
+
   it('renders unknown entity warning for unrecognized entity', () => {
     renderWithProvider(<ScopeConfigEditorApp {...makeDefaultProps('sprk_unknown_entity')} />);
 
@@ -135,7 +176,7 @@ describe('ScopeConfigEditorApp — entity routing', () => {
     renderWithProvider(<ScopeConfigEditorApp {...makeDefaultProps('sprk_analysisaction')} />);
 
     // Version footer must be present per CLAUDE.md requirement
-    expect(screen.getByText(/v1\.0\.0/)).toBeInTheDocument();
+    expect(screen.getByText(/v1\.3\.0/)).toBeInTheDocument();
   });
 
   it('calls onValueChange when ActionEditor changes', () => {

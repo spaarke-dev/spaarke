@@ -33,32 +33,34 @@ export const invoicesRegistration: SectionRegistration = {
   icon: ReceiptRegular,
   category: "data",
   defaultHeight: "480px",
+  // spaarke-dataset-grid-framework-r2 FR-08 (task 005, 2026-07-02): replaces the
+  // prior tactical 80vh clamp wrapper. See communications.registration.ts.
+  contentSizing: "clamped",
 
-  factory(_context: SectionFactoryContext): ContentSectionConfig {
+  factory(context: SectionFactoryContext): ContentSectionConfig {
+    // spaarke-dataset-grid-framework-r2 DEF-005 / DEF-005b+c (2026-07-02, FR-03
+    // end-to-end wiring): honor per-instance overrides from the LayoutJsonRow
+    // SectionInstance. Bare-string entries + omitted overrides fall through to
+    // the baked-in default configId / config-record / framework defaults.
+    // Widget forwards to `<DataGrid />` which delegates precedence to
+    // `resolveEffectivePageSize` + `resolveEffectiveAvailableViews`.
+    const effectiveConfigId =
+      context.sectionInstance?.configIdOverride ?? INVOICES_CONFIG_ID;
+    const instanceOverrides = context.sectionInstance?.overrides;
     return {
       id: "invoices",
       type: "content",
       title: "Invoices",
       style: { overflow: "hidden" },
-      // Height-chain fix v2 — see communications.registration.ts for rationale.
       renderContent: () =>
-        React.createElement(
-          "div",
-          {
-            style: {
-              display: "flex",
-              flexDirection: "column",
-              flex: "1 1 auto",
-              maxHeight: "80vh",
-              minHeight: 0,
-              overflow: "hidden",
-            },
+        React.createElement(DataverseEntityViewWidget, {
+          data: {
+            configId: effectiveConfigId,
+            pageSize: instanceOverrides?.pageSize,
+            availableViews: instanceOverrides?.availableViews,
           },
-          React.createElement(DataverseEntityViewWidget, {
-            data: { configId: INVOICES_CONFIG_ID },
-            widgetType: "invoices-list",
-          }),
-        ),
+          widgetType: "invoices-list",
+        }),
     };
   },
 };

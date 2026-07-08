@@ -16,6 +16,7 @@
  */
 
 import type { AuthenticatedFetchFn } from '@spaarke/auth';
+import { readSseStream, parseSseEvent } from '@spaarke/ui-components';
 import type {
   AnalysisRecord,
   DocumentMetadata,
@@ -345,8 +346,14 @@ export interface ExecuteAnalysisParams {
  * Execute an analysis via the BFF SSE endpoint.
  *
  * NB: SSE bypasses authenticatedFetch because the ReadableStream lifecycle
- * doesn't fit fetch's request/response shape. We await getAccessToken() once
- * on the exact line before fetch(), per CLAUDE.md §D-AUTH-7.
+ * doesn't fit fetch's request/response shape. The `getAccessToken` getter is
+ * handed to the canonical `readSseStream` primitive, which awaits it ONCE
+ * immediately before opening the stream fetch, per CLAUDE.md §D-AUTH-7.
+ *
+ * task 045 (FR-P3-06 / NFR-08): the SSE read loop (fetch + getReader +
+ * TextDecoder + buffer split) is the canonical `readSseStream` from
+ * @spaarke/ui-components; line parsing uses `parseSseEvent` — exactly ONE
+ * SSE parse path client-wide.
  */
 export async function executeAnalysis(params: ExecuteAnalysisParams): Promise<void> {
   const { analysisId, documentIds, actionId, playbookId, getAccessToken, onChunk, signal } = params;
@@ -363,93 +370,94 @@ export async function executeAnalysis(params: ExecuteAnalysisParams): Promise<vo
   if (actionId) body.actionId = actionId;
   if (playbookId) body.playbookId = playbookId;
 
-  // Auth v2 (D-AUTH-7): SSE exception site — token is acquired with fresh
-  // `await getAccessToken()` on every stream open, never snapshotted.
-  const token = await getAccessToken();
-  const response = await fetch(`${getApiBaseUrl()}/api/ai/analysis/execute`, {
-    method: 'POST',
-    headers: {
-      Authorization: `Bearer ${token}`,
-      'Content-Type': 'application/json',
-      Accept: 'text/event-stream',
-    },
-    body: JSON.stringify(body),
-    signal,
-  });
-
-  console.log(`${LOG_PREFIX} Execute response: ${response.status} ${response.statusText}`);
-
-  if (!response.ok) {
-    const error = await parseApiError(response);
-    console.error(`${LOG_PREFIX} Execute analysis failed:`, error);
-    throw error;
-  }
-
-  if (!response.body) {
-    throw {
-      errorCode: 'NO_STREAM',
-      message: 'Server did not return a stream',
-    } as AnalysisError;
-  }
-
-  // Read SSE stream
-  const reader = response.body.getReader();
-  const decoder = new TextDecoder();
-  let buffer = '';
   let chunkCount = 0;
   const startTime = Date.now();
+  let sawDone = false;
 
-  try {
-    while (true) {
-      const { done, value } = await reader.read();
-      if (done) break;
+  // Internal controller lets us stop reading on `data: [DONE]` (matching the
+  // retired hand-rolled loop's early return) while still honoring the
+  // caller's AbortSignal (external abort is chained into the internal one).
+  const controller = new AbortController();
+  const onExternalAbort = (): void => controller.abort();
+  if (signal) {
+    if (signal.aborted) {
+      controller.abort();
+    } else {
+      signal.addEventListener('abort', onExternalAbort);
+    }
+  }
 
-      const decoded = decoder.decode(value, { stream: true });
-      buffer += decoded;
+  const handleLine = (line: string): void => {
+    if (sawDone) return;
+    const trimmed = line.trim();
+    if (!trimmed || trimmed.startsWith(':')) return; // Skip empty/comment lines
 
-      // Process complete SSE lines
-      const lines = buffer.split('\n');
-      buffer = lines.pop() ?? ''; // Keep incomplete last line
+    if (trimmed === 'data: [DONE]') {
+      console.log(
+        `${LOG_PREFIX} SSE complete (${chunkCount} chunks, ${((Date.now() - startTime) / 1000).toFixed(1)}s)`
+      );
+      onChunk?.({ type: 'status', content: 'done' });
+      sawDone = true;
+      controller.abort(); // Stop reading — mirrors the original early return
+      return;
+    }
 
-      for (const line of lines) {
-        const trimmed = line.trim();
-        if (!trimmed || trimmed.startsWith(':')) continue; // Skip empty/comment lines
-
-        if (trimmed === 'data: [DONE]') {
-          console.log(
-            `${LOG_PREFIX} SSE complete (${chunkCount} chunks, ${((Date.now() - startTime) / 1000).toFixed(1)}s)`
-          );
-          onChunk?.({ type: 'status', content: 'done' });
+    if (trimmed.startsWith('data: ')) {
+      try {
+        const event = parseSseEvent(trimmed);
+        if (!event) {
+          console.warn(`${LOG_PREFIX} Failed to parse SSE line:`, trimmed);
           return;
         }
 
-        if (trimmed.startsWith('data: ')) {
-          try {
-            const chunk = JSON.parse(trimmed.substring(6)) as AnalysisStreamChunk;
-            chunkCount++;
-            const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
-            console.log(
-              `${LOG_PREFIX} SSE [${chunkCount}] +${elapsed}s type=${chunk.type} ${chunk.content ? chunk.content.substring(0, 80) : ''}`
-            );
-            onChunk?.(chunk);
+        const chunk = event as unknown as AnalysisStreamChunk;
+        chunkCount++;
+        const elapsed = ((Date.now() - startTime) / 1000).toFixed(1);
+        console.log(
+          `${LOG_PREFIX} SSE [${chunkCount}] +${elapsed}s type=${chunk.type} ${chunk.content ? chunk.content.substring(0, 80) : ''}`
+        );
+        onChunk?.(chunk);
 
-            if (chunk.type === 'error') {
-              console.error(`${LOG_PREFIX} SSE error:`, chunk.error);
-              throw {
-                errorCode: 'EXECUTION_ERROR',
-                message: chunk.error ?? 'Analysis execution failed',
-              } as AnalysisError;
-            }
-          } catch (parseErr) {
-            // If it's an AnalysisError we threw, re-throw
-            if ((parseErr as AnalysisError).errorCode) throw parseErr;
-            console.warn(`${LOG_PREFIX} Failed to parse SSE line:`, trimmed);
-          }
+        if (chunk.type === 'error') {
+          console.error(`${LOG_PREFIX} SSE error:`, chunk.error);
+          throw {
+            errorCode: 'EXECUTION_ERROR',
+            message: chunk.error ?? 'Analysis execution failed',
+          } as AnalysisError;
         }
+      } catch (parseErr) {
+        // If it's an AnalysisError we threw, re-throw
+        if ((parseErr as AnalysisError).errorCode) throw parseErr;
+        console.warn(`${LOG_PREFIX} Failed to parse SSE line:`, trimmed);
       }
     }
+  };
+
+  try {
+    await readSseStream({
+      url: `${getApiBaseUrl()}/api/ai/analysis/execute`,
+      body,
+      // Auth v2 (D-AUTH-7): readSseStream awaits the getter once per stream
+      // open, on the line before fetch — never snapshotted.
+      getAccessToken,
+      signal: controller.signal,
+      mapHttpError: async response => {
+        const error = await parseApiError(response);
+        console.error(`${LOG_PREFIX} Execute analysis failed:`, error);
+        // Preserve AnalysisError fields (errorCode, detail, correlationId,
+        // status) while satisfying readSseStream's Error return contract.
+        return Object.assign(new Error(error.message), error);
+      },
+      onLine: handleLine,
+    });
+  } catch (err) {
+    // The internal [DONE] stop surfaces as an AbortError — normal completion.
+    if (sawDone && !signal?.aborted && err instanceof DOMException && err.name === 'AbortError') {
+      return;
+    }
+    throw err;
   } finally {
-    reader.releaseLock();
+    signal?.removeEventListener('abort', onExternalAbort);
   }
 
   console.log(

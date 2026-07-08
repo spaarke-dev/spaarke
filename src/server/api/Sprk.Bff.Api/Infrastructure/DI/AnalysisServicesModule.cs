@@ -3,6 +3,7 @@ using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai.Insights;
 using Sprk.Bff.Api.Services.Ai.Insights.Routing;
+using Sprk.Bff.Api.Services.Ai.LinearConsumers;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Sprk.Bff.Api.Services.Ai.RecordSearch;
 using Sprk.Bff.Api.Services.Ai.SemanticSearch;
@@ -20,18 +21,13 @@ public static class AnalysisServicesModule
         this IServiceCollection services,
         IConfiguration configuration)
     {
-        // R5 Summarize telemetry (task 008, D1-08). Unconditional registration per R5 CLAUDE.md §3.2
-        // (R5 introduces NO new feature flags; kill-switch coverage inherits from existing AI flags
-        // via NullSprkChatAgentFactory). Registering this singleton outside the documentIntelligenceEnabled
-        // gate is intentional: the telemetry surface is harmless when unused (zero events emitted) and
-        // sidesteps the asymmetric-registration anti-pattern (CLAUDE.md §10 F.1) by removing the conditional
-        // entirely. Downstream consumers (tasks 012 / 014 / 015) inject this singleton and call
-        // RecordSummarizeInvocation; task 007 cleanup may call RecordSessionFilesIndexSize.
-        services.AddSingleton<Sprk.Bff.Api.Telemetry.R5SummarizeTelemetry>();
+        // FR-P3-05 (task 044): the R5 Summarize telemetry singleton was deleted with its last
+        // emitters (the engine shell's chat-summarize path + the summarize orchestrator shell).
+        // The dispatch-seam path carries its own loop/dispatch telemetry.
 
         // R6 Pillar 6c (FR-37 / task 063) — IContextEventEmitter for context.* execution-trace
         // events (tool_call_started/completed, knowledge_retrieved, playbook_node_executing/completed,
-        // decision_made). Registered unconditionally at the top of the module like R5SummarizeTelemetry
+        // decision_made). Registered unconditionally at the top of the module (unconditional singleton)
         // so emission sites in PlaybookOrchestrationService / ToolHandlerToAIFunctionAdapter
         // can resolve it regardless of feature flags. ADR-015 binding: the implementation is structurally
         // constrained to deterministic IDs only — see ContextEventEmitter.cs class header.
@@ -50,7 +46,7 @@ public static class AnalysisServicesModule
 
         // Insights Engine Widgets r1 telemetry (project ai-spaarke-insights-engine-widgets-r1 task 050).
         // Meter "Sprk.Bff.Api.InsightWidgets" per Q-U8 evidence resolution (matches all 9 existing BFF
-        // meter `Sprk.Bff.Api.<Feature>` convention). Unconditional registration mirrors R5SummarizeTelemetry
+        // meter `Sprk.Bff.Api.<Feature>` convention). Unconditional registration mirrors the telemetry-singleton
         // precedent above — telemetry surface is harmless when unused and avoids the asymmetric-registration
         // anti-pattern (CLAUDE.md §10 F.1). Task 051 injects this singleton at the /api/insights/ask
         // invocation path and calls RecordInvocation with bounded tags {topic, mode, outcome, cacheHit, tenantId}.
@@ -106,10 +102,33 @@ public static class AnalysisServicesModule
             configuration.GetSection(Sprk.Bff.Api.Configuration.PostUploadIndexingOptions.SectionName));
         services.AddScoped<IPostUploadIndexingEnqueuer, PostUploadIndexingEnqueuer>();
 
+        // FR-P1-03 (ai-architecture-redesign-r1 task 022) — Event-path BOUNDS infrastructure,
+        // TRULY UNCONDITIONAL. These three registrations have NO AI dependencies:
+        //  - EventRulesOptions: platform-setting bounds (daily cap, M4 threshold, opt-out TTL).
+        //    Bounds are policy, NOT routing — event routing lives exclusively in
+        //    sprk_playbookconsumer.sprk_oneventbindings (ADR-039).
+        //  - IEventPathUserState: per-user budget counter + opt-out marker over ITenantCache
+        //    (unconditional via CacheModule). Consumed by the UNCONDITIONALLY-mapped
+        //    GET/PUT /api/ai/chat/event-rules/opt-out routes → must resolve on the AI-OFF
+        //    path too (§F.1 asymmetric-registration rule).
+        //  - EventRulesTelemetry: NFR-09 "enforced AND telemetered" meter (pattern:
+        //    telemetry singletons — unconditional).
+        services.Configure<Sprk.Bff.Api.Services.Ai.EventRules.EventRulesOptions>(
+            configuration.GetSection(Sprk.Bff.Api.Services.Ai.EventRules.EventRulesOptions.SectionName));
+        services.AddScoped<Sprk.Bff.Api.Services.Ai.EventRules.IEventPathUserState,
+                           Sprk.Bff.Api.Services.Ai.EventRules.EventPathUserState>();
+        services.AddSingleton<Sprk.Bff.Api.Services.Ai.EventRules.EventRulesTelemetry>();
+
+        // AiTelemetry — TRULY UNCONDITIONAL (moved out of the DocumentIntelligence gate by
+        // spaarke-ai-architecture-redesign-r1 task 054, FR-P4-05). It is a pure Meter wrapper
+        // with zero AI dependencies, consumed by unconditionally-mapped chat endpoints for the
+        // per-tenant metering counters — the §F.1 asymmetric-registration rule requires the
+        // unconditional registration (pattern precedent: EventRulesTelemetry above).
+        services.AddSingleton<Sprk.Bff.Api.Telemetry.AiTelemetry>();
+
         var documentIntelligenceEnabled = configuration.GetValue<bool>("DocumentIntelligence:Enabled");
         if (documentIntelligenceEnabled)
         {
-            services.AddSingleton<Sprk.Bff.Api.Telemetry.AiTelemetry>();
             services.AddSingleton<OpenAiClient>();
             services.AddSingleton<IOpenAiClient>(sp => sp.GetRequiredService<OpenAiClient>());
             services.AddSingleton<TextExtractorService>();
@@ -132,8 +151,36 @@ public static class AnalysisServicesModule
         {
             AddAnalysisOrchestrationServices(services, configuration);
             AddPlaybookServices(services);
-            AddBuilderServices(services);
-            AddTestingServices(services, configuration);
+
+            // ai-architecture-redesign-r1 task 006 (FR-P0-05, 2026-07-05) — Linear AI
+            // Consumer library (R7 Wave 12) moved from unconditional Program.cs registration
+            // to INSIDE this compound AI gate so the whole prompted-executor stack
+            // (ActionResolver + DocumentTextSource + SessionFileTextSource + ActionRunner +
+            // the endpoint-absorbed consumer pipelines, task 044) toggles as one unit. Every
+            // primitive's ctor graph is compound-ON-only anyway (IOpenAiClient,
+            // PromptSchemaRenderer, IScopeResolverService, AnalysisDocumentLoader,
+            // ITextExtractor, IRagService).
+            //
+            // §F.1 asymmetric-registration audit (static scan run 2026-07-05):
+            //  - IActionResolver/IActionRunner — consumed by WorkspaceFileEndpoints.HandleSummarize
+            //    (MapWorkspaceFileEndpoints is UNCONDITIONAL) → Null executor-primitive peers
+            //    registered in AddNullObjectsForCompoundOff (P3 subclass).
+            //  - the document-profile pipeline — consumed only by AnalysisEndpoints
+            //    (MapAnalysisEndpoints is INSIDE the same compound gate) → symmetric; no peer.
+            //  - IActionResolver / IActionRunner — consumed by Matter/ProjectPreFillService as
+            //    OPTIONAL nullable ctor params (= null default) → ADR-032 "optional-via-null-
+            //    tolerance" exemption; no peer.
+            //  - IDocumentTextSource / ISessionFileTextSource — transitively conditional
+            //    (consumed only by gated LinearConsumers services + compound-ON
+            //    the dispatch seam) → no peer.
+            services.AddLinearConsumers();
+            Console.WriteLine("✓ Linear AI Consumer library enabled (gated under compound AI gate — FR-P0-05)");
+
+            // AddBuilderServices + AddTestingServices removed 2026-07-07 (spaarke-ai-architecture-redesign-r1
+            // task 050, FR-P4-04 server leg): the AiPlaybookBuilder canvas/graph estate was deleted after
+            // task 053 removed its sole client caller. IModelSelector survives the estate (registered below)
+            // because ModelSelectorOptions remains a live config surface (ClauseAnalyzerHandler).
+            services.AddSingleton<IModelSelector, ModelSelector>();
             AddDeliveryServices(services);
             AddNodeExecutors(services);
             AddRagServices(services, configuration);
@@ -188,6 +235,14 @@ public static class AnalysisServicesModule
             AddNullObjectsForCompoundOff(services);
             Console.WriteLine("\u26a0 Analysis services disabled (Analysis:Enabled = false) \u2014 Null-Objects registered");
         }
+
+        // FR-P0-06 (ai-architecture-redesign-r1 task 007) \u2014 ICodedWorkflow assembly-scan
+        // discovery + class-ref registry (mirrors AddToolFramework's handler scan, E-1).
+        // MUST run after the gate branches above: the scan's factory bindings defer to the
+        // concrete-type registrations those branches made (real narrator/collector when the
+        // compound AI gate is ON; ADR-032 Null-Object peers when OFF), so kill-switch
+        // behavior flows through class-ref resolution unchanged.
+        services.AddCodedWorkflows();
 
         AddRecordMatchingServices(services, configuration);
 
@@ -302,9 +357,8 @@ public static class AnalysisServicesModule
         // AddAnalysisOrchestrationServices (conditional); Phase 1c re-re-triage 2026-06-01 surfaced
         // ChatEndpoints.SendMessageAsync line 318 injects IWorkingDocumentService as a hard [FromServices]
         // parameter → DI resolve failure (500 NoServiceFound) when Analysis:Enabled=false. Same root cause
-        // pattern as ChatContextMappingService + DocxExportService. Note: ChatEndpoints.ApprovePlanAsync
-        // line 1334 uses defensive RequestServices.GetService<>() — that path was tolerant; SendMessageAsync
-        // was not. Promoted under D-02 cluster exception. ADR-010.
+        // pattern as ChatContextMappingService + DocxExportService. Promoted under D-02 cluster
+        // exception. ADR-010.
         services.AddScoped<IWorkingDocumentService, WorkingDocumentService>();
 
         // L5 — AnalysisChatContextResolver (deps: IGenericEntityService + IDistributedCache + ILogger).
@@ -363,13 +417,6 @@ public static class AnalysisServicesModule
         // compound-OFF DI graph remains uniform across all four PublicContracts facades.
         services.AddScoped<IRecordMatchingAi, NullRecordMatchingAi>();
 
-        // L1 — IInvokePlaybookAi (P3 Fail-Fast). Real impl registered in AddPublicContractsFacade.
-        // R6 Pillar 3 / Q11 / task 020 — generic playbook-invocation facade for the chat-tool
-        // dispatch path (task 021 InvokePlaybookHandler), the M365 Copilot agent gateway, and
-        // future R7+ consumers. Symmetric registration with the real impl per the
-        // asymmetric-registration anti-pattern guard (CLAUDE.md §10 F.1).
-        services.AddScoped<IInvokePlaybookAi, NullInvokePlaybookAi>();
-
         // L1 — IInsightsAi (P3 Fail-Fast). Real impl (InsightsOrchestrator) registered in
         // AddPublicContractsFacade. Consumed by /api/insights/ask + /api/insights/search +
         // /api/insights/assistant/query endpoints (Zone B) AND by the D-P8 SPE-upload
@@ -382,6 +429,31 @@ public static class AnalysisServicesModule
 
         // L3 — IPlaybookOrchestrationService (P3 Fail-Fast). Real impl registered in AddPlaybookServices.
         services.AddScoped<IPlaybookOrchestrationService, NullPlaybookOrchestrationService>();
+
+        // ── ai-architecture-redesign-r1 task 006 (FR-P0-05, 2026-07-05) ──────────────────
+        // Null peers for the two playbook services moved out of FinanceModule into
+        // AddPlaybookServices (compound-ON), plus the LinearConsumers stack moved under the
+        // compound gate. See the §F.1 audit note beside services.AddLinearConsumers(...).
+
+        // IPlaybookLookupService (P3 Fail-Fast on GetByIdAsync; quiet no-op cache-clears).
+        // Real impl registered in AddPlaybookServices. Unconditional consumers:
+        // ChatEndpoints.ExecutePlaybookAsync, WorkspaceFileEndpoints.HandleSummarize,
+        // WorkspaceAiService + Matter/ProjectPreFillService, InvoiceExtractionJobHandler.
+        services.AddScoped<IPlaybookLookupService, NullPlaybookLookupService>();
+
+        // IOutputOrchestratorService (P3 Fail-Fast). Real impl registered in
+        // AddPlaybookServices. Keeps unconditional InvoiceExtractionJobHandler (IJobHandler
+        // enumeration) resolvable under compound-OFF; dequeue fails fast per ADR-018.
+        services.AddScoped<IOutputOrchestratorService, NullOutputOrchestratorService>();
+
+        // IActionResolver + IActionRunner (P3 Fail-Fast peers — FR-P3-05 task 044 wrapper
+        // absorption). WorkspaceFileEndpoints.HandleSummarize injects the executor
+        // primitives directly and MapWorkspaceFileEndpoints is UNCONDITIONAL — without
+        // these peers, minimal-API parameter inference aborts host startup when the
+        // compound AI gate is OFF. The endpoint's catch (FeatureDisabledException) emits
+        // the SSE error chunk / 503 pattern.
+        services.AddSingleton<IActionResolver, NullActionResolver>();
+        services.AddSingleton<IActionRunner, NullActionRunner>();
 
         // B6 — IPlaybookService (P3 Fail-Fast). Real impl registered in AddPlaybookServices as typed HttpClient.
         services.AddSingleton<IPlaybookService, NullPlaybookService>();
@@ -425,7 +497,7 @@ public static class AnalysisServicesModule
         // B3 — PendingPlanManager (P3 Fail-Fast subclass). Task 011 Phase 1b Tier 3, D-09 §2 B3.
         // Real impl registered scoped inside AddAiModule (compound-ON only). The Null subclass
         // surfaces compound-intent plan operations as FeatureDisabledException; ChatEndpoints
-        // SendMessageAsync + ApprovePlanAsync catch and emit SSE error chunks per ADR-018.
+        // SendMessageAsync catches and emits SSE error chunks per ADR-018.
         services.AddScoped<PendingPlanManager>(sp =>
             new NullPendingPlanManager(sp.GetRequiredService<ILogger<PendingPlanManager>>()));
 
@@ -444,20 +516,20 @@ public static class AnalysisServicesModule
         services.AddSingleton<IInsightsIntentClassifier>(sp =>
             new NullInsightsIntentClassifier(sp.GetRequiredService<ILogger<InsightsIntentClassifier>>()));
 
-        // R5 task 014 / D2-04 — SessionSummarizeOrchestrator (P3 Fail-Fast subclass).
-        // The R5 Summarize endpoint (POST /api/ai/chat/sessions/{sessionId}/summarize) is
-        // mapped UNCONDITIONALLY in EndpointMappingExtensions and injects the concrete
-        // SessionSummarizeOrchestrator. Real impl is registered scoped inside
-        // AddAnalysisOrchestrationServices (compound-ON only). Without this Null mirror,
-        // minimal-API parameter inference fails at host startup ("Failure to infer one
-        // or more parameters") because IRagService + IOpenAiClient + IGenericEntityService
-        // are unavailable when compound AI is OFF. The Null subclass throws
-        // FeatureDisabledException at first MoveNextAsync(); SummarizeSessionEndpoint
-        // catches it and emits a canonical 503 ProblemDetails per ADR-018 + ADR-019.
+        // SessionDispatchOrchestrator (P3 Fail-Fast subclass) — FR-P1-04, ai-architecture-
+        // redesign-r1 task 023b. The Click dispatch endpoint (POST /api/ai/chat/sessions/
+        // {sessionId}/dispatch) AND the direct Summarize endpoint (POST /api/ai/chat/
+        // sessions/{sessionId}/summarize — converged onto the ONE dispatch seam by
+        // FR-P3-05 task 044) are mapped UNCONDITIONALLY in EndpointMappingExtensions and
+        // inject the concrete SessionDispatchOrchestrator. Real impl registered scoped in
+        // AddAnalysisOrchestrationServices (compound-ON only — its graph needs IActionRunner
+        // + IScopeResolverService + ISessionFileTextSource + IOutputRouter). This Null peer
+        // throws FeatureDisabledException (ai.dispatch.disabled) at first MoveNextAsync();
+        // the endpoints' pre-stream probes map it to the canonical 503 (ADR-018 + ADR-019).
         // Canonical pattern siblings: NullSprkChatAgentFactory (B2), NullPendingPlanManager (B3).
-        services.AddScoped<SessionSummarizeOrchestrator>(sp =>
-            new NullSessionSummarizeOrchestrator(
-                sp.GetRequiredService<ILogger<SessionSummarizeOrchestrator>>()));
+        services.AddScoped<Sprk.Bff.Api.Services.Ai.Chat.SessionDispatchOrchestrator>(sp =>
+            new Sprk.Bff.Api.Services.Ai.Chat.NullSessionDispatchOrchestrator(
+                sp.GetRequiredService<ILogger<Sprk.Bff.Api.Services.Ai.Chat.SessionDispatchOrchestrator>>()));
 
         // R7 Wave 12 post-T135 CI fix (2026-06-30) — DailyBriefingNarrator + DailyBriefingCollector
         // P3 Fail-Fast Null-Objects. Both /api/ai/daily-briefing/render and
@@ -470,7 +542,7 @@ public static class AnalysisServicesModule
         // 28482755126 — failing parameter: `narrator`). The Null subclasses throw
         // FeatureDisabledException on first call; both consuming endpoints have generic
         // try/catch wrappers that surface a 500 ProblemDetails. ADR-032 §F.1 / CLAUDE.md §10 F.1.
-        // Canonical pattern sibling: NullSessionSummarizeOrchestrator (above).
+        // Canonical pattern sibling: NullSessionDispatchOrchestrator (above).
         // Also registers IEntityNameScrubber as a Null peer — pure algorithm, no AI deps, but
         // it lives in the same Narrators namespace and the real registration sits inside the
         // gate (line 516). Registering the real EntityNameScrubber here as the "Null" path is
@@ -483,11 +555,40 @@ public static class AnalysisServicesModule
         services.AddScoped<Sprk.Bff.Api.Services.Ai.Narrators.DailyBriefingCollector>(sp =>
             new Sprk.Bff.Api.Services.Ai.Narrators.NullDailyBriefingCollector(
                 sp.GetRequiredService<ILogger<Sprk.Bff.Api.Services.Ai.Narrators.DailyBriefingCollector>>()));
+
+        // DailyBriefingCompositeService Null peer (FR-P3-04, task 043) — the /render,
+        // /narrate, /email endpoints map unconditionally and inject the concrete composite;
+        // this mirror keeps minimal-API parameter inference valid on the compound-OFF path
+        // and throws FeatureDisabledException (ai.briefing.disabled) on first call, which
+        // the endpoints map to the canonical 503. Canonical pattern siblings: the narrator
+        // + collector Null peers directly above.
+        services.AddScoped<Sprk.Bff.Api.Services.Ai.Narrators.DailyBriefingCompositeService>(sp =>
+            new Sprk.Bff.Api.Services.Ai.Narrators.NullDailyBriefingCompositeService(
+                sp.GetRequiredService<ILogger<Sprk.Bff.Api.Services.Ai.Narrators.DailyBriefingCompositeService>>()));
+
+        // IEventRulesService (P3 Fail-Fast) — FR-P1-03, ai-architecture-redesign-r1 task 022.
+        // The document_uploaded event route (POST /api/ai/chat/sessions/{id}/events/
+        // document-uploaded) is mapped UNCONDITIONALLY in ChatDocumentEndpoints and injects
+        // IEventRulesService. Real impl registered in AddAnalysisOrchestrationServices
+        // (compound-ON only — its graph needs IActionRunner + IScopeResolverService +
+        // ISessionFileTextSource + IOutputRouter). This Null peer throws
+        // FeatureDisabledException on first MoveNextAsync(); the endpoint's pre-stream probe
+        // maps it to the canonical 503 ProblemDetails (ADR-018 + ADR-019).
+        // Canonical pattern siblings: NullSessionDispatchOrchestrator (above).
+        services.AddScoped<Sprk.Bff.Api.Services.Ai.EventRules.IEventRulesService,
+                           Sprk.Bff.Api.Services.Ai.EventRules.NullEventRulesService>();
     }
 
     private static void AddAnalysisOrchestrationServices(IServiceCollection services, IConfiguration configuration)
     {
         services.Configure<AnalysisOptions>(configuration.GetSection(AnalysisOptions.SectionName));
+        // FR-P2-01 (spaarke-ai-architecture-redesign-r1 task 030): agent-turn loop
+        // contract settings — per-turn tool-call budget (default 8; NFR-09/ADR-016
+        // tunable platform setting). Options-only Configure — no service registration,
+        // no ADR-032 Null peer needed (consumed via GetService<IOptions<...>> with an
+        // in-place default when unbound).
+        services.Configure<Sprk.Bff.Api.Services.Ai.Chat.AgentTurnOptions>(
+            configuration.GetSection(Sprk.Bff.Api.Services.Ai.Chat.AgentTurnOptions.SectionName));
         services.AddHttpClient<AnalysisActionService>();
         services.AddHttpClient<AnalysisSkillService>();
         services.AddHttpClient<AnalysisKnowledgeService>();
@@ -526,18 +627,17 @@ public static class AnalysisServicesModule
         services.AddScoped<IAnalysisOrchestrationService, AnalysisOrchestrationService>();
         services.AddScoped<IAppOnlyAnalysisService, AppOnlyAnalysisService>();
 
-        // R7 Wave 11 T116 narrator spike (2026-06-30): code-defined narrator for /narrate.
-        // Gated at request-time by Features:NarrateUseCodeBasedNarrator (default false) in
-        // DailyBriefingEndpoints.HandleNarrate — DI registration is unconditional so the
-        // service is always resolvable; the endpoint chooses which path runs.
+        // DailyBriefingNarrator — the platform's first `coded` composite workflow
+        // (FR-P3-04, ai-architecture-redesign-r1 task 043; ICodedWorkflow retrofit in
+        // task 007). Dispatched exclusively by class reference from its Action row
+        // (sprk_workflowclass) via DailyBriefingCompositeService below — the R7 spike
+        // flag + playbook-engine fallback were DELETED (NFR-08 hard cutover).
         //
         // Lifetime: Transient — depends on AnalysisActionService (typed HttpClient = Transient)
         // and IOpenAiClient (Singleton) and IEntityNameScrubber (Singleton). Transient is the
         // safe choice given the HttpClient dependency.
         //
         // Scrubber: Singleton — pure algorithm, no state, no per-request data.
-        //
-        // Spike plan: projects/spaarke-ai-platform-unification-r7/notes/spikes/narrator-spike-plan.md
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Narrators.IEntityNameScrubber,
                               Sprk.Bff.Api.Services.Ai.Narrators.EntityNameScrubber>();
         services.AddTransient<Sprk.Bff.Api.Services.Ai.Narrators.DailyBriefingNarrator>();
@@ -547,24 +647,114 @@ public static class AnalysisServicesModule
         // entirely; runs FetchXML directly via IGenericEntityService (Scoped — matches lifetime).
         services.AddScoped<Sprk.Bff.Api.Services.Ai.Narrators.DailyBriefingCollector>();
 
-        // R5 task 012 (D2-03) — SessionSummarizeOrchestrator. Concrete sealed class (no
-        // interface per ADR-010); registered Scoped to match the lifetime of its dependencies
-        // (ChatSessionManager + IGenericEntityService are both Scoped; IRagService + IOpenAiClient
-        // are Singleton; R5SummarizeTelemetry is Singleton — Scoped is the safe lifetime that
-        // respects every wrapped lifetime).
+        // DailyBriefingCompositeService — the briefing's coded-composite dispatch boundary
+        // (FR-P3-04, task 043). Resolves the Binding (ADR-039 single routing surface),
+        // executes the coded workflow via ICodedWorkflowRegistry, writes the session-ledger
+        // entries BEFORE rendering/emailing via IOutputRouter (ADR-040), routes by the
+        // Binding's disposition. Concrete class (ADR-010); Scoped — wraps IOutputRouter +
+        // ICodedWorkflowRegistry + DailyBriefingCollector (all Scoped).
         //
-        // ZERO new Program.cs lines per R5 CLAUDE.md §3.3. ZERO new feature flags per R5
-        // CLAUDE.md §3.2 — kill-switch coverage inherits from the parent compound gate
-        // (Analysis:Enabled && DocumentIntelligence:Enabled) that wraps this method.
+        // §F.1 asymmetric-registration audit: the /render, /narrate, /email endpoints map
+        // unconditionally and inject the concrete type; the compound-OFF branch registers
+        // the NullDailyBriefingCompositeService mirror in AddNullObjectsForCompoundOff.
+        services.AddScoped<Sprk.Bff.Api.Services.Ai.Narrators.DailyBriefingCompositeService>();
+        Console.WriteLine("✓ DailyBriefingCompositeService registered (FR-P3-04 first coded composite; Binding-decided dispatch; ledger-before-render)");
+
+        // IEmailDispositionSender — the OutputRouter email-disposition delivery seam
+        // (FR-P3-04, task 043). Delegates to the Communication (Email) service
+        // (unconditional singleton) under SendMode.User OBO. Scoped to match its consumer
+        // (OutputRouter). See IEmailDispositionSender remarks for the ADR-010/§11
+        // interface justification.
+        services.AddScoped<Sprk.Bff.Api.Services.Ai.IEmailDispositionSender,
+                           Sprk.Bff.Api.Services.Ai.CommunicationEmailDispositionSender>();
+        Console.WriteLine("✓ EmailDispositionSender registered (FR-P3-04 email disposition leg → Communication service)");
+
+        // IWorkProductRecordPersister — the OutputRouter work_product-disposition
+        // persistence seam (FR-P3-08, task 047; same optional-dependency shape as the
+        // email sender above). Generalizes the widgets-r1 topic-registry pattern: resolves
+        // the capability's sprk_aitopicregistry target mapping (topic = the Binding's
+        // capability code) and PATCHes the stored ledger envelope onto the session's host
+        // record under user-OBO (IDataverseUserClient — unconditional typed HttpClient,
+        // fail-closed). Scoped to match its consumer (OutputRouter). See
+        // IWorkProductRecordPersister remarks for the ADR-010/§11 interface justification.
+        services.AddScoped<Sprk.Bff.Api.Services.Ai.IWorkProductRecordPersister,
+                           Sprk.Bff.Api.Services.Ai.TopicRegistryWorkProductPersister>();
+        Console.WriteLine("✓ WorkProductRecordPersister registered (FR-P3-08 work_product disposition leg → host-record persistence)");
+
+        // SessionDispatchOrchestrator — THE dispatch seam (FR-P1-04 task 023b; FR-P3-05
+        // task 044 convergence). Resolves a Binding row BY ID (chips carry binding_id —
+        // ADR-039 D4: the id IS the routing decision) via
+        // IConsumerRoutingService.GetBindingByIdAsync and executes the catalog stack
+        // (prompted executor → IOutputRouter ledger-before-render). Callers: the loop's
+        // BindingCapabilityTool, chip clicks (POST /sessions/{id}/dispatch), gate-resolve,
+        // and the direct Summarize endpoint (POST /sessions/{id}/summarize — the former
+        // summarize-named orchestrator shell was deleted per NFR-08). Concrete class
+        // (ADR-010); Scoped to match the lifetime of its dependencies (ChatSessionManager +
+        // IScopeResolverService + ISessionFileTextSource + IConsumerRoutingService are
+        // Scoped; IActionRunner is Singleton — Scoped respects every wrapped lifetime).
         //
-        // §F.1 asymmetric-registration audit: this registration is unconditional within the
-        // already-gated outer block; task 014 (endpoint) maps unconditionally and task 015
-        // (tool handler) registers behind the same compound gate via SprkChatAgentFactory.
-        // No new `if (R5Flag)` block introduced. Forward-compat: if a future fine-grained
-        // R5 kill-switch is required, follow ADR-030 Null-Object pattern (not flag-conditional
-        // registration).
-        services.AddScoped<Sprk.Bff.Api.Services.Ai.Chat.SessionSummarizeOrchestrator>();
-        Console.WriteLine("✓ R5 SessionSummarizeOrchestrator registered (task 012; ADR-010 concrete; chat-session Summarize convergence)");
+        // §F.1 asymmetric-registration audit: registration is unconditional within the
+        // already-gated outer block; both endpoints map unconditionally with
+        // the NullSessionDispatchOrchestrator mirror in AddNullObjectsForCompoundOff.
+        services.AddScoped<Sprk.Bff.Api.Services.Ai.Chat.SessionDispatchOrchestrator>();
+        Console.WriteLine("✓ SessionDispatchOrchestrator registered (FR-P1-04 Click path; binding-id catalog dispatch; ADR-040 ledger-before-render)");
+
+        // IOutputRouter — the universal ledger write-before-render seam (ADR-040 / FR-P1-02,
+        // ai-architecture-redesign-r1 task 021). Every capability execution writes an
+        // addressable SessionOutput ({bindingId}@t{n}) through this seam BEFORE rendering,
+        // then routing follows the Binding's declared disposition (informational live at P1;
+        // email live since task 043; work_product live since task 047; overlay/record/
+        // notification remain loud NotSupported stubs — no silent fallback).
+        // Scoped: wraps ChatSessionManager (Scoped).
+        //
+        // §F.1 asymmetric-registration audit (static scan 2026-07-05; refreshed by task 044
+        // 2026-07-06): IOutputRouter is consumed by the concrete
+        // SessionDispatchOrchestrator, EventRulesService, EngineOutputLedgerAdapter, and
+        // DailyBriefingCompositeService ctors — ALL registered in this same compound-ON block.
+        // No endpoint handler injects IOutputRouter directly
+        // (rg "[\s,(]IOutputRouter\s" src/server/api/Sprk.Bff.Api/Api/ → zero hits), and the
+        // compound-OFF path resolves the logger-only Null peers of every consumer, which never
+        // touch this seam → transitively conditional; no ADR-032 Null peer needed.
+        services.AddScoped<Sprk.Bff.Api.Services.Ai.IOutputRouter,
+                           Sprk.Bff.Api.Services.Ai.OutputRouter>();
+        Console.WriteLine("✓ OutputRouter registered (FR-P1-02 universal ledger write-before-render; disposition routing per ADR-040)");
+
+        // IEngineOutputLedgerAdapter — the E-2 engine-output→ledger adapter (ADR-040 /
+        // FR-P1-05, ai-architecture-redesign-r1 task 024; re-homed by FR-P3-05 task 044).
+        // Converts the FROZEN engine's chat-invoked composite outputs (the analysis.rerun
+        // typed-handler leg) into addressable SessionOutput ledger entries via the
+        // IOutputRouter write path. Boundary shim on OUR side of the ADR-039 freeze line —
+        // zero changes inside PlaybookOrchestrationService/nodes; attaches in
+        // AnalysisExecutionHandler (the sole surviving chat-session-attached engine leg
+        // after the task-044 F-1 deletions). FR-P3-08 (task 047) landed record persistence
+        // as the OutputRouter work_product leg — session-scoped by design; session-less
+        // engine runs keep their playbook-node persistence (widgets-r1 pattern).
+        // Scoped: wraps ChatSessionManager (Scoped) + IOutputRouter (Scoped).
+        //
+        // §F.1 asymmetric-registration audit (task 024; refreshed task 044): consumed ONLY
+        // by the ctor of AnalysisExecutionHandler, which is auto-discovered by
+        // AddToolFramework — invoked INSIDE this same compound-ON block. Compound-OFF
+        // constructs no tool handlers (AddToolFramework never runs), so the registration is
+        // transitively conditional exactly like IOutputRouter above; no ADR-032 Null peer needed.
+        services.AddScoped<Sprk.Bff.Api.Services.Ai.IEngineOutputLedgerAdapter,
+                           Sprk.Bff.Api.Services.Ai.EngineOutputLedgerAdapter>();
+        Console.WriteLine("✓ EngineOutputLedgerAdapter registered (FR-P1-05 E-2 frozen-engine composite outputs → session ledger)");
+
+        // IEventRulesService — the THIN Event entry path (ADR-039 path 1 of 3; FR-P1-03,
+        // ai-architecture-redesign-r1 task 022). Resolves document_uploaded to the ordered
+        // members declared in sprk_playbookconsumer.sprk_oneventbindings and executes them
+        // through IActionRunner → IOutputRouter under the FR-P1-03 bounds (daily cap,
+        // opt-out, bulk top-1, explicit-command supersede, empty-attachments precondition).
+        // Scoped: wraps ChatSessionManager + IScopeResolverService + ISessionFileTextSource
+        // + IOutputRouter (all Scoped).
+        //
+        // §F.1 asymmetric-registration audit (task 022): the document_uploaded event route
+        // is mapped UNCONDITIONALLY in ChatDocumentEndpoints and injects IEventRulesService
+        // → NullEventRulesService peer registered in AddNullObjectsForCompoundOff (throws
+        // FeatureDisabledException on first MoveNextAsync; endpoint probe maps it to 503).
+        services.AddScoped<Sprk.Bff.Api.Services.Ai.EventRules.IEventRulesService,
+                           Sprk.Bff.Api.Services.Ai.EventRules.EventRulesService>();
+        Console.WriteLine("✓ EventRulesService registered (FR-P1-03 Event path; document_uploaded → ordered Binding members with bounds)");
 
         // R6 Pillar 7 (task 064, D-C-17) — SummarizationCompressionService. Sliding-window
         // compression primitive: folds the oldest M chat turns into a single System-role
@@ -732,9 +922,9 @@ public static class AnalysisServicesModule
         // --- InvokeInsightsQueryTool typed HttpClient ---
         // REMOVED in R6 Wave 10 / task 023 (D-A-15, Pillar 3 cleanup): the specialized
         // InvokeInsightsQueryTool C# bridge class was deleted in favor of the generic
-        // InvokePlaybookHandler (R6 Pillar 3 / task 021). The chat-side path no longer
+        // the generic playbook dispatcher (deleted by task 044). The chat-side path no longer
         // requires a typed HttpClient — the InsightsIntentClassifier playbook-vs-RAG
-        // routing happens inside the orchestration layer the IInvokePlaybookAi facade
+        // routing happens inside the orchestration layer the (since-deleted) generic facade
         // wraps (per FR-24 + docs/guides/INSIGHTS-PLAYBOOK-VS-RAG-DECISION-TREE.md).
         //
         // Zone B boundary preservation: the /api/insights/assistant/query endpoint
@@ -749,6 +939,26 @@ public static class AnalysisServicesModule
     {
         services.AddHttpClient<IPlaybookService, PlaybookService>();
         services.AddHttpClient<INodeService, NodeService>();
+
+        // ai-architecture-redesign-r1 task 006 (FR-P0-05, 2026-07-05) — moved OUT of
+        // FinanceModule (misplaced-registration debt from earlier Finance accretion).
+        //
+        // IPlaybookLookupService: cached stable-ID alt-key (sprk_playbookid) playbook lookups
+        // for SaaS multi-environment portability (IMemoryCache, 1h TTL). Playbook-domain
+        // service — belongs beside IPlaybookService. Null peer (P3 Fail-Fast) registered in
+        // AddNullObjectsForCompoundOff because its consumers include UNCONDITIONAL surfaces:
+        // ChatEndpoints.ExecutePlaybookAsync, WorkspaceFileEndpoints.HandleSummarize,
+        // WorkspaceAiService / Matter/ProjectPreFillService (WorkspaceModule, unconditional),
+        // and InvoiceExtractionJobHandler (FinanceModule IJobHandler, unconditional).
+        services.AddScoped<IPlaybookLookupService, PlaybookLookupService>();
+
+        // IOutputOrchestratorService: applies playbook outputMapping field updates to
+        // Dataverse (delegates to IDataverseUpdateHandler, which stays unconditional in
+        // FinanceModule). Sole consumer today is InvoiceExtractionJobHandler (unconditional
+        // IJobHandler) → Null peer (P3 Fail-Fast) in AddNullObjectsForCompoundOff keeps
+        // IJobHandler enumeration resolvable under compound-OFF; on dequeue the job fails
+        // fast with FeatureDisabledException and Service Bus retry/DLQ handles it (ADR-018).
+        services.AddScoped<IOutputOrchestratorService, OutputOrchestratorService>();
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Nodes.INodeExecutorRegistry, Sprk.Bff.Api.Services.Ai.Nodes.NodeExecutorRegistry>();
 
         // Insights Engine r2 Wave D4 (task 033) — runtime per-(area, type) routing for
@@ -844,27 +1054,14 @@ public static class AnalysisServicesModule
         services.AddScoped<IWorkspacePrefillAi, WorkspacePrefillAi>();
         services.AddScoped<IRecordMatchingAi, RecordMatchingAi>();
 
-        // R6 Pillar 3 / Q11 / task 020 — IInvokePlaybookAi facade. Consumed by task 021
-        // InvokePlaybookHandler (chat-tool dispatch path) + future M365 Copilot agent
-        // gateway + future R7+ consumers. Wraps IPlaybookOrchestrationService — same
-        // pattern + same lifetime as IWorkspacePrefillAi above. ADR-013 facade boundary:
-        // the implementation is the only allowed translation point between the
-        // orchestration-internal PlaybookStreamEvent / NodeOutput / PlaybookRunMetrics
-        // and the domain-shape PlaybookInvocationResult consumed by CRUD-side callers.
-        // Null peer (NullInvokePlaybookAi) registered in AddNullObjectsForCompoundOff.
-        services.AddScoped<IInvokePlaybookAi, InvokePlaybookAi>();
-
-        // ── 2026-06-04 audit Migration PR #1 — relocated from InsightsFacadeModule ────────
-        // IPlaybookExecutionEngine — Scoped (transitively consumes Scoped
-        // IPlaybookOrchestrationService). Previously registered UNCONDITIONALLY in
-        // InsightsFacadeModule. Its only consumer (InsightsOrchestrator via IInsightsAi
-        // below) is conditional behind this compound-AI-ON gate, so the engine itself
-        // must also be conditional per the Endpoint↔DI Registration Conditionality
-        // Symmetry Rule (audit W4 §4.1).
-        services.AddScoped<IPlaybookExecutionEngine, PlaybookExecutionEngine>();
+        // FR-P3-05 (spaarke-ai-architecture-redesign-r1 task 044): the generic playbook-
+        // invocation facade triangle and the engine shell that backed the loop's playbook
+        // dispatch were DELETED with their sole consumer (the app-only legacy tool-handler
+        // leg closed per audit F-1). Insights synthesis invokes the frozen
+        // IPlaybookOrchestrationService directly (see InsightsOrchestrator).
 
         // IInsightsAi → InsightsOrchestrator — the only Zone-A surface Zone B code may
-        // import per SPEC §3.5. Wraps IPlaybookExecutionEngine (above) + IOpenAiClient +
+        // import per SPEC §3.5. Wraps IOpenAiClient +
         // IInsightsPlaybookExecutionCache (D-P13) + IPlaybookOrchestrationService — all
         // compound-AI-ON dependencies. Previously registered UNCONDITIONALLY in
         // InsightsFacadeModule, which created the LATENT BUG #1 narrative: under compound-OFF,
@@ -874,32 +1071,7 @@ public static class AnalysisServicesModule
         services.AddScoped<IInsightsAi, InsightsOrchestrator>();
     }
 
-    private static void AddBuilderServices(IServiceCollection services)
-    {
-        services.AddScoped<IAiPlaybookBuilderService, AiPlaybookBuilderService>();
-        services.AddScoped<Sprk.Bff.Api.Services.Ai.Builder.BuilderToolExecutor>();
-        services.AddScoped<Sprk.Bff.Api.Services.Ai.Builder.IBuilderAgentService, Sprk.Bff.Api.Services.Ai.Builder.BuilderAgentService>();
-        services.AddScoped<Sprk.Bff.Api.Services.Ai.Builder.BuilderScopeImporter>();
-        services.AddSingleton<IModelSelector, ModelSelector>();
-        services.AddScoped<IEntityResolutionService, EntityResolutionService>();
-    }
 
-    private static void AddTestingServices(IServiceCollection services, IConfiguration configuration)
-    {
-        services.AddScoped<Sprk.Bff.Api.Services.Ai.Testing.IMockDataGenerator, Sprk.Bff.Api.Services.Ai.Testing.MockDataGenerator>();
-        services.AddScoped<Sprk.Bff.Api.Services.Ai.Testing.IMockTestExecutor, Sprk.Bff.Api.Services.Ai.Testing.MockTestExecutor>();
-
-        var storageConnectionString = configuration.GetConnectionString("BlobStorage")
-            ?? configuration["AzureStorage:ConnectionString"];
-        if (!string.IsNullOrEmpty(storageConnectionString))
-        {
-            services.AddSingleton(sp => new Azure.Storage.Blobs.BlobServiceClient(storageConnectionString));
-            services.AddSingleton<Sprk.Bff.Api.Services.Ai.Testing.ITempBlobStorageService, Sprk.Bff.Api.Services.Ai.Testing.TempBlobStorageService>();
-            services.AddScoped<Sprk.Bff.Api.Services.Ai.Testing.IQuickTestExecutor, Sprk.Bff.Api.Services.Ai.Testing.QuickTestExecutor>();
-        }
-
-        services.AddScoped<Sprk.Bff.Api.Services.Ai.Testing.IProductionTestExecutor, Sprk.Bff.Api.Services.Ai.Testing.ProductionTestExecutor>();
-    }
 
     private static void AddDeliveryServices(IServiceCollection services)
     {
@@ -982,8 +1154,8 @@ public static class AnalysisServicesModule
 
         // CodeInterpreterBridge — thin wrapper around AgentServiceClient for Code Interpreter sandbox
         // invocations (AIPU-070). Singleton: stateless, thread-safe. Kill switch: CodeInterpreter:Enabled.
-        // CodeInterpreterTools are NOT registered here — they are factory-instantiated by SprkChatAgentFactory
-        // following the WebSearchTools pattern (ADR-010: no unnecessary DI registrations).
+        // CodeInterpreterHandler resolves this bridge via DI when catalog rows expose the sandbox tools
+        // (ADR-010: no per-tool DI registrations beyond the handler assembly scan).
         services.AddSingleton<Sprk.Bff.Api.Services.Ai.Foundry.CodeInterpreterBridge>();
 
         // GroundingVerifier — D-P9 / D-47 / LAVERN ADR 10.6 platform primitive (Insights Engine Phase 1).
@@ -1019,7 +1191,7 @@ public static class AnalysisServicesModule
 
     /// <summary>
     /// Registers the D-P13 Insights playbook execution cache (SPEC §3.1) wrapping
-    /// <see cref="IPlaybookExecutionEngine"/> calls in a Redis layer per ADR-009.
+    /// frozen-engine (<see cref="IPlaybookOrchestrationService"/>) calls in a Redis layer per ADR-009.
     /// </summary>
     /// <remarks>
     /// Two singletons:
@@ -1043,8 +1215,9 @@ public static class AnalysisServicesModule
         // the per-call Ttl override is null. NOT a new interface seam (audit DR-002 / ADR-010);
         // registered as a singleton POCO alongside the cache so the Endpoint↔DI Symmetry rule
         // (audit DR-008) holds — both inside the compound-AI-ON gate that wraps AddInsightsCache.
-        // Dependencies (IDataverseService, IOptionsMonitor<InsightsPlaybookNameMapOptions>) are
-        // both Singleton; lifetime parity verified.
+        // Dependencies: IDataverseService (Singleton) + IServiceScopeFactory (Singleton;
+        // resolves the Scoped IConsumerRoutingService per reverse lookup — FR-P3-01
+        // replaced the config-map reverse scan); lifetime parity verified.
         services.AddSingleton<TopicRegistryTtlLookup>();
         services.AddSingleton<IInsightsPlaybookExecutionCache, InsightsPlaybookExecutionCache>();
     }

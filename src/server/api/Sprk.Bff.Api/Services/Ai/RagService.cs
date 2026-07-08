@@ -496,7 +496,7 @@ public partial class RagService : IRagService
 
         // For single-chunk documents, documentVector equals contentVector.
         // For multi-chunk documents indexed individually, use IndexDocumentsBatchAsync to compute documentVector
-        // by averaging all chunk contentVectors, or run DocumentVectorBackfillService afterward.
+        // by averaging all chunk contentVectors.
         if (document.DocumentVector.Length == 0 && document.ContentVector.Length > 0 && document.ChunkCount == 1)
         {
             document.DocumentVector = document.ContentVector;

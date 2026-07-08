@@ -34,6 +34,7 @@ import '@testing-library/jest-dom';
 import * as React from 'react';
 import { render, screen } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
+import { PaneEventBus, PaneEventBusProvider } from '@spaarke/ai-widgets';
 
 import { WorkspaceTabManagerComponent } from '../WorkspaceTabManagerComponent';
 import type { WorkspaceTab } from '../WorkspaceTabManager';
@@ -68,7 +69,16 @@ function makeTab(id: string, displayName: string): WorkspaceTab {
 }
 
 function renderInProviders(node: React.ReactNode): void {
-  render(<FluentProvider theme={webLightTheme}>{node}</FluentProvider>);
+  // G-P3 round-3 fix wave (2026-07-07): WorkspaceTabManagerComponent now calls
+  // useDispatchPaneEvent at render time (post-task-100 change) — the provider
+  // is a REQUIRED context; without it every render throws (this suite was
+  // failing pre-existing at HEAD).
+  const bus = new PaneEventBus();
+  render(
+    <FluentProvider theme={webLightTheme}>
+      <PaneEventBusProvider bus={bus}>{node}</PaneEventBusProvider>
+    </FluentProvider>,
+  );
 }
 
 // ---------------------------------------------------------------------------

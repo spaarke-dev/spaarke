@@ -15,7 +15,7 @@ namespace Sprk.Bff.Api.Tests.Services.Ai.Handlers;
 
 /// <summary>
 /// Unit tests for <see cref="CodeInterpreterHandler"/> (R6 Wave 8 — replaces the legacy
-/// hardcoded <c>CodeInterpreterTools</c> class previously registered on
+/// hardcoded <c>CodeInterpreter chat-tools</c> class previously registered on
 /// <see cref="Chat.SprkChatAgentFactory"/>).
 /// </summary>
 /// <remarks>
@@ -439,7 +439,7 @@ public sealed class CodeInterpreterHandlerTests : TypedToolHandlerTestFixture
         result.Success.Should().BeTrue();
         var payload = result.GetData<CodeInterpreterHandler.CodeInterpreterPayload>();
         payload!.ChartType.Should().Be("bar",
-            because: "unsupported chart types fall back to 'bar' per legacy CodeInterpreterTools forgiveness");
+            because: "unsupported chart types fall back to 'bar' per legacy CodeInterpreter chat-tools forgiveness");
         capturedPrompt.Should().NotBeNull();
         capturedPrompt!.Should().Contain("bar",
             because: "the prompt is built with the normalized chart type");
@@ -558,7 +558,7 @@ public sealed class CodeInterpreterHandlerTests : TypedToolHandlerTestFixture
         // ADR-016 binding: the static SemaphoreSlim bounds concurrent sandbox calls.
         // We assert by counting concurrent in-flight bridge invocations — they must never
         // exceed the gate's effective capacity (= MaxConcurrency captured at first
-        // construction, mirroring the pre-Wave-8 CodeInterpreterTools static-gate design).
+        // construction, mirroring the pre-Wave-8 CodeInterpreter chat-tools static-gate design).
         //
         // The gate is STATIC across all handler instances (process-wide; first construction
         // wins). Default MaxConcurrency = 2. To assert the bound, queue 4 concurrent calls

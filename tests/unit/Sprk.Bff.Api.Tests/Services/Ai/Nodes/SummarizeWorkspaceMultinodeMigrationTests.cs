@@ -93,7 +93,7 @@ public sealed class SummarizeWorkspaceMultinodeMigrationTests
         using var doc = LoadMigrationFile();
         var playbook = doc.RootElement.GetProperty("playbook");
         playbook.GetProperty("name").GetString().Should().Be(ExpectedPlaybookSlug,
-            "Phase B vector match (PlaybookDispatcher.RunPhaseBVectorMatchAsync) routes " +
+            "The retired Phase B vector match used to route " +
             "'summarize this document' queries to this playbook via embedded metadata; " +
             "changing the slug would break vector match");
     }

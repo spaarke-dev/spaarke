@@ -363,8 +363,7 @@ export const HistoryMenu: React.FC<HistoryMenuProps> = ({
       cancelled = true;
     };
     // authenticatedFetch is a stable module-level export from @spaarke/auth and
-    // is intentionally omitted from deps to avoid re-fires on every render — see
-    // ChatHistoryPanel.tsx for the same precedent.
+    // is intentionally omitted from deps to avoid re-fires on every render.
     // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [open, bffBaseUrl, reloadKey]);
 

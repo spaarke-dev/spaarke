@@ -1,7 +1,6 @@
 using System.Net;
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
-using System.Runtime.CompilerServices;
 using System.Security.Claims;
 using System.Text.Encodings.Web;
 using FluentAssertions;
@@ -13,7 +12,6 @@ using Microsoft.Extensions.DependencyInjection;
 using Microsoft.Extensions.Hosting;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Options;
-using Microsoft.Xrm.Sdk;
 using Moq;
 using Sprk.Bff.Api.Api.Ai;
 using Sprk.Bff.Api.Configuration;
@@ -22,37 +20,34 @@ using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
+using Sprk.Bff.Api.Services.Ai.LinearConsumers;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
-using Sprk.Bff.Api.Telemetry;
-using Spaarke.Dataverse;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Api.Ai;
 
 /// <summary>
-/// Unit tests for the R5 task 014 (D2-04) direct BFF endpoint
-/// <c>POST /api/ai/chat/sessions/{sessionId}/summarize</c>.
+/// Contract tests for the direct BFF endpoint
+/// <c>POST /api/ai/chat/sessions/{sessionId}/summarize</c> — catalog-driven since FR-P1-01
+/// (ai-architecture-redesign-r1 task 020).
 /// </summary>
 /// <remarks>
 /// <para>
 /// <b>Hosting approach</b>: builds a minimal in-process <see cref="WebApplication"/>
-/// that maps ONLY this endpoint, registers test-double dependencies, and exercises the
-/// real <see cref="SessionSummarizeOrchestrator"/> against stubs. This pattern (rather
-/// than <see cref="WebApplicationFactory{TEntryPoint}"/>) is used because:
-/// <list type="number">
-///   <item><see cref="SessionSummarizeOrchestrator"/> is <c>sealed</c> with no interface
-///         (ADR-010); we cannot replace it via DI override. We exercise the real class
-///         with stub dependencies (the same pattern used by
-///         <c>SessionSummarizeOrchestratorTests</c>).</item>
-///   <item>Avoids the full BFF config matrix (Dataverse / Graph / Cosmos / Service Bus
-///         test-fixture wiring) — the endpoint contract is independent of those.</item>
-/// </list>
+/// that maps ONLY this endpoint and exercises the REAL
+/// <see cref="SessionDispatchOrchestrator"/> + REAL prompted executor
+/// (<see cref="ActionRunner"/> + <see cref="PromptSchemaRenderer"/>) against module-boundary
+/// test doubles (<see cref="IConsumerRoutingService"/>, <see cref="IScopeResolverService"/>,
+/// <see cref="ISessionFileTextSource"/>, <see cref="IOpenAiClient"/>) per ADR-038. The
+/// orchestrator is concrete with no interface (ADR-010), so the real class runs with stub
+/// dependencies rather than a DI override.
 /// </para>
 /// <para>
-/// <b>Coverage</b>: happy path SSE stream, 400 missing-tenant, 400 invalid GUID, 404
-/// session-not-found, 503 feature-disabled, ProblemDetails shape (stable errorCode +
-/// correlationId), endpoint mapping registration, auth filter wired, fresh-token-per-request
-/// (no closure capture — verified via orchestrator constructor signature inspection).
+/// <b>Coverage</b>: happy path SSE 200 with terminal <c>complete</c> chunk, tenant/session
+/// propagation into the catalog path, 400 invalid GUID, 400 too-many-files, 401 missing tid,
+/// 401 unauthenticated, 404 session-not-found, 503 feature-disabled (pre-stream
+/// FeatureDisabledException), endpoint registration, auth filter wiring, ADR-028
+/// fresh-token-per-request shape.
 /// </para>
 /// </remarks>
 public class SummarizeSessionEndpointContractTests : IClassFixture<SummarizeSessionEndpointTestFixture>
@@ -61,8 +56,6 @@ public class SummarizeSessionEndpointContractTests : IClassFixture<SummarizeSess
 
     private const string TestTenantId = "00000000-0000-0000-0000-000000000abc";
     private const string TestSessionId = "11111111-2222-3333-4444-555555555555";
-    private const string TestUserOid = "test-user-r5-summarize-endpoint";
-    private const string TestBearer = "summarize-session-test-bearer";
 
     public SummarizeSessionEndpointContractTests(SummarizeSessionEndpointTestFixture fx)
     {
@@ -70,29 +63,23 @@ public class SummarizeSessionEndpointContractTests : IClassFixture<SummarizeSess
     }
 
     // ─────────────────────────────────────────────────────────────────────────
-    // HAPPY PATH — SSE 200 with progressive AnalysisChunk events
+    // HAPPY PATH — SSE 200 via the catalog path (Binding → Action → ActionRunner)
     // ─────────────────────────────────────────────────────────────────────────
 
     [Fact]
-    public async Task Post_HappyPath_StreamsSseAnalysisChunks()
+    public async Task Post_HappyPath_StreamsSseCompleteChunk()
     {
-        // Arrange — session with one file; orchestrator yields one structured token then completes.
         _fx.Reset();
         _fx.Sessions.Session = BuildSession(TestSessionId, fileId: "file-001");
-        _fx.OpenAi.TokensToYield = new[]
-        {
-            // Single-token valid Structured-Outputs payload — parser emits one FieldDelta.
-            "{\"tldr\":[\"x\"]}"
-        };
+        _fx.OpenAi.RawJsonToReturn =
+            """{"tldr":["Key takeaway"],"summary":"Contract summary.","keywords":"contract","entities":{"organizations":[],"persons":[]}}""";
 
         var client = _fx.CreateAuthenticatedClient();
 
-        // Act
         var response = await client.PostAsJsonAsync(
             $"/api/ai/chat/sessions/{TestSessionId}/summarize",
             new { });
 
-        // Assert
         response.StatusCode.Should().Be(HttpStatusCode.OK);
         response.Content.Headers.ContentType?.MediaType.Should().Be("text/event-stream");
 
@@ -100,18 +87,18 @@ public class SummarizeSessionEndpointContractTests : IClassFixture<SummarizeSess
 
         // Each SSE frame is "data: {json}\n\n" per the canonical pattern.
         body.Should().Contain("data: ");
-        body.Should().NotBeNullOrEmpty();
-        // The terminal chunk has type=complete per AnalysisChunk.Completed(DocumentAnalysisResult).
         body.Should().Contain("\"type\":\"complete\"",
-            "the orchestrator yields a final Completed chunk after streaming deltas");
+            "the catalog path yields a terminal Completed chunk carrying the structured result");
+        body.Should().Contain("Key takeaway",
+            "the LLM's structured output flows through to the wire");
     }
 
     [Fact]
-    public async Task Post_HappyPath_PassesFileIdsAndStyleToOrchestrator()
+    public async Task Post_HappyPath_PropagatesTenantSessionAndFileSubsetToCatalogPath()
     {
         _fx.Reset();
         _fx.Sessions.Session = BuildSession(TestSessionId, fileId: "file-A", fileId2: "file-B");
-        _fx.OpenAi.TokensToYield = new[] { "{\"tldr\":[\"a\"]}" };
+        _fx.OpenAi.RawJsonToReturn = """{"tldr":["a"],"summary":"s","keywords":"k","entities":{"organizations":[],"persons":[]}}""";
 
         var client = _fx.CreateAuthenticatedClient();
 
@@ -121,14 +108,28 @@ public class SummarizeSessionEndpointContractTests : IClassFixture<SummarizeSess
 
         response.StatusCode.Should().Be(HttpStatusCode.OK);
 
-        // The orchestrator was invoked with the right tenant + session via the captured
-        // RagSearchOptions (the only externally-visible signal).
-        _fx.RagServiceMock.Verify(
-            r => r.SearchAsync(It.IsAny<string>(),
-                It.Is<RagSearchOptions>(o => o.TenantId == TestTenantId && o.SessionId == TestSessionId),
+        // The orchestrator propagated tenant + session + the explicit file subset into the
+        // session-file text fetch (the catalog path's data boundary — ADR-014).
+        _fx.TextSourceMock.Verify(
+            t => t.FetchAsync(
+                TestTenantId,
+                TestSessionId,
+                It.Is<IReadOnlyList<ChatSessionFile>>(files =>
+                    files.Count == 1 && files[0].FileId == "file-A"),
                 It.IsAny<CancellationToken>()),
             Times.AtLeastOnce,
-            "endpoint must propagate tenant + session to the orchestrator (ADR-014)");
+            "endpoint must propagate tenant + session + the requested file subset (ADR-014 / FR-08)");
+
+        // And the Binding was resolved via the ADR-039 routing surface.
+        _fx.ConsumerRoutingMock.Verify(
+            c => c.ResolveBindingAsync(
+                ConsumerTypes.ChatSummarize,
+                It.IsAny<string?>(),
+                It.IsAny<IRoutingContext?>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()),
+            Times.AtLeastOnce,
+            "FR-P1-01 — dispatch resolves through the Binding contract, nothing else");
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -235,37 +236,65 @@ public class SummarizeSessionEndpointContractTests : IClassFixture<SummarizeSess
     // ─────────────────────────────────────────────────────────────────────────
 
     [Fact]
-    public async Task Post_FeatureDisabled_Returns503_WithFeatureKey()
+    public async Task Post_FeatureDisabled_Returns503_WithErrorCode()
     {
         _fx.Reset();
-        // Force the orchestrator's first downstream call (entity service) to throw
-        // FeatureDisabledException so the endpoint's "FIRST per ADR-032 P3" catch fires.
         _fx.Sessions.Session = BuildSession(TestSessionId, fileId: "file-001");
-        // R6 task 025 (D-A-17) — engine path uses RetrieveAsync (FK-resolved ID), not
-        // RetrieveByAlternateKeyAsync. Wire the FeatureDisabledException onto the new path.
-        _fx.EntityServiceMock
-            .Setup(e => e.RetrieveAsync(
-                It.IsAny<string>(), It.IsAny<Guid>(),
-                It.IsAny<string[]>(), It.IsAny<CancellationToken>()))
-            .ThrowsAsync(new FeatureDisabledException("ai.analysis.disabled",
-                "Analysis feature is disabled for this environment."));
 
-        // The orchestrator catches entity-service failures internally and yields
-        // AnalysisChunk.FromError — so the stream will be 200 with an "error" chunk,
-        // NOT a 503. This is the documented behavior of task 012's orchestrator
-        // (it converts exceptions to chunks). The endpoint's 503 path activates only
-        // when FeatureDisabledException escapes the orchestrator (e.g., from a different
-        // dep boundary). For this test, validate the error-chunk path is honored.
+        // Catalog resolution happens BEFORE the first chunk, so a FeatureDisabledException
+        // thrown at the routing boundary escapes the orchestrator pre-stream — exactly the
+        // documented ADR-032 P3 path the endpoint maps to a 503 ProblemDetails (the same
+        // shape NullSessionDispatchOrchestrator produces when compound AI is OFF).
+        _fx.ConsumerRoutingMock
+            .Setup(c => c.ResolveBindingAsync(
+                It.IsAny<string>(),
+                It.IsAny<string?>(),
+                It.IsAny<IRoutingContext?>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ThrowsAsync(new FeatureDisabledException("ai.summarize.disabled",
+                "AI Summarize requires Analysis:Enabled=true AND DocumentIntelligence:Enabled=true."));
+
         var client = _fx.CreateAuthenticatedClient();
         var response = await client.PostAsJsonAsync(
             $"/api/ai/chat/sessions/{TestSessionId}/summarize",
             new { });
 
-        response.StatusCode.Should().Be(HttpStatusCode.OK,
-            "task 012 orchestrator catches FeatureDisabledException and yields AnalysisChunk.FromError per its documented contract");
+        response.StatusCode.Should().Be(HttpStatusCode.ServiceUnavailable,
+            "FeatureDisabledException escaping pre-stream maps to the canonical 503 (ADR-018/ADR-019)");
         var body = await response.Content.ReadAsStringAsync();
-        body.Should().Contain("\"type\":\"error\"",
-            "feature-disabled propagates as an SSE error chunk per orchestrator design");
+        body.Should().Contain("ai.summarize.disabled",
+            "the kill-switch error code drives the ProblemDetails errorCode extension");
+    }
+
+    // ─────────────────────────────────────────────────────────────────────────
+    // CATALOG MISCONFIGURATION — pre-stream failure maps to 500 (never 404)
+    // ─────────────────────────────────────────────────────────────────────────
+
+    [Fact]
+    public async Task Post_NoBindingRow_Returns500_InternalError()
+    {
+        _fx.Reset();
+        _fx.Sessions.Session = BuildSession(TestSessionId, fileId: "file-001");
+        _fx.ConsumerRoutingMock
+            .Setup(c => c.ResolveBindingAsync(
+                It.IsAny<string>(),
+                It.IsAny<string?>(),
+                It.IsAny<IRoutingContext?>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Binding?)null);
+
+        var client = _fx.CreateAuthenticatedClient();
+        var response = await client.PostAsJsonAsync(
+            $"/api/ai/chat/sessions/{TestSessionId}/summarize",
+            new { });
+
+        response.StatusCode.Should().Be(HttpStatusCode.InternalServerError,
+            "NFR-08 hard cutover — a missing Binding row is an operator misconfiguration " +
+            "surfaced as a 500 (NOT a 404, and NOT a silent fallback)");
+        var raw = await response.Content.ReadAsStringAsync();
+        raw.Should().Contain("summarize.internal-error");
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -277,7 +306,7 @@ public class SummarizeSessionEndpointContractTests : IClassFixture<SummarizeSess
     {
         _fx.Reset();
         _fx.Sessions.Session = BuildSession(TestSessionId, fileId: "file-001");
-        _fx.OpenAi.TokensToYield = new[] { "{\"tldr\":[\"x\"]}" };
+        _fx.OpenAi.RawJsonToReturn = """{"tldr":["x"],"summary":"s","keywords":"k","entities":{"organizations":[],"persons":[]}}""";
 
         var client = _fx.CreateAuthenticatedClient();
 
@@ -316,20 +345,22 @@ public class SummarizeSessionEndpointContractTests : IClassFixture<SummarizeSess
     {
         // ADR-028 fresh-token-per-request contract: the endpoint MUST NOT accept a string
         // bearer token via constructor injection or capture one into a closure. The
-        // orchestrator's constructor is the only token-shaped surface; verify it accepts
+        // dispatch seam's constructor is the only token-shaped surface; verify it accepts
         // no `string` parameter (tokens are resolved via DI inside its dependencies, NOT
         // passed in via parameters).
-        var ctor = typeof(SessionSummarizeOrchestrator).GetConstructors().Single();
+        var ctor = typeof(SessionDispatchOrchestrator)
+            .GetConstructors()
+            .Single(c => c.IsPublic);
         var parameters = ctor.GetParameters();
 
         parameters.Should().NotContain(
             p => p.ParameterType == typeof(string),
-            "ADR-028: orchestrator must not accept a bearer-token string parameter; tokens are " +
-            "resolved per-request via DI inside the orchestrator's dependencies");
+            "ADR-028: the dispatch seam must not accept a bearer-token string parameter; tokens are " +
+            "resolved per-request via DI inside its dependencies");
 
-        // Defense-in-depth: the SummarizeSessionFilesRequest contract carries tenantId +
-        // sessionId + fileIds + style + path + correlationId — but NO token field.
-        var requestProps = typeof(SummarizeSessionFilesRequest)
+        // Defense-in-depth: the SessionDispatchRequest contract carries tenantId +
+        // sessionId + bindingId + args + correlationId — but NO token field.
+        var requestProps = typeof(SessionDispatchRequest)
             .GetProperties()
             .Select(p => p.Name)
             .ToArray();
@@ -374,42 +405,20 @@ public class SummarizeSessionEndpointContractTests : IClassFixture<SummarizeSess
 /// <summary>
 /// Test fixture for <see cref="SummarizeSessionEndpointContractTests"/>. Hosts a minimal
 /// <see cref="WebApplication"/> that maps ONLY
-/// <see cref="SummarizeSessionEndpoint.MapSummarizeSessionEndpoint"/> against test-double
-/// dependencies — no production-app config required.
+/// <see cref="SummarizeSessionEndpoint.MapSummarizeSessionEndpoint"/> against the real
+/// orchestrator + real prompted executor with module-boundary test doubles (FR-P1-01
+/// catalog path).
 /// </summary>
 public sealed class SummarizeSessionEndpointTestFixture : IAsyncLifetime, IDisposable
 {
     public TestableChatSessionManager Sessions { get; } = new();
-    public Mock<IRagService> RagServiceMock { get; } = new();
-    public StubOpenAiClient OpenAi { get; } = new();
-    public Mock<IGenericEntityService> EntityServiceMock { get; } = new();
-    public Mock<INodeService> NodeServiceMock { get; } = new();
-    public Mock<IPlaybookLookupService> PlaybookLookupMock { get; } = new();
-
-    // chat-routing-redesign-r1 task 028d (FR-1R-05) — orchestrator now consults
-    // IConsumerRoutingService first; default stub returns null so the fixture falls back to
-    // the FR-05 typed-options + IPlaybookLookupService path (preserves prior fixture intent
-    // verbatim — tests targeting the FR-1R-05 happy path live in SessionSummarizeOrchestratorTests).
     public Mock<IConsumerRoutingService> ConsumerRoutingMock { get; } = new();
+    public Mock<IScopeResolverService> ScopeResolverMock { get; } = new();
+    public Mock<ISessionFileTextSource> TextSourceMock { get; } = new();
+    public StubOpenAiClient OpenAi { get; } = new();
 
-    public R5SummarizeTelemetry Telemetry { get; } = new();
-
-    // R6 task 025 (D-A-17) — the chat-summarize streaming pipeline moved from
-    // SessionSummarizeOrchestrator into PlaybookExecutionEngine. The orchestrator now requires
-    // an IPlaybookExecutionEngine; we register the REAL engine here (so the in-process
-    // WebApplication exercises the real moved code) and wire INodeService + IGenericEntityService
-    // FK-chain stubs so the engine resolves the action via the FK path (not alternate key).
-    internal static readonly Guid ChatSummarizePlaybookId = Guid.Parse("44285d15-1360-f111-ab0b-70a8a59455f4");
+    internal static readonly Guid ChatSummarizeBindingId = Guid.Parse("651194cd-3670-f111-ab0e-70a8a590c51c");
     internal static readonly Guid ChatSummarizeActionId = Guid.Parse("eeb05bfd-1260-f111-ab0b-70a8a59455f4");
-
-    // chat-routing-redesign-r1 task 015 (FR-05): the orchestrator now resolves the chat-summarize
-    // playbook by stable-ID alternate key (sprk_playbookid) via IPlaybookLookupService.
-    // WorkspaceOptions.ChatSummarizePlaybookId carries the per-env GUID value (string-form).
-    // The fixture seeds the DEV GUID and stubs the lookup to return a PlaybookResponse whose
-    // Id matches — preserving the prior end-to-end behavior of forwarding this GUID to the
-    // engine for FK-chain resolution.
-    internal static readonly string ConfiguredChatSummarizePlaybookId =
-        "44285d15-1360-f111-ab0b-70a8a59455f4";
 
     private WebApplication? _app;
 
@@ -420,7 +429,6 @@ public sealed class SummarizeSessionEndpointTestFixture : IAsyncLifetime, IDispo
         var builder = WebApplication.CreateBuilder(new WebApplicationOptions
         {
             EnvironmentName = "Testing",
-            // Use a random in-process URL — we'll override server with TestServer below.
         });
 
         // Logging
@@ -440,8 +448,7 @@ public sealed class SummarizeSessionEndpointTestFixture : IAsyncLifetime, IDispo
 
         // Rate limiter — needs an `ai-context` policy registered, otherwise
         // `.RequireRateLimiting("ai-context")` would throw at request time. Register a
-        // no-op (NoLimiter) variant just for these tests; production uses
-        // RateLimitingModule.cs (which we don't bring in to keep the fixture minimal).
+        // no-op (NoLimiter) variant just for these tests.
         builder.Services.AddRateLimiter(opt =>
         {
             opt.AddPolicy("ai-context", _ =>
@@ -449,49 +456,43 @@ public sealed class SummarizeSessionEndpointTestFixture : IAsyncLifetime, IDispo
         });
 
         // Required by the AddAiAuthorizationFilter — it resolves IAiAuthorizationService.
-        // The filter's ExtractDocumentIds finds NO document IDs (this endpoint takes
-        // sessionId + body.FileIds — neither is a Guid documentId argument), so the filter
-        // pass-through path activates (AiAuthorizationFilter.cs line 75-79). The service is
-        // still resolved via DI even on the pass-through path, so we register a stub.
+        // The filter's ExtractDocumentIds finds NO document IDs on this endpoint, so the
+        // pass-through path activates; the service is still resolved via DI.
         var authMock = new Mock<IAiAuthorizationService>();
         builder.Services.AddSingleton(authMock.Object);
 
-        // Orchestrator + engine dependencies — test doubles.
+        // ── FR-P1-01 catalog-path dependencies ──────────────────────────────────────────
+        // Module-boundary test doubles (ADR-038): routing (Binding), scope resolver (Action
+        // row), session-file text source. The prompted executor is REAL — ActionRunner +
+        // PromptSchemaRenderer over the stub IOpenAiClient — so this fixture exercises the
+        // production execution stack end-to-end below the LLM boundary.
         builder.Services.AddSingleton<ChatSessionManager>(Sessions);
-        builder.Services.AddSingleton(RagServiceMock.Object);
-        builder.Services.AddSingleton<IOpenAiClient>(OpenAi);
-        builder.Services.AddSingleton(EntityServiceMock.Object);
-        builder.Services.AddSingleton(NodeServiceMock.Object);
-        builder.Services.AddSingleton(Telemetry);
-
-        // R6 task 025 (D-A-17) — IPlaybookExecutionEngine is the orchestrator's new dep. We
-        // register the REAL PlaybookExecutionEngine (so the in-process WebApplication exercises
-        // the real moved chat-summarize pipeline) wired against the test-double dependencies
-        // above. The engine's non-chat-summarize deps (builder, orchestration, http context) are
-        // stubbed minimally — they're not exercised by the chat /summarize endpoint.
-        builder.Services.AddSingleton(Mock.Of<IAiPlaybookBuilderService>());
-        builder.Services.AddSingleton(Mock.Of<IPlaybookOrchestrationService>());
-        builder.Services.AddSingleton(Mock.Of<Microsoft.AspNetCore.Http.IHttpContextAccessor>());
-        builder.Services.AddScoped<IPlaybookExecutionEngine, PlaybookExecutionEngine>();
-
-        // chat-routing-redesign-r1 task 015 (FR-05) — orchestrator now depends on
-        // IPlaybookLookupService + IOptions<WorkspaceOptions> for stable-ID resolution.
-        // Register both with the configured DEV GUID so the orchestrator's runtime lookup
-        // returns the same Guid the prior hardcoded constant emitted.
-        builder.Services.AddSingleton(PlaybookLookupMock.Object);
-        builder.Services.Configure<WorkspaceOptions>(o =>
-        {
-            o.ChatSummarizePlaybookId = ConfiguredChatSummarizePlaybookId;
-        });
-
-        // chat-routing-redesign-r1 task 028d (FR-1R-05) — orchestrator now consults
-        // IConsumerRoutingService first. Default fixture stub returns null so the fixture
-        // exercises the FR-05 typed-options fallback path (preserves the prior fixture
-        // intent verbatim). FR-1R-05 happy-path coverage lives in SessionSummarizeOrchestratorTests.
         builder.Services.AddSingleton(ConsumerRoutingMock.Object);
+        builder.Services.AddSingleton(ScopeResolverMock.Object);
+        builder.Services.AddSingleton(TextSourceMock.Object);
+        builder.Services.AddSingleton<IOpenAiClient>(OpenAi);
+        builder.Services.AddSingleton<PromptSchemaRenderer>();
+        builder.Services.AddSingleton<IActionRunner, ActionRunner>();
 
-        // Orchestrator itself — concrete (ADR-010); registered Scoped to mirror prod.
-        builder.Services.AddScoped<SessionSummarizeOrchestrator>();
+        // FR-P1-02 (task 021) — REAL OutputRouter over the fixture's session manager: the
+        // contract tests now exercise the live ledger write-before-render seam (the stored
+        // SessionOutput is observable via Sessions.Session.Outputs after a happy-path POST).
+        builder.Services.AddScoped<Sprk.Bff.Api.Services.Ai.IOutputRouter,
+                                   Sprk.Bff.Api.Services.Ai.OutputRouter>();
+
+        // FR-P2-03 (task 032): the dispatch seam resolves pending elicitation gates —
+        // the REAL unified store over the test session manager + in-memory tenant cache.
+        builder.Services.AddSingleton(sp => new PendingPlanManager(
+            new Sprk.Bff.Api.Tests.Infrastructure.Cache.InMemoryTenantCache(),
+            Sessions,
+            sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<PendingPlanManager>>()));
+
+        // FR-P3-05 (task 044): /summarize converged onto the ONE dispatch seam — the
+        // endpoint resolves the chat-summarize Binding and delegates to the REAL
+        // SessionDispatchOrchestrator (concrete per ADR-010; Scoped mirrors prod).
+        // FR-P4-05 (task 054): metering counters emitted at the dispatch seam.
+        builder.Services.AddSingleton<Sprk.Bff.Api.Telemetry.AiTelemetry>();
+        builder.Services.AddScoped<SessionDispatchOrchestrator>();
 
         // Switch server to TestServer so we get an HttpClient that talks to this in-process app.
         builder.WebHost.UseTestServer();
@@ -522,91 +523,77 @@ public sealed class SummarizeSessionEndpointTestFixture : IAsyncLifetime, IDispo
     public void Reset()
     {
         Sessions.Session = null;
-        OpenAi.TokensToYield = Array.Empty<string>();
-        OpenAi.ThrowMidStream = false;
-        RagServiceMock.Reset();
-        EntityServiceMock.Reset();
-        NodeServiceMock.Reset();
-        PlaybookLookupMock.Reset();
+        OpenAi.RawJsonToReturn = """{"tldr":["default"],"summary":"default","keywords":"default","entities":{"organizations":[],"persons":[]}}""";
         ConsumerRoutingMock.Reset();
+        ScopeResolverMock.Reset();
+        TextSourceMock.Reset();
         ConfigureDefaults();
     }
 
     private void ConfigureDefaults()
     {
-        // Default RAG response — small valid result so happy-path tests proceed.
-        RagServiceMock
-            .Setup(r => r.SearchAsync(It.IsAny<string>(), It.IsAny<RagSearchOptions>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new RagSearchResponse
-            {
-                Query = "default",
-                Results = new[]
-                {
-                    new RagSearchResult { Id = "chunk-1", DocumentName = "f.pdf", Content = "lorem.", Score = 0.9 }
-                }
-            });
-
-        // R6 task 025 (D-A-17) — FK chain stubs for the post-R6 engine path.
-        // INodeService.GetNodesAsync returns a single node with FK-resolved ActionId.
-        NodeServiceMock
-            .Setup(n => n.GetNodesAsync(It.IsAny<Guid>(), It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new[] { new Sprk.Bff.Api.Models.Ai.PlaybookNodeDto
-            {
-                Id = Guid.NewGuid(),
-                PlaybookId = ChatSummarizePlaybookId,
-                ActionId = ChatSummarizeActionId
-            }});
-
-        // Default action seed loaded by FK (NOT alternate key) — engine calls
-        // IGenericEntityService.RetrieveAsync(logicalName, id, columns, ct).
-        EntityServiceMock
-            .Setup(e => e.RetrieveAsync(
-                "sprk_analysisaction",
-                It.IsAny<Guid>(),
-                It.IsAny<string[]>(),
-                It.IsAny<CancellationToken>()))
-            .ReturnsAsync(BuildActionEntity(
-                systemPrompt: "You are the R5 Summarize-for-Chat assistant.",
-                outputSchemaJson: """{"type":"object","additionalProperties":false,"required":["tldr"],"properties":{"tldr":{"type":"array","items":{"type":"string"}}}}"""));
-
-        // chat-routing-redesign-r1 task 028d (FR-1R-05) — IConsumerRoutingService default:
-        // returns null so the fixture exercises the FR-05 fallback path (preserves the
-        // pre-028d fixture surface verbatim). Tests targeting the FR-1R-05 routing-table
-        // happy path live in SessionSummarizeOrchestratorTests.
+        // Default: the chat-summarize Binding row resolves (ADR-039 routing surface) with a
+        // prompted Action target — mirrors the seeded spaarkedev1 row (task 020).
         ConsumerRoutingMock
-            .Setup(c => c.ResolveAsync(
+            .Setup(c => c.ResolveBindingAsync(
                 It.IsAny<string>(),
                 It.IsAny<string?>(),
                 It.IsAny<IRoutingContext?>(),
                 It.IsAny<string?>(),
                 It.IsAny<CancellationToken>()))
-            .ReturnsAsync((Guid?)null);
-
-        // chat-routing-redesign-r1 task 015 (FR-05) — IPlaybookLookupService default: the
-        // orchestrator calls GetByIdAsync(configuredId) and forwards the response's Id (Guid)
-        // to the engine. Returning a PlaybookResponse whose Id == ChatSummarizePlaybookId
-        // preserves the prior end-to-end identity (FR-26 convergence invariant).
-        PlaybookLookupMock
-            .Setup(p => p.GetByIdAsync(
-                ConfiguredChatSummarizePlaybookId, It.IsAny<CancellationToken>()))
-            .ReturnsAsync(new PlaybookResponse
+            .ReturnsAsync(new Binding
             {
-                Id = ChatSummarizePlaybookId,
-                Name = "summarize-document-for-chat@v1",
-                PlaybookCode = string.Empty,
-                IsActive = true
+                BindingId = ChatSummarizeBindingId,
+                ConsumerType = ConsumerTypes.ChatSummarize,
+                ConsumerCode = "default",
+                Environment = "*",
+                ActionId = ChatSummarizeActionId,
+                ActionKind = ActionKind.Prompted,
+                Ucid = "UC-A-1",
+                Disposition = BindingDisposition.Informational,
             });
-    }
 
-    private static Entity BuildActionEntity(string systemPrompt, string outputSchemaJson)
-    {
-        var e = new Entity("sprk_analysisaction", ChatSummarizeActionId);
-        e["sprk_analysisactionid"] = e.Id;
-        e["sprk_name"] = "Summarize Document for Chat";
-        e["sprk_actioncode"] = "SUM-CHAT@v1";
-        e["sprk_systemprompt"] = systemPrompt;
-        e["sprk_outputschemajson"] = outputSchemaJson;
-        return e;
+        // FR-P3-05 (task 044): the endpoint delegates to the dispatch seam, which re-loads
+        // the Binding BY ID — mirror the resolve-by-type default above.
+        ConsumerRoutingMock
+            .Setup(c => c.GetBindingByIdAsync(
+                ChatSummarizeBindingId,
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Binding
+            {
+                BindingId = ChatSummarizeBindingId,
+                ConsumerType = ConsumerTypes.ChatSummarize,
+                ConsumerCode = "default",
+                Environment = "*",
+                ActionId = ChatSummarizeActionId,
+                ActionKind = ActionKind.Prompted,
+                Ucid = "UC-A-1",
+                Disposition = BindingDisposition.Informational,
+            });
+
+        // Default: the SUM-CHAT@v1 Action row (JPS system prompt + strict output schema).
+        ScopeResolverMock
+            .Setup(s => s.GetActionAsync(ChatSummarizeActionId, It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new AnalysisAction
+            {
+                Id = ChatSummarizeActionId,
+                Name = "Summarize Document for Chat",
+                SystemPrompt = """{"$schema":"https://spaarke.com/schemas/prompt/v1","instruction":{"role":"You are the Spaarke Summarize-for-Chat assistant.","task":"Summarize the session file text in the ## Document section."},"output":{"fields":[{"name":"tldr","type":"array","description":"bullets"}],"structuredOutput":true}}""",
+                OutputSchemaJson = """{"type":"object","additionalProperties":false,"required":["tldr"],"properties":{"tldr":{"type":"array","items":{"type":"string"}}}}""",
+                Temperature = 0.0m,
+            });
+
+        // Default: session-file text fetch succeeds with inline text.
+        TextSourceMock
+            .Setup(t => t.FetchAsync(
+                It.IsAny<string>(), It.IsAny<string>(),
+                It.IsAny<IReadOnlyList<ChatSessionFile>>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new SessionFileText
+            {
+                ExtractedText = "lorem ipsum session file text.",
+                DisplayName = "f.pdf",
+                ChunkCount = 1
+            });
     }
 
     public HttpClient CreateAuthenticatedClient()
@@ -644,7 +631,7 @@ public sealed class SummarizeSessionEndpointTestFixture : IAsyncLifetime, IDispo
 /// Subclass of <see cref="ChatSessionManager"/> that overrides the virtual
 /// <see cref="ChatSessionManager.GetSessionAsync(string, string, CancellationToken)"/> for
 /// in-process testing without Redis / Dataverse wiring. Matches the test-double pattern in
-/// <c>SessionSummarizeOrchestratorTests</c>.
+/// the dispatch-seam unit tests.
 /// </summary>
 public sealed class TestableChatSessionManager : ChatSessionManager
 {
@@ -665,36 +652,25 @@ public sealed class TestableChatSessionManager : ChatSessionManager
 }
 
 /// <summary>
-/// Stub <see cref="IOpenAiClient"/> for endpoint streaming tests. Mirrors the
-/// <c>SessionSummarizeOrchestratorTests.StubOpenAiClient</c> shape; only the streaming
-/// method is exercised — all other interface members throw to make accidental use visible.
+/// Stub <see cref="IOpenAiClient"/> for the catalog-path endpoint tests. Only
+/// <see cref="GetStructuredCompletionRawAsync"/> (the prompted executor's LLM boundary) is
+/// exercised — all other interface members throw to make accidental use visible.
 /// </summary>
 public sealed class StubOpenAiClient : IOpenAiClient
 {
-    public IReadOnlyList<string> TokensToYield { get; set; } = Array.Empty<string>();
-    public bool ThrowMidStream { get; set; }
+    public string RawJsonToReturn { get; set; } = "{}";
 
-    public async IAsyncEnumerable<string> StreamStructuredCompletionAsync(
-        IEnumerable<global::OpenAI.Chat.ChatMessage> messages,
-        BinaryData jsonSchema,
-        string schemaName,
-        string? model = null,
-        int? maxOutputTokens = null,
-        [EnumeratorCancellation] CancellationToken cancellationToken = default)
-    {
-        var i = 0;
-        foreach (var token in TokensToYield)
-        {
-            if (ThrowMidStream && i > 0)
-            {
-                throw new InvalidOperationException("simulated mid-stream failure");
-            }
-            yield return token;
-            i++;
-            await Task.Yield();
-        }
-    }
+    public Task<string> GetStructuredCompletionRawAsync(
+        string prompt, BinaryData jsonSchema, string schemaName, string? model = null,
+        int? maxOutputTokens = null, float? temperature = null,
+        CancellationToken cancellationToken = default)
+        => Task.FromResult(RawJsonToReturn);
 
+    public IAsyncEnumerable<string> StreamStructuredCompletionAsync(
+        IEnumerable<global::OpenAI.Chat.ChatMessage> messages, BinaryData jsonSchema,
+        string schemaName, string? model = null, int? maxOutputTokens = null,
+        CancellationToken cancellationToken = default)
+        => throw new NotSupportedException("Not used by endpoint tests.");
     public IAsyncEnumerable<string> StreamCompletionAsync(string prompt, string? model = null, int? maxOutputTokens = null, CancellationToken cancellationToken = default)
         => throw new NotSupportedException("Not used by endpoint tests.");
     public Task<string> GetCompletionAsync(string prompt, string? model = null, int? maxOutputTokens = null, CancellationToken cancellationToken = default)
@@ -710,8 +686,6 @@ public sealed class StubOpenAiClient : IOpenAiClient
     public Task<ChatCompletionResult> GetChatCompletionWithToolsAsync(IEnumerable<global::OpenAI.Chat.ChatMessage> messages, IEnumerable<global::OpenAI.Chat.ChatTool> tools, string? model = null, int? maxOutputTokens = null, CancellationToken cancellationToken = default)
         => throw new NotSupportedException("Not used by endpoint tests.");
     public Task<T> GetStructuredCompletionAsync<T>(IEnumerable<global::OpenAI.Chat.ChatMessage> messages, BinaryData jsonSchema, string schemaName, string deploymentName, CancellationToken cancellationToken = default)
-        => throw new NotSupportedException("Not used by endpoint tests.");
-    public Task<string> GetStructuredCompletionRawAsync(string prompt, BinaryData jsonSchema, string schemaName, string? model = null, int? maxOutputTokens = null, float? temperature = null, CancellationToken cancellationToken = default)
         => throw new NotSupportedException("Not used by endpoint tests.");
 }
 
@@ -751,8 +725,6 @@ public sealed class SummarizeFakeAuthHandler : AuthenticationHandler<Authenticat
             return Task.FromResult(AuthenticateResult.Fail("Empty Authorization header"));
         }
 
-        // Disambiguate ClaimTypes — System.Security.Claims.ClaimTypes vs Microsoft.Xrm.Sdk.ClaimTypes
-        // (the Xrm SDK 'using' is pulled in transitively by Sprk.Bff.Api). Qualify explicitly.
         var claims = new List<Claim>
         {
             new("oid", "00000000-0000-0000-0000-000000000aaa"),

@@ -1,0 +1,129 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="025" project="spaarke-ai-architecture-redesign-r1">
+  <metadata>
+    <title>Close the r7 tactical branch: keep 4 fixes, drop the dispatch patches; empty-attachments guard becomes an Event/Click precondition</title>
+    <phase>Phase P1: First Capability End-to-End</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <tags>git, portfolio, cleanup</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <parallel-group>W-P1-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>013</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement FR-P1-06: close the `spaarke-ai-platform-unification-r7` tactical branch WITHOUT merging its dispatch patches. Cherry-pick / merge exactly four keepers: (1) the session-id fix, (2) ExtractedText persistence, (3) auto-promote, (4) field_delta synthesis. Drop the dispatch-era patches that this project's architecture supersedes: the `TryDetectExplicitConsumerType` regex (a second intent-detection mechanism, forbidden under ADR-039), the `linear_dispatch` SSE event set, `executeLinearDispatch.ts`, and the diagnostic log added alongside them. The r7 empty-attachments guard is NOT merged as dispatch code — it re-homes as an Event/Click-path precondition (coordinate with tasks 022/023). Acceptance per spec: the r7 branch is merged/closed containing exactly that content, and grep for `linear_dispatch` returns zero hits.
+  </prompt>
+
+  <role>
+    Senior developer comfortable with surgical git operations (cherry-pick, partial merges, branch closure), the Sprk.Bff.Api chat pipeline, and the SpaarkeAi client dispatch code.
+  </role>
+
+  <goal>
+    The r7 tactical branch is closed; the four keep-fixes are on this project's branch (or master per the portfolio decision from task 013); the four drop items are absent; grep-zero SHOWN for `linear_dispatch` and `TryDetectExplicitConsumerType`; builds green.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-architecture-redesign-r1/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-architecture-redesign-r1/plan.md</file>
+    <file purpose="project-context">projects/spaarke-ai-architecture-redesign-r1/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md</file>
+    <file purpose="r7-close-decision">projects/spaarke-ai-architecture-redesign-r1/ (task 013 portfolio-reconciliation output: R7 close-out record + absorbed-waves documentation)</file>
+    <file purpose="r7-client-module">src/solutions/SpaarkeAi/src/components/conversation/executeLinearDispatch.ts (drop target — verify which branch carries it)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-039">MUST NOT merge `TryDetectExplicitConsumerType` — it is a second intent-detection mechanism; MUST NOT merge the `linear_dispatch` SSE set or `executeLinearDispatch.ts` — routing surfaces outside the three entry paths; MUST NOT add routing config outside the Binding table.</constraint>
+    <constraint source="NFR-08">Hard cutover: no compat shims, no "keep it dark behind a flag". Grep for `linear_dispatch` AND `TryDetectExplicitConsumerType` MUST return zero hits outside git history with output SHOWN in the transcript.</constraint>
+    <constraint source="project">Keep EXACTLY four fixes: session-id fix, ExtractedText persistence, auto-promote, field_delta synthesis. Any other r7 commit content requires an explicit keep-with-reason note or is dropped.</constraint>
+    <constraint source="project">The empty-attachments guard is preserved as BEHAVIOR, not code: it becomes an Event/Click precondition owned by tasks 022/023. Do not merge its dispatch-layer implementation; record the handoff in task notes.</constraint>
+    <constraint source="ADR-029">If kept fixes touch the BFF, run publish-size verification and report size + delta.</constraint>
+    <constraint source="NFR-02">Eval suite green is a merge gate from P1; the merge/close MUST leave CI green.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>git, portfolio-reconciliation, dispatch-deadwood</topic>
+    <files>
+      <file>docs/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>docs/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/OVERLAY-MATRIX.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-MIGRATION-MAP.md</file>
+    </files>
+    <patterns>
+      <pattern name="Client dispatch modules" location="src/solutions/SpaarkeAi/src/components/conversation/">executeLinearDispatch.ts (drop) sits beside executeSummarizeIntent.ts/intentMatcher.ts (deleted by task 023) — coordinate grep sweeps so neither task resurrects the other's deletions.</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      R7 was the tactical unification project this redesign absorbs and closes (task 013 recorded the portfolio decision and documented the absorbed waves). Its branch mixes durable bug fixes with dispatch-mechanism patches built for the architecture this project replaces. Merging the dispatch patches would land a fourth routing surface the same week P1 collapses routing to three entry paths — hence the surgical split.
+    </background>
+    <dependencies>
+      <dependency task="013" status="pending">FR-P0-11 portfolio reconciliation — R7 close/re-scope decision recorded; unblocks branch hygiene.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 023 deletes executeSummarizeIntent.ts/intentMatcher.ts on this branch (W-P1-A runs alongside — coordinate final grep sweep at wave end).</item>
+      <item>Task 022 implements the empty-attachments precondition on the Event path.</item>
+      <item>Worktree: c:\code_files\spaarke-wt-spaarke-ai-platform-unification-r6 area hosts prior unification branches; locate the actual r7 branch/worktree via git branch -a + projects/INDEX.md.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context check + load knowledge">
+      Verify context usage below 70%. Read the task-013 R7 close-out record. Locate the r7 tactical branch (git branch -a / gh pr list / projects/INDEX.md) and enumerate its commits.
+    </step>
+    <step order="1" name="Classify every r7 commit">
+      Produce a keep/drop table over ALL r7 branch commits: the four named keepers (session-id fix, ExtractedText persistence, auto-promote, field_delta synthesis), the four named drops (TryDetectExplicitConsumerType regex, linear_dispatch SSE set, executeLinearDispatch.ts, diagnostic log), and any unlisted content classified with a written reason. Record the table in task notes.
+    </step>
+    <step order="2" name="Extract the four keepers">
+      Cherry-pick (or selectively merge) exactly the four keep-fixes onto the target branch per the task-013 decision. Resolve conflicts in favor of this project's P0/P1 code (ledger model, catalog routing).
+    </step>
+    <step order="3" name="Verify the drops are absent">
+      Run grep for `linear_dispatch`, `TryDetectExplicitConsumerType`, and `executeLinearDispatch` across src/ and tests/ — SHOW zero hits outside git history. Verify the diagnostic log statements are absent from the merged result.
+    </step>
+    <step order="4" name="Re-home the empty-attachments guard">
+      Confirm with tasks 022/023 state (or file a precise note if they are in-flight in the same wave) that the empty-attachments behavior is captured as an Event/Click precondition; document the handoff so the behavior is not silently lost.
+    </step>
+    <step order="5" name="Close the branch">
+      Merge/close the r7 branch and its PR per the task-013 close-out decision (close PR with rationale comment linking FR-P1-06; delete or archive the branch per repo convention). Update the R7 project records/portfolio issue.
+    </step>
+    <step order="6" name="Build + verification">
+      dotnet build + npm run build:prod green (shown); test + eval suite green. Publish-size check if BFF files changed.
+    </step>
+    <step order="7" name="Update tracking">
+      Update TASK-INDEX.md, POML status, current-task.md per completion protocol.
+    </step>
+    <step order="9.5" name="Quality gates">
+      Step 9.5 quality gates: run code-review + adr-check on the merged keep-fixes; resolve Critical findings per CLAUDE.md §6.5 before completion.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="git">Cherry-pick, branch closure, history verification</tool>
+    <tool name="gh">PR closure + portfolio issue updates</tool>
+    <tool name="dotnet">Build + test verification of merged fixes</tool>
+    <tool name="npm">Client build verification (build:prod)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">The four keep-fixes landed on the target branch (session-id fix, ExtractedText persistence, auto-promote, field_delta synthesis)</output>
+    <output type="git">r7 tactical branch closed; PR closed with FR-P1-06 rationale; portfolio issue updated</output>
+    <output type="notes">projects/spaarke-ai-architecture-redesign-r1/notes/ (r7 commit keep/drop table + empty-attachments handoff note)</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The r7 branch is merged/closed containing EXACTLY the four keep-fixes; every other r7 commit is dropped or carries a written keep-with-reason in the task notes.</criterion>
+    <criterion testable="true">Grep for linear_dispatch returns zero hits outside git history, output SHOWN in the transcript; same for TryDetectExplicitConsumerType and executeLinearDispatch.</criterion>
+    <criterion testable="true">The empty-attachments guard behavior is documented as an Event/Click precondition (implemented in 022/023), not merged as dispatch code.</criterion>
+    <criterion testable="true">dotnet build, npm run build:prod, tests, and the eval suite are green after the merge/close (output shown).</criterion>
+    <criterion testable="true">R7 portfolio records reflect closure (branch/PR state + issue updated).</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

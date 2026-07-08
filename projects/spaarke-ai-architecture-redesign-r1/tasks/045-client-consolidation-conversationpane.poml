@@ -1,0 +1,148 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="045" project="spaarke-ai-architecture-redesign-r1">
+  <metadata>
+    <title>Client consolidation — ConversationPane thin host; LegalWorkspace + Compose onto the shared dispatch helper; ONE SSE parse path client-wide</title>
+    <phase>Phase P3: Consumer + Client Consolidation</phase>
+    <status>not-started</status>
+    <estimated-hours>14</estimated-hours>
+    <tags>frontend, spaarkeai, sse, legal-workspace</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <parallel-group>W-P3-C</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>038</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement FR-P3-06: consolidate the client dispatch/streaming estate. `ConversationPane` (src/solutions/SpaarkeAi) decomposes into a thin host over the shared `dispatchConsumer(bindingId, args)` helper built in task 023, ending at ≤300 lines (see constraints for the escalation valve). The LegalWorkspace `summarizeService` and Compose `executeComposeSummarize` call-sites migrate onto that same helper, and their hand-rolled SSE parsers are DELETED — after this task there is exactly ONE SSE parse path client-wide, the canonical `useSseStream` (grep for hand-rolled parsers must return zero, shown). Duplicated chat-hook triples across packages become re-exports of the single shared implementation. Wizard/launcher widgets are updated to carry `binding_id`s so every Click-path invocation is Binding-addressed. This is a client task: acceptance includes browser-verified UI behavior (chat renders + streams in SpaarkeAi; LW and Compose summarize still work; console error-free; ADR-021 dark mode).
+  </prompt>
+
+  <role>
+    Senior React/TypeScript developer familiar with the SpaarkeAi ConversationPane, `@spaarke/ui-components` hooks (`useSseStream`, PaneEventBus), the LegalWorkspace embedded-mode contract, and Fluent UI v9 theming.
+  </role>
+
+  <goal>
+    ConversationPane is a thin host at ≤300 lines (or an operator-approved exception); LegalWorkspace summarizeService + Compose executeComposeSummarize dispatch through the shared helper; all hand-rolled SSE parsers deleted (grep-zero shown) leaving canonical `useSseStream` as the only parse path; chat-hook triples are re-exports; wizard/launcher widgets carry binding ids; all three surfaces verified working in the browser.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-architecture-redesign-r1/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-architecture-redesign-r1/plan.md</file>
+    <file purpose="project-context">projects/spaarke-ai-architecture-redesign-r1/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md</file>
+    <file purpose="per-component-verdicts">projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/OVERLAY-MATRIX.md</file>
+    <file purpose="dispatch-helper">src/solutions/SpaarkeAi/src/ (dispatchConsumer helper from task 023)</file>
+    <file purpose="embedded-contract">docs/architecture/LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-039">Every Click-path invocation carries a `binding_id` resolved by the server against the Binding table; the client MUST NOT contain intent detection or routing tables (no second intent-detection mechanism).</constraint>
+    <constraint source="ADR-040">Client renders from server-pushed ledger-backed outputs; disposition is the only rendering contract — no client-side output invention.</constraint>
+    <constraint source="ADR-037-amended-2026-07-05">Streaming consumption follows the section-name-keyed contract; FieldDelta handling is NOT deleted in this task (task 046 owns it at the last-playbook cutover).</constraint>
+    <constraint source="NFR-08">Hard cutover: hand-rolled SSE parsers (LegalWorkspace summarizeService, Compose executeComposeSummarize, any ConversationPane-local parser) are DELETED with grep-zero output SHOWN — no dual parse paths retained.</constraint>
+    <constraint source="ADR-013-amended-2026-07-05">Client talks to BFF capability-invocation endpoints only; no new client-visible contract shapes beyond the Binding dispatch helper.</constraint>
+    <constraint source="project">ConversationPane host size budget: ≤300 lines (set at pipeline init 2026-07-05 — operator-approved best-practice ceiling for a thin host doing layout + session context + PaneEventBus wiring only). Record the measured line count in task notes. ESCALATION VALVE: if meeting functional best practices (error boundaries, accessibility wiring, embedded-mode host contract) genuinely requires exceeding 300 lines, STOP and ask the operator with the specific justification and a proposed new ceiling — do NOT silently exceed the budget, and do NOT degrade code quality (cramming logic into one-liners, or child components that are hosts in disguise) to squeeze under it.</constraint>
+    <constraint source="ADR-021">Dark mode support verified — Fluent v9 tokens, no hardcoded colors introduced.</constraint>
+    <constraint source="project">Client build via `npm run build:prod` (NOT `npm run build`) per root CLAUDE.md §12.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>spaarkeai-client, sse-streaming, shared-hooks, legal-workspace</topic>
+    <files>
+      <file>docs/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>docs/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/OVERLAY-MATRIX.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-MIGRATION-MAP.md</file>
+      <file>docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+      <file>docs/architecture/SPAARKEAI-DASHBOARD-AND-WIDGET-MODEL.md</file>
+    </files>
+    <patterns>
+      <pattern name="Canonical SSE hook" location="src/client/shared/Spaarke.UI.Components/src/hooks/">
+        `useSseStream` — the ONE SSE parse path all migrated call-sites consume.
+      </pattern>
+      <pattern name="Dispatch helper" location="src/solutions/SpaarkeAi/src/">
+        `dispatchConsumer(bindingId, args)` from task 023 (SSE → PaneEventBus inside) — the single client dispatch surface.
+      </pattern>
+      <pattern name="PaneEventBus" location="src/client/shared/Spaarke.UI.Components/src/">
+        Cross-pane event contract — streamed results fan out to widgets via the bus, not bespoke wiring.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      The client accreted three+ SSE parsers and duplicated chat-hook triples as each surface (SpaarkeAi chat, LegalWorkspace summarize, Compose summarize) wired its own streaming. With the server now Binding-routed (P1/P2), the client collapses to one dispatch helper + one parse hook, making ConversationPane a thin host and every widget invocation Binding-addressed — the precondition for task 046's widget-layer work.
+    </background>
+    <dependencies>
+      <dependency task="038" status="pending">G-P2 gate passed; dispatchConsumer helper (task 023) live since P1.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 023 — Click path: dispatchConsumer helper + deletion of executeSummarizeIntent/intentMatcher</item>
+      <item>Task 046 — widget layer dedupe + FieldDelta deletion (depends on this task)</item>
+      <item>docs/architecture/LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT.md — host MUSTs when touching LW surfaces</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context check + load knowledge">
+      Verify context &lt; 70%. Load spec FR-P3-06 and OVERLAY-MATRIX verdicts for ConversationPane / summarizeService / executeComposeSummarize / chat-hook triples. Size budget is ≤300 lines (see constraints — escalate BEFORE exceeding, never after). Grep-inventory every SSE parse site client-wide.
+    </step>
+    <step order="1" name="Decompose ConversationPane">
+      Extract ConversationPane's dispatch/stream/render logic onto the shared helper + `useSseStream`; leave a thin host component (layout, session context, PaneEventBus wiring). Measure and record the resulting line count vs the ≤300 budget; if best practices force an overrun, invoke the escalation valve BEFORE proceeding.
+    </step>
+    <step order="2" name="Migrate LegalWorkspace summarizeService">
+      Re-point the LW summarize call-site onto `dispatchConsumer` (binding id from task 040's workspace summarize-file Binding); DELETE its hand-rolled SSE parser. Respect the embedded-mode host contract.
+    </step>
+    <step order="3" name="Migrate Compose executeComposeSummarize">
+      Same migration for the Compose summarize call-site; DELETE its hand-rolled parser.
+    </step>
+    <step order="4" name="Dedupe chat hooks + widget binding ids">
+      Convert duplicated chat-hook triples to re-exports of the shared implementations; update wizard/launcher widgets to carry `binding_id`s on their invocations.
+    </step>
+    <step order="5" name="Grep-zero + builds">
+      Run and SHOW grep-zero for the deleted parser modules/symbols and for any residual `EventSource`/manual SSE parsing outside `useSseStream`. `npm run build:prod` green for every touched package (SpaarkeAi, Spaarke.UI.Components, LegalWorkspace lib, Compose).
+    </step>
+    <step order="6" name="Browser verification (ui-tests)">
+      Execute the &lt;ui-tests&gt; script below on spaarkedev1 via the ui-test skill / Chrome integration.
+    </step>
+    <step order="7" name="Step 9.5 quality gates">
+      Run code-review + adr-check (FULL rigor). Update TASK-INDEX.md; reset current-task.md.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Client builds (`npm run build:prod`) + tests</tool>
+    <tool name="ui-test">Browser-based UI verification via Chrome integration</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <ui-tests>
+    <ui-test name="spaarkeai-chat-streams">Open SpaarkeAi workspace on spaarkedev1; send a chat message; verify the response streams token-by-token through the consolidated path and renders correctly.</ui-test>
+    <ui-test name="lw-summarize-works">In LegalWorkspace, trigger file summarize; verify the summary streams and renders via the shared helper (identical behavior to pre-migration).</ui-test>
+    <ui-test name="compose-summarize-works">In Compose, trigger summarize; verify streaming + rendering via the shared helper.</ui-test>
+    <ui-test name="console-clean">Browser console shows zero errors during all three flows.</ui-test>
+    <ui-test name="dark-mode">Repeat the SpaarkeAi chat flow in dark theme; verify correct token-based rendering (ADR-021 — no hardcoded colors).</ui-test>
+  </ui-tests>
+
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/** (ConversationPane thin host; helper consumption)</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/** (shared hooks; re-export consolidation)</output>
+    <output type="code">LegalWorkspace summarizeService + Compose executeComposeSummarize call-sites (migrated; parsers deleted)</output>
+    <output type="test">Client unit tests for migrated call-sites (per package)</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">One SSE parse path client-wide: canonical `useSseStream`; grep for hand-rolled SSE parsers returns zero (output SHOWN, NFR-08).</criterion>
+    <criterion testable="true">ConversationPane is a thin host at ≤300 lines (measured line count recorded in task notes), OR an operator-approved exception with documented justification and revised ceiling is on record.</criterion>
+    <criterion testable="true">LegalWorkspace summarizeService + Compose executeComposeSummarize dispatch via the shared `dispatchConsumer` helper; duplicated chat-hook triples are re-exports.</criterion>
+    <criterion testable="true">Wizard/launcher widgets carry binding_ids on their invocations.</criterion>
+    <criterion testable="true">All &lt;ui-tests&gt; pass in the browser on spaarkedev1 (chat streams; LW + Compose summarize work; console error-free; dark mode correct).</criterion>
+    <criterion testable="true">npm run build:prod green for every touched package; Step 9.5 code-review + adr-check passed.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

@@ -1137,7 +1137,7 @@ describe('Streaming E2E Integration Tests', () => {
       });
 
       // Act: SprkChat receives SSE events from BFF API and relays via bridge
-      // (simulates the full path: user message -> LLM -> WorkingDocumentTools -> SSE)
+      // (simulates the full path: user message -> LLM -> document-streaming handler -> SSE)
       const documentContent = [
         'Executive Summary\n\n',
         'The document analysis identified ',

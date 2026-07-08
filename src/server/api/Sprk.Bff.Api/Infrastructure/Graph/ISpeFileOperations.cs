@@ -46,6 +46,19 @@ public interface ISpeFileOperations
         CancellationToken ct = default);
 
     /// <summary>
+    /// Replace the content of an existing drive-item by itemId (OBO flow). PUTs the
+    /// stream to the drive-item's /content endpoint, committing a new SPE version.
+    /// Returns null when the drive-item doesn't exist. Throws
+    /// <see cref="UnauthorizedAccessException"/> on ACL denial.
+    /// </summary>
+    Task<FileHandleDto?> ReplaceFileContentAsUserAsync(
+        HttpContext ctx,
+        string driveId,
+        string itemId,
+        Stream content,
+        CancellationToken ct = default);
+
+    /// <summary>
     /// Resolve a container ID to its drive ID.
     /// Container IDs start with "b!" (base64-encoded SharePoint site ID).
     /// If the input is already a drive ID, returns it unchanged.

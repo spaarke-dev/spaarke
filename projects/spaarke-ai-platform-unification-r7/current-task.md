@@ -1,7 +1,7 @@
 # Current Task State — spaarke-ai-platform-unification-r7
 
-> **Last Updated**: 2026-07-01 (by context-handoff)
-> **Recovery**: Read "Quick Recovery" section first
+> **Last Updated**: 2026-07-05 (Fable 5 session — audit Step 1 COMPLETE)
+> **Recovery**: read Quick Recovery, then `projects/spaarke-ai-code-audit-r1/SPAARKE-AI-CODE-INVENTORY.md`
 
 ---
 
@@ -9,124 +9,55 @@
 
 | Field | Value |
 |-------|-------|
-| **Session** | R7 Wave 12 Daily Briefing continuation + UAT feedback |
-| **Status** | in-progress — awaiting operator smoke of latest deploys |
-| **Branch** | `work/spaarke-ai-platform-unification-r7` at HEAD `f6938617a` (pushed) |
-| **Master** | `02962c268` (PR #527 merge; unchanged since ~3 hrs ago) |
-| **Worktree** | `c:/code_files/spaarke-wt-spaarke-ai-platform-unification-r7/` |
-| **Next Action** | Operator force-reloads SpaarkeAi widget + smokes the new HighPriority mini-report layout + verifies inline reference links + confirms LLM prompt tightening reduces hallucination. Then continue with wizard AC8-AC12 + Assistant↔Workspace AC13-AC15 UAT. |
-
-### Files modified this session (all committed + pushed + deployed to spaarkedev1)
-
-- `src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingCollector.cs` — case fix (`sprk_HighPriority` → `sprk_highpriority`), new `Description` + `Action` + `Reason` + `ModifiedOn` outputs on HighPriorityItemDto, `ClassifyAction` helper, wiring for description column per entity
-- `src/server/api/Sprk.Bff.Api/Api/Ai/DailyBriefingEndpoints.cs` — HighPriorityItemDto extended with Description + Action + Reason + ModifiedOn fields
-- `src/client/shared/Spaarke.DailyBriefing.Components/src/components/HighPrioritySection.tsx` — rewritten as mini-report layout: [Kind chip · Name link · Action badge · Reason chip] top row + truncated description below
-- `src/client/shared/Spaarke.DailyBriefing.Components/src/components/DailyBriefingApp.tsx` — navigateTo binding fix (called as method, not destructured — resolves `_clientApiExecutor` platform error)
-- `src/client/shared/Spaarke.DailyBriefing.Components/src/components/TldrSection.tsx` — rotating emoji next to "TL;DR" heading (16-emoji pool, deterministic per `generatedAt`)
-- `src/client/shared/Spaarke.DailyBriefing.Components/src/services/briefingService.ts` — HighPriorityItemResult extended (description + action + reason + modifiedOn)
-
-### Dataverse changes this session (via MCP, direct spaarkedev1 updates — NO git artifact)
-
-- **BRIEF-NARRATE-CHANNEL Action** (`dc3533c0-fc70-f111-ab0e-7ced8ddc4cc6`) — sprk_systemprompt updated with: PAIRING RULE (title + regarding must come from same input item), GROUNDING CHECK (verify exact { title, regardingName } pair in items[]), AGGREGATION PREFERENCE (prefer aggregated over item-specific bullets). Metadata bumped to $version 2, lastModifiedBy=r7-w12-anti-hallucination-tightening.
-- **BRIEF-NARRATE-TLDR Action** (`ce299eb4-fc70-f111-ab0e-7ced8ddc4cc6`) — sprk_systemprompt updated with: STRUCTURAL PREFERENCE (describes counts + themes, not item titles), same PAIRING RULE. Metadata bumped to $version 2, lastModifiedBy=r7-w12-structural-summary-tightening.
-
-### Critical context
-
-Tonight's session shipped a large operator-feedback batch on top of Wave 12's core widget cutover:
-
-- **Waves 6/7/8/10 feedback** (vertical dots, primarycontact wiring, 15s toast + Open link, elevated channel headings) shipped earlier tonight in commit `5988966b8`.
-- **Waves 2/3/4/5 feedback** (Perplexity-style inline hyperlinks + trailing `[N]` citations for narrative bullets) shipped in `ad903e01f`.
-- **Item 9** (High Priority section) shipped in `9a683c2c5` with the initial "compact list with badges" layout.
-- **Post-UAT continuation** (this session's commit `f6938617a`):
-  1. Case-sensitivity fix (`sprk_HighPriority` → `sprk_highpriority`) — collector was filtering on the schema name; Dataverse needs the lowercase logical name, so HighPriority section was empty despite operator having 4 flagged matters.
-  2. `navigateTo` binding fix — destructuring the method breaks its `this` context and throws `_clientApiExecutor undefined`. Fixed both call sites (handleOpenRecord + Open-To-Do toast link).
-  3. Rotating TL;DR emoji.
-  4. HighPriority section rewritten as mini-report cards with description + action badge + reason chip.
-  5. LLM prompts tightened via MCP with PAIRING + GROUNDING + AGGREGATION rules.
-- **DEF sub-agent fix** landed earlier: MembershipFieldDiscoveryService now synthesizes Owner + Customer targets from base AttributeMetadata (root-cause fix for the polymorphic-Owner bug that broke the resolver on `ownerid` fields).
-
-**Compose-r1 status**: fully merged to master via PR #515 + PR #527. Compose-r1 auto-deployed BFF once at 04:07 UTC + widget once at 16:14 UTC — the widget deploy briefly overwrote my references + high-priority code, which was subsequently restored by rebuild + redeploy from this worktree.
-
-### Deploy safety governance (added 2026-07-01 per operator concern)
-
-Going forward, ALWAYS sync master into the worktree BEFORE building + deploying locally, so we never overwrite in-flight master changes from other teams. Standard sequence:
-
-```
-git fetch origin
-git merge --ff-only origin/master  # or --rebase if conflicts
-git log origin/master..HEAD         # sanity check: what am I about to deploy?
-dotnet build src/server/api/Sprk.Bff.Api/
-cd src/solutions/SpaarkeAi && npm run build
-../../.. && ./scripts/Deploy-BffApi.ps1
-./scripts/Deploy-SpaarkeAi.ps1
-```
+| **Session** | Fable 5 session executed **Steps 1 AND 2 of the 3-step code audit** (operator-directed 2026-07-05). Step 1: `projects/spaarke-ai-code-audit-r1/` + **`SPAARKE-AI-CODE-INVENTORY.md` v1.0** (7 parallel Explore agents). Step 2: **canonical doc §4-7 drafted → v0.3**, designed against the inventory. |
+| **Branch** | `work/spaarke-ai-platform-unification-r7` |
+| **Canonical design doc** | `docs/architecture/SPAARKE-AI-ARCHITECTURE-AND-COMPONENT-DESIGN.md` **v0.3** — §4 (five layers, 3 execution shapes), §5 (21-component map K/E/N/R + O-1..O-24 resolution), §6 (extend sprk_playbookconsumer + sprk_analysistool, no new tables, single-routing-surface rule), §7 (L0-L4 protocol, ten-mechanism disposition table, P1-P10 replay). §8 roadmap deferred to Step 3. |
+| **Next Action** | **All 3 audit steps + convergence COMPLETE.** Canonical doc = **v0.4 CONVERGED TARGET** (all OQs resolved, D1-D12 ratified as amended, E-1..E-5 ruled). Next: **spin up the implementation project** — `/design-to-spec` over canonical v0.4 + `SPAARKE-AI-MIGRATION-MAP.md` (P0-P4 phases) → `/project-pipeline` (working name `spaarke-ai-target-architecture-r1`; hot-path BFF=Y SpaarkeAi=Y; FULL rigor). Also pending: portfolio registration type for the audit project; Action Engine R1 re-based spec. |
+| **Decision state (final)** | OQ-1 loop-as-dispatcher (no classifier stack; dispatcher TL→DEL at P2) · OQ-2 engine frozen, coded workflows for new composites, no maker graphs ever · OQ-3 loop-native elicitation · OQ-4/D10 native handlers w/ GA-MCP contracts + OBO spike · E-1/2/3 accepted, E-4/5 rejected · TL = sequencing+rebuild-cost only, HARD cutovers (customer continuity explicitly not a constraint) · ADR-037+ADR-013 amendments APPLIED · ADR-039/040 Proposed (Accepted at P1/P0). |
+| **Artifacts (all in `projects/spaarke-ai-code-audit-r1/` unless noted)** | `SPAARKE-AI-CODE-INVENTORY.md` v1.0 · `GREENFIELD-CONCEPTUAL-DESIGN.md` v0.2 (incl. §9 Q&A) · `OVERLAY-MATRIX.md` v1.0 (approved) · `ADR-REVIEW-VS-GREENFIELD.md` v1.1 (approved) · `SPAARKE-AI-MIGRATION-MAP.md` v1.0 · canonical doc v0.4 (`docs/architecture/`) · ADR-039/040 (`.claude/adr/` + `docs/adr/`) · notes/ (7 auditor reports + MCP research + engine-projects synthesis + worktree scan). |
 
 ---
 
-## Deferred / Follow-up items (log here for next session)
+## What the audit found (headlines — full detail in the inventory)
 
-### Operator strategic asks (pending discussion)
+1. **Dispatch drift is 10 mechanisms, not 4** — nine live in master's chat path (CompoundIntentDetector,
+   PlaybookDispatcher 2-stage, LLM tool loop, SoftSlashRouter intentHint, AgentServiceRoutingMiddleware,
+   IntentRerankerService, PlaybookCandidateSelector, ConsumerRoutingService, InvokePlaybookHandler)
+   + r7's unmerged regex as #10. None reads session-graph state.
+2. **Playbook routing truth split across 4 config surfaces** (sprk_playbookconsumer table, LinearConsumers
+   appsettings, Workspace.*PlaybookId appsettings, Insights.Playbooks.Map) + consumer-count disagreement
+   across doc(7)/seed(6-7)/ConsumerTypes.cs(8).
+3. **~24 duplicate/overlap pairs** (two orchestration engines, dual summarize paths ×3 levels, 3 cross-pane
+   mechanisms, 3 duplicated chat hooks, 2 client summarize impls + Compose's third orchestrator, ...).
+4. **Dead-code register**: DirectOpenAiAgent/ISprkAgent cluster, ~14-file SpaarkeAi Insights renderer
+   cluster, 5 dead PCF dirs, R1 registries/providers, Pillar-6b affordance trio, legacy Chat/Tools.
+5. **Manifest docs largely stale** — live R7 vocabulary = executorMetadata.ts (33 executors) +
+   R7-refreshed guides + sprk-playbookconsumer.md; 2026-02 ERD docs actively misleading; scope catalog
+   4 months stale in 2 divergent copies; multinode playbook blocked on sprk_nodetype option-set gap.
+6. **Target-model presence** (Appendix B): M6 widgets mostly exist; session store exists but no
+   addressable outputs (M1 gap); Layer 0 / slot-fill (M5) / L4 refusal / runtime Dataverse MCP tools
+   absent; Tool framework (typed handlers + sprk_analysistool) is the Tool-catalog embryo.
+7. **Worktrees**: 17/24 fully merged — the debt lives in master. Only r7 has a substantive AI delta
+   (keep/retire verified in notes/agent-findings-r7-delta.md, incl. 4 items the prior handoff missed:
+   debug log, no-revert-path for NL branch, ADR-028 bare-fetch divergence, empty-attachments guard).
 
-- **"Monitored For" schema**: Choice option set on the 7 flagged entities (Matter, Project, Invoice, Document, Workassignment, Event, Todo) that captures WHY each record is being monitored (e.g., "Awaiting reply", "Budget review", "Regulatory deadline"). Replaces the binary Monitor flag with a semantic reason. → Future project (not R7 scope).
-- **Fully-deterministic Activity Notes** (strategic option operator floated but deferred): kill LLM channel narration entirely; render structured item rows per channel. Preserves TL;DR as LLM-generated for the abstract summary. Zero hallucination risk. → Wave 12.5 or new project.
+## Artifacts written this session (all in `projects/spaarke-ai-code-audit-r1/`)
 
-### Code-review follow-ups (from earlier scoped review; 5 medium/high items)
+- `SPAARKE-AI-CODE-INVENTORY.md` — **the Step 1 deliverable** (categories §1-7, overlap register §8, dead-code register §9, caveats §10, worktree appendix A, target scorecard appendix B)
+- `README.md`, `spec.md` — project charter + classification rubric/FRs
+- `notes/worktree-delta-scan.md` — 24-worktree pre-scan
+- `notes/agent-findings-{r7-delta,bff-chat,bff-orchestration,spaarkeai-codepage,client-shared,manifest-schema,peripheral}.md` — 7 auditor reports
 
-- **Revert collector membership-resolver bypass** now that root cause is fixed via `MembershipFieldDiscoveryService.ProjectLookupAttributeRows`. Owner-only queries silently lose collaborator scope (assigned attorneys, paralegals). Add smoke test that a `sprk_assignedattorney1` user sees their matter.
-- **Author unit tests** for new client-side surfaces: `NarrativeCitedText.buildSegments` (segment splitter + overlap detection), `HighPrioritySection.classifyDueDate` + `actionToBadge`, `useBriefingRender.isEmptyResponse`, `useInlineTodoCreate` primary-contact wiring.
-- **Metadata-drive the 7 QueryHighPriority\* helpers** — collapse into a single method + `record HighPriorityEntitySpec` array.
-- **Fix `useInlineTodoCreate` primary-contact lookup race** — cache a `Promise<string | null>` in the ref instead of the resolved value so concurrent createTodo calls don't issue duplicate lookups.
-- **Doc/code inconsistency**: `bulletToNotificationItem` truncates to 197 chars for "sprk_todo.subject" per comment but actual field is `sprk_name`. Fix comment + read maxLength from metadata.
+## Constraints for next session
 
-### CI + governance items
+- Audit is READ-ONLY — no code/schema/deploy changes were made; none should be made until Step 3 dispositions are approved.
+- Do NOT ship more tactical dispatch patches before §7 lands (standing rule from 2026-07-04 pivot).
+- Design principles locked in the canonical doc v0.2.6 (D1-D6, three write-shapes, Layer 0 default, two catalogs) — don't re-litigate.
+- Environment: `spaarkedev1` Dataverse; `spaarke-bff-dev` App Service — unchanged this session.
 
-- **CI env-var workarounds still in place**: `.github/workflows/ci-tier1-blocking.yml` has `APPLICATIONINSIGHTS_CONNECTION_STRING` + `Redis__AllowInMemoryFallback` patches (commits `fd657e0b2` + `37ef38c2f`). The underlying redis-r2 startup validations should be relaxed for Testing env so these workarounds can be removed. Not blocking anything.
-- **F.2.1 restoration** (`fix/restore-bff-extensions-F.2.1` branch pushed earlier tonight): F.2.1 rule was restored to master via the compose-r1 PR #527 merge — my branch is not needed. Can be deleted.
+## Prior session context (Wave 12.3 + doc history)
 
-### R7 UAT still pending (operator-driven)
-
-- **5 wizards** (AC8-AC12): Matter, Project, Work Assignment, Document Summary, ... — operator to run in spaarkedev1 browser.
-- **Assistant↔Workspace** (AC13-AC15): Scenario A ("what matter am I in?") flow.
-- **Daily Briefing** operator smoke of tonight's changes (HighPriority mini-report + inline references + emoji).
-
----
-
-## Rollback (if smoke fails)
-
-**Tags for rollback**:
-- `deploy/spaarkedev1/pre-widget-cutover` → commit `9bae5c306` (pre-tonight state)
-- `deploy/spaarkedev1/pre-wave12-batch4` → commit `4fc73ae4a` (pre-batch4)
-
-**Path A — bundle-only rollback**:
-```powershell
-git checkout deploy/spaarkedev1/pre-widget-cutover -- src/client/shared/Spaarke.DailyBriefing.Components/src/
-cd src/solutions/SpaarkeAi && npm run build
-../../.. && ./scripts/Deploy-SpaarkeAi.ps1
-git restore src/client/shared/Spaarke.DailyBriefing.Components/src/
-```
-
-**Path B — branch revert**:
-```powershell
-git revert f6938617a --no-commit
-git commit -m "revert(r7): roll back tonight's HighPriority + prompt changes (smoke failed)"
-dotnet build src/server/api/Sprk.Bff.Api/
-cd src/solutions/SpaarkeAi && npm run build
-../../.. && ./scripts/Deploy-BffApi.ps1
-./scripts/Deploy-SpaarkeAi.ps1
-git push origin work/spaarke-ai-platform-unification-r7
-```
-
----
-
-## Reference (key docs)
-
-- **This session's continuation commit**: `f6938617a`
-- **PR #520** (R7 wave 12 merge): merged as `e106379462`
-- **PR #524** (R7 wave 12 continuation merge): merged as `2de7509ee`
-- **PR #527** (compose-r1 pull-forward): merged as `02962c268`
-- **Restart doc**: [`notes/handoffs/daily-briefing-widget-cutover-restart.md`](notes/handoffs/daily-briefing-widget-cutover-restart.md)
-- **Wave 12 plan**: [`notes/wave12-mvp-completion-plan.md`](notes/wave12-mvp-completion-plan.md)
-
----
-
-*End of current-task.md. Ready for /compact or session pause. To resume: read this file's Quick Recovery, then continue with operator smoke of latest deploys.*
+Preserved in git history of this file (commit `997c3d717` version) and in
+`projects/spaarke-ai-platform-unification-r7/notes/summarize-flow-2026-07-03.md` +
+`notes/r7-close-plan-2026-07-03.md`. The Wave 12.3 keep/retire framing is now superseded by the
+audit's verified version in `projects/spaarke-ai-code-audit-r1/notes/agent-findings-r7-delta.md`.

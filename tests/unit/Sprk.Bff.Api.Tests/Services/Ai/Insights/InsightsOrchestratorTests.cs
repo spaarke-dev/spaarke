@@ -12,6 +12,7 @@ using Sprk.Bff.Api.Services.Ai.Insights;
 using Sprk.Bff.Api.Services.Ai.Insights.Ingest;
 using Sprk.Bff.Api.Services.Ai.Insights.Nodes;
 using Sprk.Bff.Api.Services.Ai.Insights.Routing;
+using Sprk.Bff.Api.Services.Ai.PublicContracts;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Services.Ai.Insights;
@@ -25,8 +26,10 @@ namespace Sprk.Bff.Api.Tests.Services.Ai.Insights;
 /// <b>Post Wave C-G4 (task 022)</b>: the legacy <c>IIngestOrchestrator</c> code path has been
 /// retired. <see cref="InsightsOrchestrator.RunIngestAsync"/> invokes the universal-ingest@v1
 /// JPS playbook directly via <see cref="IPlaybookOrchestrationService.ExecuteAppOnlyAsync"/>;
-/// the per-env playbook Guid is resolved through
-/// <see cref="InsightsPlaybookNameMapOptions"/>. Tests covering the legacy fallback
+/// the per-env playbook Guid is resolved through the <c>insights-ask</c>
+/// <c>sprk_playbookconsumer</c> Binding rows via
+/// <see cref="IConsumerRoutingService.ResolveBindingAsync"/> (FR-P3-01 hard cutover — the
+/// config name map was deleted). Tests covering the legacy fallback
 /// (RunFailed / PlaybookThrows / PlaybookPathDisabled / PlaybookGuidEmpty) have been deleted.
 /// </para>
 /// </remarks>
@@ -38,16 +41,19 @@ public class InsightsOrchestratorTests
     private const string ScopeHash = "scope-hash-test";
 
     /// <summary>
-    /// Canonical name key used by <see cref="InsightsOrchestrator"/> to resolve the
-    /// universal-ingest@v1 playbook through <see cref="InsightsPlaybookNameMapOptions"/>.
-    /// Matches the private constant in <c>InsightsOrchestrator</c>; kept in sync by tests.
+    /// Canonical name (the Binding row's <c>sprk_consumercode</c>) used by
+    /// <see cref="InsightsOrchestrator"/> to resolve the universal-ingest@v1 playbook
+    /// through the insights-ask Binding rows (FR-P3-01). Matches the private constant
+    /// in <c>InsightsOrchestrator</c>; kept in sync by tests.
     /// </summary>
-    private const string UniversalIngestPlaybookCanonicalName = "universal_ingest_v1";
+    private const string UniversalIngestPlaybookCanonicalName = "universal-ingest@v1";
 
     private static readonly Guid UniversalIngestPlaybookId =
         Guid.Parse("11111111-2222-3333-4444-555555555555");
 
-    private readonly Mock<IPlaybookExecutionEngine> _engineMock = new(MockBehavior.Strict);
+    // FR-P3-05 (task 044): the engine shell was deleted — the orchestrator invokes the
+    // frozen IPlaybookOrchestrationService directly with the request-scoped HttpContext.
+    private readonly Mock<Microsoft.AspNetCore.Http.IHttpContextAccessor> _httpContextAccessorMock = new();
     private readonly Mock<IInsightsPlaybookExecutionCache> _cacheMock = new(MockBehavior.Strict);
     private readonly Mock<IOpenAiClient> _openAiMock = new(MockBehavior.Strict);
     private readonly Mock<IPlaybookOrchestrationService> _playbookOrchestrationMock = new();
@@ -59,34 +65,52 @@ public class InsightsOrchestratorTests
     // Loose because none of the existing orchestrator tests cover AssistantQueryAsync (those
     // live in dedicated AssistantToolCallHandlerTests / InsightsAssistantEndpointTests).
     private readonly Mock<IInsightsIntentClassifier> _classifierMock = new();
-    // Default name-map registers universal-ingest@v1 → UniversalIngestPlaybookId.
-    // Tests can substitute an empty map to exercise the "unconfigured" failure path.
-    private readonly TestOptionsMonitor<InsightsPlaybookNameMapOptions> _playbookNameMap =
-        new(new InsightsPlaybookNameMapOptions
-        {
-            Map = new Dictionary<string, Guid>(StringComparer.OrdinalIgnoreCase)
+    // FR-P3-01: the insights-ask Binding catalog replaces the deleted config name map.
+    // The default mock registers universal-ingest@v1 → UniversalIngestPlaybookId (an
+    // EXACT-consumer-code row, mirroring the seeded catalog shape). Tests can substitute
+    // a null/default-row-fallback return to exercise the "unregistered" failure path.
+    private readonly Mock<IConsumerRoutingService> _consumerRoutingMock = new();
+
+    public InsightsOrchestratorTests()
+    {
+        // Task 044: the orchestrator resolves the request-scoped HttpContext itself
+        // (the deleted engine shell used to do this) — supply one for the synthesis path.
+        _httpContextAccessorMock
+            .Setup(a => a.HttpContext)
+            .Returns(new Microsoft.AspNetCore.Http.DefaultHttpContext());
+
+        _consumerRoutingMock
+            .Setup(r => r.ResolveBindingAsync(
+                ConsumerTypes.InsightsAsk,
+                UniversalIngestPlaybookCanonicalName,
+                It.IsAny<IRoutingContext?>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Binding
             {
-                [UniversalIngestPlaybookCanonicalName] = UniversalIngestPlaybookId
-            }
-        });
+                BindingId = Guid.Parse("99999999-8888-7777-6666-555555555555"),
+                ConsumerType = ConsumerTypes.InsightsAsk,
+                ConsumerCode = UniversalIngestPlaybookCanonicalName,
+                PlaybookId = UniversalIngestPlaybookId
+            });
+    }
 
     private AssistantToolCallHandler BuildAssistantHandler()
         => new(
             _classifierMock.Object,
-            _playbookNameMap,
+            _consumerRoutingMock.Object,
             new TestOptionsMonitor<Sprk.Bff.Api.Configuration.AssistantCitationHrefOptions>(
                 new Sprk.Bff.Api.Configuration.AssistantCitationHrefOptions()),
-            new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build(),
             NullLogger<AssistantToolCallHandler>.Instance);
 
     private InsightsOrchestrator CreateSut()
         => new(
-            _engineMock.Object,
+            _httpContextAccessorMock.Object,
             _cacheMock.Object,
             _openAiMock.Object,
             _playbookOrchestrationMock.Object,
             _ingestDocumentSourceMock.Object,
-            _playbookNameMap,
+            _consumerRoutingMock.Object,
             _ragServiceMock.Object,
             BuildAssistantHandler(),
             NullLogger<InsightsOrchestrator>.Instance);
@@ -118,100 +142,6 @@ public class InsightsOrchestratorTests
             TenantId = TenantId,
             Reasoning = "Synthesised from 14 comparable matters."
         };
-
-    // ─────────────────────────────────────────────────────────────────────────
-    // Constructor + argument validation
-    // ─────────────────────────────────────────────────────────────────────────
-
-    [Fact]
-    public void Constructor_NullEngine_Throws()
-    {
-        Action act = () => new InsightsOrchestrator(
-            null!, _cacheMock.Object, _openAiMock.Object,
-            _playbookOrchestrationMock.Object, _ingestDocumentSourceMock.Object,
-            _playbookNameMap, _ragServiceMock.Object, BuildAssistantHandler(), NullLogger<InsightsOrchestrator>.Instance);
-        act.Should().Throw<ArgumentNullException>().WithParameterName("engine");
-    }
-
-    [Fact]
-    public void Constructor_NullCache_Throws()
-    {
-        Action act = () => new InsightsOrchestrator(
-            _engineMock.Object, null!, _openAiMock.Object,
-            _playbookOrchestrationMock.Object, _ingestDocumentSourceMock.Object,
-            _playbookNameMap, _ragServiceMock.Object, BuildAssistantHandler(), NullLogger<InsightsOrchestrator>.Instance);
-        act.Should().Throw<ArgumentNullException>().WithParameterName("cache");
-    }
-
-    [Fact]
-    public void Constructor_NullOpenAi_Throws()
-    {
-        Action act = () => new InsightsOrchestrator(
-            _engineMock.Object, _cacheMock.Object, null!,
-            _playbookOrchestrationMock.Object, _ingestDocumentSourceMock.Object,
-            _playbookNameMap, _ragServiceMock.Object, BuildAssistantHandler(), NullLogger<InsightsOrchestrator>.Instance);
-        act.Should().Throw<ArgumentNullException>().WithParameterName("openAi");
-    }
-
-    [Fact]
-    public void Constructor_NullPlaybookOrchestration_Throws()
-    {
-        Action act = () => new InsightsOrchestrator(
-            _engineMock.Object, _cacheMock.Object, _openAiMock.Object,
-            null!, _ingestDocumentSourceMock.Object,
-            _playbookNameMap, _ragServiceMock.Object, BuildAssistantHandler(), NullLogger<InsightsOrchestrator>.Instance);
-        act.Should().Throw<ArgumentNullException>().WithParameterName("playbookOrchestration");
-    }
-
-    [Fact]
-    public void Constructor_NullIngestDocumentSource_Throws()
-    {
-        Action act = () => new InsightsOrchestrator(
-            _engineMock.Object, _cacheMock.Object, _openAiMock.Object,
-            _playbookOrchestrationMock.Object, null!,
-            _playbookNameMap, _ragServiceMock.Object, BuildAssistantHandler(), NullLogger<InsightsOrchestrator>.Instance);
-        act.Should().Throw<ArgumentNullException>().WithParameterName("ingestDocumentSource");
-    }
-
-    [Fact]
-    public void Constructor_NullPlaybookNameMap_Throws()
-    {
-        Action act = () => new InsightsOrchestrator(
-            _engineMock.Object, _cacheMock.Object, _openAiMock.Object,
-            _playbookOrchestrationMock.Object, _ingestDocumentSourceMock.Object,
-            null!, _ragServiceMock.Object, BuildAssistantHandler(), NullLogger<InsightsOrchestrator>.Instance);
-        act.Should().Throw<ArgumentNullException>().WithParameterName("playbookNameMap");
-    }
-
-    [Fact]
-    public void Constructor_NullRagService_Throws()
-    {
-        Action act = () => new InsightsOrchestrator(
-            _engineMock.Object, _cacheMock.Object, _openAiMock.Object,
-            _playbookOrchestrationMock.Object, _ingestDocumentSourceMock.Object,
-            _playbookNameMap, null!, BuildAssistantHandler(), NullLogger<InsightsOrchestrator>.Instance);
-        act.Should().Throw<ArgumentNullException>().WithParameterName("ragService");
-    }
-
-    [Fact]
-    public void Constructor_NullAssistantHandler_Throws()
-    {
-        Action act = () => new InsightsOrchestrator(
-            _engineMock.Object, _cacheMock.Object, _openAiMock.Object,
-            _playbookOrchestrationMock.Object, _ingestDocumentSourceMock.Object,
-            _playbookNameMap, _ragServiceMock.Object, null!, NullLogger<InsightsOrchestrator>.Instance);
-        act.Should().Throw<ArgumentNullException>().WithParameterName("assistantHandler");
-    }
-
-    [Fact]
-    public void Constructor_NullLogger_Throws()
-    {
-        Action act = () => new InsightsOrchestrator(
-            _engineMock.Object, _cacheMock.Object, _openAiMock.Object,
-            _playbookOrchestrationMock.Object, _ingestDocumentSourceMock.Object,
-            _playbookNameMap, _ragServiceMock.Object, BuildAssistantHandler(), null!);
-        act.Should().Throw<ArgumentNullException>().WithParameterName("logger");
-    }
 
     // ─────────────────────────────────────────────────────────────────────────
     // AnswerQuestionAsync — happy path
@@ -262,7 +192,7 @@ public class InsightsOrchestratorTests
         result.CacheHit.Should().BeTrue("factory was not invoked");
         result.ProcessingTimeMs.Should().BeGreaterThanOrEqualTo(0);
 
-        _engineMock.Verify(e => e.ExecuteBatchAsync(It.IsAny<PlaybookRunRequest>(), It.IsAny<CancellationToken>()),
+        _playbookOrchestrationMock.Verify(o => o.ExecuteAsync(It.IsAny<PlaybookRunRequest>(), It.IsAny<Microsoft.AspNetCore.Http.HttpContext>(), It.IsAny<CancellationToken>()),
             Times.Never, "cache hit must not invoke the engine");
     }
 
@@ -282,10 +212,11 @@ public class InsightsOrchestratorTests
                     return InsightsEngineRunResult.FromArtifact(artifact);
                 });
 
-        _engineMock.Setup(e => e.ExecuteBatchAsync(
+        _playbookOrchestrationMock.Setup(o => o.ExecuteAsync(
                 It.IsAny<PlaybookRunRequest>(),
+                It.IsAny<Microsoft.AspNetCore.Http.HttpContext>(),
                 It.IsAny<CancellationToken>()))
-            .Returns<PlaybookRunRequest, CancellationToken>((req, ct) => SyntheticEngineStreamAsync(ct));
+            .Returns<PlaybookRunRequest, Microsoft.AspNetCore.Http.HttpContext, CancellationToken>((req, http, ct) => SyntheticEngineStreamAsync(ct));
 
         var sut = CreateSut();
         var req = MakeAgentRequest(new Dictionary<string, string> { ["matterType"] = "ip-licensing" });
@@ -295,10 +226,11 @@ public class InsightsOrchestratorTests
         result.Artifact.Should().BeSameAs(artifact);
         result.Decline.Should().BeNull();
         result.CacheHit.Should().BeFalse("the factory was invoked (cache miss)");
-        _engineMock.Verify(e => e.ExecuteBatchAsync(
+        _playbookOrchestrationMock.Verify(o => o.ExecuteAsync(
                 It.Is<PlaybookRunRequest>(r => r.PlaybookId == Question
                                             && r.DocumentIds.Length == 0
                                             && r.Parameters!.ContainsKey("matterType")),
+                It.IsAny<Microsoft.AspNetCore.Http.HttpContext>(),
                 It.IsAny<CancellationToken>()),
             Times.Once);
     }
@@ -684,7 +616,7 @@ public class InsightsOrchestratorTests
 
         capturedRequest.Should().NotBeNull();
         capturedRequest!.PlaybookId.Should().Be(UniversalIngestPlaybookId,
-            "facade resolves universal-ingest@v1 Guid through InsightsPlaybookNameMapOptions");
+            "facade resolves the universal-ingest@v1 Guid through the insights-ask Binding row (FR-P3-01)");
         capturedRequest.DocumentIds.Should().BeEmpty("playbook reads from parameters, not ad-hoc DocumentIds");
         capturedTenantId.Should().Be(TenantId);
     }
@@ -898,32 +830,70 @@ public class InsightsOrchestratorTests
     }
 
     [Fact]
-    public async Task RunIngestAsync_PlaybookGuidUnconfigured_ThrowsInvalidOperationException()
+    public async Task RunIngestAsync_NoExactBindingRow_ThrowsInvalidOperationException()
     {
-        // When InsightsPlaybookNameMapOptions does not contain a mapping for
-        // universal_ingest_v1, RunIngestAsync MUST fail loudly — not silently fall back.
-        // (Wave C-G4 removes the legacy fallback.)
-        var emptyNameMap = new TestOptionsMonitor<InsightsPlaybookNameMapOptions>(
-            new InsightsPlaybookNameMapOptions { Map = new Dictionary<string, Guid>() });
-        var sut = new InsightsOrchestrator(
-            _engineMock.Object, _cacheMock.Object, _openAiMock.Object,
-            _playbookOrchestrationMock.Object, _ingestDocumentSourceMock.Object,
-            emptyNameMap, _ragServiceMock.Object, BuildAssistantHandler(), NullLogger<InsightsOrchestrator>.Instance);
+        // FR-P3-01: when no enabled insights-ask Binding row with sprk_consumercode
+        // 'universal-ingest@v1' exists, RunIngestAsync MUST fail loudly — not silently
+        // fall back. ResolveBindingAsync's 'default'-row fallback (a row whose
+        // ConsumerCode != the requested name) is REJECTED by the exact-code check —
+        // running the wrong playbook would be worse than failing.
+        _consumerRoutingMock
+            .Setup(r => r.ResolveBindingAsync(
+                ConsumerTypes.InsightsAsk,
+                UniversalIngestPlaybookCanonicalName,
+                It.IsAny<IRoutingContext?>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Binding
+            {
+                BindingId = Guid.NewGuid(),
+                ConsumerType = ConsumerTypes.InsightsAsk,
+                ConsumerCode = "default", // fallback row — NOT the requested exact code
+                PlaybookId = Guid.NewGuid()
+            });
 
         _ingestDocumentSourceMock
             .Setup(s => s.FetchAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(MakeIngestContent());
 
+        var sut = CreateSut();
         var req = new InsightsIngestRequest("doc-1", "M-1", TenantId);
         Func<Task> act = () => sut.RunIngestAsync(req);
 
         await act.Should().ThrowAsync<InvalidOperationException>()
-            .Where(ex => ex.Message.Contains("universal_ingest_v1", StringComparison.Ordinal)
-                      || ex.Message.Contains("InsightsPlaybookNameMapOptions", StringComparison.Ordinal));
+            .Where(ex => ex.Message.Contains("universal-ingest@v1", StringComparison.Ordinal)
+                      && ex.Message.Contains("sprk_playbookconsumer", StringComparison.Ordinal));
         _playbookOrchestrationMock.Verify(
             o => o.ExecuteAppOnlyAsync(It.IsAny<PlaybookRunRequest>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
             Times.Never,
-            "playbook is never invoked when its Guid is unconfigured");
+            "playbook is never invoked when its Binding row is unregistered");
+    }
+
+    [Fact]
+    public async Task RunIngestAsync_NullBindingResolution_ThrowsInvalidOperationException()
+    {
+        // Null resolution (no insights-ask rows at all) fails the same honest way.
+        _consumerRoutingMock
+            .Setup(r => r.ResolveBindingAsync(
+                ConsumerTypes.InsightsAsk,
+                UniversalIngestPlaybookCanonicalName,
+                It.IsAny<IRoutingContext?>(),
+                It.IsAny<string?>(),
+                It.IsAny<CancellationToken>()))
+            .ReturnsAsync((Binding?)null);
+
+        _ingestDocumentSourceMock
+            .Setup(s => s.FetchAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(MakeIngestContent());
+
+        var sut = CreateSut();
+        Func<Task> act = () => sut.RunIngestAsync(new InsightsIngestRequest("doc-1", "M-1", TenantId));
+
+        await act.Should().ThrowAsync<InvalidOperationException>()
+            .Where(ex => ex.Message.Contains("universal-ingest@v1", StringComparison.Ordinal));
+        _playbookOrchestrationMock.Verify(
+            o => o.ExecuteAppOnlyAsync(It.IsAny<PlaybookRunRequest>(), It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never);
     }
 
     [Fact]

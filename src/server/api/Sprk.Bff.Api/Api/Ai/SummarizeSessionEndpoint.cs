@@ -11,34 +11,40 @@ using Sprk.Bff.Api.Services.Ai.Chat;
 namespace Sprk.Bff.Api.Api.Ai;
 
 /// <summary>
-/// R5 task 014 / D2-04 — direct BFF endpoint for the chat-driven Summarize vertical slice.
+/// Direct BFF endpoint for the catalog-driven chat-summarize capability (FR-P1-01).
 /// <c>POST /api/ai/chat/sessions/{sessionId}/summarize</c>.
 /// </summary>
 /// <remarks>
 /// <para>
-/// <b>Convergence (spec FR-01 + FR-08 + SC-08)</b>: this endpoint is the HTTP entry point for
-/// the dual-path convention described in spec §4 — the slash command <c>/summarize</c>
-/// (task 019 / D2-10) calls this endpoint directly, while the agent-tool
-/// <c>InvokeSummarizePlaybookTool</c> (task 015 / D2-05) reaches the same destination via
-/// the LLM tool-call path. Both legs converge on
-/// <see cref="SessionSummarizeOrchestrator.SummarizeSessionFilesAsync"/> (task 012 / D2-03)
-/// so behavior is identical regardless of entry — including the new <c>FieldDelta</c>
-/// variant (task 005 / D1-05) emitted progressively as Structured Outputs streams.
+/// <b>Catalog path (FR-P1-01 task 020 → FR-P3-05 task 044 convergence)</b>: this endpoint
+/// resolves the <c>chat-summarize</c> Binding row (<c>sprk_playbookconsumer</c>) via
+/// <see cref="Services.Ai.PublicContracts.IConsumerRoutingService.ResolveBindingAsync"/>
+/// and delegates execution to <see cref="SessionDispatchOrchestrator.DispatchAsync"/> —
+/// the ONE dispatch seam every capability execution flows through (loop capability tools,
+/// chip clicks, gate-resolve, and this direct endpoint). The dispatch seam loads the
+/// SUM-CHAT@v1 <c>sprk_analysisaction</c> row (<c>kind: prompted</c>), executes it via the
+/// prompted executor (ActionRunner + PromptSchemaRenderer), and writes the ledger entry
+/// BEFORE the terminal render chunk (ADR-040). No summarize-specific orchestration lives
+/// anywhere anymore (ADR-039: the Binding table is the only routing surface) — the former
+/// summarize-named orchestrator shell was deleted per NFR-08 (hard cutover; the FR-04
+/// multi-file interjection chunk was retired with it so all entry paths share ONE
+/// execution UX; the dispatch seam appends the Binding's transition chips after the
+/// terminal chunk, same as a chip click).
 /// </para>
 /// <para>
-/// <b>Placement Justification (per <c>.claude/constraints/bff-extensions.md</c> + R5 CLAUDE.md §10)</b>:
+/// <b>Placement Justification (per <c>.claude/constraints/bff-extensions.md</c> + CLAUDE.md §10)</b>:
 /// this endpoint belongs in BFF — not in CRUD code, not in a shared library, not as a
 /// direct PCF/Code-Page call. Reasons:
 /// <list type="number">
 ///   <item><b>SSE streaming requires a long-lived HTTP connection</b> — only the BFF
 ///         server-side surface can hold the connection open while
-///         <see cref="SessionSummarizeOrchestrator"/> emits incremental
-///         <see cref="AnalysisChunk"/> deltas.</item>
-///   <item><b>Server-side AI orchestration</b> — the orchestrator composes
-///         <see cref="IRagService"/> + <see cref="IOpenAiClient"/> + Structured Outputs +
-///         the JPS prompt loaded from <c>sprk_analysisaction</c>. None of these can be
+///         <see cref="SessionDispatchOrchestrator"/> emits
+///         <see cref="AnalysisChunk"/> events.</item>
+///   <item><b>Server-side AI execution</b> — the dispatch seam composes the session-file
+///         text source + <see cref="IOpenAiClient"/> Structured Outputs + the SUM-CHAT@v1
+///         JPS prompt loaded from <c>sprk_analysisaction</c>. None of these can be
 ///         safely composed in a client.</item>
-///   <item><b>OBO auth</b> — the orchestrator's downstream Graph + AI Search calls run on
+///   <item><b>OBO auth</b> — the dispatch seam's downstream Graph + AI Search calls run on
 ///         a fresh bearer token resolved from the request principal per Auth v2 (ADR-028).
 ///         Frontend code cannot resolve OBO tokens.</item>
 ///   <item><b>Rate limiting + correlation ID</b> — the <c>ai-context</c> policy (ADR-016)
@@ -62,22 +68,28 @@ namespace Sprk.Bff.Api.Api.Ai;
 /// </para>
 /// <para>
 /// <b>Fresh OBO token per request (ADR-028)</b>: the handler never snapshots the bearer
-/// token into a closure. The orchestrator + its downstream <see cref="IRagService"/> /
-/// <see cref="IOpenAiClient"/> dependencies resolve their tokens via DI inside the
-/// per-request scope — verified by reading task 012's <c>SessionSummarizeOrchestrator</c>
+/// token into a closure. The dispatch seam + its downstream dependencies (session-file
+/// text source, <see cref="IOpenAiClient"/>) resolve their tokens via DI inside the
+/// per-request scope — verified by reading the <c>SessionDispatchOrchestrator</c>
 /// constructor (no string token parameter).
 /// </para>
 /// <para>
 /// <b>Asymmetric-registration (R5 CLAUDE.md §10 F.1)</b>: this endpoint maps
-/// UNCONDITIONALLY (no <c>if (flag)</c> guard). <see cref="SessionSummarizeOrchestrator"/>
-/// is registered UNCONDITIONALLY in <c>AnalysisServicesModule.AddAnalysisOrchestrationServices</c>
-/// (task 012, line 336). Asymmetric-registration rule satisfied.
+/// UNCONDITIONALLY (no <c>if (flag)</c> guard). <see cref="SessionDispatchOrchestrator"/>
+/// is registered UNCONDITIONALLY within <c>AnalysisServicesModule</c> (compound-ON) with
+/// a Null-Object mirror in <c>AddNullObjectsForCompoundOff</c>.
+/// Asymmetric-registration rule satisfied.
 /// </para>
 /// </remarks>
 public static class SummarizeSessionEndpoint
 {
-    /// <summary>JSON serialization options for SSE event payloads (camelCase; matches sibling Chat endpoints).</summary>
-    private static readonly JsonSerializerOptions s_jsonOptions = new()
+    /// <summary>
+    /// JSON serialization options for SSE event payloads (camelCase; matches sibling Chat
+    /// endpoints). Internal (not private) so <see cref="DispatchSessionEndpoint"/> reuses
+    /// the SAME serializer — ONE AnalysisChunk wire shape across the summarize + dispatch
+    /// streams (task 023b integration seam).
+    /// </summary>
+    internal static readonly JsonSerializerOptions s_jsonOptions = new()
     {
         PropertyNamingPolicy = JsonNamingPolicy.CamelCase
     };
@@ -110,14 +122,15 @@ public static class SummarizeSessionEndpoint
         group.MapPost("/sessions/{sessionId}/summarize", SummarizeAsync)
             .AddAiAuthorizationFilter()
             .WithName("SummarizeChatSession")
-            .WithSummary("Summarize files uploaded into a chat session (R5 D2-04)")
+            .WithSummary("Summarize files uploaded into a chat session (catalog-driven, FR-P1-01)")
             .WithDescription(
-                "Direct entry point for the chat-driven Summarize vertical slice. Streams " +
-                "AnalysisChunk SSE events including the additive FieldDelta variant so the " +
-                "Workspace tab populates progressively (TL;DR first → summary → per-file " +
-                "highlights). Convergence sibling: the agent-tool InvokeSummarizePlaybookTool " +
-                "(task 015) reaches the same SessionSummarizeOrchestrator via the LLM " +
-                "tool-call path — identical output regardless of entry point.")
+                "Direct entry point for the catalog-driven chat-summarize capability. Resolves " +
+                "the chat-summarize Binding row and delegates to the ONE dispatch seam " +
+                "(SessionDispatchOrchestrator), which executes the SUM-CHAT@v1 prompted Action " +
+                "via ActionRunner + PromptSchemaRenderer and streams AnalysisChunk SSE events " +
+                "(a terminal 'complete' chunk carrying the structured DocumentAnalysisResult, " +
+                "followed by the Binding's transition chips; the client synthesizes per-field " +
+                "workspace deltas from the result).")
             .Produces(StatusCodes.Status200OK, contentType: "text/event-stream")
             .ProducesProblem(StatusCodes.Status400BadRequest)
             .ProducesProblem(StatusCodes.Status401Unauthorized)
@@ -152,11 +165,12 @@ public static class SummarizeSessionEndpoint
         string sessionId,
         [FromBody] SummarizeSessionRequest? body,
         HttpContext httpContext,
-        SessionSummarizeOrchestrator orchestrator,
+        SessionDispatchOrchestrator orchestrator,
+        Services.Ai.PublicContracts.IConsumerRoutingService consumerRouting,
         ILogger<SummarizeSessionRequest> logger)
     {
         // Use HttpContext.RequestAborted for cancellation — propagates client disconnects.
-        // Per ADR-028 + R5 §10: NEVER snapshot a closure-captured token; the orchestrator
+        // Per ADR-028 + R5 §10: NEVER snapshot a closure-captured token; the dispatch seam
         // resolves OBO tokens via DI inside its dependencies on every call.
         var cancellationToken = httpContext.RequestAborted;
         var response = httpContext.Response;
@@ -221,32 +235,76 @@ public static class SummarizeSessionEndpoint
             return;
         }
 
-        // ─── Build orchestrator request (convergence contract — task 012) ─────────────
-        // The endpoint passes SummarizeInvocationPath.DirectEndpoint to drive the
-        // telemetry 'path' dimension. The agent-tool path (task 015) will pass
-        // SummarizeInvocationPath.AgentTool. Output is byte-identical for the same
-        // (TenantId, SessionId, FileIds, StyleHint) tuple per the orchestrator contract.
-        var request = new SummarizeSessionFilesRequest(
+        // ─── Resolve the chat-summarize Binding (ADR-039: the Binding table is THE ────
+        // routing surface) and build the dispatch-seam request. FR-P3-05 (task 044): the
+        // summarize-named orchestrator shell was deleted; this endpoint is now a 4th
+        // caller of the ONE dispatch seam. The optional 'style' body member is accepted
+        // for wire compatibility but has no executor effect (the Action's JPS prompt owns
+        // output style since the FR-P1-01 cutover).
+        Services.Ai.PublicContracts.Binding? binding = null;
+        try
+        {
+            binding = await consumerRouting
+                .ResolveBindingAsync(
+                    Services.Ai.PublicContracts.ConsumerTypes.ChatSummarize,
+                    cancellationToken: cancellationToken)
+                .ConfigureAwait(false);
+        }
+        catch (FeatureDisabledException fde)
+        {
+            logger.LogDebug(
+                "[SUMMARIZE-SESSION] Feature disabled at Binding resolution. errorCode={ErrorCode} tenant={TenantId} session={SessionId}",
+                fde.ErrorCode, tenantId, sessionId);
+            await WriteIResultAsync(httpContext, fde.AsFeatureDisabled503());
+            return;
+        }
+
+        if (binding is null || binding.ActionId is null || binding.ActionId.Value == Guid.Empty)
+        {
+            // Operator-actionable log; generic wire detail (ADR-019 — no config internals leak).
+            logger.LogError(
+                "[SUMMARIZE-SESSION] chat-summarize has no enabled Binding row with an Action target. " +
+                "Seed/enable the sprk_playbookconsumer row (sprk_consumertype='chat-summarize', " +
+                "sprk_enabled=true) and set its sprk_action lookup to the SUM-CHAT@v1 row — the " +
+                "Binding table is the only routing surface (ADR-039). tenant={TenantId} session={SessionId}",
+                tenantId, sessionId);
+            await WriteProblemDetailsAsync(
+                response, StatusCodes.Status500InternalServerError, "Internal Server Error",
+                "The summarize capability is not configured. See server logs for details.",
+                ErrorCodeInternalError, correlationId, cancellationToken);
+            return;
+        }
+
+        System.Text.Json.JsonElement? args = body?.FileIds is { Count: > 0 }
+            ? JsonSerializer.SerializeToElement(new { fileIds = body.FileIds }, s_jsonOptions)
+            : null;
+
+        // FR-P4-05 per-tenant metering scope (task 054): /summarize is a Click-path
+        // caller of the ONE dispatch seam — attribution per tenant/user/entry-path=click
+        // via the ambient AiMeteringContext (identifiers only, NFR-07).
+        using var meteringScope = Sprk.Bff.Api.Telemetry.AiMeteringContext.Begin(
+            tenantId, callerOid, Sprk.Bff.Api.Telemetry.AiMeteringContext.EntryPathClick);
+
+        var request = new SessionDispatchRequest(
             TenantId: tenantId,
             SessionId: sessionId,
-            FileIds: body?.FileIds,
-            StyleHint: body?.Style,
-            Path: SummarizeInvocationPath.DirectEndpoint,
+            BindingId: binding.BindingId,
+            Args: args,
             CorrelationId: correlationId);
 
         logger.LogInformation(
-            "[SUMMARIZE-SESSION] Start tenant={TenantId} session={SessionId} oid={Oid} fileIds={FileIdCount} style={Style} correlationId={CorrelationId}",
-            tenantId, sessionId, callerOid, body?.FileIds?.Count ?? 0, body?.Style, correlationId);
+            "[SUMMARIZE-SESSION] Start tenant={TenantId} session={SessionId} oid={Oid} fileIds={FileIdCount} bindingId={BindingId} correlationId={CorrelationId}",
+            tenantId, sessionId, callerOid, body?.FileIds?.Count ?? 0, binding.BindingId, correlationId);
 
-        // ─── Probe orchestrator: catch early synchronous-failure modes BEFORE setting ──
-        // SSE headers so we can return a normal JSON ProblemDetails. The orchestrator
-        // SHOULD yield AnalysisChunk.FromError instead of throwing for runtime errors,
-        // but:
-        //   - InvalidOperationException("session not found") is documented (line 188)
-        //   - FeatureDisabledException can propagate through the orchestrator's deps if
-        //     a downstream Null-Object service is wired up (ADR-018/ADR-032)
-        //   - ArgumentException (NFR-02 cap) is defensive; we filter > 20 above so this
-        //     should only fire for orchestrator-internal validation drift
+        // ─── Probe the dispatch seam: catch early synchronous-failure modes BEFORE ────
+        // setting SSE headers so we can return a normal JSON ProblemDetails. DispatchAsync
+        // SHOULD yield AnalysisChunk.FromError instead of throwing for runtime errors, but:
+        //   - InvalidOperationException("session not found") is documented on the seam;
+        //   - DispatchRejectedException covers catalog-resolution rejections (should not
+        //     fire here — we resolved the Binding above — defensive mapping kept)
+        //   - FeatureDisabledException can propagate through the seam's deps if a
+        //     downstream Null-Object service is wired up (ADR-018/ADR-032)
+        //   - ArgumentException (NFR-02 cap) is defensive; we filter > 20 above
         //   - Generic Exception: log + 500
         //
         // We MoveNext() once to detect synchronous throws, then stream from there.
@@ -257,7 +315,7 @@ public static class SummarizeSessionEndpoint
 
         try
         {
-            enumerator = orchestrator.SummarizeSessionFilesAsync(request, cancellationToken)
+            enumerator = orchestrator.DispatchAsync(request, cancellationToken)
                 .GetAsyncEnumerator(cancellationToken);
             hasFirst = await enumerator.MoveNextAsync().ConfigureAwait(false);
             if (hasFirst)
@@ -303,8 +361,24 @@ public static class SummarizeSessionEndpoint
                 return;
             }
 
-            // Orchestrator throws InvalidOperationException for session-not-found
-            // (SessionSummarizeOrchestrator.cs line 188-190). Map to 404.
+            // The dispatch seam rejects at the catalog-resolution boundary with a stable
+            // errorCode + status (defensive — the Binding was resolved above, but the
+            // by-id re-load inside the seam can still race a disable).
+            if (ex is DispatchRejectedException dre)
+            {
+                logger.LogWarning(
+                    "[SUMMARIZE-SESSION] Dispatch rejected. errorCode={ErrorCode} status={Status} tenant={TenantId} session={SessionId}",
+                    dre.ErrorCode, dre.StatusCode, tenantId, sessionId);
+                await WriteProblemDetailsAsync(
+                    response, dre.StatusCode,
+                    dre.StatusCode == StatusCodes.Status404NotFound ? "Not Found" : "Unprocessable Entity",
+                    dre.Message, dre.ErrorCode, correlationId, cancellationToken);
+                return;
+            }
+
+            // The dispatch seam throws InvalidOperationException with "not found" ONLY for
+            // session-not-found (catalog-resolution failure messages deliberately avoid
+            // the phrase). Map to 404.
             if (ex is InvalidOperationException ioe && ioe.Message.Contains("not found", StringComparison.OrdinalIgnoreCase))
             {
                 logger.LogInformation(
@@ -408,7 +482,9 @@ public static class SummarizeSessionEndpoint
     }
 
     // ─── SSE write helper — `data: {json}\n\n` per SSE format ──────────────────────
-    private static async Task WriteSseChunkAsync(
+    // Internal (not private): DispatchSessionEndpoint reuses THIS writer so the two
+    // AnalysisChunk streams share one serialization implementation (task 023b).
+    internal static async Task WriteSseChunkAsync(
         HttpResponse response,
         AnalysisChunk chunk,
         CancellationToken cancellationToken)
@@ -422,7 +498,8 @@ public static class SummarizeSessionEndpoint
     // ─── ProblemDetails writer — for pre-stream validation/auth errors ─────────────
     // Pre-stream we haven't set SSE headers; write a standard application/problem+json
     // body. ADR-019 conformance: stable errorCode + correlationId extensions; no PII.
-    private static async Task WriteProblemDetailsAsync(
+    // Internal (not private): DispatchSessionEndpoint reuses THIS writer (task 023b).
+    internal static async Task WriteProblemDetailsAsync(
         HttpResponse response,
         int statusCode,
         string title,

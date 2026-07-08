@@ -51,6 +51,9 @@ public sealed class AgentContentSafetyMiddleware : ISprkChatAgent
     /// <inheritdoc />
     public CitationContext? Citations => _inner.Citations;
 
+    /// <summary>Delegates the FR-P2-01 agent-turn contract to the inner agent (loop-contract state passes through the middleware pipeline).</summary>
+    public AgentTurnContract? TurnContract => _inner.TurnContract;
+
     /// <summary>
     /// Streams the inner agent response, scanning each token for sensitive content
     /// patterns and replacing matches with <see cref="FilteredPlaceholder"/>.
@@ -136,18 +139,6 @@ public sealed class AgentContentSafetyMiddleware : ISprkChatAgent
             "Email",
             new Regex(@"\b[A-Za-z0-9._%+-]+@[A-Za-z0-9.-]+\.[A-Za-z]{2,}\b", RegexOptions.Compiled))
     };
-
-    /// <inheritdoc />
-    /// <remarks>
-    /// Pass-through to the inner agent. Tool call detection is a pre-execution inspection
-    /// step that returns tool names, not response content, so content safety filtering
-    /// does not apply.
-    /// </remarks>
-    public Task<IReadOnlyList<FunctionCallContent>> DetectToolCallsAsync(
-        string message,
-        IReadOnlyList<AiChatMessage> history,
-        CancellationToken cancellationToken)
-        => _inner.DetectToolCallsAsync(message, history, cancellationToken);
 }
 
 /// <summary>

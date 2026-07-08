@@ -13,4 +13,5 @@
  * @see AIPU2-082 — Consolidate duplicate useSseStream implementations
  */
 
-export { useSseStream, parseSseEvent, parsePaneEvent } from '../../../hooks/useSseStream';
+export { useSseStream, parseSseEvent, parsePaneEvent, readSseStream } from '../../../hooks/useSseStream';
+export type { ReadSseStreamOptions } from '../../../hooks/useSseStream';

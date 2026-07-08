@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="013" project="record-header-and-notepad-r1">
+  <metadata>
+    <title>Update shared library exports (src/index.ts)</title>
+    <phase>1: Shared Library</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>002, 003, 004, 005, 006, 007, 008, 009, 010, 011, 012</dependencies>
+    <blocks>014, 021</blocks>
+    <tags>typescript</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Modification-only task exporting Phase 1 outputs</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>Aggregates all Phase 1 outputs; must run after 002-012</parallel-reason>
+  </metadata>
+
+  <prompt>Update src/client/shared/Spaarke.UI.Components/src/index.ts to export HeaderToolbar, RecordHeaderShell, FieldGrid, TextField, LookupField, OptionSetField, TextareaField, and hooks useRecordFieldValues, useRelatedCount, useRecordHeaderToolbarActions, plus type declarations. Verify shared lib builds cleanly and no consumer regressions.</prompt>
+
+  <role>Spaarke platform developer. Familiar with @spaarke/ui-components package structure.</role>
+
+  <goal>src/index.ts updated with named exports for all Phase 1 outputs; shared lib npm build succeeds; no consumer regressions (VisualHost, SmartTodo, other current consumers).</goal>
+
+  <context>
+    <background>Aggregation task after all Phase 1 code lands. Must add exports without breaking existing consumers.</background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/index.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/package.json</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">Shared library is the single distribution point for these primitives.</constraint>
+    <constraint source="spec">NFR-08: zero new npm packages.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/record-header-and-notepad-r1/spec.md</file>
+      <file>projects/record-header-and-notepad-r1/CLAUDE.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read current src/index.ts to identify existing export patterns.</step>
+    <step order="2">Add named exports: HeaderToolbar, IHeaderToolbarProps, IHeaderToolbarSlot; RecordHeaderShell, IRecordHeaderShellProps; FieldGrid, IFieldGridProps; TextField, LookupField, OptionSetField, TextareaField and their prop types; useRecordFieldValues, useRelatedCount, useRecordHeaderToolbarActions and IUseRecordHeaderToolbarActionsOptions.</step>
+    <step order="3">Optionally add subpath exports (e.g., @spaarke/ui-components/RecordHeader) if the lib supports it — otherwise all exports flat from root index.</step>
+    <step order="4">Run npm run build in Spaarke.UI.Components; verify no TS errors.</step>
+    <step order="5">Run npm test in shared lib.</step>
+    <step order="6">Update TASK-INDEX.md: mark 013 ✅.</step>
+    <step order="7">Document deviations in notes/.</step>
+  </steps>
+
+  <tools><tool name="npm">Build + test</tool></tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/index.ts</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Import { HeaderToolbar, RecordHeaderShell, FieldGrid, useRecordHeaderToolbarActions } from "@spaarke/ui-components" resolves without error.</criterion>
+    <criterion testable="true">Shared lib build passes with 0 errors, 0 warnings.</criterion>
+    <criterion testable="true">Existing consumer test suites still pass.</criterion>
+  </acceptance-criteria>
+
+  <notes>Do not remove or alter any existing exports. Add-only. This unblocks Phase 2 (MatterHeaderPcf) and Phase 3 (Notepad).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files first. Follow task-execute skill.</protocol>
+  </execution>
+</task>

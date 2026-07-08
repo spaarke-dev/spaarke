@@ -3,14 +3,14 @@ using System.ComponentModel.DataAnnotations;
 namespace Sprk.Bff.Api.Services.Ai.Foundry;
 
 /// <summary>
-/// Configuration options for Bing Grounding capability used by <see cref="Chat.Tools.LegalResearchTools"/>.
+/// Configuration options for Bing Grounding capability used by the <c>LegalResearchHandler</c>.
 ///
 /// Bound from appsettings section <c>BingGrounding</c> in Program.cs / ConfigurationModule.
 ///
 /// ADR-018: Kill switch — <see cref="Enabled"/> must be checked before any Bing Grounding call.
 ///          When false, tools return a user-readable degradation message immediately.
 /// ADR-016: Concurrency — <see cref="MaxConcurrency"/> controls the SemaphoreSlim gate shared
-///          across all LegalResearchTools instances.
+///          across all LegalResearch chat-tools instances.
 /// ADR-015: Data governance — <see cref="BingConnectionName"/> identifies the AI Foundry
 ///          connection; no API key is stored here (auth uses Managed Identity through the
 ///          Azure AI Projects SDK, consistent with AgentServiceClient).
@@ -21,7 +21,7 @@ public sealed class BingGroundingOptions
     public const string SectionName = "BingGrounding";
 
     /// <summary>
-    /// Kill switch (ADR-018). When <c>false</c>, all <see cref="Chat.Tools.LegalResearchTools"/>
+    /// Kill switch (ADR-018). When <c>false</c>, all the <c>LegalResearchHandler</c>
     /// operations return a user-readable message without making any Bing API call.
     /// Default: <c>false</c> (opt-in — must be explicitly enabled in configuration).
     /// </summary>
@@ -33,7 +33,7 @@ public sealed class BingGroundingOptions
     /// Used by the AgentsClient to locate the Bing connection when creating agent runs
     /// with <c>BingGroundingTool</c>. Retrieve from AI Foundry Studio > Connections.
     /// Required when <see cref="Enabled"/> is <c>true</c> — enforced at use-site in
-    /// <see cref="Chat.Tools.LegalResearchTools"/>.<c>RunBingGroundingAsync</c>, NOT via
+    /// the <c>LegalResearchHandler</c> grounding call, NOT via
     /// DataAnnotation (so the app starts cleanly when Enabled=false and no Bing config is
     /// present, even when LegalResearchHandler is constructed at startup — pre-Phase B
     /// hardening, surfaced by R6 Wave B-G8 deploy 2026-06-09).
@@ -43,7 +43,7 @@ public sealed class BingGroundingOptions
     /// <summary>
     /// Maximum number of concurrent Bing Grounding operations per BFF instance (ADR-016).
     /// Enforced via a <see cref="System.Threading.SemaphoreSlim"/> shared across all
-    /// LegalResearchTools instances. Operations that cannot acquire the semaphore within
+    /// LegalResearch chat-tools instances. Operations that cannot acquire the semaphore within
     /// 30 seconds return a user-readable degradation message instead of throwing.
     /// Default: 3 concurrent operations (lighter than AgentService at 4 because Bing
     /// Grounding runs carry a full agent thread overhead).

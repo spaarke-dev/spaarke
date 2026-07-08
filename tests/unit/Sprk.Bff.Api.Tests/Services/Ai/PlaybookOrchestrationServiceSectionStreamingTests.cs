@@ -34,7 +34,7 @@ namespace Sprk.Bff.Api.Tests.Services.Ai;
 ///   <item><b>Backward-compat invariant (binding)</b>: a schema-position playbook (i.e.,
 ///     a non-composite Output node dispatched as <see cref="ExecutorType.DeliverOutput"/>)
 ///     emits ZERO section events. The existing <c>FieldDelta</c> flow on a different
-///     stream surface (<see cref="PlaybookExecutionEngine.ExecuteChatSummarizeAsync"/>)
+///     stream surface (the deleted engine-shell chat-summarize path, FR-P3-05 task 044)
 ///     is unaffected by these events — this test asserts the non-emission contract on
 ///     the orchestrator's stream surface, which is the surface 114a modifies.</item>
 ///   <item>ADR-015 tier-1 payload safety: serialized event JSON contains ONLY section
@@ -397,7 +397,7 @@ public class PlaybookOrchestrationServiceSectionStreamingTests
     /// <see cref="ExecutorType.DeliverOutput"/> MUST emit zero <c>section_*</c> events on
     /// the orchestrator's stream surface. The existing <c>FieldDelta</c> flow on a
     /// different stream surface
-    /// (<see cref="PlaybookExecutionEngine.ExecuteChatSummarizeAsync"/>) is unaffected
+    /// (the deleted engine-shell chat-summarize path) is unaffected
     /// by these events — this test asserts the non-emission contract on the surface
     /// 114a modifies. Until 118R migrates legacy playbooks to DeliverComposite, this
     /// invariant is binding.
@@ -434,7 +434,7 @@ public class PlaybookOrchestrationServiceSectionStreamingTests
             "BACKWARD-COMPAT INVARIANT (FR-53): schema-position playbooks (NodeType.Output → " +
             "ExecutorType.DeliverOutput) MUST emit zero section_* events on the orchestrator's " +
             "stream surface until migrated by FR-58 (task 118R). The existing FieldDelta flow " +
-            "on PlaybookExecutionEngine.ExecuteChatSummarizeAsync's stream surface is " +
+            "on the legacy engine-shell chat-summarize stream surface was " +
             "untouched by 114a.");
 
         // The legacy NodeCompleted event must still be present (existing-consumer contract).

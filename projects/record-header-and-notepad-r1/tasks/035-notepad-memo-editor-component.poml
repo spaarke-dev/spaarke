@@ -1,0 +1,92 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="035" project="record-header-and-notepad-r1">
+  <metadata>
+    <title>Build MemoEditor component (FR-17)</title>
+    <phase>3: Notepad</phase>
+    <status>completed</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>033</dependencies>
+    <blocks>037</blocks>
+    <tags>react, typescript, fluent-ui, frontend</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Core editor with keybinding + save behavior + unit tests</rigor-reason>
+    <parallel-group>E</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>Build src/solutions/Notepad/src/components/MemoEditor.tsx per FR-17 — Fluent v9 Textarea wired to sprk_body. Ctrl+Enter saves immediately (via updateBody with immediate:true); onBlur saves immediately; keystrokes trigger debounced save. Enter inserts newline (does NOT save).</prompt>
+
+  <role>Spaarke platform developer. React + keyboard event handling expert.</role>
+
+  <goal>MemoEditor.tsx + tests; three save triggers verified (Ctrl+Enter, blur, debounce); Enter inserts newline.</goal>
+
+  <context>
+    <background>Design §3.6 + spec FR-17 (owner clarification O5). VSCode-style: Ctrl+Enter explicit save; Enter is newline. Debounced save while typing coalesces API pressure.</background>
+    <relevant-files>
+      <file>src/solutions/Notepad/src/components/MemoEditor.tsx</file>
+      <file>src/solutions/Notepad/src/components/__tests__/MemoEditor.test.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">Fluent v9 Textarea; semantic tokens.</constraint>
+    <constraint source="spec">FR-17: save on Ctrl+Enter/blur/1s idle; Enter inserts newline.</constraint>
+    <constraint source="spec">R5 risk: measure write frequency; fall back if throttling observed.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/record-header-and-notepad-r1/spec.md</file>
+      <file>projects/record-header-and-notepad-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-021-fluent-ui-design-system.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Declare IMemoEditorProps { value: string; onChange: (body: string, options?: { immediate?: boolean }) =&gt; void; disabled?: boolean; }</step>
+    <step order="2">Implement using Fluent v9 Textarea (resize: vertical; height fills container).</step>
+    <step order="3">onKeyDown: if event.ctrlKey &amp;&amp; event.key === "Enter" → prevent default; call onChange(currentValue, { immediate: true }). Otherwise let default (Enter → newline).</step>
+    <step order="4">onBlur: call onChange(currentValue, { immediate: true }).</step>
+    <step order="5">onChange (textarea): call onChange(newValue) — no immediate flag; hook handles debounce.</step>
+    <step order="6">Add tests: Ctrl+Enter triggers immediate; blur triggers immediate; keystroke triggers non-immediate; Enter (no Ctrl) inserts newline (no save).</step>
+    <step order="7">Run tests.</step>
+    <step order="8">Update TASK-INDEX.md: mark 035 ✅.</step>
+    <step order="9">Document deviations in notes/.</step>
+  </steps>
+
+  <tools><tool name="npm">Build + test</tool></tools>
+
+  <outputs>
+    <output type="code">src/solutions/Notepad/src/components/MemoEditor.tsx</output>
+    <output type="test">src/solutions/Notepad/src/components/__tests__/MemoEditor.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given Ctrl+Enter keydown, onChange called with immediate=true.</criterion>
+    <criterion testable="true">Given blur event, onChange called with immediate=true.</criterion>
+    <criterion testable="true">Given plain Enter keydown, onChange NOT called (default newline preserved).</criterion>
+    <criterion testable="true">Given typing, onChange called without immediate flag.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps><step>Render MemoEditor in webLightTheme then webDarkTheme</step></steps>
+      <expected>Textarea colors adapt via semantic tokens</expected>
+    </test>
+    <test name="Keybinding UX">
+      <steps>
+        <step>Focus editor; type "Line 1"; press Enter; type "Line 2"</step>
+        <step>Verify visible text has two lines</step>
+        <step>Press Ctrl+Enter; verify save triggered</step>
+      </steps>
+      <expected>Enter = newline; Ctrl+Enter = save</expected>
+    </test>
+  </ui-tests>
+
+  <notes>Composition-event handling: if IME is active (composition), do NOT trigger Ctrl+Enter — let the composition complete first.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files first. Follow task-execute skill.</protocol>
+  </execution>
+</task>

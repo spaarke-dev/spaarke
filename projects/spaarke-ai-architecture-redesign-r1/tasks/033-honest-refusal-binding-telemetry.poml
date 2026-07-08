@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="033" project="spaarke-ai-architecture-redesign-r1">
+  <metadata>
+    <title>Honest refusal — per-tenant no_match_handler Binding + dispatch_refused telemetry</title>
+    <phase>Phase P2: Text-Path Hard Cutover</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <tags>bff-api, refusal, telemetry</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <parallel-group>W-P2-B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>030</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement FR-P2-04: honest refusal as a first-class outcome of the text path. When an utterance matches nothing in the closed catalog and cannot be answered as a cited ad-hoc read, the loop does NOT guess, hallucinate a capability, or silently drop the turn — it renders the tenant's refusal via a per-tenant no_match_handler Binding row (the refusal template is itself catalog data, not hardcoded copy) and emits a dispatch_refused telemetry event to App Insights. Refusals are the fourth outcome of the G-P2 four-outcome contract (do / clarify-then-do / cited ad-hoc answer / honest refusal) and feed the future refusal-backlog view (deferred, FR-P4-07). The refusal itself is a ledger-addressable output per ADR-040.
+  </prompt>
+
+  <role>
+    Senior .NET developer expert in the SprkChatAgent loop, the Binding catalog (sprk_playbookconsumer), and App Insights telemetry conventions.
+  </role>
+
+  <goal>
+    An off-catalog utterance yields the tenant's no_match_handler refusal template rendered in chat, a SessionOutput ledger entry, and a dispatch_refused event visible in App Insights — evidence shown.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-architecture-redesign-r1/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-architecture-redesign-r1/plan.md</file>
+    <file purpose="project-context">projects/spaarke-ai-architecture-redesign-r1/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md</file>
+    <file purpose="loop-contract">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgent.cs (as delivered by task 030)</file>
+    <file purpose="routing-service">src/server/api/Sprk.Bff.Api/Services/Ai/ (ConsumerRoutingService full Binding contract from task 004)</file>
+    <file purpose="telemetry-middleware">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Middleware/AgentTelemetryMiddleware.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-039">ONE dispatch protocol — no-match is a loop outcome, not a fallback dispatcher. MUST NOT add a second intent-detection mechanism anywhere; MUST NOT gate by tool-name lists. Grounded outputs: the refusal template renders as declared; MUST NOT emit ungrounded free-form output in place of a refusal.</constraint>
+    <constraint source="ADR-039">Routing config lives ONLY in the Binding table — the no_match_handler is a Binding row, not appsettings or hardcoded copy.</constraint>
+    <constraint source="ADR-040">The refusal is written to the ledger as an addressable output BEFORE rendering.</constraint>
+    <constraint source="NFR-08">Hard cutover doctrine: no compat shims; any legacy no-match fallback path superseded here is deleted grep-zero with SHOWN output.</constraint>
+    <constraint source="ADR-029">BFF-touching task: publish-size + diff reported per ADR-029.</constraint>
+    <constraint source="NFR-02">Eval suite is a merge gate; add refusal eval cases (off-catalog utterances MUST refuse, not improvise).</constraint>
+    <constraint source="NFR-09">dispatch_refused telemetry follows ADR-016 conventions; NFR-07 — event carries identifiers only, no utterance content in logs.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff-api, refusal, telemetry, binding-catalog</topic>
+    <files>
+      <file>docs/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>docs/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/OVERLAY-MATRIX.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-MIGRATION-MAP.md</file>
+    </files>
+    <patterns>
+      <pattern name="Loop contract" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgent.cs">
+        Task 030's loop — refusal is emitted when the turn ends with no catalog match and no groundable ad-hoc answer.
+      </pattern>
+      <pattern name="Gate store" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PendingPlanManager.cs">
+        Reference only — refusals never suspend; they terminate the turn.
+      </pattern>
+      <pattern name="Tool handler framework" location="src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/">
+        The closed catalog whose non-match triggers refusal; the no_match_handler Binding resolves through the same ConsumerRoutingService.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Honest refusal is what makes the closed catalog honest: the assistant does what it can do, and says clearly when it cannot. dispatch_refused telemetry is the product-management signal for which capabilities to author next (the refusal-backlog admin view is a named P4 deferral).
+    </background>
+    <dependencies>
+      <dependency task="030" status="pending">Agent-turn loop contract in place — refusal is a loop outcome.</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0" name="Context check + load knowledge">
+      Verify context below 70%. Load ADR-039/ADR-040, OVERLAY-MATRIX.md refusal rows, the loop contract from 030, and the AgentTelemetryMiddleware conventions.
+    </step>
+    <step order="1" name="no_match_handler Binding resolution">
+      Resolve the per-tenant no_match_handler Binding row via ConsumerRoutingService; define the seeded default row for spaarkedev1; refusal copy is catalog data.
+    </step>
+    <step order="2" name="Loop no-match outcome">
+      Wire the loop's terminal no-match path: no catalog match AND no groundable ad-hoc answer leads to rendering the refusal template — never improvised output.
+    </step>
+    <step order="3" name="Ledger + telemetry">
+      Write the refusal SessionOutput to the ledger before rendering; emit dispatch_refused to App Insights (tenant/user/session identifiers only — no utterance content, NFR-07).
+    </step>
+    <step order="4" name="Tests + eval cases">
+      Unit tests: off-catalog utterance renders the tenant template; telemetry event emitted; ledger entry precedes render. Add refusal eval cases to tests/integration/contract/ per NFR-02. Build + tests green, output shown.
+    </step>
+    <step order="5" name="App Insights evidence">
+      Exercise the path against dev; capture the dispatch_refused event in App Insights (query output in task notes).
+    </step>
+    <step order="6" name="Publish-size verification">
+      dotnet publish -c Release; report compressed size + diff per ADR-029.
+    </step>
+    <step order="7" name="Step 9.5 quality gates">
+      Run code-review + adr-check. Resolve findings per CLAUDE.md section 6.5. Update TASK-INDEX.md and current-task.md.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build, test, publish Sprk.Bff.Api</tool>
+    <tool name="git">Version control</tool>
+    <tool name="az">App Insights query for dispatch_refused evidence</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ (no-match outcome + refusal rendering)</output>
+    <output type="data">no_match_handler Binding row seeded on spaarkedev1 (sprk_playbookconsumer)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/ + tests/integration/contract/ (refusal cases)</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md (status update)</output>
+    <output type="report">Task notes: App Insights dispatch_refused evidence + publish-size delta</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">An off-catalog utterance yields the tenant's no_match_handler template rendered in chat (test shown).</criterion>
+    <criterion testable="true">dispatch_refused telemetry event lands in App Insights (query evidence shown).</criterion>
+    <criterion testable="true">The refusal is written to the ledger as an addressable SessionOutput before rendering (test shown).</criterion>
+    <criterion testable="true">Refusal template is a Binding row (no hardcoded refusal copy; no routing config outside the Binding table — grep shown).</criterion>
+    <criterion testable="true">Build + tests green incl. new refusal eval cases; publish-size reported per ADR-029.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

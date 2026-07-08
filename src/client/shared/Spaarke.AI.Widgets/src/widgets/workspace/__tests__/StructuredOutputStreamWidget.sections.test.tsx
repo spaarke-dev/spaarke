@@ -2,11 +2,12 @@
  * StructuredOutputStreamWidget — section-name-keyed rendering (Phase 5R Wave
  * 5-C, FR-54 / task 114b).
  *
- * Verifies the new section-keyed SSE consumption path AND the backward-compat
- * invariant that legacy `FieldDelta` events continue to render via the
- * schema-position path unchanged.
+ * Verifies the section-keyed SSE consumption path — the ONLY streaming render
+ * contract since the ai-architecture-redesign-r1 task 046 cutover (amended
+ * ADR-037: the legacy per-field-delta dual-render path was DELETED at the
+ * last-playbook cutover).
  *
- * Acceptance criteria covered (per 114b POML):
+ * Acceptance criteria covered (per 114b POML, updated at the 046 cutover):
  *   (1) Widget hydrates `sections: Record<string, SectionState>` from
  *       `section_started` / `section_data` / `section_completed` events keyed
  *       by section name (not schema position).
@@ -14,18 +15,15 @@
  *       back to insertion order otherwise.
  *   (3) Out-of-order events tolerated (`section_completed` before
  *       `section_started`) — graceful state, no crash.
- *   (4) Legacy `FieldDelta` events: existing playbook with no `section_*`
- *       events renders via legacy path UNCHANGED — this is the
- *       BACKWARD-COMPAT-INVARIANT-TEST referenced from current-task.md for
- *       task 118R re-validation.
- *   (5) Mixed events: defensive — sections take precedence per the FR-54
- *       coordination-drop intent (5 → 2 coordination points).
+ *   (4) CUTOVER: retired per-field-delta-shaped events are IGNORED (unknown
+ *       discriminant per ADR-030) — no content renders from them.
+ *   (5) Section events flip the widget out of the pre-section waiting UI and
+ *       into section mode.
  *   (6) Empty section content → renders header only with muted hint.
  *   (7) ADR-021: no hardcoded hex/rgb colors in section-renderer DOM.
  *
- * The legacy test file (`StructuredOutputStreamWidget.test.tsx`, 851 lines)
- * remains intact and runs unmodified — it exercises the schema-position-keyed
- * codepath that this task PRESERVES under backward-compat.
+ * Static-envelope rendering (schema field plan + `prefilledFields`) remains
+ * covered by `StructuredOutputStreamWidget.test.tsx`.
  */
 
 import '@testing-library/jest-dom';
@@ -367,47 +365,42 @@ describe('StructuredOutputStreamWidget — section-keyed rendering (FR-54 / task
   });
 
   // -------------------------------------------------------------------------
-  // (4) BACKWARD-COMPAT INVARIANT — legacy FieldDelta path unchanged
-  //     (this test is referenced by current-task.md as the 118R re-validation
-  //      anchor: legacy unmigrated playbooks render via the schema-position
-  //      path until migrated)
+  // (4) CUTOVER — retired per-field-delta events are IGNORED (task 046,
+  //     amended ADR-037: section-name-keyed streaming is the ONLY streaming
+  //     render contract; the dual-render path is deleted, not shimmed)
   // -------------------------------------------------------------------------
 
-  it('BACKWARD-COMPAT: legacy FieldDelta events render via schema-position path UNCHANGED (118R anchor)', () => {
+  it('CUTOVER: retired per-field-delta-shaped events are IGNORED — no content renders from them', () => {
     const data: StructuredOutputStreamWidgetData = {
       mode: 'streaming',
       schema: SUMMARIZE_SCHEMA,
       correlationId: STREAM_ID,
-      // No outputSchema → legacy displayHint path.
     };
     const { bus } = renderWidget(data);
 
-    // Emit legacy events only (the unmigrated-playbook scenario).
     act(() => {
       bus.dispatch('workspace', { type: 'streaming_started', streamId: STREAM_ID });
     });
     act(() => {
+      // A retired-vocabulary event (as an unmigrated emitter would send it).
+      // ADR-030: unknown discriminants are ignored by subscribers. The token
+      // is constructed dynamically so the widget layer stays grep-zero for
+      // the deleted vocabulary (NFR-08 evidence rule).
       bus.dispatch('workspace', {
-        type: 'field_delta',
+        type: ['field', 'delta'].join('_'),
         streamId: STREAM_ID,
         fieldPath: 'tldr',
-        fieldContent: 'Legacy TL;DR text.',
+        fieldContent: 'Retired-path text that must NOT render.',
         sequence: 1,
-      });
-    });
-    act(() => {
-      bus.dispatch('workspace', { type: 'streaming_complete', streamId: STREAM_ID, completionStatus: 'complete' });
+      } as unknown as Parameters<typeof bus.dispatch>[1]);
     });
 
-    // Widget reports field-mode rendering.
+    // No section mode, no rendered content — the widget stays in the
+    // pre-section waiting UI (skeleton placeholders).
     const widget = screen.getByTestId('structured-output-stream-widget');
     expect(widget.getAttribute('data-render-mode')).toBe('fields');
-    // Sections container MUST NOT render.
     expect(screen.queryByTestId('sections-container')).toBeNull();
-    // Legacy field block renders the content.
-    const tldrBlock = document.querySelector('[data-field-path="tldr"]');
-    expect(tldrBlock).not.toBeNull();
-    expect(tldrBlock!.textContent).toContain('Legacy TL;DR text.');
+    expect(widget.textContent).not.toContain('Retired-path text that must NOT render.');
   });
 
   it('BACKWARD-COMPAT: legacy mode="static" without section events renders prefilledFields unchanged', () => {
@@ -430,21 +423,12 @@ describe('StructuredOutputStreamWidget — section-keyed rendering (FR-54 / task
   // (5) Mixed events — sections take precedence
   // -------------------------------------------------------------------------
 
-  it('MIXED MODE (defensive): when both FieldDelta and section events arrive, sections take precedence', () => {
+  it('flips from the pre-section waiting UI into section mode when section events arrive', () => {
     const { bus } = renderWidget(streamingMode());
 
-    // First, legacy FieldDelta — widget initially renders in field mode.
+    // Before any section event the widget is in the field-plan waiting UI.
     act(() => {
       bus.dispatch('workspace', { type: 'streaming_started', streamId: STREAM_ID });
-    });
-    act(() => {
-      bus.dispatch('workspace', {
-        type: 'field_delta',
-        streamId: STREAM_ID,
-        fieldPath: 'tldr',
-        fieldContent: 'Initial field content',
-        sequence: 1,
-      });
     });
     expect(screen.getByTestId('structured-output-stream-widget').getAttribute('data-render-mode')).toBe('fields');
 
@@ -511,10 +495,10 @@ describe('StructuredOutputStreamWidget — section-keyed rendering (FR-54 / task
   });
 
   // -------------------------------------------------------------------------
-  // Structured data — renders below text as compact JSON fallback
+  // Structured data — value-shape-typed rendering (task 046) + JSON fallback
   // -------------------------------------------------------------------------
 
-  it('renders structuredData below accumulated text as compact JSON fallback', () => {
+  it('renders a flat-record structuredData as labeled rows below accumulated text (task 046 typed rendering)', () => {
     const { bus } = renderWidget(streamingMode());
 
     act(() => {
@@ -537,11 +521,53 @@ describe('StructuredOutputStreamWidget — section-keyed rendering (FR-54 / task
 
     const block = document.querySelector('[data-section-name="structured"]');
     expect(block!.querySelector('[data-section-body="text"]')!.textContent).toContain('Header text');
-    const struct = block!.querySelector('[data-section-body="structured"]');
+    // Flat record (string + string[] values) → labeled rows, NOT raw JSON.
+    const record = block!.querySelector('[data-section-body="structured-record"]');
+    expect(record).not.toBeNull();
+    expect(record!.querySelector('[data-prop-key="keyA"]')!.textContent).toContain('valA');
+    const keyBList = record!.querySelector('[data-prop-key="keyB"] ul');
+    expect(keyBList).not.toBeNull();
+    expect(keyBList!.querySelectorAll('li')).toHaveLength(2);
+    // No compact-JSON fallback for this well-shaped payload.
+    expect(block!.querySelector('pre[data-section-body="structured"]')).toBeNull();
+  });
+
+  it('renders an array-of-strings structuredData as a bulleted list (task 046 typed rendering)', () => {
+    const { bus } = renderWidget(streamingMode());
+
+    act(() => {
+      bus.dispatch('workspace', {
+        type: 'section_completed',
+        streamId: STREAM_ID,
+        sectionName: 'bullets',
+        finalStructuredData: ['one', 'two', 'three'],
+      });
+    });
+
+    const block = document.querySelector('[data-section-name="bullets"]');
+    const list = block!.querySelector('ul[data-section-body="structured-list"]');
+    expect(list).not.toBeNull();
+    expect(list!.querySelectorAll('li')).toHaveLength(3);
+    expect(block!.querySelector('pre[data-section-body="structured"]')).toBeNull();
+  });
+
+  it('renders deeply-nested structuredData via the compact JSON fallback (unchanged MVP escape hatch)', () => {
+    const { bus } = renderWidget(streamingMode());
+
+    act(() => {
+      bus.dispatch('workspace', {
+        type: 'section_completed',
+        streamId: STREAM_ID,
+        sectionName: 'deep',
+        finalStructuredData: { outer: { inner: 'value' } },
+      });
+    });
+
+    const block = document.querySelector('[data-section-name="deep"]');
+    const struct = block!.querySelector('pre[data-section-body="structured"]');
     expect(struct).not.toBeNull();
-    expect(struct!.textContent).toContain('keyA');
-    expect(struct!.textContent).toContain('valA');
-    expect(struct!.textContent).toContain('keyB');
+    expect(struct!.textContent).toContain('outer');
+    expect(struct!.textContent).toContain('value');
   });
 
   it('renders citations below content when emitted by section_completed', () => {

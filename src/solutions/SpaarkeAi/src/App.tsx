@@ -16,7 +16,7 @@
  *     useEffect captured a token once at mount and never refreshed → 401 after
  *     ~80min idle.
  *
- * R2 change: AppShell + StandaloneAiProvider replaced by ThreePaneShell.
+ * R2 change: AppShell + the R1 standalone provider replaced by ThreePaneShell.
  * AiSessionProvider (AIPU2-076) lives inside ThreePaneShell.
  *
  * @see ADR-021 - Fluent v9, dark mode required, semantic tokens only

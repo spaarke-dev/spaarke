@@ -219,12 +219,32 @@ export const WorkspaceShell: React.FC<WorkspaceShellProps> = ({ config, classNam
         const columns = row.gridTemplateColumns ?? defaultColumns;
         const columnsSmall = row.gridTemplateColumnsSmall ?? '1fr';
 
+        // R2 UAT §5.6 fix (2026-07-03): when the operator sets a row height
+        // (via wizard Row Height dropdown → LayoutJsonRow.rowHeight → maxHeight
+        // here), it must ENFORCE that height, not merely cap it. The shell's
+        // Griffel `row` style is `flex: 1 1 0` (equal-distribution), so
+        // maxHeight alone would be overridden by flex distribution — every
+        // row would render at the same share (viewport / N). To honor the
+        // operator's per-row values, override flex to `0 0 auto` and set
+        // `height` literally when maxHeight is present.
+        const heightEnforcement =
+          row.maxHeight !== undefined
+            ? { height: row.maxHeight, maxHeight: row.maxHeight, flex: '0 0 auto' as const }
+            : undefined;
+
         return (
           <div
             key={row.id}
             className={shellStyles.row}
             style={{
               gridTemplateColumns: columns,
+              // FR-02 (spaarke-dataset-grid-framework-r2): apply optional row-level
+              // height. Populated by buildDynamicWorkspaceConfig from
+              // LayoutJsonRow.rowHeight. When set, the row is enforced at that
+              // height (see heightEnforcement above) with overflow hidden —
+              // sections inside respect the ceiling regardless of contentSizing.
+              ...(heightEnforcement ?? {}),
+              ...(row.overflow !== undefined ? { overflow: row.overflow } : {}),
               // Inline media-query equivalent via CSS custom properties is not
               // available in inline styles. Consumers who need per-row responsive
               // overrides should pass a className instead. The shell CSS handles

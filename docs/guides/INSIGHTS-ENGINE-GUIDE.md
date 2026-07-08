@@ -1,5 +1,7 @@
 # Insights Engine Guide
 
+
+> **Terminology note (2026-07-07, spaarke-ai-architecture-redesign-r1 task 052)**: references to `PlaybookExecutionEngine` in this doc mean "the playbook engine" loosely. The literal class `PlaybookExecutionEngine` (a chat-summarize shell) was DELETED at redesign-r1 task 044; the engine that executes Insights playbooks is `PlaybookOrchestrationService` + the `INodeExecutor` registry, which is **FROZEN** (Insights family only per OQ-2/D11 — new capability must NOT be built as node-graph playbooks). Insights honesty primitives, `IInsightsAi`, and the `spaarke-insights-index` substrate are unchanged.
 > **Audience**: developers + technical SMEs extending the Spaarke Insights Engine
 > **Last Updated**: 2026-06-04 (Phase 1.5 r2 shipped — Waves A/B/C/D/E via PRs #330, #334, #336, #337 + Wave F contract v1.1 via PR #339; §7/§7A/§7B/§7C updated to reflect shipped state + new `Insights:CitationHref:BffBaseUrl` config requirement)
 > **Companion documents**:
@@ -197,16 +199,11 @@ $env:DATAVERSE_URL = "https://spaarkedev1.crm.dynamics.com"
 
 Capture the playbook GUID from the output (e.g., `Playbook : <question-name>@v1 (63b80630-...)`).
 
-### 3.5 Register the friendly-name → GUID mapping
+### 3.5 Register the friendly-name → GUID mapping (Binding row)
 
-In App Service Configuration (`spaarke-bff-dev`):
+> **FR-P3-01 (spaarke-ai-architecture-redesign-r1 task 040, 2026-07-06)**: the `Insights:Playbooks:Map` App Service / appsettings config map was DELETED (ADR-039 single-routing-surface rule). Canonical-name routing lives in the `sprk_playbookconsumer` Binding table.
 
-```
-Name:  Insights__Playbooks__Map__<friendly_name_snake_case_v1>
-Value: <playbook-GUID-from-step-3.4>
-```
-
-**App Service env-var constraint**: keys must match POSIX `[A-Za-z_][A-Za-z0-9_]*`. NO `@`, NO `-`. Use snake_case_only. The Dataverse `sprk_name` can still use `@v1`/kebab — the map key is purely the API-facing alias.
+Seed one enabled `sprk_playbookconsumer` row: `sprk_consumertype = insights-ask`, `sprk_consumercode = <canonical-name>` (kebab/`@vN` fine — no POSIX env-var constraint anymore), `sprk_playbook` lookup → the playbook GUID from step 3.4, `sprk_environment = *`, `sprk_priority = 500`, `sprk_enabled = true`. Reference shape: `infra/dataverse/sprk_playbookconsumer-insights-rows.json`. Takes effect within the 5-minute routing cache TTL — no App Service change, no redeploy.
 
 ### 3.6 Smoke test
 
@@ -497,7 +494,7 @@ Validation: after v1.1 BFF redeploy, call `POST /api/insights/assistant/query` w
 
 | Symptom | Likely cause | Fix |
 |---|---|---|
-| `/api/insights/ask` returns 400 "'question' must be either a valid playbook Guid id OR a canonical name registered in 'Insights:Playbooks:Map' configuration" | Friendly name not in App Service config map for this env | Add `Insights__Playbooks__Map__<name>` setting; restart App Service |
+| `/api/insights/ask` returns 400 "'question' must be either a valid playbook Guid id OR a canonical name registered as an enabled sprk_playbookconsumer row" | No enabled Binding row (consumerType `insights-ask`, `sprk_consumercode` = the name, exact match) targets a playbook in this env | Seed/fix the `sprk_playbookconsumer` row per §3.5 (FR-P3-01 deleted the config map); effective within the 5-min routing cache TTL, no restart |
 | `/api/insights/ask` returns 200 with `decline.reason="no-artifact-produced"` and the explanation mentions "no InsightArtifact and no DeclineResponse" | Engine ran but no terminal node fired (LiveFactNode dispatch failed, OR playbook misconfigured) | Check App Insights for `"Node X in batch 1 failed - stopping playbook execution"`. Phase 1.5 Wave B fixes the dispatch case by wiring sprk_analysisaction rows. |
 | Engine logs `"Built execution graph for playbook X: 0 active nodes"` | Playbook nodes have `sprk_isactive = false` (Dataverse column default) | Patch existing nodes via `mcp__dataverse__update_record` to set true; re-run `Deploy-Playbook.ps1` for new playbooks (script now sets this explicitly per the post-2026-05-30 fix) |
 | Ingest job never runs after upload | `AiProcessingOptions.InsightsIngest = true` not set on upload | Phase 1.5 needs producer-side surface; today no upload triggers Insights ingest |

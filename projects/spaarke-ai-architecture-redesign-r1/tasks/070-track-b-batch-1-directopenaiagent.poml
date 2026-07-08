@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="070" project="spaarke-ai-architecture-redesign-r1">
+  <metadata>
+    <title>Track-B batch 1 — DirectOpenAiAgent cluster + server dependency-free deadwood</title>
+    <phase>Track B: Continuous Deadwood Sweep</phase>
+    <status>not-started</status>
+    <estimated-hours>5</estimated-hours>
+    <tags>cleanup, deletion, track-b</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <parallel-group>W-P0-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+
+  <prompt>
+    Execute Track-B batch 1 of FR-TB-01 (sweep-as-you-go): delete the DirectOpenAiAgent cluster and its dependents plus the server-side dependency-free deadwood from inventory §9 / the migration map's start-now delete list. These files are dead by definition — `DirectOpenAiAgent` is registered at `AiChatModule.cs:61` but never consumed, and its test suite maintains dead code. This batch rides alongside wave W-P0-A because it has zero overlap with live-code tasks. Per NFR-08 (hard-cutover proof), every deletion must be grep-zero-verified with SHOWN output, and builds must be proven green. Batch evidence lands in `notes/track-b/batch-1-evidence.md`.
+  </prompt>
+
+  <role>
+    .NET developer disciplined at surgical dead-code removal in the Sprk.Bff.Api codebase — verifies liveness before deleting, shows grep evidence, and never widens a delete beyond the batch list.
+  </role>
+
+  <goal>
+    Every batch-1 item below is deleted (or recorded keep-with-reason if found live), grep returns zero hits per deleted symbol outside git history (output shown), `dotnet build` is green (output shown), TASK-INDEX is updated, and `notes/track-b/batch-1-evidence.md` is written.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-architecture-redesign-r1/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-architecture-redesign-r1/plan.md</file>
+    <file purpose="project-context">projects/spaarke-ai-architecture-redesign-r1/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md</file>
+    <file purpose="deadwood-register">projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-CODE-INVENTORY.md</file>
+    <file purpose="delete-list">projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-MIGRATION-MAP.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="project">Do not modify files outside the batch list; deadwood only — if a batch item turns out to be live, STOP and record keep-with-reason in the batch evidence file instead of deleting.</constraint>
+    <constraint source="NFR-08">Every retirement verified grep-zero with SHOWN output in the transcript and in the evidence file; no compat shims retained.</constraint>
+    <constraint source="project">`PlaybookDispatcher` and `CompoundIntentDetector` FILES delete at P2 (task 035) — this batch removes ONLY the dead method `RunPhaseBManifestPresentAsync` and the dead assignment (lines 97-98) respectively. Do not delete those files here.</constraint>
+    <constraint source="ADR-029 / NFR-01">Deletions are expected to reduce or hold publish size; report any anomaly.</constraint>
+    <constraint source="ADR-038">Deleting `DirectOpenAiAgentTests` is removal of a test-of-dead-code (SCAFFOLDING class) — record it in the evidence file for the task-090 /test-diet reconciliation.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff-api/dead-code-removal, track-b</topic>
+    <files>
+      <file>projects/spaarke-ai-architecture-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/plan.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-MIGRATION-MAP.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-CODE-INVENTORY.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/OVERLAY-MATRIX.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      FR-TB-01 distributes the migration map's ~30 dependency-free deletes across four batches riding phase waves. Batch 1 is the server cluster. Batch contents (inventory §9 "Server" + migration-map start-now list):
+      (1) `DirectOpenAiAgent` + `ISprkAgent` + DTOs (`AgentRequest`, `ConversationTurn`) — registered `AiChatModule.cs:61`, never consumed;
+      (2) the `AiChatModule.cs:61` DI registration line (dependent edit in a live file);
+      (3) `DirectOpenAiAgentTests` (test maintaining dead code);
+      (4) `Services/Ai/Chat/SseEvent.cs`;
+      (5) `ScopeGapDetector` (no DI registration);
+      (6) `DocumentVectorBackfillService` (one-time migration, stub method);
+      (7) `SummarizeInvocationPath.AgentTool` enum value;
+      (8) `PlaybookDispatcher.RunPhaseBManifestPresentAsync` (unreachable scaffolding — method only, file deletes at P2);
+      (9) `LinearConsumersOptions.ActionIds` residue;
+      (10) `CompoundIntentDetector` dead assignment at lines 97-98 (file itself deletes at P2).
+    </background>
+    <dependencies>
+      <dependency task="none" status="complete">No dependencies — rides wave W-P0-A from project start.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 050 (FR-P4-01) audits every §9 item at P4 — this batch's evidence file feeds that audit table</item>
+      <item>Task 035 (FR-P2-06) deletes PlaybookDispatcher + CompoundIntentDetector files at P2</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context check">
+      Check context usage. If &gt; 70%, create handoff summary and request new chat. Load inputs; read inventory §9 (Server) and migration map Track-B list.
+    </step>
+    <step order="1" name="Read and confirm the batch list">
+      Locate every batch-1 item via Glob/Grep (exact file paths + all reference sites). For each item, confirm deadness: no production consumer outside the cluster itself. If any item is live, mark it keep-with-reason and exclude from deletion.
+    </step>
+    <step order="2" name="Delete the batch">
+      Delete the confirmed-dead files; remove the `AiChatModule.cs:61` registration, the `SummarizeInvocationPath.AgentTool` enum value, the `RunPhaseBManifestPresentAsync` method, the `ActionIds` residue, and the CompoundIntentDetector dead assignment. Touch nothing else in those live files.
+    </step>
+    <step order="3" name="Grep-zero verification (SHOWN)">
+      For each deleted symbol (`DirectOpenAiAgent`, `ISprkAgent`, `AgentRequest` (agent DTO), `ConversationTurn`, `SseEvent`, `ScopeGapDetector`, `DocumentVectorBackfillService`, `AgentTool`, `RunPhaseBManifestPresentAsync`, `ActionIds`): run grep across src/ + tests/ and SHOW the zero-hit output in the transcript. Note any intentional survivor (e.g., unrelated same-name symbols) explicitly.
+    </step>
+    <step order="4" name="Build verification (SHOWN)">
+      Run `dotnet build src/server/api/Sprk.Bff.Api/` and `dotnet test` for the touched test project; show green output. No client surface is touched in this batch — npm build not required unless grep in step 3 reveals client references.
+    </step>
+    <step order="5" name="Evidence + close">
+      Write `projects/spaarke-ai-architecture-redesign-r1/notes/track-b/batch-1-evidence.md` (item table: deleted-path / grep output / keep-with-reason). Update TASK-INDEX.md (070 → ✅). Report completion.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + test verification</tool>
+    <tool name="git">Version control (deletions preserved in history)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/ (batch-1 deletions incl. AiChatModule.cs registration removal)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (DirectOpenAiAgentTests deleted)</output>
+    <output type="report">projects/spaarke-ai-architecture-redesign-r1/notes/track-b/batch-1-evidence.md</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Per-batch grep-zero for every deleted symbol outside git history, with output SHOWN (FR-TB-01 / NFR-08).</criterion>
+    <criterion testable="true">dotnet build + touched test suites green with output shown.</criterion>
+    <criterion testable="true">Any live-found item is recorded keep-with-reason instead of deleted; no files outside the batch list modified.</criterion>
+    <criterion testable="true">notes/track-b/batch-1-evidence.md exists with the per-item evidence table; TASK-INDEX updated.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

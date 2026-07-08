@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="034" project="spaarke-ai-architecture-redesign-r1">
+  <metadata>
+    <title>HARD CUTOVER of chat NL to the loop — soft slashes become direct invocations; intentHint retired</title>
+    <phase>Phase P2: Text-Path Hard Cutover</phase>
+    <status>not-started</status>
+    <estimated-hours>10</estimated-hours>
+    <tags>bff-api, cutover, spaarkeai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <parallel-group>W-P2-C</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>030, 031, 032, 033</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement FR-P2-05: the HARD CUTOVER of chat natural language to the agent loop. After this task, NO chat utterance reaches any legacy dispatcher (PlaybookDispatcher / reranker / candidate-selector stack) — telemetry-proven over the UAT window. The four retained soft slash commands map to deterministic direct invocations of their Binding rows (no NL interpretation on the slash path). The intentHint plumbing — client-to-server hint threading through ChatEndpoints and the SpaarkeAi client — is retired end-to-end. Per NFR-03, verify AgentContentSafetyMiddleware coverage on the loop path: uploaded-document text and tool results are UNTRUSTED input, and the safety middleware must sit on the path every utterance now takes. There is no parallel-run and no fallback flag: the legacy dispatcher stack becomes unreachable in this task and is DELETED in tasks 035/036.
+  </prompt>
+
+  <role>
+    Senior full-stack developer expert in the Sprk.Bff.Api chat pipeline (ChatEndpoints, SprkChatAgent, middleware) and the SpaarkeAi client chat surface.
+  </role>
+
+  <goal>
+    All chat NL routes through the loop; four soft slashes invoke deterministically via binding ids; intentHint grep-zero end-to-end; AgentContentSafetyMiddleware verified on the loop path; telemetry proves zero legacy-dispatcher traffic.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-architecture-redesign-r1/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-architecture-redesign-r1/plan.md</file>
+    <file purpose="project-context">projects/spaarke-ai-architecture-redesign-r1/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md</file>
+    <file purpose="chat-endpoints">src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs</file>
+    <file purpose="legacy-dispatcher">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookDispatcher.cs (made unreachable here; deleted in 035)</file>
+    <file purpose="safety-middleware">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Middleware/AgentContentSafetyMiddleware.cs</file>
+    <file purpose="client-dispatch">src/solutions/SpaarkeAi/src/ (chat send path + dispatchConsumer helper from task 023)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-039">ONE dispatch protocol — the loop is the only text-path dispatcher after this task. MUST NOT add a second intent-detection mechanism anywhere (soft slashes are deterministic direct invocations, not NL shortcuts). MUST NOT gate by tool-name lists. Grounded outputs only.</constraint>
+    <constraint source="ADR-040">Every loop output + tool chain written to the ledger before rendering (contract from 030/021 holds on the cutover path).</constraint>
+    <constraint source="NFR-08">Hard-cutover doctrine: NO parallel-run, NO fallback flag, NO compat shims. intentHint retirement verified grep-zero with SHOWN output across server + client.</constraint>
+    <constraint source="NFR-03">AgentContentSafetyMiddleware coverage MUST be verified on the loop path — uploaded-document text and tool results are UNTRUSTED input; the confirmation gate is the last line of defense, not the only one.</constraint>
+    <constraint source="ADR-029">BFF-touching task: publish-size + diff reported per ADR-029.</constraint>
+    <constraint source="NFR-02">Eval suite green is a merge gate — the full pre-cutover suite must pass THROUGH the loop path.</constraint>
+    <constraint source="NFR-09">Per-turn budgets enforced + telemetered per ADR-016 on the cutover path.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff-api, hard-cutover, chat-routing, content-safety, spaarkeai-client</topic>
+    <files>
+      <file>docs/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>docs/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/OVERLAY-MATRIX.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-MIGRATION-MAP.md</file>
+    </files>
+    <patterns>
+      <pattern name="SprkChatAgent stack" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgent.cs">
+        The loop that now takes ALL chat NL — with the 030 contract, 031 gate, 032 elicitation, 033 refusal in place.
+      </pattern>
+      <pattern name="Gate store" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PendingPlanManager.cs">
+        Unified pending store — cutover traffic's write confirmations flow through it.
+      </pattern>
+      <pattern name="Tool handler framework" location="src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/">
+        The closed catalog the loop projects; soft-slash direct invocations resolve binding ids through the same catalog.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      This is the moment the ten accreted dispatch mechanisms collapse to one. 030-033 built the four-outcome loop; this task points the traffic at it and cuts the old path. Tasks 035/036 then delete the unreachable dispatcher stack in the SAME phase.
+    </background>
+    <dependencies>
+      <dependency task="030" status="pending">Loop contract (budget/projection/pre-filter/cite/persist).</dependency>
+      <dependency task="031" status="pending">Unified confirmation gate.</dependency>
+      <dependency task="032" status="pending">Loop-native elicitation.</dependency>
+      <dependency task="033" status="pending">Honest refusal + dispatch_refused telemetry.</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0" name="Context check + load knowledge">
+      Verify context below 70%. Load ADR-039/ADR-040, bff-extensions.md, OVERLAY-MATRIX.md cutover rows, ChatEndpoints, and the client chat send path. Confirm 030-033 are complete.
+    </step>
+    <step order="1" name="Inventory the legacy path + intentHint plumbing">
+      Trace every route by which a chat utterance can reach PlaybookDispatcher/reranker/selector; grep intentHint across server + client; write the cutover inventory to task notes.
+    </step>
+    <step order="2" name="Route chat NL to the loop">
+      Re-point ChatEndpoints so all NL utterances enter the SprkChatAgent loop; remove the legacy dispatch branch (unreachable, deleted in 035); no fallback flag.
+    </step>
+    <step order="3" name="Soft slashes to deterministic direct invocations">
+      Map the four retained soft slash commands to direct invocations of their Binding rows (deterministic binding-id resolution; zero NL interpretation on the slash path).
+    </step>
+    <step order="4" name="Retire intentHint end-to-end">
+      Delete intentHint plumbing from server contracts, ChatEndpoints, and the SpaarkeAi client send path; grep-zero with SHOWN output; npm run build:prod green for touched client packages.
+    </step>
+    <step order="5" name="Verify AgentContentSafetyMiddleware on the loop path (NFR-03)">
+      Prove (test + pipeline-order evidence) that AgentContentSafetyMiddleware executes for every loop turn, including turns carrying uploaded-document text and tool results.
+    </step>
+    <step order="6" name="Telemetry proof + eval suite">
+      Add/verify telemetry distinguishing loop vs legacy dispatch; run the full eval suite through the loop path (green, output shown); capture zero-legacy-traffic evidence for the UAT window setup.
+    </step>
+    <step order="7" name="Publish-size verification">
+      dotnet publish -c Release; report compressed size + diff per ADR-029.
+    </step>
+    <step order="8" name="Step 9.5 quality gates">
+      Run code-review + adr-check. Resolve findings per CLAUDE.md section 6.5. Update TASK-INDEX.md and current-task.md.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build, test, publish Sprk.Bff.Api</tool>
+    <tool name="npm">Build SpaarkeAi client (npm run build:prod)</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs (NL to loop; slash direct invocations; intentHint removed)</output>
+    <output type="code">src/solutions/SpaarkeAi/src/ (client intentHint removal)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (cutover routing + safety-coverage tests)</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md (status update)</output>
+    <output type="report">Task notes: cutover inventory + grep-zero intentHint output + safety-middleware evidence + publish-size delta</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">No chat utterance reaches any legacy dispatcher — telemetry-proven over the UAT window (evidence captured; test proof at task close).</criterion>
+    <criterion testable="true">The four retained soft slashes map to deterministic direct invocations of Binding rows (tests shown).</criterion>
+    <criterion testable="true">intentHint plumbing retired — grep-zero across server + client with SHOWN output (NFR-08).</criterion>
+    <criterion testable="true">AgentContentSafetyMiddleware coverage verified on the loop path (NFR-03 evidence shown).</criterion>
+    <criterion testable="true">Full eval suite green through the loop path; dotnet + npm run build:prod green; publish-size reported per ADR-029.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

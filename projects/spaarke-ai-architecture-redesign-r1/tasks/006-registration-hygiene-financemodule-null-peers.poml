@@ -1,0 +1,122 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="006" project="spaarke-ai-architecture-redesign-r1">
+  <metadata>
+    <title>Registration hygiene: FinanceModule exits + Null-Object peers + compound AI gate</title>
+    <phase>Phase P0: Foundations</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <tags>bff-api, di, adr-032</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <parallel-group>W-P0-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement FR-P0-05: registration hygiene for AI services currently registered in the wrong DI module. Move `PlaybookLookupService` and `OutputOrchestratorService` out of `FinanceModule` (Infrastructure/DI/) into the appropriate AI module(s), each with an ADR-032 Null-Object peer so endpoints keep mapping unconditionally and return the 503 kill-switch pattern when the AI subsystem is off. Place the `LinearConsumers` registrations under the compound AI gate so the whole prompted-executor stack toggles as one unit. Acceptance per spec: the real services are unresolvable when `Analysis:Enabled=false` and the Null peers respond with the 503 pattern. This clears misplaced-registration debt before P1 starts routing everything through these services.
+  </prompt>
+
+  <role>
+    Senior .NET developer familiar with the Sprk.Bff.Api modular DI structure (Infrastructure/DI/*Module.cs), feature gating, and the ADR-032 Null-Object kill-switch pattern.
+  </role>
+
+  <goal>
+    PlaybookLookupService + OutputOrchestratorService registered in AI modules with Null-Object peers; LinearConsumers gated under the compound AI gate; with Analysis:Enabled=false the real implementations are unresolvable and Null peers return the 503 pattern — all test-proven.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-architecture-redesign-r1/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-architecture-redesign-r1/plan.md</file>
+    <file purpose="project-context">projects/spaarke-ai-architecture-redesign-r1/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md</file>
+    <file purpose="source-module">src/server/api/Sprk.Bff.Api/Infrastructure/DI/FinanceModule.cs</file>
+    <file purpose="service">src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookLookupService.cs</file>
+    <file purpose="service">src/server/api/Sprk.Bff.Api/Services/Ai/OutputOrchestratorService.cs</file>
+    <file purpose="executor-stack">src/server/api/Sprk.Bff.Api/Services/Ai/LinearConsumers/</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-032">Every gated registration MUST ship a Null-Object peer (P1/P2/P3 per service); endpoints map unconditionally; Null peers return the 503 kill-switch pattern. Run the §F.1 static-scan recipe from bff-extensions.md for every conditional registration touched.</constraint>
+    <constraint source="bff-extensions §F.1">Asymmetric-Registration Tier 1.5 anti-pattern check is binding for every *Module.cs `if (flag)` block modified in this task.</constraint>
+    <constraint source="ADR-029 / NFR-01">Verify publish-size impact per ADR-029/NFR-01; expect net change reported in task notes.</constraint>
+    <constraint source="project">No behavior change when Analysis:Enabled=true — this is registration relocation, not service modification.</constraint>
+    <constraint source="ADR-038">DI-registration tests are BANNED; prove gating through endpoint/service behavior (503 response, resolution failure), not container assertions.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff-api/di, adr-032-null-object</topic>
+    <files>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/OVERLAY-MATRIX.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-MIGRATION-MAP.md</file>
+    </files>
+    <patterns>
+      <pattern name="DI modules" location="src/server/api/Sprk.Bff.Api/Infrastructure/DI/">
+        FinanceModule.cs is the wrong home; find the AI module(s) hosting the compound AI gate and follow the 18-service Null-Object migration precedent (sdap.bff.api-test-suite-repair-r2 task 011).
+      </pattern>
+      <pattern name="Prompted executor stack" location="src/server/api/Sprk.Bff.Api/Services/Ai/LinearConsumers/">
+        The registrations to bring under the compound AI gate as one unit.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      PlaybookLookupService and OutputOrchestratorService landed in FinanceModule during earlier accretion; P1+ routes core capability execution through them, so their gating and placement must be correct before readers arrive.
+    </background>
+    <dependencies>
+      <dependency task="none" status="complete">No upstream dependencies — Wave W-P0-A entry task.</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0" name="Context check">
+      Check context usage; handoff if &gt; 70%. Load ADR-032, bff-extensions.md §F.1, and the DI module files.
+    </step>
+    <step order="1" name="Map current registrations">
+      Grep all registrations of PlaybookLookupService, OutputOrchestratorService, and every LinearConsumers service across Infrastructure/DI/ + Program.cs; identify the compound AI gate flag(s) and each service's consumers.
+    </step>
+    <step order="2" name="Relocate + gate">
+      Move the two registrations from FinanceModule to the appropriate AI module under the compound AI gate; move LinearConsumers registrations under the same gate.
+    </step>
+    <step order="3" name="Add Null-Object peers">
+      Implement Null-Object peers for the gated services per ADR-032 (503 pattern), registered on the else-branch so resolution never fails for endpoint mapping. Run the §F.1 static-scan recipe and record the result.
+    </step>
+    <step order="4" name="Test">
+      Add behavior tests: with Analysis:Enabled=false, endpoints backed by these services return the 503 kill-switch response and real implementations are unresolvable; with the flag on, behavior is unchanged (existing tests green).
+    </step>
+    <step order="5" name="Build + publish-size">
+      dotnet build + full test suite green; publish-size delta reported per ADR-029.
+    </step>
+    <step order="6" name="Verify + quality gates">
+      Check acceptance criteria. Step 9.5 quality gates: code-review + adr-check. Update TASK-INDEX.md.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build, test, publish-size verification</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/FinanceModule.cs (registrations removed)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/ (AI module registrations + gate)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ (Null-Object peer implementations)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (503-pattern behavior tests)</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">PlaybookLookupService + OutputOrchestratorService no longer registered in FinanceModule (grep shown); registered in AI module(s) under the compound AI gate.</criterion>
+    <criterion testable="true">Real services unresolvable when Analysis:Enabled=false; Null-Object peers return the 503 pattern (test output shown).</criterion>
+    <criterion testable="true">LinearConsumers registrations sit under the compound AI gate.</criterion>
+    <criterion testable="true">Behavior unchanged with the gate on; dotnet build + tests green; publish-size delta reported per ADR-029.</criterion>
+    <criterion testable="true">Step 9.5 quality gates (code-review + adr-check) passed.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

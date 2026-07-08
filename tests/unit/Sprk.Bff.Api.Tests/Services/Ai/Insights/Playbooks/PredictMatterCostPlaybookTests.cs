@@ -55,14 +55,25 @@ public class PredictMatterCostPlaybookTests
     private const string Subject = "matter:M-NEW-0042";
     private const string ScopeHash = "scope-hash-test";
 
-    private readonly Mock<IPlaybookExecutionEngine> _engineMock = new(MockBehavior.Strict);
+    // FR-P3-05 (task 044): the engine shell was deleted — the orchestrator invokes the
+    // frozen IPlaybookOrchestrationService directly with the request-scoped HttpContext.
+    private readonly Mock<Microsoft.AspNetCore.Http.IHttpContextAccessor> _httpContextAccessorMock = new();
+
+    public PredictMatterCostPlaybookTests()
+    {
+        // Task 044: supply the request-scoped HttpContext the orchestrator now resolves itself.
+        _httpContextAccessorMock
+            .Setup(a => a.HttpContext)
+            .Returns(new Microsoft.AspNetCore.Http.DefaultHttpContext());
+    }
     private readonly Mock<IInsightsPlaybookExecutionCache> _cacheMock = new(MockBehavior.Strict);
     private readonly Mock<IOpenAiClient> _openAiMock = new(MockBehavior.Strict);
     // Wave C-G4 (task 022) — IIngestOrchestrator + InsightsIngestOptions retired; ctor now
     // takes IPlaybookOrchestrationService + IIngestDocumentSource (for the JPS-only ingest
-    // path) + IOptionsMonitor<InsightsPlaybookNameMapOptions> (per-env playbook Guid
-    // resolution). These tests cover the AnswerQuestion path only (predict-matter-cost@v1
-    // is a synthesis playbook, not ingest), so loose mocks suffice — they're never invoked.
+    // path) + IConsumerRoutingService (per-env playbook Guid resolution via the insights-ask
+    // Binding rows — FR-P3-01 replaced the config name map). These tests cover the
+    // AnswerQuestion path only (predict-matter-cost@v1 is a synthesis playbook, not ingest),
+    // so loose mocks suffice — they're never invoked.
     private readonly Mock<Sprk.Bff.Api.Services.Ai.IPlaybookOrchestrationService> _playbookOrchestrationMock = new();
     private readonly Mock<Sprk.Bff.Api.Services.Ai.Insights.Ingest.IIngestDocumentSource> _ingestDocumentSourceMock = new();
     // Wave E task 040 — IRagService dependency added for SearchAsync. Loose mock here
@@ -72,26 +83,23 @@ public class PredictMatterCostPlaybookTests
     // Loose mock for the classifier; handler is real with no-op deps; never invoked from this
     // test class (covers AnswerQuestion path only).
     private readonly Mock<Sprk.Bff.Api.Services.Ai.Insights.Routing.IInsightsIntentClassifier> _classifierMock = new();
-    private readonly Microsoft.Extensions.Options.IOptionsMonitor<Sprk.Bff.Api.Api.Insights.InsightsPlaybookNameMapOptions> _playbookNameMap =
-        new TestOptionsMonitor<Sprk.Bff.Api.Api.Insights.InsightsPlaybookNameMapOptions>(
-            new Sprk.Bff.Api.Api.Insights.InsightsPlaybookNameMapOptions());
+    private readonly Mock<Sprk.Bff.Api.Services.Ai.PublicContracts.IConsumerRoutingService> _consumerRoutingMock = new();
 
     private Sprk.Bff.Api.Services.Ai.Insights.AssistantToolCallHandler BuildAssistantHandler()
         => new(
             _classifierMock.Object,
-            _playbookNameMap,
+            _consumerRoutingMock.Object,
             new TestOptionsMonitor<Sprk.Bff.Api.Configuration.AssistantCitationHrefOptions>(
                 new Sprk.Bff.Api.Configuration.AssistantCitationHrefOptions()),
-            new Microsoft.Extensions.Configuration.ConfigurationBuilder().Build(),
             NullLogger<Sprk.Bff.Api.Services.Ai.Insights.AssistantToolCallHandler>.Instance);
 
     private InsightsOrchestrator CreateSut() => new(
-        _engineMock.Object,
+        _httpContextAccessorMock.Object,
         _cacheMock.Object,
         _openAiMock.Object,
         _playbookOrchestrationMock.Object,
         _ingestDocumentSourceMock.Object,
-        _playbookNameMap,
+        _consumerRoutingMock.Object,
         _ragServiceMock.Object,
         BuildAssistantHandler(),
         NullLogger<InsightsOrchestrator>.Instance);
@@ -331,9 +339,9 @@ public class PredictMatterCostPlaybookTests
                     return InsightsEngineRunResult.FromArtifact(artifact);
                 });
 
-        _engineMock
-            .Setup(e => e.ExecuteBatchAsync(It.IsAny<PlaybookRunRequest>(), It.IsAny<CancellationToken>()))
-            .Returns<PlaybookRunRequest, CancellationToken>((req, ct) => SyntheticSufficientEvidenceStream(artifact, ct));
+        _playbookOrchestrationMock
+            .Setup(o => o.ExecuteAsync(It.IsAny<PlaybookRunRequest>(), It.IsAny<Microsoft.AspNetCore.Http.HttpContext>(), It.IsAny<CancellationToken>()))
+            .Returns<PlaybookRunRequest, Microsoft.AspNetCore.Http.HttpContext, CancellationToken>((req, http, ct) => SyntheticSufficientEvidenceStream(artifact, ct));
 
         var sut = CreateSut();
         var req = MakeRequest();
@@ -355,9 +363,10 @@ public class PredictMatterCostPlaybookTests
         result.Artifact.Predicate.Should().Be("predictedCost");
 
         // Engine was invoked once (cache miss)
-        _engineMock.Verify(
-            e => e.ExecuteBatchAsync(
+        _playbookOrchestrationMock.Verify(
+            o => o.ExecuteAsync(
                 It.Is<PlaybookRunRequest>(r => r.PlaybookId == PredictMatterCostPlaybookId),
+                It.IsAny<Microsoft.AspNetCore.Http.HttpContext>(),
                 It.IsAny<CancellationToken>()),
             Times.Once);
     }
@@ -410,9 +419,9 @@ public class PredictMatterCostPlaybookTests
                     return InsightsEngineRunResult.FromDecline(realDecline);
                 });
 
-        _engineMock
-            .Setup(e => e.ExecuteBatchAsync(It.IsAny<PlaybookRunRequest>(), It.IsAny<CancellationToken>()))
-            .Returns<PlaybookRunRequest, CancellationToken>((req, ct) => SyntheticInsufficientEvidenceStream(cohortCount, ct));
+        _playbookOrchestrationMock
+            .Setup(o => o.ExecuteAsync(It.IsAny<PlaybookRunRequest>(), It.IsAny<Microsoft.AspNetCore.Http.HttpContext>(), It.IsAny<CancellationToken>()))
+            .Returns<PlaybookRunRequest, Microsoft.AspNetCore.Http.HttpContext, CancellationToken>((req, http, ct) => SyntheticInsufficientEvidenceStream(cohortCount, ct));
 
         var sut = CreateSut();
         var req = MakeRequest();
@@ -474,9 +483,9 @@ public class PredictMatterCostPlaybookTests
                     return InsightsEngineRunResult.FromArtifact(verifiedArtifact);
                 });
 
-        _engineMock
-            .Setup(e => e.ExecuteBatchAsync(It.IsAny<PlaybookRunRequest>(), It.IsAny<CancellationToken>()))
-            .Returns<PlaybookRunRequest, CancellationToken>((req, ct) => SyntheticSufficientEvidenceStream(verifiedArtifact, ct));
+        _playbookOrchestrationMock
+            .Setup(o => o.ExecuteAsync(It.IsAny<PlaybookRunRequest>(), It.IsAny<Microsoft.AspNetCore.Http.HttpContext>(), It.IsAny<CancellationToken>()))
+            .Returns<PlaybookRunRequest, Microsoft.AspNetCore.Http.HttpContext, CancellationToken>((req, http, ct) => SyntheticSufficientEvidenceStream(verifiedArtifact, ct));
 
         var sut = CreateSut();
         var req = MakeRequest();
@@ -517,9 +526,9 @@ public class PredictMatterCostPlaybookTests
                     return InsightsEngineRunResult.FromArtifact(artifactWithPrecedent);
                 });
 
-        _engineMock
-            .Setup(e => e.ExecuteBatchAsync(It.IsAny<PlaybookRunRequest>(), It.IsAny<CancellationToken>()))
-            .Returns<PlaybookRunRequest, CancellationToken>((req, ct) => SyntheticSufficientEvidenceStream(artifactWithPrecedent, ct));
+        _playbookOrchestrationMock
+            .Setup(o => o.ExecuteAsync(It.IsAny<PlaybookRunRequest>(), It.IsAny<Microsoft.AspNetCore.Http.HttpContext>(), It.IsAny<CancellationToken>()))
+            .Returns<PlaybookRunRequest, Microsoft.AspNetCore.Http.HttpContext, CancellationToken>((req, http, ct) => SyntheticSufficientEvidenceStream(artifactWithPrecedent, ct));
 
         var sut = CreateSut();
         var req = MakeRequest();
@@ -568,9 +577,9 @@ public class PredictMatterCostPlaybookTests
                     return InsightsEngineRunResult.FromArtifact(artifact);
                 });
 
-        _engineMock
-            .Setup(e => e.ExecuteBatchAsync(It.IsAny<PlaybookRunRequest>(), It.IsAny<CancellationToken>()))
-            .Returns<PlaybookRunRequest, CancellationToken>((req, ct) => SyntheticSufficientEvidenceStream(artifact, ct));
+        _playbookOrchestrationMock
+            .Setup(o => o.ExecuteAsync(It.IsAny<PlaybookRunRequest>(), It.IsAny<Microsoft.AspNetCore.Http.HttpContext>(), It.IsAny<CancellationToken>()))
+            .Returns<PlaybookRunRequest, Microsoft.AspNetCore.Http.HttpContext, CancellationToken>((req, http, ct) => SyntheticSufficientEvidenceStream(artifact, ct));
 
         var sut = CreateSut();
         var req1 = MakeRequest();
@@ -596,8 +605,8 @@ public class PredictMatterCostPlaybookTests
             Times.Exactly(2));
 
         // Engine was invoked ONLY ONCE (cache miss on first call; cache hit short-circuits the second)
-        _engineMock.Verify(
-            e => e.ExecuteBatchAsync(It.IsAny<PlaybookRunRequest>(), It.IsAny<CancellationToken>()),
+        _playbookOrchestrationMock.Verify(
+            o => o.ExecuteAsync(It.IsAny<PlaybookRunRequest>(), It.IsAny<Microsoft.AspNetCore.Http.HttpContext>(), It.IsAny<CancellationToken>()),
             Times.Once,
             "second identical invocation must hit the D-P13 cache without re-executing the playbook");
     }

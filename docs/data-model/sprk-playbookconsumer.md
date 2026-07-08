@@ -1,18 +1,23 @@
-# Data Model — `sprk_playbookconsumer`
+# Data Model — `sprk_playbookconsumer` (Binding — the invocation unit)
 
-> **Last reviewed**: 2026-06-28
-> **Status**: Canonical schema reference. Architecture/dispatch semantics live in [`docs/architecture/ai-architecture-playbook-consumer-routing.md`](../architecture/ai-architecture-playbook-consumer-routing.md).
-> **Solution**: `Spaarke` (managed component).
-> **Owner**: AI Platform team.
-> **Created by**: `spaarke-ai-platform-chat-routing-redesign-r1` Phase 1R (FR-1R-02 / FR-1R-03 / FR-1R-04).
+> **Last Updated**: 2026-07-07
+> **Reviewed By**: spaarke-ai-architecture-redesign-r1 task 052 (FR-P4-03) — full refresh; pre-redesign version superseded
+> **Status**: Current
+> **Schema source**: live `spaarkedev1` describe + full-table `read_query` (2026-07-07) cross-checked against shipped code (`ConsumerRoutingService.cs`, `Binding.cs`, `BindingCapabilityTool.cs`)
+> **Canonical architecture**: [`docs/architecture/SPAARKE-AI-ARCHITECTURE-AND-COMPONENT-DESIGN.md`](../architecture/SPAARKE-AI-ARCHITECTURE-AND-COMPONENT-DESIGN.md) §6.2 / §6.4
+> **Naming note**: the table's product name is now **Binding**; the logical name `sprk_playbookconsumer` (and this file's name, which other docs link to) is historical.
 
 ---
 
-## 1. Purpose
+## 1. Purpose — THE single routing surface
 
-Stores the runtime mapping from a **consumer surface** (a BFF service, endpoint, widget, or Agent that needs to dispatch an AI playbook) to the **playbook GUID** it should invoke. Resolved by [`IConsumerRoutingService.ResolveAsync`](../../src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/IConsumerRoutingService.cs) at runtime.
+One Binding row maps an **invocation context** (consumer type + code + environment + surfaces + events) to its **execution unit** (an Action, or — legacy — a frozen-engine playbook), plus everything the platform needs to *offer, gate, route, and chain* that capability.
 
-Replaces the per-consumer `Workspace__*PlaybookId` environment-variable lookup pattern that shipped pre-Phase-1R. Maker-managed; no BFF deploy required to redirect a consumer.
+**Single-routing-surface rule (canonical §6.4, ADR-039 — BINDING)**: this table is the ONLY answer to "which capability runs". The former `LinearConsumers` appsettings maps, `Workspace.*PlaybookId` fallbacks, and `Insights.Playbooks.Map` config keys all migrated to rows and were deleted (P3 task 040). `ConsumerTypes.cs` remains compile-time constants only, boot-reconciled against rows by `RoutingConsumerTypeHealthCheck` (drift → `/healthz` Unhealthy). Do NOT introduce a second routing contract or side-channel routing config.
+
+Every redesign consumer reads this one contract: the Event path reads `sprk_oneventbindings`; the Output Router reads `sprk_disposition`; loop tool-projection reads `sprk_tooldescription` + `sprk_surfaces`; the confirmation gate reads `sprk_risk`; chips carry Binding ids via `sprk_chiptransitions`.
+
+**Cardinality**: one Action, many Bindings — e.g. `daily-briefing-narrate` has a `default` (Informational/widget) row and an `email` (Email/scheduler) row targeting the SAME coded Action.
 
 ---
 
@@ -23,137 +28,176 @@ Replaces the per-consumer `Workspace__*PlaybookId` environment-variable lookup p
 | Property | Value |
 |---|---|
 | **Logical name** | `sprk_playbookconsumer` |
-| **Display name** | "Playbook Consumer" |
-| **Schema name** | `sprk_PlaybookConsumer` |
-| **Primary key** | `sprk_playbookconsumerid` (Guid, system) |
-| **Primary name column** | `sprk_consumertype` (string) — used in Power Apps lookup UIs |
-| **Ownership** | Organization (not user-owned — these are infrastructure routing rows) |
-| **Audit** | Enabled (changes to routing rows are security-relevant) |
-| **Statecode** | Standard active/inactive (use `sprk_enabled` for soft-disable; statecode is for record lifecycle) |
+| **Collection name** | `sprk_playbookconsumers` |
+| **Primary key** | `sprk_playbookconsumerid` (GUID) — this GUID **is the Binding's identity**: ledger outputs key on `{bindingId}@t{n}` (ADR-040), chips dispatch by it, `GetBindingByIdAsync` resolves it |
+| **Primary name column** | `sprk_name` (NVARCHAR(850), required) |
+| **Ownership** | Organization (`organizationid` — infrastructure routing rows, not user-owned) |
+| **State** | Standard `statecode`/`statuscode`; use `sprk_enabled` for soft-disable |
 
-### 2.2 Columns
+### 2.2 Columns (live spaarkedev1 schema, 2026-07-07)
 
-| Logical name | Type | Required | Default | Meaning |
-|---|---|---|---|---|
-| `sprk_playbookconsumerid` | UniqueIdentifier (system PK) | system | system | Stable row identifier |
-| `sprk_consumertype` | String (NVARCHAR(250)) | **Yes** | — | Stable consumer-type code. Must match a `public const string` in [`ConsumerTypes.cs`](../../src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ConsumerTypes.cs). Lower-kebab-case, no spaces (e.g., `matter-pre-fill`, `daily-briefing-narrate`). |
-| `sprk_consumercode` | String (NVARCHAR(100)) | No | `"default"` | Sub-discriminator within a consumer type. Resolution prefers exact match, then falls back to `"default"`. Use for area-specific variants (e.g., `vendor-contract`, `employment`). |
-| `sprk_enabled` | Boolean | **Yes** | `true` | If `false`, the row is ignored at resolve time. Soft-disable without deletion. |
-| `sprk_playbookid` | Lookup → `sprk_analysisplaybook` | **Yes** | — | The target playbook to dispatch. `sprk_analysisplaybook` is the existing playbook entity. |
-| `sprk_environment` | String (NVARCHAR(50)) | No | `"*"` | Environment scope: `dev`, `test`, `prod`, or `*` for wildcard. Specific environments win over wildcard. |
-| `sprk_priority` | Whole Number (Int32) | **Yes** | `500` | Tiebreaker when multiple rows match. **Lowest wins.** Use `100` for high-priority overrides, `500` for normal, `900` for fallback. |
-| `sprk_matchconditionsjson` | Memo (NVARCHAR(MAX)) | No | `null` | Optional JSON predicates evaluated against `IRoutingContext`. Used for content-aware routing (MIME type, document classification). Schema: see [`projects/spaarke-ai-platform-chat-routing-redesign-r1/architecture/playbookconsumer-matchconditions.schema.json`](../../projects/spaarke-ai-platform-chat-routing-redesign-r1/architecture/playbookconsumer-matchconditions.schema.json). Unknown keys are IGNORED (defensive forward-compat). |
-| `createdon` | DateTime | system | system | Standard audit |
-| `modifiedon` | DateTime | system | system | Standard audit |
-| `createdby` | Lookup → `systemuser` | system | system | Standard audit |
-| `modifiedby` | Lookup → `systemuser` | system | system | Standard audit |
-| `ownerid` | Lookup → `systemuser` / `team` | system | system | Organization-owned; ownership rarely meaningful |
+Identity + resolution columns (Phase 1R originals):
 
-### 2.3 Indexes + alternate keys
-
-| Index | Columns | Purpose |
+| Logical name | Type | Meaning |
 |---|---|---|
-| Standard FK index | `sprk_playbookid` | Lookup performance for "find all consumers using this playbook" reverse queries |
-| (Recommended) | `sprk_consumertype`, `sprk_environment`, `sprk_enabled` | Speeds up the `ResolveAsync` query path |
+| `sprk_playbookconsumerid` | GUID (PK) | The Binding id (see above). |
+| `sprk_name` | NVARCHAR(850), required | Display name. |
+| `sprk_consumertype` | NVARCHAR(250) | Stable consumer-type code (lower-kebab-case, e.g. `chat-summarize`, `create-task`). Must match a constant in [`ConsumerTypes.cs`](../../src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ConsumerTypes.cs); boot-reconciled both directions. |
+| `sprk_consumercode` | NVARCHAR(100) | Sub-discriminator. Resolution prefers exact match, falls back to `default`; null/empty is treated as `default`. |
+| `sprk_environment` | NVARCHAR(100) | `dev` \| `test` \| `prod` \| `*` (wildcard). Specific beats wildcard. |
+| `sprk_priority` | Int | Tiebreaker — **lowest wins**. Null → 500. Convention: named canonical rows 400, `default` alias 500, overrides 100, fallback 900. |
+| `sprk_enabled` | Boolean | `false` rows are invisible to every resolve path. Soft-disable without deletion. |
+| `sprk_matchconditions` | Memo (JSON) | Optional flat `{key: string \| string[]}` predicate against `IRoutingContext` (`mimeType`, `documentType`). Null/empty/`{}` always matches; malformed JSON **fails closed**; unknown keys fail the match (context doesn't expose them). |
+| `sprk_playbook` | Lookup → `sprk_analysisplaybook` | Legacy frozen-engine target. Null on Action-target rows. |
+| `sprk_action` | Lookup → `sprk_analysisaction` | The execution-unit target (canonical). Null on pure-engine legacy rows. Rows with NEITHER target are admin errors — skipped by resolution. |
 
-No alternate keys defined — uniqueness is enforced operationally (the resolution algorithm picks the lowest-priority match), not by schema constraint. Multiple rows with the same `(consumertype, code, environment)` are valid and serve as override-with-fallback patterns.
+FR-P0-03 Binding-contract columns (task 003 schema extension; all optional — pre-extension rows carry nulls and map to the documented safe defaults, never throw):
 
-### 2.4 Relationships
-
-| Direction | Related entity | Cardinality | Behavior |
+| Logical name | Type | Meaning | Null default |
 |---|---|---|---|
-| Many-to-One | `sprk_analysisplaybook` (via `sprk_playbookid`) | N:1 | Many consumers can route to the same playbook. **Restrict** delete on the playbook side — deleting a playbook with active consumer rows would break dispatch silently. |
-| Many-to-One | `systemuser` / `team` (via `ownerid`, `createdby`, `modifiedby`) | N:1 | Standard ownership/audit |
+| `sprk_ucid` | NVARCHAR(100) | Use-case id tying the row to the canonical §3 vocabulary (e.g. `UC-A-1`, `UC-D-1`, `L4-REFUSAL`). | null |
+| `sprk_tooldescription` | Memo | **The intent surface the agent loop sees** — see §3.1. Non-empty = the maker's explicit opt-in to text-path projection. | null = not loop-projected |
+| `sprk_disposition` | Choice | Output routing: `Informational` (100000000) \| `Work Product` (100000001) \| `Overlay` (100000002) \| `Email` (100000003) \| `Record` (100000004) \| `Notification` (100000005). See §4. | Informational |
+| `sprk_chiptransitions` | Memo (JSON) | Curated next-step chips — see §3.2. **Chips carry Binding ids** (D4). | `[]` |
+| `sprk_risk` | Choice | Confirmation-gate posture: `None` (100000000) \| `Confirm When Uncertain` (100000001) \| `Always Confirm` (100000002). Complements (does not replace) tool-level `side_effect_class` gating — the ONE gate. | None |
+| `sprk_capturemode` | Choice | Missing-required-args capture: `Loop Elicitation` (100000000) \| `Modal` (100000001, routes to wizard via the `elicitation_modal` SSE event). | Loop Elicitation |
+| `sprk_oneventbindings` | Memo (JSON) | Event-path memberships — see §3.3. | `[]` |
+| `sprk_surfaces` | NVARCHAR(400) | Comma-separated placement tokens (§4.1 vocabulary: `assistant`, `record-form`, `wizard`, `office`, `external-spa`, `scheduler`, `inbound-email`). **Empty = offered on ALL surfaces.** | all surfaces |
+| `sprk_modeltieroverride` | Choice | `Fast` (100000000) \| `Standard` (100000001) \| `Reasoning` (100000002). Per-Binding override; wins over the Action's `sprk_modeltier` (`Binding.EffectiveModelTier`). | use Action default |
 
-No N:N relationships. **Note**: §10.3 of the architecture doc discusses why true N:N (one consumer → multiple playbooks) is NOT modeled at this layer — composition is handled at the playbook layer via multi-node playbooks instead.
+> **Corrections vs the pre-redesign version of this doc** (verified against live schema 2026-07-07): the playbook lookup's logical name is **`sprk_playbook`** (not `sprk_playbookid`); the match-conditions column is **`sprk_matchconditions`** (not `sprk_matchconditionsjson`); the primary name column is **`sprk_name`** (not `sprk_consumertype`); `sprk_environment` is NVARCHAR(100) (not 50).
+
+### 2.3 Relationships
+
+| Direction | Related entity | Via | Behavior |
+|---|---|---|---|
+| Many-to-One | `sprk_analysisaction` | `sprk_action` | The execution unit. `ConsumerRoutingService` left-outer-joins it on every resolve to project `sprk_kind` / `sprk_workflowclass` / `sprk_inputschema` / `sprk_modeltier` into the `Binding` record. |
+| Many-to-One | `sprk_analysisplaybook` | `sprk_playbook` | Legacy engine target (Insights family; ai-summary/document-profile/pre-fill rows). |
+
+No alternate keys — uniqueness is operational (resolution picks the best match); multiple rows per `(type, code, environment)` are valid override-with-fallback patterns.
 
 ---
 
-## 3. Sample rows (production, 2026-06-28)
+## 3. JSON field contracts
 
-The seven rows currently deployed to `spaarkedev1`. Each is created by chat-routing-redesign-r1 Phase 1R seed scripts except the last, which was added by spaarke-daily-update-service-r4.
+### 3.1 `sprk_tooldescription` — the maker-editable steering surface
 
-| `sprk_consumertype` | `sprk_consumercode` | `sprk_environment` | `sprk_priority` | `sprk_enabled` | `sprk_playbook` (display) | Origin |
+When non-empty, `BindingCapabilityTool` projects the row into the agent loop as function `capability_{consumer-type}` whose **description is this column verbatim** and whose parameter schema is the target Action's `sprk_inputschema`. There is no dispatcher, classifier, or trigger-phrase index — capability tool *descriptions* ARE the text-path intent surface (ADR-039), and editing this column changes model behavior with **zero deploy**.
+
+Proven in production tuning: G-P3 UAT rounds 2 and 3 (2026-07-07) fixed model misbehavior *purely by editing catalog text* — round 2 added the ASSIGNEE RULE to the create-task Binding's `sprk_tooldescription` (stop composing unresolvable assignee lookups); round 3 appended the POST-CONFIRMATION RULE ("ask for confirmation in chat AT MOST ONCE… IMMEDIATELY invoke dataverse.create_record… do NOT re-invoke this capability"). See `projects/spaarke-ai-architecture-redesign-r1/notes/g-p3-uat-round2-findings.md` / `-round3-findings.md`.
+
+Routing regressions are caught by the golden-utterance eval suite in CI (`golden-utterances.json`), not threshold tuning.
+
+### 3.2 `sprk_chiptransitions` — curated next-step chips (D4)
+
+```json
+[
+  {
+    "target_binding_id": "05618e5d-ab79-f111-ab0e-7ced8ddc4cc6",
+    "chip_label": "Summarize this document",
+    "bulk_chip_label": "Summarize",
+    "requires_attachments": true,
+    "prefill_slots": { "styleHint": "brief" }
+  }
+]
+```
+
+| Member | Meaning |
+|---|---|
+| `target_binding_id` | The Binding id the chip dispatches (Click path: `invoke(binding_id, args)` → `SessionDispatchOrchestrator` → same executor stack as text). |
+| `chip_label` | Rendered label. |
+| `bulk_chip_label` | Optional SHORT verb for server-derived composite labels ("{bulk} all N files?"); falls back to `chip_label`'s first token. |
+| `requires_attachments` | Client disables the chip at zero session attachments. |
+| `prefill_slots` | Pre-filled capability args forwarded verbatim as the chip's `args`. |
+
+Malformed maker JSON degrades to an empty list — routing never throws.
+
+### 3.3 `sprk_oneventbindings` — Event-path membership
+
+```json
+[{ "event": "briefing_scheduled", "order": 1 }]
+```
+
+Membership in the closed platform event vocabulary (`document_uploaded`, `matter_form_opened`, `session_started_with_context`, `inbound_email_routed`, `schedule:{name}`, …); `order` sequences members within an event's composite (lower runs first). Resolved by `ResolveEventBindingsAsync` (Event Rules service reads this — rules are data, not code).
+
+---
+
+## 4. Dispositions and their shipped Output Router legs
+
+`sprk_disposition` is the ONLY rendering/routing contract for a capability's output. `OutputRouter` writes the ledger entry FIRST (ADR-040 storage-precedes-rendering), then routes by disposition:
+
+| Disposition | Shipped leg (2026-07-07) |
+|---|---|
+| `informational` | ✅ Rendered to the Assistant pane from the stored ledger entry (platform default; the terminal chunk renders FROM the store). |
+| `work_product` | ✅ `TopicRegistryWorkProductPersister` (task 047): persists the `work-product-envelope-v1` JSON to the host record field declared by the capability's `sprk_aitopicregistry` row (topic = ConsumerCode, e.g. `matter-summary` → `sprk_matter.sprk_mattersummary`). Store-first, idempotent single-field PATCH, user-OBO, loud failures. |
+| `email` | ✅ `IEmailDispositionSender` leg (task 043): routes to the Communication (Email) service — Daily Briefing `email` row is the shipped instance (DRAFT-only posture for chat drafting). |
+| `overlay` | ⏳ Not yet dispatchable — `SessionDispatchOrchestrator` 422s `dispatch.disposition-not-supported`. |
+| `record` | ⏳ Not yet dispatchable (same 422). |
+| `notification` | ⏳ Not yet dispatchable (same 422). |
+
+---
+
+## 5. Resolution (how a row is picked)
+
+[`ConsumerRoutingService`](../../src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ConsumerRoutingService.cs) queries enabled rows by `sprk_consumertype` (left-joining the Action), then in memory: filter by consumer-code (exact or `default`), environment (exact or wildcard), and match-conditions; pick lowest `sprk_priority`; tiebreak specific-code > `default`, specific-env > `*`. Routing **never throws to the consumer** — failures graceful-degrade to null/empty. Resolve surface:
+
+| Method | Returns |
+|---|---|
+| `ResolveAsync` / `ResolveActionAsync` | Playbook / Action GUID (rows lacking that target kind are invisible to that call) |
+| `ResolveBindingAsync` | The full [`Binding`](../../src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/Binding.cs) contract |
+| `GetBindingByIdAsync` | Click-path dispatch by chip-carried id (unknown/disabled → clean rejection, no fallback) |
+| `GetBindingByPlaybookIdAsync` | Reverse lookup (E-2 engine-output ledger adapter, topic TTLs) |
+| `ResolveEventBindingsAsync` | Ordered event-composite members |
+| `ListTextProjectableBindingsAsync` | Enabled rows with non-null `sprk_tooldescription`, deterministic order — the loop's capability-tool projection (FR-P2-01) |
+
+**Cache**: `IMemoryCache`, 5-minute absolute TTL per resolve key (hits AND misses cached). A row edit propagates within 5 minutes per BFF instance; restart for instant effect.
+
+---
+
+## 6. Live rows (spaarkedev1, full-table read 2026-07-07)
+
+18 enabled rows. Rows with null FR-P0-03 columns are pre-extension legacy rows (safe defaults apply):
+
+| `sprk_consumertype` | code | ucid | disposition | risk | surfaces | Notes |
 |---|---|---|---|---|---|---|
-| `matter-pre-fill` | `default` | `*` | `500` | `true` | MATTER-PREFILL@v2 | chat-routing-redesign-r1 |
-| `project-pre-fill` | `default` | `*` | `500` | `true` | PROJECT-PREFILL@v1 | chat-routing-redesign-r1 |
-| `ai-summary` | `default` | `*` | `500` | `true` | DOCUMENT-PROFILE@v1 | chat-routing-redesign-r1 |
-| `summarize-file` | `default` | `*` | `500` | `true` | SUMMARIZE-FILE@v1 | chat-routing-redesign-r1 |
-| `chat-summarize` | `default` | `*` | `500` | `true` | SUM-CHAT@v1 | chat-routing-redesign-r1 |
-| `email-analysis` | `default` | `*` | `500` | `true` | EMAIL-ANALYSIS@v1 | chat-routing-redesign-r1 |
-| `daily-briefing-narrate` | `default` | `*` | `500` | `true` | DAILY-BRIEFING-NARRATE | spaarke-daily-update-service-r4 (task 031, row id `b4503359-1771-f111-ab0e-7ced8ddc4a05`) |
+| `ai-summary` | default | — | — (→Informational) | — | — | legacy; playbook target |
+| `chat-classify` | default | UC-A-7 | Informational | None | assistant | |
+| `chat-summarize` | default | UC-A-1 | Informational | None | assistant | SUM-CHAT@v1 |
+| `chat-summarize` | matter-summary | UC-A-1 | **Work Product** | None | assistant | → `sprk_matter.sprk_mattersummary` (task 047) |
+| `compose-summarize` | default | — | — | — | — | legacy |
+| `create-task` | default | UC-H-1 | Informational | None | assistant | drafting capability; write bridges to `dataverse.create_record` |
+| `daily-briefing-narrate` | default | UC-D-1 | Informational | None | (all) | coded Action DAILY-BRIEFING@v1 |
+| `daily-briefing-narrate` | email | UC-D-1 | **Email** | None | scheduler | `on_event: briefing_scheduled` |
+| `document-profile` | default | — | — | — | — | legacy; playbook + action targets |
+| `draft-correspondence` | default | UC-G-2 | Informational | None | assistant | DRAFT-CORR@v1 |
+| `email-analysis` | default | — | — | — | — | legacy; playbook target |
+| `insights-ask` | default | UC-C-2 | Informational | None | — | not loop-projected (no tooldescription) |
+| `insights-ask` | matter-health-single | UC-C-2 | Informational | None | — | priority 400 (named-row rule) |
+| `insights-search` | default | UC-C-2 | Informational | None | — | catalog-parity row; NO target (skipped by resolution by design) |
+| `matter-pre-fill` | default | — | — | — | — | legacy |
+| `no_match_handler` | default | L4-REFUSAL | Informational | None | assistant | honest-refusal capability |
+| `project-pre-fill` | default | — | — | — | — | legacy |
+| `summarize-file` | default | — | — | — | — | legacy |
 
-### 3.1 Future P1-summarize-document variant routing
-
-Per [`projects/P1-summarize-document-v1/design.md`](../../projects/P1-summarize-document-v1/design.md), P1 will add area-specific variants of `chat-summarize`:
-
-| `sprk_consumertype` | `sprk_consumercode` | `sprk_priority` | `sprk_playbook` |
-|---|---|---|---|
-| `chat-summarize` | `vendor-contract` | `100` (high — wins over default) | summarize-vendor-contract@v1 |
-| `chat-summarize` | `employment` | `100` | summarize-employment-agreement@v1 |
-| `chat-summarize` | `real-estate-lease` | `100` | summarize-real-estate-lease@v1 |
-| `chat-summarize` | `ip-agreement` | `100` | summarize-ip-agreement@v1 |
-| `chat-summarize` | `default` | `500` (fallback) | summarize-generic@v1 (refreshed from SUM-CHAT@v1) |
-
-`SessionSummarizeOrchestrator` will pass the detected area as `consumerCode`. If no area matches, resolution falls back to `code = "default"`.
-
----
-
-## 4. Seed + deployment
-
-Rows are deployed via PowerShell scripts, not Power Apps maker UI (deterministic + auditable + reproducible across environments):
-
-| Script | Purpose |
-|---|---|
-| [`scripts/dataverse/Seed-PlaybookConsumers.ps1`](../../scripts/dataverse/Seed-PlaybookConsumers.ps1) | Bulk-seeds the standard 7 consumer rows. Idempotent — uses `Upsert` semantics by `(consumertype, consumercode, environment)`. |
-| [`scripts/dataverse/Add-PlaybookConsumer.ps1`](../../scripts/dataverse/Add-PlaybookConsumer.ps1) | Adds or updates a single row. Use this for one-offs (new consumer type, environment-specific override). |
-
-Power Apps maker UI MAY be used for inspection / disabling rows during incident response. New rows added in maker UI are valid but lack the same audit trail as script-deployed rows. Prefer scripts.
+All rows: environment `*`, priority 500 (except insights-ask/matter-health-single at 400), enabled.
 
 ---
 
-## 5. Operational notes
+## 7. Seed + operations
 
-### 5.1 Cache propagation lag
-
-`ConsumerRoutingService` caches resolved Guids for **5 minutes** per `(consumertype, code, environment)` tuple. A new row, a disable, or a playbook redirect takes up to 5 min to propagate per BFF instance. Plan deployments accordingly (restart BFF for instant propagation if needed).
-
-### 5.2 Diagnosis: "why is this consumer falling through?"
-
-Check in this order:
-
-1. Does a row exist with `sprk_consumertype = X` AND `sprk_enabled = true`? Query: `dataverse.read_query("sprk_playbookconsumers", filter: "sprk_consumertype eq 'X' and sprk_enabled eq true")`
-2. Does the row's `sprk_environment` match the BFF's current environment (or `*`)?
-3. If `consumerCode` was passed: does any row's `sprk_consumercode` exactly match? If not, is there a `code = "default"` row?
-4. Is the `sprk_playbookid` lookup populated and pointing at an active `sprk_analysisplaybook`?
-5. Has 5+ minutes passed since the row was created/changed? (Cache lag)
-
-### 5.3 Audit trail
-
-Standard Dataverse audit is enabled on this entity. Changes to `sprk_playbookid`, `sprk_enabled`, or `sprk_priority` are security-relevant — they redirect playbook dispatch and can silently change AI behaviour for end users. Reviewers should treat consumer-row edits like config changes.
-
-### 5.4 Backup considerations
-
-Rows are deterministic + low-volume + maker-editable. Inclusion in the standard Spaarke solution export covers most cases. For ALM, the seed scripts (§4) are the source of truth for the 7 standard rows.
+- Row provenance is recorded per task in `projects/spaarke-ai-architecture-redesign-r1/notes/task-0*-dataverse-changes.md`; partial seed mirrors live at `infra/dataverse/` (e.g. `sprk_playbookconsumer-insights-rows.json`). `scripts/dataverse/Seed-PlaybookConsumers.ps1` predates the FR-P0-03 columns — its **regeneration from the live table is tracked by FR-P4-02**.
+- Standard Dataverse audit is enabled; edits to `sprk_action`/`sprk_playbook`, `sprk_enabled`, `sprk_priority`, `sprk_tooldescription`, `sprk_disposition`, or `sprk_risk` redirect dispatch / change model behavior — treat row edits like config changes.
+- Diagnosis "why doesn't this consumer resolve?": (1) enabled row for the type? (2) environment matches? (3) exact code or `default` row? (4) target lookup populated (target-less rows are skipped)? (5) match-conditions JSON valid (malformed fails closed)? (6) 5-min cache elapsed?
 
 ---
 
-## 6. Related schemas
-
-| Entity | Relationship |
-|---|---|
-| `sprk_analysisplaybook` | FK target via `sprk_playbookid`. The playbook this consumer routes to. |
-| `sprk_playbooknode` | Indirect — accessed via the resolved playbook. The node graph that defines what the playbook does. |
-| `sprk_analysistool` | Indirect — accessed via the resolved playbook's node configurations. Tool handlers consumed by playbook nodes. |
-| `sprk_analysisaction` | Indirect — actions that orchestrate playbook execution. |
-
----
-
-## 7. Related docs
+## 8. Related docs
 
 | Doc | Topic |
 |---|---|
-| [`docs/architecture/ai-architecture-playbook-consumer-routing.md`](../architecture/ai-architecture-playbook-consumer-routing.md) | Architecture, semantics, Path A.5, decision matrix, Action Engine relationship |
-| [`docs/guides/HOW-TO-ADD-A-CONSUMER-ROUTING-TYPE.md`](../guides/HOW-TO-ADD-A-CONSUMER-ROUTING-TYPE.md) | 3-step procedure for adding a new consumer type |
-| `docs/architecture/ai-architecture-playbook-runtime.md` | How the orchestrator executes the resolved playbook |
-| [`src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ConsumerTypes.cs`](../../src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ConsumerTypes.cs) | Compile-time constants (must stay in sync with `sprk_consumertype` values) |
+| [`sprk_analysisaction.md`](sprk_analysisaction.md) | The Action (execution unit) incl. the `sprk_inputschema` contract |
+| [`sprk_analysistool.md`](sprk_analysistool.md) | The closed tool catalog + `side_effect_class` gate |
+| [`sprk_playbooknode.md`](sprk_playbooknode.md) | Frozen engine node table |
+| [`docs/architecture/SPAARKE-AI-ARCHITECTURE-AND-COMPONENT-DESIGN.md`](../architecture/SPAARKE-AI-ARCHITECTURE-AND-COMPONENT-DESIGN.md) | Canonical design (§6.2 Binding, §6.4 single-routing-surface, §7 three-path dispatch) |
+| [`docs/guides/ai-guide-consumer-wiring.md`](../guides/ai-guide-consumer-wiring.md) | How to wire a new consumer |
+| [`ConsumerTypes.cs`](../../src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ConsumerTypes.cs) | Compile-time constants boot-reconciled against rows |

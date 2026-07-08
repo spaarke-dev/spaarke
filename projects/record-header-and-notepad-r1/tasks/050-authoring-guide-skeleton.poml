@@ -1,0 +1,66 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="050" project="record-header-and-notepad-r1">
+  <metadata>
+    <title>Draft authoring guide skeleton</title>
+    <phase>4: Documentation</phase>
+    <status>completed</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>025, 040, 041</dependencies>
+    <blocks>051</blocks>
+    <tags>documentation</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Documentation skeleton — no code impact</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>Draft the H1-H3 skeleton of docs/guides/RECORD-HEADER-PCF-AUTHORING-GUIDE.md — headings + one-sentence purpose per section. Full content lands in task 051.</prompt>
+
+  <role>Spaarke docs author.</role>
+
+  <goal>Skeleton file with H1-H3 outline + purpose blurbs present at docs/guides/RECORD-HEADER-PCF-AUTHORING-GUIDE.md.</goal>
+
+  <context>
+    <background>Spec §Success Criteria: "Authoring Guide published enabling a developer to ship a new per-entity RecordHeader PCF (`ProjectHeaderPcf`) in a follow-on project without re-reading this design."</background>
+    <relevant-files>
+      <file>docs/guides/RECORD-HEADER-PCF-AUTHORING-GUIDE.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">Follow docs/guides/ conventions (H1 = title; H2 = major sections; H3 = subsections).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/record-header-and-notepad-r1/spec.md</file>
+      <file>projects/record-header-and-notepad-r1/CLAUDE.md</file>
+      <file>projects/record-header-and-notepad-r1/design.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Draft skeleton with sections: Purpose; Prerequisites; Shared Primitives Overview; Per-Entity Thin PCF Pattern; Worked Example (ProjectHeaderPcf); Notepad Launch Contract; Testing + Deploying; Troubleshooting; FAQ.</step>
+    <step order="2">Add a 1-sentence purpose blurb under each H2.</step>
+    <step order="3">Update TASK-INDEX.md: mark 050 ✅.</step>
+  </steps>
+
+  <tools><tool name="terminal">Shell</tool></tools>
+
+  <outputs>
+    <output type="docs">docs/guides/RECORD-HEADER-PCF-AUTHORING-GUIDE.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Skeleton file exists with the 9 sections listed above.</criterion>
+    <criterion testable="true">Each H2 has a purpose blurb.</criterion>
+  </acceptance-criteria>
+
+  <notes>Match the tone + shape of docs/guides/SHARED-UI-COMPONENTS-GUIDE.md.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files first. Follow task-execute skill.</protocol>
+  </execution>
+</task>

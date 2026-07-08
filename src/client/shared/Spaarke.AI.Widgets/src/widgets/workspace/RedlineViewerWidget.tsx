@@ -2,7 +2,7 @@
  * @spaarke/ai-widgets — RedlineViewerWidget
  *
  * Workspace widget that renders a side-by-side document comparison (redline)
- * produced by the server-side CompareDocumentsTool (task AIPU2-042).
+ * produced by the server-side the retired compare-documents chat tool (task AIPU2-042).
  *
  * Layout: left column shows the original document text; right column shows the
  * modified version. Changed sections are highlighted with Fluent v9 semantic
@@ -49,7 +49,7 @@ import {
 import type { WorkspaceWidgetProps } from '../../types/widget-types';
 
 // ---------------------------------------------------------------------------
-// Data types (mirrors server-side CompareDocumentsTool output)
+// Data types (mirrors server-side the retired compare-documents chat tool output)
 // ---------------------------------------------------------------------------
 
 /** Change classification for a diff entry, matching server DiffChangeType enum. */
@@ -664,7 +664,7 @@ const SectionRow: React.FC<SectionRowProps> = ({
 /**
  * RedlineViewerWidget
  *
- * Renders the DocumentDiff payload from CompareDocumentsTool as a side-by-side
+ * Renders the DocumentDiff payload from the retired compare-documents chat tool as a side-by-side
  * redline view with section navigation.
  *
  * Satisfies WorkspaceWidget<RedlineViewerData, RedlineViewerActions>.

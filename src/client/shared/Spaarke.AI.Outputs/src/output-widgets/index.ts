@@ -23,23 +23,9 @@ export type {
   ContractClausePair,
 } from './ContractComparisonWidget';
 
-// Wave 2 (task 021): widgets 5-8
-export { default as TimelineWidget } from './TimelineWidget';
-export type { TimelineData, TimelineWidgetProps, TimelineEvent } from './TimelineWidget';
-
-export { default as DocumentCompareWidget } from './DocumentCompareWidget';
-export type {
-  DocumentCompareData,
-  DocumentCompareWidgetProps,
-  DocumentCompareLine,
-  DocumentChangeType,
-} from './DocumentCompareWidget';
-
-export { default as DataTableWidget } from './DataTableWidget';
-export type { DataTableData, DataTableWidgetProps, DataTableColumn, DataTableRowValue } from './DataTableWidget';
-
-export { default as ChartWidget } from './ChartWidget';
-export type { ChartData, ChartWidgetProps, ChartSeries, ChartPoint } from './ChartWidget';
+// Wave 2 (task 021) widgets 5-8 (Timeline, DocumentCompare, DataTable, Chart)
+// were deleted (Track-B batch 3, ai-architecture-redesign-r1) — never registered,
+// zero consumers.
 
 // Wave 3 (task 031): widgets 9-11
 export { default as StatusSummaryWidget } from './StatusSummaryWidget';

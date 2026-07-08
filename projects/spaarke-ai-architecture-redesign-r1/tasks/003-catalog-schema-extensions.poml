@@ -1,0 +1,111 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="003" project="spaarke-ai-architecture-redesign-r1">
+  <metadata>
+    <title>Catalog schema extensions ×3 tables deployed to spaarkedev1</title>
+    <phase>Phase P0: Foundations</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <tags>dataverse, schema, data</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <parallel-group>W-P0-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement the schema half of FR-P0-03: extend the three catalog tables on spaarkedev1 via the `dataverse-create-schema` skill. Add to `sprk_analysisaction`: `sprk_kind`, `sprk_workflowclass`, `sprk_inputschema`, `sprk_modeltier`. Add to `sprk_playbookconsumer` (the Binding table): `sprk_ucid`, `sprk_tooldescription`, `sprk_disposition`, `sprk_chiptransitions`, `sprk_risk`, `sprk_capturemode`, `sprk_oneventbindings`, `sprk_surfaces`, and a model override column. Add to `sprk_analysistool`: `sprk_toolid`, `sprk_namespace`, `sprk_outputschema`, `sprk_sideeffectclass`, `sprk_permissionscope`, `sprk_budgetclass`. These columns are the two closed catalogs' full contract (ADR-039) — every later routing, gating, and tool-projection behavior reads them. The code half (ConsumerRoutingService returning the full Binding contract) is task 004 and depends on this deployment.
+  </prompt>
+
+  <role>
+    Dataverse schema engineer familiar with the Spaarke `sprk_` data model, the dataverse-create-schema skill, and column-type selection (choice vs text vs JSON-in-memo) for catalog metadata.
+  </role>
+
+  <goal>
+    All listed columns exist on spaarkedev1 across the three tables, verified by metadata query output; column types and option sets documented in task notes for task 004 to consume.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-architecture-redesign-r1/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-architecture-redesign-r1/plan.md</file>
+    <file purpose="project-context">projects/spaarke-ai-architecture-redesign-r1/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md</file>
+    <file purpose="canonical-design">docs/architecture/SPAARKE-AI-ARCHITECTURE-AND-COMPONENT-DESIGN.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-039">The two catalogs (Action + Binding) are CLOSED; these columns define their full contract. Column semantics must match canonical doc v0.4 — do not invent extras.</constraint>
+    <constraint source="spec-MUST-NOT">MUST NOT create new manifest tables — "Capability" is vocabulary, not schema; only extend the three existing tables.</constraint>
+    <constraint source="ADR-010">New columns follow org-owned entity conventions and existing `sprk_` naming.</constraint>
+    <constraint source="project">Deploy via the `dataverse-create-schema` skill (plan.md §2 Skills) against spaarkedev1; verify with metadata queries, not assumption.</constraint>
+    <constraint source="project">Additive-only: no existing column is modified or dropped; existing rows must remain valid.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>dataverse/schema, ai-catalogs</topic>
+    <files>
+      <file>docs/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/OVERLAY-MATRIX.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-MIGRATION-MAP.md</file>
+      <file>.claude/skills/dataverse-create-schema/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="dataverse-create-schema skill" location=".claude/skills/dataverse-create-schema/SKILL.md">
+        Use this skill for all column creation — covers Web API + PowerShell patterns PAC CLI does not (no `pac column create`).
+      </pattern>
+      <pattern name="Binding contract consumer" location="src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ConsumerRoutingService.cs">
+        Task 004 maps these columns into the Binding contract — align type choices with what the routing service can cheaply deserialize (JSON payloads in memo columns for chiptransitions/oneventbindings/schemas).
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      FR-P0-03 splits into schema (this task) and code (task 004). Tasks 004, 005, 008, 009 in Wave W-P0-B all depend on these columns existing on spaarkedev1.
+    </background>
+    <dependencies>
+      <dependency task="none" status="complete">No upstream dependencies — Wave W-P0-A entry task.</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0" name="Context check">
+      Check context usage; handoff if &gt; 70%. Load spec FR-P0-03, canonical doc column semantics, and the dataverse-create-schema skill.
+    </step>
+    <step order="1" name="Inventory current schema">
+      Query spaarkedev1 metadata for the three tables; record existing columns to confirm the additions are net-new and to catch naming collisions.
+    </step>
+    <step order="2" name="Design column definitions">
+      For each new column decide type (choice/option set vs single-line text vs memo/JSON), option-set values where applicable (e.g., sprk_kind: prompted/coded; sprk_sideeffectclass; sprk_risk; sprk_capturemode; sprk_disposition), and the model-override column name on sprk_playbookconsumer. Document the decisions in task notes.
+    </step>
+    <step order="3" name="Deploy via dataverse-create-schema">
+      Invoke the `dataverse-create-schema` skill to create all columns on spaarkedev1 (sprk_analysisaction ×4, sprk_playbookconsumer ×9, sprk_analysistool ×6). Publish customizations.
+    </step>
+    <step order="4" name="Verify deployment">
+      Query EntityDefinitions/Attributes for each table and show output confirming every column exists with the intended type.
+    </step>
+    <step order="5" name="Document + close">
+      Write the column dictionary (name, type, option values, purpose) to projects/spaarke-ai-architecture-redesign-r1/notes/schema-p0-column-dictionary.md for task 004/005/008/009 consumption. Update TASK-INDEX.md.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dataverse-create-schema">Skill for column/option-set creation via Web API + PowerShell</tool>
+    <tool name="pac">Power Platform CLI (auth, publish)</tool>
+  </tools>
+
+  <outputs>
+    <output type="schema">spaarkedev1: sprk_analysisaction +4 columns; sprk_playbookconsumer +9 columns; sprk_analysistool +6 columns</output>
+    <output type="notes">projects/spaarke-ai-architecture-redesign-r1/notes/schema-p0-column-dictionary.md</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All FR-P0-03 columns deployed to spaarkedev1 across the three tables (metadata query output shown).</criterion>
+    <criterion testable="true">No existing columns modified or dropped; customizations published.</criterion>
+    <criterion testable="true">Column dictionary written to notes/ documenting name, type, and option values for every new column.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

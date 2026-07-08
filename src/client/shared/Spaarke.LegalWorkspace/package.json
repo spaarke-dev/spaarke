@@ -1,0 +1,38 @@
+{
+  "name": "@spaarke/legal-workspace",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "Shared package boundary for the LegalWorkspace section registry. R2 FR-10 (spaarke-dataset-grid-framework-r2): eliminates the SpaarkeAi ← LegalWorkspace source-alias trap by inserting a proper package boundary. R2 task 020 scaffolded; task 021 populated src/index.ts with re-exports of files that stay under src/solutions/LegalWorkspace/src/ (RE-EXPORT strategy, see notes/fr10-migration-strategy.md). Source-only lib with @spaarke/* peerDependencies — mirrors Spaarke.DailyBriefing.Components; standalone `npm run build` cannot succeed (peer deps unresolvable in-package); type-check is performed by consumer tsc passes (SpaarkeAi + LegalWorkspace). Task 024 excludes this package from the Build-AllClientComponents.ps1 orchestrator on the same DailyBriefing basis.",
+  "main": "./src/index.ts",
+  "types": "./src/index.ts",
+  "exports": {
+    ".": "./src/index.ts"
+  },
+  "scripts": {
+    "build": "tsc --noEmit",
+    "lint": "tsc --noEmit",
+    "test": "jest",
+    "test:watch": "jest --watch",
+    "test:coverage": "jest --coverage",
+    "test:ci": "jest --ci --coverage --maxWorkers=2"
+  },
+  "peerDependencies": {
+    "@fluentui/react-components": "^9.0.0",
+    "@fluentui/react-icons": "^2.0.0",
+    "@spaarke/auth": "^2.0.0",
+    "@spaarke/ui-components": "^2.0.0",
+    "react": "^16.14.0 || ^17.0.0 || ^18.0.0 || ^19.0.0",
+    "react-dom": "^16.14.0 || ^17.0.0 || ^18.0.0 || ^19.0.0"
+  },
+  "devDependencies": {
+    "@fluentui/react-components": "^9.46.2",
+    "@fluentui/react-icons": "^2.0.200",
+    "@types/node": "^22.19.19",
+    "@types/react": "^19.0.0",
+    "@types/react-dom": "^19.0.0",
+    "react": "^19.0.0",
+    "react-dom": "^19.0.0",
+    "typescript": "^5.3.3"
+  }
+}

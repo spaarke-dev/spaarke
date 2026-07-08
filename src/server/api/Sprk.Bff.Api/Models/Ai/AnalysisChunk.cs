@@ -11,27 +11,22 @@ namespace Sprk.Bff.Api.Models.Ai;
 ///   <item><c>"text"</c> — streaming partial content (see <see cref="FromContent"/>).</item>
 ///   <item><c>"complete"</c> — final chunk with full result (see <see cref="Completed(string)"/> / <see cref="Completed(DocumentAnalysisResult)"/>).</item>
 ///   <item><c>"error"</c> — error chunk (see <see cref="FromError"/>).</item>
-///   <item><c>"delta"</c> — structured-field token delta (see <see cref="FromDelta"/>); R5 additive variant carrying <see cref="FieldDelta"/>.</item>
 /// </list>
 /// </para>
 /// <para>
-/// R5 additive contract (per spec NFR-10 + R5 CLAUDE.md §3.1 "Specifically prohibited"):
-/// R5 EXTENDS this envelope with the <see cref="Delta"/> property and the <c>"delta"</c> event type;
-/// it MUST NOT introduce a parallel SSE envelope. Existing wizard consumers
-/// (<c>src/solutions/LegalWorkspace/.../summarizeService.ts</c>) ignore unknown discriminants,
-/// so the <c>"delta"</c> event is silently dropped by v1.0 consumers — that IS the back-compat
-/// contract. The <see cref="Delta"/> property is serialized with
-/// <see cref="JsonIgnoreCondition.WhenWritingNull"/> so existing serialized payloads
-/// remain byte-identical when <see cref="Delta"/> is <c>null</c>.
+/// The R5 <c>"delta"</c> event type + <c>FieldDelta</c> payload were DELETED 2026-07-07
+/// (redesign-r1 task 050, per ADR-037 as amended: FieldDelta deletable at cutover; the
+/// client dual-render was removed at task 046 and <c>FromDelta</c> had zero call sites).
+/// Section-name-keyed <c>section_*</c> events are the structured-streaming contract.
 /// </para>
 /// </summary>
-/// <param name="Type">Event type: "text" for streaming content, "complete" for final result, "error" for errors, "delta" for structured-field token deltas (R5 additive).</param>
+/// <param name="Type">Event type: "text" for streaming content, "complete" for final result, "error" for errors.</param>
 /// <param name="Content">The text content of this chunk (partial summary text, for type="text").</param>
 /// <param name="Done">Whether this is the final chunk.</param>
 /// <param name="Summary">The complete summary text (only set when Done=true, for backward compatibility).</param>
 /// <param name="Result">The structured analysis result (only set when type="complete").</param>
 /// <param name="Error">Error message if analysis failed.</param>
-/// <param name="Delta">Structured-field token delta payload (only set when type="delta"). Additive R5 variant; null/omitted for all other event types.</param>
+/// <param name="Chips">Next-step consumer chips (only set when type="chips"). Additive ai-architecture-redesign-r1 G-P1 UAT-fix variant (2026-07-05); null/omitted for all other event types. Existing consumers ignore the unknown discriminant.</param>
 public record AnalysisChunk(
     [property: JsonPropertyName("type")] string Type,
     [property: JsonPropertyName("content")] string Content,
@@ -39,9 +34,9 @@ public record AnalysisChunk(
     [property: JsonPropertyName("summary")] string? Summary = null,
     [property: JsonPropertyName("result")] DocumentAnalysisResult? Result = null,
     [property: JsonPropertyName("error")] string? Error = null,
-    [property: JsonPropertyName("delta")]
+    [property: JsonPropertyName("chips")]
     [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
-    FieldDelta? Delta = null)
+    IReadOnlyList<AnalysisChunkChip>? Chips = null)
 {
     /// <summary>
     /// Create a content chunk (streaming partial result).
@@ -70,33 +65,33 @@ public record AnalysisChunk(
         new(Type: "error", Content: string.Empty, Done: true, Error: error);
 
     /// <summary>
-    /// Create a structured-field delta chunk (R5 additive variant).
-    /// Type is "delta"; carries a <see cref="FieldDelta"/> payload tagging a token chunk
-    /// with a JSON path (e.g., <c>"tldr"</c>, <c>"fileHighlights[0].summary"</c>) and a
-    /// monotonic <paramref name="sequence"/> number for ordering correctness.
+    /// Create a next-step chips chunk (ai-architecture-redesign-r1 G-P1 UAT fix, 2026-07-05).
+    /// Type is "chips"; emitted by the Click-dispatch stream AFTER the terminal
+    /// <c>complete</c> chunk so a dispatched capability's <c>sprk_chiptransitions</c>
+    /// render as the NEXT chip set (e.g. summarize → "Summarize again"). Wire shape of
+    /// each chip matches the Event-path <c>EventChip</c> vocabulary
+    /// (<c>{targetBindingId, label, args?, requiresAttachments?}</c>) — ONE client parser
+    /// (<c>parseConsumerChips</c>) reads both.
     /// </summary>
-    /// <remarks>
-    /// Producer: D1-06 incremental JSON parser over Azure OpenAI Structured Outputs.
-    /// Consumer: D2-07 <c>StructuredOutputStreamWidget</c> via PaneEventBus
-    /// <c>workspace.field_delta</c> event (D2-06).
-    /// The model does NOT validate <paramref name="path"/> syntax — that is the producer +
-    /// consumer contract. Existing v1.0 wizard consumers ignore unknown discriminants
-    /// (see <c>summarizeService.ts</c> lines ~80–100 — no branch for <c>"delta"</c>).
-    /// </remarks>
-    public static AnalysisChunk FromDelta(string path, string content, int sequence) =>
-        new(Type: "delta", Content: string.Empty, Done: false,
-            Delta: new FieldDelta(Path: path, Content: content, Sequence: sequence));
+    public static AnalysisChunk FromChips(IReadOnlyList<AnalysisChunkChip> chips) =>
+        new(Type: "chips", Content: string.Empty, Done: false, Chips: chips);
 }
 
 /// <summary>
-/// A structured-field token delta payload carried by an <see cref="AnalysisChunk"/> with
-/// <see cref="AnalysisChunk.Type"/> = <c>"delta"</c>. Enables ChatGPT/Claude-style
-/// progressive rendering of structured AI output (per R5 spec FR-02 + design §4.3).
+/// One next-step consumer chip carried by an <see cref="AnalysisChunk"/> with
+/// <see cref="AnalysisChunk.Type"/> = <c>"chips"</c>. Serialized names are pinned to the
+/// task-022/023b unified chip wire vocabulary (camelCase <c>EventChip</c> shape) so the
+/// client's single <c>parseConsumerChips</c> path consumes Event-path and Click-path chips
+/// identically (ADR-039: <c>targetBindingId</c> IS the routing decision).
 /// </summary>
-/// <param name="Path">JSON path identifying which field in the streaming structured output this chunk targets. Examples: <c>"tldr"</c>, <c>"summary"</c>, <c>"fileHighlights[0].summary"</c>. The model does NOT validate path syntax; this is a producer/consumer contract.</param>
-/// <param name="Content">The token-chunk text to append to the field identified by <see cref="Path"/>.</param>
-/// <param name="Sequence">Monotonic sequence number from the producer, for downstream ordering correctness if deltas are reordered in transit.</param>
-public record FieldDelta(
-    [property: JsonPropertyName("path")] string Path,
-    [property: JsonPropertyName("content")] string Content,
-    [property: JsonPropertyName("sequence")] int Sequence);
+/// <param name="TargetBindingId">The <c>sprk_playbookconsumer</c> row GUID to dispatch on click.</param>
+/// <param name="Label">User-facing chip label.</param>
+/// <param name="Args">Optional capability args forwarded verbatim (e.g. <c>{ fileIds: [...] }</c>).</param>
+/// <param name="RequiresAttachments">Whether the target capability needs session attachments (client-side disabled-chip precondition).</param>
+public record AnalysisChunkChip(
+    [property: JsonPropertyName("targetBindingId")] string TargetBindingId,
+    [property: JsonPropertyName("label")] string Label,
+    [property: JsonPropertyName("args")]
+    [property: JsonIgnore(Condition = JsonIgnoreCondition.WhenWritingNull)]
+    object? Args = null,
+    [property: JsonPropertyName("requiresAttachments")] bool RequiresAttachments = false);

@@ -24,29 +24,29 @@ namespace Sprk.Bff.Api.Models.Ai.Chat;
 /// </summary>
 public static class PlaybookCapabilities
 {
-    /// <summary>DocumentSearchTools — semantic search across indexed documents.</summary>
+    /// <summary>DocumentSearchHandler — semantic search across indexed documents.</summary>
     public const string Search = "search";
 
-    /// <summary>AnalysisQueryTools — retrieve and query analysis results.</summary>
+    /// <summary>Retrieve and query analysis results (legacy handler deleted by task 044; capability id retained for row compatibility).</summary>
     public const string Analyze = "analyze";
 
-    /// <summary>WorkingDocumentTools — write back edits to the active document.</summary>
+    /// <summary>Write back edits to the active document (legacy handler deleted by task 044; capability id retained for row compatibility).</summary>
     public const string WriteBack = "write_back";
 
-    /// <summary>AnalysisExecutionTools — trigger re-analysis of documents.</summary>
+    /// <summary>AnalysisExecutionHandler — trigger re-analysis of documents.</summary>
     public const string Reanalyze = "reanalyze";
 
-    /// <summary>TextRefinementTools — refine, rephrase, or improve selected text.</summary>
+    /// <summary>TextRefinementHandler — refine, rephrase, or improve selected text.</summary>
     public const string SelectionRevise = "selection_revise";
 
-    /// <summary>WebSearchTools — search the web for external information.</summary>
+    /// <summary>WebSearchHandler — search the web for external information.</summary>
     public const string WebSearch = "web_search";
 
-    /// <summary>KnowledgeRetrievalTools — summarize and retrieve knowledge base content.</summary>
+    /// <summary>KnowledgeRetrievalHandler — summarize and retrieve knowledge base content.</summary>
     public const string Summarize = "summarize";
 
     /// <summary>
-    /// LegalResearchTools — Bing Grounding-backed legal topic research and case citation lookup.
+    /// LegalResearchHandler — Bing Grounding-backed legal topic research and case citation lookup.
     /// Only available when the playbook explicitly enables legal research to ensure legal queries
     /// are reviewed through appropriate data-governance controls (ADR-015).
     /// Dataverse option: 100000007.
@@ -54,7 +54,7 @@ public static class PlaybookCapabilities
     public const string LegalResearch = "legal_research";
 
     /// <summary>
-    /// CodeInterpreterTools — run data analysis and chart generation via Azure AI Foundry
+    /// CodeInterpreterHandler — run data analysis and chart generation via Azure AI Foundry
     /// Code Interpreter sandbox. Gated here so only playbooks that explicitly declare this
     /// capability can execute sandbox code (ADR-015: data governance; ADR-018: kill switch).
     /// Dataverse option set integer code: 100000008.
@@ -62,7 +62,7 @@ public static class PlaybookCapabilities
     public const string CodeInterpreter = "code_interpreter";
 
     /// <summary>
-    /// VerifyCitationsTool — explicit LLM-invokable citation verification against authoritative
+    /// VerifyCitationsHandler — explicit LLM-invokable citation verification against authoritative
     /// legal databases. Exposed as the "verify_citations" AI function. Gated so only playbooks
     /// that deal with legal documents include this tool in the LLM's tool schema.
     /// The automatic post-LLM citation check (CitationSafetyCheck) runs unconditionally

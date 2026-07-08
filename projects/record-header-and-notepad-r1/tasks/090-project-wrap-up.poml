@@ -1,0 +1,98 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="record-header-and-notepad-r1">
+  <metadata>
+    <title>Project Wrap-up — code-review + adr-check + test-diet + repo-cleanup + lessons-learned + INDEX update</title>
+    <phase>5: Wrap-up</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>052</dependencies>
+    <blocks>none</blocks>
+    <tags>documentation, deploy</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>MANDATORY wrap-up per CLAUDE.md §7 (project-close test-diet gate BINDING); multiple quality-gate skill invocations</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>Execute the mandatory project wrap-up per CLAUDE.md §7: (1) /code-review on project code, (2) /adr-check, (3) /test-diet (BINDING gate), (4) /repo-cleanup, (5) README.md status→Complete, (6) plan.md status→Complete, (7) notes/lessons-learned.md, (8) file DEF-01 through DEF-05 as GitHub Issues via /project-defer-issue-tracking, (9) update projects/INDEX.md status, (10) mark all TASK-INDEX rows ✅.</prompt>
+
+  <role>Spaarke platform developer executing project-close protocol.</role>
+
+  <goal>Project is graduated: all graduation criteria checked; deferred work filed with GitHub Issues; INDEX.md updated; TASK-INDEX all ✅; lessons captured.</goal>
+
+  <context>
+    <background>Per CLAUDE.md §7, project close requires /test-diet (BINDING) and full quality-gate sweep. Also per CLAUDE.md §11, deferred work must be filed as concrete Issues (not vague "future flexibility" hand-waves).</background>
+    <relevant-files>
+      <file>projects/record-header-and-notepad-r1/README.md</file>
+      <file>projects/record-header-and-notepad-r1/plan.md</file>
+      <file>projects/record-header-and-notepad-r1/notes/lessons-learned.md</file>
+      <file>projects/record-header-and-notepad-r1/notes/defer-issues.md</file>
+      <file>projects/record-header-and-notepad-r1/notes/test-diet-report.md</file>
+      <file>projects/INDEX.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="CLAUDE.md-§7">/test-diet BINDING before marking project complete.</constraint>
+    <constraint source="CLAUDE.md-§11">Deferrals must name concrete failure mode; hollow reasons refuse to file.</constraint>
+    <constraint source="ADR-038">Test-diet classifies tests as MAINTAIN (KEEP path) or SCAFFOLDING (delete).</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/record-header-and-notepad-r1/spec.md</file>
+      <file>projects/record-header-and-notepad-r1/CLAUDE.md</file>
+      <file>projects/record-header-and-notepad-r1/plan.md</file>
+      <file>projects/record-header-and-notepad-r1/README.md</file>
+      <file>.claude/skills/code-review/SKILL.md</file>
+      <file>.claude/skills/adr-check/SKILL.md</file>
+      <file>.claude/skills/test-diet/SKILL.md</file>
+      <file>.claude/skills/repo-cleanup/SKILL.md</file>
+      <file>.claude/skills/project-defer-issue-tracking/SKILL.md</file>
+      <file>.claude/adr/ADR-038-testing-strategy.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Invoke /code-review projects/record-header-and-notepad-r1/ — review all Phase 1-4 code; fix any critical issues before proceeding.</step>
+    <step order="2">Invoke /adr-check on the project source files (src/client/shared/Spaarke.UI.Components/, src/client/pcf/MatterHeader/, src/solutions/Notepad/); resolve any Path A/B/C violations per CLAUDE.md §6.5.</step>
+    <step order="3">Invoke /test-diet projects/record-header-and-notepad-r1/ (BINDING per CLAUDE.md §7); classify tests as MAINTAIN or SCAFFOLDING; execute any recommended git mv/rm; write report to notes/test-diet-report.md.</step>
+    <step order="4">Invoke /repo-cleanup projects/record-header-and-notepad-r1/ — audit + clean ephemeral files (notes/debug/, notes/spikes/, notes/drafts/); archive notes/handoffs/.</step>
+    <step order="5">Update README.md: Status=Complete, Phase=Complete, Progress=100%, Completed Date=today, all Graduation Criteria checkboxes ✅, add closing Changelog entry.</step>
+    <step order="6">Update plan.md: Status=Complete; all phase milestone checkboxes ✅.</step>
+    <step order="7">Write notes/lessons-learned.md: what worked, what surprised us, what to change for record-header-and-notepad-r2 (or the first per-entity follow-on project like project-header-r1).</step>
+    <step order="8">File DEF-01 through DEF-05 as GitHub Issues via /project-defer-issue-tracking: DEF-01 refresh-icon BFF wiring; DEF-02 Matter form binding; DEF-03 VisualHost CardChrome migration; DEF-04 MemoSection useSprkMemoRepository adoption; DEF-05 per-entity PCF templates.</step>
+    <step order="9">Update projects/INDEX.md: change status column to "Complete pending PR merge" (or remove if PR is already merged).</step>
+    <step order="10">Mark all rows in tasks/TASK-INDEX.md as ✅ completed.</step>
+    <step order="11">Final verification: TASK-INDEX all ✅; graduation criteria all ✅; no critical code-review issues; no unresolved adr-check violations; test-diet report published.</step>
+    <step order="12">If any deviations from plan, document in projects/record-header-and-notepad-r1/notes/final-deviations.md.</step>
+  </steps>
+
+  <tools>
+    <tool name="terminal">Shell + gh CLI</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/record-header-and-notepad-r1/README.md (status=Complete)</output>
+    <output type="docs">projects/record-header-and-notepad-r1/plan.md (status=Complete)</output>
+    <output type="docs">projects/record-header-and-notepad-r1/notes/lessons-learned.md</output>
+    <output type="docs">projects/record-header-and-notepad-r1/notes/defer-issues.md</output>
+    <output type="docs">projects/record-header-and-notepad-r1/notes/test-diet-report.md</output>
+    <output type="docs">projects/INDEX.md (updated)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">All Phase 1-4 graduation criteria are ✅ in README.md.</criterion>
+    <criterion testable="true">notes/test-diet-report.md exists and cites classification counts (MAINTAIN vs SCAFFOLDING).</criterion>
+    <criterion testable="true">GitHub Issues filed for DEF-01 through DEF-05 with concrete cost-of-doing-nothing rationale (per CLAUDE.md §11).</criterion>
+    <criterion testable="true">/code-review + /adr-check pass with 0 critical issues.</criterion>
+    <criterion testable="true">TASK-INDEX all 36 rows ✅.</criterion>
+  </acceptance-criteria>
+
+  <notes>Do NOT skip /test-diet — it is BINDING per CLAUDE.md §7. Skipping requires explicit HARD WARNING documentation in the wrap-up PR description.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files first. Follow task-execute skill. Invoke child skills in sequence, not in parallel (each depends on the previous).</protocol>
+  </execution>
+</task>

@@ -10,10 +10,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none (project just initialized) |
+| **Task** | none — ⏸ ON HOLD at Phase 0; **re-based 2026-07-05** on `spaarke-ai-architecture-redesign-r1` (#550) after R7 (#501) closed/absorbed |
 | **Step** | — |
-| **Status** | none |
-| **Next Action** | Run `execute task 001` to start the architecture spike |
+| **Status** | on-hold (resumes after `spaarke-ai-architecture-redesign-r1` gate G-P3 + owner direction) |
+| **Next Action** | At resumption: read `notes/rebase-on-ai-redesign-r1-stub.md` FIRST, then re-validate the task 001 spike framing against the post-redesign BFF before executing anything |
 
 ### Files Modified This Session
 

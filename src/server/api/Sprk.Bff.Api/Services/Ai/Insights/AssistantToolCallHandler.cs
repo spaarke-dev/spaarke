@@ -66,14 +66,12 @@ namespace Sprk.Bff.Api.Services.Ai.Insights;
 public sealed class AssistantToolCallHandler
 {
     /// <summary>
-    /// Configuration key for the default playbook canonical name used when
-    /// <c>ForceMode == "playbook"</c> and the classifier did NOT supply a hint
-    /// (because the classifier was bypassed). Per contract §3.3.
+    /// The <c>sprk_consumercode</c> of the Assistant-path default insights-ask Binding row
+    /// used when <c>ForceMode == "playbook"</c> and the classifier did NOT supply a hint
+    /// (because the classifier was bypassed). Per contract §3.3, as re-based by FR-P3-01:
+    /// the default is catalog data (the insights-ask 'default' row), not configuration.
     /// </summary>
-    internal const string DefaultPlaybookConfigKey = "Insights:Playbooks:DefaultName";
-
-    /// <summary>Default playbook canonical name when config key is unset.</summary>
-    internal const string FallbackDefaultPlaybookName = "predict-matter-cost@v1";
+    internal const string DefaultInsightsConsumerCode = "default";
 
     /// <summary>Intent-source telemetry value when classifier returned a routable hint.</summary>
     internal const string IntentSourceClassifier = "classifier";
@@ -102,22 +100,22 @@ public sealed class AssistantToolCallHandler
     };
 
     private readonly IInsightsIntentClassifier _classifier;
-    private readonly IOptionsMonitor<InsightsPlaybookNameMapOptions> _playbookNameMap;
+    private readonly IConsumerRoutingService _consumerRouting;
     private readonly IOptionsMonitor<AssistantCitationHrefOptions> _citationHrefOptions;
-    private readonly IConfiguration _configuration;
     private readonly ILogger<AssistantToolCallHandler> _logger;
 
+    // NOTE (FR-P3-01, task 040): the IConfiguration dependency was removed with its only
+    // read (the default-playbook config key) — the Assistant default now resolves through
+    // the insights-ask 'default' Binding row via IConsumerRoutingService.
     public AssistantToolCallHandler(
         IInsightsIntentClassifier classifier,
-        IOptionsMonitor<InsightsPlaybookNameMapOptions> playbookNameMap,
+        IConsumerRoutingService consumerRouting,
         IOptionsMonitor<AssistantCitationHrefOptions> citationHrefOptions,
-        IConfiguration configuration,
         ILogger<AssistantToolCallHandler> logger)
     {
         _classifier = classifier ?? throw new ArgumentNullException(nameof(classifier));
-        _playbookNameMap = playbookNameMap ?? throw new ArgumentNullException(nameof(playbookNameMap));
+        _consumerRouting = consumerRouting ?? throw new ArgumentNullException(nameof(consumerRouting));
         _citationHrefOptions = citationHrefOptions ?? throw new ArgumentNullException(nameof(citationHrefOptions));
-        _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -199,17 +197,11 @@ public sealed class AssistantToolCallHandler
         Func<InsightsAgentRequest, CancellationToken, Task<InsightsAgentResult>> playbookInvoker,
         CancellationToken cancellationToken)
     {
-        // Step P1: resolve playbook canonical name → Guid.
-        var canonicalName = ResolvePlaybookCanonicalName(classifierPlaybookHint);
-        var playbookId = _playbookNameMap.CurrentValue.ResolveOrDefault(canonicalName);
-
-        if (playbookId == Guid.Empty)
-        {
-            // Per contract §5.1: 503 ai.assistant-default-playbook.unconfigured (handled at endpoint).
-            throw new InvalidOperationException(
-                $"Default playbook '{canonicalName}' is not configured in '{InsightsPlaybookNameMapOptions.SectionName}:Map'. " +
-                "Configure the playbook Guid per-environment OR omit forceMode to let the classifier route the query.");
-        }
+        // Step P1: resolve playbook canonical name → Guid via the insights-ask Binding rows
+        // (FR-P3-01 single routing surface). Throws InvalidOperationException on unresolved
+        // — per contract §5.1 the endpoint maps it to 503 ai.assistant-default-playbook.unconfigured.
+        var (canonicalName, playbookId) = await ResolveInsightsPlaybookAsync(classifierPlaybookHint, cancellationToken)
+            .ConfigureAwait(false);
 
         // Step P2: build playbook request. AccessibleScopeHash mirrors the InsightEndpoints.Ask
         // contract — sha256(tid + oid) — for cache-key stability vs the standalone /ask endpoint.
@@ -595,26 +587,58 @@ public sealed class AssistantToolCallHandler
     }
 
     /// <summary>
-    /// Resolve the canonical playbook name to use for the playbook path. Priority order
-    /// per contract §3.3:
-    /// 1. Classifier-supplied hint (when classifier was invoked).
-    /// 2. <c>Insights:Playbooks:DefaultName</c> configuration value.
-    /// 3. <see cref="FallbackDefaultPlaybookName"/> hard-coded final fallback.
+    /// Resolve the canonical playbook name + per-environment <c>sprk_analysisplaybook</c>
+    /// Guid for the Insights playbook path via the <c>insights-ask</c> Binding rows
+    /// (FR-P3-01 hard cutover; ADR-039 single routing surface — replaces the deleted
+    /// per-environment config name map + default-name key).
+    /// Priority order per contract §3.3 (re-based on the catalog):
+    /// 1. Classifier-supplied hint (when classifier was invoked) — resolved as the
+    ///    Binding row whose <c>sprk_consumercode</c> EXACTLY equals the hint
+    ///    (OrdinalIgnoreCase). <see cref="IConsumerRoutingService.ResolveBindingAsync"/>
+    ///    falls back to the <c>'default'</c> row on a miss, so a returned Binding whose
+    ///    <c>ConsumerCode</c> differs from the hint means "hint not registered" and is
+    ///    rejected.
+    /// 2. Null/empty hint → the <c>'default'</c> insights-ask row (the Assistant-path
+    ///    default when the classifier is bypassed or supplied no hint).
     /// </summary>
-    internal string ResolvePlaybookCanonicalName(string? classifierHint)
+    /// <exception cref="InvalidOperationException">When no matching enabled insights-ask
+    /// Binding row with a <c>sprk_playbook</c> target exists. The Assistant endpoint maps
+    /// this (by exception type + the "Default playbook" message token) to 503 ProblemDetails
+    /// with <c>errorCode = "ai.assistant-default-playbook.unconfigured"</c>.</exception>
+    internal async Task<(string CanonicalName, Guid PlaybookId)> ResolveInsightsPlaybookAsync(
+        string? classifierHint,
+        CancellationToken ct)
     {
-        if (!string.IsNullOrWhiteSpace(classifierHint))
+        var requestedCode = string.IsNullOrWhiteSpace(classifierHint)
+            ? DefaultInsightsConsumerCode
+            : classifierHint.Trim();
+
+        var binding = await _consumerRouting.ResolveBindingAsync(
+            ConsumerTypes.InsightsAsk, consumerCode: requestedCode, cancellationToken: ct)
+            .ConfigureAwait(false);
+
+        // EXACT-code check: reject the 'default'-row fallback when a specific hint was
+        // requested (a null-ConsumerCode row is treated as 'default' by resolution).
+        var resolvedCode = string.IsNullOrWhiteSpace(binding?.ConsumerCode)
+            ? DefaultInsightsConsumerCode
+            : binding!.ConsumerCode!;
+
+        if (binding is null
+            || !string.Equals(resolvedCode, requestedCode, StringComparison.OrdinalIgnoreCase)
+            || binding.PlaybookId is not { } playbookId
+            || playbookId == Guid.Empty)
         {
-            return classifierHint.Trim();
+            // "Default playbook" token is load-bearing: InsightsAssistantEndpoint's catch
+            // filter matches InvalidOperationException messages containing it (Ordinal).
+            throw new InvalidOperationException(
+                $"Default playbook resolution failed: no enabled sprk_playbookconsumer Binding row " +
+                $"(consumerType '{ConsumerTypes.InsightsAsk}', sprk_consumercode '{requestedCode}') " +
+                "with a sprk_playbook target exists in this environment. Seed the insights-ask " +
+                "Binding row (FR-P3-01 removed the config-map routing) OR omit forceMode " +
+                "to let the classifier route the query.");
         }
 
-        var configValue = _configuration[DefaultPlaybookConfigKey];
-        if (!string.IsNullOrWhiteSpace(configValue))
-        {
-            return configValue.Trim();
-        }
-
-        return FallbackDefaultPlaybookName;
+        return (resolvedCode, playbookId);
     }
 
     /// <summary>

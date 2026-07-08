@@ -13,28 +13,84 @@
 
 import * as React from "react";
 import {
+  Button,
   Checkbox,
+  Combobox,
+  Dialog,
+  DialogActions,
+  DialogBody,
+  DialogContent,
+  DialogSurface,
+  DialogTitle,
+  DialogTrigger,
+  Dropdown,
   Input,
   Label,
+  Option,
+  Popover,
+  PopoverSurface,
+  PopoverTrigger,
+  SpinButton,
+  Spinner,
   Text,
+  Tooltip,
   makeStyles,
   mergeClasses,
   shorthands,
   tokens,
 } from "@fluentui/react-components";
+import type { SpinButtonChangeEvent, SpinButtonOnChangeData } from "@fluentui/react-components";
 import {
   ReOrderDotsVertical24Regular,
   Info16Regular,
   DismissRegular,
   PinRegular,
+  QuestionCircle16Regular,
+  Settings16Regular,
+  Warning16Regular,
 } from "@fluentui/react-icons";
-import type { FluentIcon } from "@fluentui/react-icons";
 import {
   getLayoutTemplate,
+  SECTION_METADATA_CATALOG,
   type LayoutTemplateId,
   type LayoutTemplateRow,
 } from "@spaarke/ui-components";
 import type { SectionCatalogItem } from "./SectionStep";
+
+// ---------------------------------------------------------------------------
+// FR-04 (task 015) — widthPreference lookup
+//
+// `SECTION_METADATA_CATALOG` is the single source of truth for widthPreference
+// (added to `SectionMetadata` by task 014). App.tsx's derived `SECTION_CATALOG`
+// intentionally drops widthPreference to keep the wizard's local
+// `SectionCatalogItem` shape minimal, so we re-lookup from the catalog here.
+//
+// Absent widthPreference → treated as `'any'` (no wizard warnings). Matches
+// SectionMetadata's documented default.
+// ---------------------------------------------------------------------------
+function lookupWidthPreference(
+  sectionId: string,
+): "full" | "half" | "any" {
+  const meta = SECTION_METADATA_CATALOG.find((m) => m.id === sectionId);
+  return meta?.widthPreference ?? "any";
+}
+
+// ---------------------------------------------------------------------------
+// DEF-002 / DEF-003 (spaarke-dataset-grid-framework-r2) — entity-name lookup
+//
+// `SectionMetadata.entityName` is the logical name of the Dataverse entity a
+// section renders (populated on the 6 entity-list sections: documents, matters,
+// projects, invoices, work-assignments, communications). Used by the Advanced
+// panel to hydrate the configId picker + availableViews picker via BFF.
+//
+// Non-entity-list sections (dailyBriefing, quickSummary, getStarted, etc.)
+// return `undefined` and the pickers gracefully collapse to their no-data
+// state instead of triggering a network round-trip.
+// ---------------------------------------------------------------------------
+function lookupEntityName(sectionId: string): string | undefined {
+  const meta = SECTION_METADATA_CATALOG.find((m) => m.id === sectionId);
+  return meta?.entityName;
+}
 
 // ---------------------------------------------------------------------------
 // Types
@@ -42,6 +98,46 @@ import type { SectionCatalogItem } from "./SectionStep";
 
 /** Map of slot key (e.g., "row-1:0") to section ID. */
 export type SlotAssignments = Map<string, string>;
+
+/**
+ * Per-instance override shape for a section placed in a layout row.
+ *
+ * Wizard-local mirror of `SectionInstance` from
+ * `@spaarke/ui-components/components/WorkspaceShell/buildDynamicWorkspaceConfig`
+ * (task 012 schema half). Lives here (rather than in App.tsx) to break a
+ * potential circular import between App.tsx and this file. Both `App.tsx`
+ * (for parseSectionsJson + buildSectionsJson state) and `ArrangeStep.tsx`
+ * (for the Advanced accordion prop shape) reference this type.
+ *
+ * Spec: FR-03 (spaarke-dataset-grid-framework-r2, task 013 UI half).
+ */
+export interface SectionInstance {
+  /** Registration ID (matches the bare-string form). */
+  id: string;
+  /**
+   * Optional. Override the section's baked-in `configId` for this placement
+   * only — enables one registration to render different `sprk_gridconfiguration`
+   * records per placement.
+   */
+  configIdOverride?: string;
+  /**
+   * Optional. Override the section header title in this layout only.
+   * Underlying `SectionMetadata.label` is unchanged.
+   */
+  label?: string;
+  /**
+   * Per-instance DataGrid behavior overrides.
+   */
+  overrides?: {
+    /** Effective `pageSize` — takes precedence over config record's `behavior.pageSize`. */
+    pageSize?: number;
+    /**
+     * Effective savedquery allowlist — REPLACES config-level
+     * `SourceSavedQuery.availableViews` (FR-05) when both are set.
+     */
+    availableViews?: string[];
+  };
+}
 
 export interface ArrangeStepProps {
   /** Selected template ID from Step 1. */
@@ -70,6 +166,86 @@ export interface ArrangeStepProps {
   onDefaultChange: (isDefault: boolean) => void;
   /** Callback when pin-to-start checkbox changes. */
   onPinToStartChange: (pinToStart: boolean) => void;
+  /**
+   * FR-02 (task 011) — Per-row optional height ceiling, keyed by row.id
+   * (matching the template row IDs from `LAYOUT_TEMPLATES`). Empty map means
+   * every row uses the framework default (grow to fit sections). Rendered as
+   * a Fluent v9 `Dropdown` with 5 presets + "Custom…" per row.
+   */
+  rowHeights: Map<string, string>;
+  /** FR-02 (task 011) — Callback when the row-height map changes. */
+  onRowHeightsChange: (rowHeights: Map<string, string>) => void;
+  /**
+   * FR-03 (task 013) — Per-slot SectionInstance overrides, keyed by slotKey
+   * (`${row.id}:${col}`). Empty map means every placed section serializes as a
+   * bare string (back-compat). Rendered as a Fluent v9 `Accordion` "Advanced"
+   * panel under each filled slot with 4 controls: configId, label, pageSize,
+   * availableViews. See {@link AdvancedSectionControl}.
+   */
+  sectionInstances: Map<string, SectionInstance>;
+  /** FR-03 (task 013) — Callback when the section-instances map changes. */
+  onSectionInstancesChange: (sectionInstances: Map<string, SectionInstance>) => void;
+  /**
+   * DEF-002 / DEF-003 (spaarke-dataset-grid-framework-r2) — authenticated fetch
+   * used by the Advanced panel to hydrate the configId picker + availableViews
+   * picker via BFF. Passed through from App.tsx (which receives it from
+   * @spaarke/auth). When a section has no `entityName` metadata, the pickers
+   * short-circuit without a network call.
+   */
+  authenticatedFetch: (url: string, init?: RequestInit) => Promise<Response>;
+}
+
+// ---------------------------------------------------------------------------
+// FR-02 (task 011) — Row-height presets
+//
+// Values chosen from the design's common cases (spec.md § FR-02):
+//   - `""` (empty)          → "Auto (default)" — DOES NOT emit `rowHeight` to JSON
+//   - `"40vh"`               → small
+//   - `"60vh"`               → medium
+//   - `"80vh"`               → large
+//   - `"100vh"`              → full-viewport
+//   - `"__custom__"` sentinel → reveal an `Input` for arbitrary CSS length
+//
+// The dropdown value key is separate from the emitted CSS value so that
+// switching to "Custom…" doesn't accidentally emit the sentinel — the map
+// only stores the CSS value (or nothing, for "Auto").
+// ---------------------------------------------------------------------------
+
+const ROW_HEIGHT_AUTO_KEY = "__auto__" as const;
+const ROW_HEIGHT_CUSTOM_KEY = "__custom__" as const;
+
+interface RowHeightPreset {
+  key: string;
+  label: string;
+  /** CSS length to emit; `undefined` for "Auto" (omit field entirely). */
+  value: string | undefined;
+}
+
+const ROW_HEIGHT_PRESETS: readonly RowHeightPreset[] = [
+  { key: ROW_HEIGHT_AUTO_KEY, label: "Auto (default)", value: undefined },
+  { key: "40vh", label: "40vh (small)", value: "40vh" },
+  { key: "60vh", label: "60vh (medium)", value: "60vh" },
+  { key: "80vh", label: "80vh (large)", value: "80vh" },
+  { key: "100vh", label: "100vh (full-viewport)", value: "100vh" },
+  { key: ROW_HEIGHT_CUSTOM_KEY, label: "Custom…", value: undefined },
+];
+
+/**
+ * Map a stored CSS value (from the row-heights map) to the dropdown key + label
+ * that should be displayed. Any value NOT in the preset list is treated as
+ * "Custom…" and the custom input is revealed.
+ */
+function resolveRowHeightPreset(
+  storedValue: string | undefined,
+): { key: string; label: string; isCustom: boolean } {
+  if (!storedValue || storedValue.length === 0) {
+    return { key: ROW_HEIGHT_AUTO_KEY, label: "Auto (default)", isCustom: false };
+  }
+  const preset = ROW_HEIGHT_PRESETS.find((p) => p.value === storedValue);
+  if (preset) {
+    return { key: preset.key, label: preset.label, isCustom: false };
+  }
+  return { key: ROW_HEIGHT_CUSTOM_KEY, label: "Custom…", isCustom: true };
 }
 
 // ---------------------------------------------------------------------------
@@ -112,13 +288,49 @@ export function buildInitialAssignments(
 // ---------------------------------------------------------------------------
 
 const useStyles = makeStyles({
+  // R2 UAT §5.7 (2026-07-03): the ArrangeStep now uses a dedicated 3-region
+  // vertical layout so the unassigned-sections palette can dock at the
+  // bottom during drag operations. Root fills the parent (wizard body)
+  // height; the topScroll region scrolls independently while the
+  // paletteFooter stays put.
   root: {
     display: "flex",
     flexDirection: "column",
-    gap: "20px",
     width: "100%",
     maxWidth: "780px",
     alignSelf: "center",
+    // Fill the wizard body's height so the flex children can share it.
+    height: "100%",
+    minHeight: 0,
+  },
+  // Top scrollable region — everything above the palette footer.
+  topScroll: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "20px",
+    flex: "1 1 auto",
+    minHeight: 0,
+    overflowY: "auto",
+    // Small right-padding so scrollbar doesn't hug the content.
+    paddingRight: "4px",
+  },
+  // Palette docks at the bottom. Content still wraps + can scroll horizontally
+  // if the operator selects many sections.
+  paletteFooter: {
+    flexShrink: 0,
+    display: "flex",
+    flexDirection: "column",
+    gap: "8px",
+    paddingTop: tokens.spacingVerticalM,
+    paddingBottom: tokens.spacingVerticalS,
+    borderTopWidth: "1px",
+    borderTopStyle: "solid",
+    borderTopColor: tokens.colorNeutralStroke2,
+    backgroundColor: tokens.colorNeutralBackground1,
+    // Cap palette height so if the operator selects lots of sections it
+    // scrolls internally instead of stealing the row area.
+    maxHeight: "40%",
+    overflowY: "auto",
   },
   formRow: {
     display: "flex",
@@ -135,6 +347,50 @@ const useStyles = makeStyles({
     display: "flex",
     flexDirection: "column",
     gap: "8px",
+  },
+  // FR-02 (task 011) — wraps each grid row + its per-row settings header.
+  rowGroup: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "6px",
+  },
+  // FR-02 (task 011) — per-row settings header (row-height dropdown + tooltip).
+  // 2026-07-03 (R2-followup-1 §2.1): added light-grey background + padding for
+  // visual separation between rows during authoring per UAT feedback.
+  rowSettingsHeader: {
+    display: "flex",
+    alignItems: "center",
+    gap: "8px",
+    flexWrap: "wrap",
+    // Semantic token — adapts to light/dark automatically per ADR-021.
+    color: tokens.colorNeutralForeground2,
+    backgroundColor: tokens.colorNeutralBackground2,
+    borderRadius: tokens.borderRadiusMedium,
+    padding: "6px 10px",
+  },
+  rowSettingsLabel: {
+    // Semantic token for row label — adapts to dark mode.
+    color: tokens.colorNeutralForeground3,
+    fontWeight: tokens.fontWeightSemibold,
+  },
+  // R2 UAT §2.2 round 4 (2026-07-03) — flexible spacer that pushes the
+  // right-aligned per-section Advanced gears to the far right of the row
+  // settings header.
+  rowSettingsSpacer: {
+    flexGrow: 1,
+  },
+  rowHeightDropdown: {
+    minWidth: "200px",
+  },
+  rowHeightCustomInput: {
+    minWidth: "140px",
+  },
+  helpIcon: {
+    // Semantic token — adapts to dark mode; visually secondary.
+    color: tokens.colorNeutralForeground3,
+    display: "flex",
+    alignItems: "center",
+    cursor: "help",
   },
   gridRow: {
     display: "grid",
@@ -272,6 +528,77 @@ const useStyles = makeStyles({
     paddingTop: "4px",
     color: tokens.colorNeutralForeground3,
   },
+  // FR-03 (task 013) — Advanced accordion wrapper below each filled slot.
+  // Sits inside the row's grid column so accordions align with their slots.
+  advancedAccordion: {
+    marginTop: "6px",
+    // Semantic token for subtle background so the accordion visually groups
+    // with the slot without competing with the drag-drop card above it.
+    backgroundColor: tokens.colorNeutralBackground2,
+    ...shorthands.borderRadius(tokens.borderRadiusMedium),
+    border: `1px solid ${tokens.colorNeutralStroke2}`,
+  },
+  advancedHeader: {
+    // Accordion header padding + typography — Fluent v9 defaults are fine;
+    // just ensure the icon aligns cleanly.
+    color: tokens.colorNeutralForeground2,
+  },
+  advancedPanel: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "12px",
+    // Panel padding — Fluent v9 AccordionPanel has minimal built-in padding.
+    ...shorthands.padding("12px"),
+  },
+  advancedField: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "4px",
+  },
+  advancedFieldLabel: {
+    color: tokens.colorNeutralForeground2,
+    fontWeight: tokens.fontWeightSemibold,
+  },
+  advancedFieldHelp: {
+    color: tokens.colorNeutralForeground3,
+    fontSize: tokens.fontSizeBase200,
+  },
+  advancedHelpBlock: {
+    // Semantic token — adapts to dark mode automatically.
+    color: tokens.colorNeutralForeground3,
+    fontSize: tokens.fontSizeBase200,
+    paddingTop: "4px",
+  },
+  // R2 UAT §2.2 (2026-07-03 round 3) — Fluent v9 Popover surface for the
+  // per-section Advanced controls. Sized to comfortably fit the 3 fields
+  // (label / page size / available views) without being wider than the
+  // combobox needs; capped at 360px so it doesn't span the whole wizard.
+  advancedPopoverSurface: {
+    display: "flex",
+    flexDirection: "column",
+    gap: "12px",
+    minWidth: "280px",
+    maxWidth: "360px",
+    // Popover default padding is minimal; add breathing room.
+    ...shorthands.padding("12px"),
+  },
+  // FR-04 (task 015) — Warning icon overlay on a section chip when the
+  // section's widthPreference conflicts with its row slot count. The icon
+  // sits absolutely-positioned in the slot's top-left so it doesn't compete
+  // with the remove button (top-right). Fluent v9 palette + Tooltip wrap.
+  widthWarningIcon: {
+    position: "absolute",
+    top: "4px",
+    left: "4px",
+    display: "flex",
+    alignItems: "center",
+    justifyContent: "center",
+    color: tokens.colorPaletteYellowForeground1,
+    cursor: "help",
+    // Keep the icon interactive for tooltip hover but don't interfere with
+    // the slot's drag behavior.
+    pointerEvents: "auto",
+  },
 });
 
 // ---------------------------------------------------------------------------
@@ -320,19 +647,40 @@ const GridSlot: React.FC<{
    * the save flow tolerates empty slots — fix 1 / task 091.
    */
   onRemove: (slotId: string) => void;
-}> = ({ slotId, section, onDrop, onDragStart, onRemove }) => {
+  /**
+   * FR-04 (task 015) — Optional widthPreference warning to render as a small
+   * Fluent v9 Warning icon in the slot's top-left, wrapped in a Tooltip
+   * explaining the mismatch. `undefined` means no warning.
+   *
+   * Rendered only for FILLED slots (empty slots can't have a preference mismatch).
+   */
+  widthWarning?: string;
+}> = ({ slotId, section, onDrop, onDragStart, onRemove, widthWarning }) => {
   const classes = useStyles();
   const [isDragOver, setIsDragOver] = React.useState(false);
   const [isHovered, setIsHovered] = React.useState(false);
 
-  const handleDragOver = React.useCallback(
-    (e: React.DragEvent) => {
-      e.preventDefault();
-      e.dataTransfer.dropEffect = "move";
-      if (!isDragOver) setIsDragOver(true);
-    },
-    [isDragOver],
-  );
+  // R2 UAT §5.5 (2026-07-03, revised): verify the pointer is ACTUALLY inside
+  // this slot's bounding rect on every dragOver. Previous attempts
+  // (counter-based, dragEnter/dragLeave) mis-fired: rows far from the pointer
+  // lit up as drop targets while the drag preview was still nowhere near
+  // them. Root cause was that HTML5 DnD events can fire on ancestors and
+  // stale positions, and `dragEnter` doesn't always match cursor position
+  // when the drag preview extends beyond the pointer. Solution:
+  // hit-test `clientX/clientY` against `getBoundingClientRect()` on the
+  // slot's own DOM node. If the pointer isn't literally inside our box, we
+  // are NOT a drop target for this event.
+  const handleDragOver = React.useCallback((e: React.DragEvent) => {
+    e.preventDefault();
+    e.dataTransfer.dropEffect = "move";
+    const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+    const inside =
+      e.clientX >= rect.left &&
+      e.clientX <= rect.right &&
+      e.clientY >= rect.top &&
+      e.clientY <= rect.bottom;
+    setIsDragOver((prev) => (prev === inside ? prev : inside));
+  }, []);
 
   const handleDragLeave = React.useCallback(() => {
     setIsDragOver(false);
@@ -342,6 +690,15 @@ const GridSlot: React.FC<{
     (e: React.DragEvent) => {
       e.preventDefault();
       setIsDragOver(false);
+      // Hit-test one more time to reject drops that fire from ancestor
+      // dispatch when the pointer isn't actually over this slot.
+      const rect = (e.currentTarget as HTMLElement).getBoundingClientRect();
+      const inside =
+        e.clientX >= rect.left &&
+        e.clientX <= rect.right &&
+        e.clientY >= rect.top &&
+        e.clientY <= rect.bottom;
+      if (!inside) return;
       const sectionId = e.dataTransfer.getData("text/plain");
       if (sectionId) {
         onDrop(slotId, sectionId);
@@ -395,6 +752,22 @@ const GridSlot: React.FC<{
       {section ? (
         <>
           <DraggableSectionCard section={section} isHovered={isHovered} />
+          {widthWarning && (
+            <Tooltip
+              content={widthWarning}
+              relationship="description"
+              withArrow
+            >
+              <span
+                className={classes.widthWarningIcon}
+                role="img"
+                aria-label={widthWarning}
+                data-testid={`slot-width-warning-${slotId}`}
+              >
+                <Warning16Regular />
+              </span>
+            </Tooltip>
+          )}
           <button
             type="button"
             className={mergeClasses(
@@ -452,6 +825,714 @@ const UnassignedSectionCard: React.FC<{
 };
 
 // ---------------------------------------------------------------------------
+// RowHeightControl — per-row settings header (FR-02 / task 011)
+//
+// Fluent v9 Dropdown with 5 presets + "Custom…" + tooltip. When "Custom…" is
+// selected, a Fluent v9 Input for arbitrary CSS length is revealed. All
+// colors use semantic tokens (ADR-021) for dark-mode compliance.
+// ---------------------------------------------------------------------------
+
+/**
+ * Compact inline row-height dropdown for embedding inside each section's
+ * Advanced popover (R2 UAT §2.2 round 4, 2026-07-03). Extracted from the
+ * former `RowHeightControl` header component so the same row-height widget
+ * can be reused within the per-section popover — one row-height value per
+ * row but editable from any of the row's section popovers (all bound to
+ * the same rowHeights map entry).
+ */
+const RowHeightPopoverField: React.FC<{
+  rowId: string;
+  currentValue: string | undefined;
+  onChange: (rowId: string, newValue: string | undefined) => void;
+}> = ({ rowId, currentValue, onChange }) => {
+  const classes = useStyles();
+  const preset = resolveRowHeightPreset(currentValue);
+  const [showCustomInput, setShowCustomInput] = React.useState<boolean>(
+    preset.isCustom,
+  );
+
+  React.useEffect(() => {
+    if (preset.isCustom) setShowCustomInput(true);
+  }, [preset.isCustom]);
+
+  const handleDropdownChange = React.useCallback(
+    (_ev: unknown, data: { optionValue?: string }) => {
+      const key = data.optionValue;
+      if (!key) return;
+      if (key === ROW_HEIGHT_AUTO_KEY) {
+        onChange(rowId, undefined);
+        setShowCustomInput(false);
+        return;
+      }
+      if (key === ROW_HEIGHT_CUSTOM_KEY) {
+        setShowCustomInput(true);
+        if (!preset.isCustom) onChange(rowId, "");
+        return;
+      }
+      const chosen = ROW_HEIGHT_PRESETS.find((p) => p.key === key);
+      if (chosen?.value) {
+        onChange(rowId, chosen.value);
+        setShowCustomInput(false);
+      }
+    },
+    [rowId, onChange, preset.isCustom],
+  );
+
+  const handleCustomInputChange = React.useCallback(
+    (_ev: unknown, data: { value: string }) => {
+      onChange(rowId, data.value);
+    },
+    [rowId, onChange],
+  );
+
+  return (
+    <div className={classes.advancedField}>
+      <Label htmlFor={`row-height-popover-${rowId}`} size="small" className={classes.advancedFieldLabel}>
+        Row height
+      </Label>
+      <Dropdown
+        id={`row-height-popover-${rowId}`}
+        size="small"
+        appearance="outline"
+        value={preset.label}
+        selectedOptions={[preset.key]}
+        onOptionSelect={handleDropdownChange}
+        aria-label="Row height"
+        data-testid={`row-height-dropdown-popover-${rowId}`}
+      >
+        {ROW_HEIGHT_PRESETS.map((p) => (
+          <Option key={p.key} value={p.key}>
+            {p.label}
+          </Option>
+        ))}
+      </Dropdown>
+      {showCustomInput && (
+        <Input
+          size="small"
+          appearance="outline"
+          value={preset.isCustom ? currentValue ?? "" : ""}
+          onChange={handleCustomInputChange}
+          placeholder="e.g., 640px or 70vh"
+          aria-label="Row custom height"
+          data-testid={`row-height-custom-input-popover-${rowId}`}
+        />
+      )}
+    </div>
+  );
+};
+
+/**
+ * Row header — just displays "Row N" and reserves right-aligned space for
+ * per-section Advanced gears (rendered via `rightSlot`). Row height controls
+ * live inside each gear's popover per R2 UAT §2.2 round 4 (2026-07-03).
+ */
+const RowSettingsHeader: React.FC<{
+  rowIndex: number;
+  rightSlot?: React.ReactNode;
+}> = ({ rowIndex, rightSlot }) => {
+  const classes = useStyles();
+  return (
+    <div className={classes.rowSettingsHeader}>
+      <Text size={200} className={classes.rowSettingsLabel}>
+        Row {rowIndex + 1}
+      </Text>
+      <div className={classes.rowSettingsSpacer} />
+      {rightSlot}
+    </div>
+  );
+};
+
+
+// ---------------------------------------------------------------------------
+// FR-03 (task 013) — Advanced accordion per placed section
+//
+// One expandable Fluent v9 Accordion under each filled slot. Contains 4
+// controls that write into the wizard's per-slot `SectionInstance` state map:
+//
+//   (a) configId picker (Dropdown)             — SectionInstance.configIdOverride
+//   (b) label override    (Input)              — SectionInstance.label
+//   (c) pageSize override (SpinButton)         — SectionInstance.overrides.pageSize
+//   (d) availableViews    (Input, comma-list)  — SectionInstance.overrides.availableViews
+//
+// Empty/default fields = "no override" — buildSectionsJson (App.tsx) emits the
+// section as a bare string (back-compat with every pre-R2 published record).
+// Any single field set = SectionInstance object emitted.
+//
+// DEF-002 / DEF-003 (spaarke-dataset-grid-framework-r2) — RESOLVED. The
+// configId picker + availableViews field now query Dataverse via BFF:
+//   - configId picker → GET /api/dataverse/gridconfigurations/{entity}
+//     (new endpoint added by DEF-002)
+//   - availableViews  → GET /api/dataverse/savedqueries/{entity}
+//     (existing endpoint from spaarke-datagrid-framework-r1 FR-BFF-02)
+//
+// Both endpoints resolve `entity` from `SectionMetadata.entityName` (populated
+// on the 6 entity-list sections). Non-entity-list sections short-circuit both
+// pickers and fall back to helpful "no override applicable" copy.
+//
+// The pickers use `useEntityPickerData` (below) which caches results per-entity
+// for the lifetime of the wizard step, avoiding refetches when the operator
+// expands multiple Advanced accordions.
+// ---------------------------------------------------------------------------
+
+/** Configuration picker option — mirrors GridConfigurationSummaryDto from BFF. */
+interface ConfigIdOption {
+  key: string; // "" = None (clears the override)
+  label: string;
+  isDefault?: boolean;
+}
+
+/** Saved-query picker option — mirrors SavedQuerySummaryDto from BFF. */
+interface SavedQueryOption {
+  id: string;
+  name: string;
+  isDefault: boolean;
+}
+
+const CONFIG_ID_NONE_KEY = "";
+const CONFIG_ID_NONE_OPTION: ConfigIdOption = {
+  key: CONFIG_ID_NONE_KEY,
+  label: "None (use default)",
+};
+
+/**
+ * BFF response shape for GET /api/dataverse/gridconfigurations/{entity}.
+ * Mirrors GridConfigurationSummaryDto — payload names are camelCase per the
+ * BFF's PropertyNamingPolicy.CamelCase serializer.
+ */
+interface GridConfigurationSummaryPayload {
+  id: string;
+  name: string;
+  entityLogicalName: string;
+  isDefault: boolean;
+  sortOrder: number;
+}
+
+/**
+ * BFF response shape for GET /api/dataverse/savedqueries/{entity}.
+ * Mirrors SavedQuerySummaryDto (existing endpoint from framework R1).
+ */
+interface SavedQuerySummaryPayload {
+  id: string;
+  name: string;
+  isDefault: boolean;
+  queryType: number;
+}
+
+/**
+ * Loader state shared by both pickers.
+ */
+type PickerLoadState<T> =
+  | { status: "idle" }
+  | { status: "loading" }
+  | { status: "ready"; data: T }
+  | { status: "error"; message: string };
+
+/**
+ * Cached picker data keyed by entityLogicalName. Lives at the ArrangeStep
+ * component level and is threaded through AdvancedSectionControl so multiple
+ * expanded accordions for the same entity share one fetch.
+ */
+interface EntityPickerCache {
+  configs: Map<string, PickerLoadState<ConfigIdOption[]>>;
+  savedQueries: Map<string, PickerLoadState<SavedQueryOption[]>>;
+}
+
+/**
+ * Fetch grid configurations for an entity via BFF. Returns [None + fetched].
+ * Errors surface as a picker with only "None (use default)" available so
+ * makers can still edit the layout — DEF-002 explicitly requires graceful
+ * degradation, not a hard block.
+ */
+async function fetchGridConfigurations(
+  entityLogicalName: string,
+  authenticatedFetch: (url: string, init?: RequestInit) => Promise<Response>,
+  signal: AbortSignal,
+): Promise<ConfigIdOption[]> {
+  const url = `/api/dataverse/gridconfigurations/${encodeURIComponent(entityLogicalName)}`;
+  const res = await authenticatedFetch(url, { signal });
+  if (!res.ok) {
+    throw new Error(
+      `Failed to load grid configurations for ${entityLogicalName} (HTTP ${res.status})`,
+    );
+  }
+  const payload = (await res.json()) as GridConfigurationSummaryPayload[];
+  // Prepend "None" so it's always available. Backend already sorts by
+  // sortOrder then name; preserve that ordering.
+  const options: ConfigIdOption[] = [
+    CONFIG_ID_NONE_OPTION,
+    ...payload.map((c) => ({
+      key: c.id,
+      label: c.isDefault ? `${c.name} (default)` : c.name,
+      isDefault: c.isDefault,
+    })),
+  ];
+  return options;
+}
+
+/**
+ * Fetch savedqueries for an entity via BFF. Returns the raw list; the picker
+ * ignores queryType (both user-owned = 0 and main app view = 64 are
+ * user-selectable in the availableViews allowlist).
+ */
+async function fetchSavedQueries(
+  entityLogicalName: string,
+  authenticatedFetch: (url: string, init?: RequestInit) => Promise<Response>,
+  signal: AbortSignal,
+): Promise<SavedQueryOption[]> {
+  const url = `/api/dataverse/savedqueries/${encodeURIComponent(entityLogicalName)}`;
+  const res = await authenticatedFetch(url, { signal });
+  if (!res.ok) {
+    throw new Error(
+      `Failed to load saved queries for ${entityLogicalName} (HTTP ${res.status})`,
+    );
+  }
+  const payload = (await res.json()) as SavedQuerySummaryPayload[];
+  return payload.map((s) => ({
+    id: s.id,
+    name: s.name,
+    isDefault: s.isDefault,
+  }));
+}
+
+/**
+ * Read the SectionInstance for a slot from the wizard's map, or return an
+ * empty stub `{ id: sectionId }` for the "no override yet" state. Used by
+ * the Advanced accordion controls as their controlled-value source.
+ */
+function readInstanceForSlot(
+  sectionInstances: Map<string, SectionInstance>,
+  slotKey: string,
+  sectionId: string,
+): SectionInstance {
+  const existing = sectionInstances.get(slotKey);
+  if (existing) return existing;
+  return { id: sectionId };
+}
+
+/**
+ * Detect whether a SectionInstance has any override set. Mirrors the emit-time
+ * logic in App.tsx's `hasAnyOverride` — used here to decide whether the map
+ * needs to store the instance or delete it (empty instance = bare string
+ * back-compat).
+ */
+function sectionInstanceHasAnyOverride(instance: SectionInstance): boolean {
+  if (instance.configIdOverride && instance.configIdOverride.length > 0) return true;
+  if (instance.label && instance.label.length > 0) return true;
+  const o = instance.overrides;
+  if (o) {
+    if (typeof o.pageSize === "number" && Number.isFinite(o.pageSize)) return true;
+    if (Array.isArray(o.availableViews) && o.availableViews.length > 0) return true;
+  }
+  return false;
+}
+
+const AdvancedSectionControl: React.FC<{
+  slotKey: string;
+  sectionId: string;
+  sectionLabel: string;
+  sectionInstances: Map<string, SectionInstance>;
+  onSectionInstancesChange: (next: Map<string, SectionInstance>) => void;
+  /**
+   * R2 UAT §2.2 round 4 (2026-07-03): row-level height controls hoisted
+   * into the per-section Advanced popover (`Row height` field at the top).
+   * All section popovers within the same row share the same rowHeights map
+   * entry — editing from any gear updates the row for everyone.
+   */
+  rowId: string;
+  rowHeightValue: string | undefined;
+  onRowHeightChange: (rowId: string, newValue: string | undefined) => void;
+  /** DEF-002 / DEF-003 — pickers hydrate against BFF via this fetch. */
+  authenticatedFetch: (url: string, init?: RequestInit) => Promise<Response>;
+  /** DEF-002 / DEF-003 — shared entity-picker cache across all accordions. */
+  pickerCache: EntityPickerCache;
+  /**
+   * Notify parent when a fetch completes so state re-renders + shared cache updates.
+   * Typed as `React.Dispatch<React.SetStateAction<...>>` so callers here can pass
+   * a FUNCTIONAL updater — required to avoid state-races when the configs +
+   * savedqueries effects both dispatch "loading" transitions in the same tick
+   * (R2 UAT §2.5 fix, 2026-07-03).
+   */
+  onPickerCacheChange: React.Dispatch<React.SetStateAction<EntityPickerCache>>;
+}> = ({
+  slotKey,
+  sectionId,
+  sectionLabel,
+  sectionInstances,
+  onSectionInstancesChange,
+  rowId,
+  rowHeightValue,
+  onRowHeightChange,
+  authenticatedFetch,
+  pickerCache,
+  onPickerCacheChange,
+}) => {
+  const classes = useStyles();
+  const instance = readInstanceForSlot(sectionInstances, slotKey, sectionId);
+
+  // DEF-002 / DEF-003 — resolve entityName + kick off BFF fetch on mount if we
+  // haven't fetched for this entity yet. Both pickers share the same cache
+  // keyed by entity so parallel expansions of Advanced accordions for the
+  // same section don't re-request.
+  const entityName = React.useMemo(() => lookupEntityName(sectionId), [sectionId]);
+
+  const configState = entityName
+    ? pickerCache.configs.get(entityName) ?? { status: "idle" as const }
+    : ({ status: "idle" as const });
+  const savedQueriesState = entityName
+    ? pickerCache.savedQueries.get(entityName) ?? { status: "idle" as const }
+    : ({ status: "idle" as const });
+
+  // R2 UAT §2.5 fix (2026-07-03): two structural changes to make picker
+  // fetches actually complete on mount:
+  //   (1) Split configs + savedqueries into SEPARATE useEffects with SEPARATE
+  //       AbortControllers so one completing does not cancel the other.
+  //   (2) Depend ONLY on `entityName` + `authenticatedFetch` — NOT on status
+  //       fields. Status is read from closure by the idle-guard; that guard
+  //       decides whether to START a fetch, but status transitions must NOT
+  //       trigger cleanup (which would abort the fetch we just started).
+  //
+  // Original bug (pre-fix): the single effect depended on both status fields.
+  // Sequence: effect fires → dispatches idle→loading for both → next render →
+  // deps changed (status flipped) → cleanup fires → controller.abort() →
+  // BOTH in-flight fetches cancelled → re-run guard skips (status is now
+  // "loading" not "idle") → nothing ever resolves. Network tab: status blank,
+  // "Failed to load response data".
+  //
+  // Post-fix: status changes do not retrigger effects. Cleanup only fires on
+  // unmount or entityName change (i.e., user swapped to a different entity),
+  // which is the correct time to abort a stale fetch.
+
+  // Effect A: fetch grid configurations for entityName if idle.
+  React.useEffect(() => {
+    if (!entityName) return;
+    if (configState.status !== "idle") return;
+    const controller = new AbortController();
+
+    // Mark loading via functional update — safe against concurrent writes from
+    // the sibling savedqueries effect that runs in the same render pass.
+    onPickerCacheChange((prev) => {
+      const next: EntityPickerCache = {
+        configs: new Map(prev.configs),
+        savedQueries: new Map(prev.savedQueries),
+      };
+      next.configs.set(entityName, { status: "loading" });
+      return next;
+    });
+
+    void (async () => {
+      try {
+        const options = await fetchGridConfigurations(entityName, authenticatedFetch, controller.signal);
+        if (controller.signal.aborted) return;
+        onPickerCacheChange((prev) => {
+          const updated: EntityPickerCache = {
+            configs: new Map(prev.configs),
+            savedQueries: new Map(prev.savedQueries),
+          };
+          updated.configs.set(entityName, { status: "ready", data: options });
+          return updated;
+        });
+      } catch (err) {
+        if (controller.signal.aborted) return;
+        onPickerCacheChange((prev) => {
+          const updated: EntityPickerCache = {
+            configs: new Map(prev.configs),
+            savedQueries: new Map(prev.savedQueries),
+          };
+          updated.configs.set(entityName, {
+            status: "error",
+            message: err instanceof Error ? err.message : String(err),
+          });
+          return updated;
+        });
+      }
+    })();
+
+    return () => controller.abort();
+    // Deps: entityName + authenticatedFetch ONLY. Status is read via closure by
+    // the idle-guard above; it decides whether to START a fetch. If we added
+    // status to deps, the idle→loading dispatch would trigger cleanup + abort
+    // the fetch we just started. See rationale block above.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entityName, authenticatedFetch]);
+
+  // Effect B: fetch savedqueries for entityName if idle. Independent controller
+  // — completion of the configs fetch (Effect A) does NOT abort this one.
+  React.useEffect(() => {
+    if (!entityName) return;
+    if (savedQueriesState.status !== "idle") return;
+    const controller = new AbortController();
+
+    onPickerCacheChange((prev) => {
+      const next: EntityPickerCache = {
+        configs: new Map(prev.configs),
+        savedQueries: new Map(prev.savedQueries),
+      };
+      next.savedQueries.set(entityName, { status: "loading" });
+      return next;
+    });
+
+    void (async () => {
+      try {
+        const options = await fetchSavedQueries(entityName, authenticatedFetch, controller.signal);
+        if (controller.signal.aborted) return;
+        onPickerCacheChange((prev) => {
+          const updated: EntityPickerCache = {
+            configs: new Map(prev.configs),
+            savedQueries: new Map(prev.savedQueries),
+          };
+          updated.savedQueries.set(entityName, { status: "ready", data: options });
+          return updated;
+        });
+      } catch (err) {
+        if (controller.signal.aborted) return;
+        onPickerCacheChange((prev) => {
+          const updated: EntityPickerCache = {
+            configs: new Map(prev.configs),
+            savedQueries: new Map(prev.savedQueries),
+          };
+          updated.savedQueries.set(entityName, {
+            status: "error",
+            message: err instanceof Error ? err.message : String(err),
+          });
+          return updated;
+        });
+      }
+    })();
+
+    return () => controller.abort();
+    // Deps: entityName + authenticatedFetch ONLY. See Effect A rationale.
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [entityName, authenticatedFetch]);
+
+  // Central update helper — applies a mutation to the current instance,
+  // then normalizes: if the resulting instance has NO override set, DELETE it
+  // from the map (back-compat "empty → bare string" invariant). Otherwise
+  // upsert.
+  const updateInstance = React.useCallback(
+    (mutator: (draft: SectionInstance) => void) => {
+      const draft: SectionInstance = {
+        id: instance.id,
+        configIdOverride: instance.configIdOverride,
+        label: instance.label,
+        overrides: instance.overrides ? { ...instance.overrides } : undefined,
+      };
+      mutator(draft);
+      const next = new Map(sectionInstances);
+      if (sectionInstanceHasAnyOverride(draft)) {
+        next.set(slotKey, draft);
+      } else {
+        next.delete(slotKey);
+      }
+      onSectionInstancesChange(next);
+    },
+    [instance, sectionInstances, onSectionInstancesChange, slotKey],
+  );
+
+  // configId picker (Grid Configuration) removed 2026-07-03 per UAT feedback R2-followup-1 §2.4
+  // — maker use-case for swapping between multiple sprk_gridconfiguration records per
+  // section is not real; simplification removes user-facing confusion. Fetch still runs
+  // (see React.useEffect above) for a possible future reintroduction; harmless.
+
+  const handleLabelChange = React.useCallback(
+    (_ev: unknown, data: { value: string }) => {
+      updateInstance((d) => {
+        d.label = data.value.length > 0 ? data.value : undefined;
+      });
+    },
+    [updateInstance],
+  );
+
+  const handlePageSizeChange = React.useCallback(
+    (_ev: SpinButtonChangeEvent, data: SpinButtonOnChangeData) => {
+      const raw = data.value ?? (data.displayValue ? Number(data.displayValue) : null);
+      updateInstance((d) => {
+        const next = typeof raw === "number" && Number.isFinite(raw) && raw > 0 ? raw : undefined;
+        if (next === undefined) {
+          if (d.overrides) {
+            d.overrides = { ...d.overrides, pageSize: undefined };
+          }
+        } else {
+          d.overrides = { ...(d.overrides ?? {}), pageSize: next };
+        }
+      });
+    },
+    [updateInstance],
+  );
+
+  // DEF-003 — Combobox multi-select handler. Fluent v9 Combobox emits the
+  // FULL set of selected option values on each change (not deltas), so we can
+  // write them straight into the instance override.
+  const handleAvailableViewsSelect = React.useCallback(
+    (_ev: unknown, data: { selectedOptions: string[] }) => {
+      const tokens = data.selectedOptions.filter((s) => s.length > 0);
+      updateInstance((d) => {
+        if (tokens.length === 0) {
+          if (d.overrides) {
+            d.overrides = { ...d.overrides, availableViews: undefined };
+          }
+        } else {
+          d.overrides = { ...(d.overrides ?? {}), availableViews: tokens };
+        }
+      });
+    },
+    [updateInstance],
+  );
+
+  // Resolve controlled-value strings.
+  // configId picker removed 2026-07-03 (R2-followup-1 §2.4); currentConfigIdKey /
+  // currentConfigIdOption / configOptions computations retired with it.
+  const currentLabelValue = instance.label ?? "";
+  const currentPageSize = instance.overrides?.pageSize;
+  const currentAvailableViewIds = instance.overrides?.availableViews ?? [];
+  const savedQueryOptions: readonly SavedQueryOption[] =
+    savedQueriesState.status === "ready" ? savedQueriesState.data : [];
+  // Combobox displayValue: prefer resolved names, fall back to raw IDs when
+  // the list hasn't loaded yet (avoids GUIDs disappearing during hydration).
+  const currentAvailableViewsDisplay = currentAvailableViewIds
+    .map((id) => savedQueryOptions.find((sq) => sq.id === id)?.name ?? id)
+    .join(", ");
+
+  // R2 UAT §2.2 (2026-07-03 round 3): the Accordion under each slot is replaced
+  // with a compact gear icon in the row header (rendered by the parent) that
+  // opens a Fluent v9 Popover containing the same three controls. Operator
+  // benefit: (1) less vertical clutter under each row; (2) advanced state is
+  // ephemeral (popover dismisses on outside click); (3) one gear per section
+  // in the row keeps the per-slot semantics without a full accordion strip.
+  return (
+    <Popover positioning={{ position: "below", align: "start" }}>
+      <PopoverTrigger disableButtonEnhancement>
+        <Tooltip
+          content={`Advanced — ${sectionLabel}`}
+          relationship="label"
+          withArrow
+        >
+          <Button
+            appearance="subtle"
+            size="small"
+            icon={<Settings16Regular />}
+            aria-label={`Advanced settings for ${sectionLabel}`}
+            data-testid={`advanced-trigger-${slotKey}`}
+          />
+        </Tooltip>
+      </PopoverTrigger>
+      <PopoverSurface className={classes.advancedPopoverSurface}>
+        <Text size={300} weight="semibold" style={{ marginBottom: tokens.spacingVerticalXS }}>
+          Advanced — {sectionLabel}
+        </Text>
+
+        {/* Row height (applies to the whole row — R2 UAT §2.2 round 4) */}
+        <RowHeightPopoverField
+          rowId={rowId}
+          currentValue={rowHeightValue}
+          onChange={onRowHeightChange}
+        />
+
+        {/* (a) label override */}
+        <div className={classes.advancedField}>
+          <Label
+            htmlFor={`advanced-label-${slotKey}`}
+            size="small"
+            className={classes.advancedFieldLabel}
+          >
+            Label override
+          </Label>
+          <Input
+            id={`advanced-label-${slotKey}`}
+            size="small"
+            appearance="outline"
+            value={currentLabelValue}
+            onChange={handleLabelChange}
+            placeholder={sectionLabel}
+            aria-label={`Label override for ${sectionLabel}`}
+            data-testid={`advanced-label-input-${slotKey}`}
+          />
+        </div>
+
+        {/* (b) pageSize override */}
+        <div className={classes.advancedField}>
+          <Label
+            htmlFor={`advanced-pagesize-${slotKey}`}
+            size="small"
+            className={classes.advancedFieldLabel}
+          >
+            Page size
+          </Label>
+          <SpinButton
+            id={`advanced-pagesize-${slotKey}`}
+            size="small"
+            appearance="outline"
+            min={1}
+            max={500}
+            step={25}
+            value={currentPageSize ?? null}
+            displayValue={currentPageSize === undefined ? "" : String(currentPageSize)}
+            onChange={handlePageSizeChange}
+            placeholder="e.g., 100"
+            aria-label={`Page size override for ${sectionLabel}`}
+            data-testid={`advanced-pagesize-spinbutton-${slotKey}`}
+          />
+        </div>
+
+        {/* (c) availableViews override — DEF-003 real savedquery multi-select */}
+        <div className={classes.advancedField}>
+          <Label
+            htmlFor={`advanced-views-${slotKey}`}
+            size="small"
+            className={classes.advancedFieldLabel}
+          >
+            Available views
+            {savedQueriesState.status === "loading" && (
+              <Spinner
+                size="tiny"
+                aria-label="Loading saved queries"
+                data-testid={`advanced-views-spinner-${slotKey}`}
+                style={{ marginLeft: "6px", display: "inline-block" }}
+              />
+            )}
+          </Label>
+          <Combobox
+            id={`advanced-views-${slotKey}`}
+            size="small"
+            appearance="outline"
+            multiselect
+            value={currentAvailableViewsDisplay}
+            selectedOptions={currentAvailableViewIds}
+            onOptionSelect={handleAvailableViewsSelect}
+            placeholder={
+              savedQueryOptions.length === 0
+                ? entityName
+                  ? savedQueriesState.status === "loading"
+                    ? "Loading views…"
+                    : "No saved queries available"
+                  : "N/A — no Dataverse entity"
+                : "Select one or more views…"
+            }
+            aria-label={`Available views override for ${sectionLabel}`}
+            data-testid={`advanced-views-combobox-${slotKey}`}
+            disabled={!entityName || savedQueryOptions.length === 0}
+          >
+            {savedQueryOptions.map((sq) => (
+              <Option key={sq.id} value={sq.id}>
+                {sq.isDefault ? `${sq.name} (default)` : sq.name}
+              </Option>
+            ))}
+          </Combobox>
+          {savedQueriesState.status === "error" && (
+            <Text
+              className={classes.advancedFieldHelp}
+              style={{ color: tokens.colorPaletteRedForeground1 }}
+              data-testid={`advanced-views-error-${slotKey}`}
+            >
+              Could not load saved queries: {savedQueriesState.message}.
+            </Text>
+          )}
+        </div>
+      </PopoverSurface>
+    </Popover>
+  );
+};
+
+// ---------------------------------------------------------------------------
 // ArrangeStep component
 // ---------------------------------------------------------------------------
 
@@ -462,14 +1543,45 @@ export const ArrangeStep: React.FC<ArrangeStepProps> = ({
   workspaceName,
   isDefault,
   pinToStart,
+  rowHeights,
+  sectionInstances,
   onAssignmentsChange,
   onNameChange,
   onDefaultChange,
   onPinToStartChange,
+  onRowHeightsChange,
+  onSectionInstancesChange,
+  authenticatedFetch,
 }) => {
   const classes = useStyles();
   const template = getLayoutTemplate(templateId);
   const dragSourceRef = React.useRef<{ sectionId: string; slotId: string } | null>(null);
+
+  // DEF-002 / DEF-003 — shared picker cache across all Advanced accordions in
+  // this step. Keyed by entityLogicalName so opening Documents advanced +
+  // Matters advanced fires 2 fetches total (not N per accordion).
+  const [pickerCache, setPickerCache] = React.useState<EntityPickerCache>(() => ({
+    configs: new Map(),
+    savedQueries: new Map(),
+  }));
+
+  // FR-04 (task 015) — widthPreference placement dialog state. When the user
+  // drops a `widthPreference: 'full'` section into a multi-slot row, we open a
+  // Fluent v9 Dialog offering to clear the other slots in that row. Declining
+  // (Cancel) leaves the row intact — the section will still render with a
+  // persistent warning icon via `slotWidthWarnings` below.
+  //
+  // The dialog is NOT a hard block: the operator can also force a mismatch by
+  // editing JSON directly (per spec). The runtime dev-guard in
+  // `sectionRegistry.ts` still fires `console.warn` when the resulting layout
+  // renders in that state — covering the "bypassed the wizard warning" path.
+  const [widthPrefDialog, setWidthPrefDialog] = React.useState<{
+    open: boolean;
+    slotId: string;
+    sectionId: string;
+    sectionLabel: string;
+    rowId: string;
+  } | null>(null);
 
   // Build a section lookup map for quick access by ID.
   const sectionMap = React.useMemo(() => {
@@ -528,9 +1640,111 @@ export const ArrangeStep: React.FC<ArrangeStepProps> = ({
 
       dragSourceRef.current = null;
       onAssignmentsChange(next);
+
+      // FR-04 (task 015) — Placement check. If the dropped section prefers
+      // full-width AND the target row has >1 slot, prompt the operator to
+      // clear the row's other slots. The check runs AFTER the assignment
+      // update so the dialog sees the post-drop layout. Cancel leaves the
+      // multi-slot layout intact; the section chip will still surface the
+      // widthWarning icon via `slotWidthWarnings` below.
+      const widthPref = lookupWidthPreference(droppedSectionId);
+      if (widthPref !== "full" || !template) return;
+      // Parse the target slot key back into rowId + col.
+      const colonIdx = targetSlotId.lastIndexOf(":");
+      if (colonIdx <= 0) return;
+      const targetRowId = targetSlotId.slice(0, colonIdx);
+      const targetRow = template.rows.find((r) => r.id === targetRowId);
+      if (!targetRow || targetRow.slotCount <= 1) return;
+      // Only prompt when the row actually has other occupied slots — an
+      // empty multi-slot row doesn't need cleanup.
+      let otherOccupied = 0;
+      for (let c = 0; c < targetRow.slotCount; c++) {
+        const key = slotKey(targetRow.id, c);
+        if (key !== targetSlotId && next.has(key)) otherOccupied++;
+      }
+      const sectionCatalogEntry = sectionMap.get(droppedSectionId);
+      const sectionLabel = sectionCatalogEntry?.label ?? droppedSectionId;
+      // If the row is only occupied by the dropped section, no cleanup needed;
+      // but the warning icon still surfaces because the row template retains
+      // its multi-column layout. We only open the dialog when there IS a
+      // cleanup to offer (otherOccupied > 0). Icon-only case is covered by
+      // the passive warning surface.
+      if (otherOccupied > 0) {
+        setWidthPrefDialog({
+          open: true,
+          slotId: targetSlotId,
+          sectionId: droppedSectionId,
+          sectionLabel,
+          rowId: targetRow.id,
+        });
+      }
     },
-    [sectionAssignments, onAssignmentsChange],
+    [sectionAssignments, onAssignmentsChange, template, sectionMap],
   );
+
+  // FR-04 (task 015) — "Yes, convert" handler. Clears every other slot in the
+  // dialog's target row so the full-width section is the sole occupant.
+  // Downstream buildSectionsJson still emits the row's original `columns`
+  // (e.g., "1fr 1fr") — the framework's buildDynamicWorkspaceConfig then
+  // produces an overflow-safe row with the single section stretched across
+  // via the empty-slot handling. Semantics: matches "convert row to single-
+  // column" from the operator's perspective without requiring wizard-side
+  // template mutation (which would break existing tests + preview flow).
+  const handleWidthPrefConfirm = React.useCallback(() => {
+    if (!widthPrefDialog || !template) {
+      setWidthPrefDialog(null);
+      return;
+    }
+    const row = template.rows.find((r) => r.id === widthPrefDialog.rowId);
+    if (!row) {
+      setWidthPrefDialog(null);
+      return;
+    }
+    const next = new Map(sectionAssignments);
+    for (let c = 0; c < row.slotCount; c++) {
+      const key = slotKey(row.id, c);
+      if (key !== widthPrefDialog.slotId) next.delete(key);
+    }
+    onAssignmentsChange(next);
+    setWidthPrefDialog(null);
+  }, [widthPrefDialog, template, sectionAssignments, onAssignmentsChange]);
+
+  const handleWidthPrefCancel = React.useCallback(() => {
+    setWidthPrefDialog(null);
+  }, []);
+
+  // FR-04 (task 015) — Compute a per-slot widthPreference warning message.
+  // Returns a Map keyed by slotKey; only slots with a live mismatch appear.
+  // Used by GridSlot's `widthWarning` prop.
+  //
+  // Categories:
+  //   'full' section in multi-slot row  → "Full-width preferred; row has {N} columns"
+  //   'half' section in single-slot row → "Half-width preferred; single-column row may leave whitespace"
+  //   'any' → no warning (default)
+  const slotWidthWarnings = React.useMemo<Map<string, string>>(() => {
+    const warnings = new Map<string, string>();
+    if (!template) return warnings;
+    for (const row of template.rows) {
+      for (let c = 0; c < row.slotCount; c++) {
+        const key = slotKey(row.id, c);
+        const sectionId = sectionAssignments.get(key);
+        if (!sectionId) continue;
+        const pref = lookupWidthPreference(sectionId);
+        if (pref === "full" && row.slotCount > 1) {
+          warnings.set(
+            key,
+            `This widget is designed for full-width rows; the current row has ${row.slotCount} columns and may truncate content.`,
+          );
+        } else if (pref === "half" && row.slotCount === 1) {
+          warnings.set(
+            key,
+            "This widget is designed for half-width rows; a single-column row may leave excess whitespace.",
+          );
+        }
+      }
+    }
+    return warnings;
+  }, [template, sectionAssignments]);
 
   // Handle drop onto unassigned area — remove section from its slot.
   const [isUnassignedDragOver, setIsUnassignedDragOver] = React.useState(false);
@@ -583,6 +1797,22 @@ export const ArrangeStep: React.FC<ArrangeStepProps> = ({
     [sectionAssignments, onAssignmentsChange],
   );
 
+  // FR-02 (task 011) — Per-row height change handler. Delegates to the parent
+  // via onRowHeightsChange with an immutable Map update. Undefined value
+  // clears the entry (dropdown returned to "Auto (default)").
+  const handleRowHeightChange = React.useCallback(
+    (rowId: string, newValue: string | undefined) => {
+      const next = new Map(rowHeights);
+      if (newValue === undefined) {
+        next.delete(rowId);
+      } else {
+        next.set(rowId, newValue);
+      }
+      onRowHeightsChange(next);
+    },
+    [rowHeights, onRowHeightsChange],
+  );
+
   if (!template) return null;
 
   // Identify overflow sections: selected but beyond slot capacity.
@@ -592,6 +1822,8 @@ export const ArrangeStep: React.FC<ArrangeStepProps> = ({
 
   return (
     <div className={classes.root}>
+      {/* R2 UAT §5.7 — top region scrolls; palette footer stays docked. */}
+      <div className={classes.topScroll}>
       {/* Workspace name + Set default + Pin to Start (inline row) */}
       <div style={{ display: "flex", flexDirection: "row", alignItems: "flex-end", gap: tokens.spacingHorizontalL, flexWrap: "wrap" }}>
         <div style={{ flex: "1 1 0", minWidth: 0, maxWidth: "480px" }}>
@@ -643,35 +1875,121 @@ export const ArrangeStep: React.FC<ArrangeStepProps> = ({
 
       {/* Template grid */}
       <div className={classes.gridContainer}>
-        {template.rows.map((row: LayoutTemplateRow) => (
-          <div
-            key={row.id}
-            className={classes.gridRow}
-            style={{ gridTemplateColumns: row.gridTemplateColumns }}
-          >
-            {Array.from({ length: row.slotCount }, (_, colIdx) => {
-              const key = slotKey(row.id, colIdx);
-              const sectionId = sectionAssignments.get(key);
-              const section = sectionId ? sectionMap.get(sectionId) : undefined;
+        {template.rows.map((row: LayoutTemplateRow, rowIdx: number) => {
+          // R2 UAT §2.6 (2026-07-03): if this row has exactly ONE filled slot
+          // AND that slot's section is `widthPreference: 'full'`, override
+          // the row's grid template to `1fr` so the row VISUALLY appears
+          // full-width. Matches the operator's mental model after the FR-04
+          // "Yes, convert" dialog dismisses (which clears the other slots) —
+          // otherwise the row keeps its 1fr 1fr / 1fr 1fr 1fr template with
+          // empty visual space where the cleared slots used to be.
+          //
+          // Derived from state (no schema addition): purely a rendering hint.
+          // Save flow still emits `row.gridTemplateColumns` as-is; the runtime
+          // framework's `buildDynamicWorkspaceConfig` already handles the
+          // 1-section-in-multi-slot-row case identically.
+          const filledSlots: string[] = [];
+          for (let c = 0; c < row.slotCount; c++) {
+            const key = slotKey(row.id, c);
+            const id = sectionAssignments.get(key);
+            if (id) filledSlots.push(id);
+          }
+          const isSingleFullWidthOccupant =
+            row.slotCount > 1 &&
+            filledSlots.length === 1 &&
+            lookupWidthPreference(filledSlots[0]) === "full";
+          const effectiveColumns = isSingleFullWidthOccupant
+            ? "1fr"
+            : row.gridTemplateColumns;
 
-              return (
-                <GridSlot
-                  key={key}
-                  slotId={key}
-                  section={section}
-                  onDrop={handleSlotDrop}
-                  onDragStart={handleSlotDragStart}
-                  onRemove={handleSlotRemove}
-                />
-              );
-            })}
+          return (
+          <div key={row.id} className={classes.rowGroup}>
+            {/*
+              FR-02 (task 011) — Per-row settings header. Fluent v9 Dropdown
+              for `rowHeight` (Auto/40vh/60vh/80vh/100vh/Custom…) + tooltip.
+              Selected value wires through to `LayoutJsonRow.rowHeight` in the
+              wizard's JSON output via App.tsx.
+            */}
+            <RowSettingsHeader
+              rowIndex={rowIdx}
+              // R2 UAT §2.2 round 4 (2026-07-03): row header shows only "Row N"
+              // on the left + right-aligned Advanced gears (one per filled
+              // section). The row-height dropdown and the help tooltip are
+              // moved INTO the Advanced popover so operators find every row +
+              // section setting in one compact surface.
+              rightSlot={
+                <>
+                  {Array.from({ length: row.slotCount }, (_, colIdx) => {
+                    const key = slotKey(row.id, colIdx);
+                    const sectionId = sectionAssignments.get(key);
+                    const section = sectionId ? sectionMap.get(sectionId) : undefined;
+                    if (!section) return null;
+                    return (
+                      <AdvancedSectionControl
+                        key={key}
+                        slotKey={key}
+                        sectionId={section.id}
+                        sectionLabel={section.label}
+                        sectionInstances={sectionInstances}
+                        onSectionInstancesChange={onSectionInstancesChange}
+                        rowId={row.id}
+                        rowHeightValue={rowHeights.get(row.id)}
+                        onRowHeightChange={handleRowHeightChange}
+                        authenticatedFetch={authenticatedFetch}
+                        pickerCache={pickerCache}
+                        onPickerCacheChange={setPickerCache}
+                      />
+                    );
+                  })}
+                </>
+              }
+            />
+            <div
+              className={classes.gridRow}
+              style={{ gridTemplateColumns: effectiveColumns }}
+            >
+              {Array.from({ length: row.slotCount }, (_, colIdx) => {
+                const key = slotKey(row.id, colIdx);
+                const sectionId = sectionAssignments.get(key);
+                const section = sectionId ? sectionMap.get(sectionId) : undefined;
+
+                // Slot renders WITHOUT the per-slot Accordion — Advanced
+                // controls moved up to the row header via `rightSlot` above.
+                return (
+                  <GridSlot
+                    key={key}
+                    slotId={key}
+                    section={section}
+                    onDrop={handleSlotDrop}
+                    onDragStart={handleSlotDragStart}
+                    onRemove={handleSlotRemove}
+                    widthWarning={slotWidthWarnings.get(key)}
+                  />
+                );
+              })}
+            </div>
           </div>
-        ))}
+          );
+        })}
       </div>
 
-      {/* Unassigned sections area */}
+      {/* Overflow note when more sections than slots — stays in scroll region */}
+      {hasOverflow && (
+        <div className={classes.overflowNote}>
+          <Info16Regular />
+          <Text size={200}>
+            You have more sections than layout slots. Extra unassigned sections will be
+            added as full-width rows below the grid.
+          </Text>
+        </div>
+      )}
+
+      {/* R2 UAT §5.7 — close topScroll region here; palette becomes the footer. */}
+      </div>
+
+      {/* Unassigned sections palette — docked footer (R2 UAT §5.7). */}
       {(unassignedSections.length > 0 || true) && (
-        <>
+        <div className={classes.paletteFooter}>
           <Text size={300} weight="semibold" style={{ color: tokens.colorNeutralForeground2 }}>
             Unassigned sections
           </Text>
@@ -699,19 +2017,55 @@ export const ArrangeStep: React.FC<ArrangeStepProps> = ({
               </Text>
             )}
           </div>
-        </>
-      )}
-
-      {/* Overflow note when more sections than slots */}
-      {hasOverflow && (
-        <div className={classes.overflowNote}>
-          <Info16Regular />
-          <Text size={200}>
-            You have more sections than layout slots. Extra unassigned sections will be
-            added as full-width rows below the grid.
-          </Text>
         </div>
       )}
+
+      {/*
+        FR-04 (task 015) — Placement dialog. Opens when the operator drops a
+        `widthPreference: 'full'` section into a multi-slot row that has other
+        occupied slots. "Yes, convert" clears the other slots in that row;
+        "Cancel" leaves the row intact + the section chip retains a warning icon.
+
+        Fluent v9 Dialog per ADR-021 — surface uses semantic tokens (dark-mode
+        safe via FluentProvider). `onOpenChange` handles backdrop / Esc close.
+      */}
+      <Dialog
+        open={widthPrefDialog?.open === true}
+        onOpenChange={(_ev, data) => {
+          if (!data.open) handleWidthPrefCancel();
+        }}
+      >
+        <DialogSurface>
+          <DialogBody>
+            <DialogTitle>Full-width widget</DialogTitle>
+            <DialogContent>
+              <Text>
+                {widthPrefDialog
+                  ? `"${widthPrefDialog.sectionLabel}" renders best at full row width. Convert this row to a single column?`
+                  : "This widget renders best at full row width. Convert this row to a single column?"}
+              </Text>
+            </DialogContent>
+            <DialogActions>
+              <DialogTrigger disableButtonEnhancement>
+                <Button
+                  appearance="secondary"
+                  onClick={handleWidthPrefCancel}
+                  data-testid="width-pref-dialog-cancel"
+                >
+                  Cancel (keep row)
+                </Button>
+              </DialogTrigger>
+              <Button
+                appearance="primary"
+                onClick={handleWidthPrefConfirm}
+                data-testid="width-pref-dialog-confirm"
+              >
+                Yes, convert
+              </Button>
+            </DialogActions>
+          </DialogBody>
+        </DialogSurface>
+      </Dialog>
     </div>
   );
 };

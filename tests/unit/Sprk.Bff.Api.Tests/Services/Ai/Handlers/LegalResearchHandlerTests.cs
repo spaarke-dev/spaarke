@@ -16,7 +16,7 @@ namespace Sprk.Bff.Api.Tests.Services.Ai.Handlers;
 
 /// <summary>
 /// Unit tests for <see cref="LegalResearchHandler"/> (R6 Wave 8 — replaces the legacy
-/// hardcoded <c>LegalResearchTools</c> class previously registered on
+/// hardcoded <c>LegalResearch chat-tools</c> class previously registered on
 /// <c>SprkChatAgentFactory</c>).
 /// </summary>
 /// <remarks>
@@ -170,7 +170,7 @@ public sealed class LegalResearchHandlerTests : TypedToolHandlerTestFixture
 
         handler.SupportedInvocationContexts.Should().Be(
             InvocationContextKind.Chat,
-            because: "R6 Wave 8: LegalResearchHandler is chat-only — the pre-R6 hardcoded LegalResearchTools registration was chat-only, no playbook node executor exists for legal_research per NFR-08");
+            because: "R6 Wave 8: LegalResearchHandler is chat-only — the pre-R6 hardcoded LegalResearch chat-tools registration was chat-only, no playbook node executor exists for legal_research per NFR-08");
     }
 
     // ═════════════════════════════════════════════════════════════════════════════

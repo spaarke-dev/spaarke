@@ -1,0 +1,132 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="035" project="spaarke-ai-architecture-redesign-r1">
+  <metadata>
+    <title>Dispatcher-stack DELETION — PlaybookDispatcher, IntentRerankerService, PlaybookCandidateSelector, CompoundIntentDetector (+ tests, + playbook-embeddings index jobs)</title>
+    <phase>Phase P2: Text-Path Hard Cutover</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <tags>bff-api, deletion, cleanup</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <parallel-group>W-P2-D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>034</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement FR-P2-06: delete the legacy dispatcher stack in the SAME phase as the cutover (hard-cutover doctrine — no lingering dead dispatchers). DELETE: PlaybookDispatcher (plus the playbook-embeddings index jobs that exist only to feed it), IntentRerankerService, PlaybookCandidateSelector, CompoundIntentDetector — and their tests, interfaces (IIntentRerankerService, IPlaybookCandidateSelector), options classes (IntentRerankerOptions, PlaybookSelectorOptions), DI registrations, and models used only by them (DispatchResult, PlaybookEmbeddingDocument, PlaybookOptions SSE builders if orphaned). Task 034 already made this stack unreachable; this task removes it from the codebase. Acceptance is grep-zero outside git history with SHOWN output for each deleted symbol, plus a green build and full test suite, plus the publish-size REDUCTION reported.
+  </prompt>
+
+  <role>
+    Senior .NET developer expert in safe large-scale deletion: dependency tracing, DI unwiring, and grep-zero verification in the Sprk.Bff.Api codebase.
+  </role>
+
+  <goal>
+    The four dispatcher-stack components, their tests, options, interfaces, DI wiring, embeddings index jobs, and orphaned models are deleted; grep-zero SHOWN for every symbol; dotnet build + full test suite green; publish-size reduction reported.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-architecture-redesign-r1/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-architecture-redesign-r1/plan.md</file>
+    <file purpose="project-context">projects/spaarke-ai-architecture-redesign-r1/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md</file>
+    <file purpose="delete-target">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookDispatcher.cs</file>
+    <file purpose="delete-target">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/IntentRerankerService.cs</file>
+    <file purpose="delete-target">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookCandidateSelector.cs</file>
+    <file purpose="delete-target">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/CompoundIntentDetector.cs</file>
+    <file purpose="di-wiring">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AiChatModule.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-039">ONE dispatch protocol survives — the loop. MUST NOT leave (or reintroduce) any second intent-detection mechanism; this task deletes the last one. MUST NOT gate by tool-name lists; grounded outputs unaffected.</constraint>
+    <constraint source="ADR-040">Ledger-before-render contract untouched — verify no deleted component was a ledger writer without replacement.</constraint>
+    <constraint source="NFR-08">Hard-cutover doctrine: grep-zero for EVERY deleted symbol outside git history with SHOWN output; no compat shims, no [Obsolete] stubs, no commented-out code.</constraint>
+    <constraint source="project">Delete ONLY after confirming task 034 made these unreachable; frozen engine (PlaybookOrchestrationService + nodes) is NOT in scope and MUST NOT be touched.</constraint>
+    <constraint source="ADR-029">BFF deletion task: run dotnet publish and REPORT THE REDUCTION vs prior baseline.</constraint>
+    <constraint source="NFR-02">Full eval suite + unit suite green post-deletion is the merge gate.</constraint>
+    <constraint source="NFR-09">Budget telemetry (ADR-016) lives in the loop path — confirm deletion removes no live telemetry.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff-api, deletion, dispatcher-retirement, grep-zero-verification</topic>
+    <files>
+      <file>docs/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>docs/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/OVERLAY-MATRIX.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-MIGRATION-MAP.md</file>
+    </files>
+    <patterns>
+      <pattern name="SprkChatAgent stack" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgent.cs">
+        The surviving dispatcher — verify nothing here references deleted symbols after the sweep.
+      </pattern>
+      <pattern name="Gate store" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PendingPlanManager.cs">
+        Survives (generalized in 031) — ensure deletion does not disturb the unified gate.
+      </pattern>
+      <pattern name="Tool handler framework" location="src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/">
+        Survives — the closed catalog path; untouched by this deletion.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      The classifier stack (dispatcher + reranker + candidate selector + compound detector + playbook embeddings) was rejected in the ratified OQ-1 decision: loop-as-dispatcher, no classifier stack. Task 034 cut traffic over; deleting in the same phase is the hard-cutover doctrine applied — deadwood never overwinters.
+    </background>
+    <dependencies>
+      <dependency task="034" status="pending">Chat NL hard cutover complete — the stack is unreachable before deletion.</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0" name="Context check + load knowledge">
+      Verify context below 70%. Load the migration map + overlay matrix delete rows for the dispatcher stack; confirm 034 complete and zero legacy traffic.
+    </step>
+    <step order="1" name="Build the deletion inventory">
+      Grep each symbol (PlaybookDispatcher, IntentRerankerService, IIntentRerankerService, PlaybookCandidateSelector, IPlaybookCandidateSelector, CompoundIntentDetector, IntentRerankerOptions, PlaybookSelectorOptions, DispatchResult, PlaybookEmbeddingDocument, playbook-embeddings jobs) to enumerate files, DI registrations, config sections, tests, and SSE builders touched; record the inventory in task notes.
+    </step>
+    <step order="2" name="Delete components + tests">
+      Delete the four services, their interfaces, options classes, models used only by them, the playbook-embeddings index jobs, and ALL their tests. No stubs, no shims.
+    </step>
+    <step order="3" name="Unwire DI + config">
+      Remove registrations from AiChatModule/AiModule, config binding for IntentRerankerOptions/PlaybookSelectorOptions, and any appsettings sections that only served the stack.
+    </step>
+    <step order="4" name="Grep-zero verification (SHOWN)">
+      For each deleted symbol, run grep across src/, tests/, scripts/, docs/ and SHOW the zero-hit output (git history excluded) in the transcript/task notes.
+    </step>
+    <step order="5" name="Build + full test suite">
+      dotnet build + dotnet test (full suite incl. eval) green with output shown.
+    </step>
+    <step order="6" name="Publish-size reduction">
+      dotnet publish -c Release; report compressed size + the REDUCTION vs prior baseline per ADR-029.
+    </step>
+    <step order="7" name="Step 9.5 quality gates">
+      Run code-review + adr-check. Resolve findings per CLAUDE.md section 6.5. Update TASK-INDEX.md and current-task.md.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build, test, publish Sprk.Bff.Api</tool>
+    <tool name="git">Version control (deletions preserved in history)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">Deleted: src/server/api/Sprk.Bff.Api/Services/Ai/Chat/{PlaybookDispatcher,IntentRerankerService,PlaybookCandidateSelector,CompoundIntentDetector}.cs + interfaces + options + orphaned models + embeddings jobs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Infrastructure/DI/AiChatModule.cs (registrations removed)</output>
+    <output type="test">Deleted: tests for the four components</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md (status update)</output>
+    <output type="report">Task notes: deletion inventory + per-symbol grep-zero output + publish-size reduction</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Grep for PlaybookDispatcher, IntentRerankerService, PlaybookCandidateSelector, CompoundIntentDetector returns zero hits outside git history — output SHOWN per symbol.</criterion>
+    <criterion testable="true">Playbook-embeddings index jobs and stack-only options/interfaces/models deleted (grep shown).</criterion>
+    <criterion testable="true">dotnet build + full test suite (incl. eval) green post-deletion (output shown).</criterion>
+    <criterion testable="true">Frozen engine (PlaybookOrchestrationService + nodes) untouched (diff scope shown).</criterion>
+    <criterion testable="true">Publish-size REDUCTION reported per ADR-029.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

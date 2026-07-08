@@ -103,8 +103,9 @@ $RowFiles = @{
     "ClauseAnalyzerHandler"            = "$RepoRoot/infra/dataverse/sprk_analysistool-clause-analyzer-row.json"
     "RiskDetectorHandler"              = "$RepoRoot/infra/dataverse/sprk_analysistool-risk-detector-row.json"
     "InvoiceExtractionToolHandler"     = "$RepoRoot/infra/dataverse/sprk_analysistool-invoice-extractor-row.json"
-    # Wave 7 — chat-tool migration (legacy hardcoded tool → typed handler)
-    "AnalysisQueryHandler"             = "$RepoRoot/infra/dataverse/sprk_analysistool-analysis-query-row.json"
+    # Wave 7 — chat-tool migration (legacy hardcoded tool → typed handler). NOTE
+    # (ai-architecture-redesign-r1 task 044 / FR-P3-05): the analysis-query row was
+    # RETIRED with its handler (audit F-1 closure) — do not re-seed.
     # Wave 7 — TextRefinementHandler serves 3 rows via the method-discriminator in
     # sprk_configuration (refine / keypoints / summary). Because the handler class is
     # the same for all three, the upsert key MUST be sprk_toolcode (not handler-class)
@@ -117,6 +118,10 @@ $RowFiles = @{
     # sprk_configuration (GetKnowledgeSource / SearchKnowledgeBase). Same multi-row-per-
     # handler pattern as TextRefinementHandler — upsert disambiguated by sprk_toolcode.
     "KNOWLEDGE-SOURCE-GET"             = "$RepoRoot/infra/dataverse/sprk_analysistool-knowledge-source-get-row.json"
+    # ai-architecture-redesign-r1 task 041 (FR-P3-02) — email.draft typed handler
+    # (Communicate-gated). Mirror existed since 041; map entry added by task 051's
+    # seed-governance reconciliation (FR-P4-02) so the seed covers the full live set.
+    "EMAIL-DRAFT"                      = "$RepoRoot/infra/dataverse/sprk_analysistool-email-draft-row.json"
     "KNOWLEDGE-BASE-SEARCH"            = "$RepoRoot/infra/dataverse/sprk_analysistool-knowledge-base-search-row.json"
     # Wave 7c — VerifyCitationsHandler: single row, capability-gated via
     # sprk_requiredcapability = 'verify_citations'. The data-driven block's
@@ -144,23 +149,9 @@ $RowFiles = @{
     # + ADR-018 kill switch + ADR-015 telemetry hygiene preserved by the handler.
     "LEGAL-RESEARCH"                   = "$RepoRoot/infra/dataverse/sprk_analysistool-legal-research-row.json"
     "LEGAL-CASE-LOOKUP"                = "$RepoRoot/infra/dataverse/sprk_analysistool-legal-case-lookup-row.json"
-    # Wave 9 — WorkingDocumentHandler serves 3 rows via the method discriminator. All 3
-    # capability-gated via sprk_requiredcapability = 'write_back'. Implements ADR-033 (the
-    # first invocation of the ADRs-Are-Defaults operating principle): handler reads
-    # ChatInvocationContext.DocumentStreamWriter for the streaming methods (EditWorkingDocument
-    # + AppendSection) and ChatInvocationContext.AnalysisId for the persistence target
-    # (WriteBackToWorkingDocument). Closes Q9 chat-tool migration at 10/10.
-    "WORKING-DOC-EDIT"                 = "$RepoRoot/infra/dataverse/sprk_analysistool-working-doc-edit-row.json"
-    "WORKING-DOC-APPEND-SECTION"       = "$RepoRoot/infra/dataverse/sprk_analysistool-working-doc-append-section-row.json"
-    "WORKING-DOC-WRITE-BACK"           = "$RepoRoot/infra/dataverse/sprk_analysistool-working-doc-write-back-row.json"
-    # R6 Pillar 3 / Q11 / task 021 — InvokePlaybookHandler: single row exposing the generic
-    # invoke_playbook(playbookId, parameters) chat tool. Dispatches to ANY tenant-accessible
-    # playbook via the IInvokePlaybookAi facade (task 020). Replaces the specialized
-    # InvokeSummarizePlaybookTool + InvokeInsightsQueryTool bridges (deleted in Wave 10 /
-    # task 023). sprk_requiredcapability = null (intentional — generic dispatcher available
-    # to all playbooks; per-playbook authorization enforced inside the facade + the handler's
-    # tenant-visibility check via IPlaybookService). sprk_availableincontexts = Chat (100000001).
-    "INVOKE-PLAYBOOK"                  = "$RepoRoot/infra/dataverse/sprk_analysistool-invoke-playbook-row.json"
+    # NOTE (ai-architecture-redesign-r1 task 044 / FR-P3-05): the Wave-9 working-document
+    # rows (edit / append-section / write-back) and the R6 generic playbook-dispatch row
+    # were RETIRED with their handlers (audit F-1 closure) — do not re-seed.
     # R6 Pillar 6b / D-C-05 / task 054 — SendWorkspaceArtifactHandler: single row exposing the
     # send_workspace_artifact(widgetType, title, widgetData, matterId?) chat tool. Constructs
     # a WorkspaceTab + persists via IWorkspaceStateService.UpsertTabAsync (Pillar 6a infra
@@ -222,6 +213,45 @@ $RowFiles = @{
     # default user affordance available in every chat session). sprk_availableincontexts =
     # Chat (100000001) — playbook nodes do not read from chat-session workspace tabs.
     "GET-WORKSPACE-TAB-CONTENT"        = "$RepoRoot/infra/dataverse/sprk_analysistool-get-workspace-tab-content-row.json"
+    # spaarke-ai-architecture-redesign-r1 / task 008 / FR-P0-07 (read half) — the three
+    # dataverse.* READ tools with GA-Dataverse-MCP-frozen contracts (ADR-039):
+    #   dataverse.describe    → DataverseDescribeHandler    (describe(path, scope?))
+    #   dataverse.read_query  → DataverseReadQueryHandler   (read_query(querytext))
+    #   dataverse.search_data → DataverseSearchDataHandler  (search_data(query, scope?))
+    # All three: sprk_namespace='dataverse', sprk_sideeffectclass=Read (100000000),
+    # sprk_permissionscope='dataverse-user-context', executed EXCLUSIVELY over the user-OBO
+    # Dataverse Web API via IDataverseUserClient (spec MUST rule; audited by task 012).
+    # Rows carry the task-003 catalog columns (sprk_toolid / sprk_namespace / sprk_outputschema /
+    # sprk_sideeffectclass / sprk_permissionscope / sprk_budgetclass). Task 009 adds the three
+    # WRITE tools (create_record / update_record / delete_record) alongside.
+    "DATAVERSE-DESCRIBE"               = "$RepoRoot/infra/dataverse/sprk_analysistool-dataverse-describe-row.json"
+    "DATAVERSE-READ-QUERY"             = "$RepoRoot/infra/dataverse/sprk_analysistool-dataverse-read-query-row.json"
+    "DATAVERSE-SEARCH-DATA"            = "$RepoRoot/infra/dataverse/sprk_analysistool-dataverse-search-data-row.json"
+    # spaarke-ai-architecture-redesign-r1 / task 009 / FR-P0-07 (write half) — the three
+    # dataverse.* WRITE tools with GA-Dataverse-MCP-frozen contracts (ADR-039):
+    #   dataverse.create_record → DataverseCreateRecordHandler (create_record(tablename, item))
+    #   dataverse.update_record → DataverseUpdateRecordHandler (update_record(tablename, recordId, item))
+    #   dataverse.delete_record → DataverseDeleteRecordHandler (delete_record(tablename, hasUserApproved, recordId))
+    # All three: sprk_namespace='dataverse', sprk_sideeffectclass=Write (100000001) — SIDE-EFFECT
+    # tools gated at P2 by the ONE confirmation gate keyed on this declared class (FR-P2-02,
+    # task 031; NEVER by tool-name list). Executed EXCLUSIVELY over the user-OBO Dataverse Web
+    # API via IDataverseUserClient (spec MUST rule; audited by task 012) — privilege-denied
+    # writes surface the USER's own access error. Land dark at P0; P3 create-task (FR-P3-03)
+    # is the first production consumer.
+    "DATAVERSE-CREATE-RECORD"          = "$RepoRoot/infra/dataverse/sprk_analysistool-dataverse-create-record-row.json"
+    "DATAVERSE-UPDATE-RECORD"          = "$RepoRoot/infra/dataverse/sprk_analysistool-dataverse-update-record-row.json"
+    "DATAVERSE-DELETE-RECORD"          = "$RepoRoot/infra/dataverse/sprk_analysistool-dataverse-delete-record-row.json"
+
+    # spaarke-ai-architecture-redesign-r1 task 036 (FR-P2-07) — AnalysisExecutionHandler
+    # serves 2 rows via the method discriminator in sprk_configuration (rerun / refine):
+    # the typed-handler migration of the last live legacy chat-tool group. Both rows are
+    # capability-gated by sprk_requiredcapability = 'reanalyze' (preserves the legacy gate).
+    # ANALYSIS-RERUN declares sprk_sideeffectclass = Read (100000000) since the 2026-07-06
+    # operator ruling (G-P2 UAT fix wave): explicit re-runs execute ungated — they regenerate
+    # the session's OWN analysis output, never tenant records. ANALYSIS-REFINE is also Read.
+    # Namespaced tool ids per the FR-P0-03 contract: analysis.rerun / analysis.refine.
+    "ANALYSIS-RERUN"                   = "$RepoRoot/infra/dataverse/sprk_analysistool-analysis-rerun-row.json"
+    "ANALYSIS-REFINE"                  = "$RepoRoot/infra/dataverse/sprk_analysistool-analysis-refine-row.json"
 }
 
 # -----------------------------------------------------------------------------
@@ -313,8 +343,9 @@ function Get-PayloadFromRowJson {
     $payload = [ordered]@{}
     foreach ($prop in $obj.PSObject.Properties) {
         if ($prop.Name.StartsWith("_comment")) { continue }
-        # sprk_jsonschema + sprk_configuration are persisted as serialized strings.
-        if ($prop.Name -in @("sprk_jsonschema", "sprk_configuration")) {
+        # sprk_jsonschema + sprk_configuration + sprk_outputschema (task-003 column; carried
+        # by the dataverse.* rows per ADR-039 grounding) are persisted as serialized strings.
+        if ($prop.Name -in @("sprk_jsonschema", "sprk_configuration", "sprk_outputschema")) {
             $payload[$prop.Name] = ($prop.Value | ConvertTo-Json -Depth 50 -Compress)
         }
         else {

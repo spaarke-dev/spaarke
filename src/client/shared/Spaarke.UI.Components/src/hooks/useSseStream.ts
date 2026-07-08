@@ -19,9 +19,11 @@
  * mid-session, and then attached to an SSE stream that consequently 401'd silently
  * (EventSource has no auto-401 retry).
  *
- * NOTE: `authenticatedFetch` cannot be used here because SSE requires streaming the
- * ReadableStream body, which the wrapper function does not expose. The hook
- * replicates the same token-attachment + X-Tenant-Id derivation pattern internally.
+ * NOTE: the `useSseStream` HOOK always uses the token-getter mode (fresh token +
+ * X-Tenant-Id derivation per stream open). The underlying `readSseStream`
+ * primitive ALSO accepts a caller-supplied `fetchImpl` (typically
+ * `authenticatedFetch` from `@spaarke/auth`) for consumers whose auth is owned
+ * by a wrapper fetch — see the task 045 extension note on {@link readSseStream}.
  *
  * CONSOLIDATION NOTE (AIPU2-082):
  * Two prior implementations were merged here:
@@ -51,6 +53,7 @@ import type {
   IUseSseStreamResult,
   ICitationSseItem,
   IPlaybookOptionsPayload,
+  IElicitationModalPayload,
   AccessTokenGetter,
 } from '../components/SprkChat/types';
 
@@ -177,6 +180,180 @@ function extractTenantId(token: string): string | null {
 }
 
 // ─────────────────────────────────────────────────────────────────────────────
+// readSseStream — the canonical non-hook SSE streaming primitive
+// ─────────────────────────────────────────────────────────────────────────────
+
+/**
+ * Options for {@link readSseStream}.
+ */
+export interface ReadSseStreamOptions {
+  /** Fully-constructed streaming endpoint URL (never a raw template literal). */
+  url: string;
+  /**
+   * POST request body. A plain record is `JSON.stringify`'d and sent with
+   * `Content-Type: application/json`; a `FormData` is passed through verbatim
+   * WITHOUT a Content-Type header so the browser sets the multipart boundary
+   * (task 045 / FR-P3-06 — multipart consumers such as the Summarize wizard).
+   */
+  body: Record<string, unknown> | FormData;
+  /**
+   * Fresh access-token getter (Auth v2 / D-AUTH-7). Invoked ONCE per stream
+   * open, immediately before the fetch — never snapshot the token.
+   * Exactly ONE of `getAccessToken` / `fetchImpl` MUST be provided.
+   */
+  getAccessToken?: AccessTokenGetter;
+  /**
+   * Caller-supplied fetch (typically `authenticatedFetch` from `@spaarke/auth`).
+   * When provided, `readSseStream` calls it with method/headers/body/signal and
+   * does NOT attach Authorization / X-Tenant-Id — the wrapper owns auth per
+   * ADR-028. Exactly ONE of `getAccessToken` / `fetchImpl` MUST be provided.
+   * (task 045 / FR-P3-06)
+   */
+  fetchImpl?: (url: string, init: RequestInit) => Promise<Response>;
+  /** Optional AbortSignal for cancellation. AbortError propagates to the caller. */
+  signal?: AbortSignal;
+  /**
+   * Invoked once per raw SSE line (both loop parts and the trailing buffer
+   * remainder). Callers parse with {@link parseSseEvent} / {@link parsePaneEvent}
+   * — never hand-roll a parser.
+   */
+  onLine: (line: string) => void;
+  /**
+   * Optional non-OK response mapper. When provided and the response is not OK,
+   * the returned Error is thrown instead of the default message (lets callers
+   * surface ADR-019 ProblemDetails `errorCode` extensions). When omitted, the
+   * default behavior matches the useSseStream hook (429 friendly message;
+   * otherwise status + body text).
+   */
+  mapHttpError?: (response: Response) => Promise<Error>;
+}
+
+/**
+ * Canonical SSE read loop — POST fetch + ReadableStream + `data:` line delivery.
+ *
+ * ai-architecture-redesign-r1 task 023 (FR-P1-04): extracted from the
+ * useSseStream hook body so non-hook consumers (the `dispatchConsumer` helper)
+ * share the ONE SSE consumption path client-wide instead of hand-rolling
+ * fetch/reader/buffer loops (as the retired per-capability dispatch modules
+ * did). The `useSseStream` hook delegates to this function — there is exactly
+ * one parse loop in the client codebase.
+ *
+ * Token attachment + X-Tenant-Id derivation are identical to the pre-extraction
+ * hook behavior. Errors (HTTP non-OK, empty body, network) throw; AbortError
+ * propagates so hook callers can treat cancellation as a non-error.
+ *
+ * ai-architecture-redesign-r1 task 045 (FR-P3-06, NFR-08) extension — additive,
+ * backwards-compatible:
+ *   - `body` also accepts `FormData` (multipart pass-through, no Content-Type
+ *     header so the browser sets the boundary).
+ *   - `getAccessToken` is now optional; the new `fetchImpl` option lets callers
+ *     whose auth is owned by an `authenticatedFetch` wrapper (ADR-028) open the
+ *     stream without this function attaching Authorization / X-Tenant-Id.
+ *     Exactly one of the two MUST be provided.
+ * These extensions let every former hand-rolled SSE loop in this package
+ * (SprkChat plan-approve/editor-refine, useAiSummary, DocumentEmailWizard,
+ * SummarizeFilesWizard summarizeService, CreateMatterWizard matterService)
+ * consolidate onto this ONE reader loop.
+ */
+export async function readSseStream(options: ReadSseStreamOptions): Promise<void> {
+  const { url, body, getAccessToken, fetchImpl, signal, onLine, mapHttpError } = options;
+
+  // task 045: exactly ONE auth mode per stream open.
+  if (!getAccessToken && !fetchImpl) {
+    throw new Error('readSseStream: exactly one of getAccessToken or fetchImpl must be provided (got neither)');
+  }
+  if (getAccessToken && fetchImpl) {
+    throw new Error('readSseStream: exactly one of getAccessToken or fetchImpl must be provided (got both)');
+  }
+
+  const isFormData = typeof FormData !== 'undefined' && body instanceof FormData;
+  const requestBody: BodyInit = isFormData ? (body as FormData) : JSON.stringify(body);
+  // FormData: NO Content-Type header — the browser sets the multipart boundary.
+  const contentHeaders: Record<string, string> = isFormData ? {} : { 'Content-Type': 'application/json' };
+
+  let response: Response;
+  if (fetchImpl) {
+    // ADR-028: the caller's authenticatedFetch owns Authorization / X-Tenant-Id.
+    response = await fetchImpl(url, {
+      method: 'POST',
+      headers: contentHeaders,
+      body: requestBody,
+      signal,
+    });
+  } else {
+    // Auth v2 (D-AUTH-7): re-acquire a fresh token for THIS stream open.
+    const token = await (getAccessToken as AccessTokenGetter)();
+    const tenantId = extractTenantId(token);
+    response = await fetch(url, {
+      method: 'POST',
+      headers: {
+        ...contentHeaders,
+        Authorization: `Bearer ${token}`,
+        ...(tenantId ? { 'X-Tenant-Id': tenantId } : {}),
+      },
+      body: requestBody,
+      signal,
+    });
+  }
+
+  if (!response.ok) {
+    if (mapHttpError) {
+      throw await mapHttpError(response);
+    }
+    const errorText = await response.text();
+    // ADR-016: Show user-friendly message for rate limiting (429)
+    if (response.status === 429) {
+      throw new Error('You are sending messages too quickly. Please wait a moment and try again.');
+    }
+    throw new Error(`Chat request failed (${response.status}): ${errorText}`);
+  }
+
+  if (!response.body) {
+    throw new Error('Response body is empty');
+  }
+
+  const reader = response.body.getReader();
+  const decoder = new TextDecoder();
+  let buffer = '';
+
+  try {
+    // Main read loop
+    while (true) {
+      const { done, value } = await reader.read();
+      if (done) {
+        break;
+      }
+
+      buffer += decoder.decode(value, { stream: true });
+
+      // SSE events are separated by double newlines
+      const parts = buffer.split('\n\n');
+      // Keep the last incomplete part in the buffer
+      buffer = parts.pop() || '';
+
+      for (const part of parts) {
+        for (const line of part.split('\n')) {
+          onLine(line);
+        }
+      }
+    }
+
+    // Process any remaining buffer content
+    if (buffer.trim()) {
+      for (const line of buffer.split('\n')) {
+        onLine(line);
+      }
+    }
+  } finally {
+    try {
+      reader.releaseLock();
+    } catch {
+      // Cleanup-tail; mocked/polyfilled readers may not expose releaseLock.
+    }
+  }
+}
+
+// ─────────────────────────────────────────────────────────────────────────────
 // SSE event processing dispatcher
 // Shared between main read loop and remainder-buffer processing.
 // Using a dispatcher eliminates the copy-paste duplication that existed in the
@@ -209,6 +386,13 @@ interface SseEventHandlers {
    * typed enumerated fields ONLY.
    */
   onContextEvent: (data: IChatSseEventData) => void;
+  /**
+   * FR-P2-03 (spaarke-ai-architecture-redesign-r1 task 032) — receives the
+   * `elicitation_modal` payload (capture_mode: modal wizard escape). Verbatim
+   * forward; the host owns the wizard + `dispatchConsumer(bindingId, {slots})`
+   * completion.
+   */
+  onElicitationModal: (payload: IElicitationModalPayload) => void;
   onDone: () => void;
   onError: (message: string) => void;
 }
@@ -278,7 +462,7 @@ function processEvent(event: IChatSseEvent, handlers: SseEventHandlers): void {
     }
   } else if (event.type === 'playbook_options') {
     // chat-routing-redesign-r1 task 117a/117b — FR-49 / 50 / 51.
-    // Locked payload shape (see PlaybookOptionsSseEvent.cs):
+    // Locked payload shape (server emitter retired in task 035 / FR-P2-06):
     //   { candidates: [...], libraryModalCta: true, sessionAttachmentIds: [...],
     //     rerankInvoked: bool, rerankReason?: string }
     // Forwarded verbatim to the consumer; tier-1 safe by BFF construction.
@@ -290,6 +474,27 @@ function processEvent(event: IChatSseEvent, handlers: SseEventHandlers): void {
       rerankInvoked: typeof data.rerankInvoked === 'boolean' ? data.rerankInvoked : false,
       rerankReason: data.rerankReason ?? null,
     });
+  } else if (event.type === 'elicitation_modal') {
+    // FR-P2-03 task 032 — capture_mode: modal wizard routing. Payload shape locked
+    // by ChatSseElicitationModalData (camelCase): { gateId, bindingId, consumerType,
+    // title?, missingFields: [{name, prompt?, type?}], providedArgs? }. Tolerant
+    // parse: an event without the two routing ids is dropped (never throws).
+    const data = (event.data ?? {}) as unknown as Partial<IElicitationModalPayload>;
+    if (
+      typeof data.gateId === 'string' &&
+      data.gateId.length > 0 &&
+      typeof data.bindingId === 'string' &&
+      data.bindingId.length > 0
+    ) {
+      handlers.onElicitationModal({
+        gateId: data.gateId,
+        bindingId: data.bindingId,
+        consumerType: typeof data.consumerType === 'string' ? data.consumerType : '',
+        title: data.title ?? null,
+        missingFields: Array.isArray(data.missingFields) ? data.missingFields : [],
+        providedArgs: data.providedArgs ?? null,
+      });
+    }
   } else if (event.type === 'context_event') {
     // R6 task 095 — trace bridge. Forward the raw payload to the host so it
     // can dispatch on the `context` PaneEventBus channel. Tier-1 safe by BFF
@@ -364,7 +569,7 @@ export function useSseStream(): IUseSseStreamResult {
   // Handles output_pane / source_pane / source_highlight events from the BFF stream.
   // Uses a ref (not state) for zero-serialization delivery — pane events may carry
   // large payloads (widget data) and must not trigger SprkChat re-renders.
-  // OutputPanel and SourcePanel subscribe via StandaloneAiContext to receive these.
+  // OutputPanel and SourcePanel subscribe via the host AI session context to receive these.
   const onPaneEventRef = useRef<((event: IAiPaneEvent) => void) | null>(null);
 
   // chat-routing-redesign-r1 task 117a/117b — callback ref for `playbook_options`
@@ -378,6 +583,10 @@ export function useSseStream(): IUseSseStreamResult {
   // Same synchronous callback-ref pattern as setOnPlaybookOptions. SprkChat
   // wires this so the host can forward to ExecutionTraceWidget via the bus.
   const onContextEventRef = useRef<((data: IChatSseEventData) => void) | null>(null);
+
+  // FR-P2-03 task 032 — callback ref for `elicitation_modal` SSE events
+  // (capture_mode: modal wizard escape). Same callback-ref pattern.
+  const onElicitationModalRef = useRef<((payload: IElicitationModalPayload) => void) | null>(null);
 
   const abortControllerRef = useRef<AbortController | null>(null);
 
@@ -406,7 +615,7 @@ export function useSseStream(): IUseSseStreamResult {
   }, []);
 
   // Task 041: Register/unregister the AI pane-routing SSE event callback.
-  // ChatPanel.tsx wires this to the StandaloneAiContext onPaneEvent callback so
+  // ChatPanel.tsx wires this to the host AI session context onPaneEvent callback so
   // OutputPanel and SourcePanel can react to output_pane / source_pane / source_highlight events.
   const setOnPaneEvent = useCallback((handler: ((event: IAiPaneEvent) => void) | null) => {
     onPaneEventRef.current = handler;
@@ -425,6 +634,11 @@ export function useSseStream(): IUseSseStreamResult {
   // context channel where ExecutionTraceWidget renders it.
   const setOnContextEvent = useCallback((handler: ((data: IChatSseEventData) => void) | null) => {
     onContextEventRef.current = handler;
+  }, []);
+
+  // FR-P2-03 task 032 — register/unregister the elicitation_modal callback.
+  const setOnElicitationModal = useCallback((handler: ((payload: IElicitationModalPayload) => void) | null) => {
+    onElicitationModalRef.current = handler;
   }, []);
 
   const startStream = useCallback(
@@ -451,38 +665,6 @@ export function useSseStream(): IUseSseStreamResult {
 
       const fetchStream = async () => {
         try {
-          // Auth v2 (D-AUTH-7): re-acquire a fresh token for THIS stream open.
-          // Never snapshot the token; never reuse across stream opens.
-          const token = await getAccessToken();
-          const tenantId = extractTenantId(token);
-
-          const response = await fetch(url, {
-            method: 'POST',
-            headers: {
-              'Content-Type': 'application/json',
-              Authorization: `Bearer ${token}`,
-              ...(tenantId ? { 'X-Tenant-Id': tenantId } : {}),
-            },
-            body: JSON.stringify(body),
-            signal: controller.signal,
-          });
-
-          if (!response.ok) {
-            const errorText = await response.text();
-            // ADR-016: Show user-friendly message for rate limiting (429)
-            if (response.status === 429) {
-              throw new Error('You are sending messages too quickly. Please wait a moment and try again.');
-            }
-            throw new Error(`Chat request failed (${response.status}): ${errorText}`);
-          }
-
-          if (!response.body) {
-            throw new Error('Response body is empty');
-          }
-
-          const reader = response.body.getReader();
-          const decoder = new TextDecoder();
-          let buffer = '';
           let accumulated = '';
 
           // Build event handlers that capture accumulated content via closure.
@@ -528,6 +710,20 @@ export function useSseStream(): IUseSseStreamResult {
                 handler(data);
               }
             },
+            onElicitationModal: (payload: IElicitationModalPayload) => {
+              // FR-P2-03 task 032 — forward to host via the registered callback ref.
+              // No host handler = drop with a warning (the assistant's chat notice
+              // already told the user; conversational elicitation resumes on reply).
+              const handler = onElicitationModalRef.current;
+              if (handler) {
+                handler(payload);
+              } else {
+                console.warn(
+                  '[useSseStream] elicitation_modal received but no onElicitationModal handler registered — gateId:',
+                  payload.gateId
+                );
+              }
+            },
             onDone: () => {
               setIsDone(true);
               setIsStreaming(false);
@@ -539,62 +735,32 @@ export function useSseStream(): IUseSseStreamResult {
             },
           };
 
-          // Main read loop
-          while (true) {
-            const { done, value } = await reader.read();
-            if (done) {
-              break;
-            }
-
-            buffer += decoder.decode(value, { stream: true });
-
-            // SSE events are separated by double newlines
-            const parts = buffer.split('\n\n');
-            // Keep the last incomplete part in the buffer
-            buffer = parts.pop() || '';
-
-            for (const part of parts) {
-              const lines = part.split('\n');
-              for (const line of lines) {
-                // Check for pane-routing events first (output_pane / source_pane / source_highlight).
-                // These use `event` as discriminator rather than `type`, so parseSseEvent returns null.
-                const paneEvent = parsePaneEvent(line);
-                if (paneEvent) {
-                  const paneHandler = onPaneEventRef.current;
-                  if (paneHandler) {
-                    paneHandler(paneEvent);
-                  }
-                  continue;
-                }
-
-                const event = parseSseEvent(line);
-                if (event) {
-                  processEvent(event, handlers);
-                }
-              }
-            }
-          }
-
-          // Process any remaining buffer content
-          if (buffer.trim()) {
-            const lines = buffer.split('\n');
-            for (const line of lines) {
-              // Check for pane-routing events in the trailing buffer too.
+          // Canonical read loop (task 023 / FR-P1-04: shared with dispatchConsumer
+          // via readSseStream — exactly ONE SSE parse path client-wide). Per-line
+          // dispatch order preserved: pane-routing events first (they use `event`
+          // as discriminator, so parseSseEvent returns null for them), then chat
+          // events through processEvent.
+          await readSseStream({
+            url,
+            body,
+            getAccessToken,
+            signal: controller.signal,
+            onLine: (line: string) => {
               const paneEvent = parsePaneEvent(line);
               if (paneEvent) {
                 const paneHandler = onPaneEventRef.current;
                 if (paneHandler) {
                   paneHandler(paneEvent);
                 }
-                continue;
+                return;
               }
 
               const event = parseSseEvent(line);
               if (event) {
                 processEvent(event, handlers);
               }
-            }
-          }
+            },
+          });
 
           setIsStreaming(false);
           setIsTyping(false);
@@ -639,5 +805,6 @@ export function useSseStream(): IUseSseStreamResult {
     setOnPaneEvent,
     setOnPlaybookOptions,
     setOnContextEvent,
+    setOnElicitationModal,
   };
 }

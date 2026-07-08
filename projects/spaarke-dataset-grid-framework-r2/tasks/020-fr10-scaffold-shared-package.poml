@@ -1,0 +1,115 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="spaarke-dataset-grid-framework-r2">
+  <metadata>
+    <title>FR-10: Scaffold new shared package for LegalWorkspace section registry</title>
+    <phase>3: Shared Package Extraction + Documentation</phase>
+    <status>completed</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>016</dependencies>
+    <blocks>021,024</blocks>
+    <tags>frontend, typescript, shared-library, package-scaffolding, spaarkeai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Introduces NEW shared package (new component per CLAUDE.md §11); modifies build config</rigor-reason>
+    <parallel-group>Wave 9</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Scaffold a new shared package under `src/client/shared/` for the LegalWorkspace section registry. Mirror the structure of `Spaarke.DailyBriefing.Components` (closest structural analogue). Create package.json (name TBD — recommend `@spaarke/legal-workspace`), tsconfig.json, src/index.ts, and a build step that publishes types. Do NOT migrate content yet — task 021 handles migration.
+  </prompt>
+
+  <role>
+    SPAARKE frontend framework developer scaffolding a new npm package under monorepo conventions.
+  </role>
+
+  <goal>
+    New shared package exists under `src/client/shared/{PackageName}/`. Independent build succeeds. Types emit correctly. Package is discoverable by npm workspace / monorepo tooling. No content migrated yet (task 021).
+  </goal>
+
+  <context>
+    <background>
+      SpaarkeAi's `vite.config.ts` aliases `@spaarke/legal-workspace` to `../LegalWorkspace/src` — a source alias, not an npm dependency. This causes the dual-deploy trap: LegalWorkspace deploys don't reach SpaarkeAi unless SpaarkeAi is also rebuilt. FR-10 (adopted 2026-07-02 per owner clarification) eliminates the trap by extracting the section registry into a proper shared package.
+    </background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/</file>
+      <file>src/client/shared/{new-package}/</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">New shared library follows SSOT rule.</constraint>
+    <constraint source="ADR-022">Package stays React-16-safe (may need React-16-compat if section registry is consumed by any PCF surface — verify during task 021 migration).</constraint>
+    <constraint source="CLAUDE.md-§11">Component Justification — see justification block below.</constraint>
+    <constraint source="project">Package name: recommend `@spaarke/legal-workspace`; final name confirmed during scaffolding per Spaarke conventions.</constraint>
+    <constraint source="project">Package structure mirrors `Spaarke.DailyBriefing.Components` (closest structural analogue).</constraint>
+  </constraints>
+
+  <justification>
+    <existing>`src/client/shared/Spaarke.DailyBriefing.Components/` is closest structural analogue (domain-specific section registry + widgets). No overlap in scope — DailyBriefing is briefing-specific; new package is LegalWorkspace-scope.</existing>
+    <extension>Cannot extend `Spaarke.DailyBriefing.Components` — different domain (daily briefing vs LegalWorkspace section registry). Could theoretically inline the section registry in `Spaarke.UI.Components` but that violates ADR-012 SSOT: LegalWorkspace-specific code shouldn't live in the shared UI-components library.</extension>
+    <cost-of-doing-nothing>The SpaarkeAi ← LegalWorkspace source-alias trap continues. Every future section-registration edit requires dual-rebuild coordination. New team members debug the trap for 30+ min per encounter (documented in design.md § Issue 12 — actual 2026-07-01 incident). Concrete failure = onboarding friction + deploy drift.</cost-of-doing-nothing>
+  </justification>
+
+  <knowledge>
+    <files>
+      <file>projects/spaarke-dataset-grid-framework-r2/CLAUDE.md</file>
+      <file>projects/spaarke-dataset-grid-framework-r2/spec.md</file>
+      <file>.claude/adr/ADR-012-shared-components.md</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/package.json</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/tsconfig.json</file>
+      <file>src/client/shared/Spaarke.DailyBriefing.Components/src/index.ts</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read `Spaarke.DailyBriefing.Components` package structure — package.json, tsconfig.json, src/ layout.</step>
+    <step order="2">Decide final package name. Recommend `@spaarke/legal-workspace`. Confirm with existing naming conventions (grep other `Spaarke.*` packages). Folder: `src/client/shared/Spaarke.LegalWorkspace/` (recommend).</step>
+    <step order="3">Create folder structure: `src/client/shared/Spaarke.LegalWorkspace/{package.json, tsconfig.json, src/index.ts, .storybook/ (if analogue has one)}`.</step>
+    <step order="4">Populate `package.json` — copy DailyBriefing's shape, rename to `@spaarke/legal-workspace`, update description, adjust dependencies (React + Fluent v9; may add dependency on `@spaarke/ui-components`).</step>
+    <step order="5">Populate `tsconfig.json` — mirror DailyBriefing's compile options + paths.</step>
+    <step order="6">Empty `src/index.ts` with a comment `// Populated by task 021 (FR-10 section registry migration)`.</step>
+    <step order="7">Run `npm run build` in the new package — types emit; empty index.ts builds successfully.</step>
+    <step order="8">Update TASK-INDEX.md: 020 → ✅.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build</tool>
+    <tool name="terminal">Create files</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.LegalWorkspace/package.json (new)</output>
+    <output type="code">src/client/shared/Spaarke.LegalWorkspace/tsconfig.json (new)</output>
+    <output type="code">src/client/shared/Spaarke.LegalWorkspace/src/index.ts (new, empty)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Package folder exists at `src/client/shared/Spaarke.LegalWorkspace/`.</criterion>
+    <criterion testable="true">package.json has correct name (`@spaarke/legal-workspace`), types field, main field.</criterion>
+    <criterion testable="true">tsconfig.json compiles successfully.</criterion>
+    <criterion testable="true">`npm run build` in the new package emits types to expected `dist/` (or configured) location.</criterion>
+    <criterion testable="true">Root monorepo build (if npm workspaces) recognizes the new package.</criterion>
+  </acceptance-criteria>
+
+  <notes>
+    - Only SCAFFOLDING — no content migrated yet. Task 021 does the migration.
+    - Depending on Spaarke conventions, the folder name may be `Spaarke.LegalWorkspace` or `Spaarke.LegalWorkspace.Components` — check DailyBriefing/Events/SmartTodo folder conventions and match.
+    - If workspace linking (npm workspaces or pnpm) requires root package.json update, do it here.
+  </notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge. FULL rigor. Step 9.5 quality gates. CLAUDE.md §11 justification block validated.</protocol>
+  </execution>
+
+  <completion-notes date="2026-07-02">
+    - Package scaffolded at `src/client/shared/Spaarke.LegalWorkspace/` with npm name `@spaarke/legal-workspace` (matches SpaarkeAi's existing alias — zero consumer rename).
+    - Structure mirrors `Spaarke.DailyBriefing.Components` (package.json + tsconfig.json + src/index.ts).
+    - `src/index.ts` empty with header comment referencing task 021 (populates re-exports).
+    - Build verified: `npm install --legacy-peer-deps --no-audit --no-fund` succeeded (97 packages), `npm run build` (tsc --noEmit) exit 0.
+    - Strategy decision documented in `projects/spaarke-dataset-grid-framework-r2/notes/fr10-migration-strategy.md`: **RE-EXPORT** chosen over MOVE (smaller blast radius, preserves optionality, matches R2 owner clarification).
+    - No root package.json changes needed (repo has no npm workspaces — packages are independent).
+    - Quality gates: adr-check ✅ clean (ADR-012, ADR-021, ADR-022, ADR-028 all compliant); code-review ✅ 0 critical, 0 warnings, 2 advisory suggestions; §11 justification block concrete.
+    - Handoff: task 021 should read `notes/fr10-migration-strategy.md` before populating `src/index.ts`. Task 022/024 should exclude `Spaarke.LegalWorkspace` from `scripts/Build-AllClientComponents.ps1` `$SharedLibs` (matching DailyBriefing precedent — source-only lib with `@spaarke/*` peerDeps + `tsc --noEmit` can't standalone-typecheck).
+  </completion-notes>
+</task>

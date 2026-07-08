@@ -49,8 +49,9 @@
  *           task 017 widget contract.
  *       (b) `workspace.streaming_started` carries `streamId === correlationId`
  *           to flip the mounted widget's reducer from `idle` → `streaming`.
- *           Subsequent `field_delta` + `streaming_complete` events come
- *           from the BFF SSE consumer (task 020 chat-pane orchestration).
+ *           Subsequent `section_*` + `streaming_complete` events come from
+ *           the ONE dispatch helper's SSE bridge (`dispatchConsumer`,
+ *           section-keyed per amended ADR-037 — task 046 cutover).
  *   - The dispatch is encapsulated in a local `useSummarizeOnly(fileId,
  *     sessionId, fileName)` hook so both the button AND the existing
  *     `DocumentRowMenu` `aiSummary` action route through the SAME code
@@ -671,7 +672,7 @@ export function dispatchSummarizeOnly(
  *         widget receives `widgetData: { mode: 'streaming', schema:
  *         SUMMARIZE_SCHEMA, correlationId, title: "Summary: <fileName>",
  *         sessionId, fileIds: [fileId] }` so its subscriber can correlate
- *         incoming `field_delta` events.
+ *         incoming `section_*` events (task 046 cutover — section-keyed).
  *     (b) `workspace.streaming_started` carrying `streamId === correlationId`
  *         to flip the mounted widget's reducer phase to `streaming`.
  *

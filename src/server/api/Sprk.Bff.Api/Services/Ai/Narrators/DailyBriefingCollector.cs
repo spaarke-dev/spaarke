@@ -77,14 +77,24 @@ internal sealed record BriefingItem
 /// appNotification entirely. 6-channel coverage per operator spec (wave12 §2.1).
 /// </summary>
 /// <remarks>
+/// <para>
 /// Unsealed (R7 Wave 12 post-T135 CI fix 2026-06-30 — PR #520) so
 /// <see cref="NullDailyBriefingCollector"/> can subclass it for the compound-OFF kill-switch
 /// path. The /api/ai/daily-briefing/render endpoint is mapped unconditionally; without a
 /// Null peer registered when Analysis:Enabled=false || DocumentIntelligence:Enabled=false,
 /// minimal-API parameter inference fails at host startup. Mirrors
-/// <see cref="Chat.NullSessionSummarizeOrchestrator"/> + ADR-032 §F.1.
+/// <see cref="Chat.NullSessionDispatchOrchestrator"/> + ADR-032 §F.1.
+/// </para>
+/// <para>
+/// FR-P0-06 (spaarke-ai-architecture-redesign-r1 task 007): first <see cref="ICodedWorkflow"/>
+/// instance (alongside <see cref="DailyBriefingNarrator"/>) — resolvable by class reference
+/// (<c>"DailyBriefingCollector"</c>) as a <c>coded</c>-kind Action row's
+/// <c>sprk_workflowclass</c> names it. The retrofit is interface adoption only:
+/// <see cref="ExecuteAsync"/> delegates to the pre-existing <see cref="CollectAsync"/>;
+/// existing callers and behavior are unchanged.
+/// </para>
 /// </remarks>
-public class DailyBriefingCollector
+public class DailyBriefingCollector : ICodedWorkflow
 {
     // sprk_event type GUIDs (consistent with deployed notification playbooks).
     // Source of truth: sprk_eventtype_ref records in spaarkedev1.
@@ -153,6 +163,36 @@ public class DailyBriefingCollector
         _entityService = null!;
         _membershipResolver = null!;
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+    }
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// FR-P0-06: stable class reference an Action row's <c>sprk_workflowclass</c> carries.
+    /// Inherited by <see cref="NullDailyBriefingCollector"/> — the Null peer is the same
+    /// workflow identity on the compound-OFF path (ADR-032).
+    /// </remarks>
+    public string WorkflowClassRef => nameof(DailyBriefingCollector);
+
+    /// <inheritdoc />
+    /// <remarks>
+    /// FR-P0-06 convention entry point: requires <see cref="CodedWorkflowContext.UserId"/>
+    /// (the collector queries Dataverse scoped to the acting user) and delegates to
+    /// <see cref="CollectAsync"/> (the virtual method — so the
+    /// <see cref="NullDailyBriefingCollector"/> kill-switch override flows through class-ref
+    /// invocation unchanged). No behavior change to the existing path.
+    /// </remarks>
+    public async Task<object?> ExecuteAsync(CodedWorkflowContext context, CancellationToken cancellationToken)
+    {
+        ArgumentNullException.ThrowIfNull(context);
+
+        if (context.UserId is not { } userId || userId == Guid.Empty)
+        {
+            throw new ArgumentException(
+                "DailyBriefingCollector: CodedWorkflowContext.UserId (acting systemuserid) is required — the collector queries Dataverse on the user's behalf.",
+                nameof(context));
+        }
+
+        return await CollectAsync(userId, cancellationToken).ConfigureAwait(false);
     }
 
     /// <summary>

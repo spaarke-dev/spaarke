@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="032" project="spaarke-ai-architecture-redesign-r1">
+  <metadata>
+    <title>Loop-native elicitation — clarifying turns, capture_mode modal escape, Gate ledger markers</title>
+    <phase>Phase P2: Text-Path Hard Cutover</phase>
+    <status>not-started</status>
+    <estimated-hours>8</estimated-hours>
+    <tags>bff-api, loop, elicitation</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <parallel-group>W-P2-B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>030, 031</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement FR-P2-03 (ratified OQ-3: loop-native elicitation with modal escape). When a capability invocation is missing required args (per the Binding's sprk_inputschema), the loop produces a clarifying turn instead of failing or guessing. When the Binding declares capture_mode: modal, elicitation routes to the wizard surface instead of conversational Q&amp;A. In-flight invocations are tracked by Gate markers in the session ledger (ADR-040) so elicitation survives turns. Mid-elicitation user utterances parse as ANSWERS to the pending elicitation unless they are a hard-slash command or an explicit restart — the canonical walkthrough steps 10-12 semantics must be test-proven.
+  </prompt>
+
+  <role>
+    Senior .NET developer expert in the SprkChatAgent loop, multi-turn conversational state, and the Spaarke wizard/capture surfaces.
+  </role>
+
+  <goal>
+    Missing-required-args invocations yield a clarifying turn; capture_mode modal routes to the wizard surface; Gate ledger markers track in-flight invocations across turns; mid-elicitation utterances resolve as answers (except hard-slash/restart) — all test-proven against walkthrough steps 10-12.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-architecture-redesign-r1/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-architecture-redesign-r1/plan.md</file>
+    <file purpose="project-context">projects/spaarke-ai-architecture-redesign-r1/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md</file>
+    <file purpose="loop-contract">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgent.cs (as delivered by task 030)</file>
+    <file purpose="pending-store">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PendingPlanManager.cs (as generalized by task 031)</file>
+    <file purpose="canonical-walkthrough">docs/architecture/SPAARKE-AI-ARCHITECTURE-AND-COMPONENT-DESIGN.md (walkthrough steps 10-12)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-039">ONE dispatch protocol — elicitation is a state of the loop, not a new dispatcher. MUST NOT add a second intent-detection mechanism anywhere; answer-vs-command disambiguation is deterministic (hard-slash/restart escape only). MUST NOT gate by tool-name lists.</constraint>
+    <constraint source="ADR-040">Gate markers for in-flight invocations are written to the ledger BEFORE the clarifying turn renders; elicitation state is addressable ledger state, not loose memory.</constraint>
+    <constraint source="spec-MUST">Grounded outputs — clarifying turns reference the Binding's declared input schema, never invented fields.</constraint>
+    <constraint source="NFR-08">Hard cutover doctrine: no compat shims for legacy clarification flows; anything superseded here is deleted grep-zero with SHOWN output.</constraint>
+    <constraint source="ADR-029">BFF-touching task: publish-size + diff reported per ADR-029.</constraint>
+    <constraint source="NFR-02">Eval suite is a merge gate; add elicitation eval cases (missing-args, modal escape, mid-elicitation answer).</constraint>
+    <constraint source="NFR-09">Elicitation turns count within the per-turn tool budget; budget telemetry per ADR-016.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff-api, elicitation, multi-turn-state, session-ledger, wizard-surface</topic>
+    <files>
+      <file>docs/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>docs/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/OVERLAY-MATRIX.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-MIGRATION-MAP.md</file>
+    </files>
+    <patterns>
+      <pattern name="Loop contract" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgent.cs">
+        Task 030's agent-turn loop contract — elicitation extends the loop's turn semantics; do not fork the loop.
+      </pattern>
+      <pattern name="Unified pending store" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PendingPlanManager.cs">
+        Task 031's generalized store — in-flight elicitations use the SAME store/marker machinery as confirmation gates; do not build a parallel elicitation store.
+      </pattern>
+      <pattern name="Tool handler framework" location="src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/">
+        Input schemas come from catalog rows (sprk_inputschema, sprk_capturemode) — read declarations, never hardcode per-tool arg lists.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Ratified decision OQ-3: elicitation is loop-native with a modal escape hatch (capture_mode: modal routes to the wizard). This is what lets the G-P2 "clarify-then-do" outcome work and what the P3 matter pre-fill wizard flow builds on.
+    </background>
+    <dependencies>
+      <dependency task="030" status="pending">Agent-turn loop contract (budget/projection/pre-filter/persist) in place.</dependency>
+      <dependency task="031" status="pending">Unified pending store available for in-flight invocation markers.</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0" name="Context check + load knowledge">
+      Verify context below 70%. Load ADR-039/ADR-040, walkthrough steps 10-12 in the canonical doc, OVERLAY-MATRIX.md elicitation rows, and tasks 030/031 outputs.
+    </step>
+    <step order="1" name="Missing-args detection + clarifying turn">
+      Validate invocation args against the Binding's sprk_inputschema; on missing required args, produce a clarifying turn grounded in the declared schema (named fields only).
+    </step>
+    <step order="2" name="Gate ledger markers">
+      Persist Gate markers for in-flight invocations to the ledger (before rendering the clarifying turn) via the unified pending store; markers carry binding id + missing-field identifiers, no content.
+    </step>
+    <step order="3" name="Mid-elicitation answer parsing">
+      Route utterances arriving while an elicitation is in flight as answers to the pending invocation; hard-slash commands and explicit restart break out deterministically (no intent classification).
+    </step>
+    <step order="4" name="capture_mode modal escape">
+      When the Binding declares capture_mode: modal, emit the wizard-surface routing event (SSE contract consumed by the client dispatch helper from task 023) instead of conversational elicitation.
+    </step>
+    <step order="5" name="Tests — walkthrough 10-12 semantics">
+      Test-prove: missing-args clarifying turn, answer resolution mid-elicitation, hard-slash escape, modal routing, marker persistence/expiry. Add eval cases per NFR-02. Full build + tests green, output shown.
+    </step>
+    <step order="6" name="Publish-size verification">
+      dotnet publish -c Release; report compressed size + diff per ADR-029.
+    </step>
+    <step order="7" name="Step 9.5 quality gates">
+      Run code-review + adr-check. Resolve findings per CLAUDE.md section 6.5. Update TASK-INDEX.md and current-task.md.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build, test, publish Sprk.Bff.Api</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ (elicitation turn logic in the loop + marker integration)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Chat/ (elicitation semantics tests)</output>
+    <output type="test">tests/integration/contract/ (elicitation eval cases)</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md (status update)</output>
+    <output type="report">Task notes: publish-size delta</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Missing required args produce a clarifying turn grounded in the Binding's declared input schema (test shown).</criterion>
+    <criterion testable="true">capture_mode: modal routes elicitation to the wizard surface (test shown).</criterion>
+    <criterion testable="true">Ledger Gate markers track in-flight invocations across turns, written before rendering (test shown).</criterion>
+    <criterion testable="true">Mid-elicitation utterances parse as answers unless hard-slash/restart — walkthrough steps 10-12 semantics test-proven.</criterion>
+    <criterion testable="true">Build + tests green; eval cases added; publish-size reported per ADR-029.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

@@ -100,7 +100,7 @@ public static class InsightsIngestModule
         //
         // ADR-030 §F.1 inspection (Asymmetric-Registration Tier 1.5):
         //   - These are UNCONDITIONAL registrations (no `if (flag)` block).
-        //   - Endpoint consumers: none direct — invoked via PlaybookExecutionEngine which is
+        //   - Endpoint consumers: none direct — invoked via the playbook orchestration facade which is
         //     itself unconditionally registered. No metadata-gen risk.
         //   - Pattern P1 (Promote-to-unconditional) per ADR-030 — appropriate for executors
         //     auto-discovered by NodeExecutorRegistry. Choice rationale: zero feature-gated

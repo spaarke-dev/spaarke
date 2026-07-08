@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="spaarke-ai-architecture-redesign-r1">
+  <metadata>
+    <title>Digest compaction generalized to outputs (ChatHistoryManager)</title>
+    <phase>Phase P0: Foundations</phase>
+    <status>not-started</status>
+    <estimated-hours>5</estimated-hours>
+    <tags>bff-api, ledger</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <parallel-group>W-P0-B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>001</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement FR-P0-02: generalize the session digest compaction in `ChatHistoryManager` so the compacted digest covers the new ledger `Outputs` introduced by task 001 — output summaries must survive compaction so session memory ("email that summary to John" at G-P2) can resolve ledger refs after long conversations. Today compaction digests only conversational history; after this task the digest also includes summaries of `SessionOutput` entries, keyed by their `{bindingId}@t{n}` addresses so references remain resolvable post-compaction. Existing compaction behavior and tests must remain green — this is a generalization, not a rewrite.
+  </prompt>
+
+  <role>
+    Senior .NET developer familiar with the Sprk.Bff.Api chat stack, token-budget-driven history compaction, and the ChatSession ledger model from task 001.
+  </role>
+
+  <goal>
+    ChatHistoryManager's digest compaction includes output summaries (addressable by ledger key); all existing compaction tests pass unchanged; a new test proves outputs survive compaction.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-architecture-redesign-r1/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-architecture-redesign-r1/plan.md</file>
+    <file purpose="project-context">projects/spaarke-ai-architecture-redesign-r1/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md</file>
+    <file purpose="target">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatHistoryManager.cs</file>
+    <file purpose="ledger-model">src/server/api/Sprk.Bff.Api/Models/Ai/Chat/ChatSession.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-040">Outputs are addressable; digest summaries must preserve the {bindingId}@t{n} key so post-compaction sessions can still resolve ledger refs.</constraint>
+    <constraint source="ADR-015 / NFR-07">Digest content is Tier 3 session data; no output content leaks into logs.</constraint>
+    <constraint source="ADR-029 / NFR-01">Verify publish-size impact per ADR-029/NFR-01; expect net change reported in task notes.</constraint>
+    <constraint source="project">Existing compaction tests MUST pass unchanged (spec FR-P0-02 acceptance). Extend ChatHistoryManager — do not introduce a second compaction mechanism.</constraint>
+    <constraint source="ADR-038">Integration-heavy testing; no banned mock patterns.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff-api/chat-compaction, session-ledger</topic>
+    <files>
+      <file>docs/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/OVERLAY-MATRIX.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-MIGRATION-MAP.md</file>
+    </files>
+    <patterns>
+      <pattern name="History compaction" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatHistoryManager.cs">
+        The existing digest/compaction implementation to generalize; study its token-budget triggers and digest shape before extending.
+      </pattern>
+      <pattern name="Ledger model (task 001)" location="src/server/api/Sprk.Bff.Api/Models/Ai/Chat/ChatSession.cs">
+        SessionOutput records keyed {bindingId}@t{n} — the entries the digest must now summarize.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      G-P2 session memory ("email that summary to John") depends on ledger refs remaining resolvable after compaction; without output-aware digests, long sessions silently lose their composition carrier.
+    </background>
+    <dependencies>
+      <dependency task="001" status="not-started">ChatSession ledger model (SessionOutput et al.) must exist before compaction can cover it.</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0" name="Context check">
+      Check context usage; handoff if &gt; 70%. Verify task 001 is ✅ in TASK-INDEX.md. Load inputs + knowledge.
+    </step>
+    <step order="1" name="Study existing compaction">
+      Read ChatHistoryManager.cs and its tests; document the digest trigger, shape, and what currently survives compaction.
+    </step>
+    <step order="2" name="Design output-aware digest">
+      Extend the digest to include per-output summaries carrying the {bindingId}@t{n} key, disposition, and a compact content summary. Keep the change additive to the digest shape.
+    </step>
+    <step order="3" name="Implement">
+      Implement in ChatHistoryManager; ensure compaction reads ChatSession.Outputs and emits summaries into the digest.
+    </step>
+    <step order="4" name="Test">
+      Add a test proving a session with ledger outputs compacts to a digest that includes the output summaries with preserved keys. Run ALL existing compaction tests — they must pass unchanged.
+    </step>
+    <step order="5" name="Build + publish-size">
+      dotnet build green; publish-size delta reported per ADR-029.
+    </step>
+    <step order="6" name="Verify + quality gates">
+      Check acceptance criteria. Step 9.5 quality gates: code-review + adr-check. Update TASK-INDEX.md.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build, test, publish-size verification</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatHistoryManager.cs (extended)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (digest-with-outputs test)</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Digest includes output summaries with preserved {bindingId}@t{n} keys (test shown).</criterion>
+    <criterion testable="true">All existing compaction tests pass unchanged.</criterion>
+    <criterion testable="true">dotnet build green; publish-size delta reported per ADR-029.</criterion>
+    <criterion testable="true">Step 9.5 quality gates (code-review + adr-check) passed.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

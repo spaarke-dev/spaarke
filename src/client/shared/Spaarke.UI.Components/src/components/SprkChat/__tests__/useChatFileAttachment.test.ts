@@ -445,7 +445,7 @@ describe('useChatFileAttachment', () => {
 
       expect(result.current.attachments).toHaveLength(1);
       // The derived ChatAttachment carries the same File reference so hosts
-      // (e.g. ConversationPane → executeSummarizeIntent) can POST the bytes
+      // (e.g. ConversationPane's auto-promote effect) can POST the bytes
       // without reconstructing a synthetic File from extracted text.
       expect(result.current.attachments[0].file).toBe(txt);
       // Existing fields are unchanged (back-compat invariant).

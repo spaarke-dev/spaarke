@@ -1,65 +1,105 @@
+using Microsoft.Extensions.Diagnostics.HealthChecks;
+using Microsoft.Xrm.Sdk;
 using Microsoft.Xrm.Sdk.Query;
 using Spaarke.Dataverse;
+using Sprk.Bff.Api.Services.Ai.Chat;
 
 namespace Sprk.Bff.Api.Services.Ai.PublicContracts;
 
 /// <summary>
-/// Startup health check that compares the set of consumer-type strings on
-/// the BFF side (<see cref="ConsumerTypes.All"/>) against the distinct
-/// <c>sprk_consumertype</c> values present in Dataverse, and emits an
-/// operator WARN for any mismatches.
+/// Boot reconciliation gate for the two closed AI catalogs (ADR-039 /
+/// FR-P0-04, <c>spaarke-ai-architecture-redesign-r1</c> task 005). Verifies:
 /// </summary>
 /// <remarks>
-/// <para>
-/// <b>Phase 1R suggestion S-5C</b> (per 2026-06-24 code review of task 028a).
-/// The 2026-06-24 UAT-2 root cause was a Power Apps form typo
-/// (<c>matter-pre-fil</c> instead of <c>matter-pre-fill</c>) that bypassed
-/// the BFF entirely — there's no compile-time check on the Dataverse side
-/// of the contract. This health check catches that class at DEPLOY time, not
-/// at first failed request:
-/// </para>
-/// <list type="bullet">
+/// <list type="number">
 ///   <item>
-///     <b>Dataverse type NOT in <see cref="ConsumerTypes.All"/></b>: probable
-///     admin typo (or a stale row from a removed consumer). Emit WARN.
+///     <b>Constants ↔ Binding rows</b>: every <see cref="ConsumerTypes.All"/>
+///     constant has at least one <c>sprk_playbookconsumer</c> row and every
+///     distinct <c>sprk_consumertype</c> value maps back to a constant.
 ///   </item>
 ///   <item>
-///     <b>BFF constant NOT in Dataverse</b>: missing routing record. Emit WARN.
-///     This is the more important signal for a new environment seed gap.
+///     <b>Tool row ↔ handler bijection</b>: every active
+///     <c>sprk_analysistool</c> row names (via <c>sprk_handlerclass</c>, the
+///     documented routing identity per
+///     <c>Services/Ai/Handlers/HandlerRegistrationConventions.md</c>) exactly
+///     one handler registered in <see cref="IToolHandlerRegistry"/>, and every
+///     registered handler has exactly one tool row. Orphans and duplicates on
+///     either side are drift.
 ///   </item>
 /// </list>
 /// <para>
-/// <b>ADR-015 tier-1 safe</b>: log only the consumer-type STRINGS (already
-/// deterministic identifiers); never log GUID values, user data, or any
-/// content.
+/// <b>History</b>: originally the Phase 1R suggestion S-5C startup WARN
+/// (per the 2026-06-24 code review of chat-routing-redesign-r1 task 028a;
+/// the UAT-2 <c>matter-pre-fil</c> Power Apps typo was the motivating
+/// incident). FR-P0-04 upgrades drift from an operator WARN to a startup
+/// health FAILURE: the class now also implements
+/// <see cref="IHealthCheck"/> and is registered with the health-check
+/// pipeline (see <c>Infrastructure/DI/RoutingModule.cs</c>) so catalog drift
+/// reports <see cref="HealthStatus.Unhealthy"/> at <c>/healthz</c> — a deploy
+/// gate rather than a first-failed-request surprise. This is what lets P1+
+/// phases trust the closed catalogs blindly (ADR-039).
 /// </para>
 /// <para>
-/// <b>Fail-soft</b>: when Dataverse is unavailable at startup (transient
-/// network blip, MI not yet propagated), the check logs a single info-level
-/// message and silently returns. It is NOT a startup blocker — Phase 1R
-/// routing has graceful-degrade on Dataverse errors via task 028a's
-/// catch-and-return-null behaviour.
+/// <b>Gating (never false-fail)</b>:
+/// </para>
+/// <list type="bullet">
+///   <item>Compound AI gate OFF (<c>Analysis:Enabled=false</c> or
+///     <c>DocumentIntelligence:Enabled=false</c>): reconciliation is skipped
+///     and the check reports Healthy-with-description — a disabled subsystem
+///     is not drift.</item>
+///   <item><c>ToolFramework:Enabled=false</c> (or
+///     <see cref="IToolHandlerRegistry"/> not resolvable): only the
+///     tool↔handler dimension is skipped (handlers are not discovered on that
+///     branch, so comparing rows against an empty registry would be a false
+///     failure); the consumer-type dimension still runs.</item>
+///   <item>Transient Dataverse error: <see cref="HealthStatus.Degraded"/>
+///     from the health check and fail-soft (info log) from the hosted
+///     service — availability blips are not catalog drift.</item>
+/// </list>
+/// <para>
+/// <b>ADR-015 tier-1 safe</b>: the drift report contains only deterministic
+/// catalog identifiers (consumer-type strings, tool display names,
+/// namespaced tool ids, handler class names) — never GUIDs, user data, or
+/// content.
 /// </para>
 /// </remarks>
-public sealed class RoutingConsumerTypeHealthCheck : IHostedService
+public sealed class RoutingConsumerTypeHealthCheck : IHostedService, IHealthCheck
 {
-    private const string EntityLogicalName = "sprk_playbookconsumer";
+    private const string BindingEntityLogicalName = "sprk_playbookconsumer";
+    private const string ToolEntityLogicalName = "sprk_analysistool";
+    private const string ActionEntityLogicalName = "sprk_analysisaction";
+
+    private const string AnalysisEnabledKey = "Analysis:Enabled";
+    private const string DocumentIntelligenceEnabledKey = "DocumentIntelligence:Enabled";
+    private const string ToolFrameworkEnabledKey = "ToolFramework:Enabled";
 
     private readonly IServiceProvider _serviceProvider;
+    private readonly IConfiguration _configuration;
     private readonly ILogger<RoutingConsumerTypeHealthCheck> _logger;
 
     public RoutingConsumerTypeHealthCheck(
         IServiceProvider serviceProvider,
+        IConfiguration configuration,
         ILogger<RoutingConsumerTypeHealthCheck> logger)
     {
         _serviceProvider = serviceProvider ?? throw new ArgumentNullException(nameof(serviceProvider));
+        _configuration = configuration ?? throw new ArgumentNullException(nameof(configuration));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
+
+    // ── IHostedService: startup log surface (fail-soft) ────────────────────
 
     public async Task StartAsync(CancellationToken cancellationToken)
     {
         try
         {
+            if (!IsAiSubsystemEnabled())
+            {
+                _logger.LogInformation(
+                    "RoutingConsumerTypeHealthCheck skipped: AI subsystem disabled (Analysis:Enabled=false or DocumentIntelligence:Enabled=false).");
+                return;
+            }
+
             using var scope = _serviceProvider.CreateScope();
             var entityService = scope.ServiceProvider.GetService<IGenericEntityService>();
             if (entityService is null)
@@ -69,56 +109,37 @@ public sealed class RoutingConsumerTypeHealthCheck : IHostedService
                 return;
             }
 
-            var query = new QueryExpression(EntityLogicalName)
-            {
-                ColumnSet = new ColumnSet("sprk_consumertype", "sprk_enabled"),
-                NoLock = true,
-            };
-
-            var result = await entityService
-                .RetrieveMultipleAsync(query, cancellationToken)
+            var report = await ReconcileAsync(scope.ServiceProvider, entityService, cancellationToken)
                 .ConfigureAwait(false);
 
-            if (result?.Entities is null || result.Entities.Count == 0)
+            if (report.HasDrift)
             {
-                _logger.LogWarning(
-                    "RoutingConsumerTypeHealthCheck: sprk_playbookconsumer table is empty. Seed via scripts/dataverse/Seed-PlaybookConsumers.ps1 (FR-1R-07) or via Power Apps.");
-                return;
+                // FR-P0-04: drift is a startup FAILURE (surfaced as Unhealthy at
+                // /healthz/catalog via CheckHealthAsync). The hosted-service run logs
+                // the same report at Error so the drift is visible in startup logs
+                // even before the first health probe. Since the FR-P2-01 cutover
+                // (task 030) the orphan-handler dimension is PART of drift — the
+                // catalog is the ONLY tool projection, so a registered handler
+                // without a sprk_analysistool row is dead code or a missing seed,
+                // never "direct-wired by design".
+                _logger.LogError(
+                    "RoutingConsumerTypeHealthCheck FAILED: {DriftReport}",
+                    report.BuildDriftDescription());
             }
-
-            var dataverseTypes = result.Entities
-                .Select(e => e.GetAttributeValue<string>("sprk_consumertype"))
-                .Where(t => !string.IsNullOrWhiteSpace(t))
-                .Select(t => t!.Trim())
-                .Distinct(StringComparer.OrdinalIgnoreCase)
-                .ToList();
-
-            var bffSet = new HashSet<string>(ConsumerTypes.All, StringComparer.OrdinalIgnoreCase);
-            var dvSet = new HashSet<string>(dataverseTypes, StringComparer.OrdinalIgnoreCase);
-
-            var onlyInDataverse = dvSet.Except(bffSet, StringComparer.OrdinalIgnoreCase).ToList();
-            var onlyInBff = bffSet.Except(dvSet, StringComparer.OrdinalIgnoreCase).ToList();
-
-            if (onlyInDataverse.Count == 0 && onlyInBff.Count == 0)
+            else if (report.HasInvalidSchemas)
+            {
+                // G-P3 UAT round-1 H1: degraded (not drift) — the projection excludes
+                // the offending rows; startup logs the findings loudly so the missing
+                // capability is diagnosable without waiting for a /healthz probe.
+                _logger.LogWarning(
+                    "RoutingConsumerTypeHealthCheck DEGRADED: {InvalidSchemaReport}",
+                    report.BuildInvalidSchemaDescription());
+            }
+            else
             {
                 _logger.LogInformation(
-                    "RoutingConsumerTypeHealthCheck: {ConsumerTypeCount} consumer types match between Dataverse and ConsumerTypes.All. Routing surface healthy.",
-                    dvSet.Count);
-                return;
-            }
-
-            if (onlyInDataverse.Count > 0)
-            {
-                _logger.LogWarning(
-                    "RoutingConsumerTypeHealthCheck: Dataverse has consumer types NOT in ConsumerTypes.All (probable admin typo or stale row): {Types}",
-                    string.Join(", ", onlyInDataverse));
-            }
-
-            if (onlyInBff.Count > 0)
-            {
-                _logger.LogWarning(
-                    "RoutingConsumerTypeHealthCheck: ConsumerTypes.All has types NOT in Dataverse (missing routing record): {Types}",
-                    string.Join(", ", onlyInBff));
+                    "RoutingConsumerTypeHealthCheck: {Summary}",
+                    report.BuildHealthyDescription());
             }
         }
         catch (OperationCanceledException)
@@ -128,14 +149,394 @@ public sealed class RoutingConsumerTypeHealthCheck : IHostedService
         }
         catch (Exception ex)
         {
-            // Fail-soft: never block startup on a transient health check.
+            // Fail-soft: never block startup on a transient reconciliation error.
             // ADR-015: log identifiers + outcome only (the exception is fine —
             // it's a Dataverse / .NET diagnostic, not user content).
             _logger.LogInformation(
                 ex,
-                "RoutingConsumerTypeHealthCheck skipped due to transient error (Dataverse unreachable, MI propagation lag, or similar). Routing continues normally — this is a deploy-time diagnostic, not a runtime dependency.");
+                "RoutingConsumerTypeHealthCheck skipped due to transient error (Dataverse unreachable, MI propagation lag, or similar). The /healthz check reports Degraded until reconciliation can run.");
         }
     }
 
     public Task StopAsync(CancellationToken cancellationToken) => Task.CompletedTask;
+
+    // ── IHealthCheck: the FR-P0-04 boot reconciliation gate ────────────────
+
+    public async Task<HealthCheckResult> CheckHealthAsync(
+        HealthCheckContext context,
+        CancellationToken cancellationToken = default)
+    {
+        if (!IsAiSubsystemEnabled())
+        {
+            return HealthCheckResult.Healthy(
+                "AI subsystem disabled (Analysis:Enabled=false or DocumentIntelligence:Enabled=false) — catalog reconciliation skipped; a disabled subsystem is not drift.");
+        }
+
+        try
+        {
+            using var scope = _serviceProvider.CreateScope();
+            var entityService = scope.ServiceProvider.GetService<IGenericEntityService>();
+            if (entityService is null)
+            {
+                return HealthCheckResult.Healthy(
+                    "IGenericEntityService not registered (test host or feature-flagged-off environment) — catalog reconciliation skipped.");
+            }
+
+            var report = await ReconcileAsync(scope.ServiceProvider, entityService, cancellationToken)
+                .ConfigureAwait(false);
+
+            // FR-P2-01 escalation (task 030; gate-014 deferral resolved): orphan
+            // registered handlers are now full drift → Unhealthy. With the closed
+            // catalog as the ONLY tool projection, "registered but row-less" means
+            // dead code or a missing seed — see HandlersWithoutToolRows in HasDrift.
+            //
+            // G-P3 UAT round-1 H1: invalid authored schemas are DEGRADED, not
+            // Unhealthy — the projection excludes the offending row so the platform
+            // still functions; the finding names the row so an operator fixes the
+            // catalog data instead of discovering a silently missing capability.
+            if (report.HasDrift)
+            {
+                return HealthCheckResult.Unhealthy(report.BuildDriftDescription());
+            }
+
+            return report.HasInvalidSchemas
+                ? HealthCheckResult.Degraded(report.BuildInvalidSchemaDescription())
+                : HealthCheckResult.Healthy(report.BuildHealthyDescription());
+        }
+        catch (OperationCanceledException)
+        {
+            throw;
+        }
+        catch (Exception ex)
+        {
+            // Transient Dataverse error is NOT catalog drift — degrade rather
+            // than fail so an availability blip cannot be mistaken for a
+            // closed-catalog violation (fail-soft precedent from S-5C).
+            return HealthCheckResult.Degraded(
+                "Catalog reconciliation could not run (Dataverse unreachable, MI propagation lag, or similar transient error). Drift status unknown until the next probe.",
+                ex);
+        }
+    }
+
+    // ── Reconciliation core (shared by both surfaces) ──────────────────────
+
+    private bool IsAiSubsystemEnabled() =>
+        _configuration.GetValue(AnalysisEnabledKey, true) &&
+        _configuration.GetValue(DocumentIntelligenceEnabledKey, true);
+
+    private async Task<CatalogReconciliationReport> ReconcileAsync(
+        IServiceProvider scopedProvider,
+        IGenericEntityService entityService,
+        CancellationToken cancellationToken)
+    {
+        // ── (a) ConsumerTypes constants ↔ Binding rows ──────────────────────
+        var bindingQuery = new QueryExpression(BindingEntityLogicalName)
+        {
+            ColumnSet = new ColumnSet("sprk_consumertype", "sprk_enabled"),
+            NoLock = true,
+        };
+
+        var bindingResult = await entityService
+            .RetrieveMultipleAsync(bindingQuery, cancellationToken)
+            .ConfigureAwait(false);
+
+        var dataverseTypes = (bindingResult?.Entities ?? Enumerable.Empty<Entity>())
+            .Select(e => e.GetAttributeValue<string>("sprk_consumertype"))
+            .Where(t => !string.IsNullOrWhiteSpace(t))
+            .Select(t => t!.Trim())
+            .Distinct(StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        var bffSet = new HashSet<string>(ConsumerTypes.All, StringComparer.OrdinalIgnoreCase);
+        var dvSet = new HashSet<string>(dataverseTypes, StringComparer.OrdinalIgnoreCase);
+
+        var rowsWithoutConstants = dvSet
+            .Except(bffSet, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(t => t, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+        var constantsWithoutRows = bffSet
+            .Except(dvSet, StringComparer.OrdinalIgnoreCase)
+            .OrderBy(t => t, StringComparer.OrdinalIgnoreCase)
+            .ToList();
+
+        // ── (b) Tool rows ↔ registered handlers (bijection) ─────────────────
+        string? toolBijectionSkippedReason = null;
+        var toolRowsWithoutHandlers = new List<string>();
+        var toolRowsMissingHandlerClass = new List<string>();
+        var handlersWithoutToolRows = new List<string>();
+        var duplicateToolRowsPerHandler = new List<string>();
+        var toolRowsWithInvalidSchema = new List<string>();
+        var toolRowCount = 0;
+        var handlerCount = 0;
+
+        if (!_configuration.GetValue(ToolFrameworkEnabledKey, true))
+        {
+            // Handlers are not auto-discovered on this branch — comparing rows
+            // against an empty registry would be a false failure.
+            toolBijectionSkippedReason = "ToolFramework:Enabled=false";
+        }
+        else
+        {
+            var registry = scopedProvider.GetService<IToolHandlerRegistry>();
+            if (registry is null)
+            {
+                toolBijectionSkippedReason = "IToolHandlerRegistry not registered";
+            }
+            else
+            {
+                var toolQuery = new QueryExpression(ToolEntityLogicalName)
+                {
+                    ColumnSet = new ColumnSet("sprk_name", "sprk_handlerclass", "sprk_toolid", "sprk_jsonschema"),
+                    NoLock = true,
+                    Criteria = new FilterExpression(LogicalOperator.And),
+                };
+                toolQuery.Criteria.AddCondition("statecode", ConditionOperator.Equal, 0); // Active rows only.
+
+                var toolResult = await entityService
+                    .RetrieveMultipleAsync(toolQuery, cancellationToken)
+                    .ConfigureAwait(false);
+
+                var toolRows = (toolResult?.Entities ?? Enumerable.Empty<Entity>()).ToList();
+                toolRowCount = toolRows.Count;
+
+                var registeredIds = registry.GetRegisteredHandlerIds();
+                handlerCount = registeredIds.Count;
+                var registeredSet = new HashSet<string>(registeredIds, StringComparer.OrdinalIgnoreCase);
+
+                var rowCountByHandler = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+                var rowCountByToolId = new Dictionary<string, int>(StringComparer.OrdinalIgnoreCase);
+                foreach (var row in toolRows)
+                {
+                    var name = row.GetAttributeValue<string>("sprk_name");
+                    var toolId = row.GetAttributeValue<string>("sprk_toolid");
+                    var handlerClass = row.GetAttributeValue<string>("sprk_handlerclass")?.Trim();
+                    var label = string.IsNullOrWhiteSpace(toolId)
+                        ? name ?? "(unnamed tool row)"
+                        : $"{name ?? "(unnamed tool row)"} [{toolId}]";
+
+                    // (c) Schema-validity dimension (G-P3 UAT round-1 H1): a tool row
+                    // whose sprk_jsonschema would fail OpenAI function-parameters
+                    // validation is EXCLUDED at projection time (one bad row must never
+                    // 400 the whole turn) — DEGRADED here, not Unhealthy, because the
+                    // platform still functions minus that one tool. Null schemas are
+                    // playbook-only rows (FR-08) and are not findings.
+                    var toolSchema = row.GetAttributeValue<string>("sprk_jsonschema");
+                    if (!string.IsNullOrWhiteSpace(toolSchema) &&
+                        OpenAiFunctionSchemaValidator.FindFirstError(toolSchema) is { } toolSchemaError)
+                    {
+                        toolRowsWithInvalidSchema.Add($"{label}: {toolSchemaError}");
+                    }
+
+                    if (string.IsNullOrWhiteSpace(handlerClass))
+                    {
+                        // No routing identity — the row cannot participate in the
+                        // bijection at all (the legacy GenericAnalysisHandler
+                        // fallback is exactly the ambiguity ADR-039 closes).
+                        toolRowsMissingHandlerClass.Add(label);
+                        continue;
+                    }
+
+                    rowCountByHandler[handlerClass] =
+                        rowCountByHandler.TryGetValue(handlerClass, out var n) ? n + 1 : 1;
+
+                    // Tool identity is sprk_toolid (the 8-field contract). A handler
+                    // MAY legitimately serve several named tool rows (row = tool,
+                    // handler = implementation — e.g. TextRefinementHandler serves
+                    // Summary/KeyPoints/Refinement). What must NOT happen is two
+                    // active rows claiming the SAME tool id. Legacy rows with null
+                    // toolid predate the contract and are excluded from this check
+                    // (they gain ids at the FR-P2-07 re-namespacing).
+                    if (!string.IsNullOrWhiteSpace(toolId))
+                    {
+                        var key = toolId.Trim();
+                        rowCountByToolId[key] =
+                            rowCountByToolId.TryGetValue(key, out var t) ? t + 1 : 1;
+                    }
+
+                    if (!registeredSet.Contains(handlerClass))
+                    {
+                        toolRowsWithoutHandlers.Add($"{label} (sprk_handlerclass={handlerClass})");
+                    }
+                }
+
+                duplicateToolRowsPerHandler.AddRange(rowCountByToolId
+                    .Where(kvp => kvp.Value > 1)
+                    .OrderBy(kvp => kvp.Key, StringComparer.OrdinalIgnoreCase)
+                    .Select(kvp => $"{kvp.Key} ({kvp.Value} rows)"));
+
+                handlersWithoutToolRows.AddRange(registeredSet
+                    .Where(id => !rowCountByHandler.ContainsKey(id))
+                    .OrderBy(id => id, StringComparer.OrdinalIgnoreCase));
+            }
+        }
+
+        // ── (c) Action input-schema validity (G-P3 UAT round-1 H1) ──────────
+        // Every non-empty sprk_analysisaction.sprk_inputschema becomes some
+        // Binding capability tool's function.parameters. An invalid schema is
+        // EXCLUDED at projection time (SprkChatAgentFactory), so the platform
+        // still functions — the health check surfaces the row as a DEGRADED
+        // finding (never Unhealthy) naming the row + first keyword-path error
+        // (NFR-07: deterministic catalog identifiers only).
+        var actionRowsWithInvalidInputSchema = new List<string>();
+        var actionQuery = new QueryExpression(ActionEntityLogicalName)
+        {
+            ColumnSet = new ColumnSet("sprk_name", "sprk_actioncode", "sprk_inputschema"),
+            NoLock = true,
+            Criteria = new FilterExpression(LogicalOperator.And),
+        };
+        actionQuery.Criteria.AddCondition("statecode", ConditionOperator.Equal, 0); // Active rows only.
+
+        var actionResult = await entityService
+            .RetrieveMultipleAsync(actionQuery, cancellationToken)
+            .ConfigureAwait(false);
+
+        foreach (var row in actionResult?.Entities ?? Enumerable.Empty<Entity>())
+        {
+            var inputSchema = row.GetAttributeValue<string>("sprk_inputschema");
+            if (string.IsNullOrWhiteSpace(inputSchema))
+            {
+                continue; // Schema-less Actions project the safe default schema — not a finding.
+            }
+
+            if (OpenAiFunctionSchemaValidator.FindFirstError(inputSchema) is { } schemaError)
+            {
+                var actionCode = row.GetAttributeValue<string>("sprk_actioncode");
+                var actionLabel = string.IsNullOrWhiteSpace(actionCode)
+                    ? row.GetAttributeValue<string>("sprk_name") ?? "(unnamed action row)"
+                    : actionCode;
+                actionRowsWithInvalidInputSchema.Add($"{actionLabel}: {schemaError}");
+            }
+        }
+
+        return new CatalogReconciliationReport(
+            constantsWithoutRows,
+            rowsWithoutConstants,
+            toolRowsWithoutHandlers,
+            toolRowsMissingHandlerClass,
+            handlersWithoutToolRows,
+            duplicateToolRowsPerHandler,
+            actionRowsWithInvalidInputSchema,
+            toolRowsWithInvalidSchema,
+            dvSet.Count,
+            toolRowCount,
+            handlerCount,
+            toolBijectionSkippedReason);
+    }
+
+    /// <summary>
+    /// Result of one reconciliation pass. All lists carry deterministic
+    /// catalog identifiers only (ADR-015 tier-1 safe).
+    /// </summary>
+    private sealed record CatalogReconciliationReport(
+        IReadOnlyList<string> ConstantsWithoutRows,
+        IReadOnlyList<string> RowsWithoutConstants,
+        IReadOnlyList<string> ToolRowsWithoutHandlers,
+        IReadOnlyList<string> ToolRowsMissingHandlerClass,
+        IReadOnlyList<string> HandlersWithoutToolRows,
+        IReadOnlyList<string> DuplicateToolRowsPerHandler,
+        IReadOnlyList<string> ActionRowsWithInvalidInputSchema,
+        IReadOnlyList<string> ToolRowsWithInvalidSchema,
+        int ConsumerTypeCount,
+        int ToolRowCount,
+        int HandlerCount,
+        string? ToolBijectionSkippedReason)
+    {
+        /// <summary>
+        /// Any dimension out of reconciliation ⇒ Unhealthy. The orphan-handler
+        /// dimension (<see cref="HandlersWithoutToolRows"/>) was Degraded-by-design
+        /// between FR-P0-04 and the FR-P2-01 catalog-projection cutover; task 030
+        /// (2026-07-05 gate-014 deferral) escalated it to full drift: the closed
+        /// catalog is now the ONLY tool projection, so every registered handler
+        /// MUST have a <c>sprk_analysistool</c> row (or be deleted).
+        /// </summary>
+        public bool HasDrift =>
+            ConstantsWithoutRows.Count > 0 ||
+            RowsWithoutConstants.Count > 0 ||
+            ToolRowsWithoutHandlers.Count > 0 ||
+            ToolRowsMissingHandlerClass.Count > 0 ||
+            DuplicateToolRowsPerHandler.Count > 0 ||
+            HandlersWithoutToolRows.Count > 0;
+
+        /// <summary>
+        /// Invalid-schema findings are DEGRADED, never Unhealthy (G-P3 UAT
+        /// round-1 H1): the projection excludes the offending row so the
+        /// platform still functions — but the row's capability is silently
+        /// absent until an operator fixes the schema, which must be visible
+        /// at /healthz rather than discovered as a missing tool.
+        /// </summary>
+        public bool HasInvalidSchemas =>
+            ActionRowsWithInvalidInputSchema.Count > 0 ||
+            ToolRowsWithInvalidSchema.Count > 0;
+
+        public string BuildInvalidSchemaDescription()
+        {
+            var parts = new List<string>();
+
+            if (ActionRowsWithInvalidInputSchema.Count > 0)
+            {
+                parts.Add(
+                    $"sprk_analysisaction rows whose sprk_inputschema fails OpenAI function-parameters validation (their Binding capability tools are EXCLUDED from projection until fixed): {string.Join(", ", ActionRowsWithInvalidInputSchema)}");
+            }
+
+            if (ToolRowsWithInvalidSchema.Count > 0)
+            {
+                parts.Add(
+                    $"sprk_analysistool rows whose sprk_jsonschema fails OpenAI function-parameters validation (excluded from projection until fixed): {string.Join(", ", ToolRowsWithInvalidSchema)}");
+            }
+
+            return
+                "AI catalog schema findings (G-P3 UAT round-1 H1; Degraded — the loop excludes the rows and continues): "
+                + string.Join("; ", parts) + ".";
+        }
+
+        public string BuildDriftDescription()
+        {
+            var parts = new List<string>();
+
+            if (ConstantsWithoutRows.Count > 0)
+            {
+                parts.Add(
+                    $"ConsumerTypes constants without Binding row (missing sprk_playbookconsumer seed — scripts/dataverse/Seed-PlaybookConsumers.ps1): {string.Join(", ", ConstantsWithoutRows)}");
+            }
+
+            if (RowsWithoutConstants.Count > 0)
+            {
+                parts.Add(
+                    $"Binding rows without ConsumerTypes constant (probable admin typo or stale row): {string.Join(", ", RowsWithoutConstants)}");
+            }
+
+            if (ToolRowsMissingHandlerClass.Count > 0)
+            {
+                parts.Add(
+                    $"tool rows missing sprk_handlerclass (no routing identity): {string.Join(", ", ToolRowsMissingHandlerClass)}");
+            }
+
+            if (ToolRowsWithoutHandlers.Count > 0)
+            {
+                parts.Add(
+                    $"tool rows without a registered handler: {string.Join(", ", ToolRowsWithoutHandlers)}");
+            }
+
+            if (DuplicateToolRowsPerHandler.Count > 0)
+            {
+                parts.Add(
+                    $"duplicate sprk_toolid across active tool rows (tool identity violated): {string.Join(", ", DuplicateToolRowsPerHandler)}");
+            }
+
+            if (HandlersWithoutToolRows.Count > 0)
+            {
+                parts.Add(
+                    $"registered handlers without a sprk_analysistool row (Unhealthy since the FR-P2-01 catalog-projection cutover, task 030 — seed the row via scripts/Seed-TypedHandlers.ps1 or delete the handler): {string.Join(", ", HandlersWithoutToolRows)}");
+            }
+
+            return
+                "AI catalog drift detected (ADR-039 / FR-P0-04 boot reconciliation): "
+                + string.Join("; ", parts) + ".";
+        }
+
+        public string BuildHealthyDescription() =>
+            ToolBijectionSkippedReason is null
+                ? $"Catalog reconciliation healthy: {ConsumerTypeCount} consumer types match ConsumerTypes.All; {ToolRowCount} tool rows <-> {HandlerCount} registered handlers form a bijection."
+                : $"Consumer types healthy ({ConsumerTypeCount} match ConsumerTypes.All); tool<->handler bijection skipped ({ToolBijectionSkippedReason}).";
+    }
 }

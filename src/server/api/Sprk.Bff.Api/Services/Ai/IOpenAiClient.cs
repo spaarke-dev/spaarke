@@ -176,7 +176,7 @@ public interface IOpenAiClient
     /// </summary>
     /// <remarks>
     /// <para>
-    /// Added to the interface in R5 task 012 (D2-03 <c>SessionSummarizeOrchestrator</c>) so that
+    /// Added to the interface in R5 task 012 (D2-03 summarize boundary) so that
     /// the orchestrator can be unit-tested against a mocked <see cref="IOpenAiClient"/> while still
     /// honoring ADR-010 (concrete-by-default consumer; interface kept only because OpenAiClient
     /// was already an interface for the same testability reason). Live implementation lives on

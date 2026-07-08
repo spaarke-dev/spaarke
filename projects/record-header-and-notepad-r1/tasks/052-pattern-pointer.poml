@@ -1,0 +1,73 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="052" project="record-header-and-notepad-r1">
+  <metadata>
+    <title>Create .claude/patterns/ui/record-header-composition.md pointer</title>
+    <phase>4: Documentation</phase>
+    <status>not-started</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>051</dependencies>
+    <blocks>090</blocks>
+    <tags>documentation</tags>
+    <rigor-hint>MINIMAL</rigor-hint>
+    <rigor-reason>Pattern pointer file — touches .claude/</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <parallel-reason>touches .claude/ — main-session-only (permission boundary per CLAUDE.md §3)</parallel-reason>
+  </metadata>
+
+  <prompt>Create .claude/patterns/ui/record-header-composition.md — ≤ 25 lines, follows pointer-file convention. Links to shared-lib entry points (HeaderToolbar/, RecordHeader/, hooks/), spec.md, and the authoring guide.</prompt>
+
+  <role>Spaarke docs author. Pattern-file convention experienced.</role>
+
+  <goal>Pointer file present at .claude/patterns/ui/record-header-composition.md; ≤ 25 lines; consistent with other .claude/patterns/ui/*.md files.</goal>
+
+  <context>
+    <background>Pattern pointers direct the agent to canonical code for a specific technique. This one points at record-header composition primitives + the ProjectHeaderPcf worked example.</background>
+    <relevant-files>
+      <file>.claude/patterns/ui/record-header-composition.md</file>
+      <file>.claude/patterns/ui/INDEX.md</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="project">≤ 25 lines.</constraint>
+    <constraint source="project">Match tone + shape of other .claude/patterns/ui/*.md files.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/record-header-and-notepad-r1/spec.md</file>
+      <file>projects/record-header-and-notepad-r1/CLAUDE.md</file>
+      <file>.claude/patterns/ui/INDEX.md</file>
+      <file>docs/guides/RECORD-HEADER-PCF-AUTHORING-GUIDE.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Read an existing .claude/patterns/ui/*.md file (e.g. fluent-v9-component-authoring.md) as a shape reference.</step>
+    <step order="2">Author record-header-composition.md with sections: Purpose (1 line); Load When (trigger phrases); Canonical Code (paths to HeaderToolbar/, RecordHeader/, hooks/); See Also (spec.md, authoring guide).</step>
+    <step order="3">Add an entry in .claude/patterns/ui/INDEX.md for the new file.</step>
+    <step order="4">Verify total lines ≤ 25.</step>
+    <step order="5">Update TASK-INDEX.md: mark 052 ✅.</step>
+    <step order="6">Document deviations in notes/.</step>
+  </steps>
+
+  <tools><tool name="terminal">Shell</tool></tools>
+
+  <outputs>
+    <output type="docs">.claude/patterns/ui/record-header-composition.md</output>
+    <output type="docs">.claude/patterns/ui/INDEX.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">File exists at .claude/patterns/ui/record-header-composition.md with ≤ 25 lines.</criterion>
+    <criterion testable="true">INDEX.md updated with the new entry.</criterion>
+  </acceptance-criteria>
+
+  <notes>This task MUST run in the main session — sub-agents cannot write to .claude/ paths per CLAUDE.md §3 Sub-Agent Write Boundary.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files first. Follow task-execute skill. Do NOT delegate to sub-agents (permission boundary).</protocol>
+  </execution>
+</task>

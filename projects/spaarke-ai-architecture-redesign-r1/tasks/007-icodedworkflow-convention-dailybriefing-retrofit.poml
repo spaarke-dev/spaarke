@@ -1,0 +1,126 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="007" project="spaarke-ai-architecture-redesign-r1">
+  <metadata>
+    <title>ICodedWorkflow registration convention + DailyBriefing retrofit (no behavior change)</title>
+    <phase>Phase P0: Foundations</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <tags>bff-api, coded-workflow</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <parallel-group>W-P0-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement FR-P0-06: introduce the `ICodedWorkflow` registration convention — an assembly-scan discovery mechanism mirroring how tool handlers are discovered — so a `coded`-kind Action row can name a workflow class and the executor resolves it by class reference. Retrofit `DailyBriefingNarrator` + `DailyBriefingCollector` (Services/Ai/Narrators/) as the first ICodedWorkflow instances with NO behavior change: existing narrator tests must pass unchanged. This establishes the "new composites are coded workflows, never maker graphs on the frozen engine" doctrine (spec MUST rule); P3's FR-P3-04 promotes Daily Briefing to the first full coded composite Action on top of this convention.
+  </prompt>
+
+  <role>
+    Senior .NET developer familiar with assembly-scan DI registration patterns, the Sprk.Bff.Api tool-handler discovery mechanism, and the DailyBriefingNarrator Wave-11 coded-workflow shape.
+  </role>
+
+  <goal>
+    An ICodedWorkflow interface + assembly-scan registration exists mirroring the tool-handler pattern; DailyBriefingNarrator/Collector implement it and are resolvable by class reference (as an Action row's sprk_workflowclass would name them); all existing narrator tests pass unchanged.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-architecture-redesign-r1/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-architecture-redesign-r1/plan.md</file>
+    <file purpose="project-context">projects/spaarke-ai-architecture-redesign-r1/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md</file>
+    <file purpose="retrofit-target">src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingNarrator.cs</file>
+    <file purpose="retrofit-target">src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingCollector.cs</file>
+    <file purpose="discovery-exemplar">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ToolHandlerToAIFunctionAdapter.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-039">Control-flow-is-code: composites are coded workflows named by the closed Action catalog (sprk_workflowclass), never maker-authored graphs. MUST NOT land new capability on the frozen engine.</constraint>
+    <constraint source="spec-MUST">MUST keep new composites as `coded` workflows — this convention is the mechanism.</constraint>
+    <constraint source="project">NO behavior change to Daily Briefing: narrator tests pass unchanged (spec FR-P0-06 acceptance). The retrofit is interface adoption + registration only.</constraint>
+    <constraint source="ADR-032">If the coded-workflow registrations land under a feature gate, ship Null-Object peers.</constraint>
+    <constraint source="ADR-029 / NFR-01">Verify publish-size impact per ADR-029/NFR-01; expect net change reported in task notes.</constraint>
+    <constraint source="ADR-038">No DI-registration tests; prove discovery by resolving the workflow through the convention and executing it.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff-api/coded-workflows, assembly-scan-discovery</topic>
+    <files>
+      <file>docs/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>docs/architecture/SPAARKE-PLAYBOOK-LLM-OUTPUT-PATTERN.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/OVERLAY-MATRIX.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-MIGRATION-MAP.md</file>
+    </files>
+    <patterns>
+      <pattern name="Coded workflow shape (Wave-11)" location="src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingNarrator.cs">
+        The canonical coded-workflow exemplar being retrofitted — its Collector/Narrator split is the shape the interface must fit without forcing changes.
+      </pattern>
+      <pattern name="Tool-handler discovery (mirror this)" location="src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/">
+        Handlers register via assembly scan + adapter; ICodedWorkflow discovery mirrors this mechanism per the FR text.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      The frozen engine takes no new capability; every future composite is a coded workflow discovered by convention and named from the Action catalog. Daily Briefing is the proving instance because it already has the right shape.
+    </background>
+    <dependencies>
+      <dependency task="none" status="complete">No upstream dependencies — Wave W-P0-A entry task. (Task 003's sprk_workflowclass column is the eventual catalog pointer, but resolution-by-class-ref is provable without a deployed row.)</dependency>
+    </dependencies>
+    <related-work>
+      <item>FR-P3-04 (task 043): Daily Briefing becomes the first full coded composite Action; narrator flag deleted</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context check">
+      Check context usage; handoff if &gt; 70%. Load the narrator files, handler-discovery mechanism, and ADR-039.
+    </step>
+    <step order="1" name="Study both patterns">
+      Read DailyBriefingNarrator/Collector and the tool-handler discovery path (registration + adapter). Decide the ICodedWorkflow surface (identity/class-ref key, execute signature, context input) so the narrator fits WITHOUT behavior change.
+    </step>
+    <step order="2" name="Define ICodedWorkflow + discovery">
+      Create the interface and an assembly-scan registration mirroring the handler pattern: all ICodedWorkflow implementations discovered and resolvable by class reference (the value an Action row's sprk_workflowclass will carry).
+    </step>
+    <step order="3" name="Retrofit DailyBriefing">
+      Implement ICodedWorkflow on the narrator composite (Narrator/Collector as one workflow unit or per the cleanest seam) with zero behavior change; existing callers keep working.
+    </step>
+    <step order="4" name="Test">
+      Add a test resolving the workflow by class ref through the convention and executing it; run ALL existing narrator tests — must pass unchanged.
+    </step>
+    <step order="5" name="Build + publish-size">
+      dotnet build + full test suite green; publish-size delta reported per ADR-029.
+    </step>
+    <step order="6" name="Verify + quality gates">
+      Check acceptance criteria. Step 9.5 quality gates: code-review + adr-check. Update TASK-INDEX.md.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build, test, publish-size verification</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ (ICodedWorkflow interface + assembly-scan registration)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingNarrator.cs (retrofit)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Narrators/DailyBriefingCollector.cs (retrofit)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (resolution-by-class-ref test)</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A workflow is resolvable by class reference through the ICodedWorkflow convention (as an Action row would name it) — test shown.</criterion>
+    <criterion testable="true">Discovery is assembly-scan based, mirroring the tool-handler pattern.</criterion>
+    <criterion testable="true">All existing narrator tests pass unchanged (no behavior change).</criterion>
+    <criterion testable="true">dotnet build green; publish-size delta reported per ADR-029.</criterion>
+    <criterion testable="true">Step 9.5 quality gates (code-review + adr-check) passed.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

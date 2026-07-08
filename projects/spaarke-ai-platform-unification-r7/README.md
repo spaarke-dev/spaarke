@@ -4,8 +4,8 @@
 > **Project Type**: AI
 > **Worktree**: `C:/code_files/spaarke-wt-spaarke-ai-platform-unification-r7`
 > **Branch**: `work/spaarke-ai-platform-unification-r7`
-> **Status**: In Progress
-> **Last Updated**: 2026-06-28
+> **Status**: **CLOSED / RE-SCOPED** 2026-07-05 — all remaining scope absorbed by [`spaarke-ai-architecture-redesign-r1`](../spaarke-ai-architecture-redesign-r1/) (Issue [#550](https://github.com/spaarke-dev/spaarke/issues/550)) or dropped with reason. Per-wave disposition map: [`notes/close-out-absorbed-by-ai-architecture-redesign-r1.md`](notes/close-out-absorbed-by-ai-architecture-redesign-r1.md). Issue #501 closed with the same map. Branch disposition = redesign-r1 task 025 (FR-P1-06).
+> **Last Updated**: 2026-07-05
 > **Owner**: ralph.schroeder@hotmail.com
 
 ## Overview
@@ -124,3 +124,4 @@ See [spec.md §Success Criteria](./spec.md) for the full enumeration with verifi
 | Date | Version | Change | Author |
 |---|---|---|---|
 | 2026-06-28 | 1.0 | Initial pipeline init (registered #501, design.md hot-path declared, foundation artifacts generated) | Claude Code |
+| 2026-07-05 | 2.0 | **Project CLOSED / RE-SCOPED** — remaining waves absorbed by `spaarke-ai-architecture-redesign-r1` (Issue #550) per FR-P0-11; absorbed-waves map at `notes/close-out-absorbed-by-ai-architecture-redesign-r1.md`; Issue #501 closed; R4/Action-Engine/insights-r3 triggers re-pointed | Claude Code (redesign-r1 task 013) |

@@ -1,0 +1,57 @@
+{
+  "_comment_top": "spaarke-ai-architecture-redesign-r1 task 009 (FR-P0-07 write half) — seed row for the dataverse.delete_record WRITE tool. GA-MCP-contract-frozen per ADR-039: sprk_toolid local segment equals the GA Dataverse MCP tool name 'delete_record'; arguments are 'tablename' + 'hasUserApproved' + 'recordId' exactly as GA (research note notes/audit-inputs/research-dataverse-mcp-2026-07.md; Learn ms.date 2026-06-05; argument shapes captured from the live GA MCP tool schemas 2026-07-05).",
+  "_comment_routing": "Runtime invocation routes to DataverseDeleteRecordHandler via sprk_handlerclass. Auto-discovered (ADR-010). P2 loop projects the LLM-facing function name from sprk_toolid; sprk_name keeps the SYS- display convention required by the seed script's safety filter.",
+  "_comment_obo": "spec MUST rule (task-012 audit): the delete executes through IDataverseUserClient under the calling user's OBO token. A privilege-denied delete fails with the USER's own access error — never escalated via app identity. A table invisible to the user 404s at metadata resolution BEFORE any delete.",
+  "_comment_side_effect": "sprk_sideeffectclass = 100000001 (Write) — SIDE-EFFECT tool. The P2 confirmation gate (FR-P2-02, task 031) suspends/resumes this tool BY THIS DECLARED CLASS (never by tool-name list); the handler itself contains NO gating logic. The GA-frozen 'hasUserApproved' argument is contract argument semantics (must be true), NOT the platform gate.",
+  "_comment_consumption": "Read by scripts/Seed-TypedHandlers.ps1. Idempotent — UPSERT by sprk_handlerclass + sprk_toolcode with sprk_name 'SYS-%' filter.",
+  "sprk_name": "SYS-Dataverse Delete Record",
+  "sprk_toolcode": "DATAVERSE-DELETE-RECORD",
+  "sprk_toolid": "dataverse.delete_record",
+  "sprk_namespace": "dataverse",
+  "sprk_sideeffectclass": 100000001,
+  "sprk_permissionscope": "dataverse-user-context",
+  "sprk_budgetclass": "light",
+  "sprk_description": "Deletes one row from a Dataverse table under the calling user's permissions. Proceed solely on explicit user consent: set hasUserApproved to true only after the user has affirmatively confirmed the deletion. The delete is permanent and executes with the user's own privileges; if the user cannot delete the record, the call fails with their access error. WRITE tool. Spaarke entity map: 'matter' = sprk_matter (name column sprk_mattername), 'project' = sprk_project (sprk_projectname), 'document' = sprk_document (sprk_documentname); people = contact, companies = account.",
+  "sprk_handlerclass": "DataverseDeleteRecordHandler",
+  "sprk_availableincontexts": 100000001,
+  "_comment_availableincontexts": "100000001 = Chat only — dataverse.* tools exist for the agent loop (P2), not playbook nodes.",
+  "sprk_jsonschema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "dataverse.delete_record Request",
+    "description": "Argument shape frozen against the GA Dataverse MCP delete_record(tablename, hasUserApproved, recordId) tool.",
+    "type": "object",
+    "required": ["tablename", "hasUserApproved", "recordId"],
+    "properties": {
+      "tablename": {
+        "type": "string",
+        "minLength": 1,
+        "description": "The logical (schema) name of the table to delete a record from (e.g. 'account', 'sprk_event')."
+      },
+      "hasUserApproved": {
+        "type": "boolean",
+        "description": "Set this to true only after asking the user if they are ok with the deletion and you have received an affirmative response."
+      },
+      "recordId": {
+        "type": "string",
+        "minLength": 1,
+        "description": "The GUID of the record to delete."
+      }
+    },
+    "additionalProperties": false
+  },
+  "sprk_outputschema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "dataverse.delete_record Result",
+    "type": "object",
+    "required": ["tool", "tablename", "recordId", "deleted"],
+    "properties": {
+      "tool": { "const": "dataverse.delete_record" },
+      "tablename": { "type": "string", "description": "Table logical name the record was deleted from." },
+      "recordId": { "type": "string", "description": "GUID of the deleted record (identifier only — the record no longer exists, so no citation is emitted)." },
+      "deleted": { "type": "boolean", "const": true }
+    }
+  },
+  "sprk_configuration": {
+    "_comment": "No method-discriminator dispatch — single LLM-facing function. Reserved for per-environment defaults."
+  }
+}

@@ -74,7 +74,7 @@ jest.mock('@spaarke/ui-components', () => {
     SprkChat: (props: ISprkChatProps) => {
       // Capture the latest props on every render so tests can drive callbacks.
       sprkChatPropsRef.current = props;
-      return <div data-testid="sprkchat-stub" />;
+      return <div data-testid="sprkchat-stub">{props.transcriptFooterSlot}</div>;
     },
   };
 });
@@ -110,6 +110,27 @@ jest.mock('@spaarke/ai-widgets', () => {
     }),
   };
 });
+
+// ---------------------------------------------------------------------------
+// FULL ThreePaneShell stub (ai-architecture-redesign-r1 task 023): loading the
+// real module pulls ContextPaneController → runtimeConfig → @spaarke/auth at
+// module scope, and rendering ConversationPane outside <ThreePaneShell> throws
+// from useShellStage(). ConversationPane consumes exactly these three hooks;
+// both context hooks tolerate null (render-in-isolation contract).
+// ---------------------------------------------------------------------------
+
+jest.mock('../../shell/ThreePaneShell', () => ({
+  useShellStage: () => ({
+    stage: 'active-chat' as const,
+    toLoading: jest.fn(),
+    toActiveChat: jest.fn(),
+    toReview: jest.fn(),
+    reset: jest.fn(),
+  }),
+  useRestoreContext: () => null,
+  usePaneCollapseContext: () => null,
+  useComposeLaunch: () => null,
+}));
 
 // Import AFTER the mocks so module resolution picks them up.
 import {

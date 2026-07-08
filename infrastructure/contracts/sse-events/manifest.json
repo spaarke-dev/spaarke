@@ -29,7 +29,7 @@
       "eventType": "workspace_action",
       "schemaFile": "workspace-action.schema.json",
       "description": "Asks the shell to perform a workspace action (navigate, open-document, run-playbook, dismiss) with optional HITL confirmation.",
-      "emittedBy": ["PlaybookOutputHandler", "PlaybookDispatcher"],
+      "emittedBy": ["R2SseEventEmitter"],
       "fr": "FR-801"
     },
     {

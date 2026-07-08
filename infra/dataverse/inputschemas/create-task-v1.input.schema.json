@@ -1,0 +1,27 @@
+{
+  "$comment": "Mirror of sprk_analysisaction.sprk_inputschema for CREATE-TASK@v1 on spaarkedev1 — the CORRECTED shape after the G-P3 UAT round-1 incident (2026-07-07): the original row carried \"required\": true INSIDE the due_date/assign_to property definitions (invalid JSON Schema), and Azure OpenAI rejected the ENTIRE request (invalid_function_parameters) on every text-path turn. Required-ness is declared ONLY via the object-level required array. CI-validated against the OpenAI function-parameters subset by CatalogInputSchemaContractTests (H4).",
+  "actionCode": "CREATE-TASK@v1",
+  "actionId": "b66c8dda-8279-f111-ab0e-7ced8ddc4cc6",
+  "environment": "spaarkedev1",
+  "inputSchema": {
+    "type": "object",
+    "properties": {
+      "fileIds": {
+        "type": "array",
+        "items": { "type": "string" },
+        "description": "Optional subset of session file ids the task should be grounded in. Omit to use all session files."
+      },
+      "due_date": {
+        "type": "string",
+        "elicitation_prompt": "What's the due date for this task?",
+        "description": "The task's due date as the user stated it (e.g. 7/9/2026)."
+      },
+      "assign_to": {
+        "type": "string",
+        "elicitation_prompt": "Should I assign it to you or someone else?",
+        "description": "Who the task is assigned to — 'me' or a person's name."
+      }
+    },
+    "required": ["due_date", "assign_to"]
+  }
+}

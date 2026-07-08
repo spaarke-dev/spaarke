@@ -64,6 +64,53 @@ export interface SectionMetadata {
   readonly category: SectionCategory;
   /** Suggested default height (e.g. "560px"). Undefined = auto. */
   readonly defaultHeight?: string;
+  /**
+   * How `defaultHeight` should be applied by `buildDynamicWorkspaceConfig`.
+   *
+   * - `'grow'` (default when omitted) — applies `defaultHeight` as `min-height` (a
+   *   floor). The section can grow taller than `defaultHeight` to fit its intrinsic
+   *   content. Suitable for card-context / narrative widgets that should never clip.
+   *
+   * - `'clamped'` — applies `defaultHeight` as `max-height` and adds
+   *   `overflow: hidden` + `display: flex` so the SectionPanel becomes a fixed-size
+   *   viewport. Content taller than `defaultHeight` scrolls inside the widget
+   *   (widget must supply its own inner scroll surface — see
+   *   `.claude/patterns/ui/embedded-widget-sizing.md`). Required for dense grids
+   *   (Communications, Documents, etc.) so the framework produces visible Fluent
+   *   scrollbars + lazy-load-on-scroll behavior.
+   *
+   * Spec ref: FR-01, spaarke-dataset-grid-framework-r2.
+   */
+  readonly contentSizing?: 'grow' | 'clamped';
+  /**
+   * Optional. Signals to the WorkspaceLayoutWizard whether this section renders
+   * best at 'full' row width, 'half' width, or is flexible ('any').
+   *
+   * - `'any'` (default when omitted) — no wizard warnings; section can be placed
+   *   in any row slot configuration.
+   * - `'full'` — wizard warns/blocks placement in multi-slot rows. Suitable for
+   *   dense grids (Communications, Documents, Invoices, Matters, Projects, Work
+   *   Assignments) whose columns read best at full row width without truncation.
+   * - `'half'` — wizard warns on single-slot placement (too much whitespace).
+   *
+   * Runtime dev-guard + wizard warnings implemented in FR-04 companion task 015.
+   *
+   * Spec ref: FR-04, spaarke-dataset-grid-framework-r2.
+   */
+  readonly widthPreference?: 'full' | 'half' | 'any';
+  /**
+   * Optional. Logical name of the Dataverse entity this section renders. Used by
+   * the WorkspaceLayoutWizard "Advanced" panel to filter `sprk_gridconfiguration`
+   * records + savedqueries to those matching the entity.
+   *
+   * Populate on entity-list sections (communications, documents, invoices,
+   * matters, projects, work-assignments). Non-entity-list sections (dailyBriefing,
+   * quickSummary, getStarted, latestUpdates, composeEditor, todo, calendar) may
+   * omit this field.
+   *
+   * Spec ref: FR-03 DEF-002/003 wiring, spaarke-dataset-grid-framework-r2.
+   */
+  readonly entityName?: string;
 }
 
 /**
@@ -117,11 +164,14 @@ export const SECTION_METADATA_CATALOG: readonly SectionMetadata[] = [
   },
   {
     id: 'documents',
-    label: 'My Documents',
+    label: 'Documents',
     description: 'Your documents',
     category: 'data',
     icon: DocumentRegular,
     defaultHeight: '480px',
+    contentSizing: 'clamped',
+    widthPreference: 'full',
+    entityName: 'sprk_document',
   },
   // ai-spaarke-ai-workspace-UI-r1 #4 (2026-06-08): three new entity-view
   // sections sharing <DataverseEntityViewWidget>. Each needs an operator-
@@ -134,6 +184,9 @@ export const SECTION_METADATA_CATALOG: readonly SectionMetadata[] = [
     category: 'data',
     icon: BriefcaseSearchRegular,
     defaultHeight: '480px',
+    contentSizing: 'clamped',
+    widthPreference: 'full',
+    entityName: 'sprk_matter',
   },
   {
     id: 'projects',
@@ -142,6 +195,9 @@ export const SECTION_METADATA_CATALOG: readonly SectionMetadata[] = [
     category: 'data',
     icon: FolderRegular,
     defaultHeight: '480px',
+    contentSizing: 'clamped',
+    widthPreference: 'full',
+    entityName: 'sprk_project',
   },
   {
     id: 'invoices',
@@ -150,6 +206,9 @@ export const SECTION_METADATA_CATALOG: readonly SectionMetadata[] = [
     category: 'data',
     icon: ReceiptRegular,
     defaultHeight: '480px',
+    contentSizing: 'clamped',
+    widthPreference: 'full',
+    entityName: 'sprk_invoice',
   },
   {
     id: 'work-assignments',
@@ -158,6 +217,9 @@ export const SECTION_METADATA_CATALOG: readonly SectionMetadata[] = [
     category: 'data',
     icon: BriefcaseRegular,
     defaultHeight: '480px',
+    contentSizing: 'clamped',
+    widthPreference: 'full',
+    entityName: 'sprk_workassignment',
   },
   // ai-spaarke-ai-workspace-UI-r2 FR-09 (2026-07-01): Communications section —
   // fifth Dataverse-entity-view section sharing <DataverseEntityViewWidget>.
@@ -171,6 +233,9 @@ export const SECTION_METADATA_CATALOG: readonly SectionMetadata[] = [
     category: 'data',
     icon: MailRegular,
     defaultHeight: '480px',
+    contentSizing: 'clamped',
+    widthPreference: 'full',
+    entityName: 'sprk_communication',
   },
   {
     id: 'daily-briefing',

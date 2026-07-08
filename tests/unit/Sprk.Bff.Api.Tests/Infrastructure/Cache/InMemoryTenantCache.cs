@@ -7,7 +7,7 @@ namespace Sprk.Bff.Api.Tests.Infrastructure.Cache;
 /// Process-local <see cref="ITenantCache"/> stand-in for tests that previously instantiated
 /// <c>MemoryDistributedCache</c> directly. Constructs the same FR-05 on-wire key format
 /// (<c>tenant:{tenantId}:{resource}:{id}:v{version}</c>) so tests asserting key shape via
-/// the legacy <c>BuildCacheKey</c>/<c>BuildPendingPlanKey</c> static helpers continue to
+/// the legacy <c>BuildCacheKey</c>-style static helpers continue to
 /// match.
 /// </summary>
 /// <remarks>

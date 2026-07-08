@@ -4,6 +4,7 @@ using Sprk.Bff.Api.Api.Reporting;
 using Sprk.Bff.Api.Api.Dataverse;                  // Dataverse passthrough endpoints (Phase B)
 using Sprk.Bff.Api.Infrastructure.DI;
 using Sprk.Bff.Api.Infrastructure.Startup;         // R2 FR-06: AzureMonitorGuard
+using Sprk.Bff.Api.Services.Ai.LinearConsumers;    // R7 Wave 12 — Linear AI Consumer library
 using Sprk.Bff.Api.Services.Dataverse.Extensions;  // Dataverse DI extension methods (Phase B)
 using Sprk.Bff.Api.Workers.Office;
 
@@ -68,6 +69,7 @@ builder.Services.AddDataverseSavedQueryServices();   // task 011: shared infra (
 builder.Services.AddDataverseMetadataServices();     // task 012: metadata endpoint (6h cache)
 builder.Services.AddDataverseFetchServices();        // task 013: fetch endpoint + FetchXmlEntityExtractor (security-critical)
 builder.Services.AddDataverseRecordServices();       // task 014: record endpoint ($select projection)
+builder.Services.AddDataverseGridConfigurationServices(); // spaarke-dataset-grid-framework-r2 DEF-002: sprk_gridconfiguration picker list
 
 // Workers module (Service Bus + BackgroundService)
 builder.Services.AddWorkersModule(builder.Configuration);
@@ -125,11 +127,18 @@ builder.Services.AddGraphModule(builder.Configuration);
 // Document Intelligence, Analysis, Playbook, Builder, RAG, and Record Matching services
 builder.Services.AddAnalysisServicesModule(builder.Configuration);
 
+// R7 Wave 12 Linear AI Consumer library: registration MOVED into AnalysisServicesModule's
+// compound AI gate (Analysis:Enabled && DocumentIntelligence:Enabled) by
+// ai-architecture-redesign-r1 task 006 (FR-P0-05, 2026-07-05) so the whole prompted-executor
+// stack toggles as one unit. Null executor-primitive peers cover the unconditional
+// WorkspaceFileEndpoints consumer on the compound-OFF path (ADR-032).
+
 // Consumer→playbook routing (Phase 1R per chat-routing-redesign-r1 spec FR-1R-02).
-// Replaces Workspace__*PlaybookId env vars with Dataverse-backed `sprk_playbookconsumer`
-// routing table. Registered UNCONDITIONALLY: routing is always-on (no kill-switch); on
-// Dataverse error the impl returns null and the caller falls back to typed-options env
-// var during the FR-1R-06 deprecation window. See Infrastructure/DI/RoutingModule.cs.
+// The Dataverse-backed `sprk_playbookconsumer` routing table is the ONLY playbook-resolution
+// source (FR-P3-01 hard cutover — the legacy per-consumer config fallback was deleted per
+// NFR-08). Registered UNCONDITIONALLY: routing is always-on (no kill-switch); on Dataverse
+// error the impl returns null and callers surface a clean routing-missing error (or a
+// graceful-degrade template response). See Infrastructure/DI/RoutingModule.cs.
 builder.Services.AddRoutingModule();
 
 // Spaarke Insights Engine — Zone A extraction post-processing primitives per SPEC §3.5.
@@ -150,11 +159,12 @@ builder.Services.AddInsightsIngestModule();
 
 // Spaarke Insights Engine — Zone A public facade per SPEC §3.5 (task 042).
 // IInsightsAi → InsightsOrchestrator: the ONLY Zone-A surface Zone B code may import.
-// Wraps IPlaybookExecutionEngine + IInsightsPlaybookExecutionCache (D-P13) + IOpenAiClient
+// Wraps IPlaybookOrchestrationService + IInsightsPlaybookExecutionCache (D-P13) + IOpenAiClient
 // + IPlaybookOrchestrationService behind a 3-method facade (AnswerQuestionAsync /
 // RunIngestAsync / EmbedTextAsync). RunIngestAsync invokes universal-ingest@v1 via the
-// orchestration service; the per-env playbook Guid is resolved through
-// InsightsPlaybookNameMapOptions (post Wave C-G4 / task 022).
+// orchestration service; the per-env playbook Guid is resolved through the insights-ask
+// sprk_playbookconsumer Binding rows via IConsumerRoutingService (FR-P3-01 / task 040,
+// ADR-039 single routing surface — replaced the deleted config name map).
 // Must follow AnalysisServicesModule which registers the engine + D-P13 cache, AND
 // AddInsightsIngestModule which registers IIngestDocumentSource.
 builder.Services.AddInsightsFacadeModule();
@@ -165,7 +175,7 @@ builder.Services.AddAiSafetyModule(builder.Configuration);
 // AI Platform R2: Cosmos DB persistence (sessions, prompts, audit, memory, feedback)
 builder.Services.AddAiPersistenceModule(builder.Configuration);
 
-// AI Platform R2: agent and chat extensions (ISprkAgent impls, orchestration)
+// AI Platform R2: chat extensions (prompt builder, latency telemetry, playbook candidate selection)
 builder.Services.AddAiChatModule(builder.Configuration);
 
 // Spaarke Insights Engine — Zone B domain services per SPEC §3.5 facade boundary.
@@ -220,6 +230,7 @@ app.MapSavedQueryEndpoints();   // task 011: GET /api/dataverse/savedquery/{id} 
 app.MapMetadataEndpoints();     // task 012: GET /api/dataverse/metadata/{entity}
 app.MapFetchEndpoints();        // task 013: POST /api/dataverse/fetch (cross-entity privilege check)
 app.MapRecordEndpoints();       // task 014: GET /api/dataverse/record/{entity}/{id}
+app.MapGridConfigurationEndpoints(); // spaarke-dataset-grid-framework-r2 DEF-002: GET /api/dataverse/gridconfigurations/{entity}
 
 app.Run();
 

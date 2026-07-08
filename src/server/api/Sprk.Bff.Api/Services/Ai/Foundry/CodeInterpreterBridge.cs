@@ -43,9 +43,9 @@ public sealed record CodeInterpreterResult(
 ///
 /// Data governance (ADR-015): callers MUST only pass caller-supplied data excerpts — never full
 /// documents or PII. This class does NOT enforce that constraint; enforcement belongs to
-/// <see cref="Chat.Tools.CodeInterpreterTools"/>.
+/// the <c>CodeInterpreterHandler</c>.
 ///
-/// Concurrency (ADR-016): concurrency gating is handled by <see cref="Chat.Tools.CodeInterpreterTools"/>
+/// Concurrency (ADR-016): concurrency gating is handled by the <c>CodeInterpreterHandler</c>
 /// via a static <see cref="SemaphoreSlim"/>. This class is stateless and thread-safe.
 ///
 /// Kill switch (ADR-018): callers check <see cref="CodeInterpreterOptions.Enabled"/> before invoking

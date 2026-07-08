@@ -1,0 +1,131 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="008" project="spaarke-ai-architecture-redesign-r1">
+  <metadata>
+    <title>dataverse.* READ handlers (describe, read_query, search_data) over BFF-OBO</title>
+    <phase>Phase P0: Foundations</phase>
+    <status>not-started</status>
+    <estimated-hours>8</estimated-hours>
+    <tags>bff-api, tools, dataverse, obo</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <parallel-group>W-P0-B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>003</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement the read half of FR-P0-07: three typed tool handlers — `dataverse.describe`, `dataverse.read_query`, `dataverse.search_data` — in the existing tool framework (Services/Ai/Handlers/), executing over the BFF's user-OBO Dataverse Web API path. Contracts (names, argument shapes, result shapes) MUST mirror the GA Dataverse MCP tool surface so a future swap to MCP transport (pending the task-010 spike) is contract-free. These handlers are what give the P2 agent loop cited ad-hoc answers over Dataverse; they are read-only, carry no side effects (`side_effect_class: none`), and every query executes under the calling user's security context — no app-only Dataverse path is reachable from AI (spec MUST rule, audited by task 012).
+  </prompt>
+
+  <role>
+    Senior .NET developer familiar with the Sprk.Bff.Api tool-handler framework (ToolHandlerToAIFunctionAdapter, sprk_analysistool discovery), Dataverse Web API querying, and OBO token flows.
+  </role>
+
+  <goal>
+    Three handlers registered in the tool framework with sprk_analysistool rows (using task-003 columns: sprk_toolid, sprk_namespace, sprk_outputschema, sprk_sideeffectclass, sprk_permissionscope, sprk_budgetclass), contracts frozen against the GA Dataverse MCP tool list, and handler tests passing under a test user's security context.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-architecture-redesign-r1/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-architecture-redesign-r1/plan.md</file>
+    <file purpose="project-context">projects/spaarke-ai-architecture-redesign-r1/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md</file>
+    <file purpose="mcp-research">projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/research-dataverse-mcp-2026-07.md</file>
+    <file purpose="handler-framework">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/</file>
+    <file purpose="adapter">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ToolHandlerToAIFunctionAdapter.cs</file>
+    <file purpose="column-dictionary">projects/spaarke-ai-architecture-redesign-r1/notes/schema-p0-column-dictionary.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec-MUST">MUST run user-OBO for ALL Dataverse tool access — no app-only Dataverse path reachable from AI. Every handler resolves the caller's identity from the request context.</constraint>
+    <constraint source="ADR-039">Tool names/contracts frozen against the GA Dataverse MCP list (describe, read_query, search_data) — cite the list in code comments; contracts are swap-ready regardless of the task-010 spike outcome.</constraint>
+    <constraint source="ADR-039">Grounded outputs: read results carry the identifiers needed for citation enforcement at P2.</constraint>
+    <constraint source="NFR-07">ToolChain-bound telemetry carries identifiers/filters/counts only; never log row content.</constraint>
+    <constraint source="ADR-029 / NFR-01">Verify publish-size impact per ADR-029/NFR-01; expect net change reported in task notes.</constraint>
+    <constraint source="project">Extend the existing Handlers/ framework — no parallel tool mechanism (CLAUDE.md §11).</constraint>
+    <constraint source="ADR-038">Handler tests exercise a test user's security context; no banned mock patterns.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff-api/tools, dataverse, obo</topic>
+    <files>
+      <file>docs/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/OVERLAY-MATRIX.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-MIGRATION-MAP.md</file>
+    </files>
+    <patterns>
+      <pattern name="Tool framework" location="src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/">
+        Existing handlers (e.g., DocumentSearchHandler, AnalysisQueryHandler) + ToolHandlerToAIFunctionAdapter + sprk_analysistool discovery — the registration and shape to follow.
+      </pattern>
+      <pattern name="OBO auth" location="src/server/api/Sprk.Bff.Api/Infrastructure/Graph/GraphClientFactory.cs">
+        OBO + app-only factory pattern; the Dataverse equivalent must use the OBO path exclusively for these handlers.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      OQ-4/D10 ratified native handlers with GA-MCP contracts over runtime MCP transport; these three reads plus task 009's three writes form the complete dataverse.* tool namespace for the P2 loop.
+    </background>
+    <dependencies>
+      <dependency task="003" status="not-started">sprk_analysistool new columns are required for the tool rows these handlers register under.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 009 builds the write handlers on the shared plumbing established here</item>
+      <item>Task 010 spike decides whether per-tool MCP transport is available later</item>
+      <item>Task 012 audits the user-OBO guarantee across all six handlers</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context check">
+      Check context usage; handoff if &gt; 70%. Verify task 003 ✅. Load the MCP research note and freeze the GA tool-name list for describe/read_query/search_data.
+    </step>
+    <step order="1" name="Study the handler framework + OBO path">
+      Read 2-3 existing handlers, the adapter, and the sprk_analysistool discovery flow; identify how the BFF's user-OBO Dataverse Web API client is obtained.
+    </step>
+    <step order="2" name="Build shared dataverse.* plumbing">
+      Create the shared base (OBO Dataverse client acquisition, entity-name validation, result envelope with citation identifiers, error mapping) that both this task's reads and task 009's writes use.
+    </step>
+    <step order="3" name="Implement the three handlers">
+      dataverse.describe (table/column metadata), dataverse.read_query (structured query), dataverse.search_data (search) — argument/result contracts mirroring the GA MCP tool surface.
+    </step>
+    <step order="4" name="Register tool rows">
+      Create/seed sprk_analysistool rows with sprk_toolid, sprk_namespace=dataverse, sprk_outputschema, sprk_sideeffectclass=none, sprk_permissionscope, sprk_budgetclass; confirm task-005 bijection health check passes with them.
+    </step>
+    <step order="5" name="Test under user context">
+      Handler tests executing under a test user's security context: results respect the user's row-level access; contract-shape assertions against the frozen GA names.
+    </step>
+    <step order="6" name="Build + publish-size">
+      dotnet build + full test suite green; publish-size delta reported per ADR-029.
+    </step>
+    <step order="7" name="Verify + quality gates">
+      Check acceptance criteria. Step 9.5 quality gates: code-review + adr-check. Update TASK-INDEX.md.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build, test, publish-size verification</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/ (DataverseDescribeHandler, DataverseReadQueryHandler, DataverseSearchDataHandler + shared plumbing)</output>
+    <output type="schema">spaarkedev1: sprk_analysistool rows for the three read tools</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (handler tests under test-user security context)</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Handler tests pass under a test user's security context (row-level access respected).</criterion>
+    <criterion testable="true">Tool names + contracts frozen against the GA Dataverse MCP list (citation shown in code/tests).</criterion>
+    <criterion testable="true">All three handlers execute over user-OBO only; no app-only Dataverse client reachable from the handlers (grep/audit evidence).</criterion>
+    <criterion testable="true">sprk_analysistool rows registered; tool↔handler bijection health check passes.</criterion>
+    <criterion testable="true">dotnet build green; publish-size delta reported per ADR-029; Step 9.5 quality gates (code-review + adr-check) passed.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

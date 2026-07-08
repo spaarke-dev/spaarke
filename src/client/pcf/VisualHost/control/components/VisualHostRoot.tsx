@@ -17,9 +17,13 @@ import {
 } from '@fluentui/react-components';
 import { OpenRegular, SparkleRegular } from '@fluentui/react-icons';
 import {
-  AiSummaryPopover,
+  AiSummaryPopover as RawAiSummaryPopover,
+  type IAiSummaryPopoverProps,
   type ISummaryData,
 } from '../../../../shared/Spaarke.UI.Components/src/components/AiSummaryPopover';
+
+// React 18/19 types-version drift workaround: see CardChrome.tsx for rationale.
+const AiSummaryPopover = RawAiSummaryPopover as unknown as React.ComponentType<IAiSummaryPopoverProps>;
 import { AppInsightsService } from '../../../../shared/Spaarke.UI.Components/src/services/AppInsightsService';
 import { IInputs } from '../generated/ManifestTypes';
 import { IChartDefinition, IChartData, DrillInteraction } from '../types';
@@ -451,6 +455,14 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({ context, notify
           if (filterField) params.set('filterField', filterField);
           if (filterValue) params.set('filterValue', filterValue);
           if (viewId) params.set('viewId', viewId.replace(/[{}]/g, ''));
+          // Drill-through view allowlist (operator-configured on the chart def,
+          // delimited by `;` or `,`). Forwarded so the DataGrid page shell can
+          // restrict its view-switcher without editing the grid config record.
+          const allowedViews = (chartDefinition.sprk_drillthroughviews ?? '')
+            .split(/[;,]/)
+            .map(g => g.trim().replace(/[{}]/g, ''))
+            .filter(g => g.length > 0);
+          if (allowedViews.length > 0) params.set('availableViews', allowedViews.join(';'));
           params.set('mode', 'dialog');
 
           // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -765,7 +777,7 @@ export const VisualHostRoot: React.FC<IVisualHostRootProps> = ({ context, notify
         ))}
 
       {/* Version badge - lower left, unobtrusive (controlled by showVersion PCF prop) */}
-      {showVersion && <span className={styles.versionBadge}>v1.4.16 • 2026-06-01</span>}
+      {showVersion && <span className={styles.versionBadge}>v1.4.26 • 2026-07-07</span>}
 
       {/* Main chart area */}
       <div className={styles.chartContainer}>

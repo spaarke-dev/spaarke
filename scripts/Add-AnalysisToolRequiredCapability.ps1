@@ -18,7 +18,7 @@
     Backward-compat invariant (Wave 7b): every existing sprk_analysistool row keeps
     sprk_requiredcapability=null, which is interpreted as "always available" — exactly
     the behavior pre-Wave 7b. Only rows MIGRATED in Waves 7c (VerifyCitations), 8
-    (LegalResearch/WebSearch/CodeInterpreter), and 9 (WorkingDocumentTools) set this
+    (LegalResearch/WebSearch/CodeInterpreter), and 9 (working-document tools) set this
     column to their canonical PlaybookCapabilities constant.
 
     The filter is enforced at chat-session start (SprkChatAgentFactory.ResolveTools()
@@ -65,7 +65,7 @@
     Project: spaarke-ai-platform-unification-r6 (Pillar 2)
     Wave: 7b — Per-playbook capability filter infrastructure
     Blocks: Wave 7c (VerifyCitations re-attempt), Wave 8 (LegalResearch / WebSearch /
-            CodeInterpreter migrations), Wave 9 (WorkingDocumentTools migration)
+            CodeInterpreter migrations), Wave 9 (working-document tools migration)
     Depends on: 008 (sprk_jsonschema column), 007 (sprk_availableincontexts column)
     Created: 2026-06-08
     ADR Compliance: ADR-027 (unmanaged solution; sprk_ prefix), ADR-013 (AI architecture —
@@ -317,7 +317,7 @@ function Main {
     Write-Host "Backward-compat invariant (Wave 7b): all existing sprk_analysistool rows" -ForegroundColor Yellow
     Write-Host "remain with sprk_requiredcapability=null (always-available — matches pre-Wave-7b" -ForegroundColor Yellow
     Write-Host "behavior). Waves 7c (VerifyCitations), 8 (LegalResearch/WebSearch/CodeInterpreter)," -ForegroundColor Yellow
-    Write-Host "and 9 (WorkingDocumentTools) will populate this field on the migrated rows to" -ForegroundColor Yellow
+    Write-Host "and 9 (working-document tools) will populate this field on the migrated rows to" -ForegroundColor Yellow
     Write-Host "preserve the today-hardcoded `if (capabilities.Contains(X))` gates exactly." -ForegroundColor Yellow
     Write-Host ""
 }

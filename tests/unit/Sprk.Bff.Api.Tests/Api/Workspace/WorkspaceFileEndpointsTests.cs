@@ -1,18 +1,16 @@
 using System.Reflection;
 using FluentAssertions;
-using Microsoft.AspNetCore.Routing;
-using Microsoft.Extensions.Options;
 using Sprk.Bff.Api.Api.Workspace;
-using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Services.Ai;
-using Sprk.Bff.Api.Services.Ai.PublicContracts;
+using Sprk.Bff.Api.Services.Ai.LinearConsumers;
 using Xunit;
 
 namespace Sprk.Bff.Api.Tests.Api.Workspace;
 
 /// <summary>
-/// Unit tests for <see cref="WorkspaceFileEndpoints"/> — contract and FR-04 stable-ID
-/// resolution invariants for the <c>/api/workspace/files/summarize</c> endpoint.
+/// Unit tests for <see cref="WorkspaceFileEndpoints"/> — contract invariants for the
+/// <c>/api/workspace/files/summarize</c> endpoint after the FR-P3-05 hard cutover
+/// (ai-architecture-redesign-r1 task 044: wrapper absorption + engine fall-through deletion).
 /// </summary>
 /// <remarks>
 /// <para>
@@ -24,137 +22,91 @@ namespace Sprk.Bff.Api.Tests.Api.Workspace;
 /// + workspace UI exercise the path end-to-end against the deployed BFF).
 /// </para>
 /// <para>
-/// <b>FR-04 (chat-routing-redesign-r1 task 019)</b>: the prior hardcoded
-/// <c>4a72f99c-a119-f111-8343-7ced8d1dc988</c> GUID fallback (<c>DefaultSummarizePlaybookId</c>)
-/// has been removed. The playbook is now resolved at runtime via
-/// <see cref="IPlaybookLookupService.GetByIdAsync"/> using
-/// <see cref="WorkspaceOptions.SummarizePlaybookId"/> (typed-options per ADR-018, set by
-/// task 012). Fail-fast on missing config — no hardcoded fallback at the convergence point.
-/// Mirrors the <c>SessionSummarizeOrchestrator</c> pattern proven by Wave 1-D task 015.
+/// <b>FR-P3-05</b>: summarize-file executes EXCLUSIVELY on the prompted executor —
+/// <see cref="IActionResolver"/> resolves the summarize-file Binding row's Action
+/// (sprk_playbookconsumer → sprk_analysisaction, ADR-039 single routing surface) and
+/// <see cref="IActionRunner"/> renders + runs it. The consumer-specific wrapper class,
+/// the Playbook Engine fall-through, and the playbook lookup were all DELETED per NFR-08.
 /// </para>
 /// </remarks>
 public class WorkspaceFileEndpointsTests
 {
-    #region Endpoint Mapping Surface
-
-
-    #endregion
-
-    #region FR-04 Task 019 — Stable-ID Resolution Contract
+    #region FR-P3-05 — Executor-Only Execution Contract
 
     [Fact]
-    public void HandleSummarize_AcceptsIPlaybookLookupServiceParameter_FR04()
+    public void HandleSummarize_AcceptsExecutorPrimitives_FRP305()
     {
-        // FR-04 task 019: the workspace /summarize endpoint MUST resolve its playbook via
-        // IPlaybookLookupService.GetByIdAsync at runtime — not via a hardcoded GUID. The
-        // service is wired into the static handler's parameter list, so its presence on the
-        // delegate signature pins the binding.
+        // FR-P3-05: the endpoint composes the prompted-executor primitives directly (the
+        // wrapper class was absorbed). Their presence on the delegate signature pins the
+        // binding — no wrapper, no engine, no playbook lookup.
         var handler = GetPrivateStaticMethod("HandleSummarize");
         handler.Should().NotBeNull(
             "the workspace summarize handler must exist on WorkspaceFileEndpoints");
 
         var parameterTypes = handler!.GetParameters().Select(p => p.ParameterType).ToList();
-        parameterTypes.Should().Contain(typeof(IPlaybookLookupService),
-            "FR-04 task 019 — HandleSummarize MUST accept IPlaybookLookupService so the " +
-            "endpoint can resolve the summarize playbook by stable-ID at runtime (replacing " +
-            "the prior hardcoded GUID fallback). Mirrors the SessionSummarizeOrchestrator " +
-            "pattern proven by Wave 1-D task 015.");
+        parameterTypes.Should().Contain(typeof(IActionResolver),
+            "FR-P3-05 — HandleSummarize MUST resolve the summarize-file Binding row's Action " +
+            "via IActionResolver (the ONLY routing surface, ADR-039)");
+        parameterTypes.Should().Contain(typeof(IActionRunner),
+            "FR-P3-05 — HandleSummarize MUST execute via IActionRunner (the prompted executor)");
     }
 
     [Fact]
-    public void HandleSummarize_AcceptsIOptionsWorkspaceOptionsParameter_ADR018()
+    public void HandleSummarize_HasNoEngineOrLookupOrConfigParameter_FRP305()
     {
-        // ADR-018 / FR-04 task 012: typed-options surface — the endpoint reads
-        // SummarizePlaybookId from WorkspaceOptions, not from raw IConfiguration[..]
-        // indexer. Task 012 added the property; task 019 keeps the typed read intact and
-        // simply forwards the value into the lookup service.
+        // FR-P3-05 hard cutover — the engine fall-through and the playbook lookup were
+        // DELETED (NFR-08: no shims). The handler may not carry the frozen-engine facade,
+        // a playbook lookup, or a config-options dependency; the Action catalog is the
+        // only execution source.
         var handler = GetPrivateStaticMethod("HandleSummarize");
         handler.Should().NotBeNull();
-
-        var parameterTypes = handler!.GetParameters().Select(p => p.ParameterType).ToList();
-        parameterTypes.Should().Contain(typeof(IOptions<WorkspaceOptions>),
-            "ADR-018 — HandleSummarize MUST receive IOptions<WorkspaceOptions> (typed options) " +
-            "rather than reading IConfiguration[\"Workspace:SummarizePlaybookId\"] via the indexer");
-    }
-
-
-    #endregion
-
-    #region FR-1R-05 Task 028c — Consumer Routing Migration
-
-    [Fact]
-    public void HandleSummarize_AcceptsIConsumerRoutingServiceParameter_FR1R05()
-    {
-        // FR-1R-05 task 028c: the workspace /summarize endpoint MUST primarily resolve its
-        // playbook via IConsumerRoutingService.ResolveAsync(ConsumerTypes.SummarizeFile, …)
-        // querying sprk_playbookconsumer. When the table returns null, the endpoint falls
-        // back to the legacy WorkspaceOptions.SummarizePlaybookId env var (FR-1R-06
-        // deprecation window). The routing service is wired into the static handler's
-        // parameter list, so its presence on the delegate signature pins the binding.
-        var handler = GetPrivateStaticMethod("HandleSummarize");
-        handler.Should().NotBeNull(
-            "the workspace summarize handler must exist on WorkspaceFileEndpoints");
-
-        var parameterTypes = handler!.GetParameters().Select(p => p.ParameterType).ToList();
-        parameterTypes.Should().Contain(typeof(IConsumerRoutingService),
-            "FR-1R-05 task 028c — HandleSummarize MUST accept IConsumerRoutingService so the " +
-            "endpoint can resolve the summarize playbook via the sprk_playbookconsumer routing " +
-            "table (with the MIME type passed through RoutingContext for content-aware routing).");
+        handler!.GetParameters().Should().NotContain(
+            p => p.ParameterType == typeof(IPlaybookOrchestrationService),
+            "FR-P3-05 — the engine fall-through was deleted; the executor is the only path");
+        handler.GetParameters().Should().NotContain(
+            p => p.ParameterType == typeof(IPlaybookLookupService),
+            "FR-P3-05 — no playbook resolution remains on the summarize path");
+        handler.GetParameters().Should().NotContain(
+            p => p.ParameterType.FullName!.Contains("WorkspaceOptions"),
+            "FR-P3-01 — the WorkspaceOptions config fallback stays deleted");
     }
 
     [Fact]
-    public void WorkspaceFileEndpoints_Source_CallsConsumerRoutingResolveAsyncWithMimeType_FR1R05()
+    public void WorkspaceFileEndpoints_Source_ExecutesOnActionResolverWithConstant_FRP305()
     {
-        // FR-1R-05 task 028c + FR-1R-04 task 028c: the endpoint MUST call
-        // IConsumerRoutingService.ResolveAsync with the ConsumerTypes.SummarizeFile
-        // compile-time constant AND pass a RoutingContext carrying the uploaded file's
-        // MIME type so future sprk_matchconditions JSON predicates can route per content
-        // type (NDA PDF → specialized playbook, etc.). Hardening per code-review S-5:
-        // ConsumerTypes constant rather than literal string.
+        // FR-P3-05 + code-review S-5: the endpoint MUST resolve via
+        // IActionResolver.ResolveAsync with the ConsumerTypes.SummarizeFile compile-time
+        // constant (never a literal string), and no engine dispatch or config fallback may
+        // remain, comments included (NFR-08 hard cutover).
         var source = File.ReadAllText(LocateWorkspaceFileEndpointsSource());
         source.Should().Contain("ConsumerTypes.SummarizeFile",
             "code-review S-5 — endpoint MUST use the ConsumerTypes.SummarizeFile constant, " +
             "not a literal string");
-        source.Should().Contain(".ResolveAsync(",
-            "FR-1R-05 — endpoint MUST call IConsumerRoutingService.ResolveAsync");
-        source.Should().Contain("RoutingContext",
-            "FR-1R-04 — endpoint MUST construct a RoutingContext so MIME-aware routing works");
-        source.Should().Contain("MimeType",
-            "FR-1R-04 — RoutingContext.MimeType MUST be populated for content-aware routing");
-        source.Should().Contain("workspaceOptions.Value.SummarizePlaybookId",
-            "FR-1R-06 — env-var fallback MUST remain readable during the deprecation window");
+        source.Should().Contain("actionResolver.ResolveAsync(",
+            "FR-P3-05 — endpoint MUST resolve the Action via IActionResolver");
+        source.Should().Contain("actionRunner.RunAsync(",
+            "FR-P3-05 — endpoint MUST execute via IActionRunner");
+        source.Should().NotContain("SummarizePlaybookId",
+            "FR-P3-01 — no reference to the deleted config property may remain, " +
+            "comments included (NFR-08 hard cutover)");
+        source.Should().NotContain("WorkspaceOptions",
+            "FR-P3-01 — the WorkspaceOptions config surface was deleted entirely");
+        source.Should().NotContain("PlaybookRunRequest",
+            "FR-P3-05 — no engine dispatch may remain on the workspace summarize path");
     }
 
     [Fact]
-    public void WorkspaceFileEndpoints_Source_PreservesFailFastOnMissingConfig_FR04()
+    public void WorkspaceFileEndpoints_Source_SurfacesResolutionFailureAsErrorChunk_FRP305()
     {
-        // FR-04 / NFR-02 fail-fast contract preserved: when BOTH the routing table and the
-        // env var are empty, the endpoint MUST throw InvalidOperationException so the SSE
-        // stream surfaces an error chunk (not a silent no-op).
+        // FR-04 / NFR-02 fail-fast contract preserved through the cutover: when the Action
+        // cannot be resolved (missing Binding row / no Action target), the endpoint MUST
+        // surface an SSE error chunk (not a silent no-op) — and the kill-switch
+        // FeatureDisabledException MUST propagate to the endpoint's 503 pattern.
         var source = File.ReadAllText(LocateWorkspaceFileEndpointsSource());
-        source.Should().Contain("throw new InvalidOperationException(",
-            "FR-04 — fail-fast on missing playbook config MUST be preserved");
-    }
-
-    #endregion
-
-    #region WorkspaceOptions Binding (regression — task 012 invariant preserved)
-
-    [Fact]
-    public void WorkspaceOptions_SummarizePlaybookIdProperty_RemainsTypedString()
-    {
-        // Task 012 invariant — the typed-options property carries the per-env GUID value as
-        // a string (deferred GUID parse) and is the ONLY config surface for the workspace
-        // summarize playbook. Task 019 consumes this value via the lookup service.
-        var prop = typeof(WorkspaceOptions)
-            .GetProperty(nameof(WorkspaceOptions.SummarizePlaybookId));
-
-        prop.Should().NotBeNull(
-            "WorkspaceOptions.SummarizePlaybookId is the typed-options surface for the workspace " +
-            "summarize playbook stable-ID per task 012 (preserved across task 019 migration)");
-        prop!.PropertyType.Should().Be(typeof(string),
-            "the property holds the stable-ID string value (queried via sprk_playbookid alt key), " +
-            "not a Guid — parsing happens inside IPlaybookLookupService on the Dataverse side");
+        source.Should().Contain("Failed to resolve action",
+            "FR-04 — a resolution miss MUST surface as an actionable SSE error chunk");
+        source.Should().Contain("catch (FeatureDisabledException)",
+            "ADR-032 — the kill-switch exception must propagate to the endpoint's 503 pattern");
     }
 
     #endregion

@@ -21,8 +21,8 @@
       "@spaarke/document-operations/*": ["../../client/shared/Spaarke.DocumentOperations/src/*"],
       "@spaarke/compose-components": ["../../client/shared/Spaarke.Compose.Components/src/index.ts"],
       "@spaarke/compose-components/*": ["../../client/shared/Spaarke.Compose.Components/src/*"],
-      "@spaarke/legal-workspace": ["../LegalWorkspace/src/index.d.ts"],
-      "@spaarke/legal-workspace/*": ["../LegalWorkspace/src/*"],
+      "@spaarke/legal-workspace": ["../../client/shared/Spaarke.LegalWorkspace/src/index.ts"],
+      "@spaarke/legal-workspace/*": ["../../client/shared/Spaarke.LegalWorkspace/src/*"],
       "@azure/msal-browser": ["./node_modules/@azure/msal-browser"],
       "@fluentui/react-components": ["./node_modules/@fluentui/react-components"],
       "@fluentui/react-icons": ["./node_modules/@fluentui/react-icons"]

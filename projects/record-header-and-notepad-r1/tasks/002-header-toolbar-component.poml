@@ -1,0 +1,119 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="record-header-and-notepad-r1">
+  <metadata>
+    <title>Build HeaderToolbar shared component (FR-01)</title>
+    <phase>1: Shared Library</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>003, 012, 013</blocks>
+    <tags>react, typescript, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>New shared React component with typed contract + unit tests</rigor-reason>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>Build the HeaderToolbar shared component per spec FR-01 in src/client/shared/Spaarke.UI.Components/src/components/HeaderToolbar/. Contract: title? + iconSlots (IHeaderToolbarSlot[]) with badge/tooltip/disabled support. Use Fluent v9 semantic tokens only (NFR-03) and CounterBadge for badges. Ship unit tests covering rendering, badge suppression when 0/undefined, tooltip a11y wrapping.</prompt>
+
+  <role>Spaarke platform developer. Expert in Fluent UI v9, React 16/17-compatible components, semantic token theming.</role>
+
+  <goal>HeaderToolbar.tsx + types.ts + index.ts + README.md + __tests__/HeaderToolbar.test.tsx present at src/client/shared/Spaarke.UI.Components/src/components/HeaderToolbar/; all unit tests pass; zero hex/rgb literals; React 16/17 compatible (NFR-06).</goal>
+
+  <context>
+    <background>Design §3.2 identifies HeaderToolbar as the ONE shared toolbar consumed by RecordHeaderShell (this project) and future VisualHost CardChrome migration (follow-on). Contract-locked at this task; must not be extended with VisualHost-specific concerns.</background>
+    <relevant-files>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/HeaderToolbar/HeaderToolbar.tsx</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/HeaderToolbar/types.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/HeaderToolbar/index.ts</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/HeaderToolbar/README.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/HeaderToolbar/__tests__/HeaderToolbar.test.tsx</file>
+      <file>src/client/pcf/VisualHost/control/components/CardChrome.tsx</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-012">Component lives in @spaarke/ui-components shared library; exported from src/index.ts.</constraint>
+    <constraint source="ADR-021">Fluent v9 semantic tokens exclusively; zero hex/rgb literals.</constraint>
+    <constraint source="ADR-022">No React 18-exclusive APIs; must run in PCF React 16/17 host.</constraint>
+    <constraint source="spec">FR-01: title? + iconSlots + badge (suppressed on 0/undefined) + required tooltip a11y label.</constraint>
+    <constraint source="spec">NFR-03: zero hex/rgb literals.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/record-header-and-notepad-r1/spec.md</file>
+      <file>projects/record-header-and-notepad-r1/CLAUDE.md</file>
+      <file>.claude/adr/ADR-012-shared-component-library.md</file>
+      <file>.claude/adr/ADR-021-fluent-ui-design-system.md</file>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>.claude/patterns/ui/fluent-v9-react-version-boundaries.md</file>
+      <file>docs/guides/SHARED-UI-COMPONENTS-GUIDE.md</file>
+      <file>docs/standards/CODING-STANDARDS.md</file>
+      <file>docs/standards/ANTI-PATTERNS.md</file>
+      <file>src/client/pcf/VisualHost/control/components/CardChrome.tsx</file>
+    </files>
+    <patterns>
+      <pattern name="fluent-v9-component-authoring" location=".claude/patterns/ui/fluent-v9-component-authoring.md">Fluent v9 component authoring standards.</pattern>
+      <pattern name="fluent-v9-react-version-boundaries" location=".claude/patterns/ui/fluent-v9-react-version-boundaries.md">Safe React APIs for shared lib consumed by React 16/17 PCFs.</pattern>
+    </patterns>
+  </knowledge>
+
+  <justification>
+    <existing>src/client/pcf/VisualHost/control/components/CardChrome.tsx:9-11 — closest neighbor with title + right-icon slots + badge + tooltip. Explicitly marked "INTERNAL to Visual Host. MUST NOT be exported from @spaarke/ui-components" per FR-VH-05.</existing>
+    <extension>No. CardChrome is contract-locked to VisualHost's per-chart drill-through semantics (showAiSparkle, onAiSummary, chart-def wiring). Reusing it would break its internal invariant and pull VisualHost concerns into unrelated consumers.</extension>
+    <cost-of-doing-nothing>Every future record-header consumer duplicates the same DOM structure. Concrete failure mode: this project ships a toolbar; a future SpaarkeAi widget refresh ships a second parallel toolbar; VisualHost keeps its third. Three overlapping toolbars is the §11 anti-pattern.</cost-of-doing-nothing>
+  </justification>
+
+  <steps>
+    <step order="1">Create the folder src/client/shared/Spaarke.UI.Components/src/components/HeaderToolbar/ with an empty index.ts and README.md skeleton.</step>
+    <step order="2">In types.ts, declare IHeaderToolbarSlot { key: string; icon: React.ReactNode; onClick: () =&gt; void | Promise&lt;void&gt;; tooltip: string; badge?: number; disabled?: boolean; } and IHeaderToolbarProps { title?: string; iconSlots: IHeaderToolbarSlot[]; } exactly per spec §3.2.</step>
+    <step order="3">Implement HeaderToolbar.tsx as a React FC with makeStyles for semantic-token styling; title left with ellipsis on overflow; icons right-aligned with subtle appearance, small size, spacingHorizontalXS gap.</step>
+    <step order="4">Wrap every icon button in a Fluent v9 Tooltip with relationship="label" and content={tooltip}. Overlay CounterBadge on the icon button when badge is a positive integer (suppress otherwise).</step>
+    <step order="5">Export HeaderToolbar + types from HeaderToolbar/index.ts.</step>
+    <step order="6">Write README.md documenting the contract, usage example, and the "one shared toolbar" invariant.</step>
+    <step order="7">Write __tests__/HeaderToolbar.test.tsx: renders with 0/1/N iconSlots; badge appears only when &gt; 0; tooltip attribute reachable via a11y query; disabled prop disables the click handler.</step>
+    <step order="8">Run npm test in the shared lib; ensure all pass.</step>
+    <step order="9">Run npm run lint (or repo linter) and verify zero hex/rgb literals via grep.</step>
+    <step order="10">Update tasks/TASK-INDEX.md: mark 002 ✅ completed.</step>
+    <step order="11">If any deviations from plan, document in projects/record-header-and-notepad-r1/notes/.</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Build + test shared lib</tool>
+    <tool name="terminal">Run shell commands</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/HeaderToolbar/HeaderToolbar.tsx</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/HeaderToolbar/types.ts</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/components/HeaderToolbar/index.ts</output>
+    <output type="docs">src/client/shared/Spaarke.UI.Components/src/components/HeaderToolbar/README.md</output>
+    <output type="test">src/client/shared/Spaarke.UI.Components/src/components/HeaderToolbar/__tests__/HeaderToolbar.test.tsx</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Given iconSlots=[{icon, onClick, tooltip:"Test", badge:5}], when rendered, then the CounterBadge shows 5 and Tooltip content is "Test".</criterion>
+    <criterion testable="true">Given badge=0 or undefined, when rendered, then no CounterBadge is present.</criterion>
+    <criterion testable="true">All unit tests pass; zero hex/rgb literals via grep; React 16-compatible (no use() / useSyncExternalStore w/o polyfill).</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Dark Mode Compliance (ADR-021)">
+      <steps>
+        <step>Render HeaderToolbar in Storybook or a harness with webLightTheme</step>
+        <step>Switch to webDarkTheme</step>
+        <step>Verify background, icon, tooltip, and badge colors adapt via semantic tokens</step>
+      </steps>
+      <expected>All colors adapt without any hex/rgb literals per ADR-021</expected>
+    </test>
+  </ui-tests>
+
+  <notes>Study CardChrome.tsx for behavior reference (do NOT reuse). Semantic-token names: use colorNeutralBackground1, colorNeutralForeground1, colorNeutralStroke1, spacingHorizontalXS.</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Before starting, load all files listed in knowledge/files. Follow task-execute skill.</protocol>
+  </execution>
+</task>

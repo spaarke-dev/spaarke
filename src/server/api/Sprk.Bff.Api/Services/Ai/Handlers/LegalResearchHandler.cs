@@ -12,7 +12,7 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// <summary>
 /// Chat- and playbook-invocable typed handler that performs legal research via Azure AI
 /// Foundry Bing Grounding (R6 Wave 8 — Q9 chat-tool migration). Replaces the legacy
-/// hardcoded <c>LegalResearchTools</c> class previously instantiated in
+/// hardcoded <c>LegalResearch chat-tools</c> class previously instantiated in
 /// <c>SprkChatAgentFactory.ResolveTools</c>.
 /// </summary>
 /// <remarks>
@@ -22,7 +22,7 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// <c>sprk_handlerclass = LegalResearchHandler</c>. Each row's
 /// <c>sprk_configuration.method</c> selects the internal method. Mirrors the pre-R6
 /// exposure model that hand-registered two <c>AIFunction</c>s from one
-/// <c>LegalResearchTools</c> instance.
+/// <c>LegalResearch chat-tools</c> instance.
 /// </para>
 /// <list type="bullet">
 /// <item><c>method = "ResearchLegal"</c> — broad legal topic / doctrine / statute research via
@@ -71,7 +71,7 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// constructor-injected (auto-discovered via
 /// <c>ToolFrameworkExtensions.AddToolHandlersFromAssembly</c>). No
 /// <see cref="QuerySanitizer"/> dependency — that class lives inside the legacy
-/// <c>LegalResearchTools</c> as <c>internal static</c>; this handler also keeps a local
+/// <c>LegalResearch chat-tools</c> as <c>internal static</c>; this handler also keeps a local
 /// <c>internal static partial</c> sanitizer with identical regex set so the migration is
 /// fully self-contained (the legacy class can be deleted by the main session once the
 /// hardcoded factory block is removed).
@@ -86,7 +86,7 @@ namespace Sprk.Bff.Api.Services.Ai.Handlers;
 /// </para>
 /// <para>
 /// <strong>Invocation contexts</strong>: <see cref="InvocationContextKind.Chat"/>. The
-/// pre-R6 hardcoded LegalResearchTools registration was chat-only; playbook orchestration
+/// pre-R6 hardcoded LegalResearch chat-tools registration was chat-only; playbook orchestration
 /// for legal research is not exposed today (no <c>legal_research</c> node exists in the
 /// 11 production node executors per NFR-08). Setting Chat-only preserves the existing
 /// surface — playbook callers reading <c>sprk_availableincontexts</c> will not see this
@@ -670,7 +670,7 @@ public partial class LegalResearchHandler : IToolHandler
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
-    // Result formatting (preserved from legacy LegalResearchTools for LLM parity)
+    // Result formatting (preserved from legacy LegalResearch chat-tools for LLM parity)
     // ─────────────────────────────────────────────────────────────────────────────
 
     private static string FormatLegalResults(List<GroundingResult> results, string operationName)
@@ -695,7 +695,7 @@ public partial class LegalResearchHandler : IToolHandler
     }
 
     // ─────────────────────────────────────────────────────────────────────────────
-    // Grounding annotation extraction (preserved from legacy LegalResearchTools)
+    // Grounding annotation extraction (preserved from legacy LegalResearch chat-tools)
     // ─────────────────────────────────────────────────────────────────────────────
 
     internal static List<GroundingResult> ExtractGroundingAnnotations(string responseText, int maxResults)
@@ -840,12 +840,12 @@ public partial class LegalResearchHandler : IToolHandler
     internal sealed record GroundingResult(string Title, string Url, string Snippet, int Position);
 
     // ─────────────────────────────────────────────────────────────────────────────
-    // Query sanitizer (ADR-015) — local copy of the legacy LegalResearchTools sanitizer
+    // Query sanitizer (ADR-015) — local copy of the legacy LegalResearch chat-tools sanitizer
     // ─────────────────────────────────────────────────────────────────────────────
 
     /// <summary>
     /// Static helper that sanitizes legal queries before they leave the BFF boundary
-    /// (ADR-015). Pattern set is identical to the legacy <c>LegalResearchTools.QuerySanitizer</c>
+    /// (ADR-015). Pattern set is identical to the legacy <c>LegalResearch chat-tools.QuerySanitizer</c>
     /// (which the main session removes alongside the hardcoded factory block once this
     /// handler lands). Tests are intentionally written against THIS sanitizer so the
     /// migration is self-contained.

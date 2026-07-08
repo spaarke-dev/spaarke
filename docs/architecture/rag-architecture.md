@@ -34,10 +34,8 @@ The tenant-isolation principle (every index document carries `tenantId`) and the
 | RagIndexingJobHandler | `src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/RagIndexingJobHandler.cs` | Service Bus job handler for single-document RAG indexing |
 | BulkRagIndexingJobHandler | `src/server/api/Sprk.Bff.Api/Services/Jobs/Handlers/BulkRagIndexingJobHandler.cs` | Service Bus job handler for batch RAG indexing |
 | RagTelemetry | `src/server/api/Sprk.Bff.Api/Telemetry/RagTelemetry.cs` | OpenTelemetry-compatible metrics for RAG operations |
-| PlaybookEmbeddingService | `src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookEmbedding/PlaybookEmbeddingService.cs` | Vector search for playbook dispatch (separate index: `spaarke-playbook-embeddings`) |
-| PlaybookIndexingService | `src/server/api/Sprk.Bff.Api/Services/Ai/PlaybookEmbedding/PlaybookIndexingService.cs` | Indexes playbook metadata into the spaarke-playbook-embeddings index |
-| DocumentSearchTools | `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/DocumentSearchTools.cs` | AI function tool: entity-scoped document search for SprkChat |
-| KnowledgeRetrievalTools | `src/server/api/Sprk.Bff.Api/Services/Ai/Chat/Tools/KnowledgeRetrievalTools.cs` | AI function tool: knowledge-source-scoped retrieval for SprkChat |
+| ~~PlaybookEmbeddingService / PlaybookIndexingService~~ | *(deleted)* | **DELETED 2026-07-06** with the dispatcher stack (`spaarke-ai-architecture-redesign-r1` task 035, FR-P2-06); the `spaarke-playbook-embeddings` index is orphaned pending the Track-B P4 decommission sweep (FR-P4-01) |
+| ~~DocumentSearchTools / KnowledgeRetrievalTools~~ | *(deleted)* | **DELETED 2026-07-06** with the legacy `Chat/Tools` directory (task 036, FR-P2-07); SprkChat retrieval now runs through the typed-handler catalog (`Services/Ai/Handlers/`) projected into the agent loop |
 
 ## Data Flow
 
@@ -103,7 +101,7 @@ The tenant-isolation principle (every index document carries `tenantId`) and the
 | Depends on | Knowledge deployment | `IKnowledgeDeploymentService` | Multi-tenant index routing |
 | Consumed by | Chat system | `DocumentSearchTools`, `KnowledgeRetrievalTools` | Entity-scoped search during chat |
 | Consumed by | Analysis pipeline | `AnalysisRagProcessor` | Reference retrieval during analysis |
-| Consumed by | Playbook dispatch | `PlaybookEmbeddingService` | Playbook matching via separate index |
+| ~~Consumed by~~ | ~~Playbook dispatch~~ | ~~`PlaybookEmbeddingService`~~ | Deleted 2026-07-06 (redesign-r1 task 035) — no dispatch consumer of embeddings remains |
 
 ## Design Decisions
 

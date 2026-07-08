@@ -1,0 +1,148 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="027" project="spaarke-ai-architecture-redesign-r1">
+  <metadata>
+    <title>G-P1 gate: P1 deploy + operator browser UAT on spaarkedev1 (upload → classification + summary + chips; typo-tolerant summarize; NFR-04 latency)</title>
+    <phase>Phase P1: First Capability End-to-End</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <tags>deploy, gate, uat</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <parallel-group>serial</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>020, 021, 022, 023, 024, 025, 026</dependencies>
+  </metadata>
+
+  <prompt>
+    Execute the G-P1 phase gate: deploy the P1 build to the dev environment (BFF via bff-deploy to spaarke-bff-dev; SpaarkeAi code page via code-page-deploy to spaarkedev1), then hand over to the OPERATOR who executes the G-P1 UAT script in the Spaarke UI in a browser. The headline behavior under test: a user uploads a file, types nothing, and sees classification + a streaming summary + working chips; and any phrasing or typo of "summarize" works as a typed command. The latency NFR-04 check runs during the same session: upload → first summary token ≤5s p50 / ≤10s p95. Per NFR-11 (BINDING browser rule), this gate CANNOT be satisfied by curl, tests, or logs — only a user in the Spaarke UI with rendered results passes it. Run `/goal clear` before starting this task (plan.md §6 rule 7).
+  </prompt>
+
+  <role>
+    Release engineer coordinating a dev deployment and facilitating an operator-executed browser UAT; prepares evidence capture, does NOT self-certify the gate.
+  </role>
+
+  <goal>
+    P1 build deployed to spaarkedev1 + spaarke-bff-dev; the operator has executed the full G-P1 UAT script in the browser with every step passing; latency measurements recorded against NFR-04; gate evidence filed in project notes; TASK-INDEX marks P1 complete.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-architecture-redesign-r1/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-architecture-redesign-r1/plan.md</file>
+    <file purpose="project-context">projects/spaarke-ai-architecture-redesign-r1/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md</file>
+    <file purpose="deploy-skill-bff">.claude/skills/bff-deploy/SKILL.md</file>
+    <file purpose="deploy-skill-codepage">.claude/skills/code-page-deploy/SKILL.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="NFR-11 (BINDING browser rule)">The gate is executed BY THE OPERATOR in the Spaarke UI on spaarkedev1 with rendered results. curl, unit/integration tests, SSE transcripts, and App Insights logs NEVER satisfy this gate. Claude Code prepares, deploys, and records — the human clicks.</constraint>
+    <constraint source="NFR-04">Latency targets verified in this browser session: upload → first-summary-token ≤5s p50 / ≤10s p95 (multiple runs; record measurements). Prompt caching for the capability-tool projection must be in place if needed to meet targets.</constraint>
+    <constraint source="NFR-02">Eval suite MUST be green before deploying the gate build (merge gate active since task 026).</constraint>
+    <constraint source="NFR-10 / plan.md §6.7">`/goal clear` MUST be run before this gate task; `/goal` never wraps a G-gate.</constraint>
+    <constraint source="ADR-029">Report the deployed publish size as part of gate evidence (P1 cumulative delta vs P0 baseline; expectation net reduction).</constraint>
+    <constraint source="ADR-039 / ADR-040">Gate evidence must reflect the target architecture: summarize routed via catalog rows; outputs addressable in the ledger (spot-check one SessionOutput key during UAT support, server-side — informational only, not a substitute for the browser script).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>deployment, uat, phase-gate</topic>
+    <files>
+      <file>docs/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>docs/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/OVERLAY-MATRIX.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-MIGRATION-MAP.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+    </files>
+    <patterns>
+      <pattern name="Gate precedent" location="projects/spaarke-ai-architecture-redesign-r1/tasks/014-*.poml">Task 014 (G-P0) established the deploy + evidence-assembly shape; G-P1 adds the operator browser script on top.</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      G-P1 is the first browser gate of the project and the first moment a real user sees the redesigned pipeline. It validates the entire P1 chain: catalog rows (020) → ledger-before-render (021) → event rule with bounds (022) → binding_id chips (023), with the eval suite (026) guarding regressions. Phase P2 does not start until the operator passes this script.
+    </background>
+    <dependencies>
+      <dependency task="020" status="pending">chat-summarize catalog rows.</dependency>
+      <dependency task="021" status="pending">Universal ledger write + OutputRouter.</dependency>
+      <dependency task="022" status="pending">Event rule document_uploaded → [classify, summarize].</dependency>
+      <dependency task="023" status="pending">Click path dispatchConsumer + chips.</dependency>
+      <dependency task="024" status="pending">Engine-output ledger adapter.</dependency>
+      <dependency task="025" status="pending">r7 branch closed.</dependency>
+      <dependency task="026" status="pending">UC-A-1 eval green; ADR-039 Accepted.</dependency>
+    </dependencies>
+  </context>
+
+  <steps>
+    <step order="0" name="Context check + goal clear">
+      Verify context usage below 70%. Run `/goal clear` (NFR-10: goal conditions never wrap a gate). Confirm tasks 020-026 are ✅ in TASK-INDEX.md and CI (incl. eval suite) is green.
+    </step>
+    <step order="1" name="Pre-deploy verification">
+      dotnet build + full test + eval suite green (shown). Run ADR-029 publish-size verification and record the P1 cumulative size/delta for the gate evidence.
+    </step>
+    <step order="2" name="Deploy BFF">
+      Invoke the bff-deploy skill to deploy Sprk.Bff.Api to the spaarke-bff-dev App Service. Verify health endpoints + startup reconciliation checks green in the deployed environment.
+    </step>
+    <step order="3" name="Deploy SpaarkeAi code page">
+      Invoke the code-page-deploy skill to build (npm run build:prod) and deploy the SpaarkeAi code page web resources to spaarkedev1. Verify the page loads.
+    </step>
+    <step order="4" name="Operator executes the G-P1 UAT script (browser)">
+      Hand the ui-tests script below to the operator. The OPERATOR executes every step in the Spaarke UI on spaarkedev1. Claude Code observes/records results and latency measurements; it does NOT execute the script itself and does NOT accept curl/test/log substitutes (NFR-11).
+    </step>
+    <step order="5" name="Record gate evidence">
+      File the gate record in projects/spaarke-ai-architecture-redesign-r1/notes/ (UAT step results, latency measurements vs NFR-04, publish size, deploy versions, operator sign-off). If any step failed: mark the gate FAILED, file findings against the owning task, and STOP — P2 does not start.
+    </step>
+    <step order="6" name="Update tracking">
+      On operator pass: update TASK-INDEX.md (027 → ✅, Phase P1 complete), POML status, current-task.md pointing at task 030. Report gate outcome.
+    </step>
+  </steps>
+
+  <ui-tests>
+    <test name="G-P1 UAT step 1 — silent upload">
+      Operator signs in to the Spaarke UI on spaarkedev1, opens the assistant/workspace, uploads a document (e.g., a contract PDF or DOCX), and TYPES NOTHING.
+    </test>
+    <test name="G-P1 UAT step 2 — classification renders">
+      Within the session, the document classification renders in the UI without any typed command (Event path: classify(1)).
+    </test>
+    <test name="G-P1 UAT step 3 — summary streams">
+      A document summary streams into the conversation after classification (Event path: summarize(2)). Operator starts a timer at upload: first summary token within ≤5s (repeat the upload flow ~5 times across the session; record each measurement for the p50/p95 check — ≤5s p50 / ≤10s p95 per NFR-04).
+    </test>
+    <test name="G-P1 UAT step 4 — chips render and work">
+      Chips render with the outputs; operator clicks a chip and the bound capability executes with rendered results (Click path via dispatchConsumer).
+    </test>
+    <test name="G-P1 UAT step 5 — typo-tolerant summarize">
+      Operator types several variants of a summarize request — e.g., "summarize this", "sumarize", "summarise the doc", "give me a summary" — each yields a rendered summary. ANY reasonable phrasing/typo of "summarize" works.
+    </test>
+    <test name="G-P1 UAT step 6 — explicit-command supersede">
+      Operator uploads a document WITH a typed command in the same action; the typed command wins and the auto event rule does not double-fire.
+    </test>
+    <test name="G-P1 UAT step 7 — no console errors">
+      Browser devtools console shows no errors across steps 1-6.
+    </test>
+  </ui-tests>
+
+  <tools>
+    <tool name="bff-deploy">Deploy Sprk.Bff.Api to spaarke-bff-dev</tool>
+    <tool name="code-page-deploy">Deploy SpaarkeAi code page to spaarkedev1</tool>
+    <tool name="dotnet">Pre-deploy build/test/publish-size</tool>
+    <tool name="npm">Client production build</tool>
+  </tools>
+
+  <outputs>
+    <output type="deploy">Sprk.Bff.Api deployed to spaarke-bff-dev; SpaarkeAi code page deployed to spaarkedev1</output>
+    <output type="report">projects/spaarke-ai-architecture-redesign-r1/notes/gate-g-p1-evidence.md (UAT results, NFR-04 latency measurements, publish size, operator sign-off)</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md (027 + Phase P1 status)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">P1 build deployed: BFF health checks green on spaarke-bff-dev; SpaarkeAi code page loads on spaarkedev1.</criterion>
+    <criterion testable="true">The OPERATOR executed every G-P1 UAT step in the browser with rendered results: upload with nothing typed yields classification + summary + working chips (NFR-11 — no curl/test/log substitutes).</criterion>
+    <criterion testable="true">Any phrasing/typo of "summarize" produces a rendered summary in the operator's session.</criterion>
+    <criterion testable="true">NFR-04 verified from the recorded runs: upload → first-summary-token ≤5s p50 / ≤10s p95.</criterion>
+    <criterion testable="true">Gate evidence record filed in notes/ with operator sign-off; TASK-INDEX marks Phase P1 complete (or gate FAILED with findings and P2 blocked).</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

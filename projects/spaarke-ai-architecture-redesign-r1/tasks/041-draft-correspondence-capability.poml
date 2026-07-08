@@ -1,0 +1,138 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="041" project="spaarke-ai-architecture-redesign-r1">
+  <metadata>
+    <title>draft-correspondence capability — prompted Action + email.draft write-shape via Spaarke Communication (Email) service (DRAFT-ONLY, gated communicate)</title>
+    <phase>Phase P3: Consumer + Client Consolidation</phase>
+    <status>not-started</status>
+    <estimated-hours>10</estimated-hours>
+    <tags>bff-api, capability, email, graph</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <parallel-group>W-P3-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>038</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement FR-P3-02: the `draft-correspondence` capability as a Prompted Action authored via the `jps-action-create` skill (JPS prompt + output schema) plus its Binding row. The `email.draft` write-shape tool delegates to **Spaarke's own Communication (Email) service via Graph API — explicitly NOT Outlook drafts** (owner clarification in spec §Owner Clarifications): the output is a Spaarke communication draft record rendered for user review. The capability is DRAFT-ONLY this project — sending remains user-initiated through the Communication service; assistant-initiated send is a named P4 deferral. The tool is gated through the ONE confirmation gate by its declared `side_effect_class: communicate` (never by tool-name list). The draft must be able to reference real ledger outputs (e.g., "draft the client letter" citing the summary + matter created earlier in the session) — that exact step in the G-P3 browser script is the acceptance bar. The Communication service itself is consumed, not structurally modified (spec §External Dependencies).
+  </prompt>
+
+  <role>
+    Senior .NET developer familiar with the Sprk.Bff.Api tool-handler framework, Graph API integration under OBO, JPS Action authoring, and the confirmation-gate/side-effect-class contract from P2.
+  </role>
+
+  <goal>
+    A catalog-authored `draft-correspondence` Prompted Action + Binding, and an `email.draft` typed tool handler that creates a Spaarke communication draft record via the Communication (Email) service over Graph, suspended/resumed through the unified confirmation gate on `side_effect_class: communicate`, with the draft rendered for review and grounded in ledger outputs.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-architecture-redesign-r1/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-architecture-redesign-r1/plan.md</file>
+    <file purpose="project-context">projects/spaarke-ai-architecture-redesign-r1/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md</file>
+    <file purpose="per-component-verdicts">projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/OVERLAY-MATRIX.md</file>
+    <file purpose="jps-skill">.claude/skills/jps-action-create/SKILL.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec-FR-P3-02">`email.draft` delegates to Spaarke's Communication (Email) service via Graph API — NOT Outlook drafts. DRAFT-ONLY: no assistant-initiated send anywhere in this task; send stays user-initiated in the Communication service.</constraint>
+    <constraint source="ADR-039">Capability lands as closed-catalog rows (Action + Binding + tool row in `sprk_analysistool`); MUST NOT add routing config outside the Binding table; output MUST be grounded (draft cites ledger refs, no ungrounded free-form).</constraint>
+    <constraint source="ADR-040">Draft output writes a `SessionOutput` ledger entry (with the ToolChain) BEFORE rendering; the rendered review card follows the store.</constraint>
+    <constraint source="FR-P2-02">Gating is driven by declared `side_effect_class: communicate` + Binding `risk` through THE one pending store (generalized PendingPlanManager) — MUST NOT gate by hardcoded tool-name lists.</constraint>
+    <constraint source="ADR-013-amended-2026-07-05">Capability invocation is the canonical facade verb; PublicContracts boundary unchanged — no AI-internal types leak into Communication-service consumption code.</constraint>
+    <constraint source="spec-MUST">User-OBO for all Dataverse/Graph access reachable from the tool plane; no app-only path.</constraint>
+    <constraint source="ADR-029 / NFR-01">BFF-touching task: report publish size + delta; &gt;=+2 MB needs justification.</constraint>
+    <constraint source="NFR-02 / NFR-06">Add golden-utterance eval cases for draft-correspondence (incl. schema-conformance + gate-fires assertions); eval green is the merge gate.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>tool-handlers, jps-actions, graph-email, confirmation-gate</topic>
+    <files>
+      <file>docs/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>docs/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/OVERLAY-MATRIX.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-MIGRATION-MAP.md</file>
+    </files>
+    <patterns>
+      <pattern name="Prompted executor" location="src/server/api/Sprk.Bff.Api/Services/Ai/LinearConsumers/">
+        ActionRunner + PromptSchemaRenderer execute the draft-correspondence Prompted Action from its JPS prompt + output schema.
+      </pattern>
+      <pattern name="Tool framework" location="src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/">
+        Typed tool handlers + ToolHandlerToAIFunctionAdapter + `sprk_analysistool` discovery — `email.draft` follows the dataverse.* handler shape from tasks 008/009.
+      </pattern>
+      <pattern name="Gate store" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PendingPlanManager.cs">
+        THE unified pending store (task 031) — email.draft suspends/resumes through it on side_effect_class.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      draft-correspondence is one of the two new proving capabilities (with create-task) that demonstrate the composition payoff of the session ledger: a user can say "draft the client letter" and the draft references the real summary + matter produced earlier in the same conversation. The owner clarified the email mechanism: Spaarke's Communication (Email) service via Graph, not Outlook drafts — the Communication service already exists and is consumed as-is.
+    </background>
+    <dependencies>
+      <dependency task="038" status="pending">G-P2 gate passed — unified confirmation gate + agent loop + typed handlers live.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Tasks 008/009 — dataverse.* typed handler contract shape</item>
+      <item>Task 031 — one confirmation gate on side_effect_class</item>
+      <item>FR-P4-07 — assistant-initiated send filed as named deferral</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context check + load knowledge">
+      Verify context &lt; 70%. Load spec FR-P3-02 + Owner Clarifications (email mechanism row), OVERLAY-MATRIX verdict, bff-extensions.md, and locate the existing Communication (Email) service surface in the BFF.
+    </step>
+    <step order="1" name="Author the JPS Action">
+      Invoke `jps-action-create` for the draft-correspondence Prompted Action: instruction, output schema (subject, body, recipients-suggestion, cited ledger refs), scopes, template params. Validate with `jps-validate`. Create the `sprk_analysisaction` row (`kind: prompted`) on spaarkedev1.
+    </step>
+    <step order="2" name="Implement the email.draft tool handler">
+      Add `email.draft` typed handler in `Services/Ai/Handlers/` delegating to the Communication (Email) service via Graph under user-OBO; register the `sprk_analysistool` row with `sprk_sideeffectclass = communicate`, output schema, permission scope, budget class. Do NOT modify the Communication service structurally.
+    </step>
+    <step order="3" name="Wire the Binding + gate">
+      Author the `sprk_playbookconsumer` Binding row (surfaces, risk, disposition renders the draft record for review). Verify the tool suspends into the unified pending store on `side_effect_class: communicate` and resumes on confirm — no tool-name list anywhere.
+    </step>
+    <step order="4" name="Ledger grounding">
+      Ensure the draft flow resolves ledger refs (`{bindingId}@t{n}`) for source summary/matter and writes its own SessionOutput + ToolChain entries before the review card renders.
+    </step>
+    <step order="5" name="Tests + eval cases">
+      Unit/integration tests: handler creates a communication draft record (mock Graph boundary per ADR-038), gate fires on communicate, DRAFT-ONLY invariant (no send call path reachable). Add golden-utterance eval cases ("draft the client letter ...") with schema-conformance + citation-integrity assertions.
+    </step>
+    <step order="6" name="Verify">
+      dotnet build + tests + eval suite green (shown). Publish-size delta reported per ADR-029.
+    </step>
+    <step order="7" name="Step 9.5 quality gates">
+      Run code-review + adr-check (FULL rigor). Update TASK-INDEX.md; reset current-task.md.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build, test, publish-size verification</tool>
+    <tool name="jps-action-create">Author the draft-correspondence JPS Action</tool>
+    <tool name="jps-validate">Validate the JPS JSON + rendering</tool>
+    <tool name="dataverse-mcp">Author Action/Binding/tool rows on spaarkedev1</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="data">sprk_analysisaction (draft-correspondence, prompted) + sprk_playbookconsumer Binding + sprk_analysistool (email.draft, side_effect_class=communicate) rows on spaarkedev1</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/EmailDraftToolHandler.cs (email.draft handler)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/** (handler + gate tests)</output>
+    <output type="test">tests/integration/contract/** (draft-correspondence eval cases)</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">draft-correspondence executes as a catalog Prompted Action via ActionRunner + PromptSchemaRenderer; no code-path routing outside the Binding table.</criterion>
+    <criterion testable="true">`email.draft` creates a Spaarke communication draft record via the Communication (Email) service over Graph (NOT an Outlook draft), rendered for user review — test-proven.</criterion>
+    <criterion testable="true">Invocation is gated through the ONE pending store by `side_effect_class: communicate` (no tool-name list); DRAFT-ONLY — no assistant-initiated send path exists.</criterion>
+    <criterion testable="true">G-P3 script step "draft the client letter" passes in the browser referencing the real summary + matter from the ledger (verified at gate task 048).</criterion>
+    <criterion testable="true">Eval cases added and suite green (NFR-02); publish-size delta reported (ADR-029); Step 9.5 code-review + adr-check passed.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

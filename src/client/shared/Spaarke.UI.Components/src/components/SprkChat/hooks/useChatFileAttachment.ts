@@ -61,8 +61,8 @@ export interface ChatAttachment {
    *
    * OPTIONAL + ADDITIVE: existing consumers that only read filename /
    * contentType / textContent are unaffected. Hosts implementing binary
-   * promotion (e.g. ConversationPane's `executeSummarizeIntent`) should
-   * prefer this field over reconstructing a synthetic File from textContent
+   * promotion (e.g. ConversationPane's auto-promote effect) should prefer
+   * this field over reconstructing a synthetic File from textContent
    * because PDF/DOCX bytes do NOT round-trip through extracted text.
    */
   file?: File;
@@ -433,7 +433,7 @@ export function useChatFileAttachment(options: UseChatFileAttachmentOptions = {}
         // Accept — create chip in `extracting` state.
         //
         // R5 task 036: retain the original File on the chip so downstream
-        // binary-upload paths (e.g. ConversationPane `executeSummarizeIntent`
+        // binary-upload paths (e.g. ConversationPane's auto-promote effect
         // → POST /documents) can re-read the bytes. Extraction below also
         // reads `file.arrayBuffer()` / `file.text()` but those calls do NOT
         // invalidate the File — browser File objects are reference-counted
@@ -581,7 +581,7 @@ export function useChatFileAttachment(options: UseChatFileAttachmentOptions = {}
   // filter; the alternative (separate state) would invite drift.
   //
   // R5 task 036: forward the retained File reference so downstream binary-
-  // upload paths (e.g. `executeSummarizeIntent` → POST /documents) can post
+  // upload paths (auto-promote → POST /documents) can post
   // the original bytes rather than a synthetic File reconstructed from
   // extracted text (which fails for PDF/DOCX BFF Document Intelligence).
   const attachments: ChatAttachment[] = files

@@ -2,18 +2,25 @@
  * @spaarke/ai-widgets — StructuredOutputStreamWidget
  *
  * Workspace-pane widget that renders structured AI output PROGRESSIVELY via
- * `FieldDelta` SSE events, OR statically from a pre-filled envelope. Created
- * in R5 task 017 (D2-07) as the destination for:
+ * section-keyed `section_*` events (ADR-037 as amended 2026-07-05 — section-
+ * name-keyed streaming is THE binding render contract), OR statically from a
+ * pre-filled envelope. Created in R5 task 017 (D2-07) as the destination for:
  *
- *   - Summarize streaming output (FR-02): TL;DR-first progressive emission
- *     from `SessionSummarizeOrchestrator` via Azure OpenAI Structured Outputs
- *     token-stream (task 006 spike: ~191 events / ~932 chars; declaration-
- *     order field arrival).
+ *   - Capability dispatch streaming output: sections arrive via the ONE
+ *     client dispatch helper (`dispatchConsumer`, task 023/FR-P1-04), which
+ *     bridges the terminal AnalysisChunk envelope onto section events.
  *   - Insights playbook static rendering (FR-13 / D2-16, task 026): the same
  *     widget renders the Insights playbook envelope via `mode: 'static'` +
  *     `INSIGHTS_PLAYBOOK_SCHEMA` + `prefilledFields` — zero widget code
  *     change required. This dual-purpose reuse is the load-bearing platform-
  *     extensibility claim of R5 (risk UR-02 mitigation).
+ *
+ * CUTOVER (ai-architecture-redesign-r1 task 046 / FR-P3-07, amended ADR-037):
+ * the legacy schema-position-keyed per-field-delta dual-render path was
+ * DELETED at the last-playbook cutover. Streaming rendering is section-keyed
+ * ONLY; the schema-driven field renderer below now serves the STATIC
+ * (`prefilledFields`) mode exclusively. No dual-render fallback is retained
+ * (NFR-08 hard cutover).
  *
  * Render contract is SCHEMA-DRIVEN: the widget accepts a list of field
  * descriptors (path + label + displayHint + order) and renders fields in
@@ -190,14 +197,13 @@ export interface JsonSchema extends JsonSchemaField {
  */
 export interface StructuredOutputField {
   /**
-   * JSON path identifying the field within the streamed envelope.
-   * MUST match the `fieldPath` value carried on incoming `workspace.field_delta`
-   * events (R5 task 016 / D2-06 — additive event types).
+   * JSON path identifying the field within the rendered envelope.
+   * MUST match the key used in `prefilledFields` (static mode — the only
+   * consumer of the schema field plan since the task 046 cutover; streaming
+   * rendering is section-name-keyed and schema-agnostic).
    *
-   * v1 supports top-level keys (e.g. `"tldr"`, `"summary"`) + a single
-   * synthetic list pattern: a path ending in `.*` (e.g. `"keywords.*"`)
-   * treats incoming deltas with the same prefix as list items. See widget
-   * body for implementation; nested paths are TODO-deferred (UR-02).
+   * v1 supports top-level keys (e.g. `"tldr"`, `"summary"`); nested paths are
+   * TODO-deferred (UR-02).
    */
   path: string;
   /**
@@ -233,9 +239,10 @@ export interface StructuredOutputSchema {
  * Two top-level modes:
  *
  *   - `'streaming'` — the widget subscribes to PaneEventBus
- *     `workspace.streaming_started / field_delta / streaming_complete` events
- *     matching `correlationId` and renders progressively. Used by Summarize
- *     (R5 task 020 dispatcher) and by Insights playbook streaming in Phase 2+.
+ *     `workspace.streaming_started / section_* / streaming_complete` events
+ *     matching `correlationId` and renders sections progressively (section-
+ *     name-keyed per amended ADR-037; the ONLY streaming render contract
+ *     since the task 046 cutover).
  *   - `'static'` — the widget renders `prefilledFields` directly with no
  *     subscription. Used by Insights playbook static rendering (task 026 /
  *     D2-16) and by Insights RAG decline-to-find rendering when
@@ -247,8 +254,8 @@ export interface StructuredOutputSchema {
  */
 export interface StructuredOutputStreamWidgetData {
   /**
-   * `'streaming'` — subscribe to PaneEventBus field deltas (Summarize path,
-   * future playbook-streaming path).
+   * `'streaming'` — subscribe to PaneEventBus section events (capability
+   * dispatch path via `dispatchConsumer`).
    * `'static'`    — render `prefilledFields` directly (Insights playbook
    * static envelope; task 026).
    */
@@ -474,16 +481,6 @@ export const SUM_CHAT_OUTPUT_SCHEMA: JsonSchema = {
 // Internal reducer — append-only progressive rendering by JSON path
 // ---------------------------------------------------------------------------
 
-/**
- * Per-path render state — `content` is the accumulated string, `lastSequence`
- * is the highest `sequence` we've seen for this path (used for out-of-order
- * detection).
- */
-interface FieldState {
-  content: string;
-  lastSequence: number;
-}
-
 /** Phase machine for the streaming state. */
 type StreamPhase = 'idle' | 'streaming' | 'complete';
 
@@ -554,31 +551,13 @@ export interface SectionState {
 interface StreamReducerState {
   phase: StreamPhase;
   /**
-   * Path → accumulated content. Map preserves insertion order (= delta-
-   * arrival order), used to identify the most-recently-updated path for
-   * cursor positioning.
-   */
-  fields: Map<string, FieldState>;
-  /**
-   * JSON path of the field that most recently received a delta. The cursor
-   * animation renders at the tail of this field while `phase === 'streaming'`.
-   * Cleared on `streaming_complete`.
-   */
-  mostRecentPath: string | null;
-  /**
    * Section-name → SectionState. Phase 5R Wave 5-C (FR-54).
    *
-   * Populated by the composite-section events (`section_started` /
-   * `section_data` / `section_completed`). Map preserves insertion order
+   * Populated by the section events (`section_started` / `section_data` /
+   * `section_completed`) — the ONLY streaming content vocabulary since the
+   * task 046 cutover (amended ADR-037). Map preserves insertion order
    * (= first-event-seen order), used as a deterministic fallback when
    * sectionIndex is missing.
-   *
-   * BACKWARD-COMPAT INVARIANT: this map is EMPTY for unmigrated playbooks
-   * (only `FieldDelta` events arrive). The renderer detects "section mode"
-   * via `sections.size > 0` and routes accordingly. Mixed mode (both field
-   * deltas AND section events on the same widget instance) is undefined
-   * behaviour by spec (114a's BFF guard ensures one OR the other per stream);
-   * the renderer is defensive but lets sections take precedence if observed.
    */
   sections: Map<string, SectionState>;
   /**
@@ -596,7 +575,6 @@ interface StreamReducerState {
 
 type StreamReducerAction =
   | { type: 'streaming_started' }
-  | { type: 'field_delta'; path: string; content: string; sequence: number }
   | { type: 'streaming_complete' }
   | {
       type: 'section_started';
@@ -622,8 +600,6 @@ type StreamReducerAction =
 
 const INITIAL_REDUCER_STATE: StreamReducerState = {
   phase: 'idle',
-  fields: new Map(),
-  mostRecentPath: null,
   sections: new Map(),
   mostRecentSectionName: null,
   sectionTickCounter: 0,
@@ -658,54 +634,18 @@ function mergeStructuredData(prior: unknown, next: unknown): unknown {
 function streamReducer(state: StreamReducerState, action: StreamReducerAction): StreamReducerState {
   switch (action.type) {
     case 'streaming_started':
-      // Fresh start. Clear any prior content from a previous run — applies to
-      // BOTH legacy field state AND section state, since a fresh stream may
-      // begin in either mode.
+      // Fresh start. Clear any prior section content from a previous run.
       return {
         phase: 'streaming',
-        fields: new Map(),
-        mostRecentPath: null,
         sections: new Map(),
         mostRecentSectionName: null,
         sectionTickCounter: 0,
       };
 
-    case 'field_delta': {
-      const { path, content, sequence } = action;
-      const prior = state.fields.get(path);
-
-      // Out-of-order detection: drop stale deltas (sequence less than or
-      // equal to the highest seen) and log for telemetry. Equal sequence is
-      // also dropped — duplicate deltas should never apply twice.
-      if (prior !== undefined && sequence <= prior.lastSequence) {
-        // eslint-disable-next-line no-console
-        console.debug(
-          `[StructuredOutputStreamWidget] dropped stale delta path="${path}" sequence=${sequence} lastSequence=${prior.lastSequence}`
-        );
-        return state;
-      }
-
-      const nextFields = new Map(state.fields);
-      nextFields.set(path, {
-        content: (prior?.content ?? '') + content,
-        lastSequence: sequence,
-      });
-      return {
-        ...state,
-        // First delta also flips phase to streaming if a stream began without
-        // an explicit `streaming_started` (defensive — should not happen, but
-        // makes the widget robust to a missing prelude).
-        phase: state.phase === 'idle' ? 'streaming' : state.phase,
-        fields: nextFields,
-        mostRecentPath: path,
-      };
-    }
-
     case 'streaming_complete':
       return {
         ...state,
         phase: 'complete',
-        mostRecentPath: null,
       };
 
     case 'section_started': {
@@ -1765,9 +1705,15 @@ const SchemaAwareObjectRenderer: React.FC<SchemaAwareObjectRendererProps> = ({
  *      ("Streaming…" while not yet completed; nothing when completed — the
  *      surrounding container's "Complete" badge carries the terminal state).
  *   2. Body: `accumulatedText` rendered as wrapping paragraph + (when
- *      `structuredData` is present) compact JSON fallback below for renderer-
- *      agnostic surfacing. Future tasks may add a per-widget-type registry for
- *      richer structured rendering (out of 114b scope — keep MVP simple).
+ *      `structuredData` is present) VALUE-SHAPE-typed rendering (task 046 —
+ *      the section path is the ONLY streaming render contract post-cutover,
+ *      so common payload shapes render properly instead of as raw JSON):
+ *        - array of strings        → bulleted list
+ *        - flat record of strings /
+ *          string-arrays           → labeled rows (prettyName keys)
+ *        - anything else           → compact JSON fallback (unchanged MVP)
+ *      Narrowing is by VALUE shape, never by schema — the section renderer
+ *      stays schema-position-agnostic per FR-54.
  *   3. Citations: when `section_completed.citations` was carried, render a
  *      sub-list of citation IDs / labels (NFR-A3 trust model). Each citation
  *      record is opaque; we extract `id`/`label`/`title` defensively.
@@ -1792,13 +1738,45 @@ const SectionRenderer: React.FC<SectionRendererProps> = ({ section, isMostRecent
   const hasStructured = section.structuredData !== undefined;
   const citations = section.citations ?? [];
 
-  // Defensive: when structured data is a string already, render as text; when
-  // it's a non-trivial object/array, render as compact JSON below the text so
-  // the user sees SOMETHING without us coupling to widget-type-specific shapes.
+  // ── Value-shape-typed structured rendering (task 046 / FR-P3-07) ────────
+  //
+  // Post-cutover the section path is the ONLY streaming render contract, so
+  // the common structured payload shapes render properly (bulleted lists,
+  // labeled rows) instead of as raw JSON. Narrowing is by VALUE shape, never
+  // by schema (the section renderer stays schema-position-agnostic, FR-54).
+  const structured = section.structuredData;
+  const structuredStringList =
+    hasStructured && Array.isArray(structured) && structured.every(x => typeof x === 'string')
+      ? (structured as ReadonlyArray<string>)
+      : null;
+  // Flat record whose values are strings or arrays-of-strings → labeled rows.
+  let structuredFlatRecord: ReadonlyArray<[string, string | ReadonlyArray<string>]> | null = null;
+  if (
+    structuredStringList === null &&
+    hasStructured &&
+    typeof structured === 'object' &&
+    structured !== null &&
+    !Array.isArray(structured)
+  ) {
+    const entries = Object.entries(structured as Record<string, unknown>);
+    const allFlat =
+      entries.length > 0 &&
+      entries.every(([, v]) => typeof v === 'string' || (Array.isArray(v) && v.every(x => typeof x === 'string')));
+    if (allFlat) {
+      structuredFlatRecord = entries as ReadonlyArray<[string, string | ReadonlyArray<string>]>;
+    }
+  }
+
+  // Compact-JSON fallback for anything the typed paths above don't cover.
   let structuredJson: string | null = null;
-  if (hasStructured && typeof section.structuredData !== 'string') {
+  if (
+    hasStructured &&
+    typeof structured !== 'string' &&
+    structuredStringList === null &&
+    structuredFlatRecord === null
+  ) {
     try {
-      structuredJson = JSON.stringify(section.structuredData, null, 2);
+      structuredJson = JSON.stringify(structured, null, 2);
     } catch {
       structuredJson = null; // unserializable — drop silently
     }
@@ -1853,9 +1831,53 @@ const SectionRenderer: React.FC<SectionRendererProps> = ({ section, isMostRecent
         </p>
       )}
 
-      {/* Compact JSON fallback for non-string structured data — keeps the
-          section MVP simple while still surfacing payload content. A future task
-          may register per-widget-type custom renderers; out of 114b scope. */}
+      {/* Array-of-strings structured payload → bulleted list (task 046). */}
+      {structuredStringList !== null && (
+        <ul
+          className={styles.list}
+          data-section-body="structured-list"
+          data-field-path={`section.${section.sectionName}.structured`}
+        >
+          {structuredStringList.map((item, i) => (
+            <li key={`${section.sectionName}-item-${i}`} className={styles.listItem}>
+              {item}
+            </li>
+          ))}
+        </ul>
+      )}
+
+      {/* Flat record payload → labeled rows; nested string-arrays render as
+          bulleted sub-lists (task 046). Keys humanized via prettyName. */}
+      {structuredFlatRecord !== null && (
+        <div
+          className={styles.schemaObjectContainer}
+          data-section-body="structured-record"
+          data-field-path={`section.${section.sectionName}.structured`}
+        >
+          {structuredFlatRecord.map(([key, value]) => (
+            <div key={key} className={styles.schemaObjectRow} data-prop-key={key}>
+              <Text className={styles.schemaObjectKey}>{prettyName(key)}</Text>
+              {typeof value === 'string' ? (
+                <p className={styles.schemaObjectValueText}>{value}</p>
+              ) : value.length === 0 ? (
+                <span className={styles.schemaObjectEmptyHint}>(none)</span>
+              ) : (
+                <ul className={styles.list} data-section-body="structured-record-list">
+                  {value.map((item, i) => (
+                    <li key={`${key}-item-${i}`} className={styles.listItem}>
+                      {item}
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          ))}
+        </div>
+      )}
+
+      {/* Compact JSON fallback for structured data the typed paths above do
+          not cover. A future task may register per-widget-type custom
+          renderers; out of scope here. */}
       {structuredJson !== null && (
         <pre
           className={styles.sectionStructuredFallback}
@@ -1972,26 +1994,6 @@ const StructuredOutputStreamWidget: React.FC<WorkspaceWidgetProps<StructuredOutp
       case 'streaming_started':
         dispatch({ type: 'streaming_started' });
         return;
-      case 'field_delta': {
-        // Required fields per PaneEventTypes contract: fieldPath, fieldContent, sequence.
-        // Defensive: drop event if any are missing.
-        if (
-          typeof event.fieldPath !== 'string' ||
-          typeof event.fieldContent !== 'string' ||
-          typeof event.sequence !== 'number'
-        ) {
-          // eslint-disable-next-line no-console
-          console.debug('[StructuredOutputStreamWidget] dropped malformed field_delta event');
-          return;
-        }
-        dispatch({
-          type: 'field_delta',
-          path: event.fieldPath,
-          content: event.fieldContent,
-          sequence: event.sequence,
-        });
-        return;
-      }
       case 'streaming_complete':
         dispatch({ type: 'streaming_complete' });
         return;
@@ -2071,15 +2073,11 @@ const StructuredOutputStreamWidget: React.FC<WorkspaceWidgetProps<StructuredOutp
 
   // ── Section-mode detection (Phase 5R Wave 5-C / FR-54) ──────────────────
   //
-  // BACKWARD-COMPAT INVARIANT: section-mode activates ONLY when at least one
-  // `section_*` event has populated the sections map. Unmigrated schema-position
-  // playbooks (which only emit `FieldDelta`) leave `sections.size === 0` →
-  // legacy renderer path runs unchanged.
-  //
-  // Mixed mode: if a widget instance receives BOTH event families (shouldn't
-  // happen per task 114a's BFF guard, but be defensive), section-mode takes
-  // precedence per the FR-54 architectural intent (coordination drops to 2).
-  // The legacy fields map remains in state but is not rendered.
+  // Section-mode activates when at least one `section_*` event has populated
+  // the sections map — the ONLY streaming content vocabulary since the task
+  // 046 cutover (amended ADR-037). Streaming mode with an empty sections map
+  // renders the schema field plan as skeleton placeholders ("waiting" UI);
+  // static mode renders `prefilledFields` via the schema field renderer.
   const isSectionMode = streamState.sections.size > 0;
   const sortedSections = React.useMemo(() => {
     const arr = Array.from(streamState.sections.values());
@@ -2170,21 +2168,14 @@ const StructuredOutputStreamWidget: React.FC<WorkspaceWidgetProps<StructuredOutp
     );
   })();
 
-  // Effective per-field content resolver — picks streaming reducer state or
-  // static `prefilledFields` depending on mode.
+  // Effective per-field content resolver — static `prefilledFields` only
+  // (streaming content is section-keyed since the task 046 cutover; the
+  // schema field renderer serves static mode + the pre-section waiting UI).
   const contentForPath = (path: string): string | undefined => {
     if (mode === 'streaming') {
-      return streamState.fields.get(path)?.content;
+      return undefined;
     }
     return prefilledFields?.[path];
-  };
-
-  // Determine whether to show a cursor for a given field. Only one cursor
-  // visible at a time — at the tail of `mostRecentPath` while streaming.
-  const showCursorForPath = (path: string): boolean => {
-    if (mode !== 'streaming') return false;
-    if (streamState.phase !== 'streaming') return false;
-    return streamState.mostRecentPath === path;
   };
 
   return (
@@ -2284,28 +2275,28 @@ const StructuredOutputStreamWidget: React.FC<WorkspaceWidgetProps<StructuredOutp
           </div>
         )}
 
-        {/* (a) Streaming + (b) Streaming-complete + static rendering — schema fields.
-            BACKWARD-COMPAT path (FR-54): when no `section_*` events have arrived,
-            the legacy schema-position-keyed renderer runs UNCHANGED. Unmigrated
-            playbooks emitting only `FieldDelta` events render via this path
-            until migrated by 118R. */}
+        {/* Schema-field rendering — STATIC mode (`prefilledFields`) plus the
+            streaming "waiting" UI (skeleton placeholders shown until the first
+            `section_*` event arrives; section mode above takes over from then
+            on). Since the task 046 cutover this renderer never receives
+            streamed content — streaming content is section-keyed ONLY. */}
         {!error && !declineState && !emptyResultState && !isLoading && !isSectionMode && (
           <div className={styles.fieldsContainer}>
             {sortedFields.length === 0 && <Text className={styles.emptyResultText}>(No schema fields declared.)</Text>}
             {sortedFields.map((field, idx) => {
               const content = contentForPath(field.path);
               const hasContent = typeof content === 'string' && content.length > 0;
-              const showCursor = hasContent && showCursorForPath(field.path);
+              const showCursor = false;
 
               // ── Schema-aware dispatch (R6 task 040 array; task 041 object) ────
               //
               // When the action's `outputSchema` declares this field as an
               // `array` of `string` (e.g., `tldr: string[]` on SUM-CHAT@v1),
-              // attempt to JSON.parse the accumulated content and render as
-              // a Fluent v9 bulleted list. The dispatch is GATED on the
-              // streaming phase: mid-stream tokens are not parseable JSON, so
-              // the legacy skeleton/cursor path continues to render until
-              // `streaming_complete` fires (or `mode === 'static'`).
+              // attempt to JSON.parse the prefilled content and render as
+              // a Fluent v9 bulleted list. Since the task 046 cutover this
+              // renderer only ever has content in STATIC mode (streaming
+              // content is section-keyed), so the parse always runs against
+              // final (non-token) content.
               //
               // Per NFR-11 backward compatibility: when `outputSchema` is
               // absent or the field's schema is not recognised, `classification`

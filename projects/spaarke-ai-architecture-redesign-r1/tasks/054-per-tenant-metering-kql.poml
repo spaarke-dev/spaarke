@@ -1,0 +1,130 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="054" project="spaarke-ai-architecture-redesign-r1">
+  <metadata>
+    <title>Per-tenant metering — usage counters to App Insights + documented KQL query pack</title>
+    <phase>Phase P4: Sweep + Hardening + Graduation</phase>
+    <status>not-started</status>
+    <estimated-hours>10</estimated-hours>
+    <tags>bff-api, telemetry, metering</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <parallel-group>W-P4-A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>048</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement FR-P4-05 (NFR-05): per-tenant metering. Emit usage counters — turns, tool calls, tokens, and capability invocations — dimensioned per tenant AND per user, to App Insights from the loop/executor paths built in P1-P3, and publish a documented KQL query pack that returns per-tenant rollups. This is the counter + telemetry + KQL tier the owner chose (an admin metering endpoint and billing/pricing surface are named follow-ons, NOT in scope). The counters also give the ADR-016 budget enforcement (per-turn tool cap, per-user daily Event-path budget, NFR-09) an observable audit trail. Acceptance: the KQL pack returns per-tenant rollups in dev.
+  </prompt>
+
+  <role>
+    Senior .NET developer experienced with the Sprk.Bff.Api telemetry stack (agent middleware incl. TelemetryMiddleware, App Insights custom events/metrics) and with authoring Kusto queries for operational rollups.
+  </role>
+
+  <goal>
+    Turns, tool calls, tokens, and capability invocations are emitted per tenant/user to App Insights from every loop turn and capability execution; a documented KQL query pack lives in the repo and returns per-tenant rollups against dev App Insights (evidence shown).
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-architecture-redesign-r1/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-architecture-redesign-r1/plan.md</file>
+    <file purpose="project-context">projects/spaarke-ai-architecture-redesign-r1/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md</file>
+    <file purpose="bff-constraints">.claude/constraints/bff-extensions.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-016 / NFR-09">Budgets: per-turn tool-call cap (default 8) + per-user daily Event-path budget are enforced AND telemetered — the counters emitted here must make both budgets observable (consumed vs cap dimensions).</constraint>
+    <constraint source="NFR-07 / ADR-015">No content in telemetry — counters carry identifiers, counts, token totals, capability/binding ids, tenant/user ids ONLY. Never prompt text, document text, or outputs.</constraint>
+    <constraint source="NFR-05">Scope is counter + telemetry + KQL pack. Do NOT build an admin metering endpoint or dashboards (named deferrals, filed at task 090).</constraint>
+    <constraint source="CLAUDE.md §11">Extend the existing agent telemetry middleware / TelemetryClient plumbing — do not introduce a parallel telemetry pipeline or new package.</constraint>
+    <constraint source="ADR-029 / NFR-01">Verify publish-size impact per ADR-029; ≥+2 MB single-task delta requires justification.</constraint>
+    <constraint source="ADR-038">Tests follow the integration-heavy pyramid; no banned patterns. Assert emission via captured telemetry items at the middleware boundary, not Mock&lt;HttpMessageHandler&gt;.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff-api/telemetry, app-insights, kql</topic>
+    <files>
+      <file>projects/spaarke-ai-architecture-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/plan.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-MIGRATION-MAP.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-CODE-INVENTORY.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/OVERLAY-MATRIX.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Agent middleware chain" location="src/server/api/Sprk.Bff.Api/Services/Ai/">
+        ContentSafety/CostControl/Telemetry middleware wrap the agent loop (inventory §7) — the natural emission point for turn/tool/token counters. IPromptBudgetTracker already tracks token budgets; extend, don't duplicate.
+      </pattern>
+      <pattern name="dispatch_refused telemetry" location="src/server/api/Sprk.Bff.Api/Services/Ai/">
+        Task 033 (FR-P2-04) established the custom-event emission pattern to App Insights — follow the same event naming/dimension conventions.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      NFR-05 makes usage observable per tenant/user ahead of a future billing/pricing surface. The loop (FR-P2-01) enforces the tool budget and the Event Rules service (FR-P1-03) enforces the daily cost cap — but before this task their consumption is not queryable per tenant. The KQL pack is the operator's window until admin dashboards arrive (deferred).
+    </background>
+    <dependencies>
+      <dependency task="048" status="pending">G-P3 passed — all execution paths (loop, Event, Click, coded composites) final, so counters cover the real surface</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 090 G-P4 sweep verifies "everything telemetered" using this task's KQL pack</item>
+      <item>Deferral filed at 090: admin observability dashboards consume these same counters later</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context check">
+      Check context usage. If &gt; 70%, create handoff summary and request new chat. Load inputs + bff-extensions.md; read the existing telemetry middleware and IPromptBudgetTracker.
+    </step>
+    <step order="1" name="Design the counter schema">
+      Define the metric/event names + dimensions (tenantId, userId, bindingId/capability, toolId, tokens in/out, budget-consumed vs cap) for the four counters: turns, tool calls, tokens, capability invocations. Document the schema in the KQL pack header. Verify NFR-07 compliance (no content dimensions).
+    </step>
+    <step order="2" name="Emit from the execution paths">
+      Extend the telemetry middleware / executor seams so every agent turn, tool invocation, and capability execution (Event, Click, Text, coded composite) emits its counters with tenant/user dimensions. Reuse IPromptBudgetTracker token figures rather than recounting.
+    </step>
+    <step order="3" name="Tests">
+      Add tests asserting counter emission (correct names, dimensions, counts) across the paths via captured telemetry at the middleware boundary; run existing suite for regressions.
+    </step>
+    <step order="4" name="Author the KQL query pack">
+      Write the documented KQL pack (e.g., docs/guides/ or scripts/kql/ per repo convention): per-tenant rollups of turns / tool calls / tokens / capability invocations, per-user drill-down, budget-consumption vs cap views. Each query documented with purpose + expected columns.
+    </step>
+    <step order="5" name="Prove rollups in dev">
+      Deploy/exercise on dev (spaarke-bff-dev + spaarkedev1) to generate traffic, run the KQL pack against dev App Insights, and capture the per-tenant rollup results (output shown).
+    </step>
+    <step order="6" name="Build + publish-size">
+      `dotnet build` + tests green (shown); publish-size delta reported per ADR-029.
+    </step>
+    <step order="7" name="Verify + quality gates">
+      Check all acceptance criteria. Step 9.5 quality gates: code-review + adr-check. Update TASK-INDEX.md and current-task.md.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build, test, publish-size verification</tool>
+    <tool name="az">App Insights KQL execution in dev</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ (telemetry middleware/executor counter emission)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (counter emission tests)</output>
+    <output type="docs">KQL query pack (documented, in repo) + counter schema doc</output>
+    <output type="report">Per-tenant rollup evidence from dev in projects/spaarke-ai-architecture-redesign-r1/notes/</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Counters for turns, tool calls, tokens, and capability invocations are emitted per tenant/user to App Insights from all execution paths (test-proven) (FR-P4-05).</criterion>
+    <criterion testable="true">The documented KQL query pack returns per-tenant rollups in dev (query output shown) (NFR-05).</criterion>
+    <criterion testable="true">ADR-016/NFR-09 budgets are observable (consumed vs cap); no content appears in any telemetry dimension (NFR-07).</criterion>
+    <criterion testable="true">dotnet build + tests green; publish-size delta reported per ADR-029.</criterion>
+    <criterion testable="true">Step 9.5 quality gates (code-review + adr-check) passed.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

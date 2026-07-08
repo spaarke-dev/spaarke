@@ -25,7 +25,7 @@ The key design decision is the **SYS-/CUST- ownership split**: system-provided s
 | ScopeInheritanceService | `src/server/api/Sprk.Bff.Api/Services/Scopes/ScopeInheritanceService.cs` | Single-level inheritance: extend parent scopes, merge effective values, handle parent deletion |
 | ScopeCopyService | `src/server/api/Sprk.Bff.Api/Services/Scopes/ScopeCopyService.cs` | "Save As" for playbooks and scopes: deep copy with CUST- prefix, duplicate name handling |
 | OwnershipValidator | `src/server/api/Sprk.Bff.Api/Services/Scopes/OwnershipValidator.cs` | SYS-/CUST- prefix validation, immutability enforcement, ProblemDetails generation |
-| ScopeGapDetector | `src/server/api/Sprk.Bff.Api/Services/Ai/ScopeGapDetector.cs` | Analyzes playbook intent to suggest missing scopes; keyword-based + AI classification |
+| ScopeGapDetector *(RETIRED 2026-07, ai-architecture-redesign-r1)* | `src/server/api/Sprk.Bff.Api/Services/Ai/ScopeGapDetector.cs` *(deleted)* | Analyzed playbook intent to suggest missing scopes; keyword-based + AI classification |
 | ScopeEndpoints | `src/server/api/Sprk.Bff.Api/Api/Ai/ScopeEndpoints.cs` | HTTP API for scope management operations |
 
 ## Scope Types
@@ -59,7 +59,7 @@ The key design decision is the **SYS-/CUST- ownership split**: system-provided s
 3. **Single-level constraint**: A scope that already has a parent cannot be extended further (no grandchildren)
 4. **Parent deletion**: Three strategies — PromoteChildren (remove link, make standalone), DeleteChildren (cascade), PreventDeletion (block if children exist)
 
-### Gap Detection Flow
+### Gap Detection Flow *(RETIRED 2026-07, ai-architecture-redesign-r1 — ScopeGapDetector deleted)*
 
 1. **Input**: Playbook description and goals text
 2. **Keyword analysis**: Fast keyword-based intent detection across 8 categories (extraction, classification, summarization, analysis, risk, dates, financial, comparison)
@@ -73,10 +73,8 @@ The key design decision is the **SYS-/CUST- ownership split**: system-provided s
 |-----------|-----------|-----------|-------|
 | Consumed by | Chat system | `PlaybookChatContextProvider` | Resolves knowledge scope for agent context |
 | Consumed by | Analysis pipeline | `AnalysisOrchestrationService` | Loads scopes for analysis execution |
-| Consumed by | Playbook builder | `AiPlaybookBuilderService` | Scope selection during playbook creation |
 | Consumed by | DynamicCommandResolver | `IGenericEntityService` | Queries active scopes for capability commands |
 | Depends on | Dataverse | OData Web API + `IGenericEntityService` | Scope entity CRUD and relationship queries |
-| Depends on | Azure OpenAI | `IOpenAiClient` | Gap detection AI classification |
 
 ## Design Decisions
 

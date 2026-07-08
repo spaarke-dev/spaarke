@@ -1,8 +1,8 @@
 <?xml version="1.0" encoding="utf-8" ?>
 <manifest>
-  <control namespace="Sprk" constructor="ScopeConfigEditor" version="1.2.7"
+  <control namespace="Sprk" constructor="ScopeConfigEditor" version="1.3.0"
            display-name-key="Scope Config Editor"
-           description-key="Clear max-height to allow full expansion (v1.2.7)"
+           description-key="Binding-editor variant (sprk_playbookconsumer) + validated Action schema columns (v1.3.0, FR-P4-04)"
            control-type="virtual">
 
     <!--

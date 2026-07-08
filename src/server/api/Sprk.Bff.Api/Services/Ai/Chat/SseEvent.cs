@@ -3,11 +3,12 @@ using System.Text.Json;
 namespace Sprk.Bff.Api.Services.Ai.Chat;
 
 /// <summary>
-/// Provider-agnostic SSE event envelope emitted by <see cref="ISprkAgent"/> implementations.
+/// Provider-agnostic SSE event envelope. Sole live consumer: <see cref="SseOutputGuard"/>
+/// (validate-and-fallback envelope for widget SSE payloads).
 ///
-/// This record defines the wire format used by the R2 agent pipeline. It is intentionally
-/// decoupled from the R1 <c>ChatSseEvent</c> record (defined in <c>ChatEndpoints.cs</c>)
-/// so that the <see cref="ISprkAgent"/> interface remains independent of the API surface layer.
+/// This record defines a wire format intentionally decoupled from the R1
+/// <c>ChatSseEvent</c> record (defined in <c>ChatEndpoints.cs</c>) so that it remains
+/// independent of the API surface layer.
 ///
 /// Callers (e.g. ChatOrchestrationService) are responsible for translating these events
 /// into the appropriate wire format when forwarding to SSE clients.

@@ -1,0 +1,117 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="071" project="spaarke-ai-architecture-redesign-r1">
+  <metadata>
+    <title>Track-B batch 2 — SpaarkeAi Insights renderer cluster + page deadwood</title>
+    <phase>Track B: Continuous Deadwood Sweep</phase>
+    <status>not-started</status>
+    <estimated-hours>5</estimated-hours>
+    <tags>cleanup, deletion, track-b</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <parallel-group>W-P0-B</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+  </metadata>
+
+  <prompt>
+    Execute Track-B batch 2 of FR-TB-01: delete the SpaarkeAi-page Insights renderer cluster (~14 files + tests — R5-origin from PR #345, never wired, superseded by R6 Pillar 5, claimed by no active project per `notes/agent-findings-engine-projects.md`) plus the rest of the SpaarkeAi-page deadwood from inventory §9. This batch rides alongside wave W-P0-B; the files are dead by definition, so there is no overlap with live-code tasks. Per NFR-08, every deletion is grep-zero-verified with SHOWN output and builds proven green; evidence lands in `notes/track-b/batch-2-evidence.md`.
+  </prompt>
+
+  <role>
+    Frontend developer (React/TypeScript) experienced with the SpaarkeAi code-page structure (`src/solutions/SpaarkeAi/src/**`) — precise at removing dead components and their vestigial import/reference sites without disturbing live panes.
+  </role>
+
+  <goal>
+    Every batch-2 item below is deleted (or recorded keep-with-reason if found live), grep-zero shown per deleted symbol, `npm run build:prod` for SpaarkeAi green with shown output, TASK-INDEX updated, and `notes/track-b/batch-2-evidence.md` written.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-architecture-redesign-r1/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-architecture-redesign-r1/plan.md</file>
+    <file purpose="project-context">projects/spaarke-ai-architecture-redesign-r1/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md</file>
+    <file purpose="deadwood-register">projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-CODE-INVENTORY.md</file>
+    <file purpose="delete-list">projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-MIGRATION-MAP.md</file>
+    <file purpose="liveness-evidence">projects/spaarke-ai-architecture-redesign-r1/notes/agent-findings-engine-projects.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="project">Do not modify files outside the batch list; deadwood only — if a batch item turns out to be live, STOP and record keep-with-reason instead of deleting.</constraint>
+    <constraint source="NFR-08">Every retirement verified grep-zero with SHOWN output; no compat shims retained.</constraint>
+    <constraint source="project">`WorkspacePane` / `ConversationPane` are LIVE files — remove ONLY the vestigial references to deleted batch items; ConversationPane's decomposition is task 045's scope, not this batch's.</constraint>
+    <constraint source="ADR-038">Deleted tests of dead components are SCAFFOLDING class — record in the evidence file for task-090 /test-diet reconciliation.</constraint>
+    <constraint source="project">SpaarkeAi is a hot path (8 active projects touch it per projects/INDEX.md) — flag the touch in the PR description per CLAUDE.md §10 Hot-Path Declaration.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>spaarkeai-page/dead-code-removal, track-b</topic>
+    <files>
+      <file>projects/spaarke-ai-architecture-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/plan.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-MIGRATION-MAP.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-CODE-INVENTORY.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/OVERLAY-MATRIX.md</file>
+      <file>docs/architecture/SPAARKEAI-COMPONENT-MODEL.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      Batch contents (inventory §9 "SpaarkeAi page" + migration-map start-now list):
+      (1) the Insights renderer cluster (~14 files + their tests) under `src/solutions/SpaarkeAi/src/` — never wired, R5-origin (PR #345), superseded by R6 Pillar 5;
+      (2) `notificationContextLoader.ts` (self-declared dead);
+      (3) the Pillar-6b trio `SendToWorkspaceButton`, `PinToMatterButton`, `AddToAssistantToggle` — built + tested, zero importers (+ their tests);
+      (4) `ChatHistoryPanel.tsx` (SpaarkeAi wrapper);
+      (5) vestigial references to the above in `WorkspacePane` / `ConversationPane` (reference-site edits only).
+    </background>
+    <dependencies>
+      <dependency task="none" status="complete">No dependencies — rides wave W-P0-B.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 050 (FR-P4-01) completion audit consumes this batch's evidence file</item>
+      <item>Task 045 (FR-P3-06) decomposes ConversationPane — this batch only strips dead references from it</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context check">
+      Check context usage. If &gt; 70%, create handoff summary and request new chat. Load inputs; read inventory §9 (SpaarkeAi page) and the migration map Track-B list; read notes/agent-findings-engine-projects.md for the renderer-cluster liveness verdict.
+    </step>
+    <step order="1" name="Read and confirm the batch list">
+      Enumerate the Insights renderer cluster files (~14 + tests) and the other four item groups via Glob/Grep; capture exact paths. Confirm zero importers for each. Any item with a live importer outside the batch → keep-with-reason.
+    </step>
+    <step order="2" name="Delete the batch">
+      Delete confirmed-dead files and tests; strip the vestigial references from WorkspacePane/ConversationPane (imports, dead props/branches referencing deleted components only).
+    </step>
+    <step order="3" name="Grep-zero verification (SHOWN)">
+      For each deleted component/symbol (each renderer-cluster component name, `notificationContextLoader`, `SendToWorkspaceButton`, `PinToMatterButton`, `AddToAssistantToggle`, `ChatHistoryPanel`): grep across src/ and SHOW the zero-hit output. Note the SpaarkeAi-wrapper vs any same-name shared-lib component distinction explicitly if applicable.
+    </step>
+    <step order="4" name="Build verification (SHOWN)">
+      Run `npm run build:prod` for the SpaarkeAi solution (and any touched shared package); show green output. Run touched-surface tests.
+    </step>
+    <step order="5" name="Evidence + close">
+      Write `projects/spaarke-ai-architecture-redesign-r1/notes/track-b/batch-2-evidence.md` (item table: deleted-path / grep output / keep-with-reason). Update TASK-INDEX.md (071 → ✅). Report completion.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="npm">build:prod + tests for SpaarkeAi</tool>
+    <tool name="git">Version control (deletions preserved in history)</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/ (batch-2 deletions + vestigial-reference removals)</output>
+    <output type="report">projects/spaarke-ai-architecture-redesign-r1/notes/track-b/batch-2-evidence.md</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Per-batch grep-zero for every deleted symbol outside git history, with output SHOWN (FR-TB-01 / NFR-08).</criterion>
+    <criterion testable="true">npm run build:prod green for SpaarkeAi with output shown.</criterion>
+    <criterion testable="true">Any live-found item recorded keep-with-reason instead of deleted; WorkspacePane/ConversationPane edits limited to dead-reference removal.</criterion>
+    <criterion testable="true">notes/track-b/batch-2-evidence.md exists with the per-item evidence table; TASK-INDEX updated.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

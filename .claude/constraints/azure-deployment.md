@@ -40,7 +40,7 @@ Load when:
 - **MUST** set `stdoutLogEnabled="true"` in the published `web.config` before packaging (dotnet publish resets it to false)
 - **MUST** set `<RuntimeIdentifier>linux-x64</RuntimeIdentifier>` + `<SelfContained>false</SelfContained>` in `Sprk.Bff.Api.csproj` — framework-dependent Linux publish (FR-A1 per `sdap-bff-api-remediation-fix` project). Eliminates the entire `runtimes/` directory tree (10 RIDs → eliminated on Linux App Service) and matches the target App Service OS.
 - **MUST** exclude wwwroot sourcemaps from publish via `<Content Update="wwwroot\**\*.js.map" CopyToPublishDirectory="Never" />` in `Sprk.Bff.Api.csproj` (FR-A2). Sourcemaps remain in the source tree for local debugging but never ship.
-- **MUST** verify zip entry count (~240) and size (~45 MB) before deploying — oversized zips indicate stale publish dirs in source. Phase 5 post-Outcome-A baseline is 45.65 MB compressed (was 72.9 MB pre-project).
+- **MUST** verify zip entry count (~247) and size (~50 MB) before deploying — oversized zips indicate stale publish dirs in source. Current baseline is **49.63 MB compressed incl. PDBs** (2026-07-08, `spaarke-ai-architecture-redesign-r1` task 055; 45.87 MB excl. PDBs — state the PDB convention when reporting). History: 72.9 MB (2026-05-19) → 45.65 (2026-05-26) → 49.63.
 - **MUST** use `az webapp deploy --type zip` or Kudu zipdeploy API for deployment (ensures atomic replacement)
 
 > **Phase 5 demo deploy verified** the framework-dependent linux-x64 publish removes the entire `runtimes/` directory tree (10 RIDs → eliminated). See `projects/sdap-bff-api-remediation-fix/EXECUTION-LOG.md` Phase 4 Outcome A for evidence.
@@ -53,7 +53,7 @@ Every task that touches `src/server/api/Sprk.Bff.Api/` (or `Spaarke.Core` / `Spa
 
 1. **MUST** run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/` AFTER changes land and BEFORE merge.
 2. **MUST** measure compressed size of `deploy/api-publish/` (or the resulting zip if packaging) and report the absolute size + diff vs the prior measured baseline in the task notes / PR description.
-3. **MUST** compare against the binding **ceiling of ≤60 MB compressed** (per spec NFR-01). The current measured baseline as of 2026-05-26 is ~45.65 MB (post-Phase 5 Outcome A). Tasks pushing toward 60 MB MUST flag the trajectory in code review.
+3. **MUST** compare against the binding **ceiling of ≤60 MB compressed** (per spec NFR-01). The current measured baseline as of 2026-07-08 is **49.63 MB incl. PDBs** (task 055, Compress-Archive Optimal over `deploy/api-publish/*` — state the PDB convention when reporting; 45.87 MB excl. PDBs). Tasks pushing toward 60 MB MUST flag the trajectory in code review.
 4. **MUST** verify no new HIGH-severity CVEs via `dotnet list package --vulnerable --include-transitive` if NuGet packages were added or upgraded.
 5. **MUST** cross-reference CLAUDE.md §10 in the task notes / PR description (e.g., "BFF Hygiene §10 + NFR-01 verified: publish size = X MB, delta = Y MB, no new HIGH CVEs").
 

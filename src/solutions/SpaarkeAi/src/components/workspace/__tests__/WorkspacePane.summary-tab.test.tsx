@@ -143,14 +143,24 @@ jest.mock('../../../services/pinnedWorkspaces', () => ({
 // real PaneHeader's styling internals.
 // ---------------------------------------------------------------------------
 
-jest.mock('@spaarke/ui-components', () => ({
-  PaneHeader: ({ title, rightSlot }: { title: string; rightSlot?: React.ReactNode }) => (
-    <div data-testid="pane-header">
-      <span>{title}</span>
-      {rightSlot}
-    </div>
-  ),
-}));
+jest.mock('@spaarke/ui-components', () => {
+  // G-P3 round-3 fix wave (2026-07-07): spread the real module — the
+  // @spaarke/ai-widgets widget registry imports safeRegister from here at
+  // module-init time; the previous bare-object mock broke this suite's
+  // requireActual('@spaarke/ai-widgets') chain ("safeRegister is not a
+  // function") after the registry adopted safeRegister.
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const actual = jest.requireActual('@spaarke/ui-components') as any;
+  return {
+    ...actual,
+    PaneHeader: ({ title, rightSlot }: { title: string; rightSlot?: React.ReactNode }) => (
+      <div data-testid="pane-header">
+        <span>{title}</span>
+        {rightSlot}
+      </div>
+    ),
+  };
+});
 
 // Import AFTER mocks so module resolution picks them up.
 import { WorkspacePane } from '../WorkspacePane';

@@ -261,7 +261,7 @@ public class ConversationHistorySanitizerTests
         MessageId: Guid.NewGuid().ToString("N"),
         SessionId: "session-1",
         Role: ChatMessageRole.System,
-        // The retrieval marker prefix is prepended by DocumentSearchTools when storing results.
+        // The retrieval marker prefix is prepended by DocumentSearch chat-tools when storing results.
         Content: ConversationHistorySanitizer.RetrievalContentMarker + documentContent,
         TokenCount: 0,
         CreatedAt: DateTimeOffset.UtcNow);

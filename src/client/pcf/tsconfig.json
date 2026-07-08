@@ -13,7 +13,6 @@
     "**/*.stories.ts",
     "**/*.stories.tsx",
     "**/jest.setup.ts",
-    "AIMetadataExtractor/**",
     "AiToolAgent/**",
     "AISummaryPanel/**",
     "DocumentRelationshipViewer/**",

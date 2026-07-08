@@ -3,7 +3,9 @@
   "version": "1.0.0",
   "description": "PCF control for semantic search with natural language queries and filters",
   "scripts": {
+    "prebuild": "node ../../shared/Spaarke.UI.Components/scripts/ensure-dist-fresh.js",
     "build": "pcf-scripts build",
+    "prebuild:prod": "node ../../shared/Spaarke.UI.Components/scripts/ensure-dist-fresh.js",
     "build:prod": "pcf-scripts build --buildMode production",
     "clean": "pcf-scripts clean",
     "lint": "pcf-scripts lint",

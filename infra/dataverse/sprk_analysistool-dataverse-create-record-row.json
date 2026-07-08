@@ -1,0 +1,58 @@
+{
+  "_comment_top": "spaarke-ai-architecture-redesign-r1 task 009 (FR-P0-07 write half) — seed row for the dataverse.create_record WRITE tool. GA-MCP-contract-frozen per ADR-039: sprk_toolid local segment equals the GA Dataverse MCP tool name 'create_record'; arguments are 'tablename' + 'item' exactly as GA (research note notes/audit-inputs/research-dataverse-mcp-2026-07.md; Learn ms.date 2026-06-05; argument shapes captured from the live GA MCP tool schemas 2026-07-05).",
+  "_comment_routing": "Runtime invocation routes to DataverseCreateRecordHandler via sprk_handlerclass. Auto-discovered (ADR-010). P2 loop projects the LLM-facing function name from sprk_toolid; sprk_name keeps the SYS- display convention required by the seed script's safety filter.",
+  "_comment_obo": "spec MUST rule (task-012 audit): the insert executes through IDataverseUserClient under the calling user's OBO token. A create the user lacks privileges for fails with the USER's own access error — never escalated via app identity. A table invisible to the user 404s at metadata resolution BEFORE any write.",
+  "_comment_side_effect": "sprk_sideeffectclass = 100000001 (Write) — SIDE-EFFECT tool. The P2 confirmation gate (FR-P2-02, task 031) suspends/resumes this tool BY THIS DECLARED CLASS (never by tool-name list); the handler itself contains NO gating logic. Lands dark at P0; P3's create-task capability (FR-P3-03) is the first production consumer via sprk_event(type=task).",
+  "_comment_lookup_deviation": "Documented native-transport deviation: lookup values require 'recordId' (the GA MCP server may resolve by 'name'; the native transport never guesses record identity — 'name' is accepted and ignored). Multi-select choice = comma-separated numeric string, exactly as GA.",
+  "_comment_consumption": "Read by scripts/Seed-TypedHandlers.ps1. Idempotent — UPSERT by sprk_handlerclass + sprk_toolcode with sprk_name 'SYS-%' filter.",
+  "sprk_name": "SYS-Dataverse Create Record",
+  "sprk_toolcode": "DATAVERSE-CREATE-RECORD",
+  "sprk_toolid": "dataverse.create_record",
+  "sprk_namespace": "dataverse",
+  "sprk_sideeffectclass": 100000001,
+  "sprk_permissionscope": "dataverse-user-context",
+  "sprk_budgetclass": "light",
+  "_comment_description_history": "sprk_description hardened across G-P3 UAT rounds 2–5 (2026-07-07): round 2 added recordId-required/resolve-first + numeric-choice-never-labels + omit-unresolvable + records-belong-to-caller; round 3 (R3-2/R3-4) added resolve-in-the-SAME-TURN-before-confirm + the sprk_document creation ban (document records need an SPE file; no chat tool uploads files); round 4 (R4-1) added the explicit @odata.bind/OData-annotation-key ban (the model invented sprk_practicearea@odata.bind on a create-matter proposal — the write mapper rejects @-keys by design) + the sprk_matter write contract FROM LIVE METADATA (mcp describe 2026-07-07: sprk_practicearea and sprk_mattertype are LOOKUPS to sprk_practicearea_ref / sprk_mattertype_ref — NOT multi-select choices); round 5 (R5-E) upgraded the R3-4 sprk_document ban from guidance to a HARD RULE (the model ignored the description-level ban and created an orphan fileless sprk_document row dd97bad5-6e7a-f111-ab0e-7ced8ddc4cc6 — DataverseCreateRecordHandler now REJECTS sprk_document creates with VALIDATION_FAILED before any Dataverse call; the description states the block so the model never attempts/retries) + the entity-map document row annotated creation-BLOCKED. Mirror of the live spaarkedev1 row.",
+  "sprk_description": "Inserts one row into a Dataverse table under the calling user's permissions and returns the created record id as a citable path (tables/{table}/records/{guid}). Call dataverse.describe first if the table's schema is unknown — do NOT guess column logical names from display names. Values: strings/numbers/booleans for simple fields; numeric option values for choice columns (NEVER labels — use dataverse.describe to find the numeric values); comma-separated numeric values for multi-select choice; lookup fields as {\"relatedTable\": \"...\", \"recordId\": \"guid\"} — recordId is REQUIRED: resolve the target record's GUID FIRST via dataverse.search_data or dataverse.read_query IN THE SAME TURN you draft the proposal, BEFORE asking the user to confirm; a lookup without recordId is rejected. NEVER use OData annotations as item keys — no '@odata.bind', no '@' or '.' in any key: the ONLY way to set a lookup on this transport is the {relatedTable, recordId} object form, and choice columns take plain numeric values. If you cannot resolve a GUID for an optional lookup or the numeric value for an optional choice, OMIT that column and mention the value in a text column instead — never guess. sprk_matter write contract (from live metadata — verify anything else with dataverse.describe): sprk_mattername (text, REQUIRED); sprk_matternumber (text); sprk_matterdescription (multiline text); sprk_mattertype is a LOOKUP to sprk_mattertype_ref and sprk_practicearea is a LOOKUP to sprk_practicearea_ref — resolve the reference row's GUID via dataverse.read_query first and send {\"relatedTable\":\"sprk_mattertype_ref\",\"recordId\":\"guid\"} (same pattern for practice area with sprk_practicearea_ref), or OMIT the column and put the value in sprk_matterdescription. Records you create belong to the calling user automatically — never set owner/assignee columns for the requesting user themselves. HARD RULE — sprk_document creates are BLOCKED: this tool REJECTS any create on the sprk_document table before anything is written (VALIDATION_FAILED). Spaarke document records require the full ingestion pipeline (file upload → SharePoint Embedded storage → document profile → indexing) that only the Document Upload wizard drives; no chat tool can upload file content. Never attempt or retry a sprk_document create — no argument change makes it valid. If asked to create a document or save chat output 'to documents', say honestly that documents can't be created from chat and point the user to the Document Upload wizard (or offer an alternative: work with a file uploaded into this chat, create a task, draft an email, or open a workspace tab). WRITE tool: executes with the user's own privileges; if the user cannot create rows in the table, the call fails with their access error. Spaarke entity map: 'matter' = sprk_matter (name column sprk_mattername), 'project' = sprk_project (sprk_projectname), 'document' = sprk_document (sprk_documentname — creation BLOCKED on this tool, Document Upload wizard only); people = contact, companies = account.",
+  "sprk_handlerclass": "DataverseCreateRecordHandler",
+  "sprk_availableincontexts": 100000001,
+  "_comment_availableincontexts": "100000001 = Chat only — dataverse.* tools exist for the agent loop (P2), not playbook nodes.",
+  "sprk_jsonschema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "dataverse.create_record Request",
+    "description": "Argument shape frozen against the GA Dataverse MCP create_record(tablename, item) tool.",
+    "type": "object",
+    "required": ["tablename", "item"],
+    "properties": {
+      "tablename": {
+        "type": "string",
+        "minLength": 1,
+        "description": "The logical (schema) name of the table to insert into (e.g. 'account', 'sprk_event'). Use dataverse.describe with path 'tables/' to find logical names."
+      },
+      "item": {
+        "type": "object",
+        "minProperties": 1,
+        "description": "Record field values as key-value pairs. Keys are column logical names from dataverse.describe. Values: strings, numbers, or booleans for simple fields. For lookup/customer fields use an object: {\"relatedTable\": \"account\", \"name\": \"Contoso Ltd\", \"recordId\": \"guid\"} (recordId required on this transport). For choice fields use the numeric option value. For multi-select choice use comma-separated values like \"100000002,100000004\".",
+        "additionalProperties": true
+      }
+    },
+    "additionalProperties": false
+  },
+  "sprk_outputschema": {
+    "$schema": "https://json-schema.org/draft/2020-12/schema",
+    "title": "dataverse.create_record Result",
+    "type": "object",
+    "required": ["tool", "tablename"],
+    "properties": {
+      "tool": { "const": "dataverse.create_record" },
+      "tablename": { "type": "string", "description": "Table logical name the record was created in." },
+      "recordId": { "type": ["string", "null"], "description": "GUID of the created record (null only if Dataverse did not echo the created row)." },
+      "path": { "type": ["string", "null"], "description": "tables/{tablename}/records/{recordId} — replayable via dataverse.describe." },
+      "columnsSet": { "type": "array", "items": { "type": "string" }, "description": "Column logical names set (identifiers only — never values)." },
+      "columnCount": { "type": "integer" }
+    }
+  },
+  "sprk_configuration": {
+    "_comment": "No method-discriminator dispatch — single LLM-facing function. Reserved for per-environment defaults."
+  }
+}

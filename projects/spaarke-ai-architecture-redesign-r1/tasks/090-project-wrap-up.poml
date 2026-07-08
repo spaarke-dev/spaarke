@@ -1,0 +1,127 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="spaarke-ai-architecture-redesign-r1">
+  <metadata>
+    <title>Project wrap-up — G-P4 NFR sweep + G-M maker gate + /test-diet + deferrals + graduation</title>
+    <phase>Phase P4: Sweep + Hardening + Graduation</phase>
+    <status>completed</status>
+    <notes>Completed 2026-07-08. G-P4 GREEN (publish-size AMBER, operator sign-off requested — notes/g-p4-evidence.md). G-M DEFERRED-WITH-EVIDENCE per operator ruling 2026-07-07 (notes/g-m-evidence.md; live walkthrough = issue #555). /test-diet PASSED (126 files: 124 maintain / 0 scaffolding / 2 ambiguous — notes/test-diet-report.md). Six /defer filings #552–#557. ADR-039/040 Accepted verified; ADR-037 twin discharge annotation. Doc-drift register (audit §10) fully fixed. FR/NFR reconciliation: zero uncovered requirements (notes/fr-acceptance-reconciliation.md). Lessons-learned + README/CLAUDE.md/INDEX close-out done.</notes>
+    <estimated-hours>8</estimated-hours>
+    <tags>wrap-up, gate, uat</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <parallel-group>serial</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>050, 051, 052, 053, 054, 055 (transitively: all tasks 001-073)</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement FR-P4-07: close the project through its two final gates. G-P4 sweeps the NFRs — everything reliable + telemetered, Track-B audit shows zero unexplained survivors, publish size reduced. G-M is the maker gate proving the second product: the operator observes a business analyst authoring a brand-new small capability ENTIRELY as data (JPS prompt + schema + Binding + chips + eval case — ZERO deploys; capability chosen by the operator now, at P4), then a user invokes it in the UI and sees a rendered result. Then the binding project-close machinery: `/test-diet` reconciliation, `/defer` filings for the three named deferrals, ADR-039/040 status verification, and portfolio close-out. Run `/goal clear` before starting — gates are never wrapped by /goal (NFR-10).
+  </prompt>
+
+  <role>
+    Project-close coordinator: assembles gate evidence, facilitates the operator-observed maker session, runs the binding close-out skills, and leaves the portfolio + repo in a clean graduated state.
+  </role>
+
+  <goal>
+    G-P4 evidence assembled and green; G-M executed and passed under operator observation (browser, NFR-11); /test-diet report written; three /defer filings on the board; ADR-039/040 verified Accepted; README status Complete, lessons-learned written, TASK-INDEX closed out, /devops-project-sync run.
+  </goal>
+
+  <inputs>
+    <file purpose="design-spec">projects/spaarke-ai-architecture-redesign-r1/spec.md</file>
+    <file purpose="project-plan">projects/spaarke-ai-architecture-redesign-r1/plan.md</file>
+    <file purpose="project-context">projects/spaarke-ai-architecture-redesign-r1/CLAUDE.md</file>
+    <file purpose="task-index">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md</file>
+    <file purpose="track-b-audit">projects/spaarke-ai-architecture-redesign-r1/notes/track-b-completion-audit.md</file>
+    <file purpose="size-cve-report">projects/spaarke-ai-architecture-redesign-r1/notes/publish-size-cve-report.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="NFR-11 / NFR-10">G-M is a BROWSER gate executed by real humans (operator observes the BA authoring session + a user's UI invocation) — curl/tests/logs never satisfy it. Run `/goal clear` before this task; /goal NEVER wraps a gate.</constraint>
+    <constraint source="CLAUDE.md §7 / ADR-038">`/test-diet` is the BINDING project-close gate: reconcile all tests added/modified during the project against the build-vs-maintain classifier; skill is read-only (emits git rm/mv for reviewer); report at notes/test-diet-report.md; wrap-up PR MUST cite the report or document skip rationale. Track-B evidence files list deleted tests-of-dead-code for reconciliation.</constraint>
+    <constraint source="G-M">The capability must be authored entirely as DATA — JPS prompt + schema + Binding + chips + eval case, ZERO deploys. Any code change during the session fails the gate. Capability is small + novel (no existing code overlap), chosen by the operator at this task.</constraint>
+    <constraint source="NFR-02 / NFR-06">The G-M eval case is added to the golden-utterance suite; the suite must be green at gate close (CI evidence).</constraint>
+    <constraint source="project">The three named /defer filings are fixed by spec FR-P4-07: admin observability dashboards; assistant-initiated email send; /goal skill promotion (if the wave pilot proved out). Each must name a concrete failing behavior per CLAUDE.md §11.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>wrap-up, gates, test-diet, deferrals</topic>
+    <files>
+      <file>projects/spaarke-ai-architecture-redesign-r1/spec.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/plan.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/SPAARKE-AI-MIGRATION-MAP.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/audit-inputs/OVERLAY-MATRIX.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r1/notes/goal-feature-evaluation.md</file>
+      <file>.claude/skills/test-diet/SKILL.md</file>
+      <file>.claude/skills/project-defer-issue-tracking/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <context>
+    <background>
+      This is the graduation task for both the audit lineage and this project: the working Spaarke Assistant (G-P0..G-P3 already passed) plus the second product — capability-as-catalog-row — proven live by G-M. Spec Success Criteria 5 and 6 are closed here; the wrap-up checklist is FR-P4-07's acceptance.
+    </background>
+    <dependencies>
+      <dependency task="050" status="pending">Track-B completion audit (zero unexplained survivors)</dependency>
+      <dependency task="051" status="pending">Catalog governance</dependency>
+      <dependency task="052" status="pending">Documentation refresh</dependency>
+      <dependency task="053" status="pending">BA Action/Binding editor (the surface G-M exercises)</dependency>
+      <dependency task="054" status="pending">Per-tenant metering (the "telemetered" half of G-P4)</dependency>
+      <dependency task="055" status="pending">Publish-size + CVE verification</dependency>
+    </dependencies>
+    <related-work>
+      <item>Spec Success Criteria 5 (G-P4) + 6 (G-M) + 7 (eval suite green at every gate)</item>
+      <item>Portfolio: Project #550 · Epic #421 · task 013 re-pointed R4/Action-Engine/insights-r3 triggers to these phases</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context check + /goal clear">
+      Check context usage; if &gt; 70%, checkpoint first. Run `/goal clear` (NFR-10 — no /goal condition may wrap a gate). Verify all dependency tasks ✅ in TASK-INDEX.
+    </step>
+    <step order="1" name="G-P4 NFR sweep">
+      Assemble the gate evidence: everything reliable + telemetered (eval suite green in CI per NFR-02; metering rollups from task 054 per NFR-05; latency NFR-04 figures from gates 027/038/048; budgets NFR-09); Track-B audit table shows ZERO unexplained survivors (task 050); publish size REDUCED (task 055 report). Record the sweep in notes/g-p4-evidence.md; escalate any red item instead of closing.
+    </step>
+    <step order="2" name="G-M maker gate (operator-observed, browser)">
+      Operator chooses the small novel capability NOW. A business analyst authors it entirely as data in the UI (task 053 editor): JPS prompt + schema + Binding row + chips + eval case — ZERO deploys. Then a user invokes it in the Spaarke UI on spaarkedev1 and sees the rendered result. Operator observes both halves (NFR-11). Add the eval case to the golden-utterance suite; CI green. Record evidence (who/what/when + screenshots) in notes/g-m-evidence.md.
+    </step>
+    <step order="3" name="/test-diet (binding close gate)">
+      Invoke the test-diet skill over all tests added/modified during the project. Review classifications (MAINTAIN at KEEP paths — the eval suite is KEEP-class per ADR-038; SCAFFOLDING → emitted git rm; AMBIGUOUS → reviewer judgment). Report at projects/spaarke-ai-architecture-redesign-r1/notes/test-diet-report.md; wrap-up PR cites it.
+    </step>
+    <step order="4" name="/defer filings">
+      File via /project-defer-issue-tracking: (1) admin observability dashboards (audit-trail UI, cost dashboards, refusal-backlog view); (2) assistant-initiated email SEND (draft-only shipped; gated send is a later catalog addition); (3) /goal skill promotion IF the wave pilot proved out (per notes/goal-feature-evaluation.md — else record pilot verdict). Each entry names the concrete failing behavior and lands in notes/defer-issues.md + a GitHub Issue.
+    </step>
+    <step order="5" name="ADR status verification">
+      Verify ADR-039 and ADR-040 both read status Accepted with citations (flipped at tasks 026 and 014). If either is not Accepted, STOP and resolve before graduation.
+    </step>
+    <step order="6" name="Close-out">
+      README status → Complete; write lessons-learned.md; TASK-INDEX close-out (all rows ✅, wave headers finalized); update project CLAUDE.md status; run /devops-project-sync to update Project #550. Report the pipeline-complete summary.
+    </step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Final build/test evidence</tool>
+    <tool name="gh">Deferral issues + portfolio sync</tool>
+    <tool name="git">Version control</tool>
+  </tools>
+
+  <outputs>
+    <output type="report">projects/spaarke-ai-architecture-redesign-r1/notes/g-p4-evidence.md (NFR sweep)</output>
+    <output type="report">projects/spaarke-ai-architecture-redesign-r1/notes/g-m-evidence.md (maker-gate evidence)</output>
+    <output type="report">projects/spaarke-ai-architecture-redesign-r1/notes/test-diet-report.md</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r1/notes/defer-issues.md + GitHub Issues (3 deferrals)</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r1/README.md (status Complete) + lessons-learned.md</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r1/tasks/TASK-INDEX.md (close-out)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">G-P4 evidence assembled: eval suite green, metering rollups shown, Track-B audit zero unexplained survivors, publish size reduced (FR-P4-07 / Success Criterion 5).</criterion>
+    <criterion testable="true">G-M passed: operator observed a BA authoring a brand-new capability entirely as data (ZERO deploys) and a user invoking it in the UI with a rendered result (Success Criterion 6, NFR-11).</criterion>
+    <criterion testable="true">/test-diet executed; report at notes/test-diet-report.md; wrap-up PR cites it (CLAUDE.md §7 binding gate, ADR-038).</criterion>
+    <criterion testable="true">Three named deferrals filed via /defer (admin observability dashboards; assistant-initiated send; /goal promotion or pilot verdict) with GitHub Issues linked.</criterion>
+    <criterion testable="true">ADR-039 and ADR-040 verified status Accepted with citations.</criterion>
+    <criterion testable="true">README status Complete; lessons-learned.md written; TASK-INDEX closed out; /devops-project-sync run against Project #550.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

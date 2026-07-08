@@ -1,5 +1,7 @@
 # Spaarke Playbook-driven LLM Output Pattern
 
+
+> **⚠️ SCOPE NOTE (2026-07-07, spaarke-ai-architecture-redesign-r1 task 052)**: the orchestrator-side Layer-1 mechanics below belong to the FROZEN node-graph engine (Insights family only; OQ-2/D11 — no new capability lands on it) and `IInvokePlaybookAi` (referenced under Related) was DELETED at task 044. Layer 2 (`PromptSchemaRenderer` `## Input` section) remains fully current — the prompted executor (`ActionRunner`) uses the same renderer. New narrative-output capabilities ship as Action + Binding ([`docs/guides/ai-guide-consumer-wiring.md`](../guides/ai-guide-consumer-wiring.md)) or coded `ICodedWorkflow` composites (shipped reference: `DailyBriefingCompositeService`).
 > **Audience**: BFF + AI platform developers building new narrative-output consumers (Daily Briefing, Insight Engine, work assignment briefings, project status updates, document review summaries, and any future Workspace UX feature that needs an LLM to produce structured output from runtime data).
 > **Last Updated**: 2026-06-29 (R7 Wave 11 task 111a — operator-required for Insights Engine and other narrative consumers)
 > **Source ADRs**: [ADR-013](../adr/ADR-013-bff-ai-architecture.md) (BFF AI Architecture), [ADR-037](../adr/ADR-037-multinode-output-composition.md) (Multinode Output Composition), [ADR-010](../adr/ADR-010-di-minimalism.md) (DI Minimalism)

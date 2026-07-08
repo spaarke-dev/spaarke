@@ -19,12 +19,13 @@ namespace Sprk.Bff.Api.Tests.Services.Ai.Chat;
 /// EntityName and PageType populated, the system prompt is enriched with an
 /// entity context block appended AFTER the playbook prompt.
 ///
-/// Expected enrichment format:
-///   "Context: You are assisting with {entityType} record '{entityName}'.
-///    The user is viewing the {humanReadablePageType} view."
-///
-/// These tests are written tests-first (task 030) before the enrichment
-/// implementation (task 031). They may not pass until task 031 is complete.
+/// Expected enrichment format (updated by the G-P3 UAT round-1 H7 fix, 2026-07-07):
+///   "Context: This chat is hosted on the {entityType} record '{entityName}' (id: {entityId}).
+///    The user is viewing the {humanReadablePageType}. When the user says …"
+/// The record IDENTITY (type + id + "this record" binding instruction) always renders
+/// when EntityType + EntityId are present; the display-name and page-type sentences
+/// degrade individually (pre-H7, either missing part silently dropped the WHOLE block —
+/// the host-context blindness of the G-P3 incident).
 /// </summary>
 public class PlaybookChatContextProviderEnrichmentTests
 {
@@ -57,9 +58,12 @@ public class PlaybookChatContextProviderEnrichmentTests
     // =========================================================================
 
     [Fact]
-    public async Task GetContextAsync_NullEntityName_NoEnrichmentBlockAppended()
+    public async Task GetContextAsync_NullEntityName_IdOnlyIdentityBlockAppended()
     {
-        // Arrange — EntityName is null, PageType is valid
+        // G-P3 UAT round-1 H7 (2026-07-07): an unresolvable EntityName (no entity
+        // service wired in this fixture, so the lazy-fetch also yields null) no longer
+        // drops the WHOLE block — the record identity (type + id + binding instruction)
+        // still renders. Pre-H7 this scenario left the loop blind to its host record.
         var hostContext = new ChatHostContext(
             EntityType: "matter",
             EntityId: "entity-123",
@@ -73,9 +77,11 @@ public class PlaybookChatContextProviderEnrichmentTests
             TestDocumentId, TestTenantId, TestPlaybookId, hostContext,
             cancellationToken: CancellationToken.None);
 
-        // Assert — system prompt should NOT contain the enrichment marker
-        context.SystemPrompt.Should().NotContain("Context: You are assisting with");
-        // The base playbook prompt should still be present
+        // Assert — id-only identity phrasing; binding instruction present
+        context.SystemPrompt.Should().Contain(
+            "Context: This chat is hosted on the matter record with id entity-123.");
+        context.SystemPrompt.Should().Contain("they mean THIS host record",
+            "the binding instruction is the H7 payload — 'save to the matter' must resolve to the host record");
         context.SystemPrompt.Should().Contain(BaseSystemPrompt);
     }
 
@@ -105,7 +111,7 @@ public class PlaybookChatContextProviderEnrichmentTests
 
         // Assert — Gap C default makes enrichment fire even when client omits PageType
         context.SystemPrompt.Should()
-            .Contain("Context: You are assisting with matter record 'Acme v. Beta Corp'.");
+            .Contain("Context: This chat is hosted on the matter record 'Acme v. Beta Corp' (id: entity-123).");
         context.SystemPrompt.Should()
             .Contain("The user is viewing the main form view.",
                 "DefaultPageType=\"entityrecord\" maps to \"main form view\" via PageTypeLabels");
@@ -113,9 +119,11 @@ public class PlaybookChatContextProviderEnrichmentTests
     }
 
     [Fact]
-    public async Task GetContextAsync_UnknownPageType_NoEnrichmentBlockAppended()
+    public async Task GetContextAsync_UnknownPageType_IdentityBlockAppendedWithoutPageSentence()
     {
-        // Arrange — PageType is "unknown" which should be treated as invalid
+        // G-P3 UAT round-1 H7: "unknown" PageType (the client's explicit not-known
+        // signal) drops ONLY the page sentence — the record identity still renders.
+        // Pre-H7 it dropped the whole block (host-context blindness).
         var hostContext = new ChatHostContext(
             EntityType: "matter",
             EntityId: "entity-123",
@@ -130,7 +138,10 @@ public class PlaybookChatContextProviderEnrichmentTests
             cancellationToken: CancellationToken.None);
 
         // Assert
-        context.SystemPrompt.Should().NotContain("Context: You are assisting with");
+        context.SystemPrompt.Should().Contain(
+            "Context: This chat is hosted on the matter record 'Acme v. Beta Corp' (id: entity-123).");
+        context.SystemPrompt.Should().NotContain("The user is viewing the",
+            "an unknown page type omits the page sentence only");
         context.SystemPrompt.Should().Contain(BaseSystemPrompt);
     }
 
@@ -146,7 +157,7 @@ public class PlaybookChatContextProviderEnrichmentTests
             cancellationToken: CancellationToken.None);
 
         // Assert
-        context.SystemPrompt.Should().NotContain("Context: You are assisting with");
+        context.SystemPrompt.Should().NotContain("Context: This chat is hosted on");
         context.SystemPrompt.Should().Contain(BaseSystemPrompt);
     }
 
@@ -172,7 +183,7 @@ public class PlaybookChatContextProviderEnrichmentTests
             cancellationToken: CancellationToken.None);
 
         // Assert — enrichment block present with correct entity type and name
-        context.SystemPrompt.Should().Contain("Context: You are assisting with matter record 'Acme v. Beta Corp'.");
+        context.SystemPrompt.Should().Contain("Context: This chat is hosted on the matter record 'Acme v. Beta Corp' (id: entity-123).");
         context.SystemPrompt.Should().Contain("The user is viewing the main form view.");
     }
 
@@ -198,7 +209,7 @@ public class PlaybookChatContextProviderEnrichmentTests
 
         // Assert — enrichment block appears AFTER the base prompt
         var basePromptIndex = context.SystemPrompt.IndexOf(BaseSystemPrompt, StringComparison.Ordinal);
-        var enrichmentIndex = context.SystemPrompt.IndexOf("Context: You are assisting with", StringComparison.Ordinal);
+        var enrichmentIndex = context.SystemPrompt.IndexOf("Context: This chat is hosted on", StringComparison.Ordinal);
 
         basePromptIndex.Should().BeGreaterOrEqualTo(0, "base prompt should be present");
         enrichmentIndex.Should().BeGreaterThan(basePromptIndex, "enrichment should appear after base prompt");
@@ -239,7 +250,7 @@ public class PlaybookChatContextProviderEnrichmentTests
     // =========================================================================
 
     [Fact]
-    public async Task GetContextAsync_EnrichmentBlock_DoesNotExceed100Tokens()
+    public async Task GetContextAsync_EnrichmentBlock_DoesNotExceedTokenCap()
     {
         // Arrange — use a realistic entity name
         var hostContext = new ChatHostContext(
@@ -256,16 +267,17 @@ public class PlaybookChatContextProviderEnrichmentTests
             cancellationToken: CancellationToken.None);
 
         // Assert — extract the enrichment block (everything after "Context: You are assisting")
-        var enrichmentStart = context.SystemPrompt.IndexOf("Context: You are assisting with", StringComparison.Ordinal);
+        var enrichmentStart = context.SystemPrompt.IndexOf("Context: This chat is hosted on", StringComparison.Ordinal);
         enrichmentStart.Should().BeGreaterOrEqualTo(0, "enrichment block should be present");
 
         var enrichmentBlock = context.SystemPrompt[enrichmentStart..];
 
-        // Rough token estimate: ~4 chars per token for English text.
-        // 100 tokens ~ 400 characters. Use a generous margin.
+        // Rough token estimate: ~4 chars per token for English text. Cap raised
+        // 100 -> 150 by the G-P3 H7 fix (the block now carries the record id + the
+        // "this record" binding instruction); see PlaybookChatContextProvider.MaxEnrichmentTokens.
         var estimatedTokens = enrichmentBlock.Length / 4.0;
-        estimatedTokens.Should().BeLessThanOrEqualTo(100,
-            $"enrichment block should be ≤100 tokens (estimated {estimatedTokens:F0} from {enrichmentBlock.Length} chars)");
+        estimatedTokens.Should().BeLessThanOrEqualTo(PlaybookChatContextProvider.MaxEnrichmentTokens,
+            $"enrichment block should be within the cap (estimated {estimatedTokens:F0} from {enrichmentBlock.Length} chars)");
     }
 
     // =========================================================================
@@ -316,7 +328,7 @@ public class PlaybookChatContextProviderEnrichmentTests
         //
         // When task 031 implements the budget check, refine this assertion:
         // If the enrichment is skipped, verify the warning log was emitted.
-        if (!context.SystemPrompt.Contains("Context: You are assisting with"))
+        if (!context.SystemPrompt.Contains("Context: This chat is hosted on"))
         {
             // Enrichment was skipped — verify warning was logged
             _loggerMock.Verify(
@@ -353,7 +365,7 @@ public class PlaybookChatContextProviderEnrichmentTests
             cancellationToken: CancellationToken.None);
 
         // Assert — enrichment should still be applied in generic mode
-        context.SystemPrompt.Should().Contain("Context: You are assisting with matter record 'Acme v. Beta Corp'.");
+        context.SystemPrompt.Should().Contain("Context: This chat is hosted on the matter record 'Acme v. Beta Corp' (id: entity-123).");
         context.SystemPrompt.Should().Contain("The user is viewing the main form view.");
     }
 
@@ -405,7 +417,7 @@ public class PlaybookChatContextProviderEnrichmentTests
         context.SystemPrompt.Should().Contain("Legal Glossary", "knowledge content present");
         context.SystemPrompt.Should().Contain("## Specialized Instructions", "skill instructions present");
         context.SystemPrompt.Should().Contain("Focus on key obligations", "skill fragment present");
-        context.SystemPrompt.Should().Contain("Context: You are assisting with matter record 'Smith v. Jones'.",
+        context.SystemPrompt.Should().Contain("Context: This chat is hosted on the matter record 'Smith v. Jones' (id: entity-789).",
             "entity enrichment present");
     }
 

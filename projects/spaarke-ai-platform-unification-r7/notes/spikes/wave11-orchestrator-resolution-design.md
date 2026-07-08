@@ -1,4 +1,4 @@
-# Wave 11 Design — Playbook Orchestrator Runtime Variable Resolution
+odel# Wave 11 Design — Playbook Orchestrator Runtime Variable Resolution
 
 > **Task**: 110 (Wave 11 — audit + design)
 > **Authored**: 2026-06-29

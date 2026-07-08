@@ -30,8 +30,12 @@ public class PlaybookChatContextProvider : IChatContextProvider
 
     /// <summary>
     /// Maximum token count for the entity enrichment block itself.
+    /// Raised 100 → 150 by the G-P3 UAT round-1 H7 fix (2026-07-07): the block now
+    /// carries the record id + the "this record" binding instruction (~95 tokens with
+    /// a typical display name); at the old cap a long matter name silently dropped the
+    /// whole block — recreating exactly the host-context blindness H7 fixes.
     /// </summary>
-    internal const int MaxEnrichmentTokens = 100;
+    internal const int MaxEnrichmentTokens = 150;
 
     /// <summary>
     /// Maps raw page type values to human-readable labels for the enrichment block.
@@ -298,7 +302,7 @@ public class PlaybookChatContextProvider : IChatContextProvider
             }
 
             // Standalone mode: when the chat has no document but has a valid host context
-            // (entityType + entityId), provide a minimal KnowledgeScope so that DocumentSearchTools
+            // (entityType + entityId), provide a minimal KnowledgeScope so that DocumentSearch chat-tools
             // can entity-scope its discovery search. RagKnowledgeSourceIds is empty, meaning
             // SearchDocumentsAsync runs tenant-wide (no knowledge source filter) while
             // SearchDiscoveryAsync is constrained to the entity boundary via ParentEntityType/Id.
@@ -575,77 +579,87 @@ public class PlaybookChatContextProvider : IChatContextProvider
     }
 
     /// <summary>
-    /// Appends an entity metadata enrichment block to the system prompt when
-    /// the host context provides a valid EntityName and PageType.
+    /// Appends the host-record identity block to the system prompt when the host
+    /// context provides EntityType + EntityId (G-P3 UAT round-1 H7, 2026-07-07:
+    /// the record IDENTITY — type, id, and the "this record" binding instruction —
+    /// always renders; the display-name and page-type sentences degrade individually).
     /// </summary>
     /// <remarks>
     /// <para>Guards:</para>
     /// <list type="bullet">
-    ///   <item><description>EntityName must be non-null/non-empty (server-side lazy-fetched
-    ///     from Dataverse when missing but EntityType + EntityId are present — R7 Wave 12
-    ///     task 151 / audit 120 Gap B).</description></item>
-    ///   <item><description>PageType must be non-null/non-empty and not "unknown"</description></item>
-    ///   <item><description>PageType must map to a known human-readable label</description></item>
+    ///   <item><description>EntityType + EntityId must be present (the record identity) —
+    ///     the ONLY hard guards since H7. Pre-H7, an unresolvable EntityName or an
+    ///     unmapped PageType silently dropped the WHOLE block, leaving the loop blind
+    ///     to its host record.</description></item>
+    ///   <item><description>EntityName: client-supplied or server-side lazy-fetched
+    ///     (R7 Wave 12 task 151 / audit 120 Gap B); unresolvable → id-only phrasing.</description></item>
+    ///   <item><description>PageType: defaulted (task 152) / mapped to a label; missing,
+    ///     "unknown", or unmapped → the page sentence is omitted.</description></item>
     ///   <item><description>Enrichment block must be ≤ <see cref="MaxEnrichmentTokens"/> tokens</description></item>
     ///   <item><description>Total system prompt must not exceed <see cref="MaxSystemPromptTokenBudget"/> tokens</description></item>
     /// </list>
-    /// <para>
-    /// R7 Wave 12 task 151 (audit 120 Gap B): when EntityName is missing but EntityType +
-    /// EntityId are present, this method calls <see cref="TryResolveEntityNameAsync"/>
-    /// which performs a per-request-cached <see cref="IGenericEntityService.RetrieveAsync"/>
-    /// to populate the display name before re-applying the enrichment guards. Fetch failures
-    /// degrade gracefully — the original guard behaviour is preserved (no enrichment, no
-    /// chat-request failure).
-    /// </para>
     /// </remarks>
     private async Task<string> AppendEntityEnrichmentAsync(
         string systemPrompt,
         ChatHostContext? hostContext,
         CancellationToken cancellationToken)
     {
-        // Guard: no host context at all
-        if (hostContext is null)
+        // Guard: no host context / no record identity at all. G-P3 UAT round-1 H7
+        // (2026-07-07): EntityType + EntityId are the ONLY hard requirements — the
+        // pre-H7 guards silently dropped the ENTIRE block when the display name could
+        // not be resolved or the page type was unmapped, leaving the loop blind to
+        // its host record (the operator's "what's the link?" turn searched for a
+        // matter NAME lifted from the uploaded document instead of the actual host
+        // record). Name and page-type sentences now degrade individually; the record
+        // identity line always renders.
+        if (hostContext is null ||
+            string.IsNullOrWhiteSpace(hostContext.EntityType) ||
+            string.IsNullOrWhiteSpace(hostContext.EntityId))
             return systemPrompt;
 
         // Resolve EntityName — populated from client OR server-side lazy-fetch (T151).
+        // Optional since H7: an unresolvable name degrades to the id-only identity line.
         var entityName = hostContext.EntityName;
-        if (string.IsNullOrWhiteSpace(entityName) &&
-            !string.IsNullOrWhiteSpace(hostContext.EntityType) &&
-            !string.IsNullOrWhiteSpace(hostContext.EntityId))
+        if (string.IsNullOrWhiteSpace(entityName))
         {
             entityName = await TryResolveEntityNameAsync(
                 hostContext.EntityType, hostContext.EntityId, cancellationToken);
         }
 
-        // Guard: EntityName must be present (after optional lazy-fetch)
-        if (string.IsNullOrWhiteSpace(entityName))
-            return systemPrompt;
-
         // R7 Wave 12 task 152 (audit 120 Gap C): apply DefaultPageType when client omitted
-        // the field. "unknown" is the client's explicit not-known signal and is NOT defaulted —
-        // it still hits the "must be present and not unknown" guard below.
+        // the field. "unknown" is the client's explicit not-known signal and is NOT defaulted.
+        // Since H7 the page sentence is OPTIONAL — missing/unknown/unmapped page types drop
+        // only the sentence, never the record identity.
         var pageType = string.IsNullOrWhiteSpace(hostContext.PageType)
             ? DefaultPageType
             : hostContext.PageType;
-
-        // Guard: PageType must be present and not "unknown"
-        if (string.IsNullOrWhiteSpace(pageType) ||
-            string.Equals(pageType, "unknown", StringComparison.OrdinalIgnoreCase))
-            return systemPrompt;
-
-        // Guard: PageType must map to a known label
-        if (!PageTypeLabels.TryGetValue(pageType, out var humanReadablePageType))
+        string? humanReadablePageType = null;
+        if (!string.IsNullOrWhiteSpace(pageType) &&
+            !string.Equals(pageType, "unknown", StringComparison.OrdinalIgnoreCase) &&
+            !PageTypeLabels.TryGetValue(pageType, out humanReadablePageType))
         {
             _logger.LogDebug(
-                "Unmapped page type '{PageType}'; skipping entity enrichment",
+                "Unmapped page type '{PageType}'; omitting the page sentence from entity enrichment",
                 pageType);
-            return systemPrompt;
         }
 
-        // Build the enrichment block
+        // Build the enrichment block (G-P3 H7 shape): deterministic host-record identity —
+        // entity type + display name (when resolvable) + Dataverse record id — plus the
+        // "this record" binding instruction so utterances like "save this summary to the
+        // matter" / "what's the link?" resolve to the HOST record, never to a lookalike
+        // name found in uploaded-document text. Static per session (prompt-cache-friendly:
+        // lives in the stable context-provider prefix, not the volatile tail).
+        var recordPhrase = string.IsNullOrWhiteSpace(entityName)
+            ? $"the {hostContext.EntityType} record with id {hostContext.EntityId}"
+            : $"the {hostContext.EntityType} record '{entityName}' (id: {hostContext.EntityId})";
+        var pageSentence = humanReadablePageType is null
+            ? string.Empty
+            : $" The user is viewing the {humanReadablePageType}.";
         var enrichmentBlock =
-            $"Context: You are assisting with {hostContext.EntityType} record '{entityName}'. " +
-            $"The user is viewing the {humanReadablePageType}.";
+            $"Context: This chat is hosted on {recordPhrase}.{pageSentence} " +
+            $"When the user says \"this {hostContext.EntityType}\", \"this record\", or asks to save, link, or " +
+            $"attach something to \"the {hostContext.EntityType}\", they mean THIS host record — use its id above. " +
+            "Do not search for a different record by name unless the user explicitly names one.";
 
         // Guard: enrichment block itself must be ≤ MaxEnrichmentTokens
         var enrichmentTokenEstimate = EstimateTokenCount(enrichmentBlock);

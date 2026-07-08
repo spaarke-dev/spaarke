@@ -31,7 +31,27 @@ describe('DonutChart', () => {
     it('renders empty state when no data', () => {
       renderWithTheme(<DonutChart data={[]} title="Empty Chart" />);
 
-      expect(screen.getByText('No data available')).toBeInTheDocument();
+      expect(screen.getByText('No data available for this measure')).toBeInTheDocument();
+    });
+
+    it('renders empty state when all data points are null', () => {
+      const allNull: IAggregatedDataPoint[] = [
+        { label: 'A', value: 0, fieldValue: null, isNull: true },
+        { label: 'B', value: 0, fieldValue: null, isNull: true },
+      ];
+      renderWithTheme(<DonutChart data={allNull} title="All Null" />);
+
+      expect(screen.getByText('No data available for this measure')).toBeInTheDocument();
+    });
+
+    it('renders empty state when all values are zero', () => {
+      const allZero: IAggregatedDataPoint[] = [
+        { label: 'A', value: 0, fieldValue: 'a' },
+        { label: 'B', value: 0, fieldValue: 'b' },
+      ];
+      renderWithTheme(<DonutChart data={allZero} title="All Zero" />);
+
+      expect(screen.getByText('No data available for this measure')).toBeInTheDocument();
     });
 
     it('renders as donut with default innerRadius', () => {

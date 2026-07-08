@@ -22,6 +22,7 @@ import type { ICreateMatterFormState } from './formTypes';
 import type { IUploadedFile } from './wizardTypes';
 import type { IDataService } from '../../types/serviceInterfaces';
 import type { ILookupItem } from '../../types/LookupTypes';
+import { readSseStream, parseSseEvent } from '../../hooks/useSseStream';
 import { EntityCreationService } from '../../services/EntityCreationService';
 import type {
   IUploadProgress,
@@ -632,63 +633,43 @@ export async function streamAiDraftSummary(
   }
 
   try {
-    const response = await authenticatedFetch(`${bffBaseUrl}/api/workspace/matters/ai-summary`, {
-      method: 'POST',
-      headers: { 'Content-Type': 'application/json' },
-      body: JSON.stringify({ matterName, matterType, practiceArea }),
-      signal,
-    });
-
-    if (!response.ok || !response.body) {
-      return buildFallbackSummary(matterName, matterType, practiceArea);
-    }
-
-    const reader = response.body.getReader();
-    const decoder = new TextDecoder();
-    let buffer = '';
+    // task 045 (FR-P3-06, NFR-08): the canonical readSseStream + parseSseEvent
+    // own the fetch/reader/buffer/`data:`-parse machinery; the caller's
+    // authenticatedFetch is supplied as fetchImpl (it owns auth per ADR-028).
+    // Per-chunk handling preserved verbatim; ANY failure (HTTP non-OK, empty
+    // body, network, error chunk) lands in the catch below → graceful fallback,
+    // exactly as before. The server's `data: [DONE]` terminator parses to null
+    // and is skipped (the stream closes right after it).
     let resultSummary: string | null = null;
-    let streamDone = false;
 
-    while (!streamDone) {
-      const { done, value } = await reader.read();
-      if (done) break;
-      buffer += decoder.decode(value, { stream: true });
-
-      const parts = buffer.split('\n\n');
-      buffer = parts.pop() ?? '';
-
-      for (const part of parts) {
-        const line = part.trim();
-        if (!line.startsWith('data:')) continue;
-        const raw = line.slice(5).trim();
-        if (raw === '[DONE]') {
-          streamDone = true;
-          break;
-        }
-
-        // eslint-disable-next-line @typescript-eslint/no-explicit-any
-        let chunk: any;
-        try {
-          chunk = JSON.parse(raw);
-        } catch {
-          continue;
-        }
+    await readSseStream({
+      url: `${bffBaseUrl}/api/workspace/matters/ai-summary`,
+      body: { matterName, matterType, practiceArea },
+      fetchImpl: (url, init) => authenticatedFetch(url, init),
+      signal,
+      onLine: (line: string) => {
+        const chunk = parseSseEvent(line) as unknown as {
+          type?: string;
+          step?: string;
+          content?: string;
+        } | null;
+        if (!chunk) return;
 
         if (chunk.type === 'progress' && chunk.step && onProgress) {
-          onProgress(chunk.step as string);
+          onProgress(chunk.step);
         } else if (chunk.type === 'result' && chunk.content) {
           try {
             // eslint-disable-next-line @typescript-eslint/no-explicit-any
-            const parsed = JSON.parse(chunk.content as string) as any;
+            const parsed = JSON.parse(chunk.content) as any;
             if (parsed?.summary) resultSummary = String(parsed.summary);
           } catch {
             /* skip malformed result */
           }
         } else if (chunk.type === 'error') {
-          throw new Error((chunk.content as string) ?? 'Summary generation failed');
+          throw new Error(chunk.content ?? 'Summary generation failed');
         }
-      }
-    }
+      },
+    });
 
     return resultSummary ? { summary: resultSummary } : buildFallbackSummary(matterName, matterType, practiceArea);
   } catch {

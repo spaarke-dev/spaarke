@@ -1,0 +1,71 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="020" project="record-header-and-notepad-r1">
+  <metadata>
+    <title>Verify sprk_smarttodo_page webresource name in target Dataverse</title>
+    <phase>2: MatterHeaderPcf</phase>
+    <status>completed</status>
+    <estimated-hours>1</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>025</blocks>
+    <tags>dataverse</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Empirical verification; may update toolbarLaunchDefaults.ts if name differs</rigor-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>Verify the exact `sprk_smarttodo_page` webresource name against the dev Dataverse environment. If the name differs, file an issue and update toolbarLaunchDefaults.ts (SMARTTODO_WEBRESOURCE_NAME constant). Document findings in notes/smarttodo-webresource.md.</prompt>
+
+  <role>Spaarke platform developer. Familiar with PAC CLI + Dataverse webresource inventory.</role>
+
+  <goal>Verification report at notes/smarttodo-webresource.md with the exact webresource name found; toolbarLaunchDefaults.ts constant updated if needed.</goal>
+
+  <context>
+    <background>Spec R4 identifies a risk that the existing SmartTodo webresource name may not match the assumed `sprk_smarttodo_page`. This verification must complete before task 025 (deploy + QA) which exercises the checkmark action.</background>
+    <relevant-files>
+      <file>projects/record-header-and-notepad-r1/notes/smarttodo-webresource.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/hooks/toolbarLaunchDefaults.ts</file>
+    </relevant-files>
+  </context>
+
+  <constraints>
+    <constraint source="spec">R4 risk mitigation.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>projects/record-header-and-notepad-r1/spec.md</file>
+      <file>projects/record-header-and-notepad-r1/CLAUDE.md</file>
+      <file>docs/guides/DATAVERSE-HOW-TO-CREATE-UPDATE-SCHEMA.md</file>
+    </files>
+  </knowledge>
+
+  <steps>
+    <step order="1">Run `pac solution list` or similar to enumerate webresources in the dev environment.</step>
+    <step order="2">Search for a webresource whose name matches "smarttodo" (case-insensitive).</step>
+    <step order="3">Compare the exact name to SMARTTODO_WEBRESOURCE_NAME constant in toolbarLaunchDefaults.ts.</step>
+    <step order="4">If a match exists: document in notes/smarttodo-webresource.md as CONFIRMED.</step>
+    <step order="5">If the name differs: update the constant in toolbarLaunchDefaults.ts to the actual name; file an ISS-{NNN} via /project-defer-issue-tracking noting the naming inconsistency.</step>
+    <step order="6">If no smarttodo webresource exists in this environment: escalate — SmartTodo checkmark action cannot be tested until deployed.</step>
+    <step order="7">Update TASK-INDEX.md: mark 020 ✅.</step>
+    <step order="8">Document deviations in notes/.</step>
+  </steps>
+
+  <tools><tool name="terminal">Shell</tool></tools>
+
+  <outputs>
+    <output type="docs">projects/record-header-and-notepad-r1/notes/smarttodo-webresource.md</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">notes/smarttodo-webresource.md exists documenting either the confirmed name or the actual name found.</criterion>
+    <criterion testable="true">SMARTTODO_WEBRESOURCE_NAME in toolbarLaunchDefaults.ts matches the environment reality.</criterion>
+  </acceptance-criteria>
+
+  <notes>This task can run in parallel with early Phase 2 build tasks (021, 022) but MUST land before 025 (QA).</notes>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+    <protocol>Load knowledge files first. Follow task-execute skill.</protocol>
+  </execution>
+</task>

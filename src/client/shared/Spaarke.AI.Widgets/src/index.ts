@@ -30,11 +30,13 @@ import { registerStructuredOutputStreamWidget } from './widgets/workspace/regist
 registerStructuredOutputStreamWidget();
 
 // ---------------------------------------------------------------------------
-// Side-effect: register all 6 R1 source widgets into ContextWidgetRegistry
-// (AIPU2-081 — migrate source widgets to context pane)
+// Side-effect: register ALL context widgets into ContextWidgetRegistry via the
+// SINGLE registration module (task 046 / FR-P3-07 registry dedupe — one module
+// consumed by both mount paths; do NOT add inline registrations here).
 // ---------------------------------------------------------------------------
-import { registerContextWidgets } from './widgets/context/register-context-widgets';
+import { registerContextWidgets } from './registry/register-context-widgets';
 registerContextWidgets();
+export { registerContextWidgets } from './registry/register-context-widgets';
 
 // ---------------------------------------------------------------------------
 // Types — React component prop contracts (tasks AIPU2-072/073)
@@ -182,16 +184,16 @@ export { SEARCH_CRITERIA_RESULT_WIDGET_TYPE } from './widgets/workspace/register
 // Widgets: StructuredOutputStreamWidget — schema-driven AI output (R5 task 017)
 //
 // Workspace widget that renders structured AI output PROGRESSIVELY via
-// `FieldDelta` SSE events (FR-02 — Summarize streaming) OR statically from a
+// section-keyed `section_*` events (ADR-037 as amended 2026-07-05 — the ONLY
+// streaming render contract since the task 046 cutover) OR statically from a
 // pre-filled envelope (FR-13 — Insights playbook rendering via D2-16 / task
 // 026). The same widget serves both consumers via different schemas — that
 // "schema-driven" design is the load-bearing reuse claim of R5's platform
 // extensibility story (risk UR-02 mitigation).
 //
 // Two CONCRETE schemas are exported (SUMMARIZE_SCHEMA, INSIGHTS_PLAYBOOK_SCHEMA)
-// so downstream consumers (chat-pane dispatcher, InsightsResponseRenderer) do
-// not redeclare them. Per task 006 spike: schema declaration order = stream
-// arrival order = render order (TL;DR first for Summarize).
+// so downstream consumers (e.g. the chat-pane dispatcher) do not redeclare
+// them for STATIC envelope rendering.
 //
 // Registered under 'structured-output-stream' via
 // register-structured-output-stream-widget.ts.
@@ -353,18 +355,13 @@ export { serializeFindSimilarWizardState } from './widgets/workspace/FindSimilar
 // Widgets: ProgressTrackerWidget (context pane — workflow step progress)
 //
 // Exported so consumers can reference the component directly and type-check
-// context_update payloads. The registerContextWidget() call below registers
-// the widget at module-load time under the 'progress-tracker' type key.
+// context_update payloads. Registration under 'progress-tracker' happens in
+// the single registration module (./registry/register-context-widgets — task
+// 046 registry dedupe; same for every context widget exported below).
 // ---------------------------------------------------------------------------
 
 export { default as ProgressTrackerWidget } from './widgets/context/ProgressTrackerWidget';
 export type { ProgressTrackerData, WorkflowStep } from './widgets/context/ProgressTrackerWidget';
-
-import { registerContextWidget } from './registry/ContextWidgetRegistry';
-import type { ContextWidgetComponent } from './types/widget-types';
-registerContextWidget('progress-tracker', {
-  factory: () => import('./widgets/context/ProgressTrackerWidget').then(m => ({ default: m.default })),
-});
 
 // ---------------------------------------------------------------------------
 // Widgets: PlaybookGalleryWidget (context pane — Welcome / playbook-gallery stage)
@@ -376,35 +373,14 @@ registerContextWidget('progress-tracker', {
 export { default as PlaybookGalleryWidget } from './widgets/context/PlaybookGalleryWidget';
 export type { PlaybookGalleryData, PlaybookSummary } from './widgets/context/PlaybookGalleryWidget';
 
-registerContextWidget('playbook-gallery', {
-  factory: () =>
-    // Type-erasure cast: registry stores ContextWidgetComponent<unknown>; the
-    // widget's default export is typed ContextWidgetComponent<PlaybookGalleryData>.
-    // The generic variance is unavoidable at the registry boundary — at render
-    // time the widget receives its typed data via the registry contract.
-    import('./widgets/context/PlaybookGalleryWidget').then(m => ({
-      default: m.default as unknown as ContextWidgetComponent,
-    })),
-});
-
 // ---------------------------------------------------------------------------
 // Widgets: GetStartedCardsWidget (context pane — Welcome stage, FR-18)
 //
 // Exported so consumers (ContextPaneController in SpaarkeAi) can render it
 // directly with an `onCardClick` callback prop. Also registered under
-// 'get-started-cards' for symmetry with the other context widgets and so
-// the registry stays the single source of truth for "what can render in
-// the Context pane".
-//
-// Note: GetStartedCardsWidget's props (`onCardClick`, `className`) are NOT
-// the standard `ContextWidgetProps` shape — it is a client-driven welcome
-// widget, not a server-driven `context_update` target. The registry factory
-// uses a type cast at the boundary so the widget can still be discovered by
-// `resolveContextWidget('get-started-cards')` if needed; callers that need
-// to wire `onCardClick` should import the named export directly and render
-// it themselves (this is what ContextPaneController does for the welcome
-// stage). PlaybookGalleryWidget registration is RETAINED above for FR-21
-// (non-welcome stage resolution).
+// 'get-started-cards' (single registration module) for symmetry with the
+// other context widgets and so the registry stays the single source of truth
+// for "what can render in the Context pane".
 // ---------------------------------------------------------------------------
 
 export { GetStartedCardsWidget } from './widgets/context/GetStartedCardsWidget';
@@ -417,18 +393,6 @@ export { default as PinnedMemoryListWidget } from './widgets/context/PinnedMemor
 export type { PinnedMemoryListData, PinnedMemoryListWidgetProps } from './widgets/context/PinnedMemoryListWidget';
 export { PINNED_MEMORY_LIST_WIDGET_TYPE } from './widgets/context/PinnedMemoryListWidget';
 
-registerContextWidget('get-started-cards', {
-  factory: () =>
-    import('./widgets/context/GetStartedCardsWidget').then(m => ({
-      // Intentional cast: GetStartedCardsWidget's prop shape differs from
-      // ContextWidgetComponent's (it takes `onCardClick` + `className` instead
-      // of `data` + `widgetType` + `isLoading`). The registry entry exists
-      // for discoverability + symmetry; the actual render uses the named
-      // export directly so the callback is wirable.
-      default: m.GetStartedCardsWidget as unknown as ContextWidgetComponent,
-    })),
-});
-
 // ---------------------------------------------------------------------------
 // Widgets: FindingsWidget (context pane — sources-citations stage)
 //
@@ -440,17 +404,6 @@ registerContextWidget('get-started-cards', {
 
 export { default as FindingsWidget } from './widgets/context/FindingsWidget';
 export type { FindingsData, Finding, Citation, RiskLevel } from './widgets/context/FindingsWidget';
-
-registerContextWidget('findings', {
-  factory: () =>
-    // Type-erasure cast: registry stores ContextWidgetComponent<unknown>; the
-    // widget's default export is typed ContextWidgetComponent<FindingsData>.
-    // Generic variance at the registry boundary — see PlaybookGalleryWidget
-    // registration above for the same pattern.
-    import('./widgets/context/FindingsWidget').then(m => ({
-      default: m.default as unknown as ContextWidgetComponent,
-    })),
-});
 
 // ---------------------------------------------------------------------------
 // Widgets: FilePreviewContextWidget (context pane — chat-driven Summarize)
@@ -480,53 +433,32 @@ export {
   dispatchSummarizeOnly,
 } from './widgets/context/FilePreviewContextWidget';
 
-registerContextWidget('file-preview', {
-  factory: () =>
-    // Type-erasure cast: registry stores ContextWidgetComponent<unknown>; the
-    // widget's default export is typed ContextWidgetComponent<FilePreviewContextData>.
-    // Generic variance at the registry boundary — see PlaybookGalleryWidget
-    // registration above for the same pattern.
-    import('./widgets/context/FilePreviewContextWidget').then(m => ({
-      default: m.default as unknown as ContextWidgetComponent,
-    })),
-});
-
 // ---------------------------------------------------------------------------
-// Widgets: ExecutionTraceWidget (context pane — Claude-Code-like trace)
+// Widgets: ExecutionTraceWidget (context pane — ADR-040 ledger trace)
 //
-// R6 task 061 / D-C-14. Subscribes to the six `context.*` trace event types
-// added by R6 task 059 (D-C-12) and renders an ordered timeline of the chat
-// agent's deterministic activity (tool calls, knowledge retrievals,
-// playbook-node executions, decisions). Per ADR-015 BINDING: renders only
-// the typed enumerated fields from each event payload (tool name + decision
-// + timestamp + numeric metrics) — NEVER user message text or document
-// content. Per ADR-030 + NFR-05: subscribes to the existing `context`
-// channel — no new channel introduced.
-//
-// NOTE: registration in ContextWidgetRegistry is performed by task 062 — this
-// task only exposes the widget + its types via the package barrel.
+// Task 046 / FR-P3-07. Renders the session ledger's PERSISTED ToolChain
+// entries (delivered via `context.tool_chain` events — the BFF emits each
+// segment only AFTER the ledger append; storage precedes rendering per
+// ADR-040). Per NFR-07 / ADR-015 BINDING: renders identifiers / redacted
+// filter summaries / counts / durations ONLY — NEVER user message text or
+// document content. Per ADR-030 + NFR-05: subscribes to the existing
+// `context` channel — no new channel introduced.
+// Registered under 'execution-trace' in the single registration module.
 // ---------------------------------------------------------------------------
 
 export { default as ExecutionTraceWidget } from './widgets/context/ExecutionTraceWidget';
 export type { ExecutionTraceData, ExecutionTraceWidgetProps } from './widgets/context/ExecutionTraceWidget';
 export { EXECUTION_TRACE_WIDGET_TYPE, MAX_TRACE_ENTRIES } from './widgets/context/ExecutionTraceWidget';
-
-// R6 task 062 / D-C-15: register the widget so the SpaarkeAi shell can mount it
-// as the Context-pane primary widget via `resolveContextWidget('execution-trace')`.
-// Registration is idempotent (the registry is first-wins; the parallel inline
-// path in `src/registry/register-context-widgets.ts` is the mirror call for
-// shell entry points that bypass this barrel — both call sites are deliberate
-// per the FilePreviewContextWidget pattern above).
-registerContextWidget('execution-trace', {
-  factory: () =>
-    // Type-erasure cast: registry stores ContextWidgetComponent<unknown>; the
-    // widget's default export is typed ContextWidgetComponent<ExecutionTraceData>.
-    // Generic variance at the registry boundary — see PlaybookGalleryWidget
-    // registration above for the same pattern.
-    import('./widgets/context/ExecutionTraceWidget').then(m => ({
-      default: m.default as unknown as ContextWidgetComponent,
-    })),
-});
+// G-P3 UAT round-5 R5-D (2026-07-07): replay buffer for tool_chain events — the
+// always-mounted SSE bridge records; the late-mounting widget replays on mount
+// (PaneEventBus is fire-and-forget; without this every pre-mount event was lost).
+export {
+  recordExecutionTraceEvent,
+  getExecutionTraceBuffer,
+  clearExecutionTraceBuffer,
+  MAX_BUFFERED_TRACE_EVENTS,
+} from './widgets/context/executionTraceBuffer';
+export type { BufferedTraceEvent } from './widgets/context/executionTraceBuffer';
 
 // ---------------------------------------------------------------------------
 // Hooks: useWorkspaceLayouts (R4 task 051 / C-3 — consolidated workspace-layouts hook)
@@ -551,12 +483,12 @@ export type {
 // Providers: AiSessionProvider (R2 session state + PaneEventBus routing)
 // ---------------------------------------------------------------------------
 
-// AiSessionProvider — replaces R1 StandaloneAiProvider; routes SSE events to PaneEventBus
+// AiSessionProvider — replaces the deleted R1 standalone provider; routes SSE events to PaneEventBus
 export { AiSessionProvider } from './providers/AiSessionProvider';
 export type { AiSessionContextValue, AiSessionProviderProps, AiContextMapping } from './providers/AiSessionProvider';
 export { AI_SESSION_CHAT_SESSION_KEY, AI_SESSION_PLAYBOOK_KEY } from './providers/AiSessionProvider';
 
-// useAiSession — consumer hook for AiSessionContext (replaces R1 useStandaloneAi)
+// useAiSession — consumer hook for AiSessionContext (replaces the deleted R1 standalone hook)
 export { useAiSession } from './providers/useAiSession';
 
 // ---------------------------------------------------------------------------

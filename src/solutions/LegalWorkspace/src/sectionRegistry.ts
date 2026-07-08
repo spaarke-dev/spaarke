@@ -83,8 +83,9 @@ import { composeEditorRegistration } from "./sections/composeEditor.registration
 export interface LegalWorkspaceSectionRegistryOptions {
   /**
    * Daily Briefing customization. Currently exposes the notification-context
-   * loader — used by SpaarkeAi to flow `loadSpaarkeAiNotificationContext` into
-   * the BFF `/narrate` envelope so the embedded copy renders real bullets.
+   * loader seam. (The former SpaarkeAi loader call site was deleted by
+   * Track-B batch 2, task 071 — the option is @deprecated and ignored by
+   * the daily-briefing factory; see dailyBriefing.registration.ts.)
    *
    * Standalone consumers omit this → empty-payload contract preserved
    * (BFF returns empty bullets → empty-state UI). FR-25 / NFR-10.
@@ -194,6 +195,127 @@ function runRegistryDevGuards(
  */
 export const SECTION_REGISTRY: readonly SectionRegistration[] =
   createLegalWorkspaceSectionRegistry();
+
+// ---------------------------------------------------------------------------
+// FR-04 (task 015) — Runtime dev-guard for `widthPreference`.
+//
+// Fires ONE `console.warn` per section-in-multi-column-row violation when a
+// layout is rendered in DEV mode. This is a dev-signal (not user-facing), so
+// it uses `console.warn` (matches CLAUDE.md guidance) rather than
+// `console.error` (which the drift guards above use for real invariant
+// violations).
+//
+// Guarded by `NODE_ENV !== 'production'` so production bundles stay silent
+// (matches spec.md FR-04 acceptance + task 015 POML constraints).
+//
+// # Contract
+//
+// Consumers pass in a `LayoutJsonLike` — the minimal shape that overlaps with
+// `LayoutJson` from `@spaarke/ui-components`. We keep the shape local rather
+// than importing `LayoutJson` to avoid a heavy WorkspaceShell import into this
+// file and to let non-shared-lib consumers call the guard with any object
+// carrying the same structural shape (duck typing).
+//
+// # Wiring
+//
+// The intended call site is right after `parseLayoutJson` in the
+// LegalWorkspace layout resolver (or wherever a `LayoutJson` first materializes
+// pre-render). See `hooks/useWorkspaceLayouts.ts` for the parse point — a
+// follow-on task can wire the call once the render pipeline is verified. This
+// exported symbol lands the primitive; the wire-up is trivially small.
+//
+// # Test coverage
+//
+// See `__tests__/widthPreferenceGuard.test.ts` for unit tests covering the
+// three branches: violation + non-violation + production silence.
+// ---------------------------------------------------------------------------
+
+/** Minimal LayoutJson row shape the guard needs. Matches
+ * `LayoutJson.rows[N]` from `@spaarke/ui-components` structurally. */
+export interface LayoutJsonRowLike {
+  id: string;
+  columns: string;
+  /** Sections may be bare strings OR SectionInstance objects (FR-03). We only
+   * need the section ID for the guard — both forms carry it in `id`. */
+  sections: ReadonlyArray<string | { id: string }>;
+}
+
+export interface LayoutJsonLike {
+  rows: ReadonlyArray<LayoutJsonRowLike>;
+}
+
+/**
+ * Estimate the number of column slots from a CSS `grid-template-columns` value.
+ * Mirrors the logic in `@spaarke/ui-components/WorkspaceShell/countSlots` but
+ * kept local to avoid a cross-package import for a single utility.
+ *
+ * Handles common cases:
+ *   `"1fr"`              → 1
+ *   `"1fr 1fr"`          → 2
+ *   `"repeat(3, 1fr)"`   → 3
+ *   invalid / empty      → 1 (safe default)
+ */
+function countColumnSlots(gridTemplateColumns: string | undefined): number {
+  if (!gridTemplateColumns) return 1;
+  const trimmed = gridTemplateColumns.trim();
+  if (trimmed.length === 0) return 1;
+  const repeatMatch = /^repeat\(\s*(\d+)\s*,/.exec(trimmed);
+  if (repeatMatch) {
+    const n = parseInt(repeatMatch[1], 10);
+    return Number.isFinite(n) && n > 0 ? n : 1;
+  }
+  // Fall back to whitespace tokenization (won't overcount for well-formed CSS).
+  const tokens = trimmed.split(/\s+/).filter((t) => t.length > 0);
+  return Math.max(tokens.length, 1);
+}
+
+/**
+ * Extract the section ID from a bare-string or SectionInstance-shaped entry.
+ * Empty strings return `undefined` (matches R2 task 091 tolerance behavior).
+ */
+function extractSectionId(entry: string | { id: string }): string | undefined {
+  if (typeof entry === "string") return entry.length > 0 ? entry : undefined;
+  return entry.id && entry.id.length > 0 ? entry.id : undefined;
+}
+
+/**
+ * Check a parsed LayoutJson for `widthPreference: 'full'` sections placed in
+ * multi-column rows and emit `console.warn` for each violation.
+ *
+ * In production (`process.env.NODE_ENV === 'production'`), this function is a
+ * no-op regardless of input — meets FR-04 "silent in production" acceptance.
+ *
+ * The lookup uses the shared `SECTION_METADATA_CATALOG` from
+ * `@spaarke/ui-components` (task 014). Sections without an entry in the catalog
+ * OR without a `widthPreference` field are skipped (no warning) — matches the
+ * `'any'` default documented on `SectionMetadata.widthPreference`.
+ *
+ * @param layout Parsed layout JSON (accepts any structurally-compatible object).
+ */
+export function warnOnWidthPreferenceViolations(
+  layout: LayoutJsonLike | null | undefined,
+): void {
+  if (process.env.NODE_ENV === "production") return;
+  if (!layout || !Array.isArray(layout.rows)) return;
+
+  for (const row of layout.rows) {
+    const slotCount = countColumnSlots(row.columns);
+    if (slotCount <= 1) continue;
+
+    for (const entry of row.sections) {
+      const sectionId = extractSectionId(entry);
+      if (!sectionId) continue;
+      const meta = SECTION_METADATA_CATALOG.find((m) => m.id === sectionId);
+      if (!meta || meta.widthPreference !== "full") continue;
+
+      console.warn(
+        `[Spaarke DataGrid] Section "${sectionId}" has widthPreference:full but ` +
+          `is rendered in a multi-column row (row "${row.id}", ${slotCount} columns). ` +
+          "Consider moving to a single-column row.",
+      );
+    }
+  }
+}
 
 // ---------------------------------------------------------------------------
 // Lookup helpers (continue to operate on the default SECTION_REGISTRY)

@@ -10,7 +10,7 @@
     `sprk_executoractiontype` (INT) was a parallel encoding of dispatch
     that R7 collapses into `node.sprk_executortype` (Choice). After
     Wave 2 task 024 (single-hop dispatch) + Wave 4 task 042
-    (ExecuteAnalysisAsync deletion), no production code reads this column.
+    (legacy direct-invocation execute method deletion), no production code reads this column.
 
     The `sprk_analysisactiontype` lookup TABLE is preserved per FR-05.
 

@@ -58,6 +58,26 @@ export interface WorkspaceLayoutWidgetData {
   layoutId: string;
   /** Human-readable layout name for the tab title (already set by the menu). */
   layoutName: string;
+  /**
+   * Optional Compose document pre-seed (G-P3 UAT round-4 R4-2, 2026-07-07).
+   * Present when the server resolved a real `sprk_document` (with a stored SPE
+   * file) for a chat-opened Compose tab — `SendWorkspaceArtifactHandler` puts it
+   * on the `workspace_open_tab` frame's widgetData. Forwarded to the renderer as
+   * `launchData.compose`; the HOST's renderer wrapper translates it into
+   * `ComposeLaunchContext` (this package must NOT depend on
+   * `@spaarke/compose-components` — that package depends on this one).
+   * Field names mirror the ribbon/modal launch params (`launch-resolver.ts`).
+   */
+  compose?: {
+    /** Dataverse `sprk_document` GUID. */
+    sprkDocumentId?: string;
+    /** SPE drive-item id — the document Compose loads. */
+    speDriveItemId: string;
+    /** SPE drive id (per-BU container drive). */
+    speDriveId?: string | null;
+    /** Display file name for UI labelling. */
+    fileName?: string | null;
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -238,6 +258,10 @@ export const WorkspaceLayoutWidget: React.FC<
         userId={userId}
         initialWorkspaceId={data.layoutId}
         embedded
+        // R4-2 (2026-07-07): forward the Compose pre-seed OPAQUELY — the host's
+        // renderer wrapper interprets `launchData.compose`; renderers that don't
+        // recognize it ignore it (contract on WorkspaceRendererProps.launchData).
+        launchData={data.compose ? { compose: data.compose } : undefined}
       />
     </div>
   );

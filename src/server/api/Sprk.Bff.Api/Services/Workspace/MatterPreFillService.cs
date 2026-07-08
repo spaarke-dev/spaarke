@@ -8,6 +8,7 @@ using Sprk.Bff.Api.Configuration;
 using Sprk.Bff.Api.Infrastructure.Graph;
 using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Services.Ai;
+using Sprk.Bff.Api.Services.Ai.LinearConsumers;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
 
 namespace Sprk.Bff.Api.Services.Workspace;
@@ -37,28 +38,33 @@ public sealed class MatterPreFillService
     private readonly IPlaybookLookupService _playbookLookup;
     private readonly IConsumerRoutingService _consumerRouting;
     private readonly IWorkspacePrefillAi? _prefillAi;
-    private readonly WorkspaceOptions _workspaceOptions;
     private readonly SharePointEmbeddedOptions _speOptions;
     private readonly ILogger<MatterPreFillService> _logger;
 
-    // FR-1R-05 routing-table resolution (chat-routing-redesign-r1 task 028c / Pattern A):
-    // Phase 1R replaces the prior WorkspaceOptions.MatterPreFillPlaybookId env-var
-    // binding with the sprk_playbookconsumer Dataverse routing table queried through
-    // IConsumerRoutingService.ResolveAsync(ConsumerTypes.MatterPreFill, ...). The
-    // env-var value remains readable as a deprecation-window fallback (FR-1R-06):
-    // when ResolveAsync returns null we fall through to the legacy
-    // _workspaceOptions.MatterPreFillPlaybookId read so existing config keeps working
-    // while admins migrate to the table.
+    // R7 Wave 12 Phase D + Wave 12.3 (2026-07-02): Linear AI Consumer dependencies.
+    // When the sprk_playbookconsumer routing row for ConsumerTypes.MatterPreFill has
+    // sprk_action populated, GetPreFillAsync routes through the Linear path
+    // (IActionResolver + IActionRunner + existing ParseAiResponse) instead of the
+    // Playbook Engine. Nullable to keep existing constructors (unit-test) compiling;
+    // DI-registered instances always supply non-null values.
+    private readonly IActionResolver? _linearActionResolver;
+    private readonly IActionRunner? _linearActionRunner;
+
+    // FR-P3-01 hard cutover (ai-architecture-redesign-r1 task 040): the sprk_playbookconsumer
+    // Binding routing table — queried through
+    // IConsumerRoutingService.ResolveAsync(ConsumerTypes.MatterPreFill, ...) — is the ONLY
+    // playbook-resolution source. The legacy typed-options config fallback (FR-1R-05/FR-1R-06
+    // deprecation window) was DELETED per NFR-08: no shims, no deprecation windows. When
+    // routing returns null the service fails cleanly with a ROUTING_MISSING empty response —
+    // the operator must seed the Binding row.
     //
     // FR-05 (chat-routing-redesign-r1 task 016 / Pattern A — historical): the prior
     // hardcoded "Create New Matter Pre-Fill" playbook GUID
-    // (2d660cad-d418-f111-8343-7ced8d1dc988) was already removed in Phase 1; this
-    // task 028c migration only changes the routing-resolution step (env var →
-    // sprk_playbookconsumer table) ahead of IPlaybookLookupService.GetByIdAsync.
+    // (2d660cad-d418-f111-8343-7ced8d1dc988) was removed in Phase 1.
     //
     // NFR-07 BINDING preserved: pre-fill flow signature, 45s timeout, useAiPrefill
     // consumer contract, and $choices output shape are unchanged — only the
-    // internal playbook-ID lookup mechanism has been migrated.
+    // internal playbook-ID resolution mechanism has changed.
 
     // Supported MIME types for the pre-fill endpoint
     private static readonly HashSet<string> AllowedExtensions =
@@ -86,18 +92,20 @@ public sealed class MatterPreFillService
         ITextExtractor textExtractor,
         IPlaybookLookupService playbookLookup,
         IConsumerRoutingService consumerRouting,
-        IOptions<WorkspaceOptions> workspaceOptions,
         IOptions<SharePointEmbeddedOptions> speOptions,
         ILogger<MatterPreFillService> logger,
-        IWorkspacePrefillAi? prefillAi = null)
+        IWorkspacePrefillAi? prefillAi = null,
+        IActionResolver? linearActionResolver = null,
+        IActionRunner? linearActionRunner = null)
     {
         _speFileStore = speFileStore ?? throw new ArgumentNullException(nameof(speFileStore));
         _textExtractor = textExtractor ?? throw new ArgumentNullException(nameof(textExtractor));
         _playbookLookup = playbookLookup ?? throw new ArgumentNullException(nameof(playbookLookup));
         _consumerRouting = consumerRouting ?? throw new ArgumentNullException(nameof(consumerRouting));
-        _workspaceOptions = (workspaceOptions ?? throw new ArgumentNullException(nameof(workspaceOptions))).Value;
         _speOptions = (speOptions ?? throw new ArgumentNullException(nameof(speOptions))).Value;
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
+        _linearActionResolver = linearActionResolver;
+        _linearActionRunner = linearActionRunner;
         _prefillAi = prefillAi; // Nullable: AI feature flags may be disabled. RequireAi() throws at use site.
     }
 
@@ -193,8 +201,106 @@ public sealed class MatterPreFillService
             "Text extraction complete. TotalChars={TotalChars}. RequestId={RequestId}",
             combinedText.Length, requestId);
 
-        // --- Step 2: Invoke playbook for structured extraction ---
+        // --- Step 2: Invoke AI for structured extraction ---
+        // R7 Wave 12 Phase D + Wave 12.3 (2026-07-02): Linear AI Consumer dispatch. When the
+        // sprk_playbookconsumer routing row for ConsumerTypes.MatterPreFill has sprk_action
+        // populated, route through the code-defined path (IActionResolver + IActionRunner)
+        // rather than the Playbook Engine. Preserves the existing PreFillResponse contract +
+        // all ParseAiResponse fallbacks. Fall-through to ExtractFieldsViaPlaybookAsync
+        // preserves engine dispatch when the sprk_action lookup is empty.
+        var linearActionId = (_linearActionResolver != null && _linearActionRunner != null)
+            ? await _consumerRouting.ResolveActionAsync(ConsumerTypes.MatterPreFill, cancellationToken: cancellationToken)
+                .ConfigureAwait(false)
+            : null;
+        if (linearActionId.HasValue && linearActionId.Value != Guid.Empty)
+        {
+            return await ExtractFieldsViaLinearAsync(combinedText, requestId, httpContext, cancellationToken);
+        }
+
         return await ExtractFieldsViaPlaybookAsync(combinedText, requestId, httpContext, cancellationToken);
+    }
+
+    /// <summary>
+    /// R7 Wave 12 Phase D — Linear AI Consumer path for Matter Prefill.
+    /// Composes <see cref="IActionResolver"/> + <see cref="IActionRunner"/> instead of
+    /// running through the Playbook Engine. Emits the same <see cref="PreFillResponse"/>
+    /// contract by feeding the raw JSON through the existing <see cref="ParseAiResponse"/>
+    /// (which handles the direct-schema / entity-extraction / partial-JSON fallbacks the
+    /// wizard client depends on).
+    /// </summary>
+    private async Task<PreFillResponse> ExtractFieldsViaLinearAsync(
+        string documentText,
+        Guid requestId,
+        HttpContext httpContext,
+        CancellationToken cancellationToken)
+    {
+        // Truncate to ~80KB to mirror ExtractFieldsViaPlaybookAsync's guard.
+        const int maxTextChars = 80_000;
+        if (documentText.Length > maxTextChars)
+        {
+            _logger.LogDebug(
+                "Truncating combined text from {Original} to {Truncated} chars. RequestId={RequestId}",
+                documentText.Length, maxTextChars, requestId);
+            documentText = documentText[..maxTextChars] + "\n\n[... content truncated ...]";
+        }
+
+        try
+        {
+            using var timeoutCts = CancellationTokenSource.CreateLinkedTokenSource(cancellationToken);
+            timeoutCts.CancelAfter(TimeSpan.FromSeconds(45));
+
+            var action = await _linearActionResolver!.ResolveAsync(ConsumerTypes.MatterPreFill, timeoutCts.Token);
+
+            var tenantId = httpContext.User?.FindFirst("tid")?.Value
+                ?? httpContext.User?.FindFirst("http://schemas.microsoft.com/identity/claims/tenantid")?.Value;
+
+            var docText = new DocumentText
+            {
+                DocumentId = null,
+                FileName = "matter-prefill-input",
+                ExtractedText = documentText,
+            };
+            var runContext = new LinearRunContext
+            {
+                ConsumerType = ConsumerTypes.MatterPreFill,
+                CorrelationId = httpContext.TraceIdentifier,
+                TenantId = tenantId,
+            };
+
+            _logger.LogInformation(
+                "Invoking Linear Matter Prefill action. ActionId={ActionId}, TextLength={TextLength}, RequestId={RequestId}",
+                action.Id, documentText.Length, requestId);
+
+            var jsonElement = await _linearActionRunner!.RunAsync(action, docText, runContext, timeoutCts.Token);
+            var preFillJson = jsonElement.GetRawText();
+
+            var confidence = 0.0;
+            if (jsonElement.ValueKind == JsonValueKind.Object
+                && jsonElement.TryGetProperty("confidence", out var confElement)
+                && confElement.ValueKind == JsonValueKind.Number)
+            {
+                confidence = confElement.GetDouble();
+            }
+
+            _logger.LogInformation(
+                "Linear Matter Prefill extraction complete. ResponseLength={Length}, Confidence={Confidence}. " +
+                "RequestId={RequestId}",
+                preFillJson.Length, confidence, requestId);
+
+            return ParseAiResponse(preFillJson, confidence, requestId);
+        }
+        catch (OperationCanceledException) when (!cancellationToken.IsCancellationRequested)
+        {
+            _logger.LogWarning(
+                "Linear Matter Prefill request timed out after 45s. RequestId={RequestId}", requestId);
+            return PreFillResponse.Empty("TIMEOUT: linear prefill timed out after 45s");
+        }
+        catch (Exception ex)
+        {
+            _logger.LogError(ex,
+                "Linear Matter Prefill call failed. RequestId={RequestId}", requestId);
+            return PreFillResponse.Empty($"EXCEPTION: {ex.Message}");
+        }
     }
 
     /// <summary>
@@ -315,14 +421,12 @@ public sealed class MatterPreFillService
             documentText = documentText[..maxTextChars] + "\n\n[... content truncated ...]";
         }
 
-        // FR-1R-05 routing-table resolution (chat-routing-redesign-r1 task 028c / Pattern A):
-        // Primary lookup is now IConsumerRoutingService.ResolveAsync(ConsumerTypes.MatterPreFill)
-        // which queries sprk_playbookconsumer with 5-min TTL (ADR-014). When the table has no
-        // matching row, ResolveAsync returns null and we fall back to the legacy
-        // WorkspaceOptions.MatterPreFillPlaybookId env-var (typed-options per ADR-018) for the
-        // FR-1R-06 deprecation window — preserving every pre-task-028c behavior so admins can
-        // migrate to the table without breaking existing deployments. Hardening (code-review S-5):
-        // ConsumerTypes.MatterPreFill is the compile-time constant — never use a literal string.
+        // FR-P3-01 hard cutover (ai-architecture-redesign-r1 task 040): the playbook is resolved
+        // EXCLUSIVELY via IConsumerRoutingService.ResolveAsync(ConsumerTypes.MatterPreFill),
+        // which queries sprk_playbookconsumer with 5-min TTL (ADR-014). The legacy typed-options
+        // config fallback was DELETED per NFR-08 — routing null is a clean, terminal miss.
+        // Hardening (code-review S-5): ConsumerTypes.MatterPreFill is the compile-time
+        // constant — never use a literal string.
         //
         // NFR-07 BINDING preserved: the 45s timeout below, useAiPrefill consumer contract, and
         // $choices output schema are unchanged — only the internal routing mechanism has been
@@ -331,24 +435,18 @@ public sealed class MatterPreFillService
             .ResolveAsync(ConsumerTypes.MatterPreFill, cancellationToken: cancellationToken)
             .ConfigureAwait(false);
 
-        string? configuredPlaybookId = routedPlaybookId?.ToString();
-        if (string.IsNullOrWhiteSpace(configuredPlaybookId))
-        {
-            // Fallback to legacy env var during the FR-1R-06 deprecation window.
-            configuredPlaybookId = _workspaceOptions.MatterPreFillPlaybookId;
-        }
-
-        if (string.IsNullOrWhiteSpace(configuredPlaybookId))
+        if (routedPlaybookId is null)
         {
             _logger.LogError(
-                "Matter pre-fill playbook is not configured. Neither sprk_playbookconsumer " +
-                "(consumerType='{ConsumerType}') nor Workspace:MatterPreFillPlaybookId returned a " +
-                "playbook id. RequestId={RequestId}. Configure the routing table or set the " +
-                "per-environment env var as a fallback.",
+                "Routing table has no enabled sprk_playbookconsumer row for consumerType " +
+                "'{ConsumerType}'; seed the row — no config fallback exists per FR-P3-01. " +
+                "RequestId={RequestId}",
                 ConsumerTypes.MatterPreFill, requestId);
             return PreFillResponse.Empty(
-                "CONFIG_MISSING: Workspace:MatterPreFillPlaybookId is not configured");
+                "ROUTING_MISSING: no enabled sprk_playbookconsumer row for consumerType 'matter-pre-fill'");
         }
+
+        string configuredPlaybookId = routedPlaybookId.Value.ToString();
 
         Guid playbookId;
         try
