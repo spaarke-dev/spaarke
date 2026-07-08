@@ -391,8 +391,16 @@ public class SessionFilesCleanupJobTests
     {
         // Arrange:
         //   Indexed sessions in spaarke-session-files: (TenantA, SessionId1), (TenantA, SessionId2)
-        //   Active Redis keys: only chat:session:TenantA:SessionId1 exists
+        //   Active Redis keys: only (TenantA, SessionId1) exists
         //   → orphan: (TenantA, SessionId2) — should be evicted
+        //
+        // Key format is owned by ChatSessionManager.BuildCacheKey (centralised as
+        // tenant:{tenantId}:session:{sessionId}:v1 by spaarke-redis-cache-remediation-r1
+        // FR-05, commit 8b2cdb676). The test uses the helper rather than a hardcoded
+        // literal so the liveness probe and the writer can never drift apart in the mock —
+        // a mismatch here previously made BOTH sessions look orphaned (2 deletes).
+        var activeSessionKey = (RedisKey)ChatSessionManager.BuildCacheKey(TenantA, SessionId1);
+        var orphanSessionKey = (RedisKey)ChatSessionManager.BuildCacheKey(TenantA, SessionId2);
         var indexedDocs = new List<SearchResult<SessionFilesCleanupRef>>
         {
             SearchModelFactory.SearchResult(
@@ -416,12 +424,12 @@ public class SessionFilesCleanupJobTests
         // Redis: only SessionId1 exists for TenantA
         _redisDatabaseMock
             .Setup(d => d.KeyExistsAsync(
-                It.Is<RedisKey>(k => k == (RedisKey)$"chat:session:{TenantA}:{SessionId1}"),
+                It.Is<RedisKey>(k => k == activeSessionKey),
                 It.IsAny<CommandFlags>()))
             .ReturnsAsync(true);
         _redisDatabaseMock
             .Setup(d => d.KeyExistsAsync(
-                It.Is<RedisKey>(k => k == (RedisKey)$"chat:session:{TenantA}:{SessionId2}"),
+                It.Is<RedisKey>(k => k == orphanSessionKey),
                 It.IsAny<CommandFlags>()))
             .ReturnsAsync(false);
 
@@ -445,13 +453,14 @@ public class SessionFilesCleanupJobTests
             "exactly one orphan session is evicted by the scheduled scan");
 
         // Active SessionId1 is NOT evicted — the absence of a second delete call confirms isolation.
-        // Active sessions are checked via Redis KeyExistsAsync; verify both keys were checked.
+        // Active sessions are checked via Redis KeyExistsAsync; verify both keys were checked
+        // using the SAME key builder the writer (ChatSessionManager) uses.
         _redisDatabaseMock.Verify(d => d.KeyExistsAsync(
-            It.Is<RedisKey>(k => k == (RedisKey)$"chat:session:{TenantA}:{SessionId1}"),
+            It.Is<RedisKey>(k => k == activeSessionKey),
             It.IsAny<CommandFlags>()),
             Times.Once);
         _redisDatabaseMock.Verify(d => d.KeyExistsAsync(
-            It.Is<RedisKey>(k => k == (RedisKey)$"chat:session:{TenantA}:{SessionId2}"),
+            It.Is<RedisKey>(k => k == orphanSessionKey),
             It.IsAny<CommandFlags>()),
             Times.Once);
     }

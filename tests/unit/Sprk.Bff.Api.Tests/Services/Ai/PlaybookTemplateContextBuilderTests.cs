@@ -76,14 +76,30 @@ public class PlaybookTemplateContextBuilderTests
     }
 
     [Fact]
-    public void Build_TextOnlyOutput_IsExposedAsString()
+    public void Build_TextOnlyOutput_IsExposedAsWrappedShapeWithLosslessText()
     {
         var runContext = CreateRunContext();
         runContext.StoreNodeOutput(TextOutput("rawText", "Plain narrative output"));
 
         var context = PlaybookTemplateContextBuilder.Build(runContext);
 
-        context["rawText"].Should().Be("Plain narrative output");
+        // Since commit 3789ce43c ("dual-shape node output exposure in Layer 1 template
+        // context", R7 W12) text-only outputs are exposed as the wrapped pre-Wave-11
+        // per-executor shape so canvas-authored playbooks can bind {{node.output}} /
+        // {{node.text}} / {{node.success}} (e.g. Document Profile binds
+        // {{output_aiAnalysis.output.sprk_filesummary}}). Protective intent preserved:
+        // the node's text MUST remain template-reachable and lossless via BOTH
+        // {{rawText.text}} and {{rawText.output}}, and the success flag must be honest.
+        var wrapped = context["rawText"].Should()
+            .BeAssignableTo<IDictionary<string, object?>>(
+                "text-only outputs surface as the wrapped {output, text, success} shape")
+            .Subject;
+        wrapped["text"].Should().Be("Plain narrative output",
+            "{{rawText.text}} is the canonical text binding for text-only node outputs");
+        wrapped["output"].Should().Be("Plain narrative output",
+            "{{rawText.output}} mirrors the text so wrapped-shape playbook bindings resolve");
+        wrapped["success"].Should().Be(true,
+            "a successful text-only node must expose success=true to gate-style templates");
     }
 
     [Fact]
