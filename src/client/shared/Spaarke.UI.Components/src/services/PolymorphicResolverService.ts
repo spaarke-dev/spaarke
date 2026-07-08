@@ -545,10 +545,7 @@ export async function applyResolverFields(
   if (selectFields.length > 0) {
     try {
       const primaryIdAttr = `${parentEntityLogicalName}id`;
-      const query =
-        `?$filter=${primaryIdAttr} eq ${cleanRecordId}` +
-        `&$select=${selectFields.join(',')}` +
-        `&$top=1`;
+      const query = `?$filter=${primaryIdAttr} eq ${cleanRecordId}` + `&$select=${selectFields.join(',')}` + `&$top=1`;
       const result = await webApi.retrieveMultipleRecords(parentEntityLogicalName, query, 1);
 
       if (result.entities && result.entities.length > 0) {

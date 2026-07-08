@@ -859,8 +859,6 @@ describe('applyResolverFields — SRFR-052 display-name resolution', () => {
 
     expect(payload['sprk_regardingrecordname']).toBe('Picker Fallback');
     expect(result.displayName).toBe('Picker Fallback');
-    expect(consoleWarnSpy).toHaveBeenCalledWith(
-      expect.stringContaining('has null/empty "sprk_mattername"')
-    );
+    expect(consoleWarnSpy).toHaveBeenCalledWith(expect.stringContaining('has null/empty "sprk_mattername"'));
   });
 });

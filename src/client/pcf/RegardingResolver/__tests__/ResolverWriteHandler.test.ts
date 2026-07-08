@@ -150,18 +150,66 @@ describe('ResolverWriteHandler', () => {
       ok: true,
       json: async () => ({
         value: [
-          { ReferencingAttribute: 'sprk_regardingmatter', ReferencingEntityNavigationPropertyName: 'sprk_RegardingMatter', ReferencedEntity: 'sprk_matter' },
-          { ReferencingAttribute: 'sprk_regardingproject', ReferencingEntityNavigationPropertyName: 'sprk_RegardingProject', ReferencedEntity: 'sprk_project' },
-          { ReferencingAttribute: 'sprk_regardingevent', ReferencingEntityNavigationPropertyName: 'sprk_RegardingEvent', ReferencedEntity: 'sprk_event' },
-          { ReferencingAttribute: 'sprk_regardingcommunication', ReferencingEntityNavigationPropertyName: 'sprk_RegardingCommunication', ReferencedEntity: 'sprk_communication' },
-          { ReferencingAttribute: 'sprk_regardingworkassignment', ReferencingEntityNavigationPropertyName: 'sprk_RegardingWorkAssignment', ReferencedEntity: 'sprk_workassignment' },
-          { ReferencingAttribute: 'sprk_regardinginvoice', ReferencingEntityNavigationPropertyName: 'sprk_RegardingInvoice', ReferencedEntity: 'sprk_invoice' },
-          { ReferencingAttribute: 'sprk_regardingbudget', ReferencingEntityNavigationPropertyName: 'sprk_RegardingBudget', ReferencedEntity: 'sprk_budget' },
-          { ReferencingAttribute: 'sprk_regardinganalysis', ReferencingEntityNavigationPropertyName: 'sprk_RegardingAnalysis', ReferencedEntity: 'sprk_analysis' },
-          { ReferencingAttribute: 'sprk_regardingorganization', ReferencingEntityNavigationPropertyName: 'sprk_RegardingOrganization', ReferencedEntity: 'sprk_organization' },
-          { ReferencingAttribute: 'sprk_regardingcontact', ReferencingEntityNavigationPropertyName: 'sprk_RegardingContact', ReferencedEntity: 'contact' },
-          { ReferencingAttribute: 'sprk_regardingdocument', ReferencingEntityNavigationPropertyName: 'sprk_RegardingDocument', ReferencedEntity: 'sprk_document' },
-          { ReferencingAttribute: 'sprk_regardingrecordtype', ReferencingEntityNavigationPropertyName: 'sprk_RegardingRecordType', ReferencedEntity: 'sprk_recordtype_ref' },
+          {
+            ReferencingAttribute: 'sprk_regardingmatter',
+            ReferencingEntityNavigationPropertyName: 'sprk_RegardingMatter',
+            ReferencedEntity: 'sprk_matter',
+          },
+          {
+            ReferencingAttribute: 'sprk_regardingproject',
+            ReferencingEntityNavigationPropertyName: 'sprk_RegardingProject',
+            ReferencedEntity: 'sprk_project',
+          },
+          {
+            ReferencingAttribute: 'sprk_regardingevent',
+            ReferencingEntityNavigationPropertyName: 'sprk_RegardingEvent',
+            ReferencedEntity: 'sprk_event',
+          },
+          {
+            ReferencingAttribute: 'sprk_regardingcommunication',
+            ReferencingEntityNavigationPropertyName: 'sprk_RegardingCommunication',
+            ReferencedEntity: 'sprk_communication',
+          },
+          {
+            ReferencingAttribute: 'sprk_regardingworkassignment',
+            ReferencingEntityNavigationPropertyName: 'sprk_RegardingWorkAssignment',
+            ReferencedEntity: 'sprk_workassignment',
+          },
+          {
+            ReferencingAttribute: 'sprk_regardinginvoice',
+            ReferencingEntityNavigationPropertyName: 'sprk_RegardingInvoice',
+            ReferencedEntity: 'sprk_invoice',
+          },
+          {
+            ReferencingAttribute: 'sprk_regardingbudget',
+            ReferencingEntityNavigationPropertyName: 'sprk_RegardingBudget',
+            ReferencedEntity: 'sprk_budget',
+          },
+          {
+            ReferencingAttribute: 'sprk_regardinganalysis',
+            ReferencingEntityNavigationPropertyName: 'sprk_RegardingAnalysis',
+            ReferencedEntity: 'sprk_analysis',
+          },
+          {
+            ReferencingAttribute: 'sprk_regardingorganization',
+            ReferencingEntityNavigationPropertyName: 'sprk_RegardingOrganization',
+            ReferencedEntity: 'sprk_organization',
+          },
+          {
+            ReferencingAttribute: 'sprk_regardingcontact',
+            ReferencingEntityNavigationPropertyName: 'sprk_RegardingContact',
+            ReferencedEntity: 'contact',
+          },
+          {
+            ReferencingAttribute: 'sprk_regardingdocument',
+            ReferencingEntityNavigationPropertyName: 'sprk_RegardingDocument',
+            ReferencedEntity: 'sprk_document',
+          },
+          {
+            ReferencingAttribute: 'sprk_regardingrecordtype',
+            ReferencingEntityNavigationPropertyName: 'sprk_RegardingRecordType',
+            ReferencedEntity: 'sprk_recordtype_ref',
+          },
         ],
       }),
     });
@@ -278,11 +326,31 @@ describe('ResolverWriteHandler', () => {
       ok: true,
       json: async () => ({
         value: [
-          { ReferencingAttribute: 'sprk_regardingmatter', ReferencingEntityNavigationPropertyName: 'sprk_RegardingMatter', ReferencedEntity: 'sprk_matter' },
-          { ReferencingAttribute: 'sprk_regardingproject', ReferencingEntityNavigationPropertyName: 'sprk_RegardingProject', ReferencedEntity: 'sprk_project' },
-          { ReferencingAttribute: 'sprk_regardinginvoice', ReferencingEntityNavigationPropertyName: 'sprk_RegardingInvoice', ReferencedEntity: 'sprk_invoice' },
-          { ReferencingAttribute: 'sprk_regardingworkassignment', ReferencingEntityNavigationPropertyName: 'sprk_RegardingWorkAssignment', ReferencedEntity: 'sprk_workassignment' },
-          { ReferencingAttribute: 'sprk_regardingrecordtype', ReferencingEntityNavigationPropertyName: 'sprk_RegardingRecordType', ReferencedEntity: 'sprk_recordtype_ref' },
+          {
+            ReferencingAttribute: 'sprk_regardingmatter',
+            ReferencingEntityNavigationPropertyName: 'sprk_RegardingMatter',
+            ReferencedEntity: 'sprk_matter',
+          },
+          {
+            ReferencingAttribute: 'sprk_regardingproject',
+            ReferencingEntityNavigationPropertyName: 'sprk_RegardingProject',
+            ReferencedEntity: 'sprk_project',
+          },
+          {
+            ReferencingAttribute: 'sprk_regardinginvoice',
+            ReferencingEntityNavigationPropertyName: 'sprk_RegardingInvoice',
+            ReferencedEntity: 'sprk_invoice',
+          },
+          {
+            ReferencingAttribute: 'sprk_regardingworkassignment',
+            ReferencingEntityNavigationPropertyName: 'sprk_RegardingWorkAssignment',
+            ReferencedEntity: 'sprk_workassignment',
+          },
+          {
+            ReferencingAttribute: 'sprk_regardingrecordtype',
+            ReferencingEntityNavigationPropertyName: 'sprk_RegardingRecordType',
+            ReferencedEntity: 'sprk_recordtype_ref',
+          },
         ],
       }),
     });

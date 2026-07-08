@@ -1843,10 +1843,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         // Auto-detect runs in an effect after mount; wait for the record-type
         // resolve to complete + the resolver-fields setValue calls to fire.
         await waitFor(() => {
-          expect(mockResolveRecordType).toHaveBeenCalledWith(
-            expect.anything(),
-            'sprk_matter'
-          );
+          expect(mockResolveRecordType).toHaveBeenCalledWith(expect.anything(), 'sprk_matter');
         });
 
         // 4 always-known form-attribute setValue calls MUST have fired:
@@ -1857,15 +1854,11 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         await waitFor(() => {
           expect(attrCalls.sprk_regardingrecordid).toBeDefined();
         });
-        expect(attrCalls.sprk_regardingrecordid?.[0]).toBe(
-          'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
-        );
+        expect(attrCalls.sprk_regardingrecordid?.[0]).toBe('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
         expect(attrCalls.sprk_regardingrecordname?.[0]).toBe('Smith v. Jones');
         expect(typeof attrCalls.sprk_regardingrecordurl?.[0]).toBe('string');
         expect(String(attrCalls.sprk_regardingrecordurl?.[0])).toContain('sprk_matter');
-        expect(String(attrCalls.sprk_regardingrecordurl?.[0])).toContain(
-          'aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa'
-        );
+        expect(String(attrCalls.sprk_regardingrecordurl?.[0])).toContain('aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa');
 
         // Record Type lookup value shape.
         await waitFor(() => {
@@ -1873,12 +1866,10 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         });
         const rtValue = attrCalls.sprk_regardingrecordtype?.[0];
         expect(Array.isArray(rtValue)).toBe(true);
-        expect((rtValue as Array<{ id: string; name: string; entityType: string }>)[0].id).toBe(
-          'rt-guid'
+        expect((rtValue as Array<{ id: string; name: string; entityType: string }>)[0].id).toBe('rt-guid');
+        expect((rtValue as Array<{ id: string; name: string; entityType: string }>)[0].entityType).toBe(
+          'sprk_recordtype_ref'
         );
-        expect(
-          (rtValue as Array<{ id: string; name: string; entityType: string }>)[0].entityType
-        ).toBe('sprk_recordtype_ref');
 
         // onRecordTypeChanged fired so the bound lookup output tracks.
         expect(onRecordTypeChanged).toHaveBeenCalledWith(
@@ -1927,18 +1918,13 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         );
 
         await waitFor(() => {
-          expect(mockResolveRecordType).toHaveBeenCalledWith(
-            expect.anything(),
-            'sprk_project'
-          );
+          expect(mockResolveRecordType).toHaveBeenCalledWith(expect.anything(), 'sprk_project');
         });
 
         await waitFor(() => {
           expect(attrCalls.sprk_regardingrecordid).toBeDefined();
         });
-        expect(attrCalls.sprk_regardingrecordid?.[0]).toBe(
-          'bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb'
-        );
+        expect(attrCalls.sprk_regardingrecordid?.[0]).toBe('bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb');
         expect(attrCalls.sprk_regardingrecordname?.[0]).toBe('Alpha Project');
         expect(String(attrCalls.sprk_regardingrecordurl?.[0])).toContain('sprk_project');
 
@@ -2031,10 +2017,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
       const w = window as any;
       const originalXrm = w.Xrm;
       const attrCalls: Record<string, unknown[]> = {};
-      const attrs: Record<
-        string,
-        { getValue: () => unknown; setValue: (v: unknown) => void }
-      > = {};
+      const attrs: Record<string, { getValue: () => unknown; setValue: (v: unknown) => void }> = {};
 
       attrs.sprk_regardingmatter = {
         getValue: () => [
@@ -2089,16 +2072,16 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
       // populated when the user saves.
 
       // Make Phase 2 retrieveMultipleRecords reject (network timeout).
-      const rejectingWebApi = jest
-        .fn()
-        .mockRejectedValue(new Error('Network timeout — presave race'));
+      const rejectingWebApi = jest.fn().mockRejectedValue(new Error('Network timeout — presave race'));
 
       const { attrCalls, restore } = buildXrmCreateModeMatterPrePopulated();
       const { context } = buildContext();
       // Override webAPI.retrieveMultipleRecords with the rejecting mock.
-      (context as unknown as {
-        webAPI: { retrieveMultipleRecords: jest.Mock };
-      }).webAPI.retrieveMultipleRecords = rejectingWebApi;
+      (
+        context as unknown as {
+          webAPI: { retrieveMultipleRecords: jest.Mock };
+        }
+      ).webAPI.retrieveMultipleRecords = rejectingWebApi;
 
       // Also make display-name / record-number resolvers return a truthy field
       // so Phase 2 progresses to the (rejecting) retrieveMultipleRecords call.
@@ -2128,9 +2111,7 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         // Xrm.LookupValue.name gave us. Phase 2 would polish this to the
         // sprk_mattername value BUT retrieveMultipleRecords rejects, so the
         // baseline is preserved (graceful-blank per NFR-06).
-        expect(attrCalls.sprk_regardingrecordid?.[0]).toBe(
-          'cccccccc-cccc-cccc-cccc-cccccccccccc'
-        );
+        expect(attrCalls.sprk_regardingrecordid?.[0]).toBe('cccccccc-cccc-cccc-cccc-cccccccccccc');
         expect(attrCalls.sprk_regardingrecordname?.[0]).toBe('MAT-001');
         expect(typeof attrCalls.sprk_regardingrecordurl?.[0]).toBe('string');
         expect(String(attrCalls.sprk_regardingrecordurl?.[0])).toContain('sprk_matter');
@@ -2150,14 +2131,14 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
         // retrieveMultipleRecords both reject → warns logged; NO throw
         // propagates to the host form.
         await waitFor(() => {
-          expect(warnSpy.mock.calls.some(call =>
-            String(call[0]).includes('display-name resolution failed')
-          )).toBe(true);
+          expect(warnSpy.mock.calls.some(call => String(call[0]).includes('display-name resolution failed'))).toBe(
+            true
+          );
         });
         await waitFor(() => {
-          expect(warnSpy.mock.calls.some(call =>
-            String(call[0]).includes('record-number resolution failed')
-          )).toBe(true);
+          expect(warnSpy.mock.calls.some(call => String(call[0]).includes('record-number resolution failed'))).toBe(
+            true
+          );
         });
 
         // recordname NOT re-written after Phase 2 (baseline preserved).
@@ -2192,9 +2173,11 @@ describe('RegardingResolverApp v1.3 — 2-row layout', () => {
       // Mock retrieveMultipleRecords to return the polished display-name.
       // First call = Phase 2b (display-name query). Only Phase 2b runs since
       // resolveRecordNumberFieldName returns null and short-circuits Phase 2c.
-      (context as unknown as {
-        webAPI: { retrieveMultipleRecords: jest.Mock };
-      }).webAPI.retrieveMultipleRecords = jest.fn().mockResolvedValueOnce({
+      (
+        context as unknown as {
+          webAPI: { retrieveMultipleRecords: jest.Mock };
+        }
+      ).webAPI.retrieveMultipleRecords = jest.fn().mockResolvedValueOnce({
         entities: [{ sprk_mattername: 'Smith v. Jones (Polished)' }],
       });
 

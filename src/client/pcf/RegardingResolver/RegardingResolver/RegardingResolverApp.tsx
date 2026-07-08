@@ -702,10 +702,7 @@ function detectPrePopulatedParent(
         }
       }
     } catch (err) {
-      console.warn(
-        `[RegardingResolver] Error probing ${entry.lookupAttribute} for auto-detect:`,
-        err
-      );
+      console.warn(`[RegardingResolver] Error probing ${entry.lookupAttribute} for auto-detect:`, err);
     }
   }
   return null;
@@ -725,12 +722,7 @@ function detectPrePopulatedParent(
  * Defensive throughout: field not on form → warn + return false. Xrm
  * unavailable → warn + return false. Never throws to the host form.
  */
-function setFormLookupValue(
-  fieldName: string,
-  entityType: string,
-  id: string,
-  name: string
-): boolean {
+function setFormLookupValue(fieldName: string, entityType: string, id: string, name: string): boolean {
   const xrm = getXrm();
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   const page = xrm?.Page as any;
@@ -896,20 +888,17 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
       const hostRecordId = getHostRecordId();
       const isCreateMode = !hostRecordId;
 
-      console.log(
-        '[RegardingResolver auto-detect] fired',
-        {
-          hostEntity,
-          hostRecordId: hostRecordId ?? '(none — CREATE mode)',
-          detected: {
-            entityType: detected.entityType,
-            recordId: detected.recordId,
-            recordName: detected.recordName,
-            lookupAttribute: detected.lookupAttribute,
-          },
-          mode: isCreateMode ? 'CREATE' : 'UPDATE',
-        }
-      );
+      console.log('[RegardingResolver auto-detect] fired', {
+        hostEntity,
+        hostRecordId: hostRecordId ?? '(none — CREATE mode)',
+        detected: {
+          entityType: detected.entityType,
+          recordId: detected.recordId,
+          recordName: detected.recordName,
+          lookupAttribute: detected.lookupAttribute,
+        },
+        mode: isCreateMode ? 'CREATE' : 'UPDATE',
+      });
 
       try {
         if (isCreateMode) {
@@ -1016,12 +1005,7 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
                 field: 'sprk_regardingrecordtype',
                 recordType,
               });
-              setFormLookupValue(
-                'sprk_regardingrecordtype',
-                'sprk_recordtype_ref',
-                recordType.id,
-                recordType.name
-              );
+              setFormLookupValue('sprk_regardingrecordtype', 'sprk_recordtype_ref', recordType.id, recordType.name);
               // Notify PCF class so the bound lookup output tracks
               onRecordTypeChanged({
                 id: recordType.id,
@@ -1034,10 +1018,7 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
               );
             }
           } catch (rtErr) {
-            console.warn(
-              '[RegardingResolver auto-detect] Phase 2a: resolveRecordType failed:',
-              rtErr
-            );
+            console.warn('[RegardingResolver auto-detect] Phase 2a: resolveRecordType failed:', rtErr);
           }
 
           // --- Phase 2b: async display-name resolution (polish) ---
@@ -1046,20 +1027,11 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
           // RE-write sprk_regardingrecordname AND update the bridge.
           const displayNamePromise = (async (): Promise<string | null> => {
             try {
-              const displayField = await resolveRecordDisplayNameFieldName(
-                writeCtx.webApi,
-                detected.entityType
-              );
+              const displayField = await resolveRecordDisplayNameFieldName(writeCtx.webApi, detected.entityType);
               if (!displayField) return null;
               const primaryIdAttr = `${detected.entityType}id`;
-              const query =
-                `?$filter=${primaryIdAttr} eq ${detected.recordId}` +
-                `&$select=${displayField}&$top=1`;
-              const result = await writeCtx.webApi.retrieveMultipleRecords(
-                detected.entityType,
-                query,
-                1
-              );
+              const query = `?$filter=${primaryIdAttr} eq ${detected.recordId}` + `&$select=${displayField}&$top=1`;
+              const result = await writeCtx.webApi.retrieveMultipleRecords(detected.entityType, query, 1);
               const raw = result.entities?.[0]?.[displayField];
               if (typeof raw === 'string' && raw.trim().length > 0) {
                 return raw.trim();
@@ -1081,20 +1053,11 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
           // presave webresource still writes it on save.
           const recordNumberPromise = (async (): Promise<string | null> => {
             try {
-              const numberField = await resolveRecordNumberFieldName(
-                writeCtx.webApi,
-                detected.entityType
-              );
+              const numberField = await resolveRecordNumberFieldName(writeCtx.webApi, detected.entityType);
               if (!numberField) return null;
               const primaryIdAttr = `${detected.entityType}id`;
-              const query =
-                `?$filter=${primaryIdAttr} eq ${detected.recordId}` +
-                `&$select=${numberField}&$top=1`;
-              const result = await writeCtx.webApi.retrieveMultipleRecords(
-                detected.entityType,
-                query,
-                1
-              );
+              const query = `?$filter=${primaryIdAttr} eq ${detected.recordId}` + `&$select=${numberField}&$top=1`;
+              const result = await writeCtx.webApi.retrieveMultipleRecords(detected.entityType, query, 1);
               const raw = result.entities?.[0]?.[numberField];
               if (typeof raw === 'string' && raw.trim().length > 0) {
                 return raw.trim();
@@ -1144,10 +1107,7 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
           }
 
           // Write record-number if resolved.
-          if (
-            typeof resolvedRecordNumber === 'string' &&
-            resolvedRecordNumber.length > 0
-          ) {
+          if (typeof resolvedRecordNumber === 'string' && resolvedRecordNumber.length > 0) {
             console.log('[RegardingResolver auto-detect] Phase 2 write', {
               field: 'sprk_regardingrecordnumber',
               value: resolvedRecordNumber,
@@ -1181,10 +1141,7 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
           };
           const result = await applyRegardingSelection(writeCtx, selection);
           if (!result.success) {
-            console.warn(
-              '[RegardingResolver] Auto-detect UPDATE-mode applyRegardingSelection failed:',
-              result.error
-            );
+            console.warn('[RegardingResolver] Auto-detect UPDATE-mode applyRegardingSelection failed:', result.error);
             return;
           }
 
@@ -1201,10 +1158,7 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
               });
             }
           } catch (rtErr) {
-            console.warn(
-              '[RegardingResolver] Auto-detect resolveRecordType for output notify failed:',
-              rtErr
-            );
+            console.warn('[RegardingResolver] Auto-detect resolveRecordType for output notify failed:', rtErr);
           }
         }
       } catch (err) {
