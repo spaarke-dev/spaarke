@@ -776,10 +776,6 @@ public class SafetyPerimeterE2ETests
         string? apiKey,
         MockHttpHandler handler)
     {
-        var httpClientFactory = new MockHttpClientFactory(
-            handler,
-            "https://test-content-safety.cognitiveservices.azure.com/");
-
         var configData = new Dictionary<string, string?>();
         if (apiKey is not null)
             configData["AiSafety:ContentSafety:ApiKey"] = apiKey;
@@ -788,13 +784,41 @@ public class SafetyPerimeterE2ETests
             .AddInMemoryCollection(configData)
             .Build();
 
+        // Real ContentSafetyAuthHandler in the pipeline (assessment rec 3): key configured →
+        // Ocp-Apim-Subscription-Key attached; key ABSENT → bearer fallback, where the
+        // unavailable stub credential throws and exercises the fail-open path (the same
+        // semantics the old in-service missing-key guard covered).
+        var authHandler = new ContentSafetyAuthHandler(
+            configuration,
+            new ContentSafetyTokenProvider(new UnavailableCredential()),
+            NullLogger<ContentSafetyAuthHandler>.Instance)
+        {
+            InnerHandler = handler,
+        };
+
+        var httpClientFactory = new MockHttpClientFactory(
+            authHandler,
+            "https://test-content-safety.cognitiveservices.azure.com/");
+
         var telemetry = new PromptShieldTelemetry();
 
         return new PromptShieldService(
             httpClientFactory,
-            configuration,
             telemetry,
+            new AiTelemetry(),
             NullLogger<PromptShieldService>.Instance);
+    }
+
+    /// <summary>Stub credential representing "no credential source available" (local box, no az login).</summary>
+    private sealed class UnavailableCredential : Azure.Core.TokenCredential
+    {
+        public override Azure.Core.AccessToken GetToken(
+            Azure.Core.TokenRequestContext requestContext, CancellationToken cancellationToken) =>
+            throw new Azure.Identity.CredentialUnavailableException("No credential available (test stub).");
+
+        public override ValueTask<Azure.Core.AccessToken> GetTokenAsync(
+            Azure.Core.TokenRequestContext requestContext, CancellationToken cancellationToken) =>
+            throw new Azure.Identity.CredentialUnavailableException("No credential available (test stub).");
     }
 
     // =========================================================================

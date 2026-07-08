@@ -30,6 +30,15 @@ public sealed record PromptShieldResult(
     double LatencyMs)
 {
     /// <summary>
+    /// True when the Content Safety service did NOT complete the scan (429 / 5xx / timeout /
+    /// network / auth / parse failure) and the request proceeded to the LLM unshielded.
+    /// Distinguishes fail-open from a genuinely safe scan for the shield-coverage counter
+    /// (<c>ai.safety.shield_evaluations</c>, AI-ARCHITECTURE assessment rec 2a) — both have
+    /// <see cref="IsBlocked"/> = false.
+    /// </summary>
+    public bool FailedOpen { get; init; }
+
+    /// <summary>
     /// Convenience factory: safe result (not blocked).
     /// </summary>
     public static PromptShieldResult Safe(double latencyMs) =>
@@ -40,7 +49,7 @@ public sealed record PromptShieldResult(
     /// Callers MUST log a warning before returning this result.
     /// </summary>
     public static PromptShieldResult FailOpen(double latencyMs) =>
-        new(false, PromptShieldBlockReason.None, null, [], latencyMs);
+        new(false, PromptShieldBlockReason.None, null, [], latencyMs) { FailedOpen = true };
 }
 
 /// <summary>

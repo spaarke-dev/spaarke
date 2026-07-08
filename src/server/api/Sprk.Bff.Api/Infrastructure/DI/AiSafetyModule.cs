@@ -45,10 +45,23 @@ public static class AiSafetyModule
         IConfiguration configuration)
     {
         // Named HttpClient "ContentSafety" — base address from AiSafety:ContentSafety:Endpoint.
-        // The API key is read at call time by PromptShieldService (supports Key Vault rotation).
         // Timeout is set to 120ms (generous outer limit; PromptShieldService enforces 100ms internally).
         var endpoint = configuration["AiSafety:ContentSafety:Endpoint"]
             ?? "https://spaarke-contentsafety-dev.cognitiveservices.azure.com/";
+
+        // ContentSafetyTokenProvider — singleton: caches the Entra ID bearer token across the
+        // ~2-minute HttpClientFactory handler rotation (a per-scan token fetch would blow the
+        // Prompt Shield 100ms deadline). Wraps ManagedIdentityCredentialFactory (ADR-028 cascade).
+        // Factory registration pins the IConfiguration ctor (the TokenCredential overload is a test seam).
+        services.AddSingleton(sp =>
+            new ContentSafetyTokenProvider(sp.GetRequiredService<IConfiguration>()));
+
+        // ContentSafetyAuthHandler — transient (HttpClientFactory manages handler lifetime).
+        // Attaches managed-identity bearer auth when AiSafety:ContentSafety:ManagedIdentity:Enabled
+        // is true OR no API key is configured; otherwise attaches Ocp-Apim-Subscription-Key.
+        // Config is read at call time (supports Key Vault rotation). Assessment rec 3 / ADR-028.
+        // Applies to BOTH consumers of this named client (PromptShieldService + GroundednessCheckService).
+        services.AddTransient<ContentSafetyAuthHandler>();
 
         services.AddHttpClient(PromptShieldService.HttpClientName, client =>
         {
@@ -56,7 +69,8 @@ public static class AiSafetyModule
             client.DefaultRequestHeaders.Add("Accept", "application/json");
             // Outer timeout is generous; PromptShieldService applies its own 100ms CancellationToken.
             client.Timeout = TimeSpan.FromMilliseconds(120);
-        });
+        })
+        .AddHttpMessageHandler<ContentSafetyAuthHandler>();
 
         // PromptShieldTelemetry — singleton: Meter instances are thread-safe and long-lived.
         // ADR-010: no interface needed (single implementation, no seam required for testing).
