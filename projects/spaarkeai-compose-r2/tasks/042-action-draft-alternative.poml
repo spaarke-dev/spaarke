@@ -33,8 +33,8 @@
       Spec FR-09 + design §2.3 (Draft Alternative) + §7 (Catalog Roster row 4, declares the `compose` disposition) + §7.2 (dispatch sequence, Draft-Alternative leg materializes from the ledger). The one edit-producing catalog row: the structured payload is a ledger `SessionOutput` with the core `compose` disposition (§1 of the HANDOFF contract), addressable as `{bindingId}@t{n}` so the Workspace tags provenance and can supersede it on undo/replace (FR-17). Depends on FR-04 draft-into-editor (task 016) landing the disposition + SSE-frame consumption path.
     </background>
     <relevant-files>
-      <file purpose="input-schema-mirror-NEW">infra/dataverse/inputschemas/draft-alt-v1.input.schema.json — NEW input-schema mirror (proposed actionCode DRAFT-ALT@v1; confirm via jps-action-create)</file>
-      <file purpose="output-schema-mirror-NEW">infra/dataverse/outputschemas/draft-alt-v1.schema.json — NEW OutputSchemaJson mirror `{target_text, new_text, match_mode, rationale, sources[]}`</file>
+      <file purpose="input-schema-mirror-NEW">infra/dataverse/inputschemas/compose-draft-alternative.input.schema.json — NEW input-schema mirror (proposed actionCode compose-draft-alternative; confirm via jps-action-create)</file>
+      <file purpose="output-schema-mirror-NEW">infra/dataverse/outputschemas/compose-draft-alternative.schema.json — NEW OutputSchemaJson mirror `{target_text, new_text, match_mode, rationale, sources[]}`</file>
       <file purpose="binding-mirror-EXTEND">infra/dataverse/sprk_playbookconsumer-rows.json — EXTEND: Click-path Binding row (consumerType compose-draft-alternative / consumerCode default) with the `compose` disposition set on the Binding's disposition field</file>
       <file purpose="exemplar-binding-disposition">infra/dataverse/sprk_playbookconsumer-rows.json — existing rows show the `disposition` field convention (e.g. chat-summarize) to mirror for the `compose` disposition member</file>
       <file purpose="exemplar-input">infra/dataverse/inputschemas/draft-corr-v1.input.schema.json — a drafting-Action schema exemplar to copy</file>
@@ -76,8 +76,8 @@
   </steps>
 
   <outputs>
-    <output type="config">infra/dataverse/inputschemas/draft-alt-v1.input.schema.json</output>
-    <output type="config">infra/dataverse/outputschemas/draft-alt-v1.schema.json</output>
+    <output type="config">infra/dataverse/inputschemas/compose-draft-alternative.input.schema.json</output>
+    <output type="config">infra/dataverse/outputschemas/compose-draft-alternative.schema.json</output>
     <output type="config">infra/dataverse/sprk_playbookconsumer-rows.json (Binding row + `compose` disposition added)</output>
   </outputs>
 

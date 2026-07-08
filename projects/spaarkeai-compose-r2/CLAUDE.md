@@ -99,6 +99,7 @@ See [task-execute SKILL.md](../../.claude/skills/task-execute/SKILL.md) for the 
 - **Fluent v9 + dark mode** for all new UI; **`@spaarke/auth`** for client fetches (ADR-021, ADR-028).
 - **Context pane is audit-only** — never an interactive input surface.
 - **Catalog rows**: mirror-first under `infra/dataverse/inputschemas/`; author *through* the core triple-twin hoist; eval cases (golden + dispatch, ≥5 each); `OpenAiFunctionSchemaValidator` compliance; property-level boolean `required` BANNED.
+- **NO version suffix in action codes / data-row keys / config names** (owner hygiene rule, 2026-07-08): never use `@v1` / `-v1` (or any `@vN`) in `sprk_analysisaction` codes, Binding names, mirror filenames, or any Dataverse data-row value — it becomes cleanup cruft on cross-environment config transfer. Use plain logical names (`compose-explain-clause`). If versioning is genuinely needed, put it in the description or an explicit version *field*, never baked into the name.
 - **Publish size ≤ 60 MB** compressed; measure per BFF task (baseline 49.63 MB incl. PDBs).
 - **Engine frozen** — no new `sprk_analysisplaybook` records; playbooks read as reference data only.
 

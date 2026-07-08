@@ -33,8 +33,8 @@
       Spec FR-10 + design §2.5 (Return from Word) + §7 (Catalog Roster row 5). A read/summarize action invoked automatically after a Word round-trip (FR-25 pull + FR-27 re-anchor produce the changed-version input): the LLM turns the structured change set into a human-friendly narrative. Consumes the R1 `compose-document` scope (enriched by the FR-22 semantic appendix). No `compose` disposition. Depends on Spike 6 (reverse round-trip) landing the return-from-Word input shape.
     </background>
     <relevant-files>
-      <file purpose="input-schema-mirror-NEW">infra/dataverse/inputschemas/sum-wordchg-v1.input.schema.json — NEW input-schema mirror (proposed actionCode SUM-WORDCHG@v1; confirm via jps-action-create)</file>
-      <file purpose="output-schema-mirror-NEW">infra/dataverse/outputschemas/sum-wordchg-v1.schema.json — NEW OutputSchemaJson mirror `{summary, changes[]}`</file>
+      <file purpose="input-schema-mirror-NEW">infra/dataverse/inputschemas/compose-summarize-word-changes.input.schema.json — NEW input-schema mirror (proposed actionCode compose-summarize-word-changes; confirm via jps-action-create)</file>
+      <file purpose="output-schema-mirror-NEW">infra/dataverse/outputschemas/compose-summarize-word-changes.schema.json — NEW OutputSchemaJson mirror `{summary, changes[]}`</file>
       <file purpose="binding-mirror-EXTEND">infra/dataverse/sprk_playbookconsumer-rows.json — EXTEND: Click-path Binding row (consumerType compose-summarize-word-changes / consumerCode default; invoked by the return-from-Word flow)</file>
       <file purpose="exemplar-input">infra/dataverse/inputschemas/sum-chat-v1.input.schema.json — summarize-Action schema shape to copy</file>
       <file purpose="dispatch-seam">src/client/shared/Spaarke.UI.Components/src/services/dispatchConsumer.ts — Click-path seam (no new route)</file>
@@ -75,8 +75,8 @@
   </steps>
 
   <outputs>
-    <output type="config">infra/dataverse/inputschemas/sum-wordchg-v1.input.schema.json</output>
-    <output type="config">infra/dataverse/outputschemas/sum-wordchg-v1.schema.json</output>
+    <output type="config">infra/dataverse/inputschemas/compose-summarize-word-changes.input.schema.json</output>
+    <output type="config">infra/dataverse/outputschemas/compose-summarize-word-changes.schema.json</output>
     <output type="config">infra/dataverse/sprk_playbookconsumer-rows.json (Binding row added)</output>
   </outputs>
 

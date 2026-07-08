@@ -33,8 +33,8 @@
       Spec FR-11 + design §7 (Catalog Roster row 6, overflow trigger → Context read-only) + owner clarification (defined-terms UX = overflow-menu trigger → Context-pane read-only output). Document-wide, so it is triggered from the "More actions…" overflow (or a doc-level command), NOT the selection toolbar. Output is a reference display in the Context pane — the Context pane stays a non-input, audit-only surface (FR-28/FR-32). Note: the schema carries a `consistent` boolean-TYPE field on each usage; that is a boolean value type and is legal — it is the property-level boolean `required` KEYWORD that is banned. Consumes the R1 `compose-document` scope.
     </background>
     <relevant-files>
-      <file purpose="input-schema-mirror-NEW">infra/dataverse/inputschemas/def-terms-v1.input.schema.json — NEW input-schema mirror (proposed actionCode DEF-TERMS@v1; confirm via jps-action-create)</file>
-      <file purpose="output-schema-mirror-NEW">infra/dataverse/outputschemas/def-terms-v1.schema.json — NEW OutputSchemaJson mirror `{terms[], inconsistencies[]}`</file>
+      <file purpose="input-schema-mirror-NEW">infra/dataverse/inputschemas/compose-defined-terms.input.schema.json — NEW input-schema mirror (proposed actionCode compose-defined-terms; confirm via jps-action-create)</file>
+      <file purpose="output-schema-mirror-NEW">infra/dataverse/outputschemas/compose-defined-terms.schema.json — NEW OutputSchemaJson mirror `{terms[], inconsistencies[]}`</file>
       <file purpose="binding-mirror-EXTEND">infra/dataverse/sprk_playbookconsumer-rows.json — EXTEND: Click-path Binding row (consumerType compose-defined-terms / consumerCode default; overflow-menu / doc-level trigger)</file>
       <file purpose="overflow-trigger">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx — the "More actions…" overflow that dispatches this doc-level action (registration-extensible, FR-14)</file>
       <file purpose="context-pane-readonly">@spaarke/legal-workspace Context pane — the read-only defined-terms display target (audit-only; never an input surface)</file>
@@ -75,8 +75,8 @@
   </steps>
 
   <outputs>
-    <output type="config">infra/dataverse/inputschemas/def-terms-v1.input.schema.json</output>
-    <output type="config">infra/dataverse/outputschemas/def-terms-v1.schema.json</output>
+    <output type="config">infra/dataverse/inputschemas/compose-defined-terms.input.schema.json</output>
+    <output type="config">infra/dataverse/outputschemas/compose-defined-terms.schema.json</output>
     <output type="config">infra/dataverse/sprk_playbookconsumer-rows.json (Binding row added)</output>
   </outputs>
 
