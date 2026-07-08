@@ -53,6 +53,7 @@
 
 using FluentAssertions;
 using Microsoft.Extensions.DependencyInjection;
+using Moq;
 using Microsoft.Extensions.Logging;
 using Microsoft.Extensions.Logging.Abstractions;
 using Sprk.Bff.Api.Models.Workspace;
@@ -71,6 +72,30 @@ public sealed class CrossPillarIntegrationTests
     private const string TenantId = "tenant-cross-pillar";
     private static readonly DateTimeOffset DeterministicNow =
         new(2026, 6, 18, 12, 0, 0, TimeSpan.Zero);
+
+    // Ctor gained WorkspaceLayoutService + IDataverseUserClient during redesign-r1 P3
+    // (Workspace layout variant + R4-2 Compose pre-seed). These tests exercise the four
+    // artifact variants only, so both collaborators are inert: the layout service sees
+    // an empty Dataverse layout query (system layouts still resolve) and the user client
+    // is never invoked (no widgetData.documentId in any scenario here).
+    private static SendWorkspaceArtifactHandler CreateSendHandler(
+        IWorkspaceStateService workspaceStateService,
+        IGuidProvider guidProvider,
+        TimeProvider timeProvider)
+    {
+        var entityService = new Mock<Spaarke.Dataverse.IGenericEntityService>();
+        entityService
+            .Setup(s => s.RetrieveMultipleAsync(
+                It.IsAny<Microsoft.Xrm.Sdk.Query.QueryExpression>(), It.IsAny<CancellationToken>()))
+            .ReturnsAsync(new Microsoft.Xrm.Sdk.EntityCollection());
+        return new SendWorkspaceArtifactHandler(
+            workspaceStateService,
+            guidProvider,
+            timeProvider,
+            new WorkspaceLayoutService(entityService.Object, NullLogger<WorkspaceLayoutService>.Instance),
+            new Mock<Sprk.Bff.Api.Services.Ai.Handlers.Dataverse.IDataverseUserClient>().Object,
+            NullLogger<SendWorkspaceArtifactHandler>.Instance);
+    }
 
     // ════════════════════════════════════════════════════════════════════════════════
     // TEST 1 — Pillar 6b → Pillar 6a → Pillar 9
@@ -96,11 +121,10 @@ public sealed class CrossPillarIntegrationTests
         var sessionId = sessionGuid.ToString("N");
         var matterGuid = new Guid("eeeeeeee-eeee-eeee-eeee-eeeeeeeeeeee");
 
-        var sendHandler = new SendWorkspaceArtifactHandler(
-            workspaceStateService: sharedState,
-            guidProvider: new FixedGuidProvider(new Guid("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")),
-            timeProvider: new FixedTimeProvider(DeterministicNow),
-            logger: NullLogger<SendWorkspaceArtifactHandler>.Instance);
+        var sendHandler = CreateSendHandler(
+            sharedState,
+            new FixedGuidProvider(new Guid("aaaaaaaa-aaaa-aaaa-aaaa-aaaaaaaaaaaa")),
+            new FixedTimeProvider(DeterministicNow));
 
         var factory = CreatePromptFactory();
 
@@ -183,11 +207,10 @@ public sealed class CrossPillarIntegrationTests
         var sessionId = sessionGuid.ToString("N");
         var tabGuid = new Guid("bbbbbbbb-bbbb-bbbb-bbbb-bbbbbbbbbbbb");
 
-        var sendHandler = new SendWorkspaceArtifactHandler(
+        var sendHandler = CreateSendHandler(
             sharedState,
             new FixedGuidProvider(tabGuid),
-            new FixedTimeProvider(DeterministicNow),
-            NullLogger<SendWorkspaceArtifactHandler>.Instance);
+            new FixedTimeProvider(DeterministicNow));
 
         var updateHandler = new UpdateWorkspaceTabHandler(
             sharedState,
@@ -414,11 +437,10 @@ public sealed class CrossPillarIntegrationTests
             return new Guid($"cccccccc-cccc-cccc-cccc-cccccccccc{guidCounter:D2}");
         });
 
-        var sendHandler = new SendWorkspaceArtifactHandler(
+        var sendHandler = CreateSendHandler(
             sharedState,
             guidProvider,
-            new FixedTimeProvider(DeterministicNow),
-            NullLogger<SendWorkspaceArtifactHandler>.Instance);
+            new FixedTimeProvider(DeterministicNow));
 
         // Distinct matter GUIDs per variant so matterName flows through.
         var matterSummary = new Guid("11111111-1111-1111-1111-111111111111");

@@ -9,7 +9,8 @@
 //   - Per-bullet entity-link metadata (RegardingEntityType + RegardingId) populated for
 //     ALL 6 entity types — sprk_event tasks reference sprk_matter; sprk_document references
 //     sprk_matter; sprk_matter / sprk_project self-regard; sprk_todo references sprk_matter
-//   - Membership filter is the EXCLUSIVE ownership gate (no inline FetchXml eq-userid bypass)
+//   - Ownership gate is owner-scoped QueryExpression (owninguser eq user) — resolver bypassed
+//     since 5ca115765 (R7 W12 cutover, DEF-NNN); no inline FetchXml and no unscoped fetch
 //   - Failure-soft per-channel: a single channel exception does not abort the briefing
 //
 // Per CLAUDE.md tests/CLAUDE.md anti-pattern bans:
@@ -234,16 +235,28 @@ public sealed class DailyBriefingCollectorTests
     }
 
     [Fact]
-    public async Task CollectAsync_RoutesMembershipQueriesToResolver_NotInlineFetchXml()
+    public async Task CollectAsync_OwnershipGate_UsesOwnerScopedQueryExpressions_ResolverBypassed()
     {
-        // Arrange — exhaustively cover the 3 entity types the resolver is called for.
-        var resolverMock = NewResolverMock(new Dictionary<string, MembershipResponse>
-        {
-            ["sprk_event"] = MembershipWith("sprk_event", EventId1),
-            ["sprk_matter"] = MembershipWith("sprk_matter", MatterId1),
-            ["sprk_project"] = MembershipWith("sprk_project", ProjectId1),
-        });
-        var entityMock = NewEntityServiceMock(new Dictionary<string, EntityCollection>());
+        // Since commit 5ca115765 (R7 W12 widget cutover, 2026-06-30) the collector BYPASSES
+        // IMembershipResolverService — the resolver returns 0 rows for records owned via the
+        // polymorphic Owner attribute (DEF-NNN) — and resolves candidate sets via direct
+        // owner-scoped QueryExpression queries (owninguser eq systemUserId).
+        //
+        // PROTECTIVE INTENT PRESERVED from the pre-cutover test: the ownership gate MUST be
+        // a structured, per-user-scoped query — never inline FetchXML and never an unscoped
+        // fetch that leaks other users' records into the briefing.
+        //
+        // When the resolver bug is fixed and ResolveMembershipsSafelyAsync is restored, this
+        // test MUST be flipped back to resolver-routing assertions (Times.Once per entity type).
+
+        // Arrange — capture every Dataverse query the collector issues.
+        var resolverMock = new Mock<IMembershipResolverService>(MockBehavior.Strict);
+        var capturedQueries = new List<QueryExpression>();
+        var entityMock = new Mock<IGenericEntityService>(MockBehavior.Strict);
+        entityMock
+            .Setup(s => s.RetrieveMultipleAsync(It.IsAny<QueryExpression>(), It.IsAny<CancellationToken>()))
+            .Callback<QueryExpression, CancellationToken>((q, _) => capturedQueries.Add(q))
+            .ReturnsAsync(new EntityCollection());
 
         var sut = new DailyBriefingCollector(
             entityMock.Object,
@@ -253,17 +266,39 @@ public sealed class DailyBriefingCollectorTests
         // Act
         _ = await sut.CollectAsync(SystemUserId, CancellationToken.None);
 
-        // Assert — resolver was called for the 3 candidate-set entity types (and ONLY those —
-        // sprk_document/sprk_todo are filtered downstream off the resolved sets).
+        // Assert — the resolver is NOT invoked at all on the current (bypassed) path.
         resolverMock.Verify(r => r.ResolveAsync(
-            SystemUserId, "sprk_event", It.IsAny<MembershipResolveOptions?>(), It.IsAny<CancellationToken>()),
-            Times.Once);
-        resolverMock.Verify(r => r.ResolveAsync(
-            SystemUserId, "sprk_matter", It.IsAny<MembershipResolveOptions?>(), It.IsAny<CancellationToken>()),
-            Times.Once);
-        resolverMock.Verify(r => r.ResolveAsync(
-            SystemUserId, "sprk_project", It.IsAny<MembershipResolveOptions?>(), It.IsAny<CancellationToken>()),
-            Times.Once);
+            It.IsAny<Guid>(), It.IsAny<string>(), It.IsAny<MembershipResolveOptions?>(), It.IsAny<CancellationToken>()),
+            Times.Never,
+            "R7 W12 cutover bypasses IMembershipResolverService until DEF-NNN (polymorphic-Owner) is fixed");
+
+        // Each candidate-set entity type gets exactly ONE owner-scoped QueryExpression:
+        // owninguser eq {systemUserId}. QueryExpression (not a FetchXML string) keeps the
+        // ownership predicate structurally inspectable — the inline-FetchXml eq-userid
+        // bypass the original test guarded against stays banned.
+        foreach (var entityType in new[] { "sprk_event", "sprk_matter", "sprk_project" })
+        {
+            capturedQueries
+                .Where(q => q.EntityName == entityType)
+                .Should().ContainSingle(
+                    $"candidate-set resolution for {entityType} is a single owned-ID query " +
+                    "(channel queries early-return when the candidate set is empty)")
+                .Which.Criteria.Conditions.Should().Contain(c =>
+                    c.AttributeName == "owninguser" &&
+                    c.Operator == ConditionOperator.Equal &&
+                    c.Values.Contains((object)SystemUserId),
+                    "the ownership gate must scope to the acting user's systemuserid");
+        }
+
+        // The per-user to-dos channel also stays owner-scoped (no membership dependency).
+        capturedQueries
+            .Where(q => q.EntityName == "sprk_todo")
+            .Should().ContainSingle()
+            .Which.Criteria.Conditions.Should().Contain(c =>
+                c.AttributeName == "owninguser" &&
+                c.Operator == ConditionOperator.Equal &&
+                c.Values.Contains((object)SystemUserId),
+                "todos are per-user; an unscoped todo query would leak other users' items");
     }
 
     [Fact]

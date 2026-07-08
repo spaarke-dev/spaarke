@@ -560,10 +560,17 @@ public class KnowledgeDeploymentConfigTests
         // Arrange & Act
         var config = new KnowledgeDeploymentConfig();
 
-        // Assert
-        config.Model.Should().Be(RagDeploymentModel.Shared);
-        config.IndexName.Should().Be("spaarke-knowledge-index-v2");
-        config.IsActive.Should().BeTrue();
+        // Assert — protective value of these defaults: a tenant with NO
+        // sprk_aiknowledgedeployment row falls through to this record's defaults, so a
+        // drifting default routes Shared-model tenants to the wrong index / wrong model.
+        config.Model.Should().Be(RagDeploymentModel.Shared,
+            "tenants without an explicit deployment row must land on the Shared model");
+        // Canonical shared index per multi-container-multi-index-r1 task 030 (commit
+        // 9180e241b): the record default MUST stay aligned with
+        // AiSearchOptions.KnowledgeIndexName / appsettings.template.json
+        // ("spaarke-files-index") — the previous "spaarke-knowledge-index-v2" no longer exists.
+        config.IndexName.Should().Be("spaarke-files-index");
+        config.IsActive.Should().BeTrue("a default-constructed deployment must not be skipped by routing");
         config.TenantId.Should().BeEmpty();
     }
 
