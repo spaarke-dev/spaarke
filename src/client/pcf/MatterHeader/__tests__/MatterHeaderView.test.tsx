@@ -4,20 +4,28 @@
  * Verifies the FR-12 composition wiring:
  *  - Loading skeleton visible before Xrm resolves
  *  - 5 field labels render after retrieveRecord resolves
- *  - 3 toolbar slots (sparkle / checkmark / annotation) render
+ *  - 2 toolbar slots (checkmark / annotation) + the AI Summary sparkle trigger render
  *  - Version footer rendered
- *  - Sparkle click opens the Popover with the `sprk_recordsummary` body
- *  - Sparkle click with null `sprk_recordsummary` shows the empty state
+ *  - Sparkle click invokes `aiSummary.onFetchSummary` and renders the `sprk_mattersummary`
+ *    body (regression coverage for the v1.0.20 field-wiring fix — the popover
+ *    previously read the never-populated `sprk_recordsummary` field)
+ *  - Sparkle click renders the empty state when `sprk_mattersummary` is null
  *  - `useRecordFieldValues` is called with the exact 6-field FR-12 REVISED payload
  *
- * Strategy: `@spaarke/ui-components` is jest-mocked with light stubs so this
- * test exercises MatterHeaderView's OWN wiring (props flow, popover content
- * plumbing, field-list constants). The end-to-end composition of the real
- * shared-lib primitives + hooks is already covered by the Phase 1 integration
- * test at
- * `src/client/shared/Spaarke.UI.Components/src/__tests__/recordHeader.integration.test.tsx`.
- * Duplicating that coverage here would violate ADR-038 test-diet criteria
- * (a MAINTAIN-class test at one KEEP path is enough).
+ * Strategy: `@spaarke/ui-components` is jest-mocked via PER-SUBPATH `jest.mock()`
+ * calls (NOT the bare `'@spaarke/ui-components'` specifier) because
+ * MatterHeaderView.tsx imports from deep `dist/*` subpaths (see that file's
+ * v1.0.12 comment — this PCF's tsconfig uses legacy `moduleResolution: "node"`
+ * and doesn't read the shared lib's `exports` map). A bare-specifier mock never
+ * applies to those imports and silently no-ops — see `RelatedDocumentCount.test.tsx`
+ * for the established per-subpath precedent this file now follows.
+ *
+ * `RecordHeaderShell` is stubbed with a minimal re-implementation of the
+ * `aiSummary` → sparkle-trigger → popover flow (real behavior lives in
+ * `HeaderToolbar` + `AiSummaryPopover`, both already covered by the shared
+ * lib's own suites — duplicating that here would violate ADR-038 test-diet
+ * criteria). The stub only needs to prove MatterHeaderView wires
+ * `toolbar.aiSummary.onFetchSummary` correctly, not re-verify Popover a11y/UX.
  *
  * Wrapping in FluentProvider mirrors the reference PCFs' test-environment
  * pattern (jsdom has no host theme; the production PCF class uses
@@ -32,15 +40,15 @@ import { render, screen, fireEvent } from '@testing-library/react';
 import { FluentProvider, webLightTheme } from '@fluentui/react-components';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Mock @spaarke/ui-components — light stubs that make the view's wiring
-// deterministically observable.
+// Mocks — one per deep `dist/*` subpath MatterHeaderView.tsx actually imports.
 // ─────────────────────────────────────────────────────────────────────────────
 
 const mockUseRecordFieldValues = jest.fn();
 const mockUseRecordHeaderToolbarActions = jest.fn();
 
-jest.mock('@spaarke/ui-components', () => {
+jest.mock('@spaarke/ui-components/dist/components/RecordHeader', () => {
   const React = require('react');
+
   return {
     __esModule: true,
 
@@ -52,16 +60,6 @@ jest.mock('@spaarke/ui-components', () => {
         { 'data-testid': 'stub-text-field', 'data-label': label, 'data-required': required ? '1' : '0' },
         React.createElement('span', { 'data-testid': 'stub-field-label' }, label),
         React.createElement('span', { 'data-testid': 'stub-field-value' }, value ?? '')
-      ),
-
-    // The RecordHeader flavor is aliased in the shared-lib top-level barrel;
-    // the view imports it as `RecordHeaderLookupField`.
-    RecordHeaderLookupField: ({ label, value }: { label: string; value?: { name?: string } | null }) =>
-      React.createElement(
-        'div',
-        { 'data-testid': 'stub-lookup-field', 'data-label': label },
-        React.createElement('span', { 'data-testid': 'stub-field-label' }, label),
-        React.createElement('span', { 'data-testid': 'stub-field-value' }, value?.name ?? '')
       ),
 
     TextareaField: ({ label, value }: { label: string; value?: string }) =>
@@ -76,22 +74,48 @@ jest.mock('@spaarke/ui-components', () => {
     FieldGrid: ({ children, columns }: { children: React.ReactNode; columns?: number }) =>
       React.createElement('div', { 'data-testid': 'stub-field-grid', 'data-columns': columns ?? 3 }, children),
 
-    // RecordHeaderShell — pass-through with toolbar + loading indicator.
+    // RecordHeaderShell — pass-through card chrome + a minimal re-implementation
+    // of the `aiSummary` → sparkle → popover flow (real impl: HeaderToolbar +
+    // AiSummaryPopover, both covered by the shared lib's own test suites).
     RecordHeaderShell: ({
       children,
       toolbar,
       loading,
     }: {
       children: React.ReactNode;
-      toolbar: { iconSlots: Array<{ key: string; tooltip: string; onClick: () => void }> };
+      toolbar: {
+        iconSlots: Array<{ key: string; tooltip: string; onClick: () => void; badge?: number }>;
+        aiSummary?: { onFetchSummary: () => Promise<{ summary: string | null; tldr: string | null }> };
+      };
       loading?: boolean;
-    }) =>
-      React.createElement(
+    }) => {
+      const [open, setOpen] = React.useState(false);
+      const [summary, setSummary] = React.useState<{ summary: string | null; tldr: string | null } | null>(null);
+
+      const handleSparkleClick = () => {
+        setOpen((prev: boolean) => !prev);
+        if (!summary && toolbar.aiSummary) {
+          void toolbar.aiSummary.onFetchSummary().then(setSummary);
+        }
+      };
+
+      return React.createElement(
         'div',
         { 'data-testid': 'stub-record-header-shell', 'data-loading': loading ? '1' : '0' },
         React.createElement(
           'div',
           { 'data-testid': 'stub-toolbar' },
+          toolbar.aiSummary
+            ? React.createElement(
+                'button',
+                {
+                  'data-testid': 'stub-toolbar-slot-sparkle',
+                  'aria-label': 'AI Summary',
+                  onClick: handleSparkleClick,
+                },
+                'AI Summary'
+              )
+            : null,
           toolbar.iconSlots.map(slot =>
             React.createElement(
               'button',
@@ -105,21 +129,56 @@ jest.mock('@spaarke/ui-components', () => {
             )
           )
         ),
+        open
+          ? React.createElement(
+              'div',
+              { 'data-testid': 'stub-popover' },
+              !summary
+                ? React.createElement('span', { 'data-testid': 'stub-popover-loading' }, 'Loading…')
+                : summary.summary
+                  ? React.createElement('span', { 'data-testid': 'stub-popover-summary' }, summary.summary)
+                  : React.createElement('span', { 'data-testid': 'stub-popover-empty' }, 'No summary yet')
+            )
+          : null,
         loading
           ? React.createElement('div', { 'data-testid': 'stub-skeleton' }, 'loading…')
           : React.createElement('div', { 'data-testid': 'stub-body' }, children)
-      ),
-
-    useRecordFieldValues: (...args: unknown[]) => mockUseRecordFieldValues(...args),
-    useRecordHeaderToolbarActions: (...args: unknown[]) => mockUseRecordHeaderToolbarActions(...args),
+      );
+    },
   };
 });
+
+jest.mock('@spaarke/ui-components/dist/components/LookupField/LookupField', () => {
+  const React = require('react');
+  return {
+    __esModule: true,
+    LookupField: ({ label, value }: { label: string; value?: { name?: string } | null }) =>
+      React.createElement(
+        'div',
+        { 'data-testid': 'stub-lookup-field', 'data-label': label },
+        React.createElement('span', { 'data-testid': 'stub-field-label' }, label),
+        React.createElement('span', { 'data-testid': 'stub-field-value' }, value?.name ?? '')
+      ),
+  };
+});
+
+jest.mock('@spaarke/ui-components/dist/hooks', () => ({
+  __esModule: true,
+  useRecordFieldValues: (...args: unknown[]) => mockUseRecordFieldValues(...args),
+  useRecordHeaderToolbarActions: (...args: unknown[]) => mockUseRecordHeaderToolbarActions(...args),
+}));
+
+jest.mock('@spaarke/ui-components/dist/utils/xrmContext', () => ({
+  __esModule: true,
+  getXrm: jest.fn(() => null),
+}));
 
 import { MatterHeaderView } from '../control/MatterHeaderView';
 import { CONTROL_VERSION } from '../control/version';
 
 // ─────────────────────────────────────────────────────────────────────────────
-// Fixtures
+// Fixtures — shape matches the REAL `useRecordFieldValues` contract (raw
+// Dataverse WebAPI entity: `_<field>_value` + `...FormattedValue` for lookups).
 // ─────────────────────────────────────────────────────────────────────────────
 
 const MATTER_ID = '00000000-0000-0000-0000-000000000001';
@@ -128,41 +187,22 @@ const MATTER_RECORD = {
   sprk_matternumber: 'M-2026-001',
   sprk_mattername: 'Acme Litigation Matter',
   sprk_matterdescription: 'A moderately long matter description.',
-  sprk_recordsummary: 'AI-generated summary body rendered inside the sparkle popover.',
-  sprk_mattertype: { id: 'mt-1', name: 'Litigation', entityType: 'sprk_mattertype' },
-  sprk_practicearea: { id: 'pa-1', name: 'Corporate', entityType: 'sprk_practicearea' },
+  sprk_mattersummary: 'AI-generated summary body rendered inside the sparkle popover.',
+  _sprk_mattertype_value: 'mt-1',
+  '_sprk_mattertype_value@OData.Community.Display.V1.FormattedValue': 'Litigation',
+  _sprk_practicearea_value: 'pa-1',
+  '_sprk_practicearea_value@OData.Community.Display.V1.FormattedValue': 'Corporate',
 };
 
-/**
- * Build a toolbar-actions return that keeps popover state controlled via a
- * shared ref so the test can drive it through the sparkle click.
- */
-function makeToolbarActionsMock(recordSummary: string | null) {
-  const state = { open: false };
-  const setOpen = jest.fn((next: boolean) => {
-    state.open = next;
-  });
-
+/** Real hook (v1.0.10+) returns ONLY `{ toolbarProps }` — checkmark + annotation slots. */
+function makeToolbarActionsResult() {
   return {
-    getState: () => state,
-    build: () => ({
-      toolbarProps: {
-        iconSlots: [
-          { key: 'sparkle', tooltip: 'AI Summary', onClick: () => setOpen(!state.open) },
-          { key: 'checkmark', tooltip: 'Related to-dos', onClick: jest.fn(), badge: 0 },
-          { key: 'annotation', tooltip: 'Notepad', onClick: jest.fn(), badge: 0 },
-        ],
-      },
-      sparklePopoverOpen: state.open,
-      setSparklePopoverOpen: setOpen,
-      sparklePopoverContent:
-        recordSummary && recordSummary.length > 0 ? (
-          <div data-testid="stub-popover-summary">{recordSummary}</div>
-        ) : (
-          <div data-testid="stub-popover-empty">No summary yet</div>
-        ),
-    }),
-    setOpen,
+    toolbarProps: {
+      iconSlots: [
+        { key: 'checkmark', tooltip: 'Related to-dos', onClick: jest.fn(), badge: 0 },
+        { key: 'annotation', tooltip: 'Notepad', onClick: jest.fn(), badge: 0 },
+      ],
+    },
   };
 }
 
@@ -177,6 +217,7 @@ function renderView(recordId: string = MATTER_ID) {
 beforeEach(() => {
   mockUseRecordFieldValues.mockReset();
   mockUseRecordHeaderToolbarActions.mockReset();
+  mockUseRecordHeaderToolbarActions.mockReturnValue(makeToolbarActionsResult());
 });
 
 // ─────────────────────────────────────────────────────────────────────────────
@@ -186,27 +227,29 @@ beforeEach(() => {
 describe('MatterHeaderView', () => {
   it('requests the FR-12 REVISED 6-field payload from useRecordFieldValues', () => {
     mockUseRecordFieldValues.mockReturnValue({ values: null, loading: true, error: null });
-    mockUseRecordHeaderToolbarActions.mockReturnValue(makeToolbarActionsMock(null).build());
 
     renderView();
 
-    expect(mockUseRecordFieldValues).toHaveBeenCalledTimes(1);
-    const [entity, recordId, fields] = mockUseRecordFieldValues.mock.calls[0];
+    // Called on every render (>=1) — the v1.0.7 pending-changes-buffer reset
+    // effect triggers one extra re-render on mount, so exact count isn't the
+    // invariant under test; every call must carry the same FR-12 args.
+    expect(mockUseRecordFieldValues.mock.calls.length).toBeGreaterThanOrEqual(1);
+    const [entity, recordId, fields] =
+      mockUseRecordFieldValues.mock.calls[mockUseRecordFieldValues.mock.calls.length - 1];
     expect(entity).toBe('sprk_matter');
     expect(recordId).toBe(MATTER_ID);
     expect(fields).toEqual([
       'sprk_matternumber',
       'sprk_mattername',
-      'sprk_mattertype',
-      'sprk_practicearea',
+      '_sprk_mattertype_value',
+      '_sprk_practicearea_value',
       'sprk_matterdescription',
-      'sprk_recordsummary',
+      'sprk_mattersummary',
     ]);
   });
 
   it('renders the 5 FR-12 field labels after data load', () => {
     mockUseRecordFieldValues.mockReturnValue({ values: MATTER_RECORD, loading: false, error: null });
-    mockUseRecordHeaderToolbarActions.mockReturnValue(makeToolbarActionsMock(MATTER_RECORD.sprk_recordsummary).build());
 
     renderView();
 
@@ -214,8 +257,6 @@ describe('MatterHeaderView', () => {
     expect(screen.queryByTestId('stub-skeleton')).toBeNull();
     expect(screen.getByTestId('stub-body')).toBeInTheDocument();
 
-    // Each field label rendered exactly once — assert the presence via
-    // data-label attribute so we don't collide with the version footer text.
     expect(screen.getByTestId('stub-field-grid')).toHaveAttribute('data-columns', '3');
     expect(screen.getByText('Matter Number')).toBeInTheDocument();
     expect(screen.getByText('Matter Name')).toBeInTheDocument();
@@ -223,7 +264,8 @@ describe('MatterHeaderView', () => {
     expect(screen.getByText('Practice Area')).toBeInTheDocument();
     expect(screen.getByText('Matter Description')).toBeInTheDocument();
 
-    // Values wire through per prop flow.
+    // Values wire through per prop flow — lookups resolve via `projectLookup`
+    // from the `_field_value` + FormattedValue pair.
     expect(screen.getByText('M-2026-001')).toBeInTheDocument();
     expect(screen.getByText('Acme Litigation Matter')).toBeInTheDocument();
     expect(screen.getByText('Litigation')).toBeInTheDocument();
@@ -231,21 +273,19 @@ describe('MatterHeaderView', () => {
     expect(screen.getByText(MATTER_RECORD.sprk_matterdescription)).toBeInTheDocument();
   });
 
-  it('renders 3 toolbar slots (sparkle, checkmark, annotation)', () => {
+  it('renders the checkmark + annotation toolbar slots plus the AI Summary sparkle trigger', () => {
     mockUseRecordFieldValues.mockReturnValue({ values: MATTER_RECORD, loading: false, error: null });
-    mockUseRecordHeaderToolbarActions.mockReturnValue(makeToolbarActionsMock(MATTER_RECORD.sprk_recordsummary).build());
 
     renderView();
 
     expect(screen.getByTestId('stub-toolbar-slot-sparkle')).toBeInTheDocument();
+    expect(screen.getByTestId('stub-toolbar-slot-sparkle')).toHaveAttribute('aria-label', 'AI Summary');
     expect(screen.getByTestId('stub-toolbar-slot-checkmark')).toBeInTheDocument();
     expect(screen.getByTestId('stub-toolbar-slot-annotation')).toBeInTheDocument();
-    expect(screen.getByTestId('stub-toolbar-slot-sparkle')).toHaveAttribute('aria-label', 'AI Summary');
   });
 
   it('renders the version footer', () => {
     mockUseRecordFieldValues.mockReturnValue({ values: MATTER_RECORD, loading: false, error: null });
-    mockUseRecordHeaderToolbarActions.mockReturnValue(makeToolbarActionsMock(MATTER_RECORD.sprk_recordsummary).build());
 
     renderView();
 
@@ -255,55 +295,35 @@ describe('MatterHeaderView', () => {
     expect(footer).toHaveAttribute('aria-hidden', 'true');
   });
 
-  it('passes sprk_recordsummary to useRecordHeaderToolbarActions.recordSummary and renders it in the popover on sparkle click', () => {
+  it('sparkle click fetches and renders the sprk_mattersummary body (v1.0.20 field-wiring regression guard)', async () => {
     mockUseRecordFieldValues.mockReturnValue({ values: MATTER_RECORD, loading: false, error: null });
-    // Popover starts open so we can observe the summary body without needing
-    // rerenders. Real hook uses controlled state; this stub reflects that.
-    const actions = makeToolbarActionsMock(MATTER_RECORD.sprk_recordsummary);
-    mockUseRecordHeaderToolbarActions.mockReturnValue({
-      ...actions.build(),
-      sparklePopoverOpen: true,
-    });
 
     renderView();
 
-    // The hook received recordSummary — verify via the mock's call args.
-    expect(mockUseRecordHeaderToolbarActions).toHaveBeenCalledWith(
-      expect.objectContaining({
-        entity: 'sprk_matter',
-        recordId: MATTER_ID,
-        recordSummary: MATTER_RECORD.sprk_recordsummary,
-      })
-    );
-
-    // Popover open → summary body rendered.
-    expect(screen.getByTestId('stub-popover-summary')).toHaveTextContent(MATTER_RECORD.sprk_recordsummary);
-    expect(screen.queryByTestId('stub-popover-empty')).toBeNull();
-
-    // Sparkle button click toggles the setter.
     fireEvent.click(screen.getByTestId('stub-toolbar-slot-sparkle'));
-    expect(actions.setOpen).toHaveBeenCalled();
+
+    // Popover resolves asynchronously (matches real AiSummaryPopover's
+    // lazy-fetch-on-open contract) — findBy* waits for the state update.
+    const summaryEl = await screen.findByTestId('stub-popover-summary');
+    expect(summaryEl).toHaveTextContent(MATTER_RECORD.sprk_mattersummary);
+    expect(screen.queryByTestId('stub-popover-empty')).toBeNull();
   });
 
-  it('renders the empty-state popover body when sprk_recordsummary is null', () => {
-    const recordNoSummary = { ...MATTER_RECORD, sprk_recordsummary: null };
+  it('renders the empty-state popover body when sprk_mattersummary is null', async () => {
+    const recordNoSummary = { ...MATTER_RECORD, sprk_mattersummary: null };
     mockUseRecordFieldValues.mockReturnValue({ values: recordNoSummary, loading: false, error: null });
-    const actions = makeToolbarActionsMock(null);
-    mockUseRecordHeaderToolbarActions.mockReturnValue({
-      ...actions.build(),
-      sparklePopoverOpen: true,
-    });
 
     renderView();
 
-    expect(mockUseRecordHeaderToolbarActions).toHaveBeenCalledWith(expect.objectContaining({ recordSummary: null }));
-    expect(screen.getByTestId('stub-popover-empty')).toHaveTextContent('No summary yet');
+    fireEvent.click(screen.getByTestId('stub-toolbar-slot-sparkle'));
+
+    const emptyEl = await screen.findByTestId('stub-popover-empty');
+    expect(emptyEl).toHaveTextContent('No summary yet');
     expect(screen.queryByTestId('stub-popover-summary')).toBeNull();
   });
 
   it('renders the loading skeleton while useRecordFieldValues is loading', () => {
     mockUseRecordFieldValues.mockReturnValue({ values: null, loading: true, error: null });
-    mockUseRecordHeaderToolbarActions.mockReturnValue(makeToolbarActionsMock(null).build());
 
     renderView();
 

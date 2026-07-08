@@ -3,7 +3,9 @@
   "version": "1.2.0",
   "description": "PCF control: 11-entity regarding picker bound to sprk_regardingrecordtype; wraps PolymorphicResolverService.applyResolverFields (ADR-024). Reusable for sprk_todo and sprk_communication per FR-22.",
   "scripts": {
+    "prebuild": "node ../../shared/Spaarke.UI.Components/scripts/ensure-dist-fresh.js",
     "build": "pcf-scripts build",
+    "prebuild:prod": "node ../../shared/Spaarke.UI.Components/scripts/ensure-dist-fresh.js",
     "build:prod": "pcf-scripts build --buildMode production",
     "clean": "pcf-scripts clean",
     "lint": "pcf-scripts lint",

@@ -110,6 +110,8 @@ cd src/client/pcf/SemanticSearchControl && npm run build
 
 Code Pages do NOT need this — Vite reads source directly via alias. But Code Pages DO need `npm install` if the shared lib added new dependencies.
 
+**Automated guard for `@spaarke/ui-components` (added 2026-07-07)**: the 9 PCFs that import deep `dist/*` subpaths run `src/client/shared/Spaarke.UI.Components/scripts/ensure-dist-fresh.js` as a `prebuild`/`prebuild:prod` npm script — it rebuilds the shared lib automatically when `dist/` is older than `src/`, and no-ops when fresh. This does NOT cover `@spaarke/auth` — the manual rebuild commands above are still required for auth changes. See `.claude/skills/pcf-deploy/SKILL.md` § Shared Library Dependency for the incident this closes.
+
 ---
 
 ## MUST NOT Rules
