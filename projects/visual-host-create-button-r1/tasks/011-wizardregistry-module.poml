@@ -1,0 +1,58 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="011" project="visual-host-create-button-r1">
+  <metadata>
+    <title>WizardRegistry + WizardHostProps + resolveWizard + unknown-key toast</title>
+    <phase>A: Visual Host + Registry + Event</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>012,015,030,040</blocks>
+    <tags>shared-lib, pcf, registry, fluent-ui</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>New shared-lib module + .tsx; consumed by Visual Host</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>New self-contained dispatch module; explicit contract in design §5.3</model-tier-reason>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>Create the central WizardRegistry that maps a wizard key to a lazy-loaded wizard component, plus the shared WizardHostProps injection contract and resolveWizard() with entity-fallback + null-on-unknown.</prompt>
+  <role>SPAARKE shared-UI developer. React 18 + Fluent v9. Follow ADR-012 (context-agnostic) + ADR-022.</role>
+  <goal>New components/WizardRegistry/wizardRegistry.ts exporting wizardRegistry (event/invoice/kpi-assessment via React.lazy), the WizardHostProps interface, and resolveWizard(key, fallbackEntity) returning a lazy component or null; exported from the shared-lib root index.</goal>
+
+  <context>
+    <background>Visual Host must stay agnostic to specific wizards (design §5.3, §6.2). Registry keys are dev-defined; maker enters one into sprk_createwizardkey; unknown key → toast (FR-03).</background>
+    <relevant-files>
+      src/client/shared/Spaarke.UI.Components/src/components/WizardRegistry/ (new)
+      src/client/shared/Spaarke.UI.Components/src/index.ts
+      src/client/shared/Spaarke.UI.Components/src/components/CreateWorkAssignmentWizard/WorkAssignmentWizardDialog.tsx (WizardHostProps model)
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      projects/visual-host-create-button-r1/design.md
+      projects/visual-host-create-button-r1/spec.md
+      src/client/shared/Spaarke.UI.Components/src/components/CreateWorkAssignmentWizard/WorkAssignmentWizardDialog.tsx
+      src/client/shared/Spaarke.UI.Components/src/components/CreateEventWizard/CreateEventWizard.tsx
+      src/client/shared/Spaarke.UI.Components/src/index.ts
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Define WizardHostProps modeled on IWorkAssignmentWizardDialogProps (open, onClose, dataService, authenticatedFetch, bffBaseUrl, navigationService?, resolveSpeContainerId?, tenantId?, embedded?, initialAssociation?, lockAssociation?).</step>
+    <step>Create wizardRegistry: Record&lt;string, LazyExoticComponent&gt; with keys event/invoice/kpi-assessment (invoice/kpi wizards may be placeholder lazy imports until 030/040 land — keep event working).</step>
+    <step>Implement resolveWizard(key, fallbackEntity): use key if set; else normalize fallbackEntity (sprk_invoice→invoice, etc.); return null for unknown keys.</step>
+    <step>Export from src/index.ts.</step>
+  </steps>
+
+  <tools>Read, Grep, Edit, Write</tools>
+  <outputs>components/WizardRegistry/wizardRegistry.ts; root index export.</outputs>
+
+  <acceptance-criteria>
+    <criterion>resolveWizard returns the event wizard for key "event" and for fallback "sprk_event".</criterion>
+    <criterion>Unknown key returns null (caller shows toast — verified in task 012).</criterion>
+    <criterion>Wizards are React.lazy (code-split); registry adds &lt; 5 KB to the consuming bundle.</criterion>
+    <criterion>Shared lib builds.</criterion>
+  </acceptance-criteria>
+</task>

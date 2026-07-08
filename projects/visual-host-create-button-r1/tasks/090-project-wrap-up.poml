@@ -1,0 +1,52 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="090" project="visual-host-create-button-r1">
+  <metadata>
+    <title>Project wrap-up: test-diet, docs, PR</title>
+    <phase>E: Wrap-up</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>050</dependencies>
+    <blocks>none</blocks>
+    <tags>wrapup, docs, test-diet</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Wrap-up + docs; triggers /test-diet gate</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Documentation + reconciliation; mechanical</model-tier-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>Close the project: run /test-diet, write the maker-facing valid-keys note, update README to Complete, write lessons-learned, and open the PR with the hot-path declaration + git diff --stat evidence.</prompt>
+  <role>SPAARKE platform developer.</role>
+  <goal>Project artifacts finalized; /test-diet reconciliation report produced; PR opened citing BFF=N (no Sprk.Bff.Api in diff) + the hot-path declaration.</goal>
+
+  <context>
+    <background>Project-close test-diet gate (CLAUDE.md §7). Maker needs the list of valid wizard keys (event/invoice/kpi-assessment) to configure sprk_createwizardkey.</background>
+    <relevant-files>projects/visual-host-create-button-r1/</relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      .claude/skills/test-diet/SKILL.md
+      .claude/skills/push-to-github/SKILL.md
+      projects/visual-host-create-button-r1/README.md
+      projects/visual-host-create-button-r1/spec.md
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Run /test-diet; write notes/test-diet-report.md; apply KEEP/delete recommendations for reviewer.</step>
+    <step>Write a short maker-facing note (valid keys: event, invoice, kpi-assessment) — where to set sprk_createwizardenabled + sprk_createwizardkey.</step>
+    <step>Update README status → Complete; write notes/lessons-learned.md.</step>
+    <step>Open the PR: description cites hot-path declaration (all N) + git diff --stat (no Sprk.Bff.Api) + Placement Justification N/A (BFF=N).</step>
+  </steps>
+
+  <tools>Skill(test-diet), Skill(push-to-github), Read, Write, Bash</tools>
+  <outputs>test-diet-report.md; lessons-learned.md; maker note; PR.</outputs>
+
+  <acceptance-criteria>
+    <criterion>/test-diet report produced + cited in PR (or skip rationale documented).</criterion>
+    <criterion>README status = Complete; lessons-learned written.</criterion>
+    <criterion>PR opened; git diff --stat shows no Sprk.Bff.Api files.</criterion>
+  </acceptance-criteria>
+</task>

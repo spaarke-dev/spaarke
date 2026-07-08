@@ -1,0 +1,54 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="024" project="visual-host-create-button-r1">
+  <metadata>
+    <title>Migrate SummarizeFilesWizard onto WizardFollowOns (delete duplicate)</title>
+    <phase>D: WizardFollowOns Consolidation</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>020</dependencies>
+    <blocks>none</blocks>
+    <tags>shared-lib, consolidation, regression</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Migrates an existing working wizard</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Regression-sensitive migration; summary-oriented card set must survive via config</model-tier-reason>
+    <parallel-group>D</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>Migrate SummarizeFilesWizard to consume WizardFollowOns and delete its SummaryNextStepsStep + SummarizeSendEmailStep copies. Its summary-oriented card set is expressed as a FollowOnCardConfig[], not a fork.</prompt>
+  <role>SPAARKE shared-UI developer. Follow §11.</role>
+  <goal>SummarizeFilesDialog renders Next Steps via WizardFollowOns; its duplicate copies removed; summarize flow + follow-ons unchanged.</goal>
+
+  <context>
+    <background>design §5.9. SummarizeFilesWizard has SummaryNextStepsStep + SummarizeSendEmailStep. If its cards are summary-specific, register them as FollowOnCardConfig entries (extend the shared step set if genuinely needed, don't fork the grid).</background>
+    <relevant-files>
+      src/client/shared/Spaarke.UI.Components/src/components/SummarizeFilesWizard/ (SummaryNextStepsStep.tsx, SummarizeSendEmailStep.tsx, SummarizeFilesDialog.tsx)
+      src/client/shared/Spaarke.UI.Components/src/components/WizardFollowOns/
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      projects/visual-host-create-button-r1/design.md
+      src/client/shared/Spaarke.UI.Components/src/components/SummarizeFilesWizard/SummaryNextStepsStep.tsx
+      src/client/shared/Spaarke.UI.Components/src/components/WizardFollowOns/index.ts
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Swap SummaryNextStepsStep for WizardFollowOns FollowOnGrid + its FollowOnCardConfig[].</step>
+    <step>Delete SummaryNextStepsStep.tsx + SummarizeSendEmailStep.tsx; fix imports.</step>
+    <step>Regression: run the summarize flow, exercise each card.</step>
+    <step>Build + tests. Confirm grep shows NO remaining duplicate NextSteps/SendEmail across all four families.</step>
+  </steps>
+
+  <tools>Read, Grep, Edit, Bash, Skill(code-review)</tools>
+  <outputs>SummarizeFilesWizard on WizardFollowOns; duplicates deleted; project-wide duplicate-free confirmation.</outputs>
+
+  <acceptance-criteria>
+    <criterion>No local SummaryNextStepsStep/SummarizeSendEmailStep remains (grep clean).</criterion>
+    <criterion>Grep across the lib shows exactly ONE follow-on implementation (WizardFollowOns) — all four families migrated.</criterion>
+    <criterion>Summarize flow + follow-ons unchanged (regression pass).</criterion>
+  </acceptance-criteria>
+</task>

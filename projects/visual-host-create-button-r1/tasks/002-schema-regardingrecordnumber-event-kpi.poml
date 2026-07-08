@@ -1,0 +1,49 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="002" project="visual-host-create-button-r1">
+  <metadata>
+    <title>Schema delta: sprk_regardingrecordnumber on Event/KPI (conditional)</title>
+    <phase>0: Discovery &amp; Schema Verification</phase>
+    <status>not-started</status>
+    <estimated-hours>2</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>014,040</blocks>
+    <tags>dataverse, schema, dataverse-create-schema</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Additive Dataverse schema; no app code</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical additive column via dataverse-create-schema recipe</model-tier-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>ONLY IF task 001 found sprk_regardingrecordnumber absent on sprk_event or sprk_kpiassessment: add the single additive text column so applyResolverFields populates the 5th resolver field. If present on both, mark this task complete with a note (no-op).</prompt>
+  <role>SPAARKE platform developer. Dataverse schema authoring via Web API + PowerShell.</role>
+  <goal>sprk_regardingrecordnumber (Single Line Text) exists on sprk_event and sprk_kpiassessment (matching the Invoice column definition), or a documented no-op if already present.</goal>
+
+  <context>
+    <background>#549 wired sprk_regardingrecordnumber into PolymorphicResolverService.resolveRecordNumberFieldName. Invoice already has it. This closes the gap for Event/KPI if 001 flags it.</background>
+    <relevant-files>sprk_event, sprk_kpiassessment (Dataverse)</relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      projects/visual-host-create-button-r1/notes/field-manifests/kpi.md
+      .claude/adr/ADR-024-polymorphic-resolver-pattern.md
+      .claude/skills/dataverse-create-schema/SKILL.md
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Read the task-001 note for the sprk_regardingrecordnumber presence finding. If present on both entities → record no-op, complete.</step>
+    <step>If absent: match the Invoice sprk_regardingrecordnumber column definition (type, length) and add it to the missing entity/entities via dataverse-create-schema.</step>
+    <step>Verify with a describe read that the column exists post-add.</step>
+  </steps>
+
+  <tools>Skill(dataverse-create-schema), ToolSearch (mcp__dataverse__describe), Read</tools>
+  <outputs>sprk_regardingrecordnumber on sprk_event/sprk_kpiassessment (if needed); note recorded.</outputs>
+
+  <acceptance-criteria>
+    <criterion>sprk_regardingrecordnumber present on both sprk_event and sprk_kpiassessment (added or pre-existing).</criterion>
+    <criterion>Column matches the Invoice definition (type/length).</criterion>
+  </acceptance-criteria>
+</task>

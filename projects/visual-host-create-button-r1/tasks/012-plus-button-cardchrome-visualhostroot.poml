@@ -1,0 +1,74 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="012" project="visual-host-create-button-r1">
+  <metadata>
+    <title>"+" button (CardChrome + VisualHostRoot) + Fluent Dialog host + host-record seed</title>
+    <phase>A: Visual Host + Registry + Event</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>010,011</dependencies>
+    <blocks>015</blocks>
+    <tags>pcf, fluent-ui, visualhost, frontend</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>PCF UI change across two toolbar paths</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-scoped UI addition (a third toolbar icon) with explicit registry + seed contract</model-tier-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>Add the "+" toolbar icon (AddRegular) between spaarkle and open in CardChrome and the legacy VisualHostRoot toolbar, gated on createWizardEnabled. On click, resolve the wizard via WizardRegistry and open it in a Fluent Dialog seeded with the host record as initialAssociation + lockAssociation=true.</prompt>
+  <role>SPAARKE PCF developer. Fluent v9 + React 18. Follow ADR-021 (dark mode via semantic tokens) + ADR-022.</role>
+  <goal>A "+" button appears only when chartDefinition.createWizardEnabled===true, in both CardChrome and VisualHostRoot; clicking resolves + lazy-mounts the wizard in a Fluent Dialog seeded from the host record; unknown key shows a toast.</goal>
+
+  <context>
+    <background>design §5.2, §5.5. Host record entity/id/name come from context.mode.contextInfo. lockAssociation hides step 1 (from task 014).</background>
+    <relevant-files>
+      src/client/pcf/VisualHost/control/components/CardChrome.tsx
+      src/client/pcf/VisualHost/control/components/VisualHostRoot.tsx
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      projects/visual-host-create-button-r1/design.md
+      docs/guides/PCF-DEPLOYMENT-GUIDE.md
+      src/client/pcf/CLAUDE.md
+      src/client/pcf/VisualHost/control/components/CardChrome.tsx
+      src/client/pcf/VisualHost/control/components/VisualHostRoot.tsx
+      docs/standards/MODAL-DECISION-CRITERIA.md
+      .claude/patterns/pcf/theme-management.md
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>In CardChrome iconSlots, add a Fluent Button (AddRegular) between spaarkle and open, rendered only when createWizardEnabled.</step>
+    <step>Click handler: resolveWizard(createWizardKey, entitylogicalname); if null → toast "No create wizard registered for {key}"; else open Fluent Dialog with the lazy wizard + WizardHostProps (dataService, authenticatedFetch, bffBaseUrl, navigationService, resolveSpeContainerId, tenantId, initialAssociation={host entity,id,name}, lockAssociation=true).</step>
+    <step>Mirror the same treatment in VisualHostRoot's legacy toolbar path.</step>
+    <step>Dark-mode: use semantic tokens (ADR-021).</step>
+  </steps>
+
+  <tools>Read, Grep, Edit</tools>
+  <outputs>Updated CardChrome.tsx + VisualHostRoot.tsx.</outputs>
+
+  <acceptance-criteria>
+    <criterion>"+" renders only when createWizardEnabled; hidden otherwise.</criterion>
+    <criterion>Click opens the resolved wizard modally, seeded with the host record; step 1 hidden.</criterion>
+    <criterion>Unknown key → toast, no crash.</criterion>
+    <criterion>No regression to spaarkle/open buttons; dark mode correct.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Plus button gated by config">
+      <steps>
+        <step>Open a Visual Host visual whose chart-def has createWizardEnabled=Yes</step>
+        <step>Verify "+" icon appears between spaarkle and open</step>
+        <step>Set createWizardEnabled=No; reload; verify "+" is gone</step>
+      </steps>
+      <expected>Button visibility tracks the config flag; no console errors</expected>
+    </test>
+    <test name="Dark mode compliance">
+      <steps><step>Toggle dark mode</step><step>Verify "+" icon + dialog adapt</step></steps>
+      <expected>All colors use semantic tokens (ADR-021)</expected>
+    </test>
+  </ui-tests>
+</task>

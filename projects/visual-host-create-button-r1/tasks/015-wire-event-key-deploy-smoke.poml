@@ -1,0 +1,59 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="015" project="visual-host-create-button-r1">
+  <metadata>
+    <title>Wire event key + PCF version bump + deploy + Event-from-Matter smoke</title>
+    <phase>A: Visual Host + Registry + Event</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>012,013,014</dependencies>
+    <blocks>020</blocks>
+    <tags>pcf, deploy, visualhost, e2e-test</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Deploy + end-to-end verification of Phase A</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical wire-up + pcf-deploy recipe + smoke</model-tier-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>Confirm the event key resolves to the migrated CreateEventWizard, bump the VisualHost PCF version, build:prod + pack + deploy per pcf-deploy, and smoke-test creating an Event from a Matter visual.</prompt>
+  <role>SPAARKE PCF developer. Follow pcf-deploy exactly (build:prod, shared-lib installed first).</role>
+  <goal>VisualHost deployed with a working "+" → CreateEventWizard flow; a created Event is regarding the host Matter with all resolver fields populated; a document dual-binds to Matter + Event.</goal>
+
+  <context>
+    <background>VisualHost imports shared-lib SOURCE — the shared lib node_modules must be installed before build:prod. Bump all 5 version locations.</background>
+    <relevant-files>src/client/pcf/VisualHost/ (control + Solution)</relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      docs/guides/PCF-DEPLOYMENT-GUIDE.md
+      .claude/skills/pcf-deploy/SKILL.md
+      src/client/pcf/CLAUDE.md
+      projects/visual-host-create-button-r1/spec.md
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Verify wizardRegistry 'event' → migrated CreateEventWizard.</step>
+    <step>Install shared-lib node_modules; bump VisualHost version (all 5 locations); npm run build:prod (expect ~740 KB, not a 6 MB dev bundle); copy artifacts; pack.ps1.</step>
+    <step>Provide the solution ZIP path for import (or import per pcf-deploy).</step>
+    <step>Smoke: on a Matter's Events visual, click "+", complete CreateEventWizard, submit; inspect the Event's regarding lookup + resolver fields; upload a file and confirm it appears in both the Matter and Event Documents subgrids.</step>
+  </steps>
+
+  <tools>Bash, PowerShell, Skill(pcf-deploy), Skill(ui-test)</tools>
+  <outputs>Deployed VisualHost solution ZIP; smoke-test results.</outputs>
+
+  <acceptance-criteria>
+    <criterion>"+" on an Event visual opens CreateEventWizard; created Event regarding the host Matter with all resolver fields.</criterion>
+    <criterion>Uploaded file dual-binds (Matter + Event subgrids).</criterion>
+    <criterion>Bundle delta &lt; 5 KB gzipped (registry only); no BFF files in diff.</criterion>
+  </acceptance-criteria>
+
+  <ui-tests>
+    <test name="Event create from Matter visual">
+      <steps><step>Open Matter form → Events visual</step><step>Click "+"; complete wizard; submit</step><step>Open the new Event; verify regarding + resolver fields</step></steps>
+      <expected>Valid sprk_event regarding the Matter; no console errors</expected>
+    </test>
+  </ui-tests>
+</task>

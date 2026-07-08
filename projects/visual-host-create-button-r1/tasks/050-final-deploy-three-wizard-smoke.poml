@@ -1,0 +1,53 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="050" project="visual-host-create-button-r1">
+  <metadata>
+    <title>Final VisualHost deploy + 3-wizard smoke (Event/Invoice/KPI)</title>
+    <phase>B/C: Integration</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>030,040</dependencies>
+    <blocks>090</blocks>
+    <tags>pcf, deploy, e2e-test, visualhost</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Final deploy + end-to-end verification of all three wizards</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Deploy recipe + smoke verification</model-tier-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>Rebuild + redeploy VisualHost (which bundles the lazy-loaded Invoice/KPI wizard chunks), then smoke-test the "+" flow for all three wizards end-to-end.</prompt>
+  <role>SPAARKE PCF developer. Follow pcf-deploy (build:prod, shared-lib installed first).</role>
+  <goal>Deployed VisualHost with working "+" → Event/Invoice/KPI wizards; each creates a valid record regarding the host; documents dual-bind (Event/Invoice); no regression to spaarkle/open; bundle delta &lt; 5 KB.</goal>
+
+  <context>
+    <background>Wizards are React.lazy chunks in the shared lib consumed by VisualHost — redeploy VisualHost to ship them. Verify no BFF files in the diff (NFR-02).</background>
+    <relevant-files>src/client/pcf/VisualHost/</relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      docs/guides/PCF-DEPLOYMENT-GUIDE.md
+      .claude/skills/pcf-deploy/SKILL.md
+      projects/visual-host-create-button-r1/spec.md
+      .claude/skills/ui-test/SKILL.md
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Install shared-lib node_modules; bump VisualHost version; build:prod; copy artifacts; pack.ps1; provide ZIP path (or import).</step>
+    <step>git diff --stat — confirm NO src/server/api/Sprk.Bff.Api files (BFF=N).</step>
+    <step>Smoke each wizard: Event (dual-bind doc), Invoice (dual-bind doc), KPI (no files); verify regarding + resolver fields; verify Next Steps cards create follow-ons regarding the child.</step>
+    <step>Verify spaarkle/open unaffected; measure bundle delta.</step>
+  </steps>
+
+  <tools>Bash, PowerShell, Skill(pcf-deploy), Skill(ui-test)</tools>
+  <outputs>Deployed VisualHost ZIP; smoke results for all 3 wizards.</outputs>
+
+  <acceptance-criteria>
+    <criterion>All 3 wizards open + create valid records regarding the host with resolver fields.</criterion>
+    <criterion>Event/Invoice document dual-binds; KPI has no files step.</criterion>
+    <criterion>Next Steps (Send Email/Add To Do/Assign Work) create follow-ons regarding the child.</criterion>
+    <criterion>No BFF files in diff; bundle delta &lt; 5 KB; spaarkle/open unaffected.</criterion>
+  </acceptance-criteria>
+</task>

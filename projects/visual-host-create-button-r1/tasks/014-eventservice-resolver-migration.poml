@@ -1,0 +1,63 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="014" project="visual-host-create-button-r1">
+  <metadata>
+    <title>Migrate eventService.createEvent to applyResolverFields + lockAssociation support</title>
+    <phase>A: Visual Host + Registry + Event</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>001,002</dependencies>
+    <blocks>015</blocks>
+    <tags>shared-lib, adr-024, migration, resolver</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>ADR-024 compliance migration of existing non-compliant code; regression-sensitive</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>ADR-migration of existing non-compliant wizard; must preserve existing Event links while adding all resolver fields — high correctness bar</model-tier-reason>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>Migrate CreateEventWizard's eventService.createEvent off its ad-hoc matter/project-only map onto the ADR-024 applyResolverFields (entity-specific lookup + ALL resolver fields, 5 incl. sprk_regardingrecordnumber). Add lockAssociation support so Visual Host can hide the Associate-To step. Copy the pattern from the canonical workAssignmentService.ts.</prompt>
+  <role>SPAARKE shared-UI developer + ADR-024 expert. Follow ADR-024 exactly (amended by #549).</role>
+  <goal>eventService.createEvent writes the entity-specific @odata.bind AND all resolver fields via applyResolverFields; existing Event creation surfaces still link correctly (regression-verified); CreateRecordWizard/AssociateToStep honor a lockAssociation flag that hides/locks step 1.</goal>
+
+  <context>
+    <background>eventService currently uses a hardcoded matter/project map and SKIPS the 4 resolver fields (design §5.6, R2) — an ADR-024 violation. This is a correctness fix, not a new deviation. The canonical compliant reference is workAssignmentService.ts (nav-prop discovery → payload → BU defaults → applyResolverFields → createRecord → file pipeline → warnings). ADR-024 MUST: populate ALL resolver fields; only ONE entity-specific lookup at a time (satisfied on create-from-host); use sprk_recordtype_ref discriminator.</background>
+    <relevant-files>
+      src/client/shared/Spaarke.UI.Components/src/components/CreateEventWizard/eventService.ts
+      src/client/shared/Spaarke.UI.Components/src/components/CreateWorkAssignmentWizard/workAssignmentService.ts (CANONICAL — copy this pattern)
+      src/client/shared/Spaarke.UI.Components/src/services/PolymorphicResolverService.ts
+      src/client/shared/Spaarke.UI.Components/src/components/AssociateToStep/AssociateToStep.tsx
+      src/client/shared/Spaarke.UI.Components/src/components/CreateRecordWizard/CreateRecordWizard.tsx
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      .claude/adr/ADR-024-polymorphic-resolver-pattern.md
+      .claude/patterns/dataverse/polymorphic-resolver.md
+      src/client/shared/Spaarke.UI.Components/src/components/CreateWorkAssignmentWizard/workAssignmentService.ts
+      src/client/shared/Spaarke.UI.Components/src/services/PolymorphicResolverService.ts
+      src/client/shared/Spaarke.UI.Components/src/components/CreateEventWizard/eventService.ts
+      projects/visual-host-create-button-r1/design.md
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Study workAssignmentService.ts as the canonical ADR-024 flow. Note _discoverNavProps + applyResolverFields usage and the post-#549 result type.</step>
+    <step>Replace eventService.createEvent's ad-hoc regarding map with: discover sprk_event nav-props, then call applyResolverFields(webApi, entity, navProps, parentEntity, parentEntitySet, parentRecordId, parentRecordName, hint) before createRecord.</step>
+    <step>Ensure all resolver fields (recordtype→sprk_recordtype_ref, recordid, recordname, recordurl, recordnumber) are written; verify sprk_recordtype_ref rows exist for the parent types.</step>
+    <step>Add lockAssociation support: when true, CreateRecordWizard/AssociateToStep hides/locks step 1 and treats initialAssociation as fixed (design §5.5).</step>
+    <step>Regression-test: create an Event from every existing surface (subgrid, form) and confirm the entity-specific lookup + resolver fields are set and the record opens correctly.</step>
+    <step>Update/add unit tests per ADR-038.</step>
+  </steps>
+
+  <tools>Read, Grep, Edit, Skill(adr-check), Skill(code-review)</tools>
+  <outputs>Migrated eventService.ts; lockAssociation wiring in CreateRecordWizard/AssociateToStep; tests.</outputs>
+
+  <acceptance-criteria>
+    <criterion>Created Event has one entity-specific lookup + ALL resolver fields populated (verify in Dataverse).</criterion>
+    <criterion>Events created from existing surfaces still link correctly (no regression).</criterion>
+    <criterion>lockAssociation=true hides step 1; false leaves it visible.</criterion>
+    <criterion>adr-check passes for ADR-024; code-review clean.</criterion>
+  </acceptance-criteria>
+</task>

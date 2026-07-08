@@ -1,0 +1,57 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="001" project="visual-host-create-button-r1">
+  <metadata>
+    <title>Discovery + schema/manifest validation</title>
+    <phase>0: Discovery &amp; Schema Verification</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>002,010,011,013,014,015,030,040</blocks>
+    <tags>discovery, dataverse, schema, read-only</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Read-only discovery; produces notes, no code changes</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Read-only schema/metadata inspection with explicit targets</model-tier-reason>
+    <parallel-group>none</parallel-group>
+    <parallel-safe>false</parallel-safe>
+  </metadata>
+
+  <prompt>Ground the build in live Dataverse schema and confirm the owner-provided field manifests before any wizard code is written.</prompt>
+  <role>SPAARKE platform developer. Dataverse schema + ADR-024 resolver expertise. Follow ADRs strictly.</role>
+  <goal>Validated field manifests written to notes/field-manifests/{event,invoice,kpi}.md, and a schema-delta decision (expected: none, or a single additive sprk_regardingrecordnumber column on sprk_event/sprk_kpiassessment).</goal>
+
+  <context>
+    <background>Owner provided field manifests (spec FR-16); data-model docs proved stale earlier, so validate against live schema. #549 added sprk_regardingrecordnumber as a 5th resolver field.</background>
+    <relevant-files>
+      sprk_event, sprk_invoice, sprk_kpiassessment, sprk_document, sprk_recordtype_ref (Dataverse, via MCP read tools)
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      projects/visual-host-create-button-r1/spec.md
+      projects/visual-host-create-button-r1/design.md
+      .claude/adr/ADR-024-polymorphic-resolver-pattern.md
+      .claude/patterns/dataverse/polymorphic-resolver.md
+      src/client/shared/Spaarke.UI.Components/src/services/PolymorphicResolverService.ts
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Read sprk_document lookups via MCP describe: confirm sprk_matter, sprk_project, sprk_Event, sprk_invoice exist (host + Event/Invoice child); note whether any KPI lookup exists (expected none — KPI has no files).</step>
+    <step>Read sprk_event and sprk_kpiassessment: confirm whether sprk_regardingrecordnumber exists (Invoice already has it). Record the delta.</step>
+    <step>Validate the owner manifests against live schema: KPI (sprk_kpiname, sprk_performancearea, sprk_kpigradescore, sprk_assessmentcriteria, sprk_assessmentnotes) — confirm logical names, types, required flags, choice option-sets. Invoice (sprk_invoicenumber, sprk_name, sprk_description, sprk_vendororg→sprk_organization, sprk_invoicedate) — confirm logical names + vendor-org relationship.</step>
+    <step>Re-read the post-#549 applyResolverFields signature + PolymorphicPicker contract in PolymorphicResolverService.ts and components/PolymorphicPicker/.</step>
+    <step>Write notes/field-manifests/{event,invoice,kpi}.md with validated fields + flag any mismatch or required field the owner omitted.</step>
+  </steps>
+
+  <tools>ToolSearch (mcp__dataverse__describe, read_query), Read, Grep, Write</tools>
+  <outputs>notes/field-manifests/{event,invoice,kpi}.md; schema-delta decision recorded in the KPI manifest note.</outputs>
+
+  <acceptance-criteria>
+    <criterion>Each of the 3 manifest notes lists validated logical names + types + required flags; any mismatch flagged for owner.</criterion>
+    <criterion>sprk_document host+child lookups confirmed for Event and Invoice; KPI files confirmed out of scope.</criterion>
+    <criterion>sprk_regardingrecordnumber presence on Event/KPI recorded (drives whether task 002 runs).</criterion>
+    <criterion>Owner signs off the manifests before tasks 030/040 build.</criterion>
+  </acceptance-criteria>
+</task>

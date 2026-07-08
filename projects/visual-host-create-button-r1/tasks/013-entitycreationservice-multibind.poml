@@ -1,0 +1,56 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="013" project="visual-host-create-button-r1">
+  <metadata>
+    <title>EntityCreationService.createDocumentRecords multi-bind</title>
+    <phase>A: Visual Host + Registry + Event</phase>
+    <status>not-started</status>
+    <estimated-hours>3</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>015,030</blocks>
+    <tags>shared-lib, spe, documents, adr-007</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Modifies shared service used by multiple wizards</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Single-seam additive change (one @odata.bind → optional array of binds)</model-tier-reason>
+    <parallel-group>A</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>Extend EntityCreationService.createDocumentRecords to bind one sprk_document to BOTH the host record and the created child record, so an uploaded file appears in both Documents subgrids.</prompt>
+  <role>SPAARKE shared-UI developer. SharePoint Embedded + Dataverse Web API. Follow ADR-007.</role>
+  <goal>createDocumentRecords accepts an optional additionalBinds: {entitySet, id, navProp}[] and emits extra @odata.bind entries alongside the primary one; backward compatible (absent → current single-bind behavior).</goal>
+
+  <context>
+    <background>sprk_document has separate typed lookups (sprk_matter, sprk_project, sprk_Event, sprk_invoice) — one row can bind to multiple parents natively (design §5.8). Single seam at the create-payload assembly.</background>
+    <relevant-files>
+      src/client/shared/Spaarke.UI.Components/src/services/EntityCreationService.ts
+      src/client/shared/Spaarke.UI.Components/src/services/PolymorphicResolverService.ts (findNavProp)
+    </relevant-files>
+  </context>
+
+  <knowledge>
+    <files>
+      projects/visual-host-create-button-r1/design.md
+      projects/visual-host-create-button-r1/notes/field-manifests/
+      src/client/shared/Spaarke.UI.Components/src/services/EntityCreationService.ts
+      src/client/shared/Spaarke.UI.Components/src/services/PolymorphicResolverService.ts
+      .claude/adr/ADR-007-*.md
+    </files>
+  </knowledge>
+
+  <steps>
+    <step>Locate the createDocumentRecords single @odata.bind assembly seam.</step>
+    <step>Add an optional additionalBinds param; for each, emit `${navProp}@odata.bind = /${entitySet}(${cleanId})`.</step>
+    <step>Keep the primary bind + GUID normalization unchanged; ensure no duplicate nav-props.</step>
+    <step>Add/adjust unit tests per ADR-038 (no Mock&lt;HttpMessageHandler&gt;; assert payload shape).</step>
+  </steps>
+
+  <tools>Read, Grep, Edit</tools>
+  <outputs>Updated EntityCreationService.ts + tests.</outputs>
+
+  <acceptance-criteria>
+    <criterion>Passing additionalBinds emits both @odata.bind entries on one create call.</criterion>
+    <criterion>Omitting additionalBinds preserves current single-bind behavior (no regression).</criterion>
+    <criterion>Shared lib builds; tests pass.</criterion>
+  </acceptance-criteria>
+</task>
