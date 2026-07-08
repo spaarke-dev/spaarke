@@ -34,7 +34,9 @@ public static class EndpointMappingExtensions
     {
         MapHealthEndpoints(app);
         MapDomainEndpoints(app);
-        MapSpaFallback(app);
+        // MapSpaFallback removed 2026-07-08 — the /playbook-builder SPA the BFF used to
+        // serve (legacy canvas builder) is deleted; PlaybookBuilder ships as the
+        // sprk_playbookbuilder Dataverse web resource.
     }
 
     private static void MapHealthEndpoints(WebApplication app)
@@ -313,28 +315,6 @@ public static class EndpointMappingExtensions
         // Unconditional registration per bff-extensions.md §F.1 — IMembershipFieldDiscoveryService
         // is unconditionally registered in MembershipModule.AddMembership.
         app.MapAdminMembershipEndpoints();
-    }
-
-    private static void MapSpaFallback(WebApplication app)
-    {
-        app.MapFallback(context =>
-        {
-            var path = context.Request.Path.Value ?? "";
-            if (path.StartsWith("/playbook-builder/", StringComparison.OrdinalIgnoreCase) &&
-                !Path.HasExtension(path))
-            {
-                context.Request.Path = "/playbook-builder/index.html";
-                return context.RequestServices.GetRequiredService<IWebHostEnvironment>()
-                    .WebRootFileProvider
-                    .GetFileInfo("playbook-builder/index.html")
-                    .Exists
-                    ? Results.File(
-                        Path.Combine(context.RequestServices.GetRequiredService<IWebHostEnvironment>().WebRootPath!, "playbook-builder/index.html"),
-                        "text/html").ExecuteAsync(context)
-                    : Results.NotFound().ExecuteAsync(context);
-            }
-            return Results.NotFound().ExecuteAsync(context);
-        });
     }
 
     private static async Task<IResult> TestDataverseConnectionAsync(IDataverseHealthService dataverseService)
