@@ -37,6 +37,17 @@ Performs a structured, multi-dimension code review for Spaarke codebase changes.
 
 ## Workflow
 
+### Step 0: Coverage-First Contract (READ FIRST — added 2026-07-08 for Sonnet-5)
+
+**At the finding stage, maximize recall — do not self-filter for importance.** Sonnet 5 follows filtering language ("only report significant issues", "be conservative", "don't nitpick") more faithfully than earlier models: it will investigate just as deeply, identify the bug, and then withhold it because it judged it below the bar. That reads as a capability regression but is a harness effect.
+
+So, when producing findings (Steps 3–7):
+- **Report every issue you find, including low-severity and ones you are uncertain about.** It is better to surface a finding that gets filtered out later than to silently drop a real bug.
+- **Annotate each finding with a severity (Critical / Warning / Suggestion) AND a confidence.** Do not omit a finding because confidence is low — label it and keep it.
+- **Filtering is the downstream job, not this stage's.** The two-stage contract: *this skill maximizes coverage; the orchestrator (task-execute Step 9.5) applies the accept / patch / escalate / block judgment and explains its decisions.* The one exception is pure style/naming nits when a task explicitly scoped them out — those you may omit.
+
+This does NOT change severity as an *output annotation* (the report still ranks Critical → Warning → Suggestion) — it changes only that nothing is dropped *before* it reaches the report.
+
 ### Step 1: Determine Scope
 ```
 IF files explicitly specified:
