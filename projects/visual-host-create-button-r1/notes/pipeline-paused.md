@@ -1,5 +1,7 @@
-# Pipeline Paused — Blocked on In-Flight PRs
+# Pipeline Paused — Blocked on In-Flight PRs  ✅ RESOLVED 2026-07-08
 
+> **RESOLUTION (2026-07-08)**: Both blockers merged and pulled into this worktree via master merge — **#525 merged 2026-07-07**, **#549 merged 2026-07-08**. Spec/design realigned to the post-#549 resolver API (backward-compatible `applyResolverFields` now returning `IApplyResolverFieldsResult`; 5th resolver field `sprk_regardingrecordnumber`; new optional `PolymorphicPicker`; `FieldMappingHandler` inheritance left out of scope). Pipeline resumed via `/project-pipeline`. The pause history below is retained for the record.
+>
 > **Date**: 2026-07-05
 > **State**: spec.md + design.md complete and committed (commit `cc53ed77a`, branch `work/visual-host-create-button-r1`). `/project-pipeline` was run but **halted at overlap detection (before Step 2)** — NO README/PLAN/CLAUDE.md/tasks generated yet.
 > **Decision**: Owner chose to **pause the pipeline entirely** until the blocking PRs merge, and to treat **#549 as a hard prerequisite**.

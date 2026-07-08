@@ -134,7 +134,7 @@ When launched from a Visual Host visual, the created child must be regarding the
 
 ### 5.6 Polymorphic association per entity (ADR-024)
 
-Association is written via the **shared `PolymorphicResolverService.applyResolverFields(...)`** (`src/client/shared/Spaarke.UI.Components/src/services/PolymorphicResolverService.ts`), which is the ADR-024-mandated primitive. It writes the entity-specific lookup (`@odata.bind`) **and** all four resolver fields (`sprk_regardingrecordtype` → `sprk_recordtype_ref`, `sprk_regardingrecordid`, `sprk_regardingrecordname`, `sprk_regardingrecordurl`). The canonical reference call is `CreateTodoWizard`/`workAssignmentService.ts`.
+Association is written via the **shared `PolymorphicResolverService.applyResolverFields(...)`** (`src/client/shared/Spaarke.UI.Components/src/services/PolymorphicResolverService.ts`), which is the ADR-024-mandated primitive. It writes the entity-specific lookup (`@odata.bind`) **and** all resolver fields (`sprk_regardingrecordtype` → `sprk_recordtype_ref`, `sprk_regardingrecordid`, `sprk_regardingrecordname`, `sprk_regardingrecordurl`). The canonical reference call is `CreateTodoWizard`/`workAssignmentService.ts`.
 
 Per-entity status and delta:
 
@@ -142,7 +142,7 @@ Per-entity status and delta:
 |---|---|---|
 | **`sprk_event`** | Already fully polymorphic (11 lookups + resolver fields). **But `CreateEventWizard` bypasses the resolver** — it uses an ad-hoc matter/project-only map and skips the 4 resolver fields (`eventService.ts:315`). | **Migrate `eventService.createEvent` to `applyResolverFields`.** No schema change; brings Event into ADR-024 compliance and unblocks all host types. |
 | **`sprk_invoice`** | **Already fully resolver-ready** (confirmed by owner): has `sprk_matter`, `sprk_project`, and all resolver fields (`sprk_regardingrecordid`/`number`/`name`/`type`/`url`) + vendor org + `sprk_recordtype_ref`. The `docs/data-model/sprk_invoice.md` file is stale; the ER model (lines 120–124) confirms. | **No schema delta.** Create via `applyResolverFields` (Matter + Project). |
-| **`sprk_kpiassessment`** | **Now fully resolver-ready** — has `sprk_matter` + `sprk_project` lookups and the **4 resolver fields were created by owner (2026-07-05)**. | **No schema delta.** Create via `applyResolverFields` (Matter + Project). `sprk_recordtype_ref` rows for matter/project already exist (used by Todo). |
+| **`sprk_kpiassessment`** | **Now resolver-ready** — has `sprk_matter` + `sprk_project` lookups and the resolver fields were created by owner (2026-07-05). | **No confirmed schema delta.** Create via `applyResolverFields` (Matter + Project). `sprk_recordtype_ref` rows for matter/project already exist. **Phase 0 verifies `sprk_regardingrecordnumber`** (the post-#549 5th resolver field) is present on Event + KPI; if absent, a small additive column is added. |
 
 Schema deltas (KPI, and Invoice if needed) are authored via the `dataverse-create-schema` skill. These are Dataverse-only changes — **not** a BFF hot-path.
 
@@ -311,7 +311,7 @@ Phase D (follow-on consolidation) runs after A and is a prerequisite for B/C so 
 
 ## 10. ADR Compliance Snapshot
 
-- **ADR-024 (Polymorphic Resolver Pattern)** — CENTRAL. All child associations MUST go through `applyResolverFields` (both entity-specific lookup + 4 resolver fields). This includes **migrating `CreateEventWizard` off its non-compliant ad-hoc map**. New KPI/Invoice resolver fields follow the dual-field strategy; `sprk_recordtype_ref` rows (not choice fields) back the discriminator.
+- **ADR-024 (Polymorphic Resolver Pattern)** — CENTRAL. All child associations MUST go through `applyResolverFields` (both entity-specific lookup + all resolver fields, now 5 incl. `sprk_regardingrecordnumber` per #549). This includes **migrating `CreateEventWizard` off its non-compliant ad-hoc map**. `sprk_recordtype_ref` rows (not choice fields) back the discriminator. Note ADR-024 was amended by #549 — re-read before implementation.
 - **ADR-022 (PCF Platform Libraries)** — Visual Host is a PCF; React + Fluent v9 per convention.
 - **ADR-032 (Null-Object kill-switch)** — N/A (no BFF service registration this project).
 
@@ -327,7 +327,7 @@ The Event-wizard migration is a **correctness fix**, not a new deviation — the
 | R4 | Maker enables `sprk_createwizardenabled = Yes` but key doesn't resolve. | Toast on unknown key: "No create wizard is registered for `{key}`." |
 | R5 | AI prefill seam ships inert; a later BFF project must not break the wizard when `prefillEnabled` flips. | Keep the hook contract stable; the follow-on only adds endpoints + JPS actions + flips the flag. Document the seam in each wizard's Enter Info step. |
 | R6 | Multiple Visual Host instances on one page — "+" on visual A while B's wizard is open. | Fluent Dialog is modal; second click queues. Standard behavior. |
-| R9 | **Two active-PR collisions** (found at `/project-pipeline` overlap scan 2026-07-05). **PR #549** refactors `PolymorphicResolverService`/`applyResolverFields`, extracts the polymorphic picker (overlaps `AssociateToStep`), and edits ADR-024 — our foundation. **PR #525** directly edits `CardChrome.tsx`/`VisualHostRoot.tsx` + VisualHost solution. | **Pipeline paused** until #549 (hard prereq) and ideally #525 merge. On resume, build wizards on the post-#549 resolver API + extracted picker, and rebase VisualHost changes on #525. See `notes/pipeline-paused.md`. |
+| R9 | ✅ **RESOLVED 2026-07-08** — both blocking PRs merged (#525 on 07-07, #549 on 07-08) and pulled into this worktree via master merge. | Wizards build on the post-#549 API: `applyResolverFields` (backward-compatible, now returns `IApplyResolverFieldsResult`), **5 resolver fields** incl. `sprk_regardingrecordnumber`, new `PolymorphicPicker` (optional; `AssociateToStep` stays as the wizard step), `FieldMappingHandler` inheritance (out of scope). Phase 0 verifies `sprk_regardingrecordnumber` on Event/KPI. |
 | R7 | **Follow-on consolidation (Phase D) touches 3 existing working wizards** (Matter, WorkAssignment, SummarizeFiles). Migration could regress their Next Steps / email / assign-work flows. | Config-driven grid keeps each wizard's card set intact; each migrated wizard gets a smoke/regression pass before its duplicate is deleted. Migrate + delete per-wizard (not big-bang) so a regression is isolatable. |
 | Q1 | KPI reuses existing `sprk_matter` lookup vs. adding `sprk_regardingmatter` for strict ADR-024 naming. | Recommend reuse — `applyResolverFields` discovers nav-props by referenced entity, so the existing `sprk_matter` column works; only add `sprk_regardingproject` + resolver fields. Confirm at Phase 0. |
 | Q2 | Field manifests: owner must refine the Phase 0 drafts before B/C build. | Drafts land in `notes/field-manifests/`; B/C are gated on owner sign-off of the corresponding manifest. |
@@ -335,7 +335,7 @@ The Event-wizard migration is a **correctness fix**, not a new deviation — the
 ## 12. Success Criteria
 
 1. A maker can enable the "+" button on a visual by toggling `sprk_createwizardenabled = Yes`, no PCF redeploy.
-2. Clicking "+" on an Event calendar visual (on a Matter) opens `CreateEventWizard`, the Associate-To step is hidden, and the created Event is regarding the host Matter **with all 4 resolver fields populated** (ADR-024).
+2. Clicking "+" on an Event calendar visual (on a Matter) opens `CreateEventWizard`, the Associate-To step is hidden, and the created Event is regarding the host Matter **with all resolver fields populated** (ADR-024).
 3. Clicking "+" on an Invoice-bound visual opens `CreateInvoiceWizard`; submitting creates a valid `sprk_invoice` regarding the host record via `applyResolverFields`.
 4. Clicking "+" on a KPI-bound visual opens `CreateKPIAssessmentWizard`; submitting creates a valid `sprk_kpiassessment` regarding the host Matter/Project.
 5. Files uploaded in the **Event and Invoice** wizards produce a single `sprk_document` bound to **both** the host record and the created child (visible in both Documents subgrids). KPI Assessment has no files step.

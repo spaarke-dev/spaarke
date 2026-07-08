@@ -19,7 +19,7 @@ Add a maker-configurable **"+" toolbar button** to the Visual Host PCF that open
 - **Migrate `CreateEventWizard`/`eventService` onto `applyResolverFields`** (ADR-024 compliance fix) and wire it to the `event` key.
 - Two new wizards on the standard template: **`CreateInvoiceWizard`** (`sprk_invoice`) and **`CreateKPIAssessmentWizard`** (`sprk_kpiassessment`), each with a service.
 - **Auto-association** from the host record: `initialAssociation` seed + `lockAssociation` (hides step 1 when launched from Visual Host).
-- **Polymorphic association** via `PolymorphicResolverService.applyResolverFields` (entity-specific lookup + all 4 resolver fields).
+- **Polymorphic association** via `PolymorphicResolverService.applyResolverFields` (entity-specific lookup + all resolver fields).
 - **Schema delta** (Dataverse): **none.** All resolver fields (KPI created by owner; Invoice pre-existing) and chart-def columns already exist. KPI has no files step, so no `sprk_document` KPI lookup is needed.
 - **File dual-bind (Event + Invoice only)**: extend `EntityCreationService.createDocumentRecords` for a second `@odata.bind` so one `sprk_document` links to both host and child. **KPI Assessment has no files step** (owner: KPI needs no documents).
 - **`WizardFollowOns` shared module** (`FollowOnGrid` + reusable follow-on steps incl. net-new `AddTodoFollowOnStep`); **migrate all four wizard families** (`CreateRecordWizard`, `CreateMatterWizard`, `CreateWorkAssignmentWizard`, `SummarizeFilesWizard`) onto it and delete duplicate copies.
@@ -59,7 +59,7 @@ Add a maker-configurable **"+" toolbar button** to the Visual Host PCF that open
 4. **FR-04** — Clicking "+" opens the resolved wizard in a Fluent Dialog, injected with `WizardHostProps` (dataService, authenticatedFetch, bffBaseUrl, navigationService, resolveSpeContainerId, tenantId, `initialAssociation`, `lockAssociation`). *Acceptance*: wizard mounts modally; second "+" queues behind the first.
 5. **FR-05** — Each wizard implements the standard template built by wrapping `CreateRecordWizard`. **Event/Invoice**: Associate To → Add Files → Enter Info → Next Steps. **KPI Assessment**: Associate To → Enter Info → Next Steps (no files step — owner: KPI needs no documents). *Acceptance*: step order/nav match the CreateWorkAssignment reference; KPI omits Add Files via config, not a fork.
 6. **FR-06** — When launched from Visual Host, the wizard receives `initialAssociation = {host entity, id, name}` and `lockAssociation = true`, and **hides step 1**. *Acceptance*: created child is regarding the host record; the user never sees/edits the association step in the Visual Host flow.
-7. **FR-07** — All child associations write via `PolymorphicResolverService.applyResolverFields` — the entity-specific `@odata.bind` **and** all 4 resolver fields (`sprk_regardingrecordtype`→`sprk_recordtype_ref`, `sprk_regardingrecordid`, `sprk_regardingrecordname`, `sprk_regardingrecordurl`). *Acceptance*: created record has one specific lookup + 4 populated resolver fields; verified in Dataverse.
+7. **FR-07** — All child associations write via `PolymorphicResolverService.applyResolverFields` — the entity-specific `@odata.bind` **and** all resolver fields (`sprk_regardingrecordtype`→`sprk_recordtype_ref`, `sprk_regardingrecordid`, `sprk_regardingrecordname`, `sprk_regardingrecordurl`). *Acceptance*: created record has one specific lookup + the populated resolver fields; verified in Dataverse.
 8. **FR-08** — Migrate `eventService.createEvent` off its ad-hoc matter/project map onto `applyResolverFields`. *Acceptance*: Events created from all existing surfaces still link correctly, now with resolver fields populated (regression-verified).
 9. **FR-09** — **No Dataverse schema delta.** Resolver fields on `sprk_kpiassessment` were created by owner (2026-07-05); Invoice already resolver-ready; chart-def columns exist; KPI has no files (no `sprk_document` KPI lookup needed). *Acceptance*: `applyResolverFields` succeeds for Matter and Project parents on Event/Invoice/KPI; resolver fields verified present.
 10. **FR-10** — `CreateInvoiceWizard` + `invoiceService` create a valid `sprk_invoice` regarding the host record; `CreateKPIAssessmentWizard` + `kpiAssessmentService` create a valid `sprk_kpiassessment` regarding the host Matter/Project. *Acceptance*: submit produces a saved record with correct association and field values from the manifest.
@@ -90,7 +90,7 @@ Add a maker-configurable **"+" toolbar button** to the Visual Host PCF that open
 
 ### Applicable ADRs
 
-- **ADR-024 (Polymorphic Resolver Pattern)** — CENTRAL. Association MUST use the shared resolver + all 4 resolver fields.
+- **ADR-024 (Polymorphic Resolver Pattern)** — CENTRAL. Association MUST use the shared resolver + all resolver fields.
 - **ADR-022 (PCF Platform Libraries)** — React/Fluent versions for PCF.
 - **ADR-021 (Fluent Design System)** — Fluent v9 UI.
 - **ADR-007 (SPE storage)** — file upload path (`/api/obo/containers/...`).
@@ -99,7 +99,7 @@ Add a maker-configurable **"+" toolbar button** to the Visual Host PCF that open
 
 ### MUST Rules
 
-- ✅ MUST write associations via `PolymorphicResolverService.applyResolverFields` (both specific lookup + 4 resolver fields).
+- ✅ MUST write associations via `PolymorphicResolverService.applyResolverFields` (both specific lookup + all resolver fields).
 - ✅ MUST populate only ONE entity-specific lookup at a time (mutual exclusion; naturally satisfied on create-from-host).
 - ✅ MUST reference `sprk_recordtype_ref` for the resolver-type discriminator (not choice fields).
 - ✅ MUST keep record creation client-side via `IDataService.createRecord` (`Xrm.WebApi` adapter) — no new BFF endpoints.
@@ -131,7 +131,7 @@ Two items worth explicit note (neither requires an exception/amendment):
 ## Success Criteria
 
 1. [ ] Maker enables "+" via `sprk_createwizardenabled = Yes`, no PCF redeploy — *Verify*: toggle column, reload visual.
-2. [ ] "+" on an Event visual (on a Matter) opens `CreateEventWizard`, step 1 hidden, created Event regarding the host Matter with 4 resolver fields populated — *Verify*: create + inspect record in Dataverse.
+2. [ ] "+" on an Event visual (on a Matter) opens `CreateEventWizard`, step 1 hidden, created Event regarding the host Matter with all resolver fields populated — *Verify*: create + inspect record in Dataverse.
 3. [ ] "+" on an Invoice visual creates a valid `sprk_invoice` regarding the host via `applyResolverFields` — *Verify*: create + inspect.
 4. [ ] "+" on a KPI visual creates a valid `sprk_kpiassessment` regarding the host Matter/Project — *Verify*: create + inspect.
 5. [ ] A file uploaded in the **Event or Invoice** wizard yields one `sprk_document` in both the host and child Documents subgrids — *Verify*: upload + check both subgrids. (KPI has no files step.)
@@ -145,11 +145,14 @@ Two items worth explicit note (neither requires an exception/amendment):
 
 ### Prerequisites
 
-- **🚧 BLOCKED ON PR #549 (`set-regarding-and-field-mapping-resolver-r1`)** — hard prerequisite (owner decision 2026-07-05). It refactors `PolymorphicResolverService` (`applyResolverFields`), **extracts the polymorphic picker** (overlaps `AssociateToStep`), and edits ADR-024. Wizard tasks MUST consume the **post-#549** resolver API + extracted picker. Do not start resolver-dependent implementation until #549 merges.
-- **⚠️ COORDINATE WITH PR #525 (`feat/pcf-visualhost-uat-tracking-field-trio`)** — direct file collision on `CardChrome.tsx`, `VisualHostRoot.tsx`, `ControlManifest.Input.xml`, `bundle.js`, VisualHost solution files. Sequence to rebase on #525; PCF version-bump must account for #525's bump.
-- Pipeline re-run (`/project-pipeline`) is **paused** until #549 (and ideally #525) merge — see `notes/pipeline-paused.md`.
-- Phase 0 discovery: live-schema read of `sprk_document` (confirm host + Event/Invoice child lookups); validate owner-provided manifests (required flags, option-set values).
-- Dataverse schema: **none.** All resolver fields, chart-def columns, and document lookups already exist.
+- ✅ **PR #549 (`set-regarding-and-field-mapping-resolver-r1`) MERGED 2026-07-08** — prerequisite satisfied. Post-#549 resolver API is now the target (see "Post-#549 resolver API" below). ✅ **PR #525 MERGED 2026-07-07** — VisualHost files rebased in via master merge. Pipeline **unblocked**; `notes/pipeline-paused.md` annotated RESOLVED.
+- **Post-#549 resolver API (build wizards against this):**
+  - `applyResolverFields(...)` — same required params (backward-compatible), plus optional `options: IApplyResolverFieldsOptions` and now returns `IApplyResolverFieldsResult`. Still the persistence primitive for child association.
+  - **5 resolver fields now** (added `sprk_regardingrecordnumber`, wired via `resolveRecordNumberFieldName`). `applyResolverFields` populates it automatically when the target entity has the column.
+  - `PolymorphicPicker` (`components/PolymorphicPicker/`) — new shared lower-level picker. `AssociateToStep` is unchanged and does NOT consume it; our wizard Associate-To step stays on `AssociateToStep`.
+  - `FieldMappingHandler` + `sprk_fieldmappingprofile` — parent→child field inheritance now available. **Out of scope** for this project (potential later enhancement); wizards do not auto-inherit unless a follow-on adds it.
+- Phase 0 discovery: live-schema read of `sprk_document` (confirm host + Event/Invoice child lookups); **verify `sprk_regardingrecordnumber` exists on `sprk_event` and `sprk_kpiassessment`** (Invoice has it; if Event/KPI lack it, small additive schema delta returns); validate owner-provided manifests.
+- Dataverse schema: **none confirmed** for chart-def/resolver fields; contingent only on the Phase-0 `sprk_regardingrecordnumber` check for Event/KPI.
 
 ### External Dependencies
 
