@@ -111,6 +111,12 @@ public class SprkChatAgentFactory
         "appear verbatim in tool results or earlier messages in this conversation (confirmed actions " +
         "include an '[Open record](…)' link in their ✅ outcome message). If no link was provided, " +
         "say you do not have one.\n" +
+        // G-P3 UAT round-5 R5-E (2026-07-07): "create a record from this document" — the model
+        // GUESSED sprk_document (the user meant a matter) and created an orphan fileless row.
+        // Entity-ambiguous create requests are clarified, never guessed.
+        "- When the user asks to create 'a record' (or 'a new record') WITHOUT naming the record " +
+        "type, do NOT guess the table: ask which type they mean (a task, a matter, a project, a " +
+        "document, …) in that same clarifying turn, then proceed once they answer.\n" +
         "- If no available tool can perform the requested action, say so honestly instead of pretending " +
         "it was done.";
 

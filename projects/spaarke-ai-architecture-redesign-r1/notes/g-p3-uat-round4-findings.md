@@ -446,3 +446,112 @@ Deploy this branch: **BFF + shared-lib (`Spaarke.UI.Components`) + `@spaarke/ai-
   `infra/dataverse/inputschemas/` mirror pointer).
 - `projects/INDEX.md` hot-path note: this wave touched BFF + SpaarkeAi + shared-lib
   (`Spaarke.UI.Components` + `Spaarke.AI.Widgets`).
+
+---
+
+# ROUND-5 FINDING R5-E + targeted fix wave (2026-07-07, ~21:46 local; build under test 0bbb1fed9)
+
+## R5-E — "create a record from this document" → bare sprk_document row — FIXED (HARD enforcement)
+
+**Defect (operator)**: the model satisfied an entity-AMBIGUOUS request (the operator meant a
+MATTER) by GUESSING `sprk_document` and calling `dataverse.create_record` — creating a bare row
+with **no SPE file** ("No file is attached to this document yet"), erroring Similar Documents
+widget, and empty profile fields. Spaarke documents require the full ingestion pipeline (file
+upload → SPE storage → document profile analysis → indexing) that only the Document Upload
+wizard drives.
+
+**🧹 ORPHAN RECORD FOR OPERATOR CLEANUP (not deleted — delete tools are operator-gated)**:
+`sprk_document` **`dd97bad5-6e7a-f111-ab0e-7ced8ddc4cc6`** ("Written Opinion International
+Searching Authority PCT/US2024/039292", createdon 2026-07-07T21:46:33Z, `sprk_graphitemid`
+empty — confirmed still present at fix time).
+
+**Root cause**: round-3's R3-4 fix banned fileless `sprk_document` creation at the
+DESCRIPTION level only — the model ignored the guidance. **Guidance ≠ enforcement.**
+
+**Fixes**:
+1. **HARD enforcement — `DataverseCreateRecordHandler`**: `sprk_document` creates are now
+   REJECTED outright with `VALIDATION_FAILED` **before any Dataverse call**, in BOTH legs —
+   `ValidateChat` (the gate-resume path runs it first via `TypedHandlerResumeExecutor`) and
+   `ExecuteChatAsync` (defense in depth; fires before the metadata GET; `TryParseArgs`
+   lower-cases so casing variants can't slip past). One dual-audience rejection message
+   (`SprkDocumentCreateBlockedMessage`): user-facing honesty ("can't be created from chat…
+   Document Upload wizard, or upload the file into this chat") + model-facing remediation
+   ("Do NOT retry… no argument change makes it valid; offer an alternative"). The gate
+   failure leg persists this text verbatim into the ❌ transcript AND the model's history.
+2. **Ambiguity steering (cheap)**: `SprkChatAgentFactory.SideEffectHonestyDirective` +1
+   bullet — when the user asks to create "a record" WITHOUT naming the record type, do NOT
+   guess the table: ask which type (task, matter, project, document, …) in the SAME
+   clarifying turn.
+3. **Catalog row** `sprk_analysistool` `18b3531f-ba78-f111-ab0e-7ced8ddc4a05`
+   `sprk_description` (verified by post-write re-read): the R3-4 sentence "Do NOT create
+   sprk_document rows from chat…" REPLACED by the HARD RULE ("…this tool REJECTS any create
+   on the sprk_document table before anything is written (VALIDATION_FAILED)… Never attempt
+   or retry… point the user to the Document Upload wizard…") + the entity-map document entry
+   annotated "creation BLOCKED on this tool, Document Upload wizard only". Old→new: old text
+   = round-4 state (captured verbatim in the pre-write read; identical to the pre-edit seed
+   mirror). Handler `Metadata` description mirrors; seed mirror
+   `infra/dataverse/sprk_analysistool-dataverse-create-record-row.json` updated (+ history
+   comment).
+4. **Eval**: NEW fixture case **GU-064** (family clarify, "create a record from this
+   document" → ask which type, never guess; documents the two enforcement layers).
+
+**Census (per fix brief)**: `DataverseCreateRecordHandler` is reachable ONLY via (a) the
+IToolHandler assembly-scan DI registration consumed by the chat-tool projection (the LLM tool
+leg, gated by declared side-effect class) and (b) `TypedHandlerResumeExecutor` resume (same
+`ValidateChat`→`ExecuteChatAsync` stack). No CRUD/server path constructs or injects it
+(grep: only tests + eval harness + seed/catalog references). **No legitimate server path
+creates sprk_document through this handler — the block breaks nothing.**
+
+**Pinned tests** (`DataverseCreateRecordHandlerTests` +4 facts, `…InvalidSchemaProjectionTests`
++1 assertion): `ValidateChat_SprkDocumentTable_RejectsWithHardBlockMessage_AndZeroDataverseCalls`;
+`ExecuteChatAsync_SprkDocumentTable_FailsValidation_WithZeroWireCalls` (×2 casing theory —
+verifies ZERO GetAsync/PostAsync); `Metadata_Description_CarriesSprkDocumentHardBlock`; R5-E
+directive bullet pinned in `CreateAgentAsync_ToolsProjected_AppendsSideEffectHonestyDirective`.
+
+**Known residual (accepted, candidate)**: the confirmation DIALOG still shows before the
+rejection on the loop path — `SideEffectGateAIFunction` suspends by declared class without
+pre-validating (by design; no tool-name/table logic belongs in the gate per ADR-039). With the
+hardened row description the model should refuse before invoking; if it invokes anyway, the
+user sees Confirm → honest ❌. Pre-suspend validation is a gate-architecture candidate, not
+this wave.
+
+## R5-E wave test evidence (2026-07-07)
+
+- Targeted (CreateRecord + InvalidSchemaProjection + TypedHandlerResumeExecutor +
+  ConfirmationGateUnification): **59/59 green**.
+- **Full BFF unit suite: 7657 total — 7551 passed, 101 skipped, 5 failed** — the 5 are
+  exactly the KNOWN pre-existing list (ExecutorConfigSchemas placeholder,
+  KnowledgeDeploymentConfig defaults, DailyBriefingCollector, PlaybookTemplateContextBuilder
+  TextOnly, SessionFilesCleanup orphan-eviction; AuditLogService flake + NetArchTest did not
+  fire this run). Total grew 7653 → 7657 = exactly this wave's +4 new facts. **Zero failures
+  attributable.**
+- **Eval gate (`Category=GoldenUtteranceEval`): 35/35 green** (fixture now 64 cases incl.
+  GU-064).
+- **Publish (ADR-029/NFR-01)**: `dotnet publish -c Release` + `Compress-Archive Optimal`:
+  **270 files | 141.53 MB uncompressed | 46.84 MB compressed** — file count and uncompressed
+  size IDENTICAL to round-4's reading (270 / 141.53); the ±1.3 MB compressed swing vs
+  round-4's 45.50 is the same compressor variance round-4 documented (it read −1.33 vs
+  round-3's 46.83). Zero `*.csproj` changes → zero NuGet/CVE surface change. Ceiling 60 MB:
+  far clear.
+
+## R5-E wave — r2 inherited-backlog check (READ ONLY)
+
+`projects/spaarke-ai-architecture-redesign-r2/design.md` **§7 row 2** carries the candidate:
+"Document-creation capability (R3-4 named candidate: SPE upload + `sprk_document` row) →
+Area 3 — absorbed into D-C2 save-back leg"; D-C2's save-back row spells out SPE upload +
+`sprk_document` promotion + container wiring + provenance (compose-r1 §8 reuse). ✅ Covered.
+*Wording nit for the r2 spec pass (not edited)*: the row says "SPE upload + sprk_document
+row" — R5-E establishes the bar as **full ingestion parity** (profile analysis + indexing
+too, matching what the Document Upload wizard drives), which D-C2/compose-r1 §8 should make
+explicit at spec time.
+
+## Round-6 UAT script addition (G-P3)
+
+12. **sprk_document hard block + ambiguity clarify (R5-E)**: (a) "create a record from this
+    document" → the model ASKS which record type (task/matter/project/document…) in the same
+    turn — it does NOT guess and does NOT invoke create_record. (b) Force the block: "create
+    a document record for this file" (or answer "document" to the clarify) → the model
+    refuses citing the Document Upload wizard WITHOUT invoking the tool; if it does invoke,
+    the outcome is an honest ❌ "Spaarke document records can't be created from chat…" with
+    ZERO record created (verify no new sprk_document row). 🧹 And delete orphan
+    `dd97bad5-6e7a-f111-ab0e-7ced8ddc4cc6` (operator cleanup from this finding).

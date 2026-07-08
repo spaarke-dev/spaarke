@@ -177,6 +177,84 @@ public sealed class DataverseCreateRecordHandlerTests : TypedToolHandlerTestFixt
     }
 
     // ═════════════════════════════════════════════════════════════════════════════
+    // G-P3 UAT round-5 R5-E — sprk_document HARD block (2026-07-07)
+    // ═════════════════════════════════════════════════════════════════════════════
+
+    /// <summary>
+    /// R5-E repro pin: "create a record from this document" → the model created a BARE
+    /// sprk_document row (dd97bad5-6e7a-f111-ab0e-7ced8ddc4cc6) — no SPE file, empty
+    /// profile, Similar Documents errored. Round-3's R3-4 DESCRIPTION-level ban was
+    /// ignored; guidance is not enforcement. The handler now rejects the table outright.
+    /// ValidateChat is the gate-resume leg's first stop (TypedHandlerResumeExecutor runs
+    /// it BEFORE ExecuteChatAsync), so this rejection fires before any Dataverse call.
+    /// </summary>
+    [Fact]
+    public void ValidateChat_SprkDocumentTable_RejectsWithHardBlockMessage_AndZeroDataverseCalls()
+    {
+        var ctx = BuildChatInvocationContext(
+            toolArgumentsJson: """{"tablename":"sprk_document","item":{"sprk_documentname":"Summary of NDA"}}""");
+
+        var result = CreateHandler().ValidateChat(ctx, BuildCreateTool());
+
+        result.IsValid.Should().BeFalse(
+            because: "sprk_document creates are blocked unconditionally (R5-E hard rule)");
+        var error = string.Join(" ", result.Errors);
+        error.Should().Contain("can't be created from chat",
+            because: "the user-facing half must state the honest outcome");
+        error.Should().Contain("Document Upload wizard",
+            because: "the user-facing half must point at the supported path");
+        error.Should().Contain("Do NOT retry",
+            because: "the model-facing half must forbid retrying the same create");
+        _dataverse.VerifyNoOtherCalls();
+    }
+
+    [Theory]
+    [InlineData("sprk_document")]
+    [InlineData("SPRK_DOCUMENT")] // TryParseArgs lower-cases — casing variants cannot slip past
+    public async Task ExecuteChatAsync_SprkDocumentTable_FailsValidation_WithZeroWireCalls(string tablename)
+    {
+        // Even with metadata plumbing available, the block fires BEFORE the metadata GET.
+        SetupEntityMetadata("sprk_document", "sprk_documents", "sprk_documentid");
+        var ctx = BuildChatInvocationContext(
+            toolArgumentsJson: $$$"""{"tablename":"{{{tablename}}}","item":{"sprk_documentname":"Summary of NDA"}}""");
+
+        var result = await CreateHandler().ExecuteChatAsync(ctx, BuildCreateTool(), CancellationToken.None);
+
+        result.Success.Should().BeFalse();
+        result.ErrorCode.Should().Be(ToolErrorCodes.ValidationFailed);
+        result.ErrorMessage.Should().Contain("Document Upload wizard").And.Contain("Do NOT retry");
+        _dataverse.Verify(
+            d => d.GetAsync(It.IsAny<string>(), It.IsAny<CancellationToken>()),
+            Times.Never,
+            failMessage: "the block must fire before metadata resolution — zero Dataverse wire calls");
+        _dataverse.Verify(
+            d => d.PostAsync(It.IsAny<string>(), It.IsAny<string>(), It.IsAny<bool>(), It.IsAny<CancellationToken>()),
+            Times.Never,
+            failMessage: "no sprk_document row may ever be written from this tool");
+    }
+
+    /// <summary>
+    /// R5-E guidance parity: the handler description (mirrored on the catalog row
+    /// 18b3531f… and the infra seed JSON) must state the block as a HARD rule the
+    /// model never attempts or retries — round-3's softer "Do NOT use" phrasing was
+    /// demonstrably insufficient.
+    /// </summary>
+    [Fact]
+    public void Metadata_Description_CarriesSprkDocumentHardBlock()
+    {
+        var description = CreateHandler().Metadata.Description;
+
+        description.Should().Contain("HARD RULE",
+            because: "the description must state the ban as enforced, not advisory");
+        description.Should().Contain("sprk_document creates are BLOCKED");
+        description.Should().Contain("VALIDATION_FAILED",
+            because: "the model is told the rejection is mechanical — retrying is pointless");
+        description.Should().Contain("Document Upload wizard",
+            because: "the model must have the honest alternative to relay");
+        description.Should().Contain("Never attempt or retry a sprk_document create");
+    }
+
+    // ═════════════════════════════════════════════════════════════════════════════
     // Successful create — created-record citation shape (ADR-039 grounding)
     // ═════════════════════════════════════════════════════════════════════════════
 

@@ -42,6 +42,35 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
 {
     private const string HandlerIdValue = nameof(DataverseCreateRecordHandler);
 
+    /// <summary>
+    /// G-P3 UAT round-5 R5-E (2026-07-07): HARD block on <c>sprk_document</c> creates.
+    /// Round-3's R3-4 fix banned fileless document creation at the DESCRIPTION level only —
+    /// the model ignored the guidance and created a bare, broken sprk_document row (no SPE
+    /// file, empty profile, Similar Documents errors). Guidance is not enforcement: this
+    /// handler now REJECTS the table outright (<see cref="ToolErrorCodes.ValidationFailed"/>,
+    /// before any Dataverse call) in BOTH <see cref="ValidateChat"/> (the gate-resume leg
+    /// runs it before <see cref="ExecuteChatAsync"/>) and <see cref="ExecuteChatAsync"/>
+    /// (defense in depth). Spaarke documents require the full ingestion pipeline (file
+    /// upload → SPE storage → document profile → indexing) that only the Document Upload
+    /// wizard drives. Exposed internal for the enforcement tests.
+    /// </summary>
+    internal const string BlockedTableLogicalName = "sprk_document";
+
+    /// <summary>
+    /// The single rejection message for blocked <c>sprk_document</c> creates. Serves BOTH
+    /// audiences on purpose: the gate failure leg persists this text verbatim into the ❌
+    /// transcript message (user-facing honesty) AND into conversation history the model
+    /// reads on the next turn (model-facing remediation — never retry, offer alternatives).
+    /// </summary>
+    internal const string SprkDocumentCreateBlockedMessage =
+        "Spaarke document records can't be created from chat — this create was REJECTED and nothing " +
+        "was written. Documents need the full ingestion pipeline (file upload → secure storage → " +
+        "document profile) that the Document Upload wizard drives; a row created here would be a " +
+        "broken, fileless document. Use the Document Upload wizard to add a document, or upload the " +
+        "file into this chat and I can work with it in-session. Do NOT retry this create — " +
+        "sprk_document is blocked on this tool unconditionally and no argument change makes it " +
+        "valid; offer an alternative instead (Document Upload wizard, create a task, or draft an email).";
+
     [GeneratedRegex(@"^[a-z][a-z0-9_]*$")]
     private static partial Regex LogicalNameRegex();
 
@@ -86,13 +115,20 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
                      "resolve the reference row's GUID via dataverse.read_query first and send " +
                      "{\"relatedTable\":\"sprk_mattertype_ref\",\"recordId\":\"guid\"} (same pattern for " +
                      "practice area), or OMIT the column and put the value in sprk_matterdescription. " +
-                     // G-P3 UAT round-3 R3-4 (2026-07-07): the model tried to satisfy "add this to
-                     // documents" by creating a bare sprk_document row (DATAVERSE_BAD_REQUEST) —
-                     // document records require an SPE file and no chat tool can upload one.
-                     "Do NOT use this tool to create sprk_document rows: document records require a file " +
-                     "uploaded to SharePoint Embedded and no chat tool can upload file content — if asked to " +
-                     "save chat output 'to documents', say honestly that you cannot create documents from " +
-                     "chat and offer an alternative (create a task, draft an email, or open a workspace tab). " +
+                     // G-P3 UAT round-3 R3-4 (2026-07-07): description-level ban on bare
+                     // sprk_document rows. Round-5 R5-E (2026-07-07): the model IGNORED that
+                     // guidance and created an orphan fileless document — the ban is now a HARD
+                     // rule enforced by this handler (ValidateChat + ExecuteChatAsync reject
+                     // sprk_document with VALIDATION_FAILED before any Dataverse call).
+                     "HARD RULE — sprk_document creates are BLOCKED: this tool REJECTS any create on the " +
+                     "sprk_document table before anything is written (VALIDATION_FAILED). Spaarke document " +
+                     "records require the full ingestion pipeline (file upload → SharePoint Embedded storage → " +
+                     "document profile → indexing) that only the Document Upload wizard drives; no chat tool " +
+                     "can upload file content. Never attempt or retry a sprk_document create — no argument " +
+                     "change makes it valid. If asked to create a document or save chat output 'to documents', " +
+                     "say honestly that documents can't be created from chat and point the user to the Document " +
+                     "Upload wizard (or offer an alternative: work with a file uploaded into this chat, create " +
+                     "a task, draft an email, or open a workspace tab). " +
                      "SIDE-EFFECT tool (write): the create is executed with the user's own privileges; " +
                      "if the user cannot create rows in the table, the call fails with their access error.",
         Version: "1.0.0",
@@ -143,8 +179,14 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
         if (string.IsNullOrWhiteSpace(context.TenantId))
             return ToolValidationResult.Failure("TenantId is required.");
 
-        if (!TryParseArgs(context.ToolArgumentsJson, out _, out _, out var error))
+        if (!TryParseArgs(context.ToolArgumentsJson, out var tablename, out _, out var error))
             return ToolValidationResult.Failure(error!);
+
+        // R5-E HARD RULE: sprk_document creates never execute — the gate-resume leg
+        // (TypedHandlerResumeExecutor) runs ValidateChat BEFORE ExecuteChatAsync, so this
+        // rejection fires before any Dataverse wire call on every path.
+        if (string.Equals(tablename, BlockedTableLogicalName, StringComparison.Ordinal))
+            return ToolValidationResult.Failure(SprkDocumentCreateBlockedMessage);
 
         return ToolValidationResult.Success();
     }
@@ -161,6 +203,16 @@ public sealed partial class DataverseCreateRecordHandler : IToolHandler
         if (!TryParseArgs(context.ToolArgumentsJson, out var tablename, out var item, out var parseError))
         {
             return Error(tool, parseError!, ToolErrorCodes.ValidationFailed, startedAt);
+        }
+
+        // R5-E HARD RULE (defense in depth — ValidateChat already rejects): sprk_document
+        // creates are blocked BEFORE any Dataverse call. TryParseArgs lower-cases the
+        // table name, so casing variants cannot slip past.
+        if (string.Equals(tablename, BlockedTableLogicalName, StringComparison.Ordinal))
+        {
+            return LogOutcome(context, tablename,
+                Error(tool, SprkDocumentCreateBlockedMessage, ToolErrorCodes.ValidationFailed, startedAt),
+                stopwatch);
         }
 
         try

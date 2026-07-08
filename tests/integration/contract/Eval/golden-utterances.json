@@ -739,6 +739,18 @@
       "expected": { "outcomeClass": "clarify", "consumerType": "draft-correspondence", "consumerCode": "default", "catalogStatus": "existing" },
       "assertions": { "schemaConformance": null, "citationIntegrity": false },
       "activation": { "dispatchAssertPhase": "P3", "activatedBy": "G-P3 round-4 fix wave (R4-4 — no-attachments + inline-content steering on SYS-Email Draft row bc11e90d… + DRAFT-CORR@v1 system prompt 4b8b50f4…); live-LLM proof in the round-5 UAT script" }
+    },
+    {
+      "caseId": "GU-064",
+      "family": "clarify",
+      "ucId": "UC-H-1",
+      "channel": "text",
+      "utterance": "create a record from this document",
+      "notes": "G-P3 UAT round-5 R5-E (2026-07-07) — entity-AMBIGUOUS create: the request names no record type; the model GUESSED sprk_document (the operator meant a MATTER) and dataverse.create_record wrote an orphan fileless row (dd97bad5-6e7a-f111-ab0e-7ced8ddc4cc6 — no SPE file, empty profile, Similar Documents errored). Correct behavior: ask WHICH record type (task, matter, project, document, …) in the SAME clarifying turn, never guess the table (Action Honesty directive R5-E bullet). Two enforcement layers back the steering: DataverseCreateRecordHandler now HARD-REJECTS sprk_document creates (VALIDATION_FAILED before any Dataverse call — round-3's description-level ban was ignored, so guidance became enforcement) and the create_record row 18b3531f… states the block as a HARD RULE.",
+      "context": { "surface": "assistant-chat", "sessionHasDocument": true },
+      "expected": { "outcomeClass": "clarify", "consumerType": null, "consumerCode": null, "catalogStatus": null },
+      "assertions": { "schemaConformance": null, "citationIntegrity": false },
+      "activation": { "dispatchAssertPhase": "P2", "activatedBy": "G-P3 round-5 R5-E fix wave (directive bullet + handler hard block + row 18b3531f… HARD RULE); live-LLM proof in the round-6 UAT script" }
     }
   ]
 }

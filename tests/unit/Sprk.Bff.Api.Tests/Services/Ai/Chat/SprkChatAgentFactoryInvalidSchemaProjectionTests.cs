@@ -205,6 +205,13 @@ public class SprkChatAgentFactoryInvalidSchemaProjectionTests
             "R4-3(b): asked 'do you have a link?', the model invented a /WebResources/tables/… " +
             "URL — confirmed actions now carry a real [Open record] link in the transcript; the " +
             "directive pins relay-only");
+
+        // G-P3 UAT round-5 extension (2026-07-07):
+        agent.Context.SystemPrompt.Should().Contain(
+            "WITHOUT naming the record type, do NOT guess the table",
+            "R5-E: 'create a record from this document' — the model guessed sprk_document (the " +
+            "user meant a matter) and created an orphan fileless row; entity-ambiguous create " +
+            "requests are clarified in the same turn, never guessed");
     }
 
     // ─────────────────────────────────────────────────────────────────────────
