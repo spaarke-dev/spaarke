@@ -805,12 +805,21 @@ PARALLEL EXECUTION REQUIREMENTS:
   - All tasks in a group must have dependencies satisfied
   - Tasks must NOT modify the same files (check <relevant-files> and <parallel-safe>)
   - Each task agent uses its own task-execute invocation with full context loading
-  - **MODEL TIER (added 2026-07-08 for Sonnet-5 execution)**: dispatch each task's subagent with
-    `model = <model-tier>` from its POML (default `sonnet` @ effort `xhigh`; `opus`/`fable` for the
-    high-power tasks flagged by task-create Step 3.5.5b). This keeps the expensive top tier scoped to
-    the minority of tasks that need it while the bulk of execution runs on Sonnet 5. Planning phases
-    of THIS skill (Steps 0–3: resource discovery + artifact generation + task decomposition) run on
-    the operator's session model — recommend Opus 4.8 / Fable 5 there per the Effort guidance above.
+  - **MODEL TIER + EFFORT (added 2026-07-08 for Sonnet-5 execution)**: dispatch each task's subagent with
+    `model = <model-tier>` AND `effort = <effort>` from its POML (defaults `sonnet` @ `high`; `opus`/`fable`
+    and/or `xhigh` for the high-power / hard-reasoning tasks flagged by task-create Step 3.5.5b). This keeps
+    the expensive top tier + `xhigh` scoped to the minority of tasks that need them while the bulk runs on
+    Sonnet 5 @ high. Planning phases of THIS skill (Steps 0–3: resource discovery + artifact generation +
+    task decomposition) run on the operator's session model — recommend Opus 4.8 / Fable 5 there per the
+    Effort guidance above.
+  - **`/goal` WAVE LOOP (added 2026-07-08)**: read each wave's `goal-eligible` flag + compiled `goal-condition`
+    from TASK-INDEX.md (set by task-create Step 3.85). For a **goal-eligible** wave, the operator may run the
+    wave under `/goal "<goal-condition>"` so the session grinds through the wave's tasks without a per-task
+    "continue" — each task still runs its own task-execute with full context loading + Step 9.5 gates. The
+    Haiku evaluator is a **stopping-condition checker, not a quality gate**: a met condition means the wave is
+    *done being iterated*, NOT that the work is *good* — the orchestrator's accept/patch/escalate/block
+    decision and Step 9.5 remain authoritative. Do NOT auto-mark tasks complete on goal achievement. For a
+    **non-eligible** wave, dispatch normally (no goal loop). See task-execute "`/goal` Wave-Completion Loop".
   - Track parallel tasks in current-task.md "Parallel Execution" section
   - If a parallel task fails, continue other tasks in the group — report failure at group end
   - **MAX CONCURRENCY: 6 agents per wave** (hard limit — API overload guard, tune only with evidence)

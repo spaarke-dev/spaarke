@@ -191,9 +191,9 @@ FOR each task identified:
 REFERENCE: See .claude/skills/task-execute/SKILL.md Step 0.5 for full decision tree
 ```
 
-### Step 3.5.5b: Assign Execution Model Tier (REQUIRED — added 2026-07-08 for Sonnet-5 execution)
+### Step 3.5.5b: Assign Execution Model Tier + Effort (REQUIRED — added 2026-07-08 for Sonnet-5 execution)
 
-**Model strategy (binding):** planning phases (`design-to-spec`, `project-pipeline` Steps 0–3) run on **Opus 4.8 / Fable 5**; task **execution defaults to Sonnet 5 at effort `xhigh`** (near-Opus coding quality at ~½ cost). `project-pipeline`/`task-create` flags the minority of tasks that genuinely need top-tier reasoning back up to Opus/Fable via a per-task `<model-tier>`.
+**Model strategy (binding):** planning phases (`design-to-spec`, `project-pipeline` Steps 0–3) run on **Opus 4.8 / Fable 5**; task **execution defaults to Sonnet 5** (near-Opus coding quality at lower cost). `project-pipeline`/`task-create` flags the minority of tasks that genuinely need top-tier reasoning back up to Opus/Fable via a per-task `<model-tier>`, and sets an explicit `<effort>` per task (see the effort rubric below).
 
 ```
 FOR each task identified, assign a model tier:
@@ -232,7 +232,63 @@ FOR each task identified, assign a model tier:
     - Keeps the expensive top tier scoped to the tasks that actually need it (cost control)
 ```
 
-**Sonnet-5 authoring note (applies to EVERY task, all tiers):** Sonnet 5 follows instructions literally and does NOT generalize intent. Make each POML **explicit**: list the **exact files** to touch (not "the follow-on components"), **point at the canonical reference implementation to copy** (e.g. `workAssignmentService.ts`) rather than describe it, state the **exact contract** (e.g. the ADR-024 resolver's 5 fields + mutual-exclusion), and give **checkable acceptance criteria**. Under-specified tasks degrade Sonnet-5 output more than Opus.
+**Effort rubric (REQUIRED — set `<effort>` per task).** Sonnet 5 respects effort strictly: `high` is the default; `xhigh` is for the hardest coding/agentic work. Blanket `xhigh` is NOT free — at `xhigh` Sonnet-5 cost approaches Opus 4.8, so reserve it. Route on how hard the *reasoning* is, given a complete spec:
+
+```
+  EFFORT = xhigh IF (model-tier is sonnet AND) the task is:
+    - Brownfield debugging / root-cause / race-condition-class work (Sonnet 5 is documented
+      as particularly strong here — some tasks once tagged "Opus-required" belong here instead)
+    - Complex multi-file change with a COMPLETE spec (hard depth, low ambiguity)
+
+  EFFORT = high OTHERWISE (default):
+    - Routine, well-patterned work with a clear reference (CRUD endpoints, PCF wiring,
+      mechanical refactors, test authoring, config)
+
+  EFFORT = medium/low: reserve for short, scoped, latency-sensitive mechanical steps only.
+
+  opus/fable tasks: set <effort>high</effort> unless the task is a genuine whole-subsystem
+  reasoning problem (then xhigh). Do NOT stack fable + xhigh reflexively.
+
+  ADD to task <metadata>:
+    <effort>{low | medium | high | xhigh}</effort>
+
+  Cost guardrail: if a SONNET task genuinely needs sustained xhigh, re-check whether it should
+  be <model-tier>opus</model-tier> instead — xhigh is for tasks where Sonnet's follow-through
+  profile fits but depth is needed, not a substitute for correct Opus routing.
+```
+
+**Authoring for literal (Sonnet-5) execution (applies to EVERY task, all tiers).** Sonnet 5 follows instructions literally and does NOT generalize intent or infer unstated requests. Under-specified tasks degrade Sonnet-5 output more than Opus. Author each POML so a literal executor cannot go wrong:
+
+- **Explicit scope everywhere.** List the **exact files** to touch (not "the follow-on components"); **point at the canonical reference implementation to copy** (e.g. `workAssignmentService.ts`) rather than describe it; state the **exact contract** (e.g. the ADR-024 resolver's 5 fields + mutual-exclusion). A `<constraint>` without an explicit scope clause is a defect — write "Every endpoint added or modified in this task applies `DocumentAuthFilter`," not "use endpoint filters for auth."
+- **Acceptance criteria are a CLOSED SET.** The executor treats every listed `<criterion>` as mandatory and **anything not listed as out of scope**. Criteria must be **exhaustive, not illustrative** — include the negative/authorization cases (the 401, the empty-input, the unauthorized-user path), not just the happy path.
+- **"Above and beyond" must be requested.** If a task should include opportunistic improvements (e.g. "also fix adjacent lint violations in touched files"), say so explicitly. Do NOT rely on the model to infer it — and do NOT add anti-laziness scaffolding ("be exhaustive", "double-check everything"); Sonnet 5 over-triggers on those and burns effort on ritual verification.
+- **Step mode (see Step 3.5.5c) and escalation triggers (see the `<escalation>` element)** are the other two literal-execution levers — set them deliberately per task.
+- **Frontend tasks need concrete visual direction** (see Step 3.65): anchor the look in a `<knowledge>` pattern reference to an existing Fluent v9 component or an explicit spec. "Clean and modern" is not a spec — Sonnet 5 will settle into a fixed default house style.
+- **Knowledge curation (token discipline).** The 1M context window is headroom for genuinely cross-cutting tasks, NOT license to load the full ADR corpus by default. The Sonnet-5 tokenizer produces ~30% more tokens for the same text, so padding is materially more expensive — load what the task needs via the Tag-to-Knowledge mapping, reference the rest by path.
+
+### Step 3.5.5c: Choose Step Mode + Escalation Triggers (REQUIRED — added 2026-07-08 for Sonnet-5 execution)
+
+A literal, agentic executor treats granular ordered `<steps>` as a **binding contract** — it will do exactly the six steps written even if step 3 is wrong for the actual codebase state. Choose a step mode per task:
+
+```
+  <steps mode="directional">  ← DEFAULT for standard implementation tasks.
+      Steps are guidance; the binding contract is <goal> + <acceptance-criteria> + <constraints>.
+      The executor MAY adapt the sequence to the real codebase state.
+
+  <steps mode="prescriptive">  ← for migrations, deployment-touching work, anything under
+      azure-deployment.md constraints, or any irreversible/ordered procedure.
+      The exact sequence is binding; deviations require escalation (not silent improvisation).
+```
+
+**Escalation triggers.** A literal model will not infer *when* to invoke human escalation (root CLAUDE.md §6 / §6.5), and Sonnet 5's follow-through tendency makes it more likely to push to *a* completion than to stop at a judgment boundary. For any task with a known failure mode or judgment boundary, add an `<escalation>` element naming the concrete trip-wire:
+
+```xml
+<escalation>
+  <trigger>If the Graph API contract differs from the spec, STOP and escalate (root CLAUDE.md §6) rather than adapting the implementation.</trigger>
+</escalation>
+```
+
+This element is also load-bearing for the `/goal` wave loop (Step 3.8): inside a goal loop, firing an `<escalation>` trigger is the *correct* way out — the worker writes `BLOCKED.md` and the loop ends on the escalation branch instead of improvising.
 
 ### Step 3.5.6: Component Justification Gate (REQUIRED per CLAUDE.md §11)
 
@@ -329,6 +385,8 @@ EXAMPLE Phase Structure:
 ```
 
 ### Step 3.65: Add UI Test Definitions for PCF/Frontend Tasks (REQUIRED)
+
+**Concrete visual direction (REQUIRED for frontend tasks — added 2026-07-08 for Sonnet-5).** Before writing UI tests, verify the task anchors its visual direction concretely. Sonnet 5 settles into a fixed default house style on open-ended frontend briefs, and generic adjustments ("cleaner", "more modern") just shift it to a *different* fixed palette rather than matching intent. Every `pcf`/`frontend`/`fluent-ui` task MUST anchor the look via ONE of: a `<knowledge><patterns>` reference to an existing Fluent v9 component in the repo to mirror, an explicit spec (tokens/spacing/layout), or a referenced design artifact. Reject "clean and modern" as a spec — if the plan gives only that, add the concrete anchor from an existing component (e.g. mirror `RecordHeaderShell`) or flag the task as needing design input.
 
 ```
 FOR each task with tags: pcf, frontend, fluent-ui, e2e-test:
@@ -460,6 +518,51 @@ DESIGN FOR PARALLELISM:
   - Aim for at least 2-3 parallel groups per project phase
 ```
 
+### Step 3.85: Assign `/goal` Wave-Completion Eligibility (REQUIRED — added 2026-07-08)
+
+`/goal` (Claude Code v2.1.139+) keeps a session working turn-after-turn until a **separate transcript-only evaluator** (Haiku by default — it reads the conversation, runs NO commands, NO file reads) judges a completion condition met. It is the per-**wave** completion loop that removes the operator "continue" press between tasks. It is NOT a per-task mechanism and NOT a quality gate — Step 9.5 + the orchestrator remain the arbiter of whether work is *good*.
+
+**Assign eligibility per wave (from the Step 3.8 wave structure), analogous to `<model-tier>`:**
+
+```
+FOR each wave in the Parallel Execution Plan:
+
+  GOAL-ELIGIBLE = true IFF ALL of:
+    (1) Machine-verifiable end-state exists — the wave's tasks prove done via transcript-visible
+        output: tests pass / build exits 0 / lint clean / git status clean. (The evaluator can
+        only see what the worker surfaces — no verifiable signal ⇒ not eligible.)
+    (2) ≥3 tasks batched in the wave (enough sequential handoffs to be worth automating).
+    (3) Tasks are well-specified — exhaustive <acceptance-criteria>, explicit <constraints>.
+    (4) Low architectural-judgment / low-ambiguity (these should stop for human input, not loop).
+
+  GOAL-ELIGIBLE = false IF ANY of:
+    - Wave touches security / auth / secrets (tags: auth, security)
+    - Wave is deployment-touching or otherwise irreversible (tags: deploy; azure-deployment.md scope)
+    - Wave has likely breaking changes / expected ADR conflicts (escalation expected)
+    - Exploratory / design / research tasks with no crisp end-state
+    - Single-task or two-task wave (no batching benefit)
+
+  IF GOAL-ELIGIBLE:
+    COMPILE a by-reference condition (stay under the 4,000-char /goal cap — do NOT enumerate every
+    criterion). Store it in TASK-INDEX.md next to the wave. Template:
+
+      All of the following hold in this session:
+      (1) Every task in Wave {N} ({id-list}) shows its acceptance criteria passing via transcript
+          output — {the wave's verify command, e.g. "dotnet test exits 0" / "npm test passes"};
+      (2) Each task's Step 9.5 gates (code-review + adr-check) have been RUN and their full findings
+          surfaced in the transcript;
+      (3) git status shows only the waves' expected file changes.
+      OR: a BLOCKED.md exists under projects/{name}/ documenting a root-CLAUDE.md §6 escalation, shown in transcript.
+      Stop after {N_tasks × 6} turns if neither state is reached.
+
+  RECORD in TASK-INDEX.md Parallel Execution Plan:
+    Wave 2 (parallel, 3 agents): 020, 021, 022 — prereq: Wave 1 — goal-eligible: YES
+      goal-condition: "{compiled condition}"
+    Wave 3 (sequential): 030 — touches .claude/ — goal-eligible: NO (single-task, .claude/ boundary)
+```
+
+**Why by-reference + capped:** the 4,000-char limit and the transcript-only evaluator mean the condition proves completion through the worker's *surfaced* test runs and gate outputs, not by re-listing criteria. The turn cap is the runaway guard. Escalation (a fired `<escalation>` trigger → `BLOCKED.md`) is a legitimate loop exit, never an error.
+
 ### Step 3.7: Add Mandatory Project Wrap-up Task (REQUIRED)
 
 ```
@@ -494,7 +597,13 @@ This task is MANDATORY for all projects and must include these steps:
      - Update all milestone statuses to ✅
 
   5. Document lessons learned:
-     - Create notes/lessons-learned.md if notable insights
+     - Append to notes/lessons-learned.md (the existing per-project convention — 51+ projects use it).
+       One lesson per entry, one-line summary, record BOTH corrections and confirmed non-obvious
+       approaches + why they mattered. Do NOT create a new central lessons store — durable,
+       cross-project lessons are promoted into .claude/FAILURE-MODES.md or an ADR by
+       doc-drift-audit / ai-procedure-maintenance at project close.
+     - When authoring NEW tasks (Step 3.4), scan the project's notes/lessons-learned.md and
+       .claude/FAILURE-MODES.md and reference any relevant lesson from the task's <knowledge>.
 
   6. Final verification:
      - All task files marked completed in TASK-INDEX.md
@@ -522,6 +631,7 @@ For each task, create `tasks/{NNN}-{task-slug}.poml` as a **valid XML document**
     <rigor-reason>{Why this level - from Step 3.5.5 decision tree}</rigor-reason>
     <model-tier>{sonnet | opus | fable}</model-tier>
     <model-tier-reason>{Why this tier - from Step 3.5.5b}</model-tier-reason>
+    <effort>{low | medium | high | xhigh}</effort>  <!-- from Step 3.5.5b effort rubric; default high -->
     <parallel-group>{A/B/C/... or "none" - from Step 3.8}</parallel-group>
     <parallel-safe>{true/false - can this run in parallel?}</parallel-safe>
   </metadata>
@@ -569,7 +679,8 @@ For each task, create `tasks/{NNN}-{task-slug}.poml` as a **valid XML document**
     </patterns>
   </knowledge>
 
-  <steps>
+  <steps mode="directional">  <!-- directional (default) = goal+criteria+constraints are binding, executor may adapt sequence;
+                                     prescriptive = exact sequence binding (migrations/deploys/irreversible) — see Step 3.5.5c -->
     <step order="1">{First concrete action}</step>
     <step order="2">{Second concrete action}</step>
     <step order="3">{Continue until task is complete}</step>
@@ -577,6 +688,10 @@ For each task, create `tasks/{NNN}-{task-slug}.poml` as a **valid XML document**
     <step order="N-1">Update TASK-INDEX.md: change this task's status to ✅ completed</step>
     <step order="N">If any deviations from plan, document in projects/{project-name}/notes/</step>
   </steps>
+
+  <escalation>  <!-- OPTIONAL but REQUIRED for tasks with a known failure mode / judgment boundary (Step 3.5.5c) -->
+    <trigger>{Concrete trip-wire: "If X differs from the spec, STOP and escalate per CLAUDE.md §6 rather than adapting."}</trigger>
+  </escalation>
 
   <tools>
     <tool name="dotnet">Build and test .NET projects</tool>
@@ -747,11 +862,17 @@ Every task file MUST have these POML sections (valid XML):
 - `<outputs>` - Exact file paths with type attribute
 - `<acceptance-criteria>` - Testable criteria with testable="true" attribute
 
+Required metadata (added 2026-07-08 for Sonnet-5 execution):
+- `<model-tier>` + `<model-tier-reason>` - execution tier (Step 3.5.5b)
+- `<effort>` - low/medium/high/xhigh (Step 3.5.5b effort rubric; default `high`)
+- `<steps mode="...">` - `directional` (default) or `prescriptive` (Step 3.5.5c)
+
 Recommended sections:
 - `<knowledge>` - ADRs, patterns, and reference files (REQUIRED if task has tags - see Tag-to-Knowledge Mapping)
 - `<tools>` - Available tools for execution
 - `<notes>` - Implementation hints
 - `<execution>` - Reference to task-execute skill and pre-execution protocol
+- `<escalation>` - Concrete stop-and-escalate trigger (REQUIRED for tasks with a known failure mode / judgment boundary — Step 3.5.5c)
 - `<ui-tests>` - Browser-based UI tests for PCF/frontend tasks (REQUIRED if tags include: pcf, frontend, fluent-ui, e2e-test)
 
 ### Status Values
@@ -805,6 +926,11 @@ Before completing task-create, verify:
 - [ ] UI tests include dark mode compliance check for Fluent UI tasks (ADR-021)
 - [ ] Each task has `<rigor-hint>` and `<rigor-reason>` in metadata (Step 3.5.5)
 - [ ] Rigor levels match task characteristics (FULL for code, STANDARD for tests, MINIMAL for docs)
+- [ ] Each task has `<model-tier>` + `<model-tier-reason>` + `<effort>` in metadata (Step 3.5.5b); `xhigh` only where the effort rubric justifies it (not blanket)
+- [ ] Each task's `<steps>` has an explicit `mode` (directional default; prescriptive for migrations/deploys) (Step 3.5.5c)
+- [ ] Tasks with a known failure mode / judgment boundary carry an `<escalation><trigger>` (Step 3.5.5c)
+- [ ] Constraints are scoped explicitly and acceptance criteria are a closed set incl. negative/authorization cases (Authoring for literal execution)
+- [ ] Frontend tasks anchor visual direction concretely — pattern ref or explicit spec, not "clean and modern" (Step 3.65)
 - [ ] Parallel groups identified and documented (Step 3.8)
 - [ ] Each task has `<parallel-group>` and `<parallel-safe>` in metadata
 - [ ] TASK-INDEX.md includes "Parallel Execution Groups" section

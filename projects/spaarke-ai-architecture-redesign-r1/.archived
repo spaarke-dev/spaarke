@@ -1,0 +1,10 @@
+Archived: 2026-07-08
+Final status: Completed
+Closing PR: #551 (https://github.com/spaarke-dev/spaarke/pull/551) — merged 2026-07-08 04:57Z; follow-up #558 (test adjudication + Scriban CVE) merged 2026-07-08
+Worktree: c:/code_files/spaarke-wt-spaarke-ai-architecture-redesign-r1 (PRESERVED — not removed by this skill; clean up separately if desired)
+Remote branch: work/spaarke-ai-architecture-redesign-r1 (still on origin)
+Issue: #550 (closed; Status=Completed, Closed Date=2026-07-08, Target Date was 2026-08-15)
+Tasks: 52/52 (incl. 090 wrap-up)
+Gates: G-P0..G-P3 PASSED · G-P4 GREEN (publish-size AMBER pending operator sign-off, notes/g-p4-evidence.md) · G-M DEFERRED-WITH-EVIDENCE post-r2 (#555, notes/g-m-evidence.md)
+Deferrals: #552 #553 #554 #555 #556 #557 (+#559 latent-bug filing)
+Successor: projects/spaarke-ai-architecture-redesign-r2/ (design v0.2 → /design-to-spec)

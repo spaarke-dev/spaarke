@@ -183,27 +183,19 @@ When adding a code pattern:
    Add: Pattern file with ADR relationships
 ```
 
-### Checklist D: New Protocol (AIP)
+### Checklist D: AI Execution Rules (protocols retired 2026-07-08)
 
-When creating a new AI Interaction Protocol:
+The `.claude/protocols/AIP-00x` layer was **removed 2026-07-08**. It duplicated the executable skills, was dropped from root CLAUDE.md in the 2026-05-17 rewrite, and had drifted (stale context thresholds). Do **not** recreate a standalone `protocols/` layer. Execution/behavioral rules now live in exactly two load-bearing surfaces:
 
 ```
-□ 1. CREATE protocol file
-   Location: .claude/protocols/AIP-{NNN}-{slug}.md
-   Follow template in .claude/protocols/INDEX.md
+□ Behavioral RULE the agent must apply every turn (context thresholds, escalation triggers,
+  task-execution flow) → root /CLAUDE.md (the always-loaded layer)
 
-□ 2. UPDATE protocol INDEX
-   Location: .claude/protocols/INDEX.md
-   Add: New row with AIP number, title, purpose
+□ Procedural HOW-TO the agent runs on demand (task-create, task-execute, code-review, adr-check)
+  → the relevant .claude/skills/{name}/SKILL.md
 
-□ 3. EMBED critical rules in root CLAUDE.md
-   Location: /CLAUDE.md
-   Section: Appropriate section based on protocol topic
-   Action: Add summary of critical rules with reference to full AIP
-
-□ 4. UPDATE skill files (if protocol affects skill behavior)
-   Identify: Which skills should follow this protocol
-   Add: Reference to protocol in skill's "Related" section
+When in doubt, follow root CLAUDE.md §18: binding rule applied every turn → CLAUDE.md;
+reference/tutorial/procedure → skill or docs/. There is no third "protocol" home.
 ```
 
 ### Checklist E: New Skill
@@ -264,9 +256,9 @@ When modifying the main instruction file:
    - Project-specific CLAUDE.md files
 
 □ 2. VERIFY path references are correct
-   - Use .claude/protocols/ (not docs/reference/protocols/)
    - Use .claude/adr/ for concise ADRs
    - Use docs/adr/ for full ADRs
+   - NOTE: .claude/protocols/ was retired 2026-07-08 — execution rules live in root CLAUDE.md + skills
 
 □ 3. UPDATE "Last Updated" dates
    All affected files should have current date
@@ -285,8 +277,7 @@ After completing any checklist, run these verification steps:
 1. PATH CONSISTENCY CHECK
    Search for old/wrong paths:
    - "docs/reference/adr" → Should be ".claude/adr/" or "docs/adr/"
-   - "docs/ai-knowledge" → Directory removed; content in .claude/
-   - "docs/reference/protocols" → Should be ".claude/protocols/"
+   - ".claude/protocols/" or "AIP-00" → RETIRED 2026-07-08; point to root CLAUDE.md + skills instead
 
 2. INDEX COMPLETENESS CHECK
    Verify each INDEX.md includes all files in directory:
@@ -315,7 +306,6 @@ After completing any checklist, run these verification steps:
 | ADR (Concise) | `.claude/adr/` | `.claude/adr/INDEX.md` | adr-aware, task-execute, task-create |
 | Constraint | `.claude/constraints/` | `.claude/constraints/INDEX.md` | adr-aware, task-execute, task-create |
 | Pattern | `.claude/patterns/{domain}/` | `.claude/patterns/{domain}/INDEX.md` | adr-aware, task-execute, task-create |
-| Protocol | `.claude/protocols/` | `.claude/protocols/INDEX.md` | (varies by protocol) |
 | Skill | `.claude/skills/{name}/` | `.claude/skills/INDEX.md` | SKILL-INTERACTION-GUIDE, root CLAUDE.md |
 
 ---

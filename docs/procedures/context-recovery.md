@@ -632,9 +632,9 @@ After recovery, verify:
 ### Templates
 - [current-task.template.md](../../.claude/templates/current-task.template.md) - Template with Quick Recovery section
 
-### Protocols
-- [AIP-001: Task Execution Protocol](../../.claude/protocols/AIP-001-task-execution.md) - Task execution and handoff rules
-- [Root CLAUDE.md](../../CLAUDE.md) - Context management rules
+### Execution rules
+- [task-execute Skill](../../.claude/skills/task-execute/SKILL.md) - Task execution and handoff rules (canonical; replaced the retired AIP-001 on 2026-07-08)
+- [Root CLAUDE.md](../../CLAUDE.md) §5 - Context management rules
 
 ---
 
