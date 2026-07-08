@@ -188,3 +188,7 @@ Small, itemized; none block G-P4 (the gate criterion is code estate + explained 
 ## 12. ADR-038 test register (for task-090 /test-diet)
 
 Deleted this task, all SCAFFOLDING-class (tests of deleted dead surface): `AiPlaybookBuilderServiceTests.cs`, `Builder/ConfigurePromptSchemaTests.cs`, `ClarificationFlowTests.cs`, `ExecutorConfigSchemasEndpointTests.cs`, `EntityResolutionServiceTests.cs`, `Chat/SessionCleanupSecurityTests.cs`, `Infrastructure/Streaming/ServerSentEventWriterTests.cs`, `Models/Ai/BuilderSseEventsTests.cs`, `Models/Ai/AnalysisChunkFieldDeltaTests.cs`. Edited fixtures (mock-DI line removal only): 5 `Spe.Integration.Tests` files.
+
+## 13. Post-close correction (2026-07-08, task 090 post-merge smoke)
+
+The §4 disposition "TL-004/006/008/010 → Inactive" was **reverted**: the ADR-039 boot reconciliation (`/healthz/catalog`) went Unhealthy on the deployed master build — those four rows' handler classes (`DocumentClassifierHandler`, `SummaryHandler`, `SemanticSearchHandler`, `GenericAnalysisHandler`) are still REGISTERED in code, and a registered handler without an active `sprk_analysistool` row is drift class "registered handler without tool row". All four rows re-activated 2026-07-08 ~05:30Z; health verified `Healthy`. The correct retirement is COORDINATED code+row (delete the handler registrations in the same change that deactivates the rows) — exactly the O-2 pattern. Filed as an addition to the O-register: **O-6 — TL-004/006/008/010 coordinated handler+row retirement (r2)**; tracked on issue #557.
