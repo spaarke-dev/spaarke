@@ -8,19 +8,34 @@
 
 ## Active Task
 
-- **Task**: none (project initialized; **53 tasks decomposed**; awaiting operator plan review)
-- **Status**: not-started
-- **Phase**: Pipeline Steps 0–3 complete → **STOP for operator review** (operator directive 2026-07-08)
+- **Task**: none (P0 wave 001–004 ALL COMPLETE)
+- **Status**: none
+- **Phase**: Phase 0 — Reconciliation & Discovery (closed)
 
 ## Next Action
 
-**Operator review of the plan + tasks.** Nothing executes until approved. When cleared, first executable group is **P0 (001–004)** + **A0 contracts (010–016)** + **020 hoist** + **030 D-F0** — see [tasks/TASK-INDEX.md](tasks/TASK-INDEX.md) Parallel Execution Groups. Every task runs via `task-execute`. Gates (049/069/079) are operator browser UAT on spaarkedev1 — never auto-run.
+**P0 wave (001–004) is fully complete.** Task 002 (Measure-first prompt-assembly baseline)
+is ✅ complete — see `notes/prompt-assembly-baseline.md`; spec.md FR-B-05 annotated with
+estimate-vs-measured deltas; 3 findings escalated for task 054 (Environment exceeds
+estimate every turn; Business near/at ceiling from two untracked unconditional directives;
+Conversation structurally unbounded to ~8,000 tokens via the untracked ledger-outputs-context
+path). Task 001 (r1 P4-close reconciliation) ✅ — `notes/r1-p4-reconciliation.md`. Task 004
+(Discovery obligations confirm) ✅ — `notes/discovery-obligations.md`. Task 003
+(Business-slice determinism check) ✅ — CONFIRMED DETERMINISTIC; `notes/business-slice-determinism.md`.
+Per [tasks/TASK-INDEX.md](tasks/TASK-INDEX.md), next eligible waves are A0 contracts
+(010–017), the 020 triple-twin hoist, and 030 D-F0 — awaiting operator dispatch decision
+(project remains under the pipeline's STOP-for-review gate for anything beyond the
+already-cleared P0 wave). Gates (049/069/079) are operator browser UAT on spaarkedev1 —
+never auto-run.
 
 ## Recovery Notes
 
-- Artifacts present: design.md (v0.4), spec.md (51 FRs), plan.md (WBS + discovered anchors), README.md, CLAUDE.md, notes/ (2 pre-spec notes).
+- Artifacts present: design.md (v0.4), spec.md (51 FRs), plan.md (WBS + discovered anchors), README.md, CLAUDE.md, notes/ (now incl. `discovery-obligations.md`, `r1-p4-reconciliation.md`, `business-slice-determinism.md`).
 - Branch: `work/spaarke-ai-architecture-redesign-r2` (existing worktree — pipeline Step 4 feature-branch creation SKIPPED per operator).
-- Pending pipeline steps: portfolio registration (#421 epic), `projects/INDEX.md` row, task decomposition.
+- Task 004 finding: all 5 design §14 discovery obligations CONFIRMED; 1 non-blocking location correction (`JobStatusService.cs` is at `Services/Office/`, not `Services/Jobs/`) — task 014 should cite the corrected path.
+- Task 001 finding: row 4 (legacy workspace tools) is the one contingent row r1 P4 did NOT close (Track-B audit item O-2) — escalated per the task's own trigger; recommended path is proceed with already-scoped task 075 (FR-D-06), not scope expansion. Row 5 (ADR-040 size-cap) is verified-closed — r1 task 055 already shipped `SessionLedger.CapInlinePayload`; task 064 (FR-B-15) should be a documented no-op. Rows 6/8 accept-as-ruled. Row 12 in-scope-FR (residual: `spaarke-playbook-embeddings` index not yet deleted) — unblocks task 076 (FR-D-07).
+- Task 003 finding: Business slice (host-identity block + hand-mirrored write-contract description) is deterministic on the existing render path — no code fix needed. Pinning test + 3 negative controls added at `tests/integration/contract/Api/Ai/BusinessSliceDeterminismContractTests.cs` (6/6 passed).
+- Task 002 finding: the POML's stated measurement anchor (`OrchestratorPromptBuilder.cs`) is DEAD CODE — zero production call sites; the REAL per-turn composition seam is `PlaybookChatContextProvider.GetContextAsync` + `SprkChatAgentFactory` suffix appends + `ChatHistoryManager.BuildLedgerOutputsContext` (per `PlaybookChatContextProvider`'s own FR-27 docstring). Measured via a temporary harness (`_Scratch_PromptAssemblyMeasurement.cs`, created + run + DELETED within this task — its transient compile error noted by task 003's concurrent build run is resolved, file no longer exists). 3 findings escalated to task 054 — see `notes/prompt-assembly-baseline.md`.
 - Key discovery: Memory Service EXTENDS existing `MatterMemoryService` (see plan.md §3).
 
 ---

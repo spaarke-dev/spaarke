@@ -1,7 +1,7 @@
 <task id="AIR2-002" project="spaarke-ai-architecture-redesign-r2">
   <metadata>
     <title>Measure-first prompt-assembly baseline — per-slice token counts on the AS-BUILT r1 assembly</title>
-    <status>not-started</status>
+    <status>completed</status>
     <phase>0 — Reconciliation &amp; Discovery</phase>
     <gate>none (foundation; fixes FR-B-05 ContextEnvelope budgets)</gate>
     <estimated-effort>1 day</estimated-effort>
@@ -95,4 +95,37 @@
   <escalation>
     <trigger>If the measured baseline shows any slice already exceeding its FR-B-05 estimate by a wide margin (e.g. Business or Conversation blows the ceiling on a normal turn), STOP and surface it — the budget model in FR-B-05 may need re-scoping before task 054, and it may indicate a cache-stability problem for FR-P0-03/NFR-04.</trigger>
   </escalation>
+
+  <notes>
+    <completion date="2026-07-08">
+      Executed at FULL rigor (sonnet · xhigh). Deviation from the stated anchor (directional
+      steps mode): `OrchestratorPromptBuilder.cs:44` is registered in DI and unit-tested but has
+      ZERO production call sites (verified — `.BuildSystemPrompt(` matches only in its own file
+      and tests). The REAL single per-turn composition seam, per `PlaybookChatContextProvider`'s
+      own FR-27 binding docstring, is `GetContextAsync` + `SprkChatAgentFactory`'s suffix appends
+      + `ChatHistoryManager.BuildLedgerOutputsContext` (the POML's Conversation-slice anchor was
+      correct). Measured (not source-only) via a temporary xUnit harness that called these REAL
+      production methods with representative fixtures, then was deleted (zero residual diff,
+      verified by `git status`) — satisfying ADR-040 (no parallel assembly path) without adding
+      new production instrumentation, since the existing `IPromptBudgetTracker`
+      (`Services/Ai/Memory/`, R6 task 068) already provides no-content per-layer telemetry for
+      most blocks (component-justification: reused, not duplicated).
+
+      Escalated per this task's own trigger: Environment (111 measured vs. ≤50 estimate,
+      deterministic every-turn overshoot from `BuildCurrentDateDirective`); Business (1,118
+      measured vs. ≤1,200, dominated by two unconditional directives — Honesty 779 +
+      CompactFormatting 189 — that bypass the shared budget tracker entirely); Conversation
+      (structurally unbounded to ~8,000 tokens via `BuildLedgerOutputsContext`'s
+      `MaxContextOutputs=8 × MaxContextPayloadChars=4,000` ceiling, which sits entirely outside
+      `IPromptBudgetTracker`'s accounting). Full table + findings:
+      `projects/spaarke-ai-architecture-redesign-r2/notes/prompt-assembly-baseline.md`.
+      spec.md FR-B-05 annotated with the estimate-vs-measured summary.
+
+      Zero production `.cs` files modified. `dotnet build` and `dotnet publish` both verified
+      (0 errors; 44.34 MB compressed excl. PDBs, ~0 delta vs. the 45.87 MB baseline). No new
+      packages, no new CVE surface. Quality gates (code-review + adr-check) run inline; one
+      self-caught arithmetic inconsistency in the note's Conversation/Total ranges was found
+      and corrected during review.
+    </completion>
+  </notes>
 </task>

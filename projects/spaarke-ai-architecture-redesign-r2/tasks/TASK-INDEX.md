@@ -11,10 +11,10 @@
 
 | # | Task | Status | Tier | Parallel-safe | Depends on | Gate |
 |---|---|---|---|---|---|---|
-| 001 | r1 P4-close reconciliation (§10 rows 4/5/6/8/12) | 🔲 | sonnet | ✅ | — | Phase 0 |
-| 002 | Measure-first prompt-assembly baseline | 🔲 | sonnet·xhigh | ✅ | — | Phase 0 |
-| 003 | Business-slice determinism check | 🔲 | sonnet | ✅ | — | Phase 0 |
-| 004 | Discovery obligations confirm | 🔲 | sonnet | ✅ | — | Phase 0 |
+| 001 | r1 P4-close reconciliation (§10 rows 4/5/6/8/12) ✅ 2026-07-08: row 4=in-scope-FR (r1 did NOT close — O-2; escalated per trigger; unblocks FR-D-06/075), row 5=verified-closed (r1 task 055 shipped `SessionLedger.CapInlinePayload`; unblocks FR-B-15/064 as no-op), row 6=accept-as-ruled (`sprk_event`, live-verified), row 8=accept-as-ruled (SseClient keep, grep-verified), row 12=in-scope-FR (DAILY-BRIEFING-NARRATE closed; `spaarke-playbook-embeddings` index residual unblocks FR-D-07/076). Note: `notes/r1-p4-reconciliation.md` | ✅ | sonnet | ✅ | — | Phase 0 |
+| 002 | Measure-first prompt-assembly baseline ✅ 2026-07-08: measured (not source-only) via a temporary harness driving the REAL seam — `PlaybookChatContextProvider.GetContextAsync` + `SprkChatAgentFactory` static directives + `ChatHistoryManager.BuildLedgerOutputsContext` (harness deleted after capture, zero residual diff). Found the POML's stated anchor (`OrchestratorPromptBuilder.cs`) is DEAD CODE — no production call site; corrected to the real FR-27 seam. Escalated 3 findings to task 054: Environment measured 111 vs. ≤50 estimate (exceeds on every turn); Business measured 1,118 vs. ≤1,200 (near/at ceiling, two unconditional directives untracked by the shared budget tracker); Conversation structurally unbounded to ~8,000 via `BuildLedgerOutputsContext`'s ledger-window caps (outside `IPromptBudgetTracker` entirely). See `notes/prompt-assembly-baseline.md`; spec.md FR-B-05 annotated. | ✅ | sonnet·xhigh | ✅ | — | Phase 0 |
+| 003 | Business-slice determinism check ✅ 2026-07-08: CONFIRMED DETERMINISTIC — Business slice stays in the ContextEnvelope stable prefix (NFR-04 not re-scoped). Verified host-identity block (PlaybookChatContextProvider.cs:582) + hand-mirrored write-contract description (DataverseCreateRecordHandler.cs:111) on the existing assembly path (ADR-040); pinning test + 3 negative controls added (`tests/integration/contract/Api/Ai/BusinessSliceDeterminismContractTests.cs`, 6/6 passed). No production code changed. Note: `notes/business-slice-determinism.md` | ✅ | sonnet | ✅ | — | Phase 0 |
+| 004 | Discovery obligations confirm | ✅ | sonnet | ✅ | — | Phase 0 |
 | 010 | Contract: ComposeDisposition v1 (publish FIRST) | 🔲 | opus | ✅ | — | A0 |
 | 011 | Contract: OutcomeCard v1 | 🔲 | opus | ✅ | — | A0 |
 | 012 | Contract: GateDecision v2 | 🔲 | opus | ✅ | — | A0 |
@@ -47,7 +47,7 @@
 | 054 | ContextEnvelope token budgets (breach-fails-eval) | 🔲 | opus | ❌ | 002,053 | G-R2-B |
 | 055 | Caller-contact self-assignment resolution | 🔲 | sonnet | ✅ | — | G-R2-B |
 | 056 | Portfolio fresh-retrieval bias | 🔲 | sonnet | ✅ | 053 | G-R2-B |
-| 057 | memory.write governed side effect (explicit-only) | 🔲 | opus | ❌ | 020,032,050 | G-R2-B |
+| 057 | memory.write — AI-initiated + provenance-tagged (no gate) | 🔲 | opus | ❌ | 050 | G-R2-B |
 | 060 | Organizational-scope provider interface | 🔲 | sonnet | ✅ | — | G-R2-B |
 | 061 | Semantic-scope provider interface | 🔲 | sonnet | ✅ | — | G-R2-B |
 | 062 | Workspace-intelligence precursors | 🔲 | sonnet | ✅ | 035,050 | G-R2-B |
