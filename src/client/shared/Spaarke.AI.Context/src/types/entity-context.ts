@@ -55,4 +55,3 @@ export interface EntityContext {
   /** Document GUID (populated when entityType === "document") */
   documentId?: string;
 }
-
