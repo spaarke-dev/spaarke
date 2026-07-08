@@ -194,6 +194,7 @@ At task start, Claude Code MUST output:
 ```
 🔒 RIGOR LEVEL: [FULL | STANDARD | MINIMAL]
 📋 REASON: [Why this level was chosen based on decision tree]
+🔧 MODEL TIER: [sonnet | opus | fable] (from POML <model-tier>; default sonnet @ effort xhigh)
 
 📖 PROTOCOL STEPS TO EXECUTE:
   [List all steps that will be executed for this rigor level]
@@ -202,6 +203,14 @@ Proceeding with Step 0...
 ```
 
 This declaration is **non-negotiable** and makes shortcuts visible.
+
+#### Model Tier (added 2026-07-08 for Sonnet-5 execution)
+
+Execution defaults to **Sonnet 5 at effort `xhigh`**. Each POML carries a `<model-tier>` (`sonnet` default; `opus`/`fable` for high-blast-radius / architectural / ADR-migration / security tasks — see task-create Step 3.5.5b).
+
+- **Parallel execution** (`project-pipeline` Step 5): the dispatcher spawns each task's subagent with `model = <model-tier>`, so escalation is automatic.
+- **Serial / main-session execution**: if the **current session model is lower** than the task's `<model-tier>` (e.g. session on Sonnet 5 but task needs `opus`), STOP and surface: *"🔔 This task is flagged `<model-tier>` — switch the session model (/model) or run it as an Opus/Fable subagent before proceeding."* Do not silently execute a top-tier task on a lower model.
+- Because Sonnet 5 follows instructions literally, keep the FULL-rigor quality gates (code-review + adr-check at Step 9.5) **unconditional** — they are the safety net for subtle ADR slips a lower-tier model is likelier to miss.
 
 #### User Override
 

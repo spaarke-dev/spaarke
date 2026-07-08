@@ -23,6 +23,13 @@ If you're not sure whether to add an entry, add one. Too granular is better than
 
 ## [Unreleased]
 
+### Added (2026-07-08 visual-host-create-button-r1 — Sonnet-5 execution model tiering)
+- **Model-tier strategy across the task pipeline.** Planning phases (design-to-spec, project-pipeline Steps 0–3) run on Opus 4.8 / Fable 5; task **execution defaults to Sonnet 5 @ effort `xhigh`**, with per-task escalation to Opus/Fable for the minority of high-power tasks. Mechanism is additive (absent tier ⇒ current behavior):
+  - [`task-create` SKILL.md](skills/task-create/SKILL.md) — new **Step 3.5.5b** assigns a `<model-tier>` (`sonnet` default; `opus`/`fable` for high-blast-radius / architectural / ADR-migration / security tasks) + a Sonnet-5 "be-explicit" authoring note; `<model-tier>`/`<model-tier-reason>` added to the POML metadata template.
+  - [`task-execute` SKILL.md](skills/task-execute/SKILL.md) — Step 0.5 declaration now includes `🔧 MODEL TIER`; serial task flagged above the session model triggers stop-and-escalate; FULL-rigor gates reaffirmed unconditional under Sonnet 5.
+  - [`project-pipeline` SKILL.md](skills/project-pipeline/SKILL.md) — Step 5 dispatches each subagent with `model = <model-tier>`.
+  - [`project-setup` claudemd-template](skills/project-setup/references/claudemd-template.md) — new "Execution Model & Tiering" section so every project CLAUDE.md carries the strategy.
+
 ### Changed (2026-07-08 spaarke-ai-architecture-redesign-r1 — tasks 050/055 close-out sync)
 - Root [`CLAUDE.md`](../CLAUDE.md) §10 item 4 — publish-size baseline 45.65 MB (2026-05-26) → **49.63 MB incl. PDBs** (task 055 re-measurement 2026-07-08; PDB-convention reporting note added). Same update mirrored in [`.claude/adr/ADR-029`](adr/ADR-029-bff-publish-hygiene.md) (baseline + NFR-01 thresholds replace the stale 50 MB ceiling + nonexistent script hard-fail guard) and [`.claude/constraints/azure-deployment.md`](constraints/azure-deployment.md) (two baseline lines).
 - [`.claude/adr/ADR-040`](adr/ADR-040-session-ledger.md) — inline payload cap MUST upgraded from "cap (pointer beyond cap)" to **enforce-at-cap 128 KB with deterministic truncation marker** (`SessionLedger.CapInlinePayload`, task 055; disposition legs fail loud on truncated payloads).

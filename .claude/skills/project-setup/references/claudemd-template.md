@@ -131,6 +131,15 @@ See [task-execute SKILL.md Step 8.0](../../.claude/skills/task-execute/SKILL.md)
 
 ---
 
+## Execution Model & Tiering (added 2026-07-08)
+
+- **Planning** (design-to-spec, project-pipeline Steps 0–3): run the session on **Opus 4.8 / Fable 5** — decomposition and cross-cutting reasoning benefit from the top tier.
+- **Execution** (task-execute per task): default **Sonnet 5 at effort `xhigh`** — near-Opus coding quality at lower cost. Same 1M context + tokenizer as Opus 4.8, so no checkpointing changes.
+- **Per-task escalation**: each POML carries a `<model-tier>` (`sonnet` default; `opus`/`fable` for high-blast-radius / architectural / ADR-migration / security tasks). project-pipeline dispatches each subagent at its tier; a serial task flagged above the session model triggers a stop-and-escalate (task-execute Step 0.5).
+- **Sonnet-5 discipline**: POMLs must be explicit — exact file lists, cite the canonical reference to copy, state exact contracts, checkable acceptance criteria. FULL-rigor gates (code-review + adr-check) stay unconditional.
+
+---
+
 ## Key Technical Constraints
 
 {Extract key constraints from spec.md, examples:}

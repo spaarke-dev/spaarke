@@ -191,6 +191,49 @@ FOR each task identified:
 REFERENCE: See .claude/skills/task-execute/SKILL.md Step 0.5 for full decision tree
 ```
 
+### Step 3.5.5b: Assign Execution Model Tier (REQUIRED — added 2026-07-08 for Sonnet-5 execution)
+
+**Model strategy (binding):** planning phases (`design-to-spec`, `project-pipeline` Steps 0–3) run on **Opus 4.8 / Fable 5**; task **execution defaults to Sonnet 5 at effort `xhigh`** (near-Opus coding quality at ~½ cost). `project-pipeline`/`task-create` flags the minority of tasks that genuinely need top-tier reasoning back up to Opus/Fable via a per-task `<model-tier>`.
+
+```
+FOR each task identified, assign a model tier:
+
+  MODEL TIER = opus (or fable) IF the task has ANY of:
+    - Cross-cutting refactor / migration touching 3+ existing files or consumers (high blast radius)
+    - Architectural change, new pattern/abstraction authoring, or ADR-migration / ADR-compliance work
+    - Security/auth-sensitive code (tags include: auth, security)
+    - Ambiguous or underspecified goal requiring significant judgment, or novel algorithm design
+    - FULL rigor AND (dependencies on 3+ tasks OR flagged high-risk in the plan Risk Register)
+    → fable ONLY for the very hardest of these (whole-subsystem migration, novel architecture);
+      opus for everything else in this bucket.
+
+  MODEL TIER = sonnet OTHERWISE (default):
+    - Standard single-component code implementation with an explicit canonical reference to follow
+    - Test authoring, wiring, configuration, deployment steps
+    - Documentation / inventory tasks
+
+  ADD to task <metadata>:
+    <model-tier>{sonnet | opus | fable}</model-tier>
+    <model-tier-reason>{Why - reference the specific trigger}</model-tier-reason>
+
+  EXAMPLES:
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Cross-cutting migration of 4 wizard families onto a shared module (high blast radius)</model-tier-reason>
+
+    <model-tier>opus</model-tier>
+    <model-tier-reason>ADR-024 resolver-compliance migration of an existing non-compliant wizard</model-tier-reason>
+
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>New single-component wizard following the canonical workAssignmentService.ts reference</model-tier-reason>
+
+  PURPOSE:
+    - project-pipeline Step 5 dispatches each task's subagent with model = <model-tier>
+    - task-execute declares the tier and escalates if the current session model is lower
+    - Keeps the expensive top tier scoped to the tasks that actually need it (cost control)
+```
+
+**Sonnet-5 authoring note (applies to EVERY task, all tiers):** Sonnet 5 follows instructions literally and does NOT generalize intent. Make each POML **explicit**: list the **exact files** to touch (not "the follow-on components"), **point at the canonical reference implementation to copy** (e.g. `workAssignmentService.ts`) rather than describe it, state the **exact contract** (e.g. the ADR-024 resolver's 5 fields + mutual-exclusion), and give **checkable acceptance criteria**. Under-specified tasks degrade Sonnet-5 output more than Opus.
+
 ### Step 3.5.6: Component Justification Gate (REQUIRED per CLAUDE.md §11)
 
 **This step enforces the universal rule from root CLAUDE.md §11 "Component Justification — Default to Reuse."**
@@ -477,6 +520,8 @@ For each task, create `tasks/{NNN}-{task-slug}.poml` as a **valid XML document**
     <tags>{context tags for Claude Code focus - see Standard Tag Vocabulary}</tags>
     <rigor-hint>{FULL | STANDARD | MINIMAL}</rigor-hint>
     <rigor-reason>{Why this level - from Step 3.5.5 decision tree}</rigor-reason>
+    <model-tier>{sonnet | opus | fable}</model-tier>
+    <model-tier-reason>{Why this tier - from Step 3.5.5b}</model-tier-reason>
     <parallel-group>{A/B/C/... or "none" - from Step 3.8}</parallel-group>
     <parallel-safe>{true/false - can this run in parallel?}</parallel-safe>
   </metadata>
