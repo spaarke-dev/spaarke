@@ -1,0 +1,101 @@
+<task id="AIR2-030" project="spaarke-ai-architecture-redesign-r2">
+  <metadata>
+    <title>D-F0 Resourcefulness Doctrine — strategy meta-prompt + read/write asymmetry + degradation ladder + affordances [FR-A1-01]</title>
+    <status>not-started</status>
+    <phase>Wave J — G-R2-A Judgment + Friction (FIRST work item, parallel with A0)</phase>
+    <gate>G-R2-A (judgment)</gate>
+    <estimated-effort>2-3 days</estimated-effort>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Architectural directive-layer change enforced by prompt+eval, not by the gate engine — it steers model behavior across every turn. Getting the doctrine block wrong either re-opens R1's fabrication risk or re-installs passivity; blast radius spans the whole assistant. Directive-layer edits are high-leverage and hard to reason about mechanically.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>false</parallel-safe>
+    <goal-eligible>false</goal-eligible>
+    <tags>bff-api, directive-layer, adr-039, judgment, df0</tags>
+    <dependencies>none (front D-F0 wave; runs parallel with A0). Its enforcement (031 eval family) is authored alongside.</dependencies>
+  </metadata>
+
+  <prompt>
+    Install the D-F0 Resourcefulness Doctrine into the assistant's directive layer (spec FR-A1-01, design §7.1 D-F0(a)-(d)): a strategy meta-prompt (decompose → inventory tools → verify state before acting → act or approximate → always deliver partial value + a concrete next step); the read/write safety-asymmetry rule (reads/searches/metadata-describes/verification are ALWAYS free; only side effects need care); the graceful-degradation ladder (full action → partial action → structured assistance → refusal LAST); and the rule that every refusal/block carries an actionable affordance. Extend the existing directive layer at `SprkChatAgentFactory.cs:65` — do NOT add a second directive mechanism. Audit the G-P3 rounds-1–6 pin accretion against the strategy block: fold generic instances into the doctrine; keep scenario-specific contracts as catalog data.
+  </prompt>
+
+  <role>Senior .NET developer fluent in the Spaarke directive/prompt-assembly layer, ADR-039 grounded execution, and the R1 anti-fabrication history (G-P3 rounds).</role>
+
+  <goal>
+    The directive layer carries a single coherent D-F0 doctrine block (strategy meta-prompt + read/write asymmetry + degradation ladder + affordance rule) extending `SprkChatAgentFactory.cs:65`'s existing honesty/grounded-outcomes directives (:718-746, :762) — NOT a parallel directive path. The doctrine changes model WILLINGNESS on reads and partial actions within the ADR-039 budget-8 bound, never weakens a gate or hard block (degradation operates BELOW the side-effect line). The G-P3 pin accretion is audited: generic pins folded in, scenario-specific ones left as catalog data. Enforcement is the 031 eval family (authored in parallel) — this task's doctrine has no forcing function without it.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/spaarke-ai-architecture-redesign-r2/spec.md</file>
+    <file purpose="plan">projects/spaarke-ai-architecture-redesign-r2/plan.md</file>
+    <file purpose="design">projects/spaarke-ai-architecture-redesign-r2/design.md</file>
+    <file purpose="eval-family-spec">projects/spaarke-ai-architecture-redesign-r2/notes/d-f0-eval-family-spec.md</file>
+    <file purpose="module-guidance">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    <file purpose="bff-governance">.claude/constraints/bff-extensions.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-039">Reads are free within the budget-8 loop bound; the doctrine changes willingness, NOT the bound (spec ADR Tension: D-F0(b) vs budget-8 → Path C comply). No second intent mechanism.</constraint>
+    <constraint source="ADR-040">Any state the doctrine relies on (prior outcomes, job status) is read through the ledger facade — no parallel session cache.</constraint>
+    <constraint source="project">D-F0 MUST NOT weaken a gate or hard block — the degradation ladder operates BELOW the side-effect line; deterministic Policy v2 (032) owns side-effect caution, not model timidity.</constraint>
+    <constraint source="project">Extend the EXISTING directive layer (SprkChatAgentFactory.cs:65); do not add a second directive/steering mechanism (CLAUDE.md §11 default-to-reuse).</constraint>
+    <constraint source="project">`no_fabrication` stays a 100% floor — the doctrine adds resourcefulness WITHOUT reopening "never lie."</constraint>
+    <constraint source="bff-hygiene">Run the bff-extensions.md checklist; state Placement Justification; measure publish-size delta; no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai/directive-layer, prompt-assembly, grounded-execution, resourcefulness-doctrine</topic>
+    <files>
+      <file>docs/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>docs/adr/ADR-040-session-ledger.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r2/notes/d-f0-eval-family-spec.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Directive layer entry" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs">Line 65 — SideEffectHonestyDirective, the honesty directive the D-F0 block extends; :718-746 grounded-outcomes directive; :762 directive composition point where the doctrine block wires in.</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>R1's anti-fabrication hardening (three of six G-P3 UAT rounds) installed caution that generalized into passivity — the assistant now refuses/hedges/asks where it should verify, act, approximate, or hand a working next step. D-F0 is the strategy-level judgment layer that fixes this WITHOUT reopening "never lie." Enforced by prompt+eval, so 031 IS the forcing function.</background>
+    <dependencies>
+      <dependency task="none" status="n/a">Front D-F0 wave — no upstream. Runs parallel with A0.</dependency>
+      <dependency task="031" status="parallel">The resourcefulness eval family is authored alongside as the enforcement mechanism.</dependency>
+    </dependencies>
+    <related-work>
+      <item>040 (refusal-affordance links) is the first concrete D-F0(d) affordance case (Document Upload deep-link).</item>
+      <item>032 (Policy v2) owns the deterministic side-effect caution the doctrine explicitly does NOT touch.</item>
+    </related-work>
+  </context>
+
+  <steps mode="directional">
+    <step order="0" name="Context + governance">Load FR-A1-01, the eval-family note, ADR-039/040, bff-extensions.md. Read the existing directives at SprkChatAgentFactory.cs:65 / :718-746 / :762.</step>
+    <step order="1" name="Author the doctrine block">Compose the D-F0 strategy meta-prompt + read/write asymmetry + degradation ladder + affordance rule as ONE block extending the existing directive layer. Keep it grounded-execution-consistent (reads free within budget-8).</step>
+    <step order="2" name="Audit pin accretion">Review G-P3 rounds-1–6 pins; fold generic instances into the doctrine; leave scenario-specific contracts as catalog data (record the disposition of each).</step>
+    <step order="3" name="Wire without duplication">Compose the block at :762 through the existing composition path; confirm no second directive mechanism was introduced.</step>
+    <step order="4" name="Sanity-verify behavior">Run a handful of the 031 seed cases (read-hesitancy, blocked-write, absence-claim) to confirm the doctrine shifts willingness without tripping fabrication.</step>
+    <step order="5" name="Verify + governance">Build; measure publish-size delta; state Placement Justification + bff-extensions checklist in PR notes. Eval enforcement lands in 031.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build the BFF</tool>
+    <tool name="git">Commit on the project branch</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs (D-F0 doctrine block extending :65/:762)</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r2/notes/ (pin-accretion audit: folded-in vs kept-as-catalog-data)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A single D-F0 doctrine block (strategy meta-prompt + read/write asymmetry + degradation ladder + affordance rule) extends the existing directive layer at SprkChatAgentFactory.cs; no second directive/steering mechanism is introduced.</criterion>
+    <criterion testable="true">Reads/searches/metadata-describes are marked always-free within the budget-8 bound; the bound itself is unchanged (ADR-039).</criterion>
+    <criterion testable="true">The doctrine does NOT weaken any gate or hard block — degradation-ladder language operates strictly below the side-effect line; side-effect caution is deferred to Policy v2 (032).</criterion>
+    <criterion testable="true">The G-P3 rounds-1–6 pin accretion is audited with each pin dispositioned (folded-in vs kept-as-catalog-data), recorded in project notes.</criterion>
+    <criterion testable="true">NEGATIVE: the doctrine block introduces NO instruction that would let the model claim an outcome/link/id/tool-call it did not perform — `no_fabrication` stays a 100% floor (verified against fabrication-counter seed cases from 031).</criterion>
+    <criterion testable="true">Publish-size delta measured + reported; no new HIGH CVE; Placement Justification stated.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If honoring the resourcefulness ladder for a given class of request would require the model to make a side-effect caution DECISION at runtime (rather than deferring to Policy v2's catalog-declared class), STOP — that is the ADR-039 one-intent boundary; surface it per CLAUDE.md §6.5 rather than encoding runtime risk judgment in the directive.</trigger>
+  </escalation>
+</task>

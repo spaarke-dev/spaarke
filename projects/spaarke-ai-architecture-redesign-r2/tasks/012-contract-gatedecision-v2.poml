@@ -1,0 +1,106 @@
+<task id="AIR2-012" project="spaarke-ai-architecture-redesign-r2">
+  <metadata>
+    <title>Publish GateDecision v2 contract (walking skeleton) — tier/origin/completeness gate-outcome shape</title>
+    <status>not-started</status>
+    <phase>A0 — Contract-first</phase>
+    <gate>G-R2-A (seam publication)</gate>
+    <estimated-effort>1 day</estimated-effort>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Gate-outcome contract the Policy v2 engine (FR-A1-03) and Compose r2 both bind to; carries the confirmation-state that makes a second ask structurally impossible — wrong shape corrupts the friction model. Architectural blast radius.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>true</parallel-safe>
+    <goal-eligible>false</goal-eligible>
+    <tags>bff-api, contract, seam, adr-039, gate-decision, policy-v2, compose-r2</tags>
+    <dependencies>none (A0 front wave; publish early)</dependencies>
+  </metadata>
+
+  <prompt>
+    Publish the `GateDecision v2` contract as a Phase-A0 walking skeleton (spec FR-A0-04, design D-F1). It is the gate OUTCOME shape carrying `tier`, `origin`, `completeness`, overlay results, and confirmation-state — the contract the deterministic Policy v2 engine (FR-A1-03) produces and clients + Compose r2 consume. Extend the EXISTING gate (`SideEffectGateAIFunction` + `PendingPlanManager`); do not create a second gate. Confirmation-state is a Gate-ledger property so a second ask is structurally impossible. Ship the contract WITH a thin producer, thin consumer, and a contract test.
+  </prompt>
+
+  <role>Senior .NET developer fluent in the Spaarke confirmation gate, ADR-039 catalog-declared side-effect classes, and versioned tolerant-reader contracts.</role>
+
+  <goal>
+    A versioned `GateDecision v2` contract under `Services/Ai/PublicContracts/` carrying: risk `tier` (0/1/2a/2b/2c/3/4), `origin` (deterministic classification result), `completeness` (args complete?), overlay-precedence results (injection-suspect → safety-degradation → incomplete-args → origin → tier), and confirmation-state — with a version field, tolerant-reader rules, example payloads, and failure/partial states. A thin producer emits a GateDecision from the existing gate for one side-effect path; a thin consumer renders/acts on it; a contract test in `tests/integration/contract/` locks the shape AND asserts confirmation-state prevents a second ask. The contract also carries an OPTIONAL parent-association selection affordance so the ONE gate dialog can host an associate-to picker (matter / project / invoice / work-assignment / none) without a bespoke banner.</goal>
+
+  <inputs>
+    <file purpose="spec">projects/spaarke-ai-architecture-redesign-r2/spec.md</file>
+    <file purpose="plan">projects/spaarke-ai-architecture-redesign-r2/plan.md</file>
+    <file purpose="policy-v2">projects/spaarke-ai-architecture-redesign-r2/notes/policy-v2-origin-classification-decision-tree.md</file>
+    <file purpose="module-guidance">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    <file purpose="bff-governance">.claude/constraints/bff-extensions.md</file>
+    <file purpose="consumer-design">projects/spaarkeai-compose-r2/design.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-039">Risk `tier`/`side_effect_class` and `origin` factors are catalog-declared DATA — the contract carries them; it does NOT invite runtime LLM risk judgment.</constraint>
+    <constraint source="ADR-040">Confirmation-state is a Gate-LEDGER property (stored) — the contract renders stored state; a second ask for an already-confirmed action is structurally impossible.</constraint>
+    <constraint source="ADR-013">Compose r2 consumes GateDecision only via `Services/Ai/PublicContracts/`.</constraint>
+    <constraint source="ADR-038">Contract test is a KEEP-path integration test; no `Mock&lt;HttpMessageHandler&gt;`, no DI-registration tests.</constraint>
+    <constraint source="project">v2 extends the existing gate outcome — do NOT introduce a second gate mechanism. Tolerant-reader; version field; additive-only.</constraint>
+    <constraint source="bff-hygiene">Run the bff-extensions.md checklist; state Placement Justification; measure publish-size delta; no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai/confirmation-gate, policy-v2, side-effect-class, gate-ledger, versioned-contracts</topic>
+    <files>
+      <file>docs/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>docs/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Side-effect gate" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SideEffectGateAIFunction.cs:77">The existing gate GateDecision v2 extends — the outcome shape attaches here.</pattern>
+      <pattern name="Pending-plan / confirmation persistence" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PendingPlanManager.cs:57">Where confirmation-state persists — the Gate-ledger property backing "no second ask".</pattern>
+      <pattern name="Gate ledger entry" location="src/server/api/Sprk.Bff.Api/Models/Ai/Chat/SessionLedgerEntries.cs">SessionGate — the stored gate outcome GateDecision projects.</pattern>
+      <pattern name="Contract test home" location="tests/integration/contract/">Add the GateDecision contract test here.</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>FR-A1-03 builds the deterministic Policy v2 engine (tier table + overlay precedence + fail-closed origin classifier + E-1..E-6). Its OUTPUT is a GateDecision. This A0 task freezes that output shape first, so the engine (032), Compose r2's Tier-2c save-back classification, and the origin-eval family (033) all bind to a stable contract. Risk factors stay catalog DATA (ADR-039) — the contract must not model runtime judgment.</background>
+    <dependencies>
+      <dependency task="none" status="n/a">Front A0 wave — no upstream (the ENGINE at 032 depends on this + the hoist).</dependency>
+    </dependencies>
+    <related-work>
+      <item>FR-A1-03 (task 032) Policy v2 engine PRODUCES GateDecision v2 (after task 020 hoist).</item>
+      <item>FR-A1-04 (task 033) origin-classification eval family asserts against GateDecision.origin.</item>
+      <item>Compose r2 consumes GateDecision for Tier-2c save-back/creation writes.</item>
+    </related-work>
+  </context>
+
+  <steps mode="directional">
+    <step order="0" name="Context + governance">Load FR-A0-04, the Policy v2 note, ADR-039/040, bff-extensions.md; confirm the existing gate + confirmation-persistence anchors.</step>
+    <step order="1" name="Define the contract">Define `GateDecision v2` DTO under `Services/Ai/PublicContracts/`: tier, origin, completeness, overlay results, confirmation-state, version field, tolerant-reader rules, failure/partial states.</step>
+    <step order="2" name="Reference producer">Wire one thin producer emitting a GateDecision from the existing gate for one side-effect path (values are catalog DATA, not model judgment).</step>
+    <step order="3" name="Reference consumer">A thin consumer that acts on / renders the GateDecision (confirm dialog vs auto-execute vs honest block).</step>
+    <step order="4" name="Contract test">Add a contract test asserting shape, version, tolerant-reader, AND that a GateDecision with confirmation-state=confirmed cannot trigger a second ask (structural).</step>
+    <step order="5" name="Verify + governance">Build; run the contract test; measure publish-size delta; state Placement Justification + bff-extensions checklist.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + run the contract/integration test</tool>
+    <tool name="git">Commit on the project branch</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ (GateDecision v2 contract DTO)</output>
+    <output type="test">tests/integration/contract/ (GateDecision contract test)</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r2/notes/ (contract doc: versioning + tolerant-reader + example payloads + overlay-precedence order)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`GateDecision v2` exists under `Services/Ai/PublicContracts/` (ADR-013) with a version field + tolerant-reader rules; an unknown extra field is ignored (asserted by the contract test).</criterion>
+    <criterion testable="true">The contract carries tier (0/1/2a/2b/2c/3/4), origin, completeness, overlay results, and confirmation-state; the documented overlay precedence matches the Policy v2 note.</criterion>
+    <criterion testable="true">A thin producer emits a GateDecision from the EXISTING gate (no second gate) and a thin consumer acts on it — round-trip proven by the contract test.</criterion>
+    <criterion testable="true">The contract test asserts a confirmed GateDecision renders NO second ask (confirmation-state is ledger-backed, structural).</criterion>
+    <criterion testable="true">The test uses no `Mock&lt;HttpMessageHandler&gt;` and no DI-registration assertions (ADR-038); Compose r2 can consume with zero local variant.</criterion>
+    <criterion testable="true">NEGATIVE: a GateDecision whose tier/origin is derived from runtime LLM judgment rather than catalog data is rejected/flagged by a test (ADR-039 — risk is DATA).</criterion>
+    <criterion testable="true">The contract carries an OPTIONAL parent-association selection affordance (associate-to matter / project / invoice / work-assignment / none) so the one gate dialog can host an associate-to picker — proven by a test; no bespoke confirmation banner.</criterion>
+    <criterion testable="true">Publish-size delta measured + reported; no new HIGH CVE; Placement Justification stated.</criterion>
+    <criterion testable="true">On completion, flip this seam's row in `projects/spaarke-ai-architecture-redesign-r2/notes/SEAM-STATUS.md` to published (with commit ref); record which Compose r2 FR it unblocks (FR-05 / FR-28). 'Published' = merged + contract test green + consumable via Services/Ai/PublicContracts/.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If the existing gate cannot express `tier`/`origin`/`completeness` as stored catalog-derived data without adding a runtime judgment step, STOP — that is an ADR-039 tension (CLAUDE.md §6.5); surface it rather than smuggling model risk-judgment into the gate.</trigger>
+  </escalation>
+</task>

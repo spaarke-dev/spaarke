@@ -1,0 +1,98 @@
+<task id="AIR2-034" project="spaarke-ai-architecture-redesign-r2">
+  <metadata>
+    <title>Gate pre-suspend validation — run ValidateChat BEFORE suspending into a dialog [FR-A1-05]</title>
+    <status>not-started</status>
+    <phase>Wave J — G-R2-A Judgment + Friction</phase>
+    <gate>G-R2-A (judgment)</gate>
+    <estimated-effort>1-2 days</estimated-effort>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Gate-sequencing change to the suspend/resume path — reordering validation ahead of dialog-suspend touches the confirm→execute lifecycle. A subtle ordering error re-introduces the Confirm→❌ dead-end or double-validates; correctness of the gate lifecycle is high-consequence.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>false</parallel-safe>
+    <goal-eligible>false</goal-eligible>
+    <tags>bff-api, gate-engine, adr-040, validation, judgment, df0-affordance</tags>
+    <dependencies>Sits on the gate stack extended by 032; consumes the D-F0(d) affordance pattern (030/040).</dependencies>
+  </metadata>
+
+  <prompt>
+    Run the handler's `ValidateChat` BEFORE suspending a side-effect call into a confirmation dialog (spec FR-A1-05 / R16, policy-note §5). Today a doomed call can be Confirmed and then fail (Confirm→❌); pre-suspend validation renders an honest ❌ WITH a D-F0(d) affordance instead of asking the user to confirm something that cannot succeed. Anchor: `DataverseCreateRecordHandler.cs:177` (ValidateChat) and the resume path at `TypedHandlerResumeExecutor.cs:86`.
+  </prompt>
+
+  <role>Senior .NET developer fluent in the Spaarke handler validation surface (`ValidateChat`), the gate suspend/resume lifecycle, and D-F0(d) affordance composition.</role>
+
+  <goal>
+    A side-effect call is validated via the handler's `ValidateChat` BEFORE the gate suspends into a dialog. A call that would fail validation never reaches the confirm dialog — it renders an honest ❌ carrying the real reason + an actionable D-F0(d) affordance (a working deep link, not a named wizard). A call that passes validation proceeds to confirm exactly as Policy v2 dictates, with no double-validation on resume.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/spaarke-ai-architecture-redesign-r2/spec.md</file>
+    <file purpose="policy-tree">projects/spaarke-ai-architecture-redesign-r2/notes/policy-v2-origin-classification-decision-tree.md</file>
+    <file purpose="module-guidance">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    <file purpose="bff-governance">.claude/constraints/bff-extensions.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-040">The suspend/resume state + the ❌ outcome persist through the ledger; store-before-render — the honest ❌ is a stored terminal entry, not an ephemeral render.</constraint>
+    <constraint source="project">Pre-suspend validation MUST NOT weaken any gate — a validation PASS still confirms per Policy v2; validation only PREVENTS confirming a doomed call.</constraint>
+    <constraint source="project">No double-validation: if validated pre-suspend, resume (`TypedHandlerResumeExecutor.cs:86`) must not redundantly re-run the same check in a way that changes behavior.</constraint>
+    <constraint source="project">Every ❌ carries a D-F0(d) affordance (NFR-10) — no refusal ships without an actionable next step.</constraint>
+    <constraint source="bff-hygiene">Run the bff-extensions.md checklist; state Placement Justification; measure publish-size delta; no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai/gate-lifecycle, handler-validation, suspend-resume, df0-affordance</topic>
+    <files>
+      <file>docs/adr/ADR-040-session-ledger.md</file>
+      <file>projects/spaarke-ai-architecture-redesign-r2/notes/policy-v2-origin-classification-decision-tree.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Handler validation" location="src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/DataverseCreateRecordHandler.cs">Line 177 — ValidateChat; the check to run BEFORE suspend.</pattern>
+      <pattern name="Resume executor" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/TypedHandlerResumeExecutor.cs">Line 86 — the resume path; ensure no redundant re-validation after a pre-suspend pass.</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>R5-E residual (design §10 row 16): a doomed create was Confirmed then failed. Pre-suspend validation converts Confirm→❌ into an honest, affordance-carrying ❌ before the user is asked. This is the last-mile of the D-F0 honesty/affordance doctrine on the gated path.</background>
+    <dependencies>
+      <dependency task="032" status="adjacent">Extends the same gate stack Policy v2 governs.</dependency>
+      <dependency task="030" status="referenced">D-F0(d) affordance pattern for the honest ❌.</dependency>
+    </dependencies>
+    <related-work>
+      <item>040 (refusal-affordance links) supplies the concrete Document Upload deep-link affordance a failed validation can hand back.</item>
+      <item>035 (Completion Engine) renders the ❌ OutcomeCard on this path.</item>
+    </related-work>
+  </context>
+
+  <steps mode="directional">
+    <step order="0" name="Context + governance">Load FR-A1-05, policy-note §5, ADR-040 store-before-render, bff-extensions.md. Read ValidateChat (:177) + the resume path (:86).</step>
+    <step order="1" name="Insert pre-suspend validation">Run `ValidateChat` before the gate suspends into a dialog; on failure, short-circuit to an honest ❌ terminal ledger entry with the real reason + a D-F0(d) affordance.</step>
+    <step order="2" name="De-dupe resume validation">Ensure the resume executor does not redundantly re-validate in a behavior-changing way after a pre-suspend pass.</step>
+    <step order="3" name="Tests">Add KEEP-path tests: doomed call → honest ❌ with affordance, NO confirm dialog fired; valid call → confirms per Policy v2, executes on resume, no double-validation.</step>
+    <step order="4" name="Verify + governance">Build; run tests; measure publish-size delta; state Placement Justification + bff-extensions checklist.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + run gate lifecycle tests</tool>
+    <tool name="git">Commit on the project branch</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/DataverseCreateRecordHandler.cs (ValidateChat invoked pre-suspend)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/TypedHandlerResumeExecutor.cs (no redundant re-validation on resume)</output>
+    <output type="test">tests/ (doomed→honest ❌ no-dialog; valid→confirm→execute no double-validation)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`ValidateChat` runs BEFORE the gate suspends into a dialog; a call that fails validation never reaches the confirm dialog.</criterion>
+    <criterion testable="true">A failed pre-suspend validation renders an honest ❌ terminal ledger entry with the real reason + a D-F0(d) affordance (working deep link, not a named wizard).</criterion>
+    <criterion testable="true">A call that passes validation confirms per Policy v2 and executes on resume; no behavior-changing double-validation occurs.</criterion>
+    <criterion testable="true">The ❌ is stored before render (ADR-040) — it is a persisted terminal entry, not ephemeral.</criterion>
+    <criterion testable="true">NEGATIVE: a create that would fail `ValidateChat` (e.g. missing-required-field / no-write-access) produces ❌+affordance with NO confirm dialog fired — asserted by a test that fails if a dialog is suspended for the doomed call.</criterion>
+    <criterion testable="true">Publish-size delta measured + reported; no new HIGH CVE; Placement Justification stated.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If pre-suspend validation cannot distinguish a doomed call from a recoverable one for some handler (validation is incomplete at that stage), STOP and surface it — do NOT suppress the confirm dialog for a call whose failure is not yet certain, or the user loses a legitimate confirm; the honest-❌ shortcut applies only to provably-doomed calls.</trigger>
+  </escalation>
+</task>

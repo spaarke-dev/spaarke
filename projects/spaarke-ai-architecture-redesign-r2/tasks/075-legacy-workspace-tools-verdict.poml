@@ -1,0 +1,95 @@
+<task id="AIR2-075" project="spaarke-ai-architecture-redesign-r2">
+  <metadata>
+    <title>Legacy workspace tools verdict — re-point or retire orphaned IWorkspaceStateService tools (contingent on 001)</title>
+    <status>not-started</status>
+    <phase>H — G-R2-D Hardening</phase>
+    <gate>G-R2-D (hardening)</gate>
+    <estimated-effort>0.5 day</estimated-effort>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Contingent disposition + bounded retire/re-point over a known tool set; sonnet suffices, but a genuine judgment boundary (retire vs re-point) is handled via escalation, not tier.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-safe>true</parallel-safe>
+    <goal-eligible>false</goal-eligible>
+    <tags>bff-api, hardening, retirement, workspace-tools, contingent, nfr-13</tags>
+    <dependencies>001 (r1 P4-close reconciliation) — CONTINGENT</dependencies>
+  </metadata>
+
+  <prompt>
+    CONTINGENT on task 001 (r1 P4-close reconciliation): if r1 P4 did NOT finish the workspace-tools cleanup, re-point or retire the Get/Update/Close Workspace Tab tools + their 4 artifact variants that hang off the orphaned `IWorkspaceStateService` (spec FR-D-06, design row R4). If task 001 verified these already closed, this task is a no-op confirmation. Do NOT assume — read the task 001 disposition first.
+  </prompt>
+
+  <role>Maintenance engineer fluent in the Spaarke AI tool catalog + the R1 workspace-state retirement history.</role>
+
+  <goal>
+    Each of the Get/Update/Close Workspace Tab tools + the 4 artifact variants is dispositioned: re-pointed to a live state service if still needed, or retired with grep-zero verification (NFR-13) if orphaned. The verdict is grounded in task 001's recorded r1 P4-close state — not re-litigated from scratch.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/spaarke-ai-architecture-redesign-r2/spec.md</file>
+    <file purpose="plan">projects/spaarke-ai-architecture-redesign-r2/plan.md</file>
+    <file purpose="reconciliation-task">projects/spaarke-ai-architecture-redesign-r2/tasks/001-r1-p4-close-reconciliation.poml</file>
+    <file purpose="reconciliation-notes">projects/spaarke-ai-architecture-redesign-r2/notes/</file>
+    <file purpose="bff-governance">.claude/constraints/bff-extensions.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="project">CONTINGENT on task 001 — read its recorded disposition of design §10 row R4 before acting; if row R4 is verified-closed, this task is a confirmation no-op.</constraint>
+    <constraint source="NFR-13">Anything retired gets grep-zero retirement verification (no dangling references).</constraint>
+    <constraint source="ADR-013">If a tool is re-pointed, it consumes state only through sanctioned facades — no re-forking an AI-internal seam.</constraint>
+    <constraint source="bff-hygiene">Measure publish-size delta; no new HIGH CVE; run the bff-extensions.md checklist for any BFF code touched.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>retirement/workspace-tools, tool-catalog, grep-zero</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/adr/ADR-013-ai-architecture.md</file>
+    </files>
+    <patterns>
+      <pattern name="Orphaned state service" location="src/server/api/Sprk.Bff.Api/">`IWorkspaceStateService` + the Get/Update/Close Workspace Tab tools + 4 artifact variants are the disposition target; confirm current references before retire/re-point.</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>Design §10 row R4 flagged these workspace tools as hanging off an orphaned state service after R1's workspace retirement. Whether they were cleaned up in r1 P4 is unknown until task 001 records it — hence contingent. This task closes the row honestly against that recorded state.</background>
+    <dependencies>
+      <dependency task="001" status="required-contingent">Task 001 records the r1 P4-close disposition of row R4; this task acts on that record.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 076 (orphan verification) is the sibling contingent-on-001 row.</item>
+      <item>Task 079 (G-R2-D verification) records the verdict outcome.</item>
+    </related-work>
+  </context>
+
+  <steps mode="directional">
+    <step order="0" name="Read 001">Read task 001's recorded disposition of design §10 row R4; determine whether cleanup is still needed.</step>
+    <step order="1" name="Reference sweep">Grep current references to `IWorkspaceStateService` + the 3 tools + 4 artifact variants; classify each as live-consumer or orphan.</step>
+    <step order="2" name="Disposition">Re-point live-needed tools to a sanctioned state facade; retire orphans.</step>
+    <step order="3" name="Grep-zero">For retired items, verify grep-zero (no dangling references); update any catalog/seed mirrors.</step>
+    <step order="4" name="Verify">Build + run affected tests; measure publish-size delta; state bff-extensions checklist result.</step>
+  </steps>
+
+  <tools>
+    <tool name="rg">Reference sweep + grep-zero verification</tool>
+    <tool name="dotnet">Build + run affected tests</tool>
+    <tool name="git">Commit on the project branch</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/ (tools re-pointed or retired)</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r2/notes/ (per-tool verdict + grep-zero evidence)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The verdict cites task 001's recorded r1 P4-close disposition of row R4 as its basis.</criterion>
+    <criterion testable="true">Each of the 3 Workspace Tab tools + 4 artifact variants is dispositioned (re-pointed or retired) with recorded rationale.</criterion>
+    <criterion testable="true">Retired items pass grep-zero verification (NFR-13); catalog/seed mirrors updated.</criterion>
+    <criterion testable="true">Re-pointed tools consume state via a sanctioned facade (no AI-internal seam fork).</criterion>
+    <criterion testable="true">NEGATIVE: if task 001 marked row R4 verified-closed, no code change is made and the task records a confirmation no-op.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If the retire-vs-re-point decision is genuinely ambiguous (a tool has a live but non-obvious consumer, or retirement risks breaking a satellite), STOP and surface the choice to the operator with the reference evidence rather than guessing — retirement is a one-way NFR-13 commitment.</trigger>
+  </escalation>
+</task>

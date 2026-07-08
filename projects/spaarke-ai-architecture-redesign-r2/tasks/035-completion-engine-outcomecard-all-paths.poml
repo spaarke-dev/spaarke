@@ -1,0 +1,102 @@
+<task id="AIR2-035" project="spaarke-ai-architecture-redesign-r2">
+  <metadata>
+    <title>Completion Engine + OutcomeCard across ALL side-effect paths — next-step chips + trace ref [FR-A1-06]</title>
+    <status>not-started</status>
+    <phase>Wave J — G-R2-A Judgment + Friction</phase>
+    <gate>G-R2-A (judgment)</gate>
+    <estimated-effort>2-3 days</estimated-effort>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Generalizing shipped R1 primitives from the gated path to ALL side-effect paths (gated + auto-executed + event-path) as one disposition-level contract — a cross-cutting completion surface. Missing a path breaks the NFR-09 OutcomeCard-coverage invariant; the Completion Engine is a genuinely net-new collaborator per §11.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>false</parallel-safe>
+    <goal-eligible>false</goal-eligible>
+    <tags>bff-api, spaarkeai, completion-engine, outcomecard, adr-040, judgment</tags>
+    <dependencies>DEPENDS ON 011 (OutcomeCard v1 contract). Feeds 036 (job-aware states) + 037 (ack) + 062 (next-step chips).</dependencies>
+  </metadata>
+
+  <prompt>
+    Build the Completion Engine that emits an OutcomeCard on EVERY side-effect path — gated, auto-executed, and event-path — generalizing the shipped R1 primitives (`ToolResult.cs:326` UserSummary audience split + `HandoffUrlBuilder.cs` server-composed record links) from the gated path only into one disposition-level contract (spec FR-A1-06). Add next-step chips (from the Binding's declared transitions) + a trace reference to each card, and upgrade markdown links to the OutcomeCard component. Consume the OutcomeCard v1 contract from task 011 — do not invent a local card shape.
+  </prompt>
+
+  <role>Full-stack developer fluent in the Spaarke side-effect paths (gated/auto/event), the `ToolResult` UserSummary primitive, `HandoffUrlBuilder` link composition, and the SpaarkeAi/AI.Widgets OutcomeCard render surface.</role>
+
+  <goal>
+    A Completion Engine yields a versioned OutcomeCard (per the task-011 v1 contract) on every side-effect path — gated, auto-executed, and event-path — carrying the server-composed record link, the UserSummary audience split, next-step chips derived from the Binding's declared transitions, and a trace reference. Markdown links are upgraded to the OutcomeCard component. NFR-09 holds: no side-effect path completes without an OutcomeCard. The card is stored before render (ADR-040).
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/spaarke-ai-architecture-redesign-r2/spec.md</file>
+    <file purpose="plan">projects/spaarke-ai-architecture-redesign-r2/plan.md</file>
+    <file purpose="outcomecard-contract">projects/spaarke-ai-architecture-redesign-r2/tasks/011-*.poml (OutcomeCard v1)</file>
+    <file purpose="module-guidance">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    <file purpose="bff-governance">.claude/constraints/bff-extensions.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-040">OutcomeCards are stored ledger entries rendered after write (store-before-render); disposition is the only rendering contract — the card rides the existing disposition surface, no second rendering path.</constraint>
+    <constraint source="ADR-013">The OutcomeCard shape consumed by satellites (Compose r2 side effects) flows via `Services/Ai/PublicContracts/` — reuse the task-011 v1 contract, do not fork.</constraint>
+    <constraint source="project">Generalize the EXISTING primitives (`ToolResult.cs:326` UserSummary + `HandoffUrlBuilder`), do not build a parallel completion mechanism (CLAUDE.md §11 default-to-reuse).</constraint>
+    <constraint source="project">Next-step chips come from the Binding's DECLARED transitions (catalog data), not model invention.</constraint>
+    <constraint source="project">NFR-09 — every side-effect path (gated + auto + event) yields an OutcomeCard; the async/job states are layered in by 036.</constraint>
+    <constraint source="bff-hygiene">Run the bff-extensions.md checklist; state Placement Justification; measure publish-size delta; no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai/completion-engine, outcomecard, side-effect-paths, disposition-rendering</topic>
+    <files>
+      <file>docs/adr/ADR-040-session-ledger.md</file>
+      <file>docs/adr/ADR-013-*.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="UserSummary primitive" location="src/server/api/Sprk.Bff.Api/Services/Ai/ToolResult.cs">Line 326 — UserSummary audience split; the shipped R1 primitive the engine generalizes to all paths.</pattern>
+      <pattern name="Server link composition" location="src/server/api/Sprk.Bff.Api/Api/Agent/HandoffUrlBuilder.cs">Server-composed record links; the OutcomeCard's clickable chip source.</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>R1 shipped UserSummary + server links only on the gated path; auto-executed and event-path side effects lack a first-class completion surface. FR-A1-06 generalizes these into one disposition-level OutcomeCard across all paths, with next-step chips + a trace ref. OutcomeCard component is genuinely net-new (§11).</background>
+    <dependencies>
+      <dependency task="011" status="required-upstream">OutcomeCard v1 contract (formalizes the UserSummary/link primitives).</dependency>
+    </dependencies>
+    <related-work>
+      <item>036 layers JobAwareCompletionState v1 async job states onto these cards.</item>
+      <item>037 gates UI-affecting completions on a client-ack event.</item>
+      <item>062 (workspace-intelligence precursors) reads the next-step chips added here.</item>
+    </related-work>
+  </context>
+
+  <steps mode="directional">
+    <step order="0" name="Context + governance">Load FR-A1-06, the OutcomeCard v1 contract (011), ADR-040/013, bff-extensions.md. Read ToolResult.cs:326 + HandoffUrlBuilder.</step>
+    <step order="1" name="Completion Engine collaborator">Introduce the Completion Engine that composes an OutcomeCard (per v1) from any side-effect result; wire the three paths (gated / auto-executed / event) to it.</step>
+    <step order="2" name="Chips + trace ref">Add next-step chips from the Binding's declared transitions + a trace reference to each card.</step>
+    <step order="3" name="Upgrade links">Replace markdown links with the OutcomeCard component render (client).</step>
+    <step order="4" name="Coverage tests">Add KEEP-path tests proving each of the three paths yields an OutcomeCard stored-before-render; the negative-coverage test asserts no path completes card-less.</step>
+    <step order="5" name="Verify + governance">Build; run tests; measure publish-size delta; state Placement Justification + bff-extensions checklist.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + run completion tests</tool>
+    <tool name="npm">Build SpaarkeAi/AI.Widgets OutcomeCard render</tool>
+    <tool name="git">Commit on the project branch</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ (Completion Engine collaborator generalizing ToolResult.cs:326 + HandoffUrlBuilder)</output>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/ + src/solutions/SpaarkeAi/ (OutcomeCard component render + next-step chips)</output>
+    <output type="test">tests/ (per-path OutcomeCard coverage + store-before-render)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">An OutcomeCard (task-011 v1 contract, no local fork) is emitted on all three side-effect paths — gated, auto-executed, and event-path.</criterion>
+    <criterion testable="true">Each card carries the server-composed record link, the UserSummary audience split, next-step chips from the Binding's declared transitions, and a trace reference.</criterion>
+    <criterion testable="true">Markdown links are upgraded to the OutcomeCard component; the card rides the existing disposition surface (no second rendering path).</criterion>
+    <criterion testable="true">Cards are stored before render (ADR-040).</criterion>
+    <criterion testable="true">NEGATIVE: a side-effect completing on the auto-executed OR event path WITHOUT an OutcomeCard fails an NFR-09 coverage test (no path may complete card-less).</criterion>
+    <criterion testable="true">Publish-size delta measured + reported; no new HIGH CVE; Placement Justification stated.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If a side-effect path cannot yield an OutcomeCard without introducing a second rendering path (i.e., it does not ride the disposition contract), STOP — this is an ADR-040 disposition-only-rendering tension; surface it per CLAUDE.md §6.5 rather than forking rendering.</trigger>
+  </escalation>
+</task>

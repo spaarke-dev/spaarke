@@ -1,0 +1,111 @@
+<task id="AIR2-010" project="spaarke-ai-architecture-redesign-r2">
+  <metadata>
+    <title>Publish ComposeDisposition v1 contract (walking skeleton) — FIRST seam for Compose r2</title>
+    <status>not-started</status>
+    <phase>A0 — Contract-first</phase>
+    <gate>G-R2-A (seam publication)</gate>
+    <estimated-effort>1 day</estimated-effort>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Cross-project seam contract that a parallel project (Compose r2) consumes; ADR-040 disposition-enum extension; wrong shape blocks a satellite — architectural blast radius.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>true</parallel-safe>
+    <goal-eligible>false</goal-eligible>
+    <tags>bff-api, contract, seam, adr-040, compose-r2</tags>
+    <dependencies>none (A0 front wave; publish FIRST)</dependencies>
+  </metadata>
+
+  <prompt>
+    Publish the `ComposeDisposition v1` contract — the `compose` disposition member plus its SSE frame shape — as the FIRST Phase-A0 seam, so the parallel Compose r2 project is never blocked on an unstabilized contract (spec FR-A0-06/FR-A0-08, design §3.1). This is contract-first "walking skeleton": ship the contract WITH one thin reference producer, one thin reference consumer, and a contract test — not a paper spec.
+  </prompt>
+
+  <role>Senior .NET developer fluent in the Spaarke AI session pipeline (ADR-039/040), SSE streaming, and versioned tolerant-reader contracts.</role>
+
+  <goal>
+    A versioned `ComposeDisposition v1` contract exists as a first-class type in the AI seam surface, extending the ADR-040 disposition enum with a `compose` member and defining its SSE frame shape (versioning + tolerant-reader rules, example payload, client-render + server-persist expectations, failure/partial states). The contract also defines SUPERSESSION semantics: undo/replace is expressed as a NEW `compose` SessionOutput that supersedes the prior one, addressable by `{bindingId}@t{n}`; the client re-materializes from current ledger state (there is NO client-only DOM undo). A thin reference producer emits it, a thin reference consumer renders it, and a contract test in `tests/integration/contract/` locks the shape (including a supersession round-trip). Compose r2 can consume it without inventing a local variant.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/spaarke-ai-architecture-redesign-r2/spec.md</file>
+    <file purpose="plan">projects/spaarke-ai-architecture-redesign-r2/plan.md</file>
+    <file purpose="design">projects/spaarke-ai-architecture-redesign-r2/design.md</file>
+    <file purpose="module-guidance">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    <file purpose="bff-governance">.claude/constraints/bff-extensions.md</file>
+    <file purpose="consumer-design">projects/spaarkeai-compose-r2/design.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-040">Disposition is the only rendering contract — extend the ENUM (the compliant move); no second rendering path. Storage precedes rendering.</constraint>
+    <constraint source="ADR-039">No second dispatch protocol; the seam rides the existing SSE/ledger surface.</constraint>
+    <constraint source="ADR-013">CRUD/Compose consumers reach this only via `Services/Ai/PublicContracts/`.</constraint>
+    <constraint source="ADR-038">The contract test is a KEEP-path integration test in `tests/integration/contract/`; no `Mock&lt;HttpMessageHandler&gt;`, no DI-registration tests.</constraint>
+    <constraint source="project">Tolerant-reader: unknown fields ignored; version field present; additive-only v1.</constraint>
+    <constraint source="project">PAYLOAD-OWNERSHIP BOUNDARY: the core owns the ENVELOPE only (disposition member + provenance + SSE ledger-ref frame + supersession keying); the structured-edit payload schema (`target_text`/`new_text`/`match_mode`/`rationale`/`sources`) is COMPOSE-OWNED and lives inside the opaque SessionOutput payload. Do NOT bake editor semantics into the platform contract. The SSE frame carries ledger_ref + disposition, NOT the payload (storage-precedes-rendering).</constraint>
+    <constraint source="project">Publish FIRST — this task has no upstream dependency and must merge before Compose r2's draft-into-editor leg.</constraint>
+    <constraint source="bff-hygiene">Run the bff-extensions.md checklist; state Placement Justification; measure publish-size delta; no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai/session-ledger, ai/disposition, sse-streaming, versioned-contracts</topic>
+    <files>
+      <file>docs/adr/ADR-040-session-ledger.md</file>
+      <file>docs/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Session ledger entry types" location="src/server/api/Sprk.Bff.Api/Models/Ai/Chat/SessionLedgerEntries.cs">SessionOutput (:125), Disposition (:141), BuildOutputKey {bindingId}@t{n} (:39) — the disposition member + provenance keying attach here.</pattern>
+      <pattern name="Disposition rendering routing" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs">BuildDedupDirective (:1056), render-routing directives — where a new disposition wires into rendering.</pattern>
+      <pattern name="SSE frame emission" location="src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs">Existing SSE event emission pattern the compose frame follows.</pattern>
+      <pattern name="Contract test home" location="tests/integration/contract/">Existing contract/eval integration tests; add the ComposeDisposition contract test here.</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>Compose r2 (its own worktree, already re-based onto core seams) dispatches draft-into-editor "ledger-first via the core's `compose` disposition." The core owns this member; Compose consumes it, never forks it (design §0.3 C-3, §8). This is the FIRST A0 task so Compose is unblocked day one.</background>
+    <dependencies>
+      <dependency task="none" status="n/a">Front A0 wave — no upstream.</dependency>
+    </dependencies>
+    <related-work>
+      <item>FR-A0-11 OutcomeCard v1 + FR-A0-07 JobAwareCompletionState v1 are sibling A0 contracts; keep versioning + tolerant-reader rules consistent across all seven.</item>
+      <item>Cross-project obligation filing lands in task 017 (seam-publication ordering).</item>
+    </related-work>
+  </context>
+
+  <steps mode="directional">
+    <step order="0" name="Context + governance">Load spec FR-A0-06/08, ADR-040, bff-extensions.md. Confirm the disposition enum location + SSE emission pattern via the anchors above.</step>
+    <step order="1" name="Define the contract">Add the `compose` disposition member + SSE frame DTO with a version field, tolerant-reader rules, and documented failure/partial states. Place the consumable shape under `Services/Ai/PublicContracts/`.</step>
+    <step order="2" name="Reference producer">Wire one thin producer path that emits the compose frame (render-follows-store: ledger write precedes frame emission).</step>
+    <step order="3" name="Reference consumer">A thin consumer that renders the stored compose entry (client or a server-side render stub sufficient to prove the round-trip).</step>
+    <step order="3b" name="Supersession round-trip">Prove undo/replace as a NEW `compose` SessionOutput superseding the prior one, addressable by `{bindingId}@t{n}`; the consumer re-materializes from current ledger state (no client-only DOM undo). Keep the structured-edit payload opaque (Compose-owned) inside the SessionOutput.</step>
+    <step order="4" name="Contract test">Add a contract test in `tests/integration/contract/` asserting the frame shape, version, tolerant-reader behavior (unknown field ignored), the store-before-render invariant, and the supersession round-trip (`{bindingId}@t{n}` supersedes prior; re-materialize from ledger).</step>
+    <step order="5" name="Verify + governance">Build; run the contract test; measure publish-size delta vs baseline; state Placement Justification + bff-extensions checklist result in the PR notes.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + run the contract/integration test</tool>
+    <tool name="git">Commit on the project branch</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ (ComposeDisposition v1 contract + frame DTO)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Ai/Chat/SessionLedgerEntries.cs (compose disposition member)</output>
+    <output type="test">tests/integration/contract/ (ComposeDisposition contract test)</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r2/notes/ (contract doc: versioning + tolerant-reader + example payload)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A `compose` disposition member exists on the ADR-040 disposition enum; no second rendering path introduced.</criterion>
+    <criterion testable="true">The SSE frame DTO carries a version field and documented tolerant-reader rules; an unknown extra field is ignored by the consumer (asserted by the contract test).</criterion>
+    <criterion testable="true">A thin producer emits the frame AFTER the ledger write (store-before-render), and a thin consumer renders the stored entry — round-trip proven by the contract test.</criterion>
+    <criterion testable="true">The contract test lives in tests/integration/contract/ and passes; it uses no Mock&lt;HttpMessageHandler&gt; and no DI-registration assertions (ADR-038).</criterion>
+    <criterion testable="true">Consumable shape is under Services/Ai/PublicContracts/ (ADR-013); Compose r2 can consume it with zero local variant.</criterion>
+    <criterion testable="true">NEGATIVE: attempting to render a compose disposition with no prior ledger entry fails/throws (store-before-render enforced), covered by a test.</criterion>
+    <criterion testable="true">SUPERSESSION: undo/replace is a NEW `compose` SessionOutput superseding the prior, addressable by `{bindingId}@t{n}`; the consumer re-materializes from current ledger state (no client-only DOM undo) — proven by the contract test's supersession round-trip.</criterion>
+    <criterion testable="true">PAYLOAD-OWNERSHIP: the contract carries the envelope only (disposition + provenance + SSE ledger-ref frame + supersession); the structured-edit payload schema stays opaque + Compose-owned inside the SessionOutput — no editor semantics (`target_text`/`new_text`/`match_mode`/…) are baked into the platform contract.</criterion>
+    <criterion testable="true">Publish-size delta measured + reported; no new HIGH CVE; Placement Justification stated.</criterion>
+    <criterion testable="true">On completion, flip this seam's row in `projects/spaarke-ai-architecture-redesign-r2/notes/SEAM-STATUS.md` to published (with commit ref); record which Compose r2 FR it unblocks (FR-04 / FR-16 / FR-17). 'Published' = merged + contract test green + consumable via Services/Ai/PublicContracts/.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If extending the disposition enum requires a second rendering path (i.e., the `compose` member cannot ride the existing disposition-rendering contract), STOP — this is an ADR-040 tension (CLAUDE.md §6.5), surface it rather than forking rendering.</trigger>
+  </escalation>
+</task>

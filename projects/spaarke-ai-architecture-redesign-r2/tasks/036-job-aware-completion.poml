@@ -1,0 +1,101 @@
+<task id="AIR2-036" project="spaarke-ai-architecture-redesign-r2">
+  <metadata>
+    <title>Job-aware completion — integrate JobAwareCompletionState v1; enforce ingestion-parity invariant [FR-A1-07]</title>
+    <status>not-started</status>
+    <phase>Wave J — G-R2-A Judgment + Friction</phase>
+    <gate>G-R2-A (judgment)</gate>
+    <estimated-effort>2-3 days</estimated-effort>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>This is how the core enforces the R-2 ingestion-parity invariant WITHOUT owning the Compose pipeline — a cross-project correctness contract (NFR-12). Getting the async multi-step state projection wrong lets a bare document row read as a completed operation, the exact failure the invariant guards. High blast radius across core + Compose r2.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>false</parallel-safe>
+    <goal-eligible>false</goal-eligible>
+    <tags>bff-api, spaarkeai, completion-engine, jobs, ingestion-parity, judgment</tags>
+    <dependencies>DEPENDS ON 014 (JobAwareCompletionState v1) + 035 (OutcomeCard all-paths). Reuses ServiceBusJobProcessor/JobContract/JobStatusService.</dependencies>
+  </metadata>
+
+  <prompt>
+    Make OutcomeCards job-aware by integrating `JobAwareCompletionState v1` (task 014) so async multi-step pipelines — document creation, analysis, indexing, Compose save-back — show durable per-step progress + failure recovery, and the user can distinguish "record exists" from "downstream analysis/indexing finished" (spec FR-A1-07 / R20). This is how the core enforces the R-2 ingestion-parity invariant (NFR-12) WITHOUT owning the Compose pipeline. Reuse the EXISTING Job Contract / `ServiceBusJobProcessor` / `JobStatusService` — no new job model.
+  </prompt>
+
+  <role>Senior .NET developer fluent in the Spaarke background-job surface (`ServiceBusJobProcessor`, `JobContract`, `JobStatusService`, `BatchJobStatusStore`), the OutcomeCard completion surface, and the ingestion-parity invariant.</role>
+
+  <goal>
+    OutcomeCards integrate `JobAwareCompletionState v1` (task 014) to project the EXISTING job status (queued/running/partial/completed/failed/poisoned/cancelled/retry-pending/user-action-required, per-step) onto the completion surface, so a document-creating operation shows durable multi-step progress and the user can tell "row exists" from "analysis/indexing finished." The ingestion-parity invariant (NFR-12) holds: a bare `sprk_document` row is never rendered as a successful document operation. No new job model is introduced — this is a projection over the existing Job Contract.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/spaarke-ai-architecture-redesign-r2/spec.md</file>
+    <file purpose="plan">projects/spaarke-ai-architecture-redesign-r2/plan.md</file>
+    <file purpose="jobstate-contract">projects/spaarke-ai-architecture-redesign-r2/tasks/014-*.poml (JobAwareCompletionState v1)</file>
+    <file purpose="module-guidance">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    <file purpose="bff-governance">.claude/constraints/bff-extensions.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="project">Reuse the EXISTING Job Contract / `ServiceBusJobProcessor` / `JobStatusService` — `JobAwareCompletionState v1` is a PROJECTION, not a new job model (CLAUDE.md §11 default-to-reuse; plan §3).</constraint>
+    <constraint source="NFR-12">Ingestion-parity invariant — a bare `sprk_document` row is never a successful document operation; verified by gate policy + JobAwareCompletionState.</constraint>
+    <constraint source="ADR-040">Job-state transitions render from stored ledger/job state (store-before-render); no parallel session cache of job status.</constraint>
+    <constraint source="ADR-013">The job-aware completion shape consumed by Compose r2 (save-back progress) flows via `Services/Ai/PublicContracts/` using the task-014 v1 contract.</constraint>
+    <constraint source="bff-hygiene">Run the bff-extensions.md checklist; state Placement Justification; measure publish-size delta; no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai/job-aware-completion, ingestion-parity, servicebus-jobs, outcomecard</topic>
+    <files>
+      <file>docs/adr/ADR-040-session-ledger.md</file>
+      <file>docs/adr/ADR-013-*.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Job processing" location="src/server/api/Sprk.Bff.Api/Services/Jobs/ServiceBusJobProcessor.cs">The existing job processor; JobAwareCompletionState projects over it, no new model.</pattern>
+      <pattern name="Job contract + status" location="src/server/api/Sprk.Bff.Api/Services/Jobs/">`JobContract.cs:9` + `JobStatusService.cs` + `BatchJobStatusStore.cs` — the per-step status source projected onto OutcomeCards.</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>R1's OutcomeCards showed a terminal ✅ even when downstream analysis/indexing was still running — a document row could look "done" while unindexed. FR-A1-07 makes completion job-aware so the user distinguishes row-exists from pipeline-finished, and the core enforces ingestion-parity without owning Compose's pipeline.</background>
+    <dependencies>
+      <dependency task="014" status="required-upstream">JobAwareCompletionState v1 contract (integrates JobContract).</dependency>
+      <dependency task="035" status="required-upstream">OutcomeCard across all side-effect paths (the surface job states layer onto).</dependency>
+    </dependencies>
+    <related-work>
+      <item>Compose r2 consumes the job-aware save-back progress via the published v1 contract.</item>
+      <item>031 E2E scenario 8 (ingestion-parity status) browser-verifies this.</item>
+    </related-work>
+  </context>
+
+  <steps mode="directional">
+    <step order="0" name="Context + governance">Load FR-A1-07, the JobAwareCompletionState v1 contract (014), NFR-12, ADR-040/013, bff-extensions.md. Read ServiceBusJobProcessor + JobContract + JobStatusService.</step>
+    <step order="1" name="Project job state onto cards">Integrate JobAwareCompletionState v1 so an OutcomeCard for a document-creating/analysis/indexing/save-back operation carries per-step job status projected from the existing Job Contract — no new job model.</step>
+    <step order="2" name="Distinguish row-exists vs pipeline-finished">Render the states so "record exists" is visibly distinct from "analysis/indexing finished"; surface failure/retry/poisoned/user-action-required states.</step>
+    <step order="3" name="Enforce ingestion-parity">Wire gate policy + the job-aware state so a bare `sprk_document` row is never rendered as a successful document operation (NFR-12).</step>
+    <step order="4" name="Tests">Add KEEP-path tests: a doc-create shows queued→running→indexing→available; a bare-row-without-pipeline never renders success; failure states surface honestly.</step>
+    <step order="5" name="Verify + governance">Build; run tests; measure publish-size delta; state Placement Justification + bff-extensions checklist.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + run job-aware completion tests</tool>
+    <tool name="npm">Build the SpaarkeAi/AI.Widgets job-state render</tool>
+    <tool name="git">Commit on the project branch</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ (JobAwareCompletionState projection over ServiceBusJobProcessor/JobContract)</output>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/ + src/solutions/SpaarkeAi/ (per-step job-state render on OutcomeCards)</output>
+    <output type="test">tests/ (per-step progress; ingestion-parity NFR-12; failure/retry states)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">OutcomeCards integrate JobAwareCompletionState v1 and show per-step async progress for document creation / analysis / indexing / Compose save-back.</criterion>
+    <criterion testable="true">The render distinguishes "record exists" from "analysis/indexing finished"; failure/retry/poisoned/user-action-required states surface honestly.</criterion>
+    <criterion testable="true">No new job model is introduced — the state is a projection over the existing Job Contract / `ServiceBusJobProcessor` / `JobStatusService`.</criterion>
+    <criterion testable="true">Job-state renders from stored state (store-before-render); no parallel job-status cache.</criterion>
+    <criterion testable="true">NEGATIVE: a bare `sprk_document` row with no completed ingestion pipeline is NOT rendered as a successful document operation — the ingestion-parity invariant (NFR-12) fails the test if it is.</criterion>
+    <criterion testable="true">Publish-size delta measured + reported; no new HIGH CVE; Placement Justification stated.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If projecting per-step state onto the completion surface appears to require a new job model or a parallel job-status store (rather than reusing JobContract/ServiceBusJobProcessor), STOP and surface it — reuse is the §11 constraint and the plan's explicit decision; a new job model is scope creep requiring sign-off.</trigger>
+  </escalation>
+</task>

@@ -1,0 +1,115 @@
+<task id="AIR2-038" project="spaarke-ai-architecture-redesign-r2">
+  <metadata>
+    <title>Decision-traceability view + live plan narration + server ToolChain read surface — D-F4 (FR-A1-09)</title>
+    <status>not-started</status>
+    <phase>Wave J — G-R2-A Judgment + Friction</phase>
+    <gate>G-R2-A (judgment)</gate>
+    <estimated-effort>3 days</estimated-effort>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Spans a NET-NEW server ToolChain read surface (not found today) + a new ContextEnvelope-fingerprint ledger entry + live narration sourced strictly from real tool-chain events (never model-claimed) + a client trace-widget rebuild. Truthfulness invariant (narration must never fabricate) and NFR-07 no-content telemetry give it architectural blast radius across BFF + SpaarkeAi hot paths.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>false</parallel-safe>
+    <goal-eligible>true</goal-eligible>
+    <tags>bff-api, spaarkeai, ai-widgets, trace, ledger, telemetry, adr-040, hot-path</tags>
+    <dependencies>A0 contracts (013 TraceEvent v1, 015 ContextEnvelope v1) land the read shapes this consumes</dependencies>
+  </metadata>
+
+  <prompt>
+    Build the decision-traceability view (request → context slices used → memory items consulted → tools selected → gate/approval path → outcome) by extending the existing `ExecutionTraceWidget`, add live plan-narration streaming sourced ONLY from real tool-chain events (never model-claimed), and add the NET-NEW server ToolChain read surface (restore-payload or GET) so a trace survives a hard refresh (spec FR-A1-09, design D-F4, R14). The server read surface does NOT exist today — it is genuinely new (plan §3 "server ToolChain read surface (NOT FOUND — net-new)").
+  </prompt>
+
+  <role>Full-stack developer fluent in the Spaarke AI session ledger (ADR-040 `SessionToolChain`/`SessionGate`), SSE streaming, `ContextEventEmitter` OpenTelemetry counters, and the Fluent v9 AI.Widgets context-widget model.</role>
+
+  <goal>
+    A "how did you decide?" affordance opens a decision-traceability view rendering the full request lineage from stored ledger `ToolChain` + `Gate` entries plus a new ContextEnvelope-fingerprint entry (identifiers/counts only). Live plan narration streams from actual tool-chain events as they occur — never from model prose. A server ToolChain read surface (restore payload or GET endpoint under `Api/Ai/`, reached via `PublicContracts/` for any CRUD consumer) lets the trace be rehydrated after a hard refresh from the mount-gap-affected client buffer. All trace/fingerprint telemetry carries identifiers/counts only (NFR-07).
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/spaarke-ai-architecture-redesign-r2/spec.md</file>
+    <file purpose="plan">projects/spaarke-ai-architecture-redesign-r2/plan.md</file>
+    <file purpose="design">projects/spaarke-ai-architecture-redesign-r2/design.md</file>
+    <file purpose="module-guidance">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    <file purpose="bff-governance">.claude/constraints/bff-extensions.md</file>
+    <file purpose="trace-contract">projects/spaarke-ai-architecture-redesign-r2/tasks/013-contract-traceevent-v1.poml</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-040">Trace reads stored ledger entries (`SessionToolChain`, `SessionGate`, new ContextEnvelope-fingerprint) — no parallel trace cache; storage precedes render. The server read surface rides the existing ledger, not a second store.</constraint>
+    <constraint source="ADR-039">Narration reflects the real closed-catalog tool chain; no model-authored plan text is treated as trace truth.</constraint>
+    <constraint source="ADR-013">Any CRUD/satellite consumer of the ToolChain read surface reaches it via `Services/Ai/PublicContracts/`; do not expose ledger internals directly.</constraint>
+    <constraint source="ADR-038">New tests are KEEP-path integration tests; no `Mock&lt;HttpMessageHandler&gt;`, no DI-registration/ctor-null tests.</constraint>
+    <constraint source="NFR-07">Trace, fingerprint, and budget logging carry identifiers/counts ONLY — never content.</constraint>
+    <constraint source="project">Live narration streams from real tool-chain events; a model-claimed step that never fired must NOT appear in the trace.</constraint>
+    <constraint source="project">HOST-EMBEDDABLE: the D-F4 decision-traceability view MUST be embeddable in an arbitrary host container (e.g. the Compose Context pane), NOT bound to the chat surface — it takes a session/binding identifier and renders standalone, with no hard dependency on chat-surface context.</constraint>
+    <constraint source="bff-hygiene">Run the bff-extensions.md checklist; state Placement Justification for the new read surface; measure publish-size delta vs the ~49.63 MB baseline; no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai/session-ledger, ai/trace, sse-streaming, telemetry, ai-widgets</topic>
+    <files>
+      <file>docs/adr/ADR-040-session-ledger.md</file>
+      <file>docs/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>docs/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Trace widget (extend)" location="src/client/shared/Spaarke.AI.Widgets/src/widgets/context/ExecutionTraceWidget.tsx:75">EXECUTION_TRACE_WIDGET_TYPE (:75), MAX_TRACE_ENTRIES (:84), ExecutionTraceData (:96), TraceEntry (:111) — the decision-traceability view extends this widget.</pattern>
+      <pattern name="Client trace buffer (mount-gap)" location="src/client/shared/Spaarke.AI.Widgets/src/widgets/context/executionTraceBuffer.ts:40">MAX_BUFFERED_TRACE_EVENTS=50 (:40) + eviction (:59) — the documented mount-gap the server read surface backfills on hard refresh.</pattern>
+      <pattern name="Server trace events (source)" location="src/server/api/Sprk.Bff.Api/Services/Ai/Telemetry/ContextEventEmitter.cs:46">Six `context.*` counters (:56 ToolCallStarted … :61 DecisionMade) — live narration streams from these real events, not model prose.</pattern>
+      <pattern name="Ledger entry types" location="src/server/api/Sprk.Bff.Api/Models/Ai/Chat/SessionLedgerEntries.cs:39">BuildOutputKey {bindingId}@t{n} (:39), SessionOutput (:125), Disposition (:143) — attach the ContextEnvelope-fingerprint entry here alongside ToolChain/Gate.</pattern>
+      <pattern name="SSE + endpoint home" location="src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs">Existing SSE emission + chat endpoint group; add the GET/restore ToolChain read surface here.</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>Today the trace exists only client-side in a 50-entry buffer with a documented mount-gap: a hard refresh loses in-flight trace. There is NO server read surface for ToolChain — plan §3 flags it as net-new (FR-A1-09). This task adds the server-side restore/GET plus the decision-traceability rendering and live narration. It is SpaarkeAi + BFF hot-path; run `/conflict-check` before the BFF PR.</background>
+    <dependencies>
+      <dependency task="013" status="pending">TraceEvent v1 read contract names the existing SessionToolChain markers this view reads.</dependency>
+      <dependency task="015" status="pending">ContextEnvelope v1 defines the fingerprint (identifiers/counts) surfaced as the context-slices row.</dependency>
+    </dependencies>
+    <related-work>
+      <item>FR-A1-10 (task 039) progressive render shares the store-before-render invariant.</item>
+      <item>FR-A1-06 (task 035) OutcomeCard carries a trace reference that deep-links this view.</item>
+    </related-work>
+  </context>
+
+  <steps mode="directional">
+    <step order="0" name="Context + governance">Load spec FR-A1-09, ADR-040/013, bff-extensions.md, NFR-07. Confirm ledger entry types + the ContextEventEmitter counters + the client buffer mount-gap via the anchors.</step>
+    <step order="1" name="ContextEnvelope-fingerprint entry">Add the fingerprint ledger entry type (identifiers/counts only, NFR-07) so the trace can show which context slices/memory items were consulted without content.</step>
+    <step order="2" name="Server ToolChain read surface (net-new)">Add the restore-payload or GET read surface over stored ToolChain + Gate + fingerprint entries, exposed to consumers via PublicContracts. State the Placement Justification.</step>
+    <step order="3" name="Live plan narration">Stream narration frames from real ContextEventEmitter tool-chain events; assert that no model-claimed step without a corresponding real event is rendered.</step>
+    <step order="4" name="Decision-traceability view">Extend ExecutionTraceWidget into the full lineage view (request → slices → memory → tools → gate/approval → outcome); on mount, backfill the mount-gap from the server read surface.</step>
+    <step order="5" name="Tests">KEEP-path integration test: hard-refresh rehydration from the server surface; narration-never-fabricates (a model step with no real event is absent); fingerprint carries no content.</step>
+    <step order="6" name="Verify + governance">Build + jest; run bff-extensions checklist; measure publish-size delta vs baseline; report Placement Justification + no new HIGH CVE.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + run BFF integration tests</tool>
+    <tool name="npm">Build + jest the AI.Widgets trace view</tool>
+    <tool name="git">Commit on the project branch</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/ChatEndpoints.cs (ToolChain read surface — restore/GET)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Models/Ai/Chat/SessionLedgerEntries.cs (ContextEnvelope-fingerprint entry)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ (ToolChain read facade)</output>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/src/widgets/context/ExecutionTraceWidget.tsx (decision-traceability view + narration + mount-gap backfill)</output>
+    <output type="test">tests/integration/contract/ or tests/unit/Sprk.Bff.Api.Tests/ (rehydration + narration-truthfulness + no-content)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A server ToolChain read surface (restore payload or GET) returns stored ToolChain + Gate + fingerprint entries and is reachable by consumers only via PublicContracts (ADR-013).</criterion>
+    <criterion testable="true">A hard refresh rehydrates the trace from the server surface, closing the documented client-buffer mount-gap — proven by an integration test.</criterion>
+    <criterion testable="true">Live plan narration renders only steps backed by real ContextEventEmitter tool-chain events; the decision-traceability view shows request → slices → memory → tools → gate/approval → outcome.</criterion>
+    <criterion testable="true">The ContextEnvelope-fingerprint entry and all trace/narration telemetry carry identifiers/counts only — no content (NFR-07), asserted by a test.</criterion>
+    <criterion testable="true">Publish-size delta measured + reported vs baseline; no new HIGH CVE; Placement Justification stated for the new read surface.</criterion>
+    <criterion testable="true">NEGATIVE: a model-claimed step with NO corresponding real tool-chain event does NOT appear in the trace or narration — covered by a test.</criterion>
+    <criterion testable="true">The trace view is HOST-EMBEDDABLE in an arbitrary container (e.g. the Compose Context pane), not bound to the chat surface — it renders from a session/binding identifier with no hard chat-surface dependency (proven by mounting it outside the chat surface).</criterion>
+    <criterion testable="true">On completion, flip this seam's row in `projects/spaarke-ai-architecture-redesign-r2/notes/SEAM-STATUS.md` to published (with commit ref); record which Compose r2 FR it unblocks (FR-32). 'Published' = merged + contract test green + consumable via Services/Ai/PublicContracts/.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If honest live narration cannot be sourced from real tool-chain events without inventing a second dispatch/eventing protocol (ADR-039/040 tension), STOP and surface per CLAUDE.md §6.5 rather than deriving narration from model prose.</trigger>
+    <trigger>If the fingerprint entry cannot describe consulted slices/memory without carrying content (NFR-07), escalate the granularity decision rather than logging content.</trigger>
+  </escalation>
+</task>

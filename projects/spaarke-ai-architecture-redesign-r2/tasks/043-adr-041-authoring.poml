@@ -1,0 +1,105 @@
+<task id="AIR2-043" project="spaarke-ai-architecture-redesign-r2">
+  <metadata>
+    <title>ADR-041 authoring — Judgment, Confirmation &amp; Completion Policy (FR-A1-14 / D-F0+D-F1+D-F2)</title>
+    <status>not-started</status>
+    <phase>Wave J — G-R2-A Judgment + Friction</phase>
+    <gate>G-R2-A (promotion gate: Proposed → Accepted)</gate>
+    <estimated-effort>1.5 days</estimated-effort>
+    <model-tier>fable</model-tier>
+    <model-tier-reason>Whole-ADR authoring establishing binding platform doctrine (D-F0 preamble + D-F1/D-F2 policy tables) — principle-level, high blast radius across every judgment/confirmation/completion decision. Promotion-gated like ADR-039/040; requires the strongest reasoning tier.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>false</parallel-safe>
+    <goal-eligible>false</goal-eligible>
+    <tags>adr, doctrine, judgment, confirmation, completion, claude-write-boundary</tags>
+    <dependencies>030 (D-F0 doctrine), 032 (Policy v2 gate engine), 035/036 (Completion Engine) — the ADR codifies what these tasks implement</dependencies>
+  </metadata>
+
+  <prompt>
+    Author ADR-041 "Judgment, Confirmation &amp; Completion Policy" — the principle-level ADR carrying the D-F0 resourcefulness doctrine preamble plus the D-F1 (confirmation) and D-F2 (completion) policy tables (spec FR-A1-14). Mirror the ADR-039/040 promotion-gate pattern: Proposed at spec time → Accepted at gate G-R2-A. Ship BOTH a concise `.claude/adr/` mirror and the full `docs/adr/` version. Because it writes to `.claude/`, this task is main-session-only (sub-agent write boundary) and MUST run parallel-safe=false.
+  </prompt>
+
+  <role>Architecture-doctrine author fluent in the Spaarke ADR promotion-gate convention (ADR-039/040), the D-F0 resourcefulness doctrine, Policy v2 confirmation tiers, and the Completion Engine/OutcomeCard model.</role>
+
+  <goal>
+    ADR-041 exists in both forms — full `docs/adr/ADR-041-*.md` and concise `.claude/adr/ADR-041-*.md` — carrying: the D-F0 doctrine preamble (decompose → inventory → verify-before-act → act-or-approximate → deliver partial value + next step; read/write safety asymmetry; degradation-below-the-side-effect-line rule), the D-F1 confirmation policy tables (risk-tier × origin × completeness; E-1..E-6 ruled rows; confirmation-state-is-a-gate-ledger-property invariant), and the D-F2 completion policy (OutcomeCard across all side-effect paths; job-aware states). Status is Proposed at spec, promoted to Accepted at G-R2-A. The `.claude/adr/INDEX.md` and any concise-ADR registry are updated.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/spaarke-ai-architecture-redesign-r2/spec.md</file>
+    <file purpose="plan">projects/spaarke-ai-architecture-redesign-r2/plan.md</file>
+    <file purpose="design">projects/spaarke-ai-architecture-redesign-r2/design.md</file>
+    <file purpose="doctrine-note">projects/spaarke-ai-architecture-redesign-r2/notes/d-f0-eval-family-spec.md</file>
+    <file purpose="policy-note">projects/spaarke-ai-architecture-redesign-r2/notes/policy-v2-origin-classification-decision-tree.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="promotion-gate">Mirror the ADR-039/040 Proposed→Accepted pattern: authored Proposed at spec; the Accepted flip is gated on G-R2-A (do not mark Accepted before the gate passes).</constraint>
+    <constraint source="ADR-039">The confirmation policy codifies that risk classification is catalog-declared DATA, never runtime LLM judgment — the ADR must state this explicitly.</constraint>
+    <constraint source="ADR-040">Confirmation state is a Gate-ledger property (a second ask is structurally impossible) — the ADR records this invariant.</constraint>
+    <constraint source="D-F0(b)">The doctrine MUST state the degradation ladder operates BELOW the side-effect line and never weakens a gate/hard block.</constraint>
+    <constraint source="write-boundary">Writes to `.claude/adr/` — MAIN-SESSION ONLY (CLAUDE.md §3 sub-agent write boundary). parallel-safe=false; do not delegate the `.claude/` write to a sub-agent.</constraint>
+    <constraint source="dual-form">Ship BOTH concise `.claude/adr/` + full `docs/adr/`; keep them consistent; update `.claude/adr/INDEX.md`.</constraint>
+    <constraint source="changelog">A CHANGELOG entry is required if the concise-ADR surface changes conventions (per `.claude/` maintenance rules).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>adr/authoring, ai/doctrine, ai/confirmation-policy, ai/completion</topic>
+    <files>
+      <file>docs/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>docs/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/adr/INDEX.md</file>
+      <file>.claude/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+    </files>
+    <patterns>
+      <pattern name="Promotion-gate ADR pattern" location="docs/adr/ADR-039-grounded-execution-closed-catalogs.md:3">Status/promotion section — mirror the Proposed→Accepted structure and the concise/full dual form for ADR-041.</pattern>
+      <pattern name="Concise ADR mirror + index" location=".claude/adr/INDEX.md">The concise-ADR registry ADR-041 is added to; match the existing concise-mirror format.</pattern>
+      <pattern name="D-F1 policy source" location="projects/spaarke-ai-architecture-redesign-r2/notes/policy-v2-origin-classification-decision-tree.md">The risk-tier table + E-1..E-6 ruled rows the ADR's D-F1 tables codify.</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>ADR-041 is one of two new ADRs this project authors (042 is the memory one). It is principle-level: it does not re-implement D-F0/D-F1/D-F2 but codifies them as binding doctrine, so tasks 030/032/035/036 have a citable authority. Following the 039/040 pattern, it is Proposed when the spec lands and Accepted only when its gate (G-R2-A) passes.</background>
+    <dependencies>
+      <dependency task="030" status="pending">D-F0 resourcefulness doctrine — the ADR preamble codifies it.</dependency>
+      <dependency task="032" status="pending">Policy v2 gate engine — the ADR's D-F1 tables codify it.</dependency>
+      <dependency task="035" status="pending">Completion Engine + OutcomeCard — the ADR's D-F2 policy codifies it.</dependency>
+    </dependencies>
+    <related-work>
+      <item>ADR-042 (task 065) is the sibling memory ADR; keep the promotion-gate + dual-form conventions consistent across both.</item>
+      <item>Task 049 G-R2-A UAT is the gate whose pass promotes this ADR to Accepted.</item>
+    </related-work>
+  </context>
+
+  <steps mode="directional">
+    <step order="0" name="Context">Load spec FR-A1-14, the D-F0 + Policy v2 notes, and the ADR-039/040 promotion-gate + concise-mirror conventions.</step>
+    <step order="1" name="Draft full ADR">Author `docs/adr/ADR-041-*.md`: doctrine preamble (D-F0), confirmation tables (D-F1, E-1..E-6, catalog-DATA + gate-ledger invariants), completion policy (D-F2). Status: Proposed.</step>
+    <step order="2" name="Concise mirror">Author the concise `.claude/adr/ADR-041-*.md` (MUST/MUST NOT rules) mirroring the full ADR; update `.claude/adr/INDEX.md`.</step>
+    <step order="3" name="Cross-reference">Cite ADR-041 from the implementing tasks' constraints where appropriate; add the CHANGELOG entry.</step>
+    <step order="4" name="Promotion note">Record that the Accepted flip is gated on G-R2-A (task 049) — leave Status: Proposed until then.</step>
+  </steps>
+
+  <tools>
+    <tool name="git">Commit the ADR on the project branch (main-session write)</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">docs/adr/ADR-041-*.md (full ADR — Judgment, Confirmation &amp; Completion Policy; Status: Proposed)</output>
+    <output type="docs">.claude/adr/ADR-041-*.md (concise MUST/MUST NOT mirror)</output>
+    <output type="docs">.claude/adr/INDEX.md (ADR-041 registered)</output>
+    <output type="docs">.claude/CHANGELOG.md (entry for the concise-ADR addition)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Both forms exist and are consistent: full `docs/adr/ADR-041-*.md` + concise `.claude/adr/ADR-041-*.md`; `.claude/adr/INDEX.md` lists ADR-041.</criterion>
+    <criterion testable="true">The ADR carries the D-F0 doctrine preamble + the D-F1 (E-1..E-6) confirmation tables + the D-F2 completion policy, and states risk-classification-is-catalog-DATA (ADR-039) + confirmation-state-is-a-gate-ledger-property (ADR-040).</criterion>
+    <criterion testable="true">Status is Proposed; the Accepted flip is explicitly gated on G-R2-A (not marked Accepted in this task).</criterion>
+    <criterion testable="true">The doctrine states the degradation ladder operates below the side-effect line and never weakens a gate/hard block (D-F0(b)).</criterion>
+    <criterion testable="true">A `.claude/CHANGELOG.md` entry is added; the `.claude/` writes were performed in the main session (not a sub-agent).</criterion>
+    <criterion testable="true">NEGATIVE: ADR-041 is NOT marked Accepted before G-R2-A passes; and it introduces no runtime LLM risk-judgment mechanism (would contradict ADR-039) — both verifiable in the text.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If codifying D-F1/D-F2 surfaces a genuine conflict with an existing ADR (039/040) that cannot be resolved by comply (Path C), STOP and run the CLAUDE.md §6.5 ADR Conflict Resolution Protocol — propose Path A (exception) or Path B (amendment) rather than writing doctrine that silently contradicts a binding ADR.</trigger>
+    <trigger>If a sub-agent is about to write to `.claude/adr/`, STOP — the write boundary (CLAUDE.md §3) requires the main session to perform it.</trigger>
+  </escalation>
+</task>

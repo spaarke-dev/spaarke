@@ -1,0 +1,101 @@
+<task id="AIR2-021" project="spaarke-ai-architecture-redesign-r2">
+  <metadata>
+    <title>Test-repair — 3 failing SpaarkeAi suites + 8 failing AI.Widgets suites [FR-A-02]</title>
+    <status>not-started</status>
+    <phase>A-infra — before ANY catalog-row task</phase>
+    <gate>G-R2-A (enabling infra)</gate>
+    <estimated-effort>2-3 days</estimated-effort>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Brownfield jest debugging of pre-existing reds — mechanical repair against a known failing baseline, not architectural design. Sonnet at xhigh effort suits the root-cause slog without opus blast-radius.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-safe>true</parallel-safe>
+    <goal-eligible>false</goal-eligible>
+    <tags>testing, test-reset, pcf, spaarkeai, jest, brownfield</tags>
+    <dependencies>none (front-loaded infra; TEST-MODIFYING rigor)</dependencies>
+  </metadata>
+
+  <prompt>
+    Repair the 3 failing SpaarkeAi jest suites + 8 failing Spaarke.AI.Widgets jest suites that are verified pre-existing at HEAD (spec FR-A-02 / R10, plan §4 Phase A-infra). Green them WITHOUT deleting coverage that guards real behavior and without weakening assertions to pass. This is TEST-MODIFYING work: FULL rigor (code-review + adr-check at Step 9.5) applies UNCONDITIONALLY per CLAUDE.md §8. Note: AnalysisWorkspace jest-ESM debt is OUT — it clears via retire-at-parity in Compose r2, not here.
+  </prompt>
+
+  <role>Front-end engineer fluent in the Spaarke React/Fluent v9 test stack (jest + Testing Library), the SpaarkeAi code page, and the `@spaarke/ai-widgets` shared library.</role>
+
+  <goal>
+    All 3 SpaarkeAi suites and all 8 AI.Widgets suites pass, with the exact pre-repair red set pinned first (a jest run), each failure root-caused (not silenced), and each fix classified per ADR-038 build-vs-maintain so scaffolding-class repairs aren't kept as permanent tests. No assertion is weakened merely to pass; behavior-guarding coverage is preserved or improved.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/spaarke-ai-architecture-redesign-r2/spec.md</file>
+    <file purpose="plan">projects/spaarke-ai-architecture-redesign-r2/plan.md</file>
+    <file purpose="testing-adr">docs/adr/ADR-038-testing-strategy.md</file>
+    <file purpose="test-architecture">docs/standards/TEST-ARCHITECTURE.md</file>
+    <file purpose="test-constraints">.claude/constraints/testing.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-038">Repairs honor the integration-heavy pyramid + 6 KEEP-path categories; do NOT convert a broken behavioral test into a banned form (`Mock&lt;HttpMessageHandler&gt;`, DI-registration, ctor null-check). Coverage is observation, never a gate.</constraint>
+    <constraint source="ADR-022">SpaarkeAi/PCF tests stay compatible with the PCF Platform Libraries constraint (ADR-038 does NOT supersede it).</constraint>
+    <constraint source="project">Pin the EXACT red set by running jest FIRST (Step 1) — do not repair blind against an assumed list.</constraint>
+    <constraint source="project">No assertion-weakening-to-pass; if a test guards obsolete behavior, classify it SCAFFOLDING and emit a `git rm` recommendation for the reviewer (test-diet discipline) rather than silently deleting.</constraint>
+    <constraint source="node-installs">Use `npm install --legacy-peer-deps --no-audit --no-fund` for the Vite/SpaarkeAi solution, not `npm ci`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>testing/jest, react-testing-library, fluent-v9-testing, adr-038-keep-paths</topic>
+    <files>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+    <patterns>
+      <pattern name="SpaarkeAi failing suites" location="src/solutions/SpaarkeAi/src/**/__tests__/">Jest suites under components/conversation, components/workspace, components/context; run jest to pin the 3 exact reds.</pattern>
+      <pattern name="AI.Widgets failing suites" location="src/client/shared/Spaarke.AI.Widgets/src/**/__tests__/">Suites under components/memory, events, hooks, interactions, providers, registry; run jest to pin the 8 exact reds.</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>R1 left these suites red at HEAD (design §10 row 10). They must be green before r2 adds Completion UX / trace / memory UI to the same libraries, or new work lands on an unreliable baseline. This is enabling infra, parallel-safe with 020.</background>
+    <dependencies>
+      <dependency task="none" status="n/a">Front A-infra task — no upstream.</dependency>
+    </dependencies>
+    <related-work>
+      <item>035/037/038 add OutcomeCard + ack + trace UI to these same libraries — a green baseline here de-risks them.</item>
+      <item>Project-close 090 runs `/test-diet`; SCAFFOLDING classifications recorded here feed that reconciliation.</item>
+    </related-work>
+  </context>
+
+  <steps mode="directional">
+    <step order="0" name="Context + governance">Load FR-A-02, ADR-038 KEEP-path categories, TEST-ARCHITECTURE.md. Declare TEST-MODIFYING rigor.</step>
+    <step order="1" name="Pin the reds">Install deps (`--legacy-peer-deps`), run jest for both libraries, and RECORD the exact failing suite + test names and the failure messages — this is the authoritative red set, not the plan's count.</step>
+    <step order="2" name="Root-cause each">For each red, diagnose the real cause (stale mock, changed component contract, async/act warning, ESM/transform gap, obsolete assertion). Classify MAINTAIN vs SCAFFOLDING per ADR-038 §7.</step>
+    <step order="3" name="Repair MAINTAIN">Fix the code-or-test for behavior-guarding suites; preserve or strengthen assertions. No weakening-to-pass.</step>
+    <step order="4" name="Recommend removal for SCAFFOLDING">For obsolete-behavior tests, emit `git rm` recommendations (do not silently delete) for reviewer sign-off.</step>
+    <step order="5" name="Verify + rigor gate">Re-run jest for both libraries → all green; run code-review + adr-check (Step 9.5, unconditional for TEST-MODIFYING).</step>
+  </steps>
+
+  <tools>
+    <tool name="npm">Install + run jest for SpaarkeAi + AI.Widgets</tool>
+    <tool name="git">Commit on the project branch; emit git rm recommendations</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">src/solutions/SpaarkeAi/src/**/__tests__/ (3 suites green)</output>
+    <output type="test">src/client/shared/Spaarke.AI.Widgets/src/**/__tests__/ (8 suites green)</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r2/notes/ (pinned red set + per-suite root cause + MAINTAIN/SCAFFOLDING classification)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The exact pre-repair red set is pinned by an actual jest run and recorded (suite + test names), before any fix.</criterion>
+    <criterion testable="true">All 3 SpaarkeAi suites pass.</criterion>
+    <criterion testable="true">All 8 AI.Widgets suites pass.</criterion>
+    <criterion testable="true">Each repair is root-caused and classified MAINTAIN vs SCAFFOLDING per ADR-038 §7; SCAFFOLDING removals are `git rm` recommendations, not silent deletions.</criterion>
+    <criterion testable="true">No MAINTAIN test was weakened merely to pass (assertions preserved/strengthened); no repair introduces a banned test form (`Mock&lt;HttpMessageHandler&gt;`, DI-registration, ctor null-check).</criterion>
+    <criterion testable="true">NEGATIVE: a suite whose ONLY green path is a weakened/no-op assertion is rejected — it is either properly repaired or classified SCAFFOLDING with a removal recommendation, not left as a passing hollow test.</criterion>
+    <criterion testable="true">code-review + adr-check run at Step 9.5 (TEST-MODIFYING rigor, unconditional).</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If a suite is red because the PRODUCTION component contract actually regressed (not the test), STOP repairing the test — surface the production defect; a test must not be edited to conform to broken behavior.</trigger>
+    <trigger>If a repair would require converting an AnalysisWorkspace jest-ESM suite, STOP — that debt is explicitly OUT (Compose r2 retire-at-parity), not this task.</trigger>
+  </escalation>
+</task>

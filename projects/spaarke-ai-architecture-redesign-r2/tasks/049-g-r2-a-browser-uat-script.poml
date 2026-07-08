@@ -1,0 +1,95 @@
+<task id="AIR2-049" project="spaarke-ai-architecture-redesign-r2">
+  <metadata>
+    <title>G-R2-A browser UAT script — operator-executed judgment/friction gate on spaarkedev1 [gate]</title>
+    <status>not-started</status>
+    <phase>Wave J — G-R2-A Judgment + Friction</phase>
+    <gate>G-R2-A (gate verification — operator UAT)</gate>
+    <estimated-effort>1 day</estimated-effort>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Authoring an operator-executable UAT script over shipped behavior; the judgment lives in the scenarios (already specified in §Success Criteria G-R2-A), not in new architecture. It is a gate, not implementation.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>true</parallel-safe>
+    <goal-eligible>false</goal-eligible>
+    <tags>gate, uat, browser, spaarkedev1, g-r2-a, judgment</tags>
+    <dependencies>030-043 (all Wave J judgment/friction FRs) — the gate verifies their combined behavior</dependencies>
+  </metadata>
+
+  <prompt>
+    Author the G-R2-A browser UAT script — an operator-executed procedure on spaarkedev1 that verifies the judgment/friction gate across the 10-scenario E2E band (spec §Success Criteria G-R2-A). This is a GATE, not implementation: a passing curl or a green automated test NEVER satisfies it — verification is a human clicking through the assistant in a browser and observing the specified behavior. Write the script so an operator can execute it step-by-step and record pass/fail per scenario.
+  </prompt>
+
+  <role>QA/operator-experience author fluent in the Spaarke browser-UAT gate convention (r1 rule verbatim), the D-F0/D-F1/D-F2 acceptance behavior, and the SpaarkeAi assistant surface on spaarkedev1.</role>
+
+  <goal>
+    A step-by-step operator UAT script (in project notes) covers the 10-scenario E2E band for G-R2-A: the explicit+complete Tier-2b create-with-no-dialog case (✅ + record chip + next-step chips); the ambiguous/inferred write confirming exactly once, one modality; the partially-blocked request that verifies state, does what's possible, and hands over the rest (extracted values + prepared content + working deep link — e.g. the doc block links the Document Upload page); every claimed UI action backed by a real client event; honest ❌ with the real reason on failure; "how did you decide?" opening the traceability view with live plan narration; long outputs rendering progressively. Each scenario has explicit preconditions, steps, and an observable pass/fail criterion. The script states plainly that a green test or passing curl does NOT satisfy the gate.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/spaarke-ai-architecture-redesign-r2/spec.md</file>
+    <file purpose="plan">projects/spaarke-ai-architecture-redesign-r2/plan.md</file>
+    <file purpose="design">projects/spaarke-ai-architecture-redesign-r2/design.md</file>
+    <file purpose="doctrine-note">projects/spaarke-ai-architecture-redesign-r2/notes/d-f0-eval-family-spec.md</file>
+    <file purpose="policy-note">projects/spaarke-ai-architecture-redesign-r2/notes/policy-v2-origin-classification-decision-tree.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="gate-rule">Browser-UAT-gated: an operator executes it on spaarkedev1; a passing curl or green automated test NEVER satisfies the gate (r1 rule verbatim, spec §Success Criteria).</constraint>
+    <constraint source="spec">The script MUST cover the full 10-scenario E2E band enumerated in spec §Success Criteria G-R2-A — no scenario dropped.</constraint>
+    <constraint source="project">Each scenario has explicit preconditions, ordered steps, and a single observable pass/fail criterion an operator can judge without reading code.</constraint>
+    <constraint source="promotion-gate">A passing G-R2-A run is the trigger that promotes ADR-041 (task 043) from Proposed to Accepted — the script notes this linkage.</constraint>
+    <constraint source="no-code">This task authors a procedure document only — it does not modify BFF/SpaarkeAi code, so no publish-size/CVE gate applies.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>uat/browser-gate, ai/judgment, ai/confirmation, ai/completion</topic>
+    <files>
+      <file>docs/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>docs/adr/ADR-040-session-ledger.md</file>
+      <file>docs/procedures/testing-and-code-quality.md</file>
+    </files>
+    <patterns>
+      <pattern name="Success Criteria G-R2-A (source scenarios)" location="projects/spaarke-ai-architecture-redesign-r2/spec.md">The G-R2-A bullet enumerates the exact judgment/friction behaviors the 10-scenario band must verify.</pattern>
+      <pattern name="Resourcefulness E2E band" location="projects/spaarke-ai-architecture-redesign-r2/notes/d-f0-eval-family-spec.md">The 10-scenario E2E band definition the script operationalizes for a human.</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>G-R2-A is the judgment/friction gate. Per the r1-verbatim rule, gates are verified by an operator in a browser on spaarkedev1, never by automated green — evals and unit tests are necessary but not sufficient. This task produces the human-executable script that closes the gate and, on passing, promotes ADR-041 to Accepted.</background>
+    <dependencies>
+      <dependency task="030-043" status="pending">All Wave J judgment/friction FRs must be implemented; the UAT verifies their combined observable behavior.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 043 ADR-041 flips to Accepted only when this gate passes.</item>
+      <item>FR-A1-02/04 eval families are the automated complement — necessary but not gate-sufficient.</item>
+    </related-work>
+  </context>
+
+  <steps mode="directional">
+    <step order="0" name="Context">Load spec §Success Criteria G-R2-A + the 10-scenario E2E band from the D-F0 note.</step>
+    <step order="1" name="Enumerate scenarios">List all 10 scenarios with the specific observable behavior each must demonstrate (no-dialog create, confirm-once, partial-value handoff, UI-ack truthfulness, honest ❌, traceability + narration, progressive render, refusal-affordance deep-link, etc.).</step>
+    <step order="2" name="Write operator steps">For each scenario write preconditions, ordered browser steps on spaarkedev1, and one observable pass/fail criterion judgeable without code.</step>
+    <step order="3" name="State the gate rule">Prominently state that a green test / passing curl does NOT satisfy the gate; add a pass/fail recording table.</step>
+    <step order="4" name="Link promotion">Note that a full pass promotes ADR-041 (task 043) to Accepted.</step>
+  </steps>
+
+  <tools>
+    <tool name="git">Commit the UAT script on the project branch</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r2/notes/g-r2-a-uat-script.md (operator-executed 10-scenario browser UAT)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The script covers all 10 scenarios of the G-R2-A E2E band, each with explicit preconditions, ordered browser steps on spaarkedev1, and one observable pass/fail criterion.</criterion>
+    <criterion testable="true">The script includes the no-dialog Tier-2b create (✅ + record chip + next-step chips), confirm-exactly-once, and the partial-value handoff (extracted values + prepared content + working Document Upload deep link) scenarios.</criterion>
+    <criterion testable="true">The script covers UI-ack truthfulness, honest ❌ with the real reason, the "how did you decide?" traceability view + live narration, and progressive render.</criterion>
+    <criterion testable="true">The script states explicitly that a passing curl or green automated test does NOT satisfy the gate, and provides an operator pass/fail recording table.</criterion>
+    <criterion testable="true">The script notes that a full pass promotes ADR-041 (task 043) to Accepted.</criterion>
+    <criterion testable="true">NEGATIVE: the script does NOT claim the gate can be closed by automated evals/CI alone — that path is explicitly rejected in the document.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If any of the 10 scenarios cannot be exercised on spaarkedev1 because an underlying Wave J FR (030-043) is not yet shipped, STOP and report the gap — do not weaken the scenario or substitute an automated check to make the gate appear closeable.</trigger>
+  </escalation>
+</task>

@@ -1,0 +1,91 @@
+<task id="AIR2-033" project="spaarke-ai-architecture-redesign-r2">
+  <metadata>
+    <title>Origin-classification eval family — generated from E-1..E-6 (≥1 positive + ≥1 negative per row) [FR-A1-04]</title>
+    <status>not-started</status>
+    <phase>Wave J — G-R2-A Judgment + Friction</phase>
+    <gate>G-R2-A (judgment) — merge gate</gate>
+    <estimated-effort>1-2 days</estimated-effort>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Case generation from an already-ruled E-1..E-6 table — the hard judgment (the rulings, the classifier) lives in the note + task 032; this task mechanically derives positive/negative cases and wires them into the eval gate. Sonnet at high effort fits deriving-from-a-spec work.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>false</parallel-safe>
+    <goal-eligible>false</goal-eligible>
+    <tags>bff-api, eval, testing, policy-v2, merge-gate, adr-038</tags>
+    <dependencies>DEPENDS ON 032 (the classifier + E-1..E-6 behavior it scores). Shares the golden-utterance harness with 031.</dependencies>
+  </metadata>
+
+  <prompt>
+    Generate the origin-classification eval family from the E-1..E-6 ruled table in `notes/policy-v2-origin-classification-decision-tree.md` — at least one POSITIVE and one NEGATIVE case per row (spec FR-A1-04). It joins the golden-utterance suite as a CI merge gate. The rulings are already decided (note §4 + task 032); this task turns each ruling into deterministic eval cases that assert the classifier produced the ruled origin and the gate produced the ruled behavior (execute / confirm-once / dialog).
+  </prompt>
+
+  <role>AI-evaluation engineer fluent in the Spaarke golden-utterance harness and the Policy v2 origin classifier + Gate-ledger confirm-state semantics.</role>
+
+  <goal>
+    An origin-classification eval family exists with ≥1 positive + ≥1 negative case for each of E-1..E-6, each asserting BOTH the classified origin (`explicit`/`inferred`) and the resulting gate behavior, wired into the CI eval-gate as a merge gate. Cases are net-new (no duplication of golden or resourcefulness cases) and mechanically assert the deterministic outcome (a classifier is not judged by an LLM — it is deterministic, so these are hard assertions, not rubric scores).
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/spaarke-ai-architecture-redesign-r2/spec.md</file>
+    <file purpose="policy-tree">projects/spaarke-ai-architecture-redesign-r2/notes/policy-v2-origin-classification-decision-tree.md</file>
+    <file purpose="testing-adr">docs/adr/ADR-038-testing-strategy.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-038">Eval-green stays a merge gate; family is a KEEP-path asset. No `Mock&lt;HttpMessageHandler&gt;`, no DI-registration tests.</constraint>
+    <constraint source="policy-note">The classifier is DETERMINISTIC — assert its output mechanically (hard equality on origin + gate behavior), do NOT hand it to an LLM judge.</constraint>
+    <constraint source="project">≥1 positive + ≥1 negative per E-1..E-6 row (12+ cases minimum); net-new vs golden + resourcefulness suites.</constraint>
+    <constraint source="policy-note">Each case asserts BOTH the ruled origin AND the ruled gate behavior (execute no-dialog / confirm-once / dialog-with-suspicion).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai/eval-harness, origin-classification, e1-e6-rulings, deterministic-assertions</topic>
+    <files>
+      <file>projects/spaarke-ai-architecture-redesign-r2/notes/policy-v2-origin-classification-decision-tree.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+    </files>
+    <patterns>
+      <pattern name="Golden-utterance suite" location="tests/integration/contract/Eval/golden-utterances.json">The suite this family joins; dedupe against it + the resourcefulness family (031).</pattern>
+      <pattern name="CI eval-gate" location=".github/workflows/sdap-ci.yml">Line 225 — eval-gate stage the family wires into.</pattern>
+      <pattern name="E-1..E-6 rulings" location="projects/spaarke-ai-architecture-redesign-r2/notes/policy-v2-origin-classification-decision-tree.md">§4 table + §6 worked traces — the positive/negative case source.</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>The E-1..E-6 rows are RULED (design D-F1 adopted them). Each row yields at least a positive + negative case, e.g. E-1: affirmation-after-single-complete-proposal=explicit; affirmation-after-two-proposals=inferred. The family is the forcing function that keeps the 032 classifier honest across changes.</background>
+    <dependencies>
+      <dependency task="032" status="required-upstream">Implements the classifier + E-1..E-6 behavior this family scores.</dependency>
+    </dependencies>
+    <related-work>
+      <item>031 (resourcefulness eval family) is the sibling merge-gate family; keep harness conventions + dedupe boundaries consistent.</item>
+      <item>071 aggregates this into the G-R2-D eval-suite-green gate.</item>
+    </related-work>
+  </context>
+
+  <steps mode="directional">
+    <step order="0" name="Context">Load FR-A1-04, the E-1..E-6 table + worked traces, confirm 032 merged.</step>
+    <step order="1" name="Derive cases">For each of E-1..E-6, author ≥1 positive + ≥1 negative case (utterance/situation + expected origin + expected gate behavior), seeded from §6 worked traces where available.</step>
+    <step order="2" name="Mechanical assertions">Assert origin equality + gate behavior deterministically; dedupe against golden + resourcefulness suites.</step>
+    <step order="3" name="Wire the gate + verify">Register the family in the CI eval-gate (sdap-ci.yml:225); run it; confirm each row's negative case fails when the classifier is deliberately perturbed.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Run the eval harness</tool>
+    <tool name="git">Commit on the project branch</tool>
+  </tools>
+
+  <outputs>
+    <output type="test">tests/integration/contract/Eval/ (origin-classification family: ≥1 positive + ≥1 negative per E-1..E-6)</output>
+    <output type="config">.github/workflows/sdap-ci.yml (family registered in the eval-gate at :225)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Each of E-1..E-6 has ≥1 positive and ≥1 negative case, each asserting BOTH classified origin and ruled gate behavior.</criterion>
+    <criterion testable="true">Assertions are deterministic (hard equality), not LLM-judged; cases are net-new vs golden + resourcefulness suites.</criterion>
+    <criterion testable="true">The family is registered in the CI eval-gate (sdap-ci.yml:225) as a merge gate.</criterion>
+    <criterion testable="true">NEGATIVE: the E-1 negative case (affirmation after TWO proposals) asserts `inferred` + confirm-once and FAILS if the classifier returns `explicit`; the E-6 negative case (dispatchUncertain over an explicit request) asserts dialog-with-suspicion and FAILS if it auto-executes — both demonstrated red under a perturbed classifier.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If a ruled row cannot be exercised deterministically because the classifier's input signal is not observable in the harness, surface the coverage gap rather than substituting an LLM-judge assertion for a deterministic mechanism.</trigger>
+  </escalation>
+</task>

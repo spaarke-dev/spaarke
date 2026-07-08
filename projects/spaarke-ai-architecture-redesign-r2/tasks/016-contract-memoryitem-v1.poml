@@ -1,0 +1,110 @@
+<task id="AIR2-016" project="spaarke-ai-architecture-redesign-r2">
+  <metadata>
+    <title>Publish MemoryItem v1 contract (walking skeleton) — structured object + governance envelope over the EXISTING MemoryFact</title>
+    <status>not-started</status>
+    <phase>A0 — Contract-first</phase>
+    <gate>G-R2-B (seam publication)</gate>
+    <estimated-effort>1 day</estimated-effort>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>The memory object + 14-field governance envelope every Memory Service / governance task binds to; generic `(entityType,entityId)` keying + Tier-3 erasure semantics are load-bearing and genuinely new. High architectural blast radius.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>true</parallel-safe>
+    <goal-eligible>false</goal-eligible>
+    <tags>bff-api, contract, seam, adr-015, memory, governance-envelope</tags>
+    <dependencies>none (A0 front wave; publish early)</dependencies>
+  </metadata>
+
+  <prompt>
+    Publish the `MemoryItem v1` contract as a Phase-A0 walking skeleton (spec FR-A0-03, design D-M1; envelope per FR-B-02). It is the structured memory OBJECT (NOT embeddings) plus its governance envelope — `scope` (record|user), generic `(subjectType/subjectId)` or `userId` keying, `source` (+ sessionId/turnId provenance), `confidence`, `sensitivity`, `expiration`, `deletionPolicy`, `retentionClass`, created/updated/createdBy — EXTENDING the EXISTING `MemoryFact` model (reuse `Type/Key/Value/Source/ConfirmedByUser/Confidence/RecordedAt`). Generalize off matter-only to generic entity keying. Ship the contract WITH a thin producer, a thin consumer, and a contract test — plus tolerant-reader migration defaults for existing facts.
+  </prompt>
+
+  <role>Senior .NET developer fluent in the existing `MatterMemoryService`/`MemoryFact` Cosmos memory subsystem, ADR-015 Tier-3 (user-owned, GDPR-erasable) governance, and versioned tolerant-reader contracts.</role>
+
+  <goal>
+    A versioned `MemoryItem v1` contract under `Services/Ai/PublicContracts/` that EXTENDS `MemoryFact` with the governance envelope + generic `(entityType,entityId)`/`userId` keying, carries a version field + tolerant-reader rules (existing matter-keyed facts read with sensible migration defaults), an example payload, and structured-object-not-embedding invariant. A thin producer writes a MemoryItem; a thin consumer reads it back honoring scope; a contract test in `tests/integration/contract/` locks the envelope shape AND asserts tolerant-reader migration of a legacy fact.</goal>
+
+  <inputs>
+    <file purpose="spec">projects/spaarke-ai-architecture-redesign-r2/spec.md</file>
+    <file purpose="plan">projects/spaarke-ai-architecture-redesign-r2/plan.md</file>
+    <file purpose="design">projects/spaarke-ai-architecture-redesign-r2/design.md</file>
+    <file purpose="module-guidance">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    <file purpose="bff-governance">.claude/constraints/bff-extensions.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="project">EXTEND the existing `MemoryFact` (reuse `Type/Key/Value/Source/ConfirmedByUser/Confidence/RecordedAt`); do NOT greenfield a new memory model (CLAUDE.md §11; plan §3).</constraint>
+    <constraint source="project">Structured objects, NOT embeddings, for Record + User scopes. Key Record scope generically by `(entityType, entityId)` — never matter-only. TERMINOLOGY: use "Record scope `(entityType, entityId)`" throughout; Compose's "workspace-scope memory" IS Record scope (same concept, canonical name = Record scope).</constraint>
+    <constraint source="project">PROVENANCE ENVELOPE (metadata, NOT a gate): the envelope carries `source` (user | ai-derived | insights-engine), `bindingId`/`ledgerRef`, `trustLevel`, and `expiration`. These are written at capture time as METADATA — they do NOT gate the write (memory.write is AI-initiated + silent per FR-B-08); the FR-B-03 user review/delete surface is the control. `trustLevel` may be present but its ENFORCEMENT is deferred to the governance project.</constraint>
+    <constraint source="ADR-015">MemoryItems are Tier 3 (user-owned, GDPR-erasable) — the envelope carries deletionPolicy/retentionClass/expiration to support erasure.</constraint>
+    <constraint source="ADR-040">Conversation memory stays the ledger facade — MemoryItem is Record/User scope only, NOT a session cache.</constraint>
+    <constraint source="ADR-013">Consumers reach MemoryItem only via `Services/Ai/PublicContracts/`.</constraint>
+    <constraint source="ADR-038">Contract test is a KEEP-path integration test; no `Mock&lt;HttpMessageHandler&gt;`, no DI-registration tests.</constraint>
+    <constraint source="project">Tolerant-reader migration: existing matter-keyed facts read with defaults (subjectType=matter). `sourceTrustLevel` field MAY be present but its ENFORCEMENT is deferred (FR-B-08). Version field; additive-only.</constraint>
+    <constraint source="bff-hygiene">Run the bff-extensions.md checklist; state Placement Justification; measure publish-size delta; no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai/memory, memory-fact, governance-envelope, tier-3-erasure, generic-entity-keying, versioned-contracts</topic>
+    <files>
+      <file>docs/adr/ADR-015 (data-tier classification; see .claude/adr/INDEX.md)</file>
+      <file>docs/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Existing MemoryFact model" location="src/server/api/Sprk.Bff.Api/Services/Ai/Memory/MatterMemoryService.cs:27">MemoryFact + ETag/versioning + GDPR erasure + budget-serialization — the model MemoryItem v1 extends (reuse, generalize keying).</pattern>
+      <pattern name="Memory service interface" location="src/server/api/Sprk.Bff.Api/Services/Ai/Memory/IMatterMemoryService.cs">The interface generalized to RecordMemory in task 050 — MemoryItem is its contract.</pattern>
+      <pattern name="Contract test home" location="tests/integration/contract/">Add the MemoryItem contract test here.</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>Discovery found a working Cosmos memory subsystem (`MatterMemoryService`/`MemoryFact`). D-M1 generalizes it off matter-only to two scopes (Record `(entityType,entityId)` + User `userId`) with a governance envelope. This A0 task freezes the OBJECT + envelope shape first — the genuinely-new part — so task 050 (service generalization), 051 (envelope), 052 (governance), and the ContextEnvelope Memory slice (015) all bind to a stable contract. Hard-governance enforcement (untrusted-origin ban, `trustLevel` enforcement) is DEFERRED; provenance fields (`source`/`bindingId`/`ledgerRef`/`trustLevel`/`expiration`) exist as METADATA written at capture time — they do NOT gate the write. Compose's `AnchoredAnnotation` is accepted as NOT a MemoryItem: it is document-positional UI state (not governed memory), stays in Compose's session payload, and needs no negotiated MemoryItem sub-type (Compose spec §ADR-Tensions Path-A).</background>
+    <dependencies>
+      <dependency task="none" status="n/a">Front A0 wave — no upstream (service generalization at 050 depends on this).</dependency>
+    </dependencies>
+    <related-work>
+      <item>FR-B-01 (task 050) generalizes `MatterMemoryService`→RecordMemory producing/consuming MemoryItem.</item>
+      <item>FR-B-02 (task 051) adds the governance envelope to `MemoryFact` (this contract's fields).</item>
+      <item>FR-A0-01 (task 015) ContextEnvelope Memory slice carries MemoryItems.</item>
+      <item>FR-B-08 (task 057) `memory.write` — AI-initiated, silent, provenance-tagged — writes MemoryItems (no gate).</item>
+    </related-work>
+  </context>
+
+  <steps mode="directional">
+    <step order="0" name="Context + governance">Load FR-A0-03 + FR-B-02, ADR-015/040, bff-extensions.md; read the existing MemoryFact fields to know what to reuse vs add.</step>
+    <step order="1" name="Define the contract">Define `MemoryItem v1` DTO under `Services/Ai/PublicContracts/` extending MemoryFact with the governance envelope + generic `(entityType,entityId)`/`userId` keying + scope discriminator; version field; tolerant-reader migration defaults; structured-object invariant.</step>
+    <step order="2" name="Reference producer">Wire a thin producer writing a MemoryItem (Record or User scope) reusing the existing service serialization.</step>
+    <step order="3" name="Reference consumer">A thin consumer reading it back honoring scope + surfacing provenance.</step>
+    <step order="4" name="Contract test">Add a contract test asserting envelope shape, generic keying, version, tolerant-reader migration of a legacy matter-keyed fact (defaults applied), and structured-object-not-embedding.</step>
+    <step order="5" name="Verify + governance">Build; run the contract test; measure publish-size delta; state Placement Justification + bff-extensions checklist.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + run the contract/integration test</tool>
+    <tool name="git">Commit on the project branch</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ (MemoryItem v1 contract DTO + governance envelope)</output>
+    <output type="test">tests/integration/contract/ (MemoryItem contract test)</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r2/notes/ (contract doc: MemoryFact→MemoryItem field map + envelope + migration defaults + versioning + example payload)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`MemoryItem v1` exists under `Services/Ai/PublicContracts/` (ADR-013), EXTENDS the existing `MemoryFact` (reuses Type/Key/Value/Source/ConfirmedByUser/Confidence/RecordedAt), and carries the governance envelope (scope, subjectType/subjectId or userId, source+provenance, confidence, sensitivity, expiration, deletionPolicy, retentionClass, created/updated/createdBy).</criterion>
+    <criterion testable="true">Record memory is keyed generically by `(entityType, entityId)` — the contract test proves a non-matter entity (e.g. project/invoice) keys correctly; NOT matter-only.</criterion>
+    <criterion testable="true">A thin producer writes a MemoryItem and a thin consumer reads it back honoring scope — round-trip proven by the contract test.</criterion>
+    <criterion testable="true">The contract test asserts tolerant-reader MIGRATION: a legacy matter-keyed `MemoryFact` reads as a MemoryItem with sensible defaults (subjectType=matter) — no data loss.</criterion>
+    <criterion testable="true">The contract test asserts memory is a STRUCTURED object, not an embedding vector; version field present; unknown extra field ignored.</criterion>
+    <criterion testable="true">The test uses no `Mock&lt;HttpMessageHandler&gt;` and no DI-registration assertions (ADR-038).</criterion>
+    <criterion testable="true">NEGATIVE: a MemoryItem written to the Conversation scope (which must stay the ledger facade) is rejected/flagged by a test — MemoryItem is Record/User scope only (ADR-040).</criterion>
+    <criterion testable="true">The provenance envelope carries `source` (user | ai-derived | insights-engine), `bindingId`/`ledgerRef`, `trustLevel`, and `expiration` as METADATA (written at capture time; NOT a write-gate — memory.write is AI-initiated per FR-B-08); `trustLevel` enforcement is deferred.</criterion>
+    <criterion testable="true">Terminology: the contract doc uses "Record scope `(entityType, entityId)`" and states Compose's "workspace-scope memory" = Record scope; `AnchoredAnnotation` is documented as NOT a MemoryItem (document-positional UI state), requiring no MemoryItem sub-type.</criterion>
+    <criterion testable="true">Publish-size delta measured + reported; no new HIGH CVE; Placement Justification stated.</criterion>
+    <criterion testable="true">On completion, flip this seam's row in `projects/spaarke-ai-architecture-redesign-r2/notes/SEAM-STATUS.md` to published (with commit ref); record which Compose r2 FR it unblocks (FR-30). 'Published' = merged + contract test green + consumable via Services/Ai/PublicContracts/.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If extending `MemoryFact` in place would break the EXISTING matter-keyed docs on dev (partition-key or serialization incompatibility), STOP and surface it — the live-doc migration decision (migrate vs fresh-container-and-leave-legacy) is owned by task 050 and is an operator-ratified call (spec Unresolved Questions), not something to force silently in the contract task.</trigger>
+  </escalation>
+</task>

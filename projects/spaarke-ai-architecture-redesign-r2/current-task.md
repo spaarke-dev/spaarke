@@ -8,13 +8,13 @@
 
 ## Active Task
 
-- **Task**: none (project initialized; tasks not yet decomposed)
+- **Task**: none (project initialized; **53 tasks decomposed**; awaiting operator plan review)
 - **Status**: not-started
-- **Phase**: Planning complete → awaiting task decomposition (pipeline Step 3)
+- **Phase**: Pipeline Steps 0–3 complete → **STOP for operator review** (operator directive 2026-07-08)
 
 ## Next Action
 
-Run task decomposition (project-pipeline Step 3 / `task-create`) to generate `tasks/*.poml` + `tasks/TASK-INDEX.md` from [plan.md](plan.md) §4 WBS. Then **STOP for operator review** before any task execution (operator directive 2026-07-08).
+**Operator review of the plan + tasks.** Nothing executes until approved. When cleared, first executable group is **P0 (001–004)** + **A0 contracts (010–016)** + **020 hoist** + **030 D-F0** — see [tasks/TASK-INDEX.md](tasks/TASK-INDEX.md) Parallel Execution Groups. Every task runs via `task-execute`. Gates (049/069/079) are operator browser UAT on spaarkedev1 — never auto-run.
 
 ## Recovery Notes
 

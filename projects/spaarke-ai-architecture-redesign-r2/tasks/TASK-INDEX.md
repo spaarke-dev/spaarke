@@ -1,0 +1,118 @@
+# TASK-INDEX — spaarke-ai-architecture-redesign-r2 (Core)
+
+> **Generated**: 2026-07-08 by `/project-pipeline` Step 3
+> **Spec**: [../spec.md](../spec.md) · **Plan**: [../plan.md](../plan.md)
+> **Total tasks**: 53 · **Status legend**: 🔲 not-started · 🔄 in-progress · ✅ complete · ⛔ blocked
+> **Execution**: every task runs via `task-execute`. Tiering per CLAUDE.md §8.5 (dispatched by project-pipeline Step 5). **STOP-for-review gate: no task executes until the operator approves this plan.**
+
+---
+
+## Task Registry
+
+| # | Task | Status | Tier | Parallel-safe | Depends on | Gate |
+|---|---|---|---|---|---|---|
+| 001 | r1 P4-close reconciliation (§10 rows 4/5/6/8/12) | 🔲 | sonnet | ✅ | — | Phase 0 |
+| 002 | Measure-first prompt-assembly baseline | 🔲 | sonnet·xhigh | ✅ | — | Phase 0 |
+| 003 | Business-slice determinism check | 🔲 | sonnet | ✅ | — | Phase 0 |
+| 004 | Discovery obligations confirm | 🔲 | sonnet | ✅ | — | Phase 0 |
+| 010 | Contract: ComposeDisposition v1 (publish FIRST) | 🔲 | opus | ✅ | — | A0 |
+| 011 | Contract: OutcomeCard v1 | 🔲 | opus | ✅ | — | A0 |
+| 012 | Contract: GateDecision v2 | 🔲 | opus | ✅ | — | A0 |
+| 013 | Contract: TraceEvent v1 | 🔲 | opus | ✅ | — | A0 |
+| 014 | Contract: JobAwareCompletionState v1 | 🔲 | opus | ✅ | — | A0 |
+| 015 | Contract: ContextEnvelope v1 | 🔲 | opus | ✅ | — | A0 |
+| 016 | Contract: MemoryItem v1 | 🔲 | opus | ✅ | — | A0 |
+| 017 | Seam-publication ordering + cross-project obligation | 🔲 | sonnet | ❌ | 010–016 | A0 |
+| 020 | **Triple-twin validator hoist (BLOCKS catalog tasks)** | 🔲 | opus·xhigh | ❌ | — | A-infra |
+| 021 | Test-repair (SpaarkeAi + AI.Widgets suites) | 🔲 | sonnet·xhigh | ✅ | — | A-infra |
+| 030 | D-F0 Resourcefulness Doctrine (FIRST; ∥ A0) | 🔲 | opus | ❌ | — | G-R2-A |
+| 031 | D-F0(e) resourcefulness eval family | 🔲 | opus | ❌ | 030 | G-R2-A |
+| 032 | Confirmation Policy v2 gate engine | 🔲 | opus | ❌ | **020** | G-R2-A |
+| 033 | Origin-classification eval family | 🔲 | sonnet | ❌ | 032 | G-R2-A |
+| 034 | Gate pre-suspend validation | 🔲 | opus | ❌ | 032 | G-R2-A |
+| 035 | Completion Engine + OutcomeCard (all paths) | 🔲 | opus | ❌ | 011 | G-R2-A |
+| 036 | Job-aware completion (ingestion-parity) | 🔲 | opus | ❌ | 014 | G-R2-A |
+| 037 | UI-action truthfulness (client-ack) | 🔲 | sonnet | ✅ | — | G-R2-A |
+| 038 | Traceability view + narration + server read surface | 🔲 | opus | ❌ | 013 | G-R2-A |
+| 039 | Progressive render | 🔲 | sonnet | ✅ | — | G-R2-A |
+| 040 | Refusal-affordance links (Document Upload deep-link) | 🔲 | sonnet | ✅ | — | G-R2-A |
+| 041 | Capability-discovery READ endpoint | 🔲 | sonnet | ✅ | — | G-R2-A |
+| 042 | Cataloged create-matter capability | 🔲 | sonnet | ❌ | **020** | G-R2-A |
+| 043 | ADR-041 authoring (Proposed→Accepted@G-R2-A) | 🔲 | fable | ❌ | 030,032,035 | G-R2-A |
+| 049 | **G-R2-A browser UAT (operator, spaarkedev1)** | 🔲 | sonnet | ❌ | Wave J | **GATE** |
+| 050 | Memory: generalize→RecordMemory + User + new container | 🔲 | opus·xhigh | ❌ | 016 | G-R2-B |
+| 051 | Governance envelope on MemoryFact + migration | 🔲 | opus | ❌ | 050 | G-R2-B |
+| 052 | Memory governance (retention/review-delete/audit) | 🔲 | opus | ❌ | 050 | G-R2-B |
+| 053 | Context Binder + ContextEnvelope assembly | 🔲 | opus·xhigh | ❌ | 015 | G-R2-B |
+| 054 | ContextEnvelope token budgets (breach-fails-eval) | 🔲 | opus | ❌ | 002,053 | G-R2-B |
+| 055 | Caller-contact self-assignment resolution | 🔲 | sonnet | ✅ | — | G-R2-B |
+| 056 | Portfolio fresh-retrieval bias | 🔲 | sonnet | ✅ | 053 | G-R2-B |
+| 057 | memory.write governed side effect (explicit-only) | 🔲 | opus | ❌ | 020,032,050 | G-R2-B |
+| 060 | Organizational-scope provider interface | 🔲 | sonnet | ✅ | — | G-R2-B |
+| 061 | Semantic-scope provider interface | 🔲 | sonnet | ✅ | — | G-R2-B |
+| 062 | Workspace-intelligence precursors | 🔲 | sonnet | ✅ | 035,050 | G-R2-B |
+| 063 | Matter-level retrieval ACL verification spike | 🔲 | sonnet | ✅ | — | G-R2-B |
+| 064 | ADR-040 inline size-cap enforcement home | 🔲 | sonnet | ❌ | **001** | G-R2-B |
+| 065 | ADR-042 authoring (Proposed→Accepted@G-R2-B) | 🔲 | fable | ❌ | 050,057 | G-R2-B |
+| 069 | **G-R2-B browser UAT (operator, spaarkedev1)** | 🔲 | sonnet | ❌ | Wave M | **GATE** |
+| 070 | Publish-size verification harness | 🔲 | sonnet | ✅ | — | G-R2-D |
+| 071 | Eval-suite-green merge gate | 🔲 | sonnet | ✅ | 031,033 | G-R2-D |
+| 072 | Cross-satellite seam-fork verification | 🔲 | sonnet | ✅ | — | G-R2-D |
+| 073 | Track-B hygiene sweep | 🔲 | sonnet | ✅ | — | G-R2-D |
+| 074 | Audit-container partition re-key (coord 050) | 🔲 | sonnet | ❌ | 050 | G-R2-D |
+| 075 | Legacy workspace tools verdict | 🔲 | sonnet | ❌ | **001** | G-R2-D |
+| 076 | Orphan verification | 🔲 | sonnet | ✅ | **001** | G-R2-D |
+| 079 | **G-R2-D verification (CI + publish-size + seam-fork)** | 🔲 | sonnet | ❌ | Wave H | **GATE** |
+| 090 | Project wrap-up (/test-diet + /defer) | 🔲 | sonnet | ❌ | ALL | close |
+
+---
+
+## Parallel Execution Groups
+
+MAX 6 agents per wave (CLAUDE.md §8.5). `parallel-safe=false` tasks touch the shared `Services/Ai/` factory/gate/directive stack or `.claude/` — run **sequentially in the main session**. Contract tasks (010–016) are the most parallelizable (separate files).
+
+| Group | Tasks | Prerequisite | Notes |
+|---|---|---|---|
+| **P0** | 001, 002, 003, 004 | none | Phase 0 — independent research/measurement; parallel |
+| **A0-contracts** | 010, 011, 012, 013, 014, 015, 016 | none | Walking-skeleton contracts; parallel (≤6); **010 published first** |
+| **A-infra** | 020 (serial), 021 (∥) | none | **020 blocks all catalog-row tasks**; runs early |
+| **D-F0** | 030 (serial) → 031 | none | Runs in parallel with A0 (ruling R-3) |
+| **J-serial** | 032→033, 034, 035, 036, 038, 043 | 020 / A0 | Core-stack tasks — sequential (shared factory/gate files) |
+| **J-parallel** | 037, 039, 040, 041, 042 | 020 (for 042) | Independent surfaces — parallel |
+| **17/seam** | 017 | 010–016 | Cross-project obligation filing |
+| **M-serial** | 050→051,052; 053→054; 057; 065 | 016/015/020/032 | Memory core — sequential (shared memory service + binder) |
+| **M-parallel** | 055, 056, 060, 061, 062, 063 | 050/053 | Independent — parallel |
+| **contingent** | 064, 075, 076 | **001** | Re-checked against r1 P4-close at task 001 |
+| **H-parallel** | 070, 071, 072, 073, 074 | Waves / 050 | Hardening — mostly parallel |
+| **Gates** | 049, 069, 079 | their wave | **Operator browser UAT — never auto-run** |
+| **Close** | 090 | ALL | Prescriptive; `/test-diet` before complete |
+
+---
+
+## Critical Path
+
+`002/016 → 020 (hoist) → 032 (Policy v2) → 057 (memory.write) → 065 (ADR-042) → 069 (G-R2-B UAT) → 079 → 090`
+and the memory build `015 → 053 (Binder) → 054 (budgets)`. The **triple-twin hoist (020)** and the **A0 contracts** are the two upstream unblockers — schedule both first.
+
+## High-Risk / Judgment-Boundary Tasks (carry `<escalation><trigger>`)
+
+- **020** triple-twin hoist (blast radius; ADR-039 one-intent tension)
+- **032 / 034 / 057** gate + memory-write (side-effect determinism; security floor)
+- **050 / 074** Cosmos migration + audit re-key (irreversible partition change)
+- **043 / 065** ADR authoring (§6.5 conflict-resolution + `.claude/` write boundary)
+- **063** matter-wall ACL spike (security escalation path pre-declared)
+- **001 / 064 / 075 / 076** contingent on r1 P4-close ruling
+- **090** wrap-up (operator-accepted memory-governance deferral risk)
+
+---
+
+## Model-Tier Summary (CLAUDE.md §8.5)
+
+- **fable** (2): 043 ADR-041, 065 ADR-042
+- **opus** (18): all A0 contracts (010–016), 020, 030–032, 034–036, 038, 050–054, 057
+- **sonnet** (33): Phase 0, catalog-row/eval/interface/hygiene/UAT/wrap-up
+- **xhigh effort**: 002, 020, 021, 050, 053 (brownfield / high-blast-radius)
+
+---
+
+*Generated by `/project-pipeline` Step 3. Updated by `task-execute` (🔲→✅) + `/devops-project-sync`.*

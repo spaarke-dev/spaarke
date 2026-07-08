@@ -1,0 +1,93 @@
+<task id="AIR2-060" project="spaarke-ai-architecture-redesign-r2">
+  <metadata>
+    <title>Organizational-scope provider interface — read-only INBOUND</title>
+    <status>not-started</status>
+    <phase>M — G-R2-B Memory</phase>
+    <gate>G-R2-B (memory)</gate>
+    <estimated-effort>1 day</estimated-effort>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Interface-only ship (no runtime provider, no wiring); bounded contract surface feeding the ContextEnvelope Organizational slice. Runtime integration + researcher spike are deferred.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-safe>true</parallel-safe>
+    <goal-eligible>false</goal-eligible>
+    <tags>bff-api, contextenvelope, organizational-scope, provider-interface, interface-only</tags>
+    <dependencies>015 (ContextEnvelope v1 — Organizational slice), 053 (Binder)</dependencies>
+  </metadata>
+
+  <prompt>
+    Ship the Organizational-scope provider INTERFACE (FR-B-11): a read-only INBOUND interface by which Spaarke RECEIVES organizational context (Work IQ is the named candidate provider). Interface only — runtime integration + the researcher spike are DEFERRED (owner ruling). The ContextEnvelope Organizational slice consumes this interface; outbound Spaarke-as-MCP-server is explicitly OUT.
+  </prompt>
+
+  <role>Senior .NET developer fluent in provider-interface design, the Context Binder Organizational slice, and ADR-013 facade discipline.</role>
+
+  <goal>
+    A read-only inbound Organizational-scope provider interface exists (Spaarke receives organizational context; it never pushes out). The ContextEnvelope Organizational slice reads through this interface with a null/empty default when no provider is registered (ADR-032 Null-Object). No runtime provider is implemented (deferred). The interface shape does not preclude Work IQ as a future provider.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/spaarke-ai-architecture-redesign-r2/spec.md</file>
+    <file purpose="plan">projects/spaarke-ai-architecture-redesign-r2/plan.md</file>
+    <file purpose="module-guidance">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    <file purpose="bff-governance">.claude/constraints/bff-extensions.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="project">Read-only INBOUND only — Spaarke receives organizational context; no outbound push, no MCP-server surface.</constraint>
+    <constraint source="ADR-032">No registered provider ⇒ Null-Object default (empty Organizational slice), not a failure.</constraint>
+    <constraint source="project">Interface only — runtime integration + researcher spike are DEFERRED; do not implement a concrete provider.</constraint>
+    <constraint source="ADR-013">Interface lives with the Binder/PublicContracts surface; no AI-internal leak to CRUD.</constraint>
+    <constraint source="ADR-038">Interface + null-object tests are KEEP-path; no `Mock&lt;HttpMessageHandler&gt;`, no DI-registration tests.</constraint>
+    <constraint source="bff-hygiene">Run bff-extensions.md checklist; measure publish-size; no new HIGH CVE; state Placement Justification.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai/context-assembly, provider-interface, null-object, organizational-scope</topic>
+    <files>
+      <file>docs/adr/ADR-032-bff-nullobject-kill-switch.md</file>
+      <file>docs/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Context Binder Organizational slice" location="src/server/api/Sprk.Bff.Api/Services/Ai/">Task 053 Binder — the Organizational slice consumes this interface.</pattern>
+      <pattern name="ContextEnvelope v1 contract" location="src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/">Task 015 — Organizational slice shape.</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>Owner ruling 2026-07-08: the Organizational provider INTERFACE is in scope; the Work IQ researcher spike + any runtime integration are deferred. This ships the seam so a future provider plugs in without re-opening the Binder.</background>
+    <dependencies>
+      <dependency task="015" status="required">ContextEnvelope v1 Organizational slice shape.</dependency>
+      <dependency task="053" status="required">Binder that consumes the interface.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Work IQ runtime provider + researcher spike are named deferrals filed at close (090).</item>
+    </related-work>
+  </context>
+
+  <steps mode="directional">
+    <step order="0" name="Context">Load spec FR-B-11, ADR-032, the Organizational slice shape.</step>
+    <step order="1" name="Interface">Define the read-only inbound Organizational-scope provider interface.</step>
+    <step order="2" name="Null-object default">Wire a Null-Object default so an unregistered provider yields an empty slice.</step>
+    <step order="3" name="Binder consumption">The Organizational slice reads through the interface.</step>
+    <step order="4" name="Tests">Interface shape; null-object default → empty slice; no outbound path exists. Include NEGATIVE below.</step>
+    <step order="5" name="Verify + governance">Build; run tests; measure publish-size; state Placement Justification.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + run interface/null-object tests</tool>
+    <tool name="git">Commit on the project branch</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ (Organizational-scope provider interface + null-object default)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (interface + null-object tests)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A read-only inbound Organizational-scope provider interface exists and the Binder Organizational slice reads through it.</criterion>
+    <criterion testable="true">With no provider registered, the Organizational slice is an empty Null-Object default (ADR-032), not a failure (asserted by a test).</criterion>
+    <criterion testable="true">No concrete runtime provider is implemented (deferred); the interface admits Work IQ as a future provider.</criterion>
+    <criterion testable="true">NEGATIVE: no outbound/push path exists on the interface — a test/inspection asserts the interface is inbound-only (no Spaarke-as-MCP-server surface).</criterion>
+    <criterion testable="true">Publish-size delta measured + reported; no new HIGH CVE; Placement Justification stated.</criterion>
+  </acceptance-criteria>
+</task>

@@ -1,0 +1,92 @@
+<task id="AIR2-079" project="spaarke-ai-architecture-redesign-r2">
+  <metadata>
+    <title>G-R2-D verification — CI green + publish-size report + seam-fork check</title>
+    <status>not-started</status>
+    <phase>H — G-R2-D Hardening</phase>
+    <gate>G-R2-D (hardening — GATE)</gate>
+    <estimated-effort>0.5 day</estimated-effort>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Aggregates already-produced gate evidence into one verification record; no new implementation, no ambiguous design — a checklist-style close-out.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-safe>false</parallel-safe>
+    <goal-eligible>false</goal-eligible>
+    <tags>hardening, gate, verification, ci, publish-size, seam-fork</tags>
+    <dependencies>070, 071, 072, 073, 074, 075, 076 (all Wave-H rows)</dependencies>
+  </metadata>
+
+  <prompt>
+    Execute the G-R2-D gate verification (spec Success Criteria §3): confirm everything above is reliable, telemetered, eval-gated, and publish-size verified on a codebase not larger than r1 left it, and that cross-satellite verification confirms no forked AI-internal seam. This is the hardening gate close-out — it aggregates the evidence produced by tasks 070–076 into one gate record. It does NOT re-implement; it verifies. `/goal` never wraps a gate (goal-eligible false).
+  </prompt>
+
+  <role>Gate-verification engineer fluent in the Spaarke CI merge gates, the publish-size report, and the seam-boundary check.</role>
+
+  <goal>
+    A single G-R2-D verification record confirms: (a) the CI merge gate is green across all in-scope eval families (task 071); (b) the publish-size report shows compressed output ≤60 MB, not larger than r1's baseline (task 070); (c) the cross-satellite seam-fork check is clean (task 072); and (d) the hygiene/re-key/contingent rows (073–076) are closed with evidence. Any red blocks the gate.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/spaarke-ai-architecture-redesign-r2/spec.md</file>
+    <file purpose="plan">projects/spaarke-ai-architecture-redesign-r2/plan.md</file>
+    <file purpose="ci-workflow">.github/workflows/sdap-ci.yml</file>
+    <file purpose="publish-size-rule">.claude/constraints/azure-deployment.md</file>
+    <file purpose="hot-path-registry">projects/INDEX.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="NFR-01">Publish-size report MUST show compressed output ≤60 MB and not larger than r1's ~46.8 MB baseline direction.</constraint>
+    <constraint source="NFR-02">The eval merge gate MUST be green across golden-utterance + resourcefulness + origin-classification families.</constraint>
+    <constraint source="FR-D-03">The cross-satellite seam-fork check MUST be clean (no forked AI-internal seam).</constraint>
+    <constraint source="project">Verification-only — a red result blocks the gate and routes back to the owning task; this task does not fix reds itself.</constraint>
+    <constraint source="project">A gate is browser-UAT-adjacent hardening evidence; `/goal` never wraps a gate (goal-eligible false).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>gate/verification, ci-merge-gate, publish-size, seam-boundary</topic>
+    <files>
+      <file>docs/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+    </files>
+    <patterns>
+      <pattern name="CI eval-gate" location=".github/workflows/sdap-ci.yml:225">The merge gate whose green state task 079 records.</pattern>
+      <pattern name="Publish-size harness" location="projects/spaarke-ai-architecture-redesign-r2/notes/">Task 070's harness output is the size evidence.</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>G-R2-D is the third core gate (after G-R2-A judgment + G-R2-B memory). It certifies the hardening axis. Per spec §3 it is verified by CI merge-gate green + publish-size report + seam-fork check — the three artifacts produced by tasks 070–072, with 073–076 closing the backlog rows.</background>
+    <dependencies>
+      <dependency task="070-076" status="required">All Wave-H rows must be complete + evidenced for the gate to aggregate.</dependency>
+    </dependencies>
+    <related-work>
+      <item>ADR-041 + ADR-042 are Accepted at their own gates (G-R2-A / G-R2-B), not here.</item>
+      <item>Task 090 (wrap-up) follows once this gate is green.</item>
+    </related-work>
+  </context>
+
+  <steps mode="directional">
+    <step order="0" name="Collect evidence">Gather the CI eval-gate result, the publish-size report, the seam-fork check output, and the 073–076 closure records.</step>
+    <step order="1" name="CI green">Confirm the eval merge gate is green across all in-scope families.</step>
+    <step order="2" name="Size">Confirm the publish-size report shows ≤60 MB compressed, not larger than r1's baseline direction.</step>
+    <step order="3" name="Seam-fork">Confirm the cross-satellite seam-fork check is clean.</step>
+    <step order="4" name="Backlog rows">Confirm 073 (hygiene), 074 (re-key), 075/076 (contingent) are closed with evidence.</step>
+    <step order="5" name="Record">Write the G-R2-D verification record; if any item is red, block the gate and route back to the owning task.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Re-run the eval/integration suite if confirmation needed</tool>
+    <tool name="git">Commit the gate record on the project branch</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r2/notes/ (G-R2-D verification record with per-criterion evidence)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The CI eval merge gate is confirmed green across golden-utterance + resourcefulness + origin-classification families.</criterion>
+    <criterion testable="true">The publish-size report shows compressed output ≤60 MB, not larger than r1's baseline direction.</criterion>
+    <criterion testable="true">The cross-satellite seam-fork check is confirmed clean (no forked AI-internal seam).</criterion>
+    <criterion testable="true">Tasks 073–076 are confirmed closed with recorded evidence.</criterion>
+    <criterion testable="true">NEGATIVE: any red item (CI red, size >60 MB, a detected seam-fork, or an unclosed backlog row) blocks the gate — the record marks it blocked and routes back to the owning task rather than passing.</criterion>
+  </acceptance-criteria>
+</task>

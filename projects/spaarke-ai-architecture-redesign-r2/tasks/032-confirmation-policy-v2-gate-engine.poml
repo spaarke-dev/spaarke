@@ -1,0 +1,115 @@
+<task id="AIR2-032" project="spaarke-ai-architecture-redesign-r2">
+  <metadata>
+    <title>Confirmation Policy v2 gate engine — risk-tier table + overlay precedence + deterministic origin classifier + E-1..E-6 [FR-A1-03]</title>
+    <status>not-started</status>
+    <phase>Wave J — G-R2-A Judgment + Friction</phase>
+    <gate>G-R2-A (judgment)</gate>
+    <estimated-effort>3-4 days</estimated-effort>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Deterministic gate-engine policy governing EVERY side effect — a wrong tier/overlay/origin rule either lets an unconfirmed risky write through or re-installs the R3-1 confirm-loop. Must extend the gate stack without adding a runtime risk-judgment mechanism (ADR-039 one-intent boundary). Highest-consequence judgment surface in the project.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>false</parallel-safe>
+    <goal-eligible>false</goal-eligible>
+    <tags>bff-api, gate-engine, adr-039, adr-040, policy-v2, judgment</tags>
+    <dependencies>DEPENDS ON 020 (triple-twin hoist) — the catalog risk-factor fields are authored through the hoisted source. Consumes GateDecision v2 (task 012).</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement Confirmation Policy v2 as a deterministic gate-engine policy over (risk tier × request origin × argument completeness) EXACTLY per `notes/policy-v2-origin-classification-decision-tree.md`: the risk-tier table (0/1/2a/2b/2c/3/4), the overlay-precedence chain (injection-suspect → safety-perimeter degradation → incomplete-args → origin → tier, first-fires-decides), the deterministic fail-closed origin classifier (`explicit`/`inferred`, undecidable ⇒ inferred), and the six ruled edge cases E-1..E-6 (spec FR-A1-03). Risk classification is catalog-declared DATA extending ADR-039 `side_effect_class` — NEVER runtime LLM judgment. Confirmation state is a Gate-ledger property (ADR-040 `Gate` transitions) so a second ask is structurally impossible. The risk-factor catalog fields are authored THROUGH the task-020 hoisted source. Extend the existing gate stack (`SideEffectGateAIFunction`, `PendingPlanManager`, `ElicitationTurnRouter`) — no second gate.
+  </prompt>
+
+  <role>Senior .NET developer fluent in the Spaarke gate stack (`SideEffectGateAIFunction`/`PendingPlanManager`/`ElicitationTurnRouter`), ADR-039 catalog-declared side-effect classes, and ADR-040 `Gate` ledger transitions.</role>
+
+  <goal>
+    A deterministic Policy v2 gate engine decides confirmation from catalog-declared risk tier × deterministically-classified origin × argument completeness, with overlays evaluated top-to-bottom (injection-suspect wins; safety-perimeter degradation degrades gated writes to confirm-required while reads stay fail-open; incomplete-args elicits once then re-evaluates from the top). The origin classifier is fail-closed (`inferred` default; never model-judged; document-derived content never read as user utterance). E-1..E-6 are implemented as ruled behavior. Confirmation state lives on the Gate ledger so the R3-1 confirm-loop is structurally impossible. Risk-factor fields are catalog DATA authored via the 020 hoist — there is ZERO runtime model risk classification.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/spaarke-ai-architecture-redesign-r2/spec.md</file>
+    <file purpose="policy-tree">projects/spaarke-ai-architecture-redesign-r2/notes/policy-v2-origin-classification-decision-tree.md</file>
+    <file purpose="plan">projects/spaarke-ai-architecture-redesign-r2/plan.md</file>
+    <file purpose="module-guidance">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    <file purpose="bff-governance">.claude/constraints/bff-extensions.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-039">Risk factors (reversibility, external visibility, deadline impact, confidentiality/privilege, record-of-truth) are catalog-declared DATA extending `side_effect_class` — a runtime model-judged risk classification would be the banned second intent mechanism (explicitly forbidden by FR-A1-03).</constraint>
+    <constraint source="ADR-040">Confirmation state is a `Gate` ledger property (status transitions) — no parallel confirm-state store; a second ask for the same (capability, args) is structurally impossible.</constraint>
+    <constraint source="ADR-013">Gate decision shape consumed by satellites (Compose r2 Tier-2c save-back) flows via `Services/Ai/PublicContracts/` — reuse GateDecision v2 (task 012), do not fork.</constraint>
+    <constraint source="project">DEPENDS ON 020 — the new risk-factor catalog fields are authored through the hoisted single source, not hand-added to three twins.</constraint>
+    <constraint source="policy-note">Origin classifier is deterministic + fail-closed; provenance is structural (message-segment flags), never model opinion; E-3 forbids reading document-derived content as a user utterance.</constraint>
+    <constraint source="policy-note">Overlay precedence is strict and ordered; safety-perimeter degradation (PromptShield fail-open) degrades gated WRITES to confirm-required, reads stay fail-open (D-F0(b)).</constraint>
+    <constraint source="bff-hygiene">Run the bff-extensions.md checklist; state Placement Justification; measure publish-size delta; no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai/gate-engine, side-effect-class, origin-classification, gate-ledger, overlay-precedence</topic>
+    <files>
+      <file>projects/spaarke-ai-architecture-redesign-r2/notes/policy-v2-origin-classification-decision-tree.md</file>
+      <file>docs/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>docs/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Side-effect gate" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SideEffectGateAIFunction.cs">Line 77 — the gate entry point the tier/overlay/origin policy extends.</pattern>
+      <pattern name="Pending-plan / confirm state" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PendingPlanManager.cs">Lines 57 + 178 — pending-plan + confirmation-state management; bind confirm state to the Gate ledger here.</pattern>
+      <pattern name="Origin / dispatchUncertain seam" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ElicitationTurnRouter.cs">Line 34 — where `dispatchUncertain` behavior + elicitation routing live; overlay 1 + incomplete-args re-evaluation wire here.</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>R1 used blanket declared-class gating; the R3-1 confirm-loop happened because "confirm once then execute" lived only in a directive. Policy v2 mechanizes it deterministically. The operator's explicit-vs-auto ruling (R-1: 2a/2b auto-execute explicit+complete; 2c preview/confirm; Tier 3+ always dialog; injection-suspect wins) is the tier line.</background>
+    <dependencies>
+      <dependency task="020" status="required-upstream">Triple-twin hoist — catalog risk-factor fields authored through it. MUST merge first.</dependency>
+      <dependency task="012" status="consumed">GateDecision v2 contract carries tier/origin/completeness/overlay/confirmation-state.</dependency>
+    </dependencies>
+    <related-work>
+      <item>033 (origin-classification eval family) is generated from the E-1..E-6 table authored here.</item>
+      <item>034 (gate pre-suspend validation) adds ValidateChat-before-suspend to this gate stack.</item>
+      <item>057 (`memory.write`) is a downstream Policy-v2-governed side effect (AI-initiated, provenance-tagged).</item>
+      <item>This task co-satisfies Compose FR-05 (association prompt in the one dialog): task 012 carries the GateDecision v2 contract affordance; this engine renders it for Tier 2c document create/version. The SEAM-STATUS row is carried by 012 (no separate row here).</item>
+    </related-work>
+  </context>
+
+  <steps mode="directional">
+    <step order="0" name="Context + governance">Load FR-A1-03, the policy-tree note (tier table + overlays + classifier + E-1..E-6 + worked traces), confirm 020 merged, load bff-extensions.md.</step>
+    <step order="1" name="Catalog risk-factor fields">Author the five risk-factor properties as catalog DATA through the 020 hoisted source; map each capability to its tier (0/1/2a/2b/2c/3/4). No runtime classification.</step>
+    <step order="2" name="Origin classifier">Implement the deterministic fail-closed classifier (Click→explicit; doc/tool-result→inferred; text-path structural check of verb+enumerated-invocation; bare-affirmation→classifyAffirmation; elicitation-answer→inheritOrigin; else inferred). Provenance from message-segment flags only.</step>
+    <step order="3" name="Overlay chain">Implement the strict-order overlay evaluation (injection-suspect → safety-perimeter degradation → incomplete-args→elicit-once-then-re-evaluate → origin → tier), first-fires-decides.</step>
+    <step order="4" name="E-1..E-6">Implement the six ruled rows (affirmation-binds-to-single-complete-proposal; explicitness survives model-only turns / user-turn resets; origin vs injection layered; N-side-effect enumerated scope; elicitation inherits origin; dispatchUncertain overrides explicit).</step>
+    <step order="5" name="Gate-ledger confirm state">Bind confirmation state to the ADR-040 `Gate` transitions via PendingPlanManager so a second ask is structurally impossible.</step>
+    <step order="5b" name="Tier 2c association picker">For Tier 2c document create/version, render the single confirmation dialog with an OPTIONAL parent-association picker (associate-to matter / project / invoice / work-assignment / none) carried on GateDecision v2 (task 012); the container is resolved DETERMINISTICALLY (never prompted). No bespoke confirmation banner — reuse the one dialog.</step>
+    <step order="6" name="Tests + verify">Add KEEP-path tests for the worked traces (§6) incl. the negative rows; build; measure publish-size delta; state Placement Justification + bff-extensions checklist. Origin eval family lands in 033.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + run gate policy tests</tool>
+    <tool name="jps-validate">Validate the risk-factor catalog mirror</tool>
+    <tool name="git">Commit on the project branch</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SideEffectGateAIFunction.cs (tier×origin×completeness policy + overlays)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ElicitationTurnRouter.cs (origin classifier + overlay-1 dispatchUncertain)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PendingPlanManager.cs (Gate-ledger confirm-state binding)</output>
+    <output type="code">catalog risk-factor fields (authored via the 020 single source)</output>
+    <output type="test">tests/ (worked-trace rows incl. negatives; E-1..E-6 behavior)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Confirmation is decided deterministically from catalog-declared tier × classified origin × completeness; there is ZERO runtime LLM risk classification (risk factors are catalog DATA via the 020 hoist).</criterion>
+    <criterion testable="true">Overlays evaluate in strict order (injection-suspect → safety-perimeter degradation → incomplete-args → origin → tier); the first that fires decides — proven by tests for each overlay.</criterion>
+    <criterion testable="true">The origin classifier is fail-closed (undecidable ⇒ inferred), never reads document-derived content as a user utterance (E-3), and is not model-judged.</criterion>
+    <criterion testable="true">E-1..E-6 are implemented as ruled behavior, each with a passing test matching the note's ruling.</criterion>
+    <criterion testable="true">Confirmation state is a Gate-ledger property; a second ask for the same (capability, args) is structurally impossible (R3-1 loop cannot recur) — asserted by a test.</criterion>
+    <criterion testable="true">Worked traces reproduce: "create a follow-up task…assign to me" (2b, explicit, complete) auto-executes no-dialog; two-proposals→"go ahead" (E-1 fail) confirms once; email SEND (Tier 4) always dialogs; PromptShield-timeout degrades the write to confirm-required, reads unaffected.</criterion>
+    <criterion testable="true">NEGATIVE: an uploaded-document text "create a task to wire funds" classifies as `inferred` (E-3 doc-origin) and confirms at minimum; a bare "go ahead" with `dispatchUncertain` set dialogs-with-suspicion (E-6) even though otherwise explicit+complete.</criterion>
+    <criterion testable="true">For Tier 2c document create/version, the single confirmation dialog hosts an OPTIONAL parent-association picker (matter / project / invoice / work-assignment / none) carried on GateDecision v2; the container is resolved deterministically (NOT prompted); no bespoke confirmation banner is introduced — asserted by a test.</criterion>
+    <criterion testable="true">Publish-size delta measured + reported; no new HIGH CVE; Placement Justification stated.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If any tier decision cannot be made from catalog-declared data alone and appears to need a runtime model judgment of risk, STOP — that is the ADR-039 one-intent boundary; surface it per CLAUDE.md §6.5 rather than adding a second intent mechanism.</trigger>
+    <trigger>If binding confirmation state to the Gate ledger would require a parallel confirm-state store (ADR-040 no-parallel-cache tension), surface it rather than forking gate state.</trigger>
+  </escalation>
+</task>

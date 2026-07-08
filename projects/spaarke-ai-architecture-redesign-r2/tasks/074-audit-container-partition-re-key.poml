@@ -1,0 +1,98 @@
+<task id="AIR2-074" project="spaarke-ai-architecture-redesign-r2">
+  <metadata>
+    <title>Audit-container partition re-key — off bare /tenantId while small</title>
+    <status>not-started</status>
+    <phase>H — G-R2-D Hardening</phase>
+    <gate>G-R2-D (hardening)</gate>
+    <estimated-effort>1 day</estimated-effort>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Cosmos partition-key choice on a permanent container is irreversible-in-place; effort=high because the key design must coordinate with the memory-container key (task 050) and mis-choosing it re-creates the hot-partition problem.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>true</parallel-safe>
+    <goal-eligible>false</goal-eligible>
+    <tags>bff-api, hardening, cosmos, partition-key, audit, nfr-06</tags>
+    <dependencies>coordinate-with 050 (memory-container subject key)</dependencies>
+  </metadata>
+
+  <prompt>
+    Re-key the permanent audit container off bare `/tenantId` to a subject- or time-bucketed key while the container is still small (spec FR-D-05, design row R21). Customer-dedicated deployments make `/tenantId` a single hot logical partition against the Cosmos 20 GB cap; re-keying is cheap now and expensive later. COORDINATE the key choice with task 050's memory-container subject-partition key so both adopt the same scalable pattern from day one.
+  </prompt>
+
+  <role>Senior engineer fluent in Azure Cosmos DB partitioning (logical-partition 20 GB cap, no in-place key change) and the Spaarke audit-write path.</role>
+
+  <goal>
+    The audit container uses a subject- or time-bucketed partition key (not bare `/tenantId`) that spreads writes and stays under the logical-partition cap. Because a partition key can't change in place, this is a new container + a migration of existing (small) audit data, with the audit-write path re-pointed. The key choice is reconciled with task 050's memory-container key so both use one scalable convention.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/spaarke-ai-architecture-redesign-r2/spec.md</file>
+    <file purpose="plan">projects/spaarke-ai-architecture-redesign-r2/plan.md</file>
+    <file purpose="memory-store-task">projects/spaarke-ai-architecture-redesign-r2/tasks/050-memory-service-generalize.poml</file>
+    <file purpose="bff-governance">.claude/constraints/bff-extensions.md</file>
+    <file purpose="module-guidance">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="project">Partition by SUBJECT / time-bucket, never bare `/tenantId` — dedicated-per-customer envs make `/tenantId` a single hot partition against the 20 GB cap.</constraint>
+    <constraint source="project">Cosmos partition keys can't change in place — this is a new container + migration; do it while the audit data is small.</constraint>
+    <constraint source="NFR-06">Audit events on memory write/delete continue to be written; the re-key MUST NOT drop audit coverage.</constraint>
+    <constraint source="coordination">The audit key MUST be reconciled with task 050's memory-container subject-partition key so both use one scalable convention.</constraint>
+    <constraint source="bff-hygiene">Measure publish-size delta; no new HIGH CVE; run the bff-extensions.md checklist; state Placement Justification for the container change.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>cosmos/partitioning, audit-store, memory-store</topic>
+    <files>
+      <file>docs/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+    </files>
+    <patterns>
+      <pattern name="Memory store partition key" location="src/server/api/Sprk.Bff.Api/Services/Ai/Memory/MatterMemoryService.cs">Task 050 introduces the subject-partitioned memory container; the audit key follows the same subject/scalable convention.</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>The permanent audit container was created keyed on `/tenantId`. In customer-dedicated deployments that is one tenant per DB, so all audit writes land in one logical partition — a slow-motion 20 GB cap failure. Re-keying while small is a cheap hardening move. Spec's Unresolved Questions call for coordinating this with the FR-B-01 memory container so both adopt subject/scalable keys.</background>
+    <dependencies>
+      <dependency task="050" status="coordinate">Memory-container subject-partition key is decided at 050; align the audit key to the same convention (not a hard blocker, but reconcile before finalizing).</dependency>
+    </dependencies>
+    <related-work>
+      <item>Spec Unresolved Questions: "coordinate with FR-D-05 so both adopt the subject/scalable-key pattern from day one."</item>
+      <item>Task 079 (G-R2-D verification) records the re-key completion.</item>
+    </related-work>
+  </context>
+
+  <steps mode="directional">
+    <step order="0" name="Assess">Confirm current audit container key + data size; confirm task 050's chosen memory-container key.</step>
+    <step order="1" name="Choose key">Select a subject- or time-bucketed key that spreads writes + stays under the cap, reconciled with the 050 convention.</step>
+    <step order="2" name="New container + migrate">Create the new container; migrate the small existing audit data; re-point the audit-write path.</step>
+    <step order="3" name="Verify coverage">Confirm audit events on memory write/delete still land (NFR-06); confirm reads work against the new key.</step>
+    <step order="4" name="Governance">Measure publish-size delta; state Placement Justification + bff-extensions checklist; leave the legacy container disposition documented.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + run audit-path tests</tool>
+    <tool name="az">Cosmos container inspection/creation (if scripted)</tool>
+    <tool name="git">Commit on the project branch</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/ (audit-write path re-pointed to new container/key)</output>
+    <output type="infra">Cosmos audit container (new, subject/time-bucketed key)</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r2/notes/ (key choice + migration record + 050 reconciliation)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The audit container uses a subject- or time-bucketed partition key; bare `/tenantId` is no longer the key.</criterion>
+    <criterion testable="true">Existing audit data is migrated to the new container and the audit-write path is re-pointed.</criterion>
+    <criterion testable="true">Audit events on memory write/delete still land (NFR-06 coverage preserved); reads work against the new key.</criterion>
+    <criterion testable="true">The chosen key is reconciled with task 050's memory-container subject-partition key (one convention, recorded).</criterion>
+    <criterion testable="true">Publish-size delta measured; Placement Justification stated; no new HIGH CVE.</criterion>
+    <criterion testable="true">NEGATIVE: no code path writes audit records to the old `/tenantId`-keyed container after cutover (grep/trace confirms).</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If the existing audit container has already grown large enough that a live migration is NOT cheap/safe, STOP — a large-container Cosmos migration is a risk decision (data movement + downtime window). Surface options (migrate-now vs new-container-and-leave-legacy) to the operator with the measured size rather than proceeding.</trigger>
+  </escalation>
+</task>
