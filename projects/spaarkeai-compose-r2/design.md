@@ -14,6 +14,12 @@
 >
 > ### Revision log
 >
+> **2026-07-08 (code verification)** — **Entry-point state verified against the as-built code (Explore agent, file:line evidence).** Confirms owner review #2: **1c WORKS** (ribbon → launch-resolver → `ComposeWorkspace` → `GET /api/compose/documents/{speId}` → `docxBytes`→`docxToTipTapHtml`→`setContent`; load-only, checkout stubbed). **1a is a STUB** (`ComposeEmptyState` Browse/Search callbacks never supplied; fallback bus events have zero subscribers). **1b is NOT-WIRED for uploads** (upload bytes go to `/api/ai/chat/sessions/{id}/documents` for RAG only; `send_workspace_artifact` explicitly refuses session-upload ids — "tab opens empty for session files"; `POST /api/compose/upload` = 501). **Three findings that shrink R2 scope**: (1) **save-time bytes RESOLVED** — save already regenerates `.docx` from editor via `tipTapToDocxBytes` (= option (b), matches §1.6); (2) **create-on-save half-exists** — `PromoteIfEphemeralAsync` already creates the row on save; R2 UPGRADES it to full parity (+association +profile +indexing), not net-new; (3) **transient 1b mount is a short reach** — the `docxBytes` mount seam is source-agnostic and the upload flow retains the original `File`. Grounded facts folded into §2.7(d) and §5.
+>
+> **2026-07-08 (owner UX review #2)** — **Interaction-model + entry-point decisions from a second owner review.** (5a) **Inline redline stays** (design §2.3 confirmed — AI edits materialize as pending track-changes in the Workspace, Word-style; the Assistant hosts the reasoning/confirmation) — **plus a NEW requirement: the Assistant must support undo/replace of a previously-applied AI edit** ("undo that and try another approach" → the prior rewrite is retracted and swapped for a new one). (5b) **Context pane stays audit-only** — confirmed NOT an interactive input surface; the "how do we surface clause/selection inputs" question is **deferred together with clause scope**. (4b/5b) **Clause library + insert-at-cursor are OUT of R2 scope** — but the selection-popover + dispatch model MUST remain extensible so a follow-on project adds them without rearchitecting (§2.0 extensibility guarantee). **Entry-point reality correction (supersedes the §5 "✅ SHIPPED" claims):** only **1c** (Document record → "Open in Compose") mounts a file today (TipTap load only; no further functionality). **1a** (spaarke.ai home, no Document: "Browse / open file" + "Search for Document") and **1b** (Assistant upload → "open in Compose") **never worked** and are **R2 build items**. **§2.7(d) reframed**: a chat-UPLOADED file **mounts immediately as a transient working draft** (rendered from upload bytes — no SPE pointer needed to render) and **becomes a real Spaarke Document on first Save** at full ingestion parity (create-on-save; the save confirmation IS the "create it?" moment) — replacing the prior "uploaded files can never load directly / create-first" framing. Open save-time detail (spec/Spike-5): which bytes persist to SPE — original upload vs. regenerated `.docx` from editor state.
+>
+> **2026-07-08 (scope-lock)** — **§15 open items resolved in an owner review session.** All six open items decided: (1) **Document Q&A → IN R2** as a stretch feature (§2.8; rides the agent loop, no new capability); (2) **Defined-terms → IN R2 as a FULL extraction capability** — a NEW Action + Binding pair (`compose-defined-terms`) that detects defined terms + flags inconsistent usage, NOT display-only; (3) **`compose-summarize-word-changes` → IN R2** as a NEW Action + Binding pair for return-from-Word summarization; (4) **re-anchor confidence threshold** → spec commits a starting default (**≥0.85 auto-anchor / 0.6–0.85 flag-for-review / <0.6 orphan**), Spike #6 empirically tunes the bands; (5) **multiple-action concurrency → QUEUE SERIALLY** in `ConversationPane` (dispatch-order, one stream to completion before the next — predictable ledger ordering); (6) **core seam timing** → tracked as an external dependency (catalog rows + draft-into-editor leg sequence behind core Phase A0; spikes are unblocked). **Net scope delta: the R2 catalog roster grows from 3 → 5 Action + Binding pairs** (`compose-explain-clause`, `compose-compare-to-playbook`, `compose-draft-alternative`, **+ `compose-summarize-word-changes`, + `compose-defined-terms`**). Everything else in the design is unchanged; §7 roster, §7 deliverables, §14, §2.8, and §15 are updated to reflect these locks.
+>
 > **2026-07-08** — **Alignment revision per redesign-r1 close + r2 core charter v0.3 (operator-ratified gap→recommendation chart, 16 items A1–E5).** The 2026-07-03 revision pre-dated the redesign-r1 close and the r2 core charter; its AI plumbing is re-based here onto the ratified architecture: dispatch = Action + Binding resolved via the shipped Click-path session-dispatch seam (ADR-039); the Draft-Alternative edit flow is ledger-first via the core's `compose` disposition (ADR-040); confirmation/completion/trace follow the core's Policy v2 + OutcomeCard + D-F4 contracts; session memory splits onto the ledger + workspace-scope MemoryItems; document creation at FULL ingestion parity becomes a first-class feature (ruling R-2); the fidelity boundary table (ruling R-4) and the transferred G-R2-C flagship gate are added. Product features, §2.0 UX patterns, and the §6.2/§12.2 DOCX-shuttle engineering are unchanged.
 >
 > **2026-07-03** — Design revised to reflect two platform changes landed after the original 2026-06-29 draft:
@@ -96,6 +102,7 @@ When the user highlights any text in the Compose editor, a **discrete floating A
 - Single-tap interaction — no modal disruption
 - Implementation: **TipTap `BubbleMenu` extension** (MIT/OSS, ships with TipTap core — no commercial license)
 - Toolbar contents are extensible: future R3+ features can register additional actions into the menu
+- **Scope boundary (2026-07-08 owner review #2)**: the **clause library** (pick/insert a standard clause) and the **cursor-position insertion toolbar** (place cursor → menu → "insert a clause") are **OUT of R2 scope**. They are the **canonical deferred extension** and the design's extensibility test: R2's selection-popover + `+`-overflow + session-dispatch model MUST allow a follow-on project to register a clause-insertion action (and any action needing a user-input step) **without rearchitecting**. The still-open question "how do we surface an interactive input step (clause picker, precedent picker) WITHOUT turning the audit-only Context pane into an input surface" is **deferred with clause scope** — a modal or an Assistant-hosted picker are the likely answers, resolved by the follow-on project, not R2.
 
 This is the **primary discovery surface for AI features**. A user discovers what Compose can do by selecting text. Hidden in a top toolbar = invisible feature.
 
@@ -177,6 +184,8 @@ Per adeu's "tool descriptions ARE the prompt" insight, the same descriptions tha
 **Dispatch path**: PaneEventBus → Assistant → session-dispatch seam → Binding → executor → **compose-disposition ledger write** → SSE frame → Workspace materializes from the stored entry
 **Critical UX detail**: Suggestion is **pending** — not auto-applied. User explicitly accepts. Aligns with adeu's pattern: LLM proposes, user controls.
 
+**Iterative-refinement requirement (2026-07-08 owner review #2)**: the Assistant MUST support **undo / replace of a previously-applied AI edit** — e.g., "undo that and try another approach" retracts the last AI-applied redline and swaps it for a fresh proposal (the Word-Copilot pattern in the owner's reference screenshot). Because edits are ledger-first (`compose` disposition), the retract is a **ledger operation** (supersede the prior `SessionOutput`, re-materialize the Workspace from the current ledger state), NOT an ad-hoc client-side DOM undo — the same durability/provenance rules apply to the retraction as to the original edit. The `compose-draft-alternative` (and any inline-redline) flow keys `{bindingId}@t{n}` provenance so a prior edit is addressable for supersession.
+
 **Why it matters**: Demonstrates the full Workspace ↔ Assistant ↔ Workspace round-trip. Provenance trail is Spaarke-unique.
 
 ---
@@ -215,7 +224,7 @@ Per adeu's "tool descriptions ARE the prompt" insight, the same descriptions tha
 - **Context**: Shows diff summary; lists comments added in Word; surfaces structural changes
 
 **No new AI capability for detection itself** — uses SPE webhooks + Open XML SDK reader.
-**Optional capability (R2 stretch)**: `compose-summarize-word-changes` — an Action + Binding pair that uses the LLM to summarize what changed in human-friendly terms (NOT a playbook — the engine is frozen; see §7.3).
+**Committed capability (R2 — 2026-07-08 scope-lock)**: `compose-summarize-word-changes` — an Action + Binding pair that uses the LLM to summarize what changed in human-friendly terms (NOT a playbook — the engine is frozen; see §7.3). Promoted from stretch to committed; it is the 4th catalog pair and ships with eval cases.
 
 **Resources hooked into**:
 - SPE webhook subscription (`drives/{containerId}/root`, `changeType: "updated"`, 4230-min lifespan; renewal cron)
@@ -260,10 +269,14 @@ Per adeu's "tool descriptions ARE the prompt" insight, the same descriptions tha
 |---|---|
 | **(a) Existing documents** | Open / pre-seed directly into Compose — **SHIPPED** (redesign-r1 R4-2): real `sprk_document` rows resolve SPE pointers under user OBO, refresh-surviving |
 | **(b) Chat-DRAFTED content** | Lands in the editor as a **TRANSIENT working draft** via the `compose` disposition (§2.3 ledger-first seam) — **no document yet**; an in-editor buffer is allowed transiently |
-| **(c) FIRST SAVE of a transient draft** | The **document-creation capability runs at full ingestion parity** — this is compose-r1's promotion-on-first-Save, bar-raised to the R-2 standard (SPE storage + `sprk_document` + association + profile analysis + indexing). Tier 2c write under Policy v2 (preview/confirm in r2) |
-| **(d) Chat-UPLOADED files** | Can **NEVER** load into Compose directly (no SPE pointer exists). The honest path is a **D-F0(d) affordance**: *"this file isn't a Spaarke document yet — create it?"* — which runs the SAME ingestion-parity capability, **then automatically opens the resulting document in Compose** |
+| **(c) FIRST SAVE of a transient draft** (covers both (b) and (d)) | The **document-creation capability runs at full ingestion parity** — this is compose-r1's promotion-on-first-Save, bar-raised to the R-2 standard: **SPE storage** (into a **container resolved from the user's business unit** — same mechanism as new matter/project record creation; a container id is REQUIRED) + `sprk_document` + **document profile analysis** + **indexing**. **Parent association is OPTIONAL** — a Spaarke Document may stand alone; the Tier-2c save dialog **prompts** to optionally associate it (matter / project / invoice / work assignment / none). Tier 2c write under Policy v2 (preview/confirm in r2); **the save confirmation IS the "create it?" moment** (and hosts the optional-association prompt). *(Container-from-business-unit + optional-parent clarified 2026-07-08 owner interview during design-to-spec.)* |
+| **(d) Chat-UPLOADED files** *(reframed 2026-07-08 owner review #2 — supersedes the "create-first" framing)* | **Mount immediately as a TRANSIENT working draft** — the uploaded file's content renders into the Compose editor **from the upload bytes** (no SPE pointer is needed to RENDER; the pointer is only needed to PERSIST). No document exists yet. On **first Save**, the **same full-ingestion-parity capability as (c) runs** (create-on-save) — the working file becomes a real Spaarke Document with the source file stored in SPE + `sprk_document` + association + profile analysis + indexing. The file **never leaves Compose**, so there is **no re-open step**. *(The prior "uploaded files can NEVER load directly" rule conflated "no SPE pointer" (a persistence fact) with "cannot render" (false) — corrected here.)* **Save-time bytes — RESOLVED by the as-built code (2026-07-08 verification)**: the existing save path already **regenerates the `.docx` from editor state** via `tipTapToDocxBytes(editor)`, and load converts via mammoth `docxToTipTapHtml` (inherently lossy) — so the codebase already committed to **option (b): regenerate from editor**, consistent with the §1.6 fidelity boundary. R2 follows the existing seam; not a Spike-5 open item |
 
-**End-to-end chain (operator-ratified refinement)**: for path (d) — and for any "save this as a document" flow — the ASSISTANT facilitates the **entire chain end-to-end**: create the Document at full ingestion parity **AND THEN automatically open/pre-seed it into the Compose workspace tab**. The user must NEVER have to manually open Compose and look up the newly created document. Concretely: the document-creation capability's completion (OutcomeCard) **chains into the shipped chat→Compose-layout bridge + pre-seed leg** (the r1 R4-2 mechanism) — one conversation turn takes the user from "make this a document" to the document open in the editor. The flagship gate's create leg (§1.5) verifies exactly this.
+**End-to-end chain (operator-ratified refinement; refined 2026-07-08 owner review #2)**: the user must NEVER have to manually open Compose and look up a newly created document. Two cases:
+- **Uploaded / mounted-then-saved (path (d), create-on-save)**: the file is **already open** in the Compose tab (it mounted transiently on upload), so first-Save simply promotes it to a real Document in place — **no re-open step**.
+- **Chat-originated "save this as a document" (not yet in a Compose tab)**: the document-creation capability's completion (OutcomeCard) **chains into the shipped chat→Compose-layout bridge + pre-seed leg** (the r1 R4-2 mechanism) — one conversation turn takes the user from "make this a document" to the document open in the editor.
+
+Either way the flagship gate's create leg (§1.5) verifies the chain ends with the document **open in Compose**.
 
 **Completion evidence**: creation renders as a **per-step `JobAwareCompletionState` OutcomeCard** — the user can distinguish "the record exists" from "profile analysis / indexing finished" (queued / running / partial / completed / failed states per step, integrating the existing Job Contract / `ServiceBusJobProcessor` status) — and its completion hands off to the open-in-Compose leg above.
 
@@ -272,6 +285,8 @@ Per adeu's "tool descriptions ARE the prompt" insight, the same descriptions tha
 ---
 
 ### 2.8 (Stretch) Document Q&A
+
+> **Status (2026-07-08 scope-lock)**: IN R2 as a committed **stretch** feature. No new capability — rides the agent loop with the document session-mounted. Real work is validation + highlight-UX polish.
 
 **User story**: User asks Assistant "what's the indemnification cap?" — Assistant answers from the document content without the user needing to find the clause.
 
@@ -329,16 +344,23 @@ R1 wired the six coordinated flows with stub receivers. R2 fills them with real 
 |---|---|---|
 | TipTap OOB editor shell with three-pane mount | wired | + Custom marks: `insertion`, `deletion`, `commentAnchor` (R2 schema additions) |
 | `ChatSession` binding via `DocumentId` | wired | + Session ledger content: anchored annotations (Compose-domain), ledger action history, workspace-scope memory pointers (§8) |
-| Two JPS scopes: `compose-selection`, `compose-document` | wired | + Three new Action + Binding pairs consuming those scopes (§7) |
-| `compose-summarize` consumer | **Binding row LIVE** (catalog governance) | R1's `POST /api/compose/action/*` endpoint died in PR #544, but the `compose-summarize / default` Binding row survives under redesign-r1 catalog governance (name-keyed mirror; targets the Document Summary playbook). R2 adds 3 new Action + Binding pairs: `compose-explain-clause`, `compose-compare-to-playbook`, `compose-draft-alternative` — dispatched via the session-dispatch seam |
+| Two JPS scopes: `compose-selection`, `compose-document` | wired | + Five new Action + Binding pairs consuming those scopes (§7; 2026-07-08 scope-lock) |
+| `compose-summarize` consumer | **Binding row LIVE** (catalog governance) | R1's `POST /api/compose/action/*` endpoint died in PR #544, but the `compose-summarize / default` Binding row survives under redesign-r1 catalog governance (name-keyed mirror; targets the Document Summary playbook). R2 adds 5 new Action + Binding pairs: `compose-explain-clause`, `compose-compare-to-playbook`, `compose-draft-alternative`, `compose-summarize-word-changes`, `compose-defined-terms` — dispatched via the session-dispatch seam |
 | **Compose entry: the `compose-editor` WORKSPACE LAYOUT** (core D-C1 — not modal-first) + chat→layout-tab bridge | ✅ **SHIPPED** (redesign-r1) | — (done; R2 consumes) |
-| **Real-document pre-seed** — assistant resolves the `sprk_document`'s SPE pointer under user OBO, loads into Compose, refresh-surviving | ✅ **SHIPPED** (redesign-r1 R4-2) | — (done; session-UPLOADED files intentionally excluded until §2.7(d) lands) |
+| **Real-document pre-seed** — assistant resolves the `sprk_document`'s SPE pointer under user OBO, loads into Compose, refresh-surviving | ⚠️ **PARTIAL** (corrected 2026-07-08 owner review #2) — works **only for entry path 1c** (Document record → command-bar "Open in Compose" → mounts in TipTap, load-only). The **in-workspace "Search for Document" lookup (1a)** and **Assistant upload → "open in Compose" (1b)** are **NOT wired** (1a never built; 1b opens an empty tab, no mount). | **R2 BUILD ITEMS**: (1a) in-workspace Document Search → pre-seed; (1b) upload → **transient mount + create-on-save** per reframed §2.7(d) |
+| **Entry-point empty state** — "Browse / open file" + "Search for Document" buttons on the Compose empty state | ❌ **NON-FUNCTIONAL** (never worked) | **R2 BUILD ITEM** — wire both buttons (Browse → transient mount; Search → Document lookup + pre-seed) |
 | Open-in-Word handoff via existing `/api/documents/{id}/open-links` | wired | + Push-to-Word annotation infrastructure (NEW BFF service) |
 | SPE plumbing (load, save, promote-on-Save) — `ComposeService` reworked in PR #544 to inject `SpeFileStore` directly; added `SpeFileStore.ReplaceFileContentAsUserAsync` for item-based content replacement | wired | + SPE webhook subscription + delta query for return-from-Word detection; + promotion-on-first-Save bar-raised to full ingestion parity (§2.7) |
 | Three-pane coordination wire-only | wired | + Activated flows per §3 (PaneEventBus discriminants `compose_action_request` + `compose_edit_apply_request` added by R2, upgraded to the D-F3 ack contract) |
 | Single-session lock (`DocumentCheckoutService`), heartbeat | wired | + Conflict UX banner for return-from-Word edits |
 
-**R2 starts at draft-into-editor.** The open and pre-seed lifecycle legs are DONE (shipped in redesign-r1); R2's first new user-visible behavior is chat-drafted content landing in the editor via the `compose` disposition.
+**R2 entry-point reality (corrected 2026-07-08 owner review #2; grounded by 2026-07-08 code verification).** Only the **1c** path (Document record → "Open in Compose") mounts a file today, and it is load-only (no AI actions / annotations yet). The **1a** (in-workspace Browse + Search) and **1b** (Assistant upload → mount) entry paths are **R2 build items**, not done. So R2's earliest user-visible work is BOTH: (i) wiring the missing entry paths (1a/1b, including transient-mount + create-on-save per §2.7(d)), and (ii) chat-drafted content landing in the editor via the `compose` disposition.
+
+**As-built facts that shrink the entry-point work (verified in code, 2026-07-08):**
+- **The editor mount seam is source-agnostic** — `ComposeEditor` initializes from a `docxBytes` prop (`docxToTipTapHtml` → `setContent`). Mounting an uploaded file transiently (1b) means feeding the **already-retained upload `File` bytes** (the Assistant upload flow keeps the original `File`) into that same prop — **no SPE round-trip needed to render**.
+- **Create-on-save half-exists** — `ComposeService.PromoteIfEphemeralAsync` already runs on every save (idempotent: creates the `sprk_document` row + new SPE version, rebinds the ChatSession). R2's document-creation feature is an **UPGRADE of this method to full ingestion parity** (add association + profile analysis + indexing per §2.7(c)/§12.3), **not a net-new pipeline**.
+- **The 1b blocker is explicit and concrete** — the `send_workspace_artifact` LLM tool currently **refuses** session-uploaded file ids as a Compose pre-seed (its system prompt says the tab "opens empty for session files"), and `POST /api/compose/upload` returns **501**. R2 flips that refusal and wires the retained bytes to the mount seam.
+- **1a buttons are pure no-ops** — `ComposeEmptyState`'s Browse/Search callbacks are never supplied by the production mount and their fallback bus events have zero subscribers. R2 supplies the callbacks + builds their targets (Browse → transient mount; Search → reuse the working 1c load path).
 
 R2 does NOT redo any R1 work. R2 layers on top. **R2 also does NOT re-introduce** any component retired by PR #544 — no Compose-specific AI dispatch endpoint (see §7.2 for the binding explanation), no `IDocxTextExtractor` (use the platform `IDocumentTextSource` + `ITextExtractor`). Per ADR-039, every new capability is an **Action row + Binding row pair** — the Binding is the routing config, the Action carries the prompt.
 
@@ -405,7 +427,7 @@ R2's risk and effort are concentrated in two distinct phases with different valu
 
 ## 7. AI Action Authoring — Actions + Bindings (ADR-039)
 
-R2's AI actions are one-shot, document-scoped, single-LLM-call capabilities. Per **ADR-039 (Accepted)**, every capability on the platform is an **Action row** (`sprk_analysisaction` — carries the prompt: SystemPrompt + OutputSchemaJson + Temperature + ModelDeploymentId) **paired with a Binding row** (`sprk_playbookconsumer` — the invocation config: routing, chips, event rules, tool description). R2 authors **3 Action rows + 3 Binding rows**.
+R2's AI actions are one-shot, document-scoped, single-LLM-call capabilities. Per **ADR-039 (Accepted)**, every capability on the platform is an **Action row** (`sprk_analysisaction` — carries the prompt: SystemPrompt + OutputSchemaJson + Temperature + ModelDeploymentId) **paired with a Binding row** (`sprk_playbookconsumer` — the invocation config: routing, chips, event rules, tool description). R2 authors **5 Action rows + 5 Binding rows** (per the 2026-07-08 scope-lock: the original 3 + `compose-summarize-word-changes` + `compose-defined-terms`).
 
 ### Why Action + Binding — and why the resolution model changed in this revision
 
@@ -425,11 +447,13 @@ Full-workflow playbooks (multi-node orchestration) remain what the EXISTING Dail
 | **`compose-explain-clause`** (R2) | NEW — plain-language explanation of a clause | **NEW** — Click-path Binding, toolbar-invoked | `compose-selection` | `{explanation: string, keyConcepts: string[], relatedPlaybookIds: string[]}` |
 | **`compose-compare-to-playbook`** (R2) | NEW — matches selection to matter/firm playbook clauses | **NEW** — Click-path Binding, toolbar-invoked | `compose-selection` + matter context | `{matches: [{playbookEntryId, clauseText, deviations, riskScore, rationale}], overallRisk: string}` |
 | **`compose-draft-alternative`** (R2) | NEW — proposes structured edit payload (adeu Pattern §6.1) | **NEW** — Click-path Binding, toolbar-invoked; declares the `compose` disposition | `compose-selection` | `{target_text, new_text, match_mode: "strict"\|"first"\|"all", rationale, sources: [{type, id, snippet}]}` |
+| **`compose-summarize-word-changes`** (R2 — 2026-07-08 scope-lock) | NEW — human-friendly summary of what changed in a returned-from-Word DOCX version | **NEW** — Click-path Binding; invoked by the return-from-Word flow (§2.5) | `compose-document` | `{summary: string, changes: [{kind: "insertion"\|"deletion"\|"comment"\|"structural", location, description}]}` |
+| **`compose-defined-terms`** (R2 — 2026-07-08 scope-lock) | NEW — detects defined terms + flags inconsistent usage across the document | **NEW** — Click-path Binding; **triggered from the selection-popover "More actions…" overflow (or a small doc-level command)** — NOT selection-based, since it is document-wide; **output rendered READ-ONLY in the Context pane** (reference display, so it honors the audit-only Context rule — owner review #2 decision) | `compose-document` | `{terms: [{term, definitionSpan, usages: [{span, consistent: boolean, note}]}], inconsistencies: [{term, detail}]}` |
 
 ### R2 Catalog-Authoring Deliverables
 
-- **3 new `sprk_analysisaction` Action rows** deployed to Dataverse (each carries `sprk_systemprompt`, `sprk_outputschemajson`, `sprk_temperature`, `sprk_modeldeploymentid`)
-- **3 new `sprk_playbookconsumer` Binding rows** — one per Action; the Binding is the ONLY routing config surface (ADR-039); toolbar buttons resolve through it (Click path)
+- **5 new `sprk_analysisaction` Action rows** deployed to Dataverse (each carries `sprk_systemprompt`, `sprk_outputschemajson`, `sprk_temperature`, `sprk_modeldeploymentid`) — `compose-explain-clause`, `compose-compare-to-playbook`, `compose-draft-alternative`, `compose-summarize-word-changes`, `compose-defined-terms`
+- **5 new `sprk_playbookconsumer` Binding rows** — one per Action; the Binding is the ONLY routing config surface (ADR-039); toolbar buttons resolve through it (Click path)
 - **Eval cases ship WITH each row** (NFR-06 obligation — a catalog row without eval coverage does not merge)
 - **No new BFF endpoint** — dispatch flows through the shipped session-dispatch seam (see §7.2)
 - **Rich JPS scope descriptions** — per adeu Pattern "tool descriptions ARE the prompt", each scope's description field carries behavioral guidance for the LLM (recovery paths + critical gotchas + example inputs/outputs)
@@ -523,7 +547,7 @@ type ComposeSessionPayload = {
 
   // R2 additions
   anchoredAnnotations: AnchoredAnnotation[];  // R2 — Compose-domain document-adjacent state (see deviation note)
-  definedTermsTracking: DefinedTerm[];        // R2 stretch
+  definedTermsTracking: DefinedTerm[];        // R2 — committed (compose-defined-terms extraction capability, 2026-07-08 scope-lock)
   // actionLog        — REMOVED: query the session ledger (ToolChain + SessionOutput refs)
   // derivedInsights  — REMOVED: workspace-scope MemoryItems via the gated memory.write tool
 };
@@ -566,7 +590,7 @@ Every external/cross-cutting resource R2 depends on, mapped to where it's used:
 | **`IConsumerRoutingService`** | Existing — **CANONICAL Binding resolver (ADR-039)** | Resolves R2's Binding rows (`GetBindingByIdAsync`) inside the session-dispatch seam. redesign-r1 task 040 moved ALL consumers onto Bindings — this is the platform's one routing surface, not legacy. |
 | **`ActionRunner` / `PromptSchemaRenderer`** (LinearConsumers) | Existing | The **prompted executor** — renders the resolved Action's prompt, one LLM call, validates against OutputSchemaJson. Reached only via Binding resolution, never by string action key. |
 | **`IDocumentTextSource` + `ITextExtractor`** | Existing platform | Extracts document text (supports `.docx`) — no Compose-specific extractor (the R1 `IDocxTextExtractor` stays dead, PR #544) |
-| **`sprk_analysisaction` table** (Actions) | Existing | **3 new Action rows for R2** (see §7) |
+| **`sprk_analysisaction` table** (Actions) | Existing | **5 new Action rows for R2** (see §7) |
 | **`sprk_playbookconsumer` table** (Bindings) | Existing — **CANONICAL routing config (ADR-039)** | **3 new Binding rows for R2** (one per Action). The R1 `compose-summarize / default` row is LIVE under redesign-r1 catalog governance (name-keyed mirror; targets Document Summary) — owned by catalog governance, not by this project. |
 | **`sprk_analysisplaybook` table** | Existing — **engine FROZEN** | R2 adds NO playbook records (no one does — no new playbooks ever). Existing matter/firm playbook entries are **read as reference data** by the `compose-compare-to-playbook` action, not routed to. |
 | **Core A0 contracts (consumed, never forked)**: `ComposeDisposition v1` (+ SSE frame shape) · `OutcomeCard v1` · `JobAwareCompletionState v1` · `TraceEvent v1` | r2 core Phase A0 (charter §3.4) | Draft-into-editor seam (§2.3); completion evidence for push/save/create (§2.4/§2.7); Context-pane trace hosting (§2.0/§3). Satellites may only consume these contracts — no local variants. |
@@ -641,8 +665,8 @@ All R2 endpoints belong in `Sprk.Bff.Api`. No new microservice. No Dataverse plu
 | Insight persistence | Core Memory Service workspace scope + gated `memory.write` tool (core D-M1/D-M3) | Compose-derived insights as governed MemoryItems (consumed contract — no local variant) |
 | SPE facade | `SpeFileStore` + `ISpeFileOperations` (extended in PR #544 with `ReplaceFileContentAsUserAsync`) | Reused by R2's DOCX writer (annotation apply → save via `ReplaceFileContentAsUserAsync`) |
 | AI dispatch | **Session-dispatch seam** (`dispatchConsumer` + `POST /api/ai/chat/sessions/{id}/dispatch` + `SessionDispatchOrchestrator`) — shipped, redesign-r1 | — (reused verbatim; §7.2) |
-| AI routing | **Binding rows + `IConsumerRoutingService`** (canonical resolver, ADR-039) | + 3 new `sprk_playbookconsumer` Binding rows |
-| AI action prompts | `sprk_analysisaction` Action rows + prompted executor (`ActionRunner`/`PromptSchemaRenderer`) | + 3 new Action rows (executor reused verbatim) |
+| AI routing | **Binding rows + `IConsumerRoutingService`** (canonical resolver, ADR-039) | + 5 new `sprk_playbookconsumer` Binding rows |
+| AI action prompts | `sprk_analysisaction` Action rows + prompted executor (`ActionRunner`/`PromptSchemaRenderer`) | + 5 new Action rows (executor reused verbatim) |
 | Document text extraction | `IDocumentTextSource` + `ITextExtractor` (platform) | — (reused; supports `.docx`) |
 | Completion / confirmation / trace UX | **Core A0 contracts (consumed)**: `OutcomeCard v1` · `JobAwareCompletionState v1` · `GateDecision v2` (Policy v2 Tier 2c) · `TraceEvent v1` · `ComposeDisposition v1` + SSE frame | Compose-side rendering only — contracts are consumed, never forked (charter §3.4) |
 | DOCX engine (annotation writer/reader) | NET-NEW: Open XML SDK 3.x + Codeuctivity.OpenXmlPowerTools | NEW (R2) — both MIT. Distinct from `ITextExtractor`: this SDK is for **writing** track changes / comments back into DOCX, whereas `ITextExtractor` is for **extracting plain text** as LLM input. |
@@ -650,7 +674,7 @@ All R2 endpoints belong in `Sprk.Bff.Api`. No new microservice. No Dataverse plu
 | SPE access | Existing Graph + R1 plumbing | + Webhook subscriptions + delta query handler |
 | Document creation at ingestion parity | Existing Document Upload pipeline stages (SPE storage, profile analysis, indexing) + Job Contract / `ServiceBusJobProcessor` | NEW (R2) — the capability that composes them behind one Tier-2c gate (§2.7); core enforces the R-2 invariant |
 | JPS scopes | `compose-selection`, `compose-document` (R1) | + Enriched `description` fields per "prompt = description" pattern |
-| Catalog authoring | `jps-action-create` / `jps-validate` skills + BA catalog editor / Dataverse MCP, mirror-first under `infra/dataverse/inputschemas/` (§7.4) | Author 3 Action rows + 3 Binding rows, each with eval cases |
+| Catalog authoring | `jps-action-create` / `jps-validate` skills + BA catalog editor / Dataverse MCP, mirror-first under `infra/dataverse/inputschemas/` (§7.4) | Author 5 Action rows + 5 Binding rows, each with eval cases |
 | Playbook authoring | — | NOT applicable — engine frozen, no new playbooks ever (§7.3) |
 | LLM editing patterns | adopt from adeu (reference only, NOT code dependency) | NEW (R2) — `ComposeEditValidator`, `ComposeEditBatch`, `ComposeEditTransaction` in BFF |
 
@@ -687,7 +711,7 @@ R2 introduces **no new AI dispatch endpoint**. The server dispatch surface is th
 | Retired surface | Retired in | Rationale |
 |---|---|---|
 | `POST /api/compose/action/{consumerType}` | PR #544 | Parallel dispatch endpoint — superseded by the session-dispatch seam (§7.2); ADR-039 bans its return |
-| `POST /api/compose/upload` (R2-reserved stub) | Existing R1 stub, unchanged | Compose upload continues to route through the Assistant upload pipeline; chat-uploaded files reach Compose only via the §2.7(d) ingestion-parity affordance |
+| `POST /api/compose/upload` (R2-reserved stub) | Existing R1 stub — **R2 activates it** | Upload → **transient mount in Compose** (render from bytes) → **create-on-save** at full ingestion parity per reframed §2.7(d). (Supersedes the prior "create-first affordance" framing; the save confirmation is the create moment.) |
 
 ---
 
@@ -741,30 +765,34 @@ Phase 0 (dispatch validation) + Phase 1 (LLM patterns) + Phase 2 (DOCX shuttle) 
 | **Editor in-memory format** | ProseMirror state with custom marks (`insertion`, `deletion`, `commentAnchor`) |
 | **Anchoring strategy** | Hybrid — TipTap span IDs (R1) for in-editor stability; content-match + paragraph hint (R2 addition) for drift resistance through Word round-trip |
 | **Phase priority** | Phase 1 (LLM patterns) > Phase 2 (DOCX shuttle) — Phase 1 is where adeu's lessons-learned are most valuable; Phase 2 is largely Microsoft-documented |
-| **Three new R2 capabilities** | `compose-explain-clause`, `compose-compare-to-playbook`, `compose-draft-alternative` — each an `sprk_analysisaction` Action row + `sprk_playbookconsumer` Binding row pair (NOT playbooks — the engine is frozen; see §7) |
-| **AI actions in R2** | 3 (Explain, Compare, Draft Alternative); Document Q&A is stretch goal (§2.8 — no new capability, rides the agent loop) |
+| **Five R2 capabilities (2026-07-08 scope-lock)** | `compose-explain-clause`, `compose-compare-to-playbook`, `compose-draft-alternative`, `compose-summarize-word-changes`, `compose-defined-terms` — each an `sprk_analysisaction` Action row + `sprk_playbookconsumer` Binding row pair (NOT playbooks — the engine is frozen; see §7) |
+| **AI actions in R2** | 5 (Explain, Compare, Draft Alternative, Summarize-Word-Changes, Defined-Terms extraction); Document Q&A is an additional stretch goal (§2.8 — no new capability, rides the agent loop) |
+| **Document Q&A (2026-07-08 scope-lock)** | IN R2 as a stretch feature (§2.8) — document session-mounted, agent answers with citations per the ADR-039 grounded-output invariant; work is validation + highlight-UX polish |
+| **Defined-terms (2026-07-08 scope-lock)** | IN R2 as a FULL extraction capability (`compose-defined-terms` Action + Binding) — LLM detects defined terms + flags inconsistent usage; NOT display-only; Context-pane surface renders the result |
+| **Multiple-action concurrency (2026-07-08 scope-lock)** | Queue SERIALLY in `ConversationPane` — dispatch-order, each streams to completion before the next; predictable ledger ordering, no interleaved SSE |
+| **Re-anchor confidence threshold (2026-07-08 scope-lock)** | Spec commits default bands ≥0.85 auto-anchor / 0.6–0.85 flag-for-review / <0.6 orphan; Spike #6 tunes empirically |
 | **AI dispatch path** | **Binding resolution via the shipped session-dispatch seam** (`dispatchConsumer` → `POST /api/ai/chat/sessions/{id}/dispatch` → `SessionDispatchOrchestrator` → `IConsumerRoutingService` → prompted executor). Rationale: ADR-039 (Accepted) — the Binding table is the ONLY routing config surface; redesign-r1 task 040 moved ALL consumers onto Bindings; the seam provides SSE + ledger + gate for free. `ActionRunner`/`PromptSchemaRenderer` remains the prompted executor. |
-| **Consumer routing** | **R2 ADDS 3 Binding rows** (one per Action) — the Binding IS the dispatch config (ADR-039), not legacy. The R1 `compose-summarize / default` row is LIVE under redesign-r1 catalog governance (name-keyed mirror, targets Document Summary) — governed there, not an R2 dependency. |
+| **Consumer routing** | **R2 ADDS 5 Binding rows** (one per Action) — the Binding IS the dispatch config (ADR-039), not legacy. The R1 `compose-summarize / default` row is LIVE under redesign-r1 catalog governance (name-keyed mirror, targets Document Summary) — governed there, not an R2 dependency. |
 | **AI dispatch endpoint** | ZERO new endpoints — **answered, not open**. Dispatch goes through the shipped session-dispatch seam; Spike 0 validates it (no selection to make). See §7.2's binding explanation block for why a new endpoint can never be added. |
 | **DOCX text extraction** | Platform `IDocumentTextSource` + `ITextExtractor` — NOT a Compose-specific extractor. R1's `IDocxTextExtractor` was retired in PR #544 as redundant with platform coverage. |
 | **Word-native annotations** | YES in R2 (amends R1 non-goals; competitive necessity) |
 | **Round-trip from Word** | YES in R2 (annotation re-anchoring + conflict UX banner) |
 | **Memory richness** | Ledger + workspace-scope memory + Compose-domain anchored annotations (§8): action history = session ledger queries (never duplicated); insights = governed MemoryItems via gated `memory.write`; anchored annotations = document-adjacent Compose state (explicit §8 deviation note) |
 | **Confirmation / completion / trace** | Three moments, three surfaces (§2.4): gate's ONE dialog (Policy v2 Tier 2c, preview inside it) · job-aware OutcomeCard in the transcript · Context pane as audit surface (D-F4 trace view). No bespoke confirm banners anywhere. |
-| **Document creation** | First-class R2 feature at FULL ingestion parity (§2.7, ruling R-2) — first save of a transient draft runs the capability; chat-uploaded files get the D-F0(d) "create it?" affordance; bare `sprk_document` rows are never success (R5-E bar) |
+| **Document creation** | First-class R2 feature at FULL ingestion parity (§2.7, ruling R-2) — first save of a transient draft runs the capability; **chat-uploaded files mount transiently and are created ON SAVE** (create-on-save; the save confirmation is the create moment — reframed 2026-07-08 owner review #2, supersedes the "create-first" affordance); bare `sprk_document` rows are never success (R5-E bar) |
 
 ---
 
 ## 15. Open Items for Next Discussion
 
-These need user decision or further investigation before `spec.md`:
+**All six open items were resolved in the 2026-07-08 scope-lock owner review** (see revision log). Recorded here for audit trail; the decisions are folded into §2.8, §7, §14:
 
-1. **Document Q&A stretch goal**: include in R2 scope, or pure R3+ deferral? (Cheap under the §2.8 framing — rides the agent loop with the document session-mounted; the real work is highlight-UX polish.)
-2. **Defined-terms surface**: include as Context pane addition in R2 (parity feature with Legora), or R3 deferral?
-3. **`compose-summarize-word-changes` capability** for return-from-Word: include as R2 deliverable (NEW Action + Binding pair), or just show diff?
-4. **Anchored-annotation re-anchoring confidence threshold**: at what fuzzy-match confidence do we flag an annotation as "needs review" vs auto-anchor? (Spike #6 informs.)
-5. **Multiple-action concurrency**: if user invokes "Compare to playbook" and "Draft alternative" rapidly, do they queue serially or run in parallel in the Assistant pane? Design implication for `ConversationPane`.
-6. **Core seam timing**: confirm with the core project when Phase A0 publishes `ComposeDisposition v1` + `JobAwareCompletionState v1` + the triple-twin hoist (charter §10 row 15) — Compose's catalog rows and draft-into-editor leg sequence behind those; Phase 0/1 spikes do not.
+1. ~~**Document Q&A stretch goal**~~ — **RESOLVED: IN R2 as a stretch feature** (§2.8). Rides the agent loop with the document session-mounted; no new capability. Real work is validation + highlight-UX polish.
+2. ~~**Defined-terms surface**~~ — **RESOLVED: IN R2 as a FULL extraction capability** — a NEW `compose-defined-terms` Action + Binding pair (LLM detects defined terms + flags inconsistent usage across the document), NOT display-only. This is the 5th catalog pair; ships with eval cases like every row.
+3. ~~**`compose-summarize-word-changes` capability**~~ — **RESOLVED: IN R2** as a NEW Action + Binding pair for return-from-Word (§2.5 optional-capability promoted to committed). The 4th catalog pair.
+4. ~~**Anchored-annotation re-anchoring confidence threshold**~~ — **RESOLVED: spec commits a starting default** — **≥0.85 auto-anchor / 0.6–0.85 flag-for-review / <0.6 orphan** — and **Spike #6 empirically tunes the bands**. Does not block spec authoring.
+5. ~~**Multiple-action concurrency**~~ — **RESOLVED: QUEUE SERIALLY** in `ConversationPane`. Actions run one at a time in dispatch order; each streams to completion before the next starts (predictable ledger ordering, no interleaved SSE). Design implication tracked for `ConversationPane`.
+6. **Core seam timing** — **tracked as an external dependency** (not a decision): R2's catalog rows + draft-into-editor leg sequence behind core Phase A0 publishing `ComposeDisposition v1` + `JobAwareCompletionState v1` + the triple-twin hoist (charter §10 row 15). Phase 0/1 spikes are unblocked and do not wait. Confirm timing with the core project before authoring the catalog-row + draft-into-editor tasks.
 
 **Resolved since 2026-07-03** (kept for audit trail):
 
@@ -779,8 +807,8 @@ These need user decision or further investigation before `spec.md`:
 
 | Release | Theme | Headline deliverables |
 |---|---|---|
-| **R2 (this project)** | AI actions + Word-native interop + memory continuity | 3 AI actions; Word-native annotation push/pull; round-trip; document creation at full ingestion parity; rich session memory |
-| **R3** | Word add-in entry + defined terms + cross-refs | "Open in Spaarke Compose" add-in for Word; defined-terms management in Context; cross-reference validation |
+| **R2 (this project)** | AI actions + Word-native interop + memory continuity | 5 AI actions (Explain, Compare, Draft Alternative, Summarize-Word-Changes, Defined-Terms) + Document Q&A stretch; Word-native annotation push/pull; round-trip; document creation at full ingestion parity; rich session memory |
+| **R3** | Word add-in entry + clause library + cross-refs | "Open in Spaarke Compose" add-in for Word; **clause library** (pick/insert standard clauses; cursor-position insertion toolbar + interactive picker UX — deferred from R2 per owner review #2); cross-reference validation *(defined-terms management moved INTO R2 per 2026-07-08 scope-lock)* |
 | **R4** | Multi-artifact | PDF artifact (viewer + extracted-text editor); email artifact (Outlook MIME via Graph); transcript artifact |
 | **R5+** | Co-editing | Real-time multi-user editing (CRDT); comparison/redline artifact (two-document compare); multi-document Q&A across matter |
 
