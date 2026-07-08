@@ -15,7 +15,7 @@
   </metadata>
 
   <prompt>
-    Extend the existing `MemoryFact` with the governance envelope (FR-B-02): `scope` (record|user), `subjectType/subjectId` (or `userId`), `source` (+ `sessionId`/`turnId` provenance), `confidence`, `sensitivity`, `expiration`, `deletionPolicy`, `retentionClass`, `created/updated/createdBy` — REUSING the existing `Type/Key/Value/Source/ConfirmedByUser/Confidence/RecordedAt` fields, not replacing them. Structured objects, NOT embeddings. Apply tolerant-reader defaults so already-persisted facts deserialize without the new fields. A `sourceTrustLevel` field MAY be present but its ENFORCEMENT is deferred (FR-B-08 explicit-only floor is the interim control).
+    Extend the existing `MemoryFact` with the governance envelope (FR-B-02): `scope` (record|user), `subjectType/subjectId` (or `userId`), `source` (+ `sessionId`/`turnId` provenance), `confidence`, `sensitivity`, `expiration`, `deletionPolicy`, `retentionClass`, `created/updated/createdBy` — REUSING the existing `Type/Key/Value/Source/ConfirmedByUser/Confidence/RecordedAt` fields, not replacing them. Structured objects, NOT embeddings. Apply tolerant-reader defaults so already-persisted facts deserialize without the new fields. A `sourceTrustLevel` field MAY be present but its ENFORCEMENT is deferred (FR-B-08: memory writes are AI-initiated + provenance-tagged; provenance + the user delete surface are the interim controls).
   </prompt>
 
   <role>Senior .NET developer fluent in durable memory data modeling, JSON tolerant-reader migration, and ADR-015 Tier 3 governance semantics.</role>

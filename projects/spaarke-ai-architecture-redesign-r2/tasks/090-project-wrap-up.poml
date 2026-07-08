@@ -95,6 +95,6 @@
   </acceptance-criteria>
 
   <escalation>
-    <trigger>The memory hard-governance deferral (group e) carries an operator-accepted risk (the explicit-only-write floor is only an interim control). Before filing it as deferred, confirm the operator still accepts that risk at close; if the risk posture changed, STOP and surface it rather than silently deferring.</trigger>
+    <trigger>The memory hard-governance deferral (group e) carries an operator-accepted risk (interim controls = provenance tags + content-safety + scope-isolation + user delete surface; document-injection poisoning is the accepted residual risk). Before filing it as deferred, confirm the operator still accepts that risk at close; if the risk posture changed, STOP and surface it rather than silently deferring.</trigger>
   </escalation>
 </task>

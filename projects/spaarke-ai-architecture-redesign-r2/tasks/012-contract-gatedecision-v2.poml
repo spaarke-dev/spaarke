@@ -21,7 +21,7 @@
   <role>Senior .NET developer fluent in the Spaarke confirmation gate, ADR-039 catalog-declared side-effect classes, and versioned tolerant-reader contracts.</role>
 
   <goal>
-    A versioned `GateDecision v2` contract under `Services/Ai/PublicContracts/` carrying: risk `tier` (0/1/2a/2b/2c/3/4), `origin` (deterministic classification result), `completeness` (args complete?), overlay-precedence results (injection-suspect → safety-degradation → incomplete-args → origin → tier), and confirmation-state — with a version field, tolerant-reader rules, example payloads, and failure/partial states. A thin producer emits a GateDecision from the existing gate for one side-effect path; a thin consumer renders/acts on it; a contract test in `tests/integration/contract/` locks the shape AND asserts confirmation-state prevents a second ask.</goal>
+    A versioned `GateDecision v2` contract under `Services/Ai/PublicContracts/` carrying: risk `tier` (0/1/2a/2b/2c/3/4), `origin` (deterministic classification result), `completeness` (args complete?), overlay-precedence results (injection-suspect → safety-degradation → incomplete-args → origin → tier), and confirmation-state — with a version field, tolerant-reader rules, example payloads, and failure/partial states. A thin producer emits a GateDecision from the existing gate for one side-effect path; a thin consumer renders/acts on it; a contract test in `tests/integration/contract/` locks the shape AND asserts confirmation-state prevents a second ask. The contract also carries an OPTIONAL parent-association selection affordance so the ONE gate dialog can host an associate-to picker (matter / project / invoice / work-assignment / none) without a bespoke banner.</goal>
 
   <inputs>
     <file purpose="spec">projects/spaarke-ai-architecture-redesign-r2/spec.md</file>
@@ -95,7 +95,9 @@
     <criterion testable="true">The contract test asserts a confirmed GateDecision renders NO second ask (confirmation-state is ledger-backed, structural).</criterion>
     <criterion testable="true">The test uses no `Mock&lt;HttpMessageHandler&gt;` and no DI-registration assertions (ADR-038); Compose r2 can consume with zero local variant.</criterion>
     <criterion testable="true">NEGATIVE: a GateDecision whose tier/origin is derived from runtime LLM judgment rather than catalog data is rejected/flagged by a test (ADR-039 — risk is DATA).</criterion>
+    <criterion testable="true">The contract carries an OPTIONAL parent-association selection affordance (associate-to matter / project / invoice / work-assignment / none) so the one gate dialog can host an associate-to picker — proven by a test; no bespoke confirmation banner.</criterion>
     <criterion testable="true">Publish-size delta measured + reported; no new HIGH CVE; Placement Justification stated.</criterion>
+    <criterion testable="true">On completion, flip this seam's row in `projects/spaarke-ai-architecture-redesign-r2/notes/SEAM-STATUS.md` to published (with commit ref); record which Compose r2 FR it unblocks (FR-05 / FR-28). 'Published' = merged + contract test green + consumable via Services/Ai/PublicContracts/.</criterion>
   </acceptance-criteria>
 
   <escalation>

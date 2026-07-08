@@ -93,6 +93,7 @@
     <criterion testable="true">The test uses no `Mock&lt;HttpMessageHandler&gt;` and no DI-registration assertions (ADR-038).</criterion>
     <criterion testable="true">NEGATIVE: a TraceEvent carrying message content (not just an identifier/count) fails the no-content test assertion.</criterion>
     <criterion testable="true">Publish-size delta measured + reported; no new HIGH CVE; Placement Justification stated.</criterion>
+    <criterion testable="true">On completion, flip this seam's row in `projects/spaarke-ai-architecture-redesign-r2/notes/SEAM-STATUS.md` to published (with commit ref); record which Compose r2 FR it unblocks (FR-32). 'Published' = merged + contract test green + consumable via Services/Ai/PublicContracts/.</criterion>
   </acceptance-criteria>
 
   <escalation>

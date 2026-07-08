@@ -21,7 +21,7 @@
   <role>Engineer doing cross-project seam coordination — verifying published contracts are consumable, and filing tracked obligations so neither project silently drifts from the seam.</role>
 
   <goal>
-    A seam-ordering verification note confirming every §3.1 seam Compose r2 depends on is published + consumable (contract exists under `Services/Ai/PublicContracts/`, has a passing contract test, and is versioned/tolerant-reader). The cross-project obligation is filed BOTH ways: (i) this project's `notes/` + a pointer in `projects/INDEX.md` state what the core owes; (ii) a reciprocal obligation entry lands in `projects/spaarkeai-compose-r2/` so Compose r2 tracks the consumed seams + the no-fork rule. `/conflict-check` guidance for BFF PRs is reaffirmed.</goal>
+    A seam-ordering verification note confirming every §3.1 seam Compose r2 depends on is published + consumable (contract exists under `Services/Ai/PublicContracts/`, has a passing contract test, and is versioned/tolerant-reader). This task OWNS `notes/SEAM-STATUS.md` as the milestone: it verifies ALL seam rows are published + consumable, then flips the SEAM-STATUS overall-status header to "✅ ALL SEAMS PUBLISHED — Compose UNBLOCKED" and posts the consolidated "Compose r2 UNBLOCKED — core seams available" notice (in the SEAM-STATUS header AND as a comment on the compose-r2 project tracking). The cross-project obligation is filed BOTH ways: (i) this project's `notes/` + a pointer in `projects/INDEX.md` state what the core owes; (ii) a reciprocal obligation entry lands in `projects/spaarkeai-compose-r2/` so Compose r2 tracks the consumed seams + the no-fork rule. `/conflict-check` guidance for BFF PRs is reaffirmed.</goal>
 
   <inputs>
     <file purpose="spec">projects/spaarke-ai-architecture-redesign-r2/spec.md</file>
@@ -74,6 +74,7 @@
     <step order="2" name="File core-owes">Record in this project's `notes/` + a pointer in `projects/INDEX.md` what the core owes Compose r2 (the seam list + no-fork rule + ack-plumbing/Tier-2c/OutcomeCard duties from spec Dependencies).</step>
     <step order="3" name="File Compose-consumes">Add the reciprocal obligation into `projects/spaarkeai-compose-r2/` (notes/defer-issues or the equivalent) so Compose tracks the consumed seams + the no-fork rule.</step>
     <step order="4" name="Reaffirm conflict-check">State the `/conflict-check`-before-every-BFF-PR guidance and that FR-D-03 (task 072) verifies no forked seam.</step>
+    <step order="5" name="Own SEAM-STATUS milestone">Verify every row in `notes/SEAM-STATUS.md` is published + consumable; flip the SEAM-STATUS overall-status header to "✅ ALL SEAMS PUBLISHED — Compose UNBLOCKED"; post the consolidated "Compose r2 UNBLOCKED — core seams available" notice in the SEAM-STATUS header AND as a comment on the compose-r2 project tracking.</step>
   </steps>
 
   <tools>
@@ -92,7 +93,8 @@
     <criterion testable="true">The core-owes obligation is filed in this project's notes AND pointed to from `projects/INDEX.md`.</criterion>
     <criterion testable="true">The reciprocal Compose-consumes obligation is filed into `projects/spaarkeai-compose-r2/` — the dependency is tracked from BOTH sides (FR-A0-08).</criterion>
     <criterion testable="true">The filing reaffirms the no-forked-seam rule + that FR-D-03 (task 072) verifies it, and restates `/conflict-check`-before-every-BFF-PR.</criterion>
-    <criterion testable="true">NEGATIVE: if any seam is missing, lacks a passing contract test, or is reachable outside `Services/Ai/PublicContracts/`, the note records it as a BLOCKER (Compose r2 NOT yet unblocked) rather than declaring completion.</criterion>
+    <criterion testable="true">This task OWNS the SEAM-STATUS milestone: every row in `notes/SEAM-STATUS.md` is verified published + consumable, the overall-status header is flipped to "✅ ALL SEAMS PUBLISHED — Compose UNBLOCKED", and the consolidated "Compose r2 UNBLOCKED — core seams available" notice is posted in the SEAM-STATUS header AND as a comment on the compose-r2 project tracking.</criterion>
+    <criterion testable="true">NEGATIVE: if any seam is missing, lacks a passing contract test, or is reachable outside `Services/Ai/PublicContracts/`, the note records it as a BLOCKER (Compose r2 NOT yet unblocked), the SEAM-STATUS header is NOT flipped, and the UNBLOCKED notice is NOT posted — rather than declaring completion.</criterion>
   </acceptance-criteria>
 
   <escalation>

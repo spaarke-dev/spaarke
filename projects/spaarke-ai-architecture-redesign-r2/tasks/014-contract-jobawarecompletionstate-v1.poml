@@ -21,7 +21,7 @@
   <role>Senior .NET developer fluent in the Spaarke Service Bus job pipeline (`JobContract`, `ServiceBusJobProcessor`, `JobStatusService`) and versioned tolerant-reader contracts.</role>
 
   <goal>
-    A versioned `JobAwareCompletionState v1` contract under `Services/Ai/PublicContracts/` projecting existing job status into the nine per-step states, with a version field, tolerant-reader rules, example payloads, and the terminal/non-terminal state map. A thin producer maps a real `JobContract` status into a JobAwareCompletionState; a thin consumer renders it (progress/recovery); a contract test in `tests/integration/contract/` locks the shape AND asserts the ingestion-parity distinction (record-exists ≠ downstream-analysis-finished).</goal>
+    A versioned `JobAwareCompletionState v1` contract under `Services/Ai/PublicContracts/` projecting existing job status into the nine per-step states, with a version field, tolerant-reader rules, example payloads, and the terminal/non-terminal state map. A thin producer maps a real `JobContract` status into a JobAwareCompletionState; a thin consumer renders it (progress/recovery); a contract test in `tests/integration/contract/` locks the shape AND asserts the ingestion-parity distinction (record-exists ≠ downstream-analysis-finished). The ordered step SET is CONSUMER-DECLARED: a consumer declares its own ordered steps (Compose's are `container → record → profile-analysis → indexing`); the contract is generic over the step set and MUST NOT hardcode any one consumer's steps.</goal>
 
   <inputs>
     <file purpose="spec">projects/spaarke-ai-architecture-redesign-r2/spec.md</file>
@@ -70,6 +70,7 @@
   <steps mode="directional">
     <step order="0" name="Context + governance">Load FR-A0-07, the Job Contract anchors, NFR-12, bff-extensions.md; map existing job statuses to the nine target states.</step>
     <step order="1" name="Define the contract">Define `JobAwareCompletionState v1` DTO under `Services/Ai/PublicContracts/`: the nine per-step states, terminal/non-terminal map, version field, tolerant-reader rules, failure/partial states.</step>
+    <step order="1b" name="Consumer-declared step set">Make the ordered step SET consumer-declared — the contract is generic over steps (no hardcoded consumer). Support Compose's `container → record → profile-analysis → indexing`; prove a DIFFERENT step set renders correctly too.</step>
     <step order="2" name="Reference producer">Wire a thin producer projecting a REAL JobContract status into a JobAwareCompletionState (no new job model).</step>
     <step order="3" name="Reference consumer">A thin consumer rendering the state (progress + failure recovery + record-exists vs downstream-finished).</step>
     <step order="4" name="Contract test">Add a contract test asserting the state map, version, tolerant-reader, and the ingestion-parity distinction (record-exists ≠ analysis-finished).</step>
@@ -94,7 +95,10 @@
     <criterion testable="true">The contract test asserts the ingestion-parity distinction: a "record created" state is NOT reported as "completed" while downstream analysis/indexing is still running (NFR-12).</criterion>
     <criterion testable="true">The test uses no `Mock&lt;HttpMessageHandler&gt;` and no DI-registration assertions (ADR-038); Compose r2 can consume with zero local variant.</criterion>
     <criterion testable="true">NEGATIVE: a state derived from model-claimed progress (not stored job status) fails a test assertion (store-before-render).</criterion>
+    <criterion testable="true">The ordered step SET is CONSUMER-DECLARED (generic over steps, no hardcoded consumer); Compose's `container → record → profile-analysis → indexing` renders correctly — proven by a test.</criterion>
+    <criterion testable="true">NEGATIVE: a consumer with a DIFFERENT ordered step set still renders correctly (the contract does not assume or hardcode Compose's steps) — asserted by a test.</criterion>
     <criterion testable="true">Publish-size delta measured + reported; no new HIGH CVE; Placement Justification stated.</criterion>
+    <criterion testable="true">On completion, flip this seam's row in `projects/spaarke-ai-architecture-redesign-r2/notes/SEAM-STATUS.md` to published (with commit ref); record which Compose r2 FR it unblocks (FR-05 / FR-28). 'Published' = merged + contract test green + consumable via Services/Ai/PublicContracts/.</criterion>
   </acceptance-criteria>
 
   <escalation>

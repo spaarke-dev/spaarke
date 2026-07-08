@@ -96,6 +96,7 @@
     <criterion testable="true">Compose r2 can consume OutcomeCard v1 with zero local variant (shape is under PublicContracts).</criterion>
     <criterion testable="true">NEGATIVE: producing an OutcomeCard whose link field was model-composed (not from HandoffUrlBuilder) or that references no stored outcome fails a test assertion (server-composed + store-before-render enforced).</criterion>
     <criterion testable="true">Publish-size delta measured + reported; no new HIGH CVE; Placement Justification stated.</criterion>
+    <criterion testable="true">On completion, flip this seam's row in `projects/spaarke-ai-architecture-redesign-r2/notes/SEAM-STATUS.md` to published (with commit ref); record which Compose r2 FR it unblocks (FR-05 / FR-28). 'Published' = merged + contract test green + consumable via Services/Ai/PublicContracts/.</criterion>
   </acceptance-criteria>
 
   <escalation>

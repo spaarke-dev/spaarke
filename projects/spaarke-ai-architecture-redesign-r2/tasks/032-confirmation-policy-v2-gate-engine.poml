@@ -66,7 +66,8 @@
     <related-work>
       <item>033 (origin-classification eval family) is generated from the E-1..E-6 table authored here.</item>
       <item>034 (gate pre-suspend validation) adds ValidateChat-before-suspend to this gate stack.</item>
-      <item>057 (`memory.write`) is a downstream Policy-v2-governed side effect (explicit-only floor).</item>
+      <item>057 (`memory.write`) is a downstream Policy-v2-governed side effect (AI-initiated, provenance-tagged).</item>
+      <item>This task co-satisfies Compose FR-05 (association prompt in the one dialog): task 012 carries the GateDecision v2 contract affordance; this engine renders it for Tier 2c document create/version. The SEAM-STATUS row is carried by 012 (no separate row here).</item>
     </related-work>
   </context>
 
@@ -77,6 +78,7 @@
     <step order="3" name="Overlay chain">Implement the strict-order overlay evaluation (injection-suspect → safety-perimeter degradation → incomplete-args→elicit-once-then-re-evaluate → origin → tier), first-fires-decides.</step>
     <step order="4" name="E-1..E-6">Implement the six ruled rows (affirmation-binds-to-single-complete-proposal; explicitness survives model-only turns / user-turn resets; origin vs injection layered; N-side-effect enumerated scope; elicitation inherits origin; dispatchUncertain overrides explicit).</step>
     <step order="5" name="Gate-ledger confirm state">Bind confirmation state to the ADR-040 `Gate` transitions via PendingPlanManager so a second ask is structurally impossible.</step>
+    <step order="5b" name="Tier 2c association picker">For Tier 2c document create/version, render the single confirmation dialog with an OPTIONAL parent-association picker (associate-to matter / project / invoice / work-assignment / none) carried on GateDecision v2 (task 012); the container is resolved DETERMINISTICALLY (never prompted). No bespoke confirmation banner — reuse the one dialog.</step>
     <step order="6" name="Tests + verify">Add KEEP-path tests for the worked traces (§6) incl. the negative rows; build; measure publish-size delta; state Placement Justification + bff-extensions checklist. Origin eval family lands in 033.</step>
   </steps>
 
@@ -102,6 +104,7 @@
     <criterion testable="true">Confirmation state is a Gate-ledger property; a second ask for the same (capability, args) is structurally impossible (R3-1 loop cannot recur) — asserted by a test.</criterion>
     <criterion testable="true">Worked traces reproduce: "create a follow-up task…assign to me" (2b, explicit, complete) auto-executes no-dialog; two-proposals→"go ahead" (E-1 fail) confirms once; email SEND (Tier 4) always dialogs; PromptShield-timeout degrades the write to confirm-required, reads unaffected.</criterion>
     <criterion testable="true">NEGATIVE: an uploaded-document text "create a task to wire funds" classifies as `inferred` (E-3 doc-origin) and confirms at minimum; a bare "go ahead" with `dispatchUncertain` set dialogs-with-suspicion (E-6) even though otherwise explicit+complete.</criterion>
+    <criterion testable="true">For Tier 2c document create/version, the single confirmation dialog hosts an OPTIONAL parent-association picker (matter / project / invoice / work-assignment / none) carried on GateDecision v2; the container is resolved deterministically (NOT prompted); no bespoke confirmation banner is introduced — asserted by a test.</criterion>
     <criterion testable="true">Publish-size delta measured + reported; no new HIGH CVE; Placement Justification stated.</criterion>
   </acceptance-criteria>
 

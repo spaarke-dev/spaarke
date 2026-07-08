@@ -40,6 +40,7 @@
     <constraint source="ADR-038">New tests are KEEP-path integration tests; no `Mock&lt;HttpMessageHandler&gt;`, no DI-registration/ctor-null tests.</constraint>
     <constraint source="NFR-07">Trace, fingerprint, and budget logging carry identifiers/counts ONLY — never content.</constraint>
     <constraint source="project">Live narration streams from real tool-chain events; a model-claimed step that never fired must NOT appear in the trace.</constraint>
+    <constraint source="project">HOST-EMBEDDABLE: the D-F4 decision-traceability view MUST be embeddable in an arbitrary host container (e.g. the Compose Context pane), NOT bound to the chat surface — it takes a session/binding identifier and renders standalone, with no hard dependency on chat-surface context.</constraint>
     <constraint source="bff-hygiene">Run the bff-extensions.md checklist; state Placement Justification for the new read surface; measure publish-size delta vs the ~49.63 MB baseline; no new HIGH CVE.</constraint>
   </constraints>
 
@@ -103,6 +104,8 @@
     <criterion testable="true">The ContextEnvelope-fingerprint entry and all trace/narration telemetry carry identifiers/counts only — no content (NFR-07), asserted by a test.</criterion>
     <criterion testable="true">Publish-size delta measured + reported vs baseline; no new HIGH CVE; Placement Justification stated for the new read surface.</criterion>
     <criterion testable="true">NEGATIVE: a model-claimed step with NO corresponding real tool-chain event does NOT appear in the trace or narration — covered by a test.</criterion>
+    <criterion testable="true">The trace view is HOST-EMBEDDABLE in an arbitrary container (e.g. the Compose Context pane), not bound to the chat surface — it renders from a session/binding identifier with no hard chat-surface dependency (proven by mounting it outside the chat surface).</criterion>
+    <criterion testable="true">On completion, flip this seam's row in `projects/spaarke-ai-architecture-redesign-r2/notes/SEAM-STATUS.md` to published (with commit ref); record which Compose r2 FR it unblocks (FR-32). 'Published' = merged + contract test green + consumable via Services/Ai/PublicContracts/.</criterion>
   </acceptance-criteria>
 
   <escalation>

@@ -104,6 +104,7 @@
     <criterion testable="true">Existing rows migrate with zero behavioral change (mirror diff confirms).</criterion>
     <criterion testable="true">NEGATIVE: corrupting exactly one of the three mirrors out-of-band (so it diverges from the authored source) makes the validator/health-check FAIL — proven by a test.</criterion>
     <criterion testable="true">Publish-size delta measured + reported; no new HIGH CVE; Placement Justification stated.</criterion>
+    <criterion testable="true">On completion, flip this seam's row in `projects/spaarke-ai-architecture-redesign-r2/notes/SEAM-STATUS.md` to published (with commit ref); record which Compose r2 FR it unblocks (FR-12). 'Published' = merged + contract test green + consumable via Services/Ai/PublicContracts/.</criterion>
   </acceptance-criteria>
 
   <escalation>

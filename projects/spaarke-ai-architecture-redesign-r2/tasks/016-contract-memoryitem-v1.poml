@@ -33,7 +33,8 @@
 
   <constraints>
     <constraint source="project">EXTEND the existing `MemoryFact` (reuse `Type/Key/Value/Source/ConfirmedByUser/Confidence/RecordedAt`); do NOT greenfield a new memory model (CLAUDE.md §11; plan §3).</constraint>
-    <constraint source="project">Structured objects, NOT embeddings, for Record + User scopes. Key Record memory generically by `(entityType, entityId)` — never matter-only.</constraint>
+    <constraint source="project">Structured objects, NOT embeddings, for Record + User scopes. Key Record scope generically by `(entityType, entityId)` — never matter-only. TERMINOLOGY: use "Record scope `(entityType, entityId)`" throughout; Compose's "workspace-scope memory" IS Record scope (same concept, canonical name = Record scope).</constraint>
+    <constraint source="project">PROVENANCE ENVELOPE (metadata, NOT a gate): the envelope carries `source` (user | ai-derived | insights-engine), `bindingId`/`ledgerRef`, `trustLevel`, and `expiration`. These are written at capture time as METADATA — they do NOT gate the write (memory.write is AI-initiated + silent per FR-B-08); the FR-B-03 user review/delete surface is the control. `trustLevel` may be present but its ENFORCEMENT is deferred to the governance project.</constraint>
     <constraint source="ADR-015">MemoryItems are Tier 3 (user-owned, GDPR-erasable) — the envelope carries deletionPolicy/retentionClass/expiration to support erasure.</constraint>
     <constraint source="ADR-040">Conversation memory stays the ledger facade — MemoryItem is Record/User scope only, NOT a session cache.</constraint>
     <constraint source="ADR-013">Consumers reach MemoryItem only via `Services/Ai/PublicContracts/`.</constraint>
@@ -57,7 +58,7 @@
   </knowledge>
 
   <context>
-    <background>Discovery found a working Cosmos memory subsystem (`MatterMemoryService`/`MemoryFact`). D-M1 generalizes it off matter-only to two scopes (Record `(entityType,entityId)` + User `userId`) with a governance envelope. This A0 task freezes the OBJECT + envelope shape first — the genuinely-new part — so task 050 (service generalization), 051 (envelope), 052 (governance), and the ContextEnvelope Memory slice (015) all bind to a stable contract. Hard-governance enforcement (untrusted-origin ban) is DEFERRED; the field may exist but is not enforced here.</background>
+    <background>Discovery found a working Cosmos memory subsystem (`MatterMemoryService`/`MemoryFact`). D-M1 generalizes it off matter-only to two scopes (Record `(entityType,entityId)` + User `userId`) with a governance envelope. This A0 task freezes the OBJECT + envelope shape first — the genuinely-new part — so task 050 (service generalization), 051 (envelope), 052 (governance), and the ContextEnvelope Memory slice (015) all bind to a stable contract. Hard-governance enforcement (untrusted-origin ban, `trustLevel` enforcement) is DEFERRED; provenance fields (`source`/`bindingId`/`ledgerRef`/`trustLevel`/`expiration`) exist as METADATA written at capture time — they do NOT gate the write. Compose's `AnchoredAnnotation` is accepted as NOT a MemoryItem: it is document-positional UI state (not governed memory), stays in Compose's session payload, and needs no negotiated MemoryItem sub-type (Compose spec §ADR-Tensions Path-A).</background>
     <dependencies>
       <dependency task="none" status="n/a">Front A0 wave — no upstream (service generalization at 050 depends on this).</dependency>
     </dependencies>
@@ -65,7 +66,7 @@
       <item>FR-B-01 (task 050) generalizes `MatterMemoryService`→RecordMemory producing/consuming MemoryItem.</item>
       <item>FR-B-02 (task 051) adds the governance envelope to `MemoryFact` (this contract's fields).</item>
       <item>FR-A0-01 (task 015) ContextEnvelope Memory slice carries MemoryItems.</item>
-      <item>FR-B-08 (task 057) `memory.write` explicit-only floor writes MemoryItems.</item>
+      <item>FR-B-08 (task 057) `memory.write` — AI-initiated, silent, provenance-tagged — writes MemoryItems (no gate).</item>
     </related-work>
   </context>
 
@@ -97,7 +98,10 @@
     <criterion testable="true">The contract test asserts memory is a STRUCTURED object, not an embedding vector; version field present; unknown extra field ignored.</criterion>
     <criterion testable="true">The test uses no `Mock&lt;HttpMessageHandler&gt;` and no DI-registration assertions (ADR-038).</criterion>
     <criterion testable="true">NEGATIVE: a MemoryItem written to the Conversation scope (which must stay the ledger facade) is rejected/flagged by a test — MemoryItem is Record/User scope only (ADR-040).</criterion>
+    <criterion testable="true">The provenance envelope carries `source` (user | ai-derived | insights-engine), `bindingId`/`ledgerRef`, `trustLevel`, and `expiration` as METADATA (written at capture time; NOT a write-gate — memory.write is AI-initiated per FR-B-08); `trustLevel` enforcement is deferred.</criterion>
+    <criterion testable="true">Terminology: the contract doc uses "Record scope `(entityType, entityId)`" and states Compose's "workspace-scope memory" = Record scope; `AnchoredAnnotation` is documented as NOT a MemoryItem (document-positional UI state), requiring no MemoryItem sub-type.</criterion>
     <criterion testable="true">Publish-size delta measured + reported; no new HIGH CVE; Placement Justification stated.</criterion>
+    <criterion testable="true">On completion, flip this seam's row in `projects/spaarke-ai-architecture-redesign-r2/notes/SEAM-STATUS.md` to published (with commit ref); record which Compose r2 FR it unblocks (FR-30). 'Published' = merged + contract test green + consumable via Services/Ai/PublicContracts/.</criterion>
   </acceptance-criteria>
 
   <escalation>

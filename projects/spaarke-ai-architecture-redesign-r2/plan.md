@@ -62,7 +62,7 @@ Discovery (project-pipeline Step 2) confirmed the presumption-of-reuse and **shr
 | Session Ledger | REUSE `Models/Ai/Chat/SessionLedgerEntries.cs` (`SessionOutput`, `SessionToolChain`, `SessionGate`; `{bindingId}@t{n}` at `:39`; inline cap `:50`) | ContextEnvelope-fingerprint entry type |
 | Context primitives | GENERALIZE `Chat/ChatHistoryManager.cs:302` `BuildLedgerOutputsContext` + `SprkChatAgentFactory.cs:129` `BuildCurrentDateDirective` + `PlaybookChatContextProvider.cs:582` host-identity + `OrchestratorPromptBuilder.cs:44` | Context Binder + ContextEnvelope contract |
 | Directive layer | EXTEND `SprkChatAgentFactory.cs:65` honesty directive + `ToolResult.cs:326` `UserSummary` + `HandoffUrlBuilder.cs` link composition | D-F0 strategy meta-prompt block |
-| **Memory Service** ⚠️ | **GENERALIZE the EXISTING memory subsystem** — `Services/Ai/Memory/MatterMemoryService.cs:27` (`MemoryFact` model, ETag/versioning, GDPR erasure, budget-serialization) + `MemoryCompositionService`, `PinnedContextRepository`, `RecentlyDiscussedTracker`, `PinnedMemoryEndpoints`, client `memory/*`. **`MatterMemory`→`RecordMemory`, generic `(entityType,entityId)`** (matters/projects/invoices/work-assignments/events/documents — NOT matter-only) | TWO scopes (Record + User); envelope fields; view/delete surface; explicit-only `memory.write` via Policy v2 |
+| **Memory Service** ⚠️ | **GENERALIZE the EXISTING memory subsystem** — `Services/Ai/Memory/MatterMemoryService.cs:27` (`MemoryFact` model, ETag/versioning, GDPR erasure, budget-serialization) + `MemoryCompositionService`, `PinnedContextRepository`, `RecentlyDiscussedTracker`, `PinnedMemoryEndpoints`, client `memory/*`. **`MatterMemory`→`RecordMemory`, generic `(entityType,entityId)`** (matters/projects/invoices/work-assignments/events/documents — NOT matter-only) | TWO scopes (Record + User); envelope fields; view/delete surface; **AI-initiated + silent + provenance-tagged** `memory.write` (no gate) |
 | Memory store | **NEW Cosmos container partitioned by SUBJECT** (`entityId`/`userId`, NOT `/tenantId` — dedicated-per-customer envs make `/tenantId` a single hot partition; key can't change in place) — **reuse the service CODE, not the container** (resolves Q4). Live-doc migration decided at task 050 | subject partition key; scope discriminator; owner/subject keying |
 | Insights persistence | Insights currently **TTL-cached, no durable store** (`Insights/InsightsPlaybookExecutionCache.cs`) → Record memory shaped as the future durable insight store (`source: insights-engine`) | envelope supports it; **wiring = follow-on** |
 | Trace surface | EXTEND `Spaarke.AI.Widgets/.../ExecutionTraceWidget.tsx` + `executionTraceBuffer.ts` (buffer `MAX=50`, mount-gap documented) + `Telemetry/ContextEventEmitter.cs` | **server ToolChain read surface (NOT FOUND — net-new, FR-A1-09)** + live plan narration |
@@ -74,7 +74,7 @@ Discovery (project-pipeline Step 2) confirmed the presumption-of-reuse and **shr
 
 **Genuinely net-new** (per §11): OutcomeCard component + server trace-read surface; the Record/User two-scope model + generic `(entityType,entityId)` keying + subject-partitioned container + governance envelope atop `MatterMemoryService`; the Context Binder + ContextEnvelope contract; the D-F0 doctrine block + **two** eval families (resourcefulness + origin-classification — memory-poisoning deferred); ADR-041/042.
 
-> **Memory scope refinement (operator review 2026-07-08)**: five scopes → **two active** (Record + User); Record generalized off `sprk_matter` to any entity; User is one general per-user store (not per-matter); store re-partitioned by subject; **hard-governance rules DEFERRED** to a separate project behind an **explicit-only-write floor** (see spec FR-B-01/02/03/08/09/10 + Deferrals). Insights-Engine-as-consumer is the named direction; wiring is a follow-on.
+> **Memory scope refinement (operator review 2026-07-08)**: five scopes → **two active** (Record + User); Record generalized off `sprk_matter` to any entity; User is one general per-user store (not per-matter); store re-partitioned by subject; **memory writes are AI-initiated + silent + provenance-tagged** (automatic memory = the value prop; user review/delete is the control); **hard-governance rules DEFERRED** to a separate project (see spec FR-B-01/02/03/08/09/10 + Deferrals). Insights-Engine-as-consumer is the named direction; wiring is a follow-on.
 
 ---
 
@@ -128,7 +128,7 @@ Each: contract + thin reference producer + consumer + contract test in `tests/in
 - 054 ContextEnvelope token budgets (fix against 002 measurement; breach-fails-eval)
 - 055 Caller-contact self-assignment resolution (claims→contact, server-side)
 - 056 Portfolio fresh-retrieval bias (Memory.Conversation retrieval policy)
-- 057 `memory.write` as a governed side effect — Policy v2 confirm UX + **explicit-only floor** (never model/document-initiated) *(after 020, 032)*
+- 057 `memory.write` — **AI-initiated, silent, provenance-tagged** capture (no write-gate); provenance (`source`/`bindingId`/`trustLevel`) + user review/delete are the controls *(after 050)*
 - ~~058 Semantic-retrieval ↔ memory trust boundary~~ — **DEFERRED** (governance project)
 - ~~059 Memory-poisoning eval families~~ — **DEFERRED** (governance project)
 - 060 Organizational-scope provider interface (read-only inbound)

@@ -93,6 +93,7 @@
     <criterion testable="true">NFR-08 holds — every UI-claiming tool is ack-gated or fails honestly (coverage asserted).</criterion>
     <criterion testable="true">NEGATIVE: a UI tool whose client ack never arrives within the timeout produces an honest failure, and a test that asserts a fabricated "I opened the tab" success FAILS (R2-D structurally prevented).</criterion>
     <criterion testable="true">Publish-size delta measured + reported; no new HIGH CVE; Placement Justification stated.</criterion>
+    <criterion testable="true">On completion, flip this seam's row in `projects/spaarke-ai-architecture-redesign-r2/notes/SEAM-STATUS.md` to published (with commit ref); record which Compose r2 FR it unblocks (FR-34). 'Published' = merged + contract test green + consumable via Services/Ai/PublicContracts/.</criterion>
   </acceptance-criteria>
 
   <escalation>

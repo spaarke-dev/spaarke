@@ -6,7 +6,7 @@
     <gate>G-R2-B (memory)</gate>
     <estimated-effort>1 day</estimated-effort>
     <model-tier>fable</model-tier>
-    <model-tier-reason>ADR authoring — durable architectural decision record codifying the two-scope memory model, subject-partition rationale, explicit-only floor, and deferred-governance boundary; Fable is the writing-optimized tier for principle-level ADR text mirroring the 039/040 promotion pattern. Touches `.claude/` (sub-agent write boundary).</model-tier-reason>
+    <model-tier-reason>ADR authoring — durable architectural decision record codifying the two-scope memory model, subject-partition rationale, the AI-initiated + provenance-tagged write posture, and deferred-governance boundary; Fable is the writing-optimized tier for principle-level ADR text mirroring the 039/040 promotion pattern. Touches `.claude/` (sub-agent write boundary).</model-tier-reason>
     <effort>high</effort>
     <parallel-safe>false</parallel-safe>
     <goal-eligible>false</goal-eligible>
@@ -21,7 +21,7 @@
   <role>Architecture writer fluent in the Spaarke ADR format, ADR-039/040 promotion-gate precedent, and the memory subsystem decisions this project made.</role>
 
   <goal>
-    ADR-042 exists in both the concise `.claude/adr/` mirror and the full `docs/adr/` history, status Proposed (Accepted at G-R2-B). It records the two-scope memory model, subject-partition rationale, governance envelope, explicit-only write floor, the deferred hard-governance boundary (untrusted-origin ban / sourceTrustLevel / litigation-hold / poisoning evals → governance project), ADR-015 Tier 3 erasure semantics, the not-a-parallel-session-cache resolution, and the Insights-Engine-as-consumer direction — each traceable to the implementing tasks (050/051/052/057). Both ADR indexes are updated.
+    ADR-042 exists in both the concise `.claude/adr/` mirror and the full `docs/adr/` history, status Proposed (Accepted at G-R2-B). It records the two-scope memory model, subject-partition rationale, governance envelope, the AI-initiated + silent + provenance-tagged write posture (no write-gate), the deferred hard-governance boundary (untrusted-origin ban / sourceTrustLevel / litigation-hold / poisoning evals → governance project), ADR-015 Tier 3 erasure semantics, the not-a-parallel-session-cache resolution, and the Insights-Engine-as-consumer direction — each traceable to the implementing tasks (050/051/052/057). Both ADR indexes are updated.
   </goal>
 
   <inputs>
@@ -37,7 +37,7 @@
   <constraints>
     <constraint source="project">Mirror the ADR-039/040 promotion-gate pattern: concise `.claude/adr/` + full `docs/adr/`; status Proposed→Accepted at G-R2-B.</constraint>
     <constraint source="project">Codify subject-partitioning (never `/tenantId`) with the dedicated-per-customer-env rationale + the Cosmos-key-immutability consequence.</constraint>
-    <constraint source="project">State the explicit-only write floor as binding + clearly mark the DEFERRED hard-governance boundary (untrusted-origin ban, sourceTrustLevel enforcement, litigation-hold, poisoning evals → governance project).</constraint>
+    <constraint source="project">State the AI-initiated + silent + provenance-tagged write posture as binding (no write-gate; user review/delete is the control) + clearly mark the DEFERRED hard-governance boundary (untrusted-origin ban, sourceTrustLevel enforcement, litigation-hold, poisoning evals → governance project).</constraint>
     <constraint source="ADR-040">Record the not-a-parallel-session-cache resolution by construction (Conversation = ledger facade; Record/User = cross-session governed objects).</constraint>
     <constraint source="ADR-015">Memory items are Tier 3 (user-owned, GDPR-erasable) — erasure semantics stated.</constraint>
     <constraint source="claude-write">This task writes `.claude/adr/` — MAIN-SESSION only (sub-agent write boundary); parallel-safe=false.</constraint>
@@ -59,7 +59,7 @@
   </knowledge>
 
   <context>
-    <background>ADR-041 (judgment) and ADR-042 (memory) are the two new ADRs this project promotes at their gates, mirroring how ADR-039/040 were Proposed then Accepted. ADR-042 is the durable record of the memory refinement (two scopes, subject-partition, explicit-only floor, deferred governance) so future work doesn't re-litigate it.</background>
+    <background>ADR-041 (judgment) and ADR-042 (memory) are the two new ADRs this project promotes at their gates, mirroring how ADR-039/040 were Proposed then Accepted. ADR-042 is the durable record of the memory refinement (two scopes, subject-partition, AI-initiated provenance-tagged writes, deferred governance) so future work doesn't re-litigate it.</background>
     <dependencies>
       <dependency task="050" status="required">Two-scope model + subject-partition + container decision.</dependency>
       <dependency task="051" status="required">Governance envelope.</dependency>
@@ -74,7 +74,7 @@
 
   <steps mode="directional">
     <step order="0" name="Context">Load spec FR-B-16, the 039/040 precedent ADRs, the implementing tasks' decisions.</step>
-    <step order="1" name="Full ADR">Author full ADR-042 in `docs/adr/` — context, decision, the two scopes, subject-partition rationale, envelope, explicit-only floor, deferred boundary, erasure, no-parallel-cache, Insights direction; status Proposed.</step>
+    <step order="1" name="Full ADR">Author full ADR-042 in `docs/adr/` — context, decision, the two scopes, subject-partition rationale, envelope, the AI-initiated + provenance-tagged write posture (no write-gate), deferred boundary, erasure, no-parallel-cache, Insights direction; status Proposed.</step>
     <step order="2" name="Concise mirror">Author the concise `.claude/adr/` mirror (MUST/MUST-NOT).</step>
     <step order="3" name="Indexes + changelog">Update `.claude/adr/INDEX.md` (and docs ADR index); add a `.claude/CHANGELOG.md` entry.</step>
     <step order="4" name="Promotion note">Record Proposed→Accepted-at-G-R2-B in the ADR status line.</step>
@@ -93,7 +93,7 @@
   <acceptance-criteria>
     <criterion testable="true">ADR-042 exists in both full (`docs/adr/`) and concise (`.claude/adr/`) form, status Proposed→Accepted at G-R2-B, mirroring the 039/040 pattern.</criterion>
     <criterion testable="true">It codifies the two active scopes (Record `(entityType,entityId)` + User `userId`), subject-partition rationale (no `/tenantId`), the governance envelope, and ADR-015 Tier 3 erasure.</criterion>
-    <criterion testable="true">It states the explicit-only write floor as binding AND marks the deferred hard-governance boundary (untrusted-origin ban / sourceTrustLevel / litigation-hold / poisoning evals → governance project).</criterion>
+    <criterion testable="true">It states the AI-initiated + silent + provenance-tagged write posture (no write-gate; user review/delete is the control) as binding AND marks the deferred hard-governance boundary (untrusted-origin ban / sourceTrustLevel / litigation-hold / poisoning evals → governance project).</criterion>
     <criterion testable="true">It records the not-a-parallel-session-cache resolution (ADR-040) and the Insights-Engine-as-consumer direction.</criterion>
     <criterion testable="true">`.claude/adr/INDEX.md` and `.claude/CHANGELOG.md` are updated (root CLAUDE.md §18).</criterion>
     <criterion testable="true">NEGATIVE: the ADR does NOT claim the deferred hard-governance rules are implemented — it explicitly scopes them out to the governance project (reviewer-verifiable).</criterion>
