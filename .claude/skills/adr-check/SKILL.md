@@ -35,6 +35,10 @@ Validate code changes against Spaarke's Architecture Decision Records (ADRs) bef
 
 ## Workflow
 
+### Step 0: Coverage-First Contract (added 2026-07-08 for Sonnet-5)
+
+At the finding stage, **report every potential ADR violation you identify — including low-confidence ones — annotated with confidence.** Sonnet 5 honors "only report significant issues" / "be conservative" literally and will silently drop violations it judges minor; that hides real ADR slips. Do not self-filter. The downstream filter is the orchestrator (task-execute Step 9.5), which applies CLAUDE.md §6.5 (fix / exception / amend) per violation. Your job here is coverage, not the accept/waive decision.
+
 ### Step 1: Identify Scope
 
 Determine what code to validate:

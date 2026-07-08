@@ -131,12 +131,14 @@ See [task-execute SKILL.md Step 8.0](../../.claude/skills/task-execute/SKILL.md)
 
 ---
 
-## Execution Model & Tiering (added 2026-07-08)
+## Execution Model & Tiering (added 2026-07-08 — Sonnet-5)
 
 - **Planning** (design-to-spec, project-pipeline Steps 0–3): run the session on **Opus 4.8 / Fable 5** — decomposition and cross-cutting reasoning benefit from the top tier.
-- **Execution** (task-execute per task): default **Sonnet 5 at effort `xhigh`** — near-Opus coding quality at lower cost. Same 1M context + tokenizer as Opus 4.8, so no checkpointing changes.
-- **Per-task escalation**: each POML carries a `<model-tier>` (`sonnet` default; `opus`/`fable` for high-blast-radius / architectural / ADR-migration / security tasks). project-pipeline dispatches each subagent at its tier; a serial task flagged above the session model triggers a stop-and-escalate (task-execute Step 0.5).
-- **Sonnet-5 discipline**: POMLs must be explicit — exact file lists, cite the canonical reference to copy, state exact contracts, checkable acceptance criteria. FULL-rigor gates (code-review + adr-check) stay unconditional.
+- **Execution** (task-execute per task): default **Sonnet 5 at effort `high`** — near-Opus coding quality at lower cost. Same 1M context + tokenizer as Opus 4.8, so no checkpointing changes.
+- **Per-task tier + effort**: each POML carries `<model-tier>` (`sonnet` default; `opus`/`fable` for high-blast-radius / architectural / ADR-migration / security tasks) AND `<effort>` (`high` default; `xhigh` reserved for brownfield/root-cause or complex-but-fully-specified work — blanket `xhigh` approaches Opus cost). project-pipeline dispatches each subagent at its tier + effort; a serial task above the session model triggers a stop-and-escalate (task-execute Step 0.5).
+- **Sonnet-5 authoring discipline**: POMLs must be explicit — exact file lists, cite the canonical reference to copy, state exact contracts, scope every constraint, make acceptance criteria a **closed set** (incl. negative/auth cases). No anti-laziness scaffolding. Frontend tasks anchor visual direction concretely (pattern ref, not "clean and modern"). FULL-rigor gates (code-review + adr-check) stay unconditional and **coverage-first** (report all findings; orchestrator filters).
+- **Step modes**: `<steps mode="directional">` (default; goal+criteria bind, sequence adaptable) vs `prescriptive` (exact sequence binds — migrations/deploys). Tasks with a judgment boundary carry `<escalation><trigger>`.
+- **`/goal` wave loop (optional)**: for `goal-eligible` waves (machine-verifiable end-state, ≥3 well-specified low-ambiguity tasks, not security/deploy/irreversible), the wave may run under `/goal` to remove per-task "continue". The evaluator is transcript-only and a stopping-condition check — **not** a quality gate; Step 9.5 authority is unchanged.
 
 ---
 
