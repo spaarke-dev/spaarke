@@ -67,6 +67,28 @@ export interface IResolverWriteResult {
   catalogEntry?: ITodoRegardingTargetCatalogEntry;
   /** The full payload that was written (or staged for the form save). */
   payload?: Record<string, unknown>;
+  /**
+   * Resolved `sprk_regardingrecordnumber` value from the target record, as
+   * returned by the shared `applyResolverFields` service (SRFR-020). `null` when
+   * metadata was missing OR the target's value was null/empty (NFR-06
+   * graceful-blank — e.g., Contact / Account intentional-null per Q-06). The
+   * CREATE-mode presave bridge (`__sprk_regarding_pending__.recordNumber`)
+   * propagates this to the OnSave handler so it can stage
+   * `sprk_regardingrecordnumber` onto the form for the INSERT transaction
+   * (SRFR-032 / SRFR-040 FR-A5-04).
+   */
+  recordNumber?: string | null;
+  /**
+   * v1.4.5 (SRFR-054): resolved display-name value from the target record.
+   * The shared `applyResolverFields` (SRFR-052) resolves this via
+   * `sprk_recordtype_ref.sprk_recorddisplaynamefield` metadata and target-record
+   * query. `null` when metadata was missing OR target's value was null/empty
+   * (NFR-06). Consumer (RegardingResolverApp CREATE-mode presave bridge) MUST
+   * propagate this into `__sprk_regarding_pending__.recordName` so the presave
+   * webresource stages the correct display-name for the INSERT transaction —
+   * NOT the picker-returned Primary Name (which for sprk_matter is the number).
+   */
+  displayName?: string | null;
   /** Error message if any step failed. */
   error?: string;
 }
@@ -97,8 +119,14 @@ export async function discoverHostNavProps(
   }
 
   try {
+    // v1.4.2 (SRFR-050): Dataverse entity logical names are lowercase-normalized;
+    // if the maker set `entity` input with wrong case (e.g., `sprk_Communication`),
+    // the metadata endpoint returns 200 with EMPTY results (not 404), which
+    // silently breaks nav-prop discovery + all downstream writes. Lowercase
+    // defensively.
+    const hostEntityLower = hostEntity.toLowerCase();
     const url =
-      `/api/data/v9.0/EntityDefinitions(LogicalName='${hostEntity}')/ManyToOneRelationships` +
+      `/api/data/v9.0/EntityDefinitions(LogicalName='${hostEntityLower}')/ManyToOneRelationships` +
       `?$select=ReferencingAttribute,ReferencingEntityNavigationPropertyName,ReferencedEntity`;
 
     const resp = await fetchImpl(url, { credentials: 'include' });
@@ -120,6 +148,17 @@ export async function discoverHostNavProps(
       navPropName: r.ReferencingEntityNavigationPropertyName,
       referencedEntity: r.ReferencedEntity,
     }));
+
+    // v1.4.2 (SRFR-050): diagnostic warning if discovery returned no entries.
+    // Common cause: `entity` input on the manifest was set to a non-existent /
+    // misspelled logical name. Silent empty was the v1.4.0/1.4.1 failure mode
+    // on sprk_communication placement.
+    if (entries.length === 0) {
+      console.warn(
+        `[RegardingResolver] Nav-prop discovery returned zero entries for hostEntity="${hostEntity}" (normalized "${hostEntityLower}"). ` +
+          `Verify the Host Entity input on the form matches an actual entity logical name. All resolver writes will silently fail.`
+      );
+    }
 
     _navPropCache[hostEntity] = entries;
     return entries;
@@ -202,20 +241,37 @@ export async function applyRegardingSelection(
 
   const navProps = await discoverHostNavProps(ctx.hostEntity, fetchImpl);
 
-  // 1. Pre-clear the 10 OTHER entity-specific lookups (clear-and-set per FR-13).
+  // 1. Pre-clear the OTHER entity-specific lookups that ACTUALLY EXIST on this
+  //    host entity (clear-and-set per FR-13).
+  //
+  // v1.4.1 (SRFR-048): only clear lookups that exist on the host — sprk_event /
+  // sprk_invoice / sprk_communication / sprk_kpiassessment carry only a subset
+  // of the 11 possible entity-specific lookups (per each entity's polymorphic
+  // parent list). Skipping entries where `navProps.find(...)` returns undefined
+  // avoids the v1.4.0 failure mode: writing `sprk_regardingcommunication@odata.bind = null`
+  // on sprk_event → Dataverse rejects with "Invalid property".
+  //
+  // navProps is the host entity's DISCOVERED nav-props (from RelationshipDefinitions
+  // via discoverHostNavProps). A nav-prop is present ONLY if the lookup exists on
+  // the host. So iterating navProps-limited entries is the correct membership check.
   const payload: Record<string, unknown> = {};
   for (const other of TODO_REGARDING_CATALOG) {
     if (other.entityType === catalogEntry.entityType) continue;
     const navProp = navProps.find(
       n => n.referencedEntity === other.entityType && n.columnName.toLowerCase().includes(other.navPropHint)
     );
-    const key = navProp?.navPropName ?? other.lookupAttribute;
-    payload[`${key}@odata.bind`] = null;
+    if (!navProp) continue; // Lookup doesn't exist on this host entity — skip.
+    payload[`${navProp.navPropName}@odata.bind`] = null;
   }
 
-  // 2. Delegate to the shared service for the SET path (chosen lookup + 4 resolver fields).
+  // 2. Delegate to the shared service for the SET path (chosen lookup + 5 resolver fields).
   //    THIS IS THE SOLE WRITE LOGIC — never reimplemented per FR-21 / ADR-024.
-  await applyResolverFields(
+  //    Since SRFR-020, the shared service returns an IApplyResolverFieldsResult
+  //    payload including `recordNumber` (the resolved value from
+  //    sprk_recordtype_ref.sprk_regardingrecordnumberfield → target record).
+  //    Forward that value on the write result so the caller (RegardingResolverApp)
+  //    can propagate it into the CREATE-mode presave bridge (SRFR-032 FR-A5-04).
+  const applyResult = await applyResolverFields(
     ctx.webApi,
     payload,
     navProps,
@@ -236,12 +292,19 @@ export async function applyRegardingSelection(
         success: false,
         catalogEntry,
         payload,
+        recordNumber: applyResult.recordNumber,
+        displayName: applyResult.displayName,
         error: err instanceof Error ? err.message : 'updateRecord failed',
       };
     }
   }
 
-  return { success: true, catalogEntry, payload };
+  return {
+    success: true,
+    catalogEntry,
+    payload,
+    recordNumber: applyResult.recordNumber,
+  };
 }
 
 // ---------------------------------------------------------------------------
@@ -266,12 +329,14 @@ export async function clearRegarding(
 
   const payload: Record<string, unknown> = {};
 
+  // v1.4.1 (SRFR-048): only null lookups that ACTUALLY EXIST on this host.
+  // Same rationale as applyRegardingSelection — see comment above.
   for (const target of TODO_REGARDING_CATALOG) {
     const navProp = navProps.find(
       n => n.referencedEntity === target.entityType && n.columnName.toLowerCase().includes(target.navPropHint)
     );
-    const key = navProp?.navPropName ?? target.lookupAttribute;
-    payload[`${key}@odata.bind`] = null;
+    if (!navProp) continue; // Lookup doesn't exist on this host entity — skip.
+    payload[`${navProp.navPropName}@odata.bind`] = null;
   }
 
   const recordTypeNavProp = navProps.find(

@@ -453,14 +453,43 @@ export function WorkspacePane(): React.JSX.Element {
 
     // Skip if this layout is already open (e.g. NFR-09 tab restore brought
     // it back from the last session). Match by widgetData.layoutId.
-    const alreadyOpen = manager
+    const existingTab = manager
       .getSnapshot()
-      .tabs.some((t) => {
+      .tabs.find((t) => {
         if (t.widgetType !== "workspace") return false;
         const data = t.widgetData as { layoutId?: string } | null;
         return data?.layoutId === layoutForAutoInstall.id;
       });
-    if (alreadyOpen) return;
+    if (existingTab) {
+      // Issue #572 Defect 1d: in compose-launch mode we must ACTIVATE the
+      // restored Compose tab, not just skip the install. NFR-09 restore
+      // honors the persisted activeTabId and never force-activates — so on
+      // a compose relaunch the restored session could land on a different
+      // tab, and with the tab strip hidden in compose-launch mode the user
+      // had no way to reach the Compose surface (relaunch showed the normal
+      // three-pane workspace instead of the editor). This mirrors the
+      // "always want the Compose layout on top" rule the pin-skip guard
+      // below already documents.
+      if (composeLaunch?.composeMode === "editor") {
+        manager.setActiveTab(existingTab.id);
+        syncState();
+        // Same macrotask deferral as the widget_load dispatch below — the
+        // tab_change subscribers (ContextPaneController) register in effects
+        // that may not have run yet on a fresh mount.
+        const activateTimerId = window.setTimeout(() => {
+          dispatch("workspace", {
+            type: "tab_change",
+            tabId: existingTab.id,
+            widgetType: existingTab.widgetType,
+            widgetData: existingTab.widgetData,
+          });
+        }, 0);
+        return () => {
+          window.clearTimeout(activateTimerId);
+        };
+      }
+      return;
+    }
 
     // Skip if the default is in the pinned list — the pin auto-open effect
     // below will open it; we don't want to double-dispatch. This check does
@@ -872,8 +901,16 @@ export function WorkspacePane(): React.JSX.Element {
       // Pillar 6a/9 — the endpoint accepts a partial PATCH on the tab record
       // with the visibleToAssistant field.
       if (chatSessionId && bffBaseUrl && isAuthenticated) {
+        // Issue #572 aggravator: this URL was previously built raw as
+        // `${bffBaseUrl}/ai/chat/...` — missing the `/api` prefix — so the
+        // per-tab request 404'd in production (App Insights). buildBffApiUrl
+        // adds the `/api` prefix idempotently, matching every other BFF call
+        // in this file.
         void authenticatedFetch(
-          `${bffBaseUrl}/ai/chat/sessions/${encodeURIComponent(chatSessionId)}/tabs/${encodeURIComponent(tabId)}`,
+          buildBffApiUrl(
+            bffBaseUrl,
+            `/ai/chat/sessions/${encodeURIComponent(chatSessionId)}/tabs/${encodeURIComponent(tabId)}`,
+          ),
           {
             method: "PATCH",
             headers: { "Content-Type": "application/json" },

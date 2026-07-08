@@ -1,0 +1,136 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="SRFR-032" project="set-regarding-and-field-mapping-resolver-r1">
+  <metadata>
+    <title>RegardingResolver populates pending.recordNumber on CREATE-mode global seam (client half of FR-A5-04)</title>
+    <status>completed</status>
+    <estimated-effort>2h</estimated-effort>
+    <actual-effort>~1h</actual-effort>
+    <assigned>AI Agent</assigned>
+    <started>2026-07-02</started>
+    <completed>2026-07-02</completed>
+    <rigor>FULL</rigor>
+    <parallel-safe>true</parallel-safe>
+    <parallel-group>B</parallel-group>
+    <tags>pcf,regarding-resolver,presave,wave-3</tags>
+    <depends-on>SRFR-020,SRFR-030</depends-on>
+    <wave>3</wave>
+  </metadata>
+
+  <prompt><![CDATA[
+The presave webresource (task SRFR-040) picks up
+`window.__sprk_regarding_pending__.recordNumber` and stages it onto the form
+for INSERT (spec.md FR-A5-04 server half). RegardingResolver must populate
+that key on CREATE-mode selection. This task is the client half of FR-A5-04
+that pairs with task SRFR-040's presave-side changes.
+
+On CREATE-mode selection: after `PolymorphicResolverService.applyResolverFields()`
+resolves the record-number value, populate `window.__sprk_regarding_pending__`
+including the new `recordNumber` key alongside the existing keys (hostEntity,
+entityType, entitySet, navProp, recordId, recordName, recordUrl,
+lookupAttribute). On UPDATE-mode, do NOT touch the global seam — the
+resolver has already written the 5 fields via `Xrm.WebApi.updateRecord`
+and a stale seam payload could confuse a subsequent form event.
+  ]]></prompt>
+
+  <role>PCF developer familiar with the Spaarke CREATE-mode presave bridge pattern (`window.__sprk_regarding_pending__` global seam) and the FR-A5-04 payload contract.</role>
+
+  <goal><![CDATA[
+On CREATE-mode selection through RegardingResolver, `window.__sprk_regarding_pending__`
+carries all previously-required keys PLUS a new `recordNumber` key whose value
+equals the fetched record-number from the target record (resolved via
+`sprk_recordtype_ref.sprk_regardingrecordnumberfield`). On UPDATE-mode, the
+seam is not written. Contract keys align exactly with FR-A5-04 spec so the
+presave webresource's `textKeyForField` switch consumes `recordNumber` →
+`sprk_regardingrecordnumber` correctly. Backward compat: presave v1.1.0
+tolerates the extra key (safely ignored); the new key only takes effect
+once presave v1.2.0 (SRFR-040) is deployed.
+  ]]></goal>
+
+  <inputs>
+    <file purpose="spec">projects/set-regarding-and-field-mapping-resolver-r1/spec.md</file>
+    <file purpose="plan">projects/set-regarding-and-field-mapping-resolver-r1/plan.md</file>
+    <file purpose="project-claude">projects/set-regarding-and-field-mapping-resolver-r1/CLAUDE.md</file>
+    <file purpose="source">src/client/pcf/RegardingResolver/RegardingResolver/RegardingResolverApp.tsx</file>
+    <file purpose="source">src/client/pcf/RegardingResolver/RegardingResolver/handlers</file>
+    <file purpose="reference">src/client/webresources/js/sprk_todo_regarding_presave.js</file>
+    <file purpose="shared-service">src/client/shared/Spaarke.UI.Components/src/services/PolymorphicResolverService.ts</file>
+    <file purpose="pattern">.claude/patterns/dataverse/polymorphic-resolver.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="spec FR-A5-02">CREATE-mode presave bridge continues to stage regarding writes prior to first save. This task extends the payload with `recordNumber` without breaking existing 4-key consumers.</constraint>
+    <constraint source="spec FR-A5-04">Payload key `recordNumber` maps to logical `sprk_regardingrecordnumber` — presave webresource `textKeyForField('sprk_regardingrecordnumber')` MUST return `'recordNumber'`. Contract cannot drift.</constraint>
+    <constraint source="project">CREATE-mode detection uses either `context.mode.getFormType() === 1` or `context.mode.contextInfo?.entityRecord?.recordType === undefined` — pick whichever pattern is already used by the current RegardingResolver code path. Do NOT introduce a third pattern.</constraint>
+    <constraint source="project">On UPDATE-mode, the global seam MUST NOT be written (avoids stale-payload pickup on subsequent form events).</constraint>
+    <constraint source="project">Backward compatibility: presave &lt; v1.2.0 must still function correctly on CREATE-mode. Extra `recordNumber` key is safely ignored by presave v1.1.0's explicit `TEXT_FIELDS` enumeration.</constraint>
+    <constraint source="project">Preferred sourcing: task SRFR-020's extended `applyResolverFields()` return value SHOULD carry the fetched record-number. If SRFR-020 landed without this on the return type, this task fetches the value via a light Xrm.WebApi query on the target record (single-column retrieve) using the same metadata field name.</constraint>
+    <constraint source="project">TypeScript strict mode; no `any`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>dataverse/polymorphic-resolver</topic>
+    <files>
+      <file>.claude/patterns/dataverse/polymorphic-resolver.md</file>
+      <file>src/client/webresources/js/sprk_todo_regarding_presave.js</file>
+    </files>
+    <patterns>
+      <pattern name="CREATE-mode global seam" location=".claude/patterns/dataverse/polymorphic-resolver.md">
+        `window.__sprk_regarding_pending__` is a transient handoff between an in-form control (PCF or WebResource) and the OnSave presave handler. Only populated when there is no record ID yet (formType 1 = CREATE).
+      </pattern>
+      <pattern name="Presave key → field mapping" location="src/client/webresources/js/sprk_todo_regarding_presave.js">
+        `textKeyForField` maps logical field name to bridge-payload key. When adding a new field, both `TEXT_FIELDS` (in SRFR-040) and this producer (in SRFR-032) must agree on the same key name.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      The Spaarke set-regarding pattern splits work across two form-lifecycle moments: (1) at PCF selection time, in-memory state is captured to a global seam because the form has no record ID yet; (2) at OnSave time, the presave webresource reads the seam and stages the writes onto the form. This task closes the CREATE-mode gap for the newly-added `sprk_regardingrecordnumber` field so the value is preserved through the INSERT transaction.
+    </background>
+    <dependencies>
+      <dependency task="SRFR-020" status="pending">`applyResolverFields()` resolves and writes the record-number; ideally exposes the resolved value on return so this task doesn't re-query.</dependency>
+      <dependency task="SRFR-030" status="pending">2-row layout wires the onSelect callback path where this task hooks in.</dependency>
+    </dependencies>
+    <related-work>
+      <item>SRFR-040 (Wave 4) updates the presave webresource to consume the new `recordNumber` key: extends `TEXT_FIELDS`, adds case to `textKeyForField()`, updates docstring, bumps v1.1.0 → v1.2.0.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check">Verify context &lt; 60%. Read spec.md FR-A5-02 and FR-A5-04 (both halves). Read presave webresource lines 37-46 (docstring contract) and 100-110 (`TEXT_FIELDS`) and 250-270 (`textKeyForField`).</step>
+    <step order="1" name="Confirm CREATE-mode Detection Pattern">Grep the current RegardingResolver for `getFormType`, `contextInfo`, or existing CREATE-mode branching. Use the same pattern. Record which in notes/task-032-inventory.md.</step>
+    <step order="2" name="Confirm Record-Number Source">Check whether SRFR-020's `applyResolverFields()` return value exposes the fetched record-number. If yes, use it. If no, add a one-line Xrm.WebApi.retrieveRecord query for the single column using the metadata field name derived from `sprk_recordtype_ref`.</step>
+    <step order="3" name="Extend onSelect Path — CREATE Branch">In the onSelect callback (added by SRFR-030), after `applyResolverFields()` resolves: if CREATE-mode, populate `window.__sprk_regarding_pending__` with the 9-key shape (existing 8 + new `recordNumber`). Ensure all string values are strings (not undefined; empty string acceptable for graceful-blank cases per NFR-06).</step>
+    <step order="4" name="UPDATE Branch — No Bridge Write">Verify that on UPDATE-mode, no seam write occurs. If existing code writes the seam unconditionally, gate it on CREATE-mode. Grep to confirm no other code path writes `__sprk_regarding_pending__` in UPDATE-mode.</step>
+    <step order="5" name="Payload Type Declaration">Update the TypeScript type (or inline JSDoc) for `window.__sprk_regarding_pending__` to include `recordNumber: string`. If the type is declared in a shared `.d.ts`, update it there so both PCFs pick up the same shape.</step>
+    <step order="6" name="Unit Tests">Add tests covering: (a) CREATE-mode simulation with valid metadata → seam includes all 9 keys with correct values, especially `recordNumber` matching the resolved value; (b) UPDATE-mode simulation → seam untouched (assert `window.__sprk_regarding_pending__` unchanged from pre-condition); (c) CREATE-mode with metadata-null (graceful-blank Contact/Account) → seam still written but `recordNumber` is empty string; NO throw; (d) contract-parity check: keys asserted match FR-A5-04 spec docstring exactly.</step>
+    <step order="7" name="Build">Run `npm run build:prod` in `src/client/pcf/RegardingResolver/`. Verify build.</step>
+    <step order="9.5" name="Quality Gate">Invoke `/code-review` and `/adr-check` on the changed files. Address findings or escalate per CLAUDE.md §6.5.</step>
+    <step order="10" name="Update Task Status">Update TASK-INDEX.md 🔲 → ✅ for SRFR-032. Reset current-task.md for next task.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Load spec, presave webresource, PCF source, shared service</tool>
+    <tool name="Edit">Extend onSelect + type declaration</tool>
+    <tool name="Grep">Confirm CREATE-mode detection pattern and no stray seam writes</tool>
+    <tool name="Bash">Run `npm run build:prod` and `npm test`</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/RegardingResolver/RegardingResolver/RegardingResolverApp.tsx</output>
+    <output type="code" conditional="if-shared-dts">src/client/pcf/RegardingResolver/RegardingResolver/types.d.ts</output>
+    <output type="test">src/client/pcf/RegardingResolver/__tests__/RegardingResolverApp.test.tsx</output>
+    <output type="notes">projects/set-regarding-and-field-mapping-resolver-r1/notes/task-032-inventory.md</output>
+    <output type="docs">projects/set-regarding-and-field-mapping-resolver-r1/tasks/TASK-INDEX.md (🔲 → ✅ for SRFR-032)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">CREATE-mode unit test: after simulated selection, `window.__sprk_regarding_pending__.recordNumber` equals the fetched record-number value from the resolved metadata.</criterion>
+    <criterion testable="true">UPDATE-mode unit test: after simulated selection, `window.__sprk_regarding_pending__` is unchanged from its pre-selection state (seam untouched).</criterion>
+    <criterion testable="true">Metadata-null (graceful-blank) unit test: CREATE-mode selection with null metadata resolves to `recordNumber: ''` (empty string), no exception thrown.</criterion>
+    <criterion testable="true">Contract parity: the seam payload keys exactly match FR-A5-04 docstring — `{ hostEntity, entityType, entitySet, navProp, recordId, recordName, recordUrl, recordNumber, lookupAttribute }`.</criterion>
+    <criterion testable="true">Type declaration for `window.__sprk_regarding_pending__` includes `recordNumber: string`.</criterion>
+    <criterion testable="true">TypeScript strict mode compiles with zero errors and zero `any` in changed lines.</criterion>
+    <criterion testable="true">`/code-review` and `/adr-check` pass at Step 9.5 (or all findings addressed / escalated per CLAUDE.md §6.5).</criterion>
+  </acceptance-criteria>
+</task>

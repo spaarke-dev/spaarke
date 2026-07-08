@@ -194,6 +194,8 @@ At task start, Claude Code MUST output:
 ```
 🔒 RIGOR LEVEL: [FULL | STANDARD | MINIMAL]
 📋 REASON: [Why this level was chosen based on decision tree]
+🔧 MODEL TIER: [sonnet | opus | fable] @ effort [low|medium|high|xhigh] (from POML <model-tier> + <effort>; defaults sonnet @ high)
+🧭 STEP MODE: [directional | prescriptive] (from POML <steps mode="…">)
 
 📖 PROTOCOL STEPS TO EXECUTE:
   [List all steps that will be executed for this rigor level]
@@ -202,6 +204,26 @@ Proceeding with Step 0...
 ```
 
 This declaration is **non-negotiable** and makes shortcuts visible.
+
+#### Model Tier + Effort (added 2026-07-08 for Sonnet-5 execution)
+
+Execution defaults to **Sonnet 5**. Each POML carries a `<model-tier>` (`sonnet` default; `opus`/`fable` for high-blast-radius / architectural / ADR-migration / security tasks) AND an `<effort>` (`high` default; `xhigh` only for brownfield/root-cause or complex-but-fully-specified work — see task-create Step 3.5.5b). **Do not run every task at `xhigh`** — at `xhigh` Sonnet-5 cost approaches Opus; honor the task's declared `<effort>`.
+
+- **Parallel execution** (`project-pipeline` Step 5): the dispatcher spawns each task's subagent with `model = <model-tier>` and `effort = <effort>`, so both are automatic.
+- **Serial / main-session execution**: honor `<effort>` for the session (`/effort {level}` or the invocation's effort setting). If the **current session model is lower** than the task's `<model-tier>` (e.g. session on Sonnet 5 but task needs `opus`), STOP and surface: *"🔔 This task is flagged `<model-tier>` — switch the session model (/model) or run it as an Opus/Fable subagent before proceeding."* Do not silently execute a top-tier task on a lower model.
+- Because Sonnet 5 follows instructions literally, keep the FULL-rigor quality gates (code-review + adr-check at Step 9.5) **unconditional** — they are the safety net for subtle ADR slips a lower-tier model is likelier to miss.
+
+#### Step Mode (added 2026-07-08 for Sonnet-5 execution)
+
+Honor the POML `<steps mode="…">`:
+- **`directional`** (default): `<steps>` are guidance; the binding contract is `<goal>` + `<acceptance-criteria>` + `<constraints>`. You MAY adapt the sequence to the real codebase state — if step 3 is wrong for what you find, do the right thing and note the deviation. Do NOT robotically execute a step you can see is wrong.
+- **`prescriptive`**: the exact sequence is binding (migrations, deployments, anything irreversible). Follow it exactly; a needed deviation is an **escalation** (root CLAUDE.md §6), not a silent improvisation.
+
+If the POML carries an `<escalation><trigger>`, treat firing that trigger as a first-class outcome: STOP and escalate per CLAUDE.md §6 (and, inside a `/goal` wave loop, write `BLOCKED.md` — see Step 11 wave-loop notes). Sonnet 5's follow-through tendency means it will otherwise push toward *a* completion; the trigger is what makes stopping legitimate.
+
+#### Sonnet-5 execution hygiene (added 2026-07-08)
+
+Sonnet 5 self-verifies and reports progress natively. Do NOT pad execution with ritual: skip "double-check everything after every step" / "be exhaustive" self-talk and forced interim progress summaries — they burn effort without adding signal. **Keep** the structural verification that produces artifacts or gate decisions: Step 9 acceptance-criteria checks, Step 9.5 quality gates, and the test/build runs named in the task. The rule: keep verification that yields an artifact or a gate decision; drop verification that only yields reassurance.
 
 #### User Override
 
@@ -905,6 +927,28 @@ TRANSITION current-task.md:
 
 ---
 
+## `/goal` Wave-Completion Loop (added 2026-07-08 for Sonnet-5 execution)
+
+`/goal` (Claude Code v2.1.139+) is an **optional per-wave** loop: the session keeps taking turns until a **transcript-only** evaluator (Haiku by default — reads the conversation, runs no commands/files) judges the wave's compiled condition met. It replaces the operator's per-task "continue" press. It is set by the operator (or project-pipeline Step 5) for waves that task-create Step 3.85 marked `goal-eligible: YES`. **It is not a per-task mechanism and never a quality gate.**
+
+**When it applies:** only for `goal-eligible` waves (machine-verifiable end-state, ≥3 well-specified tasks, low ambiguity, not security/deploy/irreversible). Non-eligible waves run task-by-task as normal — do not wrap them in `/goal`.
+
+**Prerequisites** (if unavailable, `/goal` reports why — fall back to manual per-task execution): workspace trust accepted; hooks not disabled (`disableAllHooks` unset, no `allowManagedHooksOnly` in managed settings); Claude Code v2.1.139+.
+
+**Mechanics:**
+- The operator runs `/goal "<goal-condition>"` (the compiled, by-reference, ≤4,000-char condition stored in TASK-INDEX.md) AFTER context loading, so knowledge/constraints are in the transcript before the loop begins.
+- Each task in the wave STILL runs its own task-execute with full context loading and **Step 9.5 gates unchanged**. The loop only removes the between-task human prompt.
+- Unattended runs pair `/goal` with auto-mode (`claude -p "/goal <condition>"` + tool auto-approval) — appropriate **only** when the wave's constraints and outputs are fully declared. Interactive is the default.
+
+**Three exit states:**
+1. **Condition met** → proceed to the normal completion flow. Goal achievement is *necessary but not sufficient*: the orchestrator's accept / patch / escalate / block decision + Step 9.5 remain the actual gate for marking tasks `complete`. **Do NOT auto-mark tasks complete because the goal cleared.**
+2. **`BLOCKED.md` written** (an `<escalation>` trigger fired, or a genuine blocker) → the wave's affected task moves to `blocked`; `BLOCKED.md` contents flow to the orchestrator per CLAUDE.md §6 / §6.5. Writing `BLOCKED.md` is the *correct* behavior inside a loop, not a failure. `BLOCKED.md` (under `projects/{name}/`) states: task id, blocking condition, what was attempted, what decision is needed.
+3. **Turn/time cap hit** → treated as an implicit block: write `BLOCKED.md` summarizing state + why the cap was reached, then the same escalation path applies.
+
+**Non-negotiable:** the Haiku evaluator's judgment is a stopping-condition check, not a verdict on quality. Do not weaken, skip, or reorder Step 9.5 on the grounds that the goal was achieved.
+
+---
+
 ## Handoff Protocol (Pre-Compaction)
 
 When context usage is high or session ending, use the **context-handoff** skill:
@@ -1126,10 +1170,10 @@ Merge now? [y/n]
 
 If user says yes, invoke the `merge-to-master` skill in Single Merge mode for the current branch.
 
-## Related Protocols
+## Related
 
 - **[Context Recovery Protocol](../../../docs/procedures/context-recovery.md)**: Full recovery procedure
-- **[AIP-001: Task Execution Protocol](../../protocols/AIP-001-task-execution.md)**: Task execution and handoff rules
+- **Root [CLAUDE.md](../../../CLAUDE.md) §5 (Context Management & Checkpointing) + §6 (Human Escalation)**: the always-loaded execution + escalation rules (canonical; superseded the retired `.claude/protocols/AIP-00x` docs on 2026-07-08)
 
 ---
 

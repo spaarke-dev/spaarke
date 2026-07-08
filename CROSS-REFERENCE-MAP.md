@@ -141,13 +141,15 @@
 
 ---
 
-## AI Protocols
+## AI Execution Rules (formerly AIP protocols — retired 2026-07-08)
 
-| Protocol | Location | Purpose |
-|----------|----------|---------|
-| AIP-001 | [.claude/protocols/AIP-001-task-execution.md](.claude/protocols/AIP-001-task-execution.md) | Task execution, context management, handoffs |
-| AIP-002 | [.claude/protocols/AIP-002-poml-format.md](.claude/protocols/AIP-002-poml-format.md) | POML task file format specification |
-| AIP-003 | [.claude/protocols/AIP-003-human-escalation.md](.claude/protocols/AIP-003-human-escalation.md) | Human escalation triggers and format |
+The `.claude/protocols/AIP-00x` documents were removed 2026-07-08; they had been dropped from root CLAUDE.md in the 2026-05-17 rewrite and frozen, so they were vestigial and drifted (e.g. stale context thresholds). Their content is canonical in the load-bearing surfaces below.
+
+| Topic | Canonical location |
+|-------|--------------------|
+| Task execution, context management, handoffs | root [CLAUDE.md](CLAUDE.md) §5 + [.claude/skills/task-execute/SKILL.md](.claude/skills/task-execute/SKILL.md) + [.claude/skills/context-handoff/SKILL.md](.claude/skills/context-handoff/SKILL.md) |
+| POML task file format specification | [.claude/skills/task-create/SKILL.md](.claude/skills/task-create/SKILL.md) + [.claude/templates/task-execution.template.md](.claude/templates/task-execution.template.md) |
+| Human escalation triggers and format | root [CLAUDE.md](CLAUDE.md) §6 + §6.5 (ADR Conflict Resolution Protocol) |
 
 ---
 

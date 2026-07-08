@@ -1,0 +1,177 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="SRFR-041" project="set-regarding-and-field-mapping-resolver-r1">
+  <metadata>
+    <title>sprk_todo FormXml revert — hide OOB fields again (undo SRFR-038 visibility flip; preserve OnLoad handler wiring)</title>
+    <status>completed</status>
+    <estimated-effort>30min</estimated-effort>
+    <actual-effort>~15min</actual-effort>
+    <assigned>AI Agent</assigned>
+    <started>2026-07-03</started>
+    <completed>2026-07-03</completed>
+    <rigor>STANDARD</rigor>
+    <parallel-safe>true</parallel-safe>
+    <parallel-group>—</parallel-group>
+    <tags>form-config,formxml,sprk-todo,dataverse-deploy,wave-3-followon,post-v1.3.3,revert</tags>
+    <depends-on>SRFR-038</depends-on>
+    <wave>3</wave>
+  </metadata>
+
+  <prompt><![CDATA[
+Post-SRFR-038 owner clarification. SRFR-038 misinterpreted the owner's
+intent: the OOB fields on the form (sprk_regardingrecordnumber +
+sprk_regardingrecordname cells) were ALREADY hidden by owner intentionally,
+NOT hidden by a SRFR-036 regression. SRFR-038 made them visible — WRONG.
+
+Revert: flip both cells back to `visible="false"` while preserving
+everything else that SRFR-036 + SRFR-038 established:
+  - Cell IDs unchanged
+  - `disabled="true"` preserved
+  - `<events>` block + `<formLibraries>` block preserved (companion
+    webresource stays wired — owner may re-enable fields via maker portal
+    later)
+  - URL cell (sprk_regardingrecordurl) preserved in its current hidden state
+  - Section `celllabelposition="Top"` preserved
+  - All other sections untouched
+
+Deliverables:
+  1. Author revert deploy script mirroring SRFR-038's PS1 pattern (Get-Token,
+     Invoke-Dv helpers, PATCH systemform + PublishXml).
+  2. Deploy: PATCH systemforms(eca59df4-1364-f111-ab0c-7ced8ddc4cc6) with the
+     reverted formxml, then PublishXml for sprk_todo entity.
+  3. Verify: re-fetch formxml, confirm both cells now `visible="false"`,
+     section intact, OnLoad handler still registered.
+
+Constraints:
+  - ADR-006: form config only, no PCF code changes.
+  - Preserve SRFR-036 companion webresource registration (`<events>` +
+    `<formLibraries>` block wiring).
+  - Preserve `sprk_regardingrecordurl` cell's hidden state.
+  - Preserve `disabled="true"` on both new-shape fields.
+  - Idempotent: script detects if fix has already been applied.
+
+Step 9.5 quality gates: SKIPPED per STANDARD rigor (form config, not code).
+
+Coordination: SRFR-039 running in parallel bumping RegardingResolver PCF to
+v1.3.4 (restore Name cell inline). Different files, no collision.
+  ]]></prompt>
+
+  <role>Dataverse FormXml surgery + systemform PATCH developer familiar
+  with MDA main-form section/row/cell layout, cell-level visibility, and
+  direct Web API systemform PATCH + PublishXml deploy pattern (mirrors
+  SRFR-036 + SRFR-038 deploy scripts).</role>
+
+  <goal><![CDATA[
+Owner-visible outcome: on the sprk_todo main form (after hard-refresh),
+the OOB sprk_regardingrecordnumber + sprk_regardingrecordname cells are
+BOTH hidden (per owner intent — they exist on the form for other purposes
+but not displayed). RegardingResolver PCF (v1.3.4 from SRFR-039)
+displays the record-number + record-name inline in its Row 2. Companion
+webresource OnLoad handler remains registered so owner can re-enable the
+OOB fields via maker portal later if desired.
+  ]]></goal>
+
+  <inputs>
+    <file purpose="prior-log">projects/set-regarding-and-field-mapping-resolver-r1/notes/task-038-sprk-todo-form-labels.log</file>
+    <file purpose="prior-task">projects/set-regarding-and-field-mapping-resolver-r1/tasks/038-sprk-todo-form-labels-fix.poml</file>
+    <file purpose="prior-task">projects/set-regarding-and-field-mapping-resolver-r1/tasks/036-sprk-todo-form-config.poml</file>
+    <file purpose="prior-deploy-script">c:/tmp/deploy-sprktodo-form-038-labels.ps1</file>
+    <file purpose="fetch-script">c:/tmp/fetch-sprktodo-form.ps1</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-006">Form config only, no PCF code changes. Additive revert to SRFR-038 — flip two `visible` attributes back to false.</constraint>
+    <constraint source="project">Preserve `<events>` + `<formLibraries>` block. Companion webresource OnLoad handler MUST remain registered (owner may re-enable OOB fields later).</constraint>
+    <constraint source="project">Preserve `sprk_regardingrecordurl` cell as `visible="false"` (persistence unchanged).</constraint>
+    <constraint source="project">Preserve `disabled="true"` on both new-shape fields.</constraint>
+    <constraint source="project">Idempotent: script detects if BOTH target cells are already `visible="false"`, skips FormXml modification.</constraint>
+    <constraint source="project">STANDARD rigor: Step 9.5 (code-review + adr-check) skipped per form-config directive.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Dataverse FormXml cell visibility surgery via systemform PATCH</topic>
+    <files>
+      <file>c:/tmp/deploy-sprktodo-form-038-labels.ps1</file>
+    </files>
+    <patterns>
+      <pattern name="Direct substring PATCH pattern" location="c:/tmp/deploy-sprktodo-form-038-labels.ps1 Step 2">
+        Fetch current formxml, do exact substring replace on the cell
+        attribute (visible="true" → visible="false"), PATCH via
+        systemforms(id), then PublishXml for the entity. Idempotency check
+        verifies the target cells aren't already in the desired state.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      SRFR-036 wired the row layout + hyperlink companion webresource.
+      SRFR-038 flipped two cells to visible="true" thinking it was a
+      regression fix; owner clarified the fields were already hidden
+      intentionally. This task reverts the visibility flip while
+      preserving the OnLoad handler wiring (owner may re-enable via maker
+      portal later).
+
+      The RegardingResolver PCF (v1.3.4 via SRFR-039 running in parallel)
+      handles the display of number + name inline in its Row 2.
+    </background>
+    <dependencies>
+      <dependency task="SRFR-038" status="completed">Made both cells visible; this task reverts that visibility flip.</dependency>
+    </dependencies>
+    <related-work>
+      <item>SRFR-039 (parallel) — RegardingResolver PCF v1.3.4 restore Name cell inline. Different surface.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check">Confirm context &lt; 60%. Fetch current sprk_todo FormXml to verify SRFR-038 state (both cells visible="true").</step>
+    <step order="1" name="Author revert script">Create `c:/tmp/deploy-sprktodo-form-041-revert.ps1`. Mirror SRFR-038 script style (Get-Token, Invoke-Dv helpers, PATCH systemform + PublishXml). Idempotent: check if BOTH target cells already have `visible="false"`, skip if so. Otherwise:
+      - Replace `id="{9588438e-3d20-44b9-b8e7-5c2fba328ccb}" locklevel="0" colspan="1" rowspan="1" visible="true"` → same with `visible="false"`.
+      - Replace `id="{428bc1c1-b3ee-4f97-abcf-1dbec6a5b0d3}" locklevel="0" colspan="2" rowspan="1" visible="true"` → same with `visible="false"`.
+      - PATCH `systemforms(eca59df4-1364-f111-ab0c-7ced8ddc4cc6)` with the reverted formxml.
+      - POST `PublishXml` for sprk_todo entity.</step>
+    <step order="2" name="Dry-run + deploy">Run script with `-DryRun` first. Then run without dry-run to apply + publish.</step>
+    <step order="3" name="Verify">
+      Re-fetch formxml. Grep for:
+      - `id="{9588438e-3d20-44b9-b8e7-5c2fba328ccb}" ... visible="false"` — should match.
+      - `id="{428bc1c1-b3ee-4f97-abcf-1dbec6a5b0d3}" ... visible="false"` — should match.
+      - `id="{5150dabe-3d35-45e8-8f24-24fe96cc6293}" ... visible="false"` — should still match (URL stays hidden).
+      - `libraryName="sprk_regardingrecordnumber_hyperlink"` — should still match (events block preserved).
+    </step>
+    <step order="4" name="Log + TASK-INDEX update">Write session log to `projects/set-regarding-and-field-mapping-resolver-r1/notes/task-041-sprk-todo-form-revert.log`. Add SRFR-041 row to TASK-INDEX.md under Wave 3.</step>
+    <step order="5" name="Update task status">Mark SRFR-041 completed. Reset current-task.md.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Load prior SRFR-038 deploy script as reference</tool>
+    <tool name="Write">Author POML + revert script + log</tool>
+    <tool name="Edit">TASK-INDEX.md, current-task.md, POML status update</tool>
+    <tool name="Bash">Execute pwsh revert script + fetch script for verification</tool>
+    <tool name="Grep">Verify FormXml before + after PATCH</tool>
+  </tools>
+
+  <outputs>
+    <output type="artifact">c:/tmp/deploy-sprktodo-form-041-revert.ps1</output>
+    <output type="artifact">Modified sprk_todo main form (formid eca59df4-1364-f111-ab0c-7ced8ddc4cc6) with visible=false on both record-number + record-name cells; PublishXml executed</output>
+    <output type="notes">projects/set-regarding-and-field-mapping-resolver-r1/notes/task-041-sprk-todo-form-revert.log</output>
+    <output type="docs">projects/set-regarding-and-field-mapping-resolver-r1/tasks/TASK-INDEX.md updated with SRFR-041 row</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Post-deploy FormXml grep confirms `sprk_regardingrecordnumber` cell (id 9588438e-...) carries `visible="false"`.</criterion>
+    <criterion testable="true">Post-deploy FormXml grep confirms `sprk_regardingrecordname` cell (id 428bc1c1-...) carries `visible="false"`.</criterion>
+    <criterion testable="true">`sprk_regardingrecordurl` cell (id 5150dabe-...) still carries `visible="false"` (unchanged).</criterion>
+    <criterion testable="true">Both cells still carry `disabled="true"` on their `<control>` sub-element.</criterion>
+    <criterion testable="true">FormXml still contains `libraryName="sprk_regardingrecordnumber_hyperlink"` in `<events>` block.</criterion>
+    <criterion testable="true">Publish log shows no errors.</criterion>
+    <criterion testable="true">`notes/task-041-sprk-todo-form-revert.log` written.</criterion>
+    <criterion testable="true">TASK-INDEX.md contains SRFR-041 row under Wave 3.</criterion>
+  </acceptance-criteria>
+
+  <notes><![CDATA[
+Owner clarification correction to SRFR-038: OOB fields were intentionally
+hidden by owner. RegardingResolver PCF v1.3.4 (SRFR-039) displays number
++ name inline. This revert preserves OnLoad handler wiring so owner may
+re-enable OOB fields via maker portal later without re-registering the
+webresource.
+  ]]></notes>
+</task>

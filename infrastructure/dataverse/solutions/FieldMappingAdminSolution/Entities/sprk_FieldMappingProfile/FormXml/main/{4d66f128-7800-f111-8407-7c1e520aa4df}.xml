@@ -1,0 +1,203 @@
+﻿<?xml version="1.0" encoding="utf-8"?>
+<forms xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance">
+  <systemform>
+    <formid>{4d66f128-7800-f111-8407-7c1e520aa4df}</formid>
+    <IntroducedVersion>1.0.0.0</IntroducedVersion>
+    <FormPresentation>1</FormPresentation>
+    <FormActivationState>1</FormActivationState>
+    <form headerdensity="HighWithControls">
+      <tabs>
+        <tab verticallayout="true" id="{7e9b7ec1-b948-4ac6-a95c-dfbbee5cd3bf}" IsUserDefined="1" labelid="{0597a5c5-15a9-4094-8676-be076cb39bde}">
+          <labels>
+            <label description="General" languagecode="1033" />
+          </labels>
+          <columns>
+            <column width="100%">
+              <sections>
+                <section name="overview_section_fieldmappingprofile" id="38cebba5-33af-4e5f-a173-a4997e8a47eb" IsUserDefined="0" locklevel="0" showlabel="true" showbar="false" layout="varwidth" celllabelalignment="Left" celllabelposition="Top" columns="1111" labelwidth="115">
+                  <labels>
+                    <label description="FIELD MAPPING PROFILE" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row>
+                      <cell id="{ae211081-2359-4f4b-afb5-eded72aa4054}" labelid="{0628ce8b-8bf3-4738-8410-9e2c590c39b5}" colspan="2" rowspan="1">
+                        <labels>
+                          <label description="Name" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_name" classid="{4273EDBD-AC1D-40D3-9FB2-095C621B552D}" datafieldname="sprk_name" />
+                      </cell>
+                      <cell id="{4f9f502b-c342-4e4f-ab6d-b94335f63d1b}" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="Source Record Type" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_sourcerecordtype" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_sourcerecordtype" disabled="false" />
+                      </cell>
+                      <cell id="{4256043d-7f41-4359-83bf-94d57194c6f7}" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="Target Record Type" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_targetrecordtype" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="sprk_targetrecordtype" disabled="false" />
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{6261daef-efc9-460a-94b2-a004c6e86836}" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="Compatibility Mode" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_compatibilitymode" classid="{3EF39988-22BB-4F0B-BBBE-64B5A3748AEE}" datafieldname="sprk_compatibilitymode" disabled="false" />
+                      </cell>
+                      <cell id="{8f230505-5d67-4db8-844b-aba5639ebf2b}" locklevel="0" colspan="1" rowspan="1">
+                        <labels>
+                          <label description="Default Value" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_defaultvalue" classid="{4273EDBD-AC1D-40D3-9FB2-095C621B552D}" datafieldname="sprk_defaultvalue" disabled="false" />
+                      </cell>
+                      <cell locklevel="0" id="{650901c2-1fd8-4182-a9ef-1fd8c965a6e7}">
+                        <labels>
+                          <label description="" languagecode="1033" />
+                        </labels>
+                      </cell>
+                    </row>
+                    <row>
+                      <cell id="{f718be70-37f5-41b7-ac06-e8cdbbd30d2b}" locklevel="0" colspan="3" rowspan="1">
+                        <labels>
+                          <label description="Description" languagecode="1033" />
+                        </labels>
+                        <control id="sprk_description" classid="{E0DECE4B-6FC8-4A8F-A065-082708572369}" datafieldname="sprk_description" disabled="false" />
+                      </cell>
+                    </row>
+                  </rows>
+                </section>
+                <section showlabel="true" showbar="false" IsUserDefined="0" id="{f58b7f0a-cf3a-420d-b01a-ee4d3c47868a}" labelid="{63058641-d4ef-4c42-b35a-153542774f8d}" name="section_fieldmappingrules">
+                  <labels>
+                    <label description="FIELD MAPPING RULES" languagecode="1033" />
+                  </labels>
+                  <rows>
+                    <row />
+                    <row>
+                      <cell locklevel="0" id="{cf8e4cde-db9e-4722-93ba-57d704cdbf30}" rowspan="4" colspan="1" auto="false" showlabel="false">
+                        <labels>
+                          <label description="Field Mapping Rules" languagecode="1033" />
+                        </labels>
+                        <control indicationOfSubgrid="true" id="Subgrid_fieldmappingrules" classid="{E7A81278-8635-4D9E-8D4D-59480B391C5B}" uniqueid="{a1b2c3d4-e5f6-7890-abcd-ef1234567890}">
+                          <parameters>
+                            <RecordsPerPage>4</RecordsPerPage>
+                            <AutoExpand>Fixed</AutoExpand>
+                            <EnableQuickFind>false</EnableQuickFind>
+                            <EnableViewPicker>false</EnableViewPicker>
+                            <EnableChartPicker>true</EnableChartPicker>
+                            <ChartGridMode>All</ChartGridMode>
+                            <RelationshipName>sprk_fieldmappingrule_FieldMappingProfile_n1</RelationshipName>
+                            <TargetEntityType>sprk_fieldmappingrule</TargetEntityType>
+                            <ViewId>{825182F1-D19E-4615-9D03-F2953A3A55B0}</ViewId>
+                            <ViewIds>{825182F1-D19E-4615-9D03-F2953A3A55B0}</ViewIds>
+                          </parameters>
+                        </control>
+                      </cell>
+                    </row>
+                    <row />
+                    <row />
+                    <row />
+                  </rows>
+                </section>
+              </sections>
+            </column>
+          </columns>
+        </tab>
+      </tabs>
+      <header id="{09f936cf-ad58-40ce-9b5c-e50fde683bc9}" celllabelposition="Top" columns="111" labelwidth="115" celllabelalignment="Left">
+        <rows>
+          <row>
+            <cell id="{5003cdcd-f555-42b8-9633-7cee022937f6}" showlabel="false" labelid="{62f2327a-e85a-4f8f-827a-1104486f3641}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{3cbfb4f0-c969-4765-bf26-273bacfd1c21}" showlabel="false" labelid="{5dc69442-1a41-4746-9701-ceb02f3540ac}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{96dae8ea-6795-4bc5-98bc-629858bdc9fa}" showlabel="false" labelid="{441edcb4-9dfb-4a99-9045-dee8105c6d11}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{e955519e-a70d-4461-a723-157b91abbc5f}" locklevel="0" colspan="1" rowspan="1">
+              <labels>
+                <label description="Status" languagecode="1033" />
+              </labels>
+              <control id="header_statecode" classid="{3EF39988-22BB-4F0B-BBBE-64B5A3748AEE}" datafieldname="statecode" disabled="false" />
+            </cell>
+            <cell id="{d7582591-4a92-46db-893f-1d4402be080f}" locklevel="0" colspan="1" rowspan="1">
+              <labels>
+                <label description="Status Reason" languagecode="1033" />
+              </labels>
+              <control id="header_statuscode" classid="{3EF39988-22BB-4F0B-BBBE-64B5A3748AEE}" datafieldname="statuscode" disabled="false" />
+            </cell>
+            <cell id="{a237ff87-130d-4fde-a3a7-243a759b6f53}" labelid="{1973c756-fc5d-4c21-8c0a-f4b8b0959a5b}" colspan="1" rowspan="1">
+              <labels>
+                <label description="Owner" languagecode="1033" />
+              </labels>
+              <control id="header_ownerid" classid="{270BD3DB-D9AF-4782-9025-509E298DEC0A}" datafieldname="ownerid" />
+            </cell>
+          </row>
+        </rows>
+      </header>
+      <footer id="{340c905a-9f72-4620-87da-d93485113242}" celllabelposition="Top" columns="111" labelwidth="115" celllabelalignment="Left">
+        <rows>
+          <row>
+            <cell id="{abc65fd3-d188-4464-b2e8-e76f8508836a}" showlabel="false" labelid="{edd84c16-68db-4c9c-af2f-5cb8a710248d}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{9e521682-100a-4376-8925-10964d62e423}" showlabel="false" labelid="{faa9646d-de11-4ad9-a887-2330c1c5caf7}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+            <cell id="{6e3cb28b-5a6b-4fbf-bef8-1ad20fa5fad6}" showlabel="false" labelid="{c8af530f-dcfc-44bc-81aa-01efcbedb9d4}">
+              <labels>
+                <label description="" languagecode="1033" />
+              </labels>
+            </cell>
+          </row>
+        </rows>
+      </footer>
+      <DisplayConditions Order="1" FallbackForm="true">
+        <Role Id="{e865e125-ceeb-43fa-b4eb-0c0e1e4111a3}" />
+        <Role Id="{f83c57f8-bc9c-415b-b20a-1b169edaa3a1}" />
+        <Role Id="{627090ff-40a3-4053-8790-584edc5be201}" />
+        <Role Id="{119f245c-3cc8-4b62-b31c-d1a046ced15d}" />
+      </DisplayConditions>
+      <controlDescriptions>
+        <controlDescription forControl="{a1b2c3d4-e5f6-7890-abcd-ef1234567890}">
+          <customControl formFactor="0" name="Microsoft.PowerApps.PowerAppsOneGrid">
+            <parameters>
+              <EnableEditing type="TwoOptions" static="true">true</EnableEditing>
+            </parameters>
+          </customControl>
+          <customControl formFactor="2" name="Microsoft.PowerApps.PowerAppsOneGrid">
+            <parameters>
+              <EnableEditing type="TwoOptions" static="true">true</EnableEditing>
+            </parameters>
+          </customControl>
+          <customControl formFactor="1" name="Microsoft.PowerApps.PowerAppsOneGrid">
+            <parameters>
+              <EnableEditing type="TwoOptions" static="true">true</EnableEditing>
+            </parameters>
+          </customControl>
+        </controlDescription>
+      </controlDescriptions>
+    </form>
+    <IsCustomizable>1</IsCustomizable>
+    <CanBeDeleted>1</CanBeDeleted>
+    <LocalizedNames>
+      <LocalizedName description="Field Mapping Profile main form" languagecode="1033" />
+    </LocalizedNames>
+    <Descriptions>
+      <Description description="A form for this entity." languagecode="1033" />
+    </Descriptions>
+  </systemform>
+</forms>

@@ -1,0 +1,253 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="SRFR-039" project="set-regarding-and-field-mapping-resolver-r1">
+  <metadata>
+    <title>RegardingResolver v1.3.3 → v1.3.4 — restore Row 2 Name cell inline (1/3 : 2/3 grid) with top-aligned OOB-parity labels ("Regarding Number" / "Regarding Name")</title>
+    <status>completed</status>
+    <estimated-effort>1h30min</estimated-effort>
+    <actual-effort>~55min</actual-effort>
+    <assigned>AI Agent</assigned>
+    <started>2026-07-03</started>
+    <completed>2026-07-03</completed>
+    <rigor>FULL</rigor>
+    <parallel-safe>true</parallel-safe>
+    <parallel-group>—</parallel-group>
+    <tags>pcf,regarding-resolver,fluent-ui,react,styling,version-bump,wave-3-followon,deploy</tags>
+    <depends-on>SRFR-037</depends-on>
+    <wave>3</wave>
+  </metadata>
+
+  <prompt><![CDATA[
+Out-of-plan owner correction to SRFR-034 §6 (which removed the Name cell entirely
+from Row 2). Owner wants the Name displayed INSIDE the PCF, next to the
+record-number, with proportional widths: Number cell = 1/3 of row width, Name
+cell = 2/3 of row width.
+
+Additional owner clarification (mid-task): both cells need OOB-parity top-aligned
+labels above the value — "Regarding Number" above the number hyperlink, and
+"Regarding Name" above the plain-text name. Label styling to match OOB field
+labels on the same form: small font (12px), regular weight, gray color
+(#616161).
+
+Scope (all in `src/client/pcf/RegardingResolver/`):
+
+1. `RegardingResolverApp.tsx`:
+   - Row 2 layout: change from single-column single-Link to CSS grid with
+     `grid-template-columns: 1fr 2fr;` (or equivalent Flexbox proportional).
+   - LEFT cell (1/3): label "Regarding Number" (Text) above; hyperlinked
+     record-number Link below (preserve SRFR-031 modal-open click handler).
+   - RIGHT cell (2/3): label "Regarding Name" (Text) above; record-name as
+     plain-text Fluent v9 `<Text>` component (NOT a Link — just display).
+   - Label styling: fontSize 12px, fontWeight 400, color '#616161'
+     (Path A extension for OOB label parity).
+   - Value styling: inherit OOB body-text (Segoe UI 14px, #242424, weight 400).
+   - Both cells share the same label styling.
+   - If either value is null/empty: hide that specific cell (rather than
+     render em-dash) so empty state is clean.
+   - Restore any Griffel styles for the Name cell that SRFR-034 deleted;
+     preserve SRFR-037's title semi-bold weight 600 + reduced top padding.
+
+2. Version bump v1.3.3 → v1.3.4 across all 7 anchors:
+   - `ControlManifest.Input.xml` (control root version attr)
+   - `index.ts` CONTROL_VERSION
+   - `RegardingResolverApp.tsx` BUILD_DATE (leave as 2026-07-03 if same day)
+   - `Solution/solution.xml` <Version>
+   - `Solution/Controls/sprk_Spaarke.Controls.RegardingResolver/ControlManifest.xml`
+     version attr
+   - `package.json` version
+   - `Solution/pack.ps1` $version
+
+3. Tests (`__tests__/RegardingResolverApp.test.tsx`):
+   - Bulk grep + replace 1.3.3 → 1.3.4 (version prop + assertion regex).
+   - REPLACE the SRFR-034 §6 tests that assert "no name cell" with tests that
+     assert BOTH cells are present.
+   - Add: (a) Row 2 has two cells with correct data-testids; (b) Name cell
+     renders `<Text>` (plain-text, NOT a Link — hyperlink is only on number);
+     (c) labels "Regarding Number" and "Regarding Name" render above cells
+     with the expected label className.
+
+4. Step 9.5 quality gates: `/code-review` + `/adr-check` + `npm run build:prod`.
+
+5. Deploy: pack solution, `pac solution import --force-overwrite
+   --publish-changes`, verify `pac solution list | grep RegardingResolver`
+   shows v1.3.4.
+
+Constraints:
+  - ADR-022 virtual pattern preserved.
+  - SRFR-034/035/037 features preserved: refresh button, auto-refresh,
+    showVersionFooter, PolymorphicPicker consumption, title semi-bold + low
+    top padding.
+  - ADR-021 Path A exception continues — OOB parity styling extends to Row 2
+    labels (12px, weight 400, color #616161).
+  - Backward compat: no manifest property removal (regardingRecordNameField
+    is re-consumed — was preserved for backcompat since v1.3.1).
+  ]]></prompt>
+
+  <role>PCF developer familiar with Spaarke PCF version discipline
+  (`src/client/pcf/CLAUDE.md`), Fluent v9 Griffel + tokens (`ADR-021`),
+  virtual PCF platform-library pattern (`ADR-022`), shared PolymorphicPicker
+  (`ADR-012`), and Dataverse OOB field-label styling conventions.</role>
+
+  <goal><![CDATA[
+RegardingResolver v1.3.4 deployed to spaarkedev1, verified via
+`pac solution list`. Row 2 renders both fields inline: LEFT (1/3 width) is
+"Regarding Number" label above the hyperlinked record-number; RIGHT (2/3
+width) is "Regarding Name" label above the plain-text record-name.
+Labels use OOB-parity styling (12px, weight 400, #616161). Empty cells hide
+gracefully. SRFR-034/035/037 features preserved unchanged. All 7 version
+anchors bumped 1.3.3 → 1.3.4. `npm run build:prod` passes. Tests updated
+to assert BOTH cells present + label rendering.
+  ]]></goal>
+
+  <inputs>
+    <file purpose="spec">projects/set-regarding-and-field-mapping-resolver-r1/spec.md</file>
+    <file purpose="project-claude">projects/set-regarding-and-field-mapping-resolver-r1/CLAUDE.md</file>
+    <file purpose="checklist">src/client/pcf/CLAUDE.md</file>
+    <file purpose="prior-task">projects/set-regarding-and-field-mapping-resolver-r1/tasks/037-regarding-resolver-title-styling-v1.3.3.poml</file>
+    <file purpose="prior-task">projects/set-regarding-and-field-mapping-resolver-r1/tasks/034-regarding-resolver-ui-polish-v1.3.1.poml</file>
+    <file purpose="source">src/client/pcf/RegardingResolver/RegardingResolver/ControlManifest.Input.xml</file>
+    <file purpose="source">src/client/pcf/RegardingResolver/RegardingResolver/index.ts</file>
+    <file purpose="source">src/client/pcf/RegardingResolver/RegardingResolver/RegardingResolverApp.tsx</file>
+    <file purpose="source">src/client/pcf/RegardingResolver/package.json</file>
+    <file purpose="source">src/client/pcf/RegardingResolver/Solution/solution.xml</file>
+    <file purpose="source">src/client/pcf/RegardingResolver/Solution/Controls/sprk_Spaarke.Controls.RegardingResolver/ControlManifest.xml</file>
+    <file purpose="source">src/client/pcf/RegardingResolver/Solution/pack.ps1</file>
+    <file purpose="test">src/client/pcf/RegardingResolver/__tests__/RegardingResolverApp.test.tsx</file>
+    <file purpose="adr">.claude/adr/ADR-021-fluent-v9-tokens.md</file>
+    <file purpose="adr">.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+    <file purpose="adr">.claude/adr/ADR-012-shared-component-library.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-022">Virtual PCF pattern preserved. React 16 + Fluent 9 platform-libraries. No bundling regression.</constraint>
+    <constraint source="ADR-012">Shared PolymorphicPicker consumption preserved. Do NOT modify the shared component.</constraint>
+    <constraint source="ADR-021 Path A exception">Title (600 semi-bold) + Row 2 labels (12px, weight 400, #616161) both use hardcoded OOB-parity values. Documented Path A exception (SRFR-034 §4, extended by SRFR-037 for title weight, extended by SRFR-039 for Row 2 labels). All other styles remain on Fluent v9 semantic tokens.</constraint>
+    <constraint source="project">Feature preservation: manual refresh button (SRFR-034), auto-refresh (SRFR-035), showVersionFooter (SRFR-034), PolymorphicPicker consumption (SRFR-030/034), CREATE-mode presave bridge (SRFR-032), title semi-bold + low top padding (SRFR-037) — ALL preserved.</constraint>
+    <constraint source="project">Backward compat: no manifest property additions/removals; `regardingRecordNameField` is now re-consumed (was pass-through since v1.3.1 SRFR-034 §6).</constraint>
+    <constraint source="src/client/pcf/CLAUDE.md — Version Update Checklist">ALL 7 anchors bumped together (manifest, index.ts, footer BUILD_DATE, solution.xml, Solution ControlManifest, package.json, pack.ps1).</constraint>
+    <constraint source="project">TypeScript strict mode.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>pcf/version-discipline + Fluent v9 Griffel styling + OOB Dataverse field-label parity</topic>
+    <files>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>src/client/pcf/RegardingResolver/RegardingResolver/RegardingResolverApp.tsx</file>
+    </files>
+    <patterns>
+      <pattern name="OOB field-label parity" location="RegardingResolverApp.tsx Row 2 label Griffel block">
+        Dataverse OOB field labels use small font (~12px), regular weight
+        (400), gray color (roughly #616161), left-aligned, positioned above
+        the field value. Row 2 restores the Name cell alongside the Number
+        cell and adds top-aligned labels for both.
+      </pattern>
+      <pattern name="1/3 : 2/3 grid layout" location="RegardingResolverApp.tsx Row 2 grid Griffel block">
+        `display: 'grid', gridTemplateColumns: '1fr 2fr', gap: (small token)`.
+        Left cell is 1/3 width for the number; right cell is 2/3 width for the
+        name (names are usually longer than record numbers).
+      </pattern>
+      <pattern name="Cell hide-on-empty" location="RegardingResolverApp.tsx Row 2 conditional rendering">
+        If number is empty, hide the LEFT cell entirely (do NOT render an
+        em-dash placeholder). Same for the Name cell. Empty-state UX is
+        cleaner than a placeholder character.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      SRFR-034 §6 removed the Row 2 record-name cell based on a briefing
+      that owner wanted only the number in Row 2 and the OOB name field
+      elsewhere. Owner post-v1.3.3 deploy clarified: they want the Name
+      INSIDE the PCF, alongside the number. This task restores the Name cell
+      with a 1/3 : 2/3 proportional layout AND adds OOB-parity top-aligned
+      labels above both cells.
+    </background>
+    <dependencies>
+      <dependency task="SRFR-037" status="completed">v1.3.3 shipped with title font-weight 600 + reduced top padding.</dependency>
+    </dependencies>
+    <related-work>
+      <item>SRFR-041 (parallel) — sprk_todo FormXml revert of SRFR-038 (revert OOB fields to hidden). Different files.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check">Verify context &lt; 60%. Read current `RegardingResolverApp.tsx` Row 2 block. Confirm 7-anchor version state at 1.3.3.</step>
+    <step order="1" name="Add label styles">In `RegardingResolverApp.tsx` `useStyles`, add a new `fieldLabel` block: `fontSize: '12px'`, `fontWeight: 400`, `color: '#616161'`, `fontFamily: (Segoe UI stack)`. Add `numberCell` + `nameCell` wrapper blocks so each cell can render label-above-value in flex column layout. Add a `row2Grid` block with `display: 'grid'`, `gridTemplateColumns: '1fr 2fr'`, `gap: tokens.spacingHorizontalS`.</step>
+    <step order="2" name="Rewire Row 2 JSX">Replace the current single-Link Row 2 with a two-cell layout:
+      - Row 2 root: grid container (row2Grid).
+      - Left cell (numberCell): if hasRecordNumber, render Text label "Regarding Number" then Link (record-number, existing click handler preserved).
+      - Right cell (nameCell): if boundRecordName is non-empty, render Text label "Regarding Name" then Text (plain-text record-name, NOT a Link).
+      - Read `boundRecordName` from `context.parameters.regardingRecordNameField?.raw` (was previously read then discarded — now consumed).
+      - Empty cells hide entirely (no em-dash).
+    </step>
+    <step order="3" name="Update docstring">Bump v1.3.3 references to v1.3.4 in the file docstring header. Add a "# v1.3.4 (SRFR-039 restore Name cell + labels)" section describing the layout change and label styling.</step>
+    <step order="4" name="Version bump — Location 1 (ControlManifest.Input.xml)">Update `version="1.3.4"` on the control root element.</step>
+    <step order="5" name="Version bump — Location 2 (index.ts CONTROL_VERSION)">Update `CONTROL_VERSION = '1.3.4'`.</step>
+    <step order="6" name="Version bump — Location 3 (BUILD_DATE)">Confirm `BUILD_DATE = '2026-07-03'`.</step>
+    <step order="7" name="Version bump — Location 4 (Solution manifest)">Update `Solution/solution.xml` `&lt;Version&gt;` to `1.3.4`.</step>
+    <step order="8" name="Version bump — Location 5 (Solution Control Manifest)">Update extracted `ControlManifest.xml` version to `1.3.4`.</step>
+    <step order="9" name="Version bump — Location 6 (package.json)">Update `package.json` `"version": "1.3.4"`.</step>
+    <step order="10" name="Version bump — Location 7 (pack.ps1)">Update `$version = "1.3.4"`.</step>
+    <step order="11" name="Tests update">
+      In `__tests__/RegardingResolverApp.test.tsx`:
+      (a) Bulk replace 1.3.3 → 1.3.4 (version prop + regex).
+      (b) Update the SRFR-034 §6 tests that assert "no name cell" — replace with
+          tests asserting BOTH cells are present under the new v1.3.4 shape.
+      (c) Add 3 new tests: (i) Row 2 has data-testid for number cell AND name
+          cell; (ii) Name cell renders `<Text>` component (plain-text, not a
+          Link — no href/onClick); (iii) Both labels "Regarding Number" and
+          "Regarding Name" render with the expected text content.
+    </step>
+    <step order="12" name="Grep verification">Grep for `1.3.3` under `src/client/pcf/RegardingResolver/` (exclude node_modules + out + Solution/bin + docstring version-history section). Assert zero non-history hits.</step>
+    <step order="9.5" name="Quality Gate">Invoke `/code-review` and `/adr-check` on modified files. Address findings or escalate per CLAUDE.md §6.5.</step>
+    <step order="13" name="Build">Run `npm run build:prod`. Confirm build passes.</step>
+    <step order="14" name="Test run">Run `npm test`. Confirm all tests pass.</step>
+    <step order="15" name="Copy bundle + pack solution">Copy `out/controls/RegardingResolver/bundle.js` to solution controls folder. Run `pack.ps1` to produce `Solution/bin/RegardingResolverSolution_v1.3.4.zip`.</step>
+    <step order="16" name="Deploy">Run `pac solution import --path Solution/bin/RegardingResolverSolution_v1.3.4.zip --force-overwrite --publish-changes` against spaarkedev1. Verify via `pac solution list | Select-String RegardingResolver` shows Version 1.3.4.</step>
+    <step order="17" name="Update Task Status">Update SRFR-039 status → completed, notes summary. Update TASK-INDEX.md — add SRFR-039 row. Reset current-task.md.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Load current source, prior tasks, ADRs</tool>
+    <tool name="Edit">Manifest + code + tests + solution manifests</tool>
+    <tool name="Grep">Verify no straggling `1.3.3` references</tool>
+    <tool name="Bash">`npm run build:prod`, `npm test`, `pack.ps1`, `pac solution import`, `pac solution list`</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/RegardingResolver/RegardingResolver/ControlManifest.Input.xml</output>
+    <output type="code">src/client/pcf/RegardingResolver/RegardingResolver/index.ts</output>
+    <output type="code">src/client/pcf/RegardingResolver/RegardingResolver/RegardingResolverApp.tsx</output>
+    <output type="code">src/client/pcf/RegardingResolver/package.json</output>
+    <output type="code">src/client/pcf/RegardingResolver/Solution/solution.xml</output>
+    <output type="code">src/client/pcf/RegardingResolver/Solution/Controls/sprk_Spaarke.Controls.RegardingResolver/ControlManifest.xml</output>
+    <output type="code">src/client/pcf/RegardingResolver/Solution/pack.ps1</output>
+    <output type="test">src/client/pcf/RegardingResolver/__tests__/RegardingResolverApp.test.tsx</output>
+    <output type="artifact">src/client/pcf/RegardingResolver/Solution/bin/RegardingResolverSolution_v1.3.4.zip</output>
+    <output type="notes">projects/set-regarding-and-field-mapping-resolver-r1/notes/task-039-restore-name-cell.log</output>
+    <output type="docs">projects/set-regarding-and-field-mapping-resolver-r1/tasks/TASK-INDEX.md (add SRFR-039 row)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`grep -c 'version="1.3.4"' src/client/pcf/RegardingResolver/RegardingResolver/ControlManifest.Input.xml` returns 1.</criterion>
+    <criterion testable="true">`grep -R "1.3.3" src/client/pcf/RegardingResolver/ --exclude-dir=node_modules --exclude-dir=out --exclude-dir=bin` returns only version-history docstring hits.</criterion>
+    <criterion testable="true">Row 2 renders 2 cells with data-testids for number and name cells.</criterion>
+    <criterion testable="true">Name cell renders as `<Text>` (plain-text), NOT a Link.</criterion>
+    <criterion testable="true">Both labels "Regarding Number" and "Regarding Name" render with 12px / weight 400 / #616161 styling.</criterion>
+    <criterion testable="true">Left cell width proportion is 1/3, right cell is 2/3 (CSS grid `1fr 2fr`).</criterion>
+    <criterion testable="true">SRFR-037 title weight 600 preserved; SRFR-034 refresh button preserved; SRFR-035 auto-refresh preserved.</criterion>
+    <criterion testable="true">`npm run build:prod` succeeds with zero errors.</criterion>
+    <criterion testable="true">`npm test` all tests pass.</criterion>
+    <criterion testable="true">Platform-library declarations for React 16 and Fluent 9 preserved in ControlManifest.Input.xml.</criterion>
+    <criterion testable="true">`/code-review` and `/adr-check` pass at Step 9.5 (or findings addressed / escalated per CLAUDE.md §6.5).</criterion>
+    <criterion testable="true">`pac solution list` shows RegardingResolverSolution v1.3.4 after deploy.</criterion>
+  </acceptance-criteria>
+
+  <notes><![CDATA[
+Owner correction to SRFR-034 §6 (which removed Name cell entirely). Owner
+wants BOTH cells inline in Row 2 with 1/3 : 2/3 proportional widths and
+top-aligned OOB-parity labels ("Regarding Number" / "Regarding Name").
+Path A exception on ADR-021 extended to cover Row 2 label styling
+(12px, weight 400, #616161).
+  ]]></notes>
+</task>

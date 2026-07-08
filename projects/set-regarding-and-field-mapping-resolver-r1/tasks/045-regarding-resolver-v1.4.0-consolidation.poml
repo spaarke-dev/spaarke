@@ -1,0 +1,217 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="SRFR-045" project="set-regarding-and-field-mapping-resolver-r1">
+  <metadata>
+    <title>RegardingResolver v1.3.7 → v1.4.0 — consolidation with AssociationResolver (port subgrid auto-detect; retire AssociationResolver)</title>
+    <status>completed</status>
+    <estimated-effort>3h</estimated-effort>
+    <actual-effort>~1h30min</actual-effort>
+    <assigned>AI Agent</assigned>
+    <started>2026-07-05</started>
+    <completed>2026-07-05</completed>
+    <rigor>FULL</rigor>
+    <parallel-safe>false</parallel-safe>
+    <parallel-group>—</parallel-group>
+    <tags>pcf,regarding-resolver,consolidation,version-bump,deletion,deploy,wave-3-followon</tags>
+    <depends-on>SRFR-042,SRFR-043,SRFR-044</depends-on>
+    <wave>3</wave>
+  </metadata>
+
+  <prompt><![CDATA[
+Owner post-v1.3.7 clarification: the two PCFs (RegardingResolver + AssociationResolver)
+are largely redundant. Both do the same primary job — pick a polymorphic parent,
+write 5 denormalized fields + 1 entity-specific lookup, provide click-to-open.
+The differences (auto-detect from subgrid, write pathway, UI density) don't
+justify two components.
+
+Decision: **drop AssociationResolver entirely** and **extend RegardingResolver
+to v1.4.0** with the one AssociationResolver feature worth keeping — auto-detect
+from subgrid.
+
+Owner's clarified use case:
+  - Parent-child relationships in the entity model with polymorphic children
+  - Child entities that need the resolver: sprk_todo, sprk_event, sprk_invoice,
+    sprk_communication, sprk_kpiassessment
+  - Placement pattern: resolver goes on the CHILD form so the child associates
+    to a parent AND the parent's subgrids show the child (via entity-specific
+    sprk_regarding{Entity} lookup)
+  - The "+ new" flow: from parent's subgrid → new child form opens with parent
+    lookup pre-set → resolver must auto-write 5 fields without user click
+  - Field-mapping cascade is "on demand" from the parent side (SRFR-062 ribbon)
+    — NOT needed at child-write time. This confirms AssociationResolver's
+    write-time FieldMappingHandler is redundant.
+
+Scope (6 discrete work items):
+
+1. Port auto-detect from subgrid into RegardingResolverApp.tsx:
+   - On mount (React useEffect), detect if any bound sprk_regarding{Entity}
+     lookup on the Xrm.Page is pre-populated.
+   - CREATE mode: write 5 denormalized fields via
+     Xrm.Page.getAttribute().setValue() so they save with the record on first
+     save. Also populate window.__sprk_regarding_pending__ for SRFR-040
+     presave webresource fallback.
+   - UPDATE mode: use context.webAPI.updateRecord via applyRegardingSelection.
+   - Populate selectedTarget React state so Row 2 hyperlink works immediately.
+   - Ported from AssociationResolver/handlers/RecordSelectionHandler.ts
+     (detectPrePopulatedParent + completeAutoDetectedAssociation). Adapted
+     for RegardingResolver's catalog + write path.
+   - Skip auto-detect under readOnly.
+
+2. Manifest description update:
+   - Change control-element description-key to reflect polymorphic parent
+     picker for any child entity, removing HOST-only language.
+   - Remove HOST-only inline comments from RegardingResolverApp.tsx and
+     RegardingResolverHost.tsx.
+
+3. Bump version 1.3.7 → 1.4.0 across all 7 anchors:
+   ControlManifest.Input.xml, index.ts CONTROL_VERSION, RegardingResolverApp.tsx
+   BUILD_DATE (2026-07-05), Solution/solution.xml <Version>,
+   Solution/Controls/.../ControlManifest.xml, package.json, Solution/pack.ps1.
+
+4. Delete AssociationResolver source directory (src/client/pcf/AssociationResolver/).
+   Never placed on any form; all valuable behavior ported to v1.4.0 or already
+   in shared lib.
+
+5. Delete AssociationResolverSolution from spaarkedev1:
+   pac solution delete --solution-name AssociationResolverSolution
+   Verify: pac solution list returns no Association.
+
+6. Build + Deploy RegardingResolver v1.4.0:
+   - npm test — all tests pass (66 baseline + 3 new SRFR-045 = 69 expected)
+   - npm run build:prod
+   - Copy bundle to Solution/Controls/.../bundle.js
+   - Pack: pwsh -File Solution/pack.ps1
+   - pac solution import --path Solution/bin/RegardingResolverSolution_v1.4.0.zip
+     --force-overwrite --publish-changes
+   - Verify: pac solution list shows RegardingResolverSolution 1.4.0.
+
+New tests (3) in __tests__/RegardingResolverApp.test.tsx:
+  (a) Auto-detect fires when sprk_regardingmatter is pre-populated → 5 fields
+      written via setValue in CREATE mode → picker state reflects selection.
+  (b) Auto-detect fires when sprk_regardingproject is pre-populated → same
+      behavior for different entity type.
+  (c) No pre-populated lookup → no auto-detect fires → picker starts empty.
+
+Preserve: shared lib exports (PolymorphicPicker, FieldMappingHandler,
+applyResolverFields) — these remain used by RegardingResolver and by
+sprk_fieldmapping_push.js webresource for parent-side push ribbon.
+Preserve ADR-022 (React 16 + Fluent 9 platform libs). Preserve ADR-024 5-field
+write via applyResolverFields — extend with auto-detect, don't replace.
+Preserve ADR-012 shared lib pattern — auto-detect uses shared primitives via
+@spaarke/ui-components.
+
+Note: ADR-024 amendment (v1.4.0 subgrid auto-detect noted) is DEFERRED to the
+main session per §3 sub-agent write boundary — sub-agents cannot write to
+.claude/adr/. Amendment is documentation-only.
+
+Order: complete Task 1-3 (code + version bump) → verify tests+build pass →
+Task 4-6 (delete + deploy). Do NOT delete AssociationResolver source until
+Task 6 build succeeds.
+  ]]></prompt>
+
+  <role>PCF developer familiar with Spaarke PCF version discipline
+  (`src/client/pcf/CLAUDE.md`), Fluent v9 Griffel + tokens (`ADR-021`),
+  virtual PCF platform-library pattern (`ADR-022`), shared library
+  consumption (`ADR-012`), polymorphic resolver pattern (`ADR-024`), and
+  defensive host-safe error handling.</role>
+
+  <goal><![CDATA[
+RegardingResolver v1.4.0 deployed to spaarkedev1, verified via
+`pac solution list`. Subgrid-driven "+ new" flows auto-write the 5 denormalized
+fields via CREATE-mode setValue path OR UPDATE-mode updateRecord path.
+AssociationResolver source deleted and solution removed from spaarkedev1.
+All 7 version anchors bumped 1.3.7 → 1.4.0. All 3 new SRFR-045 tests pass
+alongside 66 baseline tests. `npm run build:prod` passes.
+  ]]></goal>
+
+  <inputs>
+    <file purpose="spec">projects/set-regarding-and-field-mapping-resolver-r1/spec.md</file>
+    <file purpose="project-claude">projects/set-regarding-and-field-mapping-resolver-r1/CLAUDE.md</file>
+    <file purpose="checklist">src/client/pcf/CLAUDE.md</file>
+    <file purpose="prior-task">projects/set-regarding-and-field-mapping-resolver-r1/tasks/042-regarding-resolver-hyperlink-onload-fix-v1.3.5.poml</file>
+    <file purpose="source">src/client/pcf/RegardingResolver/RegardingResolver/ControlManifest.Input.xml</file>
+    <file purpose="source">src/client/pcf/RegardingResolver/RegardingResolver/index.ts</file>
+    <file purpose="source">src/client/pcf/RegardingResolver/RegardingResolver/RegardingResolverApp.tsx</file>
+    <file purpose="source">src/client/pcf/RegardingResolver/package.json</file>
+    <file purpose="source">src/client/pcf/RegardingResolver/Solution/solution.xml</file>
+    <file purpose="source">src/client/pcf/RegardingResolver/Solution/Controls/sprk_Spaarke.Controls.RegardingResolver/ControlManifest.xml</file>
+    <file purpose="source">src/client/pcf/RegardingResolver/Solution/pack.ps1</file>
+    <file purpose="reference-only">src/client/pcf/AssociationResolver/handlers/RecordSelectionHandler.ts</file>
+    <file purpose="test">src/client/pcf/RegardingResolver/__tests__/RegardingResolverApp.test.tsx</file>
+    <file purpose="adr">.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+    <file purpose="adr">.claude/adr/ADR-024-polymorphic-resolver-pattern.md</file>
+    <file purpose="adr">.claude/adr/ADR-012-shared-component-library.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-022">Virtual PCF pattern preserved. React 16 + Fluent 9 platform-libraries. No bundling regression.</constraint>
+    <constraint source="ADR-024">5-field write via applyResolverFields preserved. Extend with auto-detect, don't replace.</constraint>
+    <constraint source="ADR-012">Shared lib pattern preserved. Auto-detect logic uses shared primitives (resolveRecordType, buildRecordUrl, applyResolverFields) via @spaarke/ui-components.</constraint>
+    <constraint source="project">Feature preservation: manual refresh button (SRFR-034), auto-refresh (SRFR-035), showVersionFooter (SRFR-034), PolymorphicPicker consumption (SRFR-030/034), CREATE-mode presave bridge (SRFR-032), title semi-bold + low top padding (SRFR-037), Row 2 grid + labels + Name cell (SRFR-039), Row 2 hyperlink WebAPI-based fix (SRFR-043), navigateTo this-binding fix (SRFR-044) — ALL preserved.</constraint>
+    <constraint source="src/client/pcf/CLAUDE.md — Version Update Checklist">ALL 7 anchors bumped together (manifest, index.ts, footer BUILD_DATE, solution.xml, Solution ControlManifest, package.json, pack.ps1).</constraint>
+    <constraint source="project">TypeScript strict mode. Host-safe error handling (never throw to host form).</constraint>
+    <constraint source="CLAUDE.md §3">Sub-agent write boundary — ADR-024 amendment deferred to main session; sub-agent cannot write to .claude/.</constraint>
+    <constraint source="project">Never delete AssociationResolver source until Task 6 build succeeds.</constraint>
+    <constraint source="XML">description-key attributes MUST NOT contain apostrophes (Dataverse XSD noAposStringType constraint — discovered during import).</constraint>
+  </constraints>
+
+  <steps>
+    <step order="0" name="Context Check">Verify context &lt; 60%. Read RegardingResolverApp.tsx + AssociationResolver/handlers/RecordSelectionHandler.ts (auto-detect logic to port).</step>
+    <step order="1" name="Add auto-detect helpers to RegardingResolverApp.tsx">Add module-level helpers: `detectPrePopulatedParent(catalog)`, `setFormLookupValue`, `setFormTextValue`. Defensive throughout — never throw.</step>
+    <step order="2" name="Add auto-detect useEffect to RegardingResolverApp">Wire on-mount effect with `useRef` guard against double-fire. Skip under readOnly. CREATE-mode: setValue path + presave seam. UPDATE-mode: applyRegardingSelection. Populate selectedTarget + notify onRecordTypeChanged.</step>
+    <step order="3" name="Update docstrings">Bump docstring header to v1.4.0. Add "# v1.4.0 (SRFR-045 consolidation with AssociationResolver — subgrid auto-detect)" section. Remove HOST-only language.</step>
+    <step order="4" name="Manifest description update">Update ControlManifest.Input.xml description-key + entity property description. Also update Solution/.../ControlManifest.xml + Solution/solution.xml description. Avoid apostrophes (XSD constraint).</step>
+    <step order="5" name="Version bump — all 7 anchors">Update 1.3.7 → 1.4.0 in: ControlManifest.Input.xml, index.ts CONTROL_VERSION, RegardingResolverApp.tsx BUILD_DATE (2026-07-05), Solution/solution.xml, Solution/Controls/.../ControlManifest.xml, package.json, Solution/pack.ps1.</step>
+    <step order="6" name="Tests update">Add 3 new SRFR-045 tests to __tests__/RegardingResolverApp.test.tsx: (a) sprk_regardingmatter pre-populated, (b) sprk_regardingproject pre-populated, (c) no pre-populated → no-op.</step>
+    <step order="7" name="Grep verification">Grep for `1.3.7` under `src/client/pcf/RegardingResolver/` (exclude node_modules + out + Solution/bin + stack-chain). Assert zero non-history hits.</step>
+    <step order="9.5" name="Quality Gate">Test run + build. If code-review + adr-check are unavailable in sub-agent mode, note deferral to main session review.</step>
+    <step order="8" name="Test run">Run `npm test`. Confirm 69 tests pass (66 baseline + 3 new SRFR-045).</step>
+    <step order="9" name="Build">Run `npm run build:prod`. Confirm build passes.</step>
+    <step order="10" name="Copy bundle + pack solution">Copy `out/controls/RegardingResolver/bundle.js` to solution controls folder. Run `pack.ps1` → `Solution/bin/RegardingResolverSolution_v1.4.0.zip`.</step>
+    <step order="11" name="Deploy">Run `pac solution import --path Solution/bin/RegardingResolverSolution_v1.4.0.zip --force-overwrite --publish-changes` against spaarkedev1. Verify via `pac solution list` → 1.4.0.</step>
+    <step order="12" name="Delete AssociationResolverSolution from spaarkedev1">`pac solution delete --solution-name AssociationResolverSolution`. Verify: `pac solution list | grep -i Association` returns nothing.</step>
+    <step order="13" name="Delete AssociationResolver source">`rm -rf src/client/pcf/AssociationResolver/`. Verify: `ls src/client/pcf/` shows no AssociationResolver.</step>
+    <step order="14" name="Update Task Status">Update SRFR-045 status → completed. Update TASK-INDEX.md — add SRFR-045 row.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/pcf/RegardingResolver/RegardingResolver/ControlManifest.Input.xml</output>
+    <output type="code">src/client/pcf/RegardingResolver/RegardingResolver/index.ts</output>
+    <output type="code">src/client/pcf/RegardingResolver/RegardingResolver/RegardingResolverApp.tsx</output>
+    <output type="code">src/client/pcf/RegardingResolver/package.json</output>
+    <output type="code">src/client/pcf/RegardingResolver/Solution/solution.xml</output>
+    <output type="code">src/client/pcf/RegardingResolver/Solution/Controls/sprk_Spaarke.Controls.RegardingResolver/ControlManifest.xml</output>
+    <output type="code">src/client/pcf/RegardingResolver/Solution/pack.ps1</output>
+    <output type="test">src/client/pcf/RegardingResolver/__tests__/RegardingResolverApp.test.tsx</output>
+    <output type="artifact">src/client/pcf/RegardingResolver/Solution/bin/RegardingResolverSolution_v1.4.0.zip</output>
+    <output type="deletion">src/client/pcf/AssociationResolver/ (entire directory)</output>
+    <output type="deployment">AssociationResolverSolution removed from spaarkedev1</output>
+    <output type="notes">projects/set-regarding-and-field-mapping-resolver-r1/notes/task-045-consolidation.log</output>
+    <output type="docs">projects/set-regarding-and-field-mapping-resolver-r1/tasks/TASK-INDEX.md (add SRFR-045 row)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`grep -c 'version="1.4.0"' src/client/pcf/RegardingResolver/RegardingResolver/ControlManifest.Input.xml` returns 1.</criterion>
+    <criterion testable="true">`grep -R "1.3.7" src/client/pcf/RegardingResolver/ --exclude-dir=node_modules --exclude-dir=out --exclude-dir=bin` returns only history-comment hits (SRFR-044 docstring reference) + stack-chain package.</criterion>
+    <criterion testable="true">Auto-detect on mount when sprk_regardingmatter pre-populated → 5 fields written via setValue in CREATE mode → picker state reflects selection.</criterion>
+    <criterion testable="true">Auto-detect on mount when sprk_regardingproject pre-populated → same behavior for different entity type.</criterion>
+    <criterion testable="true">No pre-populated lookup → no auto-detect fires → picker starts empty.</criterion>
+    <criterion testable="true">All prior features preserved (manual refresh, auto-refresh, showVersionFooter, Row 2 layout, Name cell, title styling, hyperlink WebAPI-based fix).</criterion>
+    <criterion testable="true">`npm run build:prod` succeeds with zero errors.</criterion>
+    <criterion testable="true">`npm test` all tests pass (69 = 66 baseline + 3 new SRFR-045).</criterion>
+    <criterion testable="true">`pac solution list` shows RegardingResolverSolution 1.4.0 after deploy.</criterion>
+    <criterion testable="true">`pac solution list | grep -i Association` returns nothing (AssociationResolverSolution deleted).</criterion>
+    <criterion testable="true">`ls src/client/pcf/` shows no AssociationResolver directory.</criterion>
+    <criterion testable="true">description-key attributes contain no apostrophes (Dataverse XSD noAposStringType constraint).</criterion>
+  </acceptance-criteria>
+
+  <notes><![CDATA[
+Owner clarification post-v1.3.7 that two PCFs are redundant. Consolidate on
+RegardingResolver by porting the one worth-keeping AssociationResolver
+feature (subgrid auto-detect) and retiring AssociationResolver.
+ADR-024 amendment noting v1.4.0 subgrid auto-detect is deferred to main
+session per §3 sub-agent write boundary.
+Dataverse XSD gotcha discovered on first import: description-key attributes
+cannot contain apostrophes (noAposStringType). Reworded "child entity's" to
+"child" in both manifests before successful re-import.
+  ]]></notes>
+</task>

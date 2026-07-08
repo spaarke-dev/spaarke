@@ -1,0 +1,145 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="SRFR-022" project="set-regarding-and-field-mapping-resolver-r1">
+  <metadata>
+    <title>Relocate FieldMappingHandler from AssociationResolver to @spaarke/ui-components</title>
+    <status>completed</status>
+    <estimated-effort>3h</estimated-effort>
+    <actual-effort>~1h</actual-effort>
+    <assigned>AI Agent</assigned>
+    <started>2026-07-02</started>
+    <completed>2026-07-02</completed>
+    <rigor>FULL</rigor>
+    <parallel-safe>true</parallel-safe>
+    <parallel-group>A</parallel-group>
+    <tags>shared-lib,refactor,wave-2,spaarke-ui-components</tags>
+    <depends-on></depends-on>
+    <wave>2</wave>
+  </metadata>
+
+  <prompt><![CDATA[
+Today `FieldMappingHandler` lives inside the AssociationResolver PCF package
+(`src/client/pcf/AssociationResolver/handlers/FieldMappingHandler.ts`). This
+mirrors `PolymorphicResolverService` structurally but sits in the wrong package.
+Per owner clarification C1 (see project CLAUDE.md § Owner clarifications), move
+it to `@spaarke/ui-components` so both `PolymorphicResolverService` and
+`FieldMappingHandler` live symmetrically in the shared lib's `src/services/`
+directory.
+
+This is FR-C1b-01 from spec.md. The move is behavior-preserving — a pure
+relocation plus import updates. Any behavior change is deferred to a different
+task. Also update the stale spec cross-link at `FieldMappingHandler.ts:10` per
+FR-B1-01 to point at this project's `spec.md` Appendix A.
+  ]]></prompt>
+
+  <role>TypeScript refactoring engineer familiar with the Spaarke shared component library (`@spaarke/ui-components`), the ADR-012 boundary rules, and behavior-preserving `git mv` workflows.</role>
+
+  <goal><![CDATA[
+`FieldMappingHandler` file lives at
+`src/client/shared/Spaarke.UI.Components/src/services/FieldMappingHandler.ts`.
+The old file at `src/client/pcf/AssociationResolver/handlers/FieldMappingHandler.ts`
+is deleted. All AssociationResolver imports resolve via `@spaarke/ui-components`.
+Public exports updated in `src/index.ts`. Stale inline reference at (formerly)
+line 10 corrected to point at this project's spec.md Appendix A. Existing tests
+migrate to the new location and continue to pass.
+  ]]></goal>
+
+  <inputs>
+    <file purpose="spec">projects/set-regarding-and-field-mapping-resolver-r1/spec.md</file>
+    <file purpose="plan">projects/set-regarding-and-field-mapping-resolver-r1/plan.md</file>
+    <file purpose="project-claude">projects/set-regarding-and-field-mapping-resolver-r1/CLAUDE.md</file>
+    <file purpose="source">src/client/pcf/AssociationResolver/handlers/FieldMappingHandler.ts</file>
+    <file purpose="consumer">src/client/pcf/AssociationResolver/AssociationResolverApp.tsx</file>
+    <file purpose="destination-dir">src/client/shared/Spaarke.UI.Components/src/services/</file>
+    <file purpose="public-surface">src/client/shared/Spaarke.UI.Components/src/index.ts</file>
+    <file purpose="adr">.claude/adr/ADR-012-shared-component-library.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-012">Shared lib exports MUST go through `src/index.ts`; no reaching into internal subpaths from consumers</constraint>
+    <constraint source="project">Behavior-preserving move — any semantic change goes to a different task</constraint>
+    <constraint source="project">Verification: `grep -R "FieldMappingHandler" src/client/pcf/AssociationResolver` returns zero occurrences of local copy or stale relative import; ONLY `@spaarke/ui-components` imports remain</constraint>
+    <constraint source="spec FR-C1b-01">Symmetry with `PolymorphicResolverService` — both live in `Spaarke.UI.Components/src/services/`</constraint>
+    <constraint source="spec FR-B1-01">Correct stale spec cross-link (formerly `FieldMappingHandler.ts:10`) to reference this project's `spec.md` Appendix A. Prefer a stable `docs/architecture/…` link if that matches repo pattern.</constraint>
+    <constraint source="convention">Use `git mv` (via Bash) to preserve history</constraint>
+    <constraint source="project">TypeScript strict mode preserved. No `any`. No behavioral regressions.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>shared-lib/refactor</topic>
+    <files>
+      <file>.claude/adr/ADR-012-shared-component-library.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+    </files>
+    <patterns>
+      <pattern name="Behavior-preserving relocation" location=".claude/adr/ADR-012-shared-component-library.md">
+        Move the file with `git mv` to retain history. Update all imports in the same
+        commit. Verify tests pass in the new location BEFORE deleting anything from
+        the source package.
+      </pattern>
+      <pattern name="Public export gate" location=".claude/adr/ADR-012-shared-component-library.md">
+        The only path consumers may use is the package root export (`@spaarke/ui-components`).
+        Do not export from a subpath. Add the new type + class to `src/index.ts`.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Owner clarification C1 confirms `FieldMappingHandler` belongs in `@spaarke/ui-components`
+      for symmetry with `PolymorphicResolverService`. Today it sits in the AssociationResolver
+      PCF where it was originally authored. The relocation removes the last package-boundary
+      asymmetry between the two services and enables future consumers (Wave 5 tasks and any
+      downstream projects) to depend on it cleanly. This task is scoped as a pure move — any
+      interface changes (like FR-B4-01 optional-property extension) are a separate task (023).
+    </background>
+    <dependencies></dependencies>
+    <related-work>
+      <item>Task SRFR-023 extends `EntityLookupConfig` interface — will land in the new location.</item>
+      <item>Wave 5 AssociationResolver tasks import from `@spaarke/ui-components` after this move.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check">Verify context &lt; 60%. Read spec.md FR-B1-01, FR-C1b-01. Read current `FieldMappingHandler.ts` and consumer `AssociationResolverApp.tsx`.</step>
+    <step order="1" name="Inventory Consumers">Grep for `FieldMappingHandler` across the entire repo. Record each import site + line in notes/task-022-consumer-audit.md. Confirm the set is limited to AssociationResolver (and any tests).</step>
+    <step order="2" name="git mv the File">Move `src/client/pcf/AssociationResolver/handlers/FieldMappingHandler.ts` to `src/client/shared/Spaarke.UI.Components/src/services/FieldMappingHandler.ts` via `git mv`. Move companion test file similarly.</step>
+    <step order="3" name="Update Imports Inside Moved File">Rewrite any AssociationResolver-package-local type imports to use `@spaarke/ui-components` public exports (or relative imports within the shared lib). Ensure no path escapes `Spaarke.UI.Components/src/`.</step>
+    <step order="4" name="Correct Stale Cross-Link">The comment previously at `FieldMappingHandler.ts:10` referenced a stale spec path. Replace with a link to `projects/set-regarding-and-field-mapping-resolver-r1/spec.md#appendix-a-field-mapping-subsystem-spec`, OR a stable `docs/architecture/…` cross-link if that matches repo pattern (verify by Glob).</step>
+    <step order="5" name="Export from Public Surface">Add `export { FieldMappingHandler } from './services/FieldMappingHandler';` (and any public types) to `src/client/shared/Spaarke.UI.Components/src/index.ts`.</step>
+    <step order="6" name="Rewrite Consumer Imports">In `AssociationResolverApp.tsx` (and any other AssociationResolver files), change `./handlers/FieldMappingHandler` imports to `@spaarke/ui-components`. Confirm test files updated similarly.</step>
+    <step order="7" name="Verify Zero Local References">Run `grep -R "FieldMappingHandler" src/client/pcf/AssociationResolver` and confirm the ONLY hits are `@spaarke/ui-components` imports — no local relative paths, no leftover copies.</step>
+    <step order="8" name="Build + Test">Run `npm run build` and `npm test` in both `Spaarke.UI.Components/` and `AssociationResolver/` packages. Fix any TS or test failures.</step>
+    <step order="9" name="Step 9.5 Quality Gate">Invoke `/code-review` and `/adr-check` on the changed files. Confirm ADR-012 boundary rules satisfied.</step>
+    <step order="10" name="Update Task Status">Update TASK-INDEX.md 🔲 → ✅ for SRFR-022. Reset current-task.md for next task.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Load source, consumers, ADRs</tool>
+    <tool name="Bash">`git mv` for file move; `npm run build` and `npm test` in both packages</tool>
+    <tool name="Grep">Consumer inventory + zero-local-reference verification</tool>
+    <tool name="Edit">Import rewrites in consumers + spec cross-link correction + `src/index.ts` export</tool>
+    <tool name="Glob">Locate any docs/architecture reference candidates for the stable cross-link</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/services/FieldMappingHandler.ts (new location)</output>
+    <output type="delete">src/client/pcf/AssociationResolver/handlers/FieldMappingHandler.ts (removed)</output>
+    <output type="code">src/client/shared/Spaarke.UI.Components/src/index.ts (public export added)</output>
+    <output type="code">src/client/pcf/AssociationResolver/AssociationResolverApp.tsx (import rewrite)</output>
+    <output type="test">Migrated test file at Spaarke.UI.Components/src/services/__tests__/</output>
+    <output type="notes">projects/set-regarding-and-field-mapping-resolver-r1/notes/task-022-consumer-audit.md</output>
+    <output type="docs">projects/set-regarding-and-field-mapping-resolver-r1/tasks/TASK-INDEX.md (🔲 → ✅ for SRFR-022)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">File exists at `src/client/shared/Spaarke.UI.Components/src/services/FieldMappingHandler.ts`.</criterion>
+    <criterion testable="true">File does NOT exist at `src/client/pcf/AssociationResolver/handlers/FieldMappingHandler.ts` (verify: file absent).</criterion>
+    <criterion testable="true">`grep -R "@spaarke/ui-components" src/client/pcf/AssociationResolver` shows at least one hit referencing `FieldMappingHandler` (consumer imports via public path).</criterion>
+    <criterion testable="true">`grep -R "handlers/FieldMappingHandler" src/client/pcf/AssociationResolver` returns zero hits (no stale relative imports).</criterion>
+    <criterion testable="true">Existing FieldMappingHandler tests pass in the new location.</criterion>
+    <criterion testable="true">TypeScript compilation passes for both `Spaarke.UI.Components/` and `AssociationResolver/` packages.</criterion>
+    <criterion testable="true">Stale spec cross-link (formerly at line 10) corrected to reference this project's `spec.md` Appendix A or an equivalent stable `docs/architecture/` link.</criterion>
+    <criterion testable="true">`FieldMappingHandler` exported from `@spaarke/ui-components` public surface.</criterion>
+    <criterion testable="true">`/code-review` and `/adr-check` pass at Step 9.5.</criterion>
+  </acceptance-criteria>
+</task>

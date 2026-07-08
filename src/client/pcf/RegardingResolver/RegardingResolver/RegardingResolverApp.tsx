@@ -1,132 +1,402 @@
 /**
- * RegardingResolverApp — main UI for the polymorphic regarding picker.
+ * RegardingResolverApp — v1.4.0 polymorphic parent picker for any child entity
+ * following the N:1 polymorphic pattern.
  *
- * Layout (single-row form-line):
+ * # v1.4.0 (SRFR-045 consolidation with AssociationResolver — subgrid auto-detect)
+ *
+ * Owner clarified use case: the resolver goes on the CHILD form (e.g. sprk_todo,
+ * sprk_event, sprk_invoice, sprk_communication, sprk_kpiassessment) so the
+ * child associates to a polymorphic parent AND the parent's subgrids show
+ * the child via the entity-specific `sprk_regarding{Entity}` lookup. When
+ * the user clicks "+ new" from a parent's subgrid, Dataverse auto-populates
+ * the `sprk_regarding{Entity}` lookup via relationship mapping. This resolver
+ * must detect that pre-populated lookup at mount time and auto-write the 5
+ * denormalized fields without requiring the user to click the picker.
+ *
+ * The one AssociationResolver feature worth keeping — auto-detect from
+ * subgrid — is ported here. AssociationResolver is retired in this same
+ * task; both PCFs did essentially the same job. Key differences that
+ * disqualified AssociationResolver: field-mapping cascade is now driven
+ * from the parent side (SRFR-062 push ribbon), so the write-time
+ * FieldMappingHandler is redundant.
+ *
+ * Behavior on mount (React useEffect):
+ *   - Iterate `sprk_regarding{entityName}` field names derived from the
+ *     bound catalog (via ResolverWriteHandler.resolveAllowedCatalog).
+ *   - For each, ask `Xrm.Page.getAttribute(...).getValue()` if the lookup
+ *     has a value.
+ *   - First hit → auto-detect the parent → apply resolver fields:
+ *     * CREATE mode (no host record id): use `Xrm.Page.getAttribute(...).setValue()`
+ *       to write the 5 denormalized fields to form attributes so they save
+ *       with the record on first save. Also populate
+ *       `window.__sprk_regarding_pending__` for the SRFR-040 presave webresource fallback.
+ *     * UPDATE mode (host record id): use `context.webAPI.updateRecord(...)`
+ *       with the applyResolverFields payload (existing UPDATE-mode write path).
+ *   - Populate `selectedTarget` React state so the Row 2 hyperlink works immediately.
+ *
+ * All existing v1.3.x features preserved: refresh button, auto-refresh,
+ * showVersionFooter, PolymorphicPicker consumption, Row 2 grid + labels,
+ * name cell, title semi-bold + reduced top padding, click-time WebAPI-based
+ * hyperlink target resolution.
+ *
+ * # v1.3.6 (SRFR-043 Row 2 hyperlink WebAPI-based fix)
+ *
+ * Follow-up bug fix (owner post-v1.3.5 deploy): SRFR-042's URL-parse path
+ * silently failed. Owner + MCP data query confirmed that Dataverse HAS the
+ * `sprk_regardingrecordurl` populated correctly on host records, BUT the field
+ * is NOT on the sprk_todo form (SRFR-036 added only `sprk_regardingrecordnumber`;
+ * the URL field was never added, even hidden). Consequence: `Xrm.Page.getAttribute`
+ * returns `null` for fields not present on the form → v1.3.5 Priority 2 was
+ * never reachable → click fell through to inert Priority 3 → silent no-op
+ * (same failure mode as v1.3.4).
+ *
+ * Fix (SRFR-043 v1.3.6): replace the Xrm.Page-based URL read with a
+ * WebAPI-based host-record retrieve at click time. `context.webAPI` can read
+ * ANY field on the host record regardless of form presence, so the URL is
+ * available even though the field isn't on the form. Priority order:
+ *   1. `selectedTarget` — fresh picker selection wins (unchanged, synchronous).
+ *   2. `webApi.retrieveRecord(hostEntity, hostRecordId, '?$select=sprk_regardingrecordurl')`
+ *      → parse `etn` + `id` from the returned URL. Async — click handler is
+ *      wrapped to await this via `void resolveClickTarget(...).then(...)`.
+ *
+ * Removed from v1.3.5: (a) Xrm.Page `sprk_regardingrecordurl` attribute read
+ * (never reachable in production), (b) `sprk_regardingrecordtype.entityType`
+ * hint fallback (was inert per prior docstring warning — the lookup targets
+ * `sprk_recordtype_ref`, not the parent entity).
+ *
+ * All defensive: WebAPI rejection (record deleted, no privilege, network error)
+ * → warn + no-op. URL parse errors → warn + no-op. Never throws to the host
+ * form. Shared library + manifest properties UNCHANGED.
+ *
+ * All prior SRFR-034/035/037/039 features preserved: refresh button,
+ * auto-refresh, showVersionFooter, PolymorphicPicker consumption, Row 2 grid
+ * with labels, Name cell, title semi-bold + reduced top padding.
+ *
+ * # v1.3.4 (SRFR-039 restore Name cell + top-aligned OOB-parity labels)
+ *
+ * Owner clarification post-v1.3.3: SRFR-034 §6 over-eagerly removed the Row 2
+ * record-name cell. Owner wants the Name displayed INSIDE the PCF, next to
+ * the record-number, in a proportional 1/3 : 2/3 grid layout (Number 1/3
+ * left, Name 2/3 right). Additionally, both cells now carry OOB-parity
+ * top-aligned labels: "Regarding Number" and "Regarding Name" (small font
+ * 12px, weight 400, color #616161 — matches Dataverse OOB field-label
+ * styling). Empty cells hide entirely (no em-dash placeholder).
+ *
+ * The `regardingRecordNameField` bound manifest property (preserved for
+ * backward-compat since v1.3.1 SRFR-034 §6) is now RE-CONSUMED in Row 2's
+ * right cell as plain-text (Fluent v9 `<Text>` — NOT a Link; hyperlink is
+ * only on the number).
+ *
+ * All other SRFR-034/035/037 features preserved: refresh button,
+ * auto-refresh, showVersionFooter, PolymorphicPicker consumption, title
+ * font-weight 600 + reduced top padding.
+ *
+ * # v1.3.3 (SRFR-037 title-styling fix)
+ *
+ * Two OOB-parity corrections after owner DevTools inspection of the OOB
+ * "TRACKING" section header on the sprk_todo form:
+ *   1. Title font-weight was 400 (per SRFR-034 briefing) but OOB actually uses
+ *      600 (semi-bold) — `.pa-hw { font-weight: 600 }`. Corrected to 600.
+ *      All other title style values (Segoe UI stack, 14px, #242424,
+ *      padding 4px 0px) already matched OOB and remain unchanged.
+ *   2. Root container top padding reduced to 0 (was ~8px via
+ *      `tokens.spacingHorizontalS`). The extra top gap made the RELATED
+ *      RECORD title sit visibly below other OOB section headers on the same
+ *      form. Right/bottom/left padding preserved at `spacingHorizontalS`.
+ *
+ * Refresh button (SRFR-034), auto-refresh after picker selection (SRFR-035),
+ * `showVersionFooter` (SRFR-034), and PolymorphicPicker consumption
+ * (SRFR-030/034) all preserved.
+ *
+ * # v1.3.2 (SRFR-035 owner post-UAT polish)
+ *
+ * After a successful picker selection in UPDATE mode, the form auto-refreshes
+ * so any bound fields (e.g. `sprk_regardingrecordnumber`,
+ * `sprk_regardingrecordname` displayed elsewhere on the form) update
+ * immediately without the user clicking Save or Refresh. CREATE mode
+ * (formType === 1) is DELIBERATELY skipped — the SRFR-032 presave bridge
+ * (`__sprk_regarding_pending__` window seam) owns that path, and auto-refresh
+ * would clobber the buffered attributes. The manual refresh button added in
+ * SRFR-034 remains as an escape hatch. See `autoRefreshForm` helper below.
+ *
+ * # v1.3.1 layout (SRFR-034 owner polish pass)
  *
  *   ┌────────────────────────────────────────────────────────────────────────┐
- *   │  Record Type:  [ Matter  ▼ ]      [ Select Record 🔍 ]                │
- *   │                                                                        │
- *   │  ✅ Smith v. Jones (Matter)                  [ Open ]  [ ✕ Clear ]   │
- *   └────────────────────────────────────────────────────────────────────────┘
+ *   │  RELATED RECORD                                          [⟳] [🔎]      │  ← Row 1: OOB-styled title + refresh + lookup
+ *   ├────────────────────┬───────────────────────────────────────────────────┤
+ *   │  Regarding Number  │  Regarding Name                                    │  ← v1.3.4: top-aligned labels
+ *   │  MTR-2025-0142     │  Smith v. Jones                                    │  ← Row 2: number link (1/3) + name text (2/3)
+ *   └────────────────────┴───────────────────────────────────────────────────┘
  *
- * When read-only (FR-24), the dropdown / Select Record / Clear are hidden;
- * only the selected target's clickable link is rendered.
+ * Row 1: OOB-styled uppercase title (Segoe UI 14px / #242424 / weight 600 /
+ *        padding 4px 0px per SRFR-037 correction of SRFR-034 §4 — documented
+ *        Path A exception to ADR-021 for OOB parity). Title text is derived from the `title`
+ *        manifest input (default "RELATED RECORD") and rendered UPPERCASED
+ *        regardless of maker input case (SRFR-034 §1). Right side of Row 1
+ *        contains the refresh ToolbarButton (SRFR-034 §5 — save + refresh
+ *        handler) LEFT of the shared `PolymorphicPicker` lookup icon. The
+ *        picker's search icon is CSS-flipped horizontally (`scaleX(-1)`) to
+ *        match OOB Dataverse lookup direction (SRFR-034 §3, consumer-side
+ *        transform — shared lib unchanged per ADR-012). Clicking the lookup
+ *        opens `Xrm.Utility.lookupObjects`; the picked record flows through
+ *        `onSelect(entityType, recordId, recordName)` back into this
+ *        component's `applyRegardingSelection` handler which delegates to
+ *        `PolymorphicResolverService.applyResolverFields` per FR-A4-01.
  *
- * # HOST-only usage (binding contract — R4-112 clarification 2026-06-24)
+ * Row 2: v1.3.4 (SRFR-039) — 2-column CSS grid (`1fr 2fr`) with top-aligned
+ *        OOB-parity labels above each value. LEFT (1/3 width): "Regarding
+ *        Number" label + record-number Link (SRFR-031 modal-open handler
+ *        preserved). RIGHT (2/3 width): "Regarding Name" label + record-name
+ *        plain-text (Fluent v9 `<Text>` — NOT a Link; hyperlink is only on
+ *        the number). Empty cells hide entirely (no em-dash placeholder).
+ *        Field names for both cells are resolved from bound manifest
+ *        properties (`regardingRecordNumberField` default
+ *        `sprk_regardingrecordnumber`; `regardingRecordNameField` default
+ *        `sprk_regardingrecordname`) so makers can rebind on a new host
+ *        entity without code change (FR-A1-02).
  *
- * Bind this PCF ONLY to entities that HOST the polymorphic regarding fields
- * (`sprk_regardingrecordtype` lookup + `sprk_regardingrecordid` / `name` /
- * `url` text fields + the 11 `sprk_Regarding<X>` entity-specific lookups).
+ * Footer: Version footer (v1.3.4 • Built {YYYY-MM-DD}) — conditionally rendered
+ *         based on the new `showVersionFooter` input property (SRFR-034 §2,
+ *         default true).
  *
- * Currently host entities: `sprk_todo`, `sprk_communication` (FR-22).
+ * # Child-form binding (v1.4.0 SRFR-045)
  *
- * Do NOT bind to target entities (the things a To Do can be regarding):
- * `sprk_matter`, `sprk_project`, `sprk_event`, `sprk_invoice`,
- * `sprk_workassignment`, `sprk_budget`, `sprk_analysis`,
- * `sprk_organization`, `contact`, `sprk_document`. These entities do NOT
- * have the resolver fields, so a save will fail with HTTP 400
- * "Error identified in Payload provided by the user for Entity:''".
+ * Bind this PCF to CHILD entities in an N:1 polymorphic relationship — those
+ * hosting the polymorphic regarding fields (`sprk_regardingrecordtype` lookup +
+ * `sprk_regardingrecordid` / `name` / `url` + `sprk_regardingrecordnumber` text
+ * fields + the 11 `sprk_Regarding<X>` entity-specific lookups). Designed for
+ * child entities: `sprk_todo`, `sprk_event`, `sprk_invoice`, `sprk_communication`,
+ * `sprk_kpiassessment` (plus any future entity following the resolver pattern).
+ * When placed on a child form, the PCF associates the child to its polymorphic
+ * parent AND exposes the child in the parent's subgrids via the entity-specific
+ * `sprk_regarding{Entity}` lookup.
  *
- * If the desired UX is "from a target record, see/create related To Dos",
- * use the inverse direction: a To Do subgrid on the target form (1:N
- * relationship via the `sprk_Regarding<X>` lookup).
+ * # Read-only mode (FR-A5-01 / NFR-04) — preserved by SRFR-033 + SRFR-034
  *
- * # Behavior
+ * When read-only (either `context.parameters.readOnly.raw === true` OR
+ * `context.mode.isControlDisabled === true`, resolved by RegardingResolverHost),
+ * Row 1 hides BOTH the refresh ToolbarButton (SRFR-034 §5) AND the
+ * PolymorphicPicker lookup trigger (gated on `!readOnly` internally); the
+ * OOB-styled title text still renders. Row 2 continues to render BOTH the
+ * number Link and the plain-text Name (v1.3.4 SRFR-039 restored the Name
+ * cell). The number-hyperlink click handler stays active because opening the
+ * related record in a modal is a VIEW action — safe under read-only per
+ * FR-A5-01. handlePickerSelect has a defensive write-gate that refuses to
+ * write if a race reaches it while readOnly is true.
  *
- *  - Renders the 11-entity picker (via TODO_REGARDING_CATALOG)
- *  - Calls `applyRegardingSelection` from the local handler on selection.
- *    That handler wraps `applyResolverFields` (ADR-024 / FR-21) — there is
- *    NO field-write logic in this component.
- *  - Notifies the PCF class via `onRecordTypeChanged` so the bound lookup
- *    output is kept in sync (the form picks it up via getOutputs()).
- *  - Auto-seeds the picker on mount from the bound `regardingRecordType`
- *    lookup if it's already populated (mirrors AssociationResolver's
- *    "auto-detect existing parent" pattern).
- *  - On CREATE-mode forms (formType===1, no host record id), publishes the
- *    selection payload on `window.__sprk_regarding_pending__` so the
- *    companion OnSave handler (`sprk_todo_regarding_presave.js`) can stage
- *    the 4 companion fields into the form's pending-attribute buffer for
- *    the INSERT transaction.
+ * # CREATE-mode presave bridge (FR-A5-02)
+ *
+ * On CREATE forms (no host record id), the selection payload is published on
+ * `window.__sprk_regarding_pending__` so the companion OnSave handler
+ * (`sprk_todo_regarding_presave.js`) can stage the fields into the form's
+ * pending-attribute buffer for the INSERT transaction. SRFR-032 owns the
+ * `recordNumber` extension of that bridge payload; this task keeps the shape
+ * consistent (recordId / recordName / recordUrl / entityType).
  */
 
 import * as React from 'react';
 import {
-  Button,
-  Dropdown,
-  Label,
   Link,
   MessageBar,
   MessageBarBody,
-  Option,
-  Spinner,
   Text,
+  Toolbar,
+  ToolbarButton,
+  Tooltip,
   makeStyles,
   tokens,
 } from '@fluentui/react-components';
-import { DismissRegular, Open16Regular, SearchRegular } from '@fluentui/react-icons';
+import { ArrowClockwiseRegular } from '@fluentui/react-icons';
 import {
-  TODO_REGARDING_CATALOG,
+  PolymorphicPicker as PolymorphicPickerRaw,
   buildRecordUrl,
   resolveRecordType,
+  resolveRecordDisplayNameFieldName,
+  resolveRecordNumberFieldName,
+  type IPolymorphicPickerWebApi,
   type ITodoRegardingTargetCatalogEntry,
+  type PolymorphicPickerProps,
+  type RecordTypeCatalogEntry,
 } from '@spaarke/ui-components';
+
+/**
+ * The shared library's `.d.ts` bundle exposes `PolymorphicPicker` as
+ * `React.FC<PolymorphicPickerProps>`, but that `React.FC` is emitted against
+ * the shared lib's own `@types/react` (React 19-family), whose FC return type
+ * (`ReactNode | Promise<ReactNode>`) is incompatible with React 16's JSX
+ * element type. PCFs pin `@types/react` to 16.x per ADR-022. Cast to the React
+ * 16 `React.ComponentType` shape at the seam so the JSX use-site typechecks
+ * against the local React 16 types. Runtime is unaffected — the compiled JS
+ * module is the same regardless of which type version emitted the `.d.ts`.
+ */
+const PolymorphicPicker = PolymorphicPickerRaw as unknown as React.ComponentType<PolymorphicPickerProps>;
 import { IInputs } from './generated/ManifestTypes';
 import {
   applyRegardingSelection,
-  clearRegarding,
   resolveAllowedCatalog,
   type IRegardingSelection,
   type IResolverWriteContext,
 } from './handlers/ResolverWriteHandler';
 
 // ---------------------------------------------------------------------------
-// Styles (Fluent v9 semantic tokens only — ADR-021)
+// Build date embedded in the version footer per src/client/pcf/CLAUDE.md
+// "Version Footer Requirement (MANDATORY)". Bump alongside the CONTROL_VERSION
+// in index.ts and the manifest attributes on every release (SRFR-033).
+// ---------------------------------------------------------------------------
+
+const BUILD_DATE = '2026-07-08';
+
+// ---------------------------------------------------------------------------
+// Styles
+//
+// Note (v1.3.3): The `title` style intentionally uses hardcoded values
+// (Segoe UI stack, 14px, weight 600 (semi-bold), #242424, padding 4px 0px)
+// to match the Dataverse OOB section-header EXACTLY, as observed via owner
+// DevTools inspection of the OOB "TRACKING" section header:
+//   .pa-nn { padding: 4px 0px; }
+//   .pa-nl { font-size: 14px; }
+//   .pa-hw { font-weight: 600; }   ← corrected from 400 in SRFR-037
+//   .pa-de { font-family: "Segoe UI", "Segoe UI Web (West European)", ... }
+//   .pa-s  { color: rgb(36, 36, 36); }
+// This is a documented Path A exception to ADR-021 (semantic tokens
+// preferred): OOB parity is the visual target, not Fluent v9 theming.
+// Owner-approved (SRFR-034 spec §4, corrected by SRFR-037, extended by
+// SRFR-039 for Row 2 field labels).
+//
+// Note (v1.3.4 SRFR-039): The `fieldLabel` style uses hardcoded OOB field-
+// label values (12px, weight 400, color #616161, Segoe UI stack). This is
+// the Path A extension covering Row 2 top-aligned labels. `row2Grid` uses
+// CSS grid `1fr 2fr` for the 1/3 : 2/3 Number/Name proportional layout.
+//
+// The `container` block uses directional padding (top: 0) rather than
+// uniform `padding: tokens.spacingHorizontalS`; this removes the ~8px extra
+// gap above the title so the RELATED RECORD title aligns with OOB section
+// headers on the same form (SRFR-037).
+//
+// All other styles remain on Fluent v9 semantic tokens per ADR-021.
 // ---------------------------------------------------------------------------
 
 const useStyles = makeStyles({
   container: {
     display: 'flex',
     flexDirection: 'column',
-    gap: tokens.spacingVerticalS,
-    padding: tokens.spacingHorizontalS,
+    gap: tokens.spacingVerticalXS,
+    // SRFR-037: reduce top padding to 0 so the OOB-styled title aligns with
+    // other section headers on the host form (OOB `.pa-nn` uses `padding: 4px 0px`
+    // — the title Griffel block already carries that vertical padding, so the
+    // root container needs zero additional top gap). Right/bottom/left padding
+    // preserved at `tokens.spacingHorizontalS` (8px) for the surrounding layout.
+    paddingTop: 0,
+    paddingRight: tokens.spacingHorizontalS,
+    paddingBottom: tokens.spacingHorizontalS,
+    paddingLeft: tokens.spacingHorizontalS,
     height: '100%',
     boxSizing: 'border-box',
   },
-  searchSection: {
+  row1: {
     display: 'flex',
-    gap: tokens.spacingHorizontalS,
-    alignItems: 'flex-end',
-    flexWrap: 'wrap',
+    alignItems: 'center',
+    justifyContent: 'space-between',
+    minHeight: '32px',
   },
-  dropdownWrapper: {
+  // Row-1 title — Dataverse OOB section-header parity (SRFR-034 §4, corrected
+  // by SRFR-037 to font-weight 600 per actual OOB DevTools inspection).
+  // SRFR-051 (v1.4.3): top padding reduced from 4px → 2px per owner screenshot
+  // comparison with adjacent OOB "New Section" header — the OOB baseline sits
+  // 2px higher than v1.4.2.
+  title: {
+    fontFamily:
+      '"Segoe UI", "Segoe UI Web (West European)", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", sans-serif',
+    fontSize: '14px',
+    fontWeight: 600,
+    color: '#242424',
+    padding: '2px 0px 4px',
+    letterSpacing: 0,
+    textTransform: 'uppercase',
+  },
+  // Row-1 actions area — refresh (left) + PolymorphicPicker (right).
+  row1Actions: {
+    display: 'flex',
+    alignItems: 'center',
+    gap: tokens.spacingHorizontalXXS,
+  },
+  refreshToolbar: {
+    paddingLeft: 0,
+    paddingRight: 0,
+    minHeight: 'auto',
+  },
+  // Flip the shared PolymorphicPicker's trigger icon horizontally so the
+  // magnifier handle points toward the top-left, matching the OOB Dataverse
+  // lookup icon direction (SRFR-034 §3). Consumer-side CSS transform —
+  // shared component is unchanged (ADR-012).
+  //
+  // Also visually suppress the picker's internal title span: our own OOB-styled
+  // title (rendered above) is the visible label; the picker's title is kept
+  // in the DOM for accessibility (aria-label + tooltip content wiring) but
+  // hidden with `display: none` on its span. The picker's title text is still
+  // used for the tooltip / aria-label wiring inside the shared component.
+  pickerContainer: {
+    '& [data-testid="polymorphic-picker-title"]': {
+      display: 'none',
+    },
+    '& [data-testid="polymorphic-picker-trigger"] svg': {
+      transform: 'scaleX(-1)',
+    },
+  },
+  // Row-2 — v1.3.4 (SRFR-039): two-column grid. Number cell = 1/3 width
+  // (left), Name cell = 2/3 width (right). Empty cells hide entirely.
+  row2: {
+    display: 'grid',
+    gridTemplateColumns: '1fr 2fr',
+    gap: tokens.spacingHorizontalS,
+    padding: `${tokens.spacingVerticalXS} ${tokens.spacingHorizontalXS}`,
+    minHeight: '24px',
+    alignItems: 'start',
+  },
+  // Per-cell wrapper: label above, value below (flex column).
+  numberCell: {
     display: 'flex',
     flexDirection: 'column',
     gap: tokens.spacingVerticalXXS,
+    minWidth: 0,
   },
-  dropdown: {
-    minWidth: '200px',
-  },
-  selectedRecord: {
+  nameCell: {
     display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-    padding: tokens.spacingVerticalS,
-    backgroundColor: tokens.colorNeutralBackground2,
-    borderRadius: tokens.borderRadiusMedium,
+    flexDirection: 'column',
+    gap: tokens.spacingVerticalXXS,
+    minWidth: 0,
   },
-  selectedLabel: {
+  // Row-2 field label — OOB-parity styling (SRFR-039 Path A extension).
+  // Small font (12px), regular weight (400), gray color (#616161), Segoe UI
+  // stack. Left-aligned inherently via flex column. Documented exception
+  // to ADR-021 semantic tokens for OOB parity.
+  fieldLabel: {
+    fontFamily:
+      '"Segoe UI", "Segoe UI Web (West European)", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", sans-serif',
+    fontSize: '12px',
+    fontWeight: 400,
+    color: '#616161',
+    lineHeight: '16px',
+  },
+  recordNumber: {
     fontWeight: tokens.fontWeightSemibold,
   },
-  readOnlyDisplay: {
-    display: 'flex',
-    alignItems: 'center',
-    gap: tokens.spacingHorizontalS,
-    padding: tokens.spacingVerticalS,
+  // Row-2 record-name value — plain text (NOT a Link). Segoe UI 14px, weight
+  // 400, color #242424 — matches OOB body-text on the same form. Truncate
+  // with ellipsis on overflow so long names don't blow out the cell.
+  recordName: {
+    fontFamily:
+      '"Segoe UI", "Segoe UI Web (West European)", -apple-system, BlinkMacSystemFont, Roboto, "Helvetica Neue", sans-serif',
+    fontSize: '14px',
+    fontWeight: 400,
+    color: '#242424',
+    overflow: 'hidden',
+    textOverflow: 'ellipsis',
+    whiteSpace: 'nowrap',
   },
   footer: {
     marginTop: 'auto',
     paddingTop: tokens.spacingVerticalS,
-    borderTop: `1px solid ${tokens.colorNeutralStroke1}`,
     display: 'flex',
     justifyContent: 'flex-end',
     alignItems: 'center',
@@ -148,11 +418,19 @@ const useStyles = makeStyles({
 function getXrm():
   | {
       Utility?: {
-        lookupObjects: (opts: unknown) => Promise<{ id: string; name: string; entityType?: string }[]>;
         getGlobalContext?: () => unknown;
       };
-      Navigation?: { openForm: (opts: unknown) => void };
       Page?: Xrm.Page;
+      Navigation?: {
+        navigateTo?: (
+          pageInput: { pageType: 'entityrecord'; entityName: string; entityId: string },
+          navigationOptions: {
+            target: 1 | 2;
+            width: { value: number; unit: '%' | 'px' };
+            height: { value: number; unit: '%' | 'px' };
+          }
+        ) => Promise<unknown>;
+      };
     }
   | undefined {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
@@ -160,17 +438,210 @@ function getXrm():
   return w.Xrm ?? w.parent?.Xrm ?? w.top?.Xrm;
 }
 
-/** Open the host record's regarding parent in a new form. */
-function navigateToRecord(entityLogicalName: string, recordId: string): void {
+/**
+ * v1.3.2 — Auto-refresh helper (SRFR-035).
+ *
+ * Called after a successful picker selection so the form updates
+ * transparently for the user. `applyResolverFields` already committed the
+ * writes via `webApi.updateRecord`, so this helper's job is to (a) flush any
+ * pending form-side bound-property writes with `data.entity.save()` and then
+ * (b) pull server-side updated values with `data.refresh(true)`.
+ *
+ * CREATE mode gate (formType === 1): CREATE mode is DELIBERATELY skipped
+ * because the SRFR-032 presave bridge (`__sprk_regarding_pending__` window
+ * seam) owns that path. On CREATE the host record does not yet exist —
+ * calling save() would fire the OnSave chain (including the presave webresource
+ * that stages the resolver payload into the form buffer for INSERT), which we
+ * do NOT want as a side effect of picker selection; refresh(true) would then
+ * clobber the buffered attributes and break the INSERT transaction.
+ *
+ * Xrm-unavailable path: silent-continue with a warn. Test harness and canvas
+ * app both lack Xrm; rejecting here would surface as unhandled promise
+ * rejection breaking test infra.
+ *
+ * Any exception thrown by save/refresh is caught and warned — the manual
+ * refresh button added in SRFR-034 remains as an escape hatch for the user.
+ */
+async function autoRefreshForm(formType: number): Promise<void> {
+  // Skip auto-refresh on CREATE (formType === 1) — presave bridge handles that path.
+  if (formType === 1) return;
+
   const xrm = getXrm();
-  if (xrm?.Navigation?.openForm) {
-    xrm.Navigation.openForm({
-      entityName: entityLogicalName,
-      entityId: recordId.replace(/[{}]/g, ''),
-    });
-  } else {
-    console.warn('[RegardingResolver] Xrm.Navigation.openForm not available');
+  if (!xrm) {
+    console.warn('[RegardingResolver] Auto-refresh skipped: Xrm unavailable (test harness or canvas app).');
+    return;
   }
+
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const data = (xrm.Page as any)?.data;
+    if (!data) return;
+
+    // Flush any pending form-side bound-property writes before refresh.
+    const save = data.entity?.save;
+    if (typeof save === 'function') {
+      const saveResult = save.call(data.entity);
+      if (saveResult && typeof (saveResult as Promise<unknown>).then === 'function') {
+        await saveResult;
+      }
+    }
+
+    // Refresh to pull updated field values from the server.
+    const refresh = data.refresh;
+    if (typeof refresh === 'function') {
+      const refreshResult = refresh.call(data, true);
+      if (refreshResult && typeof (refreshResult as Promise<unknown>).then === 'function') {
+        await refreshResult;
+      }
+    }
+  } catch (err) {
+    // Silent — user still has the manual refresh button (SRFR-034) as escape hatch.
+    console.warn('[RegardingResolver] Auto-refresh after selection failed:', err);
+  }
+}
+
+/**
+ * Resolve the current form type via `Xrm.Page.ui.getFormType()`.
+ * Return values: 1 = CREATE, 2 = UPDATE, 3 = READONLY, 4 = DISABLED, 6 = BULKEDIT.
+ * Defaults to UPDATE (2) when Xrm.Page.ui or getFormType is unavailable
+ * (test harness), so the auto-refresh gate opens rather than closes — the
+ * inner Xrm-unavailable check in autoRefreshForm covers the actual no-op.
+ */
+function getFormType(): number {
+  const xrm = getXrm();
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const ui = (xrm?.Page as any)?.ui;
+    const ft = ui?.getFormType?.();
+    if (typeof ft === 'number') return ft;
+  } catch {
+    /* ignore */
+  }
+  return 2; // Default UPDATE
+}
+
+/**
+ * v1.3.1 — Refresh handler wired to a new toolbar button (SRFR-034 §5).
+ *
+ * Behavior:
+ *   1. Saves the current form (`Xrm.Page.data.entity.save()`) so any dirty
+ *      buffered attributes commit before refreshing.
+ *   2. Refreshes the form (`Xrm.Page.data.refresh(true)`) — the `true` arg
+ *      re-fetches from the server (parity with the OOB "Refresh" ribbon
+ *      command).
+ *   3. If Xrm is unavailable (test harness / canvas app), falls back to
+ *      `window.location.reload()` so the user still gets a refresh.
+ *   4. Any failure is caught and warned — the form host must NEVER crash
+ *      because a save error propagated (parity with the existing modal-open
+ *      handler's defensive posture).
+ */
+async function handleRefreshInternal(): Promise<void> {
+  const xrm = getXrm();
+  try {
+    // eslint-disable-next-line @typescript-eslint/no-explicit-any
+    const data = (xrm?.Page as any)?.data;
+    const save = data?.entity?.save;
+    if (typeof save === 'function') {
+      // save() returns a promise in modern MDA; older forms return void.
+      const saveResult = save.call(data.entity);
+      if (saveResult && typeof (saveResult as Promise<unknown>).then === 'function') {
+        await saveResult;
+      }
+    }
+    const refresh = data?.refresh;
+    if (typeof refresh === 'function') {
+      const refreshResult = refresh.call(data, true);
+      if (refreshResult && typeof (refreshResult as Promise<unknown>).then === 'function') {
+        await refreshResult;
+      }
+      return;
+    }
+    // Fallback — no MDA refresh API available.
+    if (typeof window !== 'undefined' && typeof window.location?.reload === 'function') {
+      window.location.reload();
+    }
+  } catch (err) {
+    // Defensive: never crash the host form.
+    console.warn('[RegardingResolver] Refresh failed:', err);
+  }
+}
+
+/**
+ * v1.3.6 (SRFR-043) — Click-time click-target resolution helper.
+ *
+ * Returns the `entityName` + `entityId` the Row 2 record-number hyperlink should
+ * open. Fixes the pre-loaded-record no-op bug (originally observed in v1.3.4;
+ * v1.3.5's URL-parse-via-Xrm.Page path never fired in production because the
+ * `sprk_regardingrecordurl` field is not on the sprk_todo form, so
+ * `Xrm.Page.getAttribute` returned null — see file docstring for full history).
+ *
+ * Priority (fresh selection wins over pre-loaded state):
+ *   1. `selectedTarget` — populated by the PolymorphicPicker onSelect callback.
+ *      Synchronous, no WebAPI call.
+ *   2. `webApi.retrieveRecord(hostEntity, hostRecordId, '?$select=sprk_regardingrecordurl')`
+ *      → parse `etn` + `id` from the returned URL. Async. Works regardless of
+ *      whether the URL field is on the form because `context.webAPI` reads
+ *      DIRECTLY from the record row, not from form attributes.
+ *
+ * Returns `null` when the target cannot be resolved. Defensive throughout:
+ * WebAPI rejection (record deleted, no privilege, network error) → return null.
+ * Malformed URL → return null. Never throws to the host form.
+ *
+ * @param selectedTarget - Fresh picker selection state (populated by onSelect).
+ * @param webApi - The PCF's context.webAPI (Xrm.WebApi-compatible).
+ * @param hostEntity - Host entity logical name (from context.parameters.entity.raw).
+ * @param hostRecordId - Host record GUID (from getHostRecordId()).
+ */
+async function resolveClickTarget(
+  selectedTarget: IRegardingSelection | null,
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  webApi: any,
+  hostEntity: string,
+  hostRecordId: string | undefined
+): Promise<{ entityName: string; entityId: string } | null> {
+  // Priority 1 — fresh picker selection wins. Synchronous, no WebAPI call.
+  if (selectedTarget?.entityType && selectedTarget?.recordId) {
+    const cleanId = String(selectedTarget.recordId).replace(/[{}]/g, '');
+    if (cleanId.length > 0) {
+      return { entityName: selectedTarget.entityType, entityId: cleanId };
+    }
+  }
+
+  // Priority 2 — WebAPI retrieve of sprk_regardingrecordurl on the host record.
+  // Requires hostEntity + hostRecordId (pre-loaded UPDATE-mode form). CREATE
+  // mode has no host record id so this path opens for UPDATE only.
+  if (!hostEntity || !hostRecordId) return null;
+  if (!webApi || typeof webApi.retrieveRecord !== 'function') return null;
+
+  try {
+    const result = await webApi.retrieveRecord(hostEntity, hostRecordId, '?$select=sprk_regardingrecordurl');
+    const urlValue = result?.sprk_regardingrecordurl;
+    if (typeof urlValue === 'string' && urlValue.length > 0) {
+      try {
+        // URL constructor handles absolute URLs; the stored value is
+        // `https://<orgurl>/main.aspx?etn=<entity>&id=<guid>` per the shared
+        // buildRecordUrl helper (used by applyResolverFields on write).
+        const parsed = new URL(urlValue);
+        const etn = parsed.searchParams.get('etn');
+        const id = parsed.searchParams.get('id');
+        if (etn && id) {
+          const cleanId = id.replace(/[{}]/g, '');
+          if (cleanId.length > 0) {
+            return { entityName: etn, entityId: cleanId };
+          }
+        }
+      } catch {
+        // Malformed URL — return null. Warn is intentionally silent here to
+        // avoid noisy logs for admin-edited records; the caller warns on null.
+      }
+    }
+  } catch (err) {
+    // Record deleted, no privilege, or network error. Warn (developer-visible)
+    // but do not throw — the host form must never crash from a click.
+    console.warn('[RegardingResolver] webApi.retrieveRecord(sprk_regardingrecordurl) rejected:', err);
+  }
+
+  return null;
 }
 
 /** Try to resolve the host record's GUID from `Xrm.Page`. */
@@ -187,6 +658,121 @@ function getHostRecordId(): string | undefined {
     /* ignore */
   }
   return undefined;
+}
+
+/**
+ * v1.4.0 (SRFR-045) — Detect a pre-populated `sprk_regarding{Entity}` lookup on
+ * the child form (subgrid-driven "+ new" flow).
+ *
+ * When a user clicks "+ new" from a parent's subgrid (e.g. Matter subgrid of
+ * Todos), Dataverse auto-populates the entity-specific `sprk_regarding{Entity}`
+ * lookup via relationship mapping. This helper iterates the catalog's
+ * lookupAttribute fields, checks `Xrm.Page.getAttribute(...).getValue()`, and
+ * returns the first hit as a synthesized selection payload.
+ *
+ * Returns `null` when Xrm.Page is unavailable OR no lookup is populated. All
+ * paths defensive — never throws to the host form.
+ *
+ * @param catalog - The allowed catalog subset (from resolveAllowedCatalog).
+ */
+function detectPrePopulatedParent(
+  catalog: ReadonlyArray<ITodoRegardingTargetCatalogEntry>
+): { entityType: string; recordId: string; recordName: string; lookupAttribute: string } | null {
+  const xrm = getXrm();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const page = xrm?.Page as any;
+  if (!page || typeof page.getAttribute !== 'function') {
+    return null;
+  }
+
+  for (const entry of catalog) {
+    try {
+      const attr = page.getAttribute(entry.lookupAttribute);
+      if (!attr) continue;
+      const value = attr.getValue?.();
+      if (value && Array.isArray(value) && value.length > 0) {
+        const lookupValue = value[0];
+        if (lookupValue && typeof lookupValue.id === 'string' && lookupValue.id.length > 0) {
+          return {
+            entityType: entry.entityType,
+            recordId: String(lookupValue.id).replace(/[{}]/g, ''),
+            recordName: typeof lookupValue.name === 'string' ? lookupValue.name : '',
+            lookupAttribute: entry.lookupAttribute,
+          };
+        }
+      }
+    } catch (err) {
+      console.warn(`[RegardingResolver] Error probing ${entry.lookupAttribute} for auto-detect:`, err);
+    }
+  }
+  return null;
+}
+
+/**
+ * v1.4.0 (SRFR-045) — Xrm.Page setValue helpers for CREATE-mode auto-detect.
+ *
+ * When a child form is in CREATE mode (no host record id yet), the write
+ * pathway is DIFFERENT from UPDATE mode: instead of calling
+ * `webApi.updateRecord`, we mutate the form's pending-attribute buffer via
+ * `Xrm.Page.getAttribute(...).setValue()` so the fields ride the INSERT
+ * transaction. This mirrors the AssociationResolver setLookupValue /
+ * setTextValue helpers (see AssociationResolver/handlers/RecordSelectionHandler.ts
+ * lines 204-287, from which this is adapted per SRFR-045).
+ *
+ * Defensive throughout: field not on form → warn + return false. Xrm
+ * unavailable → warn + return false. Never throws to the host form.
+ */
+function setFormLookupValue(fieldName: string, entityType: string, id: string, name: string): boolean {
+  const xrm = getXrm();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const page = xrm?.Page as any;
+  if (!page || typeof page.getAttribute !== 'function') return false;
+  try {
+    const attr = page.getAttribute(fieldName);
+    if (!attr) return false;
+    const cleanId = String(id).replace(/[{}]/g, '');
+    attr.setValue([{ id: cleanId, name, entityType }]);
+    return true;
+  } catch (err) {
+    console.warn(`[RegardingResolver] setFormLookupValue(${fieldName}) failed:`, err);
+    return false;
+  }
+}
+
+function setFormTextValue(fieldName: string, value: string | null): boolean {
+  const xrm = getXrm();
+  // eslint-disable-next-line @typescript-eslint/no-explicit-any
+  const page = xrm?.Page as any;
+  if (!page || typeof page.getAttribute !== 'function') return false;
+  try {
+    const attr = page.getAttribute(fieldName);
+    if (!attr) return false;
+    attr.setValue(value);
+    return true;
+  } catch (err) {
+    console.warn(`[RegardingResolver] setFormTextValue(${fieldName}) failed:`, err);
+    return false;
+  }
+}
+
+/**
+ * Adapt the internal `TODO_REGARDING_CATALOG` shape (used by the write path
+ * per ADR-024) to the shared `RecordTypeCatalogEntry` shape consumed by
+ * `PolymorphicPicker`. The shared picker only needs a stable key, display
+ * label, and logical name; the recordTypeRefId is derived from `entityType`
+ * (a stable string) since the picker doesn't touch the actual
+ * `sprk_recordtype_ref` GUID.
+ */
+function adaptCatalogForPicker(catalog: ReadonlyArray<ITodoRegardingTargetCatalogEntry>): RecordTypeCatalogEntry[] {
+  return catalog.map(entry => ({
+    recordTypeRefId: entry.entityType,
+    displayName: entry.entityType,
+    logicalName: entry.entityType,
+    regardingField: entry.lookupAttribute,
+    // regardingRecordNumberField intentionally omitted at the adapter layer —
+    // the write path (applyResolverFields) resolves this from
+    // sprk_recordtype_ref.sprk_regardingrecordnumberfield per FR-A4-01.
+  }));
 }
 
 // ---------------------------------------------------------------------------
@@ -211,40 +797,51 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
   // Host entity (FR-22 lever — single config point, no code branching).
   const hostEntity = (context.parameters.entity?.raw ?? '').trim();
 
+  // Row-1 title from manifest input property (FR-A1-01). Falls back to the
+  // default "RELATED RECORD" if the maker omits the property or clears it.
+  // v1.3.1 (SRFR-034 §1 + §4): Uppercase unconditionally in the app to match
+  // Dataverse OOB section-header convention, regardless of maker input
+  // case. Belt-and-suspenders with the manifest default "RELATED RECORD".
+  const titleRaw = context.parameters.title?.raw ?? null;
+  const titleInput = titleRaw && titleRaw.trim().length > 0 ? titleRaw.trim() : 'RELATED RECORD';
+  const title = titleInput.toUpperCase();
+
+  // v1.3.1 (SRFR-034 §2): version-footer visibility toggle. Defaults to true
+  // when the maker omits the property or sets it to null; only an explicit
+  // `false` hides the footer.
+  const showVersionFooterRaw = context.parameters.showVersionFooter?.raw;
+  const showVersionFooter = showVersionFooterRaw !== false;
+
+  // Row-2 record-number — read from bound manifest property (FR-A1-02).
+  // Value comes straight from the host record's column value as the framework
+  // passes them. When the maker binds to a different column (default
+  // `sprk_regardingrecordnumber`), the raw already reflects that column's
+  // value; we render as-is.
+  //
+  // v1.3.4 (SRFR-039): The `regardingRecordNameField` bound property is now
+  // RE-CONSUMED in Row 2's right cell as plain-text (Fluent v9 `<Text>` —
+  // NOT a Link; hyperlink is only on the number). This restores the Name
+  // display SRFR-034 §6 removed, per owner clarification.
+  const boundRecordNumber = context.parameters.regardingRecordNumberField?.raw ?? null;
+  const boundRecordName = context.parameters.regardingRecordNameField?.raw ?? null;
+
   // Allowed regarding targets (subset of TODO_REGARDING_CATALOG).
   const catalog = React.useMemo<readonly ITodoRegardingTargetCatalogEntry[]>(
     () => resolveAllowedCatalog(context.parameters.regardingTargets?.raw),
     [context.parameters.regardingTargets?.raw]
   );
 
-  // The default selection comes from the bound `regardingRecordType` lookup if set.
-  // The bound lookup is a Lookup.Simple to sprk_recordtype_ref; we use its `name`
-  // (display name) to display the existing selection, but the catalog entry for
-  // a given record type is keyed on the parent entity logical name. Since we don't
-  // have that mapping from the lookup alone, we render whatever name is bound; the
-  // user can re-select to overwrite.
-  const boundRecordType = (() => {
-    const raw = context.parameters.regardingRecordType?.raw;
-    if (!raw) return null;
-    const ref = Array.isArray(raw) ? raw[0] : raw;
-    if (!ref || !ref.id) return null;
-    return { id: ref.id, name: ref.name ?? '' };
-  })();
+  const pickerCatalog = React.useMemo<RecordTypeCatalogEntry[]>(() => adaptCatalogForPicker(catalog), [catalog]);
 
-  const [selectedEntityType, setSelectedEntityType] = React.useState<string>(() => catalog[0]?.entityType ?? '');
-  const [selectedTarget, setSelectedTarget] = React.useState<IRegardingSelection | null>(null);
-  const [isLookupPending, setIsLookupPending] = React.useState(false);
-  const [isWriting, setIsWriting] = React.useState(false);
+  // Local transient state — errors + write-in-flight indicator.
   const [error, setError] = React.useState<string | null>(null);
-  const [statusMsg, setStatusMsg] = React.useState<string | null>(null);
+  const [isWriting, setIsWriting] = React.useState(false);
+  const [selectedTarget, setSelectedTarget] = React.useState<IRegardingSelection | null>(null);
 
-  // Sync default when catalog changes (e.g. user changes the regardingTargets input).
-  React.useEffect(() => {
-    if (!catalog.find(c => c.entityType === selectedEntityType)) {
-      setSelectedEntityType(catalog[0]?.entityType ?? '');
-    }
-    // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [catalog]);
+  // v1.4.0 (SRFR-045) — guard against double-firing auto-detect if React
+  // re-renders during the effect. `useRef` persists across renders without
+  // triggering re-renders itself.
+  const autoDetectFiredRef = React.useRef<boolean>(false);
 
   // ---------------- Write context ----------------
   const writeCtx = React.useMemo<IResolverWriteContext>(
@@ -257,305 +854,623 @@ export const RegardingResolverApp: React.FC<IRegardingResolverAppProps> = ({
     [context.webAPI, hostEntity]
   );
 
-  // ---------------- Handlers ----------------
-
-  const handleEntityTypeChange = (_ev: unknown, data: { optionValue?: string }): void => {
-    if (data.optionValue) {
-      setSelectedEntityType(data.optionValue);
-      setError(null);
-      setStatusMsg(null);
-    }
-  };
-
-  const handleSelectRecord = async (): Promise<void> => {
-    // FR-24 — Defensive write-gate: in read-only mode the edit UI is not
-    // rendered, but if a race or programmatic invocation reaches this handler
-    // (e.g. transition during prop change), refuse to write anything.
-    // This is belt-and-suspenders alongside the early read-only render branch.
+  // ---------------- v1.4.0 (SRFR-045) Auto-detect from subgrid ----------------
+  //
+  // On mount, detect if any bound `sprk_regarding{Entity}` lookup is
+  // pre-populated (subgrid-driven "+ new" flow). First hit → resolve the
+  // Record Type + record-number via shared primitives → write the 5
+  // denormalized fields. CREATE mode uses setValue on form attributes;
+  // UPDATE mode uses updateRecord (existing applyRegardingSelection path).
+  //
+  // The effect runs once per mount (autoDetectFiredRef guard). Read-only
+  // mode SKIPS auto-detect — the resolver fields shouldn't be mutated on
+  // a read-only form. Errors are swallowed with warn only — never crash
+  // the host form.
+  React.useEffect(() => {
+    if (autoDetectFiredRef.current) return;
     if (readOnly) {
-      console.warn('[RegardingResolver] handleSelectRecord invoked in read-only mode — write skipped (FR-24).');
-      return;
-    }
-    if (!selectedEntityType) {
-      setError('Please select an entity type first.');
+      autoDetectFiredRef.current = true;
       return;
     }
     if (!hostEntity) {
-      setError("Host entity is not configured (manifest 'entity' input property is empty).");
+      autoDetectFiredRef.current = true;
       return;
     }
 
-    setIsLookupPending(true);
-    setError(null);
-    setStatusMsg(null);
+    const detected = detectPrePopulatedParent(catalog);
+    if (!detected) {
+      autoDetectFiredRef.current = true;
+      return;
+    }
+    autoDetectFiredRef.current = true;
 
-    try {
-      const xrm = getXrm();
-      if (!xrm?.Utility?.lookupObjects) {
-        throw new Error('Xrm.Utility.lookupObjects is not available.');
-      }
+    const runAutoDetect = async (): Promise<void> => {
+      const hostRecordId = getHostRecordId();
+      const isCreateMode = !hostRecordId;
 
-      const results = await xrm.Utility.lookupObjects({
-        defaultEntityType: selectedEntityType,
-        entityTypes: [selectedEntityType],
-        allowMultiSelect: false,
+      console.log('[RegardingResolver auto-detect] fired', {
+        hostEntity,
+        hostRecordId: hostRecordId ?? '(none — CREATE mode)',
+        detected: {
+          entityType: detected.entityType,
+          recordId: detected.recordId,
+          recordName: detected.recordName,
+          lookupAttribute: detected.lookupAttribute,
+        },
+        mode: isCreateMode ? 'CREATE' : 'UPDATE',
       });
 
-      if (!results || results.length === 0) {
-        // User cancelled lookup.
+      try {
+        if (isCreateMode) {
+          // ============================================================
+          // v1.4.6 (SRFR-057) — Two-phase CREATE-mode auto-detect writes
+          // ============================================================
+          //
+          // Root cause of v1.4.5 UAT bug: the previous implementation
+          // gated ALL setValue calls behind three sequential `await`
+          // calls (resolveRecordType, resolveRecordDisplayNameFieldName,
+          // retrieveMultipleRecords). If the user hit Save before all
+          // awaits resolved (or if any await threw), NONE of the fields
+          // fired. Screenshot from 2026-07-08 UAT confirmed: subgrid
+          // "+ New" created an Event where `_sprk_regardingproject_value`
+          // was populated (by Dataverse relationship mapping) but all 5
+          // resolver fields were NULL.
+          //
+          // Two-phase fix:
+          //
+          //   Phase 1 (immediate / synchronous): write the 3 always-known
+          //   fields — `sprk_regardingrecordid`, `sprk_regardingrecordname`
+          //   (using detected.recordName as the baseline; may be the
+          //   parent's Primary Name which for sprk_matter/sprk_project is
+          //   the number, but it's SOMETHING — better than blank), and
+          //   `sprk_regardingrecordurl` (buildRecordUrl is synchronous).
+          //   Populate `selectedTarget` React state + the SRFR-040
+          //   presave bridge. This runs BEFORE any await so a fast-save
+          //   still captures 3-of-5 fields with reasonable defaults.
+          //
+          //   Phase 2 (async catch-up): resolve `sprk_regardingrecordtype`
+          //   (as soon as resolveRecordType returns — writes as its own
+          //   micro-step), then in parallel resolve display-name AND
+          //   record-number. When those come back, RE-write recordname
+          //   if it differs (polish) and write recordnumber if resolved.
+          //   Also update the presave bridge with the polished values.
+          //
+          // Key invariant: users who save quickly get all 5 fields with
+          // reasonable defaults; the display-name refinement is a
+          // "polish" that happens if the user is still on the form.
+          // ============================================================
+
+          // --- Phase 1: immediate, synchronous writes ---
+          const recordUrl = buildRecordUrl(detected.entityType, detected.recordId);
+
+          console.log('[RegardingResolver auto-detect] Phase 1 begin', {
+            field: 'sprk_regardingrecordid',
+            value: detected.recordId,
+          });
+          setFormTextValue('sprk_regardingrecordid', detected.recordId);
+
+          console.log('[RegardingResolver auto-detect] Phase 1', {
+            field: 'sprk_regardingrecordname',
+            value: detected.recordName,
+            note: 'baseline value — may be refined in Phase 2',
+          });
+          setFormTextValue('sprk_regardingrecordname', detected.recordName);
+
+          console.log('[RegardingResolver auto-detect] Phase 1', {
+            field: 'sprk_regardingrecordurl',
+            value: recordUrl,
+          });
+          setFormTextValue('sprk_regardingrecordurl', recordUrl);
+
+          // Populate selectedTarget so Row 2 hyperlink works immediately
+          // (even before Phase 2 completes).
+          setSelectedTarget({
+            entityType: detected.entityType,
+            recordId: detected.recordId,
+            recordName: detected.recordName,
+          });
+
+          // Populate SRFR-040 presave bridge with baseline values. Phase 2
+          // will re-write this global with polished values if resolution
+          // completes before the user saves.
+          (
+            window as unknown as {
+              __sprk_regarding_pending__?: Record<string, unknown>;
+            }
+          ).__sprk_regarding_pending__ = {
+            hostEntity,
+            entityType: detected.entityType,
+            entitySet: undefined,
+            lookupAttribute: detected.lookupAttribute,
+            recordId: detected.recordId,
+            recordName: detected.recordName,
+            recordUrl,
+            recordNumber: null,
+          };
+
+          console.log('[RegardingResolver auto-detect] Phase 1 complete', {
+            wrote: ['sprk_regardingrecordid', 'sprk_regardingrecordname', 'sprk_regardingrecordurl'],
+            selectedTarget: 'populated',
+            __sprk_regarding_pending__: 'populated with baseline values',
+          });
+
+          // --- Phase 2a: resolveRecordType + write recordtype lookup ---
+          // Run this on its own so it fires as soon as resolveRecordType
+          // returns — independent of display-name / record-number
+          // resolution latency.
+          try {
+            const recordType = await resolveRecordType(writeCtx.webApi, detected.entityType);
+            if (recordType) {
+              console.log('[RegardingResolver auto-detect] Phase 2a', {
+                field: 'sprk_regardingrecordtype',
+                recordType,
+              });
+              setFormLookupValue('sprk_regardingrecordtype', 'sprk_recordtype_ref', recordType.id, recordType.name);
+              // Notify PCF class so the bound lookup output tracks
+              onRecordTypeChanged({
+                id: recordType.id,
+                name: recordType.name,
+                entityType: 'sprk_recordtype_ref',
+              });
+            } else {
+              console.warn(
+                '[RegardingResolver auto-detect] Phase 2a: resolveRecordType returned null — sprk_regardingrecordtype left blank (NFR-06 graceful-blank)'
+              );
+            }
+          } catch (rtErr) {
+            console.warn('[RegardingResolver auto-detect] Phase 2a: resolveRecordType failed:', rtErr);
+          }
+
+          // --- Phase 2b: async display-name resolution (polish) ---
+          // Fire in parallel with record-number resolution below. If this
+          // completes and yields a different value than detected.recordName,
+          // RE-write sprk_regardingrecordname AND update the bridge.
+          const displayNamePromise = (async (): Promise<string | null> => {
+            try {
+              const displayField = await resolveRecordDisplayNameFieldName(writeCtx.webApi, detected.entityType);
+              if (!displayField) return null;
+              const primaryIdAttr = `${detected.entityType}id`;
+              const query = `?$filter=${primaryIdAttr} eq ${detected.recordId}` + `&$select=${displayField}&$top=1`;
+              const result = await writeCtx.webApi.retrieveMultipleRecords(detected.entityType, query, 1);
+              const raw = result.entities?.[0]?.[displayField];
+              if (typeof raw === 'string' && raw.trim().length > 0) {
+                return raw.trim();
+              }
+              return null;
+            } catch (err) {
+              console.warn(
+                '[RegardingResolver auto-detect] Phase 2b: display-name resolution failed; keeping baseline (NFR-06 graceful-blank):',
+                err
+              );
+              return null;
+            }
+          })();
+
+          // --- Phase 2c: async record-number resolution (polish) ---
+          // If the target entity's catalog nominates a record-number field
+          // AND that field has a value, write it to
+          // `sprk_regardingrecordnumber` AND update the bridge so the
+          // presave webresource still writes it on save.
+          const recordNumberPromise = (async (): Promise<string | null> => {
+            try {
+              const numberField = await resolveRecordNumberFieldName(writeCtx.webApi, detected.entityType);
+              if (!numberField) return null;
+              const primaryIdAttr = `${detected.entityType}id`;
+              const query = `?$filter=${primaryIdAttr} eq ${detected.recordId}` + `&$select=${numberField}&$top=1`;
+              const result = await writeCtx.webApi.retrieveMultipleRecords(detected.entityType, query, 1);
+              const raw = result.entities?.[0]?.[numberField];
+              if (typeof raw === 'string' && raw.trim().length > 0) {
+                return raw.trim();
+              }
+              if (typeof raw === 'number') {
+                return String(raw);
+              }
+              return null;
+            } catch (err) {
+              console.warn(
+                '[RegardingResolver auto-detect] Phase 2c: record-number resolution failed; keeping baseline null (NFR-06 graceful-blank):',
+                err
+              );
+              return null;
+            }
+          })();
+
+          const [resolvedDisplayName, resolvedRecordNumber] = await Promise.all([
+            displayNamePromise,
+            recordNumberPromise,
+          ]);
+
+          console.log('[RegardingResolver auto-detect] Phase 2 async catch-up complete', {
+            resolvedDisplayName: resolvedDisplayName ?? '(none — kept baseline)',
+            resolvedRecordNumber: resolvedRecordNumber ?? '(none — kept null)',
+          });
+
+          // Refine recordname if resolved to a different value.
+          if (
+            typeof resolvedDisplayName === 'string' &&
+            resolvedDisplayName.length > 0 &&
+            resolvedDisplayName !== detected.recordName
+          ) {
+            console.log('[RegardingResolver auto-detect] Phase 2 re-write', {
+              field: 'sprk_regardingrecordname',
+              from: detected.recordName,
+              to: resolvedDisplayName,
+              note: 'display-name polish over baseline',
+            });
+            setFormTextValue('sprk_regardingrecordname', resolvedDisplayName);
+            // Also refine selectedTarget so Row 2 label reflects the polish.
+            setSelectedTarget({
+              entityType: detected.entityType,
+              recordId: detected.recordId,
+              recordName: resolvedDisplayName,
+            });
+          }
+
+          // Write record-number if resolved.
+          if (typeof resolvedRecordNumber === 'string' && resolvedRecordNumber.length > 0) {
+            console.log('[RegardingResolver auto-detect] Phase 2 write', {
+              field: 'sprk_regardingrecordnumber',
+              value: resolvedRecordNumber,
+            });
+            setFormTextValue('sprk_regardingrecordnumber', resolvedRecordNumber);
+          }
+
+          // Refresh the presave bridge with the polished values (in case
+          // the user is still on the form). Idempotent — safe to overwrite.
+          (
+            window as unknown as {
+              __sprk_regarding_pending__?: Record<string, unknown>;
+            }
+          ).__sprk_regarding_pending__ = {
+            hostEntity,
+            entityType: detected.entityType,
+            entitySet: undefined,
+            lookupAttribute: detected.lookupAttribute,
+            recordId: detected.recordId,
+            recordName: resolvedDisplayName ?? detected.recordName,
+            recordUrl,
+            recordNumber: resolvedRecordNumber,
+          };
+        } else {
+          // UPDATE mode: host record exists — use applyRegardingSelection
+          // which internally calls webApi.updateRecord with the full payload.
+          const selection: IRegardingSelection = {
+            entityType: detected.entityType,
+            recordId: detected.recordId,
+            recordName: detected.recordName,
+          };
+          const result = await applyRegardingSelection(writeCtx, selection);
+          if (!result.success) {
+            console.warn('[RegardingResolver] Auto-detect UPDATE-mode applyRegardingSelection failed:', result.error);
+            return;
+          }
+
+          setSelectedTarget(selection);
+
+          // Notify PCF class so the bound lookup output tracks.
+          try {
+            const recordType = await resolveRecordType(writeCtx.webApi, detected.entityType);
+            if (recordType) {
+              onRecordTypeChanged({
+                id: recordType.id,
+                name: recordType.name,
+                entityType: 'sprk_recordtype_ref',
+              });
+            }
+          } catch (rtErr) {
+            console.warn('[RegardingResolver] Auto-detect resolveRecordType for output notify failed:', rtErr);
+          }
+        }
+      } catch (err) {
+        // Defensive: never crash the host form.
+        console.warn('[RegardingResolver] Auto-detect from subgrid failed:', err);
+      }
+    };
+
+    void runAutoDetect();
+  }, [catalog, hostEntity, readOnly, writeCtx, onRecordTypeChanged]);
+
+  // ---------------- PolymorphicPicker onSelect ----------------
+
+  const handlePickerSelect = React.useCallback(
+    async (entityType: string, recordId: string, recordName: string): Promise<void> => {
+      // FR-24 — Defensive write-gate: read-only mode hides the picker trigger,
+      // but if a race reaches this handler, refuse to write.
+      if (readOnly) {
+        console.warn('[RegardingResolver] handlePickerSelect invoked in read-only mode — write skipped (FR-A5-01).');
         return;
       }
-
-      const picked = results[0];
-      const cleanId = picked.id.replace(/[{}]/g, '').toLowerCase();
+      if (!hostEntity) {
+        setError("Host entity is not configured (manifest 'entity' input property is empty).");
+        return;
+      }
 
       const selection: IRegardingSelection = {
-        entityType: selectedEntityType,
-        recordId: cleanId,
-        recordName: picked.name,
+        entityType,
+        recordId,
+        recordName,
       };
 
+      setError(null);
       setIsWriting(true);
-      const result = await applyRegardingSelection(writeCtx, selection);
-      if (!result.success) {
-        setError(result.error ?? 'Failed to apply regarding fields.');
-        return;
-      }
-
-      setSelectedTarget(selection);
-
-      // CREATE-mode bridge for the form's OnSave handler (R4-051 follow-up):
-      // On UPDATE forms, applyResolverFields persisted all 5 fields directly
-      // via webApi.updateRecord — no further action needed. On CREATE forms,
-      // the row doesn't exist yet so persistence was deferred. Surface the
-      // resolved payload on a stable global so sprk_todo_regarding_presave.js
-      // can stage the 4 companion fields (sprk_regarding<X>, recordid,
-      // recordname, recordurl) onto the form's pending-attribute buffer via
-      // getAttribute().setValue() so they ride the INSERT transaction.
-      // sprk_regardingrecordtype is already propagated via notifyOutputChanged.
-      // See projects/smart-todo-r4/notes/d-form-bind-instructions.md.
-      if (!writeCtx.hostRecordId) {
-        (
-          window as unknown as {
-            __sprk_regarding_pending__?: Record<string, unknown>;
-          }
-        ).__sprk_regarding_pending__ = {
-          hostEntity: writeCtx.hostEntity,
-          entityType: selection.entityType,
-          entitySet: result.catalogEntry?.entitySet,
-          lookupAttribute: result.catalogEntry?.lookupAttribute,
-          recordId: selection.recordId,
-          recordName: selection.recordName,
-          recordUrl: buildRecordUrl(selection.entityType, selection.recordId),
-        };
-      }
-
-      // Notify PCF class so the bound `sprk_regardingrecordtype` lookup output
-      // is kept in sync. CRITICAL (Bug-1 fix 2026-06-24): the bound lookup
-      // targets `sprk_recordtype_ref` — NOT the parent entity. We MUST pass
-      // the matching `sprk_recordtype_ref` record's id + 'sprk_recordtype_ref'
-      // as the entityType. Passing the parent (e.g., `sprk_matter` GUID +
-      // entityType) causes MDA to throw:
-      //   "Unable to find many-to-one relationship, entity: sprk_todo,
-      //    referenced entity: sprk_matter, field: sprk_regardingrecordtype"
-      // because that m:1 path doesn't exist.
-      //
-      // `resolveRecordType` queries sprk_recordtype_ref for the entry where
-      // sprk_recordlogicalname === selection.entityType and is cached per page.
-      // `applyResolverFields` already used this internally to write the
-      // host record's @odata.bind, so this is a cache hit in practice.
       try {
-        const recordType = await resolveRecordType(writeCtx.webApi, selection.entityType);
-        if (recordType) {
-          onRecordTypeChanged({
-            id: recordType.id,
-            name: recordType.name,
-            entityType: 'sprk_recordtype_ref',
-          });
-        } else {
-          // No matching record-type-ref — clear the bound output rather than
-          // setting it to a stale value.
+        // Delegate to the shared write path — nav-prop discovery + 15-field
+        // clear-and-set + applyResolverFields for the SET group. This is the
+        // ONLY write logic (FR-A4-01 / ADR-024).
+        const result = await applyRegardingSelection(writeCtx, selection);
+        if (!result.success) {
+          setError(result.error ?? 'Failed to apply regarding fields.');
+          return;
+        }
+
+        setSelectedTarget(selection);
+
+        // CREATE-mode bridge: populate the well-known window global so the
+        // presave OnSave handler can stage the resolver payload into the form
+        // buffer for the INSERT transaction. UPDATE-mode already persisted via
+        // webApi.updateRecord inside applyRegardingSelection.
+        //
+        // SRFR-032 (FR-A5-04 client half): propagates the resolved
+        // `recordNumber` from the shared applyResolverFields result so the
+        // v1.2.0+ presave webresource can stage `sprk_regardingrecordnumber`
+        // onto the form. Backward compat: presave < v1.2.0 ignores the extra
+        // key (its TEXT_FIELDS array explicitly enumerates the 3 legacy
+        // fields; unrecognized keys are simply not consumed).
+        if (!writeCtx.hostRecordId) {
+          (
+            window as unknown as {
+              __sprk_regarding_pending__?: Record<string, unknown>;
+            }
+          ).__sprk_regarding_pending__ = {
+            hostEntity: writeCtx.hostEntity,
+            entityType: selection.entityType,
+            entitySet: result.catalogEntry?.entitySet,
+            lookupAttribute: result.catalogEntry?.lookupAttribute,
+            recordId: selection.recordId,
+            // v1.4.5 (SRFR-054): use the resolved display-name from
+            // applyResolverFields (SRFR-052 shared-lib fix). The presave
+            // webresource reads pending.recordName and writes it as
+            // sprk_regardingrecordname. Without this the presave staged the
+            // picker's returned Primary Name (which for sprk_matter is the
+            // number), producing "Regarding Name = number" on CREATE.
+            recordName: result.displayName ?? selection.recordName,
+            recordUrl: buildRecordUrl(selection.entityType, selection.recordId),
+            recordNumber: result.recordNumber ?? null,
+          };
+        }
+
+        // Notify the PCF class so the bound `sprk_regardingrecordtype` lookup
+        // output tracks the picked entity's record-type-ref (per Bug-1 fix
+        // 2026-06-24: the bound lookup targets `sprk_recordtype_ref`, NOT the
+        // parent entity itself).
+        try {
+          const recordType = await resolveRecordType(writeCtx.webApi, selection.entityType);
+          if (recordType) {
+            onRecordTypeChanged({
+              id: recordType.id,
+              name: recordType.name,
+              entityType: 'sprk_recordtype_ref',
+            });
+          } else {
+            onRecordTypeChanged(null);
+          }
+        } catch (rtErr) {
+          console.warn('[RegardingResolver] resolveRecordType for output notify failed:', rtErr);
           onRecordTypeChanged(null);
         }
-      } catch (rtErr) {
-        console.warn('[RegardingResolver] resolveRecordType for output notify failed:', rtErr);
-        onRecordTypeChanged(null);
+
+        // v1.3.2 (SRFR-035) — After successful selection, auto-refresh the
+        // form so bound fields (record-number etc.) display fresh values
+        // without the user clicking Save/Refresh. CREATE mode (formType === 1)
+        // is deliberately skipped inside autoRefreshForm (presave bridge owns
+        // that path). Manual refresh button from SRFR-034 remains as escape
+        // hatch. Errors are swallowed inside autoRefreshForm (warn only).
+        const formType = getFormType();
+        void autoRefreshForm(formType);
+      } catch (err) {
+        console.error('[RegardingResolver] handlePickerSelect error:', err);
+        setError(err instanceof Error ? err.message : 'Selection failed.');
+      } finally {
+        setIsWriting(false);
       }
+    },
+    [readOnly, hostEntity, writeCtx, onRecordTypeChanged]
+  );
 
-      setStatusMsg(`Associated with ${selection.recordName}.`);
-    } catch (err) {
-      console.error('[RegardingResolver] handleSelectRecord error:', err);
-      setError(err instanceof Error ? err.message : 'Lookup failed.');
-    } finally {
-      setIsLookupPending(false);
-      setIsWriting(false);
-    }
-  };
+  // Row-2 record-number click handler (SRFR-031 / FR-A2-01) — opens the related
+  // record in a Dataverse MODAL via `Xrm.Navigation.navigateTo`.
+  //
+  // Design contract (verbatim per spec FR-A2-01):
+  //   Xrm.Navigation.navigateTo(
+  //     { pageType: 'entityrecord', entityName, entityId },
+  //     { target: 2, width: { value: 80, unit: '%' }, height: { value: 80, unit: '%' } }
+  //   )
+  //
+  // `target: 2` = modal (per docs/guides/BUILD-A-NEW-WORKSPACE-WIDGET.md#L513
+  // and MS Learn PageInput type). `target: 1` would REPLACE main content —
+  // do NOT confuse the two.
+  //
+  // v1.3.6 (SRFR-043): entity name + id come from `resolveClickTarget()` which
+  // is now ASYNC. For fresh picker selections the resolution is synchronous
+  // (Priority 1 returns immediately). For pre-loaded records the helper calls
+  // `context.webAPI.retrieveRecord` to fetch `sprk_regardingrecordurl` directly
+  // from the row (works even though the URL field is not on the form; that was
+  // the v1.3.5 failure mode). The click handler wraps the async work in a
+  // fire-and-forget promise via `void .then(...)` so the React event handler
+  // itself stays synchronous.
+  //
+  // Xrm-unavailable path (test harness / missing SDK) logs warn and no-ops
+  // without throwing so the host form is never broken by a click on an inert
+  // link.
+  const handleRecordNumberClick = React.useCallback(
+    (e: React.MouseEvent) => {
+      e.preventDefault();
 
-  const handleClear = async (): Promise<void> => {
-    // FR-24 — Defensive write-gate: read-only mode renders no Clear button, but
-    // if a race or programmatic invocation reaches this handler, refuse to write.
-    if (readOnly) {
-      console.warn('[RegardingResolver] handleClear invoked in read-only mode — write skipped (FR-24).');
-      return;
-    }
-    if (!hostEntity) {
-      setError("Host entity is not configured (manifest 'entity' input property is empty).");
-      return;
-    }
+      // v1.3.6 SRFR-043 — click-time target resolution is now async because
+      // pre-loaded records go through webApi.retrieveRecord. Fire-and-forget
+      // via .then; errors are logged inside resolveClickTarget.
+      void resolveClickTarget(selectedTarget, context.webAPI, hostEntity, getHostRecordId()).then(clickTarget => {
+        const entityName = clickTarget?.entityName;
+        const entityId = clickTarget?.entityId;
 
-    setIsWriting(true);
-    setError(null);
-    setStatusMsg(null);
+        // Empty-state guard — no picker selection AND no bound URL/id to derive
+        // a target from. Silent no-op is intentional to keep the host form
+        // safe under partially-populated states (e.g., mid-load, cleared, or
+        // brand-new blank form).
+        if (!entityName || !entityId) {
+          console.warn(
+            '[RegardingResolver] Cannot open modal — entityName or entityId not resolved from selection or bound fields.'
+          );
+          return;
+        }
 
-    try {
-      const result = await clearRegarding(writeCtx);
-      if (!result.success) {
-        setError(result.error ?? 'Failed to clear regarding fields.');
-        return;
-      }
-      setSelectedTarget(null);
-      onRecordTypeChanged(null);
-      setStatusMsg('Regarding cleared.');
-    } catch (err) {
-      console.error('[RegardingResolver] handleClear error:', err);
-      setError(err instanceof Error ? err.message : 'Clear failed.');
-    } finally {
-      setIsWriting(false);
-    }
-  };
+        const xrm = getXrm();
+        if (typeof xrm?.Navigation?.navigateTo !== 'function') {
+          // Xrm unavailable — test harness, canvas app, or missing SDK. Warn
+          // (developer-visible), do not throw (host-safe).
+          console.warn(
+            '[RegardingResolver] Xrm.Navigation.navigateTo unavailable; cannot open regarding record modal.'
+          );
+          return;
+        }
 
-  // ---------------- Render: read-only (FR-24) ----------------
-  if (readOnly) {
-    return (
-      <div className={styles.container} data-testid="regarding-resolver-readonly">
-        {selectedTarget || boundRecordType ? (
-          <div className={styles.readOnlyDisplay}>
-            <Text className={styles.selectedLabel}>Regarding:</Text>
-            {selectedTarget ? (
-              <Link
-                onClick={(e: React.MouseEvent) => {
-                  e.preventDefault();
-                  navigateToRecord(selectedTarget.entityType, selectedTarget.recordId);
-                }}
-                style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}
-              >
-                {selectedTarget.recordName}
-                <Open16Regular />
-              </Link>
-            ) : (
-              <Text>{boundRecordType?.name ?? '(unknown)'}</Text>
-            )}
-          </div>
-        ) : (
-          <Text className={styles.selectedLabel}>No regarding selected.</Text>
-        )}
-        <div className={styles.footer}>
-          <Text className={styles.versionText}>v{version}</Text>
-        </div>
-      </div>
-    );
-  }
+        // Promise handling: navigateTo returns a Promise per MS docs. Rejection
+        // (record deleted, no privilege, user cancelled) must NOT surface as an
+        // unhandled rejection or crash the host form.
+        //
+        // v1.3.7 (SRFR-044): call as `xrm.Navigation.navigateTo(...)` — NOT
+        // via an extracted `const navigateTo = xrm.Navigation.navigateTo`
+        // reference. The extracted reference loses `this`; the platform impl
+        // accesses `this.Navigation._clientApiExecutor` internally and throws
+        // `TypeError: Cannot read properties of undefined (reading '_clientApiExecutor')`
+        // when unbound. Method-call form preserves `this`.
+        try {
+          const result = xrm.Navigation.navigateTo(
+            { pageType: 'entityrecord', entityName, entityId },
+            {
+              target: 2,
+              width: { value: 80, unit: '%' },
+              height: { value: 80, unit: '%' },
+            }
+          );
+          if (result && typeof (result as Promise<unknown>).catch === 'function') {
+            (result as Promise<unknown>).catch((err: unknown) => {
+              console.warn('[RegardingResolver] Xrm.Navigation.navigateTo rejected:', err);
+            });
+          }
+        } catch (err) {
+          // Defensive: synchronous throw from a stubbed / non-conformant Xrm.
+          console.warn('[RegardingResolver] Xrm.Navigation.navigateTo threw:', err);
+        }
+      });
+    },
+    [selectedTarget, context.webAPI, hostEntity]
+  );
 
-  // ---------------- Render: edit mode ----------------
-  const selectedCatalogEntry = catalog.find(c => c.entityType === selectedEntityType);
-  const selectedEntityTypeLabel = selectedCatalogEntry?.entityType ?? '';
+  const hasRecordNumber = typeof boundRecordNumber === 'string' && boundRecordNumber.trim().length > 0;
+  const hasRecordName = typeof boundRecordName === 'string' && boundRecordName.trim().length > 0;
+
+  // v1.3.1 (SRFR-034 §5) — refresh handler wraps the module-level internal
+  // helper as a stable useCallback so the onClick reference is stable across
+  // re-renders.
+  const handleRefreshClick = React.useCallback(() => {
+    void handleRefreshInternal();
+  }, []);
+
+  // ---------------- Render ----------------
+  //
+  // v1.3.4 layout (SRFR-039):
+  //   - Row 1 title uppercased + styled to match OOB section-header (SRFR-034 §1 + §4, weight 600 per SRFR-037).
+  //   - Row 1 "actions" area holds refresh (LEFT) + PolymorphicPicker (RIGHT) (SRFR-034 §5).
+  //   - PolymorphicPicker trigger icon flipped horizontally via CSS transform (SRFR-034 §3).
+  //   - Row 2 = 1/3:2/3 CSS grid: LEFT record-number Link (SRFR-031 modal-open), RIGHT record-name plain-text Text.
+  //   - Row 2 top-aligned OOB-parity labels above each cell ("Regarding Number" / "Regarding Name").
+  //   - Empty cells hide entirely (no em-dash placeholder).
+  //   - Version footer gated on `showVersionFooter` (SRFR-034 §2).
 
   return (
-    <div className={styles.container} data-testid="regarding-resolver-edit">
+    <div className={styles.container} data-testid="regarding-resolver-root">
       {error && (
-        <MessageBar intent="error">
+        <MessageBar intent="error" data-testid="regarding-resolver-error">
           <MessageBarBody>{error}</MessageBarBody>
         </MessageBar>
       )}
-      {statusMsg && !error && (
-        <MessageBar intent="success">
-          <MessageBarBody>{statusMsg}</MessageBarBody>
-        </MessageBar>
-      )}
 
-      <div className={styles.searchSection}>
-        <div className={styles.dropdownWrapper}>
-          <Label id="regarding-resolver-entity-type-label" size="small" weight="semibold">
-            Record Type
-          </Label>
-          <Dropdown
-            className={styles.dropdown}
-            aria-labelledby="regarding-resolver-entity-type-label"
-            data-testid="regarding-resolver-entity-type-dropdown"
-            value={catalog.find(c => c.entityType === selectedEntityType) ? selectedEntityType : ''}
-            selectedOptions={selectedEntityType ? [selectedEntityType] : []}
-            onOptionSelect={handleEntityTypeChange}
-            disabled={isLookupPending || isWriting}
-          >
-            {catalog.map(c => (
-              <Option key={c.entityType} value={c.entityType}>
-                {c.entityType}
-              </Option>
-            ))}
-          </Dropdown>
-        </div>
-
-        <Button
-          data-testid="regarding-resolver-select-record-button"
-          appearance="primary"
-          icon={isLookupPending ? <Spinner size="tiny" /> : <SearchRegular />}
-          onClick={handleSelectRecord}
-          disabled={!selectedEntityType || isLookupPending || isWriting}
-        >
-          {isLookupPending ? 'Opening…' : 'Select Record'}
-        </Button>
-      </div>
-
-      {selectedTarget && (
-        <div className={styles.selectedRecord}>
-          <Text className={styles.selectedLabel}>{selectedTarget.entityType}:</Text>
-          <Link
-            onClick={(e: React.MouseEvent) => {
-              e.preventDefault();
-              navigateToRecord(selectedTarget.entityType, selectedTarget.recordId);
-            }}
-            style={{ display: 'inline-flex', alignItems: 'center', gap: '4px' }}
-          >
-            {selectedTarget.recordName}
-            <Open16Regular />
-          </Link>
-          <Button
-            appearance="subtle"
-            icon={<DismissRegular />}
-            size="small"
-            onClick={handleClear}
-            disabled={isLookupPending || isWriting}
-            aria-label="Clear selection"
-          >
-            Clear
-          </Button>
-        </div>
-      )}
-
-      {!selectedTarget && boundRecordType && (
-        <div className={styles.selectedRecord}>
-          <Text className={styles.selectedLabel}>Currently:</Text>
-          <Text>{boundRecordType.name}</Text>
-          <Button
-            appearance="subtle"
-            icon={<DismissRegular />}
-            size="small"
-            onClick={handleClear}
-            disabled={isLookupPending || isWriting}
-            aria-label="Clear current regarding"
-          >
-            Clear
-          </Button>
-        </div>
-      )}
-
-      <div className={styles.footer}>
-        <Text className={styles.versionText} data-testid="regarding-resolver-version">
-          v{version}
-          {selectedEntityTypeLabel ? ` • ${selectedEntityTypeLabel}` : ''}
+      {/* Row 1 — OOB-styled title (left) + refresh + PolymorphicPicker (right) */}
+      <div className={styles.row1} data-testid="regarding-resolver-row-1">
+        <Text className={styles.title} data-testid="regarding-resolver-title">
+          {title}
         </Text>
+        <div className={styles.row1Actions}>
+          {!readOnly && (
+            <Toolbar className={styles.refreshToolbar} size="small" aria-label="Refresh actions">
+              <Tooltip content="Refresh form" relationship="label" withArrow>
+                <ToolbarButton
+                  icon={<ArrowClockwiseRegular />}
+                  aria-label="Refresh form"
+                  data-testid="regarding-resolver-refresh"
+                  onClick={handleRefreshClick}
+                />
+              </Tooltip>
+            </Toolbar>
+          )}
+          <div className={styles.pickerContainer}>
+            <PolymorphicPicker
+              catalog={pickerCatalog}
+              webApi={context.webAPI as unknown as IPolymorphicPickerWebApi}
+              // Pass the resolved title so the picker's aria/tooltip surface
+              // remain accessible ("Select related record"). The visible
+              // duplicate is suppressed via the pickerContainer style below
+              // (which also targets the picker's own title span).
+              title={title}
+              onSelect={handlePickerSelect}
+              readOnly={readOnly}
+              disabled={isWriting}
+              onError={setError}
+            />
+          </div>
+        </div>
       </div>
+
+      {/* Row 2 — v1.3.4 (SRFR-039): 1/3 : 2/3 grid layout with top-aligned
+          OOB-parity labels. Left cell = number hyperlink (SRFR-031 modal-open
+          preserved). Right cell = plain-text name (NOT a Link). Empty cells
+          hide entirely. */}
+      <div className={styles.row2} data-testid="regarding-resolver-row-2">
+        {hasRecordNumber && (
+          <div className={styles.numberCell} data-testid="regarding-resolver-number-cell">
+            <Text className={styles.fieldLabel} data-testid="regarding-resolver-number-label">
+              Regarding Number
+            </Text>
+            <Link
+              className={styles.recordNumber}
+              role="link"
+              data-testid="regarding-resolver-record-number"
+              onClick={handleRecordNumberClick}
+            >
+              {boundRecordNumber}
+            </Link>
+          </div>
+        )}
+        {hasRecordName && (
+          <div className={styles.nameCell} data-testid="regarding-resolver-name-cell">
+            <Text className={styles.fieldLabel} data-testid="regarding-resolver-name-label">
+              Regarding Name
+            </Text>
+            <Text className={styles.recordName} data-testid="regarding-resolver-record-name">
+              {boundRecordName}
+            </Text>
+          </div>
+        )}
+      </div>
+
+      {showVersionFooter && (
+        <div className={styles.footer} data-testid="regarding-resolver-footer">
+          <Text className={styles.versionText} data-testid="regarding-resolver-version">
+            v{version} • Built {BUILD_DATE}
+          </Text>
+        </div>
+      )}
     </div>
   );
 };

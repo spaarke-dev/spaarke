@@ -1,0 +1,244 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="SRFR-034" project="set-regarding-and-field-mapping-resolver-r1">
+  <metadata>
+    <title>RegardingResolver UI polish v1.3.0 → v1.3.1 (7 owner-requested changes; OOB section-header styling)</title>
+    <status>completed</status>
+    <estimated-effort>3h</estimated-effort>
+    <actual-effort>~2h30min</actual-effort>
+    <assigned>AI Agent</assigned>
+    <started>2026-07-03</started>
+    <completed>2026-07-03</completed>
+    <rigor>FULL</rigor>
+    <parallel-safe>false</parallel-safe>
+    <parallel-group>—</parallel-group>
+    <tags>pcf,regarding-resolver,fluent-ui,react,ui-polish,version-bump,wave-3-followon,deploy</tags>
+    <depends-on>SRFR-033,SRFR-080</depends-on>
+    <wave>3</wave>
+  </metadata>
+
+  <prompt><![CDATA[
+Out-of-plan polish pass on the deployed v1.3.0 RegardingResolver. Owner
+feedback after Wave 8 UAT visual: 7 targeted changes plus a version bump
+across the 7 anchors documented in SRFR-033's Version Update Checklist.
+
+Scope (all in `src/client/pcf/RegardingResolver/`):
+
+1. `title` manifest input default: "Related Record" → "RELATED RECORD"; and
+   render title UPPERCASED in the app regardless of maker input (defensive).
+2. New manifest input `showVersionFooter` (TwoOptions, default true) —
+   conditionally hides the version footer.
+3. Right-side lookup icon direction matches OOB Dataverse lookup convention:
+   flip the current SearchRegular horizontally via CSS
+   `transform: scaleX(-1)`. Right-alignment already achieved.
+4. Title styling matches OOB section-header: 14px Segoe UI, weight 400,
+   color #242424, padding 4px 0px, letter-spacing 0. text-transform
+   uppercase belt-and-suspenders with #1.
+5. NEW refresh icon (`ArrowClockwiseRegular`) on the toolbar, LEFT of the
+   lookup icon. Click saves the form then refreshes it.
+6. Remove the Row-2 record-name cell entirely (owner uses the OOB name
+   field placed elsewhere on the form). Row 2 becomes single-column
+   `[record-number hyperlink]` only. Also remove the em-dash placeholder
+   for the record-number empty state and the empty-name placeholder.
+7. Version bump 1.3.0 → 1.3.1 across all 7 anchors per SRFR-033's checklist:
+   ControlManifest.Input.xml, index.ts CONTROL_VERSION, UI footer BUILD_DATE
+   (2026-07-03), Solution/solution.xml, Solution Control Manifest,
+   package.json, pack.ps1.
+
+Update tests: bulk 1.3.0 → 1.3.1; add tests for uppercase title
+rendering, `showVersionFooter` toggle, refresh-icon click behavior, Row-2
+single-column structure (no record-name cell, no em-dash placeholder).
+
+Step 9.5 quality gates: /code-review + /adr-check + `npm run build:prod`.
+Deploy: pack solution, `pac solution import --force-overwrite`, verify via
+`pac solution list`.
+  ]]></prompt>
+
+  <role>PCF developer familiar with Spaarke PCF version discipline (`src/client/pcf/CLAUDE.md`), Fluent v9 Griffel + tokens (`ADR-021`), virtual PCF platform-library pattern (`ADR-022`), shared PolymorphicPicker (`ADR-012`), and Dataverse OOB form styling conventions.</role>
+
+  <goal><![CDATA[
+RegardingResolver v1.3.1 deployed to spaarkedev1, verified via `pac solution list`.
+All 7 owner-requested visual polish changes shipped:
+  - Uppercased "RELATED RECORD" title matching OOB section-header type
+  - `showVersionFooter` (default true) input property gates footer visibility
+  - Lookup icon horizontally flipped to match OOB direction
+  - Title styled Segoe UI 14px/#242424/weight 400/padding 4px 0px
+  - New refresh toolbar button (save + refresh form) LEFT of lookup icon
+  - Row 2 = single record-number hyperlink cell (no name, no em-dash placeholder)
+  - All 7 version anchors bumped 1.3.0 → 1.3.1
+Tests updated + passing. `npm run build:prod` passes. ADR-021/022/012 preserved.
+Backward-compat: existing v1.3.0 form bindings continue to function; new
+`showVersionFooter` prop's default preserves footer behavior.
+  ]]></goal>
+
+  <inputs>
+    <file purpose="spec">projects/set-regarding-and-field-mapping-resolver-r1/spec.md</file>
+    <file purpose="project-claude">projects/set-regarding-and-field-mapping-resolver-r1/CLAUDE.md</file>
+    <file purpose="checklist">src/client/pcf/CLAUDE.md</file>
+    <file purpose="prior-task">projects/set-regarding-and-field-mapping-resolver-r1/tasks/033-regarding-resolver-preserve-and-version.poml</file>
+    <file purpose="source">src/client/pcf/RegardingResolver/RegardingResolver/ControlManifest.Input.xml</file>
+    <file purpose="source">src/client/pcf/RegardingResolver/RegardingResolver/index.ts</file>
+    <file purpose="source">src/client/pcf/RegardingResolver/RegardingResolver/RegardingResolverApp.tsx</file>
+    <file purpose="source">src/client/pcf/RegardingResolver/package.json</file>
+    <file purpose="source">src/client/pcf/RegardingResolver/Solution/solution.xml</file>
+    <file purpose="source">src/client/pcf/RegardingResolver/Solution/Controls/sprk_Spaarke.Controls.RegardingResolver/ControlManifest.xml</file>
+    <file purpose="source">src/client/pcf/RegardingResolver/Solution/pack.ps1</file>
+    <file purpose="test">src/client/pcf/RegardingResolver/__tests__/RegardingResolverApp.test.tsx</file>
+    <file purpose="shared-picker-ref">src/client/shared/Spaarke.UI.Components/src/components/PolymorphicPicker/PolymorphicPicker.tsx</file>
+    <file purpose="adr">.claude/adr/ADR-021-semantic-tokens-theming.md</file>
+    <file purpose="adr">.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+    <file purpose="adr">.claude/adr/ADR-012-shared-component-library.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-022">Virtual PCF pattern preserved. React 16 + Fluent 9 platform-libraries. No bundling regression.</constraint>
+    <constraint source="ADR-021">Fluent v9 semantic tokens for tokens where OOB parity isn't required. The title styling deliberately uses hardcoded #242424 + Segoe UI to match OOB section-header — this is a documented exception (matches Dataverse OOB convention exactly, not a Fluent v9 theme target).</constraint>
+    <constraint source="ADR-012">Shared PolymorphicPicker consumption preserved. Do NOT modify the shared component; the icon-flip is a consumer-side CSS transform on the picker's rendered root.</constraint>
+    <constraint source="spec NFR-04">Backward compat: existing form bindings continue to function. New `showVersionFooter` prop defaults to `true` preserving v1.3.0 footer behavior. Removals (record-name cell, em-dash placeholders) are the intentional visual changes.</constraint>
+    <constraint source="project">No new npm dependencies. `@fluentui/react-icons` already provides `ArrowClockwiseRegular` (verified in RegardingResolver/node_modules).</constraint>
+    <constraint source="project">Refresh handler uses existing `getXrm()` helper from RegardingResolverApp; no new Xrm bridge needed.</constraint>
+    <constraint source="project">TypeScript strict mode; no `any` unless behind an explicit shape cast at an Xrm seam (like existing getXrm return).</constraint>
+    <constraint source="src/client/pcf/CLAUDE.md — Version Update Checklist">ALL 7 anchors bumped together per SRFR-033's expanded list (manifest, index.ts, footer, solution.xml, Solution ControlManifest, package.json, pack.ps1).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>pcf/version-discipline + Fluent v9 icon usage + OOB form styling parity</topic>
+    <files>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>src/client/shared/Spaarke.UI.Components/src/components/PolymorphicPicker/PolymorphicPicker.tsx</file>
+      <file>.claude/patterns/pcf/fluent-v9-modern-theming.md</file>
+    </files>
+    <patterns>
+      <pattern name="Fluent v9 icon rotation via CSS transform" location=".claude/patterns/pcf/fluent-v9-modern-theming.md">
+        Icon direction changes for OOB parity are applied at the consumer via
+        Griffel `makeStyles` on a wrapper span; do NOT swap the icon component
+        itself (breaks tests + accessibility) and do NOT patch the shared lib.
+      </pattern>
+      <pattern name="Version-anchor 7-location bump" location="projects/set-regarding-and-field-mapping-resolver-r1/tasks/033-regarding-resolver-preserve-and-version.poml">
+        SRFR-033 established the 7-anchor discipline. Grep for old version
+        string across the RegardingResolver folder before finalizing to
+        confirm no straggling references.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      Owner reviewed deployed RegardingResolver v1.3.0 on the sprk_todo form.
+      Screenshot showed Row 1 "Related Record" + search icon; Row 2 "— PAT-212344"
+      (em-dash placeholder next to record number because the record-name column
+      was not populated on the test record). Owner also shared the OOB
+      Dataverse "REGARDING" section header as the target visual for the title.
+      This task is an out-of-plan polish pass after Wave 8 UAT; it lands as
+      v1.3.1 to preserve v1.3.0 as the shipped baseline in case rollback needed.
+    </background>
+    <dependencies>
+      <dependency task="SRFR-033" status="completed">v1.3.0 versioning + read-only preservation shipped.</dependency>
+      <dependency task="SRFR-080" status="completed">v1.3.0 solution deployed to spaarkedev1 (Wave 8).</dependency>
+    </dependencies>
+    <related-work>
+      <item>No downstream tasks blocked. SRFR-084 UAT continues once v1.3.1 lands.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check">Verify context &lt; 60%. Read `src/client/pcf/CLAUDE.md` Version Update Checklist. Grep for existing `1.3.0` occurrences under `src/client/pcf/RegardingResolver/` to enumerate every anchor. Confirm `ArrowClockwiseRegular` exported from `@fluentui/react-icons`.</step>
+    <step order="1" name="Manifest — title default + new showVersionFooter">Edit `ControlManifest.Input.xml`: change `title` default-value from "Related Record" → "RELATED RECORD"; add new `showVersionFooter` TwoOptions input property with default true. Preserve all other attributes.</step>
+    <step order="2" name="Version bump — Location 1 (ControlManifest.Input.xml)">Update `version="1.3.1"` on the control root element in `ControlManifest.Input.xml`.</step>
+    <step order="3" name="Version bump — Location 2 (index.ts CONTROL_VERSION)">Update `CONTROL_VERSION = '1.3.1'` in `RegardingResolver/index.ts`.</step>
+    <step order="4" name="App refactor — title, styling, refresh button, row-2 simplify, footer gate, icon flip">
+      In `RegardingResolverApp.tsx`:
+      (a) Update `BUILD_DATE` constant to `'2026-07-03'`.
+      (b) Read the new `showVersionFooter` input property (defaults true when raw is null).
+      (c) Rewrite the `useStyles` `title`, `row2`, `footer` styles. Add a new
+          `pickerContainer` style with `[data-testid="polymorphic-picker-trigger"] { transform: scaleX(-1); }` to flip the search icon.
+      (d) Uppercase the title unconditionally in the component (belt-and-suspenders with manifest default).
+      (e) Add a new `handleRefreshClick` callback: save the form via `xrm.Page.data.entity.save()` then `xrm.Page.data.refresh(true)`; fallback to `window.location.reload()` when Xrm unavailable. Catch and warn on failure.
+      (f) Add a `Toolbar` in Row 1 that contains a refresh `ToolbarButton` (ArrowClockwiseRegular) LEFT of the existing PolymorphicPicker. The picker's toolbar remains unchanged; use a flex container so refresh is on the far right of the "actions" area but LEFT of the picker's own toolbar. Preserve read-only behavior: hide the refresh button when `readOnly`.
+      (g) Remove Row 2 record-name Text component AND the em-dash placeholder for empty record-number. Row 2 now renders ONLY the record-number Link (or nothing if empty).
+      (h) Wrap the footer render in `showVersionFooter && ( ... )`.
+      (i) Update version footer string to `v{version} • Built {BUILD_DATE}` (unchanged shape — version prop from index.ts is now 1.3.1).
+    </step>
+    <step order="5" name="Version bump — Location 4 (Solution manifest)">Update `Solution/solution.xml` `<Version>` element to `1.3.1`.</step>
+    <step order="6" name="Version bump — Location 5 (Solution Control Manifest)">Update `Solution/Controls/sprk_Spaarke.Controls.RegardingResolver/ControlManifest.xml` version attribute to `1.3.1`. Also sync the new v1.3 manifest properties (title, showVersionFooter, regardingRecordNumberField, regardingRecordNameField) if the extracted manifest lags — the earlier discovery revealed the extracted file was missing v1.3 additions. Best practice: re-sync from the source manifest but keep this scope MINIMAL (only version + new/missing properties).</step>
+    <step order="7" name="Version bump — Location 6 (package.json)">Update `package.json` `"version": "1.3.1"`.</step>
+    <step order="8" name="Version bump — Location 7 (pack.ps1)">Update `$version = "1.3.1"` in `Solution/pack.ps1`.</step>
+    <step order="9" name="Tests — bulk version + new coverage">
+      In `__tests__/RegardingResolverApp.test.tsx`:
+      (a) Bulk grep/replace 1.3.0 → 1.3.1 (version prop and version regex).
+      (b) Update the buildContext helper to include `showVersionFooter` in the context stub parameters.
+      (c) Add test: default title renders uppercased ("RELATED RECORD") even when maker sets "related record".
+      (d) Add test: `showVersionFooter: false` hides the version footer.
+      (e) Add test: `showVersionFooter: true` (default) shows footer with v1.3.1.
+      (f) Add test: refresh button renders; click invokes `xrm.Page.data.entity.save()` then `xrm.Page.data.refresh(true)`.
+      (g) Add test: refresh button hidden under readOnly.
+      (h) Add test: Row 2 does NOT contain record-name element (`queryByTestId('regarding-resolver-record-name')` is null); Row 2 does NOT contain em-dash placeholder for empty record-number (`queryByTestId('regarding-resolver-record-number-empty')` is null).
+      (i) Bulk-remove any assertions on the removed elements from prior tests.
+    </step>
+    <step order="10" name="Grep verification">Grep for `1.3.0` under `src/client/pcf/RegardingResolver/` (exclude node_modules + out + Solution/bin). Assert zero straggling references. Confirm exactly ONE `version="1.3.1"` on `ControlManifest.Input.xml`.</step>
+    <step order="11" name="Build">Run `npm run build:prod` in `src/client/pcf/RegardingResolver/`. Confirm build passes. Confirm bundle-size delta remains consistent with virtual pattern.</step>
+    <step order="12" name="Test run">Run `npm test` in `src/client/pcf/RegardingResolver/`. Confirm all tests pass.</step>
+    <step order="9.5" name="Quality Gate">Invoke `/code-review` and `/adr-check` on modified files: ControlManifest.Input.xml, index.ts, RegardingResolverApp.tsx, solution.xml, extracted ControlManifest.xml, package.json, pack.ps1, RegardingResolverApp.test.tsx. Address findings or escalate per CLAUDE.md §6.5.</step>
+    <step order="13" name="Copy bundle + pack solution">Copy `out/controls/RegardingResolver/bundle.js` to `Solution/Controls/sprk_Spaarke.Controls.RegardingResolver/bundle.js`. Run `Solution/pack.ps1` to produce `Solution/bin/RegardingResolverSolution_v1.3.1.zip`.</step>
+    <step order="14" name="Deploy">Run `pac solution import --path Solution/bin/RegardingResolverSolution_v1.3.1.zip --force-overwrite --publish-changes` against spaarkedev1. Verify via `pac solution list | Select-String RegardingResolver` shows Version 1.3.1.</step>
+    <step order="15" name="Update Task Status">Update SRFR-034 status → completed, notes summary. Update TASK-INDEX.md — add row for SRFR-034 under Wave 3 as a post-Wave 3 follow-on. Reset current-task.md.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Load spec, CLAUDE.md checklist, ADRs, current source</tool>
+    <tool name="Edit">Manifest + code + tests + solution manifests</tool>
+    <tool name="Grep">Verify no straggling `1.3.0` references</tool>
+    <tool name="Bash">`npm run build:prod`, `npm test`, `pack.ps1`, `pac solution import`, `pac solution list`</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/RegardingResolver/RegardingResolver/ControlManifest.Input.xml</output>
+    <output type="code">src/client/pcf/RegardingResolver/RegardingResolver/index.ts</output>
+    <output type="code">src/client/pcf/RegardingResolver/RegardingResolver/RegardingResolverApp.tsx</output>
+    <output type="code">src/client/pcf/RegardingResolver/package.json</output>
+    <output type="code">src/client/pcf/RegardingResolver/Solution/solution.xml</output>
+    <output type="code">src/client/pcf/RegardingResolver/Solution/Controls/sprk_Spaarke.Controls.RegardingResolver/ControlManifest.xml</output>
+    <output type="code">src/client/pcf/RegardingResolver/Solution/pack.ps1</output>
+    <output type="test">src/client/pcf/RegardingResolver/__tests__/RegardingResolverApp.test.tsx</output>
+    <output type="artifact">src/client/pcf/RegardingResolver/Solution/bin/RegardingResolverSolution_v1.3.1.zip</output>
+    <output type="notes">projects/set-regarding-and-field-mapping-resolver-r1/notes/task-034-regarding-resolver-ui-polish.log</output>
+    <output type="docs">projects/set-regarding-and-field-mapping-resolver-r1/tasks/TASK-INDEX.md (add SRFR-034 row)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`grep -c 'version="1.3.1"' src/client/pcf/RegardingResolver/RegardingResolver/ControlManifest.Input.xml` returns 1.</criterion>
+    <criterion testable="true">`grep -R "1.3.0" src/client/pcf/RegardingResolver/ --exclude-dir=node_modules --exclude-dir=out --exclude-dir=bin` returns zero non-history hits.</criterion>
+    <criterion testable="true">`ControlManifest.Input.xml` has `<property name="showVersionFooter" ... default-value="true">`.</criterion>
+    <criterion testable="true">`ControlManifest.Input.xml` `title` default-value is `RELATED RECORD` (uppercase).</criterion>
+    <criterion testable="true">`RegardingResolverApp.tsx` renders title UPPERCASED unconditionally.</criterion>
+    <criterion testable="true">CSS transform `scaleX(-1)` applied to the picker's trigger button (grep for `scaleX(-1)` in RegardingResolverApp.tsx).</criterion>
+    <criterion testable="true">Title style has font-size 14px, color #242424, padding 4px 0px, letter-spacing 0.</criterion>
+    <criterion testable="true">Refresh button (`ArrowClockwiseRegular`) renders LEFT of the picker; hidden under `readOnly`.</criterion>
+    <criterion testable="true">Refresh click invokes `xrm.Page.data.entity.save()` then `xrm.Page.data.refresh(true)`.</criterion>
+    <criterion testable="true">Row 2 renders only the record-number Link (no record-name Text, no em-dash placeholder).</criterion>
+    <criterion testable="true">`showVersionFooter=false` hides footer; default (true) shows footer with `v1.3.1 • Built 2026-07-03`.</criterion>
+    <criterion testable="true">`npm run build:prod` succeeds with zero errors.</criterion>
+    <criterion testable="true">`npm test` all tests pass.</criterion>
+    <criterion testable="true">Platform-library declarations for React 16 and Fluent 9 preserved in ControlManifest.Input.xml.</criterion>
+    <criterion testable="true">`/code-review` and `/adr-check` pass at Step 9.5 (or findings addressed / escalated per CLAUDE.md §6.5).</criterion>
+    <criterion testable="true">`pac solution list` shows RegardingResolverSolution v1.3.1 after deploy.</criterion>
+  </acceptance-criteria>
+
+  <notes><![CDATA[
+Completed 2026-07-03. All 7 owner-requested changes shipped. v1.3.1 deployed
+to spaarkedev1 (verified via `pac solution list`). All 51 unit tests pass
+including 9 new SRFR-034 tests. `/code-review` + `/adr-check` clean
+(ADR-021 hardcoded #242424 title is a documented Path A exception —
+owner-approved for OOB parity).
+
+Deploy discovery: Dataverse PCF XSD `noAposStringType` forbids apostrophes
+in `description-key` attributes. First import attempt failed on three
+apostrophes I added to the extracted Solution ControlManifest.xml while
+sync'ing the missing v1.3 properties. Removed apostrophes, rebuilt, repacked,
+re-imported successfully. See notes/task-034-regarding-resolver-ui-polish.log
+for full session log + follow-on backlog.
+
+Files modified: 8 (see log). LOC delta +558 / -74. Build passes, bundle
+1.57 MiB (parity with v1.3.0). Backward compat preserved: v1.3.0 form
+bindings continue to work; new showVersionFooter defaults to true.
+  ]]></notes>
+</task>

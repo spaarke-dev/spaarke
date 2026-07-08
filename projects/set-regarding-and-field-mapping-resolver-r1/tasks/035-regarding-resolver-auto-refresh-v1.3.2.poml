@@ -1,0 +1,216 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="SRFR-035" project="set-regarding-and-field-mapping-resolver-r1">
+  <metadata>
+    <title>RegardingResolver auto-refresh v1.3.1 → v1.3.2 (post-selection form refresh, additive to SRFR-034 manual refresh button)</title>
+    <status>completed</status>
+    <estimated-effort>1h30min</estimated-effort>
+    <actual-effort>~50min</actual-effort>
+    <assigned>AI Agent</assigned>
+    <started>2026-07-03</started>
+    <completed>2026-07-03</completed>
+    <rigor>FULL</rigor>
+    <parallel-safe>true</parallel-safe>
+    <parallel-group>—</parallel-group>
+    <tags>pcf,regarding-resolver,fluent-ui,react,auto-refresh,version-bump,wave-3-followon,deploy</tags>
+    <depends-on>SRFR-034</depends-on>
+    <wave>3</wave>
+  </metadata>
+
+  <prompt><![CDATA[
+Out-of-plan follow-on to SRFR-034 (v1.3.1 deploy). Owner feedback after v1.3.1
+UAT on sprk_todo form: "make the PCF auto save and update after record is
+selected (i.e. don't force user to hit save or refresh)".
+
+Interpretation: `applyResolverFields` uses `webApi.updateRecord` (writes
+committed directly, not staged in form buffer). So the records are ALREADY
+saved after selection. What owner wants: after selection completes,
+auto-refresh the form display so any form fields bound to
+`sprk_regardingrecordnumber` / `sprk_regardingrecordname` / etc. refresh
+immediately without user clicking Save/Refresh.
+
+The manual refresh button added in SRFR-034 stays (useful escape hatch) —
+auto-refresh is ADDITIVE.
+
+Scope (all in `src/client/pcf/RegardingResolver/`):
+
+1. `RegardingResolverApp.tsx` — after `applyRegardingSelection` completes
+   successfully in `handlePickerSelect`, call a new `autoRefreshForm(formType)`
+   helper that:
+   - Skips on CREATE mode (formType === 1) — presave bridge owns that path
+     (SRFR-032 wired the __sprk_regarding_pending__ seam; refreshing during
+     CREATE would clobber the buffered attributes)
+   - Otherwise calls `formContext.data.entity.save()` (to flush any
+     bound-property writes queued in the form buffer) then
+     `formContext.data.refresh(true)` to pull server-side updated values
+   - Silent-continues on any error (warn only; test-harness safety)
+   - Silent-continues if Xrm unavailable
+
+2. Version bump v1.3.1 → v1.3.2 across all 7 anchors per SRFR-033's checklist:
+   ControlManifest.Input.xml (2 places — control version attr + potentially
+   default-value additions), index.ts CONTROL_VERSION, UI footer BUILD_DATE,
+   Solution/solution.xml, Solution Control Manifest,
+   package.json, pack.ps1.
+
+3. Add 3 new unit tests to `__tests__/RegardingResolverApp.test.tsx`:
+   - UPDATE mode selection (formType === 2) → auto-refresh invoked (save +
+     refresh called)
+   - CREATE mode selection (formType === 1) → auto-refresh SKIPPED (presave
+     path owns it)
+   - Xrm unavailable → auto-refresh silent-continues (no throw)
+
+4. Bulk update existing tests: version prop 1.3.1 → 1.3.2 and version regex.
+
+Step 9.5 quality gates: /code-review + /adr-check + `npm run build:prod`.
+
+Deploy: pack solution, `pac solution import --force-overwrite`, verify via
+`pac solution list`.
+
+Coordination: SRFR-036 running in parallel (form config for sprk_todo) —
+different files, no collision.
+  ]]></prompt>
+
+  <role>PCF developer familiar with Spaarke PCF version discipline (`src/client/pcf/CLAUDE.md`), Fluent v9 Griffel + tokens (`ADR-021`), virtual PCF platform-library pattern (`ADR-022`), shared PolymorphicPicker (`ADR-012`), and Xrm form-context lifecycle (save + refresh, formType semantics).</role>
+
+  <goal><![CDATA[
+RegardingResolver v1.3.2 deployed to spaarkedev1, verified via
+`pac solution list`. After successful picker selection in UPDATE mode, form
+auto-refreshes so newly-populated fields (bound to sprk_regardingrecordnumber
+etc.) display immediately without user Save/Refresh clicks. CREATE mode is
+untouched (presave bridge owns it). Manual refresh button from SRFR-034
+preserved. All 7 version anchors bumped 1.3.1 → 1.3.2. Tests updated with
+3 new auto-refresh coverage tests. `npm run build:prod` passes. ADR-021/
+022/012 preserved. Backward compat: existing v1.3.1 form bindings continue
+to function; auto-refresh is silent-continue on any Xrm-unavailable path.
+  ]]></goal>
+
+  <inputs>
+    <file purpose="spec">projects/set-regarding-and-field-mapping-resolver-r1/spec.md</file>
+    <file purpose="project-claude">projects/set-regarding-and-field-mapping-resolver-r1/CLAUDE.md</file>
+    <file purpose="checklist">src/client/pcf/CLAUDE.md</file>
+    <file purpose="prior-task">projects/set-regarding-and-field-mapping-resolver-r1/tasks/034-regarding-resolver-ui-polish-v1.3.1.poml</file>
+    <file purpose="prior-task">projects/set-regarding-and-field-mapping-resolver-r1/tasks/032-regarding-resolver-presave-record-number.poml</file>
+    <file purpose="source">src/client/pcf/RegardingResolver/RegardingResolver/ControlManifest.Input.xml</file>
+    <file purpose="source">src/client/pcf/RegardingResolver/RegardingResolver/index.ts</file>
+    <file purpose="source">src/client/pcf/RegardingResolver/RegardingResolver/RegardingResolverApp.tsx</file>
+    <file purpose="source">src/client/pcf/RegardingResolver/package.json</file>
+    <file purpose="source">src/client/pcf/RegardingResolver/Solution/solution.xml</file>
+    <file purpose="source">src/client/pcf/RegardingResolver/Solution/Controls/sprk_Spaarke.Controls.RegardingResolver/ControlManifest.xml</file>
+    <file purpose="source">src/client/pcf/RegardingResolver/Solution/pack.ps1</file>
+    <file purpose="test">src/client/pcf/RegardingResolver/__tests__/RegardingResolverApp.test.tsx</file>
+    <file purpose="adr">.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+    <file purpose="adr">.claude/adr/ADR-012-shared-component-library.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-022">Virtual PCF pattern preserved. React 16 + Fluent 9 platform-libraries. No bundling regression.</constraint>
+    <constraint source="ADR-012">Shared PolymorphicPicker consumption preserved. Do NOT modify the shared component.</constraint>
+    <constraint source="project">Manual refresh button (SRFR-034) STAYS — auto-refresh is ADDITIVE, not a replacement.</constraint>
+    <constraint source="FR-A5-02">CREATE mode (formType === 1) MUST skip auto-refresh — presave bridge (`__sprk_regarding_pending__`) owns that path. Refreshing during CREATE clobbers the buffered attributes and breaks the INSERT transaction.</constraint>
+    <constraint source="project">Xrm-unavailable path: warn + silent-continue (no throw). Test harness safety — the harness has no Xrm, and rejection would surface as unhandled promise rejection breaking test infra.</constraint>
+    <constraint source="project">Backward compat: existing selection flow unchanged EXCEPT for the new post-selection refresh. All existing tests pass with only version-string bumps.</constraint>
+    <constraint source="src/client/pcf/CLAUDE.md — Version Update Checklist">ALL 7 anchors bumped together (manifest, index.ts, footer BUILD_DATE, solution.xml, Solution ControlManifest, package.json, pack.ps1).</constraint>
+    <constraint source="project">TypeScript strict mode; use existing `getXrm()` helper for Xrm access.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>pcf/version-discipline + Xrm.Page.data lifecycle (save + refresh)</topic>
+    <files>
+      <file>src/client/pcf/CLAUDE.md</file>
+      <file>src/client/pcf/RegardingResolver/RegardingResolver/RegardingResolverApp.tsx</file>
+    </files>
+    <patterns>
+      <pattern name="formType detection" location="RegardingResolverApp.tsx (existing getHostRecordId helper)">
+        Xrm.Page.ui.getFormType() returns 1 (CREATE), 2 (UPDATE), 3 (READONLY), 4 (DISABLED), 6 (BULKEDIT). SRFR-032 already keys CREATE-mode branch on empty hostRecordId; we mirror that with an explicit formType check for clarity.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      SRFR-034 deployed v1.3.1 with a manual refresh button. Owner UAT
+      feedback: manual click still required after picker selection to see
+      the newly-populated record-number / etc. Owner wants auto-refresh
+      after selection so the form updates transparently. This task lands
+      as v1.3.2 to preserve v1.3.1 as the shipped baseline. Ships in
+      parallel with SRFR-036 (sprk_todo form field config) — no collision.
+    </background>
+    <dependencies>
+      <dependency task="SRFR-034" status="completed">v1.3.1 shipped with manual refresh button.</dependency>
+    </dependencies>
+    <related-work>
+      <item>SRFR-036 (parallel) — sprk_todo main form field config (2/3 + 1/3 width + companion hyperlink webresource). Different files.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check">Verify context &lt; 60%. Read current `RegardingResolverApp.tsx` `handlePickerSelect` seam. Confirm `getFormType` shape on Xrm.Page.ui.</step>
+    <step order="1" name="Add autoRefreshForm helper">In `RegardingResolverApp.tsx`, add a module-level `autoRefreshForm(formType: number)` async helper. CREATE-mode (formType === 1) early-return. Otherwise get Xrm, call `data.entity.save()` (await), then `data.refresh(true)` (await). Wrap in try/catch → warn only.</step>
+    <step order="2" name="Wire autoRefreshForm after applyRegardingSelection">In `handlePickerSelect`, after the existing successful `applyRegardingSelection` block and after CREATE-mode seam publish + onRecordTypeChanged, call `autoRefreshForm(formType)`. formType obtained via `xrm?.Page?.ui?.getFormType?.() ?? 2` (default UPDATE). Do NOT await inside the try/catch that handles applyRegardingSelection — auto-refresh is best-effort.</step>
+    <step order="3" name="Version bump — Location 1 (ControlManifest.Input.xml)">Update `version="1.3.2"` on the control root element.</step>
+    <step order="4" name="Version bump — Location 2 (index.ts CONTROL_VERSION)">Update `CONTROL_VERSION = '1.3.2'`.</step>
+    <step order="5" name="Version bump — Location 3 (BUILD_DATE)">Update `BUILD_DATE = '2026-07-03'` (unchanged if same day).</step>
+    <step order="6" name="Version bump — Location 4 (Solution manifest)">Update `Solution/solution.xml` `&lt;Version&gt;` element to `1.3.2`.</step>
+    <step order="7" name="Version bump — Location 5 (Solution Control Manifest)">Update `Solution/Controls/sprk_Spaarke.Controls.RegardingResolver/ControlManifest.xml` version attribute to `1.3.2`.</step>
+    <step order="8" name="Version bump — Location 6 (package.json)">Update `package.json` `"version": "1.3.2"`.</step>
+    <step order="9" name="Version bump — Location 7 (pack.ps1)">Update `$version = "1.3.2"`.</step>
+    <step order="10" name="Tests — bulk version + new coverage">
+      In `__tests__/RegardingResolverApp.test.tsx`:
+      (a) Bulk replace 1.3.1 → 1.3.2 (version prop and version regex).
+      (b) Add test: UPDATE mode selection (formType 2) → save() then refresh(true) called.
+      (c) Add test: CREATE mode selection (formType 1) → save/refresh NOT called (presave bridge owns).
+      (d) Add test: Xrm unavailable → auto-refresh silent-continues (no throw, no crash).
+    </step>
+    <step order="11" name="Grep verification">Grep for `1.3.1` under `src/client/pcf/RegardingResolver/` (exclude node_modules + out + Solution/bin). Assert zero non-history hits.</step>
+    <step order="9.5" name="Quality Gate">Invoke `/code-review` and `/adr-check` on modified files: ControlManifest.Input.xml, index.ts, RegardingResolverApp.tsx, solution.xml, extracted ControlManifest.xml, package.json, pack.ps1, RegardingResolverApp.test.tsx. Address findings or escalate per CLAUDE.md §6.5.</step>
+    <step order="12" name="Build">Run `npm run build:prod` in `src/client/pcf/RegardingResolver/`. Confirm build passes.</step>
+    <step order="13" name="Test run">Run `npm test`. Confirm all tests pass (SRFR-034 51 + SRFR-035 3 new = 54 expected).</step>
+    <step order="14" name="Copy bundle + pack solution">Copy `out/controls/RegardingResolver/bundle.js` to `Solution/Controls/sprk_Spaarke.Controls.RegardingResolver/bundle.js`. Run `Solution/pack.ps1` to produce `Solution/bin/RegardingResolverSolution_v1.3.2.zip`.</step>
+    <step order="15" name="Deploy">Run `pac solution import --path Solution/bin/RegardingResolverSolution_v1.3.2.zip --force-overwrite --publish-changes` against spaarkedev1. Verify via `pac solution list | Select-String RegardingResolver` shows Version 1.3.2.</step>
+    <step order="16" name="Update Task Status">Update SRFR-035 status → completed, notes summary. Update TASK-INDEX.md — add row for SRFR-035 under Wave 3 as another follow-on. Reset current-task.md.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Load current source, prior task, ADRs</tool>
+    <tool name="Edit">Manifest + code + tests + solution manifests</tool>
+    <tool name="Grep">Verify no straggling `1.3.1` references</tool>
+    <tool name="Bash">`npm run build:prod`, `npm test`, `pack.ps1`, `pac solution import`, `pac solution list`</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/RegardingResolver/RegardingResolver/ControlManifest.Input.xml</output>
+    <output type="code">src/client/pcf/RegardingResolver/RegardingResolver/index.ts</output>
+    <output type="code">src/client/pcf/RegardingResolver/RegardingResolver/RegardingResolverApp.tsx</output>
+    <output type="code">src/client/pcf/RegardingResolver/package.json</output>
+    <output type="code">src/client/pcf/RegardingResolver/Solution/solution.xml</output>
+    <output type="code">src/client/pcf/RegardingResolver/Solution/Controls/sprk_Spaarke.Controls.RegardingResolver/ControlManifest.xml</output>
+    <output type="code">src/client/pcf/RegardingResolver/Solution/pack.ps1</output>
+    <output type="test">src/client/pcf/RegardingResolver/__tests__/RegardingResolverApp.test.tsx</output>
+    <output type="artifact">src/client/pcf/RegardingResolver/Solution/bin/RegardingResolverSolution_v1.3.2.zip</output>
+    <output type="notes">projects/set-regarding-and-field-mapping-resolver-r1/notes/task-035-regarding-resolver-auto-refresh.log</output>
+    <output type="docs">projects/set-regarding-and-field-mapping-resolver-r1/tasks/TASK-INDEX.md (add SRFR-035 row)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`grep -c 'version="1.3.2"' src/client/pcf/RegardingResolver/RegardingResolver/ControlManifest.Input.xml` returns 1.</criterion>
+    <criterion testable="true">`grep -R "1.3.1" src/client/pcf/RegardingResolver/ --exclude-dir=node_modules --exclude-dir=out --exclude-dir=bin` returns zero non-history hits.</criterion>
+    <criterion testable="true">RegardingResolverApp.tsx contains a new `autoRefreshForm` function.</criterion>
+    <criterion testable="true">`autoRefreshForm` returns early when formType === 1 (CREATE).</criterion>
+    <criterion testable="true">`autoRefreshForm` calls `data.entity.save()` then `data.refresh(true)` on UPDATE.</criterion>
+    <criterion testable="true">Auto-refresh wired to run AFTER successful `applyRegardingSelection` in `handlePickerSelect`.</criterion>
+    <criterion testable="true">Manual refresh button (SRFR-034) still present in Row-1 toolbar (regression check).</criterion>
+    <criterion testable="true">3 new tests cover: UPDATE auto-refresh invoked, CREATE auto-refresh skipped, Xrm-unavailable silent-continue.</criterion>
+    <criterion testable="true">`npm run build:prod` succeeds with zero errors.</criterion>
+    <criterion testable="true">`npm test` all tests pass (existing + new).</criterion>
+    <criterion testable="true">Platform-library declarations for React 16 and Fluent 9 preserved in ControlManifest.Input.xml.</criterion>
+    <criterion testable="true">`/code-review` and `/adr-check` pass at Step 9.5 (or findings addressed / escalated per CLAUDE.md §6.5).</criterion>
+    <criterion testable="true">`pac solution list` shows RegardingResolverSolution v1.3.2 after deploy.</criterion>
+  </acceptance-criteria>
+
+  <notes><![CDATA[
+Completed 2026-07-03. Auto-refresh after picker selection wired in
+UPDATE-mode; CREATE-mode presave-bridge path preserved unchanged. Manual
+refresh button (SRFR-034) preserved. 7-anchor version bump to 1.3.2. Tests
+extended with 3 new auto-refresh coverage tests. Build + deploy successful.
+See notes/task-035-regarding-resolver-auto-refresh.log for full session log.
+  ]]></notes>
+</task>

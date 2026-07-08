@@ -1,0 +1,157 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<task id="SRFR-030" project="set-regarding-and-field-mapping-resolver-r1">
+  <metadata>
+    <title>RegardingResolver 2-row streamlined layout + toolbar-icon entity picker + PolymorphicPicker consumption + manifest properties</title>
+    <status>completed</status>
+    <estimated-effort>6h</estimated-effort>
+    <actual-effort>~1.5h</actual-effort>
+    <assigned>AI Agent</assigned>
+    <started>2026-07-02</started>
+    <completed>2026-07-02</completed>
+    <rigor>FULL</rigor>
+    <parallel-safe>true</parallel-safe>
+    <parallel-group>B</parallel-group>
+    <tags>pcf,regarding-resolver,fluent-v9,wave-3</tags>
+    <depends-on>SRFR-020,SRFR-021,SRFR-023</depends-on>
+    <wave>3</wave>
+  </metadata>
+
+  <prompt><![CDATA[
+Redesign RegardingResolver UI from the current 3-visible-field layout to the
+streamlined 2-row layout defined in spec.md FR-A1-01/02/03. Row 1 = title
+text "Related Record" + toolbar icon (right-aligned) that reveals an
+entity-type dropdown; selecting an entity opens `Xrm.Utility.lookupObjects`
+filtered to that entity type. Row 2 = `sprk_regardingrecordnumber` (hyperlink,
+task SRFR-031 wires click) + `sprk_regardingrecordname` (plain text).
+
+Consume the shared `PolymorphicPicker` component (task SRFR-021) so both PCFs
+share picker semantics. Expose the two Row-2 bound fields as manifest
+properties with sensible defaults matching current implied field names, so
+makers can rebind either field on a new host entity without code change
+(FR-A1-02). The Row-1 title text is also exposed as a manifest input property
+with default "Related Record".
+  ]]></prompt>
+
+  <role>Senior PCF developer with expertise in Fluent UI v9 (React 16 virtual pattern per ADR-022), the Spaarke shared component library, and ControlManifest.Input.xml manifest property authoring.</role>
+
+  <goal><![CDATA[
+RegardingResolver renders a 2-row layout matching spec.md FR-A1-01 exactly:
+Row 1 = title + toolbar icon (dropdown of 11 entities from `sprk_recordtype_ref`
+→ `Xrm.Utility.lookupObjects` scoped to selection); Row 2 = record-number
+hyperlink placeholder + record-name text. Shared `PolymorphicPicker` from
+`@spaarke/ui-components` is consumed. Manifest exposes bound properties
+`regardingRecordNumberField` and `regardingRecordNameField` with defaults
+`sprk_regardingrecordnumber` and `sprk_regardingrecordname`, plus an input
+`title` property with default "Related Record". Virtual pattern preserved;
+no bundling of React 16 or Fluent v9 platform libraries.
+  ]]></goal>
+
+  <inputs>
+    <file purpose="spec">projects/set-regarding-and-field-mapping-resolver-r1/spec.md</file>
+    <file purpose="plan">projects/set-regarding-and-field-mapping-resolver-r1/plan.md</file>
+    <file purpose="project-claude">projects/set-regarding-and-field-mapping-resolver-r1/CLAUDE.md</file>
+    <file purpose="source">src/client/pcf/RegardingResolver/RegardingResolver/index.ts</file>
+    <file purpose="source">src/client/pcf/RegardingResolver/RegardingResolver/RegardingResolverApp.tsx</file>
+    <file purpose="source">src/client/pcf/RegardingResolver/RegardingResolver/RegardingResolverHost.tsx</file>
+    <file purpose="source">src/client/pcf/RegardingResolver/RegardingResolver/ControlManifest.Input.xml</file>
+    <file purpose="shared-component">src/client/shared/Spaarke.UI.Components/src/components/PolymorphicPicker/PolymorphicPicker.tsx</file>
+    <file purpose="module-claude">src/client/pcf/CLAUDE.md</file>
+    <file purpose="adr">.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+    <file purpose="adr">.claude/adr/ADR-012-shared-component-library.md</file>
+    <file purpose="pattern">.claude/patterns/pcf/fluent-v9-modern-theming.md</file>
+    <file purpose="pattern">.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-022">Virtual pattern preserved. Platform-libraries declaration for React 16 and Fluent 9 unchanged in ControlManifest.Input.xml. NO bundling of react/fluentui.</constraint>
+    <constraint source="ADR-012">Consume `PolymorphicPicker` via `@spaarke/ui-components` public export only. NO direct file-path imports across packages.</constraint>
+    <constraint source="ADR-021 (implicit)">Fluent v9 semantic tokens for all styling; dark-mode-safe.</constraint>
+    <constraint source="spec FR-A1-01">2-row structural layout: Row 1 = title + right-aligned toolbar icon; Row 2 = number hyperlink + name text.</constraint>
+    <constraint source="spec FR-A1-02">Add manifest bound properties `regardingRecordNumberField` (default logical `sprk_regardingrecordnumber`) and `regardingRecordNameField` (default `sprk_regardingrecordname`). Retain existing `regardingRecordType` bound property (value consumed, not visually rendered).</constraint>
+    <constraint source="spec FR-A1-03">Toolbar icon click reveals dropdown of entity types sourced from `sprk_recordtype_ref` (11 entries after Wave 0 task 002); selecting an entity opens `Xrm.Utility.lookupObjects` filtered to that entity.</constraint>
+    <constraint source="spec FR-A4-01">`PolymorphicPicker.onSelect` MUST invoke `PolymorphicResolverService.applyResolverFields()` (task SRFR-020 extended) with `sourceRecordNumberField` derived from `sprk_recordtype_ref`.</constraint>
+    <constraint source="spec FR-A5-02">CREATE-mode (formType === 1) path populates `window.__sprk_regarding_pending__` including a `recordNumber` key (SRFR-032 owns the client half of this contract; keep consistent).</constraint>
+    <constraint source="spec NFR-04">Backward compatibility: existing form bindings that relied on the previous 3-visible-field layout still render correctly with new manifest defaults.</constraint>
+    <constraint source="project">TypeScript strict mode; no `any`.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>pcf/fluent-v9</topic>
+    <files>
+      <file>.claude/adr/ADR-022-pcf-platform-libraries.md</file>
+      <file>.claude/adr/ADR-012-shared-component-library.md</file>
+      <file>.claude/patterns/pcf/fluent-v9-modern-theming.md</file>
+      <file>.claude/patterns/ui/fluent-v9-component-authoring.md</file>
+      <file>src/client/pcf/CLAUDE.md</file>
+    </files>
+    <patterns>
+      <pattern name="Virtual PCF with React 16 + Fluent 9 platform-libraries" location=".claude/patterns/pcf/fluent-v9-modern-theming.md">
+        Manifest declares `platform-library name="React" version="16.14.0"` and `platform-library name="Fluent" version="9.46.2"` (or current pinned values); index.ts uses `getOutputs` + virtual pattern.
+      </pattern>
+      <pattern name="Manifest bound property with default logical name" location="src/client/pcf/CLAUDE.md">
+        `&lt;property name="X" of-type="SingleLine.Text" usage="bound" required="false" default-value="sprk_..." /&gt;` — makers can rebind on new host entity without code change.
+      </pattern>
+      <pattern name="Shared component consumption" location=".claude/patterns/ui/fluent-v9-component-authoring.md">
+        Import `PolymorphicPicker` from `@spaarke/ui-components`; pass catalog fetched from `sprk_recordtype_ref`; onSelect callback returns to control for resolver invocation.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>
+      The current RegardingResolver v1.2.0 renders 3 visible fields in a taller layout that consumes vertical form real estate. The v1.3.0 redesign compresses the surface to two rows: a header row with a right-aligned action affordance, and a content row with hyperlink + label. This matches Spaarke's streamlined-cell pattern and lets the record-number act as the primary navigation affordance (modal-open handled by SRFR-031).
+    </background>
+    <dependencies>
+      <dependency task="SRFR-020" status="pending">Shared resolver extended for 5-field write; onSelect callback path here calls `applyResolverFields()`.</dependency>
+      <dependency task="SRFR-021" status="pending">`PolymorphicPicker` shared component exists in `@spaarke/ui-components`.</dependency>
+      <dependency task="SRFR-023" status="pending">`EntityLookupConfig` interface extended with `regardingRecordNumberField?: string` (drives resolver invocation).</dependency>
+    </dependencies>
+    <related-work>
+      <item>SRFR-031 wires modal-open on the Row-2 record-number hyperlink click.</item>
+      <item>SRFR-032 populates `pending.recordNumber` on CREATE-mode global seam.</item>
+      <item>SRFR-033 handles read-only rendering and version bump v1.2.0 → v1.3.0.</item>
+    </related-work>
+  </context>
+
+  <steps>
+    <step order="0" name="Context Check">Verify context &lt; 60%. Read spec.md FR-A1-01/02/03, FR-A4-01, FR-A5-02, NFR-04. Read current `index.ts`, `RegardingResolverApp.tsx`, `RegardingResolverHost.tsx`, `ControlManifest.Input.xml` in full.</step>
+    <step order="1" name="Inventory Current Layout">Capture in notes/task-030-inventory.md: current visible fields, bound properties in manifest, existing state hooks, existing picker logic. Grep for `handlers/` usage in RegardingResolver.</step>
+    <step order="2" name="Manifest Extension">Add bound properties `regardingRecordNumberField` (of-type SingleLine.Text, default `sprk_regardingrecordnumber`) and `regardingRecordNameField` (of-type SingleLine.Text, default `sprk_regardingrecordname`). Add input property `title` (of-type SingleLine.Text, default "Related Record"). Preserve existing `regardingRecordType` bound property. Preserve platform-library declarations (React 16 + Fluent 9) verbatim per ADR-022.</step>
+    <step order="3" name="Update index.ts getOutputs + updateView">Wire the two new bound properties through the standard PCF control lifecycle: read on init/updateView, expose on getOutputs so writes propagate. Ensure `context.parameters.regardingRecordNumberField.raw` and `.regardingRecordNameField.raw` reachable in React tree.</step>
+    <step order="4" name="Redesign React Root — 2-Row Layout">Rewrite `RegardingResolverApp.tsx` (or equivalent React root) with a 2-row grid layout. Row 1 = &lt;Text&gt; title (bound to `title` manifest prop) + right-aligned action button. Row 2 = &lt;Link&gt; placeholder for record-number (styled as hyperlink; click handler stubbed for SRFR-031) + &lt;Text&gt; for record-name. Use Fluent v9 semantic tokens (Griffel makeStyles).</step>
+    <step order="5" name="Consume Shared PolymorphicPicker">Import `PolymorphicPicker` from `@spaarke/ui-components`. Fetch catalog from `sprk_recordtype_ref` (or hoist an existing service). Pass catalog + onSelect. onSelect: read the selected entity's `sprk_regardingrecordnumberfield` from catalog row → invoke `PolymorphicResolverService.applyResolverFields({ ..., sourceRecordNumberField })`.</step>
+    <step order="6" name="Toolbar-icon Trigger">Wire the Row-1 toolbar icon (Fluent v9 &lt;Button appearance="subtle" icon={...} /&gt; or &lt;ToolbarButton /&gt;) to open the PolymorphicPicker menu. Menu selection triggers the flow above; ultimately calling `Xrm.Utility.lookupObjects({ entityTypes: [selectedEntity], allowMultiSelect: false })` and passing the picked record back through `onSelect`.</step>
+    <step order="7" name="CREATE-mode + UPDATE-mode Branching">On successful `applyResolverFields` completion: if `context.mode.getFormType() === 1` (CREATE), populate `window.__sprk_regarding_pending__` including `recordNumber` (client half; SRFR-032 owns test contract). If UPDATE-mode, resolver handles Xrm.WebApi.updateRecord internally — no bridge write.</step>
+    <step order="8" name="Unit Tests">Add tests covering: (a) 2-row DOM structure via `document.querySelectorAll` snapshot; (b) toolbar-icon click reveals menu with 11 catalog entries; (c) entity selection invokes `Xrm.Utility.lookupObjects` with correct filter; (d) manifest defaults apply when maker does not override; (e) no console errors on init.</step>
+    <step order="9" name="Build">Run `npm run build:prod` in `src/client/pcf/RegardingResolver/`. Verify build succeeds; verify no bundled React 16 / Fluent 9 in bundle-analyzer output (spot-check via bundle size delta).</step>
+    <step order="9.5" name="Quality Gate">Invoke `/code-review` and `/adr-check` on the changed files. Address findings or escalate per CLAUDE.md §6.5.</step>
+    <step order="10" name="Update Task Status">Update TASK-INDEX.md 🔲 → ✅ for SRFR-030. Reset current-task.md for next task.</step>
+  </steps>
+
+  <tools>
+    <tool name="Read">Load source, manifest, spec, ADRs, patterns</tool>
+    <tool name="Edit">Modify index.ts, RegardingResolverApp.tsx, ControlManifest.Input.xml</tool>
+    <tool name="Grep">Search for existing picker + handler references</tool>
+    <tool name="Bash">Run `npm run build:prod` and `npm test`</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/client/pcf/RegardingResolver/RegardingResolver/index.ts</output>
+    <output type="code">src/client/pcf/RegardingResolver/RegardingResolver/RegardingResolverApp.tsx</output>
+    <output type="code">src/client/pcf/RegardingResolver/RegardingResolver/ControlManifest.Input.xml</output>
+    <output type="test">src/client/pcf/RegardingResolver/__tests__/RegardingResolverApp.test.tsx</output>
+    <output type="notes">projects/set-regarding-and-field-mapping-resolver-r1/notes/task-030-inventory.md</output>
+    <output type="docs">projects/set-regarding-and-field-mapping-resolver-r1/tasks/TASK-INDEX.md (🔲 → ✅ for SRFR-030)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">ControlManifest.Input.xml declares bound properties `regardingRecordNumberField` (default `sprk_regardingrecordnumber`) and `regardingRecordNameField` (default `sprk_regardingrecordname`); input property `title` defaults to "Related Record".</criterion>
+    <criterion testable="true">Platform-library declarations for React 16 and Fluent 9 preserved unchanged (grep for `platform-library` in manifest); bundle-size delta consistent with virtual pattern (no bundled framework).</criterion>
+    <criterion testable="true">Rendered DOM has exactly 2 rows in the control shell; Row 1 contains title text + right-aligned button; Row 2 contains a `role="link"` element for record-number and a text node for record-name.</criterion>
+    <criterion testable="true">Toolbar icon click opens a menu populated with 11 entries from `sprk_recordtype_ref` (verified via test-double catalog).</criterion>
+    <criterion testable="true">Selecting an entity invokes `Xrm.Utility.lookupObjects` with `entityTypes: [selectedEntity]`, `allowMultiSelect: false`.</criterion>
+    <criterion testable="true">`PolymorphicPicker` imported from `@spaarke/ui-components` (grep confirms path); onSelect callback invokes `PolymorphicResolverService.applyResolverFields()` with `sourceRecordNumberField` derived from catalog row.</criterion>
+    <criterion testable="true">No console errors on `init()` in test harness.</criterion>
+    <criterion testable="true">`/code-review` and `/adr-check` pass at Step 9.5 (or all findings addressed / escalated per CLAUDE.md §6.5).</criterion>
+  </acceptance-criteria>
+</task>
