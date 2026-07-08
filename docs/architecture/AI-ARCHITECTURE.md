@@ -1,10 +1,22 @@
 # Spaarke AI Architecture
 
-> **Last Updated**: 2026-07-07 (spaarke-ai-architecture-redesign-r1 task 052 — aligned to the shipped 2026-07 redesign: three entry paths, closed catalogs, session ledger, ONE confirmation gate; deleted dispatcher/engine-shell/Chat-Tools estates removed from this doc)
+> **Last Updated**: 2026-07-08 (operator-commissioned doc assessment fixes — analysis-execution flow reconciled with ADR-039 as-built, handler-hierarchy disposition, canonical eval-count rule, r2 superseded-soon pointers)
 > **Last Reviewed**: 2026-07-07
 > **Reviewed By**: spaarke-ai-architecture-redesign-r1 task 052 (FR-P4-03)
 > **Status**: Current
 > **Purpose**: Technical reference overview of the Spaarke AI platform — the three-path dispatch architecture (ADR-039), catalog + executor model, scope library, safety pipeline, Cosmos persistence, facade boundary, and Azure infrastructure.
+
+---
+
+## ⚠️ Superseded-soon — r2 is chartered; check before building against these seams
+
+`spaarke-ai-architecture-redesign-r2` is chartered ([`projects/spaarke-ai-architecture-redesign-r2/design.md`](../../projects/spaarke-ai-architecture-redesign-r2/design.md), DRAFT v0.3, 2026-07-08, on master). It will amend three seams this doc describes:
+
+1. **Confirmation gate** — Confirmation Policy v2 (charter D-F1): a deterministic gate-engine policy over **risk tier × request origin × argument completeness**, with a Tier-2 sub-split (**2a** private/reversible create · **2b** matter-scoped system-of-record create/update · **2c** document creation/versioning), replacing the blanket declared-`side_effect_class` gating described in the redesign summary and Safety sections below.
+2. **Memory** — a five-scope **Memory Service** (charter D-M1) whose per-item **14-field governance envelope** (incl. `retentionClass`, `expiration`, `deletionPolicy`, `sensitivity`, `sourceTrustLevel`) supersedes `MatterMemoryService`'s blanket 90-day-TTL `memory` container semantics documented under Cosmos DB Persistence below.
+3. **Context** — a **Context Binder** producing a versioned `ContextEnvelope` (User / Workspace / Business / Memory slices, per-slice token budgets) as the turn's context-assembly contract.
+
+Readers MUST NOT build against the gate, memory, or context-assembly seams without checking the r2 charter first.
 
 ---
 
@@ -31,7 +43,9 @@ The AI dispatch layer was redesigned and hard-cut-over in July 2026 (phases P0�
 - **ONE confirmation gate** — `PendingPlanManager` unified pending store; loop-invoked tools declaring `side_effect_class ∈ {write, communicate}` suspend via `SideEffectGateAIFunction`; resume via `POST …/gates/{gateId}/resolve` (`TypedHandlerResumeExecutor`, user-OBO); gate markers + outcomes land in the ledger and the transcript. Gating by hardcoded tool-name lists is forbidden.
 - **Executors** — **prompted** (`LinearConsumers/ActionRunner` + `PromptSchemaRenderer`) and **coded** (`ICodedWorkflow` via `CodedWorkflowRegistry`; first composite: `DailyBriefingCompositeService`). The node-graph engine (`PlaybookOrchestrationService`) is **FROZEN** — Insights family only.
 - **Deleted estates (grep-zero)** — the classifier/dispatcher stack (`PlaybookDispatcher`, `IntentRerankerService`, `PlaybookCandidateSelector`, `CompoundIntentDetector`, the whole PlaybookEmbedding subsystem), `CapabilityRouter` (R2 three-tier classifier), legacy `Chat/Tools` (11 classes), `PlaybookExecutionEngine`, `SessionSummarizeOrchestrator`, `FileSummarize`/`DocumentProfile` wrappers, the `intentHint` leg of `SoftSlashRouter` (the router module itself remains live), `LinearConsumers`/`Workspace.*PlaybookId`/`Insights:Playbooks` config surfaces, FieldDelta dual-render. History: `projects/spaarke-ai-architecture-redesign-r1/`.
-- **Quality discipline** — golden-utterance eval suite (62 cases, merge-blocking CI gate); catalog input schemas are CI-validated mirrors under `infra/dataverse/inputschemas/` (`OpenAiFunctionSchemaValidator` excludes invalid rows at projection; health check goes Degraded naming the row).
+- **Quality discipline** — golden-utterance eval suite (merge-blocking CI gate; see the canonical counting rule below); catalog input schemas are CI-validated mirrors under `infra/dataverse/inputschemas/` (`OpenAiFunctionSchemaValidator` excludes invalid rows at projection; health check goes Degraded naming the row).
+
+> **Canonical eval-count rule (2026-07-08)**: the golden-utterance suite is counted as **scenario cases in [`tests/integration/contract/Eval/golden-utterances.json`](../../tests/integration/contract/Eval/golden-utterances.json)** — currently **64 cases across 21 families** (counted as JSON `cases[]` entries / distinct `family` values, 2026-07-08). Two other numbers circulate and are NOT the case count: the CI category filter (`dotnet test --filter "Category=GoldenUtteranceEval"`) reports **35 xunit facts** (15 in `GoldenUtteranceEvalSuiteTests.cs` + 20 in `P2LoopInjectionEvalSuiteTests.cs`, each fact asserting over many JSON cases), and earlier snapshots (59, 62) are stale case counts from before later case additions. When citing the suite size, state the number as "N scenario cases across M families" and re-count the JSON — never quote the xunit fact count or a stale snapshot as the case count.
 
 ---
 
@@ -57,7 +71,11 @@ REJECTED options the audit explicitly considered and locked:
 
 Spaarke AI provides document analysis, knowledge retrieval, and conversational AI capabilities as an extension of the BFF API (ADR-013). The architecture separates reusable AI primitives (scopes) and catalog data (Actions, Bindings, Tools) from the execution machinery that runs them, enabling configuration-driven AI capabilities without code deployment: a maker ships a new prompted capability by authoring an Action row + a Binding row (see [`docs/guides/ai-guide-consumer-wiring.md`](../guides/ai-guide-consumer-wiring.md)). Control flow is code; behavior is data.
 
-Two handler interface hierarchies coexist: `IAnalysisToolHandler` for the tool handler registry (analysis pipeline, frozen playbook nodes; projected into the agent loop via `ToolHandlerToAIFunctionAdapter`), and `IAiToolHandler` for playbook workflow tool handlers (simpler interface with `ToolName` + `ExecuteAsync`). Both are registered in DI and resolved at runtime.
+Two handler interface hierarchies exist. Their fate is explicit (disposition, 2026-07-08 — names verified against code):
+
+- **`IToolHandler`** (`Services/Ai/IToolHandler.cs`) — the typed-handler interface behind the tool handler registry; **new tools implement this**. The historical name `IAnalysisToolHandler` was renamed to `IToolHandler` in R6 Pillar 2 (task D-A-06 / FR-06) and survives only as a `global using IAnalysisToolHandler = IToolHandler;` alias in `GlobalUsings.cs`. Typed handlers are projected into the agent loop via `ToolHandlerToAIFunctionAdapter` and declare their `InvocationContextKind`; the interface's playbook-invocation leg (`ExecuteAsync(ToolExecutionContext, …)`) serves only the FROZEN node-graph engine (Insights family) via `AiAnalysisNodeExecutor` → `IToolHandlerRegistry`, and chat-only handlers reject it (e.g. `AnalysisExecutionHandler.Validate`).
+- **`IAiToolHandler`** (`Services/Ai/IAiToolHandler.cs` — simpler interface: `ToolName` + `ExecuteAsync(ToolParameters)`) — the playbook-workflow tool interface; **frozen with the node-graph engine** (Insights family only). One live implementation remains (`Services/Finance/Tools/FinancialCalculationToolHandler`, registered in `FinanceModule`; discovery via `GET /api/ai/tools/handlers`). **No new implementations.**
+- **New composites are `ICodedWorkflow`** (assembly-scanned via `CodedWorkflowRegistry`) — never node graphs (OQ-2/D11).
 
 ---
 
@@ -65,13 +83,13 @@ Two handler interface hierarchies coexist: `IAnalysisToolHandler` for the tool h
 
 | Component | Path | Responsibility |
 |-----------|------|---------------|
-| AnalysisOrchestrationService | `src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs` | Top-level orchestrator: routes to action-based or playbook-based execution, streams SSE |
+| AnalysisOrchestrationService | `src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisOrchestrationService.cs` | Analysis lifecycle service: continue/save/export/resume + `ExecutePlaybookAsync` (chat `analysis.rerun` leg), streams SSE; the legacy action-based execute leg was deleted (R7 FR-11) |
 | ToolHandlerRegistry | `src/server/api/Sprk.Bff.Api/Services/Ai/ToolHandlerRegistry.cs` | Indexes all `IAnalysisToolHandler` by HandlerId and ToolType; supports config-based disabling |
 | ToolFrameworkExtensions | `src/server/api/Sprk.Bff.Api/Services/Ai/ToolFrameworkExtensions.cs` | DI registration: assembly-scans for handlers, registers registry as Scoped |
 | GenericAnalysisHandler | `src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/GenericAnalysisHandler.cs` | Configuration-driven handler (95% of tools); supports JPS, structured output, streaming |
-| IAnalysisToolHandler | `src/server/api/Sprk.Bff.Api/Services/Ai/IAnalysisToolHandler.cs` | Handler interface: HandlerId, Metadata, Validate, ExecuteAsync |
+| IToolHandler (alias `IAnalysisToolHandler`) | `src/server/api/Sprk.Bff.Api/Services/Ai/IToolHandler.cs` | Typed-handler interface: HandlerId, Metadata, Validate, ExecuteAsync (+ chat leg); old name survives as a `GlobalUsings.cs` alias only |
 | IStreamingAnalysisToolHandler | `src/server/api/Sprk.Bff.Api/Services/Ai/IStreamingAnalysisToolHandler.cs` | Opt-in streaming: `StreamExecuteAsync` yields `ToolStreamEvent.Token` then `Completed` |
-| IAiToolHandler | `src/server/api/Sprk.Bff.Api/Services/Ai/IAiToolHandler.cs` | Simpler playbook tool interface: ToolName + ExecuteAsync(ToolParameters) |
+| IAiToolHandler | `src/server/api/Sprk.Bff.Api/Services/Ai/IAiToolHandler.cs` | Simpler playbook-workflow tool interface: ToolName + ExecuteAsync(ToolParameters) — FROZEN with the node-graph engine; no new implementations (see Overview disposition) |
 | ScopeResolverService | `src/server/api/Sprk.Bff.Api/Services/Ai/IScopeResolverService.cs` | Loads scopes from Dataverse by ID, playbook, or node; CRUD; $choices resolution |
 | AnalysisContextBuilder | `src/server/api/Sprk.Bff.Api/Services/Ai/AnalysisContextBuilder.cs` | Prompt assembly: Action.SystemPrompt + Skill fragments + Knowledge + Document |
 | AiAnalysisNodeExecutor | `src/server/api/Sprk.Bff.Api/Services/Ai/Nodes/AiAnalysisNodeExecutor.cs` | Bridges playbook nodes to IToolHandlerRegistry; L1/L2/L3 knowledge retrieval |
@@ -140,18 +158,17 @@ Two handler interface hierarchies coexist: `IAnalysisToolHandler` for the tool h
 
 Covered in [`chat-architecture.md`](chat-architecture.md) (loop contract, gate, SSE) and canonically in [`SPAARKE-AI-ARCHITECTURE-AND-COMPONENT-DESIGN.md`](SPAARKE-AI-ARCHITECTURE-AND-COMPONENT-DESIGN.md) §7. Summary: Event rules and Click dispatch resolve a Binding deterministically; Text-path utterances enter the bounded agent turn, which composes catalog capability tools + primitive tools (≤ 8 calls/turn, deterministic context pre-filter, citation enforcement, ToolChain → ledger). Every execution writes its `SessionOutput` to the ledger BEFORE rendering; `OutputRouter` then routes by disposition.
 
-### Analysis Execution (Action-Based, No Playbook)
+### Analysis Execution (`POST /api/ai/analysis/execute` — Binding-resolved, playbook-required)
 
-1. `POST /api/ai/analysis/execute` receives `AnalysisExecuteRequest` with document IDs, action ID, and scope IDs
-2. `AnalysisEndpoints` sets SSE response headers and iterates `AnalysisOrchestrationService.ExecuteAnalysisAsync`
-3. If `PlaybookId` is set: delegates to `ExecutePlaybookAsync` (playbook path); otherwise continues with action-based path
-4. `AnalysisDocumentLoader` retrieves document from Dataverse, downloads file from SPE via `ISpeFileOperations` (OBO auth), extracts text via `ITextExtractor`
-5. `IScopeResolverService.ResolveScopesAsync` loads skills, knowledge, tools from Dataverse in parallel with `GetActionAsync`
-6. `AnalysisRagProcessor.ProcessRagKnowledgeAsync` queries Azure AI Search for RAG knowledge sources
-7. `AnalysisContextBuilder.BuildSystemPrompt` assembles: Action.SystemPrompt + Skill.PromptFragments; `BuildUserPromptAsync` assembles: document text + RAG context
-8. `IOpenAiClient.StreamCompletionAsync` streams tokens; each token is yielded as `AnalysisStreamChunk.TextChunk` (SSE)
-9. `AnalysisResultPersistence` writes working document periodically (every 500 chars) and finalizes to Dataverse
-10. RAG indexing job is enqueued via Service Bus for post-analysis indexing
+> **Tombstone (corrected 2026-07-08)**: the previous step list here ("Action-Based, No Playbook") described the legacy ActionId-only raw-OpenAI pipeline, which was **DELETED** by R7 FR-11 (task 042) — it showed no Binding resolution and no ledger write, contradicting the three-path MUST above. The as-built flow below is verified against `Api/Ai/AnalysisEndpoints.cs` (`ExecuteAnalysis`).
+
+1. `AnalysisEndpoints.ExecuteAnalysis` receives `AnalysisExecuteRequest`; feature gate `AnalysisOptions.Enabled` (503 when off); **`PlaybookId` is REQUIRED** — requests without one get 400 (the legacy ActionId-only path was removed with no transition shim, R7 FR-11 task 042)
+2. **Binding resolution (ADR-039 / FR-P3-01, redesign-r1 task 040)**: `IConsumerRoutingService.ResolveAsync(ConsumerTypes.DocumentProfile)` reads the document-profile `sprk_playbookconsumer` Binding row (cached ~5 min) and compares its `sprk_playbook` against the submitted `PlaybookId` — the Binding table is the single routing surface (task 040 moved all 8 consumers onto Bindings and deleted the `LinearConsumers` config reverse-lookup); analysis execution resolves via Binding like every Click-path invocation
+3. **Document Profile match → prompted executor**: the endpoint composes the executor primitives directly (`IActionResolver` → `IDocumentTextSource` → `IActionRunner` single-LLM-call execution; the consumer-specific wrapper class was absorbed by FR-P3-05 task 044) — same client SSE contract, no engine
+4. **All other playbooks → frozen engine**: `AnalysisDocumentLoader` pre-loads `DocumentContext` (Dataverse record fetch + SPE file download via OBO + text extraction), then `IPlaybookOrchestrationService.ExecuteAsync` runs the node graph; `BridgePlaybookEventToAnalysisChunk` maps `PlaybookStreamEvent` → the stable `AnalysisStreamChunk` SSE contract, `data: [DONE]` terminates the stream, and a fire-and-forget completion notification is sent
+5. **Session-ledger write (ADR-040 / FR-P1-05, redesign-r1 task 024 — the E-2 adapter)**: session-attached engine runs write an addressable `SessionOutput` (`{bindingId}@t{n}`, Binding identity reverse-resolved via `IConsumerRoutingService.GetBindingByPlaybookIdAsync`) through `EngineOutputLedgerAdapter` (`Services/Ai/EngineOutputLedgerAdapter.cs`) **before anything renders**; the adapter attaches in `Services/Ai/Handlers/AnalysisExecutionHandler.cs` (the chat `analysis.rerun` / `analysis.refine` typed handler — re-homed there by FR-P3-05 task 044), on OUR side of the engine freeze line. Record-context runs of this endpoint have no chat session and stay **outside the session ledger by design** (task 024 documented decision, confirmed at FR-P3-08 task 047) — their durable outputs persist via playbook persistence nodes or the `OutputRouter` `work_product` disposition leg
+
+> **Ruled residual — the `analysis.rerun` app-only engine leg**: the chat rerun leg delegates to `IAnalysisOrchestrationService.ExecutePlaybookAsync`, whose frozen engine persists results under **application identity** — the last LLM-reachable app-only engine leg (task 044 deleted the other three F-1 legs). This is a RULED, documented residual: operator accept-with-note at r1 close (task 048 rulings set), bounded and re-verified by the FR-P4-01 Track-B audit ([`projects/spaarke-ai-architecture-redesign-r1/notes/fr-acceptance-reconciliation.md`](../../projects/spaarke-ai-architecture-redesign-r1/notes/fr-acceptance-reconciliation.md) residual 6), with disposition carried to r2. Reach stays explicit in the catalog (`permission_scope = app-only-engine`); blast radius is bounded to the session's OWN playbook + document — both BFF-resolved from session context, never LLM-supplied.
 
 ### Playbook-driven LLM Output Pattern (R7 Wave 11, narrative consumers)
 
@@ -471,6 +488,8 @@ Session state, audit logs, feedback, memory, and prompt history are persisted to
 | `memory` | `/userId` | 90 days | Per-matter structured AI memory snapshots | MatterMemoryService |
 | `feedback` | `/tenantId` | 90 days | User feedback (thumbs up/down) on AI responses | FeedbackService |
 
+> **r2 forward pointer (charter D-M1)**: the r2 Memory Service supersedes the `memory` container's blanket semantics (`/userId` partition, container-level 90-day TTL, per-matter snapshots via `MatterMemoryService`) with five memory scopes and per-item `retentionClass`/`expiration`/`deletionPolicy` governance — see the Superseded-soon note at the top of this doc and [`projects/spaarke-ai-architecture-redesign-r2/design.md`](../../projects/spaarke-ai-architecture-redesign-r2/design.md) §D-M1.
+
 **CosmosClient** is registered as Singleton (thread-safe, manages connection pool internally). Uses `CosmosClientBuilder` with `WithConnectionModeDirect()` and throttling retry (30s wait, 9 retries).
 
 **Required configuration**:
@@ -560,6 +579,7 @@ All queries are tenant-scoped (partition key = `/tenantId`). Aggregation queries
 
 | Date | Version | Change |
 |------|---------|--------|
+| 2026-07-08 | 6.1 | Operator-commissioned doc-assessment fixes: (1) Analysis Execution data flow reconciled with ADR-039 as-built — Binding resolution via `IConsumerRoutingService` (FR-P3-01 task 040) + E-2 `EngineOutputLedgerAdapter` session-ledger write (FR-P1-05 task 024) now shown in the step sequence; stale ActionId-only step list tombstoned (deleted by R7 FR-11 task 042); `analysis.rerun` app-only leg documented as RULED residual (operator accept-with-note, FR-P4-01 re-verified, r2 disposition). (2) Superseded-soon admonition added for r2-chartered seams (Confirmation Policy v2 tier sub-split, five-scope Memory Service w/ 14-field governance envelope, Context Binder/ContextEnvelope). (3) Dual handler hierarchy dispositioned: `IAiToolHandler` frozen with the engine (no new implementations); new tools implement `IToolHandler` (né `IAnalysisToolHandler`, R6 FR-06 rename — alias only); new composites are `ICodedWorkflow`. (4) Canonical eval-count rule: 64 scenario cases across 21 families in `golden-utterances.json` (2026-07-08); the CI filter's 35 xunit facts and stale 59/62 snapshots are NOT the case count. (5) `memory` container r2 forward pointer (charter D-M1). |
 | 2026-07-07 | 6.0 | spaarke-ai-architecture-redesign-r1 task 052 (FR-P4-03): aligned to the SHIPPED redesign — added "2026-07 redesign" summary (three entry paths, closed catalogs, ledger, ONE gate, dispositions); tiers 1–3 redrawn (catalog manifest, dispatch, prompted/coded executors + frozen engine); component table extended with the dispatch/gate/ledger components; Capability Router section replaced with deleted-classifier history; `spaarke-playbook-embeddings` marked orphaned; facade table refreshed (IConsumerRoutingService, IInsightsAi, IObservationMirror added; IInvokePlaybookAi deleted); ADR-039/040 constraints added. |
 | 2026-06-28 | 5.1 | R7 Wave 3 (FR-16): added "Typed Executor Config Schemas" section documenting `INodeExecutor.GetConfigSchema()`, `ExecutorConfigSchema`/`ConfigSchemaField` DTOs, `GET /api/ai/playbook-builder/executor-config-schemas` endpoint, rich vs placeholder pattern (5 priority + 20 placeholder), author guidance, forward-compat (FR-27 pattern reuse), Wave 8 task 083 canvas consumer. |
 | 2026-05-17 | 5.0 | R2 additions: Capability Router (3-tier), Safety Pipeline (PromptShield, Groundedness, Citations, privilege filter), Cosmos DB persistence (5 containers, write-through), Feedback Collection. Updated Tier 4, integration points, design decisions. |
