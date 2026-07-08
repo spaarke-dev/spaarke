@@ -1,0 +1,112 @@
+<task id="024" project="spaarkeai-compose-r2">
+  <metadata>
+    <title>FR-23 enriched compose-selection/compose-document scope descriptions</title>
+    <phase>2 LLM Editing Patterns</phase>
+    <gate>green</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <parallel-group>phase2-llm</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>none</deps>
+    <tags>bff-api,api</tags>
+    <estimated-effort>high</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Enrich the `compose-selection` and `compose-document` JPS scope `description` fields with behavioral guidance
+    (recovery paths, gotchas, examples) per the adeu "tool descriptions ARE the prompt" pattern (design §6.1, §2.0).
+    The SAME description text primes the LLM AND renders as the user-visible toolbar/affordance tooltip — author once,
+    serve both. This cuts content surface area in half and keeps user/LLM understanding consistent.
+  </prompt>
+
+  <role>
+    AI prompt/scope author fluent in JPS scope schemas and the "description = prompt = tooltip" discipline.
+  </role>
+
+  <goal>
+    Updated `compose-selection` and `compose-document` scope definitions whose enriched `description` fields (scope-level
+    and per-input-field) carry behavioral guidance that doubles as user-facing tooltip copy, deployed mirror-first to the
+    scope catalog location confirmed in Step 2 resource discovery. The BubbleMenu toolbar tooltips (FR-14 / task 030)
+    source this same text.
+  </goal>
+
+  <context>
+    <background>
+      R1 authored these two scopes with rich descriptions (see the R1 notes files below). FR-23 raises them to the
+      "tool descriptions = prompt" bar: each description carries recovery paths and gotchas that both prime the model and
+      surface as tooltips. This is content authoring, not a new service — no new AI internals, no new dispatch surface.
+      Confirm the DEPLOYED scope-catalog location during Step 2 (the R1 files under `notes/jps-scopes/` are drafts; the
+      live catalog may be a Dataverse `sprk_analysisscope`-style row and/or a mirror under `infra/dataverse/` — resolve
+      before editing so the edit lands on the source of truth, not a stale copy).
+    </background>
+    <relevant-files>
+      <file change="modify">compose-selection scope definition (deployed location — CONFIRM in Step 2; draft at projects/spaarkeai-compose-r1/notes/jps-scopes/compose-selection.scope.json)</file>
+      <file change="modify">compose-document scope definition (deployed location — CONFIRM in Step 2; draft at projects/spaarkeai-compose-r1/notes/jps-scopes/compose-document.scope.json)</file>
+      <file change="reference">projects/spaarkeai-compose-r1/notes/jps-scopes/compose-selection.scope.json (R1 baseline descriptions to enrich)</file>
+      <file change="reference">.claude/catalogs/scope-model-index.json (scope/model catalog index — verify how scopes are catalogued)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="n/a">No task dependency; independent authoring.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">This task authors scope description CONTENT only; it injects no AI internals and adds no dispatch surface (Services/Compose facade discipline unaffected).</constraint>
+    <constraint source="ADR-040">Descriptions describe scope INPUTS/behavior; they do not introduce a parallel routing/config path outside the catalog.</constraint>
+    <constraint source="ADR-021">Where the same text renders as a Fluent v9 tooltip (FR-14 toolbar), it must read as concise user help AND as LLM guidance — no hardcoded UI strings elsewhere.</constraint>
+    <constraint source="project">Do NOT author new `sprk_analysisplaybook` records — the engine is frozen. This edits SCOPE descriptions only.</constraint>
+    <constraint source="project">Mirror-first: if the catalog is Dataverse-backed, edit the `infra/dataverse/inputschemas/` mirror as source of truth per the catalog governance model.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>JPS scope descriptions as prompt + tooltip; scope catalog governance; mirror-first authoring</topic>
+    <files>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/spaarkeai-compose-r2/design.md</file>
+      <file>projects/spaarkeai-compose-r2/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Tool descriptions ARE the prompt" location="design.md §6.1 / §2.0">Behavioral guidance + recovery paths embedded in scope descriptions; the same text is the LLM prompt AND the user-visible tooltip.</pattern>
+    </patterns>
+  </knowledge>
+
+  <justification>
+    MODIFY existing scope definitions (not a new component) — enriching `description` fields on the two R1 scopes. No new
+    surface is introduced. Rule §11 justification is not required for edits to existing surface, but the cost-of-doing-nothing
+    is concrete: without enriched descriptions the LLM lacks recovery-path guidance (higher error rate) and the FR-14 toolbar
+    tooltips would need separately-authored copy (dual source of truth, drift).
+  </justification>
+
+  <steps mode="directional">
+    <step order="0">Context check. Load design §2.0/§6.1 + the R1 baseline scope files.</step>
+    <step order="1">Resource discovery: CONFIRM the deployed scope-catalog location (Dataverse row vs `infra/dataverse/` mirror vs BFF-embedded) so edits land on the source of truth. Document the finding in task notes.</step>
+    <step order="2">Enrich `compose-selection` scope-level + per-field descriptions with recovery paths, gotchas, and examples that read as both LLM guidance and tooltip copy.</step>
+    <step order="3">Enrich `compose-document` scope descriptions likewise, aligned with the FR-22 semantic-appendix enrichment (task 023) so the payload and its description are consistent.</step>
+    <step order="4">Ensure each enriched description is concise enough to render as a Fluent v9 tooltip (FR-14) without truncation-of-meaning; note the tooltip-source contract for task 030.</step>
+    <step order="5">Validate the scope definitions against their schema (jps-validate or the catalog's validator); confirm no property-level boolean `required` regressions if the catalog shares the OpenAI schema validator.</step>
+    <step order="6">Report the deployed-location decision + the "same text primes LLM and renders as tooltip" verification.</step>
+  </steps>
+
+  <outputs>
+    <output type="config">compose-selection scope definition (enriched descriptions, at the confirmed deployed location)</output>
+    <output type="config">compose-document scope definition (enriched descriptions, at the confirmed deployed location)</output>
+    <output type="report">Task completion report incl. deployed-scope-location finding + tooltip-source contract for FR-14</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">`compose-selection` and `compose-document` scope descriptions carry behavioral guidance (recovery paths, gotchas, examples) at scope level and per input field.</criterion>
+    <criterion testable="true">The SAME description text is verified to (a) prime the LLM and (b) be consumable as the FR-14 toolbar tooltip — a single authored source, no duplicate copy.</criterion>
+    <criterion testable="true">The edit lands on the confirmed deployed catalog source of truth (documented in Step 1), not a stale draft copy.</criterion>
+    <criterion testable="true">No new `sprk_analysisplaybook` record is created; no new dispatch/config surface is introduced (engine frozen; catalog-governance preserved).</criterion>
+    <criterion testable="true">The scope definitions validate against their schema with no property-level boolean `required` violations (NEGATIVE: banned schema shape).</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

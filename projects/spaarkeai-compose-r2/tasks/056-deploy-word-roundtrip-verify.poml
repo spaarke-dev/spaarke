@@ -1,0 +1,119 @@
+<task id="056" project="spaarkeai-compose-r2">
+  <metadata>
+    <title>Deploy + Word for Web round-trip verification (Spikes 5/6 as gate)</title>
+    <phase>5 Word</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <parallel-group>W4-Integration</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <deps>050,051,053,054</deps>
+    <tags>bff-api,spe,docx,deploy,azure</tags>
+    <estimated-effort>1 day</estimated-effort>
+    <assigned>unassigned</assigned>
+    <started></started>
+    <completed></completed>
+  </metadata>
+
+  <prompt>
+    Deploy the Phase-5 Word-interop BFF changes (tasks 050/051/053/054) to spaarkedev1 and verify the
+    full DOCX round-trip against Word for Web: push Compose annotations → open in Word for Web (native
+    comments + track changes render) → edit + save in Word → webhook/poll detects the change → pull +
+    re-anchor with the confidence banner. Spikes 5 (write → Word for Web render) and 6 (reverse
+    round-trip) are the acceptance GATE — this task confirms their validated behavior holds in the
+    deployed environment. This is a deployment + verification task; follow the deploy steps exactly.
+  </prompt>
+
+  <role>
+    Release/verification engineer familiar with the Spaarke `bff-deploy` skill, SPE containers on
+    spaarkedev1, Word for Web, and browser-based verification (`ui-test`).
+  </role>
+
+  <goal>
+    The Phase-5 Word-interop endpoints + services deployed to spaarkedev1 and a documented, evidence-
+    backed round-trip verification: pushed annotations render natively in Word for Web; a Word edit is
+    detected (webhook + poll fallback both exercised); pulled annotations round-trip with correct
+    author/date; re-anchoring produces the "N re-anchored, M need review" banner. Publish size ≤ 60 MB
+    confirmed post-deploy; no new HIGH CVE.
+  </goal>
+
+  <context>
+    <background>
+      design §2.4/§2.5, Success Criterion #5 ("Word push renders natively in Word for Web; pull
+      round-trips with correct author/date; return-from-Word re-anchors with confidence bands +
+      banner. Verify by: Word for Web round-trip (Spikes 5/6)"). This is the Phase-5 integration gate,
+      NOT the flagship gate (that is task 082, which needs the full assistant-driven chain + core A0).
+    </background>
+    <relevant-files>
+      <file role="verify">src/server/api/Sprk.Bff.Api/Services/Compose/DocxAnnotationWriter.cs (task 050)</file>
+      <file role="verify">src/server/api/Sprk.Bff.Api/Services/Compose/DocxAnnotationReader.cs (task 051)</file>
+      <file role="verify">src/server/api/Sprk.Bff.Api/Services/Compose/SpeSyncOrchestrator.cs + SpeWebhookRenewalHostedService.cs (task 052)</file>
+      <file role="verify">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs (push/pull/webhook/check-changes routes)</file>
+      <file role="verify">src/server/api/Sprk.Bff.Api/Services/Compose/AnnotationReanchorService.cs (task 054)</file>
+      <file role="reference">projects/spaarkeai-compose-r2/notes/spikes/ — Spike 5 + Spike 6 validated behavior (the gate baseline)</file>
+      <file role="design">projects/spaarkeai-compose-r2/design.md §2.4, §2.5, §12.2</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="050" status="pending">DocxAnnotationWriter + push endpoint</dependency>
+      <dependency task="051" status="pending">DocxAnnotationReader + pull endpoint</dependency>
+      <dependency task="053" status="pending">webhook + check-changes endpoints</dependency>
+      <dependency task="054" status="pending">return-from-Word re-anchoring + banner</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-029 / CLAUDE.md §10">Confirm deployed publish size ≤ 60 MB compressed; report absolute + delta vs 49.63 MB baseline; verify no new HIGH CVE.</constraint>
+    <constraint source="ADR-028">Deployment auth + verification client fetches follow the spaarkedev1 auth runbook + `@spaarke/auth`.</constraint>
+    <constraint source="ADR-001">Confirm the `SpeWebhookRenewalHostedService` BackgroundService starts cleanly in the deployed App Service (log evidence).</constraint>
+    <constraint source="project">This is the Phase-5 integration gate, not the flagship gate (task 082). Do NOT attempt the assistant-driven full chain here.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>BFF deploy; SPE containers on spaarkedev1; Word for Web round-trip; browser verification</topic>
+    <files>
+      <file>.claude/adr/ADR-001-minimal-api.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/skills/spe-integration/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="Spike 5/6 baseline" location="projects/spaarkeai-compose-r2/notes/spikes/">
+        The validated write-renders-in-Word-for-Web and reverse-round-trip behavior; the deployed environment must reproduce it.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Pre-flight">Confirm tasks 050/051/053/054 are ✅ and BFF build is green on the branch. Confirm spaarkedev1 SPE container + a test `.docx` document are available.</step>
+    <step order="1" name="Publish-size + CVE gate">Run `dotnet publish -c Release src/server/api/Sprk.Bff.Api/ -o deploy/api-publish/`; measure compressed size; assert ≤ 60 MB; run `dotnet list package --vulnerable --include-transitive`; assert no new HIGH CVE. Record absolute + delta.</step>
+    <step order="2" name="Deploy BFF">Invoke the `bff-deploy` skill to deploy `Sprk.Bff.Api` to the spaarkedev1 App Service. Confirm deployment success + healthz.</step>
+    <step order="3" name="Confirm BackgroundService start">Check App Service logs for the `SpeWebhookRenewalHostedService` startup log line; confirm no startup exceptions.</step>
+    <step order="4" name="Push verification (Spike 5 gate)">Via a test Compose document with pending annotations, call `POST /api/compose/document/{spe-id}/push-annotations`; open the document in Word for Web; confirm the comments + track changes render NATIVELY with correct author/date. Capture browser evidence.</step>
+    <step order="5" name="Change-detection verification">Edit + save the document in Word for Web. Confirm the webhook fires (`POST /webhooks/spe-doc-changed` receives the notification → delta enumerates the item). Then exercise the poll fallback: `POST /api/compose/document/{spe-id}/check-changes` reports changed.</step>
+    <step order="6" name="Pull + re-anchor verification (Spike 6 gate)">Call `POST /api/compose/document/{spe-id}/pull-annotations`; confirm the Word-added comment/track-change round-trips with correct author/date. Trigger re-anchoring; confirm the "N re-anchored, M need review" banner appears with a flagged/orphaned anchor surfaced (not dropped).</step>
+    <step order="7" name="Document + report">Record all evidence (screenshots/log excerpts) in `notes/`. Report publish size + CVE result. Update TASK-INDEX status.</step>
+  </steps>
+
+  <outputs>
+    <output type="deploy">Sprk.Bff.Api deployed to spaarkedev1</output>
+    <output type="notes" ephemeral="true">projects/spaarkeai-compose-r2/notes/ — round-trip verification evidence (Spike 5/6 gate)</output>
+    <output type="report">Publish-size absolute + delta; CVE result; round-trip pass/fail per leg</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">Sprk.Bff.Api deploys to spaarkedev1 successfully; `/healthz` green; `SpeWebhookRenewalHostedService` startup logged with no exceptions.</criterion>
+    <criterion testable="true">Deployed publish size ≤ 60 MB compressed (absolute + delta reported); no new HIGH CVE.</criterion>
+    <criterion testable="true">Pushed Compose annotations render NATIVELY in Word for Web as comments + track changes with correct author/date (Spike 5 gate reproduced in-environment).</criterion>
+    <criterion testable="true">A Word for Web edit+save is detected by the webhook AND the `check-changes` poll fallback (both legs exercised).</criterion>
+    <criterion testable="true">A Word-added comment/track-change pulls back with correct author/date (Spike 6 gate reproduced).</criterion>
+    <criterion testable="true">Re-anchoring produces the "N re-anchored, M need review" banner with a flagged/orphaned anchor surfaced, not silently dropped.</criterion>
+    <criterion testable="true">Verification evidence (browser + logs) is captured in `notes/`.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

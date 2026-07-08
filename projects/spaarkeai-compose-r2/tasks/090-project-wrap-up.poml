@@ -1,0 +1,111 @@
+<task id="090" project="spaarkeai-compose-r2">
+  <metadata>
+    <title>Project wrap-up (code-review, adr-check, repo-cleanup, /test-diet, lessons)</title>
+    <phase>8 Wrap</phase>
+    <gate>blocked-on-core-A0</gate>
+    <status>blocked</status>
+    <rigor>FULL</rigor>
+    <model-tier>opus</model-tier>
+    <effort>high</effort>
+    <parallel-group>terminal</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <dependencies>all</dependencies>
+    <tags>docs, testing</tags>
+    <fr>project-close</fr>
+  </metadata>
+
+  <prompt>
+    Close out spaarkeai-compose-r2 per the task-create Step 3.7 wrap-up protocol: run a final full-repo
+    code-review + adr-check across all R2 changes, run repo-cleanup (ephemeral-file hygiene), run /test-diet to
+    reconcile tests added/modified during the project against the ADR-038 build-vs-maintain classifier, update
+    README + plan status to Complete, and write lessons-learned. This task is TERMINAL — it depends on ALL other
+    tasks (including the core-A0-gated chain and the flagship gate 082) and is BLOCKED until they complete.
+  </prompt>
+
+  <role>
+    Senior engineer / release manager performing project close-out, familiar with the Spaarke wrap-up protocol
+    (code-review, adr-check, repo-cleanup, /test-diet, lessons-learned) and CLAUDE.md §7 task-completion rules.
+  </role>
+
+  <goal>
+    A closed project: final code-review + adr-check clean (or documented Path-A exceptions per §6.5); repo-cleanup
+    done; /test-diet report emitted with MAINTAIN/SCAFFOLDING/AMBIGUOUS classifications and `git rm`/`git mv`
+    commands for the reviewer; README.md + plan.md status set to Complete; lessons-learned recorded; TASK-INDEX
+    fully ✅. The wrap-up PR description cites the /test-diet report (or documents the skip rationale).
+  </goal>
+
+  <context>
+    <background>
+      Per CLAUDE.md §7 project-close test-diet gate: when the just-completed task is a 090-wrapup task,
+      task-execute Step 11 invokes /test-diet BEFORE marking the project complete. /test-diet is read-only — it
+      emits commands for the reviewer, it does not auto-execute. This wrap-up also carries the standard Spaarke
+      close-out (code-review, adr-check, repo-cleanup, README/plan status, lessons-learned). It cannot run until
+      every prior task — including the flagship gate (082) and the core-gated chain — is complete.
+    </background>
+    <relevant-files>
+      <file path="projects/spaarkeai-compose-r2/tasks/TASK-INDEX.md" role="review">Confirm all tasks ✅ before close-out.</file>
+      <file path="projects/spaarkeai-compose-r2/README.md" role="edit">Set project status to Complete; update graduation criteria checkboxes.</file>
+      <file path="projects/spaarkeai-compose-r2/plan.md" role="edit">Set status to Complete.</file>
+      <file path="projects/spaarkeai-compose-r2/CLAUDE.md" role="edit">Update project status; reset current-task.md to none.</file>
+      <file path="projects/spaarkeai-compose-r2/notes" role="reference">Ephemeral notes for repo-cleanup + /test-diet report output.</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="all" status="blocked">Every prior task must be ✅, including the flagship gate (082) and the core-A0-gated chain (016/033/034/040-047/063/064/071).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="charter-7">task-create Step 3.7 wrap-up protocol: final code-review + adr-check + repo-cleanup + /test-diet + README/plan status Complete + lessons-learned. All are required, not optional.</constraint>
+    <constraint source="ADR-038">/test-diet classifies tests via the build-vs-maintain classifier; MAINTAIN-class tests stay at KEEP paths, SCAFFOLDING-class are deleted, AMBIGUOUS require reviewer judgment. /test-diet is read-only (emits git rm/git mv for the reviewer).</constraint>
+    <constraint source="charter-6.5">Any adr-check violation is resolved via Path A (documented exception) / B (amendment) / C (comply) — never silent retry-until-clean.</constraint>
+    <constraint source="charter-10">Final BFF publish-size + CVE + NetArchTest state is confirmed (cross-check task 081); the wrap-up PR cites the verification.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="prescriptive">
+    <step order="1">Verify TASK-INDEX.md shows ALL tasks ✅ (including 082 flagship gate + the core-gated chain). If any is incomplete, remain blocked and escalate.</step>
+    <step order="2">Run `/code-review` across all R2 changes; resolve Critical findings (Path C comply) or document Path-A exceptions per §6.5.</step>
+    <step order="3">Run `/adr-check` across all R2 changes; resolve or formalize each violation via Path A/B/C — no silent retry.</step>
+    <step order="4">Run `/repo-cleanup` to validate structure compliance and remove ephemeral files (notes/ scratch, spikes, drafts, handoffs).</step>
+    <step order="5">Run `/test-diet` to reconcile tests added/modified during R2 against the ADR-038 build-vs-maintain classifier; save the report to projects/spaarkeai-compose-r2/notes/test-diet-report.md; do NOT auto-execute its git rm/git mv commands (reviewer applies).</step>
+    <step order="6">Cross-check the final publish-size + CVE + NetArchTest state (task 081); confirm ≤60 MB, zero new HIGH CVE, facade rule green.</step>
+    <step order="7">Set README.md + plan.md status to Complete; update graduation-criteria checkboxes; update project CLAUDE.md status; reset current-task.md to "none" (project complete) per CLAUDE.md §7.</step>
+    <step order="8">Write lessons-learned (core-A0 dependency management, AnchoredAnnotation Path-A, DOCX shuttle, publish-size lever) to projects/spaarkeai-compose-r2/notes/lessons-learned.md.</step>
+    <step order="9">Prepare the wrap-up PR description citing the /test-diet report + publish-size verification + flagship-gate evidence (or documenting any skip rationale).</step>
+  </steps>
+
+  <outputs>
+    <output type="report">projects/spaarkeai-compose-r2/notes/test-diet-report.md</output>
+    <output type="report">projects/spaarkeai-compose-r2/notes/lessons-learned.md</output>
+    <output type="docs">projects/spaarkeai-compose-r2/README.md (status Complete)</output>
+    <output type="docs">projects/spaarkeai-compose-r2/plan.md (status Complete)</output>
+    <output type="docs">projects/spaarkeai-compose-r2/tasks/TASK-INDEX.md (all ✅)</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">All prior tasks are ✅ (including flagship gate 082 + the core-gated chain) before close-out proceeds.</criterion>
+    <criterion testable="true">`/code-review` + `/adr-check` are clean or carry documented Path-A/B resolutions (no silent violations).</criterion>
+    <criterion testable="true">`/repo-cleanup` has run; ephemeral files are removed; structure compliance validated.</criterion>
+    <criterion testable="true">`/test-diet` report exists at notes/test-diet-report.md with MAINTAIN/SCAFFOLDING/AMBIGUOUS classifications and reviewer-applied git rm/git mv commands (not auto-executed).</criterion>
+    <criterion testable="true">Final publish-size ≤60 MB, zero new HIGH CVE, NetArchTest facade rule green (cross-checked with task 081).</criterion>
+    <criterion testable="true">README.md + plan.md status set to Complete; current-task.md reset to none; lessons-learned recorded.</criterion>
+    <criterion testable="true">The wrap-up PR description cites the /test-diet report + publish-size verification + flagship-gate evidence.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>This wrap-up is TERMINAL and depends on ALL tasks — including the flagship gate (082) and the entire core-A0-gated chain (016/033/034/040-047/063/064/071). It cannot start until every dependency is ✅. Remain `blocked`; if any dependency is still core-A0-gated and unpublished, the project cannot close — escalate core timing rather than closing partially.</trigger>
+  </escalation>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

@@ -1,0 +1,129 @@
+<task id="054" project="spaarkeai-compose-r2">
+  <metadata>
+    <title>FR-27 return-from-Word re-anchoring (bands ≥0.85/0.6–0.85/&lt;0.6) + conflict banner</title>
+    <phase>5 Word</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <model-tier>opus</model-tier>
+    <effort>high</effort>
+    <parallel-group>W3-Word</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>051,006</deps>
+    <tags>bff-api,api,spe,docx</tags>
+    <estimated-effort>2-3 days</estimated-effort>
+    <assigned>unassigned</assigned>
+    <started></started>
+    <completed></completed>
+  </metadata>
+
+  <prompt>
+    Implement FR-27: when task-052/053 detects a new SPE version of a Compose document, reload it,
+    parse its annotations via `DocxAnnotationReader` (task 051), and re-anchor the prior Compose
+    annotations against the updated text using confidence bands — ≥0.85 auto-anchor / 0.6–0.85
+    flag-for-review / &lt;0.6 orphan (starting defaults, tuned by Spike 6 / dep 006). Surface a summary
+    banner ("N re-anchored, M need review") + a conflict UX for the flagged/orphaned anchors. The BFF
+    computes the re-anchor result; the Workspace renders the banner + conflict UI (Fluent v9 + dark
+    mode). Ambiguous anchors are flagged, never silently dropped.
+  </prompt>
+
+  <role>
+    Full-stack developer: .NET 8 for the re-anchoring engine (pattern-based text anchoring —
+    content-match + structural hint, drift-resistant) and Fluent UI v9 / React for the Workspace
+    banner + conflict panel. Familiar with the Compose session-state anchored-annotation model.
+  </role>
+
+  <goal>
+    A re-anchoring service in `Services/Compose/` that, given prior anchored annotations + the
+    reloaded document (via `DocxAnnotationReader`), scores each anchor and assigns it to auto /
+    review / orphan bands, returning a structured re-anchor summary; plus a Workspace banner +
+    conflict UX that renders "N re-anchored, M need review" and lets the user resolve flagged/orphaned
+    anchors. Bands are configurable constants seeded from Spike 6. Matching unit tests cover each band
+    boundary + the no-match orphan case.
+  </goal>
+
+  <context>
+    <background>
+      design §2.5, §6.2. adeu's pattern-based text anchoring (content-match + structural hint) is the
+      drift-resistant `TextAnchor` value object used for both LLM-proposed and human-created
+      annotations. Re-anchor confidence bands were committed as starting defaults in the scope-lock
+      and empirically tuned by Spike 6. The banner/conflict UI is a Workspace surface; the Context
+      pane stays audit-only.
+    </background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Compose/AnnotationReanchorService.cs — NEW: scores prior anchors vs reloaded text, assigns bands, returns summary</file>
+      <file role="canonical-reuse">src/server/api/Sprk.Bff.Api/Services/Compose/DocxAnnotationReader.cs — task 051; supplies the reloaded document's annotation/text structure</file>
+      <file role="canonical-reuse">src/server/api/Sprk.Bff.Api/Services/Compose/SpeSyncOrchestrator.cs — task 052; supplies the change signal + reloaded bytes</file>
+      <file role="modify">src/client/shared/Spaarke.Compose.Components/src/widgets/ — ComposeWorkspace conflict banner + re-anchor review UI (Fluent v9, dark mode)</file>
+      <file role="reference">projects/spaarkeai-compose-r2/notes/spikes/ — Spike 6 notes (tuned re-anchor bands)</file>
+      <file role="design">projects/spaarkeai-compose-r2/design.md §2.5 (return from Word), §6.2</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="051" status="pending">DocxAnnotationReader — the reloaded-document annotation/text input.</dependency>
+      <dependency task="006" status="pending">Spike 6 — tuned confidence bands (the ≥0.85 / 0.6–0.85 / &lt;0.6 defaults may be refined).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-007">Re-anchoring operates on the reader's structured payload + byte streams; no `Microsoft.Graph` types in `Services/Compose/`.</constraint>
+    <constraint source="ADR-013 / NFR-05">Re-anchoring is deterministic scoring — no AI-internal injection. (The human-friendly change summary is a separate gated capability, `compose-summarize-word-changes` FR-10 task 043; do NOT call an LLM here.)</constraint>
+    <constraint source="ADR-021">The banner + conflict UX are Fluent v9 + dark mode, no v8/hardcoded colors.</constraint>
+    <constraint source="ADR-028">Any client fetch of the re-anchor result uses `@spaarke/auth` (`authenticatedFetch`), never raw Bearer.</constraint>
+    <constraint source="ADR-030">Any PaneEventBus signal for the banner uses typed discriminants, no `any` payloads.</constraint>
+    <constraint source="ADR-009">Re-anchor metadata that is cross-request → Redis, not `IMemoryCache`.</constraint>
+    <constraint source="spec FR-27">Ambiguous anchors (0.6–0.85) are flagged for review; &lt;0.6 are orphaned and surfaced — NEVER silently dropped.</constraint>
+    <constraint source="ADR-029 / CLAUDE.md §10">Report publish-size + CVE for the BFF change. State Placement Justification.</constraint>
+    <constraint source="NFR-08">Matching unit tests for the re-anchor service.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Pattern-based text anchoring; confidence bands; Fluent v9 conflict UX</topic>
+    <files>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/adr/ADR-009-redis-caching.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/skills/spe-integration/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="TextAnchor content-match + structural hint" location="projects/spaarkeai-compose-r2/notes/spikes/">
+        Spike 6's drift-resistant anchor scoring — content-match similarity + structural position hint → confidence score → band.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + dependency check">Confirm tasks 051 + Spike 6 available. Declare FULL rigor; load knowledge files; state Placement Justification.</step>
+    <step order="1" name="Re-anchor scoring engine">Implement `AnnotationReanchorService`: for each prior anchor, compute a confidence score (content-match + structural hint per Spike 6) against the reloaded text; assign to auto (≥0.85) / review (0.6–0.85) / orphan (&lt;0.6). Bands are named constants seeded from Spike 6, adjustable.</step>
+    <step order="2" name="Re-anchor summary">Return a structured summary: counts per band + the flagged/orphaned anchors with enough context for the user to resolve. Persist re-anchor metadata to Redis where cross-request.</step>
+    <step order="3" name="Workspace banner + conflict UX">Add the "Document updated in Word — N re-anchored, M need review" banner + a conflict panel to resolve flagged/orphaned anchors (Fluent v9, dark mode). Fetch via `@spaarke/auth`; typed PaneEventBus signal.</step>
+    <step order="4" name="Unit tests">Band-boundary cases (0.86 auto, 0.7 review, 0.5 orphan); no-match → orphan (not dropped); summary counts correct.</step>
+    <step order="5" name="Verify">Build BFF + affected client package; run tests; publish-size/CVE; NetArchTest facade check; dark-mode check on the banner; update TASK-INDEX.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/AnnotationReanchorService.cs</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ (conflict banner + review UI)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Compose/AnnotationReanchorServiceTests.cs</output>
+    <output type="report">Publish-size delta; CVE; Placement Justification</output>
+  </outputs>
+
+  <justification>
+    <existing>No existing re-anchoring logic. Task 051 reads annotations but does not score them against a changed document; task 052 detects change but does not re-anchor. This is the missing scoring layer between them.</existing>
+    <extension>Cannot fold into the reader (051) — re-anchoring is a distinct scoring responsibility over BOTH prior state and reloaded state, warranting its own unit-tested service. The banner extends the existing `ComposeWorkspace` widget (no new pane).</extension>
+    <cost-of-doing-nothing>Without banded re-anchoring, a Word round-trip either silently drops all prior Compose annotations or blindly re-applies them to shifted text — FR-27 acceptance ("banner reports N re-anchored, M need review; ambiguous anchors are flagged, not silently dropped") fails, breaking the memory-continuity moat (design §2.5).</cost-of-doing-nothing>
+  </justification>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">Given prior anchors + a reloaded (Word-edited) document, each anchor is scored and assigned to auto (≥0.85) / review (0.6–0.85) / orphan (&lt;0.6); unit tests assert each band boundary.</criterion>
+    <criterion testable="true">The re-anchor summary reports correct per-band counts and includes flagged/orphaned anchors with resolution context.</criterion>
+    <criterion testable="true">Negative: an anchor with no viable match (&lt;0.6) is orphaned and surfaced in the conflict UX — never silently dropped.</criterion>
+    <criterion testable="true">The Workspace banner renders "N re-anchored, M need review" in Fluent v9 with correct dark-mode styling; the conflict panel lets the user resolve flagged/orphaned anchors.</criterion>
+    <criterion testable="true">Confidence bands are named constants seeded from Spike 6 and adjustable without code restructuring.</criterion>
+    <criterion testable="true">Re-anchoring makes no LLM call; no AI-internal injection (NetArchTest green); no `Microsoft.Graph` in `Services/Compose/`.</criterion>
+    <criterion testable="true">Client fetches use `@spaarke/auth`; PaneEventBus signals are typed; matching unit tests pass; publish-size + CVE reported.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

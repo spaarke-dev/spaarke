@@ -1,0 +1,97 @@
+<task id="041" project="spaarkeai-compose-r2">
+  <metadata>
+    <title>FR-08 compose-compare-to-playbook Action + Binding</title>
+    <phase>4 Catalog</phase>
+    <status>blocked</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>045</blocks>
+    <tags>dataverse, ai, azure-openai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Production catalog row on the closed ADR-039 catalog; schema-validation gate + ADR-039/040 compliance. FULL per TASK-INDEX.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Prompt + schema authoring reusing the Spike-1 pattern; read-only comparison capability, no disposition, no cross-cutting blast radius. Sonnet per TASK-INDEX.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>phase4-catalog-rows</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Author the `compose-compare-to-playbook` capability as an Action row + Click-path Binding row (ADR-039), mirror-first under infra/dataverse/, dispatched through the shipped session-dispatch seam (NO new endpoint). The Action matches a selected clause against the matter/firm playbook clauses and returns `{matches: [{playbookEntryId, clauseText, deviations, riskScore, rationale}], overallRisk}` (FR-08). Critically, it READS existing `sprk_analysisplaybook` entries as reference data injected into the prompt — the playbook is NOT a routing target and NO new playbook is authored (engine frozen). Consumes the `compose-selection` JPS scope + matter context. Ships with eval cases in task 045.
+  </prompt>
+
+  <role>
+    AI platform developer fluent in JPS Action authoring, the ADR-039 Action+Binding catalog model, playbook-as-reference-data consumption, and OpenAiFunctionSchemaValidator constraints.
+  </role>
+
+  <goal>
+    A deployable `compose-compare-to-playbook` Action row (SystemPrompt injecting the matter's playbook entries as reference context + OutputSchemaJson + Temperature + ModelDeploymentId) and its Click-path Binding row, authored mirror-first through the core's hoisted description source, consuming `compose-selection` + matter context, returning schema `{matches: [{playbookEntryId, clauseText, deviations, riskScore, rationale}], overallRisk: string}` passing OpenAiFunctionSchemaValidator with no property-level boolean `required`. Zero new routes; eval-ready for task 045.
+  </goal>
+
+  <context>
+    <background>
+      Spec FR-08 + design §7 (Catalog Roster row 3) + §7.3 (playbook read as reference data, NOT routing) + §7.4 (mirror-first through the hoist). Read action: select clause → "Compare to playbook" → matched playbook entry (clickable), deviations, and risk score render in the Context pane. The LLM's prompt includes the matter's `sprk_analysisplaybook` entries as context — data consumption, not routing configuration. No `compose` disposition.
+    </background>
+    <relevant-files>
+      <file purpose="input-schema-mirror-NEW">infra/dataverse/inputschemas/cmp-playbook-v1.input.schema.json — NEW input-schema mirror (proposed actionCode CMP-PLAYBOOK@v1; confirm via jps-action-create)</file>
+      <file purpose="output-schema-mirror-NEW">infra/dataverse/outputschemas/cmp-playbook-v1.schema.json — NEW OutputSchemaJson mirror `{matches[], overallRisk}`</file>
+      <file purpose="binding-mirror-EXTEND">infra/dataverse/sprk_playbookconsumer-rows.json — EXTEND: Click-path Binding row (consumerType compose-compare-to-playbook / consumerCode default)</file>
+      <file purpose="exemplar-input">infra/dataverse/inputschemas/sum-chat-v1.input.schema.json — schema shape to copy</file>
+      <file purpose="playbook-reference-data">infra/dataverse/playbooks/summarize-document-for-workspace-v1-multinode.json — example of an existing `sprk_analysisplaybook` shape READ as reference data (do not author new playbooks)</file>
+      <file purpose="dispatch-seam">src/client/shared/Spaarke.UI.Components/src/services/dispatchConsumer.ts — Click-path seam (no new route)</file>
+      <file purpose="spike-1-pattern">projects/spaarkeai-compose-r2/notes/spikes/spike-1-action-schema.md — validated prompt/schema pattern</file>
+      <file purpose="hoist-source">infra/dataverse/ — the core's hoisted description mirror; author the row's description through it</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="not-started">Requires the Spike-1 validated Action prompt/schema pattern.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-039">Action row + Binding row; the Binding is the ONLY routing config. NO new dispatch endpoint; NO string-key routing outside the Binding table. Mirror-first through the core's hoisted description source. Eval cases gate the change. OutputSchemaJson MUST pass OpenAiFunctionSchemaValidator — property-level boolean `required` BANNED.</constraint>
+    <constraint source="ADR-040">Dispatched output is ledger-written by the seam; no parallel cache.</constraint>
+    <constraint source="project">Engine FROZEN — MUST NOT author new sprk_analysisplaybook records. Existing playbook entries are READ as reference data injected into the prompt; the playbook is never a routing target.</constraint>
+    <constraint source="ADR-038">Golden + dispatch eval families ≥5 each ship with the row (task 045).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai/jps-action-authoring, ai/output-schema-validation, dataverse/catalog-governance</topic>
+    <files>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/skills/jps-action-create/SKILL.md</file>
+      <file>.claude/skills/jps-validate/SKILL.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + gate">Load task, project CLAUDE.md, HANDOFF doc, Spike-1 note, knowledge files. CONFIRM core Phase A0 published the triple-twin hoist + dispatch seam before authoring.</step>
+    <step order="1" name="Author Action row">Via jps-action-create, author the Action: a comparison SystemPrompt that consumes the matter's playbook entries as reference context, plus OutputSchemaJson `{matches: [{playbookEntryId, clauseText, deviations, riskScore, rationale}], overallRisk: string}`, Temperature, ModelDeploymentId. Write mirrors under infra/dataverse/ through the hoisted source.</step>
+    <step order="2" name="Author Binding row">Add the Click-path Binding row (consumerType compose-compare-to-playbook, consumerCode default, surfaces workspace, toolDescription) consuming `compose-selection` + matter context.</step>
+    <step order="3" name="Validate schema">jps-validate: OutputSchemaJson passes OpenAiFunctionSchemaValidator; no property-level boolean `required`.</step>
+    <step order="4" name="Verify dispatch + reference-data path">Confirm the Binding resolves through the shipped seam (zero new routes) and that playbook entries flow into the prompt as reference data, not routing.</step>
+  </steps>
+
+  <outputs>
+    <output type="config">infra/dataverse/inputschemas/cmp-playbook-v1.input.schema.json</output>
+    <output type="config">infra/dataverse/outputschemas/cmp-playbook-v1.schema.json</output>
+    <output type="config">infra/dataverse/sprk_playbookconsumer-rows.json (Binding row added)</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">A `compose-compare-to-playbook` Action row exists mirror-first with OutputSchemaJson exactly `{matches: [{playbookEntryId, clauseText, deviations, riskScore, rationale}], overallRisk: string}` (closed set).</criterion>
+    <criterion testable="true">A Click-path Binding row (consumerType compose-compare-to-playbook / consumerCode default) consumes `compose-selection` + matter context and is the only routing config.</criterion>
+    <criterion testable="true">The Action reads existing sprk_analysisplaybook entries as prompt reference data; NO new sprk_analysisplaybook record is authored.</criterion>
+    <criterion testable="true">OutputSchemaJson passes OpenAiFunctionSchemaValidator with no property-level boolean `required`.</criterion>
+    <criterion testable="true">Dispatch resolves through the shipped seam and adds zero new BFF routes; row is eval-ready for task 045.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>Consumes core Phase A0 triple-twin description hoist + session-dispatch/invoke seam per notes/HANDOFF-core-r2-A0-contract-requirements.md §7. If the published contract differs from the proposed shape, STOP and reconcile — do not adapt silently.</trigger>
+  </escalation>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

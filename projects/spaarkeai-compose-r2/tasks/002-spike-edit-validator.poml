@@ -1,0 +1,82 @@
+<task id="002" project="spaarkeai-compose-r2">
+  <metadata>
+    <title>Spike 2 — edit validator match_mode + ambiguity errors</title>
+    <phase>0 Spikes</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>020</blocks>
+    <tags>bff-api, ai</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Exploratory spike — throwaway validator prototype recorded as a spike note, not the production Services/Compose service. STANDARD per TASK-INDEX.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Deterministic .NET validator prototype with a bounded design question; no architectural blast radius. Sonnet per TASK-INDEX.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W0</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Prototype an IComposeEditValidator that implements adeu's match_mode (strict / first / all) and returns structured ambiguity errors — error includes match count, ~5 examples with surrounding context, and a copy-pasteable resolution path. Test against 5 representative LLM-proposed edits (some unambiguous, some ambiguous, some no-match) to validate the design and the error UX before FR-19 builds the production service (task 020). Deliverable is a spike note plus throwaway prototype code under notes/spikes/.
+  </prompt>
+
+  <role>
+    Senior .NET developer building deterministic text-processing services, familiar with adeu's structured-ambiguity-error pattern and the Spaarke AI-facade discipline (ADR-013).
+  </role>
+
+  <goal>
+    A spike note at projects/spaarkeai-compose-r2/notes/spikes/spike-2-edit-validator.md that unlocks the FR-19 decision: the validator design (match_mode semantics) + the structured ambiguity-error UX shape (match count + N examples with context + recovery path), validated against 5 sample edits.
+  </goal>
+
+  <context>
+    <background>
+      Design §6.1 (LLM editing patterns — match_mode validator) + §13 Spike 2. adeu collapses the LLM's job to find-and-replace; the validator refuses ambiguity with an actionable error rather than guessing. This spike proves the design before task 020 builds Services/Compose/IComposeEditValidator + POST /api/compose/edit-batch/validate. Decision unlocked (design §13): validator design + error UX.
+    </background>
+    <relevant-files>
+      <file purpose="target-service-dir">src/server/api/Sprk.Bff.Api/Services/Compose/ — where the production IComposeEditValidator lands (task 020); the spike prototypes under notes/spikes/</file>
+      <file purpose="existing-compose-service">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs — reference for Services/Compose conventions + facade boundary</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="n/a">No task dependencies — startable immediately (Wave W0).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">Services/Compose code MUST NOT inject AI internals (IOpenAiClient / executor / routing types). The validator is deterministic text processing; it reaches AI (if at all) only via the HTTP seam + core contracts. Tier-1 NetArchTest enforces this in production; the spike respects the same boundary.</constraint>
+    <constraint source="ADR-038">Follow the testing standard: mock at module boundaries; no Mock&lt;HttpMessageHandler&gt;. Spike may write throwaway sample-driven checks, not production tests.</constraint>
+    <constraint source="project">Throwaway prototype — production service is FR-19 (task 020); deliverable is a spike note + prototype under notes/spikes/.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai/edit-validation, dotnet/text-processing</topic>
+    <files>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + load">Load this task, project CLAUDE.md, and the knowledge files.</step>
+    <step order="1" name="Prototype validator">Prototype IComposeEditValidator with match_mode (strict / first / all) resolution over a sample document string.</step>
+    <step order="2" name="Design ambiguity error">Shape the structured ambiguity error: match count, ~5 examples with surrounding context, copy-pasteable resolution.</step>
+    <step order="3" name="Run 5 sample edits">Exercise against 5 representative LLM-proposed edits (unambiguous / ambiguous / no-match) and capture outcomes.</step>
+    <step order="4" name="Write spike note">Record the validated validator design + error UX for FR-19.</step>
+  </steps>
+
+  <outputs>
+    <output type="notes" ephemeral="true">projects/spaarkeai-compose-r2/notes/spikes/spike-2-edit-validator.md</output>
+    <output type="notes" ephemeral="true">projects/spaarkeai-compose-r2/notes/spikes/edit-validator-prototype.cs</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">Spike note documents the validated validator design (match_mode semantics) + error UX — the decision the spike unlocks (design §13).</criterion>
+    <criterion testable="true">The structured ambiguity error shape (match count + ~5 examples with context + recovery path) is specified.</criterion>
+    <criterion testable="true">All 5 representative sample edits are run and their outcomes (resolve / refuse-with-error) recorded.</criterion>
+    <criterion testable="true">The prototype respects the ADR-013 facade boundary (no AI internals injected) and the note states this.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

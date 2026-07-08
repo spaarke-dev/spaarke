@@ -10,10 +10,10 @@
 
 | Field | Value |
 |-------|-------|
-| **Task** | none — project in planning; tasks not yet generated |
+| **Task** | none — 56 tasks generated; none started |
 | **Step** | — |
 | **Status** | none |
-| **Next Action** | Run `/task-create projects/spaarkeai-compose-r2` to decompose plan.md into POML tasks (with `blocked-on: core-A0` markers) |
+| **Next Action** | Execute a startable wave via `task-execute`. First waves: W0 spikes (000/002/003/004/005/007) or W1 LLM services (020/021/023/024/052). ⛔ tasks wait on core R2 Phase A0. |
 
 ### Files Modified This Session
 - `design.md` - Modified - scope-lock + 2 owner UX reviews + code-grounded entry-point reality

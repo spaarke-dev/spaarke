@@ -1,0 +1,87 @@
+<task id="072" project="spaarkeai-compose-r2">
+  <metadata>
+    <title>FR-35 Document Q&amp;A over session-mounted document (stretch)</title>
+    <phase>7 Coord</phase>
+    <status>not-started</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks></blocks>
+    <tags>ai, frontend</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Stretch feature that rides the EXISTING agent loop with no new capability/playbook — validation + highlight-UX polish over shipped infrastructure. STANDARD per TASK-INDEX.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>No new dispatch surface — the Text path / bounded agent loop with the document session-mounted; work is validation + ephemeral-highlight UX. Sonnet per TASK-INDEX.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>phase7-docqa</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Deliver the committed stretch feature: Document Q&amp;A over the session-mounted document (FR-35). With the document in session context (a `Doc` ledger entry), the agent answers questions with citations per the ADR-039 grounded-output invariant — e.g. "what's the indemnification cap?" → cited answer + a navigated ephemeral highlight ("found in §7.3"). This rides the EXISTING Text-path / bounded agent loop and the R1 `compose-document` scope as session context — NO new capability, NO new playbook, NO new dispatch target. The real work is validation that the answer is grounded/cited and the ephemeral-highlight three-pane UX (Workspace highlight + Assistant citation + Context section/playbook surfacing).
+  </prompt>
+
+  <role>
+    AI platform + React developer fluent in the ADR-039 grounded-output invariant, the Text-path bounded agent loop, session-context (Doc ledger) mounting, and the SpaarkeAi three-pane coordination.
+  </role>
+
+  <goal>
+    A working Document Q&amp;A stretch flow: with the document session-mounted, a natural-language question returns a grounded, cited answer and navigates an ephemeral highlight to the source span, with the citation in the Assistant and the section/playbook surfaced in the Context pane. No new capability, playbook, or dispatch endpoint is introduced.
+  </goal>
+
+  <context>
+    <background>
+      Spec FR-35 (stretch) + design §2.8 (Document Q&amp;A) + owner clarification (In R2 as committed stretch; rides the agent loop). The document is already session-mounted as a `Doc` ledger entry (from the entry-path / load work); Q&amp;A over it is "nearly free once mounted" — the framing is validation + highlight-UX polish, not new infrastructure. Independent (no core dependency, no task dependency).
+    </background>
+    <relevant-files>
+      <file purpose="agent-loop-seam">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SessionDispatchOrchestrator.cs — the shipped Text-path / bounded agent loop the Q&amp;A rides (no new dispatch target)</file>
+      <file purpose="compose-document-scope">infra/dataverse/ — the R1 `compose-document` JPS scope used as SESSION CONTEXT (not a new dispatch target)</file>
+      <file purpose="assistant-pane">src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx — renders the cited answer; emits the navigate-to-highlight choreography</file>
+      <file purpose="workspace-editor">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx — renders the ephemeral highlight ("found in §7.3") at the cited span</file>
+      <file purpose="context-pane">@spaarke/legal-workspace Context pane — surfaces the navigated section + relevant playbook entry (audit-only)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="n/a">No task dependency; rides the shipped agent loop + a session-mounted document.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-039">Q&amp;A rides the Text path / bounded agent loop over the closed catalog; answers are grounded + cited per the grounded-output invariant. NO new dispatch endpoint, NO new capability, NO new dispatch target — `compose-document` is used as session context only.</constraint>
+    <constraint source="ADR-040">The document is a `Doc` ledger entry (storage precedes rendering); Q&amp;A reads from the ledger session context, not a parallel cache.</constraint>
+    <constraint source="project">Engine FROZEN — NO new sprk_analysisplaybook record. The ephemeral highlight is transient UI state; the Context pane stays audit-only.</constraint>
+    <constraint source="ADR-021">The highlight + citation UI is Fluent v9 + dark mode.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai/grounded-output, ai/agent-loop, ui/three-pane-coordination</topic>
+    <files>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/skills/jps-action-create/SKILL.md</file>
+      <file>.claude/skills/jps-validate/SKILL.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + load">Load task, project CLAUDE.md, design §2.8, the agent-loop seam, and the three pane components.</step>
+    <step order="1" name="Validate grounded Q&amp;A">With the document session-mounted (Doc ledger entry), confirm the Text-path agent loop answers a document question with a citation per the grounded-output invariant — no new dispatch target.</step>
+    <step order="2" name="Wire ephemeral highlight">On a cited answer, navigate + render an ephemeral highlight at the source span in the Workspace ("found in §7.3"); surface the section + relevant playbook entry in the Context pane.</step>
+    <step order="3" name="Assistant citation">Render the direct cited answer in the Assistant; confirm every answer carries a source citation (no uncited answer).</step>
+    <step order="4" name="Verify no new surface">Confirm no new capability / playbook / dispatch endpoint was added; `compose-document` is used only as session context.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/solutions/SpaarkeAi/src/components/conversation/ConversationPane.tsx (cited answer + navigate-to-highlight)</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx (ephemeral highlight render)</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">"what's the indemnification cap?" over a session-mounted document returns a grounded, cited answer and navigates an ephemeral highlight to the source span.</criterion>
+    <criterion testable="true">The cited answer renders in the Assistant; the navigated section + relevant playbook entry surface in the (audit-only) Context pane.</criterion>
+    <criterion testable="true">Every answer carries a source citation per the ADR-039 grounded-output invariant; no uncited answer renders.</criterion>
+    <criterion testable="true">No new capability, playbook, or dispatch endpoint is introduced; `compose-document` is used only as session context; touched UI is Fluent v9 + dark mode.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

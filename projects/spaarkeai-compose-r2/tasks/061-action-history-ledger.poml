@@ -1,0 +1,101 @@
+<task id="061" project="spaarkeai-compose-r2">
+  <metadata>
+    <title>FR-31 action history via ledger queries (no duplicate structure)</title>
+    <phase>6 Memory</phase>
+    <gate>startable-now</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <parallel-group>W2b</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>none</dependencies>
+    <tags>bff-api, testing</tags>
+    <fr>FR-31</fr>
+  </metadata>
+
+  <prompt>
+    Surface Compose action history by QUERYING the session ledger (`ToolChain` entries + `SessionOutput` refs),
+    never by writing a parallel `actionLog`/`derivedInsight` stored structure. The ledger already carries every
+    action, its inputs, and its outputs keyed by `{bindingId}@t{n}`. A duplicate log would diverge from the
+    ledger after a crash and create two disagreeing sources of truth — exactly what ADR-040 exists to prevent.
+    This task builds the read-side query, not a new store.
+  </prompt>
+
+  <role>
+    Senior .NET developer familiar with the ADR-040 session ledger, ChatHistoryManager, and the ChatSession
+    three-tier stack in Sprk.Bff.Api.
+  </role>
+
+  <goal>
+    A read-only action-history query over the ledger that returns Compose's prior actions (binding, inputs,
+    outputs, timestamps) sourced entirely from `ToolChain` + `SessionOutput` refs, with unit tests proving no
+    parallel `actionLog`/`derivedInsight` stored structure exists and the query reflects ledger state after a
+    supersession.
+  </goal>
+
+  <context>
+    <background>
+      design.md §8 deletes the proposed `actionLog: ComposeAction[]` stored structure — "it IS the session
+      ledger." Compose queries the ledger via its `ToolChain`/`SessionOutput` refs. This is the anti-component
+      task: it deliberately adds NO new stored surface; the only new code is a read/query helper over existing
+      ledger data.
+    </background>
+    <relevant-files>
+      <file path="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatHistoryManager.cs" role="reference">Ledger over the three-tier stack; ToolChain + SessionOutput entries — the query source.</file>
+      <file path="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatSessionManager.cs" role="reference">Session payload persistence; confirm no actionLog field is added here.</file>
+      <file path="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs" role="edit">Host the action-history query helper for Compose consumers.</file>
+      <file path="projects/spaarkeai-compose-r2/design.md" role="spec">§8 action-log-is-the-ledger disposition + rationale.</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="n/a">No dependency. Task 062 (compaction/cross-version) depends on this query surface.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-040">Action history is QUERIED from the ledger (`ToolChain` + `SessionOutput` refs), never duplicated in a parallel structure. Undo/replace is supersession — a query MUST reflect current ledger state, not a stale copy.</constraint>
+    <constraint source="ADR-015">Ledger retention semantics govern how far back history is queryable; do not introduce a second retention policy.</constraint>
+    <constraint source="ADR-013">`Services/Compose/` reaches AI/ledger internals only via allowed seams; no injection of AI executor/routing types (Tier-1 NetArchTest).</constraint>
+    <constraint source="spec">FR-31 acceptance: no `actionLog`/`derivedInsight` stored structures exist — Compose reads the ledger. Grep-verifiable.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read ChatHistoryManager to map how `ToolChain` + `SessionOutput` entries are stored and enumerated per session.</step>
+    <step order="2">Implement a read-only action-history query that projects ledger entries into a Compose action-history view (binding, args, output ref, timestamp) — no writes, no new stored structure.</step>
+    <step order="3">Ensure the query reflects supersession: a superseded `SessionOutput` shows as superseded, and current state is what renders (FR-17 alignment).</step>
+    <step order="4">Add unit tests: history reflects ledger after a supersession; and a static/grep assertion that no `actionLog`/`derivedInsight` persisted field was introduced.</step>
+    <step order="5">Verify BFF build + NetArchTest facade rule; report publish-size delta (expected ~0).</step>
+  </steps>
+
+  <justification>
+    <existing>Overlaps entirely with the session ledger — that is the point. Verified via ChatHistoryManager that ToolChain + SessionOutput refs already carry action data.</existing>
+    <extension>Extends the ledger by READING it. Adds only a projection/query helper; introduces no new stored structure by explicit design (§8).</extension>
+    <cost-of-doing-nothing>Without the ledger-query view, a consumer would be tempted to keep a parallel action log that diverges from the ledger after a crash — the two-sources-of-truth failure ADR-040 bans.</cost-of-doing-nothing>
+  </justification>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs — action-history query helper (read-only over ledger)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ActionHistoryLedgerQueryTests.cs</output>
+    <output type="docs">projects/spaarkeai-compose-r2/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">Action history is returned from `ToolChain` + `SessionOutput` ledger refs only.</criterion>
+    <criterion testable="true">No `actionLog` or `derivedInsight` persisted structure is introduced (grep/static-assert verified).</criterion>
+    <criterion testable="true">After a supersession, the query reflects current ledger state (superseded entry shown as such; current entry is authoritative).</criterion>
+    <criterion testable="true">Unit tests green; BFF build + Tier-1 NetArchTest facade rule green.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

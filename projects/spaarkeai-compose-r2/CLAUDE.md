@@ -7,10 +7,11 @@
 
 ## Project Status
 
-- **Phase**: Planning → task decomposition
+- **Phase**: Planning complete — 56 tasks generated; ready to execute (startable tracks)
 - **Last Updated**: 2026-07-08
 - **Current Task**: Not started
-- **Next Action**: Run task-create to decompose plan into task files
+- **Next Action**: Execute the startable waves — begin with Phase 0 spikes (W0: 000/002/003/004/005/007) or Phase 2 LLM services (W1). Core-A0-blocked tasks (⛔) wait on core R2 Phase A0. See [tasks/TASK-INDEX.md](tasks/TASK-INDEX.md).
+- **Task counts**: 56 total — 33 🟢 startable · 16 🔴 core-A0-blocked · 7 🟡 splittable
 
 ---
 

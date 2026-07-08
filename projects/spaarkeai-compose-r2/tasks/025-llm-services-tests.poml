@@ -1,0 +1,113 @@
+<task id="025" project="spaarkeai-compose-r2">
+  <metadata>
+    <title>Unit tests for Services/Compose LLM services (NFR-05/08 + NetArchTest)</title>
+    <phase>2 LLM Editing Patterns</phase>
+    <gate>green</gate>
+    <status>not-started</status>
+    <rigor>STANDARD</rigor>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <parallel-group>phase2-tests</parallel-group>
+    <parallel-safe>false</parallel-safe>
+    <deps>020,021,022,023</deps>
+    <tags>bff-api,testing</tags>
+    <estimated-effort>high</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Consolidate and complete the unit-test coverage for the Phase 2 `Services/Compose/` LLM-pattern services
+    (`IComposeEditValidator`, `ComposeEditBatch`, `ComposeEditTransaction`, `SemanticAppendixGenerator`) per the NFR-08
+    test obligation, and add the NFR-05 NetArchTest facade rule that CI-blocks any `Services/Compose/` type from injecting
+    an AI internal. This task is the Phase 2 test/architecture gate.
+  </prompt>
+
+  <role>
+    .NET test engineer fluent in the ADR-038 integration-heavy pyramid, xUnit, and NetArchTest.Rules architecture assertions.
+  </role>
+
+  <goal>
+    A complete `tests/unit/Sprk.Bff.Api.Tests/Services/Compose/` suite covering the four Phase 2 services (positive +
+    negative cases), PLUS a NetArchTest rule asserting no `Services/Compose/` type depends on `IOpenAiClient`, executor
+    types, or `IConsumerRoutingService` (ADR-013 Tier-1 facade). All tests green; the NetArchTest rule fails loudly if the
+    facade is violated.
+  </goal>
+
+  <context>
+    <background>
+      Tasks 020–023 each ship their own unit tests; this task reconciles them into a coherent suite, closes any coverage
+      gaps against the closed acceptance sets, and adds the cross-cutting NetArchTest facade rule (the spec's NFR-05 states
+      the Tier-1 CI-blocking rule "merged 2026-07-08" — verify it exists; if only a placeholder, materialize the Compose-scoped
+      assertion here). Because it depends on 020–023's code, it is NOT parallel-safe within its group.
+    </background>
+    <relevant-files>
+      <file change="create">tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ComposeServicesArchitectureTests.cs (NetArchTest facade rule)</file>
+      <file change="modify">tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ComposeEditValidatorTests.cs (from task 020 — close gaps)</file>
+      <file change="modify">tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ComposeEditBatchTests.cs (from task 021)</file>
+      <file change="modify">tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ComposeEditTransactionTests.cs (from task 022)</file>
+      <file change="modify">tests/unit/Sprk.Bff.Api.Tests/Services/Compose/SemanticAppendixGeneratorTests.cs (from task 023)</file>
+      <file change="reference">src/server/api/Sprk.Bff.Api/Services/Compose/ (the four services under test)</file>
+      <file change="reference">.claude/constraints/testing.md (KEEP categories + banned test shapes)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="020" status="pending">FR-19 IComposeEditValidator.</dependency>
+      <dependency task="021" status="pending">FR-20 ComposeEditBatch.</dependency>
+      <dependency task="022" status="pending">FR-21 ComposeEditTransaction.</dependency>
+      <dependency task="023" status="pending">FR-22 SemanticAppendixGenerator.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-038">Integration-heavy pyramid; 6 KEEP categories are MUST rules. BANNED: `Mock&lt;HttpMessageHandler&gt;`, DI-registration tests, ctor null-check tests. Coverage is observation, never a gate.</constraint>
+    <constraint source="ADR-013">The NetArchTest rule enforces the Tier-1 facade: no `Services/Compose/` type may reference `IOpenAiClient`, executor, or `IConsumerRoutingService`. This is the NFR-05 CI-blocking assertion.</constraint>
+    <constraint source="project">Per CLAUDE.md §10 #6, PRs modifying `Services/Compose/` MUST add/update matching tests in `tests/unit/Sprk.Bff.Api.Tests/Services/Compose/` (NFR-08).</constraint>
+    <constraint source="project">This is a TEST-MODIFYING task — code-review + adr-check run UNCONDITIONALLY at Step 9.5 (CLAUDE.md §8 override row).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>xUnit; NetArchTest.Rules; ADR-038 integration-heavy pyramid; facade architecture assertions</topic>
+    <files>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>projects/spaarkeai-compose-r2/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="NetArchTest facade rule" location="spec.md NFR-05">Assert Types.InCurrentDomain in the Services.Compose namespace do NOT have dependency on the AI-internal types; fail the build if they do.</pattern>
+    </patterns>
+  </knowledge>
+
+  <justification>
+    NEW test file `ComposeServicesArchitectureTests.cs`. (1) Existing — verify whether the Tier-1 NetArchTest rule already
+    exists (spec claims it merged 2026-07-08); if a global rule exists, ADD the Compose-scoped assertion rather than a
+    parallel rule. (2) Extension — extends the existing test project. (3) Cost-of-doing-nothing — without the Compose-scoped
+    facade assertion, a future edit could inject `IOpenAiClient` into a Compose service and pass CI, silently breaking ADR-013.
+  </justification>
+
+  <steps mode="directional">
+    <step order="0">Context check. Load ADR-038 + testing constraint + the four services.</step>
+    <step order="1">Verify whether the NFR-05 Tier-1 NetArchTest facade rule already exists in the test project; if global, add the Compose-scoped assertion; if absent, create `ComposeServicesArchitectureTests.cs`.</step>
+    <step order="2">Reconcile the four per-service test files against their closed acceptance sets; add missing negative cases (ambiguous match, empty selection, overlap, partial-apply-prevention, missing cross-ref).</step>
+    <step order="3">Confirm no banned test shapes are present anywhere in the Compose test suite (ADR-038).</step>
+    <step order="4">Run `dotnet test` for the Compose test namespace; confirm the NetArchTest rule passes for the current (compliant) code AND fails on a temporary deliberate violation (spike-verify, then revert).</step>
+    <step order="5">Report coverage summary + NetArchTest rule location.</step>
+  </steps>
+
+  <outputs>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ComposeServicesArchitectureTests.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Compose/*Tests.cs (gap closure)</output>
+    <output type="report">Coverage summary + NetArchTest facade rule verification</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">Every Phase 2 service (`IComposeEditValidator`, `ComposeEditBatch`, `ComposeEditTransaction`, `SemanticAppendixGenerator`) has matching unit tests covering its closed acceptance set including negative cases (NFR-08).</criterion>
+    <criterion testable="true">A NetArchTest rule asserts no `Services/Compose/` type depends on `IOpenAiClient`, executor types, or `IConsumerRoutingService`; the rule passes on current code (NFR-05 / ADR-013).</criterion>
+    <criterion testable="true">The NetArchTest rule FAILS when a deliberate temporary facade violation is introduced (verified, then reverted) — proving it is load-bearing, not vacuous.</criterion>
+    <criterion testable="true">No banned test shapes (`Mock&lt;HttpMessageHandler&gt;`, DI-registration, ctor null-check) exist in the Compose test suite (ADR-038).</criterion>
+    <criterion testable="true">`dotnet test` for the Compose namespace is green.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

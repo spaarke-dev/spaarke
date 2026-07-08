@@ -1,0 +1,82 @@
+<task id="005" project="spaarkeai-compose-r2">
+  <metadata>
+    <title>Spike 5 — Open XML write w:ins+w:comment → Word for Web</title>
+    <phase>0 Spikes</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>006, 008, 050</blocks>
+    <tags>bff-api, docx, spe</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Exploratory spike — throwaway Open XML writer + manual Word-for-Web verification recorded as a spike note, not the production DocxAnnotationWriter. STANDARD per TASK-INDEX.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Well-documented Open XML SDK territory (Microsoft Learn covers 90%); bounded forward-path validation. Sonnet per TASK-INDEX.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W0</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Prove the DOCX forward path: use Microsoft Open XML SDK 3.x to write a test .docx containing a native track-change insertion (&lt;w:ins&gt;) and a native comment (&lt;w:comment&gt;) with correct author/timestamp metadata, upload it to SPE, and open it in Word for Web to confirm BOTH render natively (not as plain text or lost). This validates forward-path validity before FR-24 (task 050) builds the production DocxAnnotationWriter + push-annotations endpoint. Deliverable is a spike note with the sample .docx, the SDK element structure that worked, and a screenshot/record of Word for Web rendering.
+  </prompt>
+
+  <role>
+    Senior .NET developer with Microsoft Open XML SDK experience (Comments, Comment, CommentReference, InsertedRun, DeletedRun) and SPE upload plumbing, respecting the Graph-isolation facade (ADR-007).
+  </role>
+
+  <goal>
+    A spike note at projects/spaarkeai-compose-r2/notes/spikes/spike-5-openxml-write.md that unlocks the FR-24 decision: forward-path validity — confirmed that SDK-written &lt;w:ins&gt; + &lt;w:comment&gt; with author/date render natively in Word for Web after an SPE round-trip, with the exact working element structure recorded.
+  </goal>
+
+  <context>
+    <background>
+      Design §6.2 (DOCX shuttle — writer) + §13 Spike 5 + spec Success Criterion 5. Word add-ins (Harvey, Spellbook) do this natively; Compose must too, else every AI suggestion is locked inside Compose. This spike proves the forward path before task 050 builds DocxAnnotationWriter. Decision unlocked (design §13): forward path validity. It gates Spike 6 (reverse round-trip) and Spike 8 (benchmark).
+    </background>
+    <relevant-files>
+      <file purpose="target-service-dir">src/server/api/Sprk.Bff.Api/Services/Compose/ — where production DocxAnnotationWriter lands (task 050); spike prototypes under notes/spikes/</file>
+      <file purpose="spe-facade">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeFileStore.cs — SPE upload seam (facade over Microsoft.Graph; upload the test .docx through here / the OBO path)</file>
+      <file purpose="save-regen-seam">src/client/shared/Spaarke.Compose.Components/src/utils/docxBridge.ts — tipTapToDocxBytes reference (the bytes the writer will annotate in production)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="n/a">No task dependencies — startable immediately (Wave W0).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-007">No Microsoft.Graph types above the SpeFileStore / Infrastructure facade — the spike uploads to SPE through the facade, not raw Graph calls in Services/Compose.</constraint>
+    <constraint source="ADR-005">SPE is the document storage system; the spike uploads/reads the test .docx via SPE, not local disk for the round-trip proof.</constraint>
+    <constraint source="project">Throwaway writer — production service is FR-24 (task 050); deliverable is a spike note + sample .docx under notes/spikes/. Open XML SDK 3.x + Codeuctivity.OpenXmlPowerTools are MIT (portfolio-approved).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>docx/open-xml-sdk, spe/upload</topic>
+    <files>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/adr/ADR-005-flat-storage.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + load">Load this task, project CLAUDE.md, and the knowledge files. State the BFF Placement Justification if adding the Open XML SDK package (measure publish-size impact).</step>
+    <step order="1" name="Write annotated .docx">Use Open XML SDK 3.x to produce a .docx with a &lt;w:ins&gt; run and a &lt;w:comment&gt; (with author/timestamp).</step>
+    <step order="2" name="Upload to SPE">Upload through the SpeFileStore facade / OBO path.</step>
+    <step order="3" name="Verify in Word for Web">Open in Word for Web and confirm the insertion appears as a tracked change and the comment appears as a native comment.</step>
+    <step order="4" name="Write spike note">Record forward-path validity + the exact working SDK element structure + evidence of native rendering.</step>
+  </steps>
+
+  <outputs>
+    <output type="notes" ephemeral="true">projects/spaarkeai-compose-r2/notes/spikes/spike-5-openxml-write.md</output>
+    <output type="notes" ephemeral="true">projects/spaarkeai-compose-r2/notes/spikes/sample-annotated.docx</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">Word for Web renders BOTH the &lt;w:ins&gt; track-change and the &lt;w:comment&gt; natively after an SPE round-trip — the forward-path-validity decision the spike unlocks (design §13).</criterion>
+    <criterion testable="true">The exact Open XML SDK element structure (types + author/date metadata) that rendered correctly is recorded for FR-24 reuse.</criterion>
+    <criterion testable="true">The SPE upload goes through the SpeFileStore facade (no raw Microsoft.Graph types in Services/Compose), per ADR-007; the note states this.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

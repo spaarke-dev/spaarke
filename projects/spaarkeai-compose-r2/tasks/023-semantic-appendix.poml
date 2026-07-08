@@ -1,0 +1,116 @@
+<task id="023" project="spaarkeai-compose-r2">
+  <metadata>
+    <title>FR-22 SemanticAppendixGenerator + CriticMarkup read direction</title>
+    <phase>2 LLM Editing Patterns</phase>
+    <gate>green</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <parallel-group>phase2-llm</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>004</deps>
+    <tags>bff-api,testing</tags>
+    <estimated-effort>high</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Build `SemanticAppendixGenerator` — it enriches the `compose-document` scope payload with defined terms, cross-references,
+    and structural metadata so the LLM hallucinates less (the adeu "Semantic Appendix" pattern, design §6.1). Separately,
+    implement the CriticMarkup READ direction: existing track-changes render TO the LLM inline as `{++...++}` / `{--...--}` /
+    `{&gt;&gt;...&lt;&lt;}` markers so the model can SEE prior edits — but the model NEVER emits CriticMarkup; it emits the
+    structured edit payload (FR-19/20). Read-in as CriticMarkup, write-out as structured edits.
+  </prompt>
+
+  <role>
+    Senior .NET developer comfortable with document-structure extraction and LLM prompt-payload shaping; writes pure,
+    testable generators with numbered edge-case comments.
+  </role>
+
+  <goal>
+    A `SemanticAppendixGenerator` in `src/server/api/Sprk.Bff.Api/Services/Compose/` that (a) produces a semantic appendix
+    (defined terms, cross-refs, structural metadata) appended to the `compose-document` scope payload; and (b) renders
+    existing track-changes to CriticMarkup for LLM read-in only. Spike 4's hallucination-delta measurement is the reference
+    for effectiveness. Full unit coverage, build green, publish size measured.
+  </goal>
+
+  <context>
+    <background>
+      FR-22 is the read-direction complement to the FR-19/20/21 write-direction stack. Spike 4 (task 004) measured the
+      hallucination reduction from the appendix; its notes are the reference. The CriticMarkup rendering is display-only
+      (LLM read direction) — the platform's structured edit contract remains the ONLY write path (the LLM must never emit
+      CriticMarkup). Scope-payload enrichment feeds the `compose-document` scope (see task 024 for the description fields).
+    </background>
+    <relevant-files>
+      <file change="create">src/server/api/Sprk.Bff.Api/Services/Compose/SemanticAppendixGenerator.cs</file>
+      <file change="create">src/server/api/Sprk.Bff.Api/Services/Compose/CriticMarkupRenderer.cs</file>
+      <file change="reference">projects/spaarkeai-compose-r2/notes/spikes/ (Spike 4 output — semantic appendix hallucination delta)</file>
+      <file change="reference">projects/spaarkeai-compose-r1/notes/jps-scopes/compose-document.scope.json (compose-document scope shape the appendix enriches)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="004" status="pending">Spike 4 — semantic appendix hallucination delta (validates effectiveness).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">Services/Compose/ MUST NOT inject any AI internal (`IOpenAiClient`/executor/`IConsumerRoutingService`). The generator produces payload TEXT consumed by the dispatch seam; it does not call the model itself.</constraint>
+    <constraint source="ADR-040">Read-in as CriticMarkup, write-out as structured edits — the LLM never emits CriticMarkup; keep the renderer strictly a display transform.</constraint>
+    <constraint source="ADR-010">DI minimalism — internal helpers need not be DI-registered.</constraint>
+    <constraint source="ADR-038">Integration-heavy pyramid; NO banned test shapes. Test appendix generation and CriticMarkup rendering with real document fixtures.</constraint>
+    <constraint source="project">BFF publish size ≤ 60 MB compressed (NFR-01); measure and report delta.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>semantic appendix; defined-term/cross-ref extraction; CriticMarkup display rendering; hallucination reduction</topic>
+    <files>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/spaarkeai-compose-r2/design.md</file>
+      <file>projects/spaarkeai-compose-r2/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="Semantic Appendix" location="design.md §6.1">LLM sees defined terms, cross-references, structural metadata to reduce hallucination.</pattern>
+      <pattern name="CriticMarkup as display" location="design.md §6.1">LLM sees existing track changes inline as {++/--/&gt;&gt;/&lt;&lt;} markers; it does not emit them.</pattern>
+    </patterns>
+  </knowledge>
+
+  <justification>
+    NEW service `SemanticAppendixGenerator` (+ `CriticMarkupRenderer`). (1) Existing — no scope-payload enrichment or
+    CriticMarkup rendering exists in `Services/Compose/`. (2) Extension — cannot fold into `ComposeService` (SPE lifecycle)
+    or the validator stack (write direction); this is the read-direction payload shaper. (3) Cost-of-doing-nothing —
+    without the appendix the LLM hallucinates defined terms/cross-refs (measured delta in Spike 4); without CriticMarkup
+    read-in the model cannot see prior track-changes and re-proposes already-made edits.
+  </justification>
+
+  <steps mode="directional">
+    <step order="0">Context check. Load ADRs/constraints + Spike 4 notes for the appendix shape + measured delta.</step>
+    <step order="1">Implement `SemanticAppendixGenerator`: extract defined terms, cross-references, and structural metadata (headings/sections/numbering) from document text; format them as the appended semantic-appendix block on the `compose-document` scope payload.</step>
+    <step order="2">Implement `CriticMarkupRenderer`: render existing track-changes (insertion/deletion/comment spans) to inline `{++ins++}` / `{--del--}` / `{&gt;&gt;comment&lt;&lt;}` markers for LLM read-in ONLY.</step>
+    <step order="3">Add `// EDGE-N:` comments: nested defined terms, duplicate term definitions, cross-ref to a missing section, empty document, document with no track-changes.</step>
+    <step order="4">Register the generator in DI only if consumed directly by the scope-payload path; keep the renderer internal if only the generator uses it.</step>
+    <step order="5">Write unit tests in `tests/unit/Sprk.Bff.Api.Tests/Services/Compose/SemanticAppendixGeneratorTests.cs` (and CriticMarkup renderer tests) covering the closed acceptance set.</step>
+    <step order="6">Build; run tests; measure + report publish size delta.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/SemanticAppendixGenerator.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/CriticMarkupRenderer.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Compose/SemanticAppendixGeneratorTests.cs</output>
+    <output type="report">Task completion report incl. publish-size delta</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">Given a document with defined terms and cross-references, the generator emits a semantic appendix enumerating them plus structural metadata, appended to the `compose-document` scope payload.</criterion>
+    <criterion testable="true">Given existing track-changes, `CriticMarkupRenderer` produces inline `{++...++}` / `{--...--}` / `{&gt;&gt;...&lt;&lt;}` markers for LLM read-in; the renderer is a pure display transform (no model call).</criterion>
+    <criterion testable="true">The generated payloads are text-only artifacts consumed by the dispatch seam — no AI internal is injected (ADR-013).</criterion>
+    <criterion testable="true">Edge cases handled: empty document yields an empty appendix; a document with no track-changes yields plain text with no CriticMarkup; a cross-ref to a missing section is flagged, not silently emitted (NEGATIVE: missing cross-ref).</criterion>
+    <criterion testable="true">Spike 4's measured hallucination delta is referenced in the task notes; `dotnet build` green; publish size ≤ 60 MB reported with delta.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

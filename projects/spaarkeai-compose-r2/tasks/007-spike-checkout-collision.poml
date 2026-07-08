@@ -1,0 +1,80 @@
+<task id="007" project="spaarkeai-compose-r2">
+  <metadata>
+    <title>Spike 7 — SPE checkout vs Word-for-Web open collision UX</title>
+    <phase>0 Spikes</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>none</blocks>
+    <tags>spe</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Exploratory spike — documents observed concurrency behavior + expected UX as a spike note; no production code. STANDARD per TASK-INDEX.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Behavioral observation + UX documentation over existing SPE checkout plumbing; bounded. Sonnet per TASK-INDEX.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W0</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Observe and document what happens when an SPE checkout (Compose single-session lock plumbing) collides with a Word for Web open/edit session on the same document — e.g. Compose holds a checkout while the user opens the doc in Word, or Word holds an implicit lock while Compose tries to check out or write back. Capture the observed platform behavior (errors, lock semantics, silent conflicts) and specify the expected conflict UX Compose should present. This de-risks concurrency handling for FR-27's conflict banner + the push/save deterministic path before those are built. Deliverable is a spike note describing the concurrency matrix + recommended UX.
+  </prompt>
+
+  <role>
+    Engineer familiar with SPE check-out / check-in semantics, Word for Web co-authoring/lock behavior, and the Compose single-session lock (DocumentCheckoutService) plumbing.
+  </role>
+
+  <goal>
+    A spike note at projects/spaarkeai-compose-r2/notes/spikes/spike-7-checkout-collision.md that unlocks the concurrency-UX decision: a documented matrix of checkout-vs-Word-open collision cases with observed platform behavior and the expected Compose conflict UX for each.
+  </goal>
+
+  <context>
+    <background>
+      Design §2.4/§2.5 (push/return) + §13 Spike 7. Compose has an existing single-session lock (DocumentCheckoutService, heartbeat). When Word for Web opens the same SPE document, checkout and co-authoring locks can collide. This spike documents the expected UX so FR-27's conflict banner and the push/save path handle it deterministically. Decision unlocked (design §13): concurrency UX. No downstream task hard-depends on it, but it informs Word-phase UX.
+    </background>
+    <relevant-files>
+      <file purpose="checkout-plumbing">src/server/api/Sprk.Bff.Api/Services/Compose/StaleCheckoutSweeperHostedService.cs — existing checkout/lock lifecycle reference</file>
+      <file purpose="spe-facade">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeFileStore.cs — SPE checkout / write-with-If-Match seam (facade over Microsoft.Graph)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="n/a">No task dependencies — startable immediately (Wave W0).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-007">Interact with SPE checkout/lock only through the SpeFileStore / Infrastructure facade — no raw Microsoft.Graph types in Services/Compose.</constraint>
+    <constraint source="ADR-005">SPE is the storage system under test; observe real SPE lock semantics, not a local emulation.</constraint>
+    <constraint source="project">Observation + UX spec only — no production code; deliverable is a spike note under notes/spikes/.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>spe/checkout-locks, spe/co-authoring</topic>
+    <files>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/adr/ADR-005-flat-storage.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + load">Load this task, project CLAUDE.md, and the knowledge files.</step>
+    <step order="1" name="Enumerate collision cases">List the checkout-vs-Word-open cases: Compose-checkout-then-Word-open; Word-open-then-Compose-checkout; write-back while Word holds a lock; heartbeat expiry during Word session.</step>
+    <step order="2" name="Observe behavior">Reproduce each case against SPE + Word for Web and record the observed platform response (error codes, lock states, silent conflict).</step>
+    <step order="3" name="Specify UX">For each case, specify the expected Compose conflict UX (banner text, blocked action, recovery path).</step>
+    <step order="4" name="Write spike note">Record the concurrency matrix + recommended UX for the Word-phase conflict handling.</step>
+  </steps>
+
+  <outputs>
+    <output type="notes" ephemeral="true">projects/spaarkeai-compose-r2/notes/spikes/spike-7-checkout-collision.md</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">Spike note documents a checkout-vs-Word-open collision matrix with observed platform behavior per case — the concurrency-UX decision the spike unlocks (design §13).</criterion>
+    <criterion testable="true">Each collision case has a recommended Compose conflict UX (banner + blocked action + recovery).</criterion>
+    <criterion testable="true">SPE interaction is via the SpeFileStore facade (no raw Microsoft.Graph in Services/Compose); the note states this.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

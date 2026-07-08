@@ -45,7 +45,7 @@ Tasks marked ⛔ are **blocked until core R2 publishes Phase A0 contracts** (see
 | 042 | FR-09 compose-draft-alternative Action + Binding (compose disposition) | 4 Catalog | 🔴 | 001,016 | ⛔ | FULL | opus | high |
 | 043 | FR-10 compose-summarize-word-changes Action + Binding | 4 Catalog | 🔴 | 001,006 | ⛔ | FULL | sonnet | high |
 | 044 | FR-11 compose-defined-terms Action + Binding (overflow trigger → Context) | 4 Catalog | 🔴 | 001 | ⛔ | FULL | sonnet | high |
-| 045 | FR-12 eval cases per row (golden + dispatch ≥5) + schema validation | 4 Catalog | 🔴 | 040,041,042,043,044 | ⛔ | STANDARD | sonnet | high |
+| 045 | FR-12 eval cases per row (golden + dispatch ≥5) + schema validation | 4 Catalog | 🔴 | 040,041,042,043,044 | ⛔ | FULL | sonnet | high |
 | 046 | FR-13 dispatch wiring (PaneEventBus compose_action_request → dispatchConsumer) | 4 Catalog | 🔴 | 016,030 | ⛔ | FULL | opus | high |
 | 047 | Deploy catalog rows to Dataverse (mirror-first) | 4 Catalog | 🔴 | 045 | ⛔ | STANDARD | sonnet | high |
 | 050 | FR-24 DocxAnnotationWriter (comments + track changes, edge cases) + push endpoint | 5 Word | 🟢 | 005 | 🔲 | FULL | opus | xhigh |
@@ -69,7 +69,7 @@ Tasks marked ⛔ are **blocked until core R2 publishes Phase A0 contracts** (see
 | 083 | AnchoredAnnotation Path-A deviation code-review sign-off | 8 Wrap | 🟢 | 060 | 🔲 | MINIMAL | sonnet | high |
 | 090 | Project wrap-up (code-review, adr-check, repo-cleanup, /test-diet, lessons) | 8 Wrap | 🔴 | all | ⛔ | FULL | opus | high |
 
-**Totals**: 56 tasks — **32 🟢 startable** · **17 🔴 core-A0-blocked** · **7 🟡 splittable**.
+**Totals**: 56 tasks — **33 🟢 startable** · **16 🔴 core-A0-blocked** · **7 🟡 splittable** (splittable are counted among startable; their gated half joins the blocked set). Task 045 rigor bumped STANDARD→FULL per CLAUDE.md §8 TEST-MODIFYING override (it modifies `tests/**`).
 
 ## Parallel Execution Plan (startable 🟢 tracks)
 

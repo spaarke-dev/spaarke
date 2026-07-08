@@ -396,7 +396,7 @@ R2's risk and effort are concentrated in two distinct phases with different valu
   - `ComposeEditBatch` (4-phase pipeline)
   - `ComposeEditTransaction` (snapshot/rollback)
   - `SemanticAppendixGenerator`
-- `src/client/shared/Spaarke.AI.Widgets/src/widgets/workspace/` — Compose UI gains custom ProseMirror marks (`insertion`, `deletion`, `commentAnchor`)
+- `src/client/shared/Spaarke.Compose.Components/src/widgets/` — Compose UI gains custom ProseMirror marks (`insertion`, `deletion`, `commentAnchor`) — *(as-built path corrected 2026-07-08; the editor + `docxBridge` live here, not the `Spaarke.AI.Widgets/.../workspace/` path this section originally named)*
 - JPS scope updates (R1 scopes get richer `description` fields per "tool descriptions = prompt" pattern)
 
 ### 6.2 Phase 2 — DOCX Shuttle (well-trodden engineering)

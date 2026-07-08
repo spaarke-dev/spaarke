@@ -1,0 +1,126 @@
+<task id="051" project="spaarkeai-compose-r2">
+  <metadata>
+    <title>FR-25 DocxAnnotationReader (parse w:comment/w:ins/w:del) + pull endpoint</title>
+    <phase>5 Word</phase>
+    <gate>startable</gate>
+    <status>not-started</status>
+    <rigor>FULL</rigor>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <parallel-group>W3-Word</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>006</deps>
+    <tags>bff-api,api,spe,docx</tags>
+    <estimated-effort>1.5-2 days</estimated-effort>
+    <assigned>unassigned</assigned>
+    <started></started>
+    <completed></completed>
+  </metadata>
+
+  <prompt>
+    Implement FR-25: a deterministic `DocxAnnotationReader` service that parses incoming `&lt;w:comment&gt;`,
+    `&lt;w:ins&gt;`, and `&lt;w:del&gt;` markup from a DOCX (as saved by Word for Web/Desktop) into a structured
+    annotation payload, plus a `POST /api/compose/document/{spe-id}/pull-annotations` endpoint that
+    downloads the current SPE bytes and returns that payload to the Compose UI for re-anchoring
+    (task 054 consumes it). This is the read direction of the DOCX shuttle (task 050 is the write
+    direction). No LLM call — pure Open XML parse. Spike 6 (dep 006) validated the reverse round-trip
+    (Word edit → webhook → read with correct author/date) and tuned the re-anchor bands; this task
+    productionizes the reader half.
+  </prompt>
+
+  <role>
+    .NET 8 developer fluent in the Open XML SDK 3.x reader APIs (`Comments`, `CommentRangeStart/End`,
+    `InsertedRun`, `DeletedRun`, `DeletedText`) and Minimal API authoring over the Spaarke SPE facade.
+  </role>
+
+  <goal>
+    A `DocxAnnotationReader` in `Services/Compose/` that extracts every comment (with author/date/id +
+    anchored text range) and every tracked insertion/deletion (with author/date + text) from a DOCX
+    into a stable structured payload, plus an authorized `POST
+    /api/compose/document/{spe-id}/pull-annotations` endpoint returning it. Matching unit tests cover
+    the parse cases plus malformed-DOCX and empty-document negatives.
+  </goal>
+
+  <context>
+    <background>
+      Phase 2 DOCX shuttle read direction (design §2.5, §6.2, §12.2). The reader output is the input
+      to FR-27 return-from-Word re-anchoring (task 054) and to `compose-summarize-word-changes`
+      (FR-10, gated). Keep the payload shape aligned with what task 054's re-anchoring expects.
+    </background>
+    <relevant-files>
+      <file role="new">src/server/api/Sprk.Bff.Api/Services/Compose/DocxAnnotationReader.cs — NEW service (this task)</file>
+      <file role="modify">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs — add POST /document/{spe-id}/pull-annotations</file>
+      <file role="canonical-reuse">src/server/api/Sprk.Bff.Api/Infrastructure/Graph/SpeFileStore.cs — DownloadFileAsUserAsync (facade download; reuse, do NOT touch Graph directly)</file>
+      <file role="canonical-reference">src/server/api/Sprk.Bff.Api/Services/Compose/DocxAnnotationWriter.cs — task 050; mirror its DTO conventions (writer/reader symmetry)</file>
+      <file role="reference">projects/spaarkeai-compose-r2/notes/spikes/ — Spike 6 notes (reverse round-trip; author/date extraction; band tuning)</file>
+      <file role="design">projects/spaarkeai-compose-r2/design.md §2.5 (return from Word), §6.2, §12.2</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="006" status="pending">Spike 6 — reverse round-trip (Word edit → webhook → read); tuned re-anchor bands. Its notes are the validated parse + metadata-extraction recipe.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-007">NO `Microsoft.Graph` types in `Services/Compose/`. Download via `SpeFileStore` facade; the reader parses byte streams only.</constraint>
+    <constraint source="ADR-008">`pull-annotations` uses `.RequireAuthorization()` (group-inherited); resource authorization via endpoint filter where applicable.</constraint>
+    <constraint source="ADR-013 / NFR-05">No AI-internal injection in the reader — deterministic parse. Tier-1 NetArchTest enforces.</constraint>
+    <constraint source="ADR-029 / CLAUDE.md §10">Open XML SDK already added by task 050; still report publish size + delta + CVE for this BFF-touching task (no net-new package expected).</constraint>
+    <constraint source="NFR-08">Matching unit tests in `tests/unit/Sprk.Bff.Api.Tests/Services/Compose/`.</constraint>
+    <constraint source="project / §10 Placement Justification">State Placement Justification in the PR description.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>Open XML comment/revision parsing; SPE facade download</topic>
+    <files>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/skills/spe-integration/SKILL.md</file>
+    </files>
+    <patterns>
+      <pattern name="Writer/reader DTO symmetry" location="src/server/api/Sprk.Bff.Api/Services/Compose/DocxAnnotationWriter.cs">
+        Mirror the annotation DTO the writer consumes so a push→pull round-trip is structurally lossless where OOXML allows.
+      </pattern>
+      <pattern name="Compose endpoint group" location="src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs">
+        Add the route to the existing `/api/compose` group following the established `.WithName/.Produces` convention.
+      </pattern>
+    </patterns>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + dependency check">Confirm Spike 6 (006) notes available; declare FULL rigor; load knowledge files.</step>
+    <step order="1" name="Define the read payload">Design the structured output: comments (id, author, date, anchored range text) + revisions (type ins/del, author, date, text, position hint). Align with task 050's writer DTO and task 054's re-anchoring input.</step>
+    <step order="2" name="Implement DocxAnnotationReader">Parse `&lt;w:comment&gt;` + `CommentRangeStart/End`, `&lt;w:ins&gt;`/`InsertedRun`, `&lt;w:del&gt;`/`DeletedRun`/`DeletedText` with author/date/id. Handle documents with zero annotations gracefully. Carry `// EDGE-N:` notes for any Spike-6-surfaced parse quirks.</step>
+    <step order="3" name="Wire the pull-annotations endpoint">Add `POST /api/compose/document/{spe-id}/pull-annotations`: download current bytes via facade, run reader, return the structured payload.</step>
+    <step order="4" name="Unit tests">`DocxAnnotationReaderTests`: parse a Word-authored comment + track-change → correct author/date; empty-document → empty payload; malformed DOCX → 400. Mock at facade boundary.</step>
+    <step order="5" name="Verify">Build + tests; publish-size/CVE report; NetArchTest facade check; update TASK-INDEX.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/DocxAnnotationReader.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs (pull-annotations route added)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Compose/DocxAnnotationReaderTests.cs</output>
+    <output type="report">Publish-size delta; CVE; Placement Justification</output>
+  </outputs>
+
+  <justification>
+    <existing>No existing service parses OOXML annotations. `DocxAnnotationWriter` (050) is the write direction; the platform `ITextExtractor` extracts plain text, not comment/revision structure. No overlap.</existing>
+    <extension>Distinct read responsibility, symmetric to the writer; separate unit-tested unit keeps each direction independently verifiable. Reuses `ComposeEndpoints.cs` + `SpeFileStore` — no new plumbing.</extension>
+    <cost-of-doing-nothing>Without it, a Word-added comment/track-change cannot round-trip back — FR-25 acceptance ("a Word-added comment + track-change round-trips back with correct author/date") fails, and FR-27 re-anchoring (task 054) has no input to re-anchor.</cost-of-doing-nothing>
+  </justification>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">A Word-authored comment parses back with correct author, date, id, and anchored text range.</criterion>
+    <criterion testable="true">Tracked insertions and deletions parse with correct type, author, date, and text.</criterion>
+    <criterion testable="true">`POST /api/compose/document/{spe-id}/pull-annotations` requires authorization and returns the structured payload from current SPE bytes.</criterion>
+    <criterion testable="true">Negative: an empty (no-annotation) document returns an empty payload, not an error.</criterion>
+    <criterion testable="true">Negative: a malformed/non-DOCX input returns 400 ProblemDetails.</criterion>
+    <criterion testable="true">No `Microsoft.Graph` type in `Services/Compose/`; no AI-internal injection (NetArchTest green).</criterion>
+    <criterion testable="true">Matching unit tests pass; BFF build green; publish-size + CVE reported.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

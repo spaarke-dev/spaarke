@@ -1,0 +1,98 @@
+<task id="040" project="spaarkeai-compose-r2">
+  <metadata>
+    <title>FR-07 compose-explain-clause Action + Binding</title>
+    <phase>4 Catalog</phase>
+    <status>blocked</status>
+    <estimated-hours>6</estimated-hours>
+    <dependencies>001</dependencies>
+    <blocks>045</blocks>
+    <tags>dataverse, ai, azure-openai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Authors a production catalog row (Action + Binding) on the closed ADR-039 catalog — architectural surface, schema-validation gate, ADR-039/040 compliance. FULL per TASK-INDEX.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Prompt + schema authoring over the shipped seam using the Spike-1 proven pattern; no cross-cutting blast radius (read-only capability, no disposition). Sonnet per TASK-INDEX.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>phase4-catalog-rows</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Author the `compose-explain-clause` capability as an Action row + Binding row (ADR-039), mirror-first under infra/dataverse/, dispatched through the shipped session-dispatch seam (NO new endpoint). The Action carries a plain-language clause-explanation SystemPrompt and a structured OutputSchemaJson `{explanation, keyConcepts[], relatedPlaybookIds[]}` (FR-07); the Binding is a Click-path, toolbar-invoked routing row consuming the `compose-selection` JPS scope. This is one of five R2 catalog rows; it reuses the prompt/schema pattern proven in Spike 1 and authors THROUGH the core's triple-twin hoisted description source (never a fourth hand-maintained twin). It ships with eval cases in task 045.
+  </prompt>
+
+  <role>
+    AI platform developer fluent in JPS (JSON Prompt Schema) Action authoring, the ADR-039 Action+Binding catalog model, OutputSchemaJson / OpenAiFunctionSchemaValidator constraints, and the redesign-r1 mirror-first catalog-governance workflow.
+  </role>
+
+  <goal>
+    A deployable `compose-explain-clause` Action row (SystemPrompt + OutputSchemaJson + Temperature + ModelDeploymentId) and its Click-path Binding row, both authored mirror-first under infra/dataverse/ through the core's hoisted description source, consuming `compose-selection`, returning schema `{explanation: string, keyConcepts: string[], relatedPlaybookIds: string[]}` that passes OpenAiFunctionSchemaValidator with no property-level boolean `required`. Dispatch adds zero new routes. Row is eval-ready for task 045 (does not merge without eval coverage).
+  </goal>
+
+  <context>
+    <background>
+      Spec FR-07 + design §7 (R2 Catalog Roster row 2) + §7.4 (authoring pipeline, mirror-first, through the triple-twin hoist). One of five R2 Action+Binding pairs. Read action: selection → "Explain" in the BubbleMenu toolbar → schema-valid explanation streams into the Assistant; sources surface in the Context pane. No `compose` disposition (this is not an edit action). Consumes the `compose-selection` scope defined in R1, whose `description` field doubles as LLM behavioral guidance and toolbar tooltip (FR-23 / adeu "tool descriptions ARE the prompt").
+    </background>
+    <relevant-files>
+      <file purpose="input-schema-mirror-NEW">infra/dataverse/inputschemas/expl-clause-v1.input.schema.json — NEW mirror of the Action `sprk_inputschema` (proposed actionCode EXPL-CLAUSE@v1; confirm final code via jps-action-create naming convention)</file>
+      <file purpose="output-schema-mirror-NEW">infra/dataverse/outputschemas/expl-clause-v1.schema.json — NEW mirror of the Action OutputSchemaJson `{explanation, keyConcepts[], relatedPlaybookIds[]}`</file>
+      <file purpose="binding-mirror-EXTEND">infra/dataverse/sprk_playbookconsumer-rows.json — EXTEND: add the Click-path Binding row (consumerType compose-explain-clause / consumerCode default; toolDescription; surfaces workspace)</file>
+      <file purpose="exemplar-input">infra/dataverse/inputschemas/sum-chat-v1.input.schema.json — the shape to copy (normalized OpenAI-subset schema; object-level required array; custom keyword conventions)</file>
+      <file purpose="exemplar-output">infra/dataverse/outputschemas/sum-chat-v1.schema.json — OutputSchemaJson exemplar</file>
+      <file purpose="dispatch-seam">src/client/shared/Spaarke.UI.Components/src/services/dispatchConsumer.ts — the Click-path seam the Binding resolves through (no new route)</file>
+      <file purpose="spike-1-pattern">projects/spaarkeai-compose-r2/notes/spikes/spike-1-action-schema.md — validated prompt pattern + schema shape to reuse</file>
+      <file purpose="hoist-source">infra/dataverse/ — the core's hoisted single-source description mirror (Phase A output); author the row's description through it, not as a new hand-maintained twin</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="not-started">Requires the Spike-1 validated Action prompt pattern + OutputSchemaJson shape.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-039">Every capability is an Action row + Binding row; the Binding is the ONLY routing config surface. NO new AI dispatch endpoint; NO string-key resolution outside the Binding table. Dispatch flows through the shipped session-dispatch seam. Rows are authored mirror-first under infra/dataverse/ THROUGH the core's hoisted description source. Eval cases gate the catalog change (row does not merge without them). OutputSchemaJson MUST pass OpenAiFunctionSchemaValidator — property-level boolean `required` is BANNED (use the object-level required array).</constraint>
+    <constraint source="ADR-040">Dispatched output is ledger-written by the seam (storage precedes rendering); the row rides that path, never a parallel cache.</constraint>
+    <constraint source="ADR-038">Eval obligation: golden + dispatch families ≥5 each ship with the row (delivered in task 045); no row merges without eval coverage.</constraint>
+    <constraint source="project">Engine frozen — NO new sprk_analysisplaybook records. This is a prompted Action, not a playbook. Consumes the R1 `compose-selection` scope; does not author a new scope.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai/jps-action-authoring, ai/output-schema-validation, dataverse/catalog-governance</topic>
+    <files>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/skills/jps-action-create/SKILL.md</file>
+      <file>.claude/skills/jps-validate/SKILL.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + gate">Load this task, project CLAUDE.md, the HANDOFF contract doc, Spike-1 note, and knowledge files. CONFIRM core Phase A0 has published the triple-twin description hoist + dispatch/invoke seam before authoring (this task is blocked until then).</step>
+    <step order="1" name="Author Action row">Via jps-action-create, author the `compose-explain-clause` Action: plain-language clause-explanation SystemPrompt (adeu behavioral-prompt style), Temperature, ModelDeploymentId, and OutputSchemaJson `{explanation: string, keyConcepts: string[], relatedPlaybookIds: string[]}`. Write the input-schema + output-schema mirrors under infra/dataverse/. Author the description THROUGH the hoisted source.</step>
+    <step order="2" name="Author Binding row">Add the Click-path Binding row to infra/dataverse/sprk_playbookconsumer-rows.json (consumerType compose-explain-clause, consumerCode default, surfaces workspace, toolDescription = the LLM/tooltip guidance), consuming `compose-selection`. Name-keyed upsert; the Binding is the sole routing config.</step>
+    <step order="3" name="Validate schema">Run jps-validate: OutputSchemaJson passes OpenAiFunctionSchemaValidator; confirm NO property-level boolean `required`; render-test the prompt.</step>
+    <step order="4" name="Verify dispatch path">Confirm the Binding resolves through dispatchConsumer → POST /api/ai/chat/sessions/{id}/dispatch → SessionDispatchOrchestrator → GetBindingByIdAsync → prompted executor, adding zero new routes.</step>
+  </steps>
+
+  <outputs>
+    <output type="config">infra/dataverse/inputschemas/expl-clause-v1.input.schema.json</output>
+    <output type="config">infra/dataverse/outputschemas/expl-clause-v1.schema.json</output>
+    <output type="config">infra/dataverse/sprk_playbookconsumer-rows.json (Binding row added)</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">A `compose-explain-clause` Action row exists mirror-first under infra/dataverse/ with SystemPrompt + Temperature + ModelDeploymentId and OutputSchemaJson exactly `{explanation: string, keyConcepts: string[], relatedPlaybookIds: string[]}` (closed set; no extra top-level fields).</criterion>
+    <criterion testable="true">A Click-path Binding row (consumerType compose-explain-clause / consumerCode default) is added to sprk_playbookconsumer-rows.json, consumes `compose-selection`, and is the only routing config for the capability.</criterion>
+    <criterion testable="true">OutputSchemaJson passes OpenAiFunctionSchemaValidator via jps-validate with NO property-level boolean `required` (object-level required array only).</criterion>
+    <criterion testable="true">The row's description is authored through the core's hoisted single-source mirror — not a new hand-maintained twin.</criterion>
+    <criterion testable="true">Dispatch resolves through the shipped session-dispatch seam and adds zero new BFF routes.</criterion>
+    <criterion testable="true">The row is eval-ready (golden + dispatch families authored in task 045); it does not merge without that coverage.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>Consumes core Phase A0 triple-twin description hoist + session-dispatch/invoke seam per notes/HANDOFF-core-r2-A0-contract-requirements.md §7. If the published contract differs from the proposed shape, STOP and reconcile — do not adapt silently.</trigger>
+  </escalation>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

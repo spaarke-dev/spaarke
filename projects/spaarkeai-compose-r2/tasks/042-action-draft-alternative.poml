@@ -1,0 +1,99 @@
+<task id="042" project="spaarkeai-compose-r2">
+  <metadata>
+    <title>FR-09 compose-draft-alternative Action + Binding (compose disposition)</title>
+    <phase>4 Catalog</phase>
+    <status>blocked</status>
+    <estimated-hours>8</estimated-hours>
+    <dependencies>001, 016</dependencies>
+    <blocks>045, 082</blocks>
+    <tags>dataverse, ai, azure-openai</tags>
+    <rigor-hint>FULL</rigor-hint>
+    <rigor-reason>Production catalog row that declares the `compose` disposition — the ledger-first inline-edit surface (ADR-040). Architectural + ADR-039/040 blast radius; feeds the flagship gate. FULL per TASK-INDEX.</rigor-reason>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Declares the ComposeDisposition and produces the structured edit payload the Workspace materializes from the ledger — ADR-040 storage-precedes-rendering surface with cross-pane blast radius. Opus per TASK-INDEX.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>phase4-catalog-rows</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Author the `compose-draft-alternative` capability as an Action row + Click-path Binding row (ADR-039) that DECLARES the core `compose` disposition, mirror-first under infra/dataverse/, dispatched through the shipped session-dispatch seam (NO new endpoint). The Action proposes a structured edit payload (adeu Pattern §6.1) enforcing `{target_text, new_text, match_mode: "strict"|"first"|"all", rationale, sources: [{type, id, snippet}]}` (FR-09). The output is written as a `SessionOutput` with the `compose` disposition BEFORE any render (ADR-040); the Workspace materializes a pending track-change from the stored ledger entry with `{bindingId}@t{n}` provenance. Consumes `compose-selection`. Ships with eval cases in task 045.
+  </prompt>
+
+  <role>
+    Senior AI platform developer fluent in JPS Action authoring, the ADR-039 Action+Binding catalog model, ADR-040 ledger-first disposition semantics, adeu structured-edit-payload patterns, and OpenAiFunctionSchemaValidator constraints.
+  </role>
+
+  <goal>
+    A deployable `compose-draft-alternative` Action row (structured-edit SystemPrompt + OutputSchemaJson + Temperature + ModelDeploymentId) and its Click-path Binding row declaring the `compose` disposition, authored mirror-first through the core's hoisted description source, consuming `compose-selection`, returning schema `{target_text: string, new_text: string, match_mode: "strict"|"first"|"all", rationale: string, sources: [{type: string, id: string, snippet: string}]}` that passes OpenAiFunctionSchemaValidator with no property-level boolean `required`. Output is ledger-written under the `compose` disposition before render. Zero new routes; eval-ready for task 045.
+  </goal>
+
+  <context>
+    <background>
+      Spec FR-09 + design §2.3 (Draft Alternative) + §7 (Catalog Roster row 4, declares the `compose` disposition) + §7.2 (dispatch sequence, Draft-Alternative leg materializes from the ledger). The one edit-producing catalog row: the structured payload is a ledger `SessionOutput` with the core `compose` disposition (§1 of the HANDOFF contract), addressable as `{bindingId}@t{n}` so the Workspace tags provenance and can supersede it on undo/replace (FR-17). Depends on FR-04 draft-into-editor (task 016) landing the disposition + SSE-frame consumption path.
+    </background>
+    <relevant-files>
+      <file purpose="input-schema-mirror-NEW">infra/dataverse/inputschemas/draft-alt-v1.input.schema.json — NEW input-schema mirror (proposed actionCode DRAFT-ALT@v1; confirm via jps-action-create)</file>
+      <file purpose="output-schema-mirror-NEW">infra/dataverse/outputschemas/draft-alt-v1.schema.json — NEW OutputSchemaJson mirror `{target_text, new_text, match_mode, rationale, sources[]}`</file>
+      <file purpose="binding-mirror-EXTEND">infra/dataverse/sprk_playbookconsumer-rows.json — EXTEND: Click-path Binding row (consumerType compose-draft-alternative / consumerCode default) with the `compose` disposition set on the Binding's disposition field</file>
+      <file purpose="exemplar-binding-disposition">infra/dataverse/sprk_playbookconsumer-rows.json — existing rows show the `disposition` field convention (e.g. chat-summarize) to mirror for the `compose` disposition member</file>
+      <file purpose="exemplar-input">infra/dataverse/inputschemas/draft-corr-v1.input.schema.json — a drafting-Action schema exemplar to copy</file>
+      <file purpose="dispatch-seam">src/client/shared/Spaarke.UI.Components/src/services/dispatchConsumer.ts — Click-path seam (no new route)</file>
+      <file purpose="disposition-consumer">projects/spaarkeai-compose-r2/tasks/016-*.poml (FR-04 draft-into-editor) — the leg that consumes the ComposeDisposition + SSE frame; this row is its edit-producing counterpart</file>
+      <file purpose="spike-1-pattern">projects/spaarkeai-compose-r2/notes/spikes/spike-1-action-schema.md — validated structured-edit prompt/schema pattern</file>
+      <file purpose="hoist-source">infra/dataverse/ — the core's hoisted description mirror; author the row's description through it</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="001" status="not-started">Requires the Spike-1 validated structured-edit prompt/schema pattern.</dependency>
+      <dependency task="016" status="blocked">Requires FR-04 draft-into-editor — the ComposeDisposition + SSE-frame consumption path the edit payload materializes through.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-039">Action row + Binding row; the Binding is the ONLY routing config and carries the `compose` disposition member. NO new dispatch endpoint; NO string-key routing. Mirror-first through the core's hoisted description source. Eval cases gate the change. OutputSchemaJson MUST pass OpenAiFunctionSchemaValidator — property-level boolean `required` BANNED (the `match_mode` enum is expressed via the OpenAI-subset `enum` keyword, not a boolean required).</constraint>
+    <constraint source="ADR-040">The edit payload is a `SessionOutput` with the `compose` disposition written to the ledger BEFORE any render; the Workspace materializes the pending track-change from the stored entry with `{bindingId}@t{n}` provenance. No client-side-only edit buffer. Undo/replace = supersession (FR-17), never DOM undo.</constraint>
+    <constraint source="project">Engine FROZEN — prompted Action, not a playbook. Consumes the R1 `compose-selection` scope.</constraint>
+    <constraint source="ADR-038">Golden + dispatch eval families ≥5 each ship with the row (task 045).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai/jps-action-authoring, ai/ledger-disposition, ai/output-schema-validation</topic>
+    <files>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/skills/jps-action-create/SKILL.md</file>
+      <file>.claude/skills/jps-validate/SKILL.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + gate">Load task, project CLAUDE.md, HANDOFF doc (§1 ComposeDisposition + §7 hoist), Spike-1 note, knowledge files. CONFIRM core Phase A0 published ComposeDisposition v1 (+ SSE frame), the triple-twin hoist, and the dispatch seam before authoring.</step>
+    <step order="1" name="Author Action row">Via jps-action-create, author a structured-edit SystemPrompt (adeu §6.1: LLM emits target_text/new_text/match_mode/rationale/sources, NOT free-form markup) + OutputSchemaJson `{target_text, new_text, match_mode enum[strict,first,all], rationale, sources[]}`, Temperature, ModelDeploymentId. Write mirrors under infra/dataverse/ through the hoisted source.</step>
+    <step order="2" name="Author Binding row + disposition">Add the Click-path Binding row (consumerType compose-draft-alternative, consumerCode default, surfaces workspace, toolDescription) consuming `compose-selection`, and set its disposition field to the published `compose` disposition member.</step>
+    <step order="3" name="Validate schema">jps-validate: OutputSchemaJson passes OpenAiFunctionSchemaValidator; `match_mode` via enum keyword; NO property-level boolean `required`.</step>
+    <step order="4" name="Verify ledger-first path">Confirm the dispatched output writes a `compose`-disposition SessionOutput to the ledger before render, addressable as `{bindingId}@t{n}`, through the shipped seam (zero new routes).</step>
+  </steps>
+
+  <outputs>
+    <output type="config">infra/dataverse/inputschemas/draft-alt-v1.input.schema.json</output>
+    <output type="config">infra/dataverse/outputschemas/draft-alt-v1.schema.json</output>
+    <output type="config">infra/dataverse/sprk_playbookconsumer-rows.json (Binding row + `compose` disposition added)</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">A `compose-draft-alternative` Action row exists mirror-first with OutputSchemaJson exactly `{target_text: string, new_text: string, match_mode: "strict"|"first"|"all", rationale: string, sources: [{type, id, snippet}]}` (closed set).</criterion>
+    <criterion testable="true">The Click-path Binding row (consumerType compose-draft-alternative / consumerCode default) declares the core `compose` disposition and consumes `compose-selection`.</criterion>
+    <criterion testable="true">The dispatched output is written as a `compose`-disposition SessionOutput to the ledger BEFORE render, addressable as `{bindingId}@t{n}` (ADR-040).</criterion>
+    <criterion testable="true">OutputSchemaJson passes OpenAiFunctionSchemaValidator; `match_mode` is an enum keyword; NO property-level boolean `required`.</criterion>
+    <criterion testable="true">Dispatch resolves through the shipped seam and adds zero new BFF routes; row is eval-ready for task 045.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>Consumes core Phase A0 ComposeDisposition v1 (+ SSE frame) per notes/HANDOFF-core-r2-A0-contract-requirements.md §1, AND the triple-twin description hoist + session-dispatch seam per §7. If either published contract differs from the proposed shape, STOP and reconcile — do not adapt silently.</trigger>
+  </escalation>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

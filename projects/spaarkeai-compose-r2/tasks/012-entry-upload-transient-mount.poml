@@ -1,0 +1,133 @@
+<task id="012" project="spaarkeai-compose-r2">
+  <metadata>
+    <title>FR-03 1b upload -&gt; transient mount (flip send_workspace_artifact + feed bytes)</title>
+    <phase>1 Entry</phase>
+    <status>not-started</status>
+    <estimated-hours>16</estimated-hours>
+    <effort>high</effort>
+    <dependencies>none</dependencies>
+    <blocks>017</blocks>
+    <tags>bff-api,api,frontend</tags>
+    <rigor-hint reason="Modifies .cs (handler + endpoint) and .tsx; flips an LLM tool refusal contract; BFF-touching; FULL per TASK-INDEX">FULL</rigor-hint>
+    <model-tier reason="Cross-surface change (LLM tool description + endpoint activation + client mount) that alters an established refusal contract — higher blast radius; opus per TASK-INDEX">opus</model-tier>
+    <parallel-group>W2</parallel-group>
+    <parallel-safe reason="Shares ComposeWorkspace/ComposeEmptyState with 010/011 on the client leg — serialize 010 -&gt; 011 -&gt; 012; BFF leg (handler/endpoint) is independent">false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Today an Assistant-uploaded file cannot open in Compose: `SendWorkspaceArtifactHandler` explicitly
+    REFUSES session-uploaded file ids as a Compose pre-seed (its tool description says the tab "opens
+    empty for session files"), and `POST /api/compose/upload` returns 501. The upload flow already
+    RETAINS the original `File` bytes. FR-03: flip that refusal for the Compose-mount path and feed the
+    retained upload bytes into the editor's source-agnostic `docxBytes` seam as a TRANSIENT working
+    draft — so "open in Compose" on an uploaded `.docx` shows its content instead of an empty tab.
+    Activate `POST /api/compose/upload` as needed to serve the retained bytes. No `sprk_document` is
+    created until first Save (create-on-save, FR-05 / task 013).
+  </prompt>
+
+  <role>
+    Full-stack developer: .NET Minimal API + the Spaarke AI chat-tool handlers on the server, and the
+    Compose widget + attachments hooks on the client. You alter an established LLM-tool refusal contract
+    carefully and keep the change scoped to the Compose-mount path.
+  </role>
+
+  <goal>
+    Uploading a `.docx` in the Assistant and choosing "open in Compose" mounts the file's retained bytes
+    into the TipTap editor transiently (content visible, no empty tab); `POST /api/compose/upload` is
+    activated to serve those bytes where the client needs a fetch; `send_workspace_artifact` no longer
+    refuses session-upload ids for the Compose-mount path; no `sprk_document` is created until Save.
+  </goal>
+
+  <context>
+    <background>
+      As-built (design.md §5): upload bytes go to `/api/ai/chat/sessions/{id}/documents` for RAG; the
+      `send_workspace_artifact` tool refuses session-file ids as a Compose pre-seed and tells the user
+      the tab opens empty; `POST /api/compose/upload` = 501. The mount seam is source-agnostic, so the
+      short reach is: (1) stop refusing on the Compose-mount path, (2) route the retained upload `File`
+      bytes into `docxBytes`. This differs from 010 (local picker) — here the bytes originate from a
+      session upload the Assistant already holds.
+    </background>
+    <relevant-files>
+      <file purpose="flip-refusal" edit="true">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/SendWorkspaceArtifactHandler.cs</file>
+      <file purpose="activate-endpoint" edit="true">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs</file>
+      <file purpose="client-mount" edit="true">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx</file>
+      <file purpose="upload-bytes" edit="maybe">src/solutions/SpaarkeAi/src/components/conversation/useAttachments.ts</file>
+      <file purpose="mount-seam" edit="false">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx</file>
+    </relevant-files>
+    <notes>
+      SendWorkspaceArtifactHandler.cs: the refusal text lives in the tool description + validation
+      (~lines 167/191/314); `ComposeLaunchContext` (~line 657) is how a Compose section opens LOADED
+      rather than empty. ComposeEndpoints.cs: the `Upload` handler returns 501 at ~line 108 with a
+      message steering callers to the Assistant pipeline; activate it to return/serve retained bytes for
+      the Compose-mount path. Keep RAG-upload behavior intact for non-Compose flows.
+    </notes>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">`Services/Compose` (and any Compose-mount code) never injects `IOpenAiClient`/executor/routing types; the upload-mount path is deterministic file handling, not AI dispatch.</constraint>
+    <constraint source="ADR-039">No new AI dispatch endpoint; activating `POST /api/compose/upload` is a file-serving route, not a dispatch route; no string-key routing.</constraint>
+    <constraint source="ADR-008">`POST /api/compose/upload`, once activated, applies `RequireAuthorization()` (endpoint filter authz) — it is NOT health/ping.</constraint>
+    <constraint source="ADR-028">Client fetch of upload bytes uses `@spaarke/auth`; never a raw Bearer.</constraint>
+    <constraint source="ADR-007">Any SPE/Graph access stays behind the `SpeFileStore`/Infrastructure facade — no `Microsoft.Graph` types leak up.</constraint>
+    <constraint source="project">Flip the refusal ONLY for the Compose-mount path; RAG upload behavior for other flows is unchanged.</constraint>
+    <constraint source="project">MUST NOT create a `sprk_document` on upload-mount — creation is Save-time (013).</constraint>
+    <constraint source="bff-hygiene">This task adds/activates a BFF endpoint — state the Placement Justification, measure publish-size delta vs the 49.63 MB baseline, and run the CVE scan per §10.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai/chat-tool-handlers, compose/entry-paths, minimal-api-auth, spe</topic>
+    <files>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/adr/ADR-008-endpoint-filters.md</file>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/adr/ADR-028-spaarke-auth-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/spaarkeai-compose-r2/spec.md</file>
+    </files>
+  </knowledge>
+
+  <justification component="Activated POST /api/compose/upload + flipped send_workspace_artifact refusal">
+    <existing>The upload endpoint stub (501) and the refusal-carrying `send_workspace_artifact` tool both already exist; upload bytes are already retained.</existing>
+    <extension>Activate the existing stub and narrow the existing refusal; extend the client to route retained bytes into the existing `docxBytes` seam — no new component/service.</extension>
+    <cost-of-doing-nothing>Without this, "open in Compose" on an uploaded file opens an empty tab (the concrete R1 UAT complaint); FR-03 unmet and the 1b entry-path success criterion fails.</cost-of-doing-nothing>
+  </justification>
+
+  <steps mode="directional">
+    <step order="0">Load spec.md FR-03 + `.claude/constraints/bff-extensions.md`; state the Placement Justification. Read SendWorkspaceArtifactHandler.cs, ComposeEndpoints.cs Upload handler, useAttachments.ts, ComposeWorkspace.tsx.</step>
+    <step order="1">Narrow the `send_workspace_artifact` refusal: allow session-upload ids on the Compose-mount path; update the tool description so it no longer tells the user the tab opens empty for session files (keep other refusals intact).</step>
+    <step order="2">Activate `POST /api/compose/upload` to serve/accept the retained upload bytes for the Compose-mount path, with `RequireAuthorization()` and SPE access behind the facade; keep the RAG-upload route unchanged.</step>
+    <step order="3">On the client, route the retained upload `File` bytes (or the upload-endpoint response) into `state.docxBytes` transiently, marking the editor dirty and pointer-less so first Save runs create-on-save.</step>
+    <step order="4">Add/update BFF unit tests (SendWorkspaceArtifactHandler + upload endpoint) per NFR-08 and ui-tests for the client mount. Build BFF + package; measure publish-size delta; run CVE scan.</step>
+    <step order="5">Run code-review + adr-check (Step 9.5). Update TASK-INDEX + current-task.md.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/SendWorkspaceArtifactHandler.cs</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/ComposeEndpoints.cs</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Ai/Handlers/SendWorkspaceArtifactHandlerTests.cs</output>
+    <output type="test">src/client/shared/Spaarke.Compose.Components/src/widgets/__tests__/ComposeWorkspace.upload.test.tsx</output>
+  </outputs>
+
+  <ui-tests>
+    <ui-test name="upload-mounts-content">Simulating "open in Compose" on an uploaded `.docx` mounts its retained bytes into the editor (content visible, empty state gone) — not an empty tab.</ui-test>
+    <ui-test name="no-create-on-mount">Upload-mount issues no `sprk_document` create; the editor is dirty so Save triggers create-on-save.</ui-test>
+    <ui-test name="dark-mode">Editor renders correctly in dark mode (ADR-021) for the upload-mounted document.</ui-test>
+  </ui-tests>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">Uploading a `.docx` in the Assistant then choosing "open in Compose" renders its content in the editor (no empty tab).</criterion>
+    <criterion testable="true">`send_workspace_artifact` no longer refuses session-upload ids for the Compose-mount path, and its description no longer claims the tab opens empty for session files.</criterion>
+    <criterion testable="true">`POST /api/compose/upload` no longer returns 501 for the Compose-mount path and applies `RequireAuthorization()` (ADR-008).</criterion>
+    <criterion testable="true">No `sprk_document` is created on upload-mount; the editor is dirty so first Save runs create-on-save (FR-05).</criterion>
+    <criterion testable="true">RAG-upload behavior for non-Compose flows is unchanged (regression check).</criterion>
+    <criterion testable="true">No `Microsoft.Graph` type leaks above the SpeFileStore/Infrastructure facade (ADR-007); NetArchTest facade rule stays green.</criterion>
+    <criterion testable="true">(negative) An unauthenticated call to `POST /api/compose/upload` is rejected (401/403).</criterion>
+    <criterion testable="true">BFF publish-size delta is reported vs the 49.63 MB baseline; no new HIGH CVE; BFF + package build succeed; unit + ui tests pass.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

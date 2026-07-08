@@ -1,0 +1,81 @@
+<task id="003" project="spaarkeai-compose-r2">
+  <metadata>
+    <title>Spike 3 — atomic edit batch + rollback</title>
+    <phase>0 Spikes</phase>
+    <status>not-started</status>
+    <estimated-hours>4</estimated-hours>
+    <dependencies>none</dependencies>
+    <blocks>021</blocks>
+    <tags>bff-api</tags>
+    <rigor-hint>STANDARD</rigor-hint>
+    <rigor-reason>Exploratory spike — throwaway pipeline prototype recorded as a spike note, not the production Services/Compose service. STANDARD per TASK-INDEX.</rigor-reason>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Deterministic .NET batch-pipeline prototype with a bounded atomicity question; no architectural blast radius. Sonnet per TASK-INDEX.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-group>W0</parallel-group>
+    <parallel-safe>true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    Prototype the ComposeEditBatch 4-phase pipeline (resolve → sort descending by offset → skip overlapping → apply bottom-up) plus a snapshot/rollback wrapper, and verify atomicity: on an intentionally-failing batch (one invalid edit among valid ones), NONE of the edits apply. This proves the atomic-transaction model before FR-20/FR-21 build the production ComposeEditBatch + ComposeEditTransaction (tasks 021/022). The bottom-up apply order matters because earlier edits must not shift later offsets. Deliverable is a spike note + throwaway prototype under notes/spikes/.
+  </prompt>
+
+  <role>
+    Senior .NET developer building deterministic, atomic text-transformation pipelines; familiar with adeu's 4-phase batch pattern and offset-stability reasoning.
+  </role>
+
+  <goal>
+    A spike note at projects/spaarkeai-compose-r2/notes/spikes/spike-3-edit-batch.md that unlocks the FR-20/21 decision: the validated atomic-transaction model — the 4-phase ordering that keeps offsets stable, and the snapshot/rollback semantics that guarantee all-or-nothing application, demonstrated on an intentionally-failing batch.
+  </goal>
+
+  <context>
+    <background>
+      Design §6.1 (4-phase atomic batch pipeline + snapshot/rollback) + §13 Spike 3. Edits must apply in an order where earlier edits don't shift later offsets (sort descending, apply bottom-up); if any edit fails validation, none apply (snapshot/rollback). This spike de-risks the model before tasks 021 (ComposeEditBatch) and 022 (ComposeEditTransaction). Decision unlocked (design §13): atomic-transaction model.
+    </background>
+    <relevant-files>
+      <file purpose="target-service-dir">src/server/api/Sprk.Bff.Api/Services/Compose/ — where production ComposeEditBatch / ComposeEditTransaction land (tasks 021/022); spike prototypes under notes/spikes/</file>
+      <file purpose="validator-spike">projects/spaarkeai-compose-r2/notes/spikes/spike-2-edit-validator.md — related validator design (edits enter the batch pre-validated)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="none" status="n/a">No task dependencies — startable immediately (Wave W0).</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">Services/Compose code MUST NOT inject AI internals. The batch pipeline is deterministic text processing behind the facade; Tier-1 NetArchTest enforces this in production.</constraint>
+    <constraint source="ADR-038">Follow the testing standard for any throwaway checks: mock at module boundaries; no Mock&lt;HttpMessageHandler&gt;.</constraint>
+    <constraint source="project">Throwaway prototype — production services are FR-20/FR-21 (tasks 021/022); deliverable is a spike note + prototype under notes/spikes/.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>dotnet/atomic-batch, ai/edit-application</topic>
+    <files>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="0" name="Context + load">Load this task, project CLAUDE.md, and the knowledge files.</step>
+    <step order="1" name="Prototype 4-phase pipeline">Implement resolve → sort-descending → skip-overlap → apply-bottom-up over a sample document string with a set of edits.</step>
+    <step order="2" name="Add snapshot/rollback">Wrap the pipeline in a snapshot/rollback so a mid-batch failure reverts to the pre-batch state.</step>
+    <step order="3" name="Verify atomicity">Run an intentionally-failing batch (one invalid edit) and confirm NONE of the edits apply. Run a valid batch and confirm offset stability.</step>
+    <step order="4" name="Write spike note">Record the validated atomic-transaction model for FR-20/21.</step>
+  </steps>
+
+  <outputs>
+    <output type="notes" ephemeral="true">projects/spaarkeai-compose-r2/notes/spikes/spike-3-edit-batch.md</output>
+    <output type="notes" ephemeral="true">projects/spaarkeai-compose-r2/notes/spikes/edit-batch-prototype.cs</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">Spike note documents the validated atomic-transaction model (4-phase ordering + snapshot/rollback) — the decision the spike unlocks (design §13).</criterion>
+    <criterion testable="true">An intentionally-failing batch is shown to apply NONE of its edits (all-or-nothing atomicity).</criterion>
+    <criterion testable="true">A valid batch is shown to preserve offset stability (bottom-up apply; earlier edits don't shift later offsets).</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

@@ -1,0 +1,94 @@
+<task id="083" project="spaarkeai-compose-r2">
+  <metadata>
+    <title>AnchoredAnnotation Path-A deviation code-review sign-off</title>
+    <phase>8 Wrap</phase>
+    <gate>startable-now</gate>
+    <status>not-started</status>
+    <rigor>MINIMAL</rigor>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <parallel-group>W4</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <dependencies>060</dependencies>
+    <tags>docs, testing</tags>
+    <fr>ADR-Tension Path-A (FR-29)</fr>
+  </metadata>
+
+  <prompt>
+    Carry the `AnchoredAnnotation` Path-A deviation into explicit code-review sign-off. Per CLAUDE.md §6.5
+    Path A, a project-scoped exception must be documented + rationalized + reviewer-approved at the point of
+    decision. The charter §3.4 rule bans local MemoryItem variants; the R2 design argues `AnchoredAnnotation`
+    is NOT a MemoryItem variant (document-adjacent positional UI state, never written via `memory.*`, never
+    retrieved by the Context Binder, never in the memory review/delete view; tenant+matter scoped). This task
+    verifies task 060's implementation matches that argument and obtains reviewer sign-off — or, if the argument
+    is rejected, escalates to negotiate a MemoryItem sub-type WITH the core (never a silent local variant).
+  </prompt>
+
+  <role>
+    Code reviewer / architect verifying an ADR/charter Path-A deviation against its implementation, familiar
+    with the core memory model (D-M1/D-M3) and the CLAUDE.md §6.5 protocol.
+  </role>
+
+  <goal>
+    A code-review sign-off record confirming that task 060's `AnchoredAnnotation` implementation matches the
+    Path-A argument (not a MemoryItem, no `memory.*` path, not Context-Binder-retrieved, not in the memory
+    review/delete view, tenant+matter scoped). If the reviewer accepts, the deviation is documented in the PR
+    description + spec.md ADR Tensions as approved. If rejected, the fallback (negotiated MemoryItem sub-type)
+    is escalated to the core.
+  </goal>
+
+  <context>
+    <background>
+      Spec.md ADR Tensions + design.md §8/§10 carry the Path-A deviation as an action to resolve at code-review
+      time. This is the sign-off task: it depends on task 060 (the implementation) and produces the reviewer
+      decision. The §8 explicit deviation note is the argument to verify against.
+    </background>
+    <relevant-files>
+      <file path="src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs" role="review">Task 060 anchoredAnnotations persistence — verify no memory.* path, tenant+matter scope.</file>
+      <file path="src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx" role="review">Client restore — verify annotations are not routed through memory review/delete UI.</file>
+      <file path="projects/spaarkeai-compose-r2/design.md" role="spec">§8 explicit deviation note (the argument) + §10 ADR Tensions Path-A row.</file>
+      <file path="projects/spaarkeai-compose-r2/spec.md" role="spec">ADR Tensions table Path-A row + Actions line.</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="060" status="pending">Anchored-annotations implementation to review.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="charter-3.4">Local MemoryItem variants are banned. `AnchoredAnnotation` is the argued Path-A exception — approval requires verifying it is genuinely NOT a MemoryItem (positional UI state, never via `memory.*`, never Context-Binder-retrieved, never in the memory review/delete view).</constraint>
+    <constraint source="charter-6.5">Path A requires documented rationale + reviewer approval at the point of decision — not deferred. If rejected, escalate the fallback (negotiated MemoryItem sub-type) to the core; do NOT ship a silent local variant.</constraint>
+    <constraint source="ADR-015">Verify the annotation state is not treated as a memory tier and honors tenant+matter (ethical-wall) authorization.</constraint>
+  </constraints>
+
+  <knowledge>
+    <files>
+      <file>.claude/adr/ADR-015-ai-data-governance.md</file>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+  </knowledge>
+
+  <steps mode="directional">
+    <step order="1">Read the §8 deviation-note argument and task 060's implementation.</step>
+    <step order="2">Verify each Path-A claim against code: not a MemoryItem type; no `memory.*` write path (grep); not retrieved by the Context Binder; not surfaced in the memory review/delete view; tenant+matter scoped.</step>
+    <step order="3">Record the reviewer decision. If ACCEPTED: document the approved deviation in the PR description + spec.md ADR Tensions. If REJECTED: escalate the fallback (negotiate a MemoryItem sub-type with the core).</step>
+    <step order="4">Confirm the spec.md/design.md "Actions" note for this deviation is satisfied.</step>
+  </steps>
+
+  <outputs>
+    <output type="report">projects/spaarkeai-compose-r2/notes/anchored-annotation-path-a-signoff.md — reviewer decision + evidence</output>
+    <output type="docs">projects/spaarkeai-compose-r2/tasks/TASK-INDEX.md (status update)</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">Each Path-A claim is verified against task 060's code (not a MemoryItem; no memory.* path; not Context-Binder-retrieved; not in memory review/delete view; tenant+matter scoped).</criterion>
+    <criterion testable="true">A reviewer decision (accept/reject) is recorded with evidence.</criterion>
+    <criterion testable="true">On accept, the approved deviation is documented in the PR description + spec.md ADR Tensions.</criterion>
+    <criterion testable="true">On reject, the fallback (negotiated MemoryItem sub-type) is escalated to the core — no silent local variant ships.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

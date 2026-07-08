@@ -1,0 +1,123 @@
+<task id="010" project="spaarkeai-compose-r2">
+  <metadata>
+    <title>FR-01 wire 1a "Browse / open file" -&gt; transient mount</title>
+    <phase>1 Entry</phase>
+    <status>not-started</status>
+    <estimated-hours>12</estimated-hours>
+    <effort>high</effort>
+    <dependencies>000</dependencies>
+    <blocks>017</blocks>
+    <tags>frontend</tags>
+    <rigor-hint reason="Modifies .tsx (ComposeWorkspace/ComposeEmptyState); user-visible entry path; FULL per TASK-INDEX">FULL</rigor-hint>
+    <model-tier reason="Frontend wiring against an existing source-agnostic mount seam; no architectural blast radius">sonnet</model-tier>
+    <parallel-group>W2</parallel-group>
+    <parallel-safe reason="Touches ComposeWorkspace.tsx handlers + shares ComposeEmptyState with 011/012 — serialize 010 -&gt; 011 -&gt; 012 to avoid edit collisions on the same files">false</parallel-safe>
+  </metadata>
+
+  <prompt>
+    The Compose empty state's "Browse / open file" button is a no-op today: `ComposeEmptyState`
+    already exposes an `onBrowseRequested` callback prop, and `ComposeWorkspace` already routes it
+    to a `handleBrowseRequested` handler, but the handler only fires a fallback bus event with zero
+    subscribers — no file ever mounts. Wire it end-to-end: clicking Browse opens a local file picker,
+    the chosen `.docx` is read into an ArrayBuffer, and those bytes are pushed into the editor via the
+    existing source-agnostic `docxBytes` mount seam as a TRANSIENT working draft. No `sprk_document`
+    is created and no BFF round-trip occurs — the file exists only in the editor until first Save
+    (create-on-save is FR-05, task 013). This is FR-01 from spec.md.
+  </prompt>
+
+  <role>
+    React/TypeScript developer fluent in Fluent UI v9, TipTap/ProseMirror, and the Spaarke Compose
+    widget architecture. You extend an existing mount seam; you do not invent a new one.
+  </role>
+
+  <goal>
+    Clicking "Browse / open file" on the Compose empty state opens a local file picker; selecting a
+    `.docx` renders its content in the TipTap editor as a transient draft (via the `docxBytes` seam ->
+    `docxToTipTapHtml` -> `setContent`); no `sprk_document` is created until save; the editor's dirty
+    state is set so first Save triggers create-on-save. Renders correctly in light and dark mode.
+  </goal>
+
+  <context>
+    <background>
+      Entry-point reality (design.md §5, verified 2026-07-08): only path 1c (Document record -> "Open
+      in Compose") mounts a file today; 1a Browse is a pure no-op. The editor mount seam is
+      source-agnostic — `ComposeEditor` imports whatever `docxBytes` ArrayBuffer it is handed via
+      mammoth. Mounting a Browse-picked file therefore means feeding the picked File's bytes into the
+      same `state.docxBytes` seam ComposeWorkspace already uses for the BFF load path — WITHOUT calling
+      the BFF. Depends on Spike 0 (000) having validated the workspace mount/dispatch path.
+    </background>
+    <relevant-files>
+      <file purpose="wire-callback" edit="true">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx</file>
+      <file purpose="button-source" edit="maybe">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEmptyState.tsx</file>
+      <file purpose="mount-seam" edit="false">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx</file>
+      <file purpose="conversion" edit="false">src/client/shared/Spaarke.Compose.Components/src/utils/docxBridge.ts</file>
+    </relevant-files>
+    <notes>
+      In ComposeWorkspace.tsx: `onBrowseRequested`/`onSearchRequested` props (~line 121-124) route to
+      `handleBrowseRequested`/`handleSearchRequested` (~line 539-560); `state.docxBytes` (~line 320) is
+      the prop passed to the ComposeEditor `docxBytes` prop (~line 667); the empty state is
+      rendered at ~line 626. The picked-file bytes must flow into that same `docxBytes` state, marking
+      the editor dirty and transient (no `documentRecordId`).
+    </notes>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-021">BubbleMenu/empty-state/picker UI is Fluent v9 + dark mode; no Fluent v8, no hardcoded colors.</constraint>
+    <constraint source="ADR-031">Entry-path mount transition honors the stage lifecycle (`determineStage()`); a transient Browse mount is a valid stage, not a loaded-document stage.</constraint>
+    <constraint source="ADR-040">A Browse mount is a transient in-editor buffer only; it does NOT write a ledger entry and does NOT create a document — persistence happens on Save (FR-05).</constraint>
+    <constraint source="project">Reuse the existing `docxBytes` seam; do NOT add a second mount path or a Compose-specific BFF load call for Browse.</constraint>
+    <constraint source="project">MUST NOT create a `sprk_document` on Browse — create-on-save (013) owns creation.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>compose/entry-paths, fluent-v9, tiptap</topic>
+    <files>
+      <file>.claude/adr/ADR-021-fluent-design-system.md</file>
+      <file>.claude/adr/ADR-031-stage-lifecycle.md</file>
+      <file>projects/spaarkeai-compose-r2/spec.md</file>
+      <file>projects/spaarkeai-compose-r2/design.md</file>
+    </files>
+  </knowledge>
+
+  <justification component="Browse file-picker handler (extends existing handler)">
+    <existing>ComposeWorkspace already has `handleBrowseRequested` and the `docxBytes` mount state; ComposeEmptyState already has the `onBrowseRequested` prop.</existing>
+    <extension>Extend the existing no-op handler to open a picker and set `docxBytes` — no new component/service.</extension>
+    <cost-of-doing-nothing>Without this, the Browse button remains a dead control: a user on the empty state cannot open a local `.docx` at all (FR-01 unmet; success criterion "all three entry paths mount a file" fails for 1a Browse).</cost-of-doing-nothing>
+  </justification>
+
+  <steps mode="directional">
+    <step order="0">Load project CLAUDE.md + spec.md FR-01. Read ComposeWorkspace.tsx, ComposeEmptyState.tsx, ComposeEditor.tsx, docxBridge.ts to confirm the current handler wiring and the `docxBytes` seam.</step>
+    <step order="1">Implement the Browse handler: on click, open a local file input (`accept=".docx"`); read the selected File into an ArrayBuffer.</step>
+    <step order="2">Push the ArrayBuffer into the same `docxBytes` state ComposeEditor consumes, marking the mount transient (no `documentRecordId`/SPE pointer) and flagging the editor dirty so first Save runs create-on-save.</step>
+    <step order="3">Ensure the empty state hides and the editor renders once bytes are set; surface import warnings via the existing `onImportWarnings` channel if mammoth reports lossy conversion.</step>
+    <step order="4">Add/adjust ui-tests (see &lt;ui-tests&gt;). Verify `npm run build` in the Spaarke.Compose.Components package; run the affected tests.</step>
+    <step order="5">Run code-review + adr-check (Step 9.5, FULL rigor). Update TASK-INDEX status and current-task.md.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx</output>
+    <output type="code" optional="true">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEmptyState.tsx</output>
+    <output type="test">src/client/shared/Spaarke.Compose.Components/src/widgets/__tests__/ComposeWorkspace.browse.test.tsx</output>
+  </outputs>
+
+  <ui-tests>
+    <ui-test name="empty-state-renders-browse">ComposeEmptyState renders the "Browse / open file" CTA with its Fluent v9 icon; matches the existing empty-state look.</ui-test>
+    <ui-test name="browse-mounts-transiently">Simulating a Browse pick of a `.docx` sets `docxBytes` and renders the editor (empty state gone); no BFF load call is issued; no `sprk_document` create call is issued.</ui-test>
+    <ui-test name="dark-mode">Empty state + editor render correctly under the dark FluentProvider theme (ADR-021) — no hardcoded colors.</ui-test>
+    <ui-test name="dirty-after-browse">After a Browse mount, the editor reports dirty so a subsequent Save will invoke create-on-save.</ui-test>
+  </ui-tests>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">Clicking "Browse / open file" opens a local file picker filtered to `.docx`.</criterion>
+    <criterion testable="true">Selecting a `.docx` renders its content in the TipTap editor via the `docxBytes` -&gt; `docxToTipTapHtml` -&gt; `setContent` seam.</criterion>
+    <criterion testable="true">No `sprk_document` is created and no `GET /api/compose/documents/{speId}` call is made on Browse (transient mount only).</criterion>
+    <criterion testable="true">After mount the editor is dirty, so first Save triggers create-on-save (FR-05).</criterion>
+    <criterion testable="true">Empty state and editor render correctly in both light and dark mode (ADR-021); no Fluent v8 imports, no hardcoded colors.</criterion>
+    <criterion testable="true">(negative) Cancelling the picker leaves the empty state unchanged and mounts nothing.</criterion>
+    <criterion testable="true">`npm run build` for Spaarke.Compose.Components succeeds; new ui-tests pass.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>
