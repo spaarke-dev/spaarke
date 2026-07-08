@@ -246,6 +246,7 @@ public class SessionDispatchManifestProbeTests
                 ReadinessProbeAttempts = probeAttempts,
                 ReadinessProbeDelayMs = 0,
             }),
+            new Sprk.Bff.Api.Telemetry.AiTelemetry(),
             Mock.Of<ILogger<SessionDispatchOrchestrator>>());
 
         return (orchestrator, textSource);

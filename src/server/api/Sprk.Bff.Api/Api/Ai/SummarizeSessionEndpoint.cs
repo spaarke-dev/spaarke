@@ -279,6 +279,12 @@ public static class SummarizeSessionEndpoint
             ? JsonSerializer.SerializeToElement(new { fileIds = body.FileIds }, s_jsonOptions)
             : null;
 
+        // FR-P4-05 per-tenant metering scope (task 054): /summarize is a Click-path
+        // caller of the ONE dispatch seam — attribution per tenant/user/entry-path=click
+        // via the ambient AiMeteringContext (identifiers only, NFR-07).
+        using var meteringScope = Sprk.Bff.Api.Telemetry.AiMeteringContext.Begin(
+            tenantId, callerOid, Sprk.Bff.Api.Telemetry.AiMeteringContext.EntryPathClick);
+
         var request = new SessionDispatchRequest(
             TenantId: tenantId,
             SessionId: sessionId,

@@ -194,6 +194,13 @@ public static class DispatchSessionEndpoint
             return;
         }
 
+        // FR-P4-05 per-tenant metering scope (task 054): chip clicks are the Click entry
+        // path — capability invocations at the dispatch seam and executor token usage
+        // observed in OpenAiClient are dimensioned per tenant/user/entry-path=click via
+        // the ambient AiMeteringContext (identifiers only, NFR-07).
+        using var meteringScope = Sprk.Bff.Api.Telemetry.AiMeteringContext.Begin(
+            tenantId, callerOid, Sprk.Bff.Api.Telemetry.AiMeteringContext.EntryPathClick);
+
         var request = new SessionDispatchRequest(
             TenantId: tenantId,
             SessionId: sessionId,

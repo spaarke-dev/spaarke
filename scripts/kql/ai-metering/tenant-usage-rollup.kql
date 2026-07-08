@@ -1,0 +1,18 @@
+// tenant-usage-rollup.kql — FR-P4-05 / NFR-05 acceptance query
+// Purpose: one row per tenant rolling up the four usage counters over the window.
+// Expected columns: tenantId, turns, toolCalls, tokensIn, tokensOut, capabilityInvocations
+let window = 7d;
+customMetrics
+| where timestamp > ago(window)
+| where name in ("ai.metering.turns", "ai.metering.tool_calls",
+                 "ai.metering.tokens", "ai.metering.capability_invocations")
+| extend tenantId = tostring(customDimensions["tenant.id"]),
+         tokenType = tostring(customDimensions["token.type"])
+| summarize
+    turns                 = sumif(valueSum, name == "ai.metering.turns"),
+    toolCalls             = sumif(valueSum, name == "ai.metering.tool_calls"),
+    tokensIn              = sumif(valueSum, name == "ai.metering.tokens" and tokenType == "input"),
+    tokensOut             = sumif(valueSum, name == "ai.metering.tokens" and tokenType == "output"),
+    capabilityInvocations = sumif(valueSum, name == "ai.metering.capability_invocations")
+    by tenantId
+| order by tokensIn + tokensOut desc

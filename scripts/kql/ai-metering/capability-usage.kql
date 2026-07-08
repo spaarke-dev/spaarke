@@ -1,0 +1,23 @@
+// capability-usage.kql — capability invocations by entry path / capability / outcome
+// Purpose: which capabilities run, on which entry path, and how often they fail —
+//          per tenant. Pair with dispatch_refused (the honest-refusal counter) for
+//          the demand-vs-refusal picture.
+// Expected columns (part 1): tenantId, entryPath, capability, outcome, invocations
+// Expected columns (part 2): tenantId, renderStatus, refusals
+let window = 7d;
+customMetrics
+| where timestamp > ago(window) and name == "ai.metering.capability_invocations"
+| extend tenantId   = tostring(customDimensions["tenant.id"]),
+         entryPath  = tostring(customDimensions["entry.path"]),
+         capability = tostring(customDimensions["capability"]),
+         outcome    = tostring(customDimensions["outcome"])
+| summarize invocations = sum(valueSum) by tenantId, entryPath, capability, outcome
+| order by tenantId asc, invocations desc
+
+// -- Part 2: honest refusals (FR-P2-04 dispatch_refused; refusal-backlog signal) --
+// customMetrics
+// | where timestamp > ago(7d) and name == "dispatch_refused"
+// | extend tenantId = tostring(customDimensions["tenant.id"]),
+//          renderStatus = tostring(customDimensions["render_status"])
+// | summarize refusals = sum(valueSum) by tenantId, renderStatus
+// | order by refusals desc

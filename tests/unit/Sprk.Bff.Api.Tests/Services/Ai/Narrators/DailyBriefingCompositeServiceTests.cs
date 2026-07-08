@@ -48,6 +48,7 @@ public sealed class DailyBriefingCompositeServiceTests
         _registry.Object,
         _collector,
         _outputRouter.Object,
+        new Sprk.Bff.Api.Telemetry.AiTelemetry(),
         NullLogger<DailyBriefingCompositeService>.Instance);
 
     // ─── Dispatch-via-Binding: the ADR-039 cutover contract ───────────────────────────────

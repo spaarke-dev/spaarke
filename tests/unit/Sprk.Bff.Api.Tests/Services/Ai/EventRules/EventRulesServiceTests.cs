@@ -121,6 +121,7 @@ public class EventRulesServiceTests
         new OutputRouter(_sessionManager, Mock.Of<ILogger<OutputRouter>>()), // REAL router — ledger-before-render proven, not mocked
         _userState.Object,
         _telemetry,
+        new Sprk.Bff.Api.Telemetry.AiTelemetry(),
         Options.Create(_options),
         Mock.Of<ILogger<EventRulesService>>());
 

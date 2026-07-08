@@ -56,6 +56,12 @@ public class AiTelemetry : IDisposable
     // Invalid-tool-schema exclusions (G-P3 UAT round-1 H1, spaarke-ai-architecture-redesign-r1)
     private readonly Counter<long> _invalidToolSchema;
 
+    // Per-tenant metering counters (FR-P4-05 / NFR-05, spaarke-ai-architecture-redesign-r1 task 054)
+    private readonly Counter<long> _meteredTurns;
+    private readonly Counter<long> _meteredToolCalls;
+    private readonly Counter<long> _meteredTokens;
+    private readonly Counter<long> _meteredCapabilityInvocations;
+
     // Meter name for OpenTelemetry
     private const string MeterName = "Sprk.Bff.Api.Ai";
 
@@ -93,6 +99,39 @@ public class AiTelemetry : IDisposable
             description: "Catalog rows excluded from the agent-turn tool projection because their " +
                          "authored schema would fail OpenAI function-parameters validation (one bad " +
                          "row must never 400 the whole turn — G-P3 UAT round-1 resilience fix).");
+
+        // === Per-Tenant Metering Counters (FR-P4-05 / NFR-05) ===
+        // Usage counters dimensioned per tenant AND per user. Deliberate exception to the
+        // low-cardinality discipline for user.id: NFR-05 REQUIRES per-user drill-down;
+        // both values are opaque AAD GUIDs (identifiers only — NFR-07/ADR-015 compliant).
+        // Queried by the KQL pack at scripts/kql/ai-metering/.
+        _meteredTurns = _meter.CreateCounter<long>(
+            name: "ai.metering.turns",
+            unit: "{turn}",
+            description: "Agent-turn loop turns completed (FR-P2-01), dimensioned per tenant/user. " +
+                         "Carries the ADR-016/NFR-09 per-turn tool budget consumed-vs-cap dimensions " +
+                         "(tool_budget.spent / tool_budget.cap / tool_budget.denied).");
+
+        _meteredToolCalls = _meter.CreateCounter<long>(
+            name: "ai.metering.tool_calls",
+            unit: "{call}",
+            description: "Tool invocations executed inside agent turns (BudgetedAIFunction-wrapped), " +
+                         "dimensioned per tenant/user/tool.id.");
+
+        _meteredTokens = _meter.CreateCounter<long>(
+            name: "ai.metering.tokens",
+            unit: "{token}",
+            description: "LLM tokens consumed (input + output as token.type), dimensioned per " +
+                         "tenant/user/entry.path. source=loop (agent-turn streaming usage) or " +
+                         "source=executor (prompted-executor structured completions).");
+
+        _meteredCapabilityInvocations = _meter.CreateCounter<long>(
+            name: "ai.metering.capability_invocations",
+            unit: "{invocation}",
+            description: "Capability (Binding) executions across the closed entry paths " +
+                         "(text/click/event/coded), dimensioned per tenant/user/capability/outcome. " +
+                         "Event-path records carry budget.cap so the NFR-09 per-user daily budget " +
+                         "is queryable as consumed-vs-cap.");
 
         // === Summarization Metrics ===
         _summarizeRequests = _meter.CreateCounter<long>(
@@ -249,6 +288,166 @@ public class AiTelemetry : IDisposable
 
         _invalidToolSchema.Add(1, tags);
     }
+
+    #region Per-Tenant Metering (FR-P4-05 / NFR-05)
+
+    /// <summary>
+    /// Record one completed agent-turn loop turn (FR-P2-01), dimensioned per tenant/user,
+    /// carrying the ADR-016/NFR-09 per-turn tool-budget consumed-vs-cap observability
+    /// (<c>tool_budget.spent</c> / <c>tool_budget.cap</c> / <c>tool_budget.denied</c> —
+    /// all bounded small integers, cap defaults to 8).
+    /// </summary>
+    /// <remarks>
+    /// Lands in App Insights as <c>customMetrics | where name == "ai.metering.turns"</c>.
+    /// NFR-07: identifiers + counts only — tenant/user ids are opaque AAD GUIDs.
+    /// </remarks>
+    public void RecordMeteredTurn(
+        string? tenantId,
+        string? userId,
+        int toolBudgetSpent,
+        int toolBudgetCap,
+        int toolBudgetDenied)
+    {
+        var tags = new TagList
+        {
+            { "tool_budget.spent", toolBudgetSpent },
+            { "tool_budget.cap", toolBudgetCap },
+            { "tool_budget.denied", toolBudgetDenied },
+        };
+        AddIdentityTags(ref tags, tenantId, userId);
+
+        _meteredTurns.Add(1, tags);
+    }
+
+    /// <summary>
+    /// Record one executed tool invocation inside an agent turn (the unit the ADR-016
+    /// per-turn tool budget counts), dimensioned per tenant/user/tool.
+    /// </summary>
+    /// <param name="tenantId">Opaque tenant id ('tid'); null omits the dimension.</param>
+    /// <param name="userId">Opaque user object id ('oid'); null omits the dimension.</param>
+    /// <param name="toolId">Deterministic tool identifier from the closed catalog projection (never content).</param>
+    public void RecordMeteredToolCall(string? tenantId, string? userId, string toolId)
+    {
+        var tags = new TagList
+        {
+            { "tool.id", toolId },
+            { "outcome", "executed" },
+        };
+        AddIdentityTags(ref tags, tenantId, userId);
+
+        _meteredToolCalls.Add(1, tags);
+    }
+
+    /// <summary>
+    /// Record LLM token consumption, dimensioned per tenant/user/entry-path. Emits two
+    /// counter increments (token.type = input / output). When <paramref name="tenantId"/>
+    /// is null, identity + entry path fall back to the ambient <see cref="AiMeteringContext"/>
+    /// scope (set at the entry seams) — this is how executor-path usage observed inside
+    /// <c>OpenAiClient</c> is attributed.
+    /// </summary>
+    /// <param name="tenantId">Opaque tenant id, or null to use <see cref="AiMeteringContext.Current"/>.</param>
+    /// <param name="userId">Opaque user object id, or null to use the ambient scope.</param>
+    /// <param name="inputTokens">Prompt token count reported by the model.</param>
+    /// <param name="outputTokens">Completion token count reported by the model.</param>
+    /// <param name="source">"loop" (agent-turn streaming usage) or "executor" (prompted-executor completions).</param>
+    /// <param name="model">Optional model/deployment name.</param>
+    /// <param name="entryPath">Optional entry path override; defaults to the ambient scope's.</param>
+    public void RecordMeteredTokens(
+        string? tenantId,
+        string? userId,
+        long inputTokens,
+        long outputTokens,
+        string source,
+        string? model = null,
+        string? entryPath = null)
+    {
+        var scope = AiMeteringContext.Current;
+        tenantId ??= scope?.TenantId;
+        userId ??= scope?.UserId;
+        entryPath ??= scope?.EntryPath;
+
+        if (inputTokens <= 0 && outputTokens <= 0)
+        {
+            return;
+        }
+
+        var baseTags = new TagList
+        {
+            { "source", source },
+        };
+        if (!string.IsNullOrEmpty(entryPath)) baseTags.Add("entry.path", entryPath);
+        if (!string.IsNullOrEmpty(model)) baseTags.Add("ai.model", model);
+        AddIdentityTags(ref baseTags, tenantId, userId);
+
+        if (inputTokens > 0)
+        {
+            var tags = baseTags;
+            tags.Add("token.type", "input");
+            _meteredTokens.Add(inputTokens, tags);
+        }
+
+        if (outputTokens > 0)
+        {
+            var tags = baseTags;
+            tags.Add("token.type", "output");
+            _meteredTokens.Add(outputTokens, tags);
+        }
+    }
+
+    /// <summary>
+    /// Record one capability (Binding) execution at a dispatch seam, dimensioned per
+    /// tenant/user/entry-path/capability/outcome (FR-P4-05). Event-path callers pass
+    /// <paramref name="budgetCap"/> so the NFR-09 per-user daily Event-path budget is
+    /// queryable as consumed-vs-cap in the KQL pack.
+    /// </summary>
+    /// <param name="tenantId">Opaque tenant id.</param>
+    /// <param name="userId">Opaque user object id, or null to use the ambient <see cref="AiMeteringContext"/> scope.</param>
+    /// <param name="entryPath">One of the <see cref="AiMeteringContext"/> entry-path constants; null uses the ambient scope (default "click" at the dispatch seam).</param>
+    /// <param name="capability">Bounded capability identifier — the Binding's ucid or consumer type (closed catalog, never content).</param>
+    /// <param name="outcome">"success" / "failed".</param>
+    /// <param name="budgetCap">Optional daily budget cap (Event path only) for consumed-vs-cap views.</param>
+    public void RecordCapabilityInvocation(
+        string? tenantId,
+        string? userId,
+        string? entryPath,
+        string capability,
+        string outcome,
+        int? budgetCap = null)
+    {
+        var scope = AiMeteringContext.Current;
+        tenantId ??= scope?.TenantId;
+        userId ??= scope?.UserId;
+        entryPath ??= scope?.EntryPath ?? AiMeteringContext.EntryPathClick;
+
+        var tags = new TagList
+        {
+            { "entry.path", entryPath },
+            { "capability", capability },
+            { "outcome", outcome },
+        };
+        if (budgetCap.HasValue) tags.Add("budget.cap", budgetCap.Value);
+        AddIdentityTags(ref tags, tenantId, userId);
+
+        _meteredCapabilityInvocations.Add(1, tags);
+    }
+
+    /// <summary>
+    /// Append the tenant/user identity dimensions when present. Omission (not a sentinel
+    /// value) is the null representation so KQL rollups can filter empties explicitly.
+    /// </summary>
+    private static void AddIdentityTags(ref TagList tags, string? tenantId, string? userId)
+    {
+        if (!string.IsNullOrEmpty(tenantId))
+        {
+            tags.Add("tenant.id", tenantId);
+        }
+        if (!string.IsNullOrEmpty(userId))
+        {
+            tags.Add("user.id", userId);
+        }
+    }
+
+    #endregion
 
     /// <summary>
     /// Record the start of a summarization request.

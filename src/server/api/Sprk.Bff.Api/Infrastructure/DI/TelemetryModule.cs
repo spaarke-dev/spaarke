@@ -34,6 +34,11 @@ public static class TelemetryModule
                 // Insights Engine Widgets r1 meter (project ai-spaarke-insights-engine-widgets-r1 task 050):
                 // widget.insightcard.invoked + widget.insightcard.duration with bounded dimensions per NFR-06.
                 metrics.AddMeter(Sprk.Bff.Api.Telemetry.InsightWidgetsTelemetry.MeterName);
+                // Event Rules meter (FR-P1-03 / NFR-09 "enforced AND telemetered") — registration
+                // added by spaarke-ai-architecture-redesign-r1 task 054 (FR-P4-05): the meter existed
+                // since task 022 but was never AddMeter'd, so eventpath.execution /
+                // eventpath.bound_denial were silently dropped from the App Insights export.
+                metrics.AddMeter(Sprk.Bff.Api.Services.Ai.EventRules.EventRulesTelemetry.MeterName);
             })
             .WithTracing(tracing =>
             {

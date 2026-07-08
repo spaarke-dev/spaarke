@@ -546,6 +546,8 @@ public sealed class DispatchSessionEndpointTestFixture : IAsyncLifetime, IDispos
             Sessions,
             sp.GetRequiredService<Microsoft.Extensions.Logging.ILogger<PendingPlanManager>>()));
 
+        // FR-P4-05 (task 054): metering counters emitted at the dispatch seam.
+        builder.Services.AddSingleton<Sprk.Bff.Api.Telemetry.AiTelemetry>();
         builder.Services.AddScoped<SessionDispatchOrchestrator>();
 
         builder.WebHost.UseTestServer();

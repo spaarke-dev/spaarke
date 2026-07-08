@@ -1,0 +1,30 @@
+// tool-budget-consumption.kql — ADR-016 / NFR-09 per-turn tool budget observability
+// Purpose: (1) spent-vs-cap distribution of the per-turn tool-call budget per tenant —
+//          turns that hit the cap or had denied calls are the budget-pressure signal;
+//          (2) per-tool execution volumes.
+// Expected columns (part 1): tenantId, cap, turns, avgSpent, maxSpent, cappedTurns, turnsWithDenials, deniedCalls
+// Expected columns (part 2): tenantId, toolId, calls
+let window = 7d;
+customMetrics
+| where timestamp > ago(window) and name == "ai.metering.turns"
+| extend tenantId = tostring(customDimensions["tenant.id"]),
+         spent  = toint(customDimensions["tool_budget.spent"]),
+         cap    = toint(customDimensions["tool_budget.cap"]),
+         denied = toint(customDimensions["tool_budget.denied"])
+| summarize
+    turns            = sum(valueSum),
+    avgSpent         = round(avg(spent), 2),
+    maxSpent         = max(spent),
+    cappedTurns      = sumif(valueSum, spent >= cap and cap > 0),
+    turnsWithDenials = sumif(valueSum, denied > 0),
+    deniedCalls      = sum(denied * valueSum)
+    by tenantId, cap
+| order by turns desc
+
+// -- Part 2: per-tool volumes (run separately) --------------------------------
+// customMetrics
+// | where timestamp > ago(7d) and name == "ai.metering.tool_calls"
+// | extend tenantId = tostring(customDimensions["tenant.id"]),
+//          toolId   = tostring(customDimensions["tool.id"])
+// | summarize calls = sum(valueSum) by tenantId, toolId
+// | order by tenantId asc, calls desc

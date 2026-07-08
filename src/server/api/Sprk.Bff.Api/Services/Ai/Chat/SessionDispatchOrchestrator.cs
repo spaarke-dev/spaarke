@@ -81,6 +81,7 @@ public class SessionDispatchOrchestrator
     private readonly IOutputRouter _outputRouter;
     private readonly PendingPlanManager _pendingPlanManager;
     private readonly EventRulesOptions _manifestProbeOptions;
+    private readonly Sprk.Bff.Api.Telemetry.AiTelemetry _aiTelemetry;
     private readonly ILogger<SessionDispatchOrchestrator> _logger;
 
     public SessionDispatchOrchestrator(
@@ -92,6 +93,7 @@ public class SessionDispatchOrchestrator
         IOutputRouter outputRouter,
         PendingPlanManager pendingPlanManager,
         IOptions<EventRulesOptions> manifestProbeOptions,
+        Sprk.Bff.Api.Telemetry.AiTelemetry aiTelemetry,
         ILogger<SessionDispatchOrchestrator> logger)
     {
         _sessionManager = sessionManager ?? throw new ArgumentNullException(nameof(sessionManager));
@@ -106,6 +108,7 @@ public class SessionDispatchOrchestrator
         // upload → manifest-write → cache-propagation race (G-P1 Defect 3) — reusing
         // EventRulesOptions keeps ONE probe policy instead of a second config surface.
         _manifestProbeOptions = manifestProbeOptions?.Value ?? throw new ArgumentNullException(nameof(manifestProbeOptions));
+        _aiTelemetry = aiTelemetry ?? throw new ArgumentNullException(nameof(aiTelemetry));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -127,6 +130,7 @@ public class SessionDispatchOrchestrator
         _outputRouter = null!;
         _pendingPlanManager = null!;
         _manifestProbeOptions = null!;
+        _aiTelemetry = null!;
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -361,6 +365,19 @@ public class SessionDispatchOrchestrator
                 binding.BindingId, action.Id, request.TenantId, request.SessionId);
             llmError = "The AI action failed. Please try again.";
         }
+
+        // FR-P4-05 per-tenant metering (task 054): one capability-invocation increment at
+        // THE dispatch seam — covers chip clicks, the loop's BindingCapabilityTool, gate
+        // resolution, and /summarize (they all converge here). User + entry-path come from
+        // the ambient AiMeteringContext scope set at the entry endpoints (text turns set
+        // "text"; the HTTP dispatch endpoints set "click"); the capability identifier is
+        // the bounded catalog ucid/consumer-type — identifiers/counts only (NFR-07).
+        _aiTelemetry.RecordCapabilityInvocation(
+            request.TenantId,
+            userId: null,     // ambient scope
+            entryPath: null,  // ambient scope (default "click")
+            capability: binding.Ucid ?? binding.ConsumerType,
+            outcome: llmError is null ? "success" : "failed");
 
         if (llmError is not null)
         {

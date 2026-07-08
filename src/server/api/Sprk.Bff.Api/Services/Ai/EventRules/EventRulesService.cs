@@ -73,6 +73,7 @@ public sealed class EventRulesService : IEventRulesService
     private readonly IOutputRouter _outputRouter;
     private readonly IEventPathUserState _userState;
     private readonly EventRulesTelemetry _telemetry;
+    private readonly Sprk.Bff.Api.Telemetry.AiTelemetry _aiTelemetry;
     private readonly EventRulesOptions _options;
     private readonly ILogger<EventRulesService> _logger;
 
@@ -85,6 +86,7 @@ public sealed class EventRulesService : IEventRulesService
         IOutputRouter outputRouter,
         IEventPathUserState userState,
         EventRulesTelemetry telemetry,
+        Sprk.Bff.Api.Telemetry.AiTelemetry aiTelemetry,
         IOptions<EventRulesOptions> options,
         ILogger<EventRulesService> logger)
     {
@@ -96,6 +98,7 @@ public sealed class EventRulesService : IEventRulesService
         _outputRouter = outputRouter ?? throw new ArgumentNullException(nameof(outputRouter));
         _userState = userState ?? throw new ArgumentNullException(nameof(userState));
         _telemetry = telemetry ?? throw new ArgumentNullException(nameof(telemetry));
+        _aiTelemetry = aiTelemetry ?? throw new ArgumentNullException(nameof(aiTelemetry));
         _options = options?.Value ?? throw new ArgumentNullException(nameof(options));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
@@ -110,6 +113,14 @@ public sealed class EventRulesService : IEventRulesService
         ArgumentException.ThrowIfNullOrWhiteSpace(request.TenantId, $"{nameof(request)}.{nameof(request.TenantId)}");
         ArgumentException.ThrowIfNullOrWhiteSpace(request.SessionId, $"{nameof(request)}.{nameof(request.SessionId)}");
         ArgumentException.ThrowIfNullOrWhiteSpace(request.UserOid, $"{nameof(request)}.{nameof(request.UserOid)}");
+
+        // FR-P4-05 per-tenant metering scope (task 054): the Event entry path's
+        // attribution — executor token usage observed inside OpenAiClient during member
+        // execution and the capability-invocation counters below are dimensioned per
+        // tenant/user/entry-path=event via the ambient AiMeteringContext (NFR-07:
+        // identifiers/counts only).
+        using var meteringScope = Sprk.Bff.Api.Telemetry.AiMeteringContext.Begin(
+            request.TenantId, request.UserOid, Sprk.Bff.Api.Telemetry.AiMeteringContext.EntryPathEvent);
 
         // ── Bound (d): explicit-command supersede — the Text path wins. Checked FIRST:
         // a typed command means the user asked for something specific; the auto-rule
@@ -362,6 +373,14 @@ public sealed class EventRulesService : IEventRulesService
                 if (memberError is not null)
                 {
                     _telemetry.RecordExecution(request.EventName, member.Ucid, "failed");
+                    // FR-P4-05: per-tenant/per-user capability invocation (budget.cap makes
+                    // the NFR-09 daily budget queryable as consumed-vs-cap in the KQL pack).
+                    _aiTelemetry.RecordCapabilityInvocation(
+                        request.TenantId, request.UserOid,
+                        Sprk.Bff.Api.Telemetry.AiMeteringContext.EntryPathEvent,
+                        capability: member.Ucid ?? member.ConsumerType,
+                        outcome: "failed",
+                        budgetCap: _options.DailyExecutionCap);
                     yield return ErrorEvent(memberError);
                     fileFailed = true;
                     break; // remaining members skip THIS file; the batch continues.
@@ -391,6 +410,12 @@ public sealed class EventRulesService : IEventRulesService
                 if (classification is { } c)
                 {
                     _telemetry.RecordExecution(request.EventName, member.Ucid, "success");
+                    _aiTelemetry.RecordCapabilityInvocation(
+                        request.TenantId, request.UserOid,
+                        Sprk.Bff.Api.Telemetry.AiMeteringContext.EntryPathEvent,
+                        capability: member.Ucid ?? member.ConsumerType,
+                        outcome: "success",
+                        budgetCap: _options.DailyExecutionCap);
                     yield return new ChatSseEvent(EventRuleSseEvents.Classification, null,
                         new EventClassificationData(
                             FileId: targetFile.FileId,
@@ -434,6 +459,12 @@ public sealed class EventRulesService : IEventRulesService
                 else
                 {
                     _telemetry.RecordExecution(request.EventName, member.Ucid, "success");
+                    _aiTelemetry.RecordCapabilityInvocation(
+                        request.TenantId, request.UserOid,
+                        Sprk.Bff.Api.Telemetry.AiMeteringContext.EntryPathEvent,
+                        capability: member.Ucid ?? member.ConsumerType,
+                        outcome: "success",
+                        budgetCap: _options.DailyExecutionCap);
                     // Render-follows-store: the payload comes from the STORED ledger entry.
                     yield return new ChatSseEvent(EventRuleSseEvents.Output, null,
                         new EventOutputData(

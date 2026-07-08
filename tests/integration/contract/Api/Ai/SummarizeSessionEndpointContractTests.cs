@@ -490,6 +490,8 @@ public sealed class SummarizeSessionEndpointTestFixture : IAsyncLifetime, IDispo
         // FR-P3-05 (task 044): /summarize converged onto the ONE dispatch seam — the
         // endpoint resolves the chat-summarize Binding and delegates to the REAL
         // SessionDispatchOrchestrator (concrete per ADR-010; Scoped mirrors prod).
+        // FR-P4-05 (task 054): metering counters emitted at the dispatch seam.
+        builder.Services.AddSingleton<Sprk.Bff.Api.Telemetry.AiTelemetry>();
         builder.Services.AddScoped<SessionDispatchOrchestrator>();
 
         // Switch server to TestServer so we get an HttpClient that talks to this in-process app.

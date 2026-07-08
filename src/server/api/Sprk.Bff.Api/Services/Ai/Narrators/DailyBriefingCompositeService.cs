@@ -68,6 +68,7 @@ public class DailyBriefingCompositeService
     private readonly ICodedWorkflowRegistry _workflows;
     private readonly DailyBriefingCollector _collector;
     private readonly IOutputRouter _outputRouter;
+    private readonly Sprk.Bff.Api.Telemetry.AiTelemetry _aiTelemetry;
     private readonly ILogger<DailyBriefingCompositeService> _logger;
 
     public DailyBriefingCompositeService(
@@ -75,12 +76,14 @@ public class DailyBriefingCompositeService
         ICodedWorkflowRegistry workflows,
         DailyBriefingCollector collector,
         IOutputRouter outputRouter,
+        Sprk.Bff.Api.Telemetry.AiTelemetry aiTelemetry,
         ILogger<DailyBriefingCompositeService> logger)
     {
         _routing = routing ?? throw new ArgumentNullException(nameof(routing));
         _workflows = workflows ?? throw new ArgumentNullException(nameof(workflows));
         _collector = collector ?? throw new ArgumentNullException(nameof(collector));
         _outputRouter = outputRouter ?? throw new ArgumentNullException(nameof(outputRouter));
+        _aiTelemetry = aiTelemetry ?? throw new ArgumentNullException(nameof(aiTelemetry));
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -94,6 +97,7 @@ public class DailyBriefingCompositeService
         _workflows = null!;
         _collector = null!;
         _outputRouter = null!;
+        _aiTelemetry = null!;
         _logger = logger ?? throw new ArgumentNullException(nameof(logger));
     }
 
@@ -243,14 +247,39 @@ public class DailyBriefingCompositeService
 
         // 3. Execute the coded workflow (FeatureDisabledException from the ADR-032 Null peer
         //    propagates unchanged — kill-switch flows through class-ref resolution).
+        //    FR-P4-05 (task 054): the coded entry path's metering scope — the narrator's
+        //    executor LLM calls (observed in OpenAiClient) and the capability-invocation
+        //    counter below are dimensioned per tenant/user/entry-path=coded. The user
+        //    dimension is the Dataverse systemuserid (an opaque identifier — NFR-07);
+        //    the narrate leg has no acting-user id and omits the dimension.
+        using var meteringScope = Sprk.Bff.Api.Telemetry.AiMeteringContext.Begin(
+            tenantId, systemUserId?.ToString(), Sprk.Bff.Api.Telemetry.AiMeteringContext.EntryPathCoded);
+
         var narrateStart = DateTimeOffset.UtcNow;
-        var workflowResult = await workflow.ExecuteAsync(
-            new CodedWorkflowContext
-            {
-                ArgumentsJson = JsonSerializer.Serialize(request, PayloadSerializerOptions),
-                UserId = systemUserId,
-            },
-            cancellationToken).ConfigureAwait(false);
+        var workflowSucceeded = false;
+        object? workflowResult;
+        try
+        {
+            workflowResult = await workflow.ExecuteAsync(
+                new CodedWorkflowContext
+                {
+                    ArgumentsJson = JsonSerializer.Serialize(request, PayloadSerializerOptions),
+                    UserId = systemUserId,
+                },
+                cancellationToken).ConfigureAwait(false);
+            workflowSucceeded = true;
+        }
+        finally
+        {
+            // FR-P4-05: one capability-invocation increment per coded-composite execution
+            // (identifiers/counts only, NFR-07). Failure still counts — the LLM spend happened.
+            _aiTelemetry.RecordCapabilityInvocation(
+                tenantId,
+                userId: systemUserId?.ToString(),
+                entryPath: Sprk.Bff.Api.Telemetry.AiMeteringContext.EntryPathCoded,
+                capability: binding.Ucid ?? binding.ConsumerType,
+                outcome: workflowSucceeded ? "success" : "failed");
+        }
         var narrateMs = (long)(DateTimeOffset.UtcNow - narrateStart).TotalMilliseconds;
 
         if (workflowResult is not DailyBriefingNarrateResponse response)

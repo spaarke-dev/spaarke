@@ -344,6 +344,7 @@ public static class ChatEndpoints
         [FromServices] IMatterContextDetector matterContextDetector,
         [FromServices] IConversationHistorySanitizer conversationHistorySanitizer,
         [FromServices] CrossMatterSafetyTelemetry crossMatterTelemetry,
+        [FromServices] AiTelemetry aiTelemetry,
         HttpContext httpContext,
         ILogger<SprkChatAgentFactory> logger)
     {
@@ -357,6 +358,16 @@ public static class ChatEndpoints
             await response.WriteAsJsonAsync(new { error = "Tenant ID not found in token claims or X-Tenant-Id header" }, cancellationToken);
             return;
         }
+
+        // === FR-P4-05 per-tenant metering scope (task 054) ===
+        // The text entry path's attribution scope: every meterable fact observed inside
+        // this turn (loop tokens, executor tokens from in-turn capability dispatch,
+        // capability invocations via BindingCapabilityTool) is dimensioned per
+        // tenant/user/entry-path=text through the ambient AiMeteringContext.
+        // Identifiers only (opaque AAD GUIDs) — NFR-07 / ADR-015.
+        var meteringUserId = ExtractUserId(httpContext)?.ToString();
+        using var meteringScope = AiMeteringContext.Begin(
+            tenantId, meteringUserId, AiMeteringContext.EntryPathText);
 
         // Retrieve the existing session
         var session = await sessionManager.GetSessionAsync(tenantId, sessionId, cancellationToken);
@@ -630,6 +641,13 @@ public static class ChatEndpoints
                     return;
                 }
 
+                // FR-P4-05 metering: one ai.metering.tool_calls increment per executed
+                // call in the segment (tenant/user/tool.id dimensions; counts only, NFR-07).
+                foreach (var meteredCall in segment)
+                {
+                    aiTelemetry.RecordMeteredToolCall(tenantId, meteringUserId, meteredCall.ToolId);
+                }
+
                 await sessionManager.AppendToolChainAsync(
                     tenantId,
                     sessionId,
@@ -679,8 +697,22 @@ public static class ChatEndpoints
             // or summarization LLM call is introduced.
             // FR-P2-03: effectiveTurnMessage carries the elicitation answer frame on
             // mid-elicitation turns; otherwise it IS effectiveMessage.
+            // FR-P4-05: harvest model-reported usage (UsageContent rides the final
+            // streaming update — the OpenAI streaming pipeline requests include_usage)
+            // for the per-tenant ai.metering.tokens counter. Counts only (NFR-07).
+            long meteredInputTokens = 0;
+            long meteredOutputTokens = 0;
             await foreach (var update in agent.SendMessageAsync(effectiveTurnMessage, history, cancellationToken))
             {
+                foreach (var updateContent in update.Contents)
+                {
+                    if (updateContent is UsageContent usageContent)
+                    {
+                        meteredInputTokens += usageContent.Details.InputTokenCount ?? 0;
+                        meteredOutputTokens += usageContent.Details.OutputTokenCount ?? 0;
+                    }
+                }
+
                 var content = update.Text;
                 if (!string.IsNullOrEmpty(content))
                 {
@@ -703,6 +735,21 @@ public static class ChatEndpoints
                     sessionId, toolChainTurn, turnContract.BudgetSpent,
                     turnContract.ToolCallBudget, turnContract.DeniedCalls);
             }
+
+            // === FR-P4-05 per-tenant metering (task 054) =============================
+            // One ai.metering.turns increment per completed loop turn, carrying the
+            // ADR-016/NFR-09 consumed-vs-cap dimensions; plus the turn's model-reported
+            // token usage as ai.metering.tokens (source=loop). Counts only (NFR-07).
+            aiTelemetry.RecordMeteredTurn(
+                tenantId,
+                meteringUserId,
+                toolBudgetSpent: turnContract?.BudgetSpent ?? 0,
+                toolBudgetCap: turnContract?.ToolCallBudget ?? 0,
+                toolBudgetDenied: turnContract?.DeniedCalls ?? 0);
+            aiTelemetry.RecordMeteredTokens(
+                tenantId, meteringUserId, meteredInputTokens, meteredOutputTokens,
+                source: "loop", entryPath: AiMeteringContext.EntryPathText);
+            // === End FR-P4-05 metering ===============================================
 
             // Emit typing_end to signal that token generation is complete.
             // Placed before citations/suggestions/done so the frontend can hide the typing
