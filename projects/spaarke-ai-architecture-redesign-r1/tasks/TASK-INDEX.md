@@ -173,7 +173,7 @@
 | # | Task | FR | Rigor | Deps | Status |
 |---|---|---|---|---|---|
 | 046 | Widget layer: ONE register-context-widgets module (14 widgets, dup deleted); ExecutionTraceWidget renders REAL ledger ToolChains (tool_chain context_event emitted AFTER AppendToolChainAsync — no new endpoint; NFR-07 identifiers-only wire); FieldDelta dual-render DELETED grep-zero (widget layer + bus discriminant + dispatchConsumer delta case; section_started/completed pairs replace it; SectionRenderer shape-typed); server AnalysisChunk.FieldDelta + legacy trace emitters + playbook_options leg → Track-B/050 candidates; publish 45.47 MB (−0.18) | FR-P3-07 | FULL | 045 | ✅ |
-| 048 | P3 deploy + **G-P3 browser UAT** (flagship one-conversation journey) | G-P3 | STANDARD | all P3 | 🔲 |
+| 048 | P3 deploy + **G-P3 browser UAT** ✅ CLOSED by operator 2026-07-07 after SIX rounds (notes/g-p3-uat-round1..4-findings.md): 16+ findings all fixed+deployed (schema outage→projection validator; fabrication→honesty directives+structural outcomes; confirm-resume live w/ record links; Compose layout open+pre-seed; translator _value rewrite; date context; trace replay; sprk_document hard-block). Refusal-with-affordance-links noted → r2. Rulings: tasks stay sprk_event (revisit r2); rerun ungated accept-with-note; size-cap→055; SseClient keep. **G-M maker gate DEFERRED by operator ruling** (BA editor shipped w/ jest evidence; live maker walkthrough post-r2) — 090 records the graduation amendment | G-P3 | STANDARD | all P3 | ✅ |
 
 ## Phase P4 — Sweep completion + hardening + graduation (gates G-P4 + G-M)
 
