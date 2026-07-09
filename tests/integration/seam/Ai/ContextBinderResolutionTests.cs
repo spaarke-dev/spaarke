@@ -111,8 +111,13 @@ public sealed class ContextBinderResolutionTests
             JsonSerializer.SerializeToElement(new { blob = new string('x', SessionLedger.InlinePayloadCapBytes + 1) }));
         var truncated = new SessionOutput
         {
-            Key = "b@t1", BindingId = "b", UcId = "uc", Turn = 1, Disposition = "informational",
-            Payload = marker.Payload, CreatedAt = DateTimeOffset.UtcNow,
+            Key = "b@t1",
+            BindingId = "b",
+            UcId = "uc",
+            Turn = 1,
+            Disposition = "informational",
+            Payload = marker.Payload,
+            CreatedAt = DateTimeOffset.UtcNow,
         };
         var args = JsonSerializer.SerializeToElement(new { ledger_resolution = new { key = "b@t1" } });
 
