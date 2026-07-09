@@ -2039,7 +2039,13 @@ public static class ChatEndpoints
                 "confirmed", userFacingSummary,
                 RecordUrl: outcome.RecordUrl,
                 RecordEntityLogicalName: outcome.RecordEntityLogicalName,
-                RecordId: outcome.RecordId?.ToString("D")));
+                RecordId: outcome.RecordId?.ToString("D"),
+                // task 035 / FR-A1-06: carry the Completion Engine's OutcomeCard so the client
+                // renders the structured card (server-composed link chip + next-step chips)
+                // instead of parsing the markdown "[Open record]" link. Composed from the stored
+                // ledger output (store-before-render — ADR-040); null only if the ledger write
+                // degraded, in which case the client falls back to the summary/record fields.
+                Outcome: outcome.Outcome));
         }
 
         // Binding-backed: get-then-delete (double-confirm → 409) + confirmed ledger marker.
@@ -3157,9 +3163,17 @@ public record GateResolveRequest(bool Approved);
 /// </param>
 /// <param name="RecordEntityLogicalName">Created/updated record's table logical name (additive, R4-3).</param>
 /// <param name="RecordId">Created/updated record's GUID as <c>D</c>-format string (additive, R4-3).</param>
+/// <param name="Outcome">
+/// The Completion Engine's structured <see cref="OutcomeCard"/> for a confirmed side-effect
+/// (spaarke-ai-architecture-redesign-r2 task 035 / FR-A1-06; additive — null on reject, on the
+/// Binding-dispatch leg, and when the ledger write degraded). The client renders this card
+/// (server-composed link chip + next-step chips) in place of the markdown "[Open record]" link;
+/// the <see cref="RecordUrl"/>/<see cref="Summary"/> fields remain as the fallback.
+/// </param>
 public record GateResolveResult(
     string Status,
     string? Summary,
     string? RecordUrl = null,
     string? RecordEntityLogicalName = null,
-    string? RecordId = null);
+    string? RecordId = null,
+    OutcomeCard? Outcome = null);
