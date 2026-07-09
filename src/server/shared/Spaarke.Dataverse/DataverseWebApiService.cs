@@ -55,7 +55,12 @@ public class DataverseWebApiService : IDataverseService
 
         _credential = new ClientSecretCredential(tenantId, clientId, clientSecret);
 
-        _httpClient.BaseAddress = new Uri(_apiUrl);
+        // BaseAddress MUST end with a trailing slash: with a relative request URI (e.g.
+        // "sprk_recordtype_refs?..."), .NET's RFC-3986 resolution drops the last path segment
+        // of a slash-less base — turning "/api/data/v9.2" into "/api/data/sprk_recordtype_refs"
+        // (version dropped), which Dataverse answers with HTTP 500. (_apiUrl stays slash-less
+        // for the scope derivation below.)
+        _httpClient.BaseAddress = new Uri(_apiUrl + "/");
         _httpClient.DefaultRequestHeaders.Add("OData-MaxVersion", "4.0");
         _httpClient.DefaultRequestHeaders.Add("OData-Version", "4.0");
         _httpClient.DefaultRequestHeaders.Accept.Add(new MediaTypeWithQualityHeaderValue("application/json"));
@@ -2279,20 +2284,20 @@ public class DataverseWebApiService : IDataverseService
                 ? Guid.Parse(pid.GetString()!) : Guid.Empty,
             SourceField = data.TryGetValue("sprk_sourcefield", out var sf) && sf.ValueKind != JsonValueKind.Null
                 ? sf.GetString()! : string.Empty,
-            SourceFieldType = data.TryGetValue("sprk_sourcefieldtype", out var sft) ? sft.GetInt32() : 0,
+            SourceFieldType = data.TryGetValue("sprk_sourcefieldtype", out var sft) && sft.ValueKind != JsonValueKind.Null ? sft.GetInt32() : 0,
             TargetField = data.TryGetValue("sprk_targetfield", out var tf) && tf.ValueKind != JsonValueKind.Null
                 ? tf.GetString()! : string.Empty,
-            TargetFieldType = data.TryGetValue("sprk_targetfieldtype", out var tft) ? tft.GetInt32() : 0,
+            TargetFieldType = data.TryGetValue("sprk_targetfieldtype", out var tft) && tft.ValueKind != JsonValueKind.Null ? tft.GetInt32() : 0,
             MappingType = data.TryGetValue("sprk_mapping_type", out var mt) && mt.ValueKind != JsonValueKind.Null ? mt.GetInt32() : 0,
-            CompatibilityMode = data.TryGetValue("sprk_compatibilitymode", out var cm) ? cm.GetInt32() : 0,
-            IsRequired = data.TryGetValue("sprk_isrequired", out var req) && req.GetBoolean(),
+            CompatibilityMode = data.TryGetValue("sprk_compatibilitymode", out var cm) && cm.ValueKind != JsonValueKind.Null ? cm.GetInt32() : 0,
+            IsRequired = data.TryGetValue("sprk_isrequired", out var req) && req.ValueKind != JsonValueKind.Null && req.GetBoolean(),
             DefaultValue = data.TryGetValue("sprk_defaultvalue", out var dv) && dv.ValueKind != JsonValueKind.Null
                 ? dv.GetString() : null,
             Expression = data.TryGetValue("sprk_expression", out var expr) && expr.ValueKind != JsonValueKind.Null
                 ? expr.GetString() : null,
-            IsCascadingSource = data.TryGetValue("sprk_iscascadingsource", out var cs) && cs.GetBoolean(),
-            ExecutionOrder = data.TryGetValue("sprk_executionorder", out var eo) ? eo.GetInt32() : 0,
-            IsActive = data.TryGetValue("sprk_isactive", out var active) && active.GetBoolean()
+            IsCascadingSource = data.TryGetValue("sprk_iscascadingsource", out var cs) && cs.ValueKind != JsonValueKind.Null && cs.GetBoolean(),
+            ExecutionOrder = data.TryGetValue("sprk_executionorder", out var eo) && eo.ValueKind != JsonValueKind.Null ? eo.GetInt32() : 0,
+            IsActive = data.TryGetValue("sprk_isactive", out var active) && active.ValueKind != JsonValueKind.Null && active.GetBoolean()
         };
     }
 
