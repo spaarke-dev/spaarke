@@ -1,0 +1,103 @@
+<task id="AIR2-041" project="spaarke-ai-architecture-redesign-r2">
+  <metadata>
+    <title>Capability-discovery READ endpoint for deterministic soft-slash launchers (FR-A1-12 / R1)</title>
+    <status>not-started</status>
+    <phase>Wave J — G-R2-A Judgment + Friction</phase>
+    <gate>G-R2-A (judgment)</gate>
+    <estimated-effort>1.5 days</estimated-effort>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>A read-only projection over the existing closed catalog / handler registry; no side effects, no new dispatch. Extends an existing endpoint group rather than introducing a new subsystem.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>true</parallel-safe>
+    <goal-eligible>true</goal-eligible>
+    <tags>bff-api, spaarkeai, capability-discovery, read-endpoint, launcher</tags>
+    <dependencies>none (reads the existing catalog/handler registry)</dependencies>
+  </metadata>
+
+  <prompt>
+    Add a capability-discovery READ endpoint that lists the dispatchable capabilities (their launch metadata) so the client can render deterministic soft-slash launchers WITHOUT the model guessing what exists (spec FR-A1-12, R1; this is the gate-038 deferral now landing). Read-only, deterministic, over the existing closed catalog — no side effects, no new dispatch mechanism.
+  </prompt>
+
+  <role>.NET developer fluent in the Spaarke closed-catalog / handler registry (`HandlerEndpoints`) and read-only minimal-API projections consumed by the SpaarkeAi client.</role>
+
+  <goal>
+    A read-only endpoint under `Api/Ai/` returns the launchable-capability list (stable identifiers + display metadata + any launch args shape) sourced deterministically from the existing catalog/handler registry, exposed to consumers via `PublicContracts/`. The SpaarkeAi soft-slash launcher renders from this list rather than from model-invented capability names, so a soft-slash menu reflects exactly the closed catalog.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/spaarke-ai-architecture-redesign-r2/spec.md</file>
+    <file purpose="plan">projects/spaarke-ai-architecture-redesign-r2/plan.md</file>
+    <file purpose="design">projects/spaarke-ai-architecture-redesign-r2/design.md</file>
+    <file purpose="module-guidance">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    <file purpose="bff-governance">.claude/constraints/bff-extensions.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-039">Discovery reflects the CLOSED catalog — the endpoint enumerates catalog-declared capabilities only; it never invents or infers capabilities.</constraint>
+    <constraint source="ADR-013">Exposed to CRUD/satellite consumers via `Services/Ai/PublicContracts/`; do not leak catalog internals.</constraint>
+    <constraint source="project">Read-only + deterministic (stable ordering, no timestamps/GUIDs in the projection) so soft-slash launchers are stable across requests.</constraint>
+    <constraint source="ADR-038">Test is a KEEP-path integration test; no `Mock&lt;HttpMessageHandler&gt;`, no DI-registration tests.</constraint>
+    <constraint source="auth">Endpoint requires auth (not `/healthz`/`/ping`); returns only capabilities the caller may launch.</constraint>
+    <constraint source="bff-hygiene">Run the bff-extensions.md checklist; measure publish-size delta vs the ~49.63 MB baseline; no new HIGH CVE; Placement Justification.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai/catalog, ai/handler-registry, read-endpoint</topic>
+    <files>
+      <file>docs/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>docs/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/standards/DATA-ACCESS-DECISION-CRITERIA.md</file>
+    </files>
+    <patterns>
+      <pattern name="Handler registry read endpoints (extend)" location="src/server/api/Sprk.Bff.Api/Api/Ai/HandlerEndpoints.cs:47">GET /api/ai/handlers (:47) + GET /api/ai/tools/handlers (:20) discovery — the capability-discovery projection extends this endpoint group.</pattern>
+      <pattern name="Catalog rows (source)" location="infra/dataverse/sprk_playbookconsumer-rows.json">Binding/consumer catalog rows the launchable-capability list projects from (via the runtime catalog, not the file).</pattern>
+      <pattern name="Facade" location="src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/">Where the discovery contract is exposed to consumers.</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>Soft-slash launchers today have no authoritative capability list, so the model can surface capabilities that don't exist. FR-A1-12 (R1, a gate-038 deferral) adds a deterministic read surface so launchers are catalog-truthful. The existing HandlerEndpoints group already does handler discovery; this extends it with the launch-facing projection.</background>
+    <dependencies>
+      <dependency task="none" status="n/a">Reads the existing catalog/handler registry — no upstream code dependency.</dependency>
+    </dependencies>
+    <related-work>
+      <item>FR-A1-13 (task 042) create-matter capability appears in this list once cataloged.</item>
+    </related-work>
+  </context>
+
+  <steps mode="directional">
+    <step order="0" name="Context + governance">Load spec FR-A1-12, ADR-039/013, bff-extensions.md. Confirm the HandlerEndpoints group + catalog source via anchors.</step>
+    <step order="1" name="Define the projection">Shape the launchable-capability DTO (stable id + display metadata + launch-args shape) deterministically over the closed catalog.</step>
+    <step order="2" name="Add the read endpoint">Add the GET under Api/Ai/, auth-required, exposed via PublicContracts; filter to capabilities the caller may launch.</step>
+    <step order="3" name="Client consumption">Point the SpaarkeAi soft-slash launcher at the endpoint (render from the list, not model output).</step>
+    <step order="4" name="Test">KEEP-path integration test: the endpoint returns the catalog capabilities deterministically (stable order), and a capability NOT in the catalog is absent.</step>
+    <step order="5" name="Verify + governance">Build; run tests; measure publish-size delta; bff-extensions checklist; no new HIGH CVE; Placement Justification.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + run BFF tests</tool>
+    <tool name="npm">Build the SpaarkeAi launcher consumption</tool>
+    <tool name="git">Commit on the project branch</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Ai/HandlerEndpoints.cs (capability-discovery READ endpoint)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ (discovery contract)</output>
+    <output type="code">src/solutions/SpaarkeAi/** (soft-slash launcher consumes the endpoint)</output>
+    <output type="test">tests/integration/contract/ or tests/unit/ (deterministic catalog projection)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A read-only, auth-required endpoint returns the launchable-capability list projected deterministically (stable ordering) from the closed catalog.</criterion>
+    <criterion testable="true">The endpoint is exposed to consumers via PublicContracts (ADR-013); catalog internals are not leaked.</criterion>
+    <criterion testable="true">The SpaarkeAi soft-slash launcher renders from this list, not from model-invented capability names.</criterion>
+    <criterion testable="true">The projection carries no per-request timestamps/GUIDs (determinism), asserted by a test.</criterion>
+    <criterion testable="true">Publish-size delta measured; no new HIGH CVE; Placement Justification stated.</criterion>
+    <criterion testable="true">NEGATIVE: a capability that is NOT a catalog-declared row does NOT appear in the discovery response — covered by a test.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If launch-arg discovery would require exposing side-effect or risk-tier judgment as runtime logic rather than catalog data (ADR-039 tension), STOP and surface per CLAUDE.md §6.5 — keep risk/side-effect as catalog DATA.</trigger>
+  </escalation>
+</task>

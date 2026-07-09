@@ -1,0 +1,111 @@
+<task id="021" project="spaarkeai-compose-r2">
+  <metadata>
+    <title>FR-20 ComposeEditBatch (4-phase pipeline)</title>
+    <phase>2 LLM Editing Patterns</phase>
+    <gate>green</gate>
+    <status>completed</status>
+    <rigor>FULL</rigor>
+    <model-tier>sonnet</model-tier>
+    <effort>high</effort>
+    <parallel-group>phase2-llm</parallel-group>
+    <parallel-safe>true</parallel-safe>
+    <deps>003</deps>
+    <tags>bff-api,testing</tags>
+    <estimated-effort>high</estimated-effort>
+  </metadata>
+
+  <prompt>
+    Build `ComposeEditBatch` — the deterministic 4-phase pipeline that applies a set of validated edits to a
+    document without offset drift. This is the adeu "4-phase atomic batch pipeline" pattern (design §6.1):
+    resolve → sort descending → skip overlap → apply bottom-up. Applying bottom-up means earlier (higher-offset)
+    edits do not shift the offsets of later (lower-offset) edits, so a multi-edit batch applies cleanly in one pass.
+  </prompt>
+
+  <role>
+    Senior .NET developer with a bias for pure, deterministic, thoroughly-tested text-transformation code and
+    numbered edge-case comments (`// EDGE-N:` per design §6.1).
+  </role>
+
+  <goal>
+    A `ComposeEditBatch` service in `src/server/api/Sprk.Bff.Api/Services/Compose/` that consumes resolved matches
+    from `IComposeEditValidator` (FR-19), applies edits via resolve → sort-descending → skip-overlap → apply-bottom-up,
+    and returns the transformed document plus an applied/skipped report. Full unit coverage of the closed acceptance set,
+    build green, publish size measured.
+  </goal>
+
+  <context>
+    <background>
+      FR-20 sits on top of FR-19's validator: the validator resolves and detects overlap; the batch pipeline orders and
+      applies. Spike 3 (task 003) validated the 4-phase pipeline + rollback atomicity; its notes are the reference approach.
+      FR-21 (ComposeEditTransaction) wraps this batch with snapshot/rollback — keep the batch itself free of transaction
+      concerns so FR-21 can compose cleanly.
+    </background>
+    <relevant-files>
+      <file change="create">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeEditBatch.cs</file>
+      <file change="modify">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeEditModels.cs (extend with batch result types if needed)</file>
+      <file change="reference">src/server/api/Sprk.Bff.Api/Services/Compose/IComposeEditValidator.cs (FR-19 — resolved-match input)</file>
+      <file change="reference">projects/spaarkeai-compose-r2/notes/spikes/ (Spike 3 output — 4-phase pipeline + rollback atomicity)</file>
+    </relevant-files>
+    <dependencies>
+      <dependency task="003" status="pending">Spike 3 — atomic edit batch + rollback (informs pipeline + atomicity).</dependency>
+      <dependency task="020" status="pending">FR-19 IComposeEditValidator — provides resolved matches consumed by the batch.</dependency>
+    </dependencies>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-013">Services/Compose/ MUST NOT inject any AI internal (`IOpenAiClient`/executor/`IConsumerRoutingService`). The batch is pure deterministic text logic.</constraint>
+    <constraint source="ADR-010">DI minimalism — internal pipeline helpers need not be DI-registered; register only what an endpoint or FR-21 requires.</constraint>
+    <constraint source="ADR-038">Integration-heavy pyramid; NO banned test shapes (`Mock&lt;HttpMessageHandler&gt;`, DI-registration, ctor null-check). Test through the public batch contract with real multi-edit inputs.</constraint>
+    <constraint source="project">BFF publish size ≤ 60 MB compressed (NFR-01); measure and report delta.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>deterministic multi-edit application; offset-stable bottom-up apply; overlap skipping</topic>
+    <files>
+      <file>.claude/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>.claude/constraints/testing.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>projects/spaarkeai-compose-r2/design.md</file>
+      <file>projects/spaarkeai-compose-r2/spec.md</file>
+    </files>
+    <patterns>
+      <pattern name="4-phase atomic batch pipeline" location="design.md §6.1">resolve → sort descending → skip overlap → apply bottom-up so earlier edits don't shift later offsets.</pattern>
+    </patterns>
+  </knowledge>
+
+  <justification>
+    NEW service `ComposeEditBatch`. (1) Existing — no batch application exists; FR-19's validator resolves/validates but
+    does not apply. (2) Extension — kept separate from the validator (single-responsibility) and from FR-21's transaction
+    wrapper so both can consume it. (3) Cost-of-doing-nothing — applying multiple edits naively (top-down, unsorted) shifts
+    every subsequent offset and corrupts the document; without the bottom-up pipeline, multi-edit batches silently drift.
+  </justification>
+
+  <steps mode="directional">
+    <step order="0">Context check. Load ADRs/constraints. Read Spike 3 notes for the locked pipeline shape.</step>
+    <step order="1">Define/extend batch result types in ComposeEditModels.cs (applied edits, skipped-for-overlap edits, final text).</step>
+    <step order="2">Implement `ComposeEditBatch.Apply`: resolve (via FR-19 results) → sort resolved spans descending by start offset → skip edits whose span overlaps an already-accepted higher-offset edit → apply each replacement bottom-up.</step>
+    <step order="3">Cover edge cases with `// EDGE-N:` comments: adjacent-but-not-overlapping edits, identical target spans, zero-length insertions, edit at document start/end.</step>
+    <step order="4">Register in DI only if consumed directly by an endpoint; otherwise expose for FR-21 to wrap.</step>
+    <step order="5">Write unit tests in `tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ComposeEditBatchTests.cs` covering the closed acceptance set.</step>
+    <step order="6">Build; run tests; measure + report publish size delta.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeEditBatch.cs</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ComposeEditBatchTests.cs</output>
+    <output type="report">Task completion report incl. publish-size delta</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">A batch of 3+ non-overlapping edits at different offsets applies with every replacement landing at its correct span (NO offset drift) — verified by asserting the exact transformed text.</criterion>
+    <criterion testable="true">Edits are applied bottom-up (descending start offset) so an earlier-in-document edit's length change does not shift a later edit's resolved offset.</criterion>
+    <criterion testable="true">Two edits whose resolved spans overlap: the pipeline skips one and reports it in the skipped list rather than corrupting the text (NEGATIVE: overlap).</criterion>
+    <criterion testable="true">An empty edit list returns the document unchanged; a zero-length insertion applies at the correct offset (NEGATIVE: empty batch / degenerate span).</criterion>
+    <criterion testable="true">The batch returns a report distinguishing applied vs skipped edits; `ComposeEditBatch` injects zero AI internals; `dotnet build` green; publish size ≤ 60 MB reported with delta.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

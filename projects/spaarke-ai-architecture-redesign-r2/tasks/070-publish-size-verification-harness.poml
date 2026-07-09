@@ -1,0 +1,91 @@
+<task id="AIR2-070" project="spaarke-ai-architecture-redesign-r2">
+  <metadata>
+    <title>Publish-size verification harness + per-task report (≤60 MB compressed)</title>
+    <status>not-started</status>
+    <phase>H — G-R2-D Hardening</phase>
+    <gate>G-R2-D (hardening)</gate>
+    <estimated-effort>0.5 day</estimated-effort>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Mechanical measurement + report harness over an established ADR-029 rule; no architectural blast radius, no ambiguous design surface — the ceiling + thresholds are already fixed.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-safe>true</parallel-safe>
+    <goal-eligible>true</goal-eligible>
+    <tags>bff-api, hardening, publish-size, adr-029, nfr-01</tags>
+    <dependencies>none (Wave H; independent of other hardening rows)</dependencies>
+  </metadata>
+
+  <prompt>
+    Stand up the per-task publish-size verification harness + report for R2 (spec FR-D-01, NFR-01). Every BFF-touching task in this project MUST measure compressed `dotnet publish` output, report absolute size + diff vs baseline, and honor the ADR-029 escalation thresholds. This task delivers the repeatable harness (script + report template) and records the current R2 baseline against r1's ~46.8 MB G-P3-close figure — it is NOT a one-off measurement.
+  </prompt>
+
+  <role>Senior .NET build/release engineer fluent in the Spaarke BFF publish pipeline and the ADR-029 publish-hygiene governance rule.</role>
+
+  <goal>
+    A repeatable harness (script + report template under the project notes) measures compressed `dotnet publish -c Release` output for `Sprk.Bff.Api`, states the PDB convention, computes the diff vs the last recorded baseline, and classifies against the ADR-029 thresholds (≥+5 MB single-task → justify; ≥55 MB cumulative → architecture review; ≥60 MB → HARD STOP). The R2 baseline is recorded. The harness is wired into the task-notes workflow so every BFF-touching R2 task reports through it.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/spaarke-ai-architecture-redesign-r2/spec.md</file>
+    <file purpose="plan">projects/spaarke-ai-architecture-redesign-r2/plan.md</file>
+    <file purpose="publish-size-rule">.claude/constraints/azure-deployment.md</file>
+    <file purpose="bff-governance">.claude/constraints/bff-extensions.md</file>
+    <file purpose="module-guidance">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-029">Compressed publish output MUST stay ≤60 MB; per-task verification is mandatory; state the PDB inclusion convention when reporting.</constraint>
+    <constraint source="NFR-01">Report absolute size + diff vs prior baseline on every BFF-touching task; escalation thresholds are +5 MB single-task / 55 MB cumulative / 60 MB HARD STOP.</constraint>
+    <constraint source="project">Baseline reference is r1 G-P3-close ~46.8 MB (task 055 measured ~49.63 MB incl. PDBs / 45.87 MB excl.) — reconcile the convention explicitly, do not silently switch it.</constraint>
+    <constraint source="bff-hygiene">Harness output feeds the bff-extensions.md pre-merge checklist; do not add new runtime dependencies to the BFF to build the harness.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>bff/publish-size, azure-deployment, ci-hygiene</topic>
+    <files>
+      <file>docs/adr/ADR-029-bff-publish-hygiene.md</file>
+      <file>.claude/constraints/azure-deployment.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Publish-size per-task rule" location=".claude/constraints/azure-deployment.md">The "BFF Publish-Size Per-Task Verification Rule (NFR-01)" section — the authoritative measurement + threshold procedure this harness automates.</pattern>
+      <pattern name="BFF publish target" location="src/server/api/Sprk.Bff.Api/">Project published via `dotnet publish -c Release -o deploy/api-publish/`; compressed size is the governed metric.</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>R1 and prior projects each grew the BFF without holistic size tracking; root CLAUDE.md §10 made per-task measurement binding. R2 adds Memory Service + gate policy + Context Binder to the BFF, so drift risk is real. This harness makes the measurement cheap and repeatable so no R2 task skips it.</background>
+    <dependencies>
+      <dependency task="none" status="n/a">Independent Wave-H row; needed early so downstream BFF tasks report through it.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 079 (G-R2-D verification) consumes this harness's report as gate evidence.</item>
+      <item>FR-D-05 (task 074) audit-container re-key is a separate hardening row; keep the size harness generic.</item>
+    </related-work>
+  </context>
+
+  <steps mode="directional">
+    <step order="0" name="Load the rule">Read the azure-deployment.md publish-size section + ADR-029; confirm the exact `dotnet publish` invocation, compression method, and PDB convention the rule expects.</step>
+    <step order="1" name="Harness">Add a small script (under the project's scripts/notes surface) that runs the Release publish, measures compressed output, and emits absolute size + diff vs a stored baseline.</step>
+    <step order="2" name="Report template">Create the per-task report template (absolute, diff, threshold classification, PDB convention) under the project notes.</step>
+    <step order="3" name="Record baseline">Run the harness once; record the R2 baseline reconciled against the r1 ~46.8 MB figure; note the PDB convention chosen.</step>
+    <step order="4" name="Wire-in">Document in the project notes that every BFF-touching R2 task reports through this harness (link from task-notes workflow).</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Release publish for measurement</tool>
+    <tool name="git">Commit harness + baseline on the project branch</tool>
+  </tools>
+
+  <outputs>
+    <output type="script">scripts/ or projects/spaarke-ai-architecture-redesign-r2/scripts/ (publish-size measurement harness)</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r2/notes/ (per-task report template + recorded R2 baseline + PDB convention)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The harness runs `dotnet publish -c Release` and emits compressed absolute size + diff vs the stored baseline in one invocation.</criterion>
+    <criterion testable="true">The R2 baseline is recorded, reconciled against r1's ~46.8 MB G-P3-close figure, with the PDB convention stated.</criterion>
+    <criterion testable="true">The report classifies against all three ADR-029 thresholds (+5 MB single-task, 55 MB cumulative, 60 MB HARD STOP).</criterion>
+    <criterion testable="true">A report template exists under the project notes and is referenced by the task-notes workflow for every BFF-touching task.</criterion>
+    <criterion testable="true">NEGATIVE: the harness build adds NO new runtime NuGet dependency to `Sprk.Bff.Api` (verified by no diff to the .csproj package refs).</criterion>
+  </acceptance-criteria>
+</task>

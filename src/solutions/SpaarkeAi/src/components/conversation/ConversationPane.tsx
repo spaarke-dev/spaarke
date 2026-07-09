@@ -19,9 +19,10 @@
 import * as React from "react";
 import { Button, Tooltip } from "@fluentui/react-components";
 import { ChatRegular, ChatAddRegular } from "@fluentui/react-icons";
-import { PaneHeader, SprkChat } from "@spaarke/ui-components";
+import { PaneHeader, SprkChat, createConsumerDispatcher } from "@spaarke/ui-components";
 import { useAiSession, useDispatchPaneEvent, clearExecutionTraceBuffer } from "@spaarke/ai-widgets";
-import type { IChatMessage } from "@spaarke/ui-components";
+import type { WorkspacePaneEvent } from "@spaarke/ai-widgets";
+import type { IChatMessage, DispatchWorkspaceEvent, DispatchConsumerResult } from "@spaarke/ui-components";
 import type { IChatSession } from "@spaarke/ai-context";
 import { WelcomePanel } from "../WelcomePanel";
 import { useShellStage, useRestoreContext, usePaneCollapseContext } from "../shell/ThreePaneShell";
@@ -37,6 +38,9 @@ import { usePlaybookSelection } from "./usePlaybookSelection";
 import { usePlaybookOptions } from "./usePlaybookOptions";
 import { useCommandRouting } from "./useCommandRouting";
 import { useSelectionChip } from "./useSelectionChip";
+import { useSerialActionQueue, type ComposeActionRequest } from "./useSerialActionQueue";
+import { formatEventOutputMarkdown } from "./DocumentUploadedEventStream";
+import { makeLocalAssistantMessage } from "./summarizeRouting";
 import {
   AuthLoadingState,
   PlaybookHeaderStrip,
@@ -120,6 +124,52 @@ export function ConversationPane(): React.JSX.Element {
     inject: injection.inject,
   });
   acceptChipsRef.current = chips.acceptChips;
+
+  // ── Serial action queue (FR-18) ────────────────────────────────────────
+  // Rapid, distinct AI actions (e.g. FR-14 toolbar's Compare then Draft) must
+  // run strictly one-at-a-time through the shipped dispatchConsumer seam —
+  // see useSerialActionQueue for the full ordering rationale + §11
+  // justification. Own bound dispatcher (mirrors useConsumerChips's
+  // createConsumerDispatcher usage): kept independent so this queue's
+  // serialization guarantee holds regardless of which future caller (toolbar,
+  // chip, or other) reaches it. `dispatchComposeAction` is the ready-made
+  // enqueue+render entry point the FR-14 toolbar (task 030) hand-off wires
+  // into at integration (contract-only dependency — see
+  // useSerialActionQueue's contract-naming note); mounting it now keeps the
+  // queue live and independently testable ahead of that integration.
+  const composeActionDispatcher = React.useMemo(
+    () =>
+      createConsumerDispatcher({
+        bffBaseUrl,
+        getSessionId,
+        getAccessToken,
+        publishPaneEvent: (channel, event: DispatchWorkspaceEvent) => dispatch(channel, event as WorkspacePaneEvent),
+      }),
+    [bffBaseUrl, getSessionId, getAccessToken, dispatch]
+  );
+  const actionQueue = useSerialActionQueue(composeActionDispatcher);
+  const dispatchComposeAction = React.useCallback(
+    (request: ComposeActionRequest): Promise<DispatchConsumerResult> =>
+      actionQueue.enqueue(request).then((dispatched) => {
+        if (dispatched.result !== undefined && dispatched.result !== null) {
+          injection.enqueue(makeLocalAssistantMessage(formatEventOutputMarkdown(dispatched.result)));
+        }
+        return dispatched;
+      }),
+    [actionQueue, injection]
+  );
+  // ADR-015: structural signal only (queue depth + in-flight correlation id —
+  // never the action's bindingId/args/content). Also keeps `dispatchComposeAction`
+  // + queue state live/observable ahead of the task-030 toolbar hand-off.
+  React.useEffect(() => {
+    if (actionQueue.inFlightId !== null || actionQueue.pendingCount > 0) {
+      console.log(
+        "[ConversationPane] serial action queue — inFlight:%s pending:%d",
+        actionQueue.inFlightId,
+        actionQueue.pendingCount
+      );
+    }
+  }, [actionQueue.inFlightId, actionQueue.pendingCount, dispatchComposeAction]);
 
   const contextBridge = useContextEventBridge({
     dispatch,

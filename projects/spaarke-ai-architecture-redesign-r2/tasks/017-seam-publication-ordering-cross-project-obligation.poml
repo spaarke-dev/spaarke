@@ -1,0 +1,103 @@
+<task id="AIR2-017" project="spaarke-ai-architecture-redesign-r2">
+  <metadata>
+    <title>Seam-publication ordering + cross-project obligation filing (Compose r2)</title>
+    <status>not-started</status>
+    <phase>A0 — Contract-first</phase>
+    <gate>G-R2-A (seam publication)</gate>
+    <estimated-effort>0.5 day</estimated-effort>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Coordination + verification task over already-authored contracts; the judgment is "is every seam Compose r2 needs actually published + consumable", which is bounded — effort high for cross-project rigor.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>false</parallel-safe>
+    <goal-eligible>false</goal-eligible>
+    <tags>contract, seam, cross-project, compose-r2, coordination</tags>
+    <dependencies>010, 011, 012, 013, 014, 015, 016 (all seven A0 contracts published)</dependencies>
+  </metadata>
+
+  <prompt>
+    Close the seam-publication ordering obligation (spec FR-A0-08): verify the §3.1 seam set — ComposeDisposition, OutcomeCard slice, ContextEnvelope workspace slice, ledger provenance `{bindingId}@t{n}`, Policy v2 tier table (GateDecision), JobAwareCompletionState — is published as the FIRST A0 tasks and is consumable by Compose r2 BEFORE core implements its own dependent features. Then FILE the cross-project obligation BOTH ways: record in this project's notes + INDEX what the core owes Compose r2, and file the reciprocal obligation into `projects/spaarkeai-compose-r2/` so the dependency is tracked from both sides.
+  </prompt>
+
+  <role>Engineer doing cross-project seam coordination — verifying published contracts are consumable, and filing tracked obligations so neither project silently drifts from the seam.</role>
+
+  <goal>
+    A seam-ordering verification note confirming every §3.1 seam Compose r2 depends on is published + consumable (contract exists under `Services/Ai/PublicContracts/`, has a passing contract test, and is versioned/tolerant-reader). This task OWNS `notes/SEAM-STATUS.md` as the milestone: it verifies ALL seam rows are published + consumable, then flips the SEAM-STATUS overall-status header to "✅ ALL SEAMS PUBLISHED — Compose UNBLOCKED" and posts the consolidated "Compose r2 UNBLOCKED — core seams available" notice (in the SEAM-STATUS header AND as a comment on the compose-r2 project tracking). The cross-project obligation is filed BOTH ways: (i) this project's `notes/` + a pointer in `projects/INDEX.md` state what the core owes; (ii) a reciprocal obligation entry lands in `projects/spaarkeai-compose-r2/` so Compose r2 tracks the consumed seams + the no-fork rule. `/conflict-check` guidance for BFF PRs is reaffirmed.</goal>
+
+  <inputs>
+    <file purpose="spec">projects/spaarke-ai-architecture-redesign-r2/spec.md</file>
+    <file purpose="plan">projects/spaarke-ai-architecture-redesign-r2/plan.md</file>
+    <file purpose="design">projects/spaarke-ai-architecture-redesign-r2/design.md</file>
+    <file purpose="consumer">projects/spaarkeai-compose-r2/design.md</file>
+    <file purpose="hot-path-registry">projects/INDEX.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="project">This task VERIFIES + FILES; it does not author contracts (010–016 do). It runs AFTER all seven land.</constraint>
+    <constraint source="FR-D-03">The obligation filing MUST reaffirm the no-forked-seam rule — Compose r2 consumes core seams, never forks an AI-internal seam (cross-satellite verification at task 072 checks this).</constraint>
+    <constraint source="project">Obligation must be filed BOTH ways (core-owes + Compose-consumes) so the dependency is tracked from each side, per FR-A0-08 "filed both ways".</constraint>
+    <constraint source="ADR-013">Confirm every consumed seam lives under `Services/Ai/PublicContracts/` — a seam Compose reaches via any other path is a defect to flag.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>cross-project-seams, publication-ordering, conflict-check, hot-path-registry</topic>
+    <files>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/INDEX.md</file>
+    </files>
+    <patterns>
+      <pattern name="Seam facade home" location="src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/">All seven consumable contracts live here — verify each is present + tested.</pattern>
+      <pattern name="Ledger provenance seam" location="src/server/api/Sprk.Bff.Api/Models/Ai/Chat/SessionLedgerEntries.cs:39">`{bindingId}@t{n}` BuildOutputKey — the provenance keying Compose r2 consumes.</pattern>
+      <pattern name="Contract tests" location="tests/integration/contract/">Each seam's passing contract test is the "consumable" evidence.</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>Compose r2 (already re-based onto core seams, 2026-07-08) is blocked day-one unless the seam set is published first. Tasks 010–016 author the seven contracts; this task confirms the SET is complete + consumable and files the obligation both ways so the dependency is durable across sessions and PRs. It is the last A0 task — the gate that says "Compose r2 is unblocked."</background>
+    <dependencies>
+      <dependency task="010" status="pending">ComposeDisposition v1 published.</dependency>
+      <dependency task="011" status="pending">OutcomeCard v1 published.</dependency>
+      <dependency task="012" status="pending">GateDecision v2 (Policy v2 tier table) published.</dependency>
+      <dependency task="013" status="pending">TraceEvent v1 published.</dependency>
+      <dependency task="014" status="pending">JobAwareCompletionState v1 published.</dependency>
+      <dependency task="015" status="pending">ContextEnvelope v1 (workspace slice) published.</dependency>
+      <dependency task="016" status="pending">MemoryItem v1 published.</dependency>
+    </dependencies>
+    <related-work>
+      <item>FR-D-03 (task 072) cross-satellite seam-fork verification enforces the no-fork rule filed here.</item>
+      <item>`/conflict-check` + `projects/INDEX.md` enforce the obligation at PR time.</item>
+    </related-work>
+  </context>
+
+  <steps mode="directional">
+    <step order="0" name="Enumerate the seam set">List the §3.1 seams Compose r2 depends on: ComposeDisposition, OutcomeCard slice, ContextEnvelope workspace slice, ledger provenance `{bindingId}@t{n}`, GateDecision (Policy v2 tier table), JobAwareCompletionState.</step>
+    <step order="1" name="Verify consumable">For each, confirm the contract exists under `Services/Ai/PublicContracts/`, has a passing contract test, and is versioned/tolerant-reader. Flag any gap.</step>
+    <step order="2" name="File core-owes">Record in this project's `notes/` + a pointer in `projects/INDEX.md` what the core owes Compose r2 (the seam list + no-fork rule + ack-plumbing/Tier-2c/OutcomeCard duties from spec Dependencies).</step>
+    <step order="3" name="File Compose-consumes">Add the reciprocal obligation into `projects/spaarkeai-compose-r2/` (notes/defer-issues or the equivalent) so Compose tracks the consumed seams + the no-fork rule.</step>
+    <step order="4" name="Reaffirm conflict-check">State the `/conflict-check`-before-every-BFF-PR guidance and that FR-D-03 (task 072) verifies no forked seam.</step>
+    <step order="5" name="Own SEAM-STATUS milestone">Verify every row in `notes/SEAM-STATUS.md` is published + consumable; flip the SEAM-STATUS overall-status header to "✅ ALL SEAMS PUBLISHED — Compose UNBLOCKED"; post the consolidated "Compose r2 UNBLOCKED — core seams available" notice in the SEAM-STATUS header AND as a comment on the compose-r2 project tracking.</step>
+  </steps>
+
+  <tools>
+    <tool name="grep">Confirm each seam is present under PublicContracts + has a test</tool>
+    <tool name="git">Commit the notes + INDEX + cross-project filing on the project branch</tool>
+  </tools>
+
+  <outputs>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r2/notes/seam-publication-ordering.md (seam set + consumable verification + core-owes obligation)</output>
+    <output type="docs">projects/INDEX.md (pointer: core owes Compose r2 the published seam set)</output>
+    <output type="docs">projects/spaarkeai-compose-r2/ (reciprocal Compose-consumes obligation entry)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The note verifies ALL six §3.1 seams (ComposeDisposition, OutcomeCard slice, ContextEnvelope workspace slice, ledger provenance `{bindingId}@t{n}`, GateDecision/Policy-v2 tier table, JobAwareCompletionState) are published under `Services/Ai/PublicContracts/` and each has a passing contract test.</criterion>
+    <criterion testable="true">The core-owes obligation is filed in this project's notes AND pointed to from `projects/INDEX.md`.</criterion>
+    <criterion testable="true">The reciprocal Compose-consumes obligation is filed into `projects/spaarkeai-compose-r2/` — the dependency is tracked from BOTH sides (FR-A0-08).</criterion>
+    <criterion testable="true">The filing reaffirms the no-forked-seam rule + that FR-D-03 (task 072) verifies it, and restates `/conflict-check`-before-every-BFF-PR.</criterion>
+    <criterion testable="true">This task OWNS the SEAM-STATUS milestone: every row in `notes/SEAM-STATUS.md` is verified published + consumable, the overall-status header is flipped to "✅ ALL SEAMS PUBLISHED — Compose UNBLOCKED", and the consolidated "Compose r2 UNBLOCKED — core seams available" notice is posted in the SEAM-STATUS header AND as a comment on the compose-r2 project tracking.</criterion>
+    <criterion testable="true">NEGATIVE: if any seam is missing, lacks a passing contract test, or is reachable outside `Services/Ai/PublicContracts/`, the note records it as a BLOCKER (Compose r2 NOT yet unblocked), the SEAM-STATUS header is NOT flipped, and the UNBLOCKED notice is NOT posted — rather than declaring completion.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If verification finds a seam Compose r2 depends on is missing or not consumable (no contract test, or reachable only via an AI-internal path), STOP and surface it — Compose r2 is NOT unblocked, and the offending A0 contract task (010–016) must be completed/fixed before this task can close.</trigger>
+  </escalation>
+</task>

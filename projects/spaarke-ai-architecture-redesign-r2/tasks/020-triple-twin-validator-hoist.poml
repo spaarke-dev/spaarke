@@ -1,0 +1,114 @@
+<task id="AIR2-020" project="spaarke-ai-architecture-redesign-r2">
+  <metadata>
+    <title>Triple-twin validator hoist — single authored catalog source → generated/validated mirrors [FR-A-01]</title>
+    <status>not-started</status>
+    <phase>A-infra — before ANY catalog-row task</phase>
+    <gate>G-R2-A (enabling infra)</gate>
+    <estimated-effort>2-3 days</estimated-effort>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Source-of-truth migration for catalog guidance/contract text with high blast radius — it BLOCKS every catalog-row task in three r2 waves (032/042/057). A wrong single-source shape or a validator that under-enforces parity silently ships drift into all three surfaces. Architectural, cross-cutting, hard to reverse.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-safe>false</parallel-safe>
+    <goal-eligible>false</goal-eligible>
+    <tags>bff-api, catalog-governance, adr-039, validator, blocking-infra</tags>
+    <dependencies>none (front-loaded; MUST merge before 032/042/057 and any memory.* row)</dependencies>
+  </metadata>
+
+  <prompt>
+    Hoist the guidance/contract text that today lives in THREE hand-maintained twins — the live catalog `sprk_description` in Dataverse, the handler `Metadata` description in code, and the `infra/dataverse/inputschemas/` seed mirror — to ONE authored source with generated/validated mirrors, and extend `OpenAiFunctionSchemaValidator` + `RoutingConsumerTypeHealthCheck` to enforce parity across all three (spec FR-A-01 / R15, plan §4 Phase A-infra). This BLOCKS all catalog-row tasks: r2 adds rows in ≥3 core waves (Policy v2 risk-factor fields at 032, create-matter at 042, `memory.write` at 057), and every one of them must be authored THROUGH this hoisted source. The `memory.*` rows are the first consumers.
+  </prompt>
+
+  <role>Senior .NET developer fluent in the ADR-039 closed-catalog model, the JPS input-schema pipeline (`jps-action-create`/`jps-validate`), and Dataverse seed-mirror generation.</role>
+
+  <goal>
+    A single authored catalog-guidance source exists; the live `sprk_description`, the handler `Metadata` description, and the `infra/dataverse/inputschemas/` seed mirror are all generated/validated FROM it (not hand-edited independently). `OpenAiFunctionSchemaValidator` (Services/Ai/Chat/OpenAiFunctionSchemaValidator.cs:70) and `RoutingConsumerTypeHealthCheck` (Services/Ai/PublicContracts/RoutingConsumerTypeHealthCheck.cs:66) are extended to FAIL when any of the three surfaces drifts from the authored source. A single-source edit propagates to all three with validator-enforced parity, proven end-to-end by authoring the `memory.*` rows through it. No catalog row can be added except through the hoisted source thereafter.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/spaarke-ai-architecture-redesign-r2/spec.md</file>
+    <file purpose="plan">projects/spaarke-ai-architecture-redesign-r2/plan.md</file>
+    <file purpose="design">projects/spaarke-ai-architecture-redesign-r2/design.md</file>
+    <file purpose="module-guidance">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    <file purpose="bff-governance">.claude/constraints/bff-extensions.md</file>
+    <file purpose="discovery">projects/spaarke-ai-architecture-redesign-r2/notes/ (FR-P0-04 validator-extension-point discovery note)</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-039">Closed catalogs, one intent mechanism — the hoist reshapes WHERE catalog text is authored, never adds a second intent/dispatch mechanism. Risk factors stay catalog-declared DATA.</constraint>
+    <constraint source="ADR-013">Any facade text consumed by CRUD stays reachable only via `Services/Ai/PublicContracts/`.</constraint>
+    <constraint source="ADR-038">Parity enforcement is exercised by a KEEP-path test that authors a row through the source and asserts three-surface propagation; no `Mock&lt;HttpMessageHandler&gt;`, no DI-registration tests.</constraint>
+    <constraint source="ADR-032">If parity enforcement is feature-gated during rollout, the gate uses a Null-Object kill-switch — no asymmetric registration.</constraint>
+    <constraint source="project">MUST sequence BEFORE 032, 042, 057, and any `memory.*` catalog-row task (spec MUST rule). This task's own PR merges first.</constraint>
+    <constraint source="project">Additive-only to the authoring format; existing rows migrate via a tolerant generator, not a hand rewrite of all rows.</constraint>
+    <constraint source="bff-hygiene">Run the bff-extensions.md checklist; state Placement Justification; measure publish-size delta vs the ~49.63 MB (incl. PDBs) baseline; no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai/closed-catalog, catalog-governance, input-schema-mirrors, health-check-parity</topic>
+    <files>
+      <file>docs/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>docs/adr/ADR-013-*.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Function-schema validator" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/OpenAiFunctionSchemaValidator.cs">Line 70 — the validation entry point to EXTEND with three-surface parity enforcement.</pattern>
+      <pattern name="Routing-consumer health check" location="src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/RoutingConsumerTypeHealthCheck.cs">Line 66 — startup/health parity assertion surface; add the authored-source-vs-mirror drift check here.</pattern>
+      <pattern name="Seed mirror home" location="infra/dataverse/inputschemas/">The `*.input.schema.json` twins (create-task-v1, draft-corr-v1, etc.) that become GENERATED artifacts, not hand-edited.</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>R1 P4 left three hand-maintained copies of each capability's guidance/contract text; they drift silently. r2 adds rows in three waves, so the drift surface grows unless authoring is single-sourced FIRST. This is design §10 row 15 and the load-bearing enabler for Policy v2's catalog-declared risk factors.</background>
+    <dependencies>
+      <dependency task="none" status="n/a">Front A-infra task — no upstream.</dependency>
+    </dependencies>
+    <related-work>
+      <item>032 (Policy v2) authors the reversibility/external-visibility/deadline/confidentiality/record-of-truth risk-factor fields THROUGH this source — its catalog changes sequence behind this hoist.</item>
+      <item>042 (create-matter) and 057 (`memory.write`) are downstream catalog-row consumers.</item>
+      <item>FR-P0-04 discovery note confirmed the validator extension points before this task.</item>
+    </related-work>
+  </context>
+
+  <steps mode="prescriptive">
+    <step order="0" name="Context + governance">Load FR-A-01, ADR-039, the FR-P0-04 discovery note, bff-extensions.md. Confirm the exact validator entry point (OpenAiFunctionSchemaValidator.cs:70) and health-check surface (RoutingConsumerTypeHealthCheck.cs:66).</step>
+    <step order="1" name="Design the authored source">Define the single-source format (one authored record per capability holding the guidance/contract text + the risk-factor property slots Policy v2 will populate). Decide file-vs-Dataverse home for the authored source; document the choice + rationale.</step>
+    <step order="2" name="Generators">Write the generator that emits the three mirrors FROM the authored source: (a) live `sprk_description` payload, (b) handler `Metadata` description, (c) `infra/dataverse/inputschemas/*.input.schema.json`. Generation is deterministic (stable ordering; no timestamps).</step>
+    <step order="3" name="Validator + health-check extension">Extend `OpenAiFunctionSchemaValidator` (:70) to fail when a handler `Metadata` description diverges from the authored source; extend `RoutingConsumerTypeHealthCheck` (:66) to fail on seed-mirror / live-description drift. Parity failure is a hard fail, not a warning.</step>
+    <step order="4" name="Migrate existing rows">Run the generator across existing rows via the tolerant generator (additive-only); confirm zero behavioral change to existing capabilities (byte-diff mirrors where possible).</step>
+    <step order="5" name="Prove with memory.* rows">Author the `memory.*` rows through the single source and assert propagation to all three surfaces + validator-green — this is the acceptance proof, not a paper claim.</step>
+    <step order="6" name="Contract/parity test">Add a KEEP-path test: edit the source for one row → assert all three surfaces change + validator passes; corrupt one mirror out-of-band → assert the validator/health-check FAILS.</step>
+    <step order="7" name="Verify + governance">Build; run the test; measure publish-size delta; state Placement Justification + bff-extensions checklist in PR notes.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + run the parity/contract test</tool>
+    <tool name="jps-validate">Validate generated input-schema mirrors</tool>
+    <tool name="git">Commit on the project branch</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ (single authored-source model + generator)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Chat/OpenAiFunctionSchemaValidator.cs (parity enforcement)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/RoutingConsumerTypeHealthCheck.cs (drift check)</output>
+    <output type="code">infra/dataverse/inputschemas/ (now GENERATED mirrors)</output>
+    <output type="test">tests/ (single-source-edit → three-surface propagation; corrupt-mirror → validator fails)</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r2/notes/ (authoring format + generator + rollout doc)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A single authored source exists; the live `sprk_description`, handler `Metadata` description, and `infra/dataverse/inputschemas/` mirror are all generated/validated FROM it — none is hand-edited independently.</criterion>
+    <criterion testable="true">A single-source edit for one capability propagates to all three surfaces (asserted by test); validator + health-check pass.</criterion>
+    <criterion testable="true">`OpenAiFunctionSchemaValidator` (:70) and `RoutingConsumerTypeHealthCheck` (:66) are extended to enforce three-surface parity as a HARD fail.</criterion>
+    <criterion testable="true">The `memory.*` rows are authored through the single source and propagate correctly — proven, not asserted on paper.</criterion>
+    <criterion testable="true">Existing rows migrate with zero behavioral change (mirror diff confirms).</criterion>
+    <criterion testable="true">NEGATIVE: corrupting exactly one of the three mirrors out-of-band (so it diverges from the authored source) makes the validator/health-check FAIL — proven by a test.</criterion>
+    <criterion testable="true">Publish-size delta measured + reported; no new HIGH CVE; Placement Justification stated.</criterion>
+    <criterion testable="true">On completion, flip this seam's row in `projects/spaarke-ai-architecture-redesign-r2/notes/SEAM-STATUS.md` to published (with commit ref); record which Compose r2 FR it unblocks (FR-12). 'Published' = merged + contract test green + consumable via Services/Ai/PublicContracts/.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If any capability's three surfaces cannot be reconciled to a single authored source without changing runtime behavior (i.e., the twins already disagree semantically, not just cosmetically), STOP and surface the divergence per CLAUDE.md §6.5 — the migration must not silently pick a winner that alters a shipped capability's contract.</trigger>
+    <trigger>If single-sourcing would require a second authoring/dispatch mechanism to satisfy a row (ADR-039 one-intent tension), surface it rather than forking authoring.</trigger>
+  </escalation>
+</task>

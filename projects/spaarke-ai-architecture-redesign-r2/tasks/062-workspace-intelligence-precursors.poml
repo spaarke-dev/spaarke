@@ -1,0 +1,95 @@
+<task id="AIR2-062" project="spaarke-ai-architecture-redesign-r2">
+  <metadata>
+    <title>Workspace-intelligence precursors — next-step chips + record memory</title>
+    <status>not-started</status>
+    <phase>M — G-R2-B Memory</phase>
+    <gate>G-R2-B (memory)</gate>
+    <estimated-effort>1 day</estimated-effort>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Precursors only — wires existing next-step-chip + record-memory primitives; the full goal-tracking subsystem is an explicit deferral. Bounded, additive; no new subsystem.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-safe>true</parallel-safe>
+    <goal-eligible>false</goal-eligible>
+    <tags>bff-api, spaarkeai, workspace-intelligence, next-step-chips, record-memory, precursor</tags>
+    <dependencies>050 (record memory), 035/036 (OutcomeCard next-step chips)</dependencies>
+  </metadata>
+
+  <prompt>
+    Ship the workspace-intelligence PRECURSORS only (FR-B-13): next-step chips on OutcomeCards (from the Binding's declared transitions, per FR-A1-06) + record-scope memory items (FR-B-01). Full goal-tracking is a NAMED DEFERRAL — do NOT build a goal-tracking subsystem here. These are the two seams a future goal-tracking project consumes.
+  </prompt>
+
+  <role>Senior full-stack developer fluent in the OutcomeCard chip model (SpaarkeAi + AI.Widgets) and the generalized record memory service.</role>
+
+  <goal>
+    Next-step chips appear on OutcomeCards, sourced from the Binding's declared transitions (not model invention), and record-scope memory items are captured as workspace-intelligence precursors. No goal-tracking subsystem, state machine, or new Dataverse tables are introduced — the two precursors are the extent of in-scope work, shaped so a future goal-tracking project can consume them.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/spaarke-ai-architecture-redesign-r2/spec.md</file>
+    <file purpose="plan">projects/spaarke-ai-architecture-redesign-r2/plan.md</file>
+    <file purpose="module-guidance">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    <file purpose="bff-governance">.claude/constraints/bff-extensions.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="project">PRECURSORS ONLY — no goal-tracking subsystem, no state machine, no new Dataverse tables. Full goal-tracking is a named deferral.</constraint>
+    <constraint source="project">Next-step chips are sourced from the Binding's declared transitions (catalog DATA), NOT model-invented next steps (ADR-039).</constraint>
+    <constraint source="project">Record-scope memory items go through the generalized service (task 050) with the governance envelope (task 051).</constraint>
+    <constraint source="ADR-013">Chips/memory reach SpaarkeAi via PublicContracts / the OutcomeCard contract; no AI-internal leak.</constraint>
+    <constraint source="ADR-038">Tests are KEEP-path; no `Mock&lt;HttpMessageHandler&gt;`, no DI-registration tests.</constraint>
+    <constraint source="bff-hygiene">Run bff-extensions.md checklist; measure publish-size (SpaarkeAi is hot-path too); no new HIGH CVE; state Placement Justification.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai/outcome-card, next-step-chips, record-memory, workspace-intelligence-precursor</topic>
+    <files>
+      <file>docs/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>docs/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="OutcomeCard next-step chips" location="src/server/api/Sprk.Bff.Api/Services/Ai/">Tasks 035/036 OutcomeCard + next-step chips (Binding declared transitions) — chips extend that surface.</pattern>
+      <pattern name="Record memory service" location="src/server/api/Sprk.Bff.Api/Services/Ai/Memory/MatterMemoryService.cs">Generalized record memory (task 050) captures the precursor items.</pattern>
+      <pattern name="Widget render surface" location="src/client/shared/Spaarke.AI.Widgets/">OutcomeCard component render for chips (SpaarkeAi consumer).</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>D-M4 explicitly scopes workspace intelligence to PRECURSORS in r2 — the two seams (chips + record memory) that a later goal-tracking subsystem would consume. Building the subsystem now is out of scope (named deferral); this task ships just enough for the direction to be real.</background>
+    <dependencies>
+      <dependency task="050" status="required">Record memory service for precursor items.</dependency>
+      <dependency task="035" status="required">OutcomeCard + next-step chip surface.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Goal-tracking subsystem is a named deferral filed at close (090).</item>
+    </related-work>
+  </context>
+
+  <steps mode="directional">
+    <step order="0" name="Context">Load spec FR-B-13, the OutcomeCard chip surface, the record memory service.</step>
+    <step order="1" name="Next-step chips">Emit next-step chips from the Binding's declared transitions on OutcomeCards.</step>
+    <step order="2" name="Record-scope precursor memory">Capture record-scope memory items through the generalized service + envelope.</step>
+    <step order="3" name="Tests">Chips sourced from declared transitions (not invented); record precursor item persisted. Include NEGATIVE below.</step>
+    <step order="4" name="Verify + governance">Build; run tests; measure publish-size; state Placement Justification.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + run BFF tests</tool>
+    <tool name="npm">Build the SpaarkeAi/AI.Widgets chip render (build:prod)</tool>
+    <tool name="git">Commit on the project branch</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ (next-step chips from declared transitions + record precursor memory)</output>
+    <output type="code">src/client/shared/Spaarke.AI.Widgets/ (OutcomeCard chip render)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (chip-source + record-precursor tests)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Next-step chips render on OutcomeCards, sourced from the Binding's declared transitions (asserted by a test).</criterion>
+    <criterion testable="true">Record-scope memory precursor items persist through the generalized service + governance envelope.</criterion>
+    <criterion testable="true">No goal-tracking subsystem, state machine, or new Dataverse table is introduced (grep/inspection).</criterion>
+    <criterion testable="true">NEGATIVE: a chip whose target is NOT a declared Binding transition is rejected/not emitted — a test asserts chips are not model-invented.</criterion>
+    <criterion testable="true">Publish-size delta measured + reported; no new HIGH CVE; Placement Justification stated.</criterion>
+  </acceptance-criteria>
+</task>

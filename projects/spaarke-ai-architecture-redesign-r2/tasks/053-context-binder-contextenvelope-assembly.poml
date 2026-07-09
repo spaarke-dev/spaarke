@@ -1,0 +1,106 @@
+<task id="AIR2-053" project="spaarke-ai-architecture-redesign-r2">
+  <metadata>
+    <title>Context Binder + ContextEnvelope assembly — generalize the 6 R1 primitives; cache-stable</title>
+    <status>not-started</status>
+    <phase>M — G-R2-B Memory</phase>
+    <gate>G-R2-B (memory)</gate>
+    <estimated-effort>3 days</estimated-effort>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Assembles the single per-turn context contract that every AI turn consumes; generalizes six scattered R1 prompt-assembly primitives into one cache-stable Binder. Slice ordering + stability classes are load-bearing for prompt-cache hit rate (NFR-04) and for the token budgets (054). Cross-cutting brownfield refactor of the hottest AI path.</model-tier-reason>
+    <effort>xhigh</effort>
+    <parallel-safe>false</parallel-safe>
+    <goal-eligible>false</goal-eligible>
+    <tags>bff-api, context-binder, contextenvelope, prompt-cache, adr-040, brownfield</tags>
+    <dependencies>015 (ContextEnvelope v1), 050 (memory service), 016 (MemoryItem v1)</dependencies>
+  </metadata>
+
+  <prompt>
+    Build the Context Binder that assembles ONE `ContextEnvelope` per turn (FR-B-04), generalizing the SIX R1 prompt-assembly primitives into named envelope slices — cache-stable so stable-prefix slices (identity, schema cards, environment facts, preferences) precede the volatile ledger tail. Generalize: `BuildLedgerOutputsContext` → Memory.Conversation (+ fresh-retrieval policy, FR-B-07); host-identity line → Business; host-record schema card + per-table write contracts + lookup metadata → Business (Dataverse metadata as first-class context, assembled once); `BuildCurrentDateDirective` → Environment facts; caller-contact resolution → User (FR-B-06); gate-outcome persistence → Memory.Conversation. Memory never duplicates live Dataverse fields — the Binder reads those directly.
+  </prompt>
+
+  <role>Senior .NET developer fluent in the R1 prompt-assembly pipeline (SprkChatAgentFactory / ChatHistoryManager / OrchestratorPromptBuilder), Anthropic prompt-cache stability, and ADR-040 ledger semantics.</role>
+
+  <goal>
+    A Context Binder assembles one governed `ContextEnvelope` per turn from six named slices {User, Workspace, Business, Memory, Organizational, Semantic} with explicit stability classes: stable-prefix slices (identity, schema cards, environment facts, preferences) are emitted before the volatile ledger tail so the prompt prefix is cache-stable (NFR-04). The six R1 primitives are folded into the Binder (not left scattered); Dataverse metadata (schema card + write contracts + lookup metadata) is assembled ONCE as first-class Business context; Memory.Conversation reads the ledger (not a parallel cache) with the fresh-retrieval policy; the Binder produces the ContextEnvelope v1 contract shape.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/spaarke-ai-architecture-redesign-r2/spec.md</file>
+    <file purpose="plan">projects/spaarke-ai-architecture-redesign-r2/plan.md</file>
+    <file purpose="design">projects/spaarke-ai-architecture-redesign-r2/design.md</file>
+    <file purpose="baseline-note">projects/spaarke-ai-architecture-redesign-r2/notes/</file>
+    <file purpose="module-guidance">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    <file purpose="bff-governance">.claude/constraints/bff-extensions.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-040">Memory.Conversation = ledger facade, NOT a parallel session cache; the Binder reads the ledger. Store-before-render preserved.</constraint>
+    <constraint source="NFR-04">Prompt-cache stability — stable-prefix slices precede the volatile tail; slice ordering is deterministic (no timestamps/GUIDs in the stable prefix, per FR-P0-03).</constraint>
+    <constraint source="project">Memory never duplicates live Dataverse fields — the Binder reads Business (Dataverse metadata + record fields) directly; Record memory holds only derived knowledge.</constraint>
+    <constraint source="project">Generalize the SIX R1 primitives into the Binder — do not leave duplicate assembly paths (grep-verify the old call sites are folded in).</constraint>
+    <constraint source="ADR-013">Envelope consumed by satellites only via PublicContracts (ContextEnvelope v1).</constraint>
+    <constraint source="ADR-038">Binder tests are KEEP-path integration tests; no `Mock&lt;HttpMessageHandler&gt;`, no DI-registration tests.</constraint>
+    <constraint source="bff-hygiene">Run bff-extensions.md checklist; measure publish-size; no new HIGH CVE; state Placement Justification (Binder runs inside the turn — latency-coupled, belongs in BFF).</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai/context-assembly, prompt-cache-stability, ledger-facade, dataverse-metadata-context</topic>
+    <files>
+      <file>docs/adr/ADR-040-session-ledger.md</file>
+      <file>docs/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Ledger-outputs primitive → Memory.Conversation" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/ChatHistoryManager.cs:302">BuildLedgerOutputsContext — generalize into the Memory.Conversation slice (+ fresh-retrieval policy).</pattern>
+      <pattern name="Current-date primitive → Environment" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/SprkChatAgentFactory.cs:129">BuildCurrentDateDirective — generalize into the Environment-facts slice.</pattern>
+      <pattern name="Host-identity primitive → Business/User" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/PlaybookChatContextProvider.cs:582">Host-identity assembly — split into Business (host record) + User (caller identity).</pattern>
+      <pattern name="Prompt builder" location="src/server/api/Sprk.Bff.Api/Services/Ai/Chat/OrchestratorPromptBuilder.cs:44">OrchestratorPromptBuilder — the assembly site the Binder feeds; fold slice emission here in stable order.</pattern>
+      <pattern name="ContextEnvelope v1 contract" location="src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/">Task 015 ContextEnvelope v1 — the shape the Binder produces.</pattern>
+      <pattern name="Memory service" location="src/server/api/Sprk.Bff.Api/Services/Ai/Memory/MatterMemoryService.cs">Generalized service (task 050) feeds the Memory.Record/User slices.</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>R1 assembled prompt context from six scattered primitives with no single contract, no cache-stability discipline, and no budget. The Binder is the D-M2 net-new collaborator that formalizes them into one ContextEnvelope. Cache-stability matters: the stable prefix (identity/schema/environment/preferences) must be byte-stable across turns for prompt-cache hits, which requires FR-P0-03's determinism (no timestamps/GUIDs in that prefix).</background>
+    <dependencies>
+      <dependency task="015" status="required">ContextEnvelope v1 contract shape.</dependency>
+      <dependency task="050" status="required">Generalized memory service (Memory slices).</dependency>
+      <dependency task="016" status="required">MemoryItem v1 (memory slice items).</dependency>
+    </dependencies>
+    <related-work>
+      <item>054 sets per-slice token budgets against the FR-P0-02 measurement and makes a breach fail eval; 056 supplies the Memory.Conversation fresh-retrieval policy; 055 supplies the User caller-contact resolution.</item>
+    </related-work>
+  </context>
+
+  <steps mode="directional">
+    <step order="0" name="Context">Load spec FR-B-04, ADR-040, ContextEnvelope v1. Read the four primitive anchors; map each to a slice + stability class.</step>
+    <step order="1" name="Slice model + stability classes">Define the six slices with stability classes; stable-prefix slices precede the volatile ledger tail. Deterministic ordering (no timestamps/GUIDs in the prefix).</step>
+    <step order="2" name="Fold the six primitives">Generalize each R1 primitive into its slice; remove the scattered assembly paths (grep-verify folded).</step>
+    <step order="3" name="Dataverse metadata as Business, once">Assemble schema card + per-table write contracts + lookup metadata once into Business; Binder reads live fields directly (no memory duplication).</step>
+    <step order="4" name="Memory + gate-outcome into Conversation">Wire Memory.Record/User from the generalized service; Memory.Conversation from the ledger (+ gate-outcome persistence); leave the fresh-retrieval policy hook for 056.</step>
+    <step order="5" name="Produce ContextEnvelope v1">Emit the envelope contract shape; expose via PublicContracts.</step>
+    <step order="6" name="Tests">Assert slice ordering (stable prefix first); byte-stable prefix across two identical turns; envelope shape; no Dataverse-field duplication in Memory. Include NEGATIVE below.</step>
+    <step order="7" name="Verify + governance">Build; run tests; measure publish-size; state Placement Justification.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + run Binder integration tests</tool>
+    <tool name="git">Commit on the project branch</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ (Context Binder + slice assembly)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ (ContextEnvelope v1 production)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (Binder assembly + cache-stability tests)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The Binder produces ONE ContextEnvelope v1 per turn with all six named slices; the six R1 primitives are folded in (old scattered call sites removed — grep-verified).</criterion>
+    <criterion testable="true">Stable-prefix slices (identity, schema cards, environment facts, preferences) precede the volatile ledger tail; the stable prefix is byte-identical across two identical turns (asserted by a test).</criterion>
+    <criterion testable="true">Dataverse metadata (schema card + write contracts + lookup metadata) is assembled once into Business; the Binder reads live record fields directly.</criterion>
+    <criterion testable="true">Memory.Conversation reads the ledger (not a parallel cache, ADR-040); Memory.Record/User read the generalized service.</criterion>
+    <criterion testable="true">The envelope is consumed only via PublicContracts (ADR-013).</criterion>
+    <criterion testable="true">NEGATIVE: a Memory slice item that merely mirrors a live Dataverse field is excluded/rejected — a test asserts Memory does not duplicate Business fields.</criterion>
+    <criterion testable="true">Publish-size delta measured + reported; no new HIGH CVE; Placement Justification stated.</criterion>
+  </acceptance-criteria>
+</task>

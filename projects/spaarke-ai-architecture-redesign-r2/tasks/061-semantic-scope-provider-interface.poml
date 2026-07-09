@@ -1,0 +1,94 @@
+<task id="AIR2-061" project="spaarke-ai-architecture-redesign-r2">
+  <metadata>
+    <title>Semantic-scope provider interface — over existing RagService</title>
+    <status>not-started</status>
+    <phase>M — G-R2-B Memory</phase>
+    <gate>G-R2-B (memory)</gate>
+    <estimated-effort>1 day</estimated-effort>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Interface over an EXISTING, shipped retrieval implementation (RagService + PrivilegeFilterBuilder); wraps, does not rebuild. Bounded contract surface for the ContextEnvelope Semantic slice.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-safe>true</parallel-safe>
+    <goal-eligible>false</goal-eligible>
+    <tags>bff-api, contextenvelope, semantic-scope, provider-interface, rag, existing-impl</tags>
+    <dependencies>015 (ContextEnvelope v1 — Semantic slice), 053 (Binder)</dependencies>
+  </metadata>
+
+  <prompt>
+    Ship the Semantic-scope provider INTERFACE (FR-B-12) over the EXISTING Azure AI Search + SPE retrieval (`RagService.cs`) — the implementation already exists, so this WRAPS it as a Binder-consumable interface, honoring the "our AI Search, not Dataverse search" ruling. The ContextEnvelope Semantic slice reads through this interface; the retrieval ACL (PrivilegeFilterBuilder) is preserved — do not bypass it.
+  </prompt>
+
+  <role>Senior .NET developer fluent in the Spaarke RAG retrieval path (RagService + PrivilegeFilterBuilder), the Context Binder Semantic slice, and ADR-013 facade discipline.</role>
+
+  <goal>
+    A Semantic-scope provider interface exists over the existing `RagService` retrieval (Azure AI Search + SPE), consumed by the ContextEnvelope Semantic slice. The interface does not fork or reimplement retrieval — it wraps the existing service and preserves the always-appended `PrivilegeFilterBuilder` ACL. Dataverse search is NOT used as the semantic source (honors the ruling).
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/spaarke-ai-architecture-redesign-r2/spec.md</file>
+    <file purpose="plan">projects/spaarke-ai-architecture-redesign-r2/plan.md</file>
+    <file purpose="module-guidance">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    <file purpose="bff-governance">.claude/constraints/bff-extensions.md</file>
+    <file purpose="existing-impl">src/server/api/Sprk.Bff.Api/Services/Ai/RagService.cs</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="project">WRAP the existing RagService — do not fork/reimplement retrieval (CLAUDE.md §11 default-to-reuse).</constraint>
+    <constraint source="project">Preserve the PrivilegeFilterBuilder ACL — the interface never bypasses the retrieval-time privilege filter.</constraint>
+    <constraint source="project">Semantic source is our Azure AI Search + SPE, NOT Dataverse search (honors the ruling).</constraint>
+    <constraint source="ADR-013">Interface lives with the Binder/PublicContracts surface; no AI-internal leak to CRUD.</constraint>
+    <constraint source="ADR-038">Interface tests are KEEP-path integration tests; no `Mock&lt;HttpMessageHandler&gt;`, no DI-registration tests.</constraint>
+    <constraint source="bff-hygiene">Run bff-extensions.md checklist; measure publish-size; no new HIGH CVE; state Placement Justification.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai/rag-retrieval, semantic-scope, provider-interface, privilege-filter, reuse</topic>
+    <files>
+      <file>docs/adr/ADR-013-ai-architecture.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="Existing retrieval impl (wrap this)" location="src/server/api/Sprk.Bff.Api/Services/Ai/RagService.cs">Azure AI Search + SPE retrieval — the interface wraps it, not rebuilds it.</pattern>
+      <pattern name="Retrieval-time ACL (preserve)" location="src/server/api/Sprk.Bff.Api/Services/Ai/Security/PrivilegeFilterBuilder.cs">Privilege filter always appended at retrieval — the interface must not bypass it.</pattern>
+      <pattern name="Context Binder Semantic slice" location="src/server/api/Sprk.Bff.Api/Services/Ai/">Task 053 Binder — the Semantic slice consumes this interface.</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>Unlike the Organizational interface (no impl yet), the Semantic implementation already ships as RagService. FR-B-12 formalizes it as one of the six ContextEnvelope slices behind a stable interface, without touching the retrieval internals or the ACL.</background>
+    <dependencies>
+      <dependency task="015" status="required">ContextEnvelope v1 Semantic slice shape.</dependency>
+      <dependency task="053" status="required">Binder that consumes the interface.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 063 spike verifies the PrivilegeFilterBuilder ACL is enforced at retrieval — this interface must not weaken that finding.</item>
+    </related-work>
+  </context>
+
+  <steps mode="directional">
+    <step order="0" name="Context">Load spec FR-B-12, RagService, PrivilegeFilterBuilder, the Semantic slice shape.</step>
+    <step order="1" name="Interface over RagService">Define a Semantic-scope provider interface wrapping the existing retrieval; no reimplementation.</step>
+    <step order="2" name="Preserve ACL">Route through the existing PrivilegeFilterBuilder path; no bypass.</step>
+    <step order="3" name="Binder consumption">The Semantic slice reads through the interface.</step>
+    <step order="4" name="Tests">Interface returns wrapped retrieval results; ACL preserved; Dataverse search not used. Include NEGATIVE below.</step>
+    <step order="5" name="Verify + governance">Build; run tests; measure publish-size; state Placement Justification.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + run interface/retrieval tests</tool>
+    <tool name="git">Commit on the project branch</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/ (Semantic-scope provider interface wrapping RagService)</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/ (interface + ACL-preservation tests)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">A Semantic-scope provider interface wraps the existing RagService (no forked/reimplemented retrieval) and the Binder Semantic slice reads through it.</criterion>
+    <criterion testable="true">The PrivilegeFilterBuilder ACL is preserved — the interface routes through the existing privilege-filtered retrieval path.</criterion>
+    <criterion testable="true">The semantic source is Azure AI Search + SPE, not Dataverse search.</criterion>
+    <criterion testable="true">NEGATIVE: no interface path returns retrieval results WITHOUT the privilege filter applied — a test asserts the ACL is never bypassed.</criterion>
+    <criterion testable="true">Publish-size delta measured + reported; no new HIGH CVE; Placement Justification stated.</criterion>
+  </acceptance-criteria>
+</task>

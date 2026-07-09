@@ -3,7 +3,7 @@
  *
  * Covers:
  * (a) Playbooks render as cards with correct name, description, and capability badges.
- * (b) Clicking a card dispatches a playbook_change event to the 'conversation' channel.
+ * (b) Clicking a card dispatches a playbook-selected event to the 'conversation' channel.
  * (c) An empty playbook list renders the EmptyState (never a blank pane).
  * (d) isLoading=true renders Skeleton placeholders, not card content.
  * (e) error prop renders the error message, not card content.
@@ -137,8 +137,17 @@ describe('PlaybookGalleryWidget — card rendering', () => {
 // (b) Selection dispatch
 // ---------------------------------------------------------------------------
 
+// NOTE (test-repair task 021, 2026-07-08): this describe block previously
+// asserted `type: 'playbook_change'`, but PlaybookGalleryWidget.tsx dispatches
+// `type: 'playbook-selected'` (see its `handleSelect`/dispatch call). Per
+// PaneEventTypes.ts's own ConversationPaneEvent docstring, these are TWO
+// distinct, intentional event types: `playbook_change` is "the active AI
+// playbook was switched (legacy / in-chat switch)" while `playbook-selected`
+// is "user selected a playbook from the PlaybookGalleryWidget" — exactly this
+// widget's scenario. Production is correct per its own documented contract;
+// the test was using the wrong (legacy) type string.
 describe('PlaybookGalleryWidget — playbook selection dispatch', () => {
-  it('dispatches playbook_change to the conversation channel when a card is clicked', async () => {
+  it('dispatches playbook-selected to the conversation channel when a card is clicked', async () => {
     const user = userEvent.setup();
     const bus = new PaneEventBus();
     const received: ConversationPaneEvent[] = [];
@@ -151,7 +160,7 @@ describe('PlaybookGalleryWidget — playbook selection dispatch', () => {
 
     expect(received).toHaveLength(1);
     expect(received[0]).toMatchObject({
-      type: 'playbook_change',
+      type: 'playbook-selected',
       playbookId: 'pb-legal-review',
       playbookName: 'Legal Review',
     });
@@ -193,12 +202,12 @@ describe('PlaybookGalleryWidget — playbook selection dispatch', () => {
     await user.click(screen.getByRole('button', { name: /Document Summary/ }));
 
     expect(received[0]).toMatchObject({
-      type: 'playbook_change',
+      type: 'playbook-selected',
       playbookId: 'pb-document-compare',
       playbookName: 'Document Compare',
     });
     expect(received[1]).toMatchObject({
-      type: 'playbook_change',
+      type: 'playbook-selected',
       playbookId: 'pb-summary',
       playbookName: 'Document Summary',
     });
@@ -217,7 +226,7 @@ describe('PlaybookGalleryWidget — playbook selection dispatch', () => {
     await user.keyboard('{Enter}');
 
     expect(received).toHaveLength(1);
-    expect(received[0].type).toBe('playbook_change');
+    expect(received[0].type).toBe('playbook-selected');
   });
 
   it('supports keyboard selection via Space key', async () => {
@@ -233,7 +242,7 @@ describe('PlaybookGalleryWidget — playbook selection dispatch', () => {
     await user.keyboard('{ }');
 
     expect(received).toHaveLength(1);
-    expect(received[0].type).toBe('playbook_change');
+    expect(received[0].type).toBe('playbook-selected');
   });
 });
 

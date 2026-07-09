@@ -1,0 +1,94 @@
+<task id="AIR2-073" project="spaarke-ai-architecture-redesign-r2">
+  <metadata>
+    <title>Track-B hygiene sweep — TimeProvider probes, ScopeModelIndex drift, dead App Service env keys</title>
+    <status>not-started</status>
+    <phase>H — G-R2-D Hardening</phase>
+    <gate>G-R2-D (hardening)</gate>
+    <estimated-effort>0.5 day</estimated-effort>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Bounded mechanical cleanup over well-understood surfaces (Task.Delay→TimeProvider, script drift, stale config keys); no architectural decisions, low blast radius.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-safe>true</parallel-safe>
+    <goal-eligible>true</goal-eligible>
+    <tags>bff-api, hardening, hygiene, timeprovider, config-drift, adr-038</tags>
+    <dependencies>none (Wave H; independent hygiene rows R9 + R11)</dependencies>
+  </metadata>
+
+  <prompt>
+    Execute the Track-B hygiene sweep (spec FR-D-04, design rows R9 + R11): replace `Task.Delay`-based timing probes with `TimeProvider` where they gate testability; reconcile `Refresh-ScopeModelIndex.ps1` drift against the current catalog; and remove dead App Service environment keys. Bounded cleanup — do not expand into refactors beyond these three surfaces.
+  </prompt>
+
+  <role>Maintenance engineer fluent in the Spaarke BFF timing conventions (TimeProvider per ADR-038 test architecture), the scope-model index refresh script, and App Service configuration.</role>
+
+  <goal>
+    `Task.Delay` occurrences that block deterministic testing are converted to `TimeProvider` (per the test-architecture standard); `Refresh-ScopeModelIndex.ps1` no longer drifts from the live catalog (drift identified + corrected or documented); dead App Service env keys are enumerated and removed. Each change is scoped, evidenced, and does not alter runtime behavior beyond removing the hygiene defect.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/spaarke-ai-architecture-redesign-r2/spec.md</file>
+    <file purpose="plan">projects/spaarke-ai-architecture-redesign-r2/plan.md</file>
+    <file purpose="scope-refresh-script">scripts/Refresh-ScopeModelIndex.ps1</file>
+    <file purpose="test-architecture">docs/standards/TEST-ARCHITECTURE.md</file>
+    <file purpose="bff-governance">.claude/constraints/bff-extensions.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-038">Prefer `TimeProvider` over `Stopwatch`/`Task.Delay` for testable timing; changed tests stay on the KEEP path — no `Mock&lt;HttpMessageHandler&gt;`, no DI-registration tests.</constraint>
+    <constraint source="project">Bounded to the three named surfaces (R9 TimeProvider probes, R11 script drift, dead env keys); no scope expansion into unrelated refactors.</constraint>
+    <constraint source="bff-hygiene">Measure publish-size delta; no new HIGH CVE; run the bff-extensions.md checklist for any BFF code touched.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>hygiene/timeprovider, config-drift, scope-model-index</topic>
+    <files>
+      <file>docs/standards/TEST-ARCHITECTURE.md</file>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="ScopeModelIndex refresh" location="scripts/Refresh-ScopeModelIndex.ps1">The script that mirrors the Dataverse scope/model catalog; reconcile its output against the live catalog to detect drift.</pattern>
+      <pattern name="TimeProvider convention" location="docs/standards/TEST-ARCHITECTURE.md">`TimeProvider` over `Stopwatch`/`Task.Delay` for deterministic timing in probes/tests.</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>These are inherited backlog rows (design §10 R9/R11) accumulated across prior projects. They are cheap to close during the hardening gate and reduce flaky-test + config-rot surface. This task closes them without touching feature behavior.</background>
+    <dependencies>
+      <dependency task="none" status="n/a">Independent hygiene sweep.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 070 (publish-size harness) reports the size delta for any BFF code touched here.</item>
+      <item>Task 079 (G-R2-D verification) notes hygiene-sweep completion.</item>
+    </related-work>
+  </context>
+
+  <steps mode="directional">
+    <step order="0" name="Inventory">Grep for `Task.Delay` in timing/probe paths; run `Refresh-ScopeModelIndex.ps1` and diff vs live catalog; enumerate App Service env keys vs actual references.</step>
+    <step order="1" name="TimeProvider">Convert probe/testability-blocking `Task.Delay` sites to `TimeProvider`; update affected tests to KEEP-path form.</step>
+    <step order="2" name="Script drift">Correct the ScopeModelIndex script drift (or document why a diff is expected); confirm a fresh run matches the catalog.</step>
+    <step order="3" name="Dead keys">Remove dead App Service env keys; record removed keys in project notes.</step>
+    <step order="4" name="Verify">Build + run affected tests; measure publish-size delta; state bff-extensions checklist result.</step>
+  </steps>
+
+  <tools>
+    <tool name="rg">Locate Task.Delay + env-key references</tool>
+    <tool name="dotnet">Build + run affected tests</tool>
+    <tool name="pwsh">Run Refresh-ScopeModelIndex.ps1 for drift check</tool>
+    <tool name="git">Commit on the project branch</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/ (Task.Delay → TimeProvider conversions)</output>
+    <output type="script">scripts/Refresh-ScopeModelIndex.ps1 (drift correction if needed)</output>
+    <output type="config">App Service configuration (dead env keys removed)</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r2/notes/ (hygiene sweep record: keys removed, drift result)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">Testability-blocking `Task.Delay` probe sites are converted to `TimeProvider`; affected tests pass on the KEEP path.</criterion>
+    <criterion testable="true">A fresh `Refresh-ScopeModelIndex.ps1` run matches the live catalog (drift corrected or the expected diff documented).</criterion>
+    <criterion testable="true">Dead App Service env keys are removed and enumerated in the project notes.</criterion>
+    <criterion testable="true">Publish-size delta measured; no new HIGH CVE; bff-extensions checklist stated for BFF code touched.</criterion>
+    <criterion testable="true">NEGATIVE: no change is made outside the three named surfaces (R9/R11/env keys) — diff review confirms no unrelated refactor.</criterion>
+  </acceptance-criteria>
+</task>

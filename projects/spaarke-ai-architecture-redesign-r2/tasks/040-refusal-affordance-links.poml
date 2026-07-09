@@ -1,0 +1,103 @@
+<task id="AIR2-040" project="spaarke-ai-architecture-redesign-r2">
+  <metadata>
+    <title>Refusal-affordance links — Document Upload deep-link from the sprk_document hard-block (FR-A1-11 / D-F0(d))</title>
+    <status>not-started</status>
+    <phase>Wave J — G-R2-A Judgment + Friction</phase>
+    <gate>G-R2-A (judgment)</gate>
+    <estimated-effort>1.5 days</estimated-effort>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Bounded, single-case affordance wiring over existing link-composition + hard-block primitives; the doctrine (NFR-10 no-refusal-without-affordance) is set upstream in D-F0. No new architecture.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>true</parallel-safe>
+    <goal-eligible>true</goal-eligible>
+    <tags>bff-api, spaarkeai, affordance, refusal, deep-link, host-scoped</tags>
+    <dependencies>D-F0 doctrine (task 030) establishes the affordance-carrying-refusal rule this first case implements</dependencies>
+  </metadata>
+
+  <prompt>
+    Implement the first refusal-affordance case: the R5-E `sprk_document` hard-block message must deep-link the Document Upload code page (`DocumentUploadWizard`), pre-scoped to the host record where possible (spec FR-A1-11, design D-F0(d), R13). This proves NFR-10 — no refusal/block ships without an actionable affordance — starting with the highest-value block.
+  </prompt>
+
+  <role>Full-stack developer fluent in the Spaarke AI hard-block/refusal path, server link composition (`HandoffUrlBuilder`), and the DocumentUploadWizard code page host-scoping.</role>
+
+  <goal>
+    When the AI hard-blocks a `sprk_document` create/write (R5-E), the refusal message carries an actionable, server-composed deep-link to the Document Upload code page, pre-scoped to the host record when a host record is known. The affordance travels through the existing UserSummary/link surface — not a bespoke message string — so the client renders it as a clickable action, and the block reads as "here's how to do this correctly," not a dead end.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/spaarke-ai-architecture-redesign-r2/spec.md</file>
+    <file purpose="plan">projects/spaarke-ai-architecture-redesign-r2/plan.md</file>
+    <file purpose="design">projects/spaarke-ai-architecture-redesign-r2/design.md</file>
+    <file purpose="module-guidance">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    <file purpose="bff-governance">.claude/constraints/bff-extensions.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="NFR-10">No refusal/block ships without an actionable affordance; this is the first enforced case.</constraint>
+    <constraint source="D-F0(b)">The affordance does NOT weaken the hard block — the block still fires; the degradation ladder operates BELOW the side-effect line (the user is redirected to the correct upload path, not granted the blocked write).</constraint>
+    <constraint source="ADR-013">The deep-link is server-composed and reaches CRUD/consumers only via `PublicContracts/`; do not inject AI-internal link builders into CRUD.</constraint>
+    <constraint source="ADR-038">Test is a KEEP-path integration test; no `Mock&lt;HttpMessageHandler&gt;`, no DI-registration tests.</constraint>
+    <constraint source="project">Deep-link is host-scoped where a host record is known; degrade to an unscoped link (still valid) when it is not.</constraint>
+    <constraint source="bff-hygiene">Run the bff-extensions.md checklist; measure publish-size delta vs the ~49.63 MB baseline; no new HIGH CVE; Placement Justification.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai/refusal, ai/affordance, link-composition, code-pages</topic>
+    <files>
+      <file>docs/adr/ADR-013-ai-architecture.md</file>
+      <file>docs/adr/ADR-039-grounded-execution-closed-catalogs.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>docs/standards/MODAL-DECISION-CRITERIA.md</file>
+    </files>
+    <patterns>
+      <pattern name="sprk_document hard-block (R5-E)" location="src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/DataverseCreateRecordHandler.cs">Where the sprk_document create hard-block fires — attach the affordance here.</pattern>
+      <pattern name="Server link composition" location="src/server/api/Sprk.Bff.Api/Api/Agent/HandoffUrlBuilder.cs">Existing server-side deep-link composition the Document Upload link reuses (host-scoping).</pattern>
+      <pattern name="Refusal message surface" location="src/server/api/Sprk.Bff.Api/Services/Ai/ToolResult.cs:326">UserSummary (:326) — the audience-split surface the affordance link travels on, not a raw string.</pattern>
+      <pattern name="Document Upload code page (target)" location="src/solutions/DocumentUploadWizard/src/DocumentUploadWizardDialog.tsx">Deep-link target; host-record scoping parameters to pre-populate.</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>R5-E hard-blocks direct `sprk_document` creation because a bare document row is not a real document operation (ingestion-parity, NFR-12). Today that block is a dead-end refusal. This task makes it the reference affordance: redirect to the correct upload flow, pre-scoped to the host record. It is the first of many; the doctrine (task 030) sets the rule, this sets the pattern.</background>
+    <dependencies>
+      <dependency task="030" status="pending">D-F0 doctrine establishes the affordance-carrying-refusal rule.</dependency>
+    </dependencies>
+    <related-work>
+      <item>FR-A1-06 (task 035) OutcomeCard shares the same link-composition surface.</item>
+      <item>NFR-12 ingestion-parity is why the raw sprk_document write stays blocked.</item>
+    </related-work>
+  </context>
+
+  <steps mode="directional">
+    <step order="0" name="Context + governance">Load spec FR-A1-11, NFR-10, bff-extensions.md. Confirm the hard-block location + HandoffUrlBuilder + UserSummary surface via anchors.</step>
+    <step order="1" name="Compose the deep-link">Build the Document Upload deep-link via HandoffUrlBuilder, host-scoped to the known record; degrade to unscoped when no host record.</step>
+    <step order="2" name="Attach to the refusal">Carry the link on the UserSummary/affordance surface of the sprk_document hard-block refusal (do NOT weaken the block).</step>
+    <step order="3" name="Expose via PublicContracts">Ensure the affordance is reachable through the facade, not by injecting AI internals into CRUD.</step>
+    <step order="4" name="Test">KEEP-path integration test: the hard-block still fires AND the refusal carries a valid, host-scoped Document Upload deep-link; the block does not grant the write.</step>
+    <step order="5" name="Verify + governance">Build; run tests; measure publish-size delta; bff-extensions checklist; no new HIGH CVE; Placement Justification.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + run BFF tests</tool>
+    <tool name="git">Commit on the project branch</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/Handlers/DataverseCreateRecordHandler.cs (affordance on the sprk_document block)</output>
+    <output type="code">src/server/api/Sprk.Bff.Api/Api/Agent/HandoffUrlBuilder.cs (Document Upload deep-link, host-scoped)</output>
+    <output type="test">tests/integration/contract/ or tests/unit/ (block-still-fires + affordance-present)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The sprk_document hard-block still fires (the blocked write is NOT granted) — asserted by a test.</criterion>
+    <criterion testable="true">The refusal message carries a server-composed Document Upload deep-link, host-scoped to the known record where one exists.</criterion>
+    <criterion testable="true">When no host record is known, the affordance degrades to a valid unscoped Document Upload link (still actionable), not an empty/dead message.</criterion>
+    <criterion testable="true">The affordance travels on the UserSummary/link surface via PublicContracts (ADR-013), not a bespoke raw string bypassing the facade.</criterion>
+    <criterion testable="true">Publish-size delta measured; no new HIGH CVE; Placement Justification stated.</criterion>
+    <criterion testable="true">NEGATIVE: the affordance never turns the hard block into a successful bare `sprk_document` write (ingestion-parity/NFR-12 intact) — covered by a test.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If pre-scoping the deep-link to the host record requires content or identifiers the refusal path cannot access without a new AI-internal dependency in CRUD (ADR-013 tension), STOP and surface per CLAUDE.md §6.5 rather than injecting internals.</trigger>
+  </escalation>
+</task>

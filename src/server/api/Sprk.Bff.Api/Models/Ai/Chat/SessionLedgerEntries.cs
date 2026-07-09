@@ -137,8 +137,14 @@ public sealed record SessionOutput
     public required int Turn { get; init; }
 
     /// <summary>
-    /// Rendering contract: <c>informational | work_product | overlay | email | record | notification</c>.
+    /// Rendering contract: <c>informational | work_product | overlay | email | record | notification | compose</c>.
     /// The only contract between storage and rendering (ADR-040).
+    /// The <c>compose</c> member (ComposeDisposition v1 seam — spaarke-ai-architecture-redesign-r2
+    /// task 010, FR-A0-06/08) rides this SAME string field and the existing SSE/ledger surface;
+    /// it is NOT a second rendering path. Its SSE frame + supersession keying live in
+    /// <see cref="Services.Ai.PublicContracts.ComposeDispositionFrame"/> / <see cref="Services.Ai.PublicContracts.ComposeDisposition"/>.
+    /// The structured-edit payload inside <see cref="Payload"/> (target_text / new_text / match_mode / …)
+    /// is Compose-owned and opaque to the platform — the core owns the envelope only.
     /// </summary>
     public required string Disposition { get; init; }
 
@@ -159,6 +165,27 @@ public sealed record SessionOutput
     /// <summary>UTC timestamp the output was written to the ledger.</summary>
     public DateTimeOffset CreatedAt { get; init; }
 }
+
+/// <summary>
+/// Client projection of a <c>compose</c>-disposition <see cref="SessionOutput"/> for the FR-04
+/// render-follows-store read endpoint (<c>GET /api/ai/chat/sessions/{id}/compose-outputs</c> —
+/// spaarkeai-compose-r2 task 016). ComposeWorkspace re-reads these to materialize AI-drafted
+/// content into the editor (ADR-040: the durable ledger entry is the source of truth, never a
+/// client buffer).
+///
+/// <para>
+/// <see cref="Payload"/> is passed through OPAQUELY — its snake_case Compose-owned fields
+/// (<c>target_text</c> / <c>new_text</c> / <c>match_mode</c> / …) are preserved verbatim; the
+/// platform never parses it (ADR-013 / ADR-040 envelope-only ownership). The serializer's
+/// camelCase policy applies only to this record's OUTER property names, not the nested element.
+/// </para>
+/// </summary>
+public sealed record ComposeLedgerOutputDto(
+    string Key,
+    string BindingId,
+    int Turn,
+    string Disposition,
+    JsonElement Payload);
 
 /// <summary>
 /// A replayable audit record of one text-turn's tool-call chain (ADR-040 ToolChain entry).

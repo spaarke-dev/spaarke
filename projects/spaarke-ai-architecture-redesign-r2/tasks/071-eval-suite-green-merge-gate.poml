@@ -1,0 +1,93 @@
+<task id="AIR2-071" project="spaarke-ai-architecture-redesign-r2">
+  <metadata>
+    <title>Eval-suite-green merge gate — golden-utterance + resourcefulness + origin-classification families</title>
+    <status>not-started</status>
+    <phase>H — G-R2-D Hardening</phase>
+    <gate>G-R2-D (hardening)</gate>
+    <estimated-effort>0.5 day</estimated-effort>
+    <model-tier>sonnet</model-tier>
+    <model-tier-reason>Wires already-authored eval families into the existing CI eval-gate; mechanical CI plumbing over an established gate mechanism — no new architecture, no ambiguous policy design.</model-tier-reason>
+    <effort>medium</effort>
+    <parallel-safe>true</parallel-safe>
+    <goal-eligible>true</goal-eligible>
+    <tags>bff-api, testing, eval-gate, ci, adr-038, nfr-02</tags>
+    <dependencies>031 (resourcefulness family), 033 (origin-classification family), 054 (budget-fails-eval)</dependencies>
+  </metadata>
+
+  <prompt>
+    Make the eval suite a hard CI merge gate covering all R2 in-scope families — golden-utterance + resourcefulness (from task 031) + origin-classification (from task 033) — with budget-breach-fails-eval wired in (FR-B-05 / task 054). Memory-poisoning families are DEFERRED to the governance project (spec FR-B-10 / Deferrals) and MUST NOT be added here. Spec FR-D-02 / NFR-02.
+  </prompt>
+
+  <role>CI/eval engineer fluent in the Spaarke golden-utterance harness, the `eval-gate` CI stage, and the ADR-038 testing pyramid.</role>
+
+  <goal>
+    The CI `eval-gate` stage runs golden-utterance + resourcefulness + origin-classification families and fails the merge on any family red or on a ContextEnvelope per-slice budget breach. The gate is wired into the existing `sdap-ci.yml` eval-gate (no second gate mechanism). Memory-poisoning families are explicitly excluded with a comment pointing at the governance-project deferral.
+  </goal>
+
+  <inputs>
+    <file purpose="spec">projects/spaarke-ai-architecture-redesign-r2/spec.md</file>
+    <file purpose="plan">projects/spaarke-ai-architecture-redesign-r2/plan.md</file>
+    <file purpose="eval-family-note">projects/spaarke-ai-architecture-redesign-r2/notes/d-f0-eval-family-spec.md</file>
+    <file purpose="ci-workflow">.github/workflows/sdap-ci.yml</file>
+    <file purpose="testing-adr">docs/adr/ADR-038-testing-strategy.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-038">Eval-green stays a merge gate; contract/eval tests are a KEEP path; no `Mock&lt;HttpMessageHandler&gt;`, no DI-registration or ctor null-check tests.</constraint>
+    <constraint source="NFR-02">All in-scope families (golden-utterance + resourcefulness + origin-classification) MUST be green as a CI merge gate.</constraint>
+    <constraint source="FR-B-05">A per-slice ContextEnvelope token-budget breach fails the eval run (budget-breach-fails-eval).</constraint>
+    <constraint source="project">Memory-poisoning eval families are DEFERRED (FR-B-10) — MUST NOT be included; leave a comment citing the governance-project deferral.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>testing/eval-gate, ci, golden-utterances, context-budget</topic>
+    <files>
+      <file>docs/adr/ADR-038-testing-strategy.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="CI eval-gate" location=".github/workflows/sdap-ci.yml:225">The existing `eval-gate` stage — extend it to run the two new families + the budget check; do not add a parallel gate.</pattern>
+      <pattern name="Golden-utterance suite" location="tests/integration/contract/Eval/golden-utterances.json">The eval suite the resourcefulness + origin-classification families join.</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>The resourcefulness (031) and origin-classification (033) families are authored earlier in the project; this task promotes them to blocking CI status and adds the budget-fails-eval hook. It closes the NFR-02 obligation for G-R2-D.</background>
+    <dependencies>
+      <dependency task="031" status="required">Resourcefulness eval family must exist to gate on.</dependency>
+      <dependency task="033" status="required">Origin-classification eval family must exist to gate on.</dependency>
+      <dependency task="054" status="required">ContextEnvelope budgets fixed so budget-breach-fails-eval is meaningful.</dependency>
+    </dependencies>
+    <related-work>
+      <item>Task 079 (G-R2-D verification) uses the green eval-gate as gate evidence.</item>
+      <item>Memory-poisoning families move to the separate governance project (spec Deferrals).</item>
+    </related-work>
+  </context>
+
+  <steps mode="directional">
+    <step order="0" name="Inventory">Confirm the three in-scope families exist + the current eval-gate shape at sdap-ci.yml:225.</step>
+    <step order="1" name="Wire families">Add resourcefulness + origin-classification families to the eval-gate run so any family red fails the merge.</step>
+    <step order="2" name="Budget hook">Wire the ContextEnvelope per-slice budget check so a breach fails the eval run (FR-B-05).</step>
+    <step order="3" name="Exclude deferred">Add an explicit comment excluding memory-poisoning families, citing the governance-project deferral.</step>
+    <step order="4" name="Verify">Run CI locally/dry to confirm a seeded red family + a seeded budget breach each fail the gate.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Run the eval/integration suite</tool>
+    <tool name="git">Commit CI wiring on the project branch</tool>
+  </tools>
+
+  <outputs>
+    <output type="ci">.github/workflows/sdap-ci.yml (eval-gate extended with two families + budget check)</output>
+    <output type="test">tests/integration/contract/Eval/ (family wiring if suite manifest changes)</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r2/notes/ (eval-gate coverage record + deferral note)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">The CI eval-gate runs golden-utterance + resourcefulness + origin-classification families; any family red fails the merge.</criterion>
+    <criterion testable="true">A ContextEnvelope per-slice budget breach fails the eval run (FR-B-05 wired).</criterion>
+    <criterion testable="true">The gate extends the existing sdap-ci.yml eval-gate — no second gate mechanism introduced.</criterion>
+    <criterion testable="true">The eval tests use no Mock&lt;HttpMessageHandler&gt; and no DI-registration assertions (ADR-038).</criterion>
+    <criterion testable="true">NEGATIVE: memory-poisoning families are NOT present in the gate; an explicit comment cites the governance-project deferral (grep confirms absence).</criterion>
+  </acceptance-criteria>
+</task>

@@ -59,7 +59,13 @@ import {
   Spinner,
 } from '@fluentui/react-components';
 import { ComposeBannerStack } from './ComposeBannerStack';
-import { ComposeEditor, type ComposeEditorHandle, type ComposeEditorDocumentRef } from './ComposeEditor';
+import {
+  ComposeEditor,
+  type ComposeEditorHandle,
+  type ComposeEditorDocumentRef,
+  type ComposeDraftPayload,
+} from './ComposeEditor';
+import type { ComposeActionEnqueue } from './ComposeAiToolbar';
 // spaarkeai-compose-r1 task 093: deep-import from `@spaarke/ai-widgets/events`
 // rather than the barrel `@spaarke/ai-widgets` to skip the barrel's side-effect
 // widget registration (`register-workspace-widgets.ts` transitively pulls in
@@ -89,6 +95,39 @@ import type {
 
 // Re-export types for backwards-compatible consumer imports.
 export type { ComposeCheckoutStatus, ComposeWorkspaceState, ComposeWorkspaceAction } from './ComposeWorkspace.types';
+
+// ---------------------------------------------------------------------------
+// FR-04 draft-into-editor — render-follows-store types + seams (task 016)
+// ---------------------------------------------------------------------------
+
+// `ComposeDraftPayload` (the client mirror of `ComposeDraftDisposition.cs`) is owned by
+// ComposeEditor (which performs the insertion) and imported above, so both sides of the
+// materialize seam share ONE type.
+
+/**
+ * A single stored `compose`-disposition ledger output projected to the client by the
+ * session-ledger read endpoint (task-016 report INTEGRATION HOOK #1). The workspace
+ * re-materializes the editor FROM this STORED entry (ADR-040 store-before-render), never from
+ * a client-only event payload — which is what makes the draft refresh-durable.
+ */
+export interface ComposeLedgerOutput {
+  /** Addressable ledger key `{bindingId}@t{n}` — the provenance stamp. */
+  key: string;
+  bindingId: string;
+  turn: number;
+  /** Always `'compose'`. */
+  disposition: string;
+  /** The Compose-owned structured-edit payload. */
+  payload: ComposeDraftPayload;
+}
+
+// The render-follows-store signal ComposeWorkspace consumes is Flow 5
+// (`workspace.compose_assistant_insert`) additively carrying the `ledgerRef` of the stored
+// compose output. Per spike-0 §3b/§4 the editor-insertion signal IS Flow 5 — there is no
+// `compose_action_request`. The `ledgerRef?` additive field now lives on the shared
+// `ComposeAssistantToWorkspaceFlow` contract (compose-contracts.ts, task 016 HOOK #3), and the
+// materialize capability lives on `ComposeEditorHandle.materializeComposeDraft` (ComposeEditor,
+// HOOK #2) — both formalized in this integration pass, so no local interface hacks remain here.
 
 // ---------------------------------------------------------------------------
 // Props
@@ -131,6 +170,17 @@ export interface ComposeWorkspaceProps {
 
   /** Optional className passed to the root container (for host styling). */
   className?: string;
+
+  /**
+   * FR-18 host serialization seam (task 032). Forwarded to ComposeEditor → the
+   * inline AI toolbar so rapid toolbar-action clicks serialize through the host's
+   * `useSerialActionQueue`-backed queue. The SpaarkeAi host supplies this by
+   * bridging ConversationPane's `dispatchComposeAction` across panes (shared
+   * context / launch context); a standalone Path-A mount may omit it (the
+   * toolbar falls back to its own unserialized dispatcher). See
+   * `ComposeActionEnqueue`.
+   */
+  enqueueComposeAction?: ComposeActionEnqueue;
 }
 
 // ---------------------------------------------------------------------------
@@ -194,6 +244,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
     onComposeMount,
     onComposeUnmount,
     className,
+    enqueueComposeAction,
   } = props;
 
   const [state, dispatch] = React.useReducer(composeWorkspaceReducer, INITIAL_STATE);
@@ -203,6 +254,12 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
 
   // Stable PaneEventBus dispatch.
   const busDispatch = useDispatchPaneEvent();
+
+  // FR-04 render-follows-store bookkeeping (task 016). `lastMaterializedKey` makes
+  // materialization idempotent across refresh + duplicate Flow-5 signals (never double-apply
+  // the same stored draft). `composeDraftError` surfaces a soft failure without crashing.
+  const [lastMaterializedKey, setLastMaterializedKey] = React.useState<string | null>(null);
+  const [composeDraftError, setComposeDraftError] = React.useState<string | null>(null);
 
   // -------------------------------------------------------------------------
   // Mount/Unmount host hooks per LEGALWORKSPACE-EMBEDDED-MODE-CONTRACT §6
@@ -482,6 +539,71 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   }, [state.status, triggerSave]);
 
   // -------------------------------------------------------------------------
+  // FR-04 draft-into-editor — render-follows-store materialization (task 016)
+  // -------------------------------------------------------------------------
+  // Materializes the drafted content into the editor FROM the stored ledger entry (ADR-040:
+  // storage precedes rendering; the client re-reads the durable ledger, never a client buffer).
+  // `targetLedgerRef` selects a specific stored output ({bindingId}@t{n}); when omitted, the
+  // CURRENT (highest-turn) compose output for the session is materialized — the refresh-durable
+  // and supersession/undo-replace resolution (FR-17 foundation).
+  const materializeComposeDraftFromLedger = React.useCallback(
+    async (targetLedgerRef?: string): Promise<void> => {
+      if (state.status !== 'loaded') return;
+      if (!bffBaseUrl || !state.sessionId) return;
+
+      const editor = editorRef.current;
+      if (!editor || typeof editor.materializeComposeDraft !== 'function') {
+        // Defensive: the editor handle always exposes materializeComposeDraft (HOOK #2), but
+        // guard against an older mounted build. Fail visibly-but-soft; do not crash.
+        setComposeDraftError(
+          'This build cannot insert AI drafts into the editor yet (editor materialize handle missing).'
+        );
+        return;
+      }
+
+      try {
+        // Session-ledger read projection of the session's compose outputs (task-016 report
+        // INTEGRATION HOOK #1). `@spaarke/auth` per ADR-028.
+        const url = `${bffBaseUrl}/api/ai/chat/sessions/${encodeURIComponent(
+          state.sessionId
+        )}/compose-outputs`;
+        const response = await authenticatedFetch(url, { method: 'GET' });
+        if (!response.ok) {
+          if (response.status === 404) return; // no compose outputs yet — nothing to materialize
+          setComposeDraftError(`Failed to load the drafted content (HTTP ${response.status}).`);
+          return;
+        }
+
+        const outputs = (await response.json()) as ComposeLedgerOutput[];
+        const composeOutputs = Array.isArray(outputs)
+          ? outputs.filter((o) => o.disposition === 'compose' && o.payload)
+          : [];
+        if (composeOutputs.length === 0) return;
+
+        const target = targetLedgerRef
+          ? composeOutputs.find((o) => o.key === targetLedgerRef)
+          : composeOutputs.reduce((a, b) => (b.turn > a.turn ? b : a));
+        if (!target) return;
+
+        // Idempotent — never double-apply the same stored draft (refresh / duplicate signal).
+        if (target.key === lastMaterializedKey) return;
+
+        editor.materializeComposeDraft(target.payload, {
+          ledgerRef: target.key, // {bindingId}@t{n} provenance
+          bindingId: target.bindingId,
+          turn: target.turn,
+        });
+        setLastMaterializedKey(target.key);
+        setComposeDraftError(null);
+      } catch (err) {
+        const message = err instanceof Error ? err.message : String(err);
+        setComposeDraftError(`Failed to insert drafted content: ${message}`);
+      }
+    },
+    [state.status, state.sessionId, bffBaseUrl, lastMaterializedKey]
+  );
+
+  // -------------------------------------------------------------------------
   // PaneEventBus subscribers — Flow 1, 2, 5 (R1 WIRED per matrix)
   // -------------------------------------------------------------------------
 
@@ -515,7 +637,10 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
   });
 
   // Flow 5 — `compose_assistant_insert` on `workspace`.
-  // R1 BINDING (Spike #2 §10.3): manual-confirm gate; stage as pending.
+  // FR-04 (task 016): when the signal carries a `ledgerRef`, materialize the drafted content
+  // FROM the stored ledger entry (ADR-040 render-follows-store) — never from the event payload.
+  // A legacy Flow-5 event without a ledgerRef keeps the R1 manual-confirm staging path
+  // (Spike #2 §10.3).
   usePaneEvent('workspace', (event: WorkspacePaneEvent) => {
     // eslint-disable-next-line @typescript-eslint/no-explicit-any
     const e = event as unknown as { type?: string };
@@ -527,9 +652,25 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
       timestamp: narrowed.timestamp,
       sourceNodeId: narrowed.sourceNodeId,
       insertMode: narrowed.insertMode,
+      ledgerRef: narrowed.ledgerRef,
     });
+
+    if (narrowed.ledgerRef) {
+      void materializeComposeDraftFromLedger(narrowed.ledgerRef);
+      return;
+    }
+
     dispatch({ kind: 'pendingAssistantInsert', payload: narrowed });
   });
+
+  // FR-04 refresh-durability (task 016): on (re)load of a session, re-materialize the CURRENT
+  // compose draft from the ledger so a page refresh restores the drafted content — materialized
+  // from durable storage (ADR-040), not a client buffer. Idempotent via `lastMaterializedKey`.
+  React.useEffect(() => {
+    if (state.status !== 'loaded') return;
+    void materializeComposeDraftFromLedger();
+    // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [state.status, state.sessionId]);
 
   // -------------------------------------------------------------------------
   // Empty-state handlers — additive workspace-channel dispatch
@@ -661,6 +802,23 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
             pendingAssistantInsert={state.pendingAssistantInsert}
           />
 
+          {/* FR-04 (task 016): soft failure surfacing for draft materialization. */}
+          {composeDraftError ? (
+            <div
+              className={styles.bannerStack}
+              role="status"
+              aria-live="polite"
+              data-testid="compose-workspace-draft-error"
+            >
+              <MessageBar intent="warning">
+                <MessageBarBody>
+                  <MessageBarTitle>Could not insert AI draft</MessageBarTitle>
+                  {composeDraftError}
+                </MessageBarBody>
+              </MessageBar>
+            </div>
+          ) : null}
+
           <div className={styles.editorSlot}>
             <ComposeEditor
               ref={editorRef}
@@ -670,6 +828,7 @@ export function ComposeWorkspace(props: ComposeWorkspaceProps): React.JSX.Elemen
               sessionId={state.sessionId}
               onDirtyChange={handleDirtyChange}
               onImportWarnings={handleImportWarnings}
+              enqueueComposeAction={enqueueComposeAction}
             />
           </div>
         </>

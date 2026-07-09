@@ -221,6 +221,19 @@ This declaration is non-negotiable and makes protocol shortcuts visible. **Overr
 
 For the full decision tree, see `.claude/skills/task-execute/SKILL.md` Step 0.5.
 
+### 8.5. Execution Model, Effort & Wave Loops — Sonnet-5 (added 2026-07-08)
+
+The task pipeline is tuned for **Sonnet 5 execution** (planning stays on Opus 4.8 / Fable 5). Rules are enforced in the skills; this is the pointer:
+
+- **Model tier + effort per task.** Execution defaults to **Sonnet 5 @ effort `high`**; each POML carries `<model-tier>` (`sonnet` default; `opus`/`fable` for high-blast-radius / architectural / ADR-migration / security work) and `<effort>` (`xhigh` only for brownfield/root-cause or complex-but-fully-specified work — blanket `xhigh` approaches Opus cost). Assigned by `task-create` Step 3.5.5b, dispatched by `project-pipeline` Step 5, declared + escalated by `task-execute` Step 0.5.
+- **Author for literal execution.** Sonnet 5 follows instructions literally and does not infer intent: scope every `<constraint>`, make `<acceptance-criteria>` a **closed set** (incl. negative/authorization cases), name exact files + the reference impl to copy, and request any "above and beyond" explicitly. Do **not** add anti-laziness scaffolding — Sonnet 5 over-triggers on it.
+- **Step modes.** `<steps mode="directional">` (default: goal+criteria+constraints bind, sequence adaptable) vs `mode="prescriptive"` (exact sequence binds — migrations/deploys/irreversible).
+- **Escalation triggers.** Tasks with a known judgment boundary carry `<escalation><trigger>`; firing it is a legitimate stop (root §6 / §6.5), not improvisation.
+- **Coverage-first review.** `code-review` + `adr-check` maximize recall at the finding stage (report all, annotate severity + confidence); the orchestrator (task-execute Step 9.5) is the downstream filter.
+- **`/goal` wave loop (optional).** For `goal-eligible` waves only (machine-verifiable end-state, ≥3 well-specified low-ambiguity tasks, not security/deploy/irreversible), the operator may run the wave under `/goal` to remove per-task "continue". The Haiku evaluator is transcript-only and a **stopping-condition check, not a quality gate** — Step 9.5 + orchestrator authority are unchanged; tasks are never auto-completed on goal achievement. Eligibility assigned by `task-create` Step 3.85.
+
+> **Note (2026-07-08):** the legacy `.claude/protocols/AIP-00x` layer was **removed**. It had been dropped from this file in the 2026-05-17 rewrite and frozen (drifted, stale thresholds). Execution/behavioral rules live in exactly two places now: binding-every-turn rules here in root CLAUDE.md, and on-demand procedure in the `.claude/skills/*` files. There is no separate "protocol" layer.
+
 ---
 
 ## 9. Security Rules

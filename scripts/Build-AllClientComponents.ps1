@@ -63,11 +63,12 @@ $RepoRoot = (Resolve-Path "$PSScriptRoot\..").Path
 
 # Shared libraries (build order matters — downstream deps must come after their dependencies)
 #
-# Spaarke.DailyBriefing.Components is intentionally EXCLUDED from this list. Its build script is
-# `tsc --noEmit` and its `@spaarke/*` deps are listed as peerDependencies (not regular deps),
-# so it cannot type-check standalone — the type-check is performed by each consumer's tsc pass
-# (SpaarkeAi, DailyBriefing). Tried adding it 2026-06-28 → orchestrator failed on TS2307
-# "Cannot find module '@spaarke/ui-components'" etc. Excluded by design.
+# Spaarke.DailyBriefing.Components is now INCLUDED (standalone build restored 2026-07-08 by
+# spaarke-daily-update-service-r5, superseding PR #506). Its `@spaarke/*` deps are declared as
+# `file:` dependencies + tsconfig `paths` (mirroring Spaarke.AI.Widgets), so `tsc --noEmit`
+# type-checks standalone. Re-added to the gate so future standalone breaks are caught in CI
+# rather than silently shipped (the 2026-06-28 TS2307 failure was the peer-only-deps root cause,
+# now fixed in the lib's package.json/tsconfig.json).
 #
 # Spaarke.LegalWorkspace is intentionally EXCLUDED on the same basis (added 2026-07-02 by
 # spaarke-dataset-grid-framework-r2 task 024 / FR-10). Task 020 scaffolded the package; task 021
@@ -85,6 +86,7 @@ $SharedLibs = @(
     @{ Name = "Spaarke.SmartTodo.Components"; Path = "$RepoRoot\src\client\shared\Spaarke.SmartTodo.Components" }
     @{ Name = "Spaarke.UI.Components";        Path = "$RepoRoot\src\client\shared\Spaarke.UI.Components" }        # depends on Auth, SdapClient
     @{ Name = "Spaarke.AI.Widgets";           Path = "$RepoRoot\src\client\shared\Spaarke.AI.Widgets" }           # depends on UI.Components, AI.Outputs
+    @{ Name = "Spaarke.DailyBriefing.Components"; Path = "$RepoRoot\src\client\shared\Spaarke.DailyBriefing.Components" } # depends on Auth + UI.Components; standalone build restored 2026-07-08 (supersedes PR #506)
     @{ Name = "Spaarke.Compose.Components";   Path = "$RepoRoot\src\client\shared\Spaarke.Compose.Components" }   # depends on Auth + DocumentOperations + AI.Widgets (PaneEventBus); MUST build AFTER AI.Widgets — re-ordered 2026-06-29 by spaarkeai-compose-r1 task 045 W4 when AI.Widgets dep was added
 )
 

@@ -20,19 +20,8 @@
  */
 
 import React from 'react';
-import {
-  clearWorkspaceRegistry,
-  getWorkspaceWidgetMetadata,
-  hasWorkspaceWidget,
-  resolveWorkspaceWidget,
-  getAllWorkspaceWidgetTypes,
-} from '../registry/WorkspaceWidgetRegistry';
-import {
-  clearContextRegistry,
-  hasContextWidget,
-  resolveContextWidget,
-  getAllContextWidgetTypes,
-} from '../registry/ContextWidgetRegistry';
+import type * as WorkspaceWidgetRegistryModule from '../registry/WorkspaceWidgetRegistry';
+import type * as ContextWidgetRegistryModule from '../registry/ContextWidgetRegistry';
 
 // ---------------------------------------------------------------------------
 // Mock GenericTextWidget (workspace fallback)
@@ -56,38 +45,44 @@ const createMockWidget = (name: string): React.FC => {
   return comp;
 };
 
+// NOTE (test-repair task 021, 2026-07-08): these mock paths previously read
+// '@spaarke/ai-outputs/src/output-widgets/...' — an extra '/src/' segment
+// that does NOT match the literal specifier register-workspace-widgets.ts
+// actually imports ('@spaarke/ai-outputs/output-widgets/...', no '/src/').
+// Corrected to the real import path (see the identical fix + rationale in
+// register-workspace-widgets.test.ts).
 jest.mock(
-  '@spaarke/ai-outputs/src/output-widgets/BudgetDashboardWidget',
+  '@spaarke/ai-outputs/output-widgets/BudgetDashboardWidget',
   () => ({ __esModule: true, default: createMockWidget('BudgetDashboardWidget') }),
   { virtual: true }
 );
 jest.mock(
-  '@spaarke/ai-outputs/src/output-widgets/SearchResultsWidget',
+  '@spaarke/ai-outputs/output-widgets/SearchResultsWidget',
   () => ({ __esModule: true, default: createMockWidget('SearchResultsWidget') }),
   { virtual: true }
 );
 jest.mock(
-  '@spaarke/ai-outputs/src/output-widgets/AnalysisEditorWidget',
+  '@spaarke/ai-outputs/output-widgets/AnalysisEditorWidget',
   () => ({ __esModule: true, default: createMockWidget('AnalysisEditorWidget') }),
   { virtual: true }
 );
 jest.mock(
-  '@spaarke/ai-outputs/src/output-widgets/ContractComparisonWidget',
+  '@spaarke/ai-outputs/output-widgets/ContractComparisonWidget',
   () => ({ __esModule: true, default: createMockWidget('ContractComparisonWidget') }),
   { virtual: true }
 );
 jest.mock(
-  '@spaarke/ai-outputs/src/output-widgets/StatusSummaryWidget',
+  '@spaarke/ai-outputs/output-widgets/StatusSummaryWidget',
   () => ({ __esModule: true, default: createMockWidget('StatusSummaryWidget') }),
   { virtual: true }
 );
 jest.mock(
-  '@spaarke/ai-outputs/src/output-widgets/RecommendationWidget',
+  '@spaarke/ai-outputs/output-widgets/RecommendationWidget',
   () => ({ __esModule: true, default: createMockWidget('RecommendationWidget') }),
   { virtual: true }
 );
 jest.mock(
-  '@spaarke/ai-outputs/src/output-widgets/ActionPlanWidget',
+  '@spaarke/ai-outputs/output-widgets/ActionPlanWidget',
   () => ({ __esModule: true, default: createMockWidget('ActionPlanWidget') }),
   { virtual: true }
 );
@@ -166,24 +161,37 @@ jest.mock('../widgets/context/PinnedMemoryListWidget', () => ({
 // Setup / teardown
 // ---------------------------------------------------------------------------
 
-beforeEach(() => {
-  clearWorkspaceRegistry();
-  clearContextRegistry();
-  jest.resetModules();
-});
+// NOTE (test-repair task 021, 2026-07-08): this file previously
+// statically `import`-ed the registry accessor functions while calling
+// `jest.resetModules()` in beforeEach — a module-instance split identical to
+// the bug fixed in register-workspace-widgets.test.ts (see that file's
+// detailed comment). Every registration written by loadWorkspaceRegistrations()
+// / loadContextRegistrations() landed in a FRESH post-reset module instance,
+// while the statically-imported accessor functions stayed bound to the
+// original (pre-reset) instance, so every assertion read stale/empty state.
+// Fixed by re-requiring both registry modules inside the load* helpers and
+// routing all assertions through the freshly-required references.
+let workspaceRegistry: typeof WorkspaceWidgetRegistryModule;
+let contextRegistry: typeof ContextWidgetRegistryModule;
 
 // ---------------------------------------------------------------------------
 // Helpers
 // ---------------------------------------------------------------------------
 
 function loadWorkspaceRegistrations(): void {
+  jest.resetModules();
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  workspaceRegistry = require('../registry/WorkspaceWidgetRegistry');
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   require('../widgets/workspace/register-workspace-widgets');
 }
 
 function loadContextRegistrations(): void {
+  jest.resetModules();
   // ONE registration module covers ALL context widget types (task 046
   // registry dedupe — shell context widgets + R1 source widgets).
+  // eslint-disable-next-line @typescript-eslint/no-require-imports
+  contextRegistry = require('../registry/ContextWidgetRegistry');
   // eslint-disable-next-line @typescript-eslint/no-require-imports
   require('../registry/register-context-widgets');
 }
@@ -281,39 +289,60 @@ const EXPECTED_CONTEXT_WIDGETS = [
 // ===========================================================================
 
 describe('Workspace widget serialize/restore — registration', () => {
-  beforeEach(() => {
+  // NOTE (test-repair task 021, 2026-07-08): switched from beforeEach to
+  // beforeAll. Every registration call in this file triggers
+  // jest.resetModules(), which forces re-instantiation of the entire
+  // @spaarke/ui-components / @spaarke/ai-outputs dependency graph (including
+  // the full @fluentui/react-icons barrel) on every call. With beforeEach,
+  // the ~34 tests across this file's 6 describe blocks each re-triggered
+  // that reload, compounding to a heap-exhaustion crash ("JavaScript heap
+  // out of memory"). None of the tests in this describe block mutate
+  // registry state that a sibling test depends on, so loading once per
+  // describe block (beforeAll) is safe and cuts resetModules() cycles from
+  // ~34 to 6 for the whole file.
+  beforeAll(() => {
     loadWorkspaceRegistrations();
   });
 
-  it('registers all 11 workspace widget types', () => {
-    const types = getAllWorkspaceWidgetTypes();
-    expect(types).toHaveLength(EXPECTED_WORKSPACE_WIDGETS.length);
+  // NOTE (test-repair task 021, 2026-07-08): register-workspace-widgets.ts
+  // now registers more than the 11 widgets originally enumerated here (task
+  // 085 and later work added several "list"/"dashboard" system widgets —
+  // documents-list, projects-list, invoices-list, work-assignments-list,
+  // communications-list, matters-dashboard — on top of the 11 tracked by
+  // EXPECTED_WORKSPACE_WIDGETS). This test's job is verifying THESE 11 are
+  // present, so assert subset containment instead of an exact total (see the
+  // identical fix in register-workspace-widgets.test.ts).
+  it('registers all 11 tracked workspace widget types (subset of the full registry)', () => {
+    const types = workspaceRegistry.getAllWorkspaceWidgetTypes();
+    for (const w of EXPECTED_WORKSPACE_WIDGETS) {
+      expect(types).toContain(w.type);
+    }
   });
 
   it.each(EXPECTED_WORKSPACE_WIDGETS)('$type is registered in WorkspaceWidgetRegistry', ({ type }) => {
-    expect(hasWorkspaceWidget(type)).toBe(true);
+    expect(workspaceRegistry.hasWorkspaceWidget(type)).toBe(true);
   });
 });
 
 describe('Workspace widget serialize/restore — metadata', () => {
-  beforeEach(() => {
+  beforeAll(() => {
     loadWorkspaceRegistrations();
   });
 
   it.each(EXPECTED_WORKSPACE_WIDGETS)('$type has correct displayName "$displayName"', ({ type, displayName }) => {
-    const meta = getWorkspaceWidgetMetadata(type);
+    const meta = workspaceRegistry.getWorkspaceWidgetMetadata(type);
     expect(meta).toBeDefined();
     expect(meta!.displayName).toBe(displayName);
   });
 
   it.each(EXPECTED_WORKSPACE_WIDGETS)('$type has correct category "$category"', ({ type, category }) => {
-    const meta = getWorkspaceWidgetMetadata(type);
+    const meta = workspaceRegistry.getWorkspaceWidgetMetadata(type);
     expect(meta).toBeDefined();
     expect(meta!.category).toBe(category);
   });
 
   it.each(EXPECTED_WORKSPACE_WIDGETS)('$type metadata includes displayName (non-empty string)', ({ type }) => {
-    const meta = getWorkspaceWidgetMetadata(type);
+    const meta = workspaceRegistry.getWorkspaceWidgetMetadata(type);
     expect(meta).toBeDefined();
     expect(typeof meta!.displayName).toBe('string');
     expect(meta!.displayName.length).toBeGreaterThan(0);
@@ -321,24 +350,28 @@ describe('Workspace widget serialize/restore — metadata', () => {
 });
 
 describe('Workspace widget serialize/restore — factory resolution', () => {
-  beforeEach(() => {
+  beforeAll(() => {
     loadWorkspaceRegistrations();
   });
 
   it.each(EXPECTED_WORKSPACE_WIDGETS)('$type resolves to a non-null, non-undefined component', async ({ type }) => {
-    const resolved = await resolveWorkspaceWidget(type);
+    const resolved = await workspaceRegistry.resolveWorkspaceWidget(type);
     expect(resolved).not.toBeNull();
     expect(resolved).not.toBeUndefined();
+    // Must be the REAL registered factory's component, not the
+    // GenericTextWidget fallback — a mock-path mismatch would otherwise pass
+    // this vacuously via WorkspaceWidgetRegistry's catch-and-fallback path.
+    expect(resolved).not.toBe(MockGenericText);
   });
 
   it.each(EXPECTED_WORKSPACE_WIDGETS)('$type resolves to a valid React component type', async ({ type }) => {
-    const resolved = await resolveWorkspaceWidget(type);
+    const resolved = await workspaceRegistry.resolveWorkspaceWidget(type);
     // React components are either functions or classes
     expect(typeof resolved).toBe('function');
   });
 
   it('unknown workspace type falls back to GenericTextWidget', async () => {
-    const resolved = await resolveWorkspaceWidget('__nonexistent_widget__');
+    const resolved = await workspaceRegistry.resolveWorkspaceWidget('__nonexistent_widget__');
     expect(resolved).toBe(MockGenericText);
   });
 });
@@ -348,38 +381,45 @@ describe('Workspace widget serialize/restore — factory resolution', () => {
 // ===========================================================================
 
 describe('Context widget serialize/restore — registration', () => {
-  beforeEach(() => {
+  beforeAll(() => {
     loadContextRegistrations();
   });
 
-  it('registers all 12 context widget types', () => {
-    const types = getAllContextWidgetTypes();
-    expect(types).toHaveLength(EXPECTED_CONTEXT_WIDGETS.length);
+  // NOTE (test-repair task 021, 2026-07-08): register-context-widgets.ts now
+  // registers more than the 12 types tracked here (e.g. 'get-started-cards',
+  // 'file-preview' were added by later work). Same pattern as the workspace
+  // registry above — assert subset containment instead of an exact total so
+  // this test tracks its own 12 without going stale on unrelated additions.
+  it('registers all 12 tracked context widget types (subset of the full registry)', () => {
+    const types = contextRegistry.getAllContextWidgetTypes();
+    for (const t of EXPECTED_CONTEXT_WIDGETS) {
+      expect(types).toContain(t);
+    }
   });
 
   it.each(EXPECTED_CONTEXT_WIDGETS)('%s is registered in ContextWidgetRegistry', type => {
-    expect(hasContextWidget(type)).toBe(true);
+    expect(contextRegistry.hasContextWidget(type)).toBe(true);
   });
 });
 
 describe('Context widget serialize/restore — factory resolution', () => {
-  beforeEach(() => {
+  beforeAll(() => {
     loadContextRegistrations();
   });
 
   it.each(EXPECTED_CONTEXT_WIDGETS)('%s resolves to a non-null component', async type => {
-    const component = await resolveContextWidget(type);
+    const component = await contextRegistry.resolveContextWidget(type);
     expect(component).not.toBeNull();
   });
 
   it.each(EXPECTED_CONTEXT_WIDGETS)('%s resolves to a valid React component type', async type => {
-    const component = await resolveContextWidget(type);
+    const component = await contextRegistry.resolveContextWidget(type);
     expect(component).not.toBeUndefined();
     expect(typeof component).toBe('function');
   });
 
   it('unknown context type returns null (not a fallback)', async () => {
-    const result = await resolveContextWidget('__nonexistent_context_widget__');
+    const result = await contextRegistry.resolveContextWidget('__nonexistent_context_widget__');
     expect(result).toBeNull();
   });
 });
@@ -389,23 +429,47 @@ describe('Context widget serialize/restore — factory resolution', () => {
 // ===========================================================================
 
 describe('Widget registries — cross-registry consistency', () => {
-  beforeEach(() => {
+  beforeAll(() => {
     loadWorkspaceRegistrations();
     loadContextRegistrations();
   });
 
   it('workspace and context registries have no overlapping type strings', () => {
-    const workspaceTypes = new Set(getAllWorkspaceWidgetTypes());
-    const contextTypes = getAllContextWidgetTypes();
+    const workspaceTypes = new Set(workspaceRegistry.getAllWorkspaceWidgetTypes());
+    const contextTypes = contextRegistry.getAllContextWidgetTypes();
 
     for (const ctxType of contextTypes) {
       expect(workspaceTypes.has(ctxType)).toBe(false);
     }
   });
 
-  it('total registered widgets across both registries is 23', () => {
-    // 11 workspace + 12 context (added pinned-memory-list in R6 task 070).
-    const total = getAllWorkspaceWidgetTypes().length + getAllContextWidgetTypes().length;
-    expect(total).toBe(23);
+  // NOTE (test-repair task 021, 2026-07-08): this test previously hardcoded
+  // "11 workspace + 12 context = 23" as the combined total. The workspace
+  // registry alone now holds more than 11 types (see the "registers all 11
+  // tracked workspace widget types" test above), so a hardcoded combined
+  // total is stale and will keep drifting as either registry grows for
+  // unrelated reasons — a fragile assertion that doesn't guard a specific
+  // behavioral contract (ADR-038 coverage-filler territory). Replaced with a
+  // structural check: every EXPECTED widget list item (workspace + context)
+  // is present, AND each registry's real size is at least as large as its
+  // tracked EXPECTED list — preserving growth-tolerance while still failing
+  // if either registry unexpectedly SHRINKS (a real regression signal).
+  it('both registries contain at least their tracked widget sets (no unexpected shrinkage)', () => {
+    const workspaceTypes = workspaceRegistry.getAllWorkspaceWidgetTypes();
+    const contextTypes = contextRegistry.getAllContextWidgetTypes();
+
+    expect(workspaceTypes.length).toBeGreaterThanOrEqual(EXPECTED_WORKSPACE_WIDGETS.length);
+    expect(contextTypes.length).toBeGreaterThanOrEqual(EXPECTED_CONTEXT_WIDGETS.length);
+
+    // Code-review follow-up (task 021): a pure lower-bound check can't catch
+    // a duplicate-registration bug that registers a widget twice under two
+    // DIFFERENT string keys (each registry's Map dedupes by key, so a keying
+    // bug would silently inflate the count without tripping the "no overlap"
+    // check above). Add a generous upper-bound sanity ceiling — wide enough
+    // to tolerate many legitimate future widget additions without needing a
+    // bump, but tight enough to catch a gross duplication bug (e.g.
+    // accidentally registering the whole widget set twice).
+    expect(workspaceTypes.length).toBeLessThan(EXPECTED_WORKSPACE_WIDGETS.length * 4);
+    expect(contextTypes.length).toBeLessThan(EXPECTED_CONTEXT_WIDGETS.length * 4);
   });
 });

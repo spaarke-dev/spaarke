@@ -1,0 +1,112 @@
+<task id="015" project="spaarkeai-compose-r2">
+  <metadata>
+    <title>FR-06a upload fidelity branch (original-if-unedited)</title>
+    <phase>1 Entry</phase>
+    <status>not-started</status>
+    <estimated-hours>12</estimated-hours>
+    <effort>high</effort>
+    <dependencies>013</dependencies>
+    <blocks>017</blocks>
+    <tags>bff-api,frontend,spe</tags>
+    <rigor-hint reason="Modifies save byte-persistence path (.cs + .ts); fidelity-sensitive; FULL per TASK-INDEX">FULL</rigor-hint>
+    <model-tier reason="Bounded branch on an existing save path (persist original vs regenerate); no architectural blast radius">sonnet</model-tier>
+    <parallel-group>W2b</parallel-group>
+    <parallel-safe reason="Save byte-selection logic is separate from the 010/011/012 mount edits and from 013's creation backbone; edits a distinct branch of the save path">true</parallel-safe>
+  </metadata>
+
+  <prompt>
+    On first Save of an uploaded-then-mounted file, WHICH bytes persist to SPE depends on whether the user
+    edited: if the upload is saved UNEDITED, persist the pristine ORIGINAL upload bytes (byte-identical);
+    once EDITED, persist the regenerated `.docx` from editor state via `tipTapToDocxBytes(editor)` (the
+    as-built save path). This is FR-06a. The regeneration path already exists (docxBridge +
+    `PromoteIfEphemeralAsync` save); this task adds the unedited-original branch: track dirty state and,
+    when clean, upload the retained original bytes instead of regenerating (avoiding the lossy mammoth
+    round-trip for untouched files).
+  </prompt>
+
+  <role>
+    Full-stack developer fluent in the Compose save path (client dirty-tracking + `tipTapToDocxBytes`) and
+    the BFF SPE persistence (SpeFileStore facade). You add a bounded conditional branch to an existing
+    save path.
+  </role>
+
+  <goal>
+    Upload -&gt; Save WITHOUT editing persists the pristine original upload bytes to SPE (byte-identical);
+    upload -&gt; edit -&gt; Save persists the regenerated `.docx` reflecting edits. The branch keys off the
+    editor's dirty state; the regeneration path is unchanged.
+  </goal>
+
+  <context>
+    <background>
+      As-built (design.md §2.7d): the save path already regenerates `.docx` from editor via
+      `tipTapToDocxBytes` (option (b)) and load converts via mammoth `docxToTipTapHtml` (inherently lossy).
+      FR-06a preserves fidelity for the common "uploaded, reviewed, saved unchanged" case by persisting the
+      retained original bytes when the editor is clean. Depends on 013 (the create-on-save persistence path
+      the branch feeds).
+    </background>
+    <relevant-files>
+      <file purpose="save-persist" edit="true">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs</file>
+      <file purpose="regenerate" edit="false">src/client/shared/Spaarke.Compose.Components/src/utils/docxBridge.ts</file>
+      <file purpose="dirty-tracking" edit="true">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx</file>
+      <file purpose="editor-dirty" edit="false">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeEditor.tsx</file>
+    </relevant-files>
+    <notes>
+      `tipTapToDocxBytes` is at docxBridge.ts ~line 145. ComposeEditor exposes an `onDirtyChange` channel;
+      ComposeWorkspace already tracks dirty state. The retained original upload bytes come from the 012
+      upload-mount path (or 010 Browse bytes) — persist those when clean.
+    </notes>
+  </context>
+
+  <constraints>
+    <constraint source="ADR-007">SPE writes go through the SpeFileStore/Infrastructure facade; no `Microsoft.Graph` types leak up.</constraint>
+    <constraint source="ADR-005">Persist to the SPE container resolved in create-on-save (013).</constraint>
+    <constraint source="ADR-028">Client save fetch uses `@spaarke/auth`.</constraint>
+    <constraint source="project">Unedited upload -&gt; persist ORIGINAL bytes byte-identical; edited -&gt; persist regenerated `.docx`.</constraint>
+    <constraint source="project">Do NOT alter the existing regeneration path for the edited case (matches §1.6 fidelity boundary).</constraint>
+    <constraint source="bff-hygiene">BFF-touching — measure publish-size delta vs 49.63 MB baseline; run CVE scan; add/update tests per §10.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>compose/save-fidelity, spe-persistence, tiptap-docx</topic>
+    <files>
+      <file>.claude/adr/ADR-007-spefilestore.md</file>
+      <file>.claude/adr/ADR-005-flat-storage.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+      <file>projects/spaarkeai-compose-r2/spec.md</file>
+    </files>
+  </knowledge>
+
+  <justification component="Unedited-original save branch (extends existing save path)">
+    <existing>The save path already regenerates via `tipTapToDocxBytes`; the editor already reports dirty; original upload bytes are retained by the 012/010 mount.</existing>
+    <extension>Add a dirty-state conditional that persists retained original bytes when clean; no new service.</extension>
+    <cost-of-doing-nothing>Without it, saving an untouched upload runs it through the lossy mammoth round-trip and mangles formatting the user never edited — a concrete fidelity regression FR-06a exists to prevent.</cost-of-doing-nothing>
+  </justification>
+
+  <steps mode="directional">
+    <step order="0">Load spec.md FR-06a. Read the save path (`PromoteIfEphemeralAsync` + client save), `tipTapToDocxBytes`, and the dirty-tracking channel.</step>
+    <step order="1">Ensure the retained original upload bytes are available at Save time (from the 010/012 mount).</step>
+    <step order="2">Branch on editor dirty state: clean -&gt; persist retained original bytes byte-identical; dirty -&gt; persist regenerated `.docx` via the existing path.</step>
+    <step order="3">Persist to the container resolved by create-on-save (013) through the SpeFileStore facade.</step>
+    <step order="4">Add tests: unedited save byte-identical to upload; edited save reflects edits. Build BFF + package; measure publish-size; CVE scan.</step>
+    <step order="5">Run code-review + adr-check (Step 9.5). Update TASK-INDEX + current-task.md.</step>
+  </steps>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Compose/ComposeService.cs</output>
+    <output type="code">src/client/shared/Spaarke.Compose.Components/src/widgets/ComposeWorkspace.tsx</output>
+    <output type="test">tests/unit/Sprk.Bff.Api.Tests/Services/Compose/ComposeServiceUploadFidelityTests.cs</output>
+  </outputs>
+
+  <acceptance-criteria testable="true">
+    <criterion testable="true">Upload -&gt; Save without editing persists SPE bytes byte-identical to the uploaded file.</criterion>
+    <criterion testable="true">Upload -&gt; edit -&gt; Save persists a regenerated `.docx` reflecting the edits (existing path).</criterion>
+    <criterion testable="true">The branch keys off the editor's dirty state; a clean editor never triggers regeneration.</criterion>
+    <criterion testable="true">Persistence targets the container resolved by create-on-save (013) via the SpeFileStore facade; no `Microsoft.Graph` leak (ADR-007).</criterion>
+    <criterion testable="true">(negative) A whitespace-only / no-op edit that does not set dirty still persists the original (no spurious regeneration).</criterion>
+    <criterion testable="true">BFF publish-size delta reported vs 49.63 MB baseline; no new HIGH CVE; unit tests pass.</criterion>
+  </acceptance-criteria>
+
+  <execution>
+    <skill>.claude/skills/task-execute/SKILL.md</skill>
+  </execution>
+</task>

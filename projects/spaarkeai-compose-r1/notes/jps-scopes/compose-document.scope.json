@@ -3,20 +3,20 @@
   "$version": 1,
   "scopeCode": "compose-document",
   "scopeName": "Compose Document",
-  "description": "Whole document open in Compose. Input contract for playbook actions that operate on the entire document (e.g., compose-summarize, full-document compare, document-wide risk scan). The R1 smoke test (compose-summarize) consumes this scope.",
+  "description": "Whole document open in Compose — the input contract for playbook actions operating on the FULL document rather than a selection (compose-summarize; R2: compose-summarize-word-changes for return-from-Word change summaries; future document-wide risk scan / compare). GOTCHA: this scope carries IDENTIFIERS ONLY — no document text crosses the BFF<>UI boundary. The playbook fetches DOCX bytes from SPE server-side via documentSpeId and extracts text itself; do not expect selectionText-style content here (see compose-selection for span-level text). ENRICHMENT: the fetched text arrives with a Semantic Appendix appended (defined terms, cross-references, structural metadata — SemanticAppendixGenerator, FR-22) to reduce hallucination, and any existing track-changes render inline as CriticMarkup ({++insertion++} / {--deletion--} / {>>comment<<}) for READ-IN only. GOTCHA: you (the model) must NEVER emit CriticMarkup back — all edits are written as the structured edit payload (target_text/new_text/rationale) on the compose-selection write path, never as inline markup mutations to this scope's payload. RECOVERY PATH: if documentVersionEtag does not match the document's current SPE etag, the document changed since dispatch was initiated — proceed with an explicit staleness caveat in your output rather than silently treating fetched content as current. EXAMPLE: compose-summarize-word-changes dispatches with documentSpeId + sessionId + tenantId; the playbook fetches the returned-from-Word DOCX, reads its CriticMarkup for prior changes, and emits { summary, changes: [...] } — never a modified DOCX or a markup string.",
   "appliesTo": ["compose-editor"],
   "inputs": {
     "fields": [
       {
         "name": "documentSpeId",
         "type": "string",
-        "description": "SharePoint Embedded drive-item id of the open document. The session<>document binding key. Always present (Compose binding rule: every document is in SPE). The BFF dispatch endpoint fetches the DOCX bytes from SPE and extracts text server-side for playbook consumption; only the SPE id crosses the BFF<>UI boundary on this scope.",
+        "description": "SharePoint Embedded drive-item id of the open document. The session<>document binding key. Always present (Compose binding rule: every document is in SPE). The BFF dispatch endpoint fetches the DOCX bytes from SPE and extracts text server-side for playbook consumption; only the SPE id crosses the BFF<>UI boundary on this scope. GOTCHA: a lookup failure (404) means the document was deleted or moved after the session opened it — surface that as a distinct 'document unavailable' error, not a generic dispatch failure.",
         "required": true
       },
       {
         "name": "documentVersionEtag",
         "type": "string",
-        "description": "SPE driveItem etag at the moment of dispatch. Lets the playbook detect that the document changed mid-flight and reject stale invocations. Optional; if absent the playbook proceeds without staleness verification.",
+        "description": "SPE driveItem etag at the moment of dispatch. Lets the playbook detect that the document changed mid-flight and reject stale invocations. Optional; if absent the playbook proceeds without staleness verification. RECOVERY PATH: on mismatch, do not discard the fetch — complete the analysis but flag it as based on a possibly-superseded version.",
         "required": false
       },
       {
@@ -29,33 +29,33 @@
       {
         "name": "matterId",
         "type": "string",
-        "description": "sprk_matter GUID when the document is matter-bound. Null when the document is unbound or pre-Save. When present, enables matter-scoped knowledge retrieval and writes derived insights to the matter's knowledge graph.",
+        "description": "sprk_matter GUID when the document is matter-bound. Null when the document is unbound or pre-Save. When present, enables matter-scoped knowledge retrieval and writes derived insights to the matter's knowledge graph. GOTCHA: absence does not mean 'no matter' permanently — an ephemeral pre-Save document can be promoted mid-session; do not cache a null matterId as a durable fact across dispatches.",
         "required": false,
         "format": "uuid"
       },
       {
         "name": "documentName",
         "type": "string",
-        "description": "Display name of the document (typically the SPE driveItem name). Used by the playbook for UI rendering and citation envelopes. Not the source of truth for identity — that's documentSpeId.",
+        "description": "Display name of the document (typically the SPE driveItem name). Used by the playbook for UI rendering and citation envelopes. Not the source of truth for identity — that's documentSpeId. GOTCHA: do not use documentName for de-duplication or lookup logic; two distinct documents can share the same display name.",
         "required": false,
         "maxLength": 500
       },
       {
         "name": "documentMimeType",
         "type": "string",
-        "description": "MIME type of the document (typically 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' for DOCX). Carried into RoutingContext.MimeType for content-aware routing (e.g., a future 'summarize-pdf' variant routes off this).",
+        "description": "MIME type of the document (typically 'application/vnd.openxmlformats-officedocument.wordprocessingml.document' for DOCX). Carried into RoutingContext.MimeType for content-aware routing (e.g., a future 'summarize-pdf' variant routes off this). GOTCHA: an unrecognized or absent MIME type should route to the default DOCX-oriented handling, not fail the dispatch.",
         "required": false
       },
       {
         "name": "sessionId",
         "type": "string",
-        "description": "ChatSession id (Redis/Cosmos/Dataverse three-tier persistence key). The playbook writes its summary output as a structured ChatMessage so prior-session continuity (Compose 'prior sessions for this document' UX) preserves the artifact.",
+        "description": "ChatSession id (Redis/Cosmos/Dataverse three-tier persistence key). The playbook writes its summary output as a structured ChatMessage so prior-session continuity (Compose 'prior sessions for this document' UX) preserves the artifact. RECOVERY PATH: if the session cannot be resolved (expired/evicted from the Redis tier), fall back to returning the result without the continuity write rather than failing the whole dispatch.",
         "required": true
       },
       {
         "name": "tenantId",
         "type": "string",
-        "description": "Azure AD tenant GUID. ADR-015 Tier 3 isolation key; inherited from PlaybookInvocationContext.TenantId.",
+        "description": "Azure AD tenant GUID. ADR-015 Tier 3 isolation key; inherited from PlaybookInvocationContext.TenantId. GOTCHA: never use this value to construct cross-tenant queries — every knowledge/precedent lookup this scope enables MUST be scoped to this tenant.",
         "required": true,
         "format": "uuid"
       }
@@ -77,6 +77,9 @@
     "createdAt": "2026-06-29T00:00:00Z",
     "tags": ["compose", "document", "input-scope", "r1"],
     "relatedAdrs": ["ADR-013", "ADR-015"],
-    "consumedBy": "R1 smoke test: compose-summarize → Document Summary playbook (47686eb1-9916-f111-8343-7c1e520aa4df). R2: any whole-document action (e.g., compose-risk-scan, compose-extract-obligations) consumes this scope without retrofit."
+    "consumedBy": "R1 smoke test: compose-summarize → Document Summary playbook (47686eb1-9916-f111-8343-7c1e520aa4df). R2: any whole-document action (e.g., compose-summarize-word-changes, compose-risk-scan, compose-extract-obligations) consumes this scope without retrofit.",
+    "enrichedBy": "spaarkeai-compose-r2 task 024 (FR-23)",
+    "enrichedAt": "2026-07-08T00:00:00Z",
+    "enrichmentNote": "description fields (scope-level + per-field) enriched with GOTCHA/RECOVERY PATH/EXAMPLE guidance per the 'tool descriptions ARE the prompt' pattern, aligned with FR-22 SemanticAppendixGenerator/CriticMarkup (task 023); no field/type/required/totalCharCap changes."
   }
 }

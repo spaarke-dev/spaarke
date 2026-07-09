@@ -1,0 +1,128 @@
+<task id="AIR2-011" project="spaarke-ai-architecture-redesign-r2">
+  <metadata>
+    <title>Publish OutcomeCard v1 contract (walking skeleton) — formalize shipped UserSummary + server-link primitives</title>
+    <status>completed</status>
+    <phase>A0 — Contract-first</phase>
+    <gate>G-R2-A (seam publication)</gate>
+    <estimated-effort>1 day</estimated-effort>
+    <model-tier>opus</model-tier>
+    <model-tier-reason>Disposition-level contract consumed by every side-effect path AND by Compose r2 for its side-effect rendering; the audience-split + link shape is load-bearing across the completion wave — architectural blast radius.</model-tier-reason>
+    <effort>high</effort>
+    <parallel-safe>true</parallel-safe>
+    <goal-eligible>false</goal-eligible>
+    <tags>bff-api, contract, seam, adr-013, outcome-card, compose-r2</tags>
+    <dependencies>none (A0 front wave; publish early)</dependencies>
+  </metadata>
+
+  <prompt>
+    Publish the `OutcomeCard v1` contract as a Phase-A0 walking skeleton (spec FR-A0-02, design D-F2). It FORMALIZES already-shipped R1 primitives — the server-composed record link (`HandoffUrlBuilder`) and the `UserSummary` audience split on `ToolResult` — into ONE disposition-level contract, so the Completion Engine (FR-A1-06/07) and Compose r2 render side-effect outcomes through a single shape instead of ad-hoc markdown. Ship the contract WITH a thin reference producer, a thin reference consumer, and a contract test — not a paper spec.
+  </prompt>
+
+  <role>Senior .NET developer fluent in the Spaarke AI session pipeline (ADR-039/040), tool-result composition, and versioned tolerant-reader contracts.</role>
+
+  <goal>
+    A versioned `OutcomeCard v1` contract exists in the AI seam surface (`Services/Ai/PublicContracts/`) capturing: the record/deep link (from `HandoffUrlBuilder`), the audience-split summary (user-facing vs internal, from `UserSummary`), next-step-chip slots (declared-transition placeholders), a trace reference, and failure/partial states — with a version field + tolerant-reader rules + example payload. A thin producer emits an OutcomeCard for one side-effect path; a thin consumer renders it; a contract test in `tests/integration/contract/` locks the shape. Compose r2 renders its side-effect outcomes through this, never a local variant.</goal>
+
+  <inputs>
+    <file purpose="spec">projects/spaarke-ai-architecture-redesign-r2/spec.md</file>
+    <file purpose="plan">projects/spaarke-ai-architecture-redesign-r2/plan.md</file>
+    <file purpose="design">projects/spaarke-ai-architecture-redesign-r2/design.md</file>
+    <file purpose="module-guidance">src/server/api/Sprk.Bff.Api/CLAUDE.md</file>
+    <file purpose="bff-governance">.claude/constraints/bff-extensions.md</file>
+    <file purpose="consumer-design">projects/spaarkeai-compose-r2/design.md</file>
+  </inputs>
+
+  <constraints>
+    <constraint source="ADR-013">CRUD/Compose consumers reach OutcomeCard only via `Services/Ai/PublicContracts/`; do NOT inject AI-internal types into CRUD.</constraint>
+    <constraint source="ADR-040">Storage precedes rendering — the OutcomeCard renders a STORED outcome (ledger entry), never a model-claimed one.</constraint>
+    <constraint source="ADR-039">No second dispatch/rendering mechanism; OutcomeCard is a disposition-level shape over existing side-effect results.</constraint>
+    <constraint source="ADR-038">The contract test is a KEEP-path integration test in `tests/integration/contract/`; no `Mock&lt;HttpMessageHandler&gt;`, no DI-registration tests.</constraint>
+    <constraint source="project">Tolerant-reader: unknown fields ignored; version field present; additive-only v1. Consistent versioning across all seven A0 contracts.</constraint>
+    <constraint source="bff-hygiene">Run the bff-extensions.md checklist; state Placement Justification; measure publish-size delta; no new HIGH CVE.</constraint>
+  </constraints>
+
+  <knowledge>
+    <topic>ai/outcome-card, tool-result, handoff-links, versioned-contracts</topic>
+    <files>
+      <file>docs/adr/ADR-013 (AI facade discipline; see .claude/adr/INDEX.md)</file>
+      <file>docs/adr/ADR-040-session-ledger.md</file>
+      <file>.claude/constraints/bff-extensions.md</file>
+    </files>
+    <patterns>
+      <pattern name="UserSummary audience split" location="src/server/api/Sprk.Bff.Api/Services/Ai/ToolResult.cs:326">UserSummary — the shipped user-facing vs internal split the OutcomeCard formalizes.</pattern>
+      <pattern name="Server-composed link" location="src/server/api/Sprk.Bff.Api/Api/Agent/HandoffUrlBuilder.cs">Record/deep-link composition — the OutcomeCard's link field source (server-composed, not model-composed).</pattern>
+      <pattern name="Ledger output entry" location="src/server/api/Sprk.Bff.Api/Models/Ai/Chat/SessionLedgerEntries.cs:125">SessionOutput — the stored entry an OutcomeCard renders (store-before-render).</pattern>
+      <pattern name="Contract test home" location="tests/integration/contract/">Add the OutcomeCard contract test here.</pattern>
+    </patterns>
+  </knowledge>
+
+  <context>
+    <background>R1 already ships the two hard parts — server-side link composition (never trust the model to build a URL) and the audience-split summary. FR-A1-06 will generalize them to ALL side-effect paths; this A0 task first freezes the SHAPE so the completion wave and Compose r2 build against a stable contract. Sibling A0 contracts (010 ComposeDisposition, 012–016) share versioning rules.</background>
+    <dependencies>
+      <dependency task="none" status="n/a">Front A0 wave — no upstream.</dependency>
+    </dependencies>
+    <related-work>
+      <item>FR-A1-06/07 (tasks 035/036) generalize OutcomeCard to all side-effect + job-aware paths.</item>
+      <item>FR-A0-05 (task 013) TraceEvent v1 provides the trace reference an OutcomeCard links to.</item>
+      <item>Cross-project obligation filing lands in task 017.</item>
+    </related-work>
+  </context>
+
+  <steps mode="directional">
+    <step order="0" name="Context + governance">Load FR-A0-02, ADR-013/040, bff-extensions.md; confirm the UserSummary + HandoffUrlBuilder shapes via anchors.</step>
+    <step order="1" name="Define the contract">Define `OutcomeCard v1` DTO under `Services/Ai/PublicContracts/`: link, audience-split summary, next-step-chip slots, trace ref, failure/partial states, version field, tolerant-reader rules.</step>
+    <step order="2" name="Reference producer">Wire one thin producer that composes an OutcomeCard from a stored SessionOutput for one side-effect path (link from HandoffUrlBuilder, summary from UserSummary).</step>
+    <step order="3" name="Reference consumer">A thin consumer that renders the OutcomeCard (client component stub or server render sufficient to prove round-trip).</step>
+    <step order="4" name="Contract test">Add a contract test asserting shape, version, audience split, tolerant-reader (unknown field ignored), and render-from-stored-entry (store-before-render).</step>
+    <step order="5" name="Verify + governance">Build; run the contract test; measure publish-size delta; state Placement Justification + bff-extensions checklist.</step>
+  </steps>
+
+  <tools>
+    <tool name="dotnet">Build + run the contract/integration test</tool>
+    <tool name="git">Commit on the project branch</tool>
+  </tools>
+
+  <outputs>
+    <output type="code">src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/ (OutcomeCard v1 contract DTO)</output>
+    <output type="test">tests/integration/contract/ (OutcomeCard contract test)</output>
+    <output type="docs">projects/spaarke-ai-architecture-redesign-r2/notes/ (contract doc: versioning + tolerant-reader + example payload + audience-split rule)</output>
+  </outputs>
+
+  <acceptance-criteria>
+    <criterion testable="true">`OutcomeCard v1` exists under `Services/Ai/PublicContracts/` (ADR-013) with a version field + documented tolerant-reader rules; an unknown extra field is ignored by the consumer (asserted by the contract test).</criterion>
+    <criterion testable="true">The contract carries: server-composed link, audience-split summary (user vs internal), next-step-chip slots, and a trace reference — formalizing the UserSummary + HandoffUrlBuilder primitives.</criterion>
+    <criterion testable="true">A thin producer composes an OutcomeCard from a STORED ledger output and a thin consumer renders it — round-trip proven by the contract test.</criterion>
+    <criterion testable="true">The contract test lives in tests/integration/contract/ and passes; no `Mock&lt;HttpMessageHandler&gt;`, no DI-registration assertions (ADR-038).</criterion>
+    <criterion testable="true">Compose r2 can consume OutcomeCard v1 with zero local variant (shape is under PublicContracts).</criterion>
+    <criterion testable="true">NEGATIVE: producing an OutcomeCard whose link field was model-composed (not from HandoffUrlBuilder) or that references no stored outcome fails a test assertion (server-composed + store-before-render enforced).</criterion>
+    <criterion testable="true">Publish-size delta measured + reported; no new HIGH CVE; Placement Justification stated.</criterion>
+    <criterion testable="true">On completion, flip this seam's row in `projects/spaarke-ai-architecture-redesign-r2/notes/SEAM-STATUS.md` to published (with commit ref); record which Compose r2 FR it unblocks (FR-05 / FR-28). 'Published' = merged + contract test green + consumable via Services/Ai/PublicContracts/.</criterion>
+  </acceptance-criteria>
+
+  <escalation>
+    <trigger>If formalizing the two primitives into one contract would require CHANGING the shipped `UserSummary`/`HandoffUrlBuilder` behavior (not just wrapping it), STOP — that is scope beyond an A0 walking skeleton and risks breaking live R1 rendering; surface it before altering shipped primitives.</trigger>
+  </escalation>
+
+  <notes>
+    Completed 2026-07-08. OutcomeCard v1 shipped as a walking skeleton.
+    - Contract DTO: src/server/api/Sprk.Bff.Api/Services/Ai/PublicContracts/OutcomeCard.cs
+      (OutcomeCard + OutcomeSummary audience split + OutcomeCardLink server-composed guard +
+      NextStepChip + OutcomeCompletion single-shot/job-aware + OutcomeStep + OutcomeCardView render).
+      Zero dependency on AI-internal types (ADR-013 facade-clean). Two invariants enforced by
+      construction in ForStoredOutcome: store-before-render (ADR-040) + server-composed link.
+    - Contract test: tests/integration/contract/Api/Ai/OutcomeCardContractTests.cs — 10 tests, all
+      green. Self-contained (construct → serialize → deserialize round-trip; no DI/WebApplicationFactory).
+      Covers shape+version, audience split, next-step chips, single-shot AND job-aware completion,
+      tolerant reader (unknown field ignored), and both NEGATIVE invariants (model-claimed link throws;
+      missing stored key throws).
+    - Contract doc: notes/outcome-card-v1-contract.md (versioning + tolerant-reader + example payload
+      + audience-split rule + Placement Justification).
+    - Escalation trigger did NOT fire — the two shipped primitives (UserSummary, HandoffUrlBuilder)
+      are WRAPPED, not changed.
+    - Deferred to main session (parallel-safety; shared files): flip SEAM-STATUS.md OutcomeCard row
+      (011) to published with commit ref; unblocks Compose r2 FR-05 + FR-28.
+    - Production wiring (thin server-side producer mapping SessionOutput.Key + HandoffUrlBuilder into
+      the guard factory) intentionally deferred to FR-A1-06/07 tasks 035/036 — the self-contained test
+      plays the producer→consumer round-trip for the skeleton.
+  </notes>
+</task>
