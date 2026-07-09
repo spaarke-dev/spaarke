@@ -40,14 +40,14 @@ Tasks marked ⛔ are **blocked until core R2 publishes Phase A0 contracts** (see
 | 032 | FR-18 serial action queueing in ConversationPane | 3 Inline | 🟢 | none | 🔲 | FULL | sonnet | high |
 | 033 | FR-16 pending track-change materialization from ledger (compose disposition) | 3 Inline | 🔴 | 031,016 | ⛔ | FULL | opus | high |
 | 034 | FR-17 undo/replace via ledger supersession | 3 Inline | 🔴 | 033 | ⛔ | FULL | opus | high |
-| 040 | FR-07 compose-explain-clause Action + Binding | 4 Catalog | 🔴 | 001 | ⛔ | FULL | sonnet | high |
-| 041 | FR-08 compose-compare-to-playbook Action + Binding | 4 Catalog | 🔴 | 001 | ⛔ | FULL | sonnet | high |
-| 042 | FR-09 compose-draft-alternative Action + Binding (compose disposition) | 4 Catalog | 🔴 | 001,016 | ⛔ | FULL | opus | high |
-| 043 | FR-10 compose-summarize-word-changes Action + Binding | 4 Catalog | 🔴 | 001,006 | ⛔ | FULL | sonnet | high |
-| 044 | FR-11 compose-defined-terms Action + Binding (overflow trigger → Context) | 4 Catalog | 🔴 | 001 | ⛔ | FULL | sonnet | high |
-| 045 | FR-12 eval cases per row (golden + dispatch ≥5) + schema validation | 4 Catalog | 🔴 | 040,041,042,043,044 | ⛔ | FULL | sonnet | high |
-| 046 | FR-13 dispatch wiring (compose_selection_offer choreography + direct dispatchConsumer) | 4 Catalog | 🔴 | 016,030 | ⛔ | FULL | opus | high |
-| 047 | Deploy catalog rows to Dataverse (mirror-first) | 4 Catalog | 🔴 | 045 | ⛔ | STANDARD | sonnet | high |
+| 040 | FR-07 compose-explain-clause Action + Binding | 4 Catalog | 🟢 | 001 | 🔲 | FULL | sonnet | high |
+| 041 | FR-08 compose-compare-to-playbook Action + Binding | 4 Catalog | 🟢 | 001 | 🔲 | FULL | sonnet | high |
+| 042 | FR-09 compose-draft-alternative Action + Binding (compose disposition) | 4 Catalog | 🟢 | 001,016 | 🔲 | FULL | opus | high |
+| 043 | FR-10 compose-summarize-word-changes Action + Binding | 4 Catalog | 🟢 | 001,006 | 🔲 | FULL | sonnet | high |
+| 044 | FR-11 compose-defined-terms Action + Binding (overflow trigger → Context) | 4 Catalog | 🟢 | 001 | 🔲 | FULL | sonnet | high |
+| 045 | FR-12 eval cases per row (golden + dispatch ≥5) + schema validation | 4 Catalog | 🟢 | 040,041,042,043,044 | 🔲 | FULL | sonnet | high |
+| 046 | FR-13 dispatch wiring (compose_selection_offer choreography + direct dispatchConsumer) | 4 Catalog | 🟢 | 016,030 | 🔲 | FULL | opus | high |
+| 047 | Deploy catalog rows to Dataverse (mirror-first) | 4 Catalog | 🟢 | 045 | 🔲 | STANDARD | sonnet | high |
 | 050 | FR-24 DocxAnnotationWriter (comments + track changes, edge cases) + push endpoint | 5 Word | 🟢 | 005 | 🔲 | FULL | opus | xhigh |
 | 051 | FR-25 DocxAnnotationReader (parse w:comment/w:ins/w:del) + pull endpoint | 5 Word | 🟢 | 006 | 🔲 | FULL | sonnet | high |
 | 052 | FR-26 SPE webhook subscription + BackgroundService renewal + delta query | 5 Word | 🟢 | none | ✅ | FULL | opus | high |
@@ -90,7 +90,7 @@ Tasks marked ⛔ are **blocked until core R2 publishes Phase A0 contracts** (see
 
 ## Blocked-on-core-A0 (⛔) — authored/executed post-A0
 
-016 UNBLOCKED (A0 ComposeDisposition landed 2026-07-08). Still core-gated: 040-044/045/047 (core task 020 triple-twin hoist), 071 (core 037 UI-ack), 063 (core 057 memory.write), 064 (core 038 D-F4 view); 033/034/046 gated by non-core deps (031/016/030); 082/090 terminal. See SEAM-STATUS.md.
+016 UNBLOCKED (A0 ComposeDisposition landed 2026-07-08). **040-044/045/046/047 UNBLOCKED 2026-07-09** — core task **020 triple-twin hoist published to master** (`78073ae03`; SEAM-STATUS row 020 = ✅ published), and 046's non-core deps 016/030/031 are all done. Catalog tasks are now authorable/startable (respect intra-wave deps: 040-044 → 045 eval cases → 047 deploy). Still core-gated: **071** (core 037 UI-ack), **063** (core 057 memory.write), **064** (core 038 D-F4 view), and **033/034** (compose-disposition ledger WRITE = core task 010, + their non-core deps 031/016); **082/090** terminal. See SEAM-STATUS.md.
 
 These get full POML authoring finalized once core A0 contract shapes are confirmed (the handoff doc is the input). 082 (flagship gate) + 090 (wrap-up) are terminal — they require the full chain.
 

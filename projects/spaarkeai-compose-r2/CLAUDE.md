@@ -108,11 +108,12 @@ See [task-execute SKILL.md](../../.claude/skills/task-execute/SKILL.md) for the 
 **UPDATE 2026-07-08**: core R2 merged the **6 A0 contract SHAPES to master** (now in this worktree at `Services/Ai/PublicContracts/`: `ComposeDisposition`, `OutcomeCard`, `GateDecisionV2`, `TraceEvent`, `JobAwareCompletionState`, `MemoryItem`, + `ContextEnvelope`). Contracts are frozen and consumable. Status board: [`../spaarke-ai-architecture-redesign-r2/notes/SEAM-STATUS.md`](../spaarke-ai-architecture-redesign-r2/notes/SEAM-STATUS.md).
 
 **NOW UNBLOCKED** (contract shape present):
-- **FR-04 draft-into-editor (task 016)** — `ComposeDisposition v1` present → startable now.
-- FR-16 pending-redline (033), FR-17 undo/replace (034) — contract present; gated only by their non-core deps (031 custom marks, 016).
+- **FR-04 draft-into-editor (task 016)** — `ComposeDisposition v1` present → **DONE** (BFF half + frontend integration merged to master 2026-07-08/09).
+- **FR-15 custom marks (031)** — **DONE** 2026-07-09 (insertion/deletion/commentAnchor).
+- **Catalog rows 040-044 + 045 + 046 + 047** — **UNBLOCKED 2026-07-09**: core **task 020 (triple-twin description hoist) published to master** (`78073ae03`; SEAM-STATUS row 020 = ✅ published). Catalog rows are now authorable/startable. Respect intra-wave order: 040-044 (Actions+Bindings) → 045 (eval cases ≥5 each) → 047 (deploy mirror-first). **Owner hygiene still binds**: NO version suffix in action codes / Binding names / mirror filenames.
+- FR-16 pending-redline (033), FR-17 undo/replace (034) — contract present; 031 (custom marks) done; still need the compose-disposition ledger **WRITE** (core **task 010**) before they can materialize.
 
 **STILL BLOCKED on further CORE work** (contract shape alone is insufficient):
-- **Catalog rows 040-044 + 045 + 047** — need core **task 020 (triple-twin description hoist)**, still 🔲 pending. Do NOT author catalog rows until 020 lands.
 - **FR-34 UI-ack (071)** — needs core **task 037 (D-F3 ack)**, 🔲 pending.
 - **FR-30 memory.write (063)** — MemoryItem shape present, but the `memory.write` tool impl (core **task 057**) 🔲 pending.
 - **FR-32 trace hosting (064)** — TraceEvent shape present, but the D-F4 view (core **task 038**) 🔲 pending.
