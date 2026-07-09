@@ -294,6 +294,33 @@ public class SpeSyncOrchestrator
         => LoadStateAsync(containerId, ct);
 
     /// <summary>
+    /// Reverse-resolves a Graph driveId (as carried in a change-notification's <c>resource</c>
+    /// field, e.g. <c>drives/{driveId}/root</c>) back to the tracked SPE containerId whose
+    /// subscription produced it. Redis keys this state by containerId (the business key), not
+    /// driveId, and a Graph change notification only carries the drive/resource path — never the
+    /// containerId — so the task-053 webhook receiver needs this reverse lookup to know which
+    /// container to enumerate. Iterates the (typically small) tracked-container index; returns
+    /// null when no tracked container matches (e.g. a stale/orphaned subscription notification),
+    /// which the caller treats as "ignore, nothing to enumerate" rather than an error.
+    /// </summary>
+    public async Task<string?> ResolveContainerIdForDriveIdAsync(string driveId, CancellationToken ct = default)
+    {
+        ArgumentException.ThrowIfNullOrEmpty(driveId);
+
+        var containerIds = await GetIndexAsync(ct).ConfigureAwait(false);
+        foreach (var containerId in containerIds)
+        {
+            var state = await LoadStateAsync(containerId, ct).ConfigureAwait(false);
+            if (state is not null && string.Equals(state.DriveId, driveId, StringComparison.OrdinalIgnoreCase))
+            {
+                return containerId;
+            }
+        }
+
+        return null;
+    }
+
+    /// <summary>
     /// True when a subscription is missing its expiry or is within <see cref="RenewalMargin"/>
     /// of expiring (per the injected <see cref="TimeProvider"/>). Unit tests drive the renewal
     /// window through this method via a fake time provider.

@@ -37,7 +37,7 @@ Tasks marked ⛔ are **blocked until core R2 publishes Phase A0 contracts** (see
 | 025 | Unit tests for Services/Compose LLM services (NFR-05/08 + NetArchTest) | 2 LLM | 🟢 | 020,021,022,023 | ✅ | STANDARD | sonnet | high |
 | 030 | FR-14 TipTap BubbleMenu inline AI toolbar (Explain/Compare/Draft/More) | 3 Inline | 🟢 | none | ✅ | FULL | sonnet | high |
 | 031 | FR-15 custom ProseMirror marks (insertion/deletion/commentAnchor) | 3 Inline | 🟢 | none | ✅ | FULL | sonnet | high |
-| 032 | FR-18 serial action queueing in ConversationPane | 3 Inline | 🟢 | none | 🔲 | FULL | sonnet | high |
+| 032 | FR-18 serial action queueing in ConversationPane | 3 Inline | 🟢 | none | ✅ | FULL | sonnet | high |
 | 033 | FR-16 pending track-change materialization from ledger (compose disposition) | 3 Inline | 🟢 | 031,016 | ✅ | FULL | opus | high |
 | 034 | FR-17 undo/replace via ledger supersession | 3 Inline | 🟢 | 033 | 🔲 | FULL | opus | high |
 | 040 | FR-07 compose-explain-clause Action + Binding | 4 Catalog | 🟢 | 001 | ✅ | FULL | sonnet | high |
@@ -51,7 +51,7 @@ Tasks marked ⛔ are **blocked until core R2 publishes Phase A0 contracts** (see
 | 050 | FR-24 DocxAnnotationWriter (comments + track changes, edge cases) + push endpoint | 5 Word | 🟢 | 005 | ✅ | FULL | opus | xhigh |
 | 051 | FR-25 DocxAnnotationReader (parse w:comment/w:ins/w:del) + pull endpoint | 5 Word | 🟢 | 006 | ✅ | FULL | sonnet | high |
 | 052 | FR-26 SPE webhook subscription + BackgroundService renewal + delta query | 5 Word | 🟢 | none | ✅ | FULL | opus | high |
-| 053 | FR-26 webhooks/spe-doc-changed + check-changes endpoints | 5 Word | 🟢 | 052 | 🔲 | FULL | sonnet | high |
+| 053 | FR-26 webhooks/spe-doc-changed + check-changes endpoints | 5 Word | 🟢 | 052 | ✅ | FULL | sonnet | high |
 | 054 | FR-27 return-from-Word re-anchoring (bands ≥0.85/0.6–0.85/<0.6) + conflict banner | 5 Word | 🟢 | 051,006 | 🔲 | FULL | opus | high |
 | 055 | FR-28 push/save deterministic path (gate dialog + OutcomeCard = splittable) | 5 Word | 🟡 | 050 | 🔲 | FULL | sonnet | high |
 | 056 | Deploy + Word for Web round-trip verification (Spikes 5/6 as gate) | 5 Word | 🟢 | 050,051,053,054 | 🔲 | STANDARD | sonnet | high |
