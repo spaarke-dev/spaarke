@@ -7,6 +7,7 @@ using Sprk.Bff.Api.Models.Ai;
 using Sprk.Bff.Api.Models.Ai.Chat;
 using Sprk.Bff.Api.Services.Ai;
 using Sprk.Bff.Api.Services.Ai.Chat;
+using Sprk.Bff.Api.Services.Ai.Context;
 using Sprk.Bff.Api.Services.Ai.EventRules;
 using Sprk.Bff.Api.Services.Ai.LinearConsumers;
 using Sprk.Bff.Api.Services.Ai.PublicContracts;
@@ -158,10 +159,12 @@ public class SessionDispatchManifestProbeTests
             TenantId, SessionId, BindingId, BuildArgs("file-A"))));
 
         chunks.Should().NotContain(c => c.Error != null);
-        // One read in DispatchAsync + one inside PendingPlanManager.ResolveElicitationOnDispatchAsync
-        // (the elicitation-resolution ledger check at the dispatch seam, FR-P2-03).
-        sessions.ReadCount.Should().Be(2,
-            "the common path (file already visible) adds NO probe re-reads and NO latency");
+        // Reads on the common path (file already visible, NO probe re-reads): (1) the initial DispatchAsync
+        // session load, (2) the ContextBinder fingerprint write (AppendContextFingerprintAsync re-fetches
+        // to avoid clobbering concurrent ledger writes — ADR-043 E-10), (3) the
+        // PendingPlanManager.ResolveElicitationOnDispatchAsync ledger check (FR-P2-03). No probe latency.
+        sessions.ReadCount.Should().Be(3,
+            "the common path adds NO probe re-reads; the fingerprint write + elicitation check each read once");
     }
 
     // ─────────────────────────────────────────────────────────────────────────
@@ -189,9 +192,10 @@ public class SessionDispatchManifestProbeTests
             .ReturnsAsync(new AnalysisAction { Id = ActionId, Name = "Summarize (probe test)" });
 
         var actionRunner = new Mock<IActionRunner>();
+        // ADR-043 E-10: the dispatch seam now runs the action over a ContextBinder-resolved BoundInputs.
         actionRunner
             .Setup(r => r.RunAsync(
-                It.IsAny<AnalysisAction>(), It.IsAny<DocumentText>(),
+                It.IsAny<AnalysisAction>(), It.IsAny<BoundInputs>(),
                 It.IsAny<LinearRunContext>(), It.IsAny<CancellationToken>()))
             .ReturnsAsync(JsonSerializer.SerializeToElement(new { summary = "probe-test summary" }));
 
@@ -231,11 +235,14 @@ public class SessionDispatchManifestProbeTests
         var pendingPlanManager = new PendingPlanManager(
             new InMemoryTenantCache(), sessions, Mock.Of<ILogger<PendingPlanManager>>());
 
+        var contextBinder = new ContextBinder(sessions, Mock.Of<ILogger<ContextBinder>>());
+
         var orchestrator = new SessionDispatchOrchestrator(
             sessions,
             routing.Object,
             scopeResolver.Object,
             actionRunner.Object,
+            contextBinder,
             textSource.Object,
             router.Object,
             pendingPlanManager,

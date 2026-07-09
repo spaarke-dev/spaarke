@@ -536,6 +536,9 @@ public sealed class DispatchSessionEndpointTestFixture : IAsyncLifetime, IDispos
         builder.Services.AddSingleton<IOpenAiClient>(OpenAi);
         builder.Services.AddSingleton<PromptSchemaRenderer>();
         builder.Services.AddSingleton<IActionRunner, ActionRunner>();
+        // ADR-043 E-10: the dispatch seam resolves inputs via the REAL ContextBinder.
+        builder.Services.AddSingleton<Sprk.Bff.Api.Services.Ai.Context.IContextBinder,
+                                      Sprk.Bff.Api.Services.Ai.Context.ContextBinder>();
         builder.Services.AddSingleton<IOutputRouter>(Router);
 
         // FR-P2-03 (task 032): the orchestrator resolves pending elicitation gates at
